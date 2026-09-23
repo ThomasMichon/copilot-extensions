@@ -317,6 +317,7 @@ headers: {}
 tools: { allow: ["repo_*", "wit_*", "search_*"], deny: [] }
 timeout: 30
 retries: 1
+idle_timeout: 300                        # exit if idle this long (#3876); <=0 disables
 ```
 
 stdio example (wrap a child-process MCP, inject a token by env):
@@ -893,6 +894,14 @@ never sees EOF, so it (and its helpers) leak. Two guards close this gap:
 - **Parent-death watchdog** — a daemon thread polls the launch-time parent's
   liveness and, when it goes away, drives the *same* graceful teardown as stdin
   EOF, with a hard-exit backstop if teardown wedges.
+- **Idle self-reap (#3876)** — neither guard above fires for the most common
+  leak today: a sub-agent's `task()` delegation finishes without ever closing
+  its bridge's stdin or killing the still-live top-level `copilot` process
+  that holds it open. So the bridge also exits itself after `idle_timeout`
+  seconds (default 300, config field or `AGENT_MCP_BRIDGE_IDLE_TIMEOUT`; `<=0`
+  disables) with no client traffic **and** no in-flight dispatch — the
+  in-flight check is authoritative, so a slow upstream call is never reaped
+  mid-flight regardless of how long it runs past the idle window.
 - **Descendant reaping** — on Windows the bridge assigns itself to a
   kill-on-close **Job Object**, so the upstream stdio child and any `az`/`gh`/`git`
   mint helpers die when the bridge exits. On POSIX the graceful path already
@@ -906,6 +915,7 @@ Tunables (all optional):
 | `AGENT_MCP_PARENT_WATCHDOG_INTERVAL` | `5` | parent-liveness poll interval, seconds (`<=0` disables) |
 | `AGENT_MCP_PARENT_WATCHDOG_GRACE` | `10` | hard-exit backstop after signalling, seconds (`0` = graceful-only) |
 | `AGENT_MCP_REAP_DESCENDANTS` | on | `0`/`false`/`off` disables the Windows kill-on-close job |
+| `AGENT_MCP_BRIDGE_IDLE_TIMEOUT` | `300` | idle self-reap seconds when a bridge config doesn't set `idle_timeout` (`<=0` disables) |
 | `AGENT_MCP_NO_VERSION_REAP` | unset | set to skip the on-upgrade reap of stale-version bridges (see below) |
 
 **Why the watchdog and not a direct launch?** The obvious "just don't interpose

@@ -101,13 +101,36 @@ class Bridge:
                 pass  # loop already closed -- shutdown is already under way
 
         threading.Thread(target=_reader, name="agent-mcp-stdin", daemon=True).start()
-        log.info("bridge '%s' started (%s -> %s); %d decorator(s)", self.cfg.name,
+        log.info("bridge '%s' started (%s -> %s); %d decorator(s); idle-timeout %gs",
+                 self.cfg.name,
                  self.cfg.server.type,
                  self.cfg.server.launch_desc,
-                 session.decorator_count)
+                 session.decorator_count,
+                 self.cfg.idle_timeout)
 
+        idle_timeout = self.cfg.idle_timeout
         while True:
-            line = await queue.get()
+            if idle_timeout > 0:
+                # Idle self-reap (#3876): nothing else today closes this
+                # process's stdin or kills its parent once the sub-agent that
+                # spawned it finishes (the parent -- the top-level session --
+                # stays alive), so the existing stdin-EOF and parent-death
+                # defenses above never fire and the bridge leaks indefinitely.
+                # Wait for the next client message with a timeout instead of
+                # blocking forever; on timeout, self-reap only if no dispatch
+                # is still in flight (``has_pending`` is the authoritative
+                # liveness signal -- a slow upstream call must never be
+                # reaped mid-flight, however long it runs past this window).
+                try:
+                    line = await asyncio.wait_for(queue.get(), timeout=idle_timeout)
+                except (TimeoutError, asyncio.TimeoutError):
+                    if session.has_pending:
+                        continue  # still mid-dispatch -- keep waiting, don't reap
+                    log.info("bridge '%s' idle for %gs with no in-flight work; "
+                             "self-reaping", self.cfg.name, idle_timeout)
+                    break
+            else:
+                line = await queue.get()
             if line is None:
                 break
             text = line.strip()

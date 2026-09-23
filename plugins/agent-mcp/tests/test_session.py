@@ -76,3 +76,51 @@ async def test_bridge_session_starts_normally_within_timeout():
         assert session._transport is not None
     finally:
         await session.aclose()
+
+
+async def test_has_pending_reflects_in_flight_dispatch():
+    """``has_pending`` (#3876) is the idle self-reap's liveness gate: false at
+    rest, true while a dispatch is running, false again once it completes --
+    a slow upstream reply must never look idle mid-flight.
+    """
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class _SlowTransport(Transport):
+        async def start(self) -> None:
+            return None
+
+        async def send(self, msg: dict) -> None:
+            started.set()
+            await release.wait()
+            await self._emit_message({"jsonrpc": "2.0", "id": msg["id"], "result": {}})
+
+        async def end_input(self) -> None:
+            pass
+
+        async def aclose(self) -> None:
+            pass
+
+    import agent_mcp.session as session_mod
+
+    original_build_transport = session_mod.build_transport
+    session_mod.build_transport = lambda cfg, injector: _SlowTransport(cfg, injector)
+    try:
+        cfg = _cfg({"timeout": 5.0})
+        session = BridgeSession(cfg, lambda _msg: None)
+        await session.start()
+        try:
+            assert session.has_pending is False
+            session.submit({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+            await asyncio.wait_for(started.wait(), timeout=5.0)
+            assert session.has_pending is True
+            release.set()
+            # Let the dispatch task's done-callback (which discards it from
+            # ``self._tasks``) run before asserting it cleared.
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            assert session.has_pending is False
+        finally:
+            await session.aclose()
+    finally:
+        session_mod.build_transport = original_build_transport
