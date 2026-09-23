@@ -58,7 +58,7 @@ stops a file from growing right up against its existing ceiling commit by
 commit until it tips over) is exactly the failure mode a *proactive*
 discipline — not just the existing reactive guard — is meant to prevent.
 
-### Current pecking order (snapshot, 2026-09-22, post-`agent-dispatch/queue.py` storage/create slice)
+### Current pecking order (snapshot, 2026-09-22, post-`agent-dispatch/queue.py` claim/query slice)
 
 `python tools/rank-module-size.py --limit 20` (vendored duplicates folded in
 — re-run before starting a phase, this list moves; it already has multiple
@@ -87,15 +87,11 @@ passes during this effort — treat it as a live command, not a frozen table):
 | 1,989 | +989 | `plugins/agent-logger/src/agent_logger/sync/targets/filesystem.py` | |
 | 1,865 | +865 | `plugins/agent-vault/src/agent_vault/cli.py` | |
 
-**Suggested next pick (Phase 2, next slice):** finish the current
-`plugins/agent-dispatch/src/agent_dispatch/queue.py` campaign. Three slices
-have now proven the queue's large-class mixin split cleanly; only the
-claim/query/reservation-read surface remains in `queue.py`, and one more
-mechanical slice should bring the composition root under cap. If the campaign
-pivots away from `queue.py` after that, the largest production offender overall remains
-`plugins/agent-worktrees/src/agent_worktrees/__main__.py`; within
-`agent-dispatch`, `supervisor.py` is already the plugin's largest remaining
-offender once `queue.py` drops below it.
+**Suggested next pick (Phase 2, next slice):** `plugins/agent-dispatch/src/agent_dispatch/supervisor.py`
+is now the plugin's largest remaining offender and the clearest same-plugin
+follow-up now that `queue.py` is under cap and dropped out of the baseline.
+If the campaign pivots by global priority instead, the largest production
+offender overall remains `plugins/agent-worktrees/src/agent_worktrees/__main__.py`.
 
 Full list: `python tools/rank-module-size.py --limit 70`. Files within a small
 margin of their own ceiling (most likely to tip over next from unrelated
@@ -289,6 +285,20 @@ Verbatim from the operator:
             F,E9 plugins/agent-dispatch` green, `check-module-size.py` green
             with baseline refreshed, and `agent-dispatch` bumped to
             `0.1.2-dev186`.
+      - [x] `agent-dispatch/queue.py` slice 4 (1,247 live lines at slice
+            start) — extracted `queue_claim_queries.py` (401 lines) for the
+            remaining claim/query/reservation-read surface: `claim_one`,
+            `claim_outcome`, `mine`, `_affinity_score`, task list/find/sweep/
+            events/progress-log reads, wake-presence probing, and reservation
+            lookups. `queue.py` remains the compatibility/composition root and
+            now drops to **789 lines**, under the 1,000-line cap, so the
+            original motivating case is finally out of the module-size
+            baseline entirely. Added `test_queue_claim_queries.py` as the
+            direct-import / MRO / `get_type_hints()` guard. Full
+            `run-plugin-tests.py agent-dispatch` green across all 6 sub-suites,
+            `ruff check --select F,E9 plugins/agent-dispatch` green,
+            `check-module-size.py` green with baseline refreshed (removing
+            `queue.py`), and `agent-dispatch` bumped to `0.1.2-dev187`.
       - [ ] The `tools/clean-room/scenarios/*` fixtures (2,429 / 2,369) —
             lower urgency (not production code), but validating a split
             means actually running the Docker-based clean-room scenario
@@ -571,6 +581,34 @@ the Phase 0 runbook, picked up as capacity allows.
   `python tools/check-module-size.py --refresh-baseline` lowered the
   shrink-only baseline again. Version bump: `agent-dispatch`
   `0.1.2-dev185 -> 0.1.2-dev186`.
+
+### 2026-09-22 — `agent-dispatch/queue.py` slice 4: claim/query/reservation-read mixin
+- Finished the `queue.py` campaign with the last clean seam still left in the
+  composition root: the read/query surface plus the claim-time selection logic
+  that consumes the stored task rows. Extracted `queue_claim_queries.py`
+  (401 lines) for `claim_one`, `claim_outcome`, `mine`, `_affinity_score`,
+  `get`, `has_pending_wakes`, `list`, `find`, `sweep`, `events`,
+  `progress_log`, `get_reservation`, `latest_reservation`, and
+  `list_reservations`.
+- Preserved the historical `agent_dispatch.queue` import surface by keeping the
+  queue-common compatibility aliases re-exported from `queue.py`; one failed
+  test run caught the missed `worker_id_for` / `machine_matches` / helper
+  re-exports immediately, and the final slice restored the whole compatibility
+  set rather than whack-a-moling one name at a time. Added
+  `tests/test_queue_claim_queries.py` to guard direct importability, MRO
+  ordering after the storage mixin it depends on, and runtime-resolvable
+  annotations.
+- Running line count: `queue.py` **1247 -> 789**. That puts the original
+  motivating case for the cap itself **under the 1,000-line hard cap** and
+  drops it out of `tools/module-size-baseline.json` entirely. Within
+  `agent-dispatch`, `supervisor.py` is now the plugin's dominant remaining
+  offender.
+- Validation: `python tools/run-plugin-tests.py agent-dispatch` passed across
+  all 6 sub-suites, `ruff check --select F,E9 plugins/agent-dispatch` passed,
+  `python tools/check-module-size.py` passed, and
+  `python tools/check-module-size.py --refresh-baseline` removed `queue.py`
+  from the shrink-only baseline. Version bump: `agent-dispatch`
+  `0.1.2-dev186 -> 0.1.2-dev187`.
 
 ### 2026-09-16 — Kickoff + Phase 0
 - Effort created from an operator request following review of
