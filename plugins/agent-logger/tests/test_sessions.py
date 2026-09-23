@@ -111,13 +111,13 @@ def test_read_review_annotations_absent_returns_empty(tmp_path: Path) -> None:
 
 def test_write_review_annotation_then_read_back(tmp_path: Path) -> None:
     src = _make_session(tmp_path / "session-state", "s1")
-    write_review_annotation(src, repo="tmichon/aperture-labs", pr_number=6100)
+    write_review_annotation(src, repo="example/repo", pr_number=6100)
     live = SessionRef(id="s1", kind="live", path=src)
 
     entries = read_review_annotations(live)
 
     assert len(entries) == 1
-    assert entries[0]["repo"] == "tmichon/aperture-labs"
+    assert entries[0]["repo"] == "example/repo"
     assert entries[0]["pr_number"] == 6100
     assert entries[0]["role"] == "reviewer"
     assert entries[0]["recorded_at"]
@@ -125,8 +125,8 @@ def test_write_review_annotation_then_read_back(tmp_path: Path) -> None:
 
 def test_write_review_annotation_dedupes_same_repo_pr_role(tmp_path: Path) -> None:
     src = _make_session(tmp_path / "session-state", "s1")
-    write_review_annotation(src, repo="tmichon/aperture-labs", pr_number=6100)
-    write_review_annotation(src, repo="tmichon/aperture-labs", pr_number=6100)
+    write_review_annotation(src, repo="example/repo", pr_number=6100)
+    write_review_annotation(src, repo="example/repo", pr_number=6100)
     live = SessionRef(id="s1", kind="live", path=src)
 
     assert len(read_review_annotations(live)) == 1
@@ -134,8 +134,8 @@ def test_write_review_annotation_dedupes_same_repo_pr_role(tmp_path: Path) -> No
 
 def test_write_review_annotation_appends_distinct_entries(tmp_path: Path) -> None:
     src = _make_session(tmp_path / "session-state", "s1")
-    write_review_annotation(src, repo="tmichon/aperture-labs", pr_number=6100)
-    write_review_annotation(src, repo="tmichon/aperture-labs", pr_number=6200)
+    write_review_annotation(src, repo="example/repo", pr_number=6100)
+    write_review_annotation(src, repo="example/repo", pr_number=6200)
     live = SessionRef(id="s1", kind="live", path=src)
 
     entries = read_review_annotations(live)
@@ -147,7 +147,7 @@ def test_review_annotation_survives_archive_as_uncompressed_sidecar(
     tmp_path: Path, monkeypatch
 ) -> None:
     src = _make_session(tmp_path / "session-state", "s1")
-    write_review_annotation(src, repo="tmichon/aperture-labs", pr_number=6100)
+    write_review_annotation(src, repo="example/repo", pr_number=6100)
     store = tmp_path / "archived"
     ref = archive_session(src, store)
 
@@ -159,6 +159,34 @@ def test_review_annotation_survives_archive_as_uncompressed_sidecar(
     monkeypatch.setattr(tarfile, "open", _boom)
     entries = read_review_annotations(ref)
     assert entries[0]["pr_number"] == 6100
+
+
+def test_write_review_annotation_creates_a_lock_file(tmp_path: Path) -> None:
+    src = _make_session(tmp_path / "session-state", "s1")
+    write_review_annotation(src, repo="example/repo", pr_number=6100)
+
+    assert (src / "review-annotations.json.lock").is_file()
+
+
+def test_write_review_annotation_propagates_real_read_errors(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A missing sidecar is treated as empty; any other read failure (e.g. a
+    permission error) must not be silently swallowed into data loss."""
+    src = _make_session(tmp_path / "session-state", "s1")
+    (src / "review-annotations.json").write_text("[]", encoding="utf-8")
+
+    real_read_text = Path.read_text
+
+    def _flaky_read_text(self, *a, **k):
+        if self.name == "review-annotations.json":
+            raise PermissionError("simulated")
+        return real_read_text(self, *a, **k)
+
+    monkeypatch.setattr(Path, "read_text", _flaky_read_text)
+
+    with pytest.raises(PermissionError):
+        write_review_annotation(src, repo="example/repo", pr_number=6100)
 
 
 # --- reads: live vs archive parity ---------------------------------------

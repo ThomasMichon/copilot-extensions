@@ -39,9 +39,9 @@ import tarfile
 import tempfile
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 #: Subdirectory of ``~/.copilot`` holding live session directories.
@@ -51,13 +51,11 @@ SESSION_STATE_SUBDIR = "session-state"
 #: These are the files the selection/listing/routing paths read; keeping them
 #: out of the tarball means those paths never decompress anything.
 #:
-#: ``review-annotations.json`` (added for effort
-#: ``dampener-reviewer-session-durability``, #7445 Phase 2) is a durable,
-#: first-class annotation -- not a worktree-naming convention (see that
-#: effort's own Context section for why the naming-convention path was
-#: rejected) -- recording which review-dispatch PR(s) a session worked, so a
-#: consumer can eventually query "every session that reviewed PR N" without
-#: sweeping every session's raw transcript. Most sessions never write it;
+#: ``review-annotations.json`` is a durable, first-class annotation --
+#: deliberately not a worktree-naming convention -- recording which external
+#: work item(s) (e.g. a code-review PR) a session worked, so a consumer can
+#: eventually query "every session that reviewed PR N" without sweeping every
+#: session's raw transcript. Most sessions never write it;
 #: :func:`read_review_annotations` returns ``[]`` when absent, exactly like
 #: :func:`read_origin` returns ``{}``.
 SIDECAR_MEMBERS: tuple[str, ...] = (
@@ -441,36 +439,69 @@ def write_review_annotation(
     is not re-appended (safe to call repeatedly from a backfill/sweep without
     growing the file unboundedly), but ``recorded_at`` on a genuinely new
     entry always reflects this call.
+
+    The read-modify-write is serialized with an advisory lock (colocated
+    ``.lock`` file, the same cross-platform primitive
+    :func:`agent_logger.sync.lock.sync_lock` uses elsewhere) so two
+    concurrent callers annotating the same session never race -- one losing
+    the other's update, or two temp files colliding on the same fixed name.
+    The temp file itself is a unique per-call name (via
+    :func:`tempfile.mkstemp` in the same directory) rather than a fixed
+    ``.tmp`` suffix, for the same reason.
+
+    Deferred import of :mod:`agent_logger.sync.lock` -- that package imports
+    this module (for archive-aware session reads), so importing it at module
+    load time here would be circular.
     """
+    from agent_logger.sync.lock import sync_lock
+
     path = session_dir / REVIEW_ANNOTATIONS_MEMBER
-    try:
-        existing_text = path.read_text(encoding="utf-8") if path.is_file() else "[]"
-        existing = json.loads(existing_text)
+    lock_path = session_dir / f"{REVIEW_ANNOTATIONS_MEMBER}.lock"
+
+    with sync_lock(lock_path) as acquired:
+        if not acquired:
+            raise TimeoutError(f"timed out acquiring review-annotation lock for {session_dir}")
+        try:
+            existing_text = path.read_text(encoding="utf-8") if path.is_file() else "[]"
+        except FileNotFoundError:
+            existing_text = "[]"
+        try:
+            existing = json.loads(existing_text)
+        except json.JSONDecodeError:
+            existing = []
         entries: list[dict[str, object]] = (
             [e for e in existing if isinstance(e, dict)] if isinstance(existing, list) else []
         )
-    except (OSError, json.JSONDecodeError):
-        entries = []
 
-    for entry in entries:
-        if (
-            entry.get("repo") == repo
-            and entry.get("pr_number") == pr_number
-            and entry.get("role") == role
-        ):
-            return
+        for entry in entries:
+            if (
+                entry.get("repo") == repo
+                and entry.get("pr_number") == pr_number
+                and entry.get("role") == role
+            ):
+                return
 
-    entries.append(
-        {
-            "repo": repo,
-            "pr_number": pr_number,
-            "role": role,
-            "recorded_at": recorded_at or datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-        }
-    )
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(entries), encoding="utf-8")
-    os.replace(tmp, path)
+        entries.append(
+            {
+                "repo": repo,
+                "pr_number": pr_number,
+                "role": role,
+                "recorded_at": recorded_at
+                or datetime.now(tz=timezone.utc).isoformat().replace("+00:00", "Z"),
+            }
+        )
+
+        fd, tmp_name = tempfile.mkstemp(
+            dir=session_dir, prefix=f"{REVIEW_ANNOTATIONS_MEMBER}.", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(json.dumps(entries))
+            os.replace(tmp_name, path)
+        except BaseException:
+            with suppress(OSError):
+                os.unlink(tmp_name)
+            raise
 
 
 @contextmanager

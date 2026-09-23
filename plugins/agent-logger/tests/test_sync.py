@@ -65,6 +65,8 @@ def test_local_target_push_excludes_lock_and_writes_meta(tmp_path: Path) -> None
     src = _make_source(tmp_path)
     projection = src / "session-state" / "abc-123" / "agent-worktrees.json"
     projection.write_bytes(b"{opaque-future-or-malformed-projection")
+    (src / "session-state" / "abc-123" / "review-annotations.json.lock").write_text("1")
+    (src / "session-state" / "abc-123" / "review-annotations.json.abc123.tmp").write_text("[]")
     dest_root = tmp_path / "dest"
     target = LocalTarget({"path": str(dest_root)})
 
@@ -78,6 +80,12 @@ def test_local_target_push_excludes_lock_and_writes_meta(tmp_path: Path) -> None
     ).read_bytes() == projection.read_bytes()
     assert not (machine_dir / "session-state" / "abc-123" / ".lock").exists()
     assert not (machine_dir / "session-state" / "abc-123" / "LOCK").exists()
+    assert not (
+        machine_dir / "session-state" / "abc-123" / "review-annotations.json.lock"
+    ).exists()
+    assert not (
+        machine_dir / "session-state" / "abc-123" / "review-annotations.json.abc123.tmp"
+    ).exists()
     assert (machine_dir / "sync-meta.json").is_file()
 
 
