@@ -275,6 +275,13 @@ Round 2 (operator's response to that evaluation):
 - [ ] Draft CONTRIBUTING.md / AGENTS.md rewrite content in-repo as a doc
       (not yet the live contract) describing the new contributor flow:
       changefile-only PRs, no manual version edits, no vendoring copies.
+  - **Drafted:** [`contributing-draft.md`](contributing-draft.md) — a
+    before/after table, the changefile workflow, the "wait, and how to
+    preview past it" section (cross-referencing `preview_release.py` and
+    the mutable-dev-slot pattern instead of the withdrawn `dev_slot.py`),
+    and an explicit list of what still has to land first (Phase 2/3, the
+    canonical-libs restoration). Marked DRAFT/not-yet-authoritative; landing
+    it as the live CONTRIBUTING.md/AGENTS.md replacement is a Phase 2 item.
 - [x] Investigate and close the auto-updater coverage gap: enumerate which
       copilot-extensions plugins a harness worktree actually keeps current
       via `agent-worktrees update` (or equivalent), confirm whether
@@ -502,3 +509,19 @@ generator contract details here or in a linked sub-doc._
   someone else's baseline to repair) — but it currently blocks *any* PR's
   "guards + lint" required check from going green, including PR #3380.
   Flagging for operator awareness rather than merging around it.
+- **Operator confirmed this is a live, unplanned case study for this
+  effort's own premise**: an unrelated merge broke the one branch every
+  consumer polls, and every subsequent PR (including this effort's own
+  #3380) is now blocked behind it with no coordinated review of the
+  breakage — exactly the "checkins land on main, then breakage is
+  discovered" failure mode the dev/main split exists to prevent. Operator
+  has another agent fixing the break directly; PR #3380 stays open,
+  unmerged, until main is green again. Continuing with the one remaining
+  Phase 1 item that doesn't depend on a merge (the CONTRIBUTING.md/AGENTS.md
+  draft) in the meantime.
+- Drafted `contributing-draft.md` (see Plan). Every Phase 1 Plan item is now
+  either done, withdrawn-with-reason, or deliberately deferred
+  (Copilot-CLI update-semantics). Phase 1 is functionally complete pending
+  operator review; next real step is Phase 2 (cutting the `dev` branch),
+  which needs the operator's go-ahead since it changes the repo's branch
+  topology.
