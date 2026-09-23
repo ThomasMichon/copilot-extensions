@@ -22,7 +22,10 @@
   [#3368](https://github.com/ThomasMichon/copilot-extensions/pull/3368)),
   [#3360](https://github.com/ThomasMichon/copilot-extensions/issues/3360)
   (retire `_engine_runtime.py`'s in-process import of agent-worktrees' own CLI-
-  root modules)
+  root modules),
+  [#3390](https://github.com/ThomasMichon/copilot-extensions/issues/3390)
+  (relocate terminal-profile handling — `profiles.py`/`terminal_fragment.py` —
+  out of agent-worktrees, matching the Mux/AHP precedent)
 - **Vision:** **vision-closing** against three already-stated visions (no
   revision needed to close their delta vs. reality; the recent
   `session-hosting` split narrowed which of these visions govern the
@@ -371,17 +374,20 @@ each checkbox below.
       sys.path injection narrowed to the libs still needed for the CLI-root
       boundary itself (`plugin-resolve`, `config-migrate`,
       `single-instance-lease`).
-- [ ] **Vendor `profiles` as a 4th shared lib (not a subprocess conversion).**
-      The inventory found `profiles`' actual call sites
-      (`engine_profiles_view.py`, `profiles_io.py`) never touch
-      agent-worktrees' own runtime state — every function takes a
-      caller-supplied config path and returns a plain dataclass
-      (`TargetSel`) or primitive. It is pure, dependency-free logic exactly
-      like `agent_procutil`/`dropin_registry`, called live during interactive
-      menu rendering (wrong shape and too frequent for a subprocess
-      round-trip regardless). Same treatment as #3359: vendor
-      `worktree-manager/libs/profiles` byte-identical, register with
-      `check-vendored-libs-sync.py`.
+- [ ] **`profiles` moves to worktree-manager as a full relocation, not a
+      vendored copy — see Phase 3e (#3390).** The inventory found
+      `profiles`' actual call sites (`engine_profiles_view.py`,
+      `profiles_io.py`) never touch agent-worktrees' own runtime state —
+      every function takes a caller-supplied config path and returns a
+      plain dataclass (`TargetSel`) or primitive, and it's also called live
+      during interactive menu rendering (wrong shape and too frequent for a
+      subprocess round-trip regardless). Originally scoped here as a
+      #3359-style vendored-lib fix; operator direction revised this to a
+      full ownership move (terminal handling of every kind is leaving
+      agent-worktrees, matching the Mux/AHP precedent) — tracked separately
+      as its own phase since it also touches agent-worktrees' own
+      `profiles`/`terminal-fragment`/`repair` CLI verbs, not just this
+      Picker's read path.
 - [ ] **Design + convert the low-frequency, one-shot CLI-root reads.**
       `pivot_manifest.py`'s `config.install_dir()` / `config._home()` /
       `state_root_module.resolve_state_root(...)` run once per pivot-registry
@@ -418,6 +424,51 @@ each checkbox below.
       I/O work lands, since both touch the same call site.
 - [ ] Retire `_engine_runtime.py` (and its 9 proxy-module shims) once every
       call site above has converted or been reclassified.
+
+### Phase 3e — Relocate terminal-profile handling out of agent-worktrees (Planned — #3390)
+
+Operator direction (2026-09-23), while scoping Phase 3d's `profiles`
+disposition: terminal handling of *every* kind — not just Mux presentation
+and the AHP backend (already relocating per Phase 3b / #2062) — is leaving
+`agent-worktrees` for the Worktree Manager control-plane, in phases, the
+same eventual direction as `agent-worktrees update` becoming
+`worktree-manager update`. Vision updated in
+[`visions/plugins/agent-worktrees`](../../../visions/plugins/agent-worktrees/README.md#non-goals--boundaries)
+(new Non-Goal) and
+[`visions/installer`](../../../visions/installer/README.md#optional-worktree-agent-control-plane)
+(feature text) — see each vision's 2026-09-23 Provenance entry.
+
+**Scope:** `agent_worktrees.profiles` (the `TargetSel` terminal-profile
+*selection* model + its `~/.<project>/config.yaml` persistence) and
+`agent_worktrees.terminal_fragment` (the real Windows Terminal / Tabby
+fragment generator that mirrors the selection) — plus the CLI surface built
+on them (`agent-worktrees profiles` / `terminal-fragment` / the
+terminal-mirroring parts of `repair`, all in `picker_profiles_cli.py`) and
+agent-worktrees' own bundled legacy Picker's `picker_support/data_local.py`
+call site.
+
+- [ ] Write the reviewed, ordered migration plan (matching
+      `phase-3b-ahp-relocation.md`'s shape): full current-state inventory
+      with exact file/line evidence, target ownership shape, back-compat for
+      existing on-disk `terminal_profiles:` records, and independently-
+      landable steps.
+- [ ] Relocate `profiles.py` + `terminal_fragment.py` into worktree-manager;
+      decide whether worktree-manager's copy is a new owned module or
+      (if agent-worktrees keeps a call site during the transition) a
+      vendored shared lib in the interim.
+- [ ] Give worktree-manager an equivalent CLI/config surface for reading and
+      writing a machine's terminal-profile column, callable both by its own
+      Picker and by agent-worktrees' `install`/`repair` flow during the
+      transition (accepting a temporary reverse dependency, same as any
+      other Mux/AHP-style cutover) until agent-worktrees' own verbs retire.
+- [ ] **Clean, decisive cutover — not an indefinitely-maintained pair**, per
+      the Mux/AHP relocation's precedent: retire agent-worktrees'
+      `profiles`/`terminal-fragment` CLI verbs and the terminal-mirroring
+      parts of `repair` once the Manager's surface is proven, rather than
+      keeping both paths alive indefinitely.
+- [ ] Update worktree-manager's own `production_picker` call sites
+      (`engine_profiles_view.py`, `profiles_io.py`) to the relocated module,
+      closing out Phase 3d's `profiles` checkbox above.
 
 ### Phase 4 — Bare-invocation seam & handoff (Plugin side landed; end-state pending)
 - [x] Plugin binstub seam resolves a no-args launch to a **usable** Manager on
@@ -540,6 +591,21 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-09-23** — Operator direction on Phase 3d's `profiles` disposition:
+  not a vendored-lib fix (as originally scoped below) — terminal handling of
+  every kind is leaving agent-worktrees for the Worktree Manager, matching
+  the standing Mux/AHP relocation precedent (#2062), eventually including
+  `agent-worktrees update` itself becoming `worktree-manager update`. Added
+  Phase 3e (Planned — #3390, filed this session) to track the relocation of
+  `profiles.py`/`terminal_fragment.py` and agent-worktrees' own
+  `profiles`/`terminal-fragment`/`repair` CLI verbs; revised Phase 3d's
+  `profiles` checkbox to point at it instead of vendoring. Updated
+  [`visions/plugins/agent-worktrees`](../../../visions/plugins/agent-worktrees/README.md)
+  (new Non-Goal) and
+  [`visions/installer`](../../../visions/installer/README.md) (feature text)
+  with matching Provenance entries. No relocation implementation yet — Phase
+  3e opens with writing the reviewed migration plan, following
+  `phase-3b-ahp-relocation.md`'s shape.
 - **2026-09-22** — Added Phase 3d (Planned — #3359, #3360): retire
   `_engine_runtime.py`'s in-process import of agent-worktrees' own CLI-root
   modules. Landed #3359 (vendor the 3 borrowed shared libs) via
