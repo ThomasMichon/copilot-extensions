@@ -590,12 +590,23 @@ below for the carved implementation plan.
   disposition.
 - [ ] Place each accepted public tracker item in exactly one existing phase,
   extending this plan before implementation when necessary.
-- [ ] Durable end-to-end lifecycle auditability: instrument session/handoff
+- [x] Durable end-to-end lifecycle auditability: instrument session/handoff
   cutover transitions (creation, transfer, completion, abandonment) so the
   full audit trail is traceable, closing the remaining cross-link/session-
   state trace gaps beyond what the session-claim lifecycle (Phase 8) already
   covers. Tracked in
   [#3113](https://github.com/ThomasMichon/copilot-extensions/issues/3113).
+  **Built as the corrected scope discovery found (2026-09-23), not the
+  literal title**: session/handoff *cutover*-stage auditability is already
+  covered elsewhere (Phase 8's session-claim register/deregister, plus the
+  separately-tracked `handoff-cutover-lifecycle-journal` effort/#2457's
+  13-stage model). The real residual gap was the **resource-claim and
+  follow-up ledgers having zero durable audit trail** -- closed via
+  `activity.log_event()` instrumentation on every real mutation point in
+  `claims_cli.py`, `follow_ups_cli.py`, and `claim_handoffs.py`'s CLI
+  dispatch (Slice 1, journaled below). Durable-persistence question
+  (whether these events also need `handoff_trace`-style storage) was
+  explicitly answered: no -- see the journal entry's rationale.
 - [x] Claim-safe terminal reclamation: finish reclaiming terminal workspaces
   with obligation-preserving release semantics -- inbound-claim release,
   multi-claim safety, and historical adoption/status surfaces -- rather than
@@ -2653,4 +2664,59 @@ The approved design is the faceted model in [design.md](design.md):
   switch, deliberately deferred, higher-risk), Phase 5 (legend/filter parity
   + agent-bridge cockpit consumer), Phase 6 (ship-it, last), and #3113
   (the still-open half of Phase 7).
+
+### 2026-09-23 (continued) - Phase 7: #3113 discovery + claim/follow-up ledger `activity.log_event()` instrumentation (Slice 1)
+
+- **Discovery pass (no code)**: re-read #3113
+  ("Instrument session/handoff cutover lifecycle transitions for full
+  auditability") against current code and found its title description does
+  NOT match a real remaining gap -- session-claim register/deregister
+  already ships (Phase 8), and the 13-stage session-handoff-*cutover*
+  sequence specifically is the separately-tracked, already-active
+  `efforts/active/handoff-cutover-lifecycle-journal` effort (#2457), not
+  this one. The genuine residual gap, confirmed by grepping all three
+  files: the **resource-claim and follow-up ledgers had zero durable audit
+  trail** -- `claims_cli.py` (add/release/settle/sweep-abandon/cleanup-
+  reclaim/reconcile-at-rest), `follow_ups_cli.py` (add/resolve/dismiss),
+  and `claim_handoffs.py`'s CLI dispatch (offer/decline/cancel) never
+  called `activity.log_event()` anywhere. Posted the finding + a proposed
+  Slice 1 scope as a comment on
+  [#3113](https://github.com/ThomasMichon/copilot-extensions/issues/3113#issuecomment-5802473962).
+- **Slice 1 implemented**: added best-effort `activity.log_event()` calls
+  at every real ledger mutation point (not on read-only or dry-run/deferred
+  paths): `claim_added`, `claim_released`, `claim_settled`,
+  `claim_abandoned` (sweep `--apply` only), `claim_at_rest_reconciled`
+  (reconcile-at-rest `--apply` only), `claim_reclaimed` (cleanup `--apply`
+  only), `claim_handoff_offered`/`_declined`/`_cancelled`, `follow_up_added`,
+  `follow_up_resolved`, `follow_up_dismissed`. Each carries `worktree_id`
+  plus enough context (kind/ref/disposition/reason/bundle id/refs) to
+  reconstruct the mutation from the rolling `activity.jsonl` log alone.
+  Documented the new event names in `activity.py`'s module docstring
+  alongside the existing vocabulary.
+- **Explicit durable-persistence decision (per the roster's own ask)**:
+  these new events do **not** feed `handoff_trace`'s unrotated per-worktree
+  store. Rationale: a claim/follow-up's *current* disposition already lives
+  durably in its owning `WorktreeRecord` YAML -- unlike a handoff-cutover
+  race, there is no "truth" gap here, only a *history* gap (who mutated
+  what, when). The existing 7-day rolling `activity.jsonl` window is
+  sufficient for that; recorded the rationale directly in `activity.py`'s
+  docstring so it's discoverable without re-deriving it.
+- Added 15 new tests exercising every new call site (asserting the exact
+  event name + fields, and that dry-run/deferred paths do NOT log):
+  `test_claims_cmd.py` (add/release/settle), `test_obligation_sweep.py`
+  (sweep apply logs, dry-run doesn't), `test_claims_reconcile_at_rest.py`
+  (apply logs, dry-run doesn't), `test_cleanup.py` (cleanup apply logs),
+  `test_claim_handoffs.py` (offer/show/decline/cancel -- show asserted to
+  never log), `test_follow_ups_cmd.py` (add/resolve/dismiss).
+- Marked #3113's Phase 7 Plan bullet `[x]` below, with a corrected
+  description matching what was actually built (the ledger gap, not the
+  handoff-cutover-stage gap the original title implied). Phase 7 still has
+  other open bullets (`migration-intake` gate, scope revalidation, "place
+  each accepted item in exactly one phase", "keep fixtures synthetic") --
+  this slice closes only the #3113 bullet, not the whole phase. Validation: 250 targeted tests pass (agent-worktrees);
+  `ruff check` byte-identical before/after (`git stash` A/B, 8 pre-existing
+  errors unrelated to these files either side). The 12 `test_doctor.py`/
+  `test_context_resolution.py` failures seen in the full-suite run are
+  pre-existing on `origin/main` (confirmed via the same A/B) and unrelated
+  to this slice.
 

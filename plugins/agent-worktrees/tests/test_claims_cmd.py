@@ -806,3 +806,42 @@ def test_claims_add_then_settle_roundtrip(monkeypatch, tmp_path, capfd):
     m.cmd_claims(_settle_args("cs-blue"))
     rec = tracking.load_record(tmp_path / "worktrees" / "wt-A.yaml")
     assert rec.resources[0].state == "at-rest"
+
+
+# --- activity.log_event instrumentation (#3113) -----------------------------
+
+def test_claims_add_logs_claim_added(monkeypatch, tmp_path, capfd):
+    _seed(tmp_path, monkeypatch)
+    logged = []
+    monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: logged.append((a, k)))
+    rc = m.cmd_claims(_add_args("codespace", "cs-blue", note="example-web"))
+    assert rc == 0
+    assert logged == [(("claim_added",), {
+        "worktree_id": "wt-A", "kind": "codespace", "ref": "cs-blue",
+        "state": "active", "reopened": False})]
+
+
+def test_claims_release_logs_claim_released(monkeypatch, tmp_path, capfd):
+    ref = "anomalous-potato/copilot-extensions/wt-B"
+    _seed(tmp_path, monkeypatch,
+          resources=[tracking.ResourceClaim(kind="worktree", ref=ref)])
+    logged = []
+    monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: logged.append((a, k)))
+    rc = m.cmd_claims(_release_args(ref))
+    assert rc == 0
+    assert logged == [(("claim_released",), {
+        "worktree_id": "wt-A", "kind": "worktree", "ref": ref,
+        "action": "released"})]
+
+
+def test_claims_settle_logs_claim_settled(monkeypatch, tmp_path, capfd):
+    _seed(tmp_path, monkeypatch)
+    m.cmd_claims(_add_args("codespace", "cs-blue"))
+    capfd.readouterr()
+    logged = []
+    monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: logged.append((a, k)))
+    rc = m.cmd_claims(_settle_args("cs-blue"))
+    assert rc == 0
+    assert logged == [(("claim_settled",), {
+        "worktree_id": "wt-A", "kind": "codespace", "ref": "cs-blue",
+        "disposition": "at-rest"})]

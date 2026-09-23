@@ -7,7 +7,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from . import claim_handoffs, obligations, output, tracking
+from . import activity, claim_handoffs, obligations, output, tracking
 from . import config as cfg, state_root as state_root_mod
 
 
@@ -380,6 +380,31 @@ def _claims_handoff(args: argparse.Namespace, target: list[str]) -> int:
             return _json_error(str(exc))
         output.err(str(exc))
         return 1
+    if action == "offer":
+        activity.log_event(
+            "claim_handoff_offered",
+            worktree_id=bundle.source,
+            bundle_id=bundle.bundle_id,
+            consumer=bundle.consumer,
+            refs=[claim["ref"] for claim in bundle.claims],
+            created=created,
+        )
+    elif action == "decline":
+        activity.log_event(
+            "claim_handoff_declined",
+            worktree_id=bundle.source,
+            bundle_id=bundle.bundle_id,
+            consumer=bundle.consumer,
+            reason=bundle.reason,
+        )
+    elif action == "cancel":
+        activity.log_event(
+            "claim_handoff_cancelled",
+            worktree_id=bundle.source,
+            bundle_id=bundle.bundle_id,
+            consumer=bundle.consumer,
+            reason=bundle.reason,
+        )
     payload = bundle.to_dict()
     if created is not None:
         payload["created"] = created
@@ -498,6 +523,14 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
             list(rec.last_finalize_released) if reopened else []
         )
         tracking.save_record(rec, rec_path)
+    activity.log_event(
+        "claim_added",
+        worktree_id=wt_id,
+        kind=kind,
+        ref=ref,
+        state=obligations.ACTIVE,
+        reopened=reopened,
+    )
     if args.json:
         _json_output(
             {
@@ -590,6 +623,7 @@ def _claims_release(args: argparse.Namespace, ref: str) -> int:
             output.err(msg)
             return 1
         remove = getattr(args, "remove", False)
+        kind = match.kind
         if remove:
             rec.resources = [c for c in rec.resources if c.ref != ref]
             action = "removed"
@@ -597,6 +631,13 @@ def _claims_release(args: argparse.Namespace, ref: str) -> int:
             match.state = "released"
             action = "released"
         tracking.save_record(rec, rec_path)
+    activity.log_event(
+        "claim_released",
+        worktree_id=wt_id,
+        kind=kind,
+        ref=ref,
+        action=action,
+    )
     if args.json:
         _json_output({"worktree_id": wt_id, "ref": ref, "action": action})
         return 0
@@ -661,6 +702,13 @@ def _claims_settle(args: argparse.Namespace, ref: str) -> int:
             return _json_error(f"no outbound claim with ref: {ref}")
         output.err(f"no outbound claim with ref: {ref} on {wt_id}")
         return 1
+    activity.log_event(
+        "claim_settled",
+        worktree_id=wt_id,
+        kind=settled.kind,
+        ref=ref,
+        disposition=disposition,
+    )
     if args.json:
         _json_output({"worktree_id": wt_id, "ref": ref, "disposition": disposition})
         return 0
@@ -726,6 +774,14 @@ def _claims_sweep(args: argparse.Namespace) -> int:
                 if c.ref in before:
                     c.state = before[c.ref]
 
+    if apply:
+        for r in reclaimed:
+            activity.log_event(
+                "claim_abandoned",
+                worktree_id=r["owner"],
+                kind=r["kind"],
+                ref=r["ref"],
+            )
     if args.json:
         _json_output({"applied": apply, "reclaimed": reclaimed, "count": len(reclaimed)})
         return 0
@@ -772,6 +828,14 @@ def _claims_reconcile_at_rest(args: argparse.Namespace) -> int:
         for c in flipped:
             released.append({"owner": rec.worktree_id, "kind": c.kind, "ref": c.ref})
 
+    if apply:
+        for r in released:
+            activity.log_event(
+                "claim_at_rest_reconciled",
+                worktree_id=r["owner"],
+                kind=r["kind"],
+                ref=r["ref"],
+            )
     if args.json:
         _json_output({"applied": apply, "released": released, "count": len(released)})
         return 0
@@ -796,6 +860,15 @@ def _claims_cleanup(args: argparse.Namespace) -> int:
     rows = cleanup_mod.cleanup_orphanage(config, apply=apply, selectors=selectors or None)
 
     reclaimed = [r for r in rows if r["status"] == "reclaimed"]
+    if apply:
+        for r in reclaimed:
+            activity.log_event(
+                "claim_reclaimed",
+                worktree_id=r.get("source_worktree"),
+                kind=r.get("kind"),
+                ref=r.get("ref"),
+                handoff_to=r.get("handoff_to"),
+            )
     if args.json:
         _json_output(
             {
