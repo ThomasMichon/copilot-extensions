@@ -1,4 +1,4 @@
-"""Tests for the Phase 3e Step 4 CLI surface (terminal-fragment / profiles).
+"""Tests for the Phase 3e Step 4/5 CLI surface (terminal-fragment / profiles).
 
 Exercises ``worktree_manager.__main__``'s ``terminal-fragment``/``profiles``
 commands end-to-end via ``main()`` against a synthetic ``USERPROFILE`` home
@@ -6,9 +6,11 @@ commands end-to-end via ``main()`` against a synthetic ``USERPROFILE`` home
 relocated ``terminal_fragment``/``terminal_profiles``/``harness_state``
 modules are wired correctly through the CLI dispatch -- not just importable.
 
-Deploying the fragment to disk is Phase 3e Step 5's scope; these commands
-are read/preview-only (``profiles apply`` always reports
-``mirrored: false``).
+Step 5 added the real deploy/mirror mechanism (``terminal-fragment --deploy``,
+``profiles apply --mirror``), always previewed first and gated behind an
+explicit ``--live`` flag: without it, both commands compute the full plan but
+never touch disk, and ``profiles apply`` without ``--mirror`` at all keeps its
+pre-Step-5 behaviour exactly (``mirrored: false``, no plan computed).
 """
 from __future__ import annotations
 
@@ -89,7 +91,8 @@ def test_profiles_apply_then_get_roundtrips(monkeypatch, tmp_path, capsys):
     ])
     assert rc == 0
     applied = json.loads(capsys.readouterr().out)
-    # Mirroring is deliberately not wired yet (Phase 3e Step 5).
+    # Without --mirror, apply persists the selection but never mirrors it
+    # (Phase 3e Step 5's opt-in path -- see the --mirror tests below).
     assert applied["mirrored"] is False
     assert any(t["machine"] == "other" for t in applied["targets"])
 
@@ -104,3 +107,63 @@ def test_profiles_apply_requires_set(monkeypatch, tmp_path, capsys):
     rc = _run(monkeypatch, tmp_path, ["profiles", "myproj", "apply"])
     assert rc == 2
     assert "requires --set" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# Phase 3e Step 5 -- deploy/mirror, dry-run by default, --live opts in.
+# ---------------------------------------------------------------------------
+
+def test_terminal_fragment_deploy_defaults_to_dry_run(monkeypatch, tmp_path, capsys):
+    _make_home(tmp_path)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "localappdata"))
+    rc = _run(monkeypatch, tmp_path, ["terminal-fragment", "myproj", "--deploy"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "DRY RUN: nothing was written" in out
+    assert not (tmp_path / "localappdata" / "Microsoft" / "Windows Terminal").exists()
+
+
+def test_terminal_fragment_deploy_live_writes_fragment(monkeypatch, tmp_path, capsys):
+    _make_home(tmp_path)
+    local = tmp_path / "localappdata"
+    monkeypatch.setenv("LOCALAPPDATA", str(local))
+    rc = _run(monkeypatch, tmp_path, ["terminal-fragment", "myproj", "--deploy", "--live"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "LIVE: writes applied." in out
+    fragment_path = local / "Microsoft" / "Windows Terminal" / "Fragments" / "AgentWorktrees" / "agent-worktrees.json"
+    assert fragment_path.exists()
+    fragment = json.loads(fragment_path.read_text())
+    assert any(p["name"] == "Myproj" for p in fragment["profiles"])
+
+
+def test_profiles_apply_mirror_without_live_is_a_preview(monkeypatch, tmp_path, capsys):
+    _make_home(tmp_path)
+    local = tmp_path / "localappdata"
+    monkeypatch.setenv("LOCALAPPDATA", str(local))
+    rc = _run(monkeypatch, tmp_path, [
+        "profiles", "myproj", "apply",
+        "--set", json.dumps([{"machine": "other", "env": "Win", "kind": "shell"}]),
+        "--mirror", "--json",
+    ])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["mirrored"] is False
+    assert "mirror_plan" in payload
+    assert not (local / "Microsoft" / "Windows Terminal").exists()
+
+
+def test_profiles_apply_mirror_live_writes_fragment(monkeypatch, tmp_path, capsys):
+    _make_home(tmp_path)
+    local = tmp_path / "localappdata"
+    monkeypatch.setenv("LOCALAPPDATA", str(local))
+    rc = _run(monkeypatch, tmp_path, [
+        "profiles", "myproj", "apply",
+        "--set", json.dumps([{"machine": "other", "env": "Win", "kind": "shell"}]),
+        "--mirror", "--live", "--json",
+    ])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["mirrored"] is True
+    fragment_path = local / "Microsoft" / "Windows Terminal" / "Fragments" / "AgentWorktrees" / "agent-worktrees.json"
+    assert fragment_path.exists()

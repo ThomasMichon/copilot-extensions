@@ -371,8 +371,9 @@ def _resolve_terminal_fragment_machine(project: str | None, explicit: str | None
 
 def _cmd_terminal_fragment(rest: list[str]) -> int:
     """``worktree-manager terminal-fragment <project> [--machine K]
-    [--explain|--doctor|--migrate-selections]`` -- preview the Windows
-    Terminal fragment a machine's config would emit, without deploying it.
+    [--explain|--doctor|--migrate-selections|--deploy [--live]]`` -- preview
+    (or, with ``--deploy --live``, actually write) the Windows Terminal
+    fragment a machine's config would emit.
 
     Phase 3e Step 4 (copilot-extensions#3390): the read-only equivalent of
     agent-worktrees' own ``profiles``/``terminal-fragment`` CLI verbs, now
@@ -381,16 +382,23 @@ def _cmd_terminal_fragment(rest: list[str]) -> int:
     takes an **explicit** ``<project>`` positional (matching
     ``worktree-manager projects``/``repos``'s own convention) and resolves
     the machine key from that project's own config.yaml directly -- no
-    cwd-based ``config.load_config()`` needed. **Deploying** the fragment
-    (writing it to disk + reconciling Windows Terminal's live state) is
-    Phase 3e Step 5's scope (repointing ``install.ps1``), not this command.
+    cwd-based ``config.load_config()`` needed.
+
+    Phase 3e Step 5: ``--deploy`` computes the real deploy plan (fragment
+    write + ``state.json``/``settings.json`` reconciliation) via
+    :func:`terminal_fragment.deploy_fragment` and always previews it first.
+    Only ``--deploy --live`` together perform the actual writes -- ``--deploy``
+    alone is a dry run, on purpose: this surface has not yet had a live trial
+    against a real machine's Windows Terminal install (see the Phase 3e
+    effort doc's Step 5 blocker), so live writes stay behind an explicit,
+    separate flag until that trial happens.
     """
     from . import terminal_fragment as tf
 
     positionals, values = _parse_flagged_args(
         rest,
         flags_with_value={"machine"},
-        flags_bool={"explain", "doctor", "migrate_selections"},
+        flags_bool={"explain", "doctor", "migrate_selections", "deploy", "live"},
     )
     project = positionals[0] if positionals else None
     machine = _resolve_terminal_fragment_machine(project, values["machine"])
@@ -411,6 +419,9 @@ def _cmd_terminal_fragment(rest: list[str]) -> int:
 
     if values["doctor"]:
         return _terminal_fragment_doctor(tf, machine, project)
+
+    if values["deploy"]:
+        return _terminal_fragment_deploy(tf, machine, project, live=bool(values["live"]))
 
     result = tf.preview_local(machine, current_project=project)
 
@@ -497,17 +508,57 @@ def _terminal_fragment_doctor(tf, machine: str, project: str | None) -> int:
     return 0
 
 
+def _terminal_fragment_deploy(tf, machine: str, project: str | None, *, live: bool) -> int:
+    """``terminal-fragment <project> --deploy [--live]`` -- print the deploy
+    plan; only ``--live`` actually writes anything.
+
+    Phase 3e Step 5 (copilot-extensions#3390). Always prints the plan
+    (fragment path, what would change in ``generatedProfiles``/
+    ``settings.json``, and any operator-facing notes) before returning, so a
+    dry run and a live deploy report the exact same information -- the only
+    difference is whether ``deploy_fragment(..., apply=live)`` actually wrote
+    anything.
+    """
+    plan = tf.deploy_fragment(machine, current_project=project, apply=live)
+
+    print(f"Terminal fragment deploy plan for '{machine}':")
+    print(f"  fragment path     : {plan.fragment_path or '(unresolvable -- non-Windows?)'}")
+    print(f"  profiles (new)    : {len(plan.new_guids)}")
+    if plan.stale_guids:
+        print(f"  stale (removed)   : {len(plan.stale_guids)}")
+    if plan.changed_guids:
+        print(f"  changed (rediscover): {len(plan.changed_guids)}")
+    if plan.generated_plan is not None:
+        gp = plan.generated_plan
+        print(f"  generatedProfiles : {len(gp.keep)} kept, {len(gp.remove)} pruned"
+              f" ({len(gp.healed)} healed, {len(gp.reclaimed)} reclaimed orphans)")
+    if plan.settings_stale_count:
+        print(f"  settings.json     : {plan.settings_stale_count} stale profile(s) to remove")
+    for note in plan.notes:
+        print(f"  note: {note}")
+
+    if live:
+        print("  -> LIVE: writes applied." if plan.applied else "  -> LIVE requested but nothing was applied.")
+    else:
+        print("  -> DRY RUN: nothing was written. Pass --live to actually deploy.")
+    return 0
+
+
 def _cmd_profiles(rest: list[str]) -> int:
     """``worktree-manager profiles <project> get|apply [--machine K]
-    [--set JSON] [--json]`` -- read or write a machine's terminal-profile
-    column for ``<project>``.
+    [--set JSON] [--mirror [--live]] [--json]`` -- read or write a machine's
+    terminal-profile column for ``<project>``.
 
     Phase 3e Step 4 (copilot-extensions#3390): the equivalent of
     agent-worktrees' own ``profiles get/apply`` CLI verb, backed by the
-    relocated ``terminal_profiles`` module. **Mirroring** the selection to a
-    real Windows Terminal fragment on disk is Phase 3e Step 5's scope (this
-    command persists the selection but never deploys it); ``apply`` always
-    reports ``mirrored: false`` until Step 5 lands.
+    relocated ``terminal_profiles`` module.
+
+    Phase 3e Step 5: ``apply --mirror`` computes what deploying the
+    resulting fragment would do (via ``terminal_fragment.deploy_fragment``)
+    and includes it as a preview; only ``apply --mirror --live`` together
+    perform the actual write. Without ``--mirror``, ``apply`` behaves exactly
+    as before Step 5 -- it persists the selection and reports
+    ``mirrored: false``, deliberately never mirroring by default.
     """
     from . import terminal_fragment as tf
     from . import terminal_profiles as profiles
@@ -515,13 +566,14 @@ def _cmd_profiles(rest: list[str]) -> int:
 
     if not rest or rest[0].startswith("-"):
         print("usage: worktree-manager profiles <project> get|apply "
-              "[--machine K] [--set '<json-array>'] [--json]")
+              "[--machine K] [--set '<json-array>'] [--mirror [--live]] [--json]")
         return 2
     project = rest[0]
     action = rest[1] if len(rest) > 1 and not rest[1].startswith("-") else "get"
     flag_rest = rest[2:] if len(rest) > 1 and not rest[1].startswith("-") else rest[1:]
     _, values = _parse_flagged_args(
-        flag_rest, flags_with_value={"machine", "set"}, flags_bool={"json"}
+        flag_rest, flags_with_value={"machine", "set"},
+        flags_bool={"json", "mirror", "live"},
     )
     machine = _resolve_terminal_fragment_machine(project, values["machine"])
     if not machine:
@@ -585,14 +637,31 @@ def _cmd_profiles(rest: list[str]) -> int:
     payload = {
         "machine": machine, "env": env,
         "targets": [s.as_dict() for s in written],
-        # Not yet wired: mirroring to a real WT fragment is Phase 3e Step 5.
         "mirrored": False,
     }
+
+    mirror_note = "not yet mirrored to disk -- see Phase 3e Step 5"
+    if values["mirror"]:
+        live = bool(values["live"])
+        plan = tf.deploy_fragment(machine, current_project=project, apply=live)
+        payload["mirrored"] = plan.applied
+        payload["mirror_plan"] = {
+            "would_change": plan.would_change,
+            "new_profiles": len(plan.new_guids),
+            "stale_profiles": len(plan.stale_guids),
+            "changed_profiles": len(plan.changed_guids),
+            "notes": plan.notes,
+        }
+        mirror_note = (
+            "mirrored to disk" if plan.applied
+            else "mirror previewed (dry run) -- pass --mirror --live to write it"
+        )
+
     if values["json"]:
         print(json.dumps(payload))
     else:
         print(f"Saved {len(written)} terminal profile(s) for {machine} {env} "
-              "(not yet mirrored to disk -- see Phase 3e Step 5)")
+              f"({mirror_note})")
     return 0
 
 
