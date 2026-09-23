@@ -90,13 +90,15 @@ ambient/legacy credentials just by making the strict path fail.
 1. **Canonical roster + destination update (single source, then sync).**
    In `libs/peer-launch/peer_launch.py`:
    - Add `"agent-worktrees"` to `OWNERS`.
-   - Add `"agent-dispatch": "agent_dispatch"` to `PEERS` alongside the
-     existing `agent-codespaces`/`agent-containers` entries the claim
-     registry needs (confirm at implementation time exactly which peer
-     module names the claim-provider registry calls into today — at least
-     agent-codespaces and agent-containers per the review-flagged call
-     sites, plus agent-dispatch per `claims_cli._dispatch_assigned_tasks()`
-     using `peer_env()` too).
+   - Canonical `PEERS` today is only `{"agent-worktrees": "agent_worktrees",
+     "agent-bridge": "agent_bridge", "agent-ssh": "agent_ssh"}` — it does
+     **not** already contain `agent-codespaces` or `agent-containers`.
+     Add all **three** entries the claim-provider registry actually calls
+     into: `"agent-codespaces": "agent_codespaces"`,
+     `"agent-containers": "agent_containers"`, and
+     `"agent-dispatch": "agent_dispatch"` (the last per
+     `claims_cli._dispatch_assigned_tasks()`, which also runs its callback
+     through `peer_env()` today).
    In `tools/sync-peer-launch.py`: add
    `plugins/agent-worktrees/src/agent_worktrees/_peer_launch.py` to
    `DESTINATIONS`. Run `python tools/sync-peer-launch.py` (or `--check` to
