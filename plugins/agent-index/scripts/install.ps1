@@ -326,6 +326,7 @@ $LocalBin = Join-Path $env:USERPROFILE '.local\bin'
 $VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 $TaskName = 'agent-index'
+$RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $EnvFile = Join-Path $InstallDir 'service.env'
 $Launcher = Join-Path $InstallDir 'service.ps1'
 
@@ -1743,6 +1744,84 @@ exit `$LASTEXITCODE
     [System.IO.File]::WriteAllText($EngineLauncher, $engLauncher, $utf8NoBom)
 }
 
+function Remove-LogonAutostart {
+    param([Parameter(Mandatory)][string]$Name)
+    try {
+        if (Get-ItemProperty -Path $RunKey -Name $Name -ErrorAction SilentlyContinue) {
+            Remove-ItemProperty -Path $RunKey -Name $Name -ErrorAction Stop
+            Write-Ok "Logon auto-start removed (HKCU Run '$Name')"
+        }
+    } catch {
+        Write-Warn "Could not remove logon auto-start '$Name' (HKCU Run): $($_.Exception.Message)"
+    }
+}
+
+function Start-LauncherDetached {
+    param(
+        [Parameter(Mandatory)][string]$LauncherPath,
+        [Parameter(Mandatory)][string]$Kind
+    )
+    $taskArgs = "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$LauncherPath`""
+    try {
+        Start-Process -FilePath 'conhost.exe' -ArgumentList $taskArgs -WindowStyle Hidden | Out-Null
+        Write-Ok "$Kind launched as a detached background process"
+    } catch {
+        Write-Warn "Could not start $Kind process: $($_.Exception.Message)"
+    }
+    return $taskArgs
+}
+
+function Install-LogonAutostartEntry {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$LauncherPath,
+        [Parameter(Mandatory)][string]$Kind,
+        [Parameter(Mandatory)][scriptblock]$IsHealthy,
+        [Parameter(Mandatory)][string]$ScheduledTaskName
+    )
+    if (Get-ScheduledTask -TaskName $ScheduledTaskName -ErrorAction SilentlyContinue) {
+        Remove-LogonAutostart -Name $Name
+        Write-Skip "$Kind logon auto-start skipped -- scheduled task '$ScheduledTaskName' is the explicit machine-local supervisor"
+        return
+    }
+    if (-not (& $IsHealthy)) {
+        [void](Start-LauncherDetached -LauncherPath $LauncherPath -Kind $Kind)
+    } else {
+        Write-Skip "$Kind already running -- not starting a second instance"
+    }
+    $taskArgs = "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$LauncherPath`""
+    try {
+        if (-not (Test-Path $RunKey)) { New-Item -Path $RunKey -Force | Out-Null }
+        New-ItemProperty -Path $RunKey -Name $Name -Value "conhost.exe $taskArgs" `
+            -PropertyType String -Force | Out-Null
+        Write-Ok "Logon auto-start registered (HKCU Run '$Name') -- durable without elevation"
+    } catch {
+        Write-Warn "Could not register logon auto-start '$Name' (HKCU Run): $($_.Exception.Message)"
+    }
+}
+
+function Install-LogonAutostart {
+    # Default durable tier: zero-elevation interactive-logon auto-start for the
+    # service and durable engine. Scheduled tasks remain an explicit opt-in
+    # upgrade and supersede the matching HKCU Run entry when present.
+    if ($NoService) { Write-Skip 'Logon auto-start skipped (-NoService)'; return }
+    if ((Get-ActivationRole) -ne 'host') {
+        Write-Skip 'Logon auto-start skipped (role is not host)'
+        return
+    }
+    Write-ServiceFiles
+    Install-LogonAutostartEntry -Name $TaskName -LauncherPath $Launcher -Kind 'Service' `
+        -IsHealthy { Test-ServiceHealthy } -ScheduledTaskName $TaskName
+    if (-not (Test-Path $EngineVenvPython)) {
+        Remove-LogonAutostart -Name $EngineTaskName
+        Write-Skip 'Engine logon auto-start skipped -- durable engine runtime not provisioned'
+        return
+    }
+    Write-EngineFiles
+    Install-LogonAutostartEntry -Name $EngineTaskName -LauncherPath $EngineLauncher -Kind 'Engine daemon' `
+        -IsHealthy { Test-EnginePort } -ScheduledTaskName $EngineTaskName
+}
+
 # ── Scheduled-task registration: OPT-IN ADVANCED TIER ONLY (never the default) ─
 #    The DEFAULT lifecycle is user-mode: the daemon runs as a plain user process,
 #    started/kept-alive by `Ensure-Running` (install/update/start) and the
@@ -1876,12 +1955,17 @@ function Invoke-ScopedElevation {
 
 function Invoke-RegisterTasks {
     # The ONLY task-scheduling entry point that may elevate -- and it elevates
-    # ONLY itself (task registration), never a full install/update. Opt-in via
-    # -AllowTaskElevation / AGENT_INDEX_ALLOW_TASK_ELEVATION=1.
+    # ONLY itself (task registration), never a full install/update. This is an
+    # explicit per-machine upgrade from the default HKCU Run tier to Windows
+    # Scheduled Tasks for boxes that want pre-login start / restart policy /
+    # missed-trigger recovery. Opt-in via -AllowTaskElevation /
+    # AGENT_INDEX_ALLOW_TASK_ELEVATION=1.
     if ((Test-TaskElevationOptIn) -and -not (Test-Elevated)) {
         [void](Invoke-ScopedElevation -ElevAction 'register-tasks')
         return
     }
+    Remove-LogonAutostart -Name $TaskName
+    Remove-LogonAutostart -Name $EngineTaskName
     Register-EngineDaemon
     Install-Service
 }
@@ -2174,12 +2258,22 @@ function Invoke-Stop {
         Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
         Write-Ok "Service task stopped: $TaskName"
     }
+    if (Get-ScheduledTask -TaskName $EngineTaskName -ErrorAction SilentlyContinue) {
+        Stop-ScheduledTask -TaskName $EngineTaskName -ErrorAction SilentlyContinue
+        Write-Ok "Engine daemon task stopped: $EngineTaskName"
+    }
 }
 
 function Invoke-Uninstall {
     if ($DryRun) {
         Write-Host '(dry run -- nothing will be changed)' -ForegroundColor Yellow
         Write-Host '[dry-run] would stop agent-index'
+        if (Get-ItemProperty -Path $RunKey -Name $TaskName -ErrorAction SilentlyContinue) {
+            Write-Host "[dry-run] would remove logon auto-start (HKCU Run): $TaskName"
+        }
+        if (Get-ItemProperty -Path $RunKey -Name $EngineTaskName -ErrorAction SilentlyContinue) {
+            Write-Host "[dry-run] would remove logon auto-start (HKCU Run): $EngineTaskName"
+        }
         if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
             Write-Host "[dry-run] would remove scheduled task: $TaskName"
         }
@@ -2200,6 +2294,8 @@ function Invoke-Uninstall {
         return
     }
     Invoke-Stop
+    Remove-LogonAutostart -Name $TaskName
+    Remove-LogonAutostart -Name $EngineTaskName
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
         Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
     }
@@ -2220,15 +2316,17 @@ switch ($Action) {
     'install' {
         Install-Runtime
         Invoke-ServiceCutover
+        Install-LogonAutostart
         Write-Skip 'Durable engine runtime unchanged; use engine / engine-update for the heavy stack'
     }
     'update' {
         Invoke-DowngradeGuard
         Install-Runtime
         Invoke-ServiceCutover
+        Install-LogonAutostart
         Write-Skip 'Durable engine runtime unchanged; use engine / engine-update for the heavy stack'
     }
-    'ensure' { Ensure-Running }  # user-mode auto-run safety net (sessionStart hook) -- start if not already healthy
+    'ensure' { Ensure-Running; Install-LogonAutostart }  # user-mode safety net + default logon auto-start registration (no elevation)
     'register-tasks' { Invoke-RegisterTasks }  # OPT-IN advanced tier (scheduled tasks) -- the sole action that may (opt-in) self-elevate that ONE step
     'engine' { Install-Engine | Out-Null; Ensure-EngineRunning }        # explicit host-side provisioning (role-independent), user-mode
     'engine-update' { if (Install-Engine -Upgrade) { Restart-EngineDaemon } }  # rebuild durable engine venv + restart daemon (decoupled from service update)

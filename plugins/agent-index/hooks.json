@@ -7,6 +7,12 @@
         "powershell": "$r = $env:COPILOT_PLUGIN_ROOT; if (-not $r) { $r = $env:PLUGIN_ROOT }; if (-not $r) { $r = $env:CLAUDE_PLUGIN_ROOT }; if (-not $r) { $r = (Get-Location).Path }; $s = (Join-Path $r 'scripts\\write-session-guidance.ps1'); if (Test-Path -LiteralPath $s -PathType Leaf) { & $s } else { [Console]::Out.Write('{}') }",
         "bash": "r=\"${COPILOT_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$PWD}}}\"; s=\"$r/scripts/write-session-guidance.sh\"; if [ -f \"$s\" ]; then bash \"$s\"; else printf '{}'; fi",
         "timeoutSec": 45
+      },
+      {
+        "type": "command",
+        "powershell": "$r = $env:COPILOT_PLUGIN_ROOT; if (-not $r) { $r = $env:PLUGIN_ROOT }; if (-not $r) { $r = $env:CLAUDE_PLUGIN_ROOT }; if (-not $r) { $r = (Get-Location).Path }; $s = (Join-Path $r 'scripts\\install.ps1'); try { if (Test-Path -LiteralPath $s -PathType Leaf) { & $s ensure *> $null } } catch {}; [Console]::Out.Write('{}')",
+        "bash": "r=\"${COPILOT_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$PWD}}}\"; s=\"$r/scripts/install.sh\"; if [ -f \"$s\" ]; then bash \"$s\" ensure >/dev/null 2>&1 || true; fi; printf '{}'",
+        "timeoutSec": 20
       }
     ]
   }

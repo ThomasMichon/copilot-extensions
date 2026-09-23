@@ -91,10 +91,12 @@ repo's own effective config as the only activator. A present invalid local
 config, an unsafe path, a conflicting singular/plural indexer declaration, a
 missing required binding for external-only activation, or an unavailable
 resolver leaves the plugin inactive.
-2. Session-start hooks only emit retrieval guidance while that resolver reports
-active; they never stamp or provision a runtime, or start a service. Retrieval
-guidance belongs in the exact-session guidance file when a session-file writer
-is present.
+2. Session-start hooks emit retrieval guidance while that resolver reports
+active, then run a cheap `ensure` safety net. The hook never stamps or
+provisions a runtime; it only health-checks the already-installed host runtime
+and, when this machine is the configured host, starts the existing user-mode
+service/engine if they are absent. Retrieval guidance belongs in the
+exact-session guidance file when a session-file writer is present.
 3. Every payload CLI entry runs the same resolver before installation-context
 selection, runtime provisioning, or transport routing. `status` reports
 structured `inactive` outside an opted-in repository; other commands are
@@ -128,9 +130,14 @@ slot. POSIX permits only the standard `bin/python` venv symlink after validating
 its owned parent slot and resolved executable; all other linked/reparse runtime
 artifacts remain rejected. A partial or corrupt slot is never dispatched.
 
-Windows scheduled tasks and POSIX systemd-user units are optional tier-2
-wrappers around the same stable launcher path. Explicit independent engine
-commands retain their existing lifecycle outside the light service runtime.
+The default durable tier now registers the same stable launchers with the
+lowest-privilege host mechanism that satisfies "restart on next logon without a
+live Copilot session": Windows writes HKCU Run entries for the service and
+durable engine; POSIX registers systemd --user units when available. Windows
+Scheduled Tasks remain an explicit per-machine upgrade tier for hosts that want
+pre-login start, missed-trigger recovery, or task-owned restart policy. Explicit
+independent engine commands retain their existing lifecycle outside the light
+service runtime.
 
 ## Service HTTP surface
 
