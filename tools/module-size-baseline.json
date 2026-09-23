@@ -19,7 +19,7 @@
   "plugins/agent-codespaces/libs/plugin-activation/src/plugin_activation/resolver.py": 1270,
   "plugins/agent-codespaces/libs/ssh-manager/src/ssh_manager/carrier.py": 1313,
   "plugins/agent-codespaces/scripts/versioned_runtime.py": 1415,
-  "plugins/agent-codespaces/src/agent_codespaces/__main__.py": 4767,
+  "plugins/agent-codespaces/src/agent_codespaces/__main__.py": 4903,
   "plugins/agent-codespaces/src/agent_codespaces/config.py": 2583,
   "plugins/agent-codespaces/src/agent_codespaces/pool.py": 1403,
   "plugins/agent-containers/libs/ssh-manager/src/ssh_manager/carrier.py": 1313,
