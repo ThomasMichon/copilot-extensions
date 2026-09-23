@@ -121,6 +121,74 @@ def _warn_of_codespace_claims_for_worktree(worktree_id: str) -> None:
     )
 
 
+def _warn_of_dev_slot_claims_for_worktree(worktree_id: str, worktree_path: str) -> None:
+    """Warn-only safety net: report any mutable dev-slot claim this worktree
+    still holds across every plugin, with the exact release command --
+    never releases anything itself (mirrors
+    :func:`_warn_of_codespace_claims_for_worktree`'s posture exactly).
+
+    A dev-slot claim (see ``libs/versioned-runtime``'s mutable-dev-slot
+    pattern) is a plain ``<root>/dev-claim.json`` sidecar a plugin installer
+    writes next to its ``current-version`` marker when a worktree opts a
+    plugin's local install into the shared, mutable ``dev`` slot. Its schema
+    is a small, stable, dependency-free JSON shape
+    (``copilot-extensions.dev-slot-claim``) specifically so a reader never
+    needs to import or shell out to the owning plugin's own runtime --
+    marketplace-isolation, same posture as the CodeSpace-claim warning above,
+    just satisfied by reading a plain file instead of calling a sibling
+    plugin's binstub. Every plugin's root lives at ``~/.<plugin-name>/`` by
+    convention, so this scans every such directory rather than hardcoding a
+    plugin list -- a plugin that adopts the pattern later needs no change
+    here.
+
+    Matches on the full worktree checkout path (the same value
+    ``agent-codespaces``' CodeSpace claims use as ``owner``), not the short
+    ``worktree_id`` -- a dev-slot claim's ``owner`` is written by the
+    installer from ``agent-worktrees get worktree-dir``, which returns the
+    path, not the id.
+    """
+    import json as _json
+
+    home = Path.home()
+    try:
+        candidates = list(home.glob(".*/dev-claim.json"))
+    except OSError:
+        return
+    held: list[tuple[str, dict]] = []
+    for path in candidates:
+        try:
+            data = _json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        if data.get("schema") != "copilot-extensions.dev-slot-claim":
+            continue
+        if data.get("owner") != worktree_path:
+            continue
+        plugin_name = path.parent.name.lstrip(".")
+        held.append((plugin_name, data))
+    if not held:
+        return
+    output.warn(
+        f"{len(held)} live dev-slot claim(s) are still held by {worktree_id} "
+        "-- finalize does NOT release these for you. Confirm each plugin's "
+        "local dev install is genuinely no longer needed, then release it:"
+    )
+    for plugin_name, data in held:
+        previous = data.get("previous_version") or "(unknown -- check dev-claim.json)"
+        print(
+            f"  · {plugin_name}: from a copilot-extensions checkout, "
+            f"`cd plugins/{plugin_name}; ./scripts/install.ps1 dev-release` "
+            f"(or `install.sh dev-release`) once that plugin has adopted the "
+            f"mutable-dev-slot pattern's release verb (see "
+            f"docs/patterns/mutable-dev-slot.md); this restores "
+            f"current-version -> {previous}. Until then, release manually: "
+            f"delete ~/.{plugin_name}/dev-claim.json, then run that plugin's "
+            f"`versioned_runtime.py activate {previous}` from its scripts/ dir."
+        )
+
+
 def _has_live_session(record) -> bool:
     """Return True if this worktree has a live bound Copilot session.
 
@@ -1953,6 +2021,12 @@ def validate_and_finalize(
             # surfaced here, with the exact release command, for the
             # calling agent to confirm and run explicitly.
             _warn_of_codespace_claims_for_worktree(worktree_id)
+            # Same posture, for the mutable-dev-slot pattern (see
+            # libs/versioned-runtime): a worktree that claimed dev mode for
+            # one or more plugins' local installs must release it explicitly
+            # too, or the next `<repo> update` on this machine leaves a
+            # different worktree's dev claim dangling indefinitely.
+            _warn_of_dev_slot_claims_for_worktree(worktree_id, worktree_path)
             # Reset the postToolUse disposition-nudge sidecar (#nudge): a
             # finalized worktree's disposition is sealed, so drop its drift
             # counter. Best-effort -- the nudge hook also self-heals on a
