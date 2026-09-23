@@ -32,6 +32,27 @@ This tool closes that gap in three modes:
   NOT blocked merely because content differs when canonical is the newer
   side -- that is the normal, expected pre-materialize state.
 
+### DRY vendor pointers (the dev-branch form)
+
+A plugin's vendored copy of a lib may, instead of carrying a real ``src/``,
+carry a single ``VENDOR_POINTER.json`` (``{"source": "libs/<lib>", ...}``) --
+this is the DRY *dev*-branch form the release-pipeline effort's promotion
+step exists to expand (validated end-to-end in a standalone trial clone; see
+the effort's Journal). A pointer copy is never a "real copy": it carries no
+content of its own, so it is excluded from copies-vs-copies agreement checks
+and from ``--restore-canonical``'s "which copy is the truth" selection --
+treating an empty pointer directory as truth would silently **wipe
+canonical** (a real bug caught during that trial: converting a lib's copies
+to pointers and then running ``--restore-canonical`` blindly copied "no
+content" up into canonical). ``--materialize`` still fully handles pointer
+copies: it expands each one from canonical (writing real ``src/`` + version,
+then deleting the now-superseded pointer file) exactly like it refreshes a
+real copy. Only ``src/`` is ever touched by a pointer -- ``tests/`` (and
+everything else in a copy) is deliberately out of scope, matching this
+guard's own existing invariant (it only ever compares ``src/`` across
+copies too). No real plugin in this repo has been converted to a pointer yet
+-- that conversion is Phase 2 (the actual `dev` cutover), not this tool.
+
 Usage::
 
     python tools/sync-vendored-libs.py                    # --check (default)
@@ -50,9 +71,20 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 PLUGINS_DIR = REPO / "plugins"
 LIBS_DIR = REPO / "libs"
+POINTER_NAME = "VENDOR_POINTER.json"
 
 _IGNORE_PARTS = {"build", ".venv", "__pycache__", "dist"}
 _VERSION_RE = re.compile(r'^(\s*version\s*=\s*")([^"]+)(")', re.MULTILINE)
+
+
+def _is_pointer_copy(path: Path) -> bool:
+    """True when ``path`` is a DRY vendor-pointer stub, not a real copy."""
+    return (path / POINTER_NAME).is_file() and not (path / "src").is_dir()
+
+
+def _real_copies(paths: list[Path]) -> list[Path]:
+    """``paths`` filtered down to real (non-pointer) copies."""
+    return [p for p in paths if not _is_pointer_copy(p)]
 
 
 def _lib_copies() -> dict[str, list[Path]]:
@@ -203,18 +235,25 @@ def cmd_check() -> int:
     copies_map = _lib_copies()
     exit_code = 0
     for lib, paths in sorted(copies_map.items()):
-        if len(paths) >= 2:
-            ok, problems = _copies_agree(paths)
+        real = _real_copies(paths)
+        pointers = [p for p in paths if p not in real]
+        if len(real) >= 2:
+            ok, problems = _copies_agree(real)
             if not ok:
                 exit_code = 1
                 print(f"{lib}: COPIES OUT OF SYNC")
                 for p in problems:
                     print(f"  - {p}")
-        drift = _canonical_drift(lib, paths)
-        if drift:
-            print(f"{lib}: canonical drift (advisory, does not fail this check)")
-            for d in drift:
-                print(f"  - {d}")
+        if pointers:
+            print(f"{lib}: {len(pointers)} DRY pointer copy/copies "
+                  f"(excluded from agreement check): "
+                  + ", ".join(str(p) for p in pointers))
+        if real:
+            drift = _canonical_drift(lib, real)
+            if drift:
+                print(f"{lib}: canonical drift (advisory, does not fail this check)")
+                for d in drift:
+                    print(f"  - {d}")
     if exit_code == 0:
         print("sync-vendored-libs --check: copies agree with each other "
               "(canonical drift, if any, is reported above as advisory).")
@@ -224,14 +263,19 @@ def cmd_check() -> int:
 def cmd_restore_canonical() -> int:
     copies_map = _lib_copies()
     for lib, paths in sorted(copies_map.items()):
-        if len(paths) >= 2:
-            ok, problems = _copies_agree(paths)
+        real = _real_copies(paths)
+        if not real:
+            print(f"{lib}: all copies are DRY pointers -- nothing to restore "
+                  "(canonical is already the only source)")
+            continue
+        if len(real) >= 2:
+            ok, problems = _copies_agree(real)
             if not ok:
                 print(f"{lib}: SKIPPED -- copies disagree, fix that first:")
                 for p in problems:
                     print(f"  - {p}")
                 continue
-        truth = paths[0]
+        truth = real[0]
         canonical = LIBS_DIR / lib
         if not canonical.is_dir():
             print(f"{lib}: no top-level libs/{lib}/ to restore into -- skipping")
@@ -249,13 +293,17 @@ def cmd_materialize(*, force: bool) -> int:
         canonical = LIBS_DIR / lib
         if not canonical.is_dir():
             continue
-        reason = None if force else _materialize_blocked(lib, canonical, paths[0])
+        real = _real_copies(paths)
+        reason = None if (force or not real) else _materialize_blocked(lib, canonical, real[0])
         if reason:
             blocked.append(reason)
             continue
         for copy in paths:
             _copy_src(canonical, copy)
             _sync_version(canonical, copy)
+            pointer = copy / POINTER_NAME
+            if pointer.exists():
+                pointer.unlink()
         print(f"{lib}: materialized into {len(paths)} copy/copies from canonical")
     if blocked:
         print(

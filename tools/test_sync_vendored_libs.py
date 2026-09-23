@@ -159,3 +159,70 @@ def test_materialize_force_overrides_drift_refusal(repo: Path):
     assert result.returncode == 0, result.stdout + result.stderr
     copy = repo / "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py"
     assert copy.read_text() == "shared = 999  # stale\n"
+
+
+# --- DRY vendor pointers -----------------------------------------------
+
+def _pointer(repo: Path, plugin: str, lib: str) -> None:
+    _write(repo, f"plugins/{plugin}/libs/{lib}/VENDOR_POINTER.json",
+           '{"schema": "copilot-extensions.vendor-pointer", "version": 1, '
+           f'"source": "libs/{lib}"}}\n')
+
+
+def test_restore_canonical_never_wipes_canonical_when_copies_are_pointers(repo: Path):
+    """Regression test: converting a lib's copies to DRY pointers and then
+    running --restore-canonical must never treat "no content" as truth and
+    wipe canonical -- this actually happened while trialing this tool."""
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "real canonical content\n")
+    _lib_pyproject(repo, "libs/shared-lib/pyproject.toml", "0.1.0-dev5")
+    for plugin in ("alpha", "beta"):
+        _pointer(repo, plugin, "shared-lib")
+        _lib_pyproject(repo, f"plugins/{plugin}/libs/shared-lib/pyproject.toml", "0.1.0-dev5")
+
+    result = _run(repo, "--restore-canonical")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "all copies are DRY pointers" in result.stdout
+
+    # Canonical must be completely untouched.
+    assert (repo / "libs/shared-lib/src/shared_lib/__init__.py").read_text() == (
+        "real canonical content\n"
+    )
+
+
+def test_check_excludes_pointer_copies_from_agreement(repo: Path):
+    _write(repo, "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py", "real = 1\n")
+    _lib_pyproject(repo, "plugins/alpha/libs/shared-lib/pyproject.toml", "0.1.0-dev5")
+    _pointer(repo, "beta", "shared-lib")  # pointer copy carries no src/ at all
+
+    result = _run(repo, "--check")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "COPIES OUT OF SYNC" not in result.stdout
+    assert "1 DRY pointer copy/copies" in result.stdout
+
+
+def test_materialize_expands_pointer_copy_and_removes_pointer_file(repo: Path):
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "canonical content\n")
+    _lib_pyproject(repo, "libs/shared-lib/pyproject.toml", "0.1.0-dev5")
+    _pointer(repo, "alpha", "shared-lib")
+    _lib_pyproject(repo, "plugins/alpha/libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+
+    result = _run(repo, "--materialize")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    copy_src = repo / "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py"
+    assert copy_src.read_text() == "canonical content\n"
+    assert not (repo / "plugins/alpha/libs/shared-lib/VENDOR_POINTER.json").exists()
+
+
+def test_materialize_pointer_copy_is_never_blocked_by_drift_gate(repo: Path):
+    """A pointer copy has no version of its own to compare against canonical,
+    so there is nothing for the "copies moved ahead" safety gate to block --
+    materialize must proceed even though the sibling real copy would be
+    considered drifted if compared naively."""
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "canonical content\n")
+    _lib_pyproject(repo, "libs/shared-lib/pyproject.toml", "0.1.0-dev5")
+    _pointer(repo, "alpha", "shared-lib")
+
+    result = _run(repo, "--materialize")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Refused to materialize" not in result.stderr
