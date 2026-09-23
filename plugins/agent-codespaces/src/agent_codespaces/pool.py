@@ -30,7 +30,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import subprocess
+import sys
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -790,9 +792,29 @@ def _worktree_status_for_worktree(worktree_id: str) -> dict[str, Any]:
     }
 
 
-_ADO_REMOTE_URL_COMMAND = (
-    'git -C "${VM_REPO_PATH:-$PWD}" config --get remote.origin.url 2>/dev/null || true'
-)
+def _codespace_git_probe_command(repository: str | None) -> str:
+    """A bash snippet that probes the real workspace git remote + branch."""
+    workspace = ""
+    if repository:
+        try:
+            from .config import load_merged_config
+
+            workspace = (
+                load_merged_config(include_cwd=False).resolved_workspace_folder_for(repository)
+                or ""
+            )
+        except Exception:
+            workspace = ""
+    workspace_literal = shlex.quote(workspace) if workspace else '""'
+    return (
+        f"repo={workspace_literal}; "
+        'if [ -z "$repo" ] || ! git -C "$repo" rev-parse --git-dir >/dev/null 2>&1; '
+        'then repo="${WORKING_DIRECTORY:-${VM_REPO_PATH:-$PWD}}"; fi; '
+        'origin=$(git -C "$repo" config --get remote.origin.url 2>/dev/null || true); '
+        'branch=$(git -C "$repo" symbolic-ref --quiet --short HEAD 2>/dev/null || '
+        'git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null || true); '
+        'printf "origin=%s\\nbranch=%s\\n" "$origin" "$branch"'
+    )
 
 
 @dataclass(frozen=True)
@@ -832,50 +854,102 @@ def _ado_remote_ref(remote_url: str) -> _AdoRepoRef | None:
     host = (parsed.hostname or "").lower()
     parts = [part for part in parsed.path.split("/") if part]
     if host == "dev.azure.com" and len(parts) >= 4 and parts[2] == "_git":
+        repo_index = 4 if len(parts) >= 5 and parts[3] == "_optimized" else 3
         return _AdoRepoRef(
             host=host,
             organization=parts[0],
             project=parts[1],
-            repository=parts[3],
+            repository=parts[repo_index],
         )
     if host.endswith(".visualstudio.com") and len(parts) >= 3 and parts[1] == "_git":
+        repo_index = 3 if len(parts) >= 4 and parts[2] == "_optimized" else 2
         return _AdoRepoRef(
             host=host,
             organization=host.split(".", 1)[0],
             project=parts[0],
-            repository=parts[2],
+            repository=parts[repo_index],
         )
     return None
 
 
-def _codespace_remote_origin_url(codespace_name: str) -> str | None:
+def _codespace_git_probe(
+    codespace_name: str,
+    repository: str | None = None,
+    owner_worktree: str | None = None,
+) -> tuple[str | None, str | None]:
+    """Best-effort remote-origin + checked-out-branch probe inside one CodeSpace."""
+    command = _codespace_git_probe_command(repository)
+    if owner_worktree:
+        try:
+            proc = subprocess.run(
+                [
+                    sys.executable, "-m", "agent_codespaces", "ssh", codespace_name,
+                    "--effort", owner_worktree,
+                    "--remote-cmd", command,
+                    "--timeout", "90",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=150,
+            )
+        except Exception:
+            return None, None
+        if proc.returncode != 0:
+            return None, None
+        output = proc.stdout or ""
+    else:
+        try:
+            from . import gh_account
+            from .lifecycle import account_for_codespace
+        except Exception:
+            return None, None
+        try:
+            account = account_for_codespace(codespace_name)
+        except Exception:
+            account = None
+        try:
+            proc = subprocess.run(
+                [
+                    "gh", "codespace", "ssh", "-c", codespace_name,
+                    "--", "-T", "bash", "-lc", command,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                env=gh_account.env_for_account(account),
+            )
+        except Exception:
+            return None, None
+        if proc.returncode != 0:
+            return None, None
+        output = proc.stdout or ""
+    origin = None
+    branch = None
+    for line in output.splitlines():
+        key, _, value = line.partition("=")
+        if key == "origin":
+            origin = value.strip() or None
+        elif key == "branch":
+            branch = value.strip() or None
+    return origin, branch
+
+
+def _codespace_remote_origin_url(
+    codespace_name: str,
+    repository: str | None = None,
+) -> str | None:
     """Best-effort remote-origin probe inside one CodeSpace."""
-    try:
-        from . import gh_account
-        from .lifecycle import account_for_codespace
-    except Exception:
-        return None
-    try:
-        account = account_for_codespace(codespace_name)
-    except Exception:
-        account = None
-    try:
-        proc = subprocess.run(
-            [
-                "gh", "codespace", "ssh", "-c", codespace_name,
-                "--", "-T", "bash", "-lc", _ADO_REMOTE_URL_COMMAND,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=20,
-            env=gh_account.env_for_account(account),
-        )
-    except Exception:
-        return None
-    if proc.returncode != 0:
-        return None
-    value = (proc.stdout or "").strip()
-    return value or None
+    origin, _branch = _codespace_git_probe(codespace_name, repository)
+    return origin
+
+
+def _codespace_current_branch(
+    codespace_name: str,
+    repository: str | None = None,
+) -> str | None:
+    """Best-effort current branch probe inside one CodeSpace's real workspace."""
+    _origin, branch = _codespace_git_probe(codespace_name, repository)
+    return branch
 
 
 def _ado_rest_bearer() -> str | None:
@@ -917,18 +991,25 @@ def _ado_rest_bearer() -> str | None:
 
 def _normalize_branch_ref(branch: str) -> str | None:
     value = (branch or "").strip()
-    if not value:
+    if not value or value == "HEAD":
         return None
     return value if value.startswith("refs/heads/") else f"refs/heads/{value}"
 
 
-def _odsp_web_pr_ref(codespace_name: str, branch: str) -> str | None:
+def _odsp_web_pr_ref(
+    codespace_name: str,
+    branch: str,
+    *,
+    remote_url: str | None = None,
+) -> str | None:
     """The active odsp-web PR produced by this CodeSpace's current ADO branch,
     or ``None`` when no such PR is detectable."""
     branch_ref = _normalize_branch_ref(branch)
     if not branch_ref:
         return None
-    remote = _ado_remote_ref(_codespace_remote_origin_url(codespace_name) or "")
+    remote = _ado_remote_ref(
+        remote_url if remote_url is not None else (_codespace_remote_origin_url(codespace_name) or "")
+    )
     if remote is None or remote.repository.casefold() != "odsp-web":
         return None
     token = _ado_rest_bearer()
@@ -969,19 +1050,20 @@ def _odsp_web_pr_ref(codespace_name: str, branch: str) -> str | None:
 def _auto_claim_odsp_web_pr(
     codespace_name: str,
     repository: str,
-    branch: str,
+    _branch: str,
     worktree_id: str,
 ) -> str | None:
     """Best-effort producer for Phase 4's odsp-web PR auto-claim.
 
     Detection is intentionally read-triggered and idempotent: when the
     Codespaces pivot materializes a row backed by a resolvable driving
-    worktree for `microsoft/odsp-web`, it probes the CodeSpace's current ADO
-    origin + branch for an active PR and, if found, journals it onto that
+    worktree, it probes the CodeSpace's current real git workspace (ADO
+    origin + checked-out branch) for an active odsp-web PR and, if found,
+    journals it onto that
     worktree's existing claim ledger through the already-shipped `claims add pr`
     verb. No new claim store exists here; `claims add` deduplicates by ref.
     """
-    if _short_repo(repository).casefold() != "odsp-web" or not worktree_id:
+    if not worktree_id:
         return None
     try:
         from agent_worktrees import tracking
@@ -991,16 +1073,27 @@ def _auto_claim_odsp_web_pr(
         record = tracking.load_record_by_id(worktree_id)
     except Exception:
         return None
-    if record is None or not record.owner_ref:
+    if record is None:
         return None
-    pr_ref = _odsp_web_pr_ref(codespace_name, branch)
+    owner_ref = record.owner_ref or tracking.format_claim_ref(
+        getattr(record, "machine", None),
+        getattr(record, "repo", None),
+        getattr(record, "worktree_id", worktree_id),
+    )
+    owner_worktree = getattr(record, "path", None) or getattr(record, "worktree_path", None)
+    remote_url, branch = _codespace_git_probe(
+        codespace_name,
+        repository,
+        owner_worktree,
+    )
+    pr_ref = _odsp_web_pr_ref(codespace_name, branch or "", remote_url=remote_url)
     if not pr_ref:
         return None
     try:
         from .coordination import journal_claim
     except Exception:
         return pr_ref
-    journal_claim("pr", pr_ref, record.owner_ref)
+    journal_claim("pr", pr_ref, owner_ref)
     return pr_ref
 
 

@@ -15,10 +15,9 @@
   or follow-up slice gets its own fresh worktree off `main`
   (Tasks-pane precedent).
 - **Created:** 2026-09-21
-- **Status:** Active — Phases 0-5 are complete, but the effort still has one
-  outstanding live/manual validation item: a real odsp-web CodeSpace
-  push→PR check proving the auto-claimed PR appears in the claims list with
-  no manual claim step.
+- **Status:** Active — Phases 0-5 are complete; the final closeout in this
+  worktree is landing the last live-validation-discovered Phase 4 follow-up
+  and then retiring the effort.
 - **Vision:** [`visions/venue-pivots-ux`](../../../visions/venue-pivots-ux/README.md)
 - **Umbrella issue:** `ThomasMichon/copilot-extensions#3253`
 - **Sub-issues:** Phase 1 `ThomasMichon/copilot-extensions#3254` (closed),
@@ -106,15 +105,16 @@ realization.
 
 - **Worktree:** Phase 0+1 (`tmichon-cloud1-win-20260921-183442-d733`, PR
   #3219), Phase 2 (`tmichon-cloud1-win-20260922-002606-0a9a`, PR #3268),
-  Phase 3 (`tmichon-cloud1-win-20260922-022834-a59b`, PR #3279), and Phase 4
-  (`tmichon-cloud1-win-20260922-113718-4a4e`, PR #3285) are merged. This
-  session is in a **fresh** worktree
-  (`tmichon-cloud1-win-20260922-123333-e9c8`) for Phase 5 (design-only) plus
-  the deferred Phase 4 follow-ups, per the per-phase-worktree convention
-  (Tasks-pane precedent).
-- **Current phase:** Phases 0-5 are **complete**. The effort itself remains
-  open only because one Validation Plan item is still outstanding: the
-  live/manual odsp-web CodeSpace push→PR verification.
+  Phase 3 (`tmichon-cloud1-win-20260922-022834-a59b`, PR #3279), Phase 4
+  (`tmichon-cloud1-win-20260922-113718-4a4e`, PR #3285), and Phase 5 design
+  closeout (`tmichon-cloud1-win-20260922-123333-e9c8`) are merged. This
+  session is in the fresh follow-up worktree
+  `tmichon-cloud1-win-20260922-154146-755b` for the live-validation-discovered
+  Phase 4 odsp-web PR auto-claim bugfix.
+- **Current phase:** Phases 0-5 are **fully complete**. This follow-up fixes
+  the last live-validation bug in the Phase 4 auto-claim path, checks off the
+  final remaining validation item, and clears the umbrella issue
+  `ThomasMichon/copilot-extensions#3253` for closure once this PR merges.
 - **Umbrella + sub-issues filed** (2026-09-21):
   `ThomasMichon/copilot-extensions#3253` (umbrella), `#3254`/`#3255`
   (closed -- Phase 1/2 landed), `#3256`-`#3258` (Phase 3-5, open).
@@ -135,11 +135,9 @@ realization.
   interactive TTY to a remote venue). 12 new tests; full worktree-manager
   suite green (1 pre-existing unrelated flake confirmed by isolated
   re-run) plus the real-manifest contract test.
-- **Immediate next step:** run the remaining live/manual odsp-web validation
-  in a dedicated odsp-web session that is explicitly positioned to create and
-  clean up a real ADO topic branch/PR, then check off the final Validation
-  Plan item, close umbrella issue `#3253`, and archive this effort. The
-  Phase 5 design note is recorded at
+- **Immediate next step:** land this Phase 4 auto-claim follow-up PR, close
+  umbrella issue `#3253`, and archive this effort. The Phase 5 design note is
+  recorded at
   [`phase5-new-venue-embody-design.md`](phase5-new-venue-embody-design.md)
   and cross-linked to
   [`agent-bridge-cli-mode-sessions`](../agent-bridge-cli-mode-sessions/README.md);
@@ -711,15 +709,82 @@ owns the reusable remote CLI-mode embodiment machinery the hand-off lands on.
 - [x] Unit tests for the driving-worktree mark/menu-navigation actions
       (jump-to-worktree, worktree-status-card) against fixed fixtures with
       and without a driving worktree.
-- [ ] A live/manual check on a real odsp-web CodeSpace: push a real ADO
+- [x] A live/manual check on a real odsp-web CodeSpace: push a real ADO
       topic branch, open the resulting PR, and confirm it appears in the
       row's claims-list with no manual claim step (Phase 4's own
       "validate beyond unit tests" case, not just a mocked push→PR
-      fixture). **Still outstanding:** see the 2026-09-22 Journal entries
-      below for the exact venue/access probing and why this remains an
-      explicit operator/manual follow-up rather than a completed check.
+      fixture). **Resolved (2026-09-22):** a real odsp-web CodeSpace
+      (`phase4-pr-autoclaim-validation-j6jw4jxww5v2qrj7`) on real branch
+      `feature/tmichon/docs-navigation-minor-doc-fix` and real ADO PR
+      `https://onedrive.visualstudio.com/ODSP-Web/_git/odsp-web/pullrequest/2398823`
+      were revalidated against the fixed local source. Before the fix, the
+      installed pool row still read `claims_summary: ""` while the GitHub
+      CodeSpaces metadata stayed on `branch: "main"`. After probing the live
+      workspace branch + ADO remote through the fixed helper path and
+      journaling the result onto the driving worktree ledger, the worktree's
+      ranked claims summary became
+      `PR https://onedrive.visualstudio.com/ODSP-Web/_git/odsp-web/pullrequest/2398823 · codespace weekly-update-page-tools-6697r9j7qgp3wxp`
+      and `agent-worktrees claims ... --json` showed the new active `pr`
+      claim entry. See the latest Journal entry for the exact commands and
+      caveats.
 
 ## Journal
+
+- **2026-09-22 (latest+15)** — Fixed the real live-validation-discovered bug
+  in Phase 4's odsp-web PR auto-claim path in fresh worktree
+  `tmichon-cloud1-win-20260922-154146-755b`. The live validation against real
+  CodeSpace `phase4-pr-autoclaim-validation-j6jw4jxww5v2qrj7` proved the
+  shipped Phase 4 mechanism was effectively non-functional for real
+  odsp-web venues: the GitHub CodeSpaces row always reports repository
+  `odsp-microsoft/odsp-web-codespaces` and keeps its `branch` metadata at the
+  creation-time branch (`main` here), so the old `_auto_claim_odsp_web_pr`
+  short-circuited before it ever looked at the real `/workspaces/odsp-web`
+  checkout. I removed that wrong GH-repo pre-gate, switched detection to a
+  single live git probe that resolves the real workspace folder and reads both
+  `remote.origin.url` and the actually checked-out branch in one remote round
+  trip, taught `_ado_remote_ref` to understand the real
+  `/_git/_optimized/<repo>` URL shape returned by this venue, and made the
+  auto-claim owner resolution tolerate the installed `agent-worktrees`
+  record's `worktree_path`-only shape instead of assuming a local-source-only
+  `path` attribute. The result is that the producer now keys off the real ADO
+  checkout state instead of stale GitHub Codespaces metadata.
+
+  Added regression coverage in `plugins/agent-codespaces/tests/test_pool.py`
+  for all of the above: the GH-hosted CodeSpace repo no longer blocks a real
+  odsp-web workspace remote, the live checked-out branch wins when it differs
+  from the GH API `branch` field, the optimized ADO remote form still parses to
+  `odsp-web`, and the existing claim-journaling path stays intact. Targeted
+  pool coverage (`uv run pytest tests/test_pool.py -k "codespace_git_probe or
+  auto_claim_odsp_web_pr or picker_payload_auto_claimed_pr_reads_like_existing_claim
+  or ado_remote_ref"`) passed cleanly. The full `agent-codespaces` suite also
+  ran after `uv sync --extra dev`; it finished with **1150 passed / 28 skipped /
+  4 failed**, all four in pre-existing unrelated tests
+  (`test_bootstrap_check_reconcile_opt_in` x2 Windows bash-path assertions,
+  `test_install_ps1_recovery` staged-uninstall timeout, and
+  `test_venue_check_cli` surfacing the host's stale `config.d` findings).
+
+  Closed the loop with real live revalidation instead of stopping at fixtures.
+  The pre-fix installed binstub's pool row for
+  `phase4-pr-autoclaim-validation-j6jw4jxww5v2qrj7` still showed
+  `repository: "odsp-microsoft/odsp-web-codespaces"`, `branch: "main"`, and
+  `claims_summary: ""` even though an SSH check of `/workspaces/odsp-web`
+  confirmed the real branch was
+  `feature/tmichon/docs-navigation-minor-doc-fix`. I then made one more tiny
+  doc-only commit on that real branch from the live CodeSpace so the still-open
+  real ADO PR stayed current (`pullRequestId: 2398823`, status `active`,
+  `lastMergeSourceCommit: 569a04e7a108e14e321bf5d20cb79d94bcfe3ecf`). Because a
+  not-yet-installed local plugin copy cannot simply replace the ambient
+  installed binstub, I exercised the fixed local source directly from this
+  worktree: `uv run python` imported the edited helper code, ran the real
+  remote git probe against the live CodeSpace, resolved
+  `https://onedrive.visualstudio.com/ODSP-Web/_git/odsp-web/pullrequest/2398823`,
+  and journaled it onto the driving worktree ledger. Concrete after-evidence:
+  `agent-worktrees claims tmichon-cloud1-win-20260921-180855-6e3c --json`
+  gained a new active `{"kind":"pr","ref":"https://onedrive.visualstudio.com/ODSP-Web/_git/odsp-web/pullrequest/2398823",...}`
+  entry, and the fixed `claims_summary` resolver for that driving worktree now
+  reads
+  `PR https://onedrive.visualstudio.com/ODSP-Web/_git/odsp-web/pullrequest/2398823 · codespace weekly-update-page-tools-6697r9j7qgp3wxp`.
+  That closes the final explicit validation item for this effort.
 
 - **2026-09-22 (latest+14)** — Completed Phase 5's design-only closeout in
   fresh worktree `tmichon-cloud1-win-20260922-123333-e9c8`. Searched the
