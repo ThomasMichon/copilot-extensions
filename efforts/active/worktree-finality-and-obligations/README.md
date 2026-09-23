@@ -207,8 +207,20 @@ below for the carved implementation plan.
   The cross-surface **compact token/style/blocker-count parity** across list
   JSON, mux, and Picker (the rest of this bullet) is not done -- no unified
   descriptor exists yet; that's the remaining Phase 1/4 work.
-- [ ] Assert the same expected compact token, semantic style, blocker counts,
+- [x] Assert the same expected compact token, semantic style, blocker counts,
   and prune verdict across list JSON, mux rendering, and Picker derivation.
+  Added `worktree-manager/tests/production_picker/
+  test_closure_cross_surface_parity.py`: one real `WorktreeRecord` +
+  `WorktreeStateInfo` fixture, run through `_worktree_to_dict` (list JSON),
+  `cmd_status_segment`/`_render_status_segment` (mux, real code path via the
+  same monkeypatch pattern `test_status_segment.py` already established),
+  and the production Picker's `derive.norm` (fed the exact `closure` payload
+  list JSON serialized) -- covering a clean FINAL record, a held-claim +
+  open-follow-up MERGED record (`C1 F1` markers), and a fetch-free/cached
+  COMPLETED record (must render MERGED everywhere, never FINAL). Lives under
+  worktree-manager's own suite, not agent-worktrees', since only that
+  package's conftest (`ensure_engine_runtime`) puts a real `agent_worktrees`
+  on `sys.path` for a test to genuinely import both sides.
 - [ ] Add compatibility fixtures for legacy boolean-only records and active
   effort bindings.
 - [ ] Add stale-snapshot concurrency fixtures proving background stamp writes
@@ -2418,4 +2430,47 @@ The approved design is the faceted model in [design.md](design.md):
   descriptor's own graded action disposition instead of `CleanupDisposition`
   directly) is untouched -- confirmed still open this session, deliberately
   left for Phase 5 as noted above.
+
+### 2026-09-23 (continued) - Phase 1: cross-surface closure-descriptor parity fixture
+
+- Picked Phase 1's cross-surface parity bullet: every existing per-surface
+  test (list JSON's `test_closure_descriptor_wiring.py`, mux's
+  `test_status_segment.py`, the Picker's `test_status_markers.py`/
+  `test_prune_shim.py`) proves its OWN surface well-formed against either a
+  real fixture or a hand-typed payload, but none of them prove that TWO
+  surfaces, given the identical underlying facts, actually agree -- exactly
+  the gap this bullet names.
+- Added `worktree-manager/tests/production_picker/
+  test_closure_cross_surface_parity.py`: one real `WorktreeRecord` +
+  `WorktreeStateInfo` fixture per test, driven through all three real
+  production code paths (not re-derivations) -- `_worktree_to_dict`, the mux
+  segment via `cmd_status_segment` (mirroring `test_status_segment.py`'s own
+  `_wire` monkeypatch pattern), and the Picker's `derive.norm` fed list
+  JSON's own serialized `closure` payload (the shape a real agent-bridge
+  crawl actually carries). Three cases: clean FINAL, held-claim + open-
+  follow-up MERGED-with-`C1 F1`-markers, and fetch-free/cached COMPLETED
+  (must stay MERGED everywhere, never FINAL -- design.md's destructive-
+  freshness rule, now proven across surfaces instead of only list JSON's).
+- This test lives in **worktree-manager's** suite, not agent-worktrees' own:
+  only worktree-manager's conftest (`_engine_runtime.ensure_engine_runtime`,
+  called at collection time) puts a REAL `agent_worktrees` on `sys.path`,
+  confirmed by `test_prune_shim.py`'s own precedent
+  (`from agent_worktrees import prune as canonical_prune`) already relying
+  on the same cross-package import. `tools/run-plugin-tests.py` doesn't
+  cover `worktree-manager` (it only walks `plugins/`) -- ran via `uv run
+  --extra dev pytest` per the package's own README.
+- Investigated a tangent before settling scope: `agent_worktrees.
+  picker_support.derive` also has its own `_state()` FINAL/MERGED logic with
+  no version-gating safety net, unlike the canonical Picker's
+  `interpret_descriptor_payload` path -- traced it and confirmed it is
+  **not** the live duplicate-Picker drift concern (that was the bundled
+  `agent_worktrees/picker_tui/`, transplanted and then fully retired by the
+  separate, already-completed `worktree-manager-control-plane` Phase 3/6
+  effort, per its own doc). `picker_support` is unrelated support code, not
+  imported by any current production path found this session -- left alone,
+  out of scope here.
+- Full worktree-manager suite: 1239 passed, 3 pre-existing/unrelated
+  failures in `test_data_ssh_sources.py` (confirmed present on `origin/main`
+  before this change too -- a Windows path-format assertion, untouched
+  file). `ruff check` clean on the new file.
 
