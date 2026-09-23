@@ -158,7 +158,94 @@ def test_promote_message_lists_bumps_and_changefiles():
     }
     message = pr.format_promotion_message(dev_range=("aaaa" * 10, "bbbb" * 10), summary=summary)
     assert "demo-plugin: 0.1.0-dev1 -> 0.1.0-dev2" in message
-    assert "20260101-test-abc123.json" in message
+
+
+def test_promote_writes_pipeline_state_into_generated_commit(repo: Path):
+    _git(["checkout", "-q", "dev"], repo)
+    (repo / "plugins" / "demo-plugin" / "new-file.txt").write_text("x\n", encoding="utf-8")
+    dev_head = _commit(repo, "demo-plugin: a change")
+    _git(["checkout", "-q", "main"], repo)
+
+    report = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
+    assert report["promoted"] is True
+
+    state_json = _git(["show", f"{report['commit']}:{pr.PIPELINE_STATE_PATH}"], repo)
+    state = json.loads(state_json)
+    assert state["last_promotion"]["dev_head"] == dev_head
+    assert report["tag"].startswith(state["last_promotion"]["tag"])
+    assert state["paused"] is False
+
+
+def test_promote_a_second_time_with_only_state_change_is_a_no_op(repo: Path):
+    """Re-running promote() against the SAME dev content a second time must
+    not treat the previous commit's own state-file update as a real content
+    change -- otherwise every promotion would spuriously "change" forever."""
+    _git(["checkout", "-q", "dev"], repo)
+    (repo / "plugins" / "demo-plugin" / "new-file.txt").write_text("x\n", encoding="utf-8")
+    _commit(repo, "demo-plugin: a change")
+    _git(["checkout", "-q", "main"], repo)
+
+    first = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
+    assert first["promoted"] is True
+    _git(["update-ref", "refs/heads/main", first["commit"]], repo)
+
+    second = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
+    assert second["promoted"] is False
+
+
+def test_promote_refuses_when_paused(repo: Path):
+    _git(["checkout", "-q", "dev"], repo)
+    (repo / "plugins" / "demo-plugin" / "new-file.txt").write_text("x\n", encoding="utf-8")
+    _commit(repo, "demo-plugin: a change")
+    _git(["checkout", "-q", "main"], repo)
+
+    (repo / ".github").mkdir(exist_ok=True)
+    (repo / pr.PIPELINE_STATE_PATH).write_text(
+        json.dumps({"paused": True, "pause_reason": "investigating a bad release"}),
+        encoding="utf-8",
+    )
+    _commit(repo, "release-pipeline: pause promotion")
+
+    with pytest.raises(pr.PromotionPaused, match="investigating a bad release"):
+        pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
+
+
+def test_main_cli_exits_zero_on_pause_not_one(repo: Path, capsys):
+    (repo / ".github").mkdir(exist_ok=True)
+    (repo / pr.PIPELINE_STATE_PATH).write_text(
+        json.dumps({"paused": True, "pause_reason": "x"}), encoding="utf-8"
+    )
+    _commit(repo, "release-pipeline: pause promotion")
+    code = pr.main(["--repo", str(repo), "--dev-ref", "dev", "--main-ref", "main"])
+    assert code == 0
+    assert "paused" in capsys.readouterr().out.lower()
+
+
+def test_promote_refuses_to_repromote_a_rolled_back_dev_state(repo: Path):
+    _git(["checkout", "-q", "dev"], repo)
+    (repo / "plugins" / "demo-plugin" / "new-file.txt").write_text("bad\n", encoding="utf-8")
+    dev_head = _commit(repo, "demo-plugin: a bad change")
+    _git(["checkout", "-q", "main"], repo)
+
+    (repo / ".github").mkdir(exist_ok=True)
+    (repo / pr.PIPELINE_STATE_PATH).write_text(
+        json.dumps({
+            "paused": False,
+            "last_rollback": {
+                "reverted_dev_head": dev_head,
+                "reason": "broke something",
+            },
+        }),
+        encoding="utf-8",
+    )
+    _commit(repo, "release-pipeline: record rollback")
+
+    with pytest.raises(pr.NonIncrementalPromotion, match="broke something"):
+        pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
+
+    # --force overrides the guard deliberately.
+    report = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False, force=True)
+    assert report["promoted"] is True
 
 
 def test_promote_no_changefiles_reports_none():

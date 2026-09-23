@@ -1,0 +1,104 @@
+name: Validation Gate
+
+# Phase 3 of the dev-branch-release-pipeline effort
+# (ThomasMichon/copilot-extensions#3336): the broader (target 10-30 min),
+# steady test-suite validation that gates promotion beyond the fast smoke CI
+# in .github/workflows/ci.yml. Runs every plugin's FULL suite (matching
+# ci.yml's own `full` workflow_dispatch job, kept here as a separate
+# workflow file rather than a job there for the same reason
+# context-handoff-exhaustive.yml is separate: a trigger declared on one
+# workflow applies to every job in it, and this one's dev-push trigger has
+# no business also re-triggering the whole fast/smoke/full matrix).
+#
+# This workflow only ever runs after CI has already gone green on `dev`
+# (workflow_run), so its own failures are never the FIRST signal a
+# contributor sees -- fast smoke CI still catches most regressions in
+# under 5 minutes. This is the deeper, slower pass that
+# .github/workflows/promote.yml actually waits on before promoting.
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    branches: [dev]
+    types: [completed]
+  workflow_dispatch:
+
+concurrency:
+  group: validation-gate-${{ github.event.workflow_run.head_sha || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  full:
+    name: full - ${{ matrix.plugin }}
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        plugin:
+          - agent-bridge
+          - agent-codespaces
+          - agent-containers
+          - agent-dispatch
+          - agent-logger
+          - agent-mcp
+          - agent-ssh
+          - agent-vault
+          - agent-worktrees
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Full suite - ${{ matrix.plugin }}
+        run: python tools/run-plugin-tests.py ${{ matrix.plugin }}
+
+  worktree-manager:
+    name: worktree-manager (out-of-plugin, full)
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Test worktree-manager
+        working-directory: worktree-manager
+        run: uv run --extra dev pytest -q
+
+  guards-full-sweep:
+    name: guards (full-tree, non-PR-scoped)
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip pytest pyyaml ruff
+      - name: Module size (full sweep, unconditional)
+        run: python tools/check-module-size.py
+      - name: Version consistency
+        run: python tools/check-version-consistency.py
+      - name: Vendored library synchronization
+        run: python tools/check-vendored-libs-sync.py
+      - name: Docs consistency
+        run: python tools/check-docs-consistency.py
