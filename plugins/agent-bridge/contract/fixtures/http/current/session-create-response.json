@@ -1,11 +1,11 @@
 {
   "captured_from": {
-    "commit": "PLACEHOLDER",
-    "plugin_version": "PLACEHOLDER",
+    "commit": "6e83ad3ac61647d2ce51f9abc421f69a530ca67c",
+    "plugin_version": "0.4.0-dev549",
     "protocol_generation": 18,
     "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
-    "source_git_blob": "PLACEHOLDER",
-    "source_sha256": "PLACEHOLDER"
+    "source_git_blob": "510e2934cf8567a396c6cd4af95fc02c4328eae0",
+    "source_sha256": "5f1a578bb949bddc9bc8e3c80f9c67afb4b874484a4b2c4add703d481482fd1c"
   },
   "response": {
     "status_code": 201,

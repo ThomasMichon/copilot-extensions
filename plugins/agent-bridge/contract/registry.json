@@ -36,7 +36,6 @@
           "0.4.0-dev447",
           "0.4.0-dev535",
           "0.4.0-dev502",
-          "0.4.0-dev547",
           "0.4.0-dev537",
           "0.4.0-dev549"
         ]
@@ -131,7 +130,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/session-create-response.json",
-          "sha256": "b0b8ffe588e72e9e4b5baa713b9cb2478afd88602275b376eb56d655b1fa4691",
+          "sha256": "20ff7dc210a6fb190ed157594a8541c071bcb962098ae01bbbf2a40566e88025",
           "role": "current session-create response",
           "generation": 18
         },
@@ -560,11 +559,11 @@
           "capture_method": "Re-attested for the generation-18 bump: this file's copilot_args field is the capability the bump advertises, gated by the paired REMOTE_COPILOT_ARGS_MIN_VERSION carrier-envelope check."
         },
         {
-          "commit": "00a0038ef68091e97d1b7e7562ebb4715a47cdd8",
+          "commit": "6e83ad3ac61647d2ce51f9abc421f69a530ca67c",
           "plugin_version": "0.4.0-dev549",
           "generation": 18,
           "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
-          "source_git_blob": "d77b3fb8a1bfb3f06b5f26df1fbb9301b4c545ee",
+          "source_git_blob": "510e2934cf8567a396c6cd4af95fc02c4328eae0",
           "capture_method": "Serialize the reviewed session-create response shape; re-attested for the generation-18 bump -- installation-scoped runtime defaults do not alter the representative wire shape."
         }
       ],
