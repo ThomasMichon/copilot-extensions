@@ -133,6 +133,22 @@ def bound_account(codespace: str) -> str | None:
         return None
 
 
+def bound_account_or_raise(codespace: str) -> str | None:
+    """Like :func:`bound_account`, but propagates a lock-acquisition
+    failure instead of silently degrading to "no binding" -- for a
+    caller (e.g. a destructive CodeSpace reclaim) that must not treat an
+    UNAVAILABLE authoritative binding the same as a confirmed absence of
+    one (claim-provider-pattern effort review finding: "Fail closed when
+    account binding cannot be read"). A missing/corrupt bindings FILE
+    still degrades to "no binding" here too -- that is this store's own
+    intentional, documented contract (see :func:`_read`'s own docstring)
+    -- only lock CONTENTION (a transient, ambiguous unavailability, not a
+    confirmed empty store) propagates."""
+    with _binding_lock():
+        rec = _read().get(codespace)
+    return (rec.account or None) if rec else None
+
+
 def unbind(codespace: str) -> bool:
     """Remove a CodeSpace account binding. Returns True if removed."""
     with _binding_lock():

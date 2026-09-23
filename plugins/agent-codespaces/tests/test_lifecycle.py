@@ -390,7 +390,7 @@ class TestGetCodespaceStatus:
         monkeypatch.setattr(
             "agent_codespaces.account_binding.bound_accounts", lambda: ())
         monkeypatch.setattr(
-            "agent_codespaces.account_binding.bound_account",
+            "agent_codespaces.account_binding.bound_account_or_raise",
             lambda name: "acct-exact" if name == "cs-dup" else None)
         seen_accounts = []
 
@@ -417,7 +417,7 @@ class TestGetCodespaceStatus:
         monkeypatch.setattr(
             "agent_codespaces.account_binding.bound_accounts", lambda: ())
         monkeypatch.setattr(
-            "agent_codespaces.account_binding.bound_account",
+            "agent_codespaces.account_binding.bound_account_or_raise",
             lambda name: "acct-exact" if name == "cs-dup" else None)
         seen_accounts = []
 
@@ -445,7 +445,7 @@ class TestGetCodespaceStatus:
         monkeypatch.setattr(
             "agent_codespaces.account_binding.bound_accounts", lambda: ())
         monkeypatch.setattr(
-            "agent_codespaces.account_binding.bound_account",
+            "agent_codespaces.account_binding.bound_account_or_raise",
             lambda name: "acct-exact" if name == "cs-dup" else None)
         seen_accounts = []
 
@@ -460,6 +460,32 @@ class TestGetCodespaceStatus:
             lifecycle.get_codespace_status_with_account("cs-dup")
         assert seen_accounts == ["acct-exact"]  # never scanned acct-other
 
+    def test_binding_read_failure_fails_closed_never_scans_other_accounts(self, monkeypatch):
+        """A binding-STORE read failure (e.g. lock contention) is an
+        UNAVAILABLE authoritative binding, not a confirmed absence of one
+        -- it must fail closed (propagate) rather than silently degrade to
+        "no binding" and fall through to the generic scan, which could
+        then select a DIFFERENT account's same-named CodeSpace
+        (claim-provider-pattern effort review finding: "Fail closed when
+        account binding cannot be read")."""
+        monkeypatch.setattr(
+            "agent_codespaces.gh_account.mapped_accounts", lambda: ("acct-other",))
+        monkeypatch.setattr(
+            "agent_codespaces.account_binding.bound_accounts", lambda: ())
+
+        def _boom(name):
+            raise RuntimeError("Could not acquire account binding lock")
+        monkeypatch.setattr(
+            "agent_codespaces.account_binding.bound_account_or_raise", _boom)
+        called = {"n": 0}
+        monkeypatch.setattr(
+            lifecycle, "_get_codespace_status_under",
+            lambda *a, **k: called.__setitem__("n", 1))
+
+        with pytest.raises(RuntimeError, match="lock"):
+            lifecycle.get_codespace_status_with_account("cs-dup")
+        assert called["n"] == 0  # never even reached a status lookup
+
     def test_default_account_raises_when_no_candidate_confirms_and_one_errors(self, monkeypatch):
         """A live CodeSpace in an account whose lookup failed for a REAL
         reason (not a 404) must never be reported absent just because
@@ -473,6 +499,27 @@ class TestGetCodespaceStatus:
             if account == "acct-a":
                 raise RuntimeError("HTTP 503: service unavailable")
             return False, None
+
+        monkeypatch.setattr(lifecycle, "_get_codespace_status_under", fake_under)
+        with pytest.raises(RuntimeError, match="503"):
+            lifecycle.get_codespace_status("cs-a")
+
+    def test_default_account_rejects_a_later_success_after_an_earlier_error(self, monkeypatch):
+        """A later candidate's CONFIRMED existence is no longer trustworthy
+        on its own once an EARLIER candidate errored ambiguously -- the
+        true owner might be the one that errored, and blindly trusting a
+        later same-named match risks recovering/reclaiming the WRONG
+        account's CodeSpace (claim-provider-pattern effort review
+        finding: "Reject later candidates after earlier lookup errors")."""
+        monkeypatch.setattr(
+            "agent_codespaces.gh_account.mapped_accounts", lambda: ("acct-a", "acct-b"))
+        monkeypatch.setattr(
+            "agent_codespaces.account_binding.bound_accounts", lambda: ())
+
+        def fake_under(name, account, **_kwargs):
+            if account == "acct-a":
+                raise RuntimeError("HTTP 503: service unavailable")
+            return True, "Available"  # acct-b "confirms" a same-named box
 
         monkeypatch.setattr(lifecycle, "_get_codespace_status_under", fake_under)
         with pytest.raises(RuntimeError, match="503"):

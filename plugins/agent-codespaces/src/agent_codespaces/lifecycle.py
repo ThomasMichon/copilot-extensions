@@ -362,7 +362,17 @@ def get_codespace_status_with_account(
     lookup returns 404" and "Binding lookup errors incorrectly fall
     through to other accounts"). The scan is the fallback ONLY when there
     is NO binding at all -- a missing binding must not make an otherwise-
-    discoverable CodeSpace misreport absent."""
+    discoverable CodeSpace misreport absent. Reading the binding STORE
+    itself (as opposed to a confirmed absence of a binding for this name)
+    can also fail (lock contention) -- that failure propagates too, via
+    ``account_binding.bound_account_or_raise``, rather than degrading to
+    "no binding" (review finding: "Fail closed when account binding
+    cannot be read"). Likewise, once ANY candidate in the fallback scan
+    has produced an ambiguous error, a LATER candidate's success is no
+    longer trusted blindly -- it also raises, rather than risk selecting
+    (and reclaiming!) a same-named CodeSpace under an unverified account
+    while the true owner's lookup remains unresolved (review finding:
+    "Reject later candidates after earlier lookup errors")."""
     from . import gh_account
 
     validate_context()
@@ -373,12 +383,9 @@ def get_codespace_status_with_account(
     deadline = time.monotonic() + _STATUS_OVERALL_BUDGET_SECONDS
     errors: list[str] = []
 
-    try:
-        from . import account_binding
+    from . import account_binding
 
-        bound = account_binding.bound_account(name)
-    except Exception:
-        bound = None
+    bound = account_binding.bound_account_or_raise(name)
     if bound:
         remaining = deadline - time.monotonic()
         # ANY outcome under the authoritative binding is final -- see the
@@ -391,8 +398,6 @@ def get_codespace_status_with_account(
         return exists, state, (bound if exists else None)
 
     try:
-        from . import account_binding
-
         bound_accounts = account_binding.bound_accounts()
     except Exception:
         bound_accounts = ()
@@ -417,6 +422,13 @@ def get_codespace_status_with_account(
             errors.append(str(exc))
             continue
         if exists:
+            # A confirmed success here is no longer trustworthy on its own
+            # if an EARLIER candidate errored ambiguously -- the true
+            # owner might be the one that errored, and blindly trusting
+            # this candidate risks reclaiming a same-named CodeSpace under
+            # the WRONG (unverified) account.
+            if errors:
+                raise RuntimeError("; ".join(dict.fromkeys(errors)))
             return True, state, candidate
     if errors:
         raise RuntimeError("; ".join(dict.fromkeys(errors)))
