@@ -132,6 +132,14 @@ def _progress_snapshot(
     return snapshot
 
 
+def _task_transition_spec(name: str) -> tuple[frozenset[str], str]:
+    """Resolve a declared task transition's ``(from_states, to_state)``."""
+    from .task_state_machine import TRANSITIONS_BY_NAME
+
+    transition = TRANSITIONS_BY_NAME[name]
+    return transition.from_states, transition.to_state
+
+
 class ResultValidationError(TaskError):
     """Raised when a completion result is not a structured JSON value."""
 
