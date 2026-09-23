@@ -315,6 +315,69 @@ def test_sweep_due_refreshes_only_ttl_expired_demanded_entries(tmp_path):
     assert result == {"v": "fresh-2"}
 
 
+def test_sweep_caps_per_tick_refreshes_prioritizing_the_stalest_entries(tmp_path):
+    """Regression (2026-09-22 live CPU-saturation investigation): an
+    unbounded sweep asks for N * (real per-entry compute cost, ~5-6s of git
+    fetch in production) of CPU-bound work every TTL window -- with enough
+    demanded worktrees this exceeds one core's capacity and the sweep
+    thread runs almost continuously rather than mostly idling. The cap
+    bounds worst-case per-tick cost to `max_refresh_per_sweep` entries,
+    always picking the STALEST (oldest computed_at) ones first so demand
+    beyond capacity degrades as wider staleness, never as unbounded CPU."""
+    clock = {"t": 1000.0}
+    cache = WorktreeStatusCache(
+        tmp_path / "cache.sqlite3",
+        ttl_seconds=5.0,
+        max_refresh_per_sweep=2,
+        now=lambda: clock["t"],
+    )
+    # Demand five entries, each becoming due at a distinct, known time so
+    # staleness order is unambiguous: "wt0" is demanded first (oldest/
+    # stalest once all are past TTL), "wt4" last (freshest).
+    for i in range(5):
+        cache.get_or_refresh("proj", f"wt{i}", force=False, compute=lambda i=i: {"v": i})
+        clock["t"] += 1.0  # stagger computed_at so ordering is deterministic
+    clock["t"] += 5.0  # now every entry is comfortably past the 5s TTL
+
+    refresh_calls = []
+    refreshed_count = cache.sweep_due(
+        refresh=lambda p, w: refresh_calls.append(w) or {"v": "swept"}
+    )
+
+    assert refreshed_count == 2
+    # The two stalest (earliest-demanded/computed) entries were prioritized.
+    assert set(refresh_calls) == {"wt0", "wt1"}
+
+    # A second sweep tick (still past TTL for the remaining three) picks up
+    # the next-stalest ones -- demand beyond capacity is served over
+    # successive ticks, not starved forever nor bursted all at once.
+    refresh_calls.clear()
+    refreshed_count = cache.sweep_due(
+        refresh=lambda p, w: refresh_calls.append(w) or {"v": "swept-2"}
+    )
+    assert refreshed_count == 2
+    assert set(refresh_calls) == {"wt2", "wt3"}
+
+
+def test_sweep_does_not_cap_when_due_entries_are_within_the_limit(tmp_path):
+    """The cap must never fire below its own threshold -- confirms the
+    prior (uncapped) sweep behavior is fully preserved for the common case
+    of a small number of demanded worktrees."""
+    clock = {"t": 1000.0}
+    cache = WorktreeStatusCache(
+        tmp_path / "cache.sqlite3",
+        ttl_seconds=5.0,
+        max_refresh_per_sweep=4,
+        now=lambda: clock["t"],
+    )
+    for i in range(4):
+        cache.get_or_refresh("proj", f"wt{i}", force=False, compute=lambda i=i: {"v": i})
+    clock["t"] += 6.0
+
+    refreshed_count = cache.sweep_due(refresh=lambda p, w: {"v": "swept"})
+    assert refreshed_count == 4
+
+
 def test_sweep_drops_entries_whose_demand_has_aged_out(tmp_path):
     clock = {"t": 1000.0}
     cache = WorktreeStatusCache(

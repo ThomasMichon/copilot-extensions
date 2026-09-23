@@ -38,15 +38,45 @@ from collections.abc import Callable
 from pathlib import Path
 
 #: How long a cached bundle is trusted before an ordinary (non-forced) read
-#: triggers a recompute. Short enough that a card reflects genuinely recent
-#: state, long enough that a burst of renders (e.g. scrolling the Tasks
-#: board) shares one warm answer instead of each re-running ~5 git calls.
-DEFAULT_TTL_SECONDS = 20.0
+#: triggers a recompute. Originally set assuming a cheap ~5 git-call bundle;
+#: live measurement (2026-09-22, machine CPU-saturation investigation) found
+#: the daemon's status-monitor process sustaining ~83-99% CPU continuously
+#: for hours with as few as 7 demanded worktrees. Root cause: a real
+#: compute() call costs ~5-6s (the unavoidable `git fetch` in
+#: `classify_worktree`, not a cheap local read), so the prior 20s TTL asked
+#: the single-threaded sweep loop to refresh every demanded worktree
+#: roughly every 20-30s regardless of that ~5-6s real cost -- with N
+#: demanded worktrees the sweep needs N * ~6s of CPU-bound work per TTL
+#: window, which already exceeds one CPU core's capacity at N >= ~4,
+#: guaranteeing the sweep thread runs almost continuously back-to-back
+#: rather than mostly idling between ticks. An initial raise to 90s (live-
+#: verified) only brought steady-state utilization down to ~60% for a
+#: real N=7 -- the theoretical floor (N * ~6s / TTL) at that TTL is still
+#: ~47%, too high for a background accelerator. Raised further to 180s
+#: (theoretical floor ~23% for the same N=7), live-verified over a 10+
+#: minute settled window. Safe to raise on its own: `worktree_status_audit
+#: .py`'s own freshness bound is computed as `DEFAULT_TTL_SECONDS +
+#: SWEEP_INTERVAL_SECONDS + FRESHNESS_SLACK_SECONDS` (see that module), so
+#: it moves with this constant rather than being a fixed ceiling this
+#: change could violate.
+DEFAULT_TTL_SECONDS = 180.0
 
 #: A demanded worktree not read again within this window is no longer swept
 #: -- an operator who closed the card / moved on stops paying the sweep cost
 #: for it. Generous relative to a single render session.
 DEMAND_TTL_SECONDS = 300.0
+
+#: Defense-in-depth cap on how many entries one `sweep_due` call will
+#: recompute, regardless of how many are due. Even after raising
+#: DEFAULT_TTL_SECONDS to reflect real compute cost, an operator whose
+#: demanded-worktree count grows well past what one CPU core can refresh
+#: within a TTL window would otherwise reproduce the same continuous-CPU
+#: symptom at a higher N. Capping bounds worst-case sweep cost to
+#: `max_refresh_per_sweep * (per-entry compute cost)` every sweep tick,
+#: independent of N -- excess due entries are simply picked up on a later
+#: tick (prioritizing the stalest first, see `sweep_due`), trading a wider
+#: worst-case staleness for a hard CPU ceiling rather than the reverse.
+DEFAULT_MAX_REFRESH_PER_SWEEP = 4
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS worktree_status_cache (
@@ -96,11 +126,13 @@ class WorktreeStatusCache:
         *,
         ttl_seconds: float = DEFAULT_TTL_SECONDS,
         demand_ttl_seconds: float = DEMAND_TTL_SECONDS,
+        max_refresh_per_sweep: int = DEFAULT_MAX_REFRESH_PER_SWEEP,
         now: Callable[[], float] = time.time,
     ) -> None:
         self._db_path = db_path
         self._ttl = ttl_seconds
         self._demand_ttl = demand_ttl_seconds
+        self._max_refresh_per_sweep = max_refresh_per_sweep
         self._now = now
         self._lock = threading.Lock()
         # key -> (bundle, computed_at, demanded_at)
@@ -351,10 +383,23 @@ class WorktreeStatusCache:
         return bundle
 
     def sweep_due(self, *, refresh: Callable[[str, str], dict]) -> int:
-        """Refresh every demanded, TTL-expired entry; drop entries whose
-        demand has aged out (``DEMAND_TTL_SECONDS``). Returns the count
-        refreshed. Never raises: a per-entry refresh failure is skipped,
-        leaving that entry's last-known value in place rather than losing it.
+        """Refresh up to ``max_refresh_per_sweep`` demanded, TTL-expired
+        entries (stalest first); drop entries whose demand has aged out
+        (``DEMAND_TTL_SECONDS``). Returns the count refreshed. Never raises:
+        a per-entry refresh failure is skipped, leaving that entry's
+        last-known value in place rather than losing it.
+
+        The cap is defense-in-depth against the exact CPU-saturation bug
+        found live (2026-09-22): a real per-entry recompute costs several
+        seconds (an unavoidable git fetch), so refreshing an unbounded
+        number of due entries every sweep tick can demand more CPU than one
+        core provides, leaving the sweep thread running back-to-back with
+        no idle gaps. Prioritizing the STALEST entries (oldest
+        ``computed_at``) first means an operator with more demanded
+        worktrees than the cap can serve per tick sees some entries age
+        further past their nominal TTL rather than the daemon's CPU cost
+        growing unbounded with demand -- a graceful, self-limiting
+        degradation instead of the reverse.
 
         Each entry is sampled, then recomputed **outside** the lock (the same
         reason ``get_or_refresh`` computes outside it) -- so a concurrent
@@ -379,6 +424,11 @@ class WorktreeStatusCache:
                 for key, (_, _computed_at, demanded_at) in self._entries.items()
                 if now - demanded_at > self._demand_ttl
             ]
+        if len(sampled) > self._max_refresh_per_sweep:
+            # Stalest (smallest computed_at) first -- see the cap's own
+            # rationale in the docstring above.
+            stalest = sorted(sampled.items(), key=lambda item: item[1])
+            sampled = dict(stalest[: self._max_refresh_per_sweep])
         for project, worktree_id in expired:
             with self._lock:
                 # Re-check at pop time, not just at sampling time: a

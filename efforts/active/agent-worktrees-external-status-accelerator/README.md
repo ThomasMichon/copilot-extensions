@@ -1525,6 +1525,28 @@ not yet written up as a dedicated entry here since no code changed):
    it would need to detect that state and fall back to printing the
    exact path for a human to add through the Windows Security app
    itself. On-demand only, never run as a side effect of anything else.
+3. **Duplicate resident status-monitor instances.** Live-observed
+   (2026-09-22, sweep-CPU investigation): killing the status-monitor and
+   waiting a few seconds repeatedly produced 2-3 simultaneously running
+   `agent_worktrees status-monitor` processes, at least one spawned as a
+   direct child of another. Whatever guards this daemon's own single-
+   instance invariant (the `agent-single-instance-lease` primitive
+   exists elsewhere in this codebase) is not preventing this -- needs
+   its own dedicated investigation into the status-monitor's own
+   spawn/cutover path, not folded into an unrelated fix.
+4. **Stale system-Python site-packages contamination.** Live-observed
+   on the same machine/investigation: the system Python interpreter
+   (distinct from any versioned runtime slot) carries `.pth`-based
+   editable installs of `agent-worktrees` and sibling libs pointing at
+   *specific, already-finalized temporary worktree checkouts* rather
+   than a stable location. A caller that resolves to bare/system
+   `python` instead of the properly-resolved versioned interpreter runs
+   permanently stale, uncoordinated code that no `agent-worktrees update
+   --force` ever reaches. Needs a dedicated cleanup (remove the stray
+   `__editable__.*.pth` files) plus tracing which launch path let a
+   caller resolve system Python at all, since every documented launch
+   path is supposed to resolve solely through the marker-based versioned
+   interpreter.
 
 ### 2026-09-21 — `_check_freshness` flagged demand-scoped staleness as a sweep bug
 A scheduled `worktree-status-audit` run reported a real, growing
@@ -1652,4 +1674,79 @@ No user-facing documentation changes needed -- this is an internal
 performance/correctness fix to the accelerator's own compute and timeout
 behavior; the wire contract, cache semantics, and every consumer-facing
 API are unchanged.
+
+### 2026-09-22 — Sweep thread was saturating a full CPU core; raised DEFAULT_TTL_SECONDS and added a per-tick refresh cap
+The operator flagged, unprompted, that the resident status-monitor
+daemon might be "murdering CPU with unlimited, continuous status
+sweeps." Investigated live: found the daemon's Windows process
+sustaining ~83-99% CPU continuously for hours, with only 7 demanded
+worktrees in the cache.
+
+Root cause: `DEFAULT_TTL_SECONDS` (20.0) was set when the effort assumed
+a cheap ~5-git-call bundle; the accelerator-perf-fix work earlier this
+session established the real cost is ~5-6s per compute (the unavoidable
+`fetch=True` git call), never re-tuned after that discovery. With N
+demanded worktrees each costing ~6s and a 20s TTL, the sweep needs
+`N * 6s` of CPU-bound work every 20s window -- already exceeding one
+core's capacity at N >= ~4, so the single-threaded sweep loop runs
+almost continuously back-to-back rather than mostly idling between
+ticks (`SWEEP_INTERVAL_SECONDS` is 10s, so it wakes far more often than
+it can ever finish its own backlog).
+
+Fixed two ways:
+1. Raised `DEFAULT_TTL_SECONDS` from 20.0 to 180.0 -- live-verified this
+   is safe in isolation: `worktree_status_audit.py`'s own freshness
+   bound is computed as `DEFAULT_TTL_SECONDS + SWEEP_INTERVAL_SECONDS +
+   FRESHNESS_SLACK_SECONDS`, so it moves with the constant rather than
+   being a fixed ceiling this change could violate (confirmed via a live
+   audit run showing 0 `cache_freshness_bounds` mismatches at the new
+   TTL).
+2. Added a `max_refresh_per_sweep` cap (default 4) to `sweep_due()` as
+   defense-in-depth: even after the TTL fix, an operator with more
+   demanded worktrees than one core can refresh within a TTL window
+   would reproduce the same symptom at a higher N. The cap bounds
+   worst-case per-tick cost to a fixed number of entries, prioritizing
+   the STALEST (oldest `computed_at`) first -- demand beyond capacity
+   degrades as wider staleness for the excess entries, served on
+   subsequent ticks, rather than unbounded CPU growth with N.
+
+Added two new unit tests (`test_sweep_caps_per_tick_refreshes_
+prioritizing_the_stalest_entries`, `test_sweep_does_not_cap_when_due_
+entries_are_within_the_limit`) plus the existing 22 `worktree_status_
+cache` tests and 45 `worktree_status_audit` tests all still pass (69
+total for this targeted run).
+
+**Live verification was significantly confounded by two separate,
+pre-existing bugs unrelated to this fix**, both discovered mid-
+investigation and captured in this README's own Follow-ups section
+below rather than fixed here:
+- **Duplicate resident daemon instances.** Killing the daemon and
+  waiting a few seconds repeatedly produced 2-3 *simultaneously running*
+  `agent_worktrees status-monitor` processes rather than one -- at least
+  one spawned as a direct child of another (a self-respawn/cutover path
+  spawning a second instance rather than replacing itself), inflating
+  observed CPU by however many redundant instances exist regardless of
+  any single instance's own sweep tuning. The `agent-single-instance-
+  lease` primitive exists in this codebase; whatever guards the
+  status-monitor's own single-instance invariant is evidently not
+  preventing this.
+- **Stale system-Python site-packages contamination.** This machine's
+  system Python (`...\Programs\Python\Python312\python.exe`, distinct
+  from any versioned runtime slot) carries `.pth`-based editable installs
+  of `agent-worktrees` and several sibling libs pointing directly at
+  *specific, temporary worktree checkouts* (some from days earlier,
+  long since finalized) rather than a stable location -- meaning any
+  caller that ends up invoking bare/system `python` instead of the
+  properly-resolved versioned interpreter runs stale, uncoordinated code
+  that no `agent-worktrees update --force` ever reaches. Confirmed this
+  is pre-existing (the editable-install pointers predate this session)
+  and reproducible: several `status-monitor` respawns during this
+  investigation resolved through this contaminated path rather than the
+  correct versioned slot.
+
+Both are real, live bugs on this operator's machine, but out of scope
+for this fix's own object (the sweep tuning itself, which is correct and
+independently unit-tested) -- pursuing them fully would have meant
+chasing a moving target indefinitely on a busy, shared, concurrently-
+updating machine rather than landing a validated, scoped fix.
 
