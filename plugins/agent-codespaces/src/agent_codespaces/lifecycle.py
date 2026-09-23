@@ -350,17 +350,19 @@ def get_codespace_status_with_account(
     delete!) whichever account's same-named CodeSpace it happened to reach
     first, not necessarily the one this name is actually bound to
     (claim-provider-pattern effort review finding: "Resolve exact
-    CodeSpace binding before scanning candidate accounts"). A CONFIRMED
-    result under the binding -- existing OR a genuine 404 -- is final and
-    is returned immediately without falling through to the generic scan:
-    scanning past a confirmed 404 would risk that exact same name-collision
-    (a DIFFERENT account's same-named CodeSpace getting reported/reclaimed
-    under this identity), contradicting the binding's own authority
-    (review finding: "Do not scan other accounts after a bound lookup
-    returns 404"). The scan is the fallback ONLY when there is no binding
-    at all, or the bound lookup itself was AMBIGUOUS (a real error, not a
-    confirmed absence) -- a stale/missing binding must not make an
-    otherwise-discoverable CodeSpace misreport absent."""
+    CodeSpace binding before scanning candidate accounts"). ANY outcome of
+    that bound lookup -- existing, a genuine 404, OR an ambiguous
+    lookup FAILURE -- is final and is propagated immediately, NEVER
+    falling through to the generic scan: falling through on ANY of these
+    (not just a confirmed 404) would risk that exact same name-collision
+    (a DIFFERENT account's same-named CodeSpace getting reported/
+    reclaimed -- possibly DELETED -- under this identity, when the bound
+    account was never actually verified), contradicting the binding's own
+    authority (review findings: "Do not scan other accounts after a bound
+    lookup returns 404" and "Binding lookup errors incorrectly fall
+    through to other accounts"). The scan is the fallback ONLY when there
+    is NO binding at all -- a missing binding must not make an otherwise-
+    discoverable CodeSpace misreport absent."""
     from . import gh_account
 
     validate_context()
@@ -379,25 +381,14 @@ def get_codespace_status_with_account(
         bound = None
     if bound:
         remaining = deadline - time.monotonic()
-        if remaining > 0:
-            try:
-                exists, state = _get_codespace_status_under(
-                    name, bound, timeout=min(_STATUS_LOOKUP_TIMEOUT_SECONDS, remaining),
-                )
-                # A CONFIRMED result (exists OR a genuine 404) under the
-                # authoritative binding is final -- never fall through to
-                # the generic scan afterward. Two accounts can own a
-                # CodeSpace with the identical NAME; scanning past a
-                # confirmed 404 here would let a DIFFERENT account's
-                # same-named CodeSpace be reported (and reclaimed!) under
-                # THIS name, contradicting the binding's own authority
-                # (claim-provider-pattern effort review finding: "Do not
-                # scan other accounts after a bound lookup returns 404").
-                # Only an AMBIGUOUS lookup failure (the except branch
-                # below) falls through -- that's not a confirmed anything.
-                return exists, state, (bound if exists else None)
-            except RuntimeError as exc:
-                errors.append(str(exc))
+        # ANY outcome under the authoritative binding is final -- see the
+        # docstring above for why even an ambiguous lookup FAILURE must
+        # propagate rather than silently fall through to the generic scan
+        # for this destructive-reclaim-feeding path.
+        exists, state = _get_codespace_status_under(
+            name, bound, timeout=min(_STATUS_LOOKUP_TIMEOUT_SECONDS, max(remaining, 0.5)),
+        )
+        return exists, state, (bound if exists else None)
 
     try:
         from . import account_binding

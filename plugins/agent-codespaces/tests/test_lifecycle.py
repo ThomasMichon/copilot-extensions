@@ -432,6 +432,34 @@ class TestGetCodespaceStatus:
         assert exists is False and resolved is None
         assert seen_accounts == ["acct-exact"]  # never scanned acct-other
 
+    def test_binding_lookup_error_propagates_never_scans_other_accounts(self, monkeypatch):
+        """An AMBIGUOUS lookup failure (token mint/auth/5xx) under the
+        authoritative binding must propagate, not silently fall through to
+        the generic scan -- for this destructive-reclaim-feeding path, a
+        binding that was never actually verified must never let a
+        DIFFERENT account's same-named CodeSpace be reported/reclaimed
+        instead (claim-provider-pattern effort review finding: "Binding
+        lookup errors incorrectly fall through to other accounts")."""
+        monkeypatch.setattr(
+            "agent_codespaces.gh_account.mapped_accounts", lambda: ("acct-other",))
+        monkeypatch.setattr(
+            "agent_codespaces.account_binding.bound_accounts", lambda: ())
+        monkeypatch.setattr(
+            "agent_codespaces.account_binding.bound_account",
+            lambda name: "acct-exact" if name == "cs-dup" else None)
+        seen_accounts = []
+
+        def fake_under(name, account, **_kwargs):
+            seen_accounts.append(account)
+            if account == "acct-exact":
+                raise RuntimeError("HTTP 503: service unavailable")
+            return True, "Available"  # a DIFFERENT account's same-named box
+
+        monkeypatch.setattr(lifecycle, "_get_codespace_status_under", fake_under)
+        with pytest.raises(RuntimeError, match="503"):
+            lifecycle.get_codespace_status_with_account("cs-dup")
+        assert seen_accounts == ["acct-exact"]  # never scanned acct-other
+
     def test_default_account_raises_when_no_candidate_confirms_and_one_errors(self, monkeypatch):
         """A live CodeSpace in an account whose lookup failed for a REAL
         reason (not a 404) must never be reported absent just because
