@@ -575,14 +575,20 @@ reviewed/buildable, replaces the prior proposal-only list):
   and ask" behavior from the Plan bullet below, scoped to advisory (warn +
   continue) rather than an interactive block, since most finalize
   invocations here are non-interactive/agent-driven.
-- [ ] Handoff-cutover settle: in `_handoff_cutover_retire_result`
-  (`__main__.py`, right after `sessions.mux_retire_pane` and
-  `reclaim.ensure_session_copilot_reaped` both succeed, `__main__.py:3659-
-  3665`), call `tracking.settle_resource_claim(record,
+- [x] Handoff-cutover settle: in `_handoff_cutover_retire_result`
+  (`__main__.py`), right after the pane is confirmed retired and the
+  predecessor Copilot process is confirmed reaped (`overall_ok and
+  pane_confirmed_retired`), a new `_settle_predecessor_session_claim`
+  helper calls `tracking.settle_resource_claim(record,
   predecessor_session_ref, disposition=obligations.AT_REST)` for the
   predecessor session -- reusing the existing settle primitive, not
   re-deriving handoff completion, and settling (not releasing) since the
-  predecessor process may still be winding down.
+  predecessor process may still be winding down. Runs for *every* confirmed
+  retire (bare or token-bearing), since `link_handoff` (the token-bearing
+  path) only transitions `SessionEntry.state`, never the Phase 8 resource
+  claim; never resurrects an already-`released` claim (a raced
+  `deregister_session`), mirroring `finalize.py`'s
+  `_settle_current_session_claim` guard.
 - [ ] Extend the existing never-wedge sweep resolvers `claim_gone`/
   `claim_safe` (`sweep.py:397-431`, dispatched from `make_resolvers`/
   `self_heal`, `sweep.py:432-472`) with a `claim.kind == "session"` branch,
@@ -810,11 +816,12 @@ either.
   sub-line) carries the marker suffix, freed up by iconifying the
   `RELATION` column (7 truncated text cells -> 1 icon cell). Every Phase 9
   Plan bullet is now checked off.
-- [ ] **Session-claim lifecycle** (Phase 8, designed 2026-09-16, not yet
-  built): a worktree's own live Copilot session is a held `kind="session"`
-  claim; `register_session` opens it, `settle_resource_claim` settles it on
-  finalize and on successful handoff cutover, a new `release_resource_claim`
-  releases it on `sessionEnd`, and a new `userPromptSubmit` hook reopens it
+- [ ] **Session-claim lifecycle** (Phase 8, designed 2026-09-16, build
+  started 2026-09-17): a worktree's own live Copilot session is a held
+  `kind="session"` claim; `register_session` opens it, `settle_resource_claim`
+  settles it on finalize and on successful handoff cutover, a new
+  `release_resource_claim` releases it on `sessionEnd`, and a new
+  `userPromptSubmit` hook reopens it
   (via the existing `add_resource_claim`/`reopen_finalized_owner` path) after
   a premature settle. `finalize`'s hard obligation gate excludes `session`
   claims from `unsettled`; a new advisory-only `_advise_other_live_sessions`
@@ -2026,4 +2033,49 @@ The approved design is the faceted model in [design.md](design.md):
   `claim_gone`/`claim_safe` session branch, the `userPromptSubmit` reopen
   hook) are unstarted -- left for the next slice(s), each its own small
   worktree per the same pattern.
+
+### 2026-09-22 - Phase 8 build continued: handoff-cutover settle (resumed via manual handoff)
+
+- Resumed via the manual `/consume-handoff` path (deliberately not
+  auto-triggered, per the retry-storm safety note on the prior handoff --
+  gim-home/odsp-web-harness#431). Verified before starting: Phase 9 fully
+  merged, Phase 8's first sub-slice (PR #2824) merged, no other open PR
+  touching Phase 8.
+- Built the second Phase 8 Plan bullet in a fresh `copilot-extensions`
+  worktree: **handoff-cutover settle**. Added
+  `_settle_predecessor_session_claim(wt_id, session_id)` in `__main__.py`
+  and called it from `_handoff_cutover_retire_result` right after a
+  confirmed retire (`overall_ok and pane_confirmed_retired`), settling the
+  predecessor's `kind="session"` claim to `at-rest` via the existing
+  `tracking.settle_resource_claim`.
+- Deliberately made this call unconditional on `bare_retire` -- unlike the
+  adjacent `_conclude_retired_predecessor` call (which only fires for a
+  bare, token-less retire), the session *claim* needs settling on **every**
+  confirmed retire, including the ordinary token-bearing handoff flow: that
+  path's own `link_handoff` transitions `SessionEntry.state` to
+  `handed-off` but never touches the Phase 8 resource claim, so without this
+  the predecessor's claim would stay `active` forever after a successful
+  token-mediated handoff.
+- Mirrored the released-claim guard from `finalize.py`'s
+  `_settle_current_session_claim` (PR #2824): never resurrects an
+  already-`released` claim (a `deregister_session`/`sessionEnd` that raced
+  ahead of this retire), by checking the claim's current state before
+  settling. Wrapped the whole helper in `contextlib.suppress(Exception)`,
+  matching `_conclude_retired_predecessor`'s own best-effort contract (an
+  unresolvable project/tracking context must never fail the retire itself).
+- Added 4 targeted tests to `test_handoff_cutover.py`: settles a bare
+  retire's claim to `at-rest`; settles a token-bearing retire's claim
+  (while leaving `link_handoff`'s own `handed-off` `SessionEntry` state
+  untouched); does not resurrect an already-`released` claim; and the
+  existing suite's own regressions. Full `test_handoff_cutover.py` run: 102
+  passed (up from 98 pre-existing). `ruff check` on both touched files shows
+  the same pre-existing counts as `main` (`__main__.py`: 27; the test file:
+  4 -- confirmed via `git stash` diff, no new findings). Widened
+  `tools/module-size-baseline.json`'s `__main__.py` ceiling from 8168 to
+  8208 (the file's real current line count) and bumped `agent-worktrees`'s
+  version to `1.5.5-dev243` (`plugin.json` + `pyproject.toml` +
+  `.github/plugin/marketplace.json`'s per-plugin entry).
+- Remaining Phase 8 bullets: the sweep `claim_gone`/`claim_safe` session
+  branch, and the `userPromptSubmit` reopen hook -- each its own next
+  slice/worktree.
 

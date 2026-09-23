@@ -1175,6 +1175,156 @@ class TestCmdHandoffCutover:
         final = _tracking.load_record(tmp_tracking_dir / "wt-retire-4702.yaml")
         assert final.resolved_head_session == "new-sess"
 
+    def test_retire_settles_predecessor_session_claim_to_at_rest(
+        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+    ):
+        """A confirmed-retired bare predecessor's Phase 8 ``session`` claim
+        (opened by ``register_session``) must be settled to ``at-rest`` --
+        not left ``active`` forever, which would otherwise show up as a
+        permanently "still live" session claim in ``finalize``'s advisory
+        ``_advise_other_live_sessions`` pass and the never-wedge sweep."""
+        from agent_worktrees import tracking as _tracking
+
+        rec = _tracking.WorktreeRecord(
+            worktree_id="wt-retire-claim", branch="worktree/wt-retire-claim",
+            worktree_path="/tmp/src/wt-retire-claim", repo="test-repo",
+            machine="test", platform="wsl", started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
+            status="active", completed_at=None, sessions=[],
+        )
+        _tracking.save_record(rec, tmp_tracking_dir / "wt-retire-claim.yaml")
+        _tracking.register_session("wt-retire-claim", "old-sess")
+        before = _tracking.load_record(tmp_tracking_dir / "wt-retire-claim.yaml")
+        claim_ref = _tracking.format_claim_ref(
+            before.machine, before.repo, before.worktree_id, session="old-sess",
+        )
+        before_claim = next(c for c in before.resources if c.ref == claim_ref)
+        assert before_claim.state == "active"
+
+        monkeypatch.setattr(
+            m.pane_lifecycle, "pane_terminate",
+            lambda p, **k: {"ok": True, "pane": p, "gone": True, "method": "graceful"},
+        )
+        monkeypatch.setattr(
+            reclaim, "ensure_session_copilot_reaped",
+            lambda sid, **kwargs: {
+                "checked": True, "identity_verified": True, "found": 1,
+                "reaped": 1, "survivors": 0, "pids": [7],
+            },
+        )
+        monkeypatch.setattr(activity, "log_event", lambda *a, **k: None)
+
+        rc = m.cmd_handoff_cutover(_ns(
+            worktree_id="wt-retire-claim", retire_pane="%9", session_id="old-sess",
+        ))
+
+        assert rc == 0
+        after = _tracking.load_record(tmp_tracking_dir / "wt-retire-claim.yaml")
+        after_claim = next(c for c in after.resources if c.ref == claim_ref)
+        assert after_claim.state == "at-rest"
+
+    def test_retire_settles_predecessor_session_claim_for_token_bearing_handoff(
+        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+    ):
+        """A token-bearing retire (the ordinary handoff flow, not the
+        bare-retire repair) must ALSO settle the predecessor's own ``session``
+        claim once its pane/process are confirmed gone -- ``link_handoff``
+        only transitions ``SessionEntry.state``; nothing else settles the
+        Phase 8 resource claim for that path."""
+        from agent_worktrees import tracking as _tracking
+
+        rec = _tracking.WorktreeRecord(
+            worktree_id="wt-retire-claim-tok", branch="worktree/wt-retire-claim-tok",
+            worktree_path="/tmp/src/wt-retire-claim-tok", repo="test-repo",
+            machine="test", platform="wsl", started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
+            status="active", completed_at=None, sessions=[],
+        )
+        _tracking.save_record(rec, tmp_tracking_dir / "wt-retire-claim-tok.yaml")
+        _tracking.register_session("wt-retire-claim-tok", "old-sess")
+        loaded = _tracking.load_record(tmp_tracking_dir / "wt-retire-claim-tok.yaml")
+        _tracking.open_handoff(loaded, "old-sess", "task-claim-tok")
+        _tracking.register_session(
+            "wt-retire-claim-tok", "new-sess", handoff_token="task-claim-tok",
+        )
+        claim_ref = _tracking.format_claim_ref(
+            loaded.machine, loaded.repo, loaded.worktree_id, session="old-sess",
+        )
+
+        monkeypatch.setattr(
+            m.pane_lifecycle, "pane_terminate",
+            lambda p, **k: {"ok": True, "pane": p, "gone": True, "method": "graceful"},
+        )
+        monkeypatch.setattr(
+            reclaim, "ensure_session_copilot_reaped",
+            lambda sid, **kwargs: {
+                "checked": True, "identity_verified": True, "found": 1,
+                "reaped": 1, "survivors": 0, "pids": [7],
+            },
+        )
+        monkeypatch.setattr(activity, "log_event", lambda *a, **k: None)
+
+        rc = m.cmd_handoff_cutover(_ns(
+            worktree_id="wt-retire-claim-tok", retire_pane="%9",
+            session_id="old-sess", handoff_token="task-claim-tok",
+        ))
+
+        assert rc == 0
+        after = _tracking.load_record(tmp_tracking_dir / "wt-retire-claim-tok.yaml")
+        after_claim = next(c for c in after.resources if c.ref == claim_ref)
+        assert after_claim.state == "at-rest"
+        # link_handoff's own SessionEntry transition is untouched.
+        assert after.session_entry("old-sess").state == "handed-off"
+
+    def test_retire_does_not_resurrect_a_released_session_claim(
+        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+    ):
+        """A ``deregister_session`` (``sessionEnd``) that raced ahead and
+        released the predecessor's claim before this retire ran must not be
+        overwritten back to ``at-rest`` -- a genuinely torn-down claim
+        must not come back to life (mirrors ``finalize.py``'s
+        ``_settle_current_session_claim`` released-claim guard)."""
+        from agent_worktrees import tracking as _tracking
+
+        rec = _tracking.WorktreeRecord(
+            worktree_id="wt-retire-claim-rel", branch="worktree/wt-retire-claim-rel",
+            worktree_path="/tmp/src/wt-retire-claim-rel", repo="test-repo",
+            machine="test", platform="wsl", started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
+            status="active", completed_at=None, sessions=[],
+        )
+        _tracking.save_record(rec, tmp_tracking_dir / "wt-retire-claim-rel.yaml")
+        _tracking.register_session("wt-retire-claim-rel", "old-sess")
+        _tracking.deregister_session("wt-retire-claim-rel", "old-sess")
+        before = _tracking.load_record(tmp_tracking_dir / "wt-retire-claim-rel.yaml")
+        claim_ref = _tracking.format_claim_ref(
+            before.machine, before.repo, before.worktree_id, session="old-sess",
+        )
+        before_claim = next(c for c in before.resources if c.ref == claim_ref)
+        assert before_claim.state == "released"
+
+        monkeypatch.setattr(
+            m.pane_lifecycle, "pane_terminate",
+            lambda p, **k: {"ok": True, "pane": p, "gone": True, "method": "graceful"},
+        )
+        monkeypatch.setattr(
+            reclaim, "ensure_session_copilot_reaped",
+            lambda sid, **kwargs: {
+                "checked": True, "identity_verified": True, "found": 0,
+                "reaped": 0, "survivors": 0, "pids": [],
+            },
+        )
+        monkeypatch.setattr(activity, "log_event", lambda *a, **k: None)
+
+        rc = m.cmd_handoff_cutover(_ns(
+            worktree_id="wt-retire-claim-rel", retire_pane="%9", session_id="old-sess",
+        ))
+
+        assert rc == 0
+        after = _tracking.load_record(tmp_tracking_dir / "wt-retire-claim-rel.yaml")
+        after_claim = next(c for c in after.resources if c.ref == claim_ref)
+        assert after_claim.state == "released"
+
     def test_retire_does_not_infer_succession_for_an_unrelated_active_session(
         self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
     ):
