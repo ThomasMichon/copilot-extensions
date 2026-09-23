@@ -41,6 +41,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 #: Subdirectory of ``~/.copilot`` holding live session directories.
@@ -49,7 +50,25 @@ SESSION_STATE_SUBDIR = "session-state"
 #: Sidecar metadata kept uncompressed beside an archive for cheap selection.
 #: These are the files the selection/listing/routing paths read; keeping them
 #: out of the tarball means those paths never decompress anything.
-SIDECAR_MEMBERS: tuple[str, ...] = ("workspace.yaml", "origin.json")
+#:
+#: ``review-annotations.json`` (added for effort
+#: ``dampener-reviewer-session-durability``, #7445 Phase 2) is a durable,
+#: first-class annotation -- not a worktree-naming convention (see that
+#: effort's own Context section for why the naming-convention path was
+#: rejected) -- recording which review-dispatch PR(s) a session worked, so a
+#: consumer can eventually query "every session that reviewed PR N" without
+#: sweeping every session's raw transcript. Most sessions never write it;
+#: :func:`read_review_annotations` returns ``[]`` when absent, exactly like
+#: :func:`read_origin` returns ``{}``.
+SIDECAR_MEMBERS: tuple[str, ...] = (
+    "workspace.yaml",
+    "origin.json",
+    "review-annotations.json",
+)
+
+#: The sidecar member name for :func:`write_review_annotation` /
+#: :func:`read_review_annotations`.
+REVIEW_ANNOTATIONS_MEMBER = "review-annotations.json"
 
 #: The member every real session has; used to tell a session dir from noise.
 EVENTS_MEMBER = "events.jsonl"
@@ -385,6 +404,73 @@ def read_origin(ref: SessionRef) -> dict[str, object]:
     except json.JSONDecodeError:
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def read_review_annotations(ref: SessionRef) -> list[dict[str, object]]:
+    """Return this session's review-annotation entries (``[]`` if none).
+
+    Each entry has at least ``repo``, ``pr_number``, ``role``, and
+    ``recorded_at`` (see :func:`write_review_annotation`). A session most
+    commonly carries zero or one entry; more than one means it worked
+    multiple review-dispatch PRs.
+    """
+    text = read_text(ref, REVIEW_ANNOTATIONS_MEMBER, errors="replace")
+    if not text:
+        return []
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+    return [entry for entry in data if isinstance(entry, dict)] if isinstance(data, list) else []
+
+
+def write_review_annotation(
+    session_dir: Path,
+    *,
+    repo: str,
+    pr_number: int,
+    role: str = "reviewer",
+    recorded_at: str | None = None,
+) -> None:
+    """Append a review annotation to a **live** session's sidecar, idempotently.
+
+    Only ever writes into a live session directory (``session_dir`` must
+    already exist -- this never creates one): an archived session's sidecar
+    is a read-only artifact produced by :func:`archive_session`, not a
+    target for later mutation. A duplicate ``(repo, pr_number, role)`` entry
+    is not re-appended (safe to call repeatedly from a backfill/sweep without
+    growing the file unboundedly), but ``recorded_at`` on a genuinely new
+    entry always reflects this call.
+    """
+    path = session_dir / REVIEW_ANNOTATIONS_MEMBER
+    try:
+        existing_text = path.read_text(encoding="utf-8") if path.is_file() else "[]"
+        existing = json.loads(existing_text)
+        entries: list[dict[str, object]] = (
+            [e for e in existing if isinstance(e, dict)] if isinstance(existing, list) else []
+        )
+    except (OSError, json.JSONDecodeError):
+        entries = []
+
+    for entry in entries:
+        if (
+            entry.get("repo") == repo
+            and entry.get("pr_number") == pr_number
+            and entry.get("role") == role
+        ):
+            return
+
+    entries.append(
+        {
+            "repo": repo,
+            "pr_number": pr_number,
+            "role": role,
+            "recorded_at": recorded_at or datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
+        }
+    )
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(entries), encoding="utf-8")
+    os.replace(tmp, path)
 
 
 @contextmanager
