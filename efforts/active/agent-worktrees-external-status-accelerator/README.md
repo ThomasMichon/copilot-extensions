@@ -1722,3 +1722,38 @@ No further consumer-facing documentation changes needed beyond the doc
 caveat reword above -- the wire contract and every consumer-facing API are
 unchanged; this round was entirely launcher/resolver-internals and doc
 precision.
+
+### 2026-09-23 — PR #3310 review round 5: negative-path test coverage + synchronous-write latency documentation
+Addressed 2 findings from the latest Copilot review round on PR #3310:
+
+- **`bootTraceLogFile` negative-path coverage.** The existing test only
+  exercised a valid override; added a parametrized
+  `test_boot_trace_log_file_rejects_unsafe_values` covering non-string
+  values (`123`, `True`, `None`), an empty string, an empty path component
+  (`logs//boot.jsonl`), a leading/trailing separator, and `..` traversal
+  (leading, embedded, and trailing) -- locking in the round-4 validation
+  fix against regression.
+- **Synchronous `AppendAllText` latency.** The reviewer correctly noted
+  that swallowing write exceptions makes the durable boot-trace write
+  fail-open, but doesn't make it non-blocking: a slow or contended
+  filesystem still stalls every phase's write before dispatch continues.
+  Rather than reimplementing the write as backgrounded PowerShell (a
+  runspace/job per phase would add its own measurable per-launch startup
+  overhead, likely exceeding the tiny local append it would be hiding, for
+  a cost class that rarely needs it), added an explicit comment at each of
+  the three `AppendAllText` call sites (`powershell-shim.tmpl`,
+  `resolve-runtime.ps1`, `invoke-payload-runtime.ps1`) documenting this as
+  a real, accepted, bounded tradeoff -- and added the same clarification to
+  `docs/patterns/uniform-runtime-resolution.md`'s boot-trace channel list,
+  since nothing there previously called out that the durable write is
+  synchronous rather than fire-and-forget.
+- Verified: targeted `agent-worktrees` pytest run (`boot_trace or activity
+  or installer_binstub or payload`) -- 177 passed, 4 skipped; full
+  `libs/payload-invocation` `test_generate.py` suite; regenerated every
+  plugin's shipped binstub and re-synced the vendored versioned-runtime
+  resolvers so the new comments propagate everywhere `AppendAllText` is
+  used.
+
+No further consumer-facing documentation changes needed beyond the doc
+clarification above; the wire contract, cache semantics, and every
+consumer-facing API are unchanged.

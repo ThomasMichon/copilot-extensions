@@ -72,6 +72,10 @@ function Write-BootTraceRecord(
             [void]$parts.Add('"path":"' + (Escape-BootTraceJson $DispatchPath) + '"')
         }
         $line = '{' + ($parts -join ',') + '}'
+        # See `powershell-shim.tmpl`'s own identical `AppendAllText` comment
+        # for the full synchronous-write-latency rationale (Copilot review,
+        # PR #3310): a real, bounded tradeoff, never a fire-and-forget
+        # guarantee, kept synchronous deliberately rather than backgrounded.
         [IO.File]::AppendAllText(
             $bootTraceLogPath,
             $line + [Environment]::NewLine,

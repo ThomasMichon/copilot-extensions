@@ -58,6 +58,20 @@ function Write-BootTraceRecord(
             [void]$parts.Add('"path":"' + (Escape-BootTraceJson $DispatchPath) + '"')
         }
         $line = '{' + ($parts -join ',') + '}'
+        # `AppendAllText` is synchronous: on a healthy local disk this is a
+        # single small write (microseconds), but on a slow or contended
+        # filesystem (a network-mapped home directory, heavy antivirus
+        # scanning, another process holding a lock) it can add real,
+        # unbounded latency to every phase logged before the actual
+        # dispatch -- this is a real, documented tradeoff, not a
+        # fire-and-forget guarantee (Copilot review, PR #3310). Exceptions
+        # are swallowed (never raises, never blocks dispatch on failure)
+        # but a slow write still stalls this call until it returns or
+        # throws. Left synchronous rather than backgrounded (a PowerShell
+        # runspace/job per phase would itself add measurable startup
+        # overhead to every launch, likely exceeding the write it's meant
+        # to hide behind, for a cost class -- a handful of tiny local
+        # appends per launch -- that rarely needs it in practice).
         [IO.File]::AppendAllText(
             $_bootTraceLogPath,
             $line + [Environment]::NewLine,

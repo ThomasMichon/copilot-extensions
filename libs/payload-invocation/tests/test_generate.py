@@ -230,6 +230,39 @@ def test_boot_trace_log_file_defaults_and_can_be_overridden(tmp_path: Path) -> N
     assert "logs\\activity.jsonl" in generated[powershell_path]
 
 
+@pytest.mark.parametrize(
+    "boot_trace_log_file",
+    [
+        123,
+        True,
+        None,
+        "",
+        "logs//boot.jsonl",
+        "/logs/boot.jsonl",
+        "logs/boot.jsonl/",
+        "../logs/boot.jsonl",
+        "logs/../boot.jsonl",
+        "logs/..",
+    ],
+)
+def test_boot_trace_log_file_rejects_unsafe_values(
+    tmp_path: Path,
+    boot_trace_log_file: object,
+) -> None:
+    """Regression (Copilot review, PR #3310): non-string values, `..`
+    traversal, and empty path components (a leading/trailing/doubled `/`)
+    must all be rejected -- an empty component would silently break the
+    writer's directory-creation logic at runtime, and `..` would let a
+    plugin manifest point the durable log outside its own runtime root."""
+    manifest = _manifest(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["bootTraceLogFile"] = boot_trace_log_file
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="invalid bootTraceLogFile"):
+        generator.load_manifest(manifest)
+
+
 def test_session_start_bootstrap_defaults_true_and_requires_boolean(
     tmp_path: Path,
 ) -> None:

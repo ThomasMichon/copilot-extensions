@@ -80,6 +80,16 @@ timestamp and so do not yet emit a durable `shim-start`/`dispatch` record.
   `::boot-trace:: plugin=... phase=... t=<epoch-ms> ...` lines to **stderr**
   only. This is additive: durable logging still happens, and the stderr extras
   keep their existing `source=... result=... version=... path=...` vocabulary.
+- **The durable write is synchronous, not fire-and-forget.** Every launcher's
+  write is a single small, exception-swallowed append (never raises, never
+  blocks dispatch on *failure*) -- but it does still run to completion before
+  dispatch continues, so a slow or contended filesystem (a network-mapped
+  home directory, heavy antivirus scanning, a concurrent writer) adds real
+  latency to every phase logged, not just a failure path. Accepted as a
+  bounded tradeoff given the write is one small local append per phase
+  (Copilot review, PR #3310) rather than backgrounded, which would add its
+  own measurable per-launch overhead spinning up a job/runspace to hide a
+  cost that is normally smaller than that overhead itself.
 - **`installationContext: required` plugins defer `shim-start`/`dispatch`
   durable writes to their own inner, installation-context-aware dispatcher.**
   The outer generated dispatcher shim (`dispatcher-posix.tmpl`/
