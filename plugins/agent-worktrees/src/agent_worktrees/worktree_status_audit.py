@@ -284,7 +284,9 @@ def _check_identity(
     return []
 
 
-def _check_freshness(cache_entry: dict | None, *, now: float) -> list[FieldMismatch]:
+def _check_freshness(
+    cache_entry: dict | None, *, now: float, demanded_count: int = 1
+) -> list[FieldMismatch]:
     if cache_entry is None:
         return []
     computed_at = cache_entry.get("computed_at")
@@ -298,7 +300,7 @@ def _check_freshness(cache_entry: dict | None, *, now: float) -> list[FieldMisma
     # .cmd_worktree_status_bundle`, which import it the same way rather
     # than at module scope.
     from .worktree_status_daemon import SWEEP_INTERVAL_SECONDS
-    from .worktree_status_cache import DEMAND_TTL_SECONDS
+    from .worktree_status_cache import DEMAND_TTL_SECONDS, DEFAULT_MAX_REFRESH_PER_SWEEP
 
     # `WorktreeStatusCache.sweep_due` only refreshes an entry while it is
     # still *demanded* (`get_or_refresh` registers demand on every read;
@@ -337,7 +339,25 @@ def _check_freshness(cache_entry: dict | None, *, now: float) -> list[FieldMisma
         return []
 
     age = now - computed_at
-    bound = DEFAULT_TTL_SECONDS + SWEEP_INTERVAL_SECONDS + FRESHNESS_SLACK_SECONDS
+    # The per-tick refresh cap (Copilot review, PR #3348 -- see
+    # WorktreeStatusCache.sweep_due's own docstring for the CPU-saturation
+    # rationale) means a demanded entry is no longer guaranteed a refresh
+    # every single sweep tick once the number of currently-demanded
+    # entries exceeds the cap: excess entries are served round-robin,
+    # stalest-first, across successive ticks. With `demanded_count`
+    # entries and a cap of `DEFAULT_MAX_REFRESH_PER_SWEEP`, the worst-case
+    # entry (last served in the round-robin) can wait up to
+    # `ceil(demanded_count / cap)` sweep ticks rather than just one --
+    # the fixed, cap-unaware bound below would otherwise false-positive
+    # under real load exactly proportional to how far demand exceeds the
+    # cap, the same "confuse a real caller's own tolerated resting state
+    # for an outage" mistake this check exists to avoid.
+    extra_ticks = max(0, -(-demanded_count // DEFAULT_MAX_REFRESH_PER_SWEEP) - 1)
+    bound = (
+        DEFAULT_TTL_SECONDS
+        + SWEEP_INTERVAL_SECONDS * (1 + extra_ticks)
+        + FRESHNESS_SLACK_SECONDS
+    )
     if age > bound:
         return [FieldMismatch(
             check="cache_freshness_bounds",
@@ -364,9 +384,16 @@ def _safe_age(cache_entry: dict | None, key: str, *, now: float) -> float | None
 
 
 def audit_one(
-    project: str, worktree_id: str, cache_entry: dict | None, *, now: float
+    project: str, worktree_id: str, cache_entry: dict | None, *, now: float,
+    demanded_count: int = 1,
 ) -> WorktreeAudit:
     """Audit one ``(project, worktree_id)`` against its cache entry (if any).
+
+    ``demanded_count`` -- the total number of currently-tracked cache rows
+    at audit time -- is forwarded to :func:`_check_freshness` so its
+    freshness bound can account for the sweep's own per-tick refresh cap
+    (see that function's own docstring); it does not affect any other
+    check.
 
     Always recomputes ground truth via :func:`worktree_status_compute
     .compute` -- the exact same fact-assembly a cache miss would run,
@@ -378,7 +405,7 @@ def audit_one(
     mismatches: list[FieldMismatch] = []
     cached_bundle = cache_entry.get("bundle") if cache_entry else None
     mismatches += _check_identity(project, worktree_id, cached_bundle, source="cached")
-    mismatches += _check_freshness(cache_entry, now=now)
+    mismatches += _check_freshness(cache_entry, now=now, demanded_count=demanded_count)
 
     cache_age = _safe_age(cache_entry, "computed_at", now=now)
     demand_age = _safe_age(cache_entry, "demanded_at", now=now)
@@ -592,7 +619,10 @@ def run_audit(
     now = time.time()
     cache_rows = read_cache_snapshot(cache_db_path(runtime_home))
     sample = select_sample(cache_rows, sample_size=sample_size, rng=rng)
-    audits = [audit_one(project, wt_id, entry, now=now) for project, wt_id, entry in sample]
+    audits = [
+        audit_one(project, wt_id, entry, now=now, demanded_count=len(cache_rows))
+        for project, wt_id, entry in sample
+    ]
     probe = (audits[0].project, audits[0].worktree_id) if audits else None
     daemon = check_daemon_liveness(
         runtime_home / "status-monitor.lock", probe=probe, ensure_monitor=ensure_monitor

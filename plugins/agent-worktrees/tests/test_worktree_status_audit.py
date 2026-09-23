@@ -242,6 +242,36 @@ def test_check_freshness_ok_when_demand_has_aged_out():
     assert wsa._check_freshness(entry, now=now) == []
 
 
+def test_check_freshness_bound_widens_with_demanded_count_past_the_sweep_cap():
+    """Regression (Copilot review, PR #3348): `WorktreeStatusCache.sweep_due`'s
+    own `max_refresh_per_sweep` cap means a demanded entry is no longer
+    guaranteed a refresh every single tick once the number of currently-
+    demanded entries exceeds the cap -- excess entries are served round-
+    robin, stalest-first, across successive ticks. A fixed, cap-unaware
+    bound would false-positive under real load exactly proportional to how
+    far demand exceeds the cap. `demanded_count` must widen the bound
+    accordingly."""
+    from agent_worktrees.worktree_status_cache import DEFAULT_MAX_REFRESH_PER_SWEEP
+    from agent_worktrees.worktree_status_daemon import SWEEP_INTERVAL_SECONDS
+
+    now = time.time()
+    # An age that comfortably clears the base (demanded_count=1) bound but
+    # falls within the extra slack a large demanded_count should grant.
+    demanded_count = DEFAULT_MAX_REFRESH_PER_SWEEP * 5 + 1
+    base_bound = wsa.DEFAULT_TTL_SECONDS + SWEEP_INTERVAL_SECONDS + wsa.FRESHNESS_SLACK_SECONDS
+    age = base_bound + SWEEP_INTERVAL_SECONDS * 3
+    entry = {"computed_at": now - age, "demanded_at": now}
+
+    # With the default demanded_count=1, this age is already past the base
+    # bound -- must be flagged.
+    assert len(wsa._check_freshness(entry, now=now)) == 1
+
+    # With enough demanded entries to make the sweep's own round-robin take
+    # several extra ticks to reach this one, the SAME age must no longer be
+    # flagged -- it's an expected, cap-driven wait, not a sweep malfunction.
+    assert wsa._check_freshness(entry, now=now, demanded_count=demanded_count) == []
+
+
 # -- audit_one -------------------------------------------------------------
 
 def test_audit_one_clean_when_cache_matches_live(monkeypatch):

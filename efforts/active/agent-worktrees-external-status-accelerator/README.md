@@ -1780,5 +1780,22 @@ across attempts instead of jamming on one broken worktree. Added
 `test_sweep_cap_does_not_let_a_persistently_failing_entry_starve_others`
 (cap=1, a permanently-failing entry demanded first, two healthy entries
 after -- confirms all three get attempted across three sweep ticks; the
-bug would have re-selected the failing entry every single tick). Full
-targeted run: 25 `worktree_status_cache` tests pass (24 prior + 1 new).
+bug would have re-selected the failing entry every single tick).
+
+The same review round also flagged that `worktree_status_audit
+._check_freshness`'s fixed freshness bound doesn't account for the new
+per-tick refresh cap: once the number of currently-demanded entries
+exceeds `max_refresh_per_sweep`, an entry's own turn in the sweep's
+round-robin can legitimately take several extra ticks to arrive, so a
+fixed bound would false-positive under real load proportional to how
+far demand exceeds the cap. Added a `demanded_count` parameter to
+`_check_freshness`/`audit_one` (threaded from `run_audit`'s own
+`len(cache_rows)`) that widens the bound by
+`SWEEP_INTERVAL_SECONDS * ceil(demanded_count / cap)` extra ticks of
+slack. Added `test_check_freshness_bound_widens_with_demanded_count_
+past_the_sweep_cap` proving the same stale age is flagged at
+`demanded_count=1` but tolerated once demand exceeds the cap enough to
+explain the delay.
+
+Full targeted run: 71 tests pass (25 `worktree_status_cache` + 46
+`worktree_status_audit`).
