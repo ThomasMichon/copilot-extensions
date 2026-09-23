@@ -677,3 +677,212 @@ def test_windows_batch_argv_is_a_noop_off_windows(monkeypatch):
     monkeypatch.setattr(cp.os, "name", "posix")
     command = ("/opt/plugin/bin/agent-codespaces.cmd", "claim-status", "ref")
     assert cp._windows_batch_argv(command) == list(command)
+
+
+# --- is_safe_argument / resolve_provider_argv / build_provider_argv --------
+
+
+@pytest.mark.parametrize("value", ["cs-a", "wt-abc", "tmichon-book2", "a.b_c/d", "123"])
+def test_is_safe_argument_accepts_ordinary_identifiers(value):
+    assert cp.is_safe_argument(value) is True
+
+
+@pytest.mark.parametrize("value", ["cs-x&whoami", "a|b", "a>b", "a<b", "a^b", 'a"b', "a!b", "-x"])
+def test_is_safe_argument_rejects_metacharacters_and_leading_dash(value):
+    assert cp.is_safe_argument(value) is False
+
+
+def test_is_safe_argument_rejects_trailing_newline():
+    """Python's bare `$` matches immediately before a single trailing
+    newline at the end of the string, unlike a strict `\\Z` end-of-string
+    anchor -- a value with a trailing control character must never pass
+    validation just because it looks safe up to that point."""
+    assert cp.is_safe_argument("cs-a\n") is False
+    assert cp.is_safe_argument("cs-a\r\n") is False
+    assert cp.is_safe_argument("cs-a") is True
+
+
+def test_peer_env_is_none_without_any_routing_vars(monkeypatch):
+    for name in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "GH_TOKEN", "GITHUB_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    assert cp.peer_env() is None
+
+
+def test_peer_env_strips_context_and_credentials_but_still_invokes(monkeypatch):
+    """agent-worktrees ships with installationContext: required, so
+    COPILOT_EXTENSIONS_CONTEXT is present on EVERY real invocation, not
+    just some rare namespaced-cell edge case -- peer_env() must still
+    return a usable (stripped) environment here, never refuse outright
+    (an earlier revision did, which silently disabled this whole registry
+    in every normal marketplace installation)."""
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "agent-worktrees@copilot-extensions")
+    monkeypatch.setenv("COPILOT_PLUGIN_ROOT", "/some/agent-worktrees/payload/root")
+    monkeypatch.setenv("GH_TOKEN", "secret-gh-token")
+    monkeypatch.setenv("GITHUB_TOKEN", "secret-github-token")
+    monkeypatch.setenv("SOME_OTHER_VAR", "kept")
+    env = cp.peer_env()
+    assert env is not None
+    assert "COPILOT_EXTENSIONS_CONTEXT" not in env
+    assert "COPILOT_PLUGIN_ROOT" not in env
+    assert "GH_TOKEN" not in env
+    assert "GITHUB_TOKEN" not in env
+    assert env.get("SOME_OTHER_VAR") == "kept"
+
+
+def test_peer_env_strips_plugin_root_even_without_a_context(monkeypatch):
+    """A consumer keying off COPILOT_PLUGIN_ROOT specifically (e.g.
+    agent-codespaces' own marketplace-installation resolution) must never
+    inherit agent-worktrees' own payload root either -- independent of
+    whether COPILOT_EXTENSIONS_CONTEXT itself happens to be set."""
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.setenv("COPILOT_PLUGIN_ROOT", "/some/agent-worktrees/payload/root")
+    env = cp.peer_env()
+    assert env is not None
+    assert "COPILOT_PLUGIN_ROOT" not in env
+
+
+def test_peer_env_strips_whitespace_only_context(monkeypatch):
+    """A whitespace-only COPILOT_EXTENSIONS_CONTEXT is still an explicit
+    (if invalid) context to agent_codespaces.worktrees.explicit_context()
+    (``bool(os.environ.get(...))`` -- no stripping there), NOT an absent
+    one -- so peer_env() must still strip it (and the credential vars)
+    rather than treating a whitespace value as "nothing set" and returning
+    None (inherit unmodified), which would leave the caller's own
+    cell-scoped GH_TOKEN/GITHUB_TOKEN reaching a sibling that then reads
+    itself as being in (invalid) cell mode."""
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "   ")
+    monkeypatch.setenv("GH_TOKEN", "secret-gh-token")
+    monkeypatch.delenv("COPILOT_PLUGIN_ROOT", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    env = cp.peer_env()
+    assert env is not None
+    assert "COPILOT_EXTENSIONS_CONTEXT" not in env
+    assert "GH_TOKEN" not in env
+
+
+def test_resolve_claim_status_still_invokes_in_a_namespaced_cell(tmp_path, monkeypatch):
+    """Cross-plugin claim-provider invocation must still be attempted when
+    this process runs under an explicit marketplace-cell installation
+    context -- that's the ONLY way agent-worktrees ever runs (installation
+    Context: required) -- peer_env() carries the credential-stripping
+    mitigation instead of a feature-disabling refusal."""
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "agent-worktrees@copilot-extensions")
+
+    def fake_discover(_plugins_root):
+        provider = cp.ClaimProviderManifest(
+            namespace="codespace",
+            plugin="agent-codespaces@copilot-extensions",
+            plugin_root=str(tmp_path),
+            status_command=(
+                "python", "-c",
+                "import json,sys;print(json.dumps({'exists': True, 'state': 'running'}))",
+            ),
+        )
+        return {"codespace": provider}, ()
+
+    monkeypatch.setattr(cp, "discover_claim_providers", fake_discover)
+    result = cp.resolve_claim_status("codespace:my-box-1", plugins_root=tmp_path)
+    assert result == {"available": True, "exists": True, "state": "running"}
+
+
+def test_resolve_provider_argv_degrades_when_no_provider_registered(tmp_path):
+    assert cp.resolve_provider_argv("codespace", plugins_root=tmp_path / "empty") is None
+
+
+def test_resolve_provider_argv_degrades_when_kind_not_declared(tmp_path, monkeypatch):
+    def fake_discover(_plugins_root):
+        provider = cp.ClaimProviderManifest(
+            namespace="codespace",
+            plugin="agent-codespaces@copilot-extensions",
+            plugin_root=str(tmp_path),
+            status_command=("agent-codespaces",),
+        )
+        return {"codespace": provider}, ()
+
+    monkeypatch.setattr(cp, "discover_claim_providers", fake_discover)
+    assert cp.resolve_provider_argv("codespace", kind="reclaim", plugins_root=tmp_path) is None
+
+
+def test_resolve_provider_argv_rejects_bad_kind():
+    with pytest.raises(ValueError):
+        cp.resolve_provider_argv("codespace", kind="delete")
+
+
+def test_resolve_provider_argv_returns_resolved_command(tmp_path, monkeypatch):
+    def fake_discover(_plugins_root):
+        provider = cp.ClaimProviderManifest(
+            namespace="codespace",
+            plugin="agent-codespaces@copilot-extensions",
+            plugin_root=str(tmp_path),
+            status_command=("agent-codespaces",),
+        )
+        return {"codespace": provider}, ()
+
+    monkeypatch.setattr(cp, "discover_claim_providers", fake_discover)
+    assert cp.resolve_provider_argv("codespace", plugins_root=tmp_path) == ("agent-codespaces",)
+
+
+def test_build_provider_argv_appends_safe_extra_tokens(tmp_path, monkeypatch):
+    def fake_discover(_plugins_root):
+        provider = cp.ClaimProviderManifest(
+            namespace="codespace",
+            plugin="agent-codespaces@copilot-extensions",
+            plugin_root=str(tmp_path),
+            reclaim_command=("agent-codespaces",),
+        )
+        return {"codespace": provider}, ()
+
+    monkeypatch.setattr(cp, "discover_claim_providers", fake_discover)
+    result = cp.build_provider_argv(
+        "codespace", ("delete", True), ("cs-a", False), ("--force", True),
+        kind="reclaim", plugins_root=tmp_path)
+    assert result == ("agent-codespaces", "delete", "cs-a", "--force")
+
+
+def test_build_provider_argv_refuses_unsafe_untrusted_token(tmp_path, monkeypatch):
+    """The whole point of this helper: a caller can never forget to
+    validate an untrusted appended token, unlike calling
+    resolve_provider_argv() and appending by hand."""
+    def fake_discover(_plugins_root):
+        provider = cp.ClaimProviderManifest(
+            namespace="codespace",
+            plugin="agent-codespaces@copilot-extensions",
+            plugin_root=str(tmp_path),
+            reclaim_command=("agent-codespaces",),
+        )
+        return {"codespace": provider}, ()
+
+    monkeypatch.setattr(cp, "discover_claim_providers", fake_discover)
+    result = cp.build_provider_argv(
+        "codespace", ("delete", True), ("cs-x&whoami", False), ("--force", True),
+        kind="reclaim", plugins_root=tmp_path)
+    assert result is None
+
+
+def test_build_provider_argv_validates_untrusted_token_even_with_leading_dash(tmp_path, monkeypatch):
+    """A leading-dash heuristic would be unsafe: a crafted untrusted value
+    like ``--apply`` must still be validated (and here rejected) rather than
+    mistaken for a trusted flag literal."""
+    def fake_discover(_plugins_root):
+        provider = cp.ClaimProviderManifest(
+            namespace="codespace",
+            plugin="agent-codespaces@copilot-extensions",
+            plugin_root=str(tmp_path),
+            reclaim_command=("agent-codespaces",),
+        )
+        return {"codespace": provider}, ()
+
+    monkeypatch.setattr(cp, "discover_claim_providers", fake_discover)
+    result = cp.build_provider_argv(
+        "codespace", ("delete", True), ("--apply", False), ("--force", True),
+        kind="reclaim", plugins_root=tmp_path)
+    assert result is None
+
+
+def test_build_provider_argv_degrades_when_no_provider_registered(tmp_path):
+    result = cp.build_provider_argv(
+        "codespace", ("delete", True), ("cs-a", False), plugins_root=tmp_path / "empty")
+    assert result is None
+

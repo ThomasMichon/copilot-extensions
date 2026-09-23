@@ -7478,7 +7478,7 @@ def _load_full_command_surface() -> None:
     global _detect_upstream_branch, _effort_focus_output, _effort_orientation, _effort_storage_root, _emit_coordination_rejection, _emit_pr_reminder, _emit_remote_plan_for_env, _ensure_ado_pr_cli
     global _ensure_anchor_ledger, _ensure_status_monitor, _enumerate_launcher_shells_posix, _fast_forward_project_anchors, _filter_list_worktree, _find_installed_plugin_dir, _find_record_for_path, _find_tracking_file
     global _find_tracking_file_by_session, _find_tracking_file_exact, _follow_up_to_json, _follow_ups_add, _follow_ups_dismiss, _follow_ups_record_path, _follow_ups_resolve, _follow_ups_show
-    global _gh_env_for_repo, _git_positional, _git_resolve_target, _git_usage, _heal_stale_anchor_if_self_missing, _in_ssh_session, _inbound_claims, _infer_active_github_slug
+    global _gh_env_for_repo, _git_positional, _git_resolve_target, _git_usage, _heal_stale_anchor_if_self_missing, _in_ssh_session, _dispatch_assigned_tasks, _infer_active_github_slug
     global _infer_active_repo_slug, _invocation_update_context, _is_copilot_plugin_name, _journal_run_claim, _launch_profile_selection, _list_error, _list_records_for_args, _load_all_machine_keys
     global _load_remote_machines, _machine_key_for_display, _mirror_terminal_profiles, _module_names, _monitor_claim_handoff_cutover, _monitor_handoff_claim_created_at, _monitor_handoff_claim_path, _monitor_handoff_claim_root
     global _monitor_handoff_claim_segment, _monitor_handoff_claim_staleness, _monitor_list_sessions, _monitor_lock_path, _monitor_mux_set, _monitor_pending_handoff_request, _monitor_read_session_state_handoff, _monitor_registry_dir
@@ -7758,7 +7758,7 @@ def _load_full_command_surface() -> None:
     _build_list_json_payload = list_cli._build_list_json_payload
     _warm_list_cache_for_active_project = list_cli._warm_list_cache_for_active_project
     cmd_list = list_cli.cmd_list
-    _inbound_claims = claims_cli._inbound_claims
+    _dispatch_assigned_tasks = claims_cli._dispatch_assigned_tasks
     _claim_handoff_actor = claims_cli._claim_handoff_actor
     _require_coordination_readiness = claims_cli._require_coordination_readiness
     _emit_coordination_rejection = claims_cli._emit_coordination_rejection

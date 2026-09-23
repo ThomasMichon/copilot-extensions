@@ -10,6 +10,7 @@ from contextlib import redirect_stdout
 import pytest
 
 from agent_worktrees import __main__ as m
+from agent_worktrees import claim_providers
 from agent_worktrees import state_root
 from agent_worktrees import tracking
 
@@ -45,17 +46,23 @@ def test_claims_registered():
     assert m._WORKTREE_VERBS.get("claims") == "claims"
 
 
-# --- _inbound_claims degradation --------------------------------------------
+# --- _dispatch_assigned_tasks degradation -----------------------------------
 
 def test_inbound_unavailable_without_dispatch(monkeypatch):
-    monkeypatch.setattr(m.shutil, "which", lambda name: None)
-    res = m._inbound_claims("anomalous-potato", "wt-a", "")
+    monkeypatch.setattr(claim_providers, "discover_claim_providers",
+                        lambda *a, **k: ({}, ()))
+    res = m._dispatch_assigned_tasks("anomalous-potato", "wt-a", "")
     assert res["available"] is False
     assert "not installed" in res["reason"]
 
 
 def test_inbound_parses_dispatch_output(monkeypatch, tmp_path):
-    monkeypatch.setattr(m.shutil, "which", lambda name: "agent-dispatch")
+    from agent_worktrees import claim_providers as cp
+    provider = cp.ClaimProviderManifest(
+        namespace="dispatch-task", plugin="agent-dispatch@marketplace",
+        plugin_root="/x", status_command=("agent-dispatch",))
+    monkeypatch.setattr(claim_providers, "discover_claim_providers",
+                        lambda *a, **k: ({"dispatch-task": provider}, ()))
 
     captured = {}
 
@@ -72,7 +79,7 @@ def test_inbound_parses_dispatch_output(monkeypatch, tmp_path):
         return _Proc()
 
     monkeypatch.setattr(m.subprocess, "run", _run)
-    res = m._inbound_claims("anomalous-potato", "wt-a", str(tmp_path))
+    res = m._dispatch_assigned_tasks("anomalous-potato", "wt-a", str(tmp_path))
     assert res["available"] is True
     assert [t["id"] for t in res["assigned"]] == ["t1"]
     assert [t["id"] for t in res["owned"]] == ["t2"]
@@ -83,7 +90,12 @@ def test_inbound_parses_dispatch_output(monkeypatch, tmp_path):
 
 
 def test_inbound_handles_dispatch_error(monkeypatch):
-    monkeypatch.setattr(m.shutil, "which", lambda name: "agent-dispatch")
+    from agent_worktrees import claim_providers as cp
+    provider = cp.ClaimProviderManifest(
+        namespace="dispatch-task", plugin="agent-dispatch@marketplace",
+        plugin_root="/x", status_command=("agent-dispatch",))
+    monkeypatch.setattr(claim_providers, "discover_claim_providers",
+                        lambda *a, **k: ({"dispatch-task": provider}, ()))
 
     class _Proc:
         returncode = 2
@@ -91,8 +103,56 @@ def test_inbound_handles_dispatch_error(monkeypatch):
         stderr = "boom"
 
     monkeypatch.setattr(m.subprocess, "run", lambda *a, **k: _Proc())
-    res = m._inbound_claims("anomalous-potato", "wt-a", "")
+    res = m._dispatch_assigned_tasks("anomalous-potato", "wt-a", "")
     assert res["available"] is False and res["reason"] == "boom"
+
+
+def test_inbound_refuses_unsafe_identity(monkeypatch):
+    """A machine/worktree_id containing a cmd.exe metacharacter must never
+    reach the resolved argv (claim-provider-pattern effort review finding)."""
+    from agent_worktrees import claim_providers as cp
+    provider = cp.ClaimProviderManifest(
+        namespace="dispatch-task", plugin="agent-dispatch@marketplace",
+        plugin_root="/x", status_command=("agent-dispatch",))
+    monkeypatch.setattr(claim_providers, "discover_claim_providers",
+                        lambda *a, **k: ({"dispatch-task": provider}, ()))
+    called = {"n": 0}
+    monkeypatch.setattr(m.subprocess, "run", lambda *a, **k: called.__setitem__("n", 1))
+    res = m._dispatch_assigned_tasks("anomalous-potato&whoami", "wt-a", "")
+    assert res["available"] is False
+    assert called["n"] == 0
+
+
+def test_inbound_still_invokes_with_a_namespaced_cell_context(monkeypatch):
+    """agent-worktrees ships with installationContext: required, so
+    COPILOT_EXTENSIONS_CONTEXT is present on EVERY real invocation -- this
+    must still invoke the resolved binstub (with a stripped/mitigated
+    environment), never refuse outright (an earlier revision did, which
+    silently disabled this feature in every normal marketplace
+    installation)."""
+    from agent_worktrees import claim_providers as cp
+    provider = cp.ClaimProviderManifest(
+        namespace="dispatch-task", plugin="agent-dispatch@marketplace",
+        plugin_root="/x", status_command=("agent-dispatch",))
+    monkeypatch.setattr(claim_providers, "discover_claim_providers",
+                        lambda *a, **k: ({"dispatch-task": provider}, ()))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "agent-worktrees@copilot-extensions")
+
+    class _Proc:
+        returncode = 0
+        stdout = json.dumps({"assigned": [], "owned": []})
+        stderr = ""
+
+    captured = {}
+
+    def _run(cmd, **kw):
+        captured["env"] = kw.get("env")
+        return _Proc()
+    monkeypatch.setattr(m.subprocess, "run", _run)
+    res = m._dispatch_assigned_tasks("anomalous-potato", "wt-a", "")
+    assert res["available"] is True
+    assert captured["env"] is not None
+    assert "COPILOT_EXTENSIONS_CONTEXT" not in captured["env"]
 
 
 # --- cmd_claims end-to-end --------------------------------------------------
@@ -124,7 +184,7 @@ def _seed(tmp_path, monkeypatch, *, owner_ref=None, resources=None):
             True, "ready", ready_root),
     )
     monkeypatch.setattr(m, "_infer_worktree_id", lambda wid, cfg_: wid or "wt-A")
-    monkeypatch.setattr(m, "_inbound_claims",
+    monkeypatch.setattr(m, "_dispatch_assigned_tasks",
                         lambda machine, wid, cwd: {"available": False,
                                                    "reason": "stubbed"})
     return tdir
@@ -503,7 +563,7 @@ def _seed_ownerref(tmp_path, monkeypatch, *, machine="anomalous-potato"):
         lambda config: state_root.CoordinationReadiness(
             True, "ready", ready_root),
     )
-    monkeypatch.setattr(m, "_inbound_claims",
+    monkeypatch.setattr(m, "_dispatch_assigned_tasks",
                         lambda machine, wid, cwd: {"available": False,
                                                    "reason": "stubbed"})
     return owner_wt_dir

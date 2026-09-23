@@ -27,6 +27,7 @@ resource.)
 """
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 import subprocess
@@ -69,19 +70,46 @@ def _creationflags() -> int:
     return no_window_flags()
 
 
-def _run_codespaces(args: list[str], *, timeout: float = 300.0):
-    """Run ``agent-codespaces <args>``; return the process, or None if unrunnable."""
-    binstub = shutil.which("agent-codespaces")
-    if not binstub:
+def _run_codespaces(args: list[tuple[str, bool]], *, timeout: float = 660.0):
+    """Run agent-codespaces via the identity-verified ``codespace:``
+    claim-provider registry (claim-provider-pattern effort); return the
+    process, or None if unrunnable. Resolves the provider's own
+    payload-local binstub -- never an ambient ``PATH`` lookup -- closing the
+    tier-3 -> tier-8 upward call this effort exists to fix. Degrades
+    identically to the prior ``shutil.which`` behavior when no provider is
+    registered (e.g. agent-codespaces not installed): returns None.
+
+    ``args`` is an ordered ``(token, trusted)`` sequence -- ``trusted=True``
+    for a static/literal subcommand name or flag this module itself wrote
+    (e.g. ``"claim-reclaim"``, ``"--apply"``), ``trusted=False`` for a
+    persisted value (a CodeSpace name). Passed straight through to
+    ``claim_providers.build_provider_argv``, which validates every
+    ``trusted=False`` token before it ever reaches a possibly-cmd.exe-wrapped
+    argv (see that helper's own docstring for why a leading-dash heuristic
+    would be unsafe here).
+
+    Default timeout (660s, matching
+    ``claim_providers._RECLAIM_CALLBACK_TIMEOUT_SECONDS``) budgets for
+    ``agent-codespaces claim-reclaim``'s own internal chain: pre-delete
+    session recovery (boot up to 180s, THEN pull up to 300s, THEN the
+    session-sync-push subprocess up to 60s) THEN the delete subprocess
+    itself (a further 60s timeout) -- every phase must complete in FULL
+    sequence within this call's own timeout, not just the first, with
+    margin left over.
+    """
+    from . import claim_providers
+
+    full_argv = claim_providers.build_provider_argv("codespace", *args, kind="reclaim")
+    if full_argv is None:
         return None
     try:
         return subprocess.run(
-            [binstub, *args],
+            list(full_argv),
             capture_output=True, text=True, timeout=timeout,
-            creationflags=_creationflags(),
+            creationflags=_creationflags(), env=claim_providers.peer_env(),
         )
     except Exception as exc:  # binstub vanished / exec error
-        log.debug("agent-codespaces %s failed to run: %s", args[:2], exc)
+        log.debug("agent-codespaces %s failed to run: %s", [t for t, _ in args][:2], exc)
         return None
 
 
@@ -107,41 +135,47 @@ def _run_worktrees(args: list[str], *, cwd: str | None = None,
         return None
 
 
-def _looks_gone(output: str) -> bool:
-    """Heuristic: does a failed delete mean the CodeSpace is already gone?
-
-    ``agent-codespaces delete`` on a non-existent box exits non-zero with an
-    HTTP 404 / Not Found from ``gh`` -- the resource is *already* reclaimed, so
-    the obligation is discharged. Any other failure is a genuine failure.
-    """
-    low = output.lower()
-    return "404" in low or "not found" in low or "could not resolve" in low
-
-
 def reclaim_codespace(name: str, *, apply: bool) -> ReclaimResult:
-    """Reclaim an orphaned CodeSpace by deleting it (best-effort, idempotent).
+    """Reclaim an orphaned CodeSpace via the provider's own ``claim-reclaim``
+    callback (best-effort, idempotent).
 
-    In dry-run (``apply=False``) reports the intent without acting. On apply,
-    shells ``agent-codespaces delete <name> --force`` (keeps the graceful
-    pre-delete Copilot-session recovery, skips the interactive prompt). Exit 0
-    -> reclaimed; a 404/not-found -> already gone -> reclaimed (idempotent); any
-    other outcome -> failed (entry retained).
+    In dry-run (``apply=False``) reports the intent without acting. On
+    apply, invokes ``agent-codespaces claim-reclaim <name> --apply`` --
+    NOT the legacy human-facing ``delete ... --force`` shape this used to
+    shell directly, which bypassed the callback's own lease guard and
+    pre-delete session-recovery gate (claim-provider-pattern effort review
+    finding: "Invoke claim-reclaim instead of the legacy delete command").
+    Parses the callback's small JSON envelope (``{"reclaimed": bool,
+    "detail": str}``, matching ``agent_worktrees.claim_providers``'
+    ``resolve_claim_reclaim`` contract) rather than grepping free-text
+    stdout for a 404/not-found heuristic -- the callback already resolves
+    idempotent-already-gone itself and reports it as ``reclaimed: true``.
     """
     if not name:
         return ReclaimResult("failed", "orphan entry has no CodeSpace name")
     if not apply:
         return ReclaimResult("reclaimed", f"would delete CodeSpace {name}")
-    proc = _run_codespaces(["delete", name, "--force"])
+    proc = _run_codespaces([("claim-reclaim", True), (name, False), ("--apply", True)])
     if proc is None:
         return ReclaimResult("failed", "agent-codespaces binstub unavailable")
-    if proc.returncode == 0:
-        return ReclaimResult("reclaimed", f"deleted CodeSpace {name}")
-    combined = f"{proc.stdout}\n{proc.stderr}"
-    if _looks_gone(combined):
-        return ReclaimResult("reclaimed", f"CodeSpace {name} already gone (404)")
-    tail = (proc.stderr or proc.stdout or "").strip().splitlines()
-    detail = tail[-1] if tail else f"delete exited {proc.returncode}"
-    return ReclaimResult("failed", f"delete failed: {detail}")
+    if proc.returncode != 0:
+        tail = (proc.stderr or proc.stdout or "").strip().splitlines()
+        detail = tail[-1] if tail else f"claim-reclaim exited {proc.returncode}"
+        return ReclaimResult("failed", f"claim-reclaim failed: {detail}")
+    try:
+        data = json.loads(proc.stdout)
+    except (ValueError, TypeError):
+        return ReclaimResult(
+            "failed", f"claim-reclaim returned invalid JSON: {proc.stdout.strip()!r}"
+        )
+    if not isinstance(data, dict) or not isinstance(data.get("reclaimed"), bool):
+        return ReclaimResult(
+            "failed", f"claim-reclaim returned an unexpected shape: {proc.stdout.strip()!r}"
+        )
+    detail = data.get("detail") or (
+        f"reclaimed CodeSpace {name}" if data["reclaimed"] else f"could not reclaim CodeSpace {name}"
+    )
+    return ReclaimResult("reclaimed" if data["reclaimed"] else "failed", detail)
 
 
 def reclaim_worktree(

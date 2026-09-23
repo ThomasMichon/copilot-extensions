@@ -75,6 +75,24 @@ log = logging.getLogger("agent-worktrees")
 CLAIM_PROVIDERS_SUBDIR = "claim-providers"
 REGISTRY_NAME = "claim-providers"
 _CALLBACK_TIMEOUT_SECONDS = 15.0
+#: A reclaim (delete/destroy + provider-side pre-destroy safety steps, e.g.
+#: agent-codespaces' own pre-delete Copilot-session recovery) is inherently
+#: slower than a status check and typically crosses the network -- a 15s
+#: budget is realistically too short (claim-provider-pattern effort review
+#: finding: a normal-duration reclaim could be killed mid-operation before
+#: it ever reports a result). agent-codespaces' own claim-reclaim callback
+#: chains ``sync_codespace_sessions`` (internally up to its OWN 180s boot/
+#: connect-retry timeout, THEN its 300s pull timeout, THEN its 60s
+#: session-sync-push timeout) THEN ``delete_codespace`` (a further 60s
+#: subprocess timeout) -- every one of those phases must be able to
+#: complete in FULL sequence within this budget, not just the first, or a
+#: slow-but-progressing recovery gets killed before deletion/lease cleanup
+#: ever runs (review finding: "Align reclaim timeout with full recovery
+#: and deletion phases" -- an earlier revision of this constant summed
+#: only the pull+delete phases, undercounting boot and the (then-
+#: unbounded) push step). 180 + 300 + 60 + 60 = 600s of phase budget;
+#: this leaves a full extra minute of margin on top.
+_RECLAIM_CALLBACK_TIMEOUT_SECONDS = 660.0
 
 #: cmd.exe's own structurally-significant characters, scanned for in a
 #: resolved ``.cmd``/``.bat`` path before ever routing it through
@@ -98,8 +116,12 @@ _CMD_METACHAR_RE = re.compile(r'[&|<>^%!"]')
 #: ``"--apply"`` identifier would let a dry-run call
 #: (``apply=False``) still append a literal ``--apply`` token the
 #: callback's own parser could interpret as ITS ``--apply`` flag,
-#: silently turning a preview into a real reclaim.
-_SAFE_TOKEN_RE = re.compile(r"^[A-Za-z0-9._/][A-Za-z0-9._/-]*$")
+#: silently turning a preview into a real reclaim. Anchored with ``\Z``
+#: (an absolute end-of-string boundary), never bare ``$`` -- Python's ``$``
+#: also matches immediately before a single trailing newline, so
+#: ``"name\n"`` would otherwise pass despite a control character outside
+#: the documented safe-token alphabet.
+_SAFE_TOKEN_RE = re.compile(r"^[A-Za-z0-9._/][A-Za-z0-9._/-]*\Z")
 
 
 class ManifestError(ValueError):
@@ -422,6 +444,95 @@ def discover_claim_providers(
     return providers, tuple(findings)
 
 
+def is_safe_argument(value: str) -> bool:
+    """Whether ``value`` is safe to append to a :func:`resolve_provider_argv`
+    result before invoking it.
+
+    :func:`resolve_claim_status`/:func:`resolve_claim_reclaim` only ever pass
+    a ref's namespace/identifier to a callback after
+    :func:`split_namespaced_ref` validates both against the same safe-token
+    pattern -- a caller of :func:`resolve_provider_argv` (which drives a
+    DIFFERENT subcommand shape, e.g. a plain positional name or a
+    ``--machine``/``--worktree`` value) must apply this same check itself to
+    every untrusted value it appends, or a persisted value containing a
+    cmd.exe metacharacter could be interpreted as shell syntax when the
+    resolved command is a Windows ``.cmd``/``.bat`` shim (see
+    :func:`_windows_batch_argv`)."""
+    return bool(_SAFE_TOKEN_RE.match(value))
+
+
+def resolve_provider_argv(
+    namespace: str,
+    *,
+    kind: str = "status",
+    plugins_root: str | os.PathLike[str] | None = None,
+) -> tuple[str, ...] | None:
+    """Resolve a claim provider's registered binstub argv (Windows-batch
+    wrapped as needed), for a caller that needs to drive a DIFFERENT
+    subcommand than the standard ``claim-status``/``claim-reclaim`` contract
+    (e.g. agent-worktrees' own pre-existing ``worktree-status``/``delete``
+    call sites, converted by the claim-provider-pattern effort to stop
+    resolving these sibling binstubs via ambient ``PATH``). ``kind`` selects
+    ``status_command`` or ``reclaim_command``. Returns ``None`` when no
+    provider is registered for ``namespace``, or it declares no command of
+    the requested ``kind`` -- the caller degrades exactly as it would for an
+    absent ambient binstub."""
+    if kind not in ("status", "reclaim"):
+        raise ValueError("kind must be 'status' or 'reclaim'")
+    providers, _findings = discover_claim_providers(plugins_root)
+    provider = providers.get(namespace)
+    if provider is None:
+        return None
+    command = provider.status_command if kind == "status" else provider.reclaim_command
+    if command is None:
+        return None
+    return tuple(_windows_batch_argv(command))
+
+
+def build_provider_argv(
+    namespace: str,
+    *extra: tuple[str, bool],
+    kind: str = "status",
+    plugins_root: str | os.PathLike[str] | None = None,
+) -> tuple[str, ...] | None:
+    """Resolve a claim provider's binstub AND append ``extra`` argv tokens in
+    one guarded step, for a caller driving a DIFFERENT subcommand than the
+    standard ``claim-status``/``claim-reclaim`` contract (which already
+    validates its own ref via :func:`split_namespaced_ref`). This is the
+    preferred entry point over calling :func:`resolve_provider_argv`
+    directly and appending tokens by hand -- it makes the same
+    :func:`is_safe_argument` validation structural rather than something
+    each caller must remember to apply itself.
+
+    Each item in ``extra`` is an explicit ``(token, trusted)`` pair --
+    ``trusted=True`` for a static/literal subcommand name or flag the call
+    site itself wrote into source (e.g. ``"delete"``, ``"--force"``,
+    ``"--machine"``), ``trusted=False`` for anything derived from
+    persisted/external data (a CodeSpace name, a machine/worktree id, ...).
+    Deliberately explicit rather than inferring trust from a leading ``-``:
+    a real call site's argv interleaves static flags AND untrusted values
+    (e.g. ``--worktree <worktree_id>``), so a leading-dash heuristic would
+    both let an untrusted value that happens to start with ``-`` (e.g. a
+    crafted ``--apply``) through unvalidated, and is simply the wrong axis
+    -- "starts with -" has nothing to do with "did this call site write it
+    as a literal". Every ``trusted=False`` token is validated with
+    :func:`is_safe_argument` regardless of its own content, INCLUDING a
+    leading dash.
+
+    Returns ``None`` when no provider is registered, it declares no command
+    of the requested ``kind``, OR any ``trusted=False`` token fails
+    :func:`is_safe_argument`."""
+    command = resolve_provider_argv(namespace, kind=kind, plugins_root=plugins_root)
+    if command is None:
+        return None
+    tokens: list[str] = []
+    for token, trusted in extra:
+        if not trusted and not is_safe_argument(token):
+            return None
+        tokens.append(token)
+    return (*command, *tokens)
+
+
 def _windows_batch_argv(command: tuple[str, ...]) -> list[str]:
     """Route a ``.cmd``/``.bat`` command through ``cmd.exe`` on Windows.
 
@@ -451,13 +562,56 @@ def _windows_batch_argv(command: tuple[str, ...]) -> list[str]:
     return [comspec, "/d", "/s", "/c", *command]
 
 
+def peer_env() -> dict[str, str] | None:
+    """Environment for invoking a resolved SIBLING plugin's binstub.
+
+    ``agent-worktrees`` ships with ``installationContext: required``
+    (``payload-invocation.json``), so ``COPILOT_EXTENSIONS_CONTEXT`` is
+    present on EVERY real invocation, not just some rare namespaced-cell
+    edge case -- an earlier revision of this helper refused outright
+    whenever that variable was set, which silently disabled this entire
+    registry in every normal marketplace installation (a strictly worse
+    outcome than the residual risk below).
+
+    Strips ``COPILOT_EXTENSIONS_CONTEXT``, ``COPILOT_PLUGIN_ROOT``, AND
+    ``GH_TOKEN``/``GITHUB_TOKEN`` before the child inherits any of them
+    unchanged. The sibling's own installation-context resolution (e.g.
+    ``agent_codespaces.worktrees.explicit_context()``) treats an ABSENT
+    context as "not in cell mode" and falls back to its legacy/ambient
+    resolution path -- a supported, non-erroring mode, not a refusal --
+    but leaving the CALLER's own cell-scoped ``GH_TOKEN``/``GITHUB_TOKEN``
+    in place would let that legacy fallback still authenticate as the
+    WRONG cell's identity. Properly rebinding to the target's OWN
+    validated cell context (mirroring each provider plugin's private
+    peer-launch mechanism, e.g. ``agent_codespaces._peer_launch``) would
+    be strictly better, but is real future work this registry cannot
+    safely approximate from the caller's side alone -- this bounded
+    stripping closes the concrete credential-leak risk without disabling
+    the feature entirely.
+
+    Returns ``None`` (inherit the ambient environment completely
+    unmodified) only when this process carries none of these variables set
+    at all -- checked by simple presence, NOT by :meth:`str.strip`, matching
+    ``agent_codespaces.worktrees.explicit_context()``'s own fail-closed
+    presence check: a whitespace-only value is still an explicit (if
+    invalid) context there, not an absent one, so it must still be
+    stripped here rather than silently passed through unmodified."""
+    stripped = ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "GH_TOKEN", "GITHUB_TOKEN")
+    if not any(os.environ.get(name, "") for name in stripped):
+        return None
+    env = dict(os.environ)
+    for name in stripped:
+        env.pop(name, None)
+    return env
+
+
 def _run_callback(
     command: tuple[str, ...], *, timeout: float, required_bool_field: str
 ) -> dict | None:
     try:
         proc = subprocess.run(
             _windows_batch_argv(command), capture_output=True, text=True, timeout=timeout,
-            encoding="utf-8", errors="replace", **no_window_kwargs(),
+            encoding="utf-8", errors="replace", env=peer_env(), **no_window_kwargs(),
         )
     except (subprocess.SubprocessError, OSError, ValueError):
         return None
@@ -553,12 +707,17 @@ def resolve_claim_reclaim(
     *,
     apply: bool,
     plugins_root: str | os.PathLike[str] | None = None,
-    timeout: float = _CALLBACK_TIMEOUT_SECONDS,
+    timeout: float = _RECLAIM_CALLBACK_TIMEOUT_SECONDS,
 ) -> dict:
     """Best-effort claim reclaim via the registered claim provider for
     ``ref``'s namespace. Never raises -- degrades to ``{"available": False,
     "reason": "..."}"`` on any absence, malformed manifest, or callback
-    failure. Without ``apply``, the provider must not act (dry-run)."""
+    failure. Without ``apply``, the provider must not act (dry-run).
+
+    Defaults to a materially larger timeout than :func:`resolve_claim_status`
+    -- a real reclaim (destroy + provider-side pre-destroy safety steps)
+    typically crosses the network and is inherently slower than a status
+    check; see :data:`_RECLAIM_CALLBACK_TIMEOUT_SECONDS`'s own comment."""
     split = split_namespaced_ref(ref)
     if split is None:
         return {"available": False, "reason": "ref has no namespace prefix, or contains unsafe characters"}

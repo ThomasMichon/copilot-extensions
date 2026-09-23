@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -126,18 +125,46 @@ def add_parsers(sub) -> None:
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
 
 
-def _inbound_claims(machine: str, worktree_id: str, cwd: str) -> dict:
-    """Best-effort inbound tasks a worktree claims, via agent-dispatch."""
-    exe = shutil.which("agent-dispatch")
-    if not exe:
+def _dispatch_assigned_tasks(machine: str, worktree_id: str, cwd: str) -> dict:
+    """Best-effort inbound tasks a worktree claims, via agent-dispatch.
+
+    Distinct from agent-worktrees' OWN claims ledger (outbound resource
+    claims) -- this reads agent-dispatch's separate assigned/owned TASK
+    concept, hence the name (renamed from ``_inbound_claims``, which
+    conflated the two, as part of the claim-provider-pattern effort).
+
+    Resolves agent-dispatch's own payload-local binstub via the
+    ``dispatch-task:`` claim-provider registry entry -- never an ambient
+    ``PATH`` lookup -- closing the tier-3 -> tier-9 upward call this effort
+    exists to fix. Degrades identically to the prior ``shutil.which``
+    behavior when no provider is registered (e.g. agent-dispatch not
+    installed): ``{"available": False, "reason": "..."}``.
+
+    Unlike ``resolve_claim_status``'s own ``claim-status <ref>`` contract,
+    this drives a DIFFERENT subcommand shape (``worktree-status --machine
+    ... --worktree ...``) -- ``claim_providers.build_provider_argv`` resolves
+    the binstub AND validates ``machine``/``worktree_id`` (persisted identity
+    values, not literal constants) with ``is_safe_argument`` in one guarded
+    step, before reaching a possibly cmd.exe-wrapped argv (see that helper's
+    own docstring for why).
+    """
+    from . import claim_providers
+
+    full_argv = claim_providers.build_provider_argv(
+        "dispatch-task",
+        ("worktree-status", True), ("--machine", True), (machine, False),
+        ("--worktree", True), (worktree_id, False),
+        kind="status")
+    if full_argv is None:
         return {"available": False, "reason": "agent-dispatch not installed"}
     try:
         proc = subprocess.run(
-            [exe, "worktree-status", "--machine", machine, "--worktree", worktree_id],
+            full_argv,
             cwd=cwd if cwd and Path(cwd).exists() else None,
             capture_output=True,
             text=True,
             timeout=15,
+            env=claim_providers.peer_env(),
         )
     except (subprocess.SubprocessError, OSError) as e:
         return {"available": False, "reason": f"agent-dispatch call failed: {e}"}
@@ -857,7 +884,7 @@ def _claims_show(args: argparse.Namespace, worktree_id: str | None) -> int:
         }
         for c in rec.resources
     ]
-    inbound = _core_helper("_inbound_claims", _inbound_claims)(
+    inbound = _core_helper("_dispatch_assigned_tasks", _dispatch_assigned_tasks)(
         rec.machine or config.machine,
         wt_id,
         rec.worktree_path,

@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "namespace": "dispatch-task",
+  "status_command": ["agent-dispatch"],
+  "description": "agent-dispatch tasks (dispatch-task: claim refs)"
+}
