@@ -21,11 +21,13 @@ from agent_logger.sessions import (
     member_exists,
     read_member,
     read_origin,
+    read_review_annotations,
     read_workspace,
     remove_archive,
     resolve_ref,
     restore_session,
     verify_archive,
+    write_review_annotation,
 )
 
 
@@ -97,6 +99,94 @@ def test_metadata_reads_use_sidecar_not_tarball(tmp_path: Path, monkeypatch) -> 
     assert ws["id"] == "s1"
     assert ws["cwd"] == "C:/repo"
     assert read_origin(ref)["source_repo"] == "dotfiles"
+
+
+# --- review annotations ----------------------------------------------------
+
+def test_read_review_annotations_absent_returns_empty(tmp_path: Path) -> None:
+    src = _make_session(tmp_path / "session-state", "s1")
+    live = SessionRef(id="s1", kind="live", path=src)
+    assert read_review_annotations(live) == []
+
+
+def test_write_review_annotation_then_read_back(tmp_path: Path) -> None:
+    src = _make_session(tmp_path / "session-state", "s1")
+    write_review_annotation(src, repo="example/repo", pr_number=6100)
+    live = SessionRef(id="s1", kind="live", path=src)
+
+    entries = read_review_annotations(live)
+
+    assert len(entries) == 1
+    assert entries[0]["repo"] == "example/repo"
+    assert entries[0]["pr_number"] == 6100
+    assert entries[0]["role"] == "reviewer"
+    assert entries[0]["recorded_at"]
+
+
+def test_write_review_annotation_dedupes_same_repo_pr_role(tmp_path: Path) -> None:
+    src = _make_session(tmp_path / "session-state", "s1")
+    write_review_annotation(src, repo="example/repo", pr_number=6100)
+    write_review_annotation(src, repo="example/repo", pr_number=6100)
+    live = SessionRef(id="s1", kind="live", path=src)
+
+    assert len(read_review_annotations(live)) == 1
+
+
+def test_write_review_annotation_appends_distinct_entries(tmp_path: Path) -> None:
+    src = _make_session(tmp_path / "session-state", "s1")
+    write_review_annotation(src, repo="example/repo", pr_number=6100)
+    write_review_annotation(src, repo="example/repo", pr_number=6200)
+    live = SessionRef(id="s1", kind="live", path=src)
+
+    entries = read_review_annotations(live)
+
+    assert {e["pr_number"] for e in entries} == {6100, 6200}
+
+
+def test_review_annotation_survives_archive_as_uncompressed_sidecar(
+    tmp_path: Path, monkeypatch
+) -> None:
+    src = _make_session(tmp_path / "session-state", "s1")
+    write_review_annotation(src, repo="example/repo", pr_number=6100)
+    store = tmp_path / "archived"
+    ref = archive_session(src, store)
+
+    assert (store / "s1.review-annotations.json").is_file()
+
+    def _boom(*a, **k):
+        raise AssertionError("sidecar read must not open the archive")
+
+    monkeypatch.setattr(tarfile, "open", _boom)
+    entries = read_review_annotations(ref)
+    assert entries[0]["pr_number"] == 6100
+
+
+def test_write_review_annotation_creates_a_lock_file(tmp_path: Path) -> None:
+    src = _make_session(tmp_path / "session-state", "s1")
+    write_review_annotation(src, repo="example/repo", pr_number=6100)
+
+    assert (src / "review-annotations.json.lock").is_file()
+
+
+def test_write_review_annotation_propagates_real_read_errors(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A missing sidecar is treated as empty; any other read failure (e.g. a
+    permission error) must not be silently swallowed into data loss."""
+    src = _make_session(tmp_path / "session-state", "s1")
+    (src / "review-annotations.json").write_text("[]", encoding="utf-8")
+
+    real_read_text = Path.read_text
+
+    def _flaky_read_text(self, *a, **k):
+        if self.name == "review-annotations.json":
+            raise PermissionError("simulated")
+        return real_read_text(self, *a, **k)
+
+    monkeypatch.setattr(Path, "read_text", _flaky_read_text)
+
+    with pytest.raises(PermissionError):
+        write_review_annotation(src, repo="example/repo", pr_number=6100)
 
 
 # --- reads: live vs archive parity ---------------------------------------

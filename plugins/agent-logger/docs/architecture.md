@@ -229,6 +229,40 @@ The registration side (`scripts/register-cold-store-provider.sh` /
 namespace-provider registration — a distinct, capability-keyed manifest
 directory, never the namespace one.
 
+### Review annotations (`agent_logger.sessions`)
+
+A durable, per-session sidecar recording which external work item (e.g. a
+code-review pull request) a session worked, so a future consumer can query
+"every session that worked item X" without a raw full-text sweep of every
+session's `events.jsonl` — a sweep that scales poorly and produces false
+positives (a session that only *quotes* another session's transcript, e.g.
+while rendering a digest, matches the same text).
+
+- `SIDECAR_MEMBERS` gains a third entry, `review-annotations.json`, alongside
+  the existing `workspace.yaml`/`origin.json`: it survives
+  `archive_session`/`restore_session`/`remove_archive` exactly like those two,
+  and is served from the uncompressed sidecar (never decompressing the
+  archive) via the same `read_member`/`member_exists` seam.
+- `write_review_annotation(session_dir, *, repo, pr_number, role="reviewer",
+  recorded_at=None)` appends one entry, idempotently — a duplicate
+  `(repo, pr_number, role)` is not re-appended — to a **live** session's
+  sidecar only (an archived session's sidecar is a read-only artifact, not a
+  mutation target). The read-modify-write is serialized with an advisory
+  lock (`review-annotations.json.lock`, via `agent_logger.sync.lock.sync_lock`)
+  and writes through a unique per-call temp file, so two concurrent writers
+  targeting the same session can't race or collide.
+- `read_review_annotations(ref) -> list[dict]` is the read-side counterpart —
+  parity with `read_origin`/`read_workspace`, `[]` when absent, works for both
+  live and archived refs.
+- `session-sync`'s filesystem target excludes any file ending in
+  `.lock`/`.tmp` (not just the legacy exact `.lock`/`lock` names) so a scan
+  can never copy the annotation lock or its atomic-replace temp file
+  mid-write.
+
+This is a write/read primitive only — a queryable index (e.g. "every session
+that reviewed PR N" without iterating every session directory) is a natural
+follow-up once a consumer needs one; none exists yet.
+
 ## Configuration
 
 Layered: built-in defaults → `$AGENT_LOGGER_HOME/config.yaml`
