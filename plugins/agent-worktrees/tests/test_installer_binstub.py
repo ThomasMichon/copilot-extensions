@@ -52,7 +52,7 @@ def test_binstub_lock_releases_after_reentrant_use(tmp_path: Path, monkeypatch):
 def test_binstub_lock_serializes_peer_threads():
     """A second thread contending for the same key must block on the
     in-process RLock -- not race straight into the OS-level lock, which
-    would hit the same same-process EDEADLK the reentrancy fix closes."""
+    would hit the process-wide EDEADLK the reentrancy fix closes."""
     order: list[str] = []
     started = threading.Event()
     release = threading.Event()
