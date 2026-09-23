@@ -7384,8 +7384,24 @@ def _dispatch_lazy(command: str, args_list: list[str]) -> int:
 # these names, so the cluster is resolved together, once, before dispatching
 # into it -- still far short of the full ~35-module eager surface (the
 # _load_full_command_surface() fallback below), and this is itself Phase 1's
-# known, documented limitation: decoupling this cluster (Phase 1b/2 work) is
-# needed to get the full lazy-dispatch win for its own commands.
+# A cluster of CLI submodules cross-reference each other's helpers through
+# `_core()` (this __main__ module) rather than importing one another
+# directly -- a pre-existing pattern discovered while implementing lazy
+# dispatch (see the agent-cli-lazy-dispatch effort's Journal). An initial,
+# narrower version of this function tried to enumerate exactly the at-risk
+# names via static analysis; that missed a second calling shape
+# (`core = _core(); ... core.attr`, not just the direct `_core().attr`
+# chain) and shipped a live `AttributeError` in `create-pr` before being
+# caught. Given the residual risk that yet another calling shape exists
+# somewhere in this ~35-module surface, this now delegates straight to
+# `_load_full_command_surface()` -- fully safe by construction (identical to
+# every command's pre-lazy-dispatch behavior) -- rather than re-attempting a
+# narrower, harder-to-fully-verify subset. This means the fast path below
+# still avoids constructing the full ~110-entry argparse tree via
+# `build_parser()`, but no longer avoids this module cluster's own import
+# cost for `_LAZY_DISPATCH_TABLE` commands. Re-narrowing this safely (Phase
+# 1b) needs runtime-exercised verification of every fast-tracked command,
+# not static analysis alone.
 _CLUSTER_LOADED = False
 
 
@@ -7393,117 +7409,7 @@ def _ensure_cluster_loaded() -> None:
     global _CLUSTER_LOADED
     if _CLUSTER_LOADED:
         return
-    from . import (
-        claims_cli,
-        cleanup_gc_cli,
-        context_cli,
-        finalize_cli,
-        handoff_cli,
-        installation_cli,
-        list_cli,
-        picker_profiles_cli,
-        pr_cli,
-        reap_cli,
-        reclaim_cli,
-        related_cli,
-        repos_cli,
-        resolve_launch_cli,
-        resolve_picker_cli,
-        services_cli,
-        session_binding_cli,
-        session_metadata_cli,
-        session_tracking_cli,
-        status_bar_cli,
-        status_cli,
-        status_monitor_runtime,
-        status_updater_cli,
-        worktree_ops_cli,
-    )
-    global CoordinationReadinessFailure, _activate_project_for_path, _activate_project_for_worktree_id, _activate_session_binding, _apply_assignment_env, _aw_runtime_home, _background_environment, _bind_nudge_decision
-    global _clarify_registration_account, _cleanup_stale_instructions, _cmd_list_stream, _coordination_readiness_for_owner_ref, _deploy_copilot_instructions, _emit_coordination_rejection, _ensure_status_monitor, _enumerate_launcher_shells_posix
-    global _find_record_for_path, _find_tracking_file_by_session, _gh_env_for_repo, _infer_active_github_slug, _launch_profile_selection, _list_records_for_args, _monitor_handoff_claim_root, _monitor_handoff_claim_segment
-    global _monitor_list_sessions, _monitor_lock_path, _monitor_mux_set, _monitor_pending_handoff_request, _monitor_read_session_state_handoff, _monitor_registry_dir, _monitor_session_state_handoff_path, _perform_remux
-    global _pr_flow_profile, _read_monitor_registry, _reflect_assignment, _refresh_terminal_profiles, _register_session_for_monitor, _related_anchor, _related_config_source_anchors, _remove_managed_worktree
-    global _remove_monitor_entry, _render_status_context, _render_status_segment, _repo_for_record, _require_coordination_readiness, _resolve_environment, _resolve_lease_origin, _resolve_mux_worktree_id
-    global _resolve_owner_ref, _resolve_owner_ref_record_path, _resolve_remote_default_branch, _resolve_repo_remote, _resolve_worktree_for_read, _revalidate_cleanup_safety, _run_new_picker, _runtime_superseded
-    global _slugify, _spawn_status_updater, _status_monitor_enabled, _sweep_orphans_on_exit, _validate_profile_assignment_config, _warm_list_cache_for_active_project, _windowless_python, auto_clean_enabled
-    global cmd_cleanup, cmd_embody, cmd_list, cmd_register, cmd_register_session, cmd_state_root_dispatch, cmd_status, reap_orphan_launcher_shells
-    global sweep_finished_session_worktrees, sweep_managed_worktrees, terminal_conclusion
-    CoordinationReadinessFailure = claims_cli.CoordinationReadinessFailure
-    _activate_project_for_path = status_updater_cli._activate_project_for_path
-    _activate_project_for_worktree_id = status_updater_cli._activate_project_for_worktree_id
-    _activate_session_binding = session_binding_cli._activate_session_binding
-    _apply_assignment_env = resolve_launch_cli._apply_assignment_env
-    _aw_runtime_home = status_monitor_runtime._aw_runtime_home
-    _background_environment = status_updater_cli._background_environment
-    _bind_nudge_decision = session_binding_cli._bind_nudge_decision
-    _clarify_registration_account = repos_cli._clarify_registration_account
-    _cleanup_stale_instructions = installation_cli._cleanup_stale_instructions
-    _cmd_list_stream = list_cli._cmd_list_stream
-    _coordination_readiness_for_owner_ref = claims_cli._coordination_readiness_for_owner_ref
-    _deploy_copilot_instructions = installation_cli._deploy_copilot_instructions
-    _emit_coordination_rejection = claims_cli._emit_coordination_rejection
-    _ensure_status_monitor = status_monitor_runtime._ensure_status_monitor
-    _enumerate_launcher_shells_posix = reap_cli._enumerate_launcher_shells_posix
-    _find_record_for_path = status_bar_cli._find_record_for_path
-    _find_tracking_file_by_session = session_tracking_cli._find_tracking_file_by_session
-    _gh_env_for_repo = installation_cli._gh_env_for_repo
-    _infer_active_github_slug = pr_cli._infer_active_github_slug
-    _launch_profile_selection = resolve_launch_cli._launch_profile_selection
-    _list_records_for_args = list_cli._list_records_for_args
-    _monitor_handoff_claim_root = status_monitor_runtime._monitor_handoff_claim_root
-    _monitor_handoff_claim_segment = status_monitor_runtime._monitor_handoff_claim_segment
-    _monitor_list_sessions = status_monitor_runtime._monitor_list_sessions
-    _monitor_lock_path = status_monitor_runtime._monitor_lock_path
-    _monitor_mux_set = status_monitor_runtime._monitor_mux_set
-    _monitor_pending_handoff_request = status_monitor_runtime._monitor_pending_handoff_request
-    _monitor_read_session_state_handoff = status_monitor_runtime._monitor_read_session_state_handoff
-    _monitor_registry_dir = status_monitor_runtime._monitor_registry_dir
-    _monitor_session_state_handoff_path = status_monitor_runtime._monitor_session_state_handoff_path
-    _perform_remux = reclaim_cli._perform_remux
-    _pr_flow_profile = pr_config._pr_flow_profile
-    _read_monitor_registry = status_monitor_runtime._read_monitor_registry
-    _reflect_assignment = resolve_launch_cli._reflect_assignment
-    _refresh_terminal_profiles = picker_profiles_cli._refresh_terminal_profiles
-    _register_session_for_monitor = status_monitor_runtime._register_session_for_monitor
-    _related_anchor = related_cli._related_anchor
-    _related_config_source_anchors = related_cli._related_config_source_anchors
-    _remove_managed_worktree = reap_cli._remove_managed_worktree
-    _remove_monitor_entry = status_monitor_runtime._remove_monitor_entry
-    _render_status_context = status_bar_cli._render_status_context
-    _render_status_segment = status_bar_cli._render_status_segment
-    _repo_for_record = tracking._repo_for_record
-    _require_coordination_readiness = claims_cli._require_coordination_readiness
-    _resolve_environment = services_cli._resolve_environment
-    _resolve_lease_origin = context_cli._resolve_lease_origin
-    _resolve_mux_worktree_id = status_updater_cli._resolve_mux_worktree_id
-    _resolve_owner_ref = worktree_ops_cli._resolve_owner_ref
-    _resolve_owner_ref_record_path = claims_cli._resolve_owner_ref_record_path
-    _resolve_remote_default_branch = status_bar_cli._resolve_remote_default_branch
-    _resolve_repo_remote = pr_config._resolve_repo_remote
-    _resolve_worktree_for_read = session_metadata_cli._resolve_worktree_for_read
-    _revalidate_cleanup_safety = cleanup_gc_cli._revalidate_cleanup_safety
-    _run_new_picker = resolve_picker_cli._run_new_picker
-    _runtime_superseded = status_updater_cli._runtime_superseded
-    _slugify = worktree_ops_cli._slugify
-    _spawn_status_updater = status_updater_cli._spawn_status_updater
-    _status_monitor_enabled = status_monitor_runtime._status_monitor_enabled
-    _sweep_orphans_on_exit = finalize_cli._sweep_orphans_on_exit
-    _validate_profile_assignment_config = resolve_launch_cli._validate_profile_assignment_config
-    _warm_list_cache_for_active_project = list_cli._warm_list_cache_for_active_project
-    _windowless_python = status_monitor_runtime._windowless_python
-    auto_clean_enabled = reap_cli.auto_clean_enabled
-    cmd_cleanup = cleanup_gc_cli.cmd_cleanup
-    cmd_embody = handoff_cli.cmd_embody
-    cmd_list = list_cli.cmd_list
-    cmd_register = installation_cli.cmd_register
-    cmd_register_session = session_binding_cli.cmd_register_session
-    cmd_state_root_dispatch = context_cli.cmd_state_root_dispatch
-    cmd_status = status_cli.cmd_status
-    reap_orphan_launcher_shells = reap_cli.reap_orphan_launcher_shells
-    sweep_finished_session_worktrees = reap_cli.sweep_finished_session_worktrees
-    sweep_managed_worktrees = reap_cli.sweep_managed_worktrees
-    terminal_conclusion = session_tracking_cli.terminal_conclusion
+    _load_full_command_surface()
     _CLUSTER_LOADED = True
 
 
