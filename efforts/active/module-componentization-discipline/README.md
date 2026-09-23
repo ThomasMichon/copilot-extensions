@@ -275,7 +275,7 @@ Verbatim from the operator:
             with baseline refreshed, and `agent-dispatch` bumped to
             `0.1.2-dev185`.
       - [x] `agent-dispatch/queue.py` slice 3 (2,203 live lines at slice
-            start) — extracted `queue_storage.py` (924 lines) for the
+            start) — extracted `queue_storage.py` (952 lines) for the
             storage-facing core: repo/token normalization, audit +
             attachment persistence, payload/result I/O, reviewer-target legacy
             parsing, and the managed `create`/`propose` path. Kept `queue.py`
@@ -550,7 +550,7 @@ the Phase 0 runbook, picked up as capacity allows.
 ### 2026-09-22 — `agent-dispatch/queue.py` slice 3: storage / creation mixin
 - Continued the queue campaign with the next natural responsibility band after
   lifecycle extraction: the storage-facing core that every other mixin already
-  leans on. Extracted `queue_storage.py` (924 lines) for the repo/token
+  leans on. Extracted `queue_storage.py` (952 lines) for the repo/token
   normalization helpers, audit + attachment persistence, payload/result reads,
   reviewer-target legacy parsing, and the managed `create` / `create_outcome` /
   `propose` path.
