@@ -166,6 +166,8 @@ def test_hook_and_projection_contracts():
     entries = hooks["hooks"]["sessionStart"]
     writer_entries = [entry for entry in entries if "write-session-guidance" in entry["bash"]]
     assert len(writer_entries) == 1
+    ensure_entries = [entry for entry in entries if 'bash "$s" ensure' in entry["bash"]]
+    assert len(ensure_entries) == 1
     assert "emit-command-catalog" not in json.dumps(entries)
     declaration = json.loads(
         (PLUGIN / "session-context.json").read_text(encoding="utf-8")

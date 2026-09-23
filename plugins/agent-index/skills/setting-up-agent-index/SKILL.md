@@ -27,10 +27,15 @@ search an already-enabled index. For day-to-day querying, use the
 - Inside an agent session, invoke the exact `argv` from the session command
   catalog. Do not search `PATH` or substitute another `agent-index` binary.
 - Session start is non-mutating: it only decides whether the command catalog and
-  scope guidance should appear. It does **not** provision a runtime, start the
-  service, or reindex.
+  scope guidance should appear, then runs a cheap `ensure` safety net for an
+  already-installed host runtime. It does **not** provision a runtime or
+  reindex.
 - The runtime can stay inactive even when the plugin is enabled globally. A repo
   must opt in through config.
+- Once the runtime is installed on a host, `install` / `update` register the
+  default durable autostart tier automatically: HKCU Run on Windows, or
+  systemd --user on POSIX when available. `register-tasks` on Windows is now an
+  explicit per-machine upgrade, not the default path to persistence.
 
 ## The layered config model
 

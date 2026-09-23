@@ -80,10 +80,17 @@ def test_installers_are_base_only_and_never_implicitly_start_engine():
             f"{following})", 1
         )[0]
         assert "Invoke-ServiceCutover" in ps_branch
+        assert "Install-LogonAutostart" in ps_branch
         assert "Install-Engine" not in ps_branch
         assert "_service_cutover || _ensure_running" in sh_branch
+        assert "_install_logon_autostart" in sh_branch
         assert "_install_engine" not in sh_branch
         assert "_ensure_engine" not in sh_branch
+
+    ps_ensure = ps_actions.split("'ensure' {", 1)[1].split("'register-tasks'", 1)[0]
+    sh_ensure = sh_actions.split("ensure)", 1)[1].split("stamp)", 1)[0]
+    assert "Ensure-Running; Install-LogonAutostart" in ps_ensure
+    assert "_ensure_running; _install_logon_autostart" in sh_ensure
 
 
 def test_installers_preserve_two_step_cuda_engine_swap():
@@ -145,6 +152,39 @@ def test_stop_and_uninstall_also_stop_the_durable_engine_daemon():
 
     sh_stop = sh.split("_stop() {", 1)[1].split("\n}\n", 1)[0]
     assert "-m agent_index engine stop" in sh_stop
+
+
+def test_default_durable_autostart_stays_unprivileged_and_tasks_remain_opt_in():
+    ps = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
+    sh = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
+
+    start_fn = ps.split("function Start-LauncherDetached {", 1)[1].split(
+        "\nfunction Install-LogonAutostartEntry {", 1
+    )[0]
+    autostart_fn = ps.split("function Install-LogonAutostartEntry {", 1)[1].split(
+        "\nfunction Install-LogonAutostart {", 1
+    )[0]
+    assert "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" in ps
+    assert "Start-Process -FilePath 'conhost.exe'" in start_fn
+    assert "Invoke-ScopedElevation" not in autostart_fn
+    assert "Get-ScheduledTask -TaskName $ScheduledTaskName" in autostart_fn
+    assert "Remove-LogonAutostart -Name $Name" in autostart_fn
+
+    register_tasks = ps.split("function Invoke-RegisterTasks {", 1)[1].split(
+        "\nfunction Register-EngineDaemon {", 1
+    )[0]
+    assert "Invoke-ScopedElevation -ElevAction 'register-tasks'" in register_tasks
+    assert "Remove-LogonAutostart -Name $TaskName" in register_tasks
+    assert "Remove-LogonAutostart -Name $EngineTaskName" in register_tasks
+    assert "Register-EngineDaemon" in register_tasks
+    assert "Install-Service" in register_tasks
+    assert "Install-LogonAutostart" not in register_tasks
+
+    assert 'SERVICE_LAUNCHER="$INSTALL_DIR/service.sh"' in sh
+    assert 'ENGINE_LAUNCHER="$ENGINE_HOME/engine.sh"' in sh
+    assert "ExecStart=$SERVICE_LAUNCHER" in sh
+    assert "ExecStart=$ENGINE_LAUNCHER" in sh
+    assert "_install_service --no-restart" in sh
 
 def test_lightweight_mcp_reports_unavailable_without_installing(monkeypatch, capsys):
     monkeypatch.setattr(importlib.util, "find_spec", lambda _name: None)
