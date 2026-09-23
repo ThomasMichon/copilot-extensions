@@ -487,6 +487,14 @@ manager, or session-host implementation.
   reattach, prompt, interrupt, or terminate Copilot processes.
 - **Not a terminal or multiplexer owner.** TMux, PSMux, terminal windows, panes,
   and console choreography belong to an execution-host provider.
+- **Not a terminal-app *profile* owner.** Which launch targets a machine's
+  terminal application (Windows Terminal, Tabby, ...) carries a profile for —
+  the selection model, its persistence, and mirroring it into real terminal-app
+  fragments — is being phased out of agent-worktrees into the Worktree Manager
+  control-plane, the same relocation already applied to Mux presentation and
+  the AHP session backend (#2062). Terminal handling of every kind is leaving
+  this plugin; agent-worktrees ends up knowing nothing about how, or whether,
+  a session is ever attached to a terminal at all.
 - **Not a universal session host.** Copilot CLI, ACP, SDK, App, and third-party
   rigs retain their own hosting and interaction semantics.
 - **Not a home for a provider-specific config union.** agent-worktrees does not
@@ -524,6 +532,20 @@ manager, or session-host implementation.
 
 ## Provenance
 
+- **2026-09-23** — Added the Non-Goals *terminal-app profile owner* bullet.
+  Operator direction while scoping copilot-extensions#3360 (retiring the
+  Worktree Manager's in-process `_engine_runtime.py` boundary): terminal
+  handling of every kind — not just Mux/PSMux presentation and the AHP
+  backend (already relocating per #2062) but also the machine-local
+  terminal-**profile** selection model (`profiles.py`) and its mirroring
+  into real terminal-app fragments (`terminal_fragment.py`), today still
+  agent-worktrees' own `profiles`/`terminal-fragment`/`repair` CLI verbs —
+  is leaving this plugin for the Worktree Manager control-plane, in phases,
+  the same way `agent-worktrees update` is expected to eventually become
+  `worktree-manager update`. See the mirrored provenance entry in
+  [`visions/installer`](../../installer/README.md) for the control-plane
+  side of this relocation, and the `worktree-manager-control-plane` effort's
+  Phase 3e for the tracked, ordered plan.
 - **2026-09-20** — Added *external-status-consumer-contract* (Features),
   *force-refresh-is-opt-in-not-implicit* and *a-full-health-check-leaves-
   nothing-stale* (Behaviors). Mined from an operator directive during the

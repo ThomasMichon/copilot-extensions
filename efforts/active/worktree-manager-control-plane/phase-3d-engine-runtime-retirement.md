@@ -155,7 +155,7 @@ calling a (necessarily slower, subprocess-based) batched verb from the
 render thread without reintroducing the blocking-I/O problem Phase 3c
 exists to fix.
 
-### Group D — `profiles.py`: not a CLI-root problem at all — a vendoring problem, like #3359
+### Group D — `profiles.py`: not a CLI-root problem, and not a vendoring problem either — a full relocation (superseded by #3390)
 
 ```
 profiles_mod.TargetSel(...)              # engine_profiles_view.py:119, profiles_io.py:25
@@ -172,12 +172,23 @@ returns/consumes a plain dataclass (`TargetSel`) or primitive — none of it
 reads or mutates agent-worktrees' own runtime state. It is pure,
 dependency-free logic, structurally identical to `agent_procutil` /
 `dropin_registry` (#3359's vendored libs), not a CLI-internals problem at
-all. It is also called live during interactive menu rendering
-(`engine_profiles_view.py`), which would make a subprocess round-trip both
-the wrong shape and too slow regardless of the CLI-root question. **Fix:
-vendor `profiles` as a 4th shared lib**, exactly like #3359 — copy it to
-`worktree-manager/libs/profiles`, declare it in `pyproject.toml`, register
-with `tools/check-vendored-libs-sync.py`. No subprocess design needed here.
+all — this analysis originally proposed vendoring it as a 4th shared lib,
+exactly like #3359.
+
+**Superseded by operator direction:** `agent_worktrees.profiles` is not
+Picker-only — it also backs agent-worktrees' own public `profiles` /
+`terminal-fragment` / `repair` CLI verbs and the installer's real
+Windows-Terminal-fragment mirror step (`terminal_fragment.py`). Vendoring a
+byte-identical copy would leave agent-worktrees as the canonical owner
+while the Picker rode a duplicate. The actual direction is a **full
+relocation**, matching the standing Mux/AHP precedent (#2062): terminal
+handling of every kind — including which terminal-app profiles exist on a
+machine, not just Mux/AHP session mechanics — is leaving agent-worktrees
+for the Worktree Manager control-plane, in phases. Tracked as its own
+phase, not folded into this one, since it also touches agent-worktrees' own
+CLI surface: see Phase 3e (#3390) and
+[`visions/plugins/agent-worktrees`](../../../visions/plugins/agent-worktrees/README.md#non-goals--boundaries) /
+[`visions/installer`](../../../visions/installer/README.md#optional-worktree-agent-control-plane).
 
 ### `update_stage.py`
 
@@ -194,11 +205,11 @@ verb exists for "is an update available."
 | A | `config` (pivot_manifest only), `state_root`, `update_stage` | low-frequency, one-shot reads | convert to `--json` CLI verbs |
 | B | `__main__`/`cli.*`, `config` (runner.py's `set_active_project`/`load_config`/`load_machines_yaml`) | private process-lifecycle internals, several managing the Picker's *own* process | reclassify as worktree-manager-owned logic, or promote a narrow public API per call site — **not** a uniform subprocess conversion |
 | C | `tracking`, `pr_ops`, `reclaim`, `sessions` (all via `data_local.py`) | one atomic read-reconcile-write hot-path loop, per Picker refresh | needs one new **batched** `--json` verb; sequence after Phase 3c |
-| D | `profiles` | pure, dependency-free logic called during interactive rendering | vendor as a shared lib (#3359-style), not a CLI conversion |
+| D | `profiles` | also agent-worktrees' own installer/CLI dependency, not Picker-only | full relocation out of agent-worktrees (Phase 3e / #3390) — not a vendored copy, not a CLI conversion |
 
 `_engine_runtime.py` retires only once every group above has either
-converted, been reclassified, or (Group D) stopped needing the boundary at
-all.
+converted, been reclassified, or (Group D) moved out from under
+agent-worktrees entirely.
 
 ## Open questions for the operator / design review
 
