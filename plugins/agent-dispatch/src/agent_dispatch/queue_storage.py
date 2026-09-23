@@ -320,7 +320,35 @@ class QueueStorageMixin:
         now: float | None = None,
         _with_outcome: bool = False,
     ) -> Task | CreationOutcome:
-        """Insert a task (default status ``queued``; ``proposed`` for a draft)."""
+        """Insert a task (default status ``queued``; ``proposed`` for a draft).
+
+        ``repo`` is the **lane** -- the canonical remote of the producing agent's
+        harness repo -- and is **required**: tasks stay in their own repo's lane,
+        so a consumer only sees/claims work for its own repo. (A cross-repo
+        *code* target is separate metadata, ``target_repo``; the lane agent does
+        that work via ``working-cross-repo``, never by launching another repo's
+        harness.)
+
+        If ``dedup_key`` collides with an existing non-terminal task in the same
+        repo lane, no new row is created and the *existing* task is returned.
+        Terminal rows release the key so a later request can create new work.
+        Managed creates use a separate ``producer_request_id`` ledger: an exact
+        retry with that generation's capability returns the accepted task from
+        any status after generation retirement, while a new request id retains
+        ordinary dedup semantics. A managed ``required_label`` also binds back
+        to its owning source, so caller-selected alternate or omitted sources
+        cannot place unfenced work in the protected label pool.
+
+        ``claim_as`` makes this an **atomic create-and-claim**: a brand-new task
+        is inserted already ``claimed`` by that owner in the *same* transaction,
+        so there is no queued-and-unclaimed gap for another worker to race into.
+        On a ``dedup_key`` collision the existing task is returned **as-is**
+        (never re-claimed) -- so a caller can tell it lost the race by seeing the
+        returned task's ``owner`` is not itself. This is the lazy-carve
+        open-ended-pickup primitive: ``create(dedup_key=<subject>, claim_as=me)``
+        either mints the subject as mine or hands me the row someone else already
+        took.
+        """
         if status not in (Status.QUEUED, Status.PROPOSED):
             raise TaskError(f"new task must be 'queued' or 'proposed', not {status!r}")
         if exclusive_key is not None:

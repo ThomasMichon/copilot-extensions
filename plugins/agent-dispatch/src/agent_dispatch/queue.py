@@ -36,8 +36,8 @@ import time
 from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 
-from .identity import canonicalize_remote
-from .payload import PayloadStore
+from .identity import canonical_reviewer_target, canonicalize_remote  # noqa: F401 -- compatibility re-export
+from .payload import PayloadStore, is_blob_ref  # noqa: F401 -- compatibility re-export
 from .queue_common import (  # noqa: F401 -- re-exported for existing call sites/tests
     DEFAULT_BLOB_THRESHOLD,
     DEFAULT_EVAL_LEASE_SECONDS,

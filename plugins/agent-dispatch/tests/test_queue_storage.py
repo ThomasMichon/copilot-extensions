@@ -18,12 +18,19 @@ from agent_dispatch.queue import (
     Task,
     TaskAttachmentEntry,
     TaskQueue,
+    canonical_reviewer_target,
+    is_blob_ref,
 )
+from agent_dispatch.queue_lifecycle import QueueLifecycleMixin
+from agent_dispatch.queue_liveness import LivenessMixin
+from agent_dispatch.queue_steering import QueueSteeringMixin
 from agent_dispatch.queue_common import AttachmentRecord as _CommonAttachmentRecord
 from agent_dispatch.queue_common import CreationOutcome as _CommonCreationOutcome
 from agent_dispatch.queue_common import Task as _CommonTask
 from agent_dispatch.queue_common import TaskAttachmentEntry as _CommonTaskAttachmentEntry
 from agent_dispatch.queue_storage import QueueStorageMixin
+from agent_dispatch.identity import canonical_reviewer_target as _IdentityReviewerTarget
+from agent_dispatch.payload import is_blob_ref as _PayloadIsBlobRef
 
 
 @pytest.mark.guard
@@ -37,6 +44,8 @@ def test_queue_re_exports_match_storage_dependencies():
     assert CreationOutcome is _CommonCreationOutcome
     assert Task is _CommonTask
     assert TaskAttachmentEntry is _CommonTaskAttachmentEntry
+    assert canonical_reviewer_target is _IdentityReviewerTarget
+    assert is_blob_ref is _PayloadIsBlobRef
 
 
 @pytest.mark.guard
@@ -61,6 +70,15 @@ def test_storage_methods_are_directly_importable():
     assert callable(QueueStorageMixin.create_outcome)
     assert callable(QueueStorageMixin.propose)
     assert callable(QueueStorageMixin.propose_outcome)
+
+
+@pytest.mark.guard
+def test_storage_mixin_precedes_dependents_in_task_queue_mro():
+    mro = TaskQueue.__mro__
+    storage_idx = mro.index(QueueStorageMixin)
+    assert storage_idx < mro.index(QueueLifecycleMixin)
+    assert storage_idx < mro.index(LivenessMixin)
+    assert storage_idx < mro.index(QueueSteeringMixin)
 
 
 @pytest.mark.guard
