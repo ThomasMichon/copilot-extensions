@@ -13,7 +13,7 @@ import json
 import logging
 import sys
 
-from .lease import get_lease
+from .lease import DeployHoldError, deploy_hold, get_lease
 from .lease import release as release_lease
 from .lifecycle import delete_codespace, get_codespace_status, get_codespace_status_with_account
 from .sessions import sync_codespace_sessions
@@ -128,12 +128,6 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
     already-gone resource must not leave a stale lease blocking
     allocation).
 
-    ``sync_codespace_sessions`` uses its own default timeout (300s, matching
-    ``cleanup._run_codespaces``'s own default and
-    ``claim_providers.resolve_claim_reclaim``'s reclaim-specific callback
-    timeout) -- a real reclaim (session recovery + delete, both over the
-    network) needs materially more budget than a quick status check.
-
     Resolves the owning account ONCE up front, mints its token ONCE, and
     threads BOTH through session recovery and the delete itself -- never
     letting either helper independently re-derive (and possibly
@@ -199,42 +193,56 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
             }))
             return 0
     try:
-        recovery = sync_codespace_sessions(
-            args.name, account=resolved_account, token=resolved_token,
-        )
+        with deploy_hold(args.name, "claim-reclaim"):
+            # Re-check the lease INSIDE the fence too -- the earlier check,
+            # above, ran before deploy_hold was even acquired, leaving a
+            # window in which another effort could still acquire the lease
+            # between that check and this hold actually taking effect.
+            lease = get_lease(args.name)
+            if lease:
+                print(json.dumps({
+                    "reclaimed": False,
+                    "detail": f"CodeSpace is leased to {lease.effort}; release it first",
+                }))
+                return 0
+            try:
+                recovery = sync_codespace_sessions(
+                    args.name, account=resolved_account, token=resolved_token,
+                )
+            except Exception as exc:
+                recovery = {"ok": False, "detail": str(exc)}
+            if not recovery.get("ok"):
+                print(json.dumps({
+                    "reclaimed": False,
+                    "detail": f"pre-delete session recovery failed: {recovery.get('detail', '')}",
+                }))
+                return 0
+            try:
+                delete_codespace(
+                    args.name,
+                    force=True,
+                    account=resolved_account,
+                    token=resolved_token,
+                )
+            except Exception as exc:
+                detail = str(exc)
+                if _codespace_looks_gone(detail):
+                    _release_lease_silently(args.name)
+                    print(json.dumps({
+                        "reclaimed": True,
+                        "detail": f"CodeSpace {args.name} already gone",
+                    }))
+                    return 0
+                print(json.dumps({"reclaimed": False, "detail": detail}))
+                return 0
+    except DeployHoldError as exc:
+        print(json.dumps({"reclaimed": False, "detail": str(exc)}))
+        return 0
     except Exception as exc:
-        recovery = {"ok": False, "detail": str(exc)}
-    if not recovery.get("ok"):
         print(json.dumps({
             "reclaimed": False,
-            "detail": f"pre-delete session recovery failed: {recovery.get('detail', '')}",
+            "detail": f"admission/hold check failed: {exc}",
         }))
-        return 0
-    # Narrow (not eliminate -- this lease store has no atomic hold/fence
-    # primitive to extend across a long external operation) the window
-    # between the initial lease check above and the destructive delete
-    # below: session recovery can itself run for minutes, during which
-    # another effort could legitimately acquire the CodeSpace. Re-verify
-    # immediately before the point of no return rather than trusting a
-    # check made minutes earlier.
-    lease = get_lease(args.name)
-    if lease:
-        print(json.dumps({
-            "reclaimed": False,
-            "detail": f"CodeSpace is leased to {lease.effort}; release it first",
-        }))
-        return 0
-    try:
-        delete_codespace(
-            args.name, force=True, account=resolved_account, token=resolved_token,
-        )
-    except Exception as exc:
-        detail = str(exc)
-        if _codespace_looks_gone(detail):
-            _release_lease_silently(args.name)
-            print(json.dumps({"reclaimed": True, "detail": f"CodeSpace {args.name} already gone"}))
-            return 0
-        print(json.dumps({"reclaimed": False, "detail": detail}))
         return 0
     _release_lease_silently(args.name)
     print(json.dumps({"reclaimed": True, "detail": f"deleted CodeSpace {args.name}"}))

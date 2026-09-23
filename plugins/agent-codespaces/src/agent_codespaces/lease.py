@@ -1,27 +1,10 @@
-"""Lease broker -- advisory borrowing of CodeSpaces by an effort.
+"""Lease broker for advisory CodeSpace borrows and exclusive worktree claims.
 
-Mirrors ``agent_containers.lease`` for GitHub CodeSpaces. State of record is a
-host-side JSON file (``~/.agent-codespaces/leases.json``) guarded by an
-exclusive lock file for race-safety across parallel worktree agents on the same
-machine. A lease records that a given local worktree/effort is "borrowing" a
-CodeSpace so a second agent on the same box doesn't dispatch to it concurrently.
-
-Leases are **advisory**: connecting (``agent-codespaces ssh``) does not hard-
-block on a lease, but ``borrow`` will refuse to hand out a CodeSpace already
-held by a *different* live effort unless ``--force`` is given (the escape hatch
-for stale/buggy holders).
-
-Unlike the container fleet -- a fixed local pool from which ``borrow`` *picks* a
-free member -- a CodeSpace is addressed by name: the caller already knows which
-CodeSpace it wants, so ``borrow`` takes an explicit name and simply guards
-concurrent ownership of it. CodeSpaces are cloud resources that can be borrowed
-from more than one machine; a host-local lease coordinates the common
-same-machine case only (documented limitation, see the borrowing-codespaces
-skill).
-
-A lease is reclaimed when its heartbeat is older than the TTL (it is held by an
-*effort*, a logical entity, not by the short-lived CLI process that created it).
-``release`` is the normal way to free one.
+Leases live in ``~/.agent-codespaces/leases.json`` behind an exclusive lock
+file, coordinate only the common same-machine case, and expire by TTL unless a
+holder refreshes or releases them. The provider deploy-hold sidecar mirrors the
+agent-containers admission fence so destructive reclaim blocks new borrows for
+the full recovery/delete window.
 """
 
 from __future__ import annotations
@@ -32,12 +15,17 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
+import threading
 import time
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
 from agent_procutil import no_window_flags
+from ssh_manager.locks import pid_alive
 
 from . import coordination
 from .config import RUNTIME_DIR, ensure_runtime_dir
@@ -46,22 +34,18 @@ log = logging.getLogger("agent-codespaces")
 
 LEASE_FILE = RUNTIME_DIR / "leases.json"
 _LOCK_FILE = RUNTIME_DIR / "leases.lock"
+_DEPLOY_HOLDS_FILE = RUNTIME_DIR / "deploy-holds.json"
 # Leases are held by an *effort*, not by the CLI process, so reclamation is
 # TTL-based. A long-running holder can refresh via ``heartbeat``; otherwise a
 # forgotten lease expires after the TTL. ``release`` is the normal way to free.
 DEFAULT_TTL = 24 * 3600.0
+DEPLOY_HOLD_TTL = 15 * 60.0
+_RECORD_HEARTBEAT_INTERVAL = 30.0
 
 
 @dataclass
 class Lease:
-    """An advisory hold on a CodeSpace by an effort.
-
-    When ``worktree`` is set, the hold is an **exclusive claim** owned by that
-    worktree (the #897 auto-claim path): a CodeSpace is fronted by a single
-    agent-bridge Session Host, so only one worktree may control it at a time.
-    A legacy record (``worktree == ""``) is an advisory effort lease, owned by
-    ``effort``.
-    """
+    """An advisory effort lease or an exclusive worktree claim."""
 
     codespace: str
     effort: str
@@ -70,19 +54,48 @@ class Lease:
     acquired_at: float
     heartbeat_at: float
     worktree: str = ""
-    # git-ref-resource-leases (Phase 2): the L2 cross-machine fencing token (the
-    # commit OID of the CodeSpace's Git-ref lease) when this claim also holds a
-    # distributed lease. Empty for a legacy record or when L2 is unavailable
-    # (L1-only). Used to renew/release the L2 lease. Default keeps old
-    # ``leases.json`` records loadable via ``Lease(**rec)``.
+    # L2 cross-machine fencing token; empty for legacy/L1-only records.
     lease_token: str = ""
 
     def age(self) -> float:
         return time.time() - self.heartbeat_at
 
 
+@dataclass
+class DeployHold:
+    """Provider-owned admission hold around destructive lifecycle work."""
+
+    codespace: str
+    operation: str
+    token: str
+    pid: int
+    host: str
+    environment: str
+    acquired_at: float
+    heartbeat_at: float
+    expires_at: float
+    uncertain: bool = False
+
+
+class ProviderAdmissionError(RuntimeError):
+    """Provider lifecycle admission state is busy or indeterminate."""
+
+
+class DeployHoldError(ProviderAdmissionError):
+    """A provider lifecycle hold could not be acquired."""
+
+
 def _this_host() -> str:
     return platform.node()
+
+
+def _this_environment() -> str:
+    if sys.platform == "win32":
+        return "windows"
+    release = platform.release().lower()
+    if "microsoft" in release or "wsl" in release:
+        return "wsl"
+    return "posix"
 
 
 @contextmanager
@@ -91,9 +104,20 @@ def _lease_lock(timeout: float = 10.0, poll: float = 0.05) -> Iterator[None]:
     ensure_runtime_dir()
     deadline = time.monotonic() + timeout
     fd = None
+    owner_token = uuid.uuid4().hex
     while True:
         try:
-            fd = os.open(str(_LOCK_FILE), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            fd = os.open(
+                str(_LOCK_FILE),
+                os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+                0o600,
+            )
+            try:
+                os.fchmod(fd, 0o600)
+            except (AttributeError, OSError):
+                pass
+            os.write(fd, owner_token.encode("ascii"))
+            os.fsync(fd)
             break
         except FileExistsError:
             if time.monotonic() >= deadline:
@@ -114,7 +138,11 @@ def _lease_lock(timeout: float = 10.0, poll: float = 0.05) -> Iterator[None]:
     finally:
         if fd is not None:
             os.close(fd)
-        _LOCK_FILE.unlink(missing_ok=True)
+        try:
+            if _LOCK_FILE.read_text(encoding="ascii") == owner_token:
+                _LOCK_FILE.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _read_leases() -> dict[str, Lease]:
@@ -137,11 +165,157 @@ def _read_leases() -> dict[str, Lease]:
 
 def _write_leases(leases: dict[str, Lease]) -> None:
     """Atomically write leases.json."""
+    _write_private_json(
+        LEASE_FILE,
+        {codespace: asdict(lease) for codespace, lease in leases.items()},
+    )
+
+
+def _read_records(path, record_type, *, fail_closed: bool = False):
+    if not path.exists():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        if fail_closed:
+            raise ProviderAdmissionError(
+                f"{path.name} is unreadable; refusing provider admission"
+            ) from exc
+        log.warning("%s unreadable; treating as empty", path.name)
+        return {}
+    if not isinstance(raw, dict):
+        if fail_closed:
+            raise ProviderAdmissionError(
+                f"{path.name} does not contain a provider admission mapping"
+            )
+        return {}
+    records = {}
+    for key, rec in (raw or {}).items():
+        try:
+            records[key] = record_type(**rec)
+        except TypeError as exc:
+            if fail_closed:
+                raise ProviderAdmissionError(
+                    f"{path.name} contains an invalid provider admission record"
+                ) from exc
+            continue
+    return records
+
+
+def _write_records(path, records) -> None:
+    _write_private_json(
+        path,
+        {key: asdict(value) for key, value in records.items()},
+    )
+
+
+def _write_private_json(path: Path, payload: dict) -> None:
+    """Atomically publish owner-only coordination JSON."""
     ensure_runtime_dir()
-    tmp = LEASE_FILE.with_suffix(".json.tmp")
-    payload = {c: asdict(lease) for c, lease in leases.items()}
-    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    os.replace(tmp, LEASE_FILE)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp-{uuid.uuid4().hex}")
+    descriptor = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(json.dumps(payload, indent=2).encode("utf-8"))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        if os.name != "nt":
+            directory = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def _record_live(record, ttl: float) -> bool:
+    expires_at = getattr(record, "expires_at", None)
+    if expires_at is not None and time.time() >= expires_at:
+        return False
+    if getattr(record, "uncertain", False):
+        return True
+    if time.time() - record.heartbeat_at > ttl:
+        return False
+    if (
+        record.host != _this_host()
+        or record.environment != _this_environment()
+    ):
+        # Windows and WSL cannot safely inspect each other's process IDs.
+        # Preserve the shared record until its bounded heartbeat TTL.
+        return True
+    return pid_alive(record.pid)
+
+
+def _read_live_records(path, record_type, ttl: float):
+    records = _read_records(path, record_type, fail_closed=True)
+    try:
+        live = {
+            key: value
+            for key, value in records.items()
+            if _record_live(value, ttl)
+        }
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ProviderAdmissionError(
+            f"{path.name} contains invalid provider admission values"
+        ) from exc
+    if len(live) != len(records):
+        _write_records(path, live)
+    return live
+
+
+def _heartbeat_record(
+    path,
+    record_type,
+    key: str,
+    token: str,
+    ttl: float,
+    stop: threading.Event,
+) -> None:
+    interval = min(_RECORD_HEARTBEAT_INTERVAL, max(1.0, ttl / 3))
+    while not stop.wait(interval):
+        try:
+            with _lease_lock():
+                records = _read_live_records(path, record_type, ttl)
+                record = records.get(key)
+                if record is None or record.token != token:
+                    return
+                record.heartbeat_at = time.time()
+                _write_records(path, records)
+        except RuntimeError:
+            log.exception("Could not heartbeat provider admission record")
+
+
+def _cleanup_record_silent(
+    path: Path,
+    record_type,
+    ttl: float,
+    key: str,
+    token: str,
+    *,
+    preserve_uncertain: bool = False,
+) -> None:
+    """Best-effort cleanup that never masks the protected operation result."""
+    try:
+        with _lease_lock():
+            records = _read_live_records(path, record_type, ttl)
+            current = records.get(key)
+            if current is None or current.token != token:
+                return
+            if preserve_uncertain and getattr(current, "uncertain", False):
+                return
+            del records[key]
+            _write_records(path, records)
+    except (OSError, RuntimeError) as exc:
+        log.warning(
+            "Could not clean provider admission record %s; leaving it "
+            "fail-closed for TTL/lifecycle-clear: %s",
+            path.name,
+            exc,
+        )
 
 
 def _is_stale(lease: Lease, ttl: float) -> bool:
@@ -199,6 +373,17 @@ def borrow(
     if not codespace:
         raise RuntimeError("borrow requires a CodeSpace name")
     with _lease_lock():
+        holds = _read_live_records(
+            _DEPLOY_HOLDS_FILE,
+            DeployHold,
+            DEPLOY_HOLD_TTL,
+        )
+        hold = holds.get(codespace)
+        if hold:
+            raise ProviderAdmissionError(
+                f"CodeSpace '{codespace}' is unavailable while provider "
+                f"{hold.operation} is in progress"
+            )
         leases = _prune(_read_leases(), ttl)
         held = leases.get(codespace)
         if held and held.effort != effort and not force:
@@ -293,16 +478,175 @@ def get_lease(codespace: str, ttl: float = DEFAULT_TTL) -> Lease | None:
     return None
 
 
-# --------------------------------------------------------------------------
-# Exclusive, worktree-keyed claims (#897)
-# --------------------------------------------------------------------------
-# A CodeSpace is fronted by exactly one agent-bridge Session Host, so two local
-# worktrees driving the same CodeSpace clobber each other. The claim path makes
-# control **exclusive** and **automatic**: ``agent-codespaces ssh`` acquires a
-# claim keyed by the calling worktree, sweeps existing claims, bounces a live
-# different owner, and auto-releases a claim whose owning worktree is gone.
-# Unlike the advisory effort ``borrow`` above, ``claim`` is enforcing and its
-# liveness is tied to the owner worktree's existence (not only the TTL).
+def get_deploy_hold(codespace: str) -> DeployHold | None:
+    """Return a live provider lifecycle hold for ``codespace``, if any."""
+    with _lease_lock():
+        holds = _read_live_records(
+            _DEPLOY_HOLDS_FILE,
+            DeployHold,
+            DEPLOY_HOLD_TTL,
+        )
+        return holds.get(codespace)
+
+
+def deploy_hold_status(codespace: str) -> dict:
+    """Return observable hold state without weakening strict admission reads."""
+    try:
+        hold = get_deploy_hold(codespace)
+    except ProviderAdmissionError as exc:
+        return {
+            "state": "unknown",
+            "operation": None,
+            "reason": str(exc),
+        }
+    if hold is None:
+        return {"state": "none", "operation": None, "reason": None}
+    return {
+        "state": "active",
+        "operation": hold.operation,
+        "reason": None,
+        "owner_environment": hold.environment,
+        "heartbeat_age_seconds": max(0.0, time.time() - hold.heartbeat_at),
+        "uncertain": hold.uncertain,
+    }
+
+
+def verify_deploy_hold(codespace: str, token: str) -> DeployHold:
+    """Prove that the current live hold still belongs to this operation."""
+    hold = get_deploy_hold(codespace)
+    if hold is None or hold.token != token:
+        raise ProviderAdmissionError(
+            f"Provider lifecycle hold for '{codespace}' is no longer owned "
+            "by this operation"
+        )
+    return hold
+
+
+def mark_deploy_hold_uncertain(codespace: str, token: str) -> None:
+    """Keep an unconfirmed destructive action fail-closed until hold expiry."""
+    with _lease_lock():
+        holds = _read_live_records(
+            _DEPLOY_HOLDS_FILE,
+            DeployHold,
+            DEPLOY_HOLD_TTL,
+        )
+        hold = holds.get(codespace)
+        if hold is None or hold.token != token:
+            raise ProviderAdmissionError(
+                f"Provider lifecycle hold for '{codespace}' cannot record "
+                "an unconfirmed action"
+            )
+        hold.uncertain = True
+        hold.heartbeat_at = time.time()
+        _write_records(_DEPLOY_HOLDS_FILE, holds)
+
+
+def clear_stale_provider_records(codespace: str | None = None) -> dict[str, int]:
+    """Safely clear only expired/dead deploy holds.
+
+    Fresh records owned by another OS environment remain fail-closed because
+    Windows and WSL cannot safely inspect each other's process IDs.
+    """
+    cleared = {"deploy_holds": 0}
+    with _lease_lock():
+        try:
+            records = _read_records(
+                _DEPLOY_HOLDS_FILE,
+                DeployHold,
+                fail_closed=True,
+            )
+        except ProviderAdmissionError:
+            try:
+                old_enough = (
+                    time.time() - _DEPLOY_HOLDS_FILE.stat().st_mtime
+                    > DEPLOY_HOLD_TTL
+                )
+            except OSError:
+                old_enough = False
+            if not old_enough:
+                raise
+            _DEPLOY_HOLDS_FILE.unlink(missing_ok=True)
+            cleared["deploy_holds"] += 1
+            return cleared
+        kept = {}
+        for key, record in records.items():
+            selected = codespace is None or record.codespace == codespace
+            if selected and not _record_live(record, DEPLOY_HOLD_TTL):
+                cleared["deploy_holds"] += 1
+                continue
+            kept[key] = record
+        if len(kept) != len(records):
+            _write_records(_DEPLOY_HOLDS_FILE, kept)
+    return cleared
+
+
+@contextmanager
+def deploy_hold(
+    codespace: str,
+    operation: str,
+    *,
+    max_lifetime: float = DEPLOY_HOLD_TTL,
+) -> Iterator[DeployHold]:
+    """Block new provider borrow admission during a destructive check."""
+    if max_lifetime <= 0:
+        raise DeployHoldError("Provider lifecycle hold lifetime must be positive")
+    token = uuid.uuid4().hex
+    now = time.time()
+    hold = DeployHold(
+        codespace=codespace,
+        operation=operation,
+        token=token,
+        pid=os.getpid(),
+        host=_this_host(),
+        environment=_this_environment(),
+        acquired_at=now,
+        heartbeat_at=now,
+        expires_at=now + max_lifetime,
+    )
+    with _lease_lock():
+        holds = _read_live_records(
+            _DEPLOY_HOLDS_FILE,
+            DeployHold,
+            DEPLOY_HOLD_TTL,
+        )
+        existing = holds.get(codespace)
+        if existing:
+            raise DeployHoldError(
+                f"CodeSpace '{codespace}' already has a provider "
+                f"{existing.operation} hold"
+            )
+        holds[codespace] = hold
+        _write_records(_DEPLOY_HOLDS_FILE, holds)
+    heartbeat_stop = threading.Event()
+    heartbeat_thread = threading.Thread(
+        target=_heartbeat_record,
+        args=(
+            _DEPLOY_HOLDS_FILE,
+            DeployHold,
+            codespace,
+            token,
+            DEPLOY_HOLD_TTL,
+            heartbeat_stop,
+        ),
+        daemon=True,
+    )
+    heartbeat_thread.start()
+    try:
+        yield hold
+    finally:
+        heartbeat_stop.set()
+        heartbeat_thread.join(timeout=2)
+        _cleanup_record_silent(
+            _DEPLOY_HOLDS_FILE,
+            DeployHold,
+            DEPLOY_HOLD_TTL,
+            codespace,
+            token,
+            preserve_uncertain=True,
+        )
+
+
+# Exclusive, worktree-keyed claims (#897).
 
 
 def _creation_flags() -> int:
@@ -332,19 +676,12 @@ class CoordinationRejected(RuntimeError):
 
 
 def _claim_owner(lease: Lease) -> str:
-    """The owning identity of a hold: the worktree for a claim, else the effort."""
+    """Return the worktree owner for a claim, else the effort owner."""
     return lease.worktree or lease.effort
 
 
 def _same_holder_ref(a: str | None, b: str | None) -> bool:
-    """True when two qualified ClaimRefs name the **same worktree**.
-
-    A ClaimRef is ``machine/project/worktree_id[#session]``; the worktree id (the
-    last path segment, minus any ``#session`` suffix) is the stable identity.
-    Two refs match iff their worktree ids match -- so a re-entry from a *new
-    session* of the same worktree still recognizes its own lease. Empty/None →
-    no match. Used to spot a self-conflict on the L2 acquire path (#1362).
-    """
+    """True when two ClaimRefs name the same worktree id."""
     if not a or not b:
         return False
     aw = a.split("/")[-1].split("#")[0].strip()
@@ -355,15 +692,7 @@ def _same_holder_ref(a: str | None, b: str | None) -> bool:
 def resolve_owner_worktree(
     explicit: str | None = None, session_id: str | None = None
 ) -> str | None:
-    """Resolve the claim owner: an explicit id, else the *calling* worktree dir.
-
-    Shells ``agent-worktrees get worktree-dir`` (loose coupling -- agent-codespaces
-    runs in its own venv, so it never imports agent_worktrees). Returns ``None``
-    when unresolvable (not a worktree, agent-worktrees absent, error) -- the
-    caller then skips claiming, preserving today's behavior (degrade-safe). This
-    is why an agent-bridge dispatch, whose ``ssh`` subprocess runs from the
-    daemon's cwd, must pass the caller's worktree explicitly (``--effort``).
-    """
+    """Resolve the explicit owner or the calling worktree dir."""
     from . import worktrees
 
     worktrees.validate_context()
@@ -396,13 +725,7 @@ def resolve_owner_worktree(
 
 
 def active_worktree_ids() -> set[str] | None:
-    """Active worktree dirs via ``agent-worktrees list --json``.
-
-    Returns the set of worktree ``path``s, or ``None`` when unavailable -- in
-    which case the caller cannot sweep by liveness and falls back to
-    path-existence + the TTL backstop. Terminal-status worktrees are excluded so
-    a finalized-but-not-yet-pruned worktree does not keep a claim alive here.
-    """
+    """Return active worktree paths, or ``None`` when they cannot be listed."""
     from . import worktrees
 
     if worktrees.explicit_context():
@@ -443,14 +766,7 @@ def active_worktree_ids() -> set[str] | None:
 
 
 def _worktree_alive(owner: str, active: set[str] | None) -> bool:
-    """Conservative liveness for a claim owner (bias toward *alive*).
-
-    A claim is only treated dead (auto-released) when we can positively confirm
-    the owner is gone: it is a worktree **path** that is both absent from the
-    active set AND no longer present on disk. This avoids wrongly reclaiming a
-    live holder when ``list`` is unavailable/partial (a different repo's
-    worktree, say). A non-path/legacy owner is treated alive (the TTL governs).
-    """
+    """Treat a holder as dead only when absence is positively confirmed."""
     if not owner:
         return True
     if active is not None and owner in active:
@@ -462,21 +778,14 @@ def _worktree_alive(owner: str, active: set[str] | None) -> bool:
                 return True
         except OSError:
             return True
-        # absolute path, not in active set, gone from disk -> positively dead
         return False
-    # legacy/non-path owner with no positive death signal -> keep (TTL governs)
     return True
 
 
 def sweep_dead(
     active: set[str] | None = None, ttl: float = DEFAULT_TTL
 ) -> list[str]:
-    """Drop claims whose owning worktree is gone; return released CodeSpaces.
-
-    Combines the TTL prune (``list_leases``/``_prune``) with worktree-liveness:
-    a claim owned by a positively-dead worktree is released now rather than
-    waiting out the TTL. Advisory (worktree-less) leases are untouched here.
-    """
+    """Release claims whose owning worktree is positively gone."""
     with _lease_lock():
         leases = _prune(_read_leases(), ttl)
         released: list[str] = []
@@ -505,25 +814,11 @@ def claim(
     coordinate: bool = True,
     preflight_result: coordination.PreflightResult | None = None,
 ) -> Lease:
-    """Acquire an **exclusive** claim on ``codespace`` for worktree ``owner``.
+    """Acquire or refresh an exclusive worktree claim on ``codespace``.
 
-    Enforcing (unlike ``borrow``): if the CodeSpace is already claimed by a
-    *different* worktree that is **still live**, raise :class:`ClaimConflict`
-    unless ``force``. A claim held by a **gone** worktree is auto-released and
-    taken over. Re-claiming for the same owner is idempotent (refreshes the
-    heartbeat, preserves ``acquired_at``). Pass ``active`` (from
-    :func:`active_worktree_ids`) so liveness is judged against the real
-    worktree set; ``None`` falls back to path-existence + TTL.
-
-    **Two-tier (git-ref-resource-leases Phase 2).** The host-local store above is
-    the same-machine L1 fast path. When ``coordinate`` and a qualified
-    ``holder_ref`` (a ``machine/project/worktree_id[#session]`` ClaimRef) are
-    given, an atomic **cross-machine L2** Git-ref lease is taken via
-    ``agent-worktrees lease`` *before* the local write, so a live claim on
-    **another machine** raises :class:`ClaimConflict` (naming the remote holder)
-    unless ``force``. The L2 network op runs **outside** the local lock (which
-    only guards the fast local file R/W). Degrade-safe: if L2 is not wired /
-    reachable, this falls back to L1-only -- identical to today's behavior.
+    Live different owners raise :class:`ClaimConflict` unless ``force``; gone
+    owners are reclaimed. When ``coordinate`` and ``holder_ref`` are present, a
+    best-effort cross-machine L2 lease is acquired before the local write.
     """
     from .worktrees import validate_context
 
@@ -533,9 +828,6 @@ def claim(
     if not owner:
         raise RuntimeError("claim requires an owner worktree")
 
-    # L2 (cross-machine) acquire/renew, network, *outside* the local lock. Peek
-    # the local store lock-free only to choose renew (we already hold it) vs
-    # acquire (new/takeover) and to carry the prior fencing token.
     lease_token = ""
     if coordinate and holder_ref:
         peek = _read_leases().get(codespace)
@@ -556,12 +848,6 @@ def claim(
         elif res.rejected:
             raise CoordinationRejected(res.detail)
         elif res.conflict:
-            # A conflict whose holder is THIS SAME worktree is re-entry, not a
-            # real conflict -- the "holder" is the caller's own prior lease
-            # (whose L2 token the local L1 record lost or never persisted, e.g.
-            # an L1-only first claim). Adopt it instead of bouncing the caller
-            # from a CodeSpace it already holds (#1362): proceed L1-only (the
-            # same-owner L1 lock block below refreshes the record idempotently).
             self_conflict = same_owner or _same_holder_ref(res.holder, holder_ref)
             if self_conflict:
                 log.info(
@@ -571,10 +857,6 @@ def claim(
                 )
                 lease_token = prior_token
             elif not force:
-                # A genuine conflict. Resolve the holder against L1 first so the
-                # message carries the real worktree/host/pid when a concrete
-                # local record exists; only fall back to the cross-machine
-                # ClaimRef (no pid) when the holder truly isn't on this box.
                 held_local = _read_leases().get(codespace)
                 if held_local is not None:
                     raise ClaimConflict(
@@ -592,7 +874,6 @@ def claim(
                     codespace, res.holder or "?",
                 )
                 lease_token = ""
-        # unavailable -> keep prior_token (renew) or "" (acquire): L1-only.
 
     with _lease_lock():
         leases = _prune(_read_leases(), ttl)
@@ -612,9 +893,6 @@ def claim(
         )
         lease = Lease(
             codespace=codespace,
-            # A worktree claim's owner is a lock holder, NOT an effort -- keep the
-            # legacy ``effort`` field empty so the two concepts never conflate
-            # (the owner lives in ``worktree``; ``_claim_owner`` reads it).
             effort="",
             pid=os.getpid(),
             host=_this_host(),
@@ -635,43 +913,7 @@ def claim_for_connect(
     effort: str | None = None,
     session_id: str | None = None,
 ) -> str | None:
-    """Resolve the calling worktree and acquire the exclusive, worktree-keyed
-    CodeSpace claim (#897) before ANY caller connects to/drives ``codespace``.
-
-    This is the single choke point every connect path is expected to go
-    through -- originally only ``agent-codespaces ssh`` called :func:`claim`
-    directly; the CLI-mode ``copilot`` verb's own interactive connect
-    (``_interactive_ssh``, a bare ``gh codespace ssh`` wrapper) never did,
-    so a live claim held by one worktree was silently bypassed by a second
-    worktree/machine driving the *same* CodeSpace through ``copilot`` instead
-    of ``ssh`` -- confirmed live (agent-bridge-cli-mode-sessions Phase 4
-    follow-up): a CLI-mode session was driven successfully on a CodeSpace a
-    different, still-live worktree on another machine had legitimately
-    claimed, disrupting its in-flight work. Every connect path must call
-    this exact function so the claim is enforced identically regardless of
-    which verb happens to be used.
-
-    Journals the CodeSpace as an outbound obligation on the resolved holder
-    ref (resource-obligation-settlement Ph3b-wiring/2) once a claim is
-    actually taken, exactly as the original ``ssh`` call site already did.
-
-    Returns the resolved ``fence_holder_ref`` (``None`` when not running
-    inside a worktree) for the caller's own downstream use (e.g. settling the
-    obligation on a clean disconnect, if the caller implements that).
-    Degrade-safe: when no worktree resolves, claiming is skipped entirely
-    (connect proceeds exactly as before this function existed) -- a bare
-    coordination preflight check still runs when a fence ref *is* available.
-
-    Raises :class:`ClaimConflict`, :class:`CoordinationRejected`, or
-    ``agent_codespaces.worktrees.ContextRefused`` exactly as :func:`claim`/
-    ``coordination.preflight`` do -- the caller is expected to catch these
-    and print its own refusal message/exit code (kept caller-side so each
-    verb's exact wording and process exit code stay under its own control).
-    A claim-bookkeeping ``RuntimeError`` also propagates uncaught here (the
-    original ``ssh`` call site treats it as non-fatal and merely warns --
-    callers wanting that same degrade-safe behavior should catch it
-    themselves, exactly as that call site does).
-    """
+    """Resolve the caller's worktree, take the claim, and journal obligation."""
     from . import coordination
 
     fence_holder_ref = coordination.owner_ref(session_id=session_id)
@@ -701,15 +943,7 @@ def claim_for_connect(
 
 
 def lease_token_for(codespace: str, ttl: float = DEFAULT_TTL) -> str | None:
-    """Return the cross-machine (L2) fencing token this box holds for ``codespace``.
-
-    Reads the local L1 lease store and returns the held lease's ``lease_token``
-    (the git-ref fencing token), or ``None`` when no live lease is held / it
-    carries no L2 token. Best-effort: any read error -> ``None``. Used to mirror
-    the obligation disposition onto the shared exclusion lease
-    (:func:`coordination.mirror_disposition`) at settle time, when the disconnect
-    hook has the CodeSpace name + holder but not the token in scope.
-    """
+    """Return the live L2 fencing token for ``codespace``, if any."""
     try:
         with _lease_lock():
             held = _prune(_read_leases(), ttl).get(codespace)
@@ -720,10 +954,7 @@ def lease_token_for(codespace: str, ttl: float = DEFAULT_TTL) -> str | None:
 
 
 def release_claim(codespace: str, owner: str, ttl: float = DEFAULT_TTL) -> bool:
-    """Release ``codespace``'s claim iff it is owned by ``owner``. Idempotent.
-
-    Also tombstones the cross-machine L2 lease (best-effort) when one was held.
-    """
+    """Release ``codespace``'s claim when ``owner`` still holds it."""
     with _lease_lock():
         leases = _prune(_read_leases(), ttl)
         held = leases.get(codespace)
@@ -739,12 +970,7 @@ def release_claim(codespace: str, owner: str, ttl: float = DEFAULT_TTL) -> bool:
 
 
 def release_worktree_claims(owner: str, ttl: float = DEFAULT_TTL) -> list[str]:
-    """Release **all** claims owned by ``owner`` (the worktree-finalize hook).
-
-    Returns the CodeSpaces released. This is the immediate-release path for
-    ``agent-worktrees finalize``; the sweep on the next launch is the safety net.
-    Also tombstones each held cross-machine L2 lease (best-effort).
-    """
+    """Release every claim owned by ``owner`` and tombstone any L2 leases."""
     with _lease_lock():
         leases = _prune(_read_leases(), ttl)
         released_tokens = {
