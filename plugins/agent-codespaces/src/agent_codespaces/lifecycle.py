@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
+import time
 from dataclasses import dataclass
 from enum import Enum
 
@@ -196,6 +198,242 @@ def account_for_codespace(name: str) -> str | None:
     except Exception:
         return None
     return None
+
+
+#: The claim-provider registry's own default STATUS callback budget is 15s
+#: (``agent_worktrees.claim_providers._CALLBACK_TIMEOUT_SECONDS``), and
+#: ``get_codespace_status`` may try this per-account call SERIALLY across
+#: several candidate accounts -- a single sub-call therefore needs a much
+#: tighter budget than a one-shot operation would, or a hung backend lets
+#: the registry kill the whole callback (and possibly outlive it as an
+#: orphaned ``gh`` process) before this code ever returns its own
+#: controlled 404-vs-error verdict.
+_STATUS_LOOKUP_TIMEOUT_SECONDS = 6.0
+
+#: Overall wall-clock budget for the WHOLE serial account loop in
+#: :func:`get_codespace_status`, strictly under the registry's own 15s
+#: callback timeout (leaving margin for JSON parsing/return overhead).
+#: Without this, two mapped accounts plus the ambient fallback could each
+#: consume up to ``_STATUS_LOOKUP_TIMEOUT_SECONDS`` (6s x 3 = 18s), already
+#: exceeding the registry's budget on its own -- the registry would then
+#: kill this callback mid-loop, reporting a live CodeSpace unavailable
+#: instead of this function's own controlled verdict.
+_STATUS_OVERALL_BUDGET_SECONDS = 12.0
+
+
+def _get_codespace_status_under(
+    name: str, account: str | None, *, timeout: float = _STATUS_LOOKUP_TIMEOUT_SECONDS,
+) -> tuple[bool, str | None]:
+    """Single-account attempt for :func:`get_codespace_status`. Raises
+    :class:`RuntimeError` for any failure that is NOT an unambiguous 404 --
+    including an explicit ``HTTP 404`` marker only, never the looser phrase
+    "not found" (which a non-404 auth/API error could also happen to
+    mention).
+
+    When ``account`` is given, this is a STRICT provider path whose verdict
+    feeds a destructive reclaim decision -- it requires a genuine
+    account-specific token, never a silent ambient-auth fallback.
+    ``gh_account.env_for_account`` returns the environment UNCHANGED
+    (ambient) when it cannot mint a token for the named account (its own
+    documented, deliberately permissive contract for its other, non-strict
+    callers) -- reusing it here would let a failed-to-authenticate named
+    candidate silently query (and later reclaim!) under whatever account
+    happens to be ambient, misreporting that as a confirmed result for the
+    NAMED candidate (claim-provider-pattern effort review finding: "Require
+    account-specific authentication for strict lookups"). Minting also
+    consumes its own time (up to its internal 10s timeout) that must count
+    against THIS candidate's own ``timeout`` budget, not run on top of it,
+    or a single candidate could blow well past its allotted share (review
+    finding: "...include credential resolution in the end-to-end
+    deadline")."""
+    from . import gh_account
+
+    env = None
+    if account is not None:
+        mint_start = time.monotonic()
+        token = gh_account.token_for_account(account)
+        timeout = max(timeout - (time.monotonic() - mint_start), 0.5)
+        if not token:
+            raise RuntimeError(
+                f"could not mint an authenticated gh token for account {account} "
+                "-- refusing to fall back to ambient auth for this strict lookup"
+            )
+        env = dict(os.environ)
+        env["GH_TOKEN"] = token
+        env.pop("GITHUB_TOKEN", None)
+
+    args = ["gh", "api", f"/user/codespaces/{name}"]
+    try:
+        result = subprocess.run(
+            args, capture_output=True, text=True, timeout=timeout,
+            creationflags=_creation_flags(), env=env,
+        )
+    except FileNotFoundError:
+        raise RuntimeError("gh CLI not found") from None
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"gh api codespace lookup for {name} timed out after {timeout:.0f}s"
+        ) from exc
+    if result.returncode != 0:
+        combined = f"{result.stdout}\n{result.stderr}".lower()
+        if "http 404" in combined:
+            return False, None
+        raise RuntimeError(
+            f"gh api codespace lookup for {name} failed: {result.stderr.strip()}"
+        )
+    try:
+        data = json.loads(result.stdout)
+    except (ValueError, TypeError) as exc:
+        raise RuntimeError(f"gh api returned invalid JSON for {name}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise RuntimeError(f"gh api returned an unexpected shape for {name}")
+    return True, data.get("state")
+
+
+def get_codespace_status(name: str, account: str | None = None) -> tuple[bool, str | None]:
+    """Strict, targeted single-CodeSpace existence check via ``gh api
+    /user/codespaces/<name>``.
+
+    Unlike :func:`list_codespaces` -- a paginated (``--limit 50``),
+    best-effort listing across candidate accounts that silently drops rows
+    on malformed JSON or a single failed account -- this hits exactly one
+    CodeSpace by name and returns an unambiguous verdict: ``(exists,
+    state)``. Raises :class:`RuntimeError` for any failure that is NOT an
+    unambiguous 404 (auth error, network failure, malformed response), so a
+    caller never mistakes a backend outage or incomplete listing for
+    confirmed absence.
+
+    When ``account`` is not given explicitly, this does NOT trust
+    :func:`account_for_codespace`'s own single best-effort guess (itself
+    backed by the same lossy ``--limit 50`` listing) as authoritative --
+    a CodeSpace beyond that listing's first page, or owned by an account
+    ``account_for_codespace`` failed to resolve, would otherwise be queried
+    under the wrong (or ambient) credentials and misreported absent. Instead
+    it tries every candidate account (the ``account_map``, each persisted
+    binding, then ambient) exactly like :func:`list_codespaces` does,
+    stopping at the first confirmed existence. Only when EVERY candidate
+    account confirms an unambiguous 404 is the CodeSpace reported absent;
+    a real backend error on any candidate raises (never a false negative).
+
+    See :func:`get_codespace_status_with_account` for a variant that also
+    reports WHICH account confirmed existence, for a caller that must then
+    reuse that same account for a follow-up operation (rather than letting
+    it re-resolve independently and possibly disagree).
+    """
+    exists, state, _account = get_codespace_status_with_account(name, account)
+    return exists, state
+
+
+def get_codespace_status_with_account(
+    name: str, account: str | None = None,
+) -> tuple[bool, str | None, str | None]:
+    """Like :func:`get_codespace_status`, but also returns the account that
+    confirmed existence (or ``None`` when ``account`` was explicit, or no
+    candidate exists).
+
+    A caller that must perform a FOLLOW-UP operation on the same CodeSpace
+    (e.g. ``sync_codespace_sessions``/``delete_codespace`` during a
+    claim-provider reclaim) should thread this resolved account through
+    rather than letting the follow-up re-resolve independently via
+    ``account_for_codespace``'s own limited listing/ambient fallback, which
+    can disagree for a CodeSpace found only under a non-ambient or
+    beyond-first-page account (claim-provider-pattern effort review
+    finding: "Preserve the resolved account through CodeSpace
+    reclamation").
+
+    When no explicit ``account`` is given, the EXACT per-name binding
+    (``account_binding.bound_account(name)``) is tried FIRST, ahead of the
+    generic multi-candidate scan -- :func:`account_for_codespace` already
+    treats that binding as authoritative for the same reason: two DIFFERENT
+    GitHub accounts can each have a CodeSpace with the identical name, and
+    the generic scan would otherwise confirm (and a reclaim would then
+    delete!) whichever account's same-named CodeSpace it happened to reach
+    first, not necessarily the one this name is actually bound to
+    (claim-provider-pattern effort review finding: "Resolve exact
+    CodeSpace binding before scanning candidate accounts"). ANY outcome of
+    that bound lookup -- existing, a genuine 404, OR an ambiguous
+    lookup FAILURE -- is final and is propagated immediately, NEVER
+    falling through to the generic scan: falling through on ANY of these
+    (not just a confirmed 404) would risk that exact same name-collision
+    (a DIFFERENT account's same-named CodeSpace getting reported/
+    reclaimed -- possibly DELETED -- under this identity, when the bound
+    account was never actually verified), contradicting the binding's own
+    authority (review findings: "Do not scan other accounts after a bound
+    lookup returns 404" and "Binding lookup errors incorrectly fall
+    through to other accounts"). The scan is the fallback ONLY when there
+    is NO binding at all -- a missing binding must not make an otherwise-
+    discoverable CodeSpace misreport absent. Reading the binding STORE
+    itself (as opposed to a confirmed absence of a binding for this name)
+    can also fail (lock contention) -- that failure propagates too, via
+    ``account_binding.bound_account_or_raise`` for the exact-name lookup
+    AND ``account_binding.bound_accounts_or_raise`` for the fallback
+    scan's own candidate-list setup, rather than either one degrading to
+    "no binding"/an empty candidate set (review findings: "Fail closed
+    when account binding cannot be read" and "Propagate binding read
+    failures instead of scanning accounts"). Likewise, once ANY candidate
+    in the fallback scan has produced an ambiguous error, a LATER
+    candidate's success is no longer trusted blindly -- it also raises,
+    rather than risk selecting (and reclaiming!) a same-named CodeSpace
+    under an unverified account while the true owner's lookup remains
+    unresolved (review finding: "Reject later candidates after earlier
+    lookup errors")."""
+    from . import gh_account
+
+    validate_context()
+    if account is not None:
+        exists, state = _get_codespace_status_under(name, account)
+        return exists, state, account
+
+    deadline = time.monotonic() + _STATUS_OVERALL_BUDGET_SECONDS
+    errors: list[str] = []
+
+    from . import account_binding
+
+    bound = account_binding.bound_account_or_raise(name)
+    if bound:
+        remaining = deadline - time.monotonic()
+        # ANY outcome under the authoritative binding is final -- see the
+        # docstring above for why even an ambiguous lookup FAILURE must
+        # propagate rather than silently fall through to the generic scan
+        # for this destructive-reclaim-feeding path.
+        exists, state = _get_codespace_status_under(
+            name, bound, timeout=min(_STATUS_LOOKUP_TIMEOUT_SECONDS, max(remaining, 0.5)),
+        )
+        return exists, state, (bound if exists else None)
+
+    bound_accounts = account_binding.bound_accounts_or_raise()
+    accounts_seen: list[str] = []
+    for login in (*gh_account.mapped_accounts(), *bound_accounts):
+        if login and login != bound and login not in accounts_seen:
+            accounts_seen.append(login)
+
+    for candidate in (*accounts_seen, None):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            errors.append(
+                f"overall status budget ({_STATUS_OVERALL_BUDGET_SECONDS:.0f}s) "
+                f"exhausted before checking account {candidate or '(ambient)'}"
+            )
+            break
+        try:
+            exists, state = _get_codespace_status_under(
+                name, candidate, timeout=min(_STATUS_LOOKUP_TIMEOUT_SECONDS, remaining),
+            )
+        except RuntimeError as exc:
+            errors.append(str(exc))
+            continue
+        if exists:
+            # A confirmed success here is no longer trustworthy on its own
+            # if an EARLIER candidate errored ambiguously -- the true
+            # owner might be the one that errored, and blindly trusting
+            # this candidate risks reclaiming a same-named CodeSpace under
+            # the WRONG (unverified) account.
+            if errors:
+                raise RuntimeError("; ".join(dict.fromkeys(errors)))
+            return True, state, candidate
+    if errors:
+        raise RuntimeError("; ".join(dict.fromkeys(errors)))
+    return False, None, None
 
 
 def list_devcontainers(repo: str) -> list[str]:
@@ -503,11 +741,22 @@ def wait_for_available(name: str, timeout: float = 300.0, interval: float = 10.0
     return outcome == WaitOutcome.AVAILABLE
 
 
-def delete_codespace(name: str, force: bool = False, account: str | None = None) -> None:
+def delete_codespace(
+    name: str, force: bool = False, account: str | None = None,
+    *, token: str | None = None,
+) -> None:
     """Delete a CodeSpace by name.
 
     ``account`` pins ``gh`` to the account that owns the CodeSpace; when None it
     is resolved from the cross-account listing (falls back to ambient auth).
+
+    ``token`` -- when given, uses this EXACT pre-minted token directly
+    instead of re-deriving one via ``gh_account.env_for_account`` (which
+    silently falls back to AMBIENT credentials when it cannot mint one for
+    ``account``). A caller that already validated the account (e.g. a
+    claim-provider reclaim) should pass its own already-minted token here
+    to close that gap entirely (claim-provider-pattern effort review
+    finding: "Preserve validated credentials during status and reclaim").
     """
     from . import gh_account
 
@@ -517,12 +766,18 @@ def delete_codespace(name: str, force: bool = False, account: str | None = None)
 
     log.info("Deleting codespace: %s", name)
 
-    if account is None:
-        account = account_for_codespace(name)
+    if token is not None:
+        env = dict(os.environ)
+        env["GH_TOKEN"] = token
+        env.pop("GITHUB_TOKEN", None)
+    else:
+        if account is None:
+            account = account_for_codespace(name)
+        env = gh_account.env_for_account(account) if account else None
     result = subprocess.run(
         args, capture_output=True, text=True, timeout=60,
         creationflags=_creation_flags(),
-        env=gh_account.env_for_account(account) if account else None,
+        env=env,
     )
 
     if result.returncode != 0:

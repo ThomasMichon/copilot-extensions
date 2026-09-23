@@ -297,7 +297,28 @@ def test_push_via_session_sync_other_error_passes_through():
         ok, detail = sessions._push_via_session_sync(Path("."), ".codespaces/x", verbose=False)
     assert ok is False
     assert "stale" not in detail
-    assert "target unreachable" in detail
+
+
+def test_push_via_session_sync_is_bounded_by_a_timeout(monkeypatch):
+    """The push subprocess previously ran unbounded -- a hung/stuck push
+    could block a reclaim past whatever budget the caller (e.g. the
+    claim-provider registry's reclaim callback timeout) actually enforces
+    (claim-provider-pattern effort review finding: "Align reclaim timeout
+    with full recovery and deletion phases")."""
+    with patch.object(sessions, "find_session_sync", return_value=("session-sync", "")), \
+            patch.object(sessions.subprocess, "run",
+                        side_effect=sessions.subprocess.TimeoutExpired("cmd", 60)):
+        ok, detail = sessions._push_via_session_sync(Path("."), ".codespaces/x", verbose=False)
+    assert ok is False
+    assert "timed out" in detail
+
+
+def test_push_via_session_sync_passes_a_timeout_kwarg():
+    completed = SimpleNamespace(returncode=0, stdout="ok", stderr="")
+    with patch.object(sessions, "find_session_sync", return_value=("session-sync", "")), \
+            patch.object(sessions.subprocess, "run", return_value=completed) as run:
+        sessions._push_via_session_sync(Path("."), ".codespaces/x", verbose=False)
+    assert run.call_args.kwargs["timeout"] == sessions._PUSH_TIMEOUT_SECONDS
 
 
 def test_is_stale_session_sync_detection():

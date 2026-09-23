@@ -28,12 +28,32 @@ class CodespaceSource(CodespaceConfigSource):
     or can call :func:`lifecycle.account_for_codespace`); the source itself
     stays side-effect-free at construction. Absent an account it uses ambient
     auth -- today's behavior.
+
+    ``token`` -- when given, uses this EXACT pre-minted token directly
+    instead of re-deriving one via ``gh_account.env_for_account`` (which
+    silently falls back to AMBIENT credentials when it cannot mint one for
+    ``account``). A caller that already validated the account (e.g. a
+    claim-provider reclaim) should pass its own already-minted token here
+    to close that gap entirely, rather than letting this constructor
+    re-derive -- and possibly disagree with, moments later -- credentials
+    (claim-provider-pattern effort review finding: "Preserve validated
+    credentials during status and reclaim").
     """
 
-    def __init__(self, codespace_name: str, *, account: str | None = None) -> None:
-        from . import gh_account
+    def __init__(
+        self, codespace_name: str, *, account: str | None = None,
+        token: str | None = None,
+    ) -> None:
+        if token is not None:
+            import os
 
-        gh_env = gh_account.env_for_account(account) if account else None
+            gh_env = dict(os.environ)
+            gh_env["GH_TOKEN"] = token
+            gh_env.pop("GITHUB_TOKEN", None)
+        else:
+            from . import gh_account
+
+            gh_env = gh_account.env_for_account(account) if account else None
         super().__init__(
             codespace_name, config_dir=SSH_CONFIG_DIR, gh_env=gh_env,
         )

@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "namespace": "container",
+  "status_command": ["agent-containers"],
+  "reclaim_command": ["agent-containers"],
+  "description": "Local Docker dev-container fleet (container: claim refs)"
+}

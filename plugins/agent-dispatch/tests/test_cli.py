@@ -2046,6 +2046,112 @@ def test_claimant_falls_back_to_target_when_unclaimed(monkeypatch):
     assert out["worker_id"] is None
 
 
+# ── claim-status (claim-provider-pattern effort: dispatch-task: callback) ────
+
+def test_claim_status_exists(monkeypatch):
+    import argparse
+    import contextlib
+    import io
+    import json
+
+    from agent_dispatch import __main__
+
+    class _FakeClient:
+        def get(self, task_id):
+            return {"id": task_id, "status": "started", "owner": "m/wt-abc"}
+
+    captured = {}
+
+    @contextlib.contextmanager
+    def _fake_client(args, **kw):
+        captured.update(kw)
+        yield _FakeClient()
+
+    monkeypatch.setattr(__main__, "_client", _fake_client)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = __main__._cmd_claim_status(argparse.Namespace(task_id="t1"))
+    assert rc == 0
+    assert captured.get("ensure") is False  # never pay coordinator lazy-startup within the callback budget
+    out = json.loads(buf.getvalue())
+    assert out == {"exists": True, "state": "started", "detail": "m/wt-abc"}
+
+
+def test_claim_status_not_found(monkeypatch):
+    import argparse
+    import contextlib
+    import io
+    import json
+
+    from agent_dispatch import __main__
+    from agent_dispatch.client import DispatchError
+
+    class _FakeClient:
+        def get(self, task_id):
+            raise DispatchError(404, "no such task")
+
+    @contextlib.contextmanager
+    def _fake_client(args, **kw):
+        yield _FakeClient()
+
+    monkeypatch.setattr(__main__, "_client", _fake_client)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = __main__._cmd_claim_status(argparse.Namespace(task_id="t404"))
+    assert rc == 0
+    out = json.loads(buf.getvalue())
+    assert out == {"exists": False, "detail": "no such task"}
+
+
+def test_claim_status_coordinator_error_is_not_false_absence(monkeypatch):
+    """A non-404 DispatchError (auth/5xx) must exit non-zero -- never a
+    false ``exists: false`` that could make a live claim look reclaimable."""
+    import argparse
+    import contextlib
+    import io
+
+    from agent_dispatch import __main__
+    from agent_dispatch.client import DispatchError
+
+    class _FakeClient:
+        def get(self, task_id):
+            raise DispatchError(500, "coordinator exploded")
+
+    @contextlib.contextmanager
+    def _fake_client(args, **kw):
+        yield _FakeClient()
+
+    monkeypatch.setattr(__main__, "_client", _fake_client)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = __main__._cmd_claim_status(argparse.Namespace(task_id="t500"))
+    assert rc != 0
+    assert buf.getvalue() == ""
+
+
+def test_claim_status_transport_error_is_not_false_absence(monkeypatch):
+    import argparse
+    import contextlib
+    import io
+
+    from agent_dispatch import __main__
+
+    class _FakeClient:
+        def get(self, task_id):
+            raise ConnectionError("coordinator unreachable")
+
+    @contextlib.contextmanager
+    def _fake_client(args, **kw):
+        yield _FakeClient()
+
+    monkeypatch.setattr(__main__, "_client", _fake_client)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = __main__._cmd_claim_status(argparse.Namespace(task_id="t-unreachable"))
+    assert rc != 0
+    assert buf.getvalue() == ""
+
+
 def test_identity_flags_take_precedence(monkeypatch):
     import argparse
 

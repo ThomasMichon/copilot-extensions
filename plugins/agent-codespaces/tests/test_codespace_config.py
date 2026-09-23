@@ -72,3 +72,20 @@ def test_default_config_dir_is_agent_codespaces():
     assert SSH_CONFIG_DIR.name == "ssh"
     src = CodespaceSource("cs-y")
     assert src._config_dir == SSH_CONFIG_DIR
+
+
+def test_token_bypasses_env_for_account_entirely(monkeypatch):
+    """When ``token`` is given, it must be used directly -- never routed
+    through ``gh_account.env_for_account`` (whose own permissive contract
+    silently falls back to ambient credentials when it cannot mint one)
+    (claim-provider-pattern effort review finding: "Preserve validated
+    credentials during status and reclaim")."""
+    called = {"n": 0}
+    monkeypatch.setattr(
+        "agent_codespaces.gh_account.env_for_account",
+        lambda *a, **k: called.__setitem__("n", 1),
+    )
+    src = CodespaceSource("cs-z", account="acct-a", token="exact-token")
+    assert called["n"] == 0
+    assert src._gh_env["GH_TOKEN"] == "exact-token"
+    assert "GITHUB_TOKEN" not in src._gh_env
