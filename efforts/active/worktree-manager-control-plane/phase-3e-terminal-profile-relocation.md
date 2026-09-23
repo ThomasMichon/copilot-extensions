@@ -208,11 +208,40 @@ rewrite is a separate, already-existing migration concern that moves with
    reports `mirrored: false` — deploying to disk is Step 5's scope. 6 new
    CLI-dispatch tests plus the manual end-to-end check recorded in the
    effort journal.
-5. [ ] **Repoint `install.ps1`'s** `Deploy-TerminalScripts`/
-   `Sync-TerminalState`/`Get-SettingsProfileGuids`/`Clean-TerminalSettingsJson`
-   at the new owner, following Phase 3b Slice 2a's launcher-script repoint
-   pattern (copy verbatim, hash-verify, repoint, keep a direct fallback for
-   the absent-Manager case).
+5. [x] **5a. Build the real deploy/mirror mechanism in worktree-manager.**
+   **Landed** — PR [#3445](https://github.com/ThomasMichon/copilot-extensions/pull/3445):
+   `terminal_fragment.deploy_fragment(machine, current_project=None,
+   apply=False)` computes the full deploy plan (new fragment JSON, GUID
+   staleness/change detection vs. the on-disk fragment,
+   `generatedProfiles`/`settings.json` reconciliation via the already-ported
+   `reconcile_generated_profiles`) unconditionally; only `apply=True`
+   performs any write, in the same reconcile-before-write order
+   `install.ps1`'s `Deploy-Shortcuts`/`Sync-TerminalState` used. Wired into
+   the CLI as `terminal-fragment <project> --deploy [--live]` and
+   `profiles <project> apply --mirror [--live]` — **per operator direction**
+   (this touches live installed Windows Terminal state with no safe CI test
+   path), both default to dry-run/preview and require the explicit `--live`
+   flag to write anything; `apply` without `--mirror` is byte-for-byte
+   unchanged from before this step. 9 new tests (module-level
+   `test_terminal_fragment_deploy.py` + CLI-dispatch coverage in
+   `test_terminal_fragment_cli.py`); full non-picker suite green (1134
+   passed, the same 3 pre-existing unrelated Windows path-validation
+   failures as every prior step).
+   - [ ] **5b. Repoint `install.ps1`'s** `Deploy-TerminalScripts`/
+     `Sync-TerminalState`/`Get-SettingsProfileGuids`/`Clean-TerminalSettingsJson`
+     at the new owner, following Phase 3b Slice 2a's launcher-script repoint
+     pattern (copy verbatim, hash-verify, repoint, keep a direct fallback for
+     the absent-Manager case).
+   - [ ] **5c. Live-machine validation trial.** `--live` has NOT yet been
+     exercised against a real installed Windows Terminal — only against
+     synthetic fixture `LOCALAPPDATA` trees in the test suite. Per the
+     operator's chosen validation approach (dry-run flag first, defer real
+     writes until proven safe), do not flip any default or remove the
+     `--live` gate, retire agent-worktrees' own deploy path, or treat this
+     mechanism as "done" until an operator-supervised live trial on one real
+     machine has confirmed `terminal-fragment <project> --deploy --live`
+     (and `profiles apply --mirror --live`) behave correctly against this
+     machine's actual Windows Terminal install.
 6. [ ] **Delete agent-worktrees' `profiles`/`terminal-fragment` CLI verbs,
    `picker_profiles_cli.py`'s terminal-mirroring code, and
    `picker_support/data_local.py`'s/`profiles_io.py`'s Profiles-grid path**
