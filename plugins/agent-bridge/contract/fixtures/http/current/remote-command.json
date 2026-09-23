@@ -1,6 +1,6 @@
 {
   "captured_from": {
-    "commit": "00a0038ef68091e97d1b7e7562ebb4715a47cdd8",
+    "commit": "c0afc2c593e867654a2b109956c6f48447ebffe8",
     "plugin_version": "0.4.0-dev549",
     "protocol_generation": 18,
     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
