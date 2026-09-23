@@ -3761,6 +3761,44 @@ def _maybe_emit_stage_13(
             claim_path.unlink()
 
 
+def _settle_predecessor_session_claim(wt_id: str | None, session_id: str) -> None:
+    """Settle a confirmed-retired predecessor's ``session`` claim to at-rest.
+
+    Runs for *every* confirmed retire (bare or token-bearing), unlike
+    :func:`_conclude_retired_predecessor` which only concludes the
+    ``SessionEntry`` on a bare retire -- a token-bearing retire's own
+    ``SessionEntry`` transition is ``link_handoff``'s job, but nothing else
+    settles the predecessor's Phase 8 ``session`` resource claim once its
+    pane and Copilot process are positively confirmed gone. Settles (not
+    releases) since ``settle_resource_claim`` never resurrects an
+    already-``released`` claim (mirrors ``finalize.py``'s
+    ``_settle_current_session_claim`` guard) -- a ``deregister_session`` that
+    raced ahead and released the claim first is left alone. Best-effort:
+    unknown worktree/session or a missing claim is a silent no-op, never a
+    hard failure of the retire itself.
+    """
+    if not wt_id or not session_id:
+        return
+    with contextlib.suppress(Exception):
+        yaml_path = tracking._owning_tracking_dir(wt_id) / f"{wt_id}.yaml"
+        if not yaml_path.exists():
+            return
+        with tracking._RecordLock(yaml_path):
+            record = tracking.load_record(yaml_path)
+            predecessor_ref = tracking.format_claim_ref(
+                record.machine, record.repo, record.worktree_id, session=session_id,
+            )
+            existing_claim = next(
+                (c for c in record.resources if c.ref == predecessor_ref), None,
+            )
+            if existing_claim is None or existing_claim.state == "released":
+                return
+            tracking.settle_resource_claim(
+                record, predecessor_ref, disposition=obligations.AT_REST, save=False,
+            )
+            tracking.save_record(record, yaml_path)
+
+
 def _conclude_retired_predecessor(wt_id: str | None, session_id: str) -> None:
     """Mark a retire-confirmed predecessor's ``SessionEntry`` concluded.
 
@@ -3950,6 +3988,8 @@ def _handoff_cutover_retire_result(
     # make that acknowledgement fail (`link_handoff` refuses an explicitly
     # concluded predecessor).
     bare_retire = not getattr(args, "handoff_token", None)
+    if overall_ok and pane_confirmed_retired and session_id:
+        _settle_predecessor_session_claim(wt_id, session_id)
     if overall_ok and pane_confirmed_retired and bare_retire and session_id:
         _conclude_retired_predecessor(wt_id, session_id)
     activity.log_event(
