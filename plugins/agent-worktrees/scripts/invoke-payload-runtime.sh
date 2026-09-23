@@ -54,6 +54,12 @@ boot_trace_iso() {
 
 boot_trace_log() {
     [[ -n "${RUNTIME_ROOT:-}" ]] || return 0
+    # Never force-create the LEGACY root purely to write a boot-trace
+    # record -- see invoke-payload-runtime.ps1's own identical guard for
+    # the full rationale (Copilot review follow-up, PR #3310).
+    if [[ "$RUNTIME_ROOT" == "$LEGACY_ROOT" && ! -d "$RUNTIME_ROOT" ]]; then
+        return 0
+    fi
     local phase="$1" now_ms="$2" dispatch_path="${3-}"
     local log_path="$RUNTIME_ROOT/logs/activity.jsonl"
     local log_dir="${log_path%/*}"
@@ -394,6 +400,16 @@ installation_resolution_current() {
 
 resolve_runtime
 boot_trace resolver-loaded
+# Log the outer dispatcher template's own `shim-start` phase here, now
+# that RUNTIME_ROOT reflects whichever root (legacy or an active
+# namespaced context) is genuinely active -- the outer template forwards
+# its own timestamp via this env var but never writes the durable record
+# itself, precisely because it cannot know which root is correct
+# (Copilot review, PR #3310; see the outer dispatcher-posix.tmpl's own
+# comment for the full rationale).
+if [[ -n "${COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS:-}" ]]; then
+    boot_trace_log "shim-start" "$COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS" ""
+fi
 if [[ -n "${AGENT_RT_PY:-}" ]]; then
     boot_trace dispatch fast
     run_runtime "$@"

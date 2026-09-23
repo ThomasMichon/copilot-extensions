@@ -4,58 +4,14 @@ $env:PYTHONUTF8 = '1'
 $_plugin = 'agent-vault'
 $_command = 'agent-vault'
 $_payloadRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$_runtimeRoot = Join-Path $env:USERPROFILE '.agent-vault'
-$_bootTraceLogPath = Join-Path $_runtimeRoot 'logs\boot-trace.jsonl'
 
 function Get-BootTraceTimestamp {
     return [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 }
 
-function Get-BootTraceIsoTimestamp {
-    return [DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:sszzz')
-}
-
-function Escape-BootTraceJson([string]$Value) {
-    if ($null -eq $Value) { return '' }
-    return $Value.Replace('\', '\\').Replace('"', '\"')
-}
-
-function Write-BootTraceRecord(
-    [string]$Phase,
-    [long]$TimestampMs,
-    [string]$DispatchPath = ''
-) {
-    if (-not $_bootTraceLogPath) { return }
-    try {
-        [IO.Directory]::CreateDirectory((Split-Path -Parent $_bootTraceLogPath)) | Out-Null
-        $parts = [System.Collections.Generic.List[string]]::new()
-        $parts.Add('"ts":"' + (Escape-BootTraceJson (Get-BootTraceIsoTimestamp)) + '"')
-        $parts.Add('"event":"boot_trace"')
-        $parts.Add('"plugin":"' + (Escape-BootTraceJson $_plugin) + '"')
-        $parts.Add('"phase":"' + (Escape-BootTraceJson $Phase) + '"')
-        $parts.Add('"t_ms":' + $TimestampMs)
-        $parts.Add('"pid":' + $PID)
-        $hostName = [Environment]::MachineName
-        if ($hostName) {
-            $parts.Add('"host":"' + (Escape-BootTraceJson $hostName) + '"')
-        }
-        $parts.Add('"source":"launcher"')
-        if ($DispatchPath) {
-            $parts.Add('"path":"' + (Escape-BootTraceJson $DispatchPath) + '"')
-        }
-        $line = '{' + ($parts -join ',') + '}'
-        [IO.File]::AppendAllText(
-            $_bootTraceLogPath,
-            $line + [Environment]::NewLine,
-            [Text.UTF8Encoding]::new($false)
-        )
-    } catch {}
-}
-
 function Write-BootTrace([string]$Phase, [string]$DispatchPath = '') {
     $timestampMs = Get-BootTraceTimestamp
-    Write-BootTraceRecord -Phase $Phase -TimestampMs $timestampMs -DispatchPath $DispatchPath
-    if (-not $env:COPILOT_EXTENSIONS_BOOT_TRACE) { return }
+    if (-not $env:COPILOT_EXTENSIONS_BOOT_TRACE) { return $timestampMs }
     $plugin = if ($env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN) {
         $env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN
     } else {
@@ -64,9 +20,26 @@ function Write-BootTrace([string]$Phase, [string]$DispatchPath = '') {
     $line = "::boot-trace:: plugin=$plugin phase=$Phase t=$timestampMs"
     if ($DispatchPath) { $line += " path=$DispatchPath" }
     [Console]::Error.WriteLine($line)
+    return $timestampMs
 }
 
-Write-BootTrace 'shim-start'
+# This outer dispatcher template's own `$_runtimeRoot` would ALWAYS be the
+# LEGACY root (see generate.py's `runtimeRoot`/`legacyRuntimeRoot`
+# resolution): installationContext=required plugins -- the only plugins
+# that ever select this template -- may actually be running under a
+# resolved, ACTIVE namespaced root that only the inner, installation-
+# context-aware dispatcher knows how to determine. Writing shim-start/
+# dispatch durably here, gated only on the legacy log directory already
+# existing, would either lose those phases when the legacy dir happens
+# not to exist yet, or silently misroute them into a stale legacy log
+# that happens to still exist while a namespaced context is actually
+# active (Copilot review, PR #3310). So this outer template never itself
+# writes the durable record for these two early phases -- it forwards
+# `shim-start`'s own timestamp via an env var so the inner dispatcher can
+# log both phases once it has resolved whichever root is genuinely
+# active. `COPILOT_EXTENSIONS_BOOT_TRACE` (opt-in stderr) still fires
+# here immediately, unaffected by this deferral.
+$_bootTraceShimStartMs = Write-BootTrace 'shim-start'
 
 if (-not (Test-Path -LiteralPath (Join-Path $_payloadRoot 'plugin.json'))) {
     [Console]::Error.WriteLine("[$_command] payload root is not a plugin: $_payloadRoot")
@@ -90,7 +63,8 @@ if (
 }
 
 $env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN = $_plugin
-Write-BootTrace 'dispatch'
+$env:COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS = $_bootTraceShimStartMs
+Write-BootTrace 'dispatch' | Out-Null
 $env:AGENT_VAULT_PAYLOAD_ROOT = $_payloadRoot
 $_payloadDispatcher = Join-Path $_payloadRoot 'scripts\runtime-gate.ps1'
 & $_payloadDispatcher @args

@@ -77,6 +77,22 @@ The durable channel is **always on** and records every phase whether or not
   `::boot-trace:: plugin=... phase=... t=<epoch-ms> ...` lines to **stderr**
   only. This is additive: durable logging still happens, and the stderr extras
   keep their existing `source=... result=... version=... path=...` vocabulary.
+- **`installationContext: required` plugins defer `shim-start`/`dispatch`
+  durable writes to their own inner, installation-context-aware dispatcher.**
+  The outer generated dispatcher shim (`dispatcher-posix.tmpl`/
+  `dispatcher-powershell.tmpl` -- the only templates these plugins select)
+  structurally cannot know whether the active root is the legacy one or a
+  resolved namespaced context, so it never writes these two phases itself;
+  it only computes/stderr-emits `shim-start`'s timestamp and forwards it via
+  `COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS` for the inner dispatcher to
+  log once it has resolved the genuinely active root. `agent-worktrees`'
+  own bespoke inner launcher (`invoke-payload-runtime.sh`/`.ps1`) does this;
+  the other nine `installationContext: required` plugins' own inner
+  dispatchers (each plugin's own bespoke `scripts/runtime-gate.*`, not a
+  shared/vendored file) do not yet consume the forwarded env var, so those
+  plugins simply do not yet emit a durable `shim-start`/`dispatch` record --
+  the same "not yet implemented" state every other unimplemented phase is
+  already in for those plugins, not a regression or a misrouted/lost record.
 
 Durable records reuse the activity-style event shape:
 

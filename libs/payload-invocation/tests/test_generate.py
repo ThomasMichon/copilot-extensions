@@ -2649,9 +2649,19 @@ def test_powershell_shim_preserves_sibling_cwd_and_leaves_payload(
     os.name != "nt" or shutil.which("pwsh") is None,
     reason="native Windows PowerShell shim test",
 )
-def test_required_dispatcher_shim_writes_durable_boot_trace_by_default(
+def test_required_dispatcher_shim_defers_boot_trace_to_the_inner_dispatcher(
     tmp_path: Path,
 ) -> None:
+    """Regression (Copilot review, PR #3310): the outer dispatcher shim's
+    own `$_runtimeRoot`/`$_runtime_root` is ALWAYS the legacy root -- an
+    installationContext=required plugin's active root may actually be a
+    resolved namespaced context only the inner, installation-context-aware
+    dispatcher knows how to determine. The outer shim must therefore never
+    itself write shim-start/dispatch durably (that would either lose the
+    record or misroute it into a stale legacy log); it must instead forward
+    `shim-start`'s own timestamp via `COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_
+    START_MS` and let the inner dispatcher log both phases once it has
+    resolved the genuinely active root."""
     pwsh = shutil.which("pwsh")
     assert pwsh
     manifest = _required_context_manifest(tmp_path)
@@ -2659,8 +2669,14 @@ def test_required_dispatcher_shim_writes_durable_boot_trace_by_default(
     plugin = manifest.parent
     (plugin / "plugin.json").write_text('{"name":"agent-machines"}\n', encoding="utf-8")
     scripts = plugin / "scripts"
+    # A fake inner dispatcher standing in for a real installation-context-
+    # aware one (e.g. agent-worktrees' own invoke-payload-runtime.ps1) --
+    # this one does NOT itself consume the forwarded env var, so this test
+    # asserts what the OUTER shim's own contract guarantees regardless of
+    # whether any given inner dispatcher has adopted forwarding yet.
     (scripts / "invoke-payload-runtime.ps1").write_text(
-        "Write-Output ('stdout:' + ($args -join '|'))\n",
+        "Write-Output ('stdout:' + ($args -join '|'))\n"
+        "Write-Output ('shim_start_ms=' + $env:COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS)\n",
         encoding="utf-8",
     )
 
@@ -2690,11 +2706,20 @@ def test_required_dispatcher_shim_writes_durable_boot_trace_by_default(
         text=True,
         check=True,
     )
-    assert baseline.stdout.strip() == "stdout:alpha|beta"
+    stdout_lines = baseline.stdout.strip().splitlines()
+    assert stdout_lines[0] == "stdout:alpha|beta"
+    # The outer shim forwarded a real, non-empty timestamp to the inner
+    # dispatcher via the env var -- proving the forwarding contract works,
+    # even though this fake inner dispatcher doesn't itself log it.
+    assert stdout_lines[1].startswith("shim_start_ms=")
+    forwarded_ms = stdout_lines[1].removeprefix("shim_start_ms=")
+    assert forwarded_ms.isdigit()
     assert baseline.stderr == ""
-    durable = _read_jsonl(home / ".agent-example" / "logs" / "boot-trace.jsonl")
-    assert [rec["phase"] for rec in durable] == ["shim-start", "dispatch"]
-    assert [rec["source"] for rec in durable] == ["launcher", "launcher"]
+    # The outer shim must NEVER itself write a durable record for these two
+    # phases -- only the inner dispatcher may, once it has resolved the
+    # genuinely active root. This fake inner dispatcher doesn't, so no
+    # boot-trace.jsonl should exist at all.
+    assert not (home / ".agent-example" / "logs" / "boot-trace.jsonl").exists()
 
     traced = subprocess.run(
         command,
@@ -2703,12 +2728,15 @@ def test_required_dispatcher_shim_writes_durable_boot_trace_by_default(
         text=True,
         check=True,
     )
-    assert traced.stdout == baseline.stdout
+    traced_lines = traced.stdout.strip().splitlines()
+    assert traced_lines[0] == "stdout:alpha|beta"
+    assert traced_lines[1].startswith("shim_start_ms=")
     assert [
         match.group(1)
         for match in re.finditer(r"phase=([a-z-]+)", traced.stderr)
     ] == ["shim-start", "dispatch"]
-    assert len(_read_jsonl(home / ".agent-example" / "logs" / "boot-trace.jsonl")) == 4
+    # Still no durable write, opt-in stderr trace or not.
+    assert not (home / ".agent-example" / "logs" / "boot-trace.jsonl").exists()
 
 
 @pytest.mark.skipif(

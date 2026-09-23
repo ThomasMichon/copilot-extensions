@@ -32,6 +32,20 @@ function Write-BootTraceRecord(
     [string]$DispatchPath = ''
 ) {
     if (-not $runtimeRoot) { return }
+    # Never force-create the LEGACY root purely to write a boot-trace
+    # record: an ordinary read-only command (e.g. --version) against an
+    # already-resolved runtime in legacy-default mode must stay side-
+    # effect-free, an invariant this repo tests extensively (Copilot
+    # review follow-up, PR #3310 -- distinct from the namespaced-cell
+    # case below, where a resolved ACTIVE context is always expected to
+    # get its own directory touched regardless). A real first-ever legacy
+    # install still gets fully traced: `provision-start`/`provision-end`
+    # explicitly `New-Item` the legacy root before emitting those phases,
+    # so this guard only ever suppresses the narrow window before any
+    # real provisioning has begun.
+    if ($runtimeRoot -eq $legacyRoot -and -not (Test-Path -LiteralPath $runtimeRoot)) {
+        return
+    }
     $bootTraceLogPath = Join-Path $runtimeRoot 'logs\activity.jsonl'
     try {
         [IO.Directory]::CreateDirectory((Split-Path -Parent $bootTraceLogPath)) | Out-Null
@@ -368,6 +382,16 @@ function Invoke-AgentWorktreesRuntime([string]$Python) {
 
 $python = Resolve-AgentWorktreesRuntime
 Write-BootTrace 'resolver-loaded'
+# Log the outer dispatcher template's own 'shim-start' phase here, now
+# that $runtimeRoot reflects whichever root (legacy or an active
+# namespaced context) is genuinely active -- the outer template forwards
+# its own timestamp via this env var but never writes the durable record
+# itself, precisely because it cannot know which root is correct
+# (Copilot review, PR #3310; see the outer dispatcher-powershell.tmpl's
+# own comment for the full rationale).
+if ($env:COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS) {
+    Write-BootTraceRecord -Phase 'shim-start' -TimestampMs ([long]$env:COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS)
+}
 if ($python) {
     Write-BootTrace 'dispatch' 'fast'
     Invoke-AgentWorktreesRuntime $python
