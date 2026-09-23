@@ -86,6 +86,7 @@
   "tools/clean-room/scenarios/agent-machines-installation-cells/scenario.py": 1117,
   "tools/clean-room/scenarios/progressive-context-disclosure-baseline/fixture.py": 2369,
   "worktree-manager/libs/plugin-activation/src/plugin_activation/resolver.py": 1270,
-  "worktree-manager/src/worktree_manager/__main__.py": 1715,
-  "worktree-manager/src/worktree_manager/production_picker/picker_tui/data_ssh.py": 2078
+  "worktree-manager/src/worktree_manager/__main__.py": 1745,
+  "worktree-manager/src/worktree_manager/production_picker/picker_tui/data_ssh.py": 2078,
+  "worktree-manager/src/worktree_manager/terminal_fragment.py": 1256
 }
