@@ -11,6 +11,8 @@ or an explicit ``--project``; it is threaded in-process, not read from
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import os
 import platform
 import re
@@ -948,7 +950,7 @@ def legacy_inrepo_config_path(anchor: str | Path) -> Path:
     return Path(anchor) / LEGACY_INREPO_CONFIG_DIRNAME / GLOBAL_CONFIG_FILENAME
 
 
-def load_config(
+def _load_config_uncached(
     path: Path | None = None,
     *,
     include_control_plane_related_pr: bool = True,
@@ -1211,11 +1213,82 @@ def load_config(
     )
 
 
+# ── Opt-in same-pass memoization ──────────────────────────────────────────
+# ``_load_config_uncached`` re-walks the control-plane related-PR discovery
+# (``_control_plane_related_pr_map``) on every call -- profiled at several
+# real seconds on a machine with many registered repos (see that function's
+# own docstring). Most callers invoke it once per process and this cost is a
+# reasonable one-time hit, but some call chains -- notably the Worktree
+# Manager's live picker setup (``_prepare_live_source``), which independently
+# asks for the roster, the profiles-matrix axes, and the REPO/BRANCH topbar
+# fields -- invoke ``load_config()`` several times in a single logical pass,
+# redundantly repeating that discovery every time (observed: 11 calls in one
+# pass, ~40s total, in a fleet with 15+ registered repos).
+#
+# ``cached_load_config_scope()`` is an explicit, opt-in memoization window: a
+# caller that knows it is about to make several ``load_config()`` calls that
+# should agree on one point-in-time answer wraps that pass in the context
+# manager, and every ``load_config()`` call in the SAME thread during that
+# window (including internal callers like ``load_project_config`` /
+# ``_control_plane_related_pr_map``) is memoized by its exact argument
+# signature. Every other caller -- everything that does not opt in -- sees
+# ``load_config()``'s ordinary always-fresh behavior, unchanged; this cannot
+# affect existing tests or invalidation semantics. Not thread-propagated: a
+# ``threading.Thread`` started from inside the scope does NOT inherit it
+# (Python's ``contextvars`` give each new thread a fresh top-level context),
+# so a caller that fans work out to worker threads must enter the scope on
+# each thread that wants the memoization.
+_load_config_cache: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    "_load_config_cache", default=None
+)
+
+
+@contextlib.contextmanager
+def cached_load_config_scope():
+    """Memoize ``load_config()`` calls (same thread) for one logical pass."""
+    token = _load_config_cache.set({})
+    try:
+        yield
+    finally:
+        _load_config_cache.reset(token)
+
+
+def load_config(
+    path: Path | None = None,
+    *,
+    include_control_plane_related_pr: bool = True,
+    project: str | None = None,
+) -> Config:
+    """Memoizing front door to :func:`_load_config_uncached`.
+
+    Outside a :func:`cached_load_config_scope`, behaves identically to the
+    unwrapped loader (a cache miss every call). Inside one, repeats of the
+    exact same ``(path, include_control_plane_related_pr, project)`` call
+    return the same already-computed :class:`Config` instead of re-running
+    the layered load + control-plane discovery.
+    """
+    cache = _load_config_cache.get()
+    if cache is None:
+        return _load_config_uncached(
+            path,
+            include_control_plane_related_pr=include_control_plane_related_pr,
+            project=project,
+        )
+    key = (str(path) if path is not None else None,
+           include_control_plane_related_pr, project)
+    if key not in cache:
+        cache[key] = _load_config_uncached(
+            path,
+            include_control_plane_related_pr=include_control_plane_related_pr,
+            project=project,
+        )
+    return cache[key]
+
+
 def load_project_config(
     name: str, *, include_control_plane_related_pr: bool = True
 ) -> Config:
     """Load one project's layered config without inheriting caller identity.
-
     Args:
         name: Project identity to load.
         include_control_plane_related_pr: Forwarded to :func:`load_config`.

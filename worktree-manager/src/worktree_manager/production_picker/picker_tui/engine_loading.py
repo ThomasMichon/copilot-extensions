@@ -8,6 +8,7 @@ import time
 
 from .engine_helpers import _DEFAULT_HOST_COLS, _DEFAULT_TARGET_ENVS, target_rows
 from .selection import ListSelection
+from .. import config as cfg
 
 class PickerScreenLoadingMixin:
     def on_mount(self):
@@ -155,9 +156,18 @@ class PickerScreenLoadingMixin:
         loader = None
         prepared = None
         try:
-            snapshot_fn = getattr(self.src, "source_snapshot", None)
-            snapshot = snapshot_fn() if callable(snapshot_fn) else None
-            prepared = self._prepare_live_source(snapshot)
+            # One logical pass asks the source for the roster, the
+            # profiles-matrix axes, and the REPO/BRANCH topbar fields --
+            # each independently calls agent_worktrees.config.load_config(),
+            # whose control-plane related-PR discovery is expensive and
+            # otherwise uncached (profiled at several real seconds per call
+            # on a fleet with many registered repos). Memoize every
+            # load_config() call in this pass so that cost is paid once, not
+            # once per helper (#worktree-manager-picker-startup-latency).
+            with cfg.cached_load_config_scope():
+                snapshot_fn = getattr(self.src, "source_snapshot", None)
+                snapshot = snapshot_fn() if callable(snapshot_fn) else None
+                prepared = self._prepare_live_source(snapshot)
             loader = (
                 self.src.make_loader(snapshot)
                 if snapshot is not None
