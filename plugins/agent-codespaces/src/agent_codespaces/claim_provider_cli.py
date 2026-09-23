@@ -160,6 +160,20 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
             "detail": f"pre-delete session recovery failed: {recovery.get('detail', '')}",
         }))
         return 0
+    # Narrow (not eliminate -- this lease store has no atomic hold/fence
+    # primitive to extend across a long external operation) the window
+    # between the initial lease check above and the destructive delete
+    # below: session recovery can itself run for minutes, during which
+    # another effort could legitimately acquire the CodeSpace. Re-verify
+    # immediately before the point of no return rather than trusting a
+    # check made minutes earlier.
+    lease = get_lease(args.name)
+    if lease:
+        print(json.dumps({
+            "reclaimed": False,
+            "detail": f"CodeSpace is leased to {lease.effort}; release it first",
+        }))
+        return 0
     try:
         delete_codespace(args.name, force=True)
     except Exception as exc:

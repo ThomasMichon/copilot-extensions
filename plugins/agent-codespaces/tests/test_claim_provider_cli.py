@@ -87,6 +87,32 @@ def test_claim_reclaim_apply_recovers_sessions_and_releases_lease(monkeypatch, c
     assert calls == [("sync", "cs-a"), ("delete", "cs-a"), ("release", "cs-a")]
 
 
+def test_claim_reclaim_refuses_when_leased_during_recovery(monkeypatch, capsys):
+    """Narrows (does not eliminate -- there is no atomic fence primitive)
+    the window between the initial lease check and the destructive delete:
+    another effort can legitimately acquire the CodeSpace during the
+    (potentially minutes-long) session-recovery step -- re-verify
+    immediately before the point of no return."""
+    lease_calls = {"n": 0}
+
+    def _get_lease(name):
+        lease_calls["n"] += 1
+        if lease_calls["n"] == 1:
+            return None  # free at the initial check
+        return types.SimpleNamespace(effort="late-borrower")  # acquired during recovery
+
+    monkeypatch.setattr(cpc, "get_lease", _get_lease)
+    monkeypatch.setattr(cpc, "sync_codespace_sessions", lambda *a, **k: {"ok": True})
+    called = {"n": 0}
+    monkeypatch.setattr(cpc, "delete_codespace", lambda *a, **k: called.__setitem__("n", 1))
+    rc = cpc.cmd_claim_reclaim(argparse.Namespace(name="cs-a", apply=True))
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["reclaimed"] is False and "late-borrower" in out["detail"]
+    assert called["n"] == 0
+    assert lease_calls["n"] == 2
+
+
 def test_claim_reclaim_blocks_delete_when_recovery_fails_and_still_exists(monkeypatch, capsys):
     """A FAILED session recovery must block the delete when the CodeSpace
     genuinely still exists (unattended path, no operator present to notice

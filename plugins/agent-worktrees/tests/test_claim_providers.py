@@ -703,23 +703,18 @@ def test_is_safe_argument_rejects_trailing_newline():
 
 
 def test_peer_env_is_none_without_a_context(monkeypatch):
-    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.delenv("COPILOT_PLUGIN_ROOT", raising=False)
     assert cp.peer_env() is None
 
 
-def test_peer_env_strips_own_context_for_the_child(monkeypatch):
-    """A resolved SIBLING binstub must never inherit THIS process's own
-    marketplace-cell installation receipt -- the sibling's own
-    installation-context runtime gate would validate it against the
-    wrong plugin id and fail closed."""
+def test_in_namespaced_cell_true_when_context_set(monkeypatch):
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "agent-worktrees@copilot-extensions")
-    monkeypatch.delenv("COPILOT_PLUGIN_ROOT", raising=False)
-    monkeypatch.setenv("SOME_OTHER_VAR", "kept")
-    env = cp.peer_env()
-    assert env is not None
-    assert "COPILOT_EXTENSIONS_CONTEXT" not in env
-    assert env.get("SOME_OTHER_VAR") == "kept"
+    assert cp.in_namespaced_cell() is True
+
+
+def test_in_namespaced_cell_false_without_context(monkeypatch):
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    assert cp.in_namespaced_cell() is False
 
 
 def test_peer_env_strips_plugin_root_even_without_a_context(monkeypatch):
@@ -732,6 +727,31 @@ def test_peer_env_strips_plugin_root_even_without_a_context(monkeypatch):
     env = cp.peer_env()
     assert env is not None
     assert "COPILOT_PLUGIN_ROOT" not in env
+
+
+def test_resolve_claim_status_degrades_in_a_namespaced_cell(tmp_path, monkeypatch):
+    """Cross-plugin claim-provider invocation is not yet supported in an
+    explicit marketplace-cell run (see in_namespaced_cell's own docstring):
+    the callback must never even be attempted, degrading exactly as it
+    would for an absent provider, rather than risk operating against the
+    wrong cell's resources/credentials."""
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "agent-worktrees@copilot-extensions")
+
+    def fake_discover(_plugins_root):
+        provider = cp.ClaimProviderManifest(
+            namespace="codespace",
+            plugin="agent-codespaces@copilot-extensions",
+            plugin_root=str(tmp_path),
+            status_command=("python", "-c", "raise SystemExit(1)"),
+        )
+        return {"codespace": provider}, ()
+
+    monkeypatch.setattr(cp, "discover_claim_providers", fake_discover)
+    result = cp.resolve_claim_status("codespace:my-box-1", plugins_root=tmp_path)
+    assert result == {
+        "available": False,
+        "reason": "agent-codespaces@copilot-extensions claim-status callback failed",
+    }
 
 
 def test_resolve_provider_argv_degrades_when_no_provider_registered(tmp_path):

@@ -161,6 +161,24 @@ def test_run_codespaces_refuses_unsafe_name(monkeypatch):
     assert called["n"] == 0
 
 
+def test_run_codespaces_refuses_in_namespaced_cell(monkeypatch):
+    """Cross-plugin claim-provider invocation is not yet supported in an
+    explicit marketplace-cell run -- never even attempt the subprocess."""
+    from agent_worktrees import claim_providers
+    provider = claim_providers.ClaimProviderManifest(
+        namespace="codespace", plugin="agent-codespaces@marketplace",
+        plugin_root="/x", reclaim_command=("agent-codespaces",))
+    monkeypatch.setattr(claim_providers, "discover_claim_providers",
+                        lambda *a, **k: ({"codespace": provider}, ()))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "agent-worktrees@copilot-extensions")
+    called = {"n": 0}
+    monkeypatch.setattr(cleanup.subprocess, "run",
+                        lambda *a, **k: called.__setitem__("n", 1))
+    proc = cleanup._run_codespaces([("delete", True), ("cs-x", False), ("--force", True)])
+    assert proc is None
+    assert called["n"] == 0
+
+
 # ── reclaim_worktree ─────────────────────────────────────────────────────────
 
 def _repo(anchor="D:/anchor"):

@@ -2060,8 +2060,11 @@ def test_claim_status_exists(monkeypatch):
         def get(self, task_id):
             return {"id": task_id, "status": "started", "owner": "m/wt-abc"}
 
+    captured = {}
+
     @contextlib.contextmanager
     def _fake_client(args, **kw):
+        captured.update(kw)
         yield _FakeClient()
 
     monkeypatch.setattr(__main__, "_client", _fake_client)
@@ -2069,6 +2072,7 @@ def test_claim_status_exists(monkeypatch):
     with contextlib.redirect_stdout(buf):
         rc = __main__._cmd_claim_status(argparse.Namespace(task_id="t1"))
     assert rc == 0
+    assert captured.get("ensure") is False  # never pay coordinator lazy-startup within the callback budget
     out = json.loads(buf.getvalue())
     assert out == {"exists": True, "state": "started", "detail": "m/wt-abc"}
 

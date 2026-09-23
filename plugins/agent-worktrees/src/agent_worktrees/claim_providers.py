@@ -559,32 +559,48 @@ def _windows_batch_argv(command: tuple[str, ...]) -> list[str]:
     return [comspec, "/d", "/s", "/c", *command]
 
 
-def peer_env() -> dict[str, str] | None:
-    """Environment for invoking a resolved SIBLING plugin's binstub.
+def in_namespaced_cell() -> bool:
+    """Whether THIS process itself runs under an explicit marketplace-cell
+    installation context (``COPILOT_EXTENSIONS_CONTEXT`` set).
 
-    Strips this process's own ``COPILOT_EXTENSIONS_CONTEXT`` AND
-    ``COPILOT_PLUGIN_ROOT`` (explicit marketplace-cell installation receipts
-    identifying THIS plugin, agent-worktrees, and its own payload root)
-    before the child inherits either unchanged -- otherwise the sibling's
-    own installation-context runtime gate validates the inherited receipt
-    against ITS OWN plugin id and exits non-zero (fails closed as
-    unavailable), or a consumer keying off ``COPILOT_PLUGIN_ROOT``
-    specifically (e.g. agent-codespaces' ``sessions.
-    _agent_codespaces_marketplace()``) misreads it as ITS OWN payload root
-    and refuses to resolve a marketplace installation -- even though the
-    provider manifest itself was discovered correctly. Mirrors the same
-    absence-means-resolve-fresh contract this suite's own pivot registry
-    already relies on (``picker_support.pivot_manifest._resolve_activation``:
-    explicit context set -> validate against it; absent -> resolve fresh).
+    Cross-plugin claim-provider callback invocation is not yet supported in
+    this mode: naively stripping the context (what :func:`peer_env` does
+    for the common case) leaves cell-routing credentials
+    (``GH_TOKEN``/``GITHUB_TOKEN``) untouched, so the invoked sibling's own
+    payload-local shim would fall back to its LEGACY ``~/.agent-*`` runtime
+    and the CALLER's ambient credentials instead of the identity-verified
+    provider cell -- silently operating against the wrong cell/resource
+    rather than failing loudly. Every claim-provider invocation site checks
+    this FIRST and degrades exactly as it would for an absent/unregistered
+    provider (never attempting the subprocess at all) rather than risk
+    that. Properly rebinding to the target's OWN validated cell context
+    (mirroring each provider plugin's private peer-launch mechanism) is
+    real future work, not something this effort's registry can safely
+    approximate from the caller's side alone."""
+    return bool(os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip())
+
+
+def peer_env() -> dict[str, str] | None:
+    """Environment for invoking a resolved SIBLING plugin's binstub, for the
+    common (non-namespaced-cell) case -- see :func:`in_namespaced_cell` for
+    why every call site refuses outright rather than reaching here at all
+    when an explicit context is present.
+
+    Strips this process's own ``COPILOT_PLUGIN_ROOT`` (an installation
+    receipt identifying THIS plugin's, agent-worktrees', own payload root)
+    before the child inherits it unchanged -- a consumer keying off
+    ``COPILOT_PLUGIN_ROOT`` specifically (e.g. agent-codespaces' ``sessions.
+    _agent_codespaces_marketplace()``) would otherwise misread it as ITS
+    OWN payload root and refuse to resolve a marketplace installation, even
+    though the provider manifest itself was discovered correctly and no
+    namespaced-cell context is even in play.
 
     Returns ``None`` (inherit the ambient environment completely
-    unmodified) when this process itself carries neither variable -- the
-    common, non-namespaced-cell case."""
-    if not any(os.environ.get(name, "").strip() for name in
-               ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT")):
+    unmodified) when this process itself carries no such variable -- the
+    common case."""
+    if not os.environ.get("COPILOT_PLUGIN_ROOT", "").strip():
         return None
     env = dict(os.environ)
-    env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
     env.pop("COPILOT_PLUGIN_ROOT", None)
     return env
 
@@ -592,6 +608,8 @@ def peer_env() -> dict[str, str] | None:
 def _run_callback(
     command: tuple[str, ...], *, timeout: float, required_bool_field: str
 ) -> dict | None:
+    if in_namespaced_cell():
+        return None
     try:
         proc = subprocess.run(
             _windows_batch_argv(command), capture_output=True, text=True, timeout=timeout,

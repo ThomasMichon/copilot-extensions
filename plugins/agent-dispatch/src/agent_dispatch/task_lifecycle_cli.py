@@ -78,11 +78,19 @@ def _cmd_claim_status(args: argparse.Namespace) -> int:
     instead, so the registry's own caller degrades to
     ``{"available": false, ...}`` rather than treating an outage as a
     confirmed absence.
+
+    Passes ``ensure=False`` to ``_client`` -- the default ``ensure=True``
+    can spend up to ``_ensure_local_coordinator``'s own lazy-startup wait
+    (~20s) before ever issuing the actual request, which alone exceeds the
+    registry's 15s status-callback budget even on an ordinary cold-start,
+    not just an error case. A cold/absent local coordinator is exactly the
+    kind of "provider not currently available" this callback should report
+    quickly, not spend most of its budget trying to boot.
     """
     from .client import DispatchError
 
     try:
-        with _core()._client(args) as c:
+        with _core()._client(args, ensure=False) as c:
             task = c.get(args.task_id)
     except DispatchError as exc:
         if exc.status_code == 404:

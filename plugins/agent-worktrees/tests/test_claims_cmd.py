@@ -123,6 +123,23 @@ def test_inbound_refuses_unsafe_identity(monkeypatch):
     assert called["n"] == 0
 
 
+def test_inbound_refuses_in_namespaced_cell(monkeypatch):
+    """Cross-plugin claim-provider invocation is not yet supported in an
+    explicit marketplace-cell run -- never even attempt the subprocess."""
+    from agent_worktrees import claim_providers as cp
+    provider = cp.ClaimProviderManifest(
+        namespace="dispatch-task", plugin="agent-dispatch@marketplace",
+        plugin_root="/x", status_command=("agent-dispatch",))
+    monkeypatch.setattr(claim_providers, "discover_claim_providers",
+                        lambda *a, **k: ({"dispatch-task": provider}, ()))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "agent-worktrees@copilot-extensions")
+    called = {"n": 0}
+    monkeypatch.setattr(m.subprocess, "run", lambda *a, **k: called.__setitem__("n", 1))
+    res = m._dispatch_assigned_tasks("anomalous-potato", "wt-a", "")
+    assert res["available"] is False
+    assert called["n"] == 0
+
+
 # --- cmd_claims end-to-end --------------------------------------------------
 
 def _seed(tmp_path, monkeypatch, *, owner_ref=None, resources=None):
