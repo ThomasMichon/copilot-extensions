@@ -58,7 +58,7 @@ stops a file from growing right up against its existing ceiling commit by
 commit until it tips over) is exactly the failure mode a *proactive*
 discipline — not just the existing reactive guard — is meant to prevent.
 
-### Current pecking order (snapshot, 2026-09-22, post-`agent-dispatch/queue.py` steering/common slice)
+### Current pecking order (snapshot, 2026-09-22, post-`agent-dispatch/queue.py` storage/create slice)
 
 `python tools/rank-module-size.py --limit 20` (vendored duplicates folded in
 — re-run before starting a phase, this list moves; it already has multiple
@@ -87,15 +87,15 @@ passes during this effort — treat it as a live command, not a frozen table):
 | 1,989 | +989 | `plugins/agent-logger/src/agent_logger/sync/targets/filesystem.py` | |
 | 1,865 | +865 | `plugins/agent-vault/src/agent_vault/cli.py` | |
 
-**Suggested next pick (Phase 2, next slice):** continue
-`plugins/agent-dispatch/src/agent_dispatch/queue.py` until it is near cap.
-Two slices have now proven the existing queue mixin pattern scales cleanly:
-the remaining strong seam is the create/claim/query/storage core (plus any
-small support helpers it wants extracted beside it). If the campaign pivots
-away from `queue.py`, the largest production offender overall remains
+**Suggested next pick (Phase 2, next slice):** finish the current
+`plugins/agent-dispatch/src/agent_dispatch/queue.py` campaign. Three slices
+have now proven the queue's large-class mixin split cleanly; only the
+claim/query/reservation-read surface remains in `queue.py`, and one more
+mechanical slice should bring the composition root under cap. If the campaign
+pivots away from `queue.py` after that, the largest production offender overall remains
 `plugins/agent-worktrees/src/agent_worktrees/__main__.py`; within
-`agent-dispatch`, `supervisor.py` is now the plugin's largest remaining
-offender after `queue.py`.
+`agent-dispatch`, `supervisor.py` is already the plugin's largest remaining
+offender once `queue.py` drops below it.
 
 Full list: `python tools/rank-module-size.py --limit 70`. Files within a small
 margin of their own ceiling (most likely to tip over next from unrelated
@@ -274,6 +274,21 @@ Verbatim from the operator:
             F,E9 plugins/agent-dispatch` green, `check-module-size.py` green
             with baseline refreshed, and `agent-dispatch` bumped to
             `0.1.2-dev185`.
+      - [x] `agent-dispatch/queue.py` slice 3 (2,203 live lines at slice
+            start) — extracted `queue_storage.py` (924 lines) for the
+            storage-facing core: repo/token normalization, audit +
+            attachment persistence, payload/result I/O, reviewer-target legacy
+            parsing, and the managed `create`/`propose` path. Kept `queue.py`
+            as the compatibility/composition root and re-export surface, with
+            existing callers still importing the moved record types and helper
+            constants through `agent_dispatch.queue`. Added
+            `test_queue_storage.py` as the direct-import / MRO /
+            `get_type_hints()` guard. Running line count:
+            `queue.py` **2203 -> 1247**. Full `run-plugin-tests.py
+            agent-dispatch` green across all 6 sub-suites, `ruff check --select
+            F,E9 plugins/agent-dispatch` green, `check-module-size.py` green
+            with baseline refreshed, and `agent-dispatch` bumped to
+            `0.1.2-dev186`.
       - [ ] The `tools/clean-room/scenarios/*` fixtures (2,429 / 2,369) —
             lower urgency (not production code), but validating a split
             means actually running the Docker-based clean-room scenario
@@ -531,6 +546,31 @@ the Phase 0 runbook, picked up as capacity allows.
   `python tools/check-module-size.py --refresh-baseline` lowered the
   shrink-only baseline again. Version bump: `agent-dispatch`
   `0.1.2-dev184 -> 0.1.2-dev185`.
+
+### 2026-09-22 — `agent-dispatch/queue.py` slice 3: storage / creation mixin
+- Continued the queue campaign with the next natural responsibility band after
+  lifecycle extraction: the storage-facing core that every other mixin already
+  leans on. Extracted `queue_storage.py` (924 lines) for the repo/token
+  normalization helpers, audit + attachment persistence, payload/result reads,
+  reviewer-target legacy parsing, and the managed `create` / `create_outcome` /
+  `propose` path.
+- Ordering mattered: `QueueStorageMixin` now precedes the later lifecycle /
+  liveness / steering mixins in `TaskQueue`'s MRO so their existing
+  `self._canonical_repo()`, `self._fetch()`, `self._audit()`,
+  `self._record_attachment()`, and `self._enqueue_wake()` calls continue to
+  resolve through the historical class surface without touching their callers.
+- Added `tests/test_queue_storage.py` to guard the new mixin's direct import
+  surface, `TaskQueue` composition, queue re-exports, and
+  `typing.get_type_hints()` resolution. Running line count:
+  `queue.py` **2203 -> 1247** — now below the top-20 offenders, but still
+  above the 1,000-line cap, with one obvious remaining seam: the claim/query/
+  reservation-read surface.
+- Validation: `python tools/run-plugin-tests.py agent-dispatch` passed across
+  all 6 sub-suites, `ruff check --select F,E9 plugins/agent-dispatch` passed,
+  `python tools/check-module-size.py` passed, and
+  `python tools/check-module-size.py --refresh-baseline` lowered the
+  shrink-only baseline again. Version bump: `agent-dispatch`
+  `0.1.2-dev185 -> 0.1.2-dev186`.
 
 ### 2026-09-16 — Kickoff + Phase 0
 - Effort created from an operator request following review of
