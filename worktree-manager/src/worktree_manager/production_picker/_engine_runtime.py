@@ -110,4 +110,18 @@ def ensure_engine_runtime() -> Path:
 
 def engine_module(name: str) -> ModuleType:
     ensure_engine_runtime()
-    return importlib.import_module(f"agent_worktrees.{name}")
+    module = importlib.import_module(f"agent_worktrees.{name}")
+    if name == "__main__":
+        # agent-worktrees' own CLI dispatch defers ~35 submodules' worth of
+        # cross-references behind `_load_full_command_surface()`, populated
+        # only when the CLI's own `main()` runs (build_parser() or the
+        # COMMAND_MAP fallback) -- see ThomasMichon/copilot-extensions#3309.
+        # This module is the one shared external-consumer boundary that
+        # imports the engine's `__main__` directly as a library rather than
+        # invoking its CLI, so it must trigger that load itself; older
+        # installed agent-worktrees runtimes may predate this function
+        # entirely, hence the defensive getattr. See #3319.
+        loader = getattr(module, "_load_full_command_surface", None)
+        if callable(loader):
+            loader()
+    return module

@@ -8530,5 +8530,32 @@ def console_entry() -> None:
     run_and_exit(main)
 
 
+def __getattr__(name: str):
+    """PEP 562 module fallback: lazily-loaded attributes for external importers.
+
+    `_load_full_command_surface()` populates ~35 submodules' worth of
+    cross-referenced names only when this CLI's own dispatch runs
+    (`build_parser()` or the `COMMAND_MAP` fallback) or when
+    `_ensure_cluster_loaded()`/`_dispatch_lazy()` runs it explicitly for a
+    fast-tracked command. A consumer that imports this module directly as a
+    library (`importlib.import_module("agent_worktrees.__main__")`) and
+    touches one of those names *before* any of those code paths have run
+    never triggers the load -- this happened in production for
+    `worktree-manager`'s Picker (ThomasMichon/copilot-extensions#3319),
+    which was fixed at its own call site, but this is a defensive backstop
+    for any other/future external consumer that reaches this module the same
+    way. Triggers the full load on the FIRST failed attribute lookup only
+    (cheap in the common case: a genuine typo/AttributeError still pays this
+    once, then raises as normal).
+    """
+    if not _FULL_SURFACE_LOADED:
+        _load_full_command_surface()
+        try:
+            return globals()[name]
+        except KeyError:
+            pass
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 if __name__ == "__main__":
     console_entry()
