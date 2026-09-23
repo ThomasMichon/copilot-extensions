@@ -26,7 +26,6 @@ function Write-BootTraceRecord(
     [string]$DispatchPath = ''
 ) {
     if (-not $_bootTraceLogPath) { return }
-    if (-not [IO.Directory]::Exists($_runtimeRoot)) { return }
     try {
         [IO.Directory]::CreateDirectory((Split-Path -Parent $_bootTraceLogPath)) | Out-Null
         $parts = [System.Collections.Generic.List[string]]::new()

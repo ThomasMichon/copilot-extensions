@@ -53,7 +53,7 @@ boot_trace_iso() {
 }
 
 boot_trace_log() {
-    [[ -n "${RUNTIME_ROOT:-}" && -d "${RUNTIME_ROOT:-}" ]] || return 0
+    [[ -n "${RUNTIME_ROOT:-}" ]] || return 0
     local phase="$1" now_ms="$2" dispatch_path="${3-}"
     local log_path="$RUNTIME_ROOT/logs/activity.jsonl"
     local log_dir="${log_path%/*}"
@@ -65,6 +65,55 @@ boot_trace_log() {
     [[ -n "$dispatch_path" ]] && line="$line,\"path\":\"$dispatch_path\""
     line="$line}"
     { printf '%s\n' "$line" >> "$log_path"; } 2>/dev/null || true
+    boot_trace_maybe_prune "$log_path"
+}
+
+# Mirrors agent_worktrees.activity._maybe_prune/_prune's own retention window
+# (RETENTION_DAYS=7, _PRUNE_SIZE_BYTES=512*1024) so a launch that emits
+# boot_trace lines but never triggers a later Python-side log_event() call
+# (e.g. it exits before the real module runs any activity-logging code path)
+# does not grow activity.jsonl unbounded. Best-effort and lossy under a
+# concurrent writer during the rewrite, same posture as the Python pruner's
+# own documented tradeoff. Never lets a pruning failure affect the caller.
+boot_trace_maybe_prune() {
+    local log_path="$1" size
+    size="$(wc -c < "$log_path" 2>/dev/null)" || return 0
+    size="${size//[[:space:]]/}"
+    [[ "$size" =~ ^[0-9]+$ ]] || return 0
+    (( size >= 524288 )) || return 0
+    local cutoff
+    cutoff="$(boot_trace_prune_cutoff_iso)" || return 0
+    local tmp="${log_path}.prune.$$"
+    if LC_ALL=C awk -v cutoff="$cutoff" '
+        {
+            i = index($0, "\"ts\":\"")
+            if (i == 0) { print; next }
+            rest = substr($0, i + 6)
+            j = index(rest, "\"")
+            if (j == 0) { print; next }
+            ts = substr(rest, 1, j - 1)
+            if (ts >= cutoff) print
+        }
+    ' "$log_path" > "$tmp" 2>/dev/null; then
+        mv -f "$tmp" "$log_path" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
+    else
+        rm -f "$tmp" 2>/dev/null || true
+    fi
+}
+
+boot_trace_prune_cutoff_iso() {
+    local now cutoff raw
+    now="$(date +%s 2>/dev/null)" || return 1
+    cutoff=$((now - 7 * 86400))
+    if raw="$(date -u -d "@$cutoff" +%Y-%m-%dT%H:%M:%S+00:00 2>/dev/null)"; then
+        printf '%s\n' "$raw"
+        return 0
+    fi
+    if raw="$(date -u -r "$cutoff" +%Y-%m-%dT%H:%M:%S+00:00 2>/dev/null)"; then
+        printf '%s\n' "$raw"
+        return 0
+    fi
+    return 1
 }
 
 boot_trace() {

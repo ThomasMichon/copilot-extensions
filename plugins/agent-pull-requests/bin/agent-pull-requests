@@ -49,7 +49,6 @@ _boot_trace_iso() {
 
 _boot_trace_log() {
     [ -n "${_boot_trace_log_path:-}" ] || return 0
-    [ -d "$_runtime_root" ] || return 0
     _bt_phase="$1"
     _bt_now_ms="$2"
     _bt_emitter="$3"

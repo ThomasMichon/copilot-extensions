@@ -64,7 +64,6 @@ if [ -n "$_rt_root" ]; then
 
   _rt_boot_trace_log() {
     [ -n "${_rt_bt_log_path:-}" ] || return 0
-    [ -d "$_rt_root" ] || return 0
     _rt_phase="$1"
     _rt_now_ms="$2"
     _rt_resolution_source="${3-}"

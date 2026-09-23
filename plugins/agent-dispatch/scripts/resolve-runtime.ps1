@@ -46,7 +46,6 @@ if ($_rtRoot) {
     [string]$version = ''
   ) {
     if (-not $_rtBootTraceLogPath) { return }
-    if (-not [IO.Directory]::Exists($_rtRoot)) { return }
     try {
       [IO.Directory]::CreateDirectory((Split-Path -Parent $_rtBootTraceLogPath)) | Out-Null
       $parts = [System.Collections.Generic.List[string]]::new()

@@ -2290,6 +2290,66 @@ def test_posix_shim_boot_trace_is_durable_by_default_and_stderr_is_still_opt_in(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX shim test")
+def test_posix_shim_boot_trace_survives_first_use_before_runtime_root_exists(
+    tmp_path: Path,
+) -> None:
+    """Regression: the earliest phases (``shim-start``, the resolver's own
+    marker/slot phases) fire before ``_runtime_root``/``$_rt_root`` has ever
+    been created on this machine -- that is the entire first-use case this
+    always-on facility exists to observe. An earlier revision gated the
+    durable-log append on ``[ -d "$_runtime_root" ]``/``[ -d "$_rt_root" ]``,
+    which returned before the very ``mkdir -p`` that would have created it,
+    silently dropping every phase from a real first launch (Copilot review,
+    PR #3310)."""
+    manifest = _manifest(tmp_path)
+    generator.process_manifest(manifest, check=False)
+    plugin = manifest.parent
+    (plugin / "plugin.json").write_text('{"name":"agent-example"}\n', encoding="utf-8")
+    scripts = plugin / "scripts"
+    canonical_resolver = (
+        REPO / "libs" / "versioned-runtime" / "resolve-runtime.sh"
+    ).read_text(encoding="utf-8")
+    (scripts / "resolve-runtime.sh").write_text(canonical_resolver, encoding="utf-8")
+
+    home = tmp_path / "home"
+    home.mkdir()
+    runtime_root = home / ".agent-example"
+    assert not runtime_root.exists()  # the exact first-use precondition
+
+    module_dir = tmp_path / "modules"
+    module_dir.mkdir()
+    (module_dir / "agent_example.py").write_text(
+        "import sys\nprint('stdout:' + '|'.join(sys.argv[1:]))\n",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home),
+            "COPILOT_PLUGIN_ROOT": str(plugin),
+            "PYTHONPATH": str(module_dir),
+            "AGENT_EXAMPLE_NO_SELFPROVISION": "1",
+        }
+    )
+    command = [str(plugin / "bin" / "agent-example"), "alpha"]
+
+    # No installed runtime and self-provisioning disabled -> the shim exits
+    # non-zero, but the durable phases up to that failure must still have
+    # been recorded, proving the log append never depended on the runtime
+    # root already existing.
+    result = subprocess.run(command, env=env, capture_output=True, text=True)
+    assert result.returncode != 0
+
+    log_path = runtime_root / "logs" / "boot-trace.jsonl"
+    assert log_path.exists(), "runtime root + log dir must be created on demand"
+    durable = _read_jsonl(log_path)
+    phases = [rec["phase"] for rec in durable]
+    assert "shim-start" in phases
+    assert "resolver-marker-start" in phases
+    assert "resolver-marker-result" in phases
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX shim test")
 def test_posix_shim_boot_trace_write_failures_are_non_fatal(tmp_path: Path) -> None:
     manifest = _manifest(tmp_path)
     generator.process_manifest(manifest, check=False)

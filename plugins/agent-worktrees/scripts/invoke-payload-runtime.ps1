@@ -31,7 +31,7 @@ function Write-BootTraceRecord(
     [long]$TimestampMs,
     [string]$DispatchPath = ''
 ) {
-    if (-not $runtimeRoot -or -not [IO.Directory]::Exists($runtimeRoot)) { return }
+    if (-not $runtimeRoot) { return }
     $bootTraceLogPath = Join-Path $runtimeRoot 'logs\activity.jsonl'
     try {
         [IO.Directory]::CreateDirectory((Split-Path -Parent $bootTraceLogPath)) | Out-Null
@@ -56,7 +56,39 @@ function Write-BootTraceRecord(
             $line + [Environment]::NewLine,
             [Text.UTF8Encoding]::new($false)
         )
+        Invoke-BootTraceMaybePrune -LogPath $bootTraceLogPath
     } catch {}
+}
+
+# Mirrors agent_worktrees.activity._maybe_prune/_prune's own retention window
+# (RETENTION_DAYS=7, _PRUNE_SIZE_BYTES=512*1024) so a launch that emits
+# boot_trace lines but never triggers a later Python-side log_event() call
+# does not grow activity.jsonl unbounded. Best-effort and lossy under a
+# concurrent writer during the rewrite, same posture as the Python pruner's
+# own documented tradeoff. Never lets a pruning failure affect the caller.
+function Invoke-BootTraceMaybePrune([string]$LogPath) {
+    try {
+        $info = Get-Item -LiteralPath $LogPath -ErrorAction Stop
+        if ($info.Length -lt 524288) { return }
+        $cutoff = [DateTimeOffset]::UtcNow.AddDays(-7).ToString('yyyy-MM-ddTHH:mm:sszzz')
+        $tmp = "$LogPath.prune.$PID"
+        $kept = [System.Collections.Generic.List[string]]::new()
+        foreach ($line in [IO.File]::ReadLines($LogPath)) {
+            $idx = $line.IndexOf('"ts":"')
+            if ($idx -lt 0) { $kept.Add($line); continue }
+            $rest = $line.Substring($idx + 6)
+            $endIdx = $rest.IndexOf('"')
+            if ($endIdx -lt 0) { $kept.Add($line); continue }
+            $ts = $rest.Substring(0, $endIdx)
+            if ([string]::CompareOrdinal($ts, $cutoff) -ge 0) { $kept.Add($line) }
+        }
+        [IO.File]::WriteAllLines($tmp, $kept, [Text.UTF8Encoding]::new($false))
+        Move-Item -LiteralPath $tmp -Destination $LogPath -Force
+    } catch {
+        if ($tmp -and (Test-Path -LiteralPath $tmp)) {
+            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 function Write-BootTrace([string]$Phase, [string]$DispatchPath = '') {
