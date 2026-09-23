@@ -626,6 +626,25 @@ def _short_repo(repository: str) -> str:
     return repository.rsplit("/", 1)[-1] if repository else repository
 
 
+def _configured_workspace_repo(repository: str | None) -> str | None:
+    """Declarative workspace repo for a CodeSpace launcher repo, if configured.
+
+    Reads ``repos.<repo>.workspace_repo`` from agent-codespaces config as a
+    cheap local fast-path for callers that only need to know which logical
+    product repo a GitHub-hosted CodeSpace repo is configured to host.
+    """
+    if not repository:
+        return None
+    try:
+        from .config import load_merged_config
+
+        repo_cfg = load_merged_config(include_cwd=False).repos.get(repository)
+    except Exception:
+        return None
+    workspace_repo = repo_cfg.workspace_repo if repo_cfg else None
+    return workspace_repo if isinstance(workspace_repo, str) and workspace_repo else None
+
+
 def _worktree_dir_id(worktree_path: str | None) -> str:
     """A #897 claim owner's worktree **dir name** (its id) from its absolute
     path, for the pivot's ``worktree`` column -- so a claim-held box shows WHICH
@@ -1057,11 +1076,13 @@ def _auto_claim_odsp_web_pr(
 
     Detection is intentionally read-triggered and idempotent: when the
     Codespaces pivot materializes a row backed by a resolvable driving
-    worktree, it probes the CodeSpace's current real git workspace (ADO
-    origin + checked-out branch) for an active odsp-web PR and, if found,
-    journals it onto that
-    worktree's existing claim ledger through the already-shipped `claims add pr`
-    verb. No new claim store exists here; `claims add` deduplicates by ref.
+    worktree, it first checks whether config already declares the GH-hosted
+    launcher repo to back some *other* product repo and, when so, skips the
+    expensive live SSH probe entirely. Otherwise it probes the CodeSpace's
+    current real git workspace (ADO origin + checked-out branch) for an active
+    odsp-web PR and, if found, journals it onto that worktree's existing claim
+    ledger through the already-shipped `claims add pr` verb. No new claim store
+    exists here; `claims add` deduplicates by ref.
     """
     if not worktree_id:
         return None
@@ -1081,6 +1102,12 @@ def _auto_claim_odsp_web_pr(
         getattr(record, "worktree_id", worktree_id),
     )
     owner_worktree = getattr(record, "path", None) or getattr(record, "worktree_path", None)
+    configured_workspace_repo = _configured_workspace_repo(repository)
+    if (
+        configured_workspace_repo
+        and _short_repo(configured_workspace_repo).casefold() != "odsp-web"
+    ):
+        return None
     remote_url, branch = _codespace_git_probe(
         codespace_name,
         repository,
