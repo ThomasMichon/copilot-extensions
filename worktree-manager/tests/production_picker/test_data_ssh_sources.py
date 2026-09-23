@@ -1981,7 +1981,7 @@ def test_load_one_prefers_stream_then_falls_back(monkeypatch, tmp_path):
     monkeypatch.setattr(loader, "_load_remote_stream",
                         lambda s, gen: calls.append("stream") or False)
     monkeypatch.setattr(loader, "_load_remote_two_phase",
-                        lambda s: calls.append("two_phase"))
+                        lambda s, gen: calls.append("two_phase"))
     loader._load_one(src)
     assert calls == ["stream", "two_phase"]
 
@@ -1995,7 +1995,7 @@ def test_load_one_skips_stream_when_disabled(monkeypatch):
     monkeypatch.setattr(loader, "_load_remote_stream",
                         lambda s, gen: calls.append("stream") or True)
     monkeypatch.setattr(loader, "_load_remote_two_phase",
-                        lambda s: calls.append("two_phase"))
+                        lambda s, gen: calls.append("two_phase"))
     loader._load_one(src)
     assert calls == ["two_phase"]
 
@@ -2281,25 +2281,21 @@ def test_cancel_source_kills_only_that_sources_procs(monkeypatch):
 
 
 def test_cancel_source_noop_when_nothing_in_flight():
-    """A source already resolved (success or permanent failure), with
-    nothing currently loading and no tracked child, is a genuine no-op --
-    unlike a freshly-constructed loader's still-"loading"-no-records seed
-    state, which IS resettable (see the fix above): that seed state is
-    indistinguishable from "never started" only in a test, never in real
-    picker usage, where cancel_source is only ever called on a loader whose
-    start() has already run."""
+    """A source with real committed records and no tracked child is a
+    genuine no-op: nothing to kill, and nothing worth resetting (it has rows
+    to lose, so `resettable` -- "no records" -- is correctly False)."""
     src = _remote_src()
     loader = data_ssh.LiveLoader([src])
-    loader._state[src.cache_key] = "failed"
+    loader._state[src.cache_key] = "ready"
+    loader._records[src.cache_key] = [{"id4": "aaaa"}]
     assert loader.cancel_source(("dev6", "Win")) is False
 
 
 def test_cancel_source_resets_an_eagerly_loaded_source_stuck_pre_first_result(monkeypatch):
     """The gap the second review round found: a source `start()` loaded
-    eagerly via focus_keys (e.g. the local tab) never touches
-    _lazy_promoted, so navigating away from it before its first result
-    commits must still be resettable -- not just a bare ensure_loaded()
-    promotion."""
+    eagerly via focus_keys (e.g. the local tab) has no real records yet, so
+    navigating away from it before its first result commits must still be
+    resettable -- not just a bare ensure_loaded() promotion."""
     src = _remote_src()
     loader = data_ssh.LiveLoader([src])
     monkeypatch.setattr(data_ssh, "_kill_proc_tree", lambda proc: None)
@@ -2314,7 +2310,7 @@ def test_cancel_source_resets_an_eagerly_loaded_source_stuck_pre_first_result(mo
     # Seeded "loading", no records -- exactly start()'s initial state for an
     # eagerly (focus_keys) loaded source before its first phase commits.
     assert loader._state[src.cache_key] == "loading"
-    assert src.cache_key not in loader._lazy_promoted
+    assert loader.records_for_source(src.cache_key) == []
 
     assert loader.cancel_source(("dev6", "Win")) is True
 
@@ -2377,21 +2373,20 @@ def test_cancel_source_re_arms_even_before_any_child_has_spawned(monkeypatch):
 
     assert loader.ensure_loaded(("dev6", "Win")) is True
     gen_after_promote = loader._gen[src.cache_key]
-    assert src.cache_key in loader._lazy_promoted
+    assert loader.records_for_source(src.cache_key) == []
     # No proc registered yet (the stub thread never actually ran _load_one).
     assert loader._procs_by_source.get(src.cache_key, []) == []
 
     assert loader.cancel_source(("dev6", "Win")) is True
     assert src.cache_key in loader._pinged_only
-    assert src.cache_key not in loader._lazy_promoted
     assert loader._gen[src.cache_key] == gen_after_promote + 1
 
 
 def test_cancel_source_preserves_last_good_rows_for_a_routine_repoll(monkeypatch):
-    """Cancelling a repoll/reconcile of an ALREADY-resolved source (not a
-    bare ensure_loaded() promotion) must only stop the wasted remote work --
-    never discard rows the operator is still looking at, and never revert
-    the tab to a ping-only placeholder."""
+    """Cancelling a repoll/reconcile of an ALREADY-resolved source (real
+    records already committed -- not a bare pre-first-result load) must only
+    stop the wasted remote work: never discard rows the operator is still
+    looking at, and never revert the tab to a ping-only placeholder."""
     src = _remote_src()
     loader = data_ssh.LiveLoader([src])
     loader._state[src.cache_key] = "ready"
@@ -2400,14 +2395,79 @@ def test_cancel_source_preserves_last_good_rows_for_a_routine_repoll(monkeypatch
     monkeypatch.setattr(data_ssh, "_kill_proc_tree", lambda proc: killed.append(proc))
     proc = types.SimpleNamespace(name="repoll-proc")
     loader._procs_by_source[src.cache_key] = [proc]
-    # NOT in _lazy_promoted -- this is a routine background refresh, not a
-    # bare ensure_loaded() promotion.
+    # Real records already committed -- resettable is False regardless of
+    # HOW this source got loaded, since the decision is purely "does it have
+    # rows to lose", not "was it ensure_loaded()-promoted".
 
     assert loader.cancel_source(("dev6", "Win")) is True
     assert killed == [proc]
     assert loader.state("dev6", "Win") == "ready"           # unchanged
     assert loader.records_for_source(src.cache_key) == [{"id4": "aaaa"}]  # kept
     assert src.cache_key not in loader._pinged_only          # NOT reset
+
+
+def test_cancel_source_preserves_a_promoted_loads_already_committed_fast_rows(monkeypatch):
+    """The gap the fourth review round found: a source ensure_loaded()
+    promoted, whose two-phase load already committed its phase-1 fast rows
+    (state == "ready", real records) before the operator navigates away
+    during phase-2 classification, must be treated exactly like any other
+    already-resolved source -- preserved, not reset -- even though it WAS a
+    bare promotion moments earlier. The decision must track "has this
+    committed a result" (self._records), not "how did this load start"."""
+    src = _remote_src()
+    loader = data_ssh.LiveLoader([src])
+    monkeypatch.setattr(data_ssh, "_kill_proc_tree", lambda proc: None)
+    # Simulate ensure_loaded() having promoted this source, and its phase-1
+    # having already committed real fast rows (phase-2 classify still running).
+    loader._state[src.cache_key] = "ready"
+    loader._records[src.cache_key] = [{"id4": "fast-row"}]
+    proc = types.SimpleNamespace(name="classify-proc")
+    loader._procs_by_source[src.cache_key] = [proc]
+
+    assert loader.cancel_source(("dev6", "Win")) is True
+
+    assert loader.state("dev6", "Win") == "ready"
+    assert loader.records_for_source(src.cache_key) == [{"id4": "fast-row"}]
+    assert src.cache_key not in loader._pinged_only   # NOT reset to ping-only
+
+
+def test_load_remote_two_phase_checks_generation_on_phase1_success(monkeypatch, tmp_path):
+    """The gap the fourth review round found: phase-1's commit must check
+    the CAPTURED generation (threaded in by _load_one), not re-read the
+    source's current generation at call time -- otherwise a cancel_source()
+    bump that lands before phase-1 finishes is silently ignored."""
+    monkeypatch.setattr(data_ssh, "_ssh_log_path", lambda: tmp_path / "l.log")
+    src = _classify_src()
+    loader = data_ssh.LiveLoader([src])
+    captured_gen = loader._gen[src.cache_key]
+    # Simulate a cancel_source() bump that happened before phase-1 returns.
+    loader._gen[src.cache_key] = captured_gen + 1
+
+    monkeypatch.setattr(data_ssh, "_fetch", lambda *a, **k: ["f1"])
+    loader._load_remote_two_phase(src, captured_gen)
+
+    # The stale (pre-bump) generation's result must never land.
+    assert loader.records_for_source(src.cache_key) == []
+
+
+def test_load_remote_two_phase_checks_generation_on_phase1_failure(monkeypatch, tmp_path):
+    monkeypatch.setattr(data_ssh, "_ssh_log_path", lambda: tmp_path / "l.log")
+    src = _classify_src()
+    loader = data_ssh.LiveLoader([src])
+    captured_gen = loader._gen[src.cache_key]
+    loader._gen[src.cache_key] = captured_gen + 1
+    loader._state[src.cache_key] = "ready"          # a fresher attempt already succeeded
+    loader._records[src.cache_key] = [{"id4": "fresh"}]
+
+    def boom(*a, **k):
+        raise data_ssh._RemoteFetchError("exit 1", returncode=1)
+
+    monkeypatch.setattr(data_ssh, "_fetch", boom)
+    loader._load_remote_two_phase(src, captured_gen)
+
+    # The stale attempt's failure must never clobber the fresher success.
+    assert loader.state("dev6", "Win") == "ready"
+    assert loader.records_for_source(src.cache_key) == [{"id4": "fresh"}]
 
 
 def test_refresh_one_and_reconcile_one_tag_their_procs_by_source(monkeypatch):

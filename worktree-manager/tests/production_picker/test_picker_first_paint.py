@@ -966,3 +966,89 @@ def test_start_loader_does_not_mask_a_real_error_from_the_new_signature():
 
     with pytest.raises(TypeError, match="boom"):
         engine_helpers.start_loader(BrokenLoader(), focus_keys=None)
+
+
+# ── PickerScreen integration: nav-driven activation/cancellation (#3447 #3) ──
+
+def test_rotate_machine_promotes_destination_and_cancels_previous_tab(monkeypatch):
+    """The end-to-end wiring _rotate_machine relies on: navigating onto a
+    ping-only tab promotes it (ensure_loaded), and navigating further away
+    cancels the tab just left (cancel_source) -- without disturbing the
+    local tab or the "All" tab's own semantics."""
+    import types as _types
+
+    pytest.importorskip("textual")
+    from worktree_manager.production_picker.picker_tui import data_ssh, engine as eng
+
+    local = data_ssh.Source("book2", "Win", None, local=True, ready=True)
+    dev6 = data_ssh.Source(
+        "dev6", "Win",
+        data_ssh._argv_for("pwsh", "host-dev6", "dotfiles", classify=True),
+        ready=True, alias="host-dev6",
+    )
+    cloud1 = data_ssh.Source(
+        "cloud1", "Win",
+        data_ssh._argv_for("pwsh", "host-cloud1", "dotfiles", classify=True),
+        ready=True, alias="host-cloud1",
+    )
+    loader = data_ssh.LiveLoader([local, dev6, cloud1])
+    monkeypatch.setattr(loader, "_load_one", lambda s, gen=None: None)
+    monkeypatch.setattr(
+        data_ssh.threading, "Thread",
+        lambda target, args=(), name=None, daemon=None: _types.SimpleNamespace(
+            start=lambda: None),  # promoted but never actually resolves
+    )
+    # Local already resolved; dev6/cloud1 are ping-only (start()'s deferral).
+    loader._state[local.cache_key] = "ready"
+    loader._records[local.cache_key] = [{"id4": "aaaa"}]
+    loader._pinged_only.update({dev6.cache_key, cloud1.cache_key})
+    loader._state[dev6.cache_key] = "ready"
+    loader._state[cloud1.cache_key] = "ready"
+
+    class Src:
+        LOCAL = ("book2", "Win")
+        from worktree_manager.production_picker.picker_tui import derive as _derive
+        bucket = staticmethod(_derive.bucket)
+        for_machine = staticmethod(_derive.for_machine)
+
+    scr = eng.PickerScreen(Src(), live=True)
+    scr.loader = loader
+    scr.data = []
+    scr.source_tabs = [
+        {"label": "All", "machine": None, "env": None, "ready": True,
+         "source_kind": "all", "source_id": None, "local": False},
+        {"label": "book2 Win", "machine": "book2", "env": "Win", "ready": True,
+         "source_kind": "machine-ssh", "source_id": None, "local": True},
+        {"label": "dev6 Win", "machine": "dev6", "env": "Win", "ready": True,
+         "source_kind": "machine-ssh", "source_id": None, "local": False},
+        {"label": "cloud1 Win", "machine": "cloud1", "env": "Win", "ready": True,
+         "source_kind": "machine-ssh", "source_id": None, "local": False},
+    ]
+    scr.machines = [
+        (t["label"], t["machine"], t["env"], t["ready"]) for t in scr.source_tabs
+    ]
+    scr.machine_idx = 1   # start on the local tab, like a real launch
+
+    # Navigate onto dev6: promotes it (no longer ping-only, "loading").
+    scr._rotate_machine(1)
+    assert scr.machine_idx == 2
+    assert dev6.cache_key not in loader._pinged_only
+    assert loader.state("dev6", "Win") == "loading"
+    # Local, just left, is untouched (already resolved with real records).
+    assert loader.records_for_source(local.cache_key) == [{"id4": "aaaa"}]
+
+    # Navigate onto cloud1: promotes it, AND cancels dev6 (just left, still
+    # unresolved) back to a ping-only placeholder.
+    scr._rotate_machine(1)
+    assert scr.machine_idx == 3
+    assert cloud1.cache_key not in loader._pinged_only
+    assert loader.state("cloud1", "Win") == "loading"
+    assert dev6.cache_key in loader._pinged_only
+    assert loader.state("dev6", "Win") == "ready"          # re-armed, not stuck
+
+    # Navigate to "All": ensure_all_loaded promotes every remaining ping-only
+    # source (dev6, re-armed above) without touching already-loading cloud1.
+    scr.machine_idx = 0
+    scr._activate_current_machine_tab(scr._current_tab_key(), False)
+    assert dev6.cache_key not in loader._pinged_only
+    assert loader.state("dev6", "Win") == "loading"

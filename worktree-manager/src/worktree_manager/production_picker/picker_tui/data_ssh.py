@@ -1369,16 +1369,6 @@ class LiveLoader:
         # load) the moment its tab becomes current (picker-lazy-per-machine-
         # loading). Never populated for a source `start()` fully loads up front.
         self._pinged_only: set = set()
-        # cache_key set: a source `ensure_loaded` JUST promoted from a ping
-        # to a real load that has never yet committed a result (bare
-        # promotion, no prior real records). Distinguishes "cancel_source
-        # should fully reset this back to ping-only" from "this is a routine
-        # repoll/reconcile/reload of an ALREADY-resolved source" (#2, below):
-        # cancelling the latter must only stop the wasted remote work, never
-        # discard last-good rows the operator is still looking at. Added by
-        # `ensure_loaded`, discarded once its `_load_one` call returns
-        # (success, failure, or killed) -- see `_load_one`'s own body.
-        self._lazy_promoted: set = set()
         # cache_key -> list of live ssh Popen this source's current load
         # spawned, so `cancel_source` can kill only ITS children (unlike the
         # blanket `cancel()`/`self._procs`, used for whole-picker teardown).
@@ -1514,9 +1504,7 @@ class LiveLoader:
         already removed itself from consideration -- see `_ping_one`), or
         unknown are all left exactly as they are. Flips the tab back to its
         connect spinner while the real fetch runs, exactly like a fresh
-        `start()`. Marks the source `_lazy_promoted` -- a bare promotion with
-        no real records behind it yet -- so `cancel_source` knows it is safe
-        to fully reset if the operator navigates away before it resolves.
+        `start()`.
         """
         with self._lock:
             src = next(
@@ -1526,7 +1514,6 @@ class LiveLoader:
             if src is None or src.cache_key not in self._pinged_only:
                 return False
             self._pinged_only.discard(src.cache_key)
-            self._lazy_promoted.add(src.cache_key)
             self._state[src.cache_key] = "loading"
             self._records[src.cache_key] = []
             gen = self._gen.get(src.cache_key, 0)
@@ -1549,18 +1536,22 @@ class LiveLoader:
         an already-resolved source's last-good rows.
 
         Unlike :meth:`cancel` (whole-picker teardown), this targets one
-        source, and does two DIFFERENT things depending on what kind of
-        in-flight work it finds:
+        source, and does two DIFFERENT things depending on whether it has
+        committed a real result yet -- **not** on how it got started (a bare
+        `ensure_loaded` promotion vs. one of `start()`'s eagerly (focus_keys)
+        loaded sources vs. a background repoll/reconcile of an
+        already-resolved source all funnel through the same one check,
+        ``self._records`` itself, so a remote's own two-phase load can never
+        be caught mid-flight with its already-committed phase-1 fast rows
+        wrongly discarded just because its phase-2 classify pass is still
+        running):
 
-        - **No first result committed yet** -- either a bare `ensure_loaded`
-          promotion (``_lazy_promoted``, always resettable) or ANY source
-          still on its *initial* load (``state == "loading"`` with no
-          records at all -- covers the local tab and any other source
-          `start()`'s ``focus_keys`` loaded eagerly, which never touch
-          ``_lazy_promoted``): fully reset it -- kill any spawned child,
-          bump the generation (so a result the killed attempt eventually
-          produces can never land), and put it back in ``_pinged_only`` with
-          a ``ready``/no-records placeholder, exactly like a successful ping
+        - **No records committed yet** (initial connect, a bare promotion
+          that hasn't resolved, or a fully-failed load that never got any
+          rows): fully reset it -- kill any spawned child, bump the
+          generation (so a result the killed attempt eventually produces can
+          never land), and put it back in ``_pinged_only`` with a
+          ``ready``/no-records placeholder, exactly like a successful ping
           -- so navigating back onto the tab (`ensure_loaded`) starts a
           genuinely fresh load instead of finding nothing to promote and
           leaving the tab stuck on its cancelled, pre-first-result state.
@@ -1570,12 +1561,13 @@ class LiveLoader:
           that orphaned attempt eventually produces, and the actual SSH
           connection -- already unavoidable once dispatched -- simply
           becomes wasted, unobserved work rather than a correctness risk.
-        - **Already has a committed result** (a remote's two-phase fast rows,
-          or any prior successful load) and a `repoll_silent`/
-          `reconcile_remote_prs`/`reload_source` refresh is in flight: only
-          bump the generation and kill its child (stopping the wasted remote
-          work); state/records are left exactly as they are, so the tab
-          keeps showing its last-good rows, not a reset connect spinner.
+        - **Already has committed rows** (a remote's two-phase fast rows
+          already landed, or any prior successful/last-good load) and a
+          further refresh (phase 2, `repoll_silent`, `reconcile_remote_prs`,
+          `reload_source`) is in flight: only bump the generation and kill
+          its child (stopping the wasted remote work); state/records are
+          left exactly as they are, so the tab keeps showing its last-good
+          rows, not a reset connect spinner.
 
         Returns ``False`` (a harmless no-op) when there is neither
         resettable in-flight work nor a tracked child process for this
@@ -1590,18 +1582,11 @@ class LiveLoader:
                 return False
             with self._procs_lock:
                 procs = list(self._procs_by_source.get(src.cache_key, ()))
-            resettable = (
-                src.cache_key in self._lazy_promoted
-                or (
-                    self._state.get(src.cache_key) == "loading"
-                    and not self._records.get(src.cache_key)
-                )
-            )
+            resettable = not self._records.get(src.cache_key)
             if not procs and not resettable:
                 return False
             self._gen[src.cache_key] = self._gen.get(src.cache_key, 0) + 1
             if resettable:
-                self._lazy_promoted.discard(src.cache_key)
                 self._pinged_only.add(src.cache_key)
                 self._state[src.cache_key] = "ready"
                 self._records[src.cache_key] = []
@@ -1945,12 +1930,6 @@ class LiveLoader:
                 self._load_one_serial(source, gen)
             finally:
                 self._active_source.key = None
-                # This call has now committed (or given up on) a result --
-                # a subsequent cancel_source() must treat this source as a
-                # routine reload/repoll from here on, not a bare promotion
-                # with nothing to lose (see `_lazy_promoted`'s own comment).
-                with self._lock:
-                    self._lazy_promoted.discard(source.cache_key)
 
     def _load_one_serial(self, source: Source, gen: int):
         if source.local:
@@ -2004,7 +1983,7 @@ class LiveLoader:
         # too old to know --stream.
         if _stream_enabled() and self._load_remote_stream(source, gen):
             return
-        self._load_remote_two_phase(source)
+        self._load_remote_two_phase(source, gen)
 
     def _load_remote_stream(self, source: Source, gen: int) -> bool:
         """Single-connection NDJSON streaming load.
@@ -2134,7 +2113,7 @@ class LiveLoader:
                 self._error[source.cache_key] = str(exc).strip() or type(exc).__name__
         return True
 
-    def _load_remote_two_phase(self, source: Source):
+    def _load_remote_two_phase(self, source: Source, gen: int | None = None):
         """Fast-then-classify for a remote tab (mirrors the local two-phase).
 
         Phase 1 runs the remote ``list`` **without** ``--classify`` -- a cheap
@@ -2149,8 +2128,19 @@ class LiveLoader:
 
         A remote already known not to support ``--classify`` (an older
         agent-worktrees, ``use_classify`` cleared by a prior fetch) has nothing
-        to classify, so it loads in a single pass -- there is no second phase."""
-        gen = self._gen.get(source.cache_key, 0)
+        to classify, so it loads in a single pass -- there is no second phase.
+
+        ``gen`` is the generation captured by the caller (``_load_one``) when
+        THIS load started; every commit below (phase-1's success AND failure,
+        not just phase-2) checks it against the source's CURRENT generation
+        before writing state/records, so a `cancel_source`/`reload_source`
+        that bumps the generation while phase 1 is still in flight can never
+        have its bump raced by a phase-1 commit that would otherwise ignore
+        it entirely. Defaults to the source's current generation when omitted
+        (a direct/test call with no cancellation in play -- unchanged from
+        before this guard existed)."""
+        if gen is None:
+            gen = self._gen.get(source.cache_key, 0)
         fast_argv = _drop_classify_arg(source.argv)
         two_phase = source.use_classify and fast_argv != source.argv
         # picker-cache-first-paint (dotfiles#948): when enabled, the fast phase
@@ -2168,6 +2158,8 @@ class LiveLoader:
             self._log_fetch_failure(source, exc, t0,
                                     phase="fast" if two_phase else "load")
             with self._lock:
+                if self._gen.get(source.cache_key, 0) != gen:
+                    return
                 self._state[source.cache_key] = "failed"
                 self._error[source.cache_key] = str(exc).strip() or type(exc).__name__
             return
@@ -2176,7 +2168,7 @@ class LiveLoader:
         _ssh_log(f"  OK      {source.machine}/{source.env} resolved "
                  f"{len(first)} worktree(s) ({label}) in {elapsed:.1f}s")
         with self._lock:
-            if self._cancelled.is_set():
+            if self._cancelled.is_set() or self._gen.get(source.cache_key, 0) != gen:
                 return
             self._records[source.cache_key] = first
             self._state[source.cache_key] = "ready"
