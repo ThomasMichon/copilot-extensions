@@ -17,6 +17,50 @@ from ssh_manager import proxy
 from ssh_manager.process import register_process_cleanup, run_process_cleanup
 
 
+@pytest.mark.asyncio
+async def test_pump_treats_connection_reset_as_clean_eof():
+    """A read-side ConnectionResetError is a peer-gone-away signal, not a bug.
+
+    Regression: on Windows, ProactorEventLoop pipe/socket reads commonly raise
+    ConnectionResetError (WinError 64) instead of returning b"" at EOF once
+    the peer has closed. Observed live bridging a loopback ProxyCommand
+    socket to a `gh cs ssh --stdio` child -- this used to propagate up
+    through `_serve` as an unhandled "SSH proxy connection failed" warning.
+    """
+
+    class ResetThenNothingReader:
+        def __init__(self):
+            self._raised = False
+
+        async def read(self, n):
+            if not self._raised:
+                self._raised = True
+                raise ConnectionResetError(64, "The specified network name is no longer available")
+            return b""
+
+    writer = SimpleNamespace(write=lambda data: None, drain=AsyncMock())
+    # Must return normally (no exception) -- this is the fix under test.
+    await proxy._pump(ResetThenNothingReader(), writer)
+    writer.drain.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_pump_still_relays_data_before_reset():
+    chunks = [b"hello", ConnectionResetError(64, "reset")]
+
+    class FlakyReader:
+        async def read(self, n):
+            item = chunks.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+    written = []
+    writer = SimpleNamespace(write=written.append, drain=AsyncMock())
+    await proxy._pump(FlakyReader(), writer)
+    assert written == [b"hello"]
+
+
 def test_loopback_routing_preserves_remote_identity_and_command():
     config = SSHConfig(
         host_alias="codespace.example",
