@@ -365,18 +365,54 @@ Round 2 (operator's response to that evaluation):
 ### Phase 3 — CI promotion pipeline
 - [ ] Implement the validation gate (target 10-30 min; broader than today's
       guard set — steady test suite, not just guards/lint).
-- [ ] Implement bump accumulation + generator materialization run against
+  - **Not started as a distinct gate.** `.github/workflows/ci.yml`'s existing
+    `checks`/`smoke` jobs now also run on push to `dev` (added alongside the
+    promotion wiring below), so `dev` gets real, if not yet broadened,
+    coverage before promotion triggers — but no dedicated, broader
+    (10-30 min) validation suite exists yet. Revisit before relying on this
+    for real traffic.
+- [x] Implement bump accumulation + generator materialization run against
       `dev`'s current state.
-- [ ] Implement the "replace main's tree wholesale as a single generated
+  - **Done, 2026-09-23.** `tools/promote_release.py`'s `consume_pending_changes()`
+    runs `accumulate_bumps.py`'s `compute()`/`apply()` and
+    `materialize_main.py`'s pointer expansion against an isolated scratch
+    `git worktree` of `dev` — never the caller's real working tree.
+- [x] Implement the "replace main's tree wholesale as a single generated
       commit" step (never merge `dev` into `main`).
-- [ ] Tag every generated `main` commit; stamp traceability metadata (the
+  - **Done, 2026-09-23.** `promote_release.py` builds a tree object from the
+    processed scratch worktree (`git write-tree`) and commits it with
+    `git commit-tree <tree> -p <main-tip>` — `main`'s current tip becomes the
+    new commit's sole parent, but its tree is `dev`'s processed state
+    entirely, matching the design's "never merge" requirement. A no-op
+    (identical tree) reports `promoted: False` rather than creating an empty
+    commit.
+- [x] Tag every generated `main` commit; stamp traceability metadata (the
       `dev` commit range / changefiles consumed).
-- [ ] Trigger: **decided** — CI success on `dev`, not a schedule (the
+  - **Done, 2026-09-23.** Each generated commit is annotated-tagged
+    `promote-<timestamp>-<short-sha>`; both the commit message and the tag
+    message record the promoted `dev` commit range (merge-base..head), every
+    plugin bump (old -> new version), and every changefile filename consumed.
+- [x] Trigger: **decided** — CI success on `dev`, not a schedule (the
       operator's stated expectation, not an open question). Implement
       promotion as triggered directly by a green `dev` CI run.
-- [ ] Gate promotion behind admin-escalation initially (maintainers blocked
+  - **Done, 2026-09-23.** `.github/workflows/promote.yml` listens on
+    `workflow_run` for `CI` completing on `dev`. _(Agent-recommended addition,
+    not required by this checklist item but consistent with the Validation
+    Plan's dry-run requirement below: the automatic trigger currently always
+    runs `promote_release.py` in report-only mode, never `--push`; only an
+    explicit `workflow_dispatch` with `push: true` can move real `main`. Flip
+    this once the dry-run item is checked off and the pipeline has been
+    observed working for a while — see the workflow file's own comment.)_
+- [x] Gate promotion behind admin-escalation initially (maintainers blocked
       from ordinary self-merge to `main`); document the criteria for walking
       this back over time.
+  - **Wired, but needs a one-time manual step before it's real.** The
+    `promote` job runs under the `main-promotion` GitHub Environment
+    (`environment: main-promotion` in `promote.yml`). A repo admin must add
+    required reviewers to that environment (Settings > Environments >
+    `main-promotion`) before this gate actually blocks anything — until then
+    the job runs unattended (but still report-only, per the note above).
+    Walk-back criteria are Phase 6's job, not this one.
 
 ### Phase 4 — Rollback & hotfix procedures
 - [ ] Implement the CI guard against producing a non-incremental (out-of-order)
@@ -411,8 +447,22 @@ Round 2 (operator's response to that evaluation):
 
 - [ ] Generator run against current (pre-split) `main` reproduces the
       existing tree exactly (idempotency/correctness baseline).
-- [ ] Dry-run the full promotion pipeline against `dev` in a scratch
+- [x] Dry-run the full promotion pipeline against `dev` in a scratch
       branch/fork before flipping branch protection on real `main`.
+  - **Done, 2026-09-23** (unit coverage: `tools/test_promote_release.py`,
+    9 tests against synthetic repos; real-repo coverage: one report-only
+    `python tools/promote_release.py --dev-ref origin/dev --main-ref
+    origin/main` run against this repo's actual state). The mechanism
+    itself works end-to-end (generated a valid, correctly-tagged wholesale
+    commit) — **but the real run surfaced why this must stay report-only
+    until Phase 5's cutover**: `origin/main` is currently 11 commits ahead
+    of `origin/dev` (nobody targets `dev` yet, exactly as the Plan expects,
+    but that also means `dev` is stale relative to real ongoing
+    development). Promoting for real right now would regress `main` to
+    `dev`'s older content, discarding those 11 commits. `promote.yml`'s
+    report-only default for the automatic trigger is therefore load-bearing,
+    not just extra caution — do not flip it to `--push` until `dev` is
+    genuinely the trunk everyone commits to (Phase 5).
 - [ ] Empirically confirm Copilot CLI's update-detection mechanism (version
       string diff vs. semver-aware) before relying on assumptions about
       staged rollout.
@@ -665,3 +715,100 @@ generator contract details here or in a linked sub-doc._
   first, then most likely start Phase 3 (the promotion pipeline is the
   actual prerequisite blocking the rest of Phase 2), not attempt to
   continue Phase 2's remaining items directly.
+
+### 2026-09-23, following the 3 AM handoff — Phase 3 built
+- Resumed via `context-handoff`/`consume_handoff` (task-backed handoff
+  `7e7a168cf6b94fb9a6b6ea2bc970932b`). Read this Journal's prior two entries
+  and the Plan's Phase 2 sequencing note first, per that handoff's own
+  instructions, before starting.
+- **Built `tools/promote_release.py`** — the core Phase 3 mechanism:
+  checks `dev` out into an isolated, detached `git worktree` (never mutates
+  the caller's real working tree); runs `accumulate_bumps.py`'s
+  `compute()`/`apply()` and `materialize_main.py`'s pointer expansion
+  against that scratch copy (loading both from the scratch worktree's own
+  `tools/`, not this checkout's, so promotion always reflects exactly what
+  was reviewed/tested on `dev`); builds a tree object (`git write-tree`) and
+  commits it with `git commit-tree <tree> -p <main-tip>` — `main`'s current
+  tip as sole parent, `dev`'s fully-processed tree as the entire content,
+  matching the "wholesale replace, never merge" design. Reports (rather
+  than commits) when the computed tree already matches `main`'s, so a
+  spurious CI re-run on unchanged `dev` content never creates an empty
+  commit. Tags every generated commit (`promote-<timestamp>-<short-sha>`)
+  with the promoted `dev` commit range, every plugin's old->new version, and
+  every changefile filename consumed — full traceability metadata per the
+  Plan's checklist item.
+- **Two real bugs found and fixed while writing
+  `tools/test_promote_release.py`** (9 tests against synthetic, throwaway
+  git repos — not this repo's real `dev`/`main`, see the Validation Plan
+  note below):
+  1. The scratch worktree's path was computed by resolving
+     `git rev-parse --git-common-dir`'s output (often a **relative** path
+     like `.git`) against this Python process's own cwd instead of the
+     target repo path the git subprocess actually ran in — silently placed
+     scratch worktrees under the wrong directory whenever the caller's cwd
+     differed from the repo being promoted (harmless in the trivial
+     single-repo-as-cwd case, which is why it passed a manual smoke check
+     before the test suite caught it).
+  2. `accumulate_bumps.py` does a bare `from changefile import
+     read_changefiles` — Python's plain-import machinery checks
+     `sys.modules` by name **before** consulting `sys.path`, so if anything else in the
+     same process had already imported a module named `changefile` (e.g. a
+     sibling test file, or the tool used against this checkout's real
+     `.changefiles/`), the scratch worktree's own `accumulate_bumps.py`
+     would silently bind to that *other* cached module instead of its own
+     sibling — reading and writing the wrong repo's changefiles entirely.
+     Fixed by force-loading the scratch worktree's own `changefile.py` and
+     injecting it into `sys.modules["changefile"]` for the duration of the
+     scratch import, restoring whatever was there afterward. Neither bug
+     was hypothetical — both reproduced immediately once real tests ran
+     against a real (if synthetic) git repo rather than being reasoned
+     through in isolation, which is exactly why the Validation Plan asks
+     for a real dry run before trusting any of this against the actual
+     repo.
+  3. (Not a bug, a real fixture-hygiene gap the tests also caught: importing
+     the scratch worktree's tooling via `importlib` left `__pycache__`
+     directories inside the scratch tree, which then polluted the
+     wholesale-replace tree diff. Fixed with an explicit sweep before
+     `git add -A` plus `sys.dont_write_bytecode = True`.)
+- **Wired the trigger**: `.github/workflows/ci.yml` now also runs on push to
+  `dev` (additive — nothing currently pushes to `dev` except this pipeline
+  itself, so no existing contributor flow is affected). New
+  `.github/workflows/promote.yml` listens for that workflow completing
+  successfully on `dev` (`workflow_run`) and runs `promote_release.py`.
+- **Admin-escalation gate, with an extra deliberate safety layer**: the
+  `promote` job runs under a `main-promotion` GitHub Environment (repo admin
+  must add required reviewers there before it's a real gate — cannot be done
+  from this workflow file, flagging as an outstanding manual step). On top
+  of that, and *not* strictly required by the Plan's checklist wording: the
+  automatic `workflow_run` trigger currently always runs in report-only mode
+  (no `--push`) regardless of environment approval; only an explicit
+  `workflow_dispatch` with `push: true` can move real `main`. This remains
+  the right default even after the real dry run below succeeded: it also
+  showed `dev` is currently stale relative to `main` (nobody targets it
+  yet), so flipping to `--push` now would actively regress `main`, not just
+  be unvalidated.
+- **Left alone, correctly**: nothing from Phase 2's remaining three items
+  (retiring the old guard, landing CONTRIBUTING.md/AGENTS.md, branch
+  protection) was touched this session — Phase 3 needed to exist and be
+  demonstrated first. `check-module-size.py` is currently failing against
+  `main`'s HEAD on two files unrelated to this effort
+  (`agent_worktrees/tracking.py`, `worktree_manager/__main__.py`) —
+  reconfirmed as the same recurring concurrent-PR baseline-drift pattern
+  flagged in the prior entry, not caused by anything here; left as-is
+  rather than widening the baseline outside that pattern's own follow-up.
+- **Ran the real dry run** (see the Validation Plan's now-checked item): it
+  worked mechanically, and also confirmed `origin/main` is 11 commits ahead
+  of `origin/dev` right now — expected (nobody targets `dev` yet), but a
+  concrete reminder that flipping the automatic trigger to `--push` before
+  Phase 5's real cutover would regress `main`. Nothing pushed; no state
+  changed on the real repo by this dry run.
+- **Next steps for whoever resumes**: (1) do NOT flip `promote.yml`'s
+  automatic trigger to `--push` until `dev` is genuinely the trunk real PRs
+  target (Phase 5) — promoting `dev`'s current stale state would regress
+  `main`; (2) ask a repo admin to add required reviewers to the
+  `main-promotion` environment ahead of that, so the gate is real before
+  it's ever needed; (3) build the still-open Phase 3 item (a dedicated,
+  broader validation gate distinct from today's fast smoke CI); (4) only
+  then return to Phase 2's remaining three items in the order the
+  sequencing note describes, ideally during a lower-traffic window with the
+  operator present.
