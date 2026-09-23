@@ -165,10 +165,27 @@ rewrite is a separate, already-existing migration concern that moves with
    `build_projects()`. This gives the relocated fragment-builder core
    (Step 3) everything `collect_local_projects` reads today, through the
    same file-reading contract `harness_state.py` already established.
-3. [ ] **Relocate the GUID/reconciliation/state-diagnosis core of
-   `terminal_fragment.py`** into worktree-manager, wired to consume Step 2's
-   `harness_state.build_projects()` instead of in-process
-   `config`/`installer`/`repos` imports.
+3. [x] **Relocate the GUID/reconciliation/state-diagnosis core of
+   `terminal_fragment.py`** into worktree-manager. **Landed** (PR pending
+   merge): `worktree_manager.terminal_fragment` — `build_fragment`,
+   `stable_guid`/GUID helpers, `reconcile_generated_profiles`,
+   `diagnose_wt_state`, `migrate_selection_to_keys`, and the
+   `ProjectInput`/`EmittedProfile`/`ProjectPlan`/`FragmentResult`/
+   `GeneratedProfilesPlan`/`WtStateDiagnosis` dataclasses — all byte-for-byte
+   ported, reusing `harness_state.RosterMachine`/`SshEnvironment` (Step 2)
+   rather than redefining them, and `terminal_profiles` (Step 1) for the
+   selection model. 35 of the original 37 tests ported verbatim (import
+   paths only); the 2 `collect_local_projects` disk-collection tests are
+   **not** ported — split into **Step 3b** below, since the registry-walk
+   rewrite still needs the `anchor`-override decision noted in the current-
+   state inventory.
+3b. [ ] **Rewire `collect_local_projects`/`preview_local`/
+   `migrate_local_selections`** onto `harness_state.build_projects()`,
+   resolving the projects.yaml-level `anchor` override
+   `anchor_for()` falls back to today (evidence suggests it has no writer —
+   `register_project()` never sets it — so it may be dead code; confirm
+   before dropping it silently) and the `display_name` field (already a
+   real, written field — needs adding to `harness_state.ProjectInfo`).
 4. [ ] **Give worktree-manager an equivalent CLI/config surface** for
    `profiles get/apply` and `terminal-fragment [--explain|--doctor|
    --migrate-selections]`, proven against the same scenarios agent-worktrees'

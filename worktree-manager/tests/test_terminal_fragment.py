@@ -1,0 +1,537 @@
+"""Tests for the Windows Terminal fragment *generation* flow (config -> fragment).
+
+Relocated from ``agent_worktrees``' ``test_terminal_fragment.py``
+(copilot-extensions#3390, Phase 3e Step 3): exercises
+:mod:`worktree_manager.terminal_fragment`, the pure fragment-building core the
+installer's ``Build-TerminalFragment`` mirrors. Covers the config-driven
+decisions that determine **which** profiles a machine emits: the default
+column for unmanaged projects, the locked ``self.agent`` diagonal (why an
+agent-exposed project keeps its launcher even with an empty selection), SSH
+shell/agent gating, self-skip, cross-project de-duplication, WSL gating, and the
+stable-GUID parity with PowerShell.
+
+The 2 disk-collection tests (``collect_local_projects`` reading
+``repos.yaml``/``projects.yaml``) are NOT ported here -- that rewiring onto
+``worktree_manager.harness_state.build_projects()`` is Phase 3e Step 3b, a
+separate follow-up (see the effort's Phase 3e doc).
+"""
+from __future__ import annotations
+
+from worktree_manager import terminal_fragment as tf
+from worktree_manager.terminal_fragment import (
+    ProjectInput,
+    RosterMachine,
+    SshEnvironment,
+)
+
+# ---------------------------------------------------------------------------
+# Shared roster: Anomalous-Potato (self) + Emancipation-Cube + Mantis-Counter, all SSH-ready.
+# ---------------------------------------------------------------------------
+
+def _roster() -> tuple[RosterMachine, ...]:
+    return (
+        RosterMachine(
+            key="anomalous-potato", display_name="Anomalous-Potato", ssh_ready=True,
+            environments=(
+                SshEnvironment("windows", "anomalous-potato", "pwsh"),
+                SshEnvironment("wsl", "anomalous-potato-wsl", "bash"),
+            ),
+        ),
+        RosterMachine(
+            key="emancipation-cube", display_name="Emancipation-Cube", ssh_ready=True,
+            environments=(
+                SshEnvironment("windows", "emancipation-cube", "pwsh"),
+                SshEnvironment("wsl", "emancipation-cube-wsl", "bash"),
+            ),
+        ),
+        RosterMachine(
+            key="mantis-counter", display_name="Mantis-Counter", ssh_ready=True,
+            environments=(SshEnvironment("linux", "mantis-counter", "bash"),),
+        ),
+    )
+
+
+def _build(project: ProjectInput, self_machine="anomalous-potato", computer="anomalous-potato"):
+    return tf.build_fragment([project], self_machine, computer_name=computer)
+
+
+def _names(result) -> list[str]:
+    return [p.name for p in result.profiles]
+
+
+def _kinds(result) -> set[str]:
+    return {p.kind for p in result.profiles}
+
+
+# ---------------------------------------------------------------------------
+# Stable GUID parity with PowerShell New-StableGuid.
+# ---------------------------------------------------------------------------
+
+def test_stable_guid_matches_powershell_reference():
+    """Reference values captured from the live install.ps1 ``New-StableGuid``."""
+    assert tf.stable_guid("test-chamber-local-windows") == \
+        "19e5e5ec-45eb-a463-895f-dd2dcfe8e233"
+    assert tf.stable_guid("ssh-emancipation-cube-wsl") == \
+        "6d216c29-376a-a904-c26d-504c3c6ab598"
+    assert tf.stable_guid("agent-worktrees-launch-anomalous-potato-windows") == \
+        "8c23a1bc-6682-3dfb-7571-961a8c7249ae"
+
+
+def test_guid_field_is_braced():
+    assert tf._guid_field("x") == "{" + tf.stable_guid("x") + "}"
+
+
+# ---------------------------------------------------------------------------
+# Unmanaged project -> default column (minimal per-agent + bare cross-machine).
+# ---------------------------------------------------------------------------
+
+def test_unmanaged_emits_default_column():
+    proj = ProjectInput(name="test-chamber", display="Test Chamber",
+                        selection=None, roster=_roster())
+    result = _build(proj)
+    names = _names(result)
+
+    # Local self.agent launcher present, named after the project.
+    assert "Test Chamber" in names
+    # A bare shell for every OTHER ready machine x env, labelled by the full key.
+    assert "emancipation-cube" in names
+    assert "emancipation-cube (WSL)" in names
+    assert "mantis-counter" in names
+    # No remote agent-launch combos, no local shells in the default column.
+    assert _kinds(result) == {"local-agent", "ssh-shell"}
+    # Self is never an SSH target.
+    assert not any(p.commandline == "ssh anomalous-potato" for p in result.profiles)
+
+
+def test_unmanaged_default_reports_in_plan():
+    proj = ProjectInput(name="test-chamber", display="Test Chamber",
+                        selection=None, roster=_roster())
+    plan = _build(proj).plans[0]
+    assert plan.unmanaged_default is True
+    assert plan.managed is False
+
+
+# ---------------------------------------------------------------------------
+# The locked self.agent diagonal -- the "why a project is/ isn't present" crux.
+# ---------------------------------------------------------------------------
+
+def test_managed_empty_but_agent_exposed_keeps_local_launcher():
+    """An explicit ``terminal_profiles: []`` on an *agent-exposed* project still
+    emits the local launcher (the diagonal is locked) -- so the project never
+    vanishes from the Terminal dropdown just because its selection is empty."""
+    proj = ProjectInput(name="test-chamber", display="Test Chamber",
+                        agent_exposed=True, selection=frozenset(), roster=_roster())
+    result = _build(proj)
+    assert _names(result) == ["Test Chamber"]
+    assert result.profiles[0].kind == "local-agent"
+
+
+def test_managed_empty_and_no_agent_emits_nothing():
+    """A genuine ``--no-agent`` project (agent_exposed False) with an empty
+    selection emits no profiles at all."""
+    proj = ProjectInput(name="reference-repo", display="Reference Repo",
+                        agent_exposed=False, selection=frozenset(), roster=_roster())
+    result = _build(proj)
+    assert result.profiles == []
+
+
+def test_unmanaged_no_agent_excludes_local_launcher():
+    """A registered but ``--no-agent`` project with NO explicit selection
+    (unmanaged -> the default column) must not emit a local self-launch
+    profile either -- `agent_exposed` used to be a no-op here because
+    `default_selection_keys()` (and `profiles.normalize_selection()`)
+    unconditionally force-include the self diagonal regardless of the flag.
+    The project's cross-machine bare shells are unaffected."""
+    proj = ProjectInput(name="reference-repo", display="Reference Repo",
+                        agent_exposed=False, selection=None, roster=_roster())
+    result = _build(proj)
+    names = _names(result)
+    assert "Reference Repo" not in names
+    assert _kinds(result) == {"ssh-shell"}
+    assert "emancipation-cube" in names
+    assert "mantis-counter" in names
+
+
+def test_managed_no_agent_with_self_in_selection_keeps_local_launcher():
+    """A MANAGED selection that explicitly lists the self diagonal remains
+    authoritative even for a `--no-agent` project -- `agent_exposed` only
+    gates the *unmanaged* default column (see
+    test_unmanaged_no_agent_excludes_local_launcher); it never overrides an
+    explicit `terminal_profiles` entry (matches
+    test_local_wsl_agent_requires_recorded_distro's WSL counterpart)."""
+    sel = frozenset({"anomalous-potato|Win|agent", "emancipation-cube|Win|shell"})
+    proj = ProjectInput(name="reference-repo", display="Reference Repo",
+                        agent_exposed=False, selection=sel, roster=_roster())
+    result = _build(proj)
+    assert "Reference Repo" in _names(result)
+    assert "local-agent" in _kinds(result)
+    assert "emancipation-cube" in _names(result)
+
+
+def test_local_launcher_shape_matches_powershell():
+    proj = ProjectInput(name="test-chamber", display="Test Chamber",
+                        agent_exposed=True, selection=frozenset(), roster=_roster())
+    p = _build(proj).profiles[0]
+    assert p.guid == "{" + tf.stable_guid("test-chamber-local-windows") + "}"
+    assert p.name == "Test Chamber"
+    assert p.commandline == r'cmd /c "%USERPROFILE%\.local\bin\test-chamber.cmd"'
+    wt = p.to_wt()
+    assert wt["startingDirectory"] == "%USERPROFILE%"
+    assert wt["colorScheme"] == "Aperture Science"
+    assert wt["hidden"] is False
+
+
+# ---------------------------------------------------------------------------
+# SSH shell + launch-agent gating.
+# ---------------------------------------------------------------------------
+
+def test_managed_selection_emits_ssh_shell_and_launch_agent():
+    # Legacy display-name vocabulary in the selection is still accepted (dual
+    # acceptance) even though profiles are now labelled by the canonical key.
+    sel = frozenset({
+        "Anomalous-Potato|Win|agent",     # self (locked anyway)
+        "Emancipation-Cube|Win|shell",        # plain ssh shell to emancipation-cube
+        "Emancipation-Cube|Win|agent",        # launch test-chamber on emancipation-cube
+    })
+    proj = ProjectInput(name="test-chamber", display="Test Chamber",
+                        selection=sel, roster=_roster())
+    result = _build(proj)
+    by_name = {p.name: p for p in result.profiles}
+
+    assert by_name["emancipation-cube"].commandline == "ssh emancipation-cube"
+    assert by_name["emancipation-cube"].kind == "ssh-shell"
+    # Launch profile: "<project display> (<machine key>)", pwsh env -> .cmd binstub.
+    assert "Test Chamber (emancipation-cube)" in by_name
+    launch = by_name["Test Chamber (emancipation-cube)"]
+    assert launch.commandline == "ssh -t emancipation-cube test-chamber.cmd"
+    assert launch.kind == "launch-agent"
+
+
+def test_managed_selection_key_vocabulary_matches():
+    """The canonical selection vocabulary is the roster KEY; a key-keyed column
+    produces the same profiles as the legacy display-name column."""
+    sel = frozenset({
+        "anomalous-potato|Win|agent",
+        "emancipation-cube|Win|shell",
+        "emancipation-cube|Win|agent",
+    })
+    proj = ProjectInput(name="test-chamber", display="Test Chamber",
+                        selection=sel, roster=_roster())
+    by_name = {p.name: p for p in _build(proj).profiles}
+    assert by_name["emancipation-cube"].commandline == "ssh emancipation-cube"
+    assert "Test Chamber (emancipation-cube)" in by_name
+
+
+def test_launch_agent_uses_bare_binstub_for_bash_env():
+    sel = frozenset({"mantis-counter|Linux|agent"})
+    proj = ProjectInput(name="test-chamber", display="Test Chamber",
+                        agent_exposed=False, selection=sel, roster=_roster())
+    launch = next(p for p in _build(proj).profiles if p.kind == "launch-agent")
+    # bash shell -> no ``.cmd`` suffix.
+    assert launch.commandline == "ssh -t mantis-counter test-chamber"
+    assert launch.name == "Test Chamber (mantis-counter)"
+
+
+def test_wsl_ssh_shell_labelled_and_iconed():
+    sel = frozenset({"emancipation-cube|WSL|shell"})
+    proj = ProjectInput(name="test-chamber", display="Test Chamber",
+                        agent_exposed=False, selection=sel, roster=_roster(),
+                        icon="ICON.ico", wsl_icon="WSL.ico")
+    p = next(x for x in _build(proj).profiles if x.kind == "ssh-shell")
+    assert p.name == "emancipation-cube (WSL)"
+    assert p.commandline == "ssh emancipation-cube-wsl"
+    assert p.icon == "WSL.ico"
+
+
+# ---------------------------------------------------------------------------
+# Self-skip, readiness gating, de-duplication.
+# ---------------------------------------------------------------------------
+
+def test_self_machine_never_becomes_ssh_target():
+    # Even if the selection names the self machine as a shell target, no ssh
+    # profile to self is emitted (the SSH loop skips self).
+    sel = frozenset({"anomalous-potato|Win|shell", "anomalous-potato|WSL|shell"})
+    proj = ProjectInput(name="test-chamber", display="Test Chamber",
+                        selection=sel, roster=_roster())
+    result = _build(proj)
+    assert not any(p.commandline.startswith("ssh anomalous-potato") for p in result.profiles)
+    # The anomalous-potato|Win|shell selection still produces a LOCAL shell (pwsh),
+    # not an SSH-to-self.
+    local_shells = [p for p in result.profiles if p.kind == "local-shell"]
+    assert len(local_shells) == 1
+    assert local_shells[0].commandline == "pwsh.exe"
+    # Labelled by the canonical full key.
+    assert local_shells[0].name == "anomalous-potato"
+
+
+def test_not_ready_machine_excluded():
+    roster = (
+        RosterMachine(key="anomalous-potato", display_name="Anomalous-Potato", ssh_ready=True,
+                      environments=(SshEnvironment("windows", "anomalous-potato", "pwsh"),)),
+        RosterMachine(key="book2", display_name="Book2", ssh_ready=False,
+                      environments=(SshEnvironment("windows", "book2", "pwsh"),)),
+    )
+    proj = ProjectInput(name="test-chamber", display="Test Chamber",
+                        selection=None, roster=roster)
+    result = _build(proj)
+    # book2 is not ready -> no bare shell for it in the default column.
+    assert "book2" not in _names(result)
+
+
+def test_shell_profiles_deduped_across_projects():
+    """Local + remote *shell* GUIDs are project-independent: two projects both
+    selecting the emancipation-cube shell emit ONE emancipation-cube profile."""
+    sel = frozenset({"emancipation-cube|Win|shell"})
+    p1 = ProjectInput(name="test-chamber", display="Test Chamber",
+                    selection=sel, roster=_roster())
+    p2 = ProjectInput(name="agent-worktrees", display="Agent Worktrees",
+                    selection=sel, roster=_roster())
+    result = tf.build_fragment([p1, p2], "anomalous-potato", computer_name="anomalous-potato")
+    emancipation_cube = [p for p in result.profiles if p.name == "emancipation-cube"]
+    assert len(emancipation_cube) == 1
+
+
+# ---------------------------------------------------------------------------
+# WSL local profiles.
+# ---------------------------------------------------------------------------
+
+def test_local_wsl_agent_requires_recorded_distro():
+    sel = frozenset({"Anomalous-Potato|WSL|agent"})
+    # No distro/state recorded -> no local WSL agent profile.
+    without = ProjectInput(name="test-chamber", display="Test Chamber",
+                        agent_exposed=False, selection=sel, roster=_roster())
+    assert not any(p.kind == "local-wsl-agent" for p in _build(without).profiles)
+
+    # Distro + state recorded -> the WSL launcher appears.
+    with_wsl = ProjectInput(name="test-chamber", display="Test Chamber",
+                        agent_exposed=False, selection=sel, roster=_roster(),
+                        wsl_distro="Ubuntu", wsl_state="ready")
+    p = next(x for x in _build(with_wsl).profiles if x.kind == "local-wsl-agent")
+    assert p.name == "Test Chamber (WSL)"
+    assert p.commandline == "wsl.exe -d Ubuntu -- bash -lc test-chamber"
+
+
+def test_local_wsl_shell_honored_without_distro():
+    sel = frozenset({"anomalous-potato|WSL|shell"})
+    proj = ProjectInput(name="test-chamber", display="Test Chamber",
+                        agent_exposed=False, selection=sel, roster=_roster())
+    p = next(x for x in _build(proj).profiles if x.kind == "local-wsl-shell")
+    assert p.commandline == "wsl.exe"
+    assert p.name == "anomalous-potato (WSL)"
+
+
+# ---------------------------------------------------------------------------
+# Fragment envelope.
+# ---------------------------------------------------------------------------
+
+def test_fragment_carries_profiles_and_scheme():
+    proj = ProjectInput(name="test-chamber", display="Test Chamber",
+                        selection=None, roster=_roster())
+    frag = _build(proj).fragment()
+    assert "profiles" in frag and "schemes" in frag
+    assert frag["schemes"][0]["name"] == "Aperture Science"
+    # Every profile object is fully formed.
+    for p in frag["profiles"]:
+        assert set(p) >= {"guid", "name", "commandline", "icon",
+                          "startingDirectory", "colorScheme", "hidden"}
+
+
+def test_multi_project_no_guid_collisions():
+    p1 = ProjectInput(name="test-chamber", display="Test Chamber",
+                    selection=None, roster=_roster())
+    p2 = ProjectInput(name="agent-worktrees", display="Agent Worktrees",
+                    selection=None, roster=_roster())
+    result = tf.build_fragment([p1, p2], "anomalous-potato", computer_name="anomalous-potato")
+    guids = [p.guid for p in result.profiles]
+    assert len(guids) == len(set(guids))
+
+
+# ---------------------------------------------------------------------------
+# Env-label vocabulary helpers.
+# ---------------------------------------------------------------------------
+
+def test_env_label_helpers():
+    assert tf.sel_env_label("windows") == "Win"
+    assert tf.sel_env_label("wsl") == "WSL"
+    assert tf.sel_env_label("linux") == "Linux"
+    assert tf.ssh_env_label("windows") == "Windows"
+    assert tf.ssh_env_label("wsl") == "WSL"
+
+
+# ---------------------------------------------------------------------------
+# state.json / generatedProfiles reconciliation -- the convergent-sync fix.
+# ---------------------------------------------------------------------------
+
+def test_reconcile_heals_hidden_fragment_profile():
+    """A live fragment GUID missing from settings.json (WT is hiding it) is
+    pruned from generatedProfiles so WT re-discovers it. This is the exact
+    Test Chamber failure the delta-based sync could never heal."""
+    frag = ["{aaaa}", "{bbbb}"]
+    settings = ["{aaaa}"]                 # bbbb materialized nowhere -> hidden
+    generated = ["{aaaa}", "{bbbb}"]
+    plan = tf.reconcile_generated_profiles(frag, settings, generated)
+    assert plan.remove == ["{bbbb}"]
+    assert plan.keep == ["{aaaa}"]
+    assert plan.changed is True
+
+
+def test_reconcile_keeps_materialized_profiles_untouched():
+    """Fragment GUIDs already in settings.json stay in generatedProfiles, so
+    WT preserves user customizations (no churn on steady state)."""
+    frag = ["{aaaa}", "{bbbb}"]
+    settings = ["{aaaa}", "{bbbb}"]
+    generated = ["{aaaa}", "{bbbb}"]
+    plan = tf.reconcile_generated_profiles(frag, settings, generated)
+    assert plan.remove == []
+    assert plan.changed is False
+
+
+def test_reconcile_is_idempotent():
+    """Re-running after WT materializes the healed profile is a no-op -- the
+    invariant converges rather than oscillating."""
+    frag = ["{aaaa}", "{bbbb}"]
+    # First pass: bbbb hidden -> removed.
+    first = tf.reconcile_generated_profiles(frag, ["{aaaa}"], ["{aaaa}", "{bbbb}"])
+    assert first.remove == ["{bbbb}"]
+    # WT then re-discovers bbbb into settings + generatedProfiles.
+    second = tf.reconcile_generated_profiles(
+        frag, ["{aaaa}", "{bbbb}"], ["{aaaa}", "{bbbb}"])
+    assert second.remove == []
+
+
+def test_reconcile_removes_stale_and_changed():
+    frag = ["{aaaa}"]
+    settings = ["{aaaa}", "{old}"]
+    generated = ["{aaaa}", "{old}", "{chg}"]
+    plan = tf.reconcile_generated_profiles(
+        frag, settings, generated, stale_guids=["{old}"], changed_guids=["{chg}"])
+    assert set(plan.remove) == {"{old}", "{chg}"}
+    assert plan.keep == ["{aaaa}"]
+
+
+def test_reconcile_leaves_foreign_orphans_untouched():
+    """A v4/v5 orphan (WT built-in / random profile the user deleted) is kept --
+    reclamation must never resurrect a foreign dynamic profile."""
+    frag = ["{aaaa}"]
+    settings = ["{aaaa}"]
+    wsl_v5 = "{7edcd332-66b5-51da-b9b9-c9feed3a9fd2}"   # version nibble 5
+    random_v4 = "{12345678-1234-4abc-8def-1234567890ab}"  # version nibble 4
+    generated = ["{aaaa}", wsl_v5, random_v4]
+    plan = tf.reconcile_generated_profiles(frag, settings, generated)
+    assert plan.remove == []
+    assert wsl_v5 in plan.keep and random_v4 in plan.keep
+
+
+def test_reconcile_reclaims_our_orphans():
+    """A non-v4/v5 orphan (our raw-hash generator's leftover, in no fragment,
+    not materialized) is reclaimed -- this is what lets plain `update` finally
+    drain the accumulated generatedProfiles cruft."""
+    frag = ["{aaaa}"]
+    settings = ["{aaaa}"]
+    ours = "{593ace19-f6f2-a0bd-237c-bd163f6708f3}"   # version nibble a -> ours
+    plan = tf.reconcile_generated_profiles(frag, settings, ["{aaaa}", ours])
+    assert plan.remove == [ours]
+    assert ours in plan.reclaimed
+    assert "{aaaa}" in plan.keep
+
+
+def test_reconcile_orphan_in_foreign_fragment_is_kept():
+    """A non-v4/v5 orphan that a foreign fragment still emits is kept: pass the
+    union of all installed fragments so we don't prune another extension's."""
+    ours_frag = ["{aaaa}"]
+    foreign = "{593ace19-f6f2-a0bd-237c-bd163f6708f3}"  # non-v4/v5 but foreign-owned
+    plan = tf.reconcile_generated_profiles(
+        ours_frag, ["{aaaa}"], ["{aaaa}", foreign],
+        all_fragment_guids=["{aaaa}", foreign])
+    assert plan.remove == []
+    assert foreign in plan.keep
+
+
+def test_reconcile_orphan_reclaim_can_be_disabled():
+    ours = "{593ace19-f6f2-a0bd-237c-bd163f6708f3}"
+    plan = tf.reconcile_generated_profiles(
+        ["{aaaa}"], ["{aaaa}"], ["{aaaa}", ours], reclaim_orphans=False)
+    assert plan.remove == []
+    assert ours in plan.keep
+
+
+def test_reconcile_heal_and_reclaim_reported_separately():
+    frag = ["{aaaa}", "{bbbb}"]
+    settings = ["{aaaa}"]                                  # bbbb hidden
+    ours_orphan = "{593ace19-f6f2-a0bd-237c-bd163f6708f3}"
+    plan = tf.reconcile_generated_profiles(
+        frag, settings, ["{aaaa}", "{bbbb}", ours_orphan])
+    assert plan.healed == ["{bbbb}"]
+    assert plan.reclaimed == [ours_orphan]
+    assert set(plan.remove) == {"{bbbb}", ours_orphan}
+
+
+# ---------------------------------------------------------------------------
+# Selection migration: legacy display_name vocabulary -> canonical key.
+# ---------------------------------------------------------------------------
+
+def test_migrate_selection_rewrites_display_names_to_keys(tmp_path):
+    """A config keyed by display_name is rewritten to the roster key; env/kind
+    preserved, other config keys untouched, and it is idempotent."""
+    import yaml
+
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "machine: anomalous-potato\n"
+        "terminal_profiles:\n"
+        "  - {machine: Anomalous-Potato, env: Win, kind: agent}\n"
+        "  - {machine: Emancipation-Cube, env: Win, kind: shell}\n"
+        "  - {machine: Mantis-Counter, env: Linux, kind: shell}\n",
+        encoding="utf-8")
+
+    changed = tf.migrate_selection_to_keys(cfg_path, _roster())
+    assert changed is True
+
+    data = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    assert data["machine"] == "anomalous-potato"   # unrelated key preserved
+    machines = [t["machine"] for t in data["terminal_profiles"]]
+    assert machines == ["anomalous-potato", "emancipation-cube", "mantis-counter"]
+
+    # Idempotent: a second pass makes no change.
+    assert tf.migrate_selection_to_keys(cfg_path, _roster()) is False
+
+
+def test_migrate_selection_preserves_unknown_machine(tmp_path):
+    """A selected machine absent from the roster is left verbatim (no data loss)."""
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "terminal_profiles:\n"
+        "  - {machine: ghost-box, env: Win, kind: shell}\n",
+        encoding="utf-8")
+    assert tf.migrate_selection_to_keys(cfg_path, _roster()) is False
+    import yaml
+    data = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    assert data["terminal_profiles"][0]["machine"] == "ghost-box"
+
+
+def test_migrate_no_selection_is_noop(tmp_path):
+    """An unmanaged config (no terminal_profiles key) is never rewritten."""
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text("machine: anomalous-potato\n", encoding="utf-8")
+    assert tf.migrate_selection_to_keys(cfg_path, _roster()) is False
+
+
+def test_is_rfc_v4_or_v5_guid():
+    assert tf.is_rfc_v4_or_v5_guid("{7edcd332-66b5-51da-b9b9-c9feed3a9fd2}")   # v5
+    assert tf.is_rfc_v4_or_v5_guid("12345678-1234-4abc-8def-1234567890ab")     # v4
+    # Our raw-hash GUIDs: version nibble not 4/5.
+    assert not tf.is_rfc_v4_or_v5_guid("{593ace19-f6f2-a0bd-237c-bd163f6708f3}")
+    assert not tf.is_rfc_v4_or_v5_guid("{440d9b37-e5d0-d1f2-d8e7-ab1e0a8d6d3b}")
+    # Malformed / short tokens are not treated as v4/v5.
+    assert not tf.is_rfc_v4_or_v5_guid("{foobar}")
+    assert not tf.is_rfc_v4_or_v5_guid("")
+
+
+def test_reconcile_case_insensitive_preserves_original():
+    frag = ["{AAAA}"]
+    settings = []                          # AAAA hidden
+    generated = ["{aaaa}"]                 # different casing than fragment
+    plan = tf.reconcile_generated_profiles(frag, settings, generated)
+    # Matched case-insensitively, but the original entry casing is preserved.
+    assert plan.remove == ["{aaaa}"]
+
