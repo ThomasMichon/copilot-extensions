@@ -57,7 +57,8 @@ use plain git.
 | Operation | Do it via | Why |
 |-----------|-----------|-----|
 | `status`, `log`, `diff`, `show`, `branch -v` | **plain git** | read-only inspection; no shared state |
-| `add`, `commit`, `restore`, `stash`, local `switch`, `rebase -i` **on your own worktree branch** | **plain git** | local history; disposable until it lands |
+| `add`, `commit`, `restore`, local `switch`, `rebase -i` **on your own worktree branch** | **plain git** | local history; disposable until it lands |
+| `stash` | **avoid -- see below** | the stash stack is **shared across every worktree of the same clone**, not scoped to yours |
 | `fetch` | **plain git** | read-only; updates remote-tracking refs only |
 | Advance the worktree onto the merged default ("pull forward") | helper: `<agent-worktrees catalog argv[0]> git sync` | wraps fetch + rebase; drops squash-merged commits without losing local work |
 | Create / update / push a **shared** feature branch | helper: `<agent-worktrees catalog argv[0]> git feature-branch ...` | wraps create + ff + push; a real remote branch many agents build on |
@@ -115,6 +116,53 @@ uncommon.
 This is the **review-gate continuation** for efforts: submit the effort PR ->
 it's reviewed + merged -> confirm via `pr-status` -> `git sync` -> build Phase
 work on top.
+
+## Safe rebase in a high-velocity repo: backup branch, then cherry-pick
+
+`git sync`'s auto-abort-on-conflict keeps a *simple* rebase safe. But in a repo
+with many concurrent contributors -- commits (and version-bump races) landing
+on the default branch faster than you can rebase and push -- a rebase can
+still turn genuinely messy: real conflicts across several of your own commits,
+or the default branch moving again mid-resolution. Reaching for `git stash` to
+"get out of the way" while you sort it out is the wrong reflex here (see
+below); the durable-safe move instead is:
+
+1. **Commit everything first.** Nothing should be sitting only in the working
+   tree or a stash -- a rebase you abort partway through must never cost you
+   uncommitted work.
+2. **Tag a local backup branch** at your current tip before touching the
+   rebase: `git branch backup/<slug>`. Costs nothing, and it's your unconditional
+   fallback if the rebase goes sideways.
+3. **Rebase (or attempt the merge) against a freshly fetched default branch**,
+   resolving conflicts as they come.
+4. **If it gets messy -- multiple conflicting commits, or the base moved again
+   mid-resolution -- stop resolving in place.** Reset to the backup
+   (`git reset --hard backup/<slug>`), re-fetch, and
+   `git cherry-pick <your-commit(s)>` onto the fresh base instead. Cherry-pick
+   replays your own commits one at a time onto wherever the default branch
+   actually is *right now*, which is usually far less error-prone than
+   untangling an in-progress rebase's conflict markers across several commits.
+5. Delete the backup branch once your work is confirmed on the remote
+   (`git branch -D backup/<slug>`) -- it's scaffolding, not a permanent ref.
+
+### `git stash` is a shared stack across every worktree of one clone -- don't reach for it here
+
+`git stash` is **not** scoped to the worktree you run it in: worktrees of the
+same repository share one `.git` directory, and the stash stack lives there,
+visible and poppable from *any* of them. A bare `git stash` / `git stash pop`
+during a rebase can silently interact with another agent's or another
+session's stash entry -- popping someone else's WIP into your tree, or (worse)
+resolving *their* conflicts and dropping *their* entry when you didn't mean to
+touch it at all.
+
+If you must set work aside momentarily, prefer a real commit on a scratch
+branch (`git commit -m wip` on `backup/<slug>` from step 2 above) over
+`git stash` -- it's exactly as disposable, but it can never collide with
+another worktree's stash entry. If you do end up needing to inspect the stash
+list for any reason, treat every entry that isn't unambiguously the one you
+just created as **someone else's** -- `git stash list` before and after any
+stash operation, and never run a bare `pop`/`drop`/`apply` unless you've
+confirmed `stash@{0}`'s message is yours.
 
 ## Iterating on an open PR (open it as a draft)
 
