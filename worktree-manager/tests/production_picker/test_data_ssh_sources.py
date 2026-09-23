@@ -2042,3 +2042,229 @@ def test_records_hides_source_that_never_resolved():
     loader._records[key] = []
     loader._state[key] = "loading"
     assert loader.records() == []
+
+
+# ── picker-lazy-per-machine-loading: ping-first, load-on-nav ─────────────────
+
+def _remote_src(machine="dev6", env="Win", alias="host-dev6"):
+    argv = data_ssh._argv_for("pwsh", alias, "dotfiles", classify=True)
+    return data_ssh.Source(machine, env, argv, ready=True, alias=alias)
+
+
+def test_ping_argv_is_a_bare_connectivity_probe():
+    argv = data_ssh._ping_argv("host-dev6")
+    assert argv[0] == "ssh"
+    assert argv[-3:] == ["host-dev6", "exit", "0"]
+    assert "BatchMode=yes" in argv
+
+
+def test_start_with_focus_keys_loads_focus_fully_and_pings_the_rest(monkeypatch):
+    local = data_ssh.Source("book2", "Win", None, local=True, ready=True)
+    focus_remote = _remote_src("dev6", "Win", "host-dev6")
+    other_remote = _remote_src("cloud1", "Win", "host-cloud1")
+    loader = data_ssh.LiveLoader([local, focus_remote, other_remote])
+
+    loaded = []
+    pinged = []
+    monkeypatch.setattr(loader, "_load_one", lambda s, gen=None: loaded.append(s.cache_key))
+    monkeypatch.setattr(loader, "_ping_one", lambda s: pinged.append(s.cache_key))
+    # start() spawns real threads; run them inline for a deterministic test.
+    monkeypatch.setattr(
+        data_ssh.threading, "Thread",
+        lambda target, args=(), name=None, daemon=None: types.SimpleNamespace(
+            start=lambda: target(*args)),
+    )
+
+    loader.start(focus_keys={("dev6", "Win")})
+
+    assert set(loaded) == {local.cache_key, focus_remote.cache_key}
+    assert pinged == [other_remote.cache_key]
+    assert other_remote.cache_key in loader._pinged_only
+
+
+def test_start_without_focus_keys_loads_everything(monkeypatch):
+    """No ``focus_keys`` -> identical to the pre-feature behavior: every
+    ready source loads in full, nothing deferred behind a ping."""
+    local = data_ssh.Source("book2", "Win", None, local=True, ready=True)
+    remote = _remote_src()
+    loader = data_ssh.LiveLoader([local, remote])
+    loaded = []
+    monkeypatch.setattr(loader, "_load_one", lambda s, gen=None: loaded.append(s.cache_key))
+    monkeypatch.setattr(
+        data_ssh.threading, "Thread",
+        lambda target, args=(), name=None, daemon=None: types.SimpleNamespace(
+            start=lambda: target(*args)),
+    )
+
+    loader.start()
+
+    assert set(loaded) == {local.cache_key, remote.cache_key}
+    assert loader._pinged_only == set()
+
+
+def test_lazy_loading_can_be_disabled_via_env(monkeypatch):
+    monkeypatch.setenv("AGENT_WORKTREES_PICKER_LAZY_LOAD", "0")
+    local = data_ssh.Source("book2", "Win", None, local=True, ready=True)
+    remote = _remote_src()
+    loader = data_ssh.LiveLoader([local, remote])
+    loaded = []
+    monkeypatch.setattr(loader, "_load_one", lambda s, gen=None: loaded.append(s.cache_key))
+    monkeypatch.setattr(
+        data_ssh.threading, "Thread",
+        lambda target, args=(), name=None, daemon=None: types.SimpleNamespace(
+            start=lambda: target(*args)),
+    )
+
+    loader.start(focus_keys={("book2", "Win")})   # focus given, but the gate is off
+
+    assert set(loaded) == {local.cache_key, remote.cache_key}
+    assert loader._pinged_only == set()
+
+
+def test_ping_one_success_marks_ready_with_no_records():
+    src = _remote_src()
+    loader = data_ssh.LiveLoader([src])
+    loader._pinged_only.add(src.cache_key)
+    loader._spawn = lambda argv, timeout: types.SimpleNamespace(
+        returncode=0, stdout="", stderr="")
+
+    loader._ping_one(src)
+
+    assert loader.state("dev6", "Win") == "ready"
+    assert loader.records_for_source(src.cache_key) == []
+    assert loader.error("dev6", "Win") == ""
+
+
+def test_ping_one_failure_marks_failed():
+    src = _remote_src()
+    loader = data_ssh.LiveLoader([src])
+    loader._pinged_only.add(src.cache_key)
+    loader._spawn = lambda argv, timeout: types.SimpleNamespace(
+        returncode=255, stdout="", stderr="ssh: Could not resolve hostname")
+
+    loader._ping_one(src)
+
+    assert loader.state("dev6", "Win") == "failed"
+    assert "Could not resolve hostname" in loader.error("dev6", "Win")
+
+
+def test_ping_one_never_clobbers_a_result_already_promoted(monkeypatch):
+    """ensure_loaded() may race a slow ping and finish first (a real load is
+    typically much slower than a ping, but the ping's own thread can still be
+    mid-flight when it commits) -- the ping must never overwrite whatever the
+    real load already committed."""
+    src = _remote_src()
+    loader = data_ssh.LiveLoader([src])
+    loader._pinged_only.add(src.cache_key)
+    loader._spawn = lambda argv, timeout: types.SimpleNamespace(
+        returncode=0, stdout="", stderr="")
+    # Simulate ensure_loaded() having already promoted + resolved this source
+    # with real rows before the (slower) ping call returns.
+    loader._pinged_only.discard(src.cache_key)
+    loader._records[src.cache_key] = [{"id4": "aaaa"}]
+    loader._state[src.cache_key] = "ready"
+
+    loader._ping_one(src)
+
+    assert loader.records_for_source(src.cache_key) == [{"id4": "aaaa"}]
+
+
+def test_ensure_loaded_promotes_a_pinged_only_source(monkeypatch):
+    src = _remote_src()
+    loader = data_ssh.LiveLoader([src])
+    loader._pinged_only.add(src.cache_key)
+    loader._state[src.cache_key] = "ready"   # as a successful ping left it
+    started = []
+    monkeypatch.setattr(loader, "_load_one", lambda s, gen=None: started.append(s.cache_key))
+    monkeypatch.setattr(
+        data_ssh.threading, "Thread",
+        lambda target, args=(), name=None, daemon=None: types.SimpleNamespace(
+            start=lambda: target(*args)),
+    )
+
+    assert loader.ensure_loaded(("dev6", "Win")) is True
+    assert started == [src.cache_key]
+    assert src.cache_key not in loader._pinged_only
+    # ensure_loaded's own synchronous state flip, before the (stubbed) load
+    # thread would normally overwrite it -- proves it re-arms the spinner.
+
+
+def test_ensure_loaded_noop_when_not_pinged(monkeypatch):
+    """Already-loaded, still-loading, and unreachable sources are all left
+    exactly as they are -- ensure_loaded only ever promotes a ping-only one."""
+    src = _remote_src()
+    loader = data_ssh.LiveLoader([src])
+    loader._state[src.cache_key] = "ready"
+    loader._records[src.cache_key] = [{"id4": "aaaa"}]
+    started = []
+    monkeypatch.setattr(loader, "_load_one", lambda s, gen=None: started.append(s.cache_key))
+
+    assert loader.ensure_loaded(("dev6", "Win")) is False
+    assert started == []
+    assert loader._records[src.cache_key] == [{"id4": "aaaa"}]
+
+
+def test_ensure_loaded_unknown_key_is_a_noop():
+    loader = data_ssh.LiveLoader([])
+    assert loader.ensure_loaded(("nope", "Win")) is False
+
+
+def test_ensure_all_loaded_promotes_every_pinged_source(monkeypatch):
+    a = _remote_src("dev6", "Win", "host-dev6")
+    b = _remote_src("cloud1", "Win", "host-cloud1")
+    already_loaded = _remote_src("cloud2", "Win", "host-cloud2")
+    loader = data_ssh.LiveLoader([a, b, already_loaded])
+    loader._pinged_only.update({a.cache_key, b.cache_key})
+    loader._state[already_loaded.cache_key] = "ready"
+    loader._records[already_loaded.cache_key] = [{"id4": "aaaa"}]
+    started = []
+    monkeypatch.setattr(loader, "_load_one", lambda s, gen=None: started.append(s.cache_key))
+    monkeypatch.setattr(
+        data_ssh.threading, "Thread",
+        lambda target, args=(), name=None, daemon=None: types.SimpleNamespace(
+            start=lambda: target(*args)),
+    )
+
+    assert loader.ensure_all_loaded() == 2
+    assert set(started) == {a.cache_key, b.cache_key}
+    assert loader._pinged_only == set()
+
+
+def test_cancel_source_kills_only_that_sources_procs(monkeypatch):
+    a = _remote_src("dev6", "Win", "host-dev6")
+    b = _remote_src("cloud1", "Win", "host-cloud1")
+    loader = data_ssh.LiveLoader([a, b])
+    killed = []
+    monkeypatch.setattr(data_ssh, "_kill_proc_tree", lambda proc: killed.append(proc))
+    proc_a = types.SimpleNamespace(name="proc-a")
+    proc_b = types.SimpleNamespace(name="proc-b")
+    loader._procs_by_source[a.cache_key] = [proc_a]
+    loader._procs_by_source[b.cache_key] = [proc_b]
+    loader._procs = [proc_a, proc_b]
+
+    assert loader.cancel_source(("dev6", "Win")) is True
+    assert killed == [proc_a]
+
+
+def test_cancel_source_noop_when_nothing_in_flight():
+    src = _remote_src()
+    loader = data_ssh.LiveLoader([src])
+    assert loader.cancel_source(("dev6", "Win")) is False
+
+
+def test_register_proc_tags_by_active_source():
+    src = _remote_src()
+    loader = data_ssh.LiveLoader([src])
+    loader._active_source.key = src.cache_key
+    proc = types.SimpleNamespace(name="proc")
+
+    loader._register_proc(proc)
+
+    assert proc in loader._procs
+    assert loader._procs_by_source[src.cache_key] == [proc]
+
+    loader._unregister_proc(proc)
+
+    assert proc not in loader._procs
+    assert src.cache_key not in loader._procs_by_source
+

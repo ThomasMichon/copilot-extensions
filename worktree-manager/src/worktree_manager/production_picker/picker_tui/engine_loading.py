@@ -216,7 +216,23 @@ class PickerScreenLoadingMixin:
                 if snapshot is not None
                 else self.src.make_loader()
             )
-            loader.start()
+            # Load only the local tab in full up front; every other ready
+            # remote gets a cheap connectivity ping instead (spinner ->
+            # checkmark/X with no listing cost) until the operator actually
+            # navigates onto its tab (picker-lazy-per-machine-loading, see
+            # LiveLoader.start's own docstring). `local` is a plain
+            # (machine, env) tuple or None; `ensure_loaded`/`start` treat a
+            # missing/unrecognized focus key the same as never navigating
+            # there, so a fixture source with no `local` degrades safely to
+            # loading everything (focus_keys=None below).
+            local = prepared.get("local") if prepared else None
+            starter = getattr(loader, "start", None)
+            if callable(starter):
+                try:
+                    starter(focus_keys={local} if local else None)
+                except TypeError:
+                    # An older engine's LiveLoader.start() takes no argument.
+                    starter()
         except Exception as exc:
             err = exc
 

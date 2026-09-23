@@ -343,7 +343,16 @@ class PickerScreenRuntimeMixin:
                 if source_snapshot is not None
                 else self.src.make_loader()
             )
-            self.loader.start()
+            # Load only the local tab in full up front; every other ready
+            # remote gets a cheap connectivity ping instead until the
+            # operator actually navigates onto its tab
+            # (picker-lazy-per-machine-loading; see LiveLoader.start's own
+            # docstring). ``local`` is a plain (machine, env) tuple or None;
+            # an older engine's LiveLoader.start() takes no argument.
+            try:
+                self.loader.start(focus_keys={local} if local else None)
+            except TypeError:
+                self.loader.start()
             self.data = self.loader.records()
         else:
             self.data = self.src.load()

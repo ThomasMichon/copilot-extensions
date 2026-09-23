@@ -301,6 +301,26 @@ def _ssh_argv(alias: str, remote: str) -> list[str]:
     return ["ssh", *_SSH_HARDENING, alias, remote]
 
 
+# A bare reachability probe -- deliberately NOT the full list/classify hardening
+# above: the picker fans a probe out to every not-yet-viewed machine tab on
+# every launch (picker-lazy-per-machine-loading), so it needs to fail fast on
+# an offline/hibernating box rather than waiting out the full ConnectTimeout.
+# ``exit 0`` never touches the remote agent-worktrees at all -- this is pure
+# SSH-layer connectivity, cheaper than even the fastest real list call.
+_PING_TIMEOUT_SECS = 5
+_PING_HARDENING = (
+    "-o", "BatchMode=yes",
+    "-o", "ConnectTimeout=4",
+    "-o", "ServerAliveInterval=4",
+    "-o", "ServerAliveCountMax=1",
+)
+
+
+def _ping_argv(alias: str) -> list[str]:
+    """``ssh`` argv for a fast connectivity-only probe (no listing)."""
+    return ["ssh", *_PING_HARDENING, alias, "exit", "0"]
+
+
 def _argv_for(shell: str, alias: str, project: str, *, classify: bool,
               reconcile: bool = False):
     """Remote list argv for a machine/env: pwsh on Windows, bash elsewhere."""
@@ -560,6 +580,22 @@ def _stream_enabled() -> bool:
     return os.environ.get(
         "AGENT_WORKTREES_PICKER_STREAM", "").strip().lower() in (
         "1", "true", "yes", "on")
+
+
+def _lazy_loading_enabled() -> bool:
+    """Whether `start()` defers a non-focused machine's full listing behind a
+    cheap connectivity ping instead of loading it immediately (picker-lazy-
+    per-machine-loading).
+
+    On by default -- unlike `_stream_enabled`'s fleet-rollout gate, this is
+    pure picker-local behavior with no remote-version dependency (the ping is
+    a bare ``ssh ... exit 0``, and `ensure_loaded` reuses the exact existing
+    load path). Kept behind an escape hatch anyway, matching this module's own
+    rollback-switch convention: set ``AGENT_WORKTREES_PICKER_LAZY_LOAD=0``
+    (any of 0/false/no/off) to load every ready machine up front again."""
+    return os.environ.get(
+        "AGENT_WORKTREES_PICKER_LAZY_LOAD", "").strip().lower() not in (
+        "0", "false", "no", "off")
 
 
 def _find_source(machine=None, env=None, *, source_id=None):
@@ -1326,12 +1362,43 @@ class LiveLoader:
         # merge the prefix over bootstrap rows instead of treating omitted
         # identities as removals during the first paint.
         self._stream_incomplete: dict = {}
+        # Sources whose full worktree listing has been DEFERRED behind a cheap
+        # connectivity ping (see `start`'s `focus_keys`) -- machine tabs the
+        # operator hasn't actually looked at yet. `ensure_loaded`/
+        # `ensure_all_loaded` promote one out of this set (and start its real
+        # load) the moment its tab becomes current (picker-lazy-per-machine-
+        # loading). Never populated for a source `start()` fully loads up front.
+        self._pinged_only: set = set()
+        # cache_key -> list of live ssh Popen this source's current load
+        # spawned, so `cancel_source` can kill only ITS children (unlike the
+        # blanket `cancel()`/`self._procs`, used for whole-picker teardown).
+        # Populated by `_spawn`/`_spawn_stream` via `_active_source` (a
+        # thread-local the load entry points set before calling `_fetch`).
+        self._procs_by_source: dict = {}
+        self._active_source = threading.local()
         for s in all_sources:
             self._state[s.cache_key] = "loading" if s.ready else "failed"
             self._records[s.cache_key] = []
             self._gen[s.cache_key] = 0
 
-    def start(self):
+    def start(self, focus_keys=None):
+        """Start every ready source loading -- or, with ``focus_keys``, load
+        only the sources the operator can actually see right now and cheaply
+        *ping* every other ready remote instead (picker-lazy-per-machine-
+        loading). A pinged tab shows the same spinner -> checkmark/X the
+        operator already reads as "reachable" -- ``ensure_loaded`` upgrades it
+        to a real listing the moment its tab becomes current, so a machine
+        never pays the full ``list --classify`` SSH round-trip (and the
+        continuous git-classification load it drives remotely) until the
+        operator is actually looking at it.
+
+        ``focus_keys`` is a set of ``(machine, env)`` tuples and/or
+        ``source_id`` strings identifying the source(s) that should load in
+        full immediately (typically just the local/initial tab); ``None``
+        (the default) loads every ready source in full, unchanged from
+        before this feature -- a caller that doesn't pass it sees identical
+        behavior to plain ``start()``.
+        """
         derive.NOW = _dt.datetime.now()
         self._log_load_header()
         # Every source -- local included -- loads on its own daemon thread so
@@ -1344,10 +1411,136 @@ class LiveLoader:
         # interaction immediate and the local tab simply shows the connect
         # spinner until its records arrive, exactly like the remotes.
         for s in self._sources:
+            if (
+                focus_keys is not None
+                and _lazy_loading_enabled()
+                and s.source_kind == SOURCE_KIND_MACHINE_SSH
+                and not (s.local or self._matches_focus(s, focus_keys))
+            ):
+                # Not local, not in view yet: a cheap reachability probe
+                # stands in for the real listing until `ensure_loaded`
+                # promotes it (picker-lazy-per-machine-loading).
+                self._pinged_only.add(s.cache_key)
+                threading.Thread(
+                    target=self._ping_one, args=(s,),
+                    name=f"ping-{s.machine}-{s.env}", daemon=True,
+                ).start()
+                continue
             threading.Thread(
                 target=self._load_one, args=(s, self._gen.get(s.cache_key, 0)),
                 name=f"load-{s.machine}-{s.env}", daemon=True,
             ).start()
+
+    @staticmethod
+    def _matches_focus(source, focus_keys) -> bool:
+        return (
+            source.key in focus_keys
+            or source.cache_key in focus_keys
+            or (source.source_id and source.source_id in focus_keys)
+            or (source.machine, source.env) in focus_keys
+        )
+
+    def _ping_one(self, source: Source):
+        """Cheap connectivity-only probe standing in for a deferred full load.
+
+        Sets the SAME ``ready``/``failed`` state the operator already reads as
+        the tab's spinner -> checkmark/X (``ready`` with empty records renders
+        identically to a machine that genuinely has no worktrees) -- but never
+        runs the remote's ``list``/git-classification. ``ensure_loaded``
+        replaces this with the real listing once the tab is actually viewed.
+        """
+        try:
+            if self._cancelled.is_set():
+                return
+            self._active_source.key = source.cache_key
+            try:
+                proc = self._spawn(_ping_argv(source.alias), _PING_TIMEOUT_SECS)
+            finally:
+                self._active_source.key = None
+        except Exception as exc:
+            with self._lock:
+                if source.cache_key in self._pinged_only:
+                    self._state[source.cache_key] = "failed"
+                    self._error[source.cache_key] = (
+                        str(exc).strip() or type(exc).__name__
+                    )
+            return
+        with self._lock:
+            # A nav-driven ensure_loaded() may have already promoted this
+            # source (and possibly completed a real load) while the ping was
+            # in flight -- never clobber that with a stale ping result.
+            if source.cache_key not in self._pinged_only:
+                return
+            if proc.returncode == 0:
+                self._records[source.cache_key] = []
+                self._state[source.cache_key] = "ready"
+                self._error[source.cache_key] = ""
+            else:
+                self._state[source.cache_key] = "failed"
+                self._error[source.cache_key] = (
+                    (proc.stderr or proc.stdout or "").strip().splitlines()[-1:]
+                    or ["unreachable"]
+                )[0]
+
+    def ensure_loaded(self, key) -> bool:
+        """Promote one ping-only source to a real listing (picker-lazy-
+        per-machine-loading): the operator just navigated onto its tab.
+
+        No-op (returns ``False``) if ``key`` doesn't match a ping-only
+        source -- already loaded, still loading, unreachable, or unknown are
+        all left exactly as they are. Flips the tab back to its connect
+        spinner while the real fetch runs, exactly like a fresh `start()`.
+        """
+        with self._lock:
+            src = next(
+                (s for s in self._sources if self._matches_focus(s, {key})),
+                None,
+            )
+            if src is None or src.cache_key not in self._pinged_only:
+                return False
+            self._pinged_only.discard(src.cache_key)
+            self._state[src.cache_key] = "loading"
+            self._records[src.cache_key] = []
+            gen = self._gen.get(src.cache_key, 0)
+        threading.Thread(
+            target=self._load_one, args=(src, gen),
+            name=f"lazyload-{src.machine}-{src.env}", daemon=True,
+        ).start()
+        return True
+
+    def ensure_all_loaded(self) -> int:
+        """``ensure_loaded`` every currently ping-only source (the "All" tab
+        needs every machine's real rows, not just the one(s) in single-machine
+        focus). Returns the number of loads actually started."""
+        with self._lock:
+            keys = list(self._pinged_only)
+        return sum(1 for k in keys if self.ensure_loaded(k))
+
+    def cancel_source(self, key) -> bool:
+        """Kill only this source's in-flight ssh child(ren) (nav-away).
+
+        Unlike :meth:`cancel` (whole-picker teardown), this targets one
+        source: the operator navigated OFF a machine tab whose real listing
+        `ensure_loaded` had just kicked off, before it finished. The source's
+        state/records are left as-is (typically still "loading") -- a
+        subsequent `ensure_loaded` (navigating back onto the tab) starts a
+        fresh attempt. Best-effort; a source with nothing in flight is a
+        harmless no-op.
+        """
+        with self._lock:
+            src = next(
+                (s for s in self._sources if self._matches_focus(s, {key})),
+                None,
+            )
+            if src is None:
+                return False
+            with self._procs_lock:
+                procs = list(self._procs_by_source.get(src.cache_key, ()))
+        if not procs:
+            return False
+        for p in procs:
+            _kill_proc_tree(p)
+        return True
 
     def reload(self, machine, env):
         """Re-fetch one source now (e.g. after a Maintenance op changed it).
@@ -1366,6 +1559,7 @@ class LiveLoader:
             if s.cache_key == source_id:
                 with self._lock:
                     self._state[s.cache_key] = "loading"
+                    self._pinged_only.discard(s.cache_key)
                     # Invalidate any in-flight silent repoll of this source so
                     # its (older) rows can't land after this reload (#1421).
                     self._gen[s.cache_key] = self._gen.get(s.cache_key, 0) + 1
@@ -1565,6 +1759,29 @@ class LiveLoader:
         for p in procs:
             _kill_proc_tree(p)
 
+    def _register_proc(self, proc):
+        """Track a freshly spawned child for both whole-picker `cancel()` and
+        per-source `cancel_source()` -- keyed by whichever source the calling
+        thread tagged via `_active_source` (unset for a caller outside the
+        load/ping/reconcile entry points, e.g. a raw test double)."""
+        key = getattr(self._active_source, "key", None)
+        with self._procs_lock:
+            self._procs.append(proc)
+            if key is not None:
+                self._procs_by_source.setdefault(key, []).append(proc)
+
+    def _unregister_proc(self, proc):
+        key = getattr(self._active_source, "key", None)
+        with self._procs_lock:
+            if proc in self._procs:
+                self._procs.remove(proc)
+            if key is not None:
+                bucket = self._procs_by_source.get(key)
+                if bucket and proc in bucket:
+                    bucket.remove(proc)
+                    if not bucket:
+                        self._procs_by_source.pop(key, None)
+
     def _spawn(self, argv, timeout):
         """Tracked, killable runner for prefetch subprocesses.
 
@@ -1597,8 +1814,7 @@ class LiveLoader:
                 | _CREATE_NO_WINDOW
             )
         proc = subprocess.Popen(argv, **kwargs)
-        with self._procs_lock:
-            self._procs.append(proc)
+        self._register_proc(proc)
         # Close the cancel/spawn race: if cancel() ran between the top-of-method
         # check and the Popen above, it never saw this child. Re-check now that
         # it's registered and kill it so a late spawn can't orphan an ssh child.
@@ -1610,9 +1826,7 @@ class LiveLoader:
             _kill_proc_tree(proc)
             out, err = proc.communicate()
         finally:
-            with self._procs_lock:
-                if proc in self._procs:
-                    self._procs.remove(proc)
+            self._unregister_proc(proc)
         return subprocess.CompletedProcess(argv, proc.returncode, out, err)
 
     def _spawn_stream(self, argv):
@@ -1640,23 +1854,24 @@ class LiveLoader:
                 | _CREATE_NO_WINDOW
             )
         proc = subprocess.Popen(argv, **kwargs)
-        with self._procs_lock:
-            self._procs.append(proc)
+        self._register_proc(proc)
         # Close the cancel/spawn race (see _spawn).
         if self._cancelled.is_set():
             _kill_proc_tree(proc)
         return proc
 
     def _untrack(self, proc):
-        with self._procs_lock:
-            if proc in self._procs:
-                self._procs.remove(proc)
+        self._unregister_proc(proc)
 
     def _load_one(self, source: Source, gen: int | None = None):
         if gen is None:
             gen = self._gen.get(source.cache_key, 0)
         with self._source_locks[source.cache_key]:
-            self._load_one_serial(source, gen)
+            self._active_source.key = source.cache_key
+            try:
+                self._load_one_serial(source, gen)
+            finally:
+                self._active_source.key = None
 
     def _load_one_serial(self, source: Source, gen: int):
         if source.local:
