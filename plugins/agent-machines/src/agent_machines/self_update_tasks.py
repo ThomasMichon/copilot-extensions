@@ -35,6 +35,7 @@ class ScheduledTaskSnapshot:
     trigger_kind: str | None = None
     trigger_value: int | None = None
     matching: bool = False
+    unavailable: bool = False
 
 
 @dataclass
