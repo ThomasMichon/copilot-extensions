@@ -525,3 +525,11 @@ generator contract details here or in a linked sub-doc._
   operator review; next real step is Phase 2 (cutting the `dev` branch),
   which needs the operator's go-ahead since it changes the repo's branch
   topology.
+- **Main fixed by the operator's other agent; PR #3380 merged.** All 4
+  Phase 1 PRs (#3337 effort, #3362 sync-vendored-libs, #3371 changefile
+  tools, #3380 preview-release + draft) are now merged. Phase 1 is
+  complete. Worktree hit a rebase conflict pulling forward past the squash
+  merge (expected: local pre-squash commits vs. the squashed remote
+  commit) — resolved with `git reset --hard origin/main` after confirming
+  the squash captured identical content (verified `contributing-draft.md`
+  present, `tools/dev_slot.py` absent).
