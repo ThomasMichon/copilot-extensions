@@ -23,6 +23,7 @@ from agent_dispatch.queue import (
     Task,
     TaskQueue,
     WakeOperation,
+    _TASK_DB_COLUMNS,
     _PROGRESS_PR_MAX,
 )
 from agent_dispatch.queue_common import (
@@ -31,6 +32,7 @@ from agent_dispatch.queue_common import (
 from agent_dispatch.queue_common import PROGRESS_PHASE_MAX as _CommonProgressPhaseMax
 from agent_dispatch.queue_common import Task as _CommonTask
 from agent_dispatch.queue_common import WakeOperation as _CommonWakeOperation
+from agent_dispatch.queue_common import _TASK_DB_COLUMNS as _CommonTaskDbColumns
 from agent_dispatch.queue_common import _PROGRESS_PR_MAX as _CommonProgressPrMax
 from agent_dispatch.queue_steering import QueueSteeringMixin
 
@@ -46,6 +48,7 @@ def test_queue_re_exports_match_queue_common():
     assert PROGRESS_PHASE_MAX is _CommonProgressPhaseMax
     assert Task is _CommonTask
     assert WakeOperation is _CommonWakeOperation
+    assert _TASK_DB_COLUMNS is _CommonTaskDbColumns
     assert _PROGRESS_PR_MAX is _CommonProgressPrMax
 
 

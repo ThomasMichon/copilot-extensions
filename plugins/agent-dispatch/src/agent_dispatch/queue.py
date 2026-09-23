@@ -66,6 +66,7 @@ from .queue_common import (  # noqa: F401 -- re-exported for existing call sites
     _CLAIM_REJECTION_EVENT_LIMIT,
     _MAX_AFFINITY,
     _PROGRESS_PR_MAX,
+    _TASK_DB_COLUMNS,
     _TASK_BULK_SELECT,
     _TASK_SELECT,
     _check_expected_status,
@@ -122,7 +123,6 @@ from .routing_provenance import (  # noqa: F401 -- re-exported for existing call
     token as routing_token,
 )
 log = logging.getLogger("agent-dispatch.queue")
-
 
 def _task_transition_spec(name: str) -> tuple[frozenset[str], str]:
     """Resolve a declared task transition's ``(from_states, to_state)`` from
