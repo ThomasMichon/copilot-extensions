@@ -129,6 +129,39 @@ def test_managed_empty_and_no_agent_emits_nothing():
     assert result.profiles == []
 
 
+def test_unmanaged_no_agent_excludes_local_launcher():
+    """A registered but ``--no-agent`` project with NO explicit selection
+    (unmanaged -> the default column) must not emit a local self-launch
+    profile either -- `agent_exposed` used to be a no-op here because
+    `default_selection_keys()` (and `profiles.normalize_selection()`)
+    unconditionally force-include the self diagonal regardless of the flag.
+    The project's cross-machine bare shells are unaffected."""
+    proj = ProjectInput(name="reference-repo", display="Reference Repo",
+                        agent_exposed=False, selection=None, roster=_roster())
+    result = _build(proj)
+    names = _names(result)
+    assert "Reference Repo" not in names
+    assert _kinds(result) == {"ssh-shell"}
+    assert "emancipation-cube" in names
+    assert "mantis-counter" in names
+
+
+def test_managed_no_agent_with_self_in_selection_keeps_local_launcher():
+    """A MANAGED selection that explicitly lists the self diagonal remains
+    authoritative even for a `--no-agent` project -- `agent_exposed` only
+    gates the *unmanaged* default column (see
+    test_unmanaged_no_agent_excludes_local_launcher); it never overrides an
+    explicit `terminal_profiles` entry (matches
+    test_local_wsl_agent_requires_recorded_distro's WSL counterpart)."""
+    sel = frozenset({"anomalous-potato|Win|agent", "emancipation-cube|Win|shell"})
+    proj = ProjectInput(name="reference-repo", display="Reference Repo",
+                        agent_exposed=False, selection=sel, roster=_roster())
+    result = _build(proj)
+    assert "Reference Repo" in _names(result)
+    assert "local-agent" in _kinds(result)
+    assert "emancipation-cube" in _names(result)
+
+
 def test_local_launcher_shape_matches_powershell():
     proj = ProjectInput(name="test-chamber", display="Test Chamber",
                         agent_exposed=True, selection=frozenset(), roster=_roster())

@@ -354,6 +354,26 @@ def build_fragment(
             sel = default_selection_keys(
                 proj.roster, self_machine, computer_name
             )
+            if not proj.agent_exposed:
+                # `default_selection_keys()` (via `profiles.default_selection`
+                # -> `profiles.normalize_selection`) unconditionally
+                # force-includes the self.agent diagonal in the DEFAULT
+                # column, regardless of `agent_exposed` -- "a host always
+                # launches itself". That makes `agent_exposed` a no-op for
+                # the one thing its name promises on an *unmanaged* project
+                # (no explicit `terminal_profiles` selection): a `--no-agent`
+                # project still got a local self-launch profile. Explicitly
+                # discard the self diagonal (both the canonical key and the
+                # legacy display-name alias, Win and WSL) from the DEFAULT
+                # column only. A MANAGED selection is left untouched below --
+                # an explicit `terminal_profiles` entry remains authoritative
+                # even for a `--no-agent` project (see
+                # test_local_wsl_agent_requires_recorded_distro).
+                for alias in local_aliases:
+                    if not alias:
+                        continue
+                    sel.discard(f"{alias}|Win|agent")
+                    sel.discard(f"{alias}|WSL|agent")
         else:
             sel = set(proj.selection)
 
