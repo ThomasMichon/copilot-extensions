@@ -40,8 +40,33 @@ def vendor_pairs() -> list[tuple[Path, Path]]:
     ]
 
 
+def unregistered_adopters() -> list[str]:
+    """Plugins that vendor an installer-engine file but are absent from ``ADOPTERS``.
+
+    A plugin that ships ``scripts/installer-engine.ps1``/``.sh`` dot-sources it
+    from its own installer, so a copy outside the adopter list never receives
+    canonical updates while this tool still reports everything in sync. That
+    drift is invisible until the stale copy misbehaves, so name it as a
+    problem instead of staying silent.
+    """
+    plugins_root = REPO / "plugins"
+    if not plugins_root.is_dir():
+        return []
+    return sorted(
+        candidate.name
+        for candidate in plugins_root.iterdir()
+        if candidate.name not in ADOPTERS
+        and any((candidate / "scripts" / name).is_file() for name in FILES)
+    )
+
+
 def verify() -> list[str]:
     problems: list[str] = []
+    for plugin in unregistered_adopters():
+        problems.append(
+            f"plugins/{plugin} vendors an installer-engine file but is not "
+            "listed in ADOPTERS, so its copy never receives canonical updates"
+        )
     for source, destination in vendor_pairs():
         relative = destination.relative_to(REPO).as_posix()
         if not source.is_file():
