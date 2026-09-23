@@ -1046,14 +1046,23 @@ function Install-Runtime {
     # make_headless_spawn -- so a bare `import agent_dispatch` never touches
     # it, and a slot that is broken ONLY at that import (as in #2863) would
     # otherwise sail through this gate and only fail on the first real spawn
-    # attempt, invisibly to `agent-dispatch health`/`daemon-status`. Import it
-    # explicitly here so that class of defect is caught before a slot is ever
-    # activated.
+    # attempt, invisibly to `agent-dispatch health`/`daemon-status`.
+    # `__main__` is the CLI entry point (argparse wiring, e.g. the
+    # `recipes_cli.register_recipes_commands` import) -- a bare `import
+    # agent_dispatch` never touches it either, so a slot whose package
+    # content got truncated/corrupted in a way that only breaks `__main__`'s
+    # own top-level imports (as in #3419: a partially-written source file
+    # produced a published payload silently missing a whole function) would
+    # otherwise sail through this gate and only surface on the very next
+    # `agent-dispatch <anything>` invocation -- including inside the
+    # coordinator's own service, which then crash-loops. Import both
+    # explicitly here so each class of defect is caught before a slot is
+    # ever activated.
     if ($VersionedRuntime) {
         $prevVersion = Get-VersionedCurrent
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        & $VenvPython -c 'import agent_dispatch, agent_dispatch.embody' 2>$null
+        & $VenvPython -c 'import agent_dispatch, agent_dispatch.embody, agent_dispatch.__main__' 2>$null
         $slotOk = ($LASTEXITCODE -eq 0)
         $ErrorActionPreference = $prevEAP
         if (-not $slotOk) {
@@ -1071,7 +1080,7 @@ function Install-Runtime {
     $ErrorActionPreference = 'Continue'
     $importOk = $false
     for ($i = 0; $i -lt 3; $i++) {
-        & $LinkPython -c 'import agent_dispatch, agent_dispatch.embody' 2>$null
+        & $LinkPython -c 'import agent_dispatch, agent_dispatch.embody, agent_dispatch.__main__' 2>$null
         if ($LASTEXITCODE -eq 0) { $importOk = $true; break }
         Start-Sleep -Seconds 1
     }
