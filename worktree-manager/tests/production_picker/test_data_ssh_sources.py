@@ -2321,6 +2321,88 @@ def test_cancel_source_re_arms_for_a_retry_on_nav_back(monkeypatch):
     assert started == [gen_after_promote + 1]
 
 
+def test_cancel_source_re_arms_even_before_any_child_has_spawned(monkeypatch):
+    """The race the review flagged: ensure_loaded() releases its lock and
+    starts a new thread, but that thread hasn't reached _spawn() yet (no
+    proc registered under _procs_by_source) when the operator navigates
+    away. cancel_source must still act -- the generation bump alone
+    discards whatever the orphaned attempt eventually produces."""
+    src = _remote_src()
+    loader = data_ssh.LiveLoader([src])
+    monkeypatch.setattr(loader, "_load_one", lambda s, gen=None: None)  # never runs for real
+    monkeypatch.setattr(
+        data_ssh.threading, "Thread",
+        lambda target, args=(), name=None, daemon=None: types.SimpleNamespace(
+            start=lambda: None),  # started but never actually invoked
+    )
+    loader._pinged_only.add(src.cache_key)
+    loader._state[src.cache_key] = "ready"
+
+    assert loader.ensure_loaded(("dev6", "Win")) is True
+    gen_after_promote = loader._gen[src.cache_key]
+    assert src.cache_key in loader._lazy_promoted
+    # No proc registered yet (the stub thread never actually ran _load_one).
+    assert loader._procs_by_source.get(src.cache_key, []) == []
+
+    assert loader.cancel_source(("dev6", "Win")) is True
+    assert src.cache_key in loader._pinged_only
+    assert src.cache_key not in loader._lazy_promoted
+    assert loader._gen[src.cache_key] == gen_after_promote + 1
+
+
+def test_cancel_source_preserves_last_good_rows_for_a_routine_repoll(monkeypatch):
+    """Cancelling a repoll/reconcile of an ALREADY-resolved source (not a
+    bare ensure_loaded() promotion) must only stop the wasted remote work --
+    never discard rows the operator is still looking at, and never revert
+    the tab to a ping-only placeholder."""
+    src = _remote_src()
+    loader = data_ssh.LiveLoader([src])
+    loader._state[src.cache_key] = "ready"
+    loader._records[src.cache_key] = [{"id4": "aaaa"}]
+    killed = []
+    monkeypatch.setattr(data_ssh, "_kill_proc_tree", lambda proc: killed.append(proc))
+    proc = types.SimpleNamespace(name="repoll-proc")
+    loader._procs_by_source[src.cache_key] = [proc]
+    # NOT in _lazy_promoted -- this is a routine background refresh, not a
+    # bare ensure_loaded() promotion.
+
+    assert loader.cancel_source(("dev6", "Win")) is True
+    assert killed == [proc]
+    assert loader.state("dev6", "Win") == "ready"           # unchanged
+    assert loader.records_for_source(src.cache_key) == [{"id4": "aaaa"}]  # kept
+    assert src.cache_key not in loader._pinged_only          # NOT reset
+
+
+def test_refresh_one_and_reconcile_one_tag_their_procs_by_source(monkeypatch):
+    """_refresh_one/_reconcile_one must also tag `_active_source` so their
+    spawned children are trackable by cancel_source -- previously only
+    _load_one did, leaving a repoll/reconcile's child unkillable."""
+    src = _remote_src()
+    loader = data_ssh.LiveLoader([src])
+    loader._state[src.cache_key] = "ready"
+    loader._records[src.cache_key] = [{"id4": "aaaa"}]
+    seen_keys_refresh = []
+    seen_keys_reconcile = []
+
+    def fake_fetch_refresh(source, runner=None, **_kw):
+        seen_keys_refresh.append(loader._active_source.key)
+        return [{"id4": "bbbb"}]
+
+    def fake_fetch_reconcile(source, runner=None, argv=None):
+        seen_keys_reconcile.append(loader._active_source.key)
+        return [{"id4": "cccc"}]
+
+    monkeypatch.setattr(data_ssh, "_fetch", fake_fetch_refresh)
+    loader._refresh_one(src, loader._gen[src.cache_key])
+    assert seen_keys_refresh == [src.cache_key]
+    assert loader._active_source.key is None   # cleared after
+
+    monkeypatch.setattr(data_ssh, "_fetch", fake_fetch_reconcile)
+    loader._reconcile_one(src, loader._gen[src.cache_key])
+    assert seen_keys_reconcile == [src.cache_key]
+    assert loader._active_source.key is None
+
+
 def test_register_proc_tags_by_active_source():
     src = _remote_src()
     loader = data_ssh.LiveLoader([src])

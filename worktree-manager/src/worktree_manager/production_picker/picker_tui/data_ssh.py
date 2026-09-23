@@ -1369,6 +1369,16 @@ class LiveLoader:
         # load) the moment its tab becomes current (picker-lazy-per-machine-
         # loading). Never populated for a source `start()` fully loads up front.
         self._pinged_only: set = set()
+        # cache_key set: a source `ensure_loaded` JUST promoted from a ping
+        # to a real load that has never yet committed a result (bare
+        # promotion, no prior real records). Distinguishes "cancel_source
+        # should fully reset this back to ping-only" from "this is a routine
+        # repoll/reconcile/reload of an ALREADY-resolved source" (#2, below):
+        # cancelling the latter must only stop the wasted remote work, never
+        # discard last-good rows the operator is still looking at. Added by
+        # `ensure_loaded`, discarded once its `_load_one` call returns
+        # (success, failure, or killed) -- see `_load_one`'s own body.
+        self._lazy_promoted: set = set()
         # cache_key -> list of live ssh Popen this source's current load
         # spawned, so `cancel_source` can kill only ITS children (unlike the
         # blanket `cancel()`/`self._procs`, used for whole-picker teardown).
@@ -1504,7 +1514,9 @@ class LiveLoader:
         already removed itself from consideration -- see `_ping_one`), or
         unknown are all left exactly as they are. Flips the tab back to its
         connect spinner while the real fetch runs, exactly like a fresh
-        `start()`.
+        `start()`. Marks the source `_lazy_promoted` -- a bare promotion with
+        no real records behind it yet -- so `cancel_source` knows it is safe
+        to fully reset if the operator navigates away before it resolves.
         """
         with self._lock:
             src = next(
@@ -1514,6 +1526,7 @@ class LiveLoader:
             if src is None or src.cache_key not in self._pinged_only:
                 return False
             self._pinged_only.discard(src.cache_key)
+            self._lazy_promoted.add(src.cache_key)
             self._state[src.cache_key] = "loading"
             self._records[src.cache_key] = []
             gen = self._gen.get(src.cache_key, 0)
@@ -1532,20 +1545,35 @@ class LiveLoader:
         return sum(1 for k in keys if self.ensure_loaded(k))
 
     def cancel_source(self, key) -> bool:
-        """Kill only this source's in-flight ssh child(ren) (nav-away), and
-        re-arm it so navigating back onto its tab retries cleanly.
+        """Stop this source's in-flight fetch (nav-away) without disturbing
+        an already-resolved source's last-good rows.
 
         Unlike :meth:`cancel` (whole-picker teardown), this targets one
-        source: the operator navigated OFF a machine tab whose real listing
-        `ensure_loaded` had just kicked off, before it finished. Bumps the
-        source's generation (so the killed attempt's eventual partial/errored
-        result can never land) and puts it back in ``_pinged_only`` with a
-        ``ready``/no-records placeholder -- the same shape a successful ping
-        leaves it in -- so a subsequent `ensure_loaded` (navigating back)
-        starts a genuinely fresh load instead of finding nothing to promote
-        and leaving the tab on whatever the killed attempt last committed.
-        Best-effort; a source with nothing in flight is a harmless no-op that
-        leaves its state untouched.
+        source, and does two DIFFERENT things depending on what kind of
+        in-flight work it finds:
+
+        - A bare `ensure_loaded` **promotion that has never committed a
+          result** (``_lazy_promoted``, no real records behind it yet): fully
+          reset it -- kill any spawned child, bump the generation (so a
+          result the killed attempt eventually produces can never land), and
+          put it back in ``_pinged_only`` with a ``ready``/no-records
+          placeholder, exactly like a successful ping -- so navigating back
+          onto the tab (`ensure_loaded`) starts a genuinely fresh load.
+          Acts even when no child has spawned yet (a race between
+          `ensure_loaded` releasing its lock and the new thread reaching
+          `_spawn`): the generation bump alone discards whatever that
+          orphaned attempt eventually produces, and the actual SSH
+          connection -- already unavoidable once dispatched -- simply
+          becomes wasted, unobserved work rather than a correctness risk.
+        - A routine `repoll_silent`/`reconcile_remote_prs`/`reload_source`
+          refresh of an **already-resolved** source: only bump the
+          generation and kill its child (stopping the wasted remote work);
+          state/records are left exactly as they are, so the tab keeps
+          showing its last-good rows, not a reset connect spinner.
+
+        Returns ``False`` (a harmless no-op) when there is neither a
+        promoted-but-uncommitted load nor a tracked child process for this
+        source -- nothing to stop.
         """
         with self._lock:
             src = next(
@@ -1556,12 +1584,15 @@ class LiveLoader:
                 return False
             with self._procs_lock:
                 procs = list(self._procs_by_source.get(src.cache_key, ()))
-            if not procs:
+            promoted = src.cache_key in self._lazy_promoted
+            if not procs and not promoted:
                 return False
             self._gen[src.cache_key] = self._gen.get(src.cache_key, 0) + 1
-            self._pinged_only.add(src.cache_key)
-            self._state[src.cache_key] = "ready"
-            self._records[src.cache_key] = []
+            if promoted:
+                self._lazy_promoted.discard(src.cache_key)
+                self._pinged_only.add(src.cache_key)
+                self._state[src.cache_key] = "ready"
+                self._records[src.cache_key] = []
         for p in procs:
             _kill_proc_tree(p)
         return True
@@ -1641,7 +1672,11 @@ class LiveLoader:
         the fetched rows are committed only if the generation is unchanged --
         i.e. no :meth:`reload` superseded this refresh while it ran (#1421)."""
         with self._source_locks[source.cache_key]:
-            self._refresh_one_serial(source, gen)
+            self._active_source.key = source.cache_key
+            try:
+                self._refresh_one_serial(source, gen)
+            finally:
+                self._active_source.key = None
 
     def _refresh_one_serial(self, source: Source, gen: int):
         """Serialized implementation of :meth:`_refresh_one`."""
@@ -1752,6 +1787,7 @@ class LiveLoader:
         A failed reconcile leaves ``_pr_reconciled_keys`` set (best-effort, one
         attempt) so a persistently-unreachable remote isn't re-hit every poll.
         """
+        self._active_source.key = source.cache_key
         try:
             if self._cancelled.is_set():
                 return
@@ -1767,6 +1803,7 @@ class LiveLoader:
                     if self._stream_incomplete.get(source.cache_key) == gen:
                         self._stream_incomplete.pop(source.cache_key, None)
         finally:
+            self._active_source.key = None
             with self._lock:
                 self._refreshing.discard(source.cache_key)
 
@@ -1896,6 +1933,12 @@ class LiveLoader:
                 self._load_one_serial(source, gen)
             finally:
                 self._active_source.key = None
+                # This call has now committed (or given up on) a result --
+                # a subsequent cancel_source() must treat this source as a
+                # routine reload/repoll from here on, not a bare promotion
+                # with nothing to lose (see `_lazy_promoted`'s own comment).
+                with self._lock:
+                    self._lazy_promoted.discard(source.cache_key)
 
     def _load_one_serial(self, source: Source, gen: int):
         if source.local:
