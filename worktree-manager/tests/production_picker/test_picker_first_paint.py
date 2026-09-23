@@ -919,3 +919,50 @@ def test_stream_source_is_not_authoritative_until_done(monkeypatch):
 
     assert not worker.is_alive()
     assert loader.authoritative_source_ids() == {source.source_id}
+
+
+# ── start_loader: focus_keys only when the loader's own signature accepts it ─
+
+def test_start_loader_passes_focus_keys_when_supported():
+    from worktree_manager.production_picker.picker_tui import engine_helpers
+
+    calls = []
+
+    class NewLoader:
+        def start(self, focus_keys=None):
+            calls.append(("new", focus_keys))
+
+    engine_helpers.start_loader(NewLoader(), focus_keys={("book2", "Win")})
+
+    assert calls == [("new", {("book2", "Win")})]
+
+
+def test_start_loader_falls_back_for_a_signature_that_lacks_it():
+    """An older engine's LiveLoader.start() takes no argument at all --
+    detected from the signature, not by calling and catching TypeError (which
+    would also swallow a real bug inside the current start())."""
+    from worktree_manager.production_picker.picker_tui import engine_helpers
+
+    calls = []
+
+    class OldLoader:
+        def start(self):
+            calls.append("old")
+
+    engine_helpers.start_loader(OldLoader(), focus_keys={("book2", "Win")})
+
+    assert calls == ["old"]
+
+
+def test_start_loader_does_not_mask_a_real_error_from_the_new_signature():
+    """A genuine bug inside a focus_keys-supporting start() must propagate,
+    never be silently reinterpreted as an old-engine signature mismatch and
+    retried without focus_keys."""
+    from worktree_manager.production_picker.picker_tui import engine_helpers
+
+    class BrokenLoader:
+        def start(self, focus_keys=None):
+            raise TypeError("boom -- an unrelated bug, not a signature issue")
+
+    with pytest.raises(TypeError, match="boom"):
+        engine_helpers.start_loader(BrokenLoader(), focus_keys=None)

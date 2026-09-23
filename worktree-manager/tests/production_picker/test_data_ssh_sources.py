@@ -2148,6 +2148,39 @@ def test_ping_one_failure_marks_failed():
     assert "Could not resolve hostname" in loader.error("dev6", "Win")
 
 
+def test_ping_one_failure_removes_source_from_pinged_only():
+    """A failed probe must not stay eligible for automatic promotion: leaving
+    it in _pinged_only would have the operator's very next nav onto (or "All"
+    past) this X-marked tab silently kick off the full listing against a host
+    just confirmed unreachable."""
+    src = _remote_src()
+    loader = data_ssh.LiveLoader([src])
+    loader._pinged_only.add(src.cache_key)
+    loader._spawn = lambda argv, timeout: types.SimpleNamespace(
+        returncode=255, stdout="", stderr="unreachable")
+
+    loader._ping_one(src)
+
+    assert src.cache_key not in loader._pinged_only
+    assert loader.ensure_loaded(("dev6", "Win")) is False
+
+
+def test_ping_one_exception_also_removes_from_pinged_only():
+    src = _remote_src()
+    loader = data_ssh.LiveLoader([src])
+    loader._pinged_only.add(src.cache_key)
+
+    def boom(argv, timeout):
+        raise OSError("no route to host")
+
+    loader._spawn = boom
+
+    loader._ping_one(src)
+
+    assert loader.state("dev6", "Win") == "failed"
+    assert src.cache_key not in loader._pinged_only
+
+
 def test_ping_one_never_clobbers_a_result_already_promoted(monkeypatch):
     """ensure_loaded() may race a slow ping and finish first (a real load is
     typically much slower than a ping, but the ping's own thread can still be
@@ -2241,6 +2274,7 @@ def test_cancel_source_kills_only_that_sources_procs(monkeypatch):
     loader._procs_by_source[a.cache_key] = [proc_a]
     loader._procs_by_source[b.cache_key] = [proc_b]
     loader._procs = [proc_a, proc_b]
+    loader._state[a.cache_key] = "loading"   # ensure_loaded had promoted it
 
     assert loader.cancel_source(("dev6", "Win")) is True
     assert killed == [proc_a]
@@ -2250,6 +2284,41 @@ def test_cancel_source_noop_when_nothing_in_flight():
     src = _remote_src()
     loader = data_ssh.LiveLoader([src])
     assert loader.cancel_source(("dev6", "Win")) is False
+
+
+def test_cancel_source_re_arms_for_a_retry_on_nav_back(monkeypatch):
+    """The regression the review asked for: navigate onto a tab (promoting
+    it), navigate away before it resolves (cancel_source), then navigate
+    back -- ensure_loaded must start a genuinely fresh load, not find nothing
+    to promote and leave the tab on the killed attempt's stale state."""
+    src = _remote_src()
+    loader = data_ssh.LiveLoader([src])
+    monkeypatch.setattr(data_ssh, "_kill_proc_tree", lambda proc: None)
+    started = []
+    monkeypatch.setattr(loader, "_load_one", lambda s, gen=None: started.append(gen))
+    monkeypatch.setattr(
+        data_ssh.threading, "Thread",
+        lambda target, args=(), name=None, daemon=None: types.SimpleNamespace(
+            start=lambda: target(*args)),
+    )
+    # 1. Ping resolved it reachable (as start()'s deferral would have).
+    loader._pinged_only.add(src.cache_key)
+    loader._state[src.cache_key] = "ready"
+    # 2. Navigate onto the tab: promotes to a real load.
+    assert loader.ensure_loaded(("dev6", "Win")) is True
+    gen_after_promote = loader._gen[src.cache_key]
+    assert started == [gen_after_promote]
+    with loader._procs_lock:
+        loader._procs_by_source[src.cache_key] = [types.SimpleNamespace(name="p")]
+    # 3. Navigate away before it resolves: cancel_source kills it and re-arms.
+    assert loader.cancel_source(("dev6", "Win")) is True
+    assert src.cache_key in loader._pinged_only
+    assert loader.state("dev6", "Win") == "ready"
+    assert loader._gen[src.cache_key] == gen_after_promote + 1
+    # 4. Navigate back: a genuinely fresh load starts (new generation).
+    started.clear()
+    assert loader.ensure_loaded(("dev6", "Win")) is True
+    assert started == [gen_after_promote + 1]
 
 
 def test_register_proc_tags_by_active_source():

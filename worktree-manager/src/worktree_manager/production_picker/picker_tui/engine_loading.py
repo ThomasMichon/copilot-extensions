@@ -7,7 +7,7 @@ import os
 import threading
 import time
 
-from .engine_helpers import _DEFAULT_HOST_COLS, _DEFAULT_TARGET_ENVS, target_rows
+from .engine_helpers import _DEFAULT_HOST_COLS, _DEFAULT_TARGET_ENVS, start_loader, target_rows
 from .selection import ListSelection
 from .. import config as cfg
 
@@ -226,13 +226,7 @@ class PickerScreenLoadingMixin:
             # there, so a fixture source with no `local` degrades safely to
             # loading everything (focus_keys=None below).
             local = prepared.get("local") if prepared else None
-            starter = getattr(loader, "start", None)
-            if callable(starter):
-                try:
-                    starter(focus_keys={local} if local else None)
-                except TypeError:
-                    # An older engine's LiveLoader.start() takes no argument.
-                    starter()
+            start_loader(loader, focus_keys={local} if local else None)
         except Exception as exc:
             err = exc
 

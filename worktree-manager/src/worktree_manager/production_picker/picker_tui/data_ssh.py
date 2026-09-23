@@ -1460,6 +1460,16 @@ class LiveLoader:
         except Exception as exc:
             with self._lock:
                 if source.cache_key in self._pinged_only:
+                    # A failed probe must NOT stay eligible for automatic
+                    # promotion: ensure_loaded()/ensure_all_loaded() only
+                    # check set membership, so leaving the key here would
+                    # have the operator's very next nav onto (or "All" past)
+                    # this X-marked tab silently kick off the full,
+                    # expensive listing against a host we just confirmed is
+                    # unreachable -- contradicting the connect-spinner ✗'s
+                    # whole point. `reload_source`/an explicit 'r' remains
+                    # the escape hatch if the operator believes it's back.
+                    self._pinged_only.discard(source.cache_key)
                     self._state[source.cache_key] = "failed"
                     self._error[source.cache_key] = (
                         str(exc).strip() or type(exc).__name__
@@ -1476,6 +1486,9 @@ class LiveLoader:
                 self._state[source.cache_key] = "ready"
                 self._error[source.cache_key] = ""
             else:
+                # Same reasoning as the exception branch above: an
+                # unreachable ping must not stay promotable.
+                self._pinged_only.discard(source.cache_key)
                 self._state[source.cache_key] = "failed"
                 self._error[source.cache_key] = (
                     (proc.stderr or proc.stdout or "").strip().splitlines()[-1:]
@@ -1487,9 +1500,11 @@ class LiveLoader:
         per-machine-loading): the operator just navigated onto its tab.
 
         No-op (returns ``False``) if ``key`` doesn't match a ping-only
-        source -- already loaded, still loading, unreachable, or unknown are
-        all left exactly as they are. Flips the tab back to its connect
-        spinner while the real fetch runs, exactly like a fresh `start()`.
+        source -- already loaded, still loading, unreachable (a failed ping
+        already removed itself from consideration -- see `_ping_one`), or
+        unknown are all left exactly as they are. Flips the tab back to its
+        connect spinner while the real fetch runs, exactly like a fresh
+        `start()`.
         """
         with self._lock:
             src = next(
@@ -1517,15 +1532,20 @@ class LiveLoader:
         return sum(1 for k in keys if self.ensure_loaded(k))
 
     def cancel_source(self, key) -> bool:
-        """Kill only this source's in-flight ssh child(ren) (nav-away).
+        """Kill only this source's in-flight ssh child(ren) (nav-away), and
+        re-arm it so navigating back onto its tab retries cleanly.
 
         Unlike :meth:`cancel` (whole-picker teardown), this targets one
         source: the operator navigated OFF a machine tab whose real listing
-        `ensure_loaded` had just kicked off, before it finished. The source's
-        state/records are left as-is (typically still "loading") -- a
-        subsequent `ensure_loaded` (navigating back onto the tab) starts a
-        fresh attempt. Best-effort; a source with nothing in flight is a
-        harmless no-op.
+        `ensure_loaded` had just kicked off, before it finished. Bumps the
+        source's generation (so the killed attempt's eventual partial/errored
+        result can never land) and puts it back in ``_pinged_only`` with a
+        ``ready``/no-records placeholder -- the same shape a successful ping
+        leaves it in -- so a subsequent `ensure_loaded` (navigating back)
+        starts a genuinely fresh load instead of finding nothing to promote
+        and leaving the tab on whatever the killed attempt last committed.
+        Best-effort; a source with nothing in flight is a harmless no-op that
+        leaves its state untouched.
         """
         with self._lock:
             src = next(
@@ -1536,8 +1556,12 @@ class LiveLoader:
                 return False
             with self._procs_lock:
                 procs = list(self._procs_by_source.get(src.cache_key, ()))
-        if not procs:
-            return False
+            if not procs:
+                return False
+            self._gen[src.cache_key] = self._gen.get(src.cache_key, 0) + 1
+            self._pinged_only.add(src.cache_key)
+            self._state[src.cache_key] = "ready"
+            self._records[src.cache_key] = []
         for p in procs:
             _kill_proc_tree(p)
         return True
