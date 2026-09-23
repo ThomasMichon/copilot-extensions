@@ -5690,21 +5690,11 @@ def _run_session_lifecycle(
             plugin_related_anchors=plugin_related_anchors,
         )
         try:
-            # Prefer an already-bound `cmd_register_session` global (either
-            # a real one from `_load_full_command_surface()`, or a test's
-            # own `monkeypatch.setattr(main, "cmd_register_session", ...)`
-            # override -- `test_hook_ipc.py`'s
-            # `test_combined_lifecycle_preserves_side_effect_snapshots`
-            # relies on exactly this). `globals().get()` is a plain dict
-            # lookup, so it can never trigger `__getattr__`'s eager
-            # `_load_full_command_surface()` the way `getattr(module, name)`
-            # would. Falling back to a direct import covers the case this
-            # global genuinely isn't bound yet: a fast-tracked, cluster-free
-            # caller (session_inspection_cli's `session-lifecycle`
-            # dispatch is NOT in `_CLUSTER_FREE_MODULES` today specifically
-            # because of this dependency chain, but this fallback also
-            # protects any future caller that reaches here before the
-            # cluster loads).
+            # Prefer an already-bound cmd_register_session global (real or
+            # test-monkeypatched, see test_hook_ipc.py); globals().get()
+            # avoids __getattr__'s eager full load. Fall back to a direct
+            # import if unbound (why session_inspection_cli isn't in
+            # _CLUSTER_FREE_MODULES).
             _register_session_fn = globals().get("cmd_register_session")
             if _register_session_fn is None:
                 from . import session_binding_cli as _session_binding_cli
@@ -7403,39 +7393,16 @@ _ALL_KNOWN_VERBS: frozenset[str] = frozenset(_LAZY_DISPATCH_TABLE.keys()) | froz
 })
 
 
-# A module is "cluster-free" when every attribute any of its own CLI
-# submodule handlers reach via `_core()` (this __main__ module) is available
-# WITHOUT running `_load_full_command_surface()` -- either because the
-# module never calls `_core()` at all, or because every name it reaches
-# (directly, via an assigned `core = _core()` var, or via its own
-# `_core_helper()` idiom -- see `tests/_core_cluster_scan.py`'s own
-# docstring for why `_core_helper` is always safe post-fix) is bound at
-# __main__ module level BEFORE the deferred ~35-submodule import block
-# (i.e. it's a plain top-level function/class/import in __main__.py, not one
-# of the `name = owning_module.attr` reexports that function builds).
-# This is Phase 1b of the agent-cli-lazy-dispatch effort: `_dispatch_lazy()`
-# skips `_ensure_cluster_loaded()` entirely for these modules, so their
-# commands no longer pay the cluster's import cost (previously EVERY
-# fast-tracked command paid it, via the blanket call that used to run before
-# any dispatch -- see that call's own comment). Regenerate and diff this set
-# with `tests/_core_cluster_scan.py`'s `compute_cluster_free_modules()`
-# before trusting it to still be accurate -- do NOT hand-edit this set
-# without re-running that scan, and do NOT reuse a regex-only scan (an
-# earlier one shipped a live `create-pr` regression; see the effort's
-# Journal). IMPORTANT: the scanner only proves a module's OWN `_core()`
-# accesses are safe -- it cannot see whether a name that resolves cleanly
-# (e.g. `_core()._run_session_lifecycle`) itself has a transitive body
-# dependency on a name only bound inside `_load_full_command_surface()`.
-# `session_inspection_cli` was excluded for exactly this reason: its
-# `session-lifecycle` handler reaches `_run_session_lifecycle`, whose body
-# referenced deferred globals (`cmd_register_session`, `_aw_runtime_home`)
-# -- found only by actually *running* the command, not by static analysis.
-# Adding a module to this set requires exercising every one of its real
-# commands end-to-end (not just `--help`, which never runs the handler
-# body), not just a clean scanner result. A module NOT in this set is
-# unaffected by Phase 1b: it still calls `_ensure_cluster_loaded()` exactly
-# as Phase 1 landed it, so it takes on zero incremental risk from this
-# change.
+# A module is "cluster-free" when every `_core()`-reached attribute (direct,
+# via a var, or via `_core_helper()`) is bound at module level BEFORE the
+# deferred `_load_full_command_surface()` block. Skips `_ensure_cluster_
+# loaded()` in `_dispatch_lazy()` for these modules only. Regenerate/diff
+# via `tests/_core_cluster_scan.py`'s `compute_cluster_free_modules()` --
+# never hand-edit, never trust a regex-only scan (one shipped a live
+# `create-pr` regression). Can't see a transitive dependency on a deferred
+# name inside a function that itself resolves cleanly --
+# `session_inspection_cli` was excluded for exactly this. Adding a module
+# requires exercising its real commands end-to-end, not just `--help`.
 _CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "claims_cli",
     "maintenance_cli",
@@ -8353,14 +8320,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 0
 
-    # Fast path: a module-delegated subcommand (see _LAZY_DISPATCH_TABLE) --
-    # import only its owning module instead of the full eager surface that
-    # build_parser()/COMMAND_MAP below would otherwise force. Checked BEFORE
-    # the manual-dispatch verbs and the blanket _ensure_cluster_loaded() call
-    # below (Phase 1b of the agent-cli-lazy-dispatch effort) so that a
-    # _CLUSTER_FREE_MODULES-listed command (see _dispatch_lazy()) never pays
-    # the cluster's import cost at all -- previously this check ran after the
-    # blanket call, so every fast-tracked command paid that cost regardless.
+    # Fast path (checked before manual-dispatch verbs + the blanket
+    # _ensure_cluster_loaded() call below, Phase 1b): import only the
+    # module owning this subcommand instead of the full eager surface, so a
+    # _CLUSTER_FREE_MODULES command (see _dispatch_lazy()) skips that cost.
     if args_list[0] in _LAZY_DISPATCH_TABLE:
         try:
             return _dispatch_lazy(args_list[0], args_list)
@@ -8374,11 +8337,8 @@ def main(argv: list[str] | None = None) -> int:
             print("\nCancelled.")
             return 130
 
-    # Every remaining dispatch path below (the manual-dispatch verbs and the
-    # full COMMAND_MAP fallback) may reach into the cross-referencing
-    # CLI-submodule cluster described at _ensure_cluster_loaded()'s own
-    # definition -- resolve it once, here, rather than chasing individual
-    # call sites. Fast-tracked commands (above) never reach this line.
+    # Manual-dispatch verbs + the COMMAND_MAP fallback may reach the
+    # cross-referencing CLI-submodule cluster -- resolve it once.
     _ensure_cluster_loaded()
 
     # Services uses manual dispatch for passthrough support --
@@ -8568,9 +8528,8 @@ def main(argv: list[str] | None = None) -> int:
         name = args_list[1] if len(args_list) > 1 else ""
         return _hooks.run_hook(name, args_list[2:])
 
-    # (The _LAZY_DISPATCH_TABLE fast path is checked earlier, before the
-    # blanket _ensure_cluster_loaded() call above -- see that check's own
-    # comment for why.)
+    # (_LAZY_DISPATCH_TABLE fast path is checked earlier, before the
+    # blanket _ensure_cluster_loaded() call above.)
 
     # First arg is a known subcommand → parse normally
     _load_full_command_surface()
