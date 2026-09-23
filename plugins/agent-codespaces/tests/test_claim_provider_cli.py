@@ -33,6 +33,17 @@ def _no_account_resolution_by_default(monkeypatch):
                         lambda name: (True, None, None))
 
 
+@pytest.fixture(autouse=True)
+def _mint_token_by_default(monkeypatch):
+    """A resolved (non-None) account now gets re-verified against
+    gh_account.token_for_account before proceeding (claim-provider-pattern
+    effort review finding: "Preserve validated credentials during status
+    and reclaim") -- default to a successful mint so tests not exercising
+    THAT behavior specifically don't all need to mock it."""
+    monkeypatch.setattr(
+        "agent_codespaces.gh_account.token_for_account", lambda login: "fake-token")
+
+
 def test_claim_status_exists(monkeypatch, capsys):
     monkeypatch.setattr(cpc, "get_codespace_status", lambda name: (True, "Shutdown"))
     rc = cpc.cmd_claim_status(argparse.Namespace(name="cs-b"))
@@ -118,6 +129,29 @@ def test_claim_reclaim_threads_resolved_account_through(monkeypatch, capsys):
     rc = cpc.cmd_claim_reclaim(argparse.Namespace(name="cs-a", apply=True))
     assert rc == 0
     assert calls == [("sync", "acct-nonambient"), ("delete", "acct-nonambient")]
+
+
+def test_claim_reclaim_fails_closed_when_remint_fails_for_resolved_account(monkeypatch, capsys):
+    """sync_codespace_sessions/delete_codespace pin to resolved_account via
+    the PERMISSIVE gh_account.env_for_account, which silently falls back
+    to ambient credentials when it cannot mint a token. Re-verifying
+    minting immediately before using them must fail closed (never proceed
+    under ambient fallback) when that re-mint fails (claim-provider-pattern
+    effort review finding: "Preserve validated credentials during status
+    and reclaim")."""
+    monkeypatch.setattr(cpc, "get_codespace_status_with_account",
+                        lambda name: (True, "Available", "acct-nonambient"))
+    monkeypatch.setattr(
+        "agent_codespaces.gh_account.token_for_account", lambda login: None)
+    called = {"n": 0}
+    monkeypatch.setattr(cpc, "sync_codespace_sessions",
+                        lambda *a, **k: called.__setitem__("n", 1))
+    monkeypatch.setattr(cpc, "delete_codespace", lambda *a, **k: called.__setitem__("n", 1))
+    rc = cpc.cmd_claim_reclaim(argparse.Namespace(name="cs-a", apply=True))
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["reclaimed"] is False and "could not mint" in out["detail"]
+    assert called["n"] == 0  # never even reached session recovery/delete
 
 
 def test_claim_reclaim_refuses_when_leased_during_recovery(monkeypatch, capsys):
