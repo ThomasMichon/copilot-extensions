@@ -6,9 +6,10 @@ import threading
 
 from rich.text import Text
 
-from .. import profiles as profiles_mod
+from ... import terminal_profiles as profiles_mod
 from .engine_dialogs import ProfConfirmScreen
 from .engine_helpers import (
+    _DEFAULT_HOST_COLS,
     C_BTN_SEL,
     C_DIM,
     C_DISABLED,
@@ -20,8 +21,8 @@ from .engine_helpers import (
     C_PULSE,
     C_SEL,
     C_TABOFF,
-    _DEFAULT_HOST_COLS,
 )
+
 
 class ProfilesView:
     """Encapsulated Profiles-configurator sub-view (#88 F5, slices 1-3).
