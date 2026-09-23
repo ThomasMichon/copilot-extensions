@@ -511,6 +511,8 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                         f"{result.get('pr_label_error')}. Re-apply the label(s) "
                         f"via the '{provider}' provider."
                     )
+                if result.get("self_merge_note"):
+                    output.ok(result["self_merge_note"])
             elif result.get("pr_open_error"):
                 output.warn(f"Branch pushed, but auto-open failed: {result.get('pr_open_error')}")
                 print(

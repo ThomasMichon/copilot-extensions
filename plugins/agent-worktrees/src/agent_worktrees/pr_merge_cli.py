@@ -84,9 +84,12 @@ def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
     which either arms auto-complete or completes immediately with the configured
     policy bypass. Other providers honor ``prefer_auto_merge`` (#225, default
     on): first try ``enable_auto_merge``, then fall back to ``merge_pull`` where
-    auto-merge is unavailable or disabled. The fallback uses an admin bypass
-    only for a non-blocking review posture; a blocking review remains
-    provider-enforced.
+    auto-merge is unavailable or disabled. A provider-supplied
+    ``pull_review_gate`` (currently GitHub) can additionally skip straight to
+    ``merge_pull(admin=True)`` when a *live, actor-bypassable* required review
+    is the only thing that would otherwise leave auto-merge armed forever
+    (#3296 follow-up); a required review the actor cannot bypass remains
+    provider-enforced either way.
     Any other profile is refused-with-reminder, steering the agent to the
     sanctioned wait/consent path.
     Returns a shell exit code (0 success, 1 merge failure, 2 refusal/usage).
@@ -276,8 +279,30 @@ def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
     # Other providers prefer native CI-gated auto-merge (so the merge waits on
     # required checks) and fall back to an immediate self-merge only where the
     # provider offers no auto-merge or it can't be armed (#225).
+    #
+    # One case must skip straight past auto-merge instead: a live, required
+    # review that the acting identity can actually bypass. GitHub's native
+    # auto-merge arms successfully even when a required review is the very
+    # thing blocking the merge -- it queues indefinitely rather than
+    # refusing -- so a pr-self-merge repo whose sole maintainer will never
+    # supply that second review would otherwise sit "armed" forever (#3296
+    # follow-up: discovered landing gim-home/odsp-web-harness#502/#504,
+    # whose live ruleset requires 1 approving review but grants the acting
+    # Maintainer pull-request-scoped bypass rights). Only a provider that
+    # exposes ``pull_review_gate`` (currently GitHub) is checked; other
+    # providers' auto-merge already means what it says.
+    bypass_review_gate = False
+    if prefer_auto and hasattr(provider, "pull_review_gate"):
+        try:
+            review_required, bypassable = provider.pull_review_gate(
+                args.repo, args.pr, api_base=base, token=tok,
+            )
+        except ProviderError:
+            review_required, bypassable = False, None
+        bypass_review_gate = bool(review_required and bypassable)
+
     auto_armed = False
-    if prefer_auto:
+    if prefer_auto and not bypass_review_gate:
         try:
             auto_err = provider.enable_auto_merge(
                 args.repo,
@@ -322,7 +347,7 @@ def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
             args.repo,
             args.pr,
             squash=True,
-            admin=not flow.review_blocking,
+            admin=bypass_review_gate or not flow.review_blocking,
             api_base=base,
             token=tok,
         )
@@ -361,16 +386,25 @@ def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
                     "pr": args.pr,
                     "action": "merge",
                     "applied": True,
+                    "bypassed_review_gate": bypass_review_gate,
                     "flow_profile": flow.profile,
                     "reminder": rem.as_dict(),
                 }
             )
         )
     else:
-        output.ok(
-            f"pr-merge --now: squash-merged PR #{args.pr} in {args.repo} "
-            f"(submitter-direct). Run `finalize` to clean up the worktree."
-        )
+        if bypass_review_gate:
+            output.ok(
+                f"pr-merge --now: squash-merged PR #{args.pr} in {args.repo} "
+                f"(submitter-direct, bypassing a required review your identity "
+                f"is authorized to bypass). Run `finalize` to clean up the "
+                f"worktree."
+            )
+        else:
+            output.ok(
+                f"pr-merge --now: squash-merged PR #{args.pr} in {args.repo} "
+                f"(submitter-direct). Run `finalize` to clean up the worktree."
+            )
         print(rem.text(), file=sys.stderr)
     return 0
 
