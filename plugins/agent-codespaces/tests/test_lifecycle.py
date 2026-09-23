@@ -359,7 +359,7 @@ class TestGetCodespaceStatus:
         def fake_under(name, account, **_kwargs):
             if account == "acct-b":
                 return True, "Available"
-            raise RuntimeError(f"gh api codespace lookup for {name} failed: HTTP 404: Not Found")
+            return False, None  # acct-a confirms a genuine 404, not an error
 
         monkeypatch.setattr(lifecycle, "_get_codespace_status_under", fake_under)
         exists, state = lifecycle.get_codespace_status("cs-a")
