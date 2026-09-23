@@ -33,7 +33,7 @@
   "plugins/agent-dispatch/src/agent_dispatch/embody.py": 1093,
   "plugins/agent-dispatch/src/agent_dispatch/managed_retention.py": 1018,
   "plugins/agent-dispatch/src/agent_dispatch/managed_runtime.py": 1605,
-  "plugins/agent-dispatch/src/agent_dispatch/queue.py": 2203,
+  "plugins/agent-dispatch/src/agent_dispatch/queue.py": 1247,
   "plugins/agent-dispatch/src/agent_dispatch/queue_spawn_reservations.py": 1057,
   "plugins/agent-dispatch/src/agent_dispatch/registrar_registry.py": 1007,
   "plugins/agent-dispatch/src/agent_dispatch/repository_issue_loops.py": 1810,
