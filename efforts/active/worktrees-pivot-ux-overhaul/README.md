@@ -189,9 +189,24 @@ accelerator, which is already done); otherwise independent and
 parallelizable across worktrees.
 
 ### Phase 1 — Golden-screenshot baseline for visual regression
-- [ ] Fix the screenshot-command crash
-      (gim-home/odsp-web-harness#265 / dotfiles#2120) blocking
-      `picker-shot.py` / `preview-picker.ps1`/`.sh`.
+- [ ] Fix the screenshot-command crash blocking `picker-shot.py` /
+      `preview-picker.ps1`/`.sh` / `worktree-manager picker screenshot`.
+      **Filed as [copilot-extensions#3319](https://github.com/ThomasMichon/copilot-extensions/issues/3319)**
+      (2026-09-22): the originally-reported crash
+      (gim-home/odsp-web-harness#265 / dotfiles#2120) traced to
+      `picker_tui/engine.py`, which no longer exists (retired with the
+      bundled Picker per `worktree-manager-control-plane` Phase 6). Live
+      reproduction found a **different, current** root cause instead: the
+      #3309/#3313 lazy-dispatch work deferred `agent_worktrees.__main__`'s
+      cross-module globals (e.g. `_in_ssh_session`) behind
+      `_load_full_command_surface()`, and its regression scans covered
+      only in-repo `agent_worktrees` call shapes — not
+      `worktree-manager/production_picker/runner.py::_prepare()`'s direct
+      `engine_module("__main__")` import, which crashes with
+      `AttributeError: module 'agent_worktrees.__main__' has no attribute
+      '_in_ssh_session'` on every invocation. Both stale issues
+      cross-linked to #3319 and left for the agent that introduced #3309
+      to fix, per its own regression-scan follow-up.
 - [ ] Capture a current, mock-data-backed set of Worktrees-pivot renders
       (the existing `capture.py` injected-source path) across representative
       states (empty, ACTIVE-only, mixed ACTIVE+Recent+unused, claims present,
@@ -309,3 +324,17 @@ reviewed-plan PR per the standard effort review gate before Phase 1 begins._
   or a Sessions sub-menu — these are net-new in this effort.
 - Filed umbrella issue #3307. Effort authored; plan not yet executed pending
   review.
+
+### 2026-09-22 — Phase 1 investigation: filed the live screenshot-crash bug
+- Reproduced the screenshot-capture crash live (both via the deployed
+  `worktree-manager` binstub and directly against this repo checkout).
+  Confirmed the originally-cited traceback (harness#265/dotfiles#2120) is
+  stale — the code it references was retired — and found the current,
+  reproducible root cause: a lazy-dispatch coverage gap from #3309/#3313
+  that the operator asked to route to the agent responsible for that work
+  rather than fix here.
+- Filed [copilot-extensions#3319](https://github.com/ThomasMichon/copilot-extensions/issues/3319)
+  with the precise root cause and expected fix seam. Cross-linked from
+  harness#265 and dotfiles#2120.
+- Phase 1 remains blocked on #3319 landing before the actual golden
+  captures can be taken. No code changes made in this slice.
