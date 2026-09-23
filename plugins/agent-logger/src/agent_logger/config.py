@@ -162,6 +162,15 @@ DEFAULTS: dict[str, Any] = {
         # narration_style, exemplars, closing_remark, landing, push}.
         "sinks": {},
     },
+    # The review-annotation catalog index -- a small SQLite derived cache over
+    # every session's review-annotations.json sidecar, keyed on (repo,
+    # pr_number). See agent_logger.catalog. The sidecar remains the durable
+    # source of truth; this index only makes it queryable without sweeping
+    # every session directory.
+    "catalog": {
+        # Index db path; None -> <home>/review-catalog.db.
+        "db_path": None,
+    },
 }
 
 REPO_CONFIG_FILENAMES: tuple[str, ...] = (
@@ -781,6 +790,15 @@ class Config:
         if configured:
             return Path(configured).expanduser()
         return self.home / "chronicle-manifests"
+
+    # -- review-annotation catalog index ----------------------------------
+
+    @property
+    def catalog_db_path(self) -> Path:
+        configured = self._data.get("catalog", {}).get("db_path")
+        if configured:
+            return Path(configured).expanduser()
+        return self.home / "review-catalog.db"
 
     def get(self, key: str, default: Any = None) -> Any:
         return self._data.get(key, default)
