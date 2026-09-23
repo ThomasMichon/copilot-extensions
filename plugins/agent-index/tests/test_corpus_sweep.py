@@ -163,6 +163,48 @@ def test_current_repo_duplicate_source_name_uses_higher_precedence_overlay(
     ]
 
 
+def test_current_repo_unions_base_knowledge_and_machine_local_sources(
+    tmp_path, monkeypatch
+) -> None:
+    aw = tmp_path / ".agent-worktrees"
+    _write(aw / "projects.yaml", "schema_version: 2\nprojects: {}\n")
+    _write(aw / "repos.yaml", "schema_version: 1\nrepos: {}\n")
+    root = tmp_path / "harness"
+    knowledge = tmp_path / "knowledge"
+    _write(root / ".agent-worktrees" / "config.yaml", """\
+        requires_external_state_root: true
+    """)
+    _write(root / ".agent-index" / "config.yaml", """\
+        corpus:
+          sources:
+            - name: github:gim-home/odsp-web-harness
+              trust_domain: harness
+    """)
+    _write(knowledge / ".agent-index" / "config.yaml", """\
+        corpus:
+          sources:
+            - name: github:owner/dotfiles
+              trust_domain: knowledge
+    """)
+    _write(tmp_path / "home" / "config.yaml", """\
+        corpus:
+          sources:
+            - name: github:personal/notes
+              trust_domain: machine
+    """)
+    monkeypatch.setenv("AGENT_WORKTREES_HOME", str(aw))
+    monkeypatch.setenv("AGENT_INDEX_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(cfg, "repo_root", lambda explicit=None: root)
+    monkeypatch.setattr(cfg, "_external_state_root", lambda _root: ("ready", knowledge))
+
+    sources = cfg.read_corpus_sources()
+    assert [s["name"] for s in sources] == [
+        "github:owner/dotfiles",
+        "github:gim-home/odsp-web-harness",
+        "github:personal/notes",
+    ]
+
+
 def test_default_when_no_registry(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("AGENT_WORKTREES_HOME", str(tmp_path / "nope"))
     monkeypatch.setenv("AGENT_INDEX_HOME", str(tmp_path / "home"))

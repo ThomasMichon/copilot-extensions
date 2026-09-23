@@ -244,7 +244,10 @@ ordinary replace-wholesale rule. For multi-repo harness use, the runtime sweeps
 effective layered repo configs from locally adopted projects via the sibling
 agent-worktrees registry; machine-local `~/.agent-index/config.yaml` can add
 supplemental sources. The session-start scope-binding hook reads the same
-layered model, so advertised and indexed corpora stay aligned in the common
+layered model, and the installed runtime module (`agent_index.config`) now uses
+that same external-state-root-aware resolver for `read_indexers()`,
+`read_corpus_sources()`, and transport role planning, so the advertised config
+and the live host/client routing decision stay aligned in the common
 adopted-knowledge-repo case.
 
 ## Embedding engine and query behavior
