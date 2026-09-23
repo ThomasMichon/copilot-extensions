@@ -180,8 +180,15 @@ normal Finalize can proceed; terminal exit never performs that destruction.
 command exports the production character grid, ANSI grid, or SVG through the
 same compositor used by the live app. `scripts/picker-shot.py` adds
 identity-obscured/shareable captures and validates the PNG signature and
-dimensions after browser rasterization. The older minimal `picker_app` remains
-only for the explicit `picker --demo` development surface.
+dimensions after browser rasterization. `picker [screenshot] --demo`/
+`--preview` renders the same real production Picker against deterministic
+mock data instead of live engine state -- see `preview.py`'s module
+docstring for the two injections this composes (a fake-engine worktree data
+source, and a manifest-injected mock pivot exercising the same cross-plugin
+pivot registry a real contributed pivot uses). The older minimal `picker_app`
+(`demo_source`/`capture_svg`/`run_picker`) is no longer used by `--demo`; it
+remains only as the still-live `LaunchRequest`/launch-compose machinery
+shared with other commands.
 
 During the migration, the copied presentation modules reach their existing
 engine/data operations through a private compatibility boundary to the active

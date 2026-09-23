@@ -207,7 +207,7 @@ parallelizable across worktrees.
       '_in_ssh_session'` on every invocation. Fixed upstream; verified
       `worktree-manager picker screenshot --demo` now captures cleanly.
       Both stale issues cross-linked to #3319.
-- [ ] **Blocked on two more findings from verifying the #3319 fix
+- [x] **Blocked on two more findings from verifying the #3319 fix
       (2026-09-23):**
       - [copilot-extensions#3413](https://github.com/ThomasMichon/copilot-extensions/issues/3413)
         — `runner.capture()` (the real, non-demo production-Picker headless
@@ -218,6 +218,16 @@ parallelizable across worktrees.
         `production_picker`'s daily churn) — **not** the actual current
         Worktrees pivot. There is currently no way to headlessly capture
         the real pivot against deterministic mock data.
+        **Resolved 2026-09-23**: rebuilt `--demo`/`--preview` to render the
+        REAL `production_picker` by composing two existing seams —
+        `engine_client.set_engine_command` pointed at the existing
+        `demo_engine` fixture (worktree data), and a plain, schema-less
+        ("operator"-class) manifest injected into a temp
+        `AGENT_WORKTREES_PIVOTS_DIR` naming a new `demo_pivot` fixture
+        (pivot data) — through the *same* cross-plugin pivot-manifest
+        registry a real contributed pivot (Codespaces/Containers/…) uses,
+        zero engine code changes. `picker_app`'s demo-rendering functions
+        are no longer used by `--demo`. See `preview.py`'s module docstring.
       - [copilot-extensions#3418](https://github.com/ThomasMichon/copilot-extensions/issues/3418)
         — chasing why non-demo capture also *hangs* (not just lacks mock
         data) led to the real, generic root cause: `agent-worktrees list
@@ -229,10 +239,12 @@ parallelizable across worktrees.
         guessed. Unrelated to the Picker/worktree-manager at all; narrows
         and supersedes the initial (incorrect) theory in #3412, which is
         cross-linked and left open for the responsible agent to triage.
-      Phase 1's actual baseline capture is on hold until #3413 and/or #3418
-      land — whichever unblocks a real, representative capture first (a
-      mock-data path for `production_picker`, or a fast/bounded
-      `list --classify`).
+        **Sidestepped for preview purposes** by #3413's fix above (the fake
+        engine never shells out to the real `list --classify`), but remains
+        open and worth fixing in its own right for real (non-preview)
+        capture and for `list --classify` generally.
+      Phase 1's golden-baseline capture is now unblocked via `--demo`/
+      `--preview` against the real Picker.
 - [ ] Capture a current, mock-data-backed set of Worktrees-pivot renders
       (the existing `capture.py` injected-source path) across representative
       states (empty, ACTIVE-only, mixed ACTIVE+Recent+unused, claims present,
@@ -391,3 +403,37 @@ reviewed-plan PR per the standard effort review gate before Phase 1 begins._
 - Phase 1 remains blocked — now on #3413 and/or #3418 — before a real,
   representative golden baseline can be captured. No functional code
   changes made in this slice; investigation and filing only.
+
+### 2026-09-23 — Fixed #3413: real production Picker now has a mock-data preview
+- Rebuilt the `--demo`/`--preview` picker flow to render the REAL
+  `production_picker` (not the stale `picker_app`) by composing two
+  existing, unmodified seams rather than adding a Picker-specific mock
+  branch:
+  1. `engine_client.set_engine_command` pointed at the already-existing
+     `demo_engine` fixture subprocess — every consumer that shells out
+     through `engine_client` (including the real `data_local`/`data_ssh`)
+     transparently receives mock worktree rows.
+  2. A new `demo_pivot.py` fixture plus a plain, schema-less
+     ("operator"-class — always active, no plugin/root attribution
+     required) manifest injected into a temp `AGENT_WORKTREES_PIVOTS_DIR`,
+     read through the *same* cross-plugin pivot-manifest registry a real
+     contributed pivot (Codespaces/Containers/…) uses. Verified it renders
+     as a genuine extra pivot tab ("Demo Queue") with its own
+     declared columns (including a `claims_summary` column, previewing the
+     Phase 4 CLAIMS-column convention).
+- Verified live: `--demo` now captures the real Worktree Manager chrome,
+  real column layout (`ID STATE R AGE LIVE T PR`), the mocked Worktrees
+  rows, and the injected pivot's own table — through the actual
+  `runner.capture()` path, `--pivot`/`--wait` included.
+- Added `tests/test_picker_preview_mode.py` (11 tests): dispatch wiring,
+  `enable_preview_mode()`'s two injections, and the `demo_pivot` fixture.
+  Found and fixed a real test-isolation bug of my own along the way (env
+  vars set by `enable_preview_mode()` leaked across tests in the same
+  pytest process, breaking an unrelated `test_plugin_contracts.py` test);
+  fixed by explicit env cleanup on both sides of the fixture rather than
+  relying on `monkeypatch`'s auto-restore (which only covers state changed
+  *through* `monkeypatch` itself). Full suite: 1143 passed, 1 skipped.
+- `runner.capture()`'s underlying cost for a REAL (non-preview) capture is
+  still #3418 — sidestepped here for preview purposes (the fake engine
+  never reaches `list --classify`), but still open and worth its own fix.
+- Phase 1 is now unblocked for the actual golden-baseline capture next.
