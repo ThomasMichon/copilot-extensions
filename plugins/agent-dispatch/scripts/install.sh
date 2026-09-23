@@ -816,11 +816,20 @@ _ensure_runtime() {
     # it, and a slot that is broken ONLY at that import (as in #2863) would
     # otherwise sail through this gate and only fail on the first real
     # spawn attempt, invisibly to `agent-dispatch health`/`daemon-status`.
-    # Import it explicitly here so that class of defect is caught before a
-    # slot is ever activated.
+    # `__main__` is the CLI entry point (argparse wiring, e.g. the
+    # `recipes_cli.register_recipes_commands` import) -- a bare `import
+    # agent_dispatch` never touches it either, so a slot whose package
+    # content got truncated/corrupted in a way that only breaks `__main__`'s
+    # own top-level imports (as in #3419: a partially-written source file
+    # produced a published payload silently missing a whole function) would
+    # otherwise sail through this gate and only surface on the very next
+    # `agent-dispatch <anything>` invocation -- including inside the
+    # coordinator's own systemd unit, which then crash-loops. Import both
+    # explicitly here so each class of defect is caught before a slot is
+    # ever activated.
     if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
         prev_version="$(_versioned_current)"
-        if ! "$VENV_PYTHON" -c 'import agent_dispatch, agent_dispatch.embody' 2>/dev/null; then
+        if ! "$VENV_PYTHON" -c 'import agent_dispatch, agent_dispatch.embody, agent_dispatch.__main__' 2>/dev/null; then
             _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
             exit 1
         fi
@@ -830,7 +839,7 @@ _ensure_runtime() {
 
     _write_manifest
 
-    if "$LINK_PYTHON" -c 'import agent_dispatch, agent_dispatch.embody' 2>/dev/null; then
+    if "$LINK_PYTHON" -c 'import agent_dispatch, agent_dispatch.embody, agent_dispatch.__main__' 2>/dev/null; then
         _ok 'Verification: module imports successfully'
     else
         _fail 'Verification: module import failed'

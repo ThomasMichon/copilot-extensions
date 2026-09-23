@@ -1,4 +1,4 @@
-"""Regression guard for ThomasMichon/copilot-extensions#2863.
+"""Regression guard for ThomasMichon/copilot-extensions#2863 and #3419.
 
 A deployed agent-dispatch package was missing a function its own import site
 required, even though every verified copy of that release's actual source
@@ -15,14 +15,26 @@ correctly. The mismatch traced to two compounding gaps in
    import there was invisible to `agent-dispatch health`/`daemon-status`
    and only surfaced on the first real spawn attempt.
 
+#3419 found the health gate still had a second, same-shape blind spot: it
+never imported `agent_dispatch.__main__`, the CLI entry point that wires
+`recipes_cli.register_recipes_commands`. A published `0.1.2-dev193` build
+whose `recipes_cli.py` got silently truncated (missing that function
+entirely, root-caused to a likely packaging-time race) sailed straight
+through the gate -- `import agent_dispatch, agent_dispatch.embody` never
+touches `__main__.py`'s own top-level imports -- and activated a completely
+non-functional CLI that crash-looped the coordinator's systemd unit on
+every launch.
+
 These tests are static-text guards (following the precedent in
-`test_install_sh_version_ordering.py`) ensuring both fixes stay in place:
-the local-path install always forces a fresh build for agent-dispatch AND
-its own local `[tool.uv.sources]` workspace path deps (equally vulnerable
-local PATH sources -- #2863 separately flagged a same-class ImportError
-against one of them, `agent-procutil`, in the self-update fallback path),
-and the health gate actually exercises the lazily-imported `embody` chain
-before a slot is activated or reported healthy.
+`test_install_sh_version_ordering.py`) ensuring all three fixes stay in
+place: the local-path install always forces a fresh build for
+agent-dispatch AND its own local `[tool.uv.sources]` workspace path deps
+(equally vulnerable local PATH sources -- #2863 separately flagged a
+same-class ImportError against one of them, `agent-procutil`, in the
+self-update fallback path); the health gate exercises the lazily-imported
+`embody` chain before a slot is activated or reported healthy; and the
+health gate also exercises the CLI entry point's own `__main__` import
+chain.
 """
 
 from __future__ import annotations
@@ -65,6 +77,18 @@ def test_sh_health_gate_imports_embody():
 
 
 @pytest.mark.guard
+def test_sh_health_gate_imports_main():
+    # #3419: the health gate must also exercise `agent_dispatch.__main__`
+    # (the CLI entry point), not just the base package + embody. Both the
+    # pre-activation slot gate and the post-swap verification.
+    assert "import agent_dispatch, agent_dispatch.embody, agent_dispatch.__main__" in _INSTALL_SH
+    assert (
+        _INSTALL_SH.count("import agent_dispatch, agent_dispatch.embody, agent_dispatch.__main__")
+        >= 2
+    )
+
+
+@pytest.mark.guard
 def test_ps1_pip_install_forces_fresh_build():
     for pkg in _LOCAL_PATH_PACKAGES:
         assert f"'{pkg}'" in _INSTALL_PS1
@@ -76,3 +100,12 @@ def test_ps1_pip_install_forces_fresh_build():
 def test_ps1_health_gate_imports_embody():
     assert "import agent_dispatch, agent_dispatch.embody" in _INSTALL_PS1
     assert _INSTALL_PS1.count("import agent_dispatch, agent_dispatch.embody") >= 2
+
+
+@pytest.mark.guard
+def test_ps1_health_gate_imports_main():
+    assert "import agent_dispatch, agent_dispatch.embody, agent_dispatch.__main__" in _INSTALL_PS1
+    assert (
+        _INSTALL_PS1.count("import agent_dispatch, agent_dispatch.embody, agent_dispatch.__main__")
+        >= 2
+    )
