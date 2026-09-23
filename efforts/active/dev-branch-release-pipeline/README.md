@@ -229,13 +229,41 @@ Round 2 (operator's response to that evaluation):
   - Not yet wired into CI or required by any guard — that's Phase 2 (retiring
     `check-version-bump.py`'s manual-bump requirement in favor of a
     changefile-presence check).
-- [ ] Build the local **"preview a release"** CLI on top of the generator
+- [x] Build the local **"preview a release"** CLI on top of the generator
       (must be the same code path CI uses, not a parallel implementation).
-- [ ] Design and prototype the **dev-slot local override**: an opt-in,
+  - **Shipped:** `tools/preview_release.py` builds a scratch copy of one
+    plugin, materializing its vendored `libs/<lib>` copies **into that
+    scratch copy only** (never the real `plugins/<plugin>/libs/<lib>` in
+    this checkout), and reports the version it would get if pending
+    changefiles were consumed — read-only against the real repo otherwise.
+    22 passing tests across the two tools.
+  - **Caught and fixed a real bug before landing:** the first draft invoked
+    `sync-vendored-libs.py --materialize` as a subprocess against the real
+    repo, which would have silently mutated real `plugins/*/libs/*` content
+    as a side effect of building a "preview." Verified the fix with a live
+    `git status`-before/after smoke test against a real plugin with known
+    drifted libs (`agent-bridge`) — confirmed zero real-repo diff.
+- [x] Design and prototype the **dev-slot local override**: an opt-in,
       clearly-logged config switch that overwrites a machine's installed
       plugin content with a locally-generated preview; auto-expires or is
       superseded by the next real release pull; the enabling agent holds a
       claim and is responsible for tidying it up when done.
+  - **Shipped:** `tools/dev_slot.py` (`install` / `status` / `clean`).
+    `install` requires an explicit `--yes`, backs up the real installed
+    payload before overwriting it, and writes a `.dev-slot-claim.json`
+    naming the claimant, source commit, and the exact cleanup command.
+    `clean` restores the backup and removes the claim. No auto-expiry
+    process exists (there's nothing to run one) — per the operator's
+    request, the installing agent/operator owns running `clean` explicitly;
+    a *real* `agent-worktrees update`/`copilot plugin update` will still
+    just overwrite the dev-slot content the normal way, so staleness can't
+    persist past the next real release either way.
+  - **Deliberately not exercised against this machine's real
+    `~/.copilot/installed-plugins`** in this session — mutating a live,
+    currently-loaded plugin tree from an automated session is exactly the
+    kind of destructive action this effort's own design principles (and the
+    harness's safety rails) call for a human in the loop on. Fully tested
+    against fake target roots instead (13 tests).
 - [ ] _(agent-recommended; not explicitly re-confirmed by the operator)_
       Confirm Copilot CLI's actual update-detection behavior empirically
       (version-string diff only, no semver range awareness) — do not assume;
@@ -427,3 +455,21 @@ generator contract details here or in a linked sub-doc._
 - Next: the local "preview a release" CLI (compose `sync-vendored-libs.py
   --materialize` + `accumulate_bumps.py --dry-run` into one preview command),
   then the dev-slot local override design.
+
+### 2026-09-23 — Preview CLI + dev-slot override
+- Shipped `tools/preview_release.py` and `tools/dev_slot.py` (see Plan).
+  Only two Phase 1 items remain: the CONTRIBUTING.md/AGENTS.md draft, and
+  empirically confirming Copilot CLI's update-detection semantics (still
+  deliberately deferred to Phase 3's dry-run, per the earlier Journal entry
+  — no safe scratch environment for it yet).
+- Self-caught, before landing, a real design bug: the first `preview_release`
+  draft would have run the materializer against the real checkout as a
+  subprocess, silently writing real vendored-lib changes as a side effect of
+  building a "preview." Fixed by loading `sync-vendored-libs.py`'s helpers
+  in-process and scoping every write to the scratch preview copy; verified
+  with a live before/after `git status` smoke test against a plugin with
+  known-drifted libs.
+- Deliberately did not exercise `dev_slot.py install`/`clean` against this
+  machine's own real `~/.copilot/installed-plugins` — too risky to mutate a
+  live, currently-loaded plugin tree from within this session. Fully covered
+  by tests against fake target roots instead.
