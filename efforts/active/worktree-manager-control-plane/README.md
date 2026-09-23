@@ -491,9 +491,12 @@ call site.
       a repos.yaml-absent, anchor-only project — so extended
       `ProjectInfo` with `anchor`/`display_name` fields (`repo.path or
       entry.get("anchor")`) rather than dropping the fallback.
-- [ ] **Step 4 — give worktree-manager an equivalent CLI/config surface**
+- [x] **Step 4 — give worktree-manager an equivalent CLI/config surface**
       for `profiles get/apply` and
-      `terminal-fragment [--explain|--doctor|--migrate-selections]`.
+      `terminal-fragment [--explain|--doctor|--migrate-selections]`. Takes
+      an explicit `<project>` positional (this CLI's own convention) instead
+      of agent-worktrees' cwd-based default; `apply` persists but doesn't
+      yet mirror to disk (`mirrored: false` — Step 5's scope).
 - [ ] **Step 5 — repoint `install.ps1`'s** `Deploy-TerminalScripts`/
       `Sync-TerminalState`/`Get-SettingsProfileGuids`/
       `Clean-TerminalSettingsJson` at the new owner, following Phase 3b
@@ -626,6 +629,28 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-09-23** — Landed Phase 3e Step 4 (CLI surface): added
+  `worktree-manager terminal-fragment <project> [--machine K]
+  [--explain|--doctor|--migrate-selections]` and `worktree-manager profiles
+  <project> get|apply [--machine K] [--set '<json>'] [--json]`. Deliberately
+  adapted the shape rather than replicating agent-worktrees' cwd-based
+  `--machine`/`--project` defaults: takes an explicit `<project>` positional
+  (matching this CLI's own `projects`/`repos` convention) and resolves
+  `--machine` from that project's own `config.yaml` `machine:` field via a
+  direct file read (`harness_state`-style) — deliberately sidesteps Phase
+  3d's still-open Group A/B question about `config.load_config()`'s
+  cwd-based active-project resolution rather than reaching back into it.
+  Added `terminal_fragment.detect_platform()`/`detect_env_label()` (ported,
+  dependency-free) so the local env label resolves without that same
+  dependency. `profiles apply` persists the selection but always reports
+  `mirrored: false` — deploying to a real Windows Terminal fragment is
+  Step 5's scope, not this command's. Verified end-to-end against a
+  synthetic `USERPROFILE` home (manual `get`/`apply`/`--explain` round
+  trip) plus 6 new automated CLI-dispatch tests
+  (`test_terminal_fragment_cli.py`). Full non-picker suite green (466
+  passed, up from 460); `production_picker` suite unaffected (658 passed,
+  same 3 pre-existing unrelated failures). worktree-manager bumped
+  `0.1.0-dev73` -> `dev74`.
 - **2026-09-23** — Landed Phase 3e Step 3b (`collect_local_projects`
   rewiring): rewired `collect_local_projects`/`preview_local`/
   `migrate_local_selections` onto `harness_state.build_projects()`,

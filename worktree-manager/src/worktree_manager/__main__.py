@@ -330,6 +330,272 @@ def _cmd_repos(rest: list[str]) -> int:
     return 0
 
 
+def _parse_flagged_args(rest: list[str], *, flags_with_value: set[str], flags_bool: set[str]):
+    """Minimal flag parser shared by ``terminal-fragment``/``profiles``.
+
+    Returns ``(positionals, values)`` where ``values`` maps each
+    ``flags_with_value`` name (without leading dashes) to its argument (or
+    ``None``) and each ``flags_bool`` name to ``True``/``False``.
+    """
+    positionals: list[str] = []
+    values: dict[str, object] = {f: None for f in flags_with_value}
+    values.update({f: False for f in flags_bool})
+    i = 0
+    while i < len(rest):
+        a = rest[i]
+        key = a.lstrip("-").replace("-", "_")
+        if a.startswith("--") and key in flags_with_value:
+            i += 1
+            values[key] = rest[i] if i < len(rest) else None
+        elif a.startswith("--") and key in flags_bool:
+            values[key] = True
+        else:
+            positionals.append(a)
+        i += 1
+    return positionals, values
+
+
+def _resolve_terminal_fragment_machine(project: str | None, explicit: str | None) -> str | None:
+    """Resolve the local machine key: ``--machine``, else the named
+    project's own ``config.yaml`` ``machine:`` field (a direct file read --
+    no cwd-based ``config.load_config()`` CLI-root dependency)."""
+    if explicit:
+        return explicit
+    if project:
+        from .harness_state import project_config
+        m = project_config(project).get("machine")
+        if isinstance(m, str) and m:
+            return m
+    return None
+
+
+def _cmd_terminal_fragment(rest: list[str]) -> int:
+    """``worktree-manager terminal-fragment <project> [--machine K]
+    [--explain|--doctor|--migrate-selections]`` -- preview the Windows
+    Terminal fragment a machine's config would emit, without deploying it.
+
+    Phase 3e Step 4 (copilot-extensions#3390): the read-only equivalent of
+    agent-worktrees' own ``profiles``/``terminal-fragment`` CLI verbs, now
+    backed entirely by the relocated ``terminal_fragment``/``harness_state``
+    modules. Unlike agent-worktrees' cwd-based ``--machine`` default, this
+    takes an **explicit** ``<project>`` positional (matching
+    ``worktree-manager projects``/``repos``'s own convention) and resolves
+    the machine key from that project's own config.yaml directly -- no
+    cwd-based ``config.load_config()`` needed. **Deploying** the fragment
+    (writing it to disk + reconciling Windows Terminal's live state) is
+    Phase 3e Step 5's scope (repointing ``install.ps1``), not this command.
+    """
+    from . import terminal_fragment as tf
+
+    positionals, values = _parse_flagged_args(
+        rest,
+        flags_with_value={"machine"},
+        flags_bool={"explain", "doctor", "migrate_selections"},
+    )
+    project = positionals[0] if positionals else None
+    machine = _resolve_terminal_fragment_machine(project, values["machine"])
+    if not machine:
+        print("error: could not resolve this machine's key -- pass --machine <key> "
+              "or a <project> whose config.yaml records one")
+        return 2
+
+    if values["migrate_selections"]:
+        changed = tf.migrate_local_selections(current_project=project)
+        if changed:
+            print("Migrating terminal_profiles selections to machine keys")
+            for name in changed:
+                print(f"  {name}: selection rewritten to canonical keys")
+        else:
+            print("terminal_profiles selections already use machine keys")
+        return 0
+
+    if values["doctor"]:
+        return _terminal_fragment_doctor(tf, machine, project)
+
+    result = tf.preview_local(machine, current_project=project)
+
+    if values["explain"]:
+        print(
+            f"Terminal fragment preview for '{machine}' "
+            f"({len(result.profiles)} profile(s) across "
+            f"{len(result.plans)} project(s)):\n"
+        )
+        for plan in result.plans:
+            state = (
+                "unmanaged -> default column" if plan.unmanaged_default else "managed selection"
+            )
+            agent = "agent-exposed" if plan.agent_exposed else "no-agent"
+            print(f"- {plan.display} [{plan.name}]  ({state}; {agent})")
+            if not plan.profiles:
+                print("    (no profiles emitted)")
+            for p in plan.profiles:
+                print(f"    - {p.name!r}  <{p.kind}>  {p.commandline}")
+            print()
+        return 0
+
+    print(json.dumps(result.fragment(), indent=2))
+    return 0
+
+
+def _terminal_fragment_doctor(tf, machine: str, project: str | None) -> int:
+    """Read-only report of Windows Terminal state drift vs. the fragment.
+
+    Ported from agent-worktrees' own ``_terminal_fragment_doctor``. Never
+    mutates anything -- the actual heal happens through Phase 3e Step 5's
+    deploy path.
+    """
+    diag = tf.diagnose_wt_state()
+    if diag is None:
+        print("warning: Windows Terminal state unavailable (non-Windows, or WT not installed).")
+        return 0
+
+    result = tf.preview_local(machine, current_project=project)
+    frag_names = {p.guid.lower(): p.name for p in result.profiles}
+
+    print(f"Windows Terminal state doctor for '{machine}':")
+    print(f"  fragment profiles : {diag.fragment_count}")
+    print(f"  settings profiles : {diag.settings_count}")
+    print(f"  generatedProfiles : {diag.generated_count}")
+
+    if diag.hidden:
+        print(
+            f"\n  HIDDEN -- in fragment + generatedProfiles but not in "
+            f"settings.json ({len(diag.hidden)}):"
+        )
+        for g in diag.hidden:
+            print(f"    - {frag_names.get(g, g)}  {g}")
+        print(
+            "    -> the next deploy will prune these from generatedProfiles "
+            "so WT re-discovers them."
+        )
+    if diag.orphans:
+        print(
+            f"\n  ORPHANS -- generatedProfiles entries in no fragment and not "
+            f"materialized ({len(diag.orphans)}): accumulated cruft."
+        )
+        if diag.reclaimable_orphans:
+            print(
+                f"    - {len(diag.reclaimable_orphans)} reclaimable (ours) -> "
+                f"the next deploy prunes these automatically."
+            )
+        if diag.foreign_orphans:
+            print(
+                f"    - {len(diag.foreign_orphans)} kept (v4/v5 GUIDs -- "
+                f"WT built-in / random profiles; never auto-pruned)."
+            )
+    if diag.duplicate_names:
+        print(
+            "\n  DUPLICATE profile names in settings.json "
+            "(often a legacy stand-alone fragment colliding with the "
+            "generated one):"
+        )
+        for name, count in diag.duplicate_names:
+            print(f"    - {name!r} x{count}")
+
+    if diag.healthy:
+        print("\n  OK -- no hidden or duplicate profiles detected.")
+    return 0
+
+
+def _cmd_profiles(rest: list[str]) -> int:
+    """``worktree-manager profiles <project> get|apply [--machine K]
+    [--set JSON] [--json]`` -- read or write a machine's terminal-profile
+    column for ``<project>``.
+
+    Phase 3e Step 4 (copilot-extensions#3390): the equivalent of
+    agent-worktrees' own ``profiles get/apply`` CLI verb, backed by the
+    relocated ``terminal_profiles`` module. **Mirroring** the selection to a
+    real Windows Terminal fragment on disk is Phase 3e Step 5's scope (this
+    command persists the selection but never deploys it); ``apply`` always
+    reports ``mirrored: false`` until Step 5 lands.
+    """
+    from . import terminal_fragment as tf
+    from . import terminal_profiles as profiles
+    from .harness_state import home as hs_home
+
+    if not rest or rest[0].startswith("-"):
+        print("usage: worktree-manager profiles <project> get|apply "
+              "[--machine K] [--set '<json-array>'] [--json]")
+        return 2
+    project = rest[0]
+    action = rest[1] if len(rest) > 1 and not rest[1].startswith("-") else "get"
+    flag_rest = rest[2:] if len(rest) > 1 and not rest[1].startswith("-") else rest[1:]
+    _, values = _parse_flagged_args(
+        flag_rest, flags_with_value={"machine", "set"}, flags_bool={"json"}
+    )
+    machine = _resolve_terminal_fragment_machine(project, values["machine"])
+    if not machine:
+        print("error: could not resolve this machine's key -- pass --machine <key> "
+              "or a <project> whose config.yaml records one")
+        return 2
+    env = tf.detect_env_label()
+    cfg_path = hs_home() / f".{project}" / "config.yaml"
+
+    if action == "get":
+        managed = profiles.has_selection(cfg_path)
+        if managed:
+            sels = profiles.normalize_selection(
+                profiles.load_selection(cfg_path), machine, env
+            )
+        else:
+            sels = profiles.default_selection(
+                [profiles.self_diagonal(machine, env)], machine, env
+            )
+        payload = {
+            "machine": machine, "env": env, "managed": managed,
+            "targets": [s.as_dict() for s in sels],
+        }
+        if values["json"]:
+            print(json.dumps(payload))
+        else:
+            state = "managed" if managed else "default (minimal + bare cross-machine)"
+            print(f"Terminal profiles for {machine} {env} [{state}]:")
+            for s in sels:
+                lock = (" (self, locked)"
+                        if (s.machine == machine and s.env == env and s.kind == "agent")
+                        else "")
+                print(f"  - {s.machine} {s.env} · {s.kind}{lock}")
+        return 0
+
+    if action != "apply":
+        print(f"error: unknown action {action!r} (expected 'get' or 'apply')")
+        return 2
+
+    raw = values["set"]
+    if raw is None:
+        print("error: profiles apply requires --set '<json-array>'")
+        return 2
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as e:
+        print(f"error: invalid --set JSON: {e}")
+        return 2
+    if not isinstance(parsed, list):
+        print("error: --set must be a JSON array of {machine, env, kind} objects")
+        return 2
+    sels = [
+        profiles.TargetSel(
+            str(o.get("machine", "")).strip(),
+            str(o.get("env", "")).strip(),
+            str(o.get("kind", "agent")).strip().lower(),
+        )
+        for o in parsed if isinstance(o, dict)
+    ]
+    written = profiles.save_selection(cfg_path, sels, self_machine=machine, self_env=env)
+    payload = {
+        "machine": machine, "env": env,
+        "targets": [s.as_dict() for s in written],
+        # Not yet wired: mirroring to a real WT fragment is Phase 3e Step 5.
+        "mirrored": False,
+    }
+    if values["json"]:
+        print(json.dumps(payload))
+    else:
+        print(f"Saved {len(written)} terminal profile(s) for {machine} {env} "
+              "(not yet mirrored to disk -- see Phase 3e Step 5)")
+    return 0
+
+
 def _worktree_row(w) -> str:
     """One rendered worktree line: id4 · machine · repo · STATE sync · title."""
     state = (w.state or "-").upper()
@@ -1376,6 +1642,10 @@ def main(argv: list[str] | None = None) -> int:
         print("  projects [<name>]      registered projects (harness repos: binstubs + profiles)")
         print("  repos [<name>]         every known repo + its config-state indicators")
         print("  worktrees [<project>]  live worktrees via the agent-worktrees engine (--json)")
+        print("  terminal-fragment <project> [--machine K] [--explain|--doctor|--migrate-selections]")
+        print("                         preview the Windows Terminal fragment a project would emit")
+        print("  profiles <project> get|apply [--machine K] [--set '<json>'] [--json]")
+        print("                         read/write this machine's terminal-profile column")
         print("  contracts [--project NAME] [--json]")
         print("                         validate plugin-contributed pivots/actions/cards/config")
         print("  picker [<project>]     launch the production Picker (Textual)")
@@ -1399,6 +1669,10 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_repos(args[1:])
     if args and args[0] == "worktrees":
         return _cmd_worktrees(args[1:])
+    if args and args[0] == "terminal-fragment":
+        return _cmd_terminal_fragment(args[1:])
+    if args and args[0] == "profiles":
+        return _cmd_profiles(args[1:])
     if args and args[0] == "contracts":
         return _cmd_contracts(args[1:])
     if args and args[0] == "picker":
