@@ -15,7 +15,7 @@ def _core():
 
 
 def _core_helper(name: str, local):
-    candidate = getattr(_core(), name, None)
+    candidate = vars(_core()).get(name)
     if callable(candidate) and candidate is not local:
         return candidate
     return local

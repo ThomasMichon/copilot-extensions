@@ -5690,7 +5690,17 @@ def _run_session_lifecycle(
             plugin_related_anchors=plugin_related_anchors,
         )
         try:
-            cmd_register_session(registration_args)
+            # Prefer an already-bound cmd_register_session global (real or
+            # test-monkeypatched, see test_hook_ipc.py); globals().get()
+            # avoids __getattr__'s eager full load. Fall back to a direct
+            # import if unbound (why session_inspection_cli isn't in
+            # _CLUSTER_FREE_MODULES).
+            _register_session_fn = globals().get("cmd_register_session")
+            if _register_session_fn is None:
+                from . import session_binding_cli as _session_binding_cli
+
+                _register_session_fn = _session_binding_cli.cmd_register_session
+            _register_session_fn(registration_args)
         except Exception as exc:
             diagnostics += f"[agent-worktrees] Session registration failed: {exc}\n"
         registration_output = (
@@ -7383,6 +7393,27 @@ _ALL_KNOWN_VERBS: frozenset[str] = frozenset(_LAZY_DISPATCH_TABLE.keys()) | froz
 })
 
 
+# A module is "cluster-free" when every `_core()`-reached attribute (direct,
+# via a var, or via `_core_helper()`) is bound at module level BEFORE the
+# deferred `_load_full_command_surface()` block. Skips `_ensure_cluster_
+# loaded()` in `_dispatch_lazy()` for these modules only. Regenerate/diff
+# via `tests/_core_cluster_scan.py`'s `compute_cluster_free_modules()` --
+# never hand-edit, never trust a regex-only scan (one shipped a live
+# `create-pr` regression). Can't see a transitive dependency on a deferred
+# name inside a function that itself resolves cleanly --
+# `session_inspection_cli` was excluded for exactly this. Adding a module
+# requires exercising its real commands end-to-end, not just `--help`.
+_CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
+    "claims_cli",
+    "maintenance_cli",
+    "pane_lifecycle",
+    "picker_profiles_cli",
+    "reclaim_cli",
+    "status_bar_cli",
+    "status_cli",
+})
+
+
 def _dispatch_lazy(command: str, args_list: list[str]) -> int:
     """Fast-path dispatch for a module-delegated subcommand.
 
@@ -7392,7 +7423,8 @@ def _dispatch_lazy(command: str, args_list: list[str]) -> int:
     identical to what build_parser() would have produced for it.
     """
     module_name, handler_attr = _LAZY_DISPATCH_TABLE[command]
-    _ensure_cluster_loaded()
+    if module_name not in _CLUSTER_FREE_MODULES:
+        _ensure_cluster_loaded()
     module = importlib.import_module(f"{__package__}.{module_name}")
     parser = argparse.ArgumentParser(
         prog="agent-worktrees",
@@ -8288,11 +8320,25 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 0
 
-    # Every remaining dispatch path below (fast-tracked _LAZY_DISPATCH_TABLE
-    # commands, the manual-dispatch verbs, and the full COMMAND_MAP fallback)
-    # may reach into the cross-referencing CLI-submodule cluster described at
-    # _ensure_cluster_loaded()'s own definition -- resolve it once, here,
-    # rather than chasing individual call sites.
+    # Fast path (checked before manual-dispatch verbs + the blanket
+    # _ensure_cluster_loaded() call below, Phase 1b): import only the
+    # module owning this subcommand instead of the full eager surface, so a
+    # _CLUSTER_FREE_MODULES command (see _dispatch_lazy()) skips that cost.
+    if args_list[0] in _LAZY_DISPATCH_TABLE:
+        try:
+            return _dispatch_lazy(args_list[0], args_list)
+        except (
+            FileNotFoundError, ValueError, inst.BinstubOwnershipError,
+            codename_tracking.CodenameAttributionPolicyError,
+        ) as e:
+            output.err(str(e))
+            return 1
+        except KeyboardInterrupt:
+            print("\nCancelled.")
+            return 130
+
+    # Manual-dispatch verbs + the COMMAND_MAP fallback may reach the
+    # cross-referencing CLI-submodule cluster -- resolve it once.
     _ensure_cluster_loaded()
 
     # Services uses manual dispatch for passthrough support --
@@ -8482,21 +8528,8 @@ def main(argv: list[str] | None = None) -> int:
         name = args_list[1] if len(args_list) > 1 else ""
         return _hooks.run_hook(name, args_list[2:])
 
-    # Fast path: a module-delegated subcommand (see _LAZY_DISPATCH_TABLE) --
-    # import only its owning module instead of the full eager surface that
-    # build_parser()/COMMAND_MAP below would otherwise force.
-    if args_list[0] in _LAZY_DISPATCH_TABLE:
-        try:
-            return _dispatch_lazy(args_list[0], args_list)
-        except (
-            FileNotFoundError, ValueError, inst.BinstubOwnershipError,
-            codename_tracking.CodenameAttributionPolicyError,
-        ) as e:
-            output.err(str(e))
-            return 1
-        except KeyboardInterrupt:
-            print("\nCancelled.")
-            return 130
+    # (_LAZY_DISPATCH_TABLE fast path is checked earlier, before the
+    # blanket _ensure_cluster_loaded() call above.)
 
     # First arg is a known subcommand → parse normally
     _load_full_command_surface()
