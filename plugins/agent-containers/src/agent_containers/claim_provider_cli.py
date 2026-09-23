@@ -121,14 +121,17 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
     ``lifecycle.cmd_remove`` applies -- so a stale worktree claim can never
     destroy a container another effort currently holds.
 
-    Holds a REAL atomic fence (``lease.deploy_hold``) across the active-
-    session-admission check AND the destructive removal, rather than a
-    bare check-then-act: ``deploy_hold`` blocks any NEW provider admission
-    from starting for its duration (enforced under the same lock file a
-    borrow/``exec --stdio`` admission itself checks), and raises outright
-    if another destructive operation already holds it -- closing the race
-    a plain check would leave open between "no admission right now" and
-    "still no admission by the time we actually remove it"."""
+    Holds a REAL atomic fence (``lease.deploy_hold``) across the LEASE
+    re-check, active-session-admission check, AND the destructive removal,
+    rather than a bare check-then-act: ``deploy_hold`` blocks any NEW
+    provider admission from starting for its duration (enforced under the
+    same lock file a borrow/``exec --stdio`` admission itself checks), and
+    raises outright if another destructive operation already holds it --
+    closing the race a plain check would leave open between "free right
+    now" and "still free by the time we actually remove it". The initial
+    lease check below (before the fence exists at all) is only a fast
+    common-case bail-out; the one inside the fence is the one that
+    actually matters."""
     if not args.apply:
         print(json.dumps({"reclaimed": True, "detail": f"would remove container {args.name}"}))
         return 0
@@ -141,6 +144,17 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
         return 0
     try:
         with deploy_hold(args.name, "claim-reclaim"):
+            # Re-check the lease INSIDE the fence too -- the earlier check,
+            # above, ran before deploy_hold was even acquired, leaving a
+            # window in which another effort could still acquire the lease
+            # between that check and this hold actually taking effect.
+            lease = get_lease(args.name)
+            if lease:
+                print(json.dumps({
+                    "reclaimed": False,
+                    "detail": f"container is leased to {lease.effort}; release it first",
+                }))
+                return 0
             if active_session_admissions(args.name):
                 print(json.dumps({
                     "reclaimed": False,

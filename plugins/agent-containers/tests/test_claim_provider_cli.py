@@ -121,6 +121,31 @@ def test_claim_reclaim_refuses_actively_leased_container(monkeypatch, capsys):
     assert called["n"] == 0
 
 
+def test_claim_reclaim_refuses_lease_acquired_under_the_fence(monkeypatch, capsys):
+    """The lease re-check INSIDE deploy_hold is the one that actually
+    matters: another effort can legitimately acquire the lease between the
+    initial (pre-fence) check and the fence actually taking effect."""
+    called = {"n": 0}
+    lease_calls = {"n": 0}
+
+    def _get_lease(name):
+        lease_calls["n"] += 1
+        if lease_calls["n"] == 1:
+            return None  # free at the initial, pre-fence check
+        return types.SimpleNamespace(effort="late-borrower")  # acquired before the fence took effect
+
+    monkeypatch.setattr(cpc, "get_lease", _get_lease)
+    monkeypatch.setattr(cpc, "deploy_hold", _fake_hold)
+    monkeypatch.setattr(lifecycle, "remove_container",
+                        lambda *a, **k: called.__setitem__("n", 1))
+    rc = cpc.cmd_claim_reclaim(argparse.Namespace(name="c-a", apply=True))
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["reclaimed"] is False and "late-borrower" in out["detail"]
+    assert called["n"] == 0
+    assert lease_calls["n"] == 2
+
+
 def test_claim_reclaim_refuses_active_session_admission(monkeypatch, capsys):
     """A restricted `exec --stdio` session can hold a container WITHOUT an
     advisory lease at all -- must still block a destructive removal.
