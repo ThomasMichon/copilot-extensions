@@ -794,18 +794,6 @@ def claim(
         raise RuntimeError("claim requires a CodeSpace name")
     if not owner:
         raise RuntimeError("claim requires an owner worktree")
-    with _lease_lock():
-        holds = _read_live_records(
-            _DEPLOY_HOLDS_FILE,
-            DeployHold,
-            DEPLOY_HOLD_TTL,
-        )
-        hold = holds.get(codespace)
-        if hold:
-            raise ProviderAdmissionError(
-                f"CodeSpace '{codespace}' is unavailable while provider "
-                f"{hold.operation} is in progress"
-            )
 
     lease_token = ""
     if coordinate and holder_ref:

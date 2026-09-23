@@ -350,7 +350,6 @@ def test_claim_releases_new_l2_token_when_hold_appears_before_local_write(leases
     from agent_codespaces import coordination
 
     responses = iter([
-        {},
         {
             "cs-one": lease_mod.DeployHold(
                 codespace="cs-one",
