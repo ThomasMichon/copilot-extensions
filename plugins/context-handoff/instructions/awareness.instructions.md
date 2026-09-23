@@ -42,7 +42,7 @@ a tool call:
 CH_ROOT="${COPILOT_PLUGIN_ROOT:-$HOME/.copilot/installed-plugins/copilot-extensions/context-handoff}"
 CH="$CH_ROOT/extensions/context-handoff/handoff-cli.mjs"
 node "$CH" save --title "<t>" --prompt-file "<f.md>" --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
-node "$CH" trigger --cwd "$PWD"          # arm pickup (mode-permitting)
+node "$CH" trigger --title "<t>" --prompt-file "<f.md>" --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"          # arm pickup (mode-permitting)
 node "$CH" consume --locator "<kind>:<id>" --cwd "$PWD"
 ```
 PowerShell: same `$CH_ROOT`/`$CH` resolution (default
