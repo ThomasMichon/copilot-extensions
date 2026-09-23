@@ -2964,3 +2964,47 @@ registry-churn race both still need an upstream resolution (tracked on
 worktree going forward: the gate can no longer block on a location this
 plugin itself just created.
 
+
+
+### 2026-09-23 (cont.) -- Warnings/cutover conflation fixed; static existence instructions added
+
+Taking stock of this effort's live-cutover-disabled posture surfaced a real
+bug: `extension.mjs`'s `session.usage_info` handler gated its ENTIRE body
+(soft/hard context-pressure warnings/nudges AND the force-tier auto-trigger)
+behind one `automaticHandoffEnabled(mode)` check (true only for `mode:
+auto`). Flipping the default to `manual-only` silently disabled the
+informational warnings too, not just the intended auto-trigger/live-cutover
+wiring. Split the gate: soft/hard warnings now run under
+`manualHandoffEnabled(mode)` (mode !== "off"); only the force tier's own
+automatic trigger keeps the narrower `automaticHandoffEnabled(mode)` guard.
+Live cutover stays exactly as disabled as intended; warnings are restored.
+Corrected two stale "automatic nudging is opt-in" descriptions in
+`README.md` and `.github/plugin/marketplace.json` to match.
+
+Also added `instructions/awareness.instructions.md` -- a THIRD, fully
+static, checked-in instructions file (projected via
+`instruction-projections.json` exactly like `session-guidance` and
+`handoff-fallback`), distinct from both existing paths: `session-guidance`
+is a pointer to a per-session file a sessionStart HOOK generates, and the
+runtime nudges need the extension itself loaded and mid-session. This one
+needs nothing to run at all. It states the mechanism exists and what that
+implies, names the `.context-handoff/config.yaml` `mode` switch without
+asserting which value is active, gives the CLI commands via the plugin's
+own bundled-CLI resolution (extension loaded or not), spells out the exact
+handoff-prompt ("seed") format
+(`<lead> | Resume: /consume-handoff to take over | Recovery: context-handoff <kind>:<id>`,
+confirmed against `cutover-seed.mjs`'s `buildCutoverSeed`), and points to
+the existing `handoff-fallback.instructions.md` for full procedures on
+EITHER end if the extension fails to load entirely.
+
+Filed as `copilot-extensions` PR #3460
+(`fix/context-handoff-warnings-and-awareness`). Full suite (144 tests, 133
+pass/11 skipped, unchanged skip count) green.
+
+**Side quest:** `origin/main` was red for the pre-push module-size guard on
+two unrelated `worktree-manager` files (recent PRs #3448/#3445/#3414),
+blocking this PR and the earlier agent-worktrees fix (#3440) alike. Filed
+copilot-extensions#3458 (real fix: split those modules) and self-merged a
+narrow, validated baseline-widen (PR #3459) to unblock pushes -- a stopgap
+per #3458, not a substitute for the real fix.
+
