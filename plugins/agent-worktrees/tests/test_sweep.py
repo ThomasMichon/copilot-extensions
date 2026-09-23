@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import types
 
-from agent_worktrees import sweep, tracking
+from agent_worktrees import obligations, sweep, tracking
 
 
 def _rec(*states: str) -> tracking.WorktreeRecord:
@@ -141,6 +141,76 @@ def test_claim_gone_safe_unknown_kind_is_spare():
     other = tracking.ResourceClaim(kind="bridge", ref="s", state="active")
     assert sweep.claim_gone(other, types.SimpleNamespace()) is None
     assert sweep.claim_safe(other, types.SimpleNamespace()) is None
+
+
+# ── session claims (Phase 8, worktree-finality-and-obligations) ─────────────
+
+def test_session_claim_gone_true_when_process_dead(monkeypatch):
+    claim = tracking.ResourceClaim(kind="session", ref="m/p/wt#sess-1", state="active")
+    rec = types.SimpleNamespace()
+    monkeypatch.setattr(
+        sweep, "load_claim_child_record", lambda ref, config: (rec, True),
+    )
+    import agent_worktrees.sessions as sessions_mod
+    monkeypatch.setattr(
+        sessions_mod, "session_id_is_live",
+        lambda r, sid: sid == "sess-1" and False,
+    )
+    assert sweep.session_claim_gone(claim, types.SimpleNamespace()) is True
+
+
+def test_session_claim_gone_false_when_process_alive(monkeypatch):
+    claim = tracking.ResourceClaim(kind="session", ref="m/p/wt#sess-1", state="active")
+    rec = types.SimpleNamespace()
+    monkeypatch.setattr(
+        sweep, "load_claim_child_record", lambda ref, config: (rec, True),
+    )
+    import agent_worktrees.sessions as sessions_mod
+    monkeypatch.setattr(sessions_mod, "session_id_is_live", lambda r, sid: True)
+    assert sweep.session_claim_gone(claim, types.SimpleNamespace()) is False
+
+
+def test_session_claim_gone_true_when_owning_record_is_entirely_gone(monkeypatch):
+    claim = tracking.ResourceClaim(kind="session", ref="m/p/wt#sess-1", state="active")
+    monkeypatch.setattr(sweep, "load_claim_child_record", lambda ref, config: (None, True))
+    assert sweep.session_claim_gone(claim, types.SimpleNamespace()) is True
+
+
+def test_session_claim_gone_spare_when_cross_machine(monkeypatch):
+    claim = tracking.ResourceClaim(kind="session", ref="other-machine/p/wt#sess-1", state="active")
+    monkeypatch.setattr(sweep, "load_claim_child_record", lambda ref, config: (None, False))
+    assert sweep.session_claim_gone(claim, types.SimpleNamespace()) is None
+
+
+def test_session_claim_gone_spare_when_ref_has_no_session():
+    claim = tracking.ResourceClaim(kind="session", ref="m/p/wt", state="active")
+    assert sweep.session_claim_gone(claim, types.SimpleNamespace()) is None
+
+
+def test_claim_gone_and_safe_route_session_to_session_resolver(monkeypatch):
+    claim = tracking.ResourceClaim(kind="session", ref="m/p/wt#sess-1", state="active")
+    monkeypatch.setattr(sweep, "session_claim_gone", lambda c, config: True)
+    assert sweep.claim_gone(claim, types.SimpleNamespace()) is True
+    # safe mirrors gone's own verdict for the session kind (no second probe).
+    assert sweep.claim_safe(claim, types.SimpleNamespace()) is True
+
+
+def test_sweep_reclaims_a_session_claim_whose_process_is_confirmed_dead(monkeypatch):
+    rec = tracking.WorktreeRecord(
+        worktree_id="wt-sess", branch="worktree/wt-sess", worktree_path="/x",
+        repo="p", machine="m", platform="windows",
+        started_at="t", last_resumed_at="t", resume_count=0, title=None,
+        status="active", completed_at=None,
+        resources=[tracking.ResourceClaim(
+            kind="session", ref="m/p/wt-sess#dead-sess", state="active",
+        )],
+    )
+    monkeypatch.setattr(sweep, "load_claim_child_record", lambda ref, config: (rec, True))
+    import agent_worktrees.sessions as sessions_mod
+    monkeypatch.setattr(sessions_mod, "session_id_is_live", lambda r, sid: False)
+    flipped = sweep.self_heal(rec, types.SimpleNamespace(), save=False)
+    assert len(flipped) == 1
+    assert flipped[0].state == obligations.ABANDONED
 
 
 def test_sweep_reclaims_at_rest_codespace_via_mirror(monkeypatch):

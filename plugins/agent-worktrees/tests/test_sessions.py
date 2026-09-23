@@ -7,7 +7,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
 from conftest import make_session_dir
 
 from agent_worktrees.sessions import (
@@ -16,22 +15,26 @@ from agent_worktrees.sessions import (
     find_latest_session_id_fast,
     list_worktree_sessions,
     mux_binding_for_session,
-    mux_focus_pane,
     mux_copilot_pane,
+    mux_focus_pane,
     mux_seed_pane,
     mux_session_index,
     mux_session_name,
-    session_message_tail,
-    worktree_id_from_mux_session,
     recent_worktree_messages,
     scan_sessions_fast,
+    session_id_is_live,
+    session_message_tail,
     validate_session_id,
+    worktree_has_live_session,
+    worktree_id_from_mux_session,
+    worktree_session_lock_state,
 )
 from agent_worktrees.tracking import (
     SessionEntry,
     WorktreeRecord,
     save_record,
 )
+
 
 def _make_mux_record(wt_id: str, wt_path: str, sessions=None) -> WorktreeRecord:
     return WorktreeRecord(
@@ -708,6 +711,84 @@ def _make_record(wt_id: str, wt_path: str, sessions=None) -> WorktreeRecord:
         completed_at=None,
         sessions=sessions,
     )
+
+
+class TestSessionIdIsLive:
+    """Per-session liveness probe (Phase 8, worktree-finality-and-obligations):
+    scoped to exactly one ``session_id``, unlike
+    :func:`worktree_has_live_session` (any session on the record)."""
+
+    def test_true_when_that_session_has_a_live_lock(self, tmp_session_state_dir: Path):
+        wt_path = "/tmp/wt-sid-live"
+        make_session_dir(
+            tmp_session_state_dir, "sess-live", wt_path, lock_pid=4242,
+        )
+        rec = _make_record("wt-sid-live", wt_path, sessions=[
+            SessionEntry("sess-live", "2026-06-01T10:00:00"),
+        ])
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ), patch(
+            "agent_worktrees.sessions._is_copilot_process",
+            lambda pid: pid == 4242,
+        ):
+            assert session_id_is_live(rec, "sess-live") is True
+            live, _stale = worktree_session_lock_state(rec)
+            assert live is True
+            assert worktree_has_live_session(rec) is True
+
+    def test_false_when_that_sessions_lock_is_stale(self, tmp_session_state_dir: Path):
+        wt_path = "/tmp/wt-sid-dead"
+        make_session_dir(
+            tmp_session_state_dir, "sess-dead", wt_path, lock_pid=9999,
+        )
+        rec = _make_record("wt-sid-dead", wt_path, sessions=[
+            SessionEntry("sess-dead", "2026-06-01T10:00:00"),
+        ])
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ), patch(
+            "agent_worktrees.sessions._is_copilot_process", return_value=False,
+        ):
+            assert session_id_is_live(rec, "sess-dead") is False
+            live, stale = worktree_session_lock_state(rec)
+            assert live is False
+            assert stale == [9999]
+
+    def test_false_for_an_unrelated_session_id_even_when_others_are_live(
+        self, tmp_session_state_dir: Path,
+    ):
+        """A DIFFERENT session being live on the same worktree must not make
+        an unrelated ``session_id`` (e.g. one already retired/released)
+        report live -- the whole point of scoping past
+        ``worktree_has_live_session``'s "any session" answer."""
+        wt_path = "/tmp/wt-sid-scoped"
+        make_session_dir(
+            tmp_session_state_dir, "sess-other-live", wt_path, lock_pid=111,
+        )
+        rec = _make_record("wt-sid-scoped", wt_path, sessions=[
+            SessionEntry("sess-other-live", "2026-06-01T10:00:00"),
+        ])
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ), patch(
+            "agent_worktrees.sessions._is_copilot_process",
+            lambda pid: pid == 111,
+        ):
+            assert session_id_is_live(rec, "sess-not-on-record") is False
+            # But the worktree-wide check still sees the OTHER session live.
+            assert worktree_has_live_session(rec) is True
+
+    def test_false_when_no_sessions_on_record(self, tmp_session_state_dir: Path):
+        rec = _make_record("wt-sid-empty", "/tmp/wt-sid-empty", sessions=None)
+        with patch(
+            "agent_worktrees.sessions._session_state_dir",
+            return_value=tmp_session_state_dir,
+        ):
+            assert session_id_is_live(rec, "anything") is False
 
 
 class TestDetachedSessionsExcluded:
