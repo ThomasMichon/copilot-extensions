@@ -842,6 +842,8 @@ def claim(
                 )
                 lease_token = ""
 
+    release_after_reject = ""
+    hold_operation = ""
     with _lease_lock():
         holds = _read_live_records(
             _DEPLOY_HOLDS_FILE,
@@ -850,48 +852,51 @@ def claim(
         )
         hold = holds.get(codespace)
         if hold:
-            if lease_token:
-                try:
-                    coordination.release(codespace, lease_token)
-                except Exception:
-                    log.warning(
-                        "Could not release cross-machine token for '%s' "
-                        "after deploy-hold rejection",
-                        codespace,
-                        exc_info=True,
-                    )
-            raise ProviderAdmissionError(
-                f"CodeSpace '{codespace}' is unavailable while provider "
-                f"{hold.operation} is in progress"
+            release_after_reject = lease_token
+            hold_operation = hold.operation
+        else:
+            leases = _prune(_read_leases(), ttl)
+            held = leases.get(codespace)
+            if held and _claim_owner(held) != owner:
+                holder = _claim_owner(held)
+                if _worktree_alive(holder, active) and not force:
+                    raise ClaimConflict(codespace, holder, held.host, held.pid)
+                log.info(
+                    "Taking CodeSpace '%s' claim from '%s' for '%s' (%s)",
+                    codespace, holder, owner,
+                    "forced" if force else "prior owner gone",
+                )
+            now = time.time()
+            keep_acquired = (
+                held.acquired_at if held and _claim_owner(held) == owner else now
             )
-        leases = _prune(_read_leases(), ttl)
-        held = leases.get(codespace)
-        if held and _claim_owner(held) != owner:
-            holder = _claim_owner(held)
-            if _worktree_alive(holder, active) and not force:
-                raise ClaimConflict(codespace, holder, held.host, held.pid)
-            log.info(
-                "Taking CodeSpace '%s' claim from '%s' for '%s' (%s)",
-                codespace, holder, owner,
-                "forced" if force else "prior owner gone",
+            lease = Lease(
+                codespace=codespace,
+                effort="",
+                pid=os.getpid(),
+                host=_this_host(),
+                acquired_at=keep_acquired,
+                heartbeat_at=now,
+                worktree=owner,
+                lease_token=lease_token,
             )
-        now = time.time()
-        keep_acquired = (
-            held.acquired_at if held and _claim_owner(held) == owner else now
-        )
-        lease = Lease(
-            codespace=codespace,
-            effort="",
-            pid=os.getpid(),
-            host=_this_host(),
-            acquired_at=keep_acquired,
-            heartbeat_at=now,
-            worktree=owner,
-            lease_token=lease_token,
-        )
-        leases[codespace] = lease
-        _write_leases(leases)
-        return lease
+            leases[codespace] = lease
+            _write_leases(leases)
+            return lease
+    if release_after_reject:
+        try:
+            coordination.release(codespace, release_after_reject)
+        except Exception:
+            log.warning(
+                "Could not release cross-machine token for '%s' "
+                "after deploy-hold rejection",
+                codespace,
+                exc_info=True,
+            )
+    raise ProviderAdmissionError(
+        f"CodeSpace '{codespace}' is unavailable while provider "
+        f"{hold_operation} is in progress"
+    )
 
 
 def claim_for_connect(

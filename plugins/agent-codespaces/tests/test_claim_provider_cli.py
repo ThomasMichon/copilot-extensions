@@ -8,6 +8,7 @@ import argparse
 import json
 import types
 from contextlib import contextmanager
+import time
 
 from agent_codespaces import claim_provider_cli as cpc
 from agent_codespaces import lease as lease_mod
@@ -233,7 +234,8 @@ def test_claim_reclaim_holds_deploy_fence_through_recovery_and_delete(monkeypatc
     monkeypatch.setattr(
         cpc,
         "verify_deploy_hold",
-        lambda name, token: events.append(("verify", name, token)),
+        lambda name, token: events.append(("verify", name, token))
+        or types.SimpleNamespace(expires_at=time.time() + 600),
     )
     monkeypatch.setattr(
         cpc,
@@ -320,6 +322,46 @@ def test_claim_reclaim_fails_closed_when_hold_expires_before_delete(monkeypatch,
     assert called["n"] == 0
 
 
+def test_claim_reclaim_refuses_to_start_delete_when_hold_budget_is_nearly_exhausted(
+    monkeypatch,
+    capsys,
+):
+    @contextmanager
+    def _hold(*_args, **_kwargs):
+        yield types.SimpleNamespace(token="hold-token")
+
+    monkeypatch.setattr(cpc, "deploy_hold", _hold)
+    monkeypatch.setattr(cpc, "sync_codespace_sessions", lambda *a, **k: {"ok": True})
+    monkeypatch.setattr(
+        cpc,
+        "verify_deploy_hold",
+        lambda *a, **k: types.SimpleNamespace(
+            expires_at=time.time() + cpc._DELETE_TIMEOUT_SECONDS
+        ),
+    )
+    marked = {}
+    monkeypatch.setattr(
+        cpc,
+        "mark_deploy_hold_uncertain",
+        lambda name, token: marked.update({"name": name, "token": token}),
+    )
+    called = {"n": 0}
+    monkeypatch.setattr(
+        cpc,
+        "delete_codespace",
+        lambda *a, **k: called.__setitem__("n", 1),
+    )
+
+    rc = cpc.cmd_claim_reclaim(argparse.Namespace(name="cs-a", apply=True))
+
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["reclaimed"] is False
+    assert "hold budget is nearly exhausted" in out["detail"]
+    assert marked == {"name": "cs-a", "token": "hold-token"}
+    assert called["n"] == 0
+
+
 def test_claim_reclaim_marks_hold_uncertain_on_ambiguous_delete_failure(monkeypatch, capsys):
     @contextmanager
     def _hold(*_args, **_kwargs):
@@ -327,7 +369,11 @@ def test_claim_reclaim_marks_hold_uncertain_on_ambiguous_delete_failure(monkeypa
 
     monkeypatch.setattr(cpc, "deploy_hold", _hold)
     monkeypatch.setattr(cpc, "sync_codespace_sessions", lambda *a, **k: {"ok": True})
-    monkeypatch.setattr(cpc, "verify_deploy_hold", lambda *a, **k: None)
+    monkeypatch.setattr(
+        cpc,
+        "verify_deploy_hold",
+        lambda *a, **k: types.SimpleNamespace(expires_at=time.time() + 600),
+    )
 
     def _boom(*a, **k):
         raise RuntimeError("HTTP 500: server exploded")

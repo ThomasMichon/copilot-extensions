@@ -12,6 +12,7 @@ import argparse
 import json
 import logging
 import sys
+import time
 
 from .lease import (
     DeployHoldError,
@@ -25,6 +26,8 @@ from .lifecycle import delete_codespace, get_codespace_status, get_codespace_sta
 from .sessions import sync_codespace_sessions
 
 log = logging.getLogger("agent-codespaces")
+_DELETE_TIMEOUT_SECONDS = 60.0
+_DELETE_START_BUFFER_SECONDS = 5.0
 
 
 def add_claim_provider_parsers(sub) -> None:
@@ -223,7 +226,18 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
                     "detail": f"pre-delete session recovery failed: {recovery.get('detail', '')}",
                 }))
                 return 0
-            verify_deploy_hold(args.name, hold.token)
+            current_hold = verify_deploy_hold(args.name, hold.token)
+            remaining = current_hold.expires_at - time.time()
+            if remaining <= _DELETE_TIMEOUT_SECONDS + _DELETE_START_BUFFER_SECONDS:
+                mark_deploy_hold_uncertain(args.name, hold.token)
+                print(json.dumps({
+                    "reclaimed": False,
+                    "detail": (
+                        "provider hold budget is nearly exhausted; "
+                        "refusing to start deletion before the fence expires"
+                    ),
+                }))
+                return 0
             try:
                 delete_codespace(
                     args.name,
