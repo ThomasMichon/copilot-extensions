@@ -16,6 +16,13 @@ name: CI
 #   * full           - workflow_dispatch only: every plugin's full suite,
 #                      including agent-worktrees, no tight timeout.
 #
+# `dev` is included in the push trigger for the dev-branch-release-pipeline
+# effort's Phase 3 (ThomasMichon/copilot-extensions#3336): a green run of
+# THIS workflow on `dev` is what `.github/workflows/promote.yml` waits on
+# (`workflow_run`) before generating the wholesale-replace commit onto
+# `main`. Nobody is asked to target `dev` yet -- see that effort's Plan for
+# the sequencing note on when contributor-facing docs actually flip.
+#
 # See also: .github/workflows/context-handoff-exhaustive.yml -- a SEPARATE
 # workflow (not a job here) for the real-git/child-process/lock-race matrix
 # under plugins/context-handoff/tests/exhaustive/. It is intentionally its
@@ -27,7 +34,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:
 
 concurrency:
