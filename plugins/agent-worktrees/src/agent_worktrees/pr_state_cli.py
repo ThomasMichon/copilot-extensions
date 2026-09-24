@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from . import config as cfg, output, pr_ops, tracking
+from . import context_cli, pr_config
 
 
 def _core():
@@ -251,7 +252,7 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
         live=not getattr(args, "no_live", False),
         config=config,
     )
-    flow = core._pr_flow_profile(config.default_repo)
+    flow = pr_config._pr_flow_profile(config.default_repo)
     result["flow"] = {
         "profile": flow.profile,
         "requires_pr": flow.requires_pr,
@@ -275,7 +276,7 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
         state = pc.PR_STATE_AWAITING_REVIEW
     else:
         state = ""
-    reminder = core._pr_reminder_for(
+    reminder = context_cli._pr_reminder_for(
         config,
         "pr-status",
         state=state,
