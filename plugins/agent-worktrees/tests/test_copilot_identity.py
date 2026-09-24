@@ -327,6 +327,35 @@ def test_loader_copilot_identity_switch_machine_overrides_global(home: Path):
 
 
 # ---------------------------------------------------------------------------
+# switch_enabled()/intended_account() must still resolve when invoked as the
+# real 'copilot-identity' no-project command -- front_door_cli classifies it
+# in _NO_PROJECT_COMMANDS, so config.load_config() (no explicit path) raises
+# via project_name(); without a no-project fallback the switch could never
+# be turned on through the real CLI (only ever through a test's monkeypatched
+# Config). Simulate that exact condition: no _ACTIVE_PROJECT set.
+# ---------------------------------------------------------------------------
+
+def test_switch_enabled_resolves_without_an_active_project(home: Path, monkeypatch):
+    monkeypatch.setattr(cfg, "_ACTIVE_PROJECT", "")
+    global_dir = home / ".agent-worktrees"
+    global_dir.mkdir(parents=True, exist_ok=True)
+    (global_dir / "config.yaml").write_text(
+        "copilot_identity_switch_enabled: true\n", encoding="utf-8"
+    )
+    assert copilot_identity.switch_enabled() is True
+
+
+def test_intended_account_resolves_without_an_active_project(home: Path, monkeypatch):
+    monkeypatch.setattr(cfg, "_ACTIVE_PROJECT", "")
+    global_dir = home / ".agent-worktrees"
+    global_dir.mkdir(parents=True, exist_ok=True)
+    (global_dir / "config.yaml").write_text(
+        "default_copilot_account: tmichon_microsoft\n", encoding="utf-8"
+    )
+    assert copilot_identity.intended_account(None) == "tmichon_microsoft"
+
+
+# ---------------------------------------------------------------------------
 # The config-file switch_enabled() gate (replaces an env-var opt-out)
 # ---------------------------------------------------------------------------
 

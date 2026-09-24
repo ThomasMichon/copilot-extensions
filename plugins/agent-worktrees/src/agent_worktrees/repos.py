@@ -501,7 +501,34 @@ def copilot_account_for(name: str) -> str | None:
 
         return _config.load_config().default_copilot_account or None
     except Exception:
-        return None
+        return no_project_top_level_defaults()[0] or None
+
+
+def no_project_top_level_defaults() -> tuple[str, bool]:
+    """Read ``default_copilot_account``/``copilot_identity_switch_enabled``
+    directly from the global + machine-local config tiers, bypassing full
+    repo resolution. ``config.load_config()`` always raises for a
+    **no-project command** (``front_door_cli._NO_PROJECT_COMMANDS``, e.g.
+    ``copilot-identity``) -- it never resolves an active project, and that
+    function also requires resolving a repo. Returns ``("", False)`` on any
+    failure; never raises."""
+    from . import config as _config
+
+    try:
+        global_raw = _config._load_yaml_safe(_config.global_config_path())
+    except Exception:
+        return "", False
+    try:
+        machine_raw = _config._load_yaml_safe(_config.default_config_path())
+    except Exception:
+        machine_raw = {}
+    account = str(machine_raw.get(
+        "default_copilot_account",
+        global_raw.get("default_copilot_account", "")) or "")
+    enabled = bool(machine_raw.get(
+        "copilot_identity_switch_enabled",
+        global_raw.get("copilot_identity_switch_enabled", False)))
+    return account, enabled
 
 
 def set_copilot_account(name: str, login: str) -> bool:

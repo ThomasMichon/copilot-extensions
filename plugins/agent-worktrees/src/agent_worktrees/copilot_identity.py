@@ -104,10 +104,10 @@ def intended_account(repo_name: str | None) -> str | None:
     back to the machine's ``default_copilot_account`` when the repo has no
     explicit override, or has no repo context at all (``repo_name=None``).
     """
+    from . import repos
+
     if repo_name:
         try:
-            from . import repos
-
             resolved = repos.copilot_account_for(repo_name)
             if resolved:
                 return resolved
@@ -118,7 +118,7 @@ def intended_account(repo_name: str | None) -> str | None:
 
         return _config.load_config().default_copilot_account or None
     except Exception:
-        return None
+        return repos.no_project_top_level_defaults()[0] or None
 
 
 def switch_enabled() -> bool:
@@ -127,14 +127,19 @@ def switch_enabled() -> bool:
     false). This is the single gate consulted by both the automatic
     ``launch-session.ps1`` check and the manual ``copilot-identity ensure``
     CLI command -- there is no separate environment-variable opt-out.
-    Any resolution failure is treated as disabled (fails closed).
-    """
+    ``copilot-identity`` is a no-project command (see
+    ``front_door_cli._NO_PROJECT_COMMANDS``), so a plain :func:`config.load_config`
+    failure falls back to :func:`repos.no_project_top_level_defaults` rather
+    than always reporting "disabled" -- otherwise the switch could never be
+    turned on through the real CLI. Any resolution failure still fails closed."""
     try:
         from . import config as _config
 
         return bool(_config.load_config().copilot_identity_switch_enabled)
     except Exception:
-        return False
+        from . import repos
+
+        return repos.no_project_top_level_defaults()[1]
 
 
 def other_copilot_sessions_running() -> int:
