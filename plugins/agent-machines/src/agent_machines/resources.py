@@ -40,8 +40,8 @@ that owns only a marked block inside an otherwise user-owned file),
 ``registry`` (Windows registry values, via ``reg.exe``), and ``feature``
 (Windows optional features/capabilities via DISM and Linux/WSL units via
 ``systemctl``, selected by a ``manager`` field), plus ``power-setting`` (Windows
-power-scheme AC/DC values via ``powercfg``), and ``self-update`` (machine-local
-opt-in for unattended ``watchdog`` / ``sweep`` tiers). Adding a type is a new
+power-scheme AC/DC values via ``powercfg``), ``self-update`` (machine-local
+opt-in tiers), and ``copilot-cli-update`` (see ``resource_copilot_cli_update.py``). Adding a type is a new
 ``ResourceHandler`` subclass registered in :data:`HANDLERS` -- nothing else in
 the engine changes.
 
@@ -1808,6 +1808,7 @@ MANAGERS: dict[str, dict[str, Any]] = {
 
 
 def _build_handlers() -> dict[str, ResourceHandler]:
+    from .resource_copilot_cli_update import CopilotCliUpdateResourceHandler
     from .resource_fleet_update import FleetUpdateResourceHandler
     from .resource_power import PowerSettingResourceHandler
     from .resource_self_update import SelfUpdateResourceHandler
@@ -1820,6 +1821,7 @@ def _build_handlers() -> dict[str, ResourceHandler]:
         "power-setting": PowerSettingResourceHandler(),
         "self-update": SelfUpdateResourceHandler(),
         "fleet-update": FleetUpdateResourceHandler(),
+        "copilot-cli-update": CopilotCliUpdateResourceHandler(),
     }
 
 
