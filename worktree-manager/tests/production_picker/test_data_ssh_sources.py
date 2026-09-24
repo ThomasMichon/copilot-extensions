@@ -2433,6 +2433,64 @@ def test_ping_one_ignores_a_stale_result_after_cancel_source_rearms(monkeypatch)
     assert loader.state("dev6", "Win") == "ready"
 
 
+def test_load_one_provider_resolve_failure_respects_generation(monkeypatch):
+    """The provider-exec resolve-exception path must be generation-aware too
+    (#round-7 finding): a cancel_source()-bumped generation (a nav-away that
+    killed the resolver subprocess) must discard this now-superseded
+    attempt's failure instead of clobbering the last-good rows/state a
+    newer, re-armed attempt might already be building on."""
+    source = data_ssh.Source(
+        "", "", ["ssh"],
+        source_kind="provider-exec",
+        source_id="provider-exec:agent-containers:container%3Aone",
+        provider="agent-containers",
+        target_id="container:one",
+        instance_id="old-instance",
+        venue={"assignment": _assignment()},
+        resolve_argv=["/bin/provider", "resolve", "one"],
+    )
+    loader = data_ssh.LiveLoader([source])
+    loader._records[source.source_id] = ["last-good"]
+    loader._state[source.source_id] = "ready"
+
+    def fail(*_args):
+        # Simulate cancel_source() bumping the generation while this
+        # provider resolve was in flight (its subprocess killed mid-nav).
+        loader._gen[source.source_id] = loader._gen.get(source.source_id, 0) + 1
+        raise RuntimeError("provider target is not ready")
+
+    monkeypatch.setattr(data_ssh, "_resolve_provider_source", fail)
+
+    loader._load_one(source, 0)
+
+    assert loader.records_for_source(source.source_id) == ["last-good"]
+    assert loader.state_for_source(source.source_id) == "ready"
+
+
+def test_authoritative_source_ids_excludes_pinged_only_sources():
+    """A successful connectivity ping flips a source to `ready` with
+    deliberately empty records, but it has never run the real listing --
+    connectivity, not roster completeness (#round-7 finding). Treating it as
+    authoritative would let the picker's merge path replace cached/partial
+    rows with this source's empty records even though its full listing has
+    never run."""
+    pinged = _remote_src("dev6", "Win", "host-dev6")
+    loaded = _remote_src("cloud1", "Win", "host-cloud1")
+    loader = data_ssh.LiveLoader([pinged, loaded])
+    # A successful ping: ready, empty records, still pinged-only.
+    loader._pinged_only.add(pinged.cache_key)
+    loader._state[pinged.cache_key] = "ready"
+    loader._records[pinged.cache_key] = []
+    # A genuine (real) load: ready, real records, not pinged-only.
+    loader._state[loaded.cache_key] = "ready"
+    loader._records[loaded.cache_key] = [{"id4": "aaaa"}]
+
+    ids = loader.authoritative_source_ids()
+
+    assert loaded.cache_key in ids
+    assert pinged.cache_key not in ids
+
+
 def test_cancel_source_preserves_a_promoted_loads_already_committed_fast_rows(monkeypatch):
     """The gap the fourth review round found: a source ensure_loaded()
     promoted, whose two-phase load already committed its phase-1 fast rows

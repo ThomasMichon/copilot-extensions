@@ -1746,6 +1746,13 @@ class LiveLoader(LazyLoadMixin):
             changed = _resolve_provider_source(source, self._spawn)
         except Exception as exc:
             with self._lock:
+                # Same generation guard as the fetch paths below: a
+                # cancel_source()-bumped generation must discard this
+                # (now-superseded) attempt's failure instead of clobbering
+                # whatever a newer, re-armed attempt goes on to commit
+                # (#round-7 finding).
+                if self._gen.get(source.cache_key, 0) != gen:
+                    return
                 self._records[source.cache_key] = []
                 self._state[source.cache_key] = "failed"
                 self._error[source.cache_key] = (
@@ -1754,6 +1761,8 @@ class LiveLoader(LazyLoadMixin):
             return
         if changed:
             with self._lock:
+                if self._gen.get(source.cache_key, 0) != gen:
+                    return
                 self._records[source.cache_key] = []
         if source.source_kind == SOURCE_KIND_PROVIDER_EXEC:
             try:
@@ -2150,12 +2159,21 @@ class LiveLoader(LazyLoadMixin):
         Streaming sources intentionally flip to ``ready`` on their first row so
         the picker can render and interact with that prefix. ``ready`` alone
         therefore does not mean identities absent from the prefix are gone.
-        """
+
+        A successful connectivity ping (picker-lazy-per-machine-loading) ALSO
+        flips a source to ``ready`` -- with deliberately empty records -- but
+        it has never run the real listing at all: connectivity, not roster
+        completeness. Excluding ``_pinged_only`` here keeps that distinct from
+        a genuine (possibly legitimately empty) full listing, so the picker's
+        merge path never treats a not-yet-loaded machine's absence of rows as
+        an authoritative "this machine has none" and drops cached/partial rows
+        over it (#round-7 finding)."""
         with self._lock:
             return {
                 key
                 for key, state in self._state.items()
                 if state == "ready"
+                and key not in self._pinged_only
                 and self._stream_incomplete.get(key) != self._gen.get(key, 0)
             }
 
