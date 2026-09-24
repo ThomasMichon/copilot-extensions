@@ -227,6 +227,11 @@ Use the `worktree` skill during a Copilot session for guided sign-off.
   manifests, agent-worktrees can discover and deploy them
 - **Multiple machines** -- add a `machines.yaml` to your repo for
   per-machine configuration
+- **Registering several repos on one machine** -- see
+  [Cross-Repo Setup](cross-repo-project-setup.md) for which of repo class,
+  agent exposure, and project registration to set for a given need (e.g. a
+  read-only reference repo, a control-plane binstub that should not
+  self-launch, or a headless CLI-only project)
 - **Architecture** -- see [Architecture](architecture.md) for internals
 - **Lifecycle & PRs** -- see [Worktree Lifecycle & Change Management](worktree-lifecycle.md)
   for the full landing flow (direct-push and PR mode)

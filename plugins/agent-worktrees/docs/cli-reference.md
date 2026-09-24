@@ -82,6 +82,12 @@ This collapses the manual `git worktree add -> edit -> squash -> rebase ->
 push -> remove` ritual into the same lifecycle commands, driven from your
 existing (e.g. `my-control-harness`) session.
 
+> **Choosing between headless, reference-only, or agent-exposed registration:**
+> see [Cross-Repo Setup](cross-repo-project-setup.md) for a decision table
+> keyed on what you're actually trying to do with the adopted repo (inspect
+> its path only, launch interactive sessions in it, back another tool's
+> binstub without a Terminal profile, or drive it entirely from the CLI).
+
 ## Worktree namespace
 
 `worktree` groups the non-launching lifecycle verbs as a discoverable
