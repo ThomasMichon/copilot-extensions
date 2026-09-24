@@ -1460,7 +1460,23 @@ def test_cold_resume_process_failure_backs_off_before_retry(q, client):
     assert attempts == ["blocked-session", "blocked-session"]
 
 
-def test_idle_headless_turn_auto_suspends_and_cools(q, client):
+def test_idle_confirm_nudge_asks_whether_the_task_is_done(monkeypatch):
+    sent = []
+    monkeypatch.setattr(
+        "agent_dispatch.bridge.send_nudge",
+        lambda target, message, **_k: sent.append((target, message)) or True,
+    )
+    from agent_dispatch.spawn_factories import _default_idle_confirm_nudge
+
+    assert _default_idle_confirm_nudge(
+        "sid-1", {"id": "abc", "title": "do the thing"}
+    )
+    assert sent[0][0] == "sid-1"
+    assert "I see you are idle, but have not reported status" in sent[0][1]
+    assert "done with task abc (do the thing)" in sent[0][1]
+
+
+def test_idle_headless_turn_nudges_confirm_done_instead_of_suspend(q, client):
     task = q.create("review turn", labels=["review"])
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn(
@@ -1469,6 +1485,7 @@ def test_idle_headless_turn_auto_suspends_and_cools(q, client):
     q.claim_one("headless-owner", task_id=task.id)
     q.start(task.id, "headless-owner")
     stopped = []
+    nudged = []
     sup = Supervisor(
         client,
         spawn_fn=_ok_spawn(),
@@ -1477,14 +1494,18 @@ def test_idle_headless_turn_auto_suspends_and_cools(q, client):
         local_body_activity_fn=lambda _session_id: "IDLE",
         local_cold_fn=lambda session_id: stopped.append(session_id) or True,
         local_body_verdict_fn=lambda _session_id: "live",
+        idle_nudge_fn=lambda target, t: nudged.append((target, t["id"])) or True,
     )
 
     assert sup.poll_once() == []
     current = q.get(task.id)
-    assert current.status == Status.SUSPENDED
+    assert current.status == Status.STARTED
     assert current.activity == "IDLE"
-    assert q.get_reservation(reservation.key).state == SpawnState.COLD
-    assert stopped == ["review-session"]
+    assert q.get_reservation(reservation.key).state == SpawnState.SPAWNED
+    assert stopped == []
+    assert nudged == [("review-session", task.id)]
+    assert sup.poll_once() == []
+    assert nudged == [("review-session", task.id)]
 
 
 def test_supervisor_binds_headless_owner_to_acp_session(q, client):
