@@ -18,7 +18,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from . import __version__
 from acp import (
     PROTOCOL_VERSION,
     Agent,
@@ -57,6 +56,7 @@ from acp.schema import (
     UsageUpdate,
 )
 
+from . import __version__
 from .agent_registry import AgentResolver
 from .events import SseEvent
 from .models import SessionStatus
@@ -69,6 +69,7 @@ log = logging.getLogger("agent-bridge")
 _VALID_STOP_REASONS = frozenset({
     "end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled",
 })
+_SESSION_ROLE_META_KEY = "agent-bridge"
 
 
 def _normalize_stop_reason(reason: str | None) -> str:
@@ -216,10 +217,17 @@ class BridgeAgent(Agent):
         # Adopt mode: bind this connection to an existing bridge session
         # (e.g. /acp/session/<id>) rather than spawning a new downstream agent.
         if self._adopt_session_id:
-            return await self._adopt_existing(self._adopt_session_id)
+            return await self._adopt_existing(
+                self._adopt_session_id, role="guest",
+            )
 
         agent_name = self._default_agent
-        target = self._resolve_target(cwd, agent_name)
+        target = await self._resolve_target(cwd, agent_name)
+        if target.adopt_session_id:
+            return await self._adopt_existing(
+                target.adopt_session_id,
+                role=target.session_role or "guest",
+            )
 
         # Build permission callback for this session
         permission_cb = self._make_permission_callback()
@@ -240,7 +248,10 @@ class BridgeAgent(Agent):
             "Upstream new_session -> bridge session %s (agent=%s)",
             session.session_id, agent_name,
         )
-        return NewSessionResponse(session_id=session.session_id)
+        return self._session_response(
+            session.session_id,
+            role=target.session_role or "owner",
+        )
 
     async def prompt(
         self,
@@ -385,12 +396,21 @@ class BridgeAgent(Agent):
         cleanup, so it is tracked as *adopted*; otherwise it is *owned* and
         torn down when the connection closes.
         """
-        if self._adopt_session_id:
+        if self._adopt_session_id or session_id in self._adopted_sessions:
             self._adopted_sessions.add(session_id)
         else:
             self._owned_sessions.add(session_id)
 
-    async def _adopt_existing(self, session_id: str) -> NewSessionResponse:
+    def _session_response(self, session_id: str, *, role: str) -> NewSessionResponse:
+        """Build a session/new response with the bridge's owner/guest hint."""
+        return NewSessionResponse(
+            session_id=session_id,
+            _meta={_SESSION_ROLE_META_KEY: {"role": role}},
+        )
+
+    async def _adopt_existing(
+        self, session_id: str, *, role: str = "guest",
+    ) -> NewSessionResponse:
         """Bind to an existing bridge session, resuming it if stopped."""
         session = self._sm.get_session(session_id)
         if not session:
@@ -409,12 +429,12 @@ class BridgeAgent(Agent):
             "Upstream new_session -> adopted existing bridge session %s",
             session_id,
         )
-        return NewSessionResponse(session_id=session_id)
+        return self._session_response(session_id, role=role)
 
-    def _resolve_target(self, cwd: str, agent_name: str | None) -> SpawnTarget:
+    async def _resolve_target(self, cwd: str, agent_name: str | None) -> SpawnTarget:
         """Resolve agent name to a spawn target."""
         if agent_name and self._resolver:
-            return self._resolver.resolve(agent_name)
+            return await self._resolver.resolve_async(agent_name)
         # Fallback: local agent with upstream cwd
         return SpawnTarget(type="local", cwd=cwd)
 

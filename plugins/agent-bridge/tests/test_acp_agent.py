@@ -6,6 +6,15 @@ import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from acp.schema import (
+    AgentMessageChunk,
+    AgentThoughtChunk,
+    Implementation,
+    TextContentBlock,
+    ToolCallProgress,
+    ToolCallStart,
+    UsageUpdate,
+)
 
 from agent_bridge.acp_agent import (
     BridgeAgent,
@@ -18,17 +27,6 @@ from agent_bridge.events import EventLog, SseEvent
 from agent_bridge.models import SessionStatus
 from agent_bridge.session_manager import Session, SessionManager
 from agent_bridge.transport import SpawnTarget
-
-from acp.schema import (
-    AgentMessageChunk,
-    AgentThoughtChunk,
-    Implementation,
-    TextContentBlock,
-    ToolCallStart,
-    ToolCallProgress,
-    UsageUpdate,
-)
-
 
 # ---------------------------------------------------------------------------
 # Helper fixtures
@@ -223,7 +221,38 @@ class TestBridgeAgentSessions:
                     resp = await bridge_agent.new_session(cwd="/tmp/test")
 
                 assert resp.session_id is not None
+                assert resp.field_meta == {"agent-bridge": {"role": "owner"}}
                 assert resp.session_id in bridge_agent._owned_sessions
+
+    @pytest.mark.asyncio
+    async def test_new_session_auto_adopts_singleton_occupant(self, sm):
+        target = SpawnTarget(type="local", cwd="/tmp")
+        session = Session("s-adopt", "test", target)
+        session.status = SessionStatus.IDLE
+        session.event_log = EventLog()
+        sm._sessions["s-adopt"] = session
+        sm._db.create_session(
+            "s-adopt", "test", None, "/tmp", "local", "idle", time.time()
+        )
+
+        class _Resolver:
+            async def resolve_async(self, _agent_name):
+                return SpawnTarget(
+                    type="local",
+                    cwd="/tmp",
+                    worktree_id="wt-1",
+                    adopt_session_id="s-adopt",
+                    session_role="guest",
+                )
+
+        agent = BridgeAgent(sm, resolver=_Resolver(), default_agent="dispatch:task-1")
+
+        resp = await agent.new_session(cwd="/tmp")
+
+        assert resp.session_id == "s-adopt"
+        assert resp.field_meta == {"agent-bridge": {"role": "guest"}}
+        assert "s-adopt" in agent._adopted_sessions
+        assert "s-adopt" not in agent._owned_sessions
 
     @pytest.mark.asyncio
     async def test_close_session(self, bridge_agent, sm):

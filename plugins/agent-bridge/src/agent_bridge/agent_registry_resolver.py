@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import logging
 import time
+from collections.abc import Callable, Iterable
 from dataclasses import replace
 from typing import Any
 
@@ -38,6 +39,7 @@ class AgentResolver:
         *,
         topology_errors: list[str] | None = None,
         topology_warnings: list[str] | None = None,
+        live_sessions_provider: Callable[[], Iterable[Any]] | None = None,
     ) -> None:
         from . import agent_registry as compat
 
@@ -53,6 +55,7 @@ class AgentResolver:
         self._provider_namespaces: set[str] = set()
         self._provider_warning_tracker = WarningTracker()
         self.cold_store = ColdStoreProviderRegistry()
+        self._live_sessions_provider = live_sessions_provider
         self._alias_index: dict[str, tuple[MachineConfig, SshEnvironment]] = {}
         for machine in machines.values():
             for env in machine.ssh_environments:
@@ -103,6 +106,12 @@ class AgentResolver:
     @property
     def topology_warnings(self) -> list[str]:
         return list(self._topology_warnings)
+
+    def set_live_sessions_provider(
+        self, provider: Callable[[], Iterable[Any]] | None,
+    ) -> None:
+        """Attach the live-session iterator used for singleton guest-join checks."""
+        self._live_sessions_provider = provider
 
     def canonical_agent_name(self, name: str) -> str | None:
         """Resolve an exact, case-insensitive, or declared static alias."""
@@ -312,7 +321,9 @@ class AgentResolver:
                 prefix,
             )
             await resolver.ensure_ready(name)
-            return await self._resolve_with_plugins(resolver, name)
+            return await self._resolve_with_plugins(
+                resolver, name, namespace=prefix,
+            )
 
         repo, venue = compat._split_repo_venue(agent_name)
         if repo is not None:
@@ -328,7 +339,7 @@ class AgentResolver:
                 [qualified for qualified, _, _ in candidates],
             )
         if len(candidates) == 1:
-            _, resolver, resolve_name = candidates[0]
+            qualified, resolver, resolve_name = candidates[0]
             if resolver is None:
                 cfg = self._agents.get(resolve_name)
                 if (
@@ -347,7 +358,11 @@ class AgentResolver:
                     return await self._resolve_venue_bound(sender_repo, resolve_name)
                 return await self._resolve_bare(agent_name)
             await resolver.ensure_ready(resolve_name)
-            return await self._resolve_with_plugins(resolver, resolve_name)
+            return await self._resolve_with_plugins(
+                resolver,
+                resolve_name,
+                namespace=qualified.partition(":")[0],
+            )
 
         return self._resolve_static(agent_name)
 
@@ -368,13 +383,14 @@ class AgentResolver:
                 name,
                 repo=repo,
                 repo_remote=repo_remote,
+                namespace=prefix,
             )
 
         candidates = await self._gather_bare_candidates(venue)
         if len(candidates) > 1:
             raise AmbiguousAgentError(venue, [qualified for qualified, _, _ in candidates])
         if len(candidates) == 1:
-            _, resolver, resolve_name = candidates[0]
+            qualified, resolver, resolve_name = candidates[0]
             if resolver is None:
                 target = await self._resolve_bare(venue)
                 return self._bind_repo(target, repo, venue)
@@ -384,6 +400,7 @@ class AgentResolver:
                 resolve_name,
                 repo=repo,
                 repo_remote=repo_remote,
+                namespace=qualified.partition(":")[0],
             )
 
         target = self._resolve_static(venue)
@@ -406,16 +423,18 @@ class AgentResolver:
         name: str,
         repo: str | None = None,
         repo_remote: str | None = None,
+        namespace: str | None = None,
     ) -> SpawnTarget:
         """Resolve via a namespace resolver, injecting related-repo plugins."""
         extra = await self._related_plugins_for(resolver, name)
-        return await self._call_resolver(
+        target = await self._call_resolver(
             resolver,
             name,
             extra_plugins=extra,
             repo=repo,
             repo_remote=repo_remote,
         )
+        return self._decorate_singleton_resolution(target, namespace=namespace)
 
     async def _call_resolver(
         self,
@@ -550,6 +569,51 @@ class AgentResolver:
                     candidates.append((f"{prefix}:{info.name}", resolver, info.name))
 
         return candidates
+
+    def _decorate_singleton_resolution(
+        self, target: SpawnTarget, *, namespace: str | None,
+    ) -> SpawnTarget:
+        """Annotate singleton-slot namespace targets with guest/owner intent.
+
+        Phase 2.5b scopes the automatic guest-join behavior to ``dispatch:``
+        first. CodeSpace/container singleton namespaces already have their own
+        guard rails and are the explicit follow-on once this path is proven.
+        """
+        if namespace != "dispatch" or not target.worktree_id:
+            return target
+        session = self._latest_live_session_for_worktree(target.worktree_id)
+        if session is None:
+            return replace(target, session_role="owner")
+        return replace(
+            target,
+            adopt_session_id=session.session_id,
+            session_role="guest",
+        )
+
+    def _latest_live_session_for_worktree(self, worktree_id: str) -> Any | None:
+        """Return the newest live bridge-owned session for ``worktree_id``."""
+        provider = self._live_sessions_provider
+        if provider is None:
+            return None
+        try:
+            sessions = provider()
+        except Exception:
+            log.warning(
+                "Live-session probe failed for worktree %s",
+                worktree_id,
+                exc_info=True,
+            )
+            return None
+        for session in sessions:
+            if getattr(getattr(session, "target", None), "worktree_id", None) != worktree_id:
+                continue
+            public_state = getattr(session, "public_state", None)
+            if not callable(public_state):
+                continue
+            public_status, _at_rest, _liveness = public_state()
+            if getattr(public_status, "value", None) in {"idle", "running"}:
+                return session
+        return None
 
     def _own_plugin_args(self, config) -> list[str]:
         """``--plugin-dir`` args for the launching repo's own enabled plugins."""

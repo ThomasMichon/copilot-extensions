@@ -101,6 +101,13 @@ bridge `session_id` for one hosted session or the authoritative worktree handle
 when they need to follow a managed succession chain. The implementation gap is
 uniform projection, not invention of another lineage store.
 
+For ACP bridge-as-agent callers, `session/new` now also carries a small
+`_meta["agent-bridge"].role` hint: `"owner"` when the bridge spawned a fresh
+session for this connection, `"guest"` when the target was a singleton-slot
+namespace target (today `dispatch:` first) already occupied by a live bridge
+session and the caller was attached to that incumbent instead of racing a second
+owner. The hint is descriptive, not a second identity surface.
+
 ## Current lifecycle
 
 `SessionStatus` currently defines:

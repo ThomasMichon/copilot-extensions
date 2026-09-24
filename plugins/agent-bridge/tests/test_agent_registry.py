@@ -20,9 +20,9 @@ from agent_bridge.agent_registry import (
     load_elevated_projects,
     parse_agent_registry,
 )
+from agent_bridge.models import SessionStatus
 from agent_bridge.topology import MachineConfig, SshEnvironment, parse_machines_yaml
 from agent_bridge.transport import PluginRef, SpawnTarget
-
 
 # -- Sample data ---------------------------------------------------------------
 
@@ -109,6 +109,16 @@ SAMPLE_MACHINES_DATA = {
         },
     }
 }
+
+
+class _StubLiveSession:
+    def __init__(self, session_id: str, worktree_id: str, status: SessionStatus) -> None:
+        self.session_id = session_id
+        self.target = SpawnTarget(type="local", cwd="/wt", worktree_id=worktree_id)
+        self._status = status
+
+    def public_state(self):
+        return self._status, self._status == SessionStatus.IDLE, None
 
 
 class TestParseAgentRegistry:
@@ -765,6 +775,47 @@ class TestNamespaceResolvers:
         assert target.spawn_command == ["echo", "my-agent"]
 
     @pytest.mark.asyncio
+    async def test_dispatch_namespace_without_live_occupant_keeps_owner_role(self):
+        class _DispatchResolver(_MockResolver):
+            def __init__(self):
+                super().__init__("dispatch")
+
+            async def resolve(self, name):
+                return SpawnTarget(type="local", cwd="/wt", worktree_id="wt-42")
+
+        resolver = AgentResolver({}, {}, live_sessions_provider=lambda: [])
+        resolver.register_namespace_resolver(_DispatchResolver())
+
+        target = await resolver.resolve_async("dispatch:task-1")
+
+        assert target.worktree_id == "wt-42"
+        assert target.adopt_session_id is None
+        assert target.session_role == "owner"
+
+    @pytest.mark.asyncio
+    async def test_dispatch_namespace_with_live_occupant_marks_guest_join(self):
+        class _DispatchResolver(_MockResolver):
+            def __init__(self):
+                super().__init__("dispatch")
+
+            async def resolve(self, name):
+                return SpawnTarget(type="local", cwd="/wt", worktree_id="wt-42")
+
+        resolver = AgentResolver(
+            {},
+            {},
+            live_sessions_provider=lambda: [
+                _StubLiveSession("sess-live", "wt-42", SessionStatus.IDLE),
+            ],
+        )
+        resolver.register_namespace_resolver(_DispatchResolver())
+
+        target = await resolver.resolve_async("dispatch:task-1")
+
+        assert target.adopt_session_id == "sess-live"
+        assert target.session_role == "guest"
+
+    @pytest.mark.asyncio
     async def test_resolve_async_not_found(self):
         resolver = AgentResolver({}, {})
         resolver.register_namespace_resolver(_MockResolver())
@@ -1419,17 +1470,16 @@ class TestPluginInjectionContract:
 import textwrap
 
 from agent_bridge.agent_registry import (
+    _effective_spawn_defaults,
+    _load_related_entries,
+    _match_machine_shortname,
+    _short_machine_agent_name,
     derive_topology_agents,
     infer_control_plane_project,
     load_local_repos,
-    _effective_spawn_defaults,
-    _short_machine_agent_name,
-    _match_machine_shortname,
-    _load_related_entries,
 )
 from agent_bridge.models import RepoBridgeConfig, TopologyProfile
 from agent_bridge.topology import load_control_plane_project
-
 
 TOPO_MACHINES_DATA = {
     "control_plane": {"project": "dotfiles"},
@@ -2353,7 +2403,8 @@ class TestAgentWorktreesBinResolution:
         assert got.endswith("agent-worktrees.cmd")
 
     def test_which_hit_is_used_directly(self, monkeypatch):
-        import agent_bridge.agent_registry as ar
         import shutil as _sh
+
+        import agent_bridge.agent_registry as ar
         monkeypatch.setattr(_sh, "which", lambda _n: "/usr/bin/agent-worktrees")
         assert ar._agent_worktrees_bin() == "/usr/bin/agent-worktrees"
