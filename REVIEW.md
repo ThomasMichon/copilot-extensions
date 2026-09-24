@@ -22,14 +22,15 @@ specifically when reviewing a pull request, not a replacement for them.
   (`.github/workflows/promote.yml`, dev-branch-release-pipeline effort,
   ThomasMichon/copilot-extensions#3336) via an automated snapshot PR: base
   `main`, head branch matching `release/promote-<run id>`, authored by the
-  pipeline's own worker identity (the `github-actions` bot). Contributors
-  always target `dev` — a PR whose base is `main` and whose head branch does
-  NOT match `release/promote-*` is not a legitimate use of this repo's PR
-  flow (the repo's own CI has a hard guard for this too, but that only
-  fails the build; this comment is the visible signal on the PR itself,
-  since Copilot review never blocks a merge here). Post this comment,
-  verbatim, exactly once per PR (do not repeat it on subsequent review
-  passes of the same PR):
+  pipeline's own worker identity (the `github-actions[bot]` account).
+  Contributors always target `dev` — a PR whose base is `main` and that
+  does NOT match BOTH that branch-naming convention AND that author is not
+  a legitimate use of this repo's PR flow (the repo's own CI has a hard
+  guard checking the same two conditions, but that only fails the build;
+  this comment is the visible signal on the PR itself, since Copilot
+  review never blocks a merge here). Post this comment, verbatim, exactly
+  once per PR (do not repeat it on subsequent review passes of the same
+  PR):
 
   > This PR targets `main` directly. `main` is only ever updated by this
   > repo's own CI promotion pipeline (dev-branch-release-pipeline effort,
