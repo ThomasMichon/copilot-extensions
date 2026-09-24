@@ -333,6 +333,28 @@ class CliNamespaceResolver(NamespaceResolver):
                         else:
                             venue["security_profile"] = security_profile
                     target_type = spec.get("type", "command")
+                    if target_type == "session":
+                        # A provider that has no spawnable target at all --
+                        # e.g. agent-dispatch's `dispatch:` namespace
+                        # resolving a completed *headless* task (#3389
+                        # extension, `agent-fabric-endpoint-discovery`
+                        # Phase 2.5a): there is no worktree to bind and
+                        # nothing to spawn, only a durable session
+                        # reference (`venue["task"]["owner_session_id"]` /
+                        # an attachment's `session_id`) for a caller doing
+                        # read-only *resolve-by-any-origin-reference*
+                        # session lookup (`dispatch_task_resolution
+                        # .candidate_session_ids`). Carry the venue through
+                        # unspawnable -- a caller that tries to actually
+                        # spawn/connect this target (rather than just read
+                        # its `.venue`) gets a clear failure from the
+                        # missing `spawn_command`/`worktree_id`, never a
+                        # silent wrong-target spawn.
+                        self.invalidate_list_cache()
+                        return SpawnTarget(
+                            type="session",
+                            venue=venue or None,
+                        )
                     if target_type == "worktree":
                         # A provider that resolves to an existing worktree
                         # (e.g. agent-dispatch's `dispatch:` namespace,

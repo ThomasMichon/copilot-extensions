@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions (control-plane home; PR-required `main`, self-merge)
 - **Branch(es):** per-phase `pr/<slug>` worktrees → landed to `main`
 - **Created:** 2026-09-22
-- **Status:** Draft <!-- Draft | Active | Blocked | Done -->
+- **Status:** Active <!-- Draft | Active | Blocked | Done -->
 - **Vision:** vision-closing / vision-extending against:
   - [`visions/picker`](../../../visions/picker/README.md) — general Picker
     render/derive contract this pivot must keep honoring.
@@ -276,15 +276,33 @@ parallelizable across worktrees.
       and extended it with the 5 new scenario goldens above, in a sibling
       file rather than duplicating the harness.
 
-### Phase 2 — Evaluate native Textual components for the Worktrees table
-- [ ] Audit `production_picker/picker_tui/engine_views.py`'s hand-rolled
+### Phase 2 — Evaluate native Textual components for the Worktrees table (Done 2026-09-23)
+- [x] Audit `production_picker/picker_tui/engine_views.py`'s hand-rolled
       Worktrees-table rendering against Textual's native `DataTable` (used
-      today only in `mux_companion.py`) and `OptionList`.
-- [ ] Name concrete benefits/costs (built-in selection, sorting, scrolling,
-      accessibility, theming vs. the current column-declarative
-      `pivot_manifest.py` model this pivot and its siblings share).
-- [ ] Decide: migrate, partially adopt, or explicitly keep custom with the
+      today only in `mux_companion.py`) and `OptionList`. **Done**: the
+      outer container already went native pre-effort
+      (`engine_regions._PickerNativeData(OptionList)`, #88 NF5-5) --
+      remaining question was the row-content model (two adjacent
+      `OptionList` options per record). `DataTable` ruled out: no colspan
+      for section bands (`── Active ──` etc.), a structural blocker, not a
+      preference.
+- [x] Name concrete benefits/costs. **Done**: full writeup in
+      [`phase2-native-textual-audit.md`](phase2-native-textual-audit.md),
+      including a real, runnable `ListView`-backed spike
+      (`production_picker/picker_tui/listview_proto.py` +
+      `scripts/listview_proto_compare.py`) captured against the real demo
+      fixture data -- confirmed atomic title+detail rows and a real
+      `Checkbox` are plausible, at the cost of re-implementing the
+      scroll-preservation/sticky-header/incremental-repaint/`sel`-sync
+      bridge `_PickerNativeData` already built for `OptionList`.
+- [x] Decide: migrate, partially adopt, or explicitly keep custom with the
       documented rationale recorded in this effort (not silently dropped).
+      **Decision**: keep `OptionList` as the Worktrees pivot's default;
+      introduce an opt-in-per-pivot `render_mode` (`"v1"`/`OptionList` vs.
+      `"v2"`/`ListView`) as its own tracked follow-up phase/issue once the
+      production `ListView` widget reaches bridge parity -- not folded into
+      this phase, and no built-in pivot opts in without its own explicit
+      review.
 
 ### Phase 3 — Fix Recent-section sort order (most-recently-used, not newest first)
 - [ ] Identify the current sort key driving the Recent section (a
@@ -498,3 +516,53 @@ reviewed-plan PR per the standard effort review gate before Phase 1 begins._
   matching the original's section shape closely, with the same titles,
   follow-up markers (✚), and PR numbers/states. Full suite: 1155 passed,
   1 skipped.
+
+### 2026-09-23 — Filed screenshot evidence to OneDrive; effort marked Active
+- Installed `resvg` (`worktree-manager/scripts/picker-snapshot`, `npm
+  install`) as a deterministic PNG rasterizer — headless Edge hung
+  unrelated to this effort's own code (an environment quirk on this
+  machine, not a repo bug), `resvg` did not.
+- Captured and filed 3 screenshots to the operator's OneDrive
+  (`2026/09.22 Worktrees Pivot UX Overhaul/`, per their maintained
+  organization profile's "tied to a specific project with a known start
+  date" placement heuristic): the current Worktrees pivot (`--demo`,
+  enriched fixture), the injected "Demo Queue" mock pivot, and the
+  original `v1.0.0` baseline — with a short `README.md` index. Local
+  temp captures cleaned up; nothing else changed in-repo this slice.
+- Effort status promoted **Draft → Active** (Phase 1 shipped, work is
+  ongoing) — no plan changes.
+- **Next up: Phase 2** — evaluate native Textual components (`DataTable`/
+  `OptionList`) for the Worktrees table vs. the current hand-rolled
+  `engine_views.py` renderer. Not yet started.
+
+### 2026-09-23 — Phase 2 complete: DataTable ruled out, ListView spiked and evidenced
+- Corrected the starting premise mid-audit: the outer list *container* was
+  already migrated to a native `OptionList` pre-effort
+  (`engine_regions._PickerNativeData`, #88 NF5-5) — the open question was
+  really the row-*content* model (two adjacent options per record), not
+  container-vs-hand-rolled.
+- `DataTable` ruled out on a concrete structural blocker: no colspan, so it
+  cannot render the Active/Recent/Completed section bands at all — not a
+  stylistic preference.
+- Built and ran a real `ListView`-backed spike
+  (`worktree-manager/src/worktree_manager/production_picker/picker_tui/listview_proto.py`
+  + `worktree-manager/scripts/listview_proto_compare.py`) against the real
+  demo fixture roster (25 records, 3 sections), confirmed atomic
+  title+detail rows and a real `Checkbox` widget both work, and found (by
+  running it, not guessing) three concrete integration costs: default
+  `ListItem` chrome is visually heavier than today's flat rows,
+  `ListView.append`/`.extend()` must be awaited (async `on_mount`), and
+  height/CSS defaults need explicit pinning at every composition level.
+  Full writeup: [`phase2-native-textual-audit.md`](phase2-native-textual-audit.md).
+- **Decision**: keep `OptionList` as the Worktrees pivot's default (it
+  already has a working, tested bridge); ListView is plausible as an
+  opt-in-per-pivot `render_mode` (`"v1"` vs `"v2"`), but the production
+  widget's bridge parity (scroll preservation, sticky header, incremental
+  repaint, `sel` sync) is its own tracked follow-up — no built-in pivot
+  opts in without a separate, explicit review.
+- Neither new file is wired into any pivot's real render path — purely
+  additive, zero risk to the existing `OptionList` path or its golden
+  screenshots.
+- **Next up: Phase 3** — fix the Recent-section sort order
+  (most-recently-used, not newest-first). Not yet started.
+

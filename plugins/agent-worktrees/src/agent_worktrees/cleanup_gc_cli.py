@@ -8,7 +8,7 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
-from . import finalize as fin, git_ops, output, prune, sessions, tracking
+from . import finalize as fin, git_ops, output, prune, reap_cli, sessions, tracking
 from . import claimant as claimant_mod
 from . import config as cfg
 
@@ -35,8 +35,8 @@ def _make_pr_lookup(*args, **kwargs): return _core()._make_pr_lookup(*args, **kw
 def _normalize_path(*args, **kwargs): return _core()._normalize_path(*args, **kwargs)
 def _reap_worktree(*args, **kwargs): return _core()._reap_worktree(*args, **kwargs)
 def reap_one(*args, **kwargs): return _core().reap_one(*args, **kwargs)
-def reap_orphan_launcher_shells(*args, **kwargs): return _core().reap_orphan_launcher_shells(*args, **kwargs)
-def sweep_managed_worktrees(*args, **kwargs): return _core().sweep_managed_worktrees(*args, **kwargs)
+def reap_orphan_launcher_shells(*args, **kwargs): return reap_cli.reap_orphan_launcher_shells(*args, **kwargs)
+def sweep_managed_worktrees(*args, **kwargs): return reap_cli.sweep_managed_worktrees(*args, **kwargs)
 
 
 def add_parsers(sub) -> None:

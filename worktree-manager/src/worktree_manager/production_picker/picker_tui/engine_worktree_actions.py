@@ -674,7 +674,10 @@ class PickerScreenWorktreeActionsMixin:
             if p["kind"] == "worktrees":
                 self.htab = i
                 break
+        prev_key = self._current_tab_key()
+        prev_was_all = self.is_all()
         self.machine_idx = idx
+        self._activate_current_machine_tab(prev_key, prev_was_all)
         # Reveal the hidden set only if the jump target is itself hidden
         # (origin-based, #2668): a User-origin bridge/ACP worktree is already
         # visible, so jumping to it must not force the whole automation set open.

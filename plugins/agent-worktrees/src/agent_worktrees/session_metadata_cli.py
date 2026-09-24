@@ -11,6 +11,7 @@ from . import claimant as claimant_mod
 from . import config as cfg
 from . import disposition_history, effort_focus, output, tracking
 from . import state_root as state_root_mod
+from . import status_updater_cli
 
 
 def _core():
@@ -20,7 +21,7 @@ def _core():
 
 
 def _activate_project_for_path(*args, **kwargs):
-    return _core()._activate_project_for_path(*args, **kwargs)
+    return status_updater_cli._activate_project_for_path(*args, **kwargs)
 
 
 def _infer_worktree_id(*args, **kwargs):
@@ -283,7 +284,7 @@ def cmd_session_role(args) -> int:
     session_id = getattr(args, "session_id", None) or (
         os.environ.get("COPILOT_AGENT_SESSION_ID") or None
     )
-    wt_id = _core()._resolve_worktree_for_read(
+    wt_id = _resolve_worktree_for_read(
         getattr(args, "worktree_id", None),
         getattr(args, "worktree_dir", None),
         session_id,
@@ -308,7 +309,7 @@ def cmd_history_digest(args) -> int:
     session_id = getattr(args, "session_id", None) or (
         os.environ.get("COPILOT_AGENT_SESSION_ID") or None
     )
-    worktree_id = _core()._resolve_worktree_for_read(
+    worktree_id = _resolve_worktree_for_read(
         getattr(args, "worktree_id", None),
         getattr(args, "worktree_dir", None),
         session_id,

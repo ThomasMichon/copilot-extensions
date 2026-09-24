@@ -76,19 +76,27 @@ def describe_copilot_spawn_error(exc: OSError, *, cwd: str | Path | None = None)
 
 
 def _refresh_marketplace(*args, **kwargs):
-    return _core()._refresh_marketplace(*args, **kwargs)
+    from . import update_cli
+
+    return update_cli._refresh_marketplace(*args, **kwargs)
 
 
 def _browse_marketplace_plugins(*args, **kwargs):
-    return _core()._browse_marketplace_plugins(*args, **kwargs)
+    from . import update_cli
+
+    return update_cli._browse_marketplace_plugins(*args, **kwargs)
 
 
 def _uninstall_one_plugin_payload(*args, **kwargs):
-    return _core()._uninstall_one_plugin_payload(*args, **kwargs)
+    from . import update_cli
+
+    return update_cli._uninstall_one_plugin_payload(*args, **kwargs)
 
 
 def _update_one_plugin_payload(*args, **kwargs):
-    return _core()._update_one_plugin_payload(*args, **kwargs)
+    from . import update_cli
+
+    return update_cli._update_one_plugin_payload(*args, **kwargs)
 
 
 def _project_update_context() -> Path | None:
