@@ -56,10 +56,6 @@ WorktreeDirectoryPresentFn = Callable[[str, "str | None"], "bool | None"]
 #: steering message to a stalled-but-live embodied session. Injectable for tests.
 NudgeFn = Callable[[str, "str | None", dict], bool]
 
-#: An idle-confirm sender: ``(target, task) -> sent?``. ``target`` is a bridge
-#: session id or worktree handle. Injectable for tests.
-IdleConfirmNudgeFn = Callable[[str, dict], bool]
-
 #: A re-drive sender for a spawned-but-unclaimed embodied worker. The session is
 #: known live, but the task is still queued/unowned, so the supervisor re-sends
 #: the idempotent autopilot seed instead of spawning a duplicate.
@@ -167,26 +163,6 @@ def _default_nudge(worktree: str, machine: str | None, task: dict) -> bool:
         f"complete it; if it is not yours, yield it."
     )
     return bridge.send_nudge(worktree, message)
-
-
-def _default_idle_confirm_nudge(target: str, task: dict) -> bool:
-    """Ask an idle headless worker to confirm the task is actually done.
-
-    Idle is not completion: Copilot often yields after loading a skill. The
-    supervisor must prod, not suspend. Best-effort -- a failed send is not fatal.
-    """
-    from . import bridge
-
-    tid = task.get("id") or "unknown"
-    title = str(task.get("title") or "").strip()
-    named = f"task {tid}" + (f" ({title})" if title else "")
-    message = (
-        f"I see you are idle, but have not reported status. Please confirm that "
-        f"you are, in fact, done with {named}. If you are not done, continue "
-        "driving (load any needed skills, then act) until you can complete the "
-        "task or must steer. If you are done, complete it."
-    )
-    return bridge.send_nudge(target, message)
 
 
 def make_redrive_sender(route: str = "") -> RedriveFn:

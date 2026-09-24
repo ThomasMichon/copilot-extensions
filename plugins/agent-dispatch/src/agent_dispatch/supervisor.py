@@ -54,7 +54,6 @@ from .spawn_factories import (  # noqa: F401 -- re-exported for existing call si
     FleetColdFn,
     FleetEndFn,
     FleetVerdictFn,
-    IdleConfirmNudgeFn,
     LivenessFn,
     LocalAcpSessionFn,
     LocalBodyActivityFn,
@@ -76,7 +75,6 @@ from .spawn_factories import (  # noqa: F401 -- re-exported for existing call si
     _default_fleet_cold,
     _default_fleet_end,
     _default_fleet_verdict,
-    _default_idle_confirm_nudge,
     _default_liveness,
     _default_local_acp_session,
     _default_local_body_activity,
@@ -193,7 +191,7 @@ class Supervisor:
         fleet_cold_fn: FleetColdFn | None = None,
         fleet_end_fn: FleetEndFn | None = None,
         nudge_fn: NudgeFn | None = None,
-        idle_nudge_fn: IdleConfirmNudgeFn | None = None,
+        idle_nudge_fn: Any | None = None,
         redrive_fn: RedriveFn | None = None,
         disposable_cli_labels: Sequence[str] | None = None,
         conclusion_fn: ConclusionFn | None = None,
@@ -315,7 +313,9 @@ class Supervisor:
         #: Nudge sender used by :meth:`nudge_stalled`. Injectable for tests.
         self.nudge_fn = nudge_fn or _default_nudge
         #: Idle-confirm sender used by :meth:`nudge_idle_headless_tasks`.
-        self.idle_nudge_fn = idle_nudge_fn or _default_idle_confirm_nudge
+        from .idle_confirm import default_idle_confirm_nudge
+
+        self.idle_nudge_fn = idle_nudge_fn or default_idle_confirm_nudge
         #: Re-drive sender used when a spawned CLI body is alive but still has
         #: not claimed its queued task after a supervisor/bridge restart.
         self.redrive_fn = redrive_fn or _default_redrive
@@ -706,80 +706,11 @@ class Supervisor:
                 self._cold_retry_after[key] = now + 60.0
         return cooled
 
-    #: Minimum seconds between idle-confirm nudges for one STARTED task.
-    _IDLE_CONFIRM_COOLDOWN = 60.0
-
     def nudge_idle_headless_tasks(self, *, now: float | None = None) -> int:
-        """Idle is not done. Ask the worker to confirm, then keep going.
+        """Idle is not done. Ask the worker to confirm, then keep going."""
+        from .idle_confirm import nudge_idle_headless_tasks as _nudge
 
-        A headless ACP body often goes IDLE after loading a skill (empty
-        follow-up turn) while the task is still STARTED. Suspending that as
-        ``headless ACP turn ended`` freezes the exclusive spawn until a human
-        resumes. Instead, nudge once per cooldown:
-
-        ``I see you are idle, but have not reported status. Please confirm
-        that you are, in fact, done with task <id>.``
-        """
-        now = time.time() if now is None else now
-        nudged = 0
-        for res in self._pool_reservations(state=SpawnState.SPAWNED):
-            try:
-                task = self.client.get(res["task_id"])
-            except DispatchError:
-                continue
-            if (
-                not self._matches_pool(task)
-                or task.get("status") != Status.STARTED
-                or not task.get("owner")
-            ):
-                continue
-            activity = None
-            fleet = _parse_fleet_body_handle(res.get("session_handle"))
-            local_sid = _parse_local_body_handle(res.get("session_handle"))
-            try:
-                if fleet is not None:
-                    activity = self.fleet_activity_fn(*fleet)
-                elif local_sid is not None:
-                    activity = self.local_body_activity_fn(local_sid)
-            except Exception:
-                log.exception(
-                    "failed to read headless turn state for task %s",
-                    task.get("id"),
-                )
-                continue
-            if activity != "IDLE":
-                continue
-            tid = str(task["id"])
-            if (now - self._last_idle_nudge.get(tid, 0.0)) < self._IDLE_CONFIRM_COOLDOWN:
-                continue
-            owner = task.get("owner")
-            target = (
-                str(task.get("owner_session_id") or "").strip()
-                or _worktree_from_reservation(res, owner)
-                or local_sid
-                or (fleet[1] if fleet is not None else None)
-            )
-            if not target:
-                continue
-            try:
-                if self.idle_nudge_fn(target, task):
-                    self._last_idle_nudge[tid] = now
-                    try:
-                        self.client.set_activity(
-                            tid, "IDLE", reservation_key=res["key"]
-                        )
-                    except DispatchError:
-                        log.exception(
-                            "failed to record idle activity for task %s", tid
-                        )
-                    nudged += 1
-                    log.info(
-                        "nudged idle unfinished headless worker for task %s",
-                        tid,
-                    )
-            except Exception:
-                log.exception("idle-confirm nudge failed for task %s", tid)
-        return nudged
+        return _nudge(self, now=time.time() if now is None else now)
 
     def suspend_idle_headless_tasks(self) -> int:
         """Compatibility alias -- idle unfinished workers are nudged, not suspended."""

@@ -1466,9 +1466,9 @@ def test_idle_confirm_nudge_asks_whether_the_task_is_done(monkeypatch):
         "agent_dispatch.bridge.send_nudge",
         lambda target, message, **_k: sent.append((target, message)) or True,
     )
-    from agent_dispatch.spawn_factories import _default_idle_confirm_nudge
+    from agent_dispatch.idle_confirm import default_idle_confirm_nudge
 
-    assert _default_idle_confirm_nudge(
+    assert default_idle_confirm_nudge(
         "sid-1", {"id": "abc", "title": "do the thing"}
     )
     assert sent[0][0] == "sid-1"
