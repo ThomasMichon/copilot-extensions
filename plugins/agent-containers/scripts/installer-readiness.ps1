@@ -1,11 +1,12 @@
 $ErrorActionPreference = 'Stop'
 $pluginRoot = Split-Path -Parent $PSScriptRoot
 $command = Join-Path $pluginRoot 'bin\agent-containers.ps1'
+$runtimeRoot = Join-Path $HOME '.agent-containers'
 $env:AGENT_CONTAINERS_NO_SELFPROVISION = '1'
 
 $output = $null
 $exitCode = 1
-if (Test-Path -LiteralPath $command) {
+if ((Test-Path -LiteralPath $command) -and (Test-Path -LiteralPath $runtimeRoot -PathType Container)) {
     $output = & $command installer-readiness 2>$null
     $exitCode = $LASTEXITCODE
 }

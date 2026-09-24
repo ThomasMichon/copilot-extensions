@@ -2,9 +2,14 @@
 set -uo pipefail
 
 plugin_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+runtime_root="${HOME}/.agent-bridge"
 export AGENT_BRIDGE_NO_SELFPROVISION=1
-output="$("$plugin_root/bin/agent-bridge" installer-readiness 2>/dev/null)"
-exit_code=$?
+output=""
+exit_code=1
+if [[ -d "$runtime_root" ]]; then
+    output="$("$plugin_root/bin/agent-bridge" installer-readiness 2>/dev/null)"
+    exit_code=$?
+fi
 if [[ -n "$output" ]]; then
     printf '%s\n' "$output"
     exit "$exit_code"
