@@ -34,6 +34,10 @@ class DetachAdapter(Protocol):
         """Launch the embody command on the venue."""
         ...
 
+    def run_input(self, command: str, stdin: bytes, *, timeout: float) -> tuple[int, str, str]:
+        """Run a POSIX shell command on the venue with ``stdin`` as its input."""
+        ...
+
     def ensure_keeper(self, *, venue_port: int, mux: str) -> dict[str, Any]:
         """Ensure the venue's host bridge forward keeper is running."""
         ...
@@ -136,6 +140,7 @@ def launch_detached(
     ensure_mux: bool,
     register_timeout: float,
     progress: Any,
+    refs: tuple[str, bytes, list[tuple[str, int]]] | None = None,
 ) -> tuple[int, dict[str, Any]]:
     reservation: dict[str, Any] | None = None
     created = False
@@ -198,6 +203,18 @@ def launch_detached(
             ),
         )
         progress("reserved", reservation.get("reservation_id", ""))
+        notes: str | None = None
+        if refs:
+            from .refs import send_refs
+
+            notes = send_refs(
+                lambda command, stdin: adapter.run_input(command, stdin, timeout=600.0),
+                refs,
+                progress,
+            )
+            if notes is None:
+                return 1, _payload(False, plan, error="could not copy the reference files to the venue")
+            seed = f"{seed.rstrip()}\n\n{notes}" if seed else notes
         progress("launch", _venue_text(plan, "launch_detail", "`agent-worktrees embody` on the venue"))
         rc, stdout, stderr = adapter.launch(
             _launch_command(
@@ -266,6 +283,17 @@ def launch_detached(
                 error="the session is running but never registered with the host bridge",
             )
         ok = True
+        refs_extra: dict[str, Any] = {}
+        if notes:
+            # A new session got the note in its seed; a running one is told now.
+            from .refs import deliver_note
+
+            refs_extra = {
+                "ref_files": notes.splitlines()[1:],
+                "refs_delivered": "seed" if created else (
+                    "message" if deliver_note(session_id, notes) else "failed"
+                ),
+            }
         return 0, _payload(
             True,
             plan,
@@ -274,6 +302,7 @@ def launch_detached(
             resumed=not created,
             seeded=bool(created and seed),
             keeper=keeper,
+            **refs_extra,
             commands={
                 **observe_commands(session_id),
                 "attach": adapter.attach_command(plan),

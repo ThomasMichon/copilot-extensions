@@ -14,6 +14,7 @@ from typing import Any
 from agent_procutil import no_window_flags
 from venue_copilot import read_seed
 from venue_copilot.detached import launch_detached, public_plan, stop_detached
+from venue_copilot.refs import upload_for
 
 _BUSY_EXIT = 75
 _RESERVATION_TTL = 900.0
@@ -93,6 +94,23 @@ def _remote(
         creationflags=no_window_flags(),
     )
     return result.returncode, result.stdout or "", result.stderr or ""
+
+
+def _remote_input(ssh_config: Any, command: str, stdin: bytes, *, timeout: float) -> tuple[int, str, str]:
+    from .ssh_transport import build_ssh_command
+
+    result = subprocess.run(
+        build_ssh_command(ssh_config, _bash(command), pty=False),
+        input=stdin,
+        capture_output=True,
+        timeout=timeout,
+        creationflags=no_window_flags(),
+    )
+    return (
+        result.returncode,
+        (result.stdout or b"").decode("utf-8", "replace"),
+        (result.stderr or b"").decode("utf-8", "replace"),
+    )
 
 
 def _launch_env(
@@ -180,6 +198,9 @@ class _ContainerAdapter:
     def run(self, command: str, *, timeout: float) -> tuple[int, str, str]:
         return _remote(self.ssh_config, command, timeout=timeout)
 
+    def run_input(self, command: str, stdin: bytes, *, timeout: float) -> tuple[int, str, str]:
+        return _remote_input(self.ssh_config, command, stdin, timeout=timeout)
+
     def launch(self, command: str, *, timeout: float) -> tuple[int, str, str]:
         from .ssh_transport import build_remote_command, build_ssh_command
 
@@ -235,10 +256,14 @@ def cmd_detach(
     plan = plan_for(args, target)
     try:
         seed = read_seed(args)
+        refs = upload_for(list(getattr(args, "ref_files", None) or []), plan["scope_id"])
     except (OSError, ValueError) as exc:
         return _fail(str(exc), plan)
     if getattr(args, "dry_run", False):
-        print(json.dumps({"ok": True, "dry_run": True, **public_plan(plan), "seed_len": len(seed or "")}, indent=2))
+        print(json.dumps({
+            "ok": True, "dry_run": True, **public_plan(plan), "seed_len": len(seed or ""),
+            "ref_files": [name for name, _ in refs[2]] if refs else [],
+        }, indent=2))
         return 0
 
     target_lock = TargetLock(f"container:{args.name}", op="copilot")
@@ -278,6 +303,7 @@ def cmd_detach(
             ensure_mux=bool(args.ensure_mux),
             register_timeout=float(args.register_timeout),
             progress=_progress,
+            refs=refs,
         )
         return _emit(rc, payload)
     finally:

@@ -36,6 +36,9 @@ CLI-mode identity (`anchor-<repo>@<ssh-target>`), runs
 workspace, and prints a JSON handle with `status`, `observe`, `nudge`, `attach`,
 and `stop` commands. Windows SSH targets are not supported yet; run the
 orchestrator on that machine and use local `agent-worktrees embody` there.
+`--ref-file PATH` (repeatable) copies an operator file outside the checkout to
+`~/.agent-bridge/refs/<batch>/` and names it to the worker (seed for a new
+session, a message on rejoin).
 
 `restore-host` exposes transport-owned host setup to declarative orchestrators
 without requiring them to know installed payload paths:

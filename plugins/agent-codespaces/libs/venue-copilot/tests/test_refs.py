@@ -7,7 +7,7 @@ import io
 import tarfile
 
 import pytest
-from agent_codespaces import venue_refs
+from venue_copilot import refs as venue_refs
 
 
 def _members(payload: bytes) -> dict[str, bytes]:

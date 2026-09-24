@@ -24,6 +24,7 @@ from venue_copilot import (
     resolve_daemon_port,
 )
 from venue_copilot.detached import launch_detached, public_plan, stop_detached
+from venue_copilot.refs import upload_for
 
 _RESERVATION_TTL = 900.0
 _RESERVE_RETRY_WINDOW = 90.0
@@ -99,6 +100,21 @@ def _remote(
         creationflags=no_window_flags(),
     )
     return result.returncode, result.stdout or "", result.stderr or ""
+
+
+def _remote_input(ssh_config: Any, command: str, stdin: bytes, *, timeout: float) -> tuple[int, str, str]:
+    result = subprocess.run(
+        build_remote_exec_args(ssh_config, command, pty=False),
+        input=stdin,
+        capture_output=True,
+        timeout=timeout,
+        creationflags=no_window_flags(),
+    )
+    return (
+        result.returncode,
+        (result.stdout or b"").decode("utf-8", "replace"),
+        (result.stderr or b"").decode("utf-8", "replace"),
+    )
 
 
 def _bash(command: str) -> str:
@@ -189,6 +205,9 @@ class _SshAdapter:
     def launch(self, command: str, *, timeout: float) -> tuple[int, str, str]:
         return self.run(command, timeout=timeout)
 
+    def run_input(self, command: str, stdin: bytes, *, timeout: float) -> tuple[int, str, str]:
+        return _remote_input(self.ssh_config, _bash(command), stdin, timeout=timeout)
+
     def ensure_keeper(self, *, venue_port: int, mux: str) -> dict[str, Any]:
         return ensure_keeper(self.target, venue_port=venue_port, mux=mux)
 
@@ -212,10 +231,14 @@ def cmd_detach(args: argparse.Namespace) -> int:
     plan = plan_for(args)
     try:
         seed = read_seed(args)
+        refs = upload_for(list(getattr(args, "ref_files", None) or []), plan["scope_id"])
     except (OSError, ValueError) as exc:
         return _fail(str(exc), plan)
     if getattr(args, "dry_run", False):
-        print(json.dumps({"ok": True, "dry_run": True, **public_plan(plan), "seed_len": len(seed or "")}, indent=2))
+        print(json.dumps({
+            "ok": True, "dry_run": True, **public_plan(plan), "seed_len": len(seed or ""),
+            "ref_files": [name for name, _ in refs[2]] if refs else [],
+        }, indent=2))
         return 0
 
     ssh_config = _ssh_config(args.target)
@@ -231,6 +254,7 @@ def cmd_detach(args: argparse.Namespace) -> int:
             ensure_mux=True,
             register_timeout=float(args.register_timeout),
             progress=_progress,
+            refs=refs,
         )
         return _emit(rc, payload)
     except (RuntimeError, subprocess.SubprocessError) as exc:
@@ -305,6 +329,11 @@ def add_copilot_subparser(sub) -> None:
     p.add_argument("--seed")
     p.add_argument("--seed-file", dest="seed_file")
     p.add_argument("--copilot-arg", dest="copilot_args", action="append", default=[])
+    p.add_argument(
+        "--ref-file", dest="ref_files", action="append", default=[], metavar="PATH",
+        help="With --detach: copy PATH (file or directory) into the target outside the "
+             "checkout and tell the worker where it is (repeatable)",
+    )
     p.add_argument("--driver", default="cli-mode")
     p.add_argument("--register-timeout", type=float, default=180.0)
     p.add_argument("--dry-run", action="store_true")

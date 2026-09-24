@@ -195,6 +195,14 @@ session to register with the host bridge before reporting success. Repeating
 kills and verifies the venue tmux session, stops the keeper, and deregisters
 the exact live-session row.
 
+`--ref-file PATH` (repeatable; a file or a folder, up to 256 MiB per call)
+copies an operator file (a HAR, a log, a transcript) into the container at
+`~/.agent-bridge/refs/<batch>/`, outside the checkout, over the SSH channel's
+stdin, and tells the worker the exact paths: in the seed for a new session, or
+as a message when the same `--detach` rejoins a running one. The handle reports
+`ref_files` and `refs_delivered` (`seed`/`message`/`failed`). The orchestrator
+passes only the host path and never reads the file itself.
+
 The fleet image must carry Copilot CLI, the agent-bridge plugin, tmux, sshd,
 and the container's own worktree manager with the workspace already adopted
 as a project (the launch fails with "Could not resolve a project" otherwise).

@@ -86,6 +86,11 @@ def add_copilot_subparser(sub) -> None:
              "(repeatable).",
     )
     copilot_p.add_argument(
+        "--ref-file", dest="ref_files", action="append", default=[], metavar="PATH",
+        help="With --detach: copy PATH (file or directory) into the container "
+             "outside the checkout and tell the worker where it is (repeatable).",
+    )
+    copilot_p.add_argument(
         "--register-timeout", dest="register_timeout", type=float, default=180.0,
         metavar="SECS",
         help="With --detach: how long to wait for the session to register with "
@@ -127,6 +132,9 @@ def cmd_copilot(
     Every ``__main__``-private helper is injected rather than imported, to
     avoid a circular import between this module and ``__main__``.
     """
+    if getattr(args, "ref_files", None) and not getattr(args, "detach", False):
+        print("[FAIL] --ref-file requires --detach", file=sys.stderr)
+        return 1
     if getattr(args, "stop", False) or getattr(args, "detach", False):
         from . import copilot_detach
 

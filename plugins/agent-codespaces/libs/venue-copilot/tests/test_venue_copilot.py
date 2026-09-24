@@ -448,6 +448,11 @@ class _Adapter:
         self.calls.append(("launch", command))
         return 0, json.dumps(self.launch_payload), ""
 
+    def run_input(self, command: str, stdin: bytes, *, timeout: float) -> tuple[int, str, str]:
+        self.calls.append(("run_input", command))
+        self.stdin = stdin
+        return (0, "/home/u/.agent-bridge/refs/b1\n", "") if getattr(self, "refs_ok", True) else (1, "", "denied")
+
     def ensure_keeper(self, *, venue_port: int, mux: str) -> dict[str, Any]:
         self.calls.append(("keeper", f"{venue_port}:{mux}"))
         return {"started": True, "state": {"pid": 123}}
@@ -538,6 +543,66 @@ class TestDetachedRunner:
         assert not {"registration_error", "reservation_ttl", "launch_detail"} & payload.keys()
         assert payload["scope_id"] == "anchor-repo@venue"
         assert detached.public_plan(plan) == self._plan()
+
+    def _patch_bridge(self, monkeypatch) -> None:
+        monkeypatch.setattr("venue_copilot.detached.resolve_daemon_port", lambda: 41234)
+        monkeypatch.setattr("venue_copilot.detached.resolve_local_auth_token", lambda: "tok")
+        monkeypatch.setattr(
+            "venue_copilot.detached.reserve_with_retry",
+            lambda scope, venue, **kw: {"reservation_id": "r1"},
+        )
+        monkeypatch.setattr("venue_copilot.detached.await_claim", lambda scope, rid, timeout: "sid-42")
+        monkeypatch.setattr("venue_copilot.detached.release_cli_mode", lambda *a, **k: 1)
+
+    def _refs(self) -> tuple[str, bytes, list[tuple[str, int]]]:
+        return "mkdir -p x && base64 -d | tar -xzf - -C x && cd x && pwd", b"UEFZTE9BRA==", [("trace.har", 2048)]
+
+    def test_ref_files_are_copied_before_launch_and_named_in_a_new_sessions_seed(self, monkeypatch) -> None:
+        from venue_copilot import detached
+
+        self._patch_bridge(monkeypatch)
+        adapter = _Adapter()
+        rc, payload = detached.launch_detached(
+            adapter, self._plan(), seed="look at the trace", driver=None, copilot_args=[],
+            ensure_mux=True, register_timeout=0.0, progress=lambda *a: None, refs=self._refs(),
+        )
+        assert rc == 0
+        kinds = [kind for kind, _ in adapter.calls]
+        assert kinds.index("run_input") < kinds.index("launch")
+        assert adapter.stdin == b"UEFZTE9BRA=="
+        launch = next(command for kind, command in adapter.calls if kind == "launch")
+        assert "/home/u/.agent-bridge/refs/b1/trace.har" in launch
+        assert payload["refs_delivered"] == "seed"
+        assert payload["ref_files"] == ["- /home/u/.agent-bridge/refs/b1/trace.har (2.0 KB)"]
+
+    def test_ref_files_for_a_running_session_are_sent_as_a_message(self, monkeypatch) -> None:
+        from venue_copilot import detached, refs
+
+        self._patch_bridge(monkeypatch)
+        sent = []
+        monkeypatch.setattr(refs, "deliver_note", lambda sid, note: sent.append((sid, note)) or True)
+        adapter = _Adapter({"ok": True, "created": False, "session": "wt-anchor-repo"})
+        rc, payload = detached.launch_detached(
+            adapter, self._plan(), seed=None, driver=None, copilot_args=[],
+            ensure_mux=True, register_timeout=0.0, progress=lambda *a: None, refs=self._refs(),
+        )
+        assert rc == 0
+        assert payload["refs_delivered"] == "message"
+        assert sent and sent[0][0] == "sid-42" and "trace.har" in sent[0][1]
+
+    def test_a_failed_ref_copy_fails_before_launch(self, monkeypatch) -> None:
+        from venue_copilot import detached
+
+        self._patch_bridge(monkeypatch)
+        adapter = _Adapter()
+        adapter.refs_ok = False
+        rc, payload = detached.launch_detached(
+            adapter, self._plan(), seed="x", driver=None, copilot_args=[],
+            ensure_mux=True, register_timeout=0.0, progress=lambda *a: None, refs=self._refs(),
+        )
+        assert rc == 1
+        assert "reference files" in payload["error"]
+        assert "launch" not in [kind for kind, _ in adapter.calls]
 
     def test_launch_failure_stops_created_unrepresented_session(self, monkeypatch) -> None:
         from venue_copilot import detached

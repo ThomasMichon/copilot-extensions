@@ -184,3 +184,12 @@ def test_stop_kills_mux_stops_keeper_and_deregisters(seams, capsys):
     assert seams.release == [("anchor-repo@devbox", None)]
     assert seams.deregister == ["sid-42"]
     assert json.loads(capsys.readouterr().out)["deregistered"] == "sid-42"
+
+
+def test_dry_run_names_ref_files_and_a_missing_one_fails(tmp_path, capsys):
+    har = tmp_path / "trace.har"
+    har.write_text("{}")
+    assert detach.cmd_detach(_args(dry_run=True, ref_files=[str(har)])) == 0
+    assert json.loads(capsys.readouterr().out)["ref_files"] == ["trace.har"]
+    assert detach.cmd_detach(_args(dry_run=True, ref_files=[str(tmp_path / "nope.har")])) == 1
+    assert "reference file not found" in capsys.readouterr().err

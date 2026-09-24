@@ -172,15 +172,13 @@ def parse_reverse_forwards(specs: list[str]) -> dict[int, int]:
 
 def _send_refs(name: str, upload: tuple[str, bytes, list[tuple[str, int]]]) -> str | None:
     """Copy one reference batch into the venue; the worker-facing note, or ``None``."""
-    from .venue_refs import refs_note
+    from venue_copilot.refs import send_refs
 
-    command, payload, files = upload
-    _progress("refs", f"copying {len(files)} reference file(s) to the venue")
-    result = _remote(name, command, timeout=600.0, input_bytes=payload)
-    if result is None or result[0] != 0 or not result[1].strip():
-        _progress("refs-failed", (result[2] if result else "transport failure").strip()[-500:])
-        return None
-    return refs_note(result[1].strip().splitlines()[-1], files)
+    return send_refs(
+        lambda command, stdin: _remote(name, command, timeout=600.0, input_bytes=stdin),
+        upload,
+        _progress,
+    )
 
 
 # A fresh CodeSpace can carry the agent-worktrees plugin payload (staged by
@@ -326,7 +324,7 @@ def cmd_detach(
         return _fail(str(exc), plan)
     ref_files = list(getattr(args, "ref_files", None) or [])
     if ref_files:
-        from .venue_refs import RefFileError, build_refs_upload, batch_id
+        from venue_copilot.refs import RefFileError, build_refs_upload, batch_id
 
         try:
             refs_upload = build_refs_upload(ref_files, batch_id(plan["scope_id"]))
@@ -505,7 +503,7 @@ def cmd_detach(
         refs_delivered = None
         if refs_note_text:
             # A new session got the note in its seed; a running one is told now.
-            from .venue_refs import deliver_note
+            from venue_copilot.refs import deliver_note
 
             refs_delivered = "seed" if created else (
                 "message" if deliver_note(session_id, refs_note_text) else "failed"

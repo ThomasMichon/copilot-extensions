@@ -167,6 +167,9 @@ and prints a JSON handle with `session_id`, `scope_id`, and ready-made
 container tmux session, verifies it is gone, stops the keeper, and deregisters
 the exact live-session row. Extra Copilot CLI flags can be repeated with
 `--copilot-arg`; use `--seed-file -` for long or multi-line prompts.
+`--ref-file PATH` (repeatable, `--detach` only) copies an operator file outside
+the checkout to `~/.agent-bridge/refs/<batch>/` in the container and names it to
+the worker (seed for a new session, a message on rejoin).
 
 ## Configuration
 

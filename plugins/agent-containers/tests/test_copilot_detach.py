@@ -360,3 +360,15 @@ def test_forward_keeper_exits_when_mux_is_gone(tmp_path, monkeypatch):
     assert rc == 0
     assert Fwd.started == 1 and Fwd.stopped == 1
     assert forward_keeper.read_state("repo-1") is None
+
+
+def test_dry_run_names_ref_files_and_a_missing_one_fails(seams, tmp_path, capsys):
+    har = tmp_path / "trace.har"
+    har.write_text("{}")
+    assert detach.cmd_detach(_args(dry_run=True, ref_files=[str(har)]), **_RELAY) == 0
+    assert json.loads(capsys.readouterr().out)["ref_files"] == ["trace.har"]
+    assert detach.cmd_detach(_args(dry_run=True, ref_files=[str(tmp_path / "nope.har")]), **_RELAY) == 1
+    assert "reference file not found" in capsys.readouterr().err
+
+
+_RELAY = {"require_live_relay_port": lambda: 61234, "relay_healthy": lambda p: True}
