@@ -468,13 +468,26 @@ Round 2 (operator's response to that evaluation):
 - [ ] Ensure a PR opened against `main` post-cutover is bounced with guidance
       pointing at `dev` (branch protection message, PR template, or a bot
       comment).
-- [ ] Flip `.agent-worktrees/config.yaml`'s `default_branch: main` to `dev`
+- [x] Flip `.agent-worktrees/config.yaml`'s `default_branch: main` to `dev`
       (ThomasMichon/copilot-extensions#3512's sibling finding, same Journal
       entry) so `agent-worktrees create-pr`/`push-changes` — the harness's
       own standard contribution tooling — actually opens PRs against `dev`
       by default, matching what CONTRIBUTING.md already claims happens.
-      Not yet done; needs operator confirmation since it changes live
-      tooling behavior for every future worktree/PR against this repo.
+      **Done ahead of the rest of this phase's sequencing** (PR #3518,
+      merged 2026-09-24, operator-confirmed): also added an explicit
+      `protected_branches: [main, dev]` guard (`main` stays the actual
+      GitHub default/release branch and must stay commit-guarded too) and
+      updated the `contributing-to-copilot-extensions` skill's contribution
+      boundary text. The anchor checkout on every machine touched by that
+      sweep was switched from `main` to `dev` so the flip actually takes
+      effect (the in-repo config resolves from the anchor's on-disk files,
+      not a specific ref). **Known risk accepted by the operator:** this
+      landed before #3512's promotion pipeline is proven and before the
+      other two items in this phase are confirmed — `dev` will accumulate
+      contributions with no proven path to `main` until #3512 closes, and a
+      stray PR against `main` has no automated bounce guard yet. Track
+      those two remaining items normally; they are not blocked by this one
+      landing early.
 - [ ] Announce cutover; watch the first few real promotion cycles closely.
 
 ### Phase 6 — Maturity walk-back
@@ -1094,3 +1107,55 @@ generator contract details here or in a linked sub-doc._
   -> tag) before trusting it for real traffic; (3) only then work through
   the rest of Phase 5's checklist; (4) scrub #3511's leaked identifiers
   whenever convenient, unblocked by the above.
+
+### 2026-09-24 — Operator-confirmed default_branch flip, ahead of #3512
+
+- A separate, machine-wide sweep (operator request: get every agent running
+  under this identity onto `dev`, since self-merge authority meant stray
+  agents kept admin-ramming straight onto `main`) reached the exact config
+  bug the prior entry flagged and held back on. This time the operator
+  **explicitly confirmed** flipping it, accepting the sequencing risk named
+  above (item 1 done before item 2/#3512).
+- Landed as ThomasMichon/copilot-extensions#3518 (squash, ordinary
+  `pr-self-merge`, no admin-bypass needed since it targeted `dev` cleanly):
+  - `.agent-worktrees/config.yaml`: `default_branch: main` -> `dev`, plus a
+    new `protected_branches: [main, dev]` key — `main` stays this repo's
+    real GitHub default and must stay commit-guarded even though it is no
+    longer the *contribution* branch.
+  - `agent_worktrees/hooks.py`: generalized the pre-commit guard from a
+    single `default_branch` to an optional `protected_branches` list
+    (falls back to `[default_branch]` for every other repo — no behavior
+    change anywhere else).
+  - `contributing-to-copilot-extensions` skill: documented `dev` as the
+    contribution branch, `main` as the release branch, and the single
+    sanctioned exception (a direct `main` change to unstick a broken
+    release pipeline itself).
+- **Mechanical gotcha hit while landing this**: the PR's worktree was
+  created (and its first commit made) while the anchor's on-disk config
+  still said `default_branch: main`, so `create-pr` naturally opened
+  against `main`. Retargeting the open PR to `dev` via `gh pr edit --base`
+  then reported `CONFLICTING` — `main`/`dev` have **genuinely diverged
+  histories** (16 commits unique to `main`, 14 unique to `dev` at the
+  time), not just a linear rename, so a raw `git rebase origin/dev`
+  attempted to replay all 16 of `main`'s unique commits, not just this
+  change's own commit. Recovered by resetting the worktree branch to
+  `origin/dev` and cherry-picking only the one real commit, which applied
+  cleanly. **Anyone else retargeting an existing PR from `main` to `dev`
+  should expect the same and reach for cherry-pick, not rebase.**
+- Also discovered the on-disk resolution mechanic in practice: the in-repo
+  config is read from the **anchor's checked-out working tree**, not a
+  fixed ref — so flipping the branch in `dev` alone does nothing for a
+  machine whose anchor checkout still sits on `main`. Every machine's
+  anchor must be switched to track `dev` (`git checkout dev && git pull
+  --ff-only`) for the flip to actually take effect locally; this needed a
+  time-boxed `repos allow-edits` break-glass grant since the anchor-write
+  guard blocks even a bare `git status`/`git checkout` in a worktree-class
+  anchor by design.
+- Per the recommended order above, **#3512 (the Promote trigger chain) is
+  still unfixed** — this flip does not by itself make Phase 5 complete, and
+  `dev` will keep accumulating unpromoted work until #3512 closes. The
+  other two Phase 5 items (auto-updater coverage confirmation, and a bounce
+  guard for stray PRs against `main`) also remain open. Whoever picks up
+  #3512 next should treat this journal entry, not just the checklist, as
+  the current ground truth for what's actually flipped live.
+

@@ -9,7 +9,7 @@
   venue provider.
 - **Scope:** leaf (cross-cutting capability within the agent fabric)
 - **Status:** Active
-- **Last revised:** 2026-09-20
+- **Last revised:** 2026-09-22
 - **Reality docs:** [`plugins/agent-bridge/docs/architecture.md`](../../plugins/agent-bridge/docs/architecture.md) ·
   [`plugins/agent-worktrees/docs/architecture.md`](../../plugins/agent-worktrees/docs/architecture.md)
 
@@ -113,6 +113,15 @@ daemon differs from the host machine's does an explicit, client-read
 discovery step become necessary — the mechanism generalizes without changing
 this concept's identity unit.
 
+One host coordination layer can see *many* venues of the same repository at
+once (several CodeSpaces each running their own anchor session), so a venue
+launch qualifies the identity it reserves and registers under with the venue
+(`<worktree identity>@<venue>`). Within a venue the unit is still the worktree;
+the qualifier only keeps sibling venues distinct at the host. The reservation
+also carries the venue descriptor (which venue, which mux session), so the
+claimed registration inherits trusted reattach metadata instead of asserting
+its own.
+
 ### Symmetric venue launch of standard muxed sessions
 
 Creating a muxed, interactive Copilot CLI session is not a capability
@@ -176,7 +185,12 @@ and not tracked in a second, parallel discovery mechanism.
 `agent-codespaces` and `agent-containers` can create a standard, muxed
 interactive Copilot CLI session bound to a pre-allocated reservation, the same
 way the local worktree/mux launch path already does, as thin transports over
-one shared SSH substrate.
+one shared SSH substrate. The same launch is available in a **detached** form
+for a programmatic caller (an orchestrating agent that must not hand its own
+terminal away): it returns a scriptable handle once the session is registered,
+and the connection's durable owner keeps the session's back-channels alive for
+as long as the muxed session exists — the session stays an ordinary,
+attachable, messageable peer, not a new execution shape.
 
 ### capability-honest-attended-marking
 
@@ -294,6 +308,20 @@ headless session's mechanics do not actually extend to an attended one.
 - Child visions: none (leaf).
 
 ## Provenance
+
+- **2026-09-22** — Added the detached, programmatic form of the venue
+  `copilot` launch (operator direction: an orchestrating session dispatches
+  work to remote CLI-mode sessions it can observe and steer, instead of opaque
+  headless sub-dispatch). Still explicit and per-request (the operator's
+  orchestrator asks for it; never a fallback for headless delegation) and still
+  the same `live_sessions` registration/messaging/observation machinery. Two
+  refinements it forced: the reserved/registered identity is venue-qualified
+  (sibling venues of one repo are otherwise indistinguishable at the host), and
+  the venue descriptor travels on the reservation rather than from the
+  registering client. Keeping a detached session's back-channels (credential
+  relay + the host daemon port) alive after its launcher exits is the existing
+  per-venue connection owner's job, renewed from its own venue-side liveness
+  check — transport stays transport; it never reads session state.
 
 - **2026-09-20** — Named the canonical local/remote launch verb `copilot`
   ("deliver a TTY Copilot session to the user in the current terminal"),

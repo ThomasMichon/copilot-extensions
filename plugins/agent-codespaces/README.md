@@ -18,6 +18,15 @@ A copilot-extensions plugin that provides:
 - **Agent-bridge provider** -- when agent-bridge is installed, a session-start
   hook drops a `providers.d` manifest so `codespace:<name>` agents resolve live
   over the agent-codespaces CLI boundary
+- **CLI-mode sessions** -- `copilot <name>` puts a real interactive Copilot
+  CLI session (tmux, inside the CodeSpace) into your terminal; `copilot <name>
+  --detach` starts it for an orchestrating agent instead (JSON handle; the
+  Connection Owner keeps its relay + host-bridge forwards alive), observable and
+  steerable through agent-bridge; `--ref-file <path>` hands the worker a
+  reference file (HAR trace, transcript, logs) without the orchestrator
+  reading it; `--reverse-forward VENUE:HOST` keeps a host port (e.g. a
+  browser's DevTools) reachable inside the venue; `--stop` ends it. See the
+  `codespaces-lifecycle` skill.
 - **Resource obligations** -- a borrowed CodeSpace is an accountable
   **obligation** on the borrowing worktree: `ssh` journals an `active`
   `codespace` claim onto its ledger, a clean disconnect settles it to `at-rest`

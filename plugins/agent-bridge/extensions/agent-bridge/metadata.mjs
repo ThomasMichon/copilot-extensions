@@ -64,7 +64,10 @@ export async function resolveMetadataAsync({ cwd = process.cwd(), env = process.
   return {
     machine,
     cwd,
-    worktree_id: sessionScopeId || null,
+    // A venue launcher may pin a venue-qualified identity (e.g.
+    // `anchor-<repo>@<codespace>`) via AGENT_BRIDGE_SCOPE_ID so several
+    // venues of the same repo stay distinguishable on the host bridge.
+    worktree_id: env.AGENT_BRIDGE_SCOPE_ID || sessionScopeId || null,
     repo,
     branch: branch || null,
     // process.pid is the extension host process -- a liveness hint, not the

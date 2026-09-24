@@ -285,7 +285,55 @@ def _yaml_unquote(val: str) -> str:
     return val
 
 
+def load_base_repo_names(registry_root: Path) -> set[str]:
+    """Names adopted in **base-repo (no-worktree)** mode in ``projects.yaml``.
+
+    A base-repo anchor is edited in place by design (the anchor *is* the working
+    checkout -- e.g. a CodeSpace dedicated to one task), so it is never guarded
+    even when ``repos.yaml`` lists it ``class: worktree``. Stdlib-only like
+    :func:`load_worktree_anchors`; never raises.
+    """
+    try:
+        text = (registry_root / "projects.yaml").read_text("utf-8")
+    except (OSError, UnicodeDecodeError):
+        return set()
+    try:
+        import yaml  # type: ignore
+        projects = (yaml.safe_load(text) or {}).get("projects") or {}
+        return {
+            str(name) for name, meta in projects.items()
+            if isinstance(meta, dict) and meta.get("base_repo") is True
+        } if isinstance(projects, dict) else set()
+    except Exception:
+        pass
+    names: set[str] = set()
+    in_projects = False
+    cur_name: str | None = None
+    for raw in text.splitlines():
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip())
+        stripped = raw.strip()
+        if indent == 0:
+            in_projects = stripped == "projects:"
+            cur_name = None
+        elif in_projects and indent == 2 and stripped.endswith(":"):
+            cur_name = _yaml_unquote(stripped[:-1])
+        elif in_projects and indent >= 4 and cur_name:
+            key, sep, val = stripped.partition(":")
+            if sep and key.strip() == "base_repo" and _yaml_unquote(val).lower() == "true":
+                names.add(cur_name)
+    return names
+
+
 def load_worktree_anchors(registry_root: Path) -> list[dict]:
+    """The guarded anchors: every ``class: worktree`` repo in ``repos.yaml``
+    that is not adopted in base-repo mode (:func:`load_base_repo_names`)."""
+    base_repos = load_base_repo_names(registry_root)
+    return [a for a in _load_worktree_class_anchors(registry_root) if a["name"] not in base_repos]
+
+
+def _load_worktree_class_anchors(registry_root: Path) -> list[dict]:
     """Parse ``repos.yaml`` -> ``[{name, path}]`` for every ``class: worktree``
     repo, across all platform path keys (windows/wsl/linux).
 

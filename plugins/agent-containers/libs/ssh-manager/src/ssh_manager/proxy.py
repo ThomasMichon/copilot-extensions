@@ -221,13 +221,18 @@ class _ProxyBroker:
                 task.result()
             if inbound in done:
                 process.stdin.close()
-            try:
-                await asyncio.wait_for(
-                    asyncio.gather(asyncio.shield(exited), asyncio.shield(outbound)),
-                    timeout=_DRAIN_TIMEOUT,
-                )
-            except asyncio.TimeoutError:
+            # asyncio.wait, not wait_for(gather(shield...)): it never cancels the
+            # tasks, and a cancelled _serve (every broker close) leaves no
+            # orphaned gather future behind -- on Python 3.11 that future's
+            # CancelledError went unretrieved and asyncio logged
+            # "_GatheringFuture exception was never retrieved" on each connect.
+            drained, pending = await asyncio.wait(
+                {exited, outbound}, timeout=_DRAIN_TIMEOUT,
+            )
+            if pending:
                 log.debug("SSH proxy did not drain after its transport closed")
+            for task in drained:
+                task.result()
             if process.returncode not in (None, 0):
                 await errors
                 log.warning(

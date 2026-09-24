@@ -12,6 +12,8 @@ import json
 import time
 from pathlib import Path
 
+import sys
+
 import pytest
 
 # The guard ships as a standalone script under scripts/ (deployed to
@@ -478,6 +480,35 @@ def test_load_worktree_anchors_filters_by_class(tmp_path):
     # Double-backslash unescaped to single; both platform paths surfaced.
     assert "C:\\Data\\Src\\copilot-extensions" in paths
     assert "/home/u/copilot-extensions" in paths
+
+
+@pytest.mark.parametrize("no_pyyaml", [False, True])
+def test_base_repo_adoption_is_not_guarded(tmp_path, monkeypatch, no_pyyaml):
+    """projects.yaml ``base_repo: true`` means the anchor IS the working checkout
+    (e.g. a CodeSpace dedicated to one task), even for a ``class: worktree`` repo."""
+    if no_pyyaml:
+        monkeypatch.setitem(sys.modules, "yaml", None)  # force the stdlib parser
+    reg = tmp_path / ".agent-worktrees"
+    reg.mkdir()
+    (reg / "repos.yaml").write_text(
+        "repos:\n"
+        "  example-web:\n"
+        "    class: worktree\n"
+        "    linux: /workspaces/example-web\n"
+        "  other-wt:\n"
+        "    class: worktree\n"
+        "    linux: /src/other\n",
+        encoding="utf-8")
+    (reg / "projects.yaml").write_text(
+        "schema_version: 2\n"
+        "projects:\n"
+        "  example-web:\n"
+        "    base_repo: true\n"
+        "    expose_agent: false\n"
+        "  other-wt:\n"
+        "    base_repo: false\n",
+        encoding="utf-8")
+    assert {a["name"] for a in guard.load_worktree_anchors(reg)} == {"other-wt"}
 
 
 def test_load_worktree_anchors_missing_file_is_empty(tmp_path):

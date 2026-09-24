@@ -1770,7 +1770,7 @@ function _Resolve-Py {
     return $AgentRtPy
 }
 $_py = _Resolve-Py
-if ($_py) { & $_py -m agent_bridge @args; exit $LASTEXITCODE }
+if ($_py) { if ($MyInvocation.ExpectingInput) { $input | & $_py -m agent_bridge @args } else { & $_py -m agent_bridge @args }; exit $LASTEXITCODE }
 if ($env:AGENT_BRIDGE_NO_SELFPROVISION) { [Console]::Error.WriteLine('[agent-bridge] runtime not provisioned (AGENT_BRIDGE_NO_SELFPROVISION set).'); exit 1 }
 $_snap = ''
 try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
@@ -1782,7 +1782,7 @@ $_pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
 $_exe = if ($_pwsh) { $_pwsh.Source } else { 'powershell.exe' }
 & $_exe -NoProfile -ExecutionPolicy Bypass -File $_inst provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
 $_py = _Resolve-Py
-if ($_py) { & $_py -m agent_bridge @args; exit $LASTEXITCODE }
+if ($_py) { if ($MyInvocation.ExpectingInput) { $input | & $_py -m agent_bridge @args } else { & $_py -m agent_bridge @args }; exit $LASTEXITCODE }
 [Console]::Error.WriteLine('[agent-bridge] provisioning did not yield a runtime. See the log above; retry, or run the snapshot installer manually.')
 exit 1
 '@ -replace '__ROOT__', $rootLit

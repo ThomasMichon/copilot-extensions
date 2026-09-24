@@ -274,3 +274,142 @@ class TestCliModeReservationRoutes:
         )
         assert resp.status_code == 200
         assert resp.json()["cli_mode"] is False
+
+
+_VENUE = {"kind": "codespace", "target": "cs-1", "mux_session_name": "wt-anchor-example"}
+
+
+class TestReservationVenueInheritance:
+    """A reserving venue launcher records the venue; the claiming session
+    inherits it (never supplied by the registering client itself)."""
+
+    def test_claim_inherits_reservation_venue(self, tmp_db: Database) -> None:
+        import json as _json
+
+        now = time.time()
+        tmp_db.create_cli_mode_reservation(
+            "anchor-example@cs-1", now=now, venue=_json.dumps(_VENUE),
+        )
+        assert _register(tmp_db, "cli-1", "anchor-example@cs-1", now + 1) == "live"
+        row = tmp_db.get_live_session("cli-1")
+        assert row["cli_mode"] == 1
+        assert _json.loads(row["venue"]) == _VENUE
+
+    def test_heartbeat_reregister_keeps_inherited_venue(self, tmp_db: Database) -> None:
+        import json as _json
+
+        now = time.time()
+        tmp_db.create_cli_mode_reservation(
+            "anchor-example@cs-1", now=now, venue=_json.dumps(_VENUE),
+        )
+        _register(tmp_db, "cli-1", "anchor-example@cs-1", now + 1)
+        # The extension's 30s heartbeat re-POST carries no venue.
+        assert _register(tmp_db, "cli-1", "anchor-example@cs-1", now + 31) == "live"
+        assert _json.loads(tmp_db.get_live_session("cli-1")["venue"]) == _VENUE
+
+    def test_reservation_without_venue_leaves_session_venue_null(
+        self, tmp_db: Database,
+    ) -> None:
+        now = time.time()
+        tmp_db.create_cli_mode_reservation("wt-A", now=now)
+        _register(tmp_db, "cli-1", "wt-A", now + 1)
+        assert tmp_db.get_live_session("cli-1")["venue"] is None
+
+    def test_reaper_skips_host_pid_probe_for_venue_sessions(
+        self, tmp_db: Database,
+    ) -> None:
+        """A remote session's pid is meaningless on this host: a lapsed lease
+        must expire it, never mark it wedged because some unrelated local
+        process happens to have that pid."""
+        import json as _json
+
+        now = time.time()
+        tmp_db.create_cli_mode_reservation(
+            "anchor-example@cs-1", now=now, venue=_json.dumps(_VENUE),
+        )
+        _register(tmp_db, "remote", "anchor-example@cs-1", now)
+        _register(tmp_db, "local", "wt-local", now)
+        probed: list = []
+
+        def _alive(pid):
+            probed.append(pid)
+            return True
+
+        tmp_db.reap_stale_live_sessions(
+            now=now + 10_000, stale_seconds=60, purge_seconds=10**9, pid_alive=_alive,
+        )
+        assert tmp_db.get_live_session("remote")["status"] == "expired"
+        assert tmp_db.get_live_session("local")["status"] == "wedged"
+        assert len(probed) == 1  # only the local row was probed
+
+
+class TestReservationVenueRoutes:
+    def _client(self, db: Database) -> TestClient:
+        app = FastAPI()
+        app.include_router(live_sessions.router)
+        app.state.db = db
+        return TestClient(app)
+
+    def test_create_route_records_and_returns_venue(self, tmp_db: Database) -> None:
+        client = self._client(tmp_db)
+        resp = client.post(
+            "/api/v1/live-sessions/cli-mode-reservations/anchor-example@cs-1",
+            json={"worktree_id": "anchor-example@cs-1", "venue": _VENUE},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["venue"] == _VENUE
+        got = client.get(
+            "/api/v1/live-sessions/cli-mode-reservations/anchor-example@cs-1"
+        )
+        assert got.json()["venue"] == _VENUE
+
+    def test_release_route_compare_and_delete(self, tmp_db: Database) -> None:
+        client = self._client(tmp_db)
+        created = client.post(
+            "/api/v1/live-sessions/cli-mode-reservations/wt-A",
+            json={"worktree_id": "wt-A"},
+        ).json()
+        miss = client.delete(
+            "/api/v1/live-sessions/cli-mode-reservations/wt-A",
+            params={"reservation_id": "not-it"},
+        )
+        assert miss.json() == {"removed": 0}
+        hit = client.delete(
+            "/api/v1/live-sessions/cli-mode-reservations/wt-A",
+            params={"reservation_id": created["reservation_id"]},
+        )
+        assert hit.json() == {"removed": 1}
+
+    def test_claimed_session_exposes_venue_in_live_session_view(
+        self, tmp_db: Database,
+    ) -> None:
+        client = self._client(tmp_db)
+        client.post(
+            "/api/v1/live-sessions/cli-mode-reservations/anchor-example@cs-1",
+            json={"worktree_id": "anchor-example@cs-1", "venue": _VENUE},
+        )
+        _register(tmp_db, "cli-1", "anchor-example@cs-1", time.time())
+        view = client.get("/api/v1/live-sessions/cli-1").json()
+        assert view["cli_mode"] is True
+        assert view["venue"] == _VENUE
+
+
+def test_live_sessions_deregister_verb_deletes_the_exact_session(monkeypatch, capsys):
+    """`live-sessions deregister --session-id` -> DELETE of that exact id (never a handle)."""
+    from agent_bridge import __main__ as m
+    from agent_bridge.client import BridgeClient
+
+    requests: list[tuple[str, str]] = []
+    client = BridgeClient.__new__(BridgeClient)
+    monkeypatch.setattr(
+        client, "_request",
+        lambda method, path, *a, **k: requests.append((method, path)) or {"ok": True},
+        raising=False,
+    )
+    monkeypatch.setattr(m, "_get_client", lambda **kw: client)
+    args = m.build_parser().parse_args(
+        ["--json", "live-sessions", "deregister", "--session-id", "sid-1"]
+    )
+    args.func(args)
+    assert requests == [("DELETE", "/api/v1/live-sessions/sid-1")]
+    assert '"ok": true' in capsys.readouterr().out

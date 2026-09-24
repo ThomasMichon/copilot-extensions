@@ -28,6 +28,7 @@ from .client import (
     SseStream,
 )
 from .protocol import REMOTE_OPERATIONS_PROTOCOL_VERSION
+from .remote_errors import RemoteBridgeError
 
 REMOTE_OPERATION_VERSION = 3
 #: Versions below this reject a request naming ``copilot_args`` (a charter
@@ -41,6 +42,7 @@ MAX_CONTINUITY_ID_LENGTH = 128
 MAX_AGENT_NAME_LENGTH = 128
 MAX_IDEMPOTENCY_KEY_LENGTH = 256
 MAX_MESSAGE_LENGTH = 1_048_576
+LIVE_MESSAGE_DELIVERIES = {"queue", "steer", "interrupt"}
 REMOTE_STREAM_RECONNECT_GRACE = 30.0
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@-]*$")
 _EOF = object()
@@ -50,58 +52,6 @@ _BRIDGE_IO_ERRORS = (
     TimeoutError,
     OSError,
 )
-
-
-class RemoteBridgeError(RuntimeError):
-    """A bounded public failure from a remote Bridge operation."""
-
-    def __init__(
-        self,
-        status: int,
-        code: str,
-        message: str,
-        *,
-        details: dict[str, Any] | None = None,
-        reconnectable: bool = False,
-    ) -> None:
-        self.status = status
-        self.code = code
-        self.details = dict(details or {})
-        self.reconnectable = reconnectable
-        super().__init__(message)
-
-    @classmethod
-    def from_carrier(cls, error: CarrierRemoteError) -> RemoteBridgeError:
-        payload = error.payload
-        default_status = {
-            "unsupported_operation": 501,
-            "unsupported_version": 426,
-            "invalid_request": 400,
-            "session_not_found": 404,
-            "cursor_invalidated": 409,
-            "cursor_mismatch": 409,
-            "replay_gap": 409,
-        }.get(error.code, 502)
-        try:
-            status = int(payload.get("status") or default_status)
-        except (TypeError, ValueError):
-            status = 502
-        details = payload.get("details")
-        return cls(
-            status,
-            error.code,
-            str(error),
-            details=details if isinstance(details, dict) else None,
-            reconnectable=error.reconnectable,
-        )
-
-    def public_detail(self) -> dict[str, Any]:
-        return {
-            "code": self.code,
-            "message": str(self),
-            **self.details,
-            "reconnectable": self.reconnectable,
-        }
 
 
 async def _require_remote_operations_protocol(client: BridgeClient) -> None:
@@ -488,12 +438,18 @@ class CarrierRequestRouter:
                     raise RemoteBridgeError(
                         400, "invalid_request", "kind is not supported"
                     )
+                delivery = payload.get("delivery") or "queue"
+                if delivery not in LIVE_MESSAGE_DELIVERIES:
+                    raise RemoteBridgeError(
+                        400, "invalid_request", "delivery is not supported"
+                    )
                 result = await asyncio.to_thread(
                     client.send_live_message,
                     session_id,
                     sender=sender,
                     body=message,
                     kind=kind,
+                    delivery=delivery,
                     wait=False,
                     idempotency_key=idempotency_key,
                     expected_session_id=expected_session_id,
@@ -1142,10 +1098,15 @@ class RemoteOperationService:
         sender: str,
         message: str,
         kind: str,
+        delivery: str = "queue",
         expected_session_id: str | None = None,
         idempotency_key: str | None = None,
         timeout: float = 20.0,
     ) -> dict[str, Any]:
+        if delivery not in LIVE_MESSAGE_DELIVERIES:
+            raise RemoteBridgeError(
+                400, "invalid_request", "delivery is not supported"
+            )
         response = await self._request(
             host,
             {
@@ -1154,6 +1115,7 @@ class RemoteOperationService:
                 "sender": validate_caller_id(sender, field="sender"),
                 "message": validate_message(message, field="message"),
                 "kind": kind,
+                "delivery": delivery,
                 "expected_session_id": validate_optional_id(
                     expected_session_id,
                     field="expected_session_id",

@@ -212,6 +212,14 @@ def _cmd_live_sessions(args: argparse.Namespace) -> None:
         print(_live_session_summary_line(session))
         return
 
+    if action == "deregister":
+        result = client.deregister_live_session(args.session_id)
+        if args.json:
+            core._json_out(result)
+            return
+        print(f"deregistered {args.session_id}")
+        return
+
     if action == "progress":
         try:
             session = client.record_live_progress(
@@ -237,8 +245,19 @@ def _cmd_live_sessions(args: argparse.Namespace) -> None:
         cli_mode_action = getattr(args, "cli_mode_action", None)
         worktree_id = getattr(args, "worktree_id", None)
         if cli_mode_action == "reserve":
+            venue = None
+            raw_venue = getattr(args, "venue_json", None)
+            if raw_venue:
+                try:
+                    venue = json.loads(raw_venue)
+                except ValueError as exc:
+                    print(f"[FAIL] --venue-json is not valid JSON: {exc}", file=sys.stderr)
+                    sys.exit(2)
             try:
-                reservation = client.create_cli_mode_reservation(worktree_id, ttl_seconds=getattr(args, "ttl_seconds", 300.0))
+                reservation = client.create_cli_mode_reservation(
+                    worktree_id, ttl_seconds=getattr(args, "ttl_seconds", 300.0),
+                    venue=venue,
+                )
             except BridgeClientError as exc:
                 if exc.status == 409:
                     print(f"(worktree {worktree_id!r} already has an active CLI-mode reservation)", file=sys.stderr)
@@ -264,7 +283,9 @@ def _cmd_live_sessions(args: argparse.Namespace) -> None:
             print(f"{worktree_id}: reservation_id={reservation.get('reservation_id')} ({state}), expires_at={reservation.get('expires_at')}")
             return
         if cli_mode_action == "release":
-            removed = client.release_cli_mode_reservation(worktree_id)
+            removed = client.release_cli_mode_reservation(
+                worktree_id, reservation_id=getattr(args, "reservation_id", None),
+            )
             if args.json:
                 core._json_out({"removed": removed})
                 return
@@ -388,6 +409,9 @@ def register_inventory_commands(sub: argparse._SubParsersAction) -> None:
     live_resolve_p = live_sub.add_parser("resolve", help="Resolve a session id OR worktree handle to its live session")
     live_resolve_p.add_argument("--handle", required=True, help="Exact session id OR worktree handle")
     live_resolve_p.set_defaults(func=_cmd_live_sessions)
+    live_deregister_p = live_sub.add_parser("deregister", help="Remove a live session whose process is known to be gone (exact session id; idempotent)")
+    live_deregister_p.add_argument("--session-id", required=True, help="Exact session id (never a worktree handle)")
+    live_deregister_p.set_defaults(func=_cmd_live_sessions)
     live_progress_p = live_sub.add_parser("progress", help="Record an operator-driven session's progress beat (Phase 7 7c)")
     live_progress_p.add_argument("--handle", required=True, help="Exact session id OR worktree handle")
     live_progress_p.add_argument("--summary", required=True, help="one-line status toward the goal (hard-capped; keep it a line)")
@@ -403,12 +427,14 @@ def register_inventory_commands(sub: argparse._SubParsersAction) -> None:
     live_cli_mode_reserve_p = live_cli_mode_sub.add_parser("reserve", help="Reserve a worktree's next CLI-mode session before its muxed CLI process starts")
     live_cli_mode_reserve_p.add_argument("--worktree-id", required=True)
     live_cli_mode_reserve_p.add_argument("--ttl-seconds", type=float, default=300.0, help="Reservation lifetime before it's reclaimable (default 300)")
+    live_cli_mode_reserve_p.add_argument("--venue-json", dest="venue_json", default=None, metavar="JSON", help='Venue descriptor the claiming session inherits into its live_sessions.venue, e.g. \'{"kind":"codespace","target":"<name>","mux_session_name":"wt-<id>"}\'')
     live_cli_mode_reserve_p.set_defaults(func=_cmd_live_sessions)
     live_cli_mode_status_p = live_cli_mode_sub.add_parser("status", help="Show a worktree's current CLI-mode reservation, if any")
     live_cli_mode_status_p.add_argument("--worktree-id", required=True)
     live_cli_mode_status_p.set_defaults(func=_cmd_live_sessions)
     live_cli_mode_release_p = live_cli_mode_sub.add_parser("release", help="Release a worktree's CLI-mode reservation")
     live_cli_mode_release_p.add_argument("--worktree-id", required=True)
+    live_cli_mode_release_p.add_argument("--reservation-id", dest="reservation_id", default=None, help="Release only this exact reservation (compare-and-delete); a newer reservation made since is left alone")
     live_cli_mode_release_p.set_defaults(func=_cmd_live_sessions)
     live_cli_mode_launch_p = live_cli_mode_sub.add_parser(
         "launch",

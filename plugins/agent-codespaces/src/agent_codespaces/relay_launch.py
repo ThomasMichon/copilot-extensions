@@ -301,6 +301,36 @@ def build_relay_env(
     return env
 
 
+def relay_azure_resources(cfg) -> list[str]:
+    """The Azure resources a codespace's relay token may mint tokens for.
+
+    The default ADO REST + Storage resources, plus any the adopting repo's
+    ``az-login`` source config adds. No product-specific values here -- they
+    come from the merged config a harness plugin supplies by convention.
+    """
+    from .relay_provider import DEFAULT_AZURE_RESOURCES
+
+    resources = list(DEFAULT_AZURE_RESOURCES)
+    az_cfg = getattr(getattr(cfg, "credentials", None), "sources", {}).get("az-login")
+    if az_cfg and az_cfg.enabled:
+        resources.extend(az_cfg.allowed_resources)
+    return resources
+
+
+def scoped_relay_token(codespace_name: str, cfg) -> str:
+    """Mint/reuse the codespace's relay token with its configured Azure scope.
+
+    Every connect path must mint through this: a token minted without a scope
+    records ``allowed_resources: []``, which the relay authorizer reads as
+    "no Azure resources" -- the CodeSpace's ``azure-auth-helper`` then fails,
+    and RushStack's cloud-cache login falls through to an interactive browser
+    flow that waits forever in an unattended session.
+    """
+    from .relay_token import token_for
+
+    return token_for(codespace_name, allowed_resources=relay_azure_resources(cfg))
+
+
 def build_relay_launch_env(
     codespace_name: str, relay_port: int | None = None
 ) -> tuple[str, int]:
@@ -323,8 +353,6 @@ def build_relay_launch_env(
     ``credentials.relay_port``.
     """
     from .config import load_merged_config
-    from .relay_provider import DEFAULT_AZURE_RESOURCES
-    from .relay_token import token_for
 
     cfg = load_merged_config(include_cwd=False)
     if relay_port is not None:
@@ -335,15 +363,9 @@ def build_relay_launch_env(
             port = published
         else:
             port = int(cfg.credentials.relay_port)
-    # Record the per-token Azure scope the relay authorizer enforces: the default
-    # ADO REST + Storage resources, plus any the adopting repo's ``az-login``
-    # source config adds. No product-specific values here -- they come from the
-    # merged config a harness plugin supplies by convention.
-    resources = list(DEFAULT_AZURE_RESOURCES)
-    az_cfg = getattr(cfg.credentials, "sources", {}).get("az-login")
-    if az_cfg and az_cfg.enabled:
-        resources.extend(az_cfg.allowed_resources)
-    token = token_for(codespace_name, allowed_resources=resources)
+    # Record the per-token Azure scope the relay authorizer enforces (see
+    # :func:`relay_azure_resources`).
+    token = scoped_relay_token(codespace_name, cfg)
     warn_if_relay_unavailable(
         port, codespace_name, context="Session Host dispatch",
     )

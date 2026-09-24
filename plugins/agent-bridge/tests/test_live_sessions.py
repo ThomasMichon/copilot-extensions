@@ -490,6 +490,40 @@ def test_route_ingest_updates_turn_state(client_with_store: TestClient) -> None:
     assert got["liveness"] == "idle"
 
 
+def _say(text: str) -> dict:
+    return {"events": [{"type": "assistant.message", "data": {"content": text}}]}
+
+
+def test_route_ingest_folds_milestone_lines_into_progress(client_with_store: TestClient) -> None:
+    """A live CLI worker's PROGRESS/DONE/BLOCKED lines become its progress beat
+    (the UI's Progress column) with no extra tool call from the agent."""
+    c = client_with_store
+    c.post("/api/v1/live-sessions", json={"session_id": "s1", "worktree_id": "wt-1"})
+    c.post("/api/v1/live-sessions/s1/events", json=_say("Building.\nPROGRESS branch=user/a/b build=ok"))
+    c.post("/api/v1/live-sessions/s1/events", json=_say("PROGRESS pr=2401031 pr-build=running"))
+    lp = c.get("/api/v1/live-sessions/s1").json()["latest_progress"]
+    assert lp["markers"] == {"branch": "user/a/b", "build": "ok", "pr": "2401031", "pr-build": "running"}
+    assert lp["pr"] == "2401031" and lp["phase"] == "pr-build"
+    assert "pr-build=running" in lp["summary"]
+
+    c.post("/api/v1/live-sessions/s1/events", json=_say("BLOCKED: which library root?"))
+    lp = c.get("/api/v1/live-sessions/s1").json()["latest_progress"]
+    assert (lp["phase"], lp["blocker"]) == ("blocked", "which library root?")
+
+    c.post("/api/v1/live-sessions/s1/events", json=_say("DONE: PR 2401031 green"))
+    lp = c.get("/api/v1/live-sessions/s1").json()["latest_progress"]
+    assert (lp["phase"], lp["summary"]) == ("done", "PR 2401031 green")
+    assert "blocker" not in lp and lp["pr"] == "2401031"
+
+
+def test_route_ingest_without_markers_keeps_the_prior_beat(client_with_store: TestClient) -> None:
+    c = client_with_store
+    c.post("/api/v1/live-sessions", json={"session_id": "s1", "worktree_id": "wt-1"})
+    c.post("/api/v1/live-sessions/s1/progress", json={"summary": "explicit beat"})
+    c.post("/api/v1/live-sessions/s1/events", json=_say("just thinking out loud"))
+    assert c.get("/api/v1/live-sessions/s1").json()["latest_progress"]["summary"] == "explicit beat"
+
+
 # -- Phase 7 Slice 7c: operator-session progress ------------------------------
 
 

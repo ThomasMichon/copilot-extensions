@@ -28,6 +28,12 @@ class TestParseProgressMarkers:
             "build": "ok", "n": "42",
         }
 
+    def test_hyphenated_keys_are_whole(self):
+        # `pr-build=running` must not be read as `build=running`.
+        assert _parse_progress_markers("PROGRESS build=ok pr-build=running") == {
+            "build": "ok", "pr-build": "running",
+        }
+
     def test_no_marker(self):
         assert _parse_progress_markers("just a normal message") == {}
 

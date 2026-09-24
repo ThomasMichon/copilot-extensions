@@ -41,6 +41,10 @@ def _resolve_prompt(args: argparse.Namespace, *, required: bool) -> str | None:
         sys.exit(2)
     if prompt_file:
         return _read_prompt_from_file(prompt_file)
+    if positional == "-":
+        # `send <target> -` is the conventional "read stdin"; sending a literal
+        # "-" as the message is never what the caller meant.
+        return _read_prompt_from_file("-")
     if positional is not None:
         return positional
     if required:
@@ -80,6 +84,14 @@ def _cmd_send(args: argparse.Namespace) -> None:
                 file=sys.stderr,
             )
             sys.exit(1)
+        if not prompt.strip():
+            # An empty envelope still costs the receiver a whole model turn.
+            print(
+                "[FAIL] Refusing to deliver an empty message to a live session "
+                "(did the --prompt-file input arrive?).",
+                file=sys.stderr,
+            )
+            sys.exit(2)
         _deliver_to_live_session(client, args, live["session_id"], prompt)
         return
     if getattr(args, "expected_session_id", None):
@@ -129,11 +141,20 @@ def _live_message_kind(args: argparse.Namespace) -> str:
     return getattr(args, "kind", None) or "prompt"
 
 
+def _live_message_delivery(args: argparse.Namespace) -> str:
+    if getattr(args, "steer", False):
+        return "steer"
+    if getattr(args, "interrupt", False):
+        return "interrupt"
+    return getattr(args, "delivery", None) or "queue"
+
+
 def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, prompt: str) -> None:
     core = _core()
     sender = core._live_sender_label(args)
     reply_to = core._live_reply_to(args)
     kind = core._live_message_kind(args)
+    delivery = core._live_message_delivery(args)
     wait = not getattr(args, "no_wait", False)
     wait_timeout = getattr(args, "reply_timeout", 120.0)
     idempotency = getattr(args, "idempotency_key", None)
@@ -149,6 +170,7 @@ def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, 
         body=prompt,
         reply_to=reply_to,
         kind=kind,
+        delivery=delivery,
         wait=wait,
         wait_timeout=wait_timeout,
         **delivery_options,
@@ -158,7 +180,11 @@ def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, 
         return
     mid = result.get("message_id")
     kind_note = "" if kind == "prompt" else f", kind {kind}"
-    print(f"[>] Delivered to live session {session_id} (message {mid}, from {sender}{kind_note})")
+    delivery_note = "" if delivery == "queue" else f", delivery {delivery}"
+    print(
+        f"[>] Delivered to live session {session_id} "
+        f"(message {mid}, from {sender}{kind_note}{delivery_note})"
+    )
     if reply_to:
         print(f"    reply-to: {reply_to}")
     else:
@@ -170,7 +196,10 @@ def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, 
         print(f"\n[<] Reply from {session_id}:")
         print(reply if reply else "    (turn completed with no assistant text)")
     else:
-        print(f"\n[..] No reply within {wait_timeout:g}s (message is queued and will still be delivered).")
+        print(
+            f"\n[..] No reply within {wait_timeout:g}s "
+            "(message remains pending until delivered)."
+        )
 
 
 def _submit_and_stream(
@@ -404,7 +433,9 @@ def _match_agents(target: str, agents: list[dict]) -> list[str]:
 _CLI_MODE_VENUE_BINSTUBS = {"codespace": "agent-codespaces", "container": "agent-containers"}
 
 
-def _cmd_create_cli(target: str, prompt: str | None, driver: str | None) -> None:
+def _cmd_create_cli(
+    target: str, prompt: str | None, driver: str | None, *, detach: bool = False,
+) -> None:
     """``agent-bridge create <target> "<prompt>" --cli``: deliver a live,
     human-attachable CLI-mode Copilot session on the venue ``target`` names,
     optionally seeded with ``prompt`` as its first turn.
@@ -423,6 +454,12 @@ def _cmd_create_cli(target: str, prompt: str | None, driver: str | None) -> None
     agent-bridge mediation at all; inventing a redundant local-dispatch path
     here would only be a second, divergent way to do what that verb already
     does.
+
+    ``detach=True`` forwards ``--detach`` (codespace venues only): the venue
+    verb starts the session in the background and prints a JSON handle
+    instead of taking over this terminal -- the shape an orchestrating agent
+    needs. The seed then travels over stdin (``--seed-file -``) so a long,
+    multi-line prompt never transits a binstub's argv re-parsing.
     """
     prefix, sep, name = target.partition(":")
     binstub = _CLI_MODE_VENUE_BINSTUBS.get(prefix) if sep else None
@@ -437,6 +474,14 @@ def _cmd_create_cli(target: str, prompt: str | None, driver: str | None) -> None
             file=sys.stderr,
         )
         sys.exit(2)
+    if detach and prefix != "codespace":
+        print(
+            f"[FAIL] --detach is currently supported for codespace:<name> "
+            f"targets only, got {target!r}. Attach interactively without "
+            "--detach instead.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
     resolved = shutil.which(binstub)
     if not resolved:
         print(
@@ -445,6 +490,14 @@ def _cmd_create_cli(target: str, prompt: str | None, driver: str | None) -> None
         )
         sys.exit(1)
     argv = [resolved, "copilot", name]
+    if detach:
+        argv.append("--detach")
+        if prompt:
+            argv += ["--seed-file", "-"]
+        if driver:
+            argv += ["--driver", driver]
+        # Stdout carries the venue verb's JSON handle; stderr its progress.
+        sys.exit(subprocess.run(argv, input=prompt or None, text=True).returncode)
     if prompt:
         argv += ["--seed", prompt]
     if driver:
@@ -456,6 +509,9 @@ def _cmd_create_cli(target: str, prompt: str | None, driver: str | None) -> None
 
 
 def _cmd_create(args: argparse.Namespace) -> None:
+    if getattr(args, "detach", False) and not getattr(args, "cli", False):
+        print("[FAIL] --detach requires --cli", file=sys.stderr)
+        sys.exit(2)
     if getattr(args, "cli", False):
         if getattr(args, "charter", None):
             print(
@@ -468,6 +524,7 @@ def _cmd_create(args: argparse.Namespace) -> None:
         _cmd_create_cli(
             args.target, _resolve_prompt(args, required=False),
             getattr(args, "driver", None),
+            detach=getattr(args, "detach", False),
         )
         return
     core = _core()
@@ -599,6 +656,10 @@ def register_session_targeting_commands(sub: argparse._SubParsersAction) -> None
     send_p.add_argument("--kind", choices=["prompt", "notify", "status-check"], default="prompt", help="Typed intent when delivering to a live session: 'prompt' (a work directive, default) vs 'notify'/'status-check' (asks only for a terse out-of-band ack, never treated as new work).")
     send_p.add_argument("--notify", action="store_true", help="Shorthand for --kind notify (informational; no work expected).")
     send_p.add_argument("--status-check", dest="status_check", action="store_true", help="Shorthand for --kind status-check (asks for a terse status ack).")
+    delivery_group = send_p.add_mutually_exclusive_group()
+    delivery_group.add_argument("--delivery", choices=["queue", "steer", "interrupt"], default="queue", help="Delivery urgency when targeting a live session: queue (default) sends after the current turn, steer injects at the running turn's next step, interrupt aborts the current turn first.")
+    delivery_group.add_argument("--steer", action="store_true", help="Shorthand for --delivery steer when targeting a live session.")
+    delivery_group.add_argument("--interrupt", action="store_true", help="Shorthand for --delivery interrupt when targeting a live session.")
     send_p.add_argument("--no-wait", action="store_true", help="Return immediately without waiting for response")
     send_p.add_argument("--reply-timeout", type=float, default=120.0, metavar="SECONDS", help="When delivering to a live interactive session, how long to wait for the receiver's reply turn before returning (default 120; the message is queued and still delivered on timeout). Ignored with --no-wait.")
     send_p.add_argument("--new", action="store_true", help=argparse.SUPPRESS)
@@ -623,5 +684,6 @@ def register_session_targeting_commands(sub: argparse._SubParsersAction) -> None
     create_p.add_argument("--worktree-id", dest="worktree_id", default=None, metavar="ID", help="Bind the created session to an existing agent-worktrees worktree id.")
     create_p.add_argument("--cli", action="store_true", help="Deliver a live, human-attachable CLI-mode Copilot session on the venue TARGET names (codespace:<name> or container:<name>) instead of an ordinary headless ACP session -- hands off entirely to that provider's own `copilot` verb, optionally seeded with the positional prompt as its first turn (agent-bridge-cli-mode-sessions Phase 4). Defaults to anchor mode on the venue (no worktree required). Refused for a bare/unprefixed TARGET -- use `agent-worktrees copilot` directly for a local session.")
     create_p.add_argument("--driver", default=None, metavar="LABEL", help="With --cli: forwarded to the remote `agent-worktrees copilot --driver` (stamps the 'driven by' banner).")
+    create_p.add_argument("--detach", action="store_true", help="With --cli on a codespace:<name> target: start the CLI-mode session in the background (seeded with the prompt) and print a JSON handle (session id plus attach/observe/nudge/stop commands) instead of taking over this terminal -- for an orchestrating agent that must not hand its TTY away.")
     core._add_stream_args(create_p)
     create_p.set_defaults(func=_cmd_create)

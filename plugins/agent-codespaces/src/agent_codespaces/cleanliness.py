@@ -22,6 +22,7 @@ from __future__ import annotations
 import re
 import shlex
 from dataclasses import dataclass
+from ._ssh_retry import exec_with_retry
 
 #: Marker lines the probe emits (KEY=VALUE), parsed back into GitCleanliness.
 _MARK_KNOWN = "OBLIGATION_PROBE"
@@ -176,8 +177,8 @@ async def probe_cleanliness(
     combines it with host-side ``in_flight`` via :func:`at_rest` before settling.
     """
     try:
-        result = await manager.exec_command(
-            name, probe_command(workspace_glob), timeout=timeout,
+        result = await exec_with_retry(
+            manager, name, probe_command(workspace_glob), timeout=timeout,
         )
     except Exception:
         return GitCleanliness(known=False)

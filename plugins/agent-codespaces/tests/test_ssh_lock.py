@@ -177,7 +177,7 @@ def _patch_ssh_dependencies(monkeypatch, tmp_path, manager):
     monkeypatch.setattr(cli, "load_merged_config", _fake_config)
     monkeypatch.setattr(cli, "_clear_status_quietly", lambda _name: None)
     monkeypatch.setattr(cli, "_relay_listening", lambda _port: True)
-    monkeypatch.setattr("agent_codespaces.relay_token.token_for", lambda _name: "tok")
+    monkeypatch.setattr("agent_codespaces.relay_token.token_for", lambda _name, **kw: "tok")
     return locks
 
 
@@ -454,3 +454,74 @@ class TestSshClaimEnforcement:
         rc = main(["ssh", "cs-blocked", "--no-relay"])
         assert rc == _COORDINATION_EXIT
         assert "knowledge_binding_required" in capsys.readouterr().err
+
+
+class TestSshSessionHooks:
+    """``_ssh_session`` keyword hooks used by the detached ``copilot`` launch."""
+
+    def _run(self, tmp_path, monkeypatch, *, settle: bool):
+        calls: list[str] = []
+        manager = _FakeManager(calls)
+        _patch_ssh_dependencies(monkeypatch, tmp_path, manager)
+
+        async def record(name, value=None):
+            calls.append(name)
+            return value
+
+        monkeypatch.setattr(cli, "_provision_relay_helpers", lambda *_a: record("relay"))
+        monkeypatch.setattr(cli, "_verify_remote_auth", lambda *_a: record("auth"))
+        monkeypatch.setattr(cli, "_provision_dotfiles", lambda *_a: record("dotfiles"))
+        monkeypatch.setattr(cli, "_provision_harness", lambda *_a: record("harness"))
+        monkeypatch.setattr(
+            cli, "_register_codespace_plugins",
+            lambda *_a: record("register", ["/stage/example-agent"]),
+        )
+        monkeypatch.setattr(cli, "_provision_repo_hooks", lambda *_a: record("hooks"))
+        monkeypatch.setattr(cli, "_stage_plugins", lambda *_a, **_k: record("stage", []))
+        monkeypatch.setattr(cli, "_warm_remote_auth_cache", lambda *_a, **_kw: record("warm"))
+        monkeypatch.setattr(
+            "agent_codespaces.lease.claim_for_connect", lambda *_a, **_k: "holder-ref",
+        )
+
+        async def settle_spy(*_a, **_k):
+            calls.append("settle")
+            return True
+
+        monkeypatch.setattr(cli, "_settle_codespace_on_disconnect", settle_spy)
+        seen: dict = {}
+
+        def builder(plugin_dirs):
+            seen["plugin_dirs"] = list(plugin_dirs)
+            return "agent-worktrees embody --anchor --json"
+
+        def sink(result):
+            seen["result"] = result
+            return 0
+
+        ns = SimpleNamespace(
+            name="cs-hook", stdio=False, remote_cmd="placeholder", timeout=30.0,
+            connect_timeout=None, no_provision=False, no_relay=False,
+            auth_cache_warmup=True, repo="example/repo", effort=None, session_id=None,
+            stage_plugins=[], force=False, force_claim=False,
+        )
+        rc = cli._ssh_session(
+            ns, remote_cmd_builder=builder, result_sink=sink, settle_on_disconnect=settle,
+        )
+        return rc, calls, seen
+
+    def test_builder_gets_full_provisioning_and_staged_plugin_dirs(self, tmp_path, monkeypatch, capsys):
+        rc, calls, seen = self._run(tmp_path, monkeypatch, settle=True)
+        assert rc == 0
+        for step in ("dotfiles", "harness", "register", "hooks", "warm", "exec_command"):
+            assert step in calls, step
+        assert seen["plugin_dirs"] == ["/stage/example-agent"]
+        assert seen["result"].stdout == "ok"
+        assert capsys.readouterr().out == ""  # the sink, not stdout, got the result
+
+    def test_settle_on_disconnect_false_keeps_the_claim_active(self, tmp_path, monkeypatch):
+        _rc, calls, _seen = self._run(tmp_path, monkeypatch, settle=False)
+        assert "settle" not in calls
+
+    def test_settle_on_disconnect_default_still_settles(self, tmp_path, monkeypatch):
+        _rc, calls, _seen = self._run(tmp_path, monkeypatch, settle=True)
+        assert "settle" in calls

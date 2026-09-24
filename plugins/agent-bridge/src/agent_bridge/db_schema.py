@@ -38,10 +38,17 @@ class _SchemaMixin:
                     "PRAGMA table_info(live_messages)"
                 ).fetchall()
             }
+            if "delivery" not in live_columns:
+                conn.execute(
+                    "ALTER TABLE live_messages ADD COLUMN delivery TEXT "
+                    "NOT NULL DEFAULT 'queue'"
+                )
+                live_columns.add("delivery")
             if "idempotency_key" not in live_columns:
                 conn.execute(
                     "ALTER TABLE live_messages ADD COLUMN idempotency_key TEXT"
                 )
+                live_columns.add("idempotency_key")
             conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS "
                 "idx_live_messages_idempotency ON live_messages(idempotency_key)"
@@ -493,3 +500,42 @@ class _SchemaMixin:
                 "Schema migrated to version 20: sessions.background_recovery_enabled "
                 "(legacy stopped rows default dormant)"
             )
+
+        if from_version < 21:
+            # v20 -> v21: a CLI-mode reservation may carry the venue descriptor
+            # (`{"kind","target","mux_session_name"}`) the reserving venue
+            # launcher knows; the claiming registration inherits it into
+            # live_sessions.venue, so a remote session's venue is recorded from
+            # the trusted reservation rather than from the registering client.
+            cols = [
+                r[1]
+                for r in conn.execute(
+                    "PRAGMA table_info(cli_mode_reservations)"
+                ).fetchall()
+            ]
+            if "venue" not in cols:
+                conn.execute(
+                    "ALTER TABLE cli_mode_reservations ADD COLUMN venue TEXT"
+                )
+            conn.execute("UPDATE schema_version SET version=?", (21,))
+            conn.commit()
+            log.info("Schema migrated to version 21: cli_mode_reservations.venue")
+
+        if from_version < 22:
+            # v21 -> v22: live-message delivery urgency. `queue` preserves the
+            # original session.send default; `steer` and `interrupt` are
+            # opt-in per-message delivery choices.
+            cols = [
+                r[1]
+                for r in conn.execute(
+                    "PRAGMA table_info(live_messages)"
+                ).fetchall()
+            ]
+            if "delivery" not in cols:
+                conn.execute(
+                    "ALTER TABLE live_messages ADD COLUMN delivery TEXT "
+                    "NOT NULL DEFAULT 'queue'"
+                )
+            conn.execute("UPDATE schema_version SET version=?", (22,))
+            conn.commit()
+            log.info("Schema migrated to version 22: live_messages.delivery")

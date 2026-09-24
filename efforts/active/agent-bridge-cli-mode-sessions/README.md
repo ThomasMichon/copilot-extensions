@@ -609,6 +609,19 @@ mechanism CLI mode binds through.
       change and remains open (the schema/model side is done; nothing yet
       sets a non-null `venue` value end-to-end). Live clean-room validation
       also remains open -- see above.
+- [x] **Detached, agent-facing venue launch (2026-09-22).** `agent-codespaces
+      copilot <name> --detach` (and `agent-bridge create codespace:<name>
+      --cli --detach`) for an orchestrating caller that must not hand its
+      terminal away: full dispatch-grade venue prep via the `ssh` verb's body
+      (`_ssh_session` hooks), remote `agent-worktrees embody` with staged
+      CodeSpace plugins folded in (`--copilot-arg=--plugin-dir=...`), success
+      only once registered (reservation claimed) and seeded; `--stop` /
+      `--dry-run`. Closes the "nothing sets a non-null `venue`" gap above: the
+      reservation now carries the venue descriptor and the claiming
+      registration inherits it. Registration identity is venue-qualified
+      (`<identity>@<codespace>`, via `AGENT_BRIDGE_SCOPE_ID`). The Connection
+      Owner keeps the relay + host-daemon forwards alive for the session's
+      lifetime (`session_forwards.py`). See the journal entry.
 
 ### Phase 5 — Docs and vision closure
 
@@ -709,6 +722,46 @@ symmetric venue-launch surface (needed once a venue's own daemon differs
 from the host's).
 
 ## Journal
+
+### 2026-09-22 — Detached venue launch: an orchestrator's observable, steerable remote CLI session
+
+Operator direction: an orchestrating session that dispatches remote work over
+headless ACP gives its operator little visibility into, or control over, the
+work in flight. The attached `copilot` verb already delivers the right kind of
+session (a real muxed CLI session, registered, represented, messageable), but
+only into a terminal a human holds. Added the detached form, composing existing
+pieces rather than a parallel path:
+
+- **agent-worktrees**: `embody`/`copilot` gain `--copilot-arg` (validated
+  passthrough into the already-honored `copilot_args`) and
+  `--bridge-scope-id` (exported as `AGENT_BRIDGE_SCOPE_ID`; the local mux name
+  is unchanged so the attached verb still re-attaches). The `copilot` parser
+  moved next to `embody` in `handoff_cli.py` (module-size guard).
+- **agent-bridge**: the extension registers under `AGENT_BRIDGE_SCOPE_ID` when
+  set; CLI-mode reservations carry an optional venue descriptor inherited by
+  the claiming `live_sessions` row (heartbeat upserts keep it), release can be
+  compare-and-delete by `reservation_id`, and the reaper no longer probes a
+  venue session's (remote) pid on this host. `create --cli --detach` passthrough
+  (codespace targets; seed over stdin). `/ui` gains live sessions with a
+  represented-event feed and a message composer; `agent-bridge ui` opens it
+  (signed in through a one-time login code; the token never enters a URL). CLI-mode models split to
+  `cli_mode_models.py` (module-size guard).
+- **agent-codespaces**: `copilot --detach/--stop/--dry-run`
+  (`copilot_detach.py`); `_cmd_ssh`'s body extracted to `_ssh_session` with
+  keyword hooks (remote-command builder that receives staged plugin dirs,
+  result sink, `settle_on_disconnect`); the Connection Owner gains session
+  tenants (renewed from its own `tmux has-session` probe, released when the
+  session or the CodeSpace is gone, 24h cap) and a host-daemon reverse forward
+  (`session_forwards.py`; host side follows the daemon's live port), plus a
+  singleton guard. `_cmd_owner` moved to `owner_cli.py` (module-size guard).
+- **venue-copilot** (vendored x2): venue-carrying reserve, reservation status,
+  exact release, and the `embody`-shaped remote command.
+
+Design review (rubber-duck) drove: venue-qualified identity (several CodeSpaces
+of one repo all report `anchor-<repo>`), venue from the trusted reservation,
+Owner stays transport-only, no false success on missing plugins (old venue
+tooling fails closed), no settle-on-disconnect for a still-running session,
+verified stop before release, and no host pid probing for remote rows.
 
 ### 2026-09-22 — Unified `agent-bridge create <target> --cli`, anchor-mode default, and registration-identity fix
 

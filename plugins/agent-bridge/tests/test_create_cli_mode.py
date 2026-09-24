@@ -192,3 +192,70 @@ class TestCmdCreateCliDispatch:
         m._cmd_create(args)
 
         assert called["target"] == "some-agent"
+
+
+class TestCmdCreateCliDetach:
+    def _capture(self, monkeypatch, rc=0):
+        monkeypatch.setattr(targeting.shutil, "which", lambda name: f"/bin/{name}")
+        seen = {}
+
+        class _Result:
+            returncode = rc
+
+        def fake_run(argv, **kwargs):
+            seen["argv"] = argv
+            seen["kwargs"] = kwargs
+            return _Result()
+
+        monkeypatch.setattr(targeting.subprocess, "run", fake_run)
+        return seen
+
+    def test_detach_forwards_flag_and_pipes_seed_over_stdin(self, monkeypatch) -> None:
+        seen = self._capture(monkeypatch)
+        prompt = 'line one\nline "two" with quotes'
+
+        with pytest.raises(SystemExit) as exc:
+            m._cmd_create(_ns(prompt=prompt, detach=True, driver="orchestrator"))
+
+        assert exc.value.code == 0
+        assert seen["argv"] == [
+            "/bin/agent-codespaces", "copilot", "friendly-eureka",
+            "--detach", "--seed-file", "-", "--driver", "orchestrator",
+        ]
+        assert seen["kwargs"]["input"] == prompt
+
+    def test_detach_without_prompt_sends_no_seed(self, monkeypatch) -> None:
+        seen = self._capture(monkeypatch)
+
+        with pytest.raises(SystemExit):
+            m._cmd_create(_ns(detach=True))
+
+        assert seen["argv"] == [
+            "/bin/agent-codespaces", "copilot", "friendly-eureka", "--detach",
+        ]
+        assert seen["kwargs"]["input"] is None
+
+    def test_detach_refused_for_container_targets(self, monkeypatch, capsys) -> None:
+        self._capture(monkeypatch)
+        monkeypatch.setattr(
+            targeting.subprocess, "run",
+            lambda *a, **k: pytest.fail("must not launch"),
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            m._cmd_create(_ns(target="container:repo-1", detach=True))
+
+        assert exc.value.code == 2
+        assert "codespace" in capsys.readouterr().err
+
+    def test_detach_requires_cli(self, monkeypatch, capsys) -> None:
+        with pytest.raises(SystemExit) as exc:
+            m._cmd_create(_ns(cli=False, detach=True))
+        assert exc.value.code == 2
+        assert "--detach requires --cli" in capsys.readouterr().err
+
+    def test_parser_exposes_detach(self) -> None:
+        args = m.build_parser().parse_args(
+            ["create", "codespace:cs-1", "do it", "--cli", "--detach"]
+        )
+        assert args.detach is True and args.cli is True

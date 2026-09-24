@@ -422,6 +422,7 @@ from .session_targeting_cli import (  # noqa: F401
     _cmd_create,
     _cmd_send,
     _deliver_to_live_session,
+    _live_message_delivery,
     _live_message_kind,
     _live_reply_to,
     _live_sender_label,

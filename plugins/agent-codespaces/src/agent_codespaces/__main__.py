@@ -33,7 +33,7 @@ import time
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from . import pool as pool_mod
 from . import relay_launch
@@ -72,6 +72,7 @@ from .lifecycle import (
     wait_for_available,
 )
 from .sessions import sync_codespace_sessions
+from ._ssh_retry import exec_with_retry
 
 log = logging.getLogger("agent-codespaces")
 
@@ -932,7 +933,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "copilot":
             from .copilot_venue import cmd_copilot
 
-            return cmd_copilot(args, interactive_ssh=_interactive_ssh)
+            return cmd_copilot(args, interactive_ssh=_interactive_ssh, ssh_session=_ssh_session)
         if args.command == "list":
             return _cmd_list(args)
         if args.command == "config":
@@ -1006,7 +1007,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "config-migrate":
             return _cmd_config_migrate()
         if args.command == "owner":
-            return _cmd_owner(args)
+            from .owner_cli import cmd_owner
+            return cmd_owner(args)
         if args.command == "dev-release":
             return _cmd_dev_release(args)
         if args.command == "dev-status":
@@ -1125,7 +1127,7 @@ async def _preflight_copilot_platform(manager, name: str) -> None:  # noqa: ANN0
     from .platform_preflight import ensure_copilot_platform
 
     async def _run(cmd: str) -> tuple[int, str]:
-        result = await manager.exec_command(name, cmd, timeout=240)
+        result = await exec_with_retry(manager, name, cmd, timeout=240)
         return result.exit_code, (result.stdout or "") + (result.stderr or "")
 
     try:
@@ -1145,6 +1147,31 @@ async def _preflight_copilot_platform(manager, name: str) -> None:  # noqa: ANN0
 @_context_admitted
 def _cmd_ssh(args: argparse.Namespace) -> int:
     """SSH into a CodeSpace using ssh-manager."""
+    return _ssh_session(args)
+
+
+def _ssh_session(
+    args: argparse.Namespace,
+    *,
+    remote_cmd_builder: Callable[[list[str]], str] | None = None,
+    result_sink: Callable[[Any], int] | None = None,
+    settle_on_disconnect: bool = True,
+) -> int:
+    """The body of ``agent-codespaces ssh``: claim, lock, full venue prep, run.
+
+    In-process callers that need the full dispatch-grade preparation for a
+    non-``--stdio`` remote command (the detached ``copilot --detach`` launch)
+    pass keyword hooks instead of widening the CLI surface:
+
+    * ``remote_cmd_builder(plugin_dirs) -> str`` supplies the remote command
+      after provisioning, receiving the staged CodeSpace-scoped plugin dirs
+      (which it folds in itself); it also opts the command out of the
+      minimal "diagnostic ``--remote-cmd``" provisioning path;
+    * ``result_sink(result) -> int`` receives the exec result instead of it
+      being printed;
+    * ``settle_on_disconnect=False`` keeps the borrowing worktree's claim
+      obligation active at disconnect (the launched work keeps running).
+    """
     from ssh_manager import ConnectionManager, TargetBusyError, TargetLock
 
     from .lifecycle import account_for_codespace
@@ -1230,10 +1257,10 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         # (it also serves network-reachable containers), so the codespace path
         # must present its own secret for the official azure-auth-helper scope
         # broker. Minted/persisted host-side; injected over SSH as LC_* so it
-        # survives the login shell into the relay client.
-        from .relay_token import token_for
-
-        relay_token = token_for(args.name)
+        # survives the login shell into the relay client. Minted WITH the
+        # configured Azure scope: an unscoped token records no resources and
+        # the broker then denies every get-azure-token.
+        relay_token = relay_launch.scoped_relay_token(args.name, config)
 
     # Launch prelude: always scrub injected PATs (#160/#77); add the relay
     # exports only when the relay is in use, after the token mint.
@@ -1266,7 +1293,9 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
     # any --stage-plugin payloads are staged -- so their on-CodeSpace
     # --plugin-dir paths can be folded into the copilot invocation. See
     # _finalize_remote_cmd below.
-    diagnostic_remote_cmd = bool(args.remote_cmd and not args.stdio)
+    diagnostic_remote_cmd = bool(
+        args.remote_cmd and not args.stdio and remote_cmd_builder is None
+    )
     minimal_provision = bool(getattr(args, "no_provision", False) or diagnostic_remote_cmd)
     overall_timeout = getattr(args, "connect_timeout", None)
     if overall_timeout is None and diagnostic_remote_cmd:
@@ -1281,8 +1310,17 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         """Wrap args.remote_cmd in a login shell (see _build_launch_command).
 
         Folds ``--plugin-dir`` args in ONLY for the ``--stdio`` copilot launch,
-        never for a plain diagnostic ``--remote-cmd`` (issue #152).
+        never for a plain diagnostic ``--remote-cmd`` (issue #152). A
+        ``remote_cmd_builder`` receives the dirs and folds them in itself.
         """
+        if remote_cmd_builder is not None:
+            return _build_launch_command(
+                remote_cmd_builder(plugin_dirs),
+                [],
+                is_stdio=False,
+                relay_env=relay_env,
+                breadcrumb=breadcrumb_prelude(args.name),
+            )
         return _build_launch_command(
             args.remote_cmd,
             plugin_dirs,
@@ -1483,6 +1521,8 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
                 args.name, remote_cmd, timeout=args.timeout
             )
             tracker.reached(ConnectStage.LAUNCH_ACP)
+            if result_sink is not None:
+                return result_sink(result)
             return _emit_remote_cmd_result(result, args.timeout)
 
         # Interactive SSH -- fall through to gh codespace ssh
@@ -1551,7 +1591,7 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
             # read-only cleanliness probe can execute. Best-effort + degrade-safe:
             # un-probeable / dirty / no holder-ref -> the obligation stays active
             # (never settled blind).
-            if fence_holder_ref:
+            if fence_holder_ref and settle_on_disconnect:
                 await _settle_codespace_on_disconnect(
                     manager, args.name, fence_holder_ref,
                 )
@@ -1667,8 +1707,8 @@ async def _stage_plugins(
         dest = dest_dir(source)
         try:
             command, payload_b64 = build_stage_command(payload, dest)
-            result = await manager.exec_command(
-                name, command, timeout=60.0, input_bytes=payload_b64
+            result = await exec_with_retry(
+                manager, name, command, timeout=60.0, input_bytes=payload_b64
             )
             if result.exit_code == 0:
                 dirs.append(dest)
@@ -1721,8 +1761,8 @@ async def _check_cross_harness_fence(
         return True
 
     try:
-        read = await manager.exec_command(
-            name, fence.read_marker_command(), timeout=30.0,
+        read = await exec_with_retry(
+            manager, name, fence.read_marker_command(), timeout=30.0,
         )
         text = read.stdout if read.exit_code == 0 else ""
     except Exception as exc:
@@ -1757,8 +1797,8 @@ async def _check_cross_harness_fence(
         harness=local_harness, holder=holder_ref or "", written_at=time.time(),
     )
     try:
-        await manager.exec_command(
-            name, fence.write_marker_command(our), timeout=30.0,
+        await exec_with_retry(
+            manager, name, fence.write_marker_command(our), timeout=30.0,
         )
     except Exception as exc:
         log.warning("Cross-harness fence write on %s failed: %s", name, exc)
@@ -1780,7 +1820,7 @@ async def _provision_relay_helpers(manager, name: str) -> None:
         cfg = load_merged_config(include_cwd=False)
         ado_host = getattr(cfg.credentials, "ado_host", None)
         command = build_provision_command(ado_host=ado_host)
-        result = await manager.exec_command(name, command, timeout=30.0)
+        result = await exec_with_retry(manager, name, command, timeout=30.0)
         if result.exit_code == 0:
             log.debug("Relay helpers provisioned on %s", name)
         else:
@@ -1822,7 +1862,7 @@ async def _provision_dotfiles(manager, name: str, config) -> None:
         # path wrap their commands.
         login_command = f"bash -l -c {shlex.quote(command)}"
         # Clone + install.sh can run long on a first connect; be generous.
-        result = await manager.exec_command(name, login_command, timeout=900.0)
+        result = await exec_with_retry(manager, name, login_command, timeout=900.0, attempts=2)
         if result.exit_code == 0:
             log.debug("Dotfiles provisioned on %s", name)
         else:
@@ -1861,7 +1901,7 @@ async def _provision_harness(manager, name: str, config) -> None:
         # authenticates to GitHub via the CodeSpace's own credential helper,
         # which needs the platform env only a login shell loads.
         login_command = f"bash -l -c {shlex.quote(command)}"
-        result = await manager.exec_command(name, login_command, timeout=900.0)
+        result = await exec_with_retry(manager, name, login_command, timeout=900.0, attempts=2)
         if result.exit_code == 0:
             log.debug("Harness provisioned on %s", name)
         else:
@@ -1962,7 +2002,7 @@ async def _register_codespace_plugins(
             wrapped = f"bash -l -c {shlex.quote(command)}"
             # Settings merge is quick; the pre-install (`copilot plugin install`)
             # clones the marketplace over the relay, so allow a generous window.
-            result = await manager.exec_command(name, wrapped, timeout=240.0)
+            result = await exec_with_retry(manager, name, wrapped, timeout=240.0)
             if result.exit_code == 0:
                 log.info(
                     "Registered %d CodeSpace-scoped plugin(s) on %s: %s",
@@ -2023,7 +2063,7 @@ async def _verify_remote_auth(manager, name: str, config) -> None:
 
     async def _run_remote(cmd: str) -> str:
         wrapped = f"bash -l -c {shlex.quote(cmd)}"
-        result = await manager.exec_command(name, wrapped, timeout=30.0)
+        result = await exec_with_retry(manager, name, wrapped, timeout=30.0)
         return result.stdout or ""
 
     # Guarantee the dotfiles repo's host is checked even if its checkout isn't
@@ -2152,7 +2192,7 @@ async def _warm_remote_auth_cache(
 
     async def _run_remote(cmd: str, *, command_timeout: float) -> str:
         wrapped = f"bash -l -c {shlex.quote(cmd)}"
-        result = await manager.exec_command(name, wrapped, timeout=command_timeout)
+        result = await exec_with_retry(manager, name, wrapped, timeout=command_timeout)
         if getattr(result, "exit_code", 1) != 0:
             return ""
         return getattr(result, "stdout", "") or ""
@@ -2240,7 +2280,7 @@ async def _provision_repo_hooks(
         # on_create hooks (e.g. install scripts) can run long; give them
         # a generous timeout. on_connect-only hooks stay snappy.
         timeout = 900.0 if include_on_create else 30.0
-        result = await manager.exec_command(name, command, timeout=timeout)
+        result = await exec_with_retry(manager, name, command, timeout=timeout)
         if result.exit_code == 0:
             log.debug("Repo provision hooks applied on %s", name)
         else:
@@ -4793,113 +4833,6 @@ def _cmd_dev_status() -> int:
         print(result.stderr.strip() or result.stdout.strip(), file=sys.stderr)
         return 1
     print(result.stdout.strip() or "null")
-    return 0
-
-
-def _cmd_owner(args: argparse.Namespace) -> int:
-    """Run the Connection Owner relay reconcile daemon (config-gated; default on).
-
-    The Owner is the single, persistent per-machine owner of each CodeSpace's
-    credential relay, independent of any one agent-bridge dispatch -- so a caller
-    disconnect / bridge restart no longer drops the relay mid-task
-    (dotfiles#1320/#1333). Config-gated: it refuses to run unless
-    ``connection_owner.enabled`` is set (or ``--force`` for validation) --
-    default is now on, so this refuses only when a repo/operator has explicitly
-    opted out. It is deliberately on-demand rather than a required
-    always-resident service: ``ssh``/dispatch spin it up themselves
-    (``ensure_owner_running``) when it is not already live, and this loop exits
-    cleanly on its own once idle (see ``--idle-shutdown-after`` below) -- a
-    login-triggered service registration is a convenience, not a requirement.
-
-    ``--once`` reconciles a single cycle and exits (validation): with no holds it
-    is a safe no-op that exercises the wiring without touching a real CodeSpace.
-
-    ``--idle-shutdown-after`` overrides ``connection_owner.idle_shutdown_after``
-    (default 300s): once the hold registry has been completely empty (no
-    pinned CodeSpace, no live tenant) for that long, the loop exits by itself
-    rather than being forced to remain resident indefinitely. A non-positive
-    value disables idle shutdown.
-
-    ``--status`` prints the resolved ``connection_owner`` config as JSON
-    (``enabled`` / ``reconcile_interval`` / ``idle_shutdown_after``) and exits
-    without starting anything -- the install/update scripts call it to decide
-    whether to provision the per-machine Owner service (config-gated cutover;
-    disabled -> inert).
-    """
-    import asyncio
-
-    from .config import load_merged_config
-    from .connection_owner import (
-        ConnectionOwner,
-        list_holds,
-        make_supervised_relay_factory,
-        run_owner_daemon,
-    )
-
-    cfg = load_merged_config(include_cwd=False)
-    co = getattr(cfg, "connection_owner", None)
-    enabled = bool(co and co.enabled)
-    default_idle = co.idle_shutdown_after if co else 300.0
-
-    if getattr(args, "status", False):
-        import json
-
-        interval = float(co.reconcile_interval) if co else 15.0
-        print(json.dumps({
-            "enabled": enabled,
-            "reconcile_interval": interval,
-            "idle_shutdown_after": default_idle,
-        }))
-        return 0
-
-    if not enabled and not args.force:
-        print(
-            "connection-owner is disabled (set connection_owner.enabled: true, or "
-            "pass --force to validate); not starting.",
-            file=sys.stderr,
-        )
-        return 0
-
-    interval = (
-        args.interval
-        if args.interval is not None
-        else (float(co.reconcile_interval) if co else 15.0)
-    )
-    if interval <= 0:
-        raise RuntimeError(
-            f"connection-owner reconcile interval must be > 0 (got {interval}); "
-            "check --interval / connection_owner.reconcile_interval."
-        )
-    idle_shutdown_after = (
-        args.idle_shutdown_after
-        if getattr(args, "idle_shutdown_after", None) is not None
-        else default_idle
-    )
-    if idle_shutdown_after is not None and idle_shutdown_after <= 0:
-        idle_shutdown_after = None
-    factory = make_supervised_relay_factory(cfg)
-    owner = ConnectionOwner(factory)
-
-    if args.once:
-        asyncio.run(owner.reconcile())
-        held = sorted(h.codespace for h in list_holds())
-        active = sorted(owner.active_codespaces())
-        print(f"connection-owner: reconciled once; held={held}; active={active}")
-        return 0
-
-    print(
-        f"connection-owner: starting reconcile daemon (interval={interval}s; "
-        f"idle_shutdown_after={idle_shutdown_after}; Ctrl-C to stop)...",
-        file=sys.stderr,
-    )
-    try:
-        asyncio.run(
-            run_owner_daemon(
-                owner, interval=interval, idle_shutdown_after=idle_shutdown_after,
-            )
-        )
-    except KeyboardInterrupt:
-        pass
     return 0
 
 

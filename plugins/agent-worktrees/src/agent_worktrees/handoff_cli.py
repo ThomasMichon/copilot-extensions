@@ -45,6 +45,113 @@ def _monitor_retire_handoff_predecessor(*args, **kwargs): return _core()._monito
 def resolve_worktree_id_by_codename(*args, **kwargs): return _core().resolve_worktree_id_by_codename(*args, **kwargs)
 
 
+# Copilot flags a caller may NOT pass through `--copilot-arg`: they would change
+# what kind of process embody launches (ACP/stdio instead of the interactive TUI
+# that registers with the bridge) or race the seed embody itself delivers.
+_REJECTED_COPILOT_ARGS = ("--acp", "--stdio", "-p", "--prompt", "-i", "--interactive")
+
+
+def add_launch_passthrough_args(p: argparse.ArgumentParser) -> None:
+    """Register the launch-passthrough flags shared by `embody` and `copilot`."""
+    p.add_argument(
+        "--copilot-arg", dest="copilot_args", action="append", default=[],
+        metavar="ARG",
+        help="Extra argument appended to the launched Copilot command line "
+        "(repeatable; use the `--copilot-arg=--flag=value` form for values that "
+        "start with '-'). For example `--copilot-arg=--plugin-dir=/path` stages "
+        "a plugin into the session, `--copilot-arg=--no-ask-user` for an "
+        "unattended one. Mode-changing flags (--acp, --stdio, -p/--prompt, "
+        "-i/--interactive) are refused -- use --seed for the first turn.",
+    )
+    p.add_argument(
+        "--bridge-scope-id", dest="bridge_scope_id", default=None, metavar="ID",
+        help="Identity the launched session registers with agent-bridge "
+        "(exported as AGENT_BRIDGE_SCOPE_ID; default: `agent-worktrees get "
+        "session-scope-id`). A venue launcher sets a venue-qualified id "
+        "(e.g. `anchor-<repo>@<codespace>`) so sessions on different venues of "
+        "the same repo stay distinguishable on the host bridge. Does not change "
+        "the local mux session name.",
+    )
+
+
+def add_copilot_parser(sub) -> None:
+    # copilot (the human/TTY-facing counterpart of embody -- deliver a TTY
+    # Copilot session in THIS terminal, the canonical "___ copilot" verb also
+    # implemented by agent-codespaces/agent-containers for a remote venue)
+    p = sub.add_parser(
+        "copilot",
+        help="Deliver a TTY Copilot session to the user in this terminal "
+        "(create-or-resume like embody, then attach this terminal to it; "
+        "refuses without a controlling terminal)",
+    )
+    g = p.add_mutually_exclusive_group()
+    g.add_argument(
+        "--worktree-id", dest="worktree_id", default=None,
+        help="Deliver a Copilot session for this existing worktree",
+    )
+    g.add_argument(
+        "--new", action="store_true", help="Create a fresh worktree first, then deliver Copilot in it"
+    )
+    g.add_argument(
+        "--codename", default=None,
+        help="Same codename resolution as `embody --codename` (local first, "
+        "then a cross-machine SSH scan; fails closed on a different machine).",
+    )
+    g.add_argument(
+        "--anchor", action="store_true",
+        help="Deliver a Copilot session directly in the active project's "
+        "anchor checkout instead of any worktree -- same as "
+        "`embody --anchor`, see its help for the full rationale.",
+    )
+    p.add_argument(
+        "--seed", default=None,
+        help="Seed prompt injected as the session's first interactive turn once Copilot is ready",
+    )
+    p.add_argument(
+        "--seed-ready-timeout", dest="seed_ready_timeout", type=float, default=180.0,
+        metavar="SECONDS",
+        help="How long to wait for Copilot's input prompt before typing --seed (default 180)",
+    )
+    p.add_argument(
+        "--driver", default=None,
+        help="Label of the agent steering this session; stamps the "
+        "'driven by <agent>' banner (AGENT_BRIDGE_DRIVEN_BY)",
+    )
+    p.add_argument(
+        "--recovery", action="store_true", help="Use the repo's recovery launch command"
+    )
+    p.add_argument(
+        "--ensure-mux", dest="ensure_mux", action="store_true",
+        help="Best-effort self-heal a missing tmux/psmux before creating the "
+        "session (same explicit opt-in as `embody --ensure-mux`).",
+    )
+    p.add_argument(
+        "--mux", default=None,
+        help="Override the mux binary used to attach (default: auto-detect "
+        "tmux/psmux, same resolution as the rest of agent-worktrees)",
+    )
+    add_launch_passthrough_args(p)
+
+
+def _passthrough_error(args: argparse.Namespace) -> str | None:
+    """Return a refusal message for a disallowed `--copilot-arg`, else None."""
+    for arg in getattr(args, "copilot_args", None) or []:
+        flag = str(arg).split("=", 1)[0]
+        if flag in _REJECTED_COPILOT_ARGS:
+            return (
+                f"--copilot-arg {arg!r} is not allowed: it changes the launched "
+                "session's mode (embody always launches the interactive TUI; "
+                "use --seed for the first turn)"
+            )
+    return None
+
+
+def _apply_bridge_scope(env: dict[str, str], args: argparse.Namespace) -> None:
+    scope = getattr(args, "bridge_scope_id", None)
+    if scope:
+        env["AGENT_BRIDGE_SCOPE_ID"] = scope
+
+
 def add_parsers(sub) -> None:
     p = sub.add_parser("handoff-cutover", help="Live handoff: spawn a seeded successor Copilot in a new mux window (cut over to it), or retire an old pane")
     p.add_argument("--seed", default=None, help="Seed prompt for the successor's first interactive turn (copilot -i). Required in spawn mode.")
@@ -88,6 +195,7 @@ def add_parsers(sub) -> None:
     p.add_argument("--ensure-mux", dest="ensure_mux", action="store_true", help="Best-effort self-heal a missing tmux/psmux before creating the session (apt-get/dnf/yum/apk, POSIX only). Explicit opt-in only: an operator running a BYO terminal/session manager instead of tmux must never have tmux installed underneath them by an ordinary embody call. Set this only when preparing a venue that has nothing else already managing sessions (e.g. a CLI-mode launch).")
     p.add_argument("--dry-run", action="store_true", help="Print the resolved plan without spawning anything")
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only; always on)")
+    add_launch_passthrough_args(p)
 
 def cmd_handoff_cutover(args: argparse.Namespace) -> int:
     """Live-cutover handoff: spawn/refocus a successor Copilot or retire a pane.
@@ -225,6 +333,9 @@ def cmd_embody(args: argparse.Namespace) -> int:
             "embody requires --worktree-id <id>, --codename <name>, --new, or --anchor",
             exit_code=2,
         )
+    passthrough_error = _passthrough_error(args)
+    if passthrough_error:
+        return _json_error(passthrough_error, exit_code=2)
 
     try:
         config = cfg.load_config()
@@ -352,6 +463,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
     driver = getattr(args, "driver", None)
     if driver:
         env["AGENT_BRIDGE_DRIVEN_BY"] = driver
+    _apply_bridge_scope(env, args)
     if record is None:
         try:
             record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
@@ -572,6 +684,7 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
     driver = getattr(args, "driver", None)
     if driver:
         env["AGENT_BRIDGE_DRIVEN_BY"] = driver
+    _apply_bridge_scope(env, args)
 
     # No worktree record, no repo.worktree_root-scoped lifecycle lock to
     # acquire -- there is no worktree lifecycle (create/finalize/GC) for the

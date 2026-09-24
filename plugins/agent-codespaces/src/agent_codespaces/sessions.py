@@ -30,6 +30,7 @@ from pathlib import Path
 from plugin_activation import ActivePlugin, resolve_active_plugins
 
 from .codespace_config import CodespaceSource
+from ._ssh_retry import exec_with_retry
 
 log = logging.getLogger("agent-codespaces")
 
@@ -196,7 +197,7 @@ async def _connect_with_retry(
 
 async def _pull_tar_bytes(manager, name: str, *, timeout: float) -> bytes | None:
     """Run the remote tar+base64 and return decoded gzip-tar bytes (or None)."""
-    result = await manager.exec_command(name, _PULL_CMD, timeout=timeout)
+    result = await exec_with_retry(manager, name, _PULL_CMD, timeout=timeout)
     b64 = _extract_b64(result.stdout or "")
     if not b64:
         return None

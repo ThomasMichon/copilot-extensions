@@ -534,7 +534,7 @@ def _generate_name() -> str:
 # ground-truth milestones (did it build? push? open a PR?) without grepping the
 # free-text feed or shelling into the host (#46.3 / #46.4).
 _PROGRESS_LINE_RE = re.compile(r"\bPROGRESS:?\s+(.+)")
-_PROGRESS_KV_RE = re.compile(r"(\w+)=(\S+)")
+_PROGRESS_KV_RE = re.compile(r"([\w-]+)=(\S+)")
 
 
 def _parse_progress_markers(text: str) -> dict[str, str]:

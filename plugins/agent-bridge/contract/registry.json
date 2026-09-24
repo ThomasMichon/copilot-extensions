@@ -68,9 +68,9 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/models.py",
-          "sha256": "ba7f41917a999e932dbbee4d1140fd3f6ab0566cd31078393ad55e2f66ea50b3",
+          "sha256": "713bf04a93fcf284b832459c2e295dd38ef5a9dfa5ded7a6b09367b3033c838e",
           "semantic": false,
-          "non_semantic_reason": "Installation-scoped runtime defaults do not alter the representative session-create wire shape."
+          "non_semantic_reason": "Live-message request/response models gained an optional delivery urgency field; the representative session-create wire shape is unchanged."
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
@@ -86,9 +86,9 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
-          "sha256": "b1e64eb95157f166274e6242ef72ed6171d4be910d57e61c13e2829ec4d58138",
-          "semantic": true,
-          "non_semantic_reason": null
+          "sha256": "0e402bba48d8fa4e76802354375b226dcab26db8281d563a912d309db478facf",
+          "semantic": false,
+          "non_semantic_reason": "Remote live-message pass-through gained an optional delivery field; the registered remote session-create fixture is unchanged."
         },
         {
           "path": "plugins/agent-bridge/tests/test_wire_compat.py",

@@ -1000,8 +1000,8 @@ class ConfigSource:
     """Absolute path to the checkout supplying config (``related.yaml``,
     ``machines.yaml``, ...)."""
     origin: str
-    """``"harness"`` for the base/launch repo, ``"knowledge"`` for the bound
-    knowledge repo's config overlay."""
+    """``"harness"`` (base/launch repo), ``"machine"`` (machine-local project
+    root), or ``"knowledge"`` (the bound knowledge repo's config overlay)."""
 
 
 def _default_anchor(config: cfg.Config) -> str | None:
@@ -1021,34 +1021,29 @@ def config_source_anchors(
     """Ordered ``.agent-*`` config sources for the current launch context.
 
     This is the **knowledge overlay** (config-graft) seam (E1e): agent-* tools
-    that read harness config (``related.yaml``, ``machines.yaml``,
-    ``.agent-codespaces/config.yaml``, ...) should union across these anchors
-    instead of assuming the launch repo is the sole config source. The list is in
-    **overlay order** -- the base (harness / launch) anchor first, then the bound
-    **knowledge repo** when the launch repo requires an external state root -- so
-    later sources win on conflict.
+    that read harness config (``related.yaml``, ``machines.yaml``, ...) union
+    across these anchors, in **overlay order** (later wins): the base (harness /
+    launch) anchor, then the machine-local project root (``get config-dir``,
+    where harness setup writes machine-specific entries) when it holds agent
+    config, then the bound **knowledge repo** when the launch repo requires one.
 
     This is the config-READ axis, distinct from the **state-root** (the personal-
     state WRITE destination): it only reuses the state-root resolver to LOCATE the
-    knowledge checkout. A normal (self-hosted) repo yields just its own anchor
-    (no overlay), so grafted readers behave identically to the pre-overlay
-    single-anchor path.
+    knowledge checkout. A repo with neither a machine-local root nor a knowledge
+    binding yields just its own anchor, like the pre-overlay single-anchor path.
 
-    Args:
-        config: The layered project config (``cfg.load_config()``).
-        base_anchor: Explicit base anchor (e.g. a ``--repo`` target or the
-            control-plane anchor). Defaults to the git worktree root of ``cwd``,
-            then the launch repo's anchor.
-        cwd: Directory for the git-toplevel probe (defaults to the process cwd).
-
-    Returns:
-        A list of :class:`ConfigSource`, base first. Empty only when no base
-        anchor can be resolved at all.
+    ``base_anchor`` is an explicit base (a ``--repo`` target or the control-plane
+    anchor; defaults to the git root of ``cwd``, then the launch repo's anchor).
+    Returns the sources base first; empty only when no base anchor resolves.
     """
     base = base_anchor or _git_toplevel(cwd) or _default_anchor(config)
     sources: list[ConfigSource] = []
     if base:
         sources.append(ConfigSource(anchor=base, origin="harness"))
+    from .machine_config import machine_config_root
+
+    if local := machine_config_root(base):
+        sources.append(ConfigSource(anchor=local, origin="machine"))
     res = resolve_state_root(config, cwd=cwd)
     if res.requires_external and res.bound and res.path:
         if not base or os.path.abspath(res.path) != os.path.abspath(base):

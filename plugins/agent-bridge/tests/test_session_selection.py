@@ -528,7 +528,7 @@ def test_cmd_send_resolves_worktree_handle_and_delivers(monkeypatch, capsys):
     assert client.delivered == [
         {"session_id": "live-sess-1", "sender": "cjohnson@peer",
          "body": "please rebase", "reply_to": "wt-caller",
-         "kind": "prompt", "wait": False}
+         "kind": "prompt", "wait": False, "delivery": "queue"}
     ]
 
 
@@ -573,6 +573,20 @@ def test_live_message_kind_precedence():
     assert m._live_message_kind(argparse.Namespace()) == "prompt"
 
 
+def test_live_message_delivery_precedence():
+    assert m._live_message_delivery(argparse.Namespace(steer=True)) == "steer"
+    assert m._live_message_delivery(
+        argparse.Namespace(steer=False, interrupt=True)
+    ) == "interrupt"
+    assert m._live_message_delivery(
+        argparse.Namespace(steer=False, interrupt=False, delivery="steer")
+    ) == "steer"
+    assert m._live_message_delivery(
+        argparse.Namespace(steer=False, interrupt=False, delivery="queue")
+    ) == "queue"
+    assert m._live_message_delivery(argparse.Namespace()) == "queue"
+
+
 class _KindCapturingClient(_LiveFakeClient):
     def send_live_message(self, session_id, *, sender, body, reply_to=None,
                           kind="prompt", wait=False, wait_timeout=None, **_options):
@@ -592,6 +606,53 @@ def test_cmd_send_passes_status_check_kind(monkeypatch):
     )
     m._cmd_send(args)
     assert client.delivered == [{"kind": "status-check", "wait": True}]
+
+
+def test_a_bare_dash_prompt_reads_stdin(monkeypatch):
+    import io
+    import sys as _sys
+
+    monkeypatch.setattr(_sys, "stdin", io.StringIO("from stdin\n"))
+    args = argparse.Namespace(prompt="-", prompt_file=None)
+    assert m._resolve_prompt(args, required=True) == "from stdin\n"
+
+
+def test_cmd_send_refuses_an_empty_live_message(monkeypatch, capsys):
+    client = _KindCapturingClient(resolved={"session_id": "live-1"})
+    monkeypatch.setattr(m, "_get_client", lambda: client)
+    args = argparse.Namespace(
+        target="wt-1", prompt="  \n", new=False, json=False,
+        no_wait=True, reply_timeout=120.0,
+        notify=False, status_check=False, kind="prompt",
+    )
+    with pytest.raises(SystemExit) as exc:
+        m._cmd_send(args)
+    assert exc.value.code == 2 and client.delivered == []
+    assert "empty message" in capsys.readouterr().err
+
+
+class _DeliveryCapturingClient(_LiveFakeClient):
+    def send_live_message(
+        self, session_id, *, sender, body, reply_to=None,
+        kind="prompt", delivery="queue", wait=False, wait_timeout=None, **_options,
+    ):
+        self.delivered.append({"delivery": delivery, "wait": wait})
+        return {"message_id": 3, "replied": False}
+
+
+def test_cmd_send_passes_interrupt_delivery(monkeypatch):
+    client = _DeliveryCapturingClient(resolved={"session_id": "live-1"})
+    monkeypatch.setattr(m, "_get_client", lambda: client)
+    monkeypatch.setattr(m, "_live_sender_label", lambda args: "peer")
+    monkeypatch.setattr(m, "_live_reply_to", lambda args: "wt-caller")
+    args = argparse.Namespace(
+        target="wt-1", prompt="now", new=False, json=False,
+        no_wait=True, reply_timeout=120.0,
+        notify=False, status_check=False, kind="prompt",
+        interrupt=True, steer=False, delivery="queue",
+    )
+    m._cmd_send(args)
+    assert client.delivered == [{"delivery": "interrupt", "wait": False}]
 
 
 def test_cmd_send_forwards_expected_session_id(monkeypatch):

@@ -1329,6 +1329,59 @@ def test_seed_pane_footer_cue_also_ready():
     assert result["submitted"] is True
 
 
+_BOXED_INPUT = (
+    " ~/repo                                     Session: 0 AIC used\n"
+    "╻▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄\n"
+    "┃\n"
+    "╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀\n"
+    " ← open sidebar · / commands · ? help · tab next tab\n"
+)
+
+
+def test_seed_pane_boxed_input_is_ready():
+    # CLI >= 1.0.89 draws a boxed input with no caret and no interrupt footer.
+    seed = "Continue: do the thing"
+    driver = _SeedDriver(
+        ready_caps=[_BOXED_INPUT, _BOXED_INPUT],
+        echo_caps=[_BOXED_INPUT.replace("┃\n", f"┃ {seed}\n")],
+    )
+    result = _run_seed(driver, seed=seed)
+    assert result["ready"] is True
+    assert result["submitted"] is True
+
+
+def test_seed_pane_never_types_into_a_selection_dialog():
+    # A trust / extension-permission prompt shows its own "❯ 1. Yes" caret;
+    # typing the seed there would pick options, so it is never "ready".
+    dialog = (
+        "│ Extension wants elevated permissions │\n"
+        "│ ❯ 1. Yes                               │\n"
+        "│   3. No (Esc)                          │\n"
+        "│ ↑/↓ to navigate · enter to select · esc to cancel │\n"
+    )
+    driver = _SeedDriver(ready_caps=[dialog] * 6, echo_caps=[])
+    result = _run_seed(driver)
+    assert result["ready"] is False
+    assert driver.sends == []
+
+
+def test_seed_pane_undecodable_capture_is_not_a_crash():
+    # An undecodable capture (stdout None) reads as "no cue yet", never a crash.
+    class _NoneCap(_SeedDriver):
+        def run(self, argv, **kw):
+            from types import SimpleNamespace
+
+            if argv[1] == "capture-pane":
+                assert kw.get("encoding") == "utf-8"
+                return SimpleNamespace(stdout=None, returncode=0)
+            return super().run(argv, **kw)
+
+    driver = _NoneCap(ready_caps=[], echo_caps=[])
+    result = _run_seed(driver)
+    assert result["reason"] == "not-ready-timeout"
+    assert driver.sends == []
+
+
 def test_seed_pane_not_echoed_skips_enter():
     # Ready + typed, but the seed never echoes back -> do NOT press Enter, so a
     # partially-eaten seed is never submitted as a bogus turn.

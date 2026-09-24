@@ -25,7 +25,8 @@ import { join } from "node:path";
 import { homedir, release } from "node:os";
 import { approveAll } from "@github/copilot-sdk";
 import { joinSession } from "@github/copilot-sdk/extension";
-import { buildDeliveredSendOptions } from "./delivery.mjs";
+import { InFlightMessages, deliveryPlan } from "./delivery.mjs";
+import { makeBridgeEndpoint } from "./bridge-endpoint.mjs";
 import { resolveMetadataAsync } from "./metadata.mjs";
 
 // --- Constants ---
@@ -79,6 +80,7 @@ const state = {
   inboxPoll: null, // delivery inbox poll interval handle
   deliveryEnabled: DELIVERY_DEFAULT_ON, // /peer MUTE toggle (delivery on by default)
   delivering: false, // guard against overlapping inbox drains
+  inFlight: new InFlightMessages(), // delivered but not yet recorded by the CLI
   lastEventAt: 0, // advanced by the observe-only event handler
 };
 
@@ -138,18 +140,21 @@ function resolveToken() {
 }
 
 // --- Bridge I/O (off the event loop; always best-effort) ---
+// The endpoint re-resolves the address/token after a failed call (see
+// bridge-endpoint.mjs); state.base/state.token mirror it for the guards below.
+let endpoint = null;
+
+async function fetchBridge(method, path, body) {
+  const res = await endpoint.call(method, path, body);
+  state.base = endpoint.ep.base;
+  state.token = endpoint.ep.token;
+  return res;
+}
+
 async function bridgeFetch(method, path, body) {
   if (!state.base || !state.token) return false;
   try {
-    const res = await fetch(`${state.base}${path}`, {
-      method,
-      headers: {
-        Authorization: `Bearer ${state.token}`,
-        "Content-Type": "application/json",
-      },
-      body: body ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
-    });
+    const res = await fetchBridge(method, path, body);
     return res.ok;
   } catch {
     return false; // bridge down/unreachable -> degrade silently
@@ -160,11 +165,7 @@ async function bridgeFetch(method, path, body) {
 async function bridgeGetJson(path) {
   if (!state.base || !state.token) return null;
   try {
-    const res = await fetch(`${state.base}${path}`, {
-      method: "GET",
-      headers: { Authorization: `Bearer ${state.token}` },
-      signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
-    });
+    const res = await fetchBridge("GET", path);
     if (!res.ok) return null;
     return await res.json();
   } catch {
@@ -245,10 +246,29 @@ async function pollInbox() {
     const messages = data?.messages;
     if (!Array.isArray(messages) || messages.length === 0) return;
     const delivered = [];
+    let aborted = false;
     for (const msg of messages) {
       if (!msg || typeof msg.id !== "number") continue;
       try {
-        await session.send(buildDeliveredSendOptions(msg));
+        const plan = deliveryPlan(msg);
+        // One abort per batch: a second interrupt in the same batch must not
+        // cancel the turn the first one just started.
+        if (plan.abortFirst && !aborted) {
+          aborted = true;
+          try {
+            await session.abort();
+          } catch (e) {
+            extLog(`abort failed before message ${msg.id}: ${e.message}`);
+          }
+          // The abort discarded every message still pending in the CLI;
+          // re-send those (oldest first) so the interrupt loses nothing.
+          for (const earlier of state.inFlight.takeBefore(msg.id)) {
+            await session.send({ ...deliveryPlan(earlier).options, mode: "immediate" });
+            state.inFlight.sent(earlier);
+          }
+        }
+        await session.send(plan.options);
+        state.inFlight.sent(msg);
         delivered.push(msg.id);
       } catch (e) {
         // Stop the batch on the first send failure; unacked messages redeliver.
@@ -314,6 +334,7 @@ const session = await joinSession({
 session.on((event) => {
   try {
     state.lastEventAt = Date.now();
+    state.inFlight.observe(event);
     if (!state.sessionId && event?.sessionId) {
       state.sessionId = event.sessionId;
       // Late session id -> kick a one-off registration off the event loop.
@@ -356,8 +377,12 @@ session.on((event) => {
 
 // --- Load-time initialization (runs once; async work off the event loop) ---
 try {
-  state.base = resolveBaseUrl();
-  state.token = resolveToken();
+  endpoint = makeBridgeEndpoint({
+    resolveBase: resolveBaseUrl, resolveToken, fetchImpl: fetch, log: extLog,
+    timeoutMs: HTTP_TIMEOUT_MS,
+  });
+  state.base = endpoint.ep.base;
+  state.token = endpoint.ep.token;
   // state.meta starts unset -- resolveMetadataAsync() below fills it in the
   // background. Deliberately NOT awaited here: this whole init block must
   // finish (and the extension report ready) without waiting on any child

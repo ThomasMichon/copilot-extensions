@@ -134,7 +134,9 @@ related --conduct                        Emit merged session-start guidance
 `related --conduct` is the dynamic source used by the `session-conduct` hook.
 It combines all configured repos from the normal config loader (committed
 in-repo settings, machine-side overrides, and `config.d/` injections) with the
-grafted related index (installed plugins, harness, and knowledge overlay). The
+grafted related index (installed plugins, harness, the machine-local project
+root that `get config-dir` names -- where a stateless harness's setup writes
+machine-specific entries -- and the knowledge overlay, later winning). The
 always-on output is intentionally bounded: registered repositories are
 discovered through the active project's repository tooling; the conduct output
 itself shows the directional-entry count, while

@@ -129,6 +129,13 @@ follow-ups using the session ID:
 
 - **Shutdown CodeSpaces auto-start** when the bridge connects. Startup
   takes 60–120 s; the SSH layer retries automatically (up to ~180 s).
+- **Transient dev-tunnel resets are retried** ("An existing connection was
+  forcibly closed", `error getting tunnel`, RPC `Unavailable`, ssh exit 255):
+  ssh-manager backs off and retries the `gh codespace ssh --config` fetch, the
+  connect, and every idempotent remote step (`exec_with_retry`: probes,
+  staging, settings merges, installs); a detached launch or `--stop` retries
+  its connection once. A failure that survives those retries is real -- read
+  its stderr rather than re-running blindly.
 - **Do NOT pre-start CodeSpaces with manual SSH** — the bridge handles
   startup end-to-end.
 - **Pool pressure:** the catalog command's `create` action consults the pool planner before
@@ -148,6 +155,74 @@ a **cross-harness fence** reads a lockfile inside the CodeSpace (`~/.agent-lease
 and **refuses** the connect if a *foreign harness* holds it (the seam the
 same-harness ref store cannot see). All degrade-safe — a missing store / identity
 never blocks. See `borrowing-codespaces` for the full lease + fence model.
+
+## CLI-mode sessions (`copilot`)
+
+`<agent-codespaces catalog argv[0]> copilot <name>` delivers a real interactive Copilot CLI
+session, running in a tmux session inside the CodeSpace, into **this**
+terminal (it reserves the CLI-mode slot on the host agent-bridge, forwards the
+credential relay and the host bridge port, and runs the venue's agent-worktrees
+`copilot` verb there). Re-running it re-attaches to the same session.
+
+An **orchestrating agent** uses the detached form instead -- nothing takes over
+its terminal:
+
+```bash
+<agent-codespaces catalog argv[0]> copilot <name> --detach --seed-file task.md \
+  --driver orchestrator --copilot-arg=--no-ask-user     # prints a JSON handle
+<agent-codespaces catalog argv[0]> copilot <name> --detach --seed-file task.md \
+  --ref-file ./trace.har --ref-file ./session.md        # + reference files for the worker
+<agent-codespaces catalog argv[0]> copilot <name> --detach --dry-run   # resolved plan, no side effects
+<agent-codespaces catalog argv[0]> copilot <name> --stop               # verified stop, then release
+```
+
+Launched with `--effort <owner>`, the attach (`copilot <name>`) and `--stop`
+commands must pass the same `--effort`: they connect, and the CodeSpace claim
+refuses a different owner as busy. The launch's JSON `commands` already carry it.
+
+`--detach` runs the same dispatch-grade venue preparation as an agent-bridge
+dispatch (relay helpers, dotfiles/harness, CodeSpace-scoped plugins staged into
+the session via `--plugin-dir`, repo hooks, auth checks), then from the product
+checkout adopts it as an anchor-only `agent-worktrees` project if needed,
+records that folder in Copilot's `trustedFolders` (nobody is there to answer the
+first-run trust dialog), and launches the session with the venue's agent-worktrees
+`embody` verb.
+`--ref-file` (repeatable; a file or a folder, up to 256 MiB per call) copies
+reference material into `~/.agent-bridge/refs/<batch>/` on the venue -- outside
+the product checkout, so it is never committed -- over the same egress-free
+stdin lane as plugin staging, and tells the worker the exact paths: in its seed
+for a new session, or as a message when the session is already running (so
+re-running the same `--detach` command with `--ref-file` hands a running
+worker more files). The caller passes only paths; it never reads the files.
+`--reverse-forward VENUE_PORT:HOST_PORT` (repeatable) asks the Connection Owner
+to keep the CodeSpace's `127.0.0.1:VENUE_PORT` forwarded to this host's
+`127.0.0.1:HOST_PORT` for as long as the session lives -- for example a host
+browser started with `--remote-debugging-port=<HOST_PORT>` exposed as the
+venue's DevTools endpoint on 9222. It binds loopback only on the venue, but
+anything running there can then drive that host process: forward only what the
+worker should control. A rejoin without the flag keeps the session's forwards.
+The launch reports `reverse_forwards_ready` per venue port (it checks each one
+accepts a connection); `false` usually means a Connection Owner that predates
+this option is still running -- it exits once it holds nothing.
+A multi-line or long seed is written to `~/.agent-bridge/seeds/` on the venue and
+seeded as a one-line pointer (tmux-typed input must be a single line). It
+succeeds only once the session is registered with the host bridge (and its seed
+submitted); a failure reports the screen (`pane_tail`) and stops what it started.
+The **Connection Owner** keeps the
+credential relay and the host-bridge forward alive while its mux session exists
+(checked from the host every couple of minutes, only after the
+launch confirmed the session; never by waking a stopped CodeSpace), up to a 24h
+cap, and both forwards follow a host bridge restart onto its new port. Observe and steer it through agent-bridge
+(`live-sessions resolve`, `result`, `send`, `ui`). A detached launch keeps the
+CodeSpace claim active; `--stop` settles it like any finished connection and
+deregisters the stopped session from the host bridge at once. A CodeSpace that
+is already `Shutdown` is never booted for `--stop`: its session is gone, so it
+only releases and deregisters (`already_shutdown`), and the claim is settled by
+the ordinary release/retire step.
+
+Requires the venue's `agent-worktrees` and `agent-bridge` plugins to support
+`embody --bridge-scope-id/--copilot-arg`; an older venue fails closed with an
+"update agent-worktrees on the CodeSpace" error.
 
 ## SSH (Diagnostic Only)
 

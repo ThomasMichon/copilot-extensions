@@ -107,6 +107,25 @@ test("resolveMetadataAsync passes an anchor session-scope-id through verbatim", 
   assert.equal(meta.worktree_id, "anchor-odsp-web");
 });
 
+// Venue CLI-mode detached launch: several CodeSpaces of the same repo all
+// report `anchor-<repo>` from session-scope-id, so the launcher pins a
+// venue-qualified identity via AGENT_BRIDGE_SCOPE_ID; it must win.
+test("resolveMetadataAsync prefers an explicit AGENT_BRIDGE_SCOPE_ID", async (t) => {
+  const { dir, write } = makeFakeBinDir();
+  write("git", 0, "main");
+  write("agent-worktrees", 0, "anchor-example-web");
+
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${dir}${process.platform === "win32" ? ";" : ":"}${originalPath}`;
+  t.after(() => { process.env.PATH = originalPath; });
+
+  const meta = await resolveMetadataAsync({
+    cwd: dir, env: { AGENT_BRIDGE_SCOPE_ID: "anchor-example-web@cs-1" },
+  });
+
+  assert.equal(meta.worktree_id, "anchor-example-web@cs-1");
+});
+
 // Sanity check that the fake-binary harness itself is exercising a real
 // subprocess (not silently no-op-ing), so the timing assertion above is
 // actually meaningful.
