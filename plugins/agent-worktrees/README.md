@@ -150,6 +150,7 @@ the skills below for in-session guidance.
 | [The Worktree Picker](docs/picker.md) | The interactive launcher — screen anatomy, navigation, resume/create/clean/sync, launch-time freshness |
 | [Multiplexed Sessions](docs/mux.md) | Why sessions run in tmux/psmux — persistence, detach/rejoin, and muxed-vs-programmatic launch |
 | [Worktree Lifecycle & Change Management](docs/worktree-lifecycle.md) | The full landing flow — states, direct-push and PR mode, held/follow-up and serial-vs-parallel PRs |
+| [Cross-Repo Setup](docs/cross-repo-project-setup.md) | Which of repo class, agent exposure, and project registration to set for a given cross-repo need — decision table + traps (e.g. `expose_agent` without `--repo-dir` is a no-op; registering a `reference` repo silently reclassifies it to `worktree`) |
 | [Architecture](docs/architecture.md) | Plugin/runtime layers, installed layout, session lifecycle |
 | [CLI Reference](docs/cli-reference.md) | Commands, installer actions, config format |
 
