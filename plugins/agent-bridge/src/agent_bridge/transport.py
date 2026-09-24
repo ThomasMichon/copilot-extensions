@@ -738,8 +738,8 @@ async def resolve_local_launch(
         # Merge plan environment into the process env
         env.update(plan_env)
 
-        # Append ACP protocol args + any extra copilot args
-        args = cmd + ["--acp", "--stdio"] + target.copilot_args
+        # --no-auto-update pins the child to the installed build (no silent CLI updates).
+        args = cmd + ["--acp", "--stdio", "--no-auto-update"] + target.copilot_args
         log.info(
             "Resolved copilot launch from worktree plan: %s (cwd=%s, worktree=%s)",
             " ".join(args), work_dir, worktree_id,
@@ -748,7 +748,7 @@ async def resolve_local_launch(
         if not target.cwd:
             raise ValueError("Local agent without 'project' requires 'cwd'")
         copilot = target.copilot_path or _find_copilot()
-        args = [copilot, "--acp", "--stdio"] + target.copilot_args
+        args = [copilot, "--acp", "--stdio", "--no-auto-update"] + target.copilot_args
         work_dir = target.cwd
         log.info("Resolved local agent launch: %s (cwd=%s)", " ".join(args), work_dir)
 
@@ -836,12 +836,12 @@ def _build_remote_cmd(target: SpawnTarget, session_id: str = "") -> str:
             binstub_args = [
                 target.project, "--json", "--worktree-id", target.worktree_id,
                 "--no-mux", "--no-update", "--no-resume",
-                "--", "--acp", "--stdio",
+                "--", "--acp", "--stdio", "--no-auto-update",
             ]
         else:
             binstub_args = [
                 target.project, "--json", "--new", "--no-mux", "--no-update",
-                "--", "--acp", "--stdio",
+                "--", "--acp", "--stdio", "--no-auto-update",
             ]
         if target.copilot_args:
             binstub_args.extend(target.copilot_args)
@@ -910,7 +910,7 @@ def _build_remote_cmd(target: SpawnTarget, session_id: str = "") -> str:
     if target.env:
         for k, v in target.env.items():
             parts.append(f"export {k}={shlex.quote(v)}")
-    copilot_cmd = f"exec {shlex.quote(copilot)} --acp --stdio"
+    copilot_cmd = f"exec {shlex.quote(copilot)} --acp --stdio --no-auto-update"
     if target.copilot_args:
         copilot_cmd += " " + " ".join(shlex.quote(a) for a in target.copilot_args)
     parts.append(copilot_cmd)
