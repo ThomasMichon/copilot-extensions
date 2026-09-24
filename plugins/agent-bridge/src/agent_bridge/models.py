@@ -8,6 +8,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from .cli_mode_models import (  # noqa: F401 -- re-exported public models
+    CliModeReservationInfo,
+    CreateCliModeReservationRequest,
+    LiveSessionVenue,
+)
 from .install_paths import effective_config_dir
 from .protocol import HTTP_PROTOCOL_MIN_SUPPORTED, HTTP_PROTOCOL_VERSION
 
@@ -520,25 +525,6 @@ class SessionListResponse(BaseModel):
 # -- Live interactive-session registry (extension-backed) --------------------
 
 
-class LiveSessionVenue(BaseModel):
-    """Where a remote-venue CLI-mode session lives and how to reattach to it.
-
-    Absent (``None``) for the ordinary local case. Populated by a venue's own
-    CLI-mode launch verb (agent-bridge-cli-mode-sessions Phase 4) -- never
-    inferred or guessed by the bridge itself.
-    """
-
-    #: Venue provider boundary, matching ``session_host``'s existing
-    #: ``boundary`` vocabulary: "codespace" | "container". Local sessions
-    #: carry no venue at all rather than a "local" kind here.
-    kind: str
-    #: The venue's own name/identifier (CodeSpace name, container name).
-    target: str
-    #: The multiplexer session name to attach to on that venue
-    #: (``embody``'s own ``wt-<worktree_id>`` convention).
-    mux_session_name: str
-
-
 class RegisterLiveSessionRequest(BaseModel):
     """Registration payload from the bundled agent-bridge extension."""
 
@@ -594,34 +580,6 @@ class LiveSessionListResponse(BaseModel):
     live_sessions: list[LiveSessionInfo]
 
 
-# -- CLI-mode Session Host reservations (agent-bridge-cli-mode-sessions) -----
-
-
-class CreateCliModeReservationRequest(BaseModel):
-    """Request to reserve a worktree for an upcoming CLI-mode session.
-
-    Created by the operator (or a control surface acting on their explicit
-    request) *before* the muxed, interactive CLI process starts -- never
-    ambiently. See ``visions/remote-interactive-sessions``
-    §opt-in-not-ambient-default.
-    """
-
-    worktree_id: str
-    ttl_seconds: float = 300.0
-
-
-class CliModeReservationInfo(BaseModel):
-    """Public view of a CLI-mode Session Host reservation."""
-
-    worktree_id: str
-    reservation_id: str
-    created_at: float
-    expires_at: float
-    #: The live session that claimed this reservation, once one has -- None
-    #: while still awaiting its CLI process (§allocate-before-launch).
-    claimed_by_session_id: str | None = None
-
-
 class SdkEventIn(BaseModel):
     """One raw Copilot extension SDK event, as forwarded by the extension.
 
@@ -664,6 +622,9 @@ class LiveProgressRequest(BaseModel):
     pr: str | None = None
 
 
+LiveMessageDelivery = Literal["queue", "steer", "interrupt"]
+
+
 class SendMessageRequest(BaseModel):
     """Post a message INTO a live interactive session (Phase 2 write path)."""
 
@@ -671,6 +632,7 @@ class SendMessageRequest(BaseModel):
     body: str
     reply_to: str | None = None
     kind: str = "prompt"
+    delivery: LiveMessageDelivery = "queue"
     wait: bool = False
     wait_timeout: float = 120.0
     #: Optional freshness assertion (#2906): the session id the caller believes
@@ -710,6 +672,7 @@ class LiveMessage(BaseModel):
     body: str
     reply_to: str | None = None
     kind: str = "prompt"
+    delivery: LiveMessageDelivery = "queue"
     created_at: float
 
 

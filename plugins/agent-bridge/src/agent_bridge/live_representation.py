@@ -302,6 +302,54 @@ def build_progress_snapshot(
     return snapshot
 
 
+_MAX_MARKERS = 12
+_MARKER_VALUE_MAX = 80
+
+
+def progress_from_events(
+    raw_events: list[dict], prior: dict | None, *, ts: float,
+) -> dict[str, object] | None:
+    """Fold a represented session's own milestone lines into its progress beat.
+
+    A dispatched worker reports milestones in its replies (``PROGRESS key=value``,
+    ``DONE: ...``, ``BLOCKED: ...``) -- the same markers ACP sessions already
+    surface (``_parse_progress_markers``). Folding them here gives a live CLI
+    session's ``latest_progress`` (the UI's Progress column, ``resolve``) its
+    milestones with no extra tool call from the agent. Returns None when the
+    batch carries no marker, leaving the prior beat untouched.
+    """
+    from .session_manager import _parse_progress_markers
+
+    markers: dict[str, str] = {}
+    done = blocked = None
+    for event in raw_events:
+        if event.get("type") != "assistant.message":
+            continue
+        text = str((event.get("data") or {}).get("content") or "")
+        markers.update(_parse_progress_markers(text))
+        for line in text.splitlines():
+            line = line.strip()
+            if line.startswith("DONE:"):
+                done, blocked = line[5:].strip(), None
+            elif line.startswith("BLOCKED:"):
+                blocked = line[8:].strip()
+    if not markers and done is None and blocked is None:
+        return None
+    merged = dict((prior or {}).get("markers") or {})
+    for key, value in markers.items():
+        merged.pop(key, None)  # re-insert so the latest keys come last
+        merged[key] = value[:_MARKER_VALUE_MAX]
+    merged = dict(list(merged.items())[-_MAX_MARKERS:])
+    summary = done or " ".join(f"{k}={v}" for k, v in list(merged.items())[-6:])
+    phase = "done" if done is not None else "blocked" if blocked else (
+        next(reversed(markers)) if markers else "")
+    snapshot = build_progress_snapshot(
+        summary, phase=phase, blocker=blocked, pr=merged.get("pr"), ts=ts,
+    )
+    snapshot["markers"] = merged
+    return snapshot
+
+
 class LiveEventStore:
     """In-memory registry of represented ``EventLog``s, keyed by session id.
 

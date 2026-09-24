@@ -530,6 +530,34 @@ def _cmd_token(args: argparse.Namespace) -> None:
         print(token)
 
 
+def _cmd_ui(args: argparse.Namespace) -> None:
+    """Open the built-in status/observe UI, signed in (``--print-url``: print the link).
+
+    Starts the daemon if needed, then mints a one-time login code (single use,
+    60 s) and puts only that in the URL fragment; the page trades it for the
+    bearer token. The token itself never enters a URL -- browsers record
+    visited URLs, fragment included, in history, which may sync.
+    """
+    import webbrowser
+
+    core = _core()
+    client = core._get_client()
+    base = f"http://127.0.0.1:{core._service_port()}/ui"
+    try:
+        code = (client._request("POST", "/api/v1/ui/login-codes") or {}).get("code")
+    except Exception:  # an older daemon: fall back to pasting the token once
+        code = None
+    url = f"{base}#code={code}" if code else base
+    hint = "" if code else " -- paste the output of `agent-bridge token` into the page once"
+    if getattr(args, "print_url", False):
+        print(url + ("   (one-time link, valid 60s)" if code else hint))
+        return
+    if webbrowser.open(url):
+        print(f"Opened {base}{' (signed in)' if code else hint}.")
+    else:
+        print(f"Could not open a browser; visit {url}{hint}")
+
+
 def register_service_start_commands(sub: argparse._SubParsersAction) -> None:
     core = _core()
 
@@ -641,3 +669,6 @@ def register_service_start_commands(sub: argparse._SubParsersAction) -> None:
     )
     token_p.add_argument("-v", "--verbose", action="store_true", help="Also print the token source path and connect URLs")
     token_p.set_defaults(func=_cmd_token)
+    ui_p = sub.add_parser("ui", help="Open the built-in status/observe UI (live sessions: watch their activity and message them) in a browser")
+    ui_p.add_argument("--print-url", dest="print_url", action="store_true", help="Print a one-time signed-in UI link instead of opening a browser (the token itself is never printed)")
+    ui_p.set_defaults(func=_cmd_ui)

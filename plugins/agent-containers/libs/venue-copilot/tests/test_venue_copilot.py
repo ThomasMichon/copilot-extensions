@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shlex
 from pathlib import Path
 from typing import Any
@@ -267,3 +268,101 @@ class TestResolveDaemonPort:
 class TestDaemonPortReverseForward:
     def test_builds_loopback_to_loopback_spec(self) -> None:
         assert daemon_port_reverse_forward(9280) == "9280:127.0.0.1:9280"
+
+
+class TestDetachedLaunchAdditions:
+    """Venue CLI-mode detached launch: venue-carrying reservations, exact
+    release, reservation status, and the `embody`-shaped remote command."""
+
+    def _recording(self, payload):
+        seen: list[list[str]] = []
+
+        def fake_run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
+            seen.append(argv)
+            return _FakeCompletedProcess(json.dumps(payload))
+
+        return seen, fake_run
+
+    def test_reserve_forwards_compact_venue_json(self, monkeypatch) -> None:
+        monkeypatch.setattr("venue_copilot.shutil.which", lambda name: None)
+        seen, fake_run = self._recording({"reservation_id": "r1"})
+        venue = {"kind": "codespace", "target": "cs-1", "mux_session_name": "wt-x"}
+
+        reserve_cli_mode("x@cs-1", venue=venue, run=fake_run)
+
+        argv = seen[0]
+        assert argv[argv.index("--venue-json") + 1] == json.dumps(
+            venue, separators=(",", ":"),
+        )
+
+    def test_release_by_exact_reservation_id(self, monkeypatch) -> None:
+        monkeypatch.setattr("venue_copilot.shutil.which", lambda name: None)
+        seen, fake_run = self._recording({"removed": 1})
+
+        assert release_cli_mode("wt-A", reservation_id="r1", run=fake_run) == 1
+        assert seen[0][-2:] == ["--reservation-id", "r1"]
+
+    def test_get_reservation_reports_claimant(self, monkeypatch) -> None:
+        from venue_copilot import get_cli_mode_reservation
+
+        monkeypatch.setattr("venue_copilot.shutil.which", lambda name: None)
+        seen, fake_run = self._recording(
+            {"reservation_id": "r1", "claimed_by_session_id": "sid-9"},
+        )
+
+        got = get_cli_mode_reservation("wt-A", run=fake_run)
+
+        assert got["claimed_by_session_id"] == "sid-9"
+        assert seen[0][:5] == [
+            "agent-bridge", "--json", "live-sessions", "cli-mode", "status",
+        ]
+
+    def test_detached_command_uses_embody_with_scope_and_copilot_args(self) -> None:
+        cmd = build_copilot_remote_command(
+            "anchor-example@cs-1", anchor=True, driver="orchestrator",
+            seed="do it", detach=True, bridge_scope_id="anchor-example@cs-1",
+            copilot_args=["--plugin-dir=/stage/a", "--no-ask-user"],
+            login_shell=False,
+        )
+        argv = shlex.split(cmd)
+        assert argv[:3] == ["agent-worktrees", "embody", "--anchor"]
+        assert argv[argv.index("--bridge-scope-id") + 1] == "anchor-example@cs-1"
+        assert "--copilot-arg=--plugin-dir=/stage/a" in argv
+        assert "--copilot-arg=--no-ask-user" in argv
+        assert argv[-1] == "--json"
+        assert "--worktree-id" not in argv
+
+    @pytest.mark.parametrize("login_shell", [False, True])
+    def test_staged_home_plugin_dirs_expand_in_the_remote_shell(self, login_shell: bool) -> None:
+        import shutil
+        import subprocess
+
+        bash = shutil.which("bash")
+        if bash is None or os.name == "nt":
+            pytest.skip("needs a POSIX bash")
+        cmd = build_copilot_remote_command(
+            "anchor-example@cs-1", anchor=True, detach=True,
+            seed="keep $HOME literal", driver="d",
+            copilot_args=["--plugin-dir=$HOME/.stage/a b", "--no-ask-user"],
+            login_shell=login_shell,
+        )
+        # The remote shell expands $HOME only inside --copilot-arg values; the
+        # seed text stays verbatim.
+        script = f"embody_argv() {{ printf '%s\\n' \"$@\"; }}; HOME=/h/u; {cmd}"
+        script = script.replace("agent-worktrees", "embody_argv", 1)
+        if login_shell:
+            script = script.replace("bash -lc ", "bash -c ", 1)
+            script = f"export -f embody_argv 2>/dev/null; {script}"
+        out = subprocess.run(
+            [bash, "--noprofile", "--norc", "-c", script],
+            capture_output=True, text=True, env={"PATH": "/usr/bin:/bin", "HOME": "/h/u"},
+        ).stdout.splitlines()
+        assert "--copilot-arg=--plugin-dir=/h/u/.stage/a b" in out
+        assert "keep $HOME literal" in out
+
+    def test_attached_command_is_unchanged_by_default(self) -> None:
+        cmd = build_copilot_remote_command("wt-A", anchor=True, seed="s")
+        assert cmd.startswith("bash -lc ")
+        inner = shlex.split(cmd)[2]
+        assert shlex.split(inner)[:3] == ["agent-worktrees", "copilot", "--anchor"]
+        assert "--json" not in inner

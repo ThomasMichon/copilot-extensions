@@ -111,7 +111,7 @@ def harness(monkeypatch, store):
     monkeypatch.setattr(m, "_relay_listening", lambda port, timeout=0.5: True)
 
     import agent_codespaces.relay_token as relay_token
-    monkeypatch.setattr(relay_token, "token_for", lambda name: "tok")
+    monkeypatch.setattr(relay_token, "token_for", lambda name, **kw: "tok")
 
     monkeypatch.setattr(ssh_manager, "ConnectionManager", _FakeManager)
     monkeypatch.setattr(ssh_manager, "TargetLock", _FakeLock)

@@ -271,6 +271,7 @@ async def test_mutating_operations_proxy_structured_bridge_calls() -> None:
                 "sender": "agent-dispatch-steer",
                 "message": "resume",
                 "kind": "prompt",
+                "delivery": "steer",
                 "expected_session_id": "live-a",
                 "idempotency_key": "wake-task-a",
             },
@@ -304,6 +305,7 @@ async def test_mutating_operations_proxy_structured_bridge_calls() -> None:
                 "sender": "agent-dispatch-steer",
                 "body": "resume",
                 "kind": "prompt",
+                "delivery": "steer",
                 "wait": False,
                 "idempotency_key": "wake-task-a",
                 "expected_session_id": "live-a",
@@ -696,6 +698,15 @@ async def test_remote_client_validates_live_message_guards() -> None:
             message="resume",
             kind="prompt",
             expected_session_id="not safe",
+        )
+    with pytest.raises(RemoteBridgeError, match="delivery is not supported"):
+        await client.send_live_message(
+            "host-a",
+            "worktree-a",
+            sender="agent-dispatch-steer",
+            message="resume",
+            kind="prompt",
+            delivery="fast",
         )
 
 
