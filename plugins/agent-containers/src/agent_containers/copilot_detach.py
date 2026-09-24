@@ -239,7 +239,6 @@ def cmd_detach(
         print(busy.user_message(), file=sys.stderr)
         return busy_exit
 
-    reservation: dict[str, Any] | None = None
     remote_env: str | None = None
     try:
         relay_env, relay_port, host_relay_port = _relay_launch_env(

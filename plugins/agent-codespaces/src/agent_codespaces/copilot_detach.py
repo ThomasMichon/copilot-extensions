@@ -35,8 +35,8 @@ from collections.abc import Callable
 from typing import Any
 
 from venue_copilot import (
-    MAX_SEED_CHARS,
-    _TRUST_FOLDER,
+    MAX_SEED_CHARS,  # noqa: F401 -- re-exported: callers/tests read detach.MAX_SEED_CHARS
+    _TRUST_FOLDER,  # noqa: F401 -- re-exported for the trust-folder snippet test
     await_claim as _await_claim,
     bridge_probe_script,
     last_json,
