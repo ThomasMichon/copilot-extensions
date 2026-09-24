@@ -231,6 +231,76 @@ def test_promote_a_second_time_with_only_state_change_is_a_no_op(repo: Path):
     assert second["promoted"] is False
 
 
+def _write_changefile(repo: Path, name: str, plugin: str, bump_type: str) -> None:
+    cf_dir = repo / ".changefiles"
+    cf_dir.mkdir(exist_ok=True)
+    (cf_dir / name).write_text(
+        json.dumps({"comment": "test", "changes": [{"plugin": plugin, "type": bump_type}]}),
+        encoding="utf-8",
+    )
+
+
+def test_promote_does_not_reapply_a_changefile_left_behind_on_dev(repo: Path):
+    """Regression: a promotion never mutates dev's own tree (by design), so
+    an already-consumed changefile can keep sitting there indefinitely (the
+    async dev-side cleanup PR is best-effort, not synchronous). Confirmed
+    live: two consecutive real promotions both recomputed the identical
+    bump target from dev's still-unbumped plugin.json. A later promotion
+    must sweep every changefile currently present and only apply ones that
+    did NOT already exist in dev at the previous promotion's own dev_head --
+    never a persisted "have we ever seen this filename" list."""
+    _git(["checkout", "-q", "dev"], repo)
+    _write_changefile(repo, "20260101-first-abc123.json", "demo-plugin", "patch")
+    (repo / "plugins" / "demo-plugin" / "new-file.txt").write_text("x\n", encoding="utf-8")
+    _commit(repo, "demo-plugin: first change + changefile")
+    _git(["checkout", "-q", "main"], repo)
+
+    first = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
+    assert first["promoted"] is True
+    assert first["bumps"] == {"demo-plugin": ("0.1.0-dev1", "0.1.1-dev1")}
+    assert first["changefiles_consumed"] == ["20260101-first-abc123.json"]
+    assert first["changefiles_newly_applied"] == ["20260101-first-abc123.json"]
+    _git(["update-ref", "refs/heads/main", first["commit"]], repo)
+    _git(["reset", "--hard", "main"], repo)
+
+    # The changefile is STILL physically present on dev (never deleted by
+    # promote itself) -- add unrelated new content but no new changefile.
+    _git(["checkout", "-q", "dev"], repo)
+    (repo / "plugins" / "demo-plugin" / "another-file.txt").write_text("y\n", encoding="utf-8")
+    _commit(repo, "demo-plugin: unrelated change, leftover changefile still present")
+    _git(["checkout", "-q", "main"], repo)
+
+    second = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
+    assert second["promoted"] is True
+    # The leftover changefile must NOT drive a second, redundant bump.
+    assert second["bumps"] == {}
+    assert second["changefiles_newly_applied"] == []
+    # It is still reported as (still) consumed, for the async dev-cleanup
+    # step to eventually delete -- just not re-applied to a version bump.
+    assert second["changefiles_consumed"] == ["20260101-first-abc123.json"]
+    _git(["update-ref", "refs/heads/main", second["commit"]], repo)
+    _git(["reset", "--hard", "main"], repo)
+
+    # A genuinely NEW changefile, landing while the old one is still present
+    # (dev cleanup hasn't happened yet) -- only the new one may drive a bump.
+    _git(["checkout", "-q", "dev"], repo)
+    _write_changefile(repo, "20260102-second-def456.json", "demo-plugin", "dev")
+    (repo / "plugins" / "demo-plugin" / "third-file.txt").write_text("z\n", encoding="utf-8")
+    _commit(repo, "demo-plugin: second real change + new changefile")
+    _git(["checkout", "-q", "main"], repo)
+
+    third = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
+    assert third["promoted"] is True
+    # Still bumps from "0.1.0-dev1" (dev's own plugin.json is never touched
+    # by promote), never from the already-shipped "0.1.1-dev1" -- but the
+    # important assertion is that only ONE new bump/changefile drove it.
+    assert third["bumps"] == {"demo-plugin": ("0.1.0-dev1", "0.1.0-dev2")}
+    assert third["changefiles_newly_applied"] == ["20260102-second-def456.json"]
+    assert sorted(third["changefiles_consumed"]) == [
+        "20260101-first-abc123.json", "20260102-second-def456.json",
+    ]
+
+
 def test_promote_refuses_when_paused(repo: Path):
     _git(["checkout", "-q", "dev"], repo)
     (repo / "plugins" / "demo-plugin" / "new-file.txt").write_text("x\n", encoding="utf-8")
