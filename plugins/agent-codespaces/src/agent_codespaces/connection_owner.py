@@ -56,7 +56,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from .config import RUNTIME_DIR, ensure_runtime_dir
 from .owner_ports import sanitize_port as _sanitize_port
-from .owner_ports import sanitize_local_forwards, sanitize_reverse_forwards
+from .owner_ports import clear_session_forwards, sanitize_hold_forwards, set_hold_forwards
 
 if TYPE_CHECKING:
     from .session_forwards import SessionForwards
@@ -197,8 +197,7 @@ def _read_holds() -> dict[str, OwnerHold]:
                     continue
         hold.tenants = tenants
         hold.daemon_port = _sanitize_port(hold.daemon_port)
-        hold.reverse_forwards = sanitize_reverse_forwards(hold.reverse_forwards)
-        hold.local_forwards = sanitize_local_forwards(hold.local_forwards)
+        sanitize_hold_forwards(hold)
         sessions: dict[str, dict[str, Any]] = {}
         if isinstance(hold.sessions, dict):
             for tenant, meta in hold.sessions.items():
@@ -251,9 +250,7 @@ def _prune_hold(hold: OwnerHold, ttl: float) -> None:
     hold.sessions = {t: m for t, m in hold.sessions.items() if t in hold.tenants}
     if not hold.sessions:
         # The daemon forward exists only for session tenants.
-        hold.daemon_port = None
-        hold.reverse_forwards = {}
-        hold.local_forwards = {}
+        clear_session_forwards(hold)
 
 
 def _prune(holds: dict[str, OwnerHold], ttl: float) -> dict[str, OwnerHold]:
@@ -366,10 +363,7 @@ def hold(
         port = _sanitize_port(daemon_port)
         if port is not None:
             existing.daemon_port = port
-        if reverse_forwards is not None:
-            existing.reverse_forwards = sanitize_reverse_forwards(reverse_forwards)
-        if local_forwards is not None:
-            existing.local_forwards = sanitize_local_forwards(local_forwards)
+        set_hold_forwards(existing, reverse_forwards, local_forwards)
         _write_holds(holds)
         return existing
 
@@ -425,9 +419,7 @@ def release(
             existing.tenants.pop(tenant, None)
             existing.sessions.pop(tenant, None)
             if not existing.sessions:
-                existing.daemon_port = None
-                existing.reverse_forwards = {}
-                existing.local_forwards = {}
+                clear_session_forwards(existing)
         if unpin:
             existing.pinned = False
         existing.heartbeat_at = time.time()

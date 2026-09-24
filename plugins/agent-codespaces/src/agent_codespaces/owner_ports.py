@@ -24,6 +24,27 @@ def sanitize_local_forwards(value: Any) -> dict[str, int]:
     return _port_map(value)
 
 
+def sanitize_hold_forwards(hold: Any) -> None:
+    """Sanitize a loaded hold's extra forward maps in place."""
+    hold.reverse_forwards = sanitize_reverse_forwards(hold.reverse_forwards)
+    hold.local_forwards = sanitize_local_forwards(hold.local_forwards)
+
+
+def set_hold_forwards(hold: Any, reverse: Any = None, local: Any = None) -> None:
+    """Replace each extra forward map that was given (``None`` keeps it)."""
+    if reverse is not None:
+        hold.reverse_forwards = sanitize_reverse_forwards(reverse)
+    if local is not None:
+        hold.local_forwards = sanitize_local_forwards(local)
+
+
+def clear_session_forwards(hold: Any) -> None:
+    """Drop the forwards that exist only for session tenants."""
+    hold.daemon_port = None
+    hold.reverse_forwards = {}
+    hold.local_forwards = {}
+
+
 def _port_map(value: Any) -> dict[str, int]:
     out: dict[str, int] = {}
     if isinstance(value, dict):
