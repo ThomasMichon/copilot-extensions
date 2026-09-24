@@ -441,6 +441,36 @@ async def test_resolve_worktree_type_with_host_becomes_ssh_target():
 
 
 @pytest.mark.asyncio
+async def test_resolve_session_type_carries_venue_unspawnable():
+    """A provider with no spawnable target at all (e.g. agent-dispatch's
+    `dispatch:` namespace resolving a completed headless task, #3389
+    extension) -- only a durable session reference for read-only
+    resolve-by-any-origin-reference lookup, never a worktree/spawn_command."""
+    fb = _Fallback()
+
+    def _run(argv, **_kw):
+        return _cp(0, json.dumps({
+            "type": "session",
+            "venue": {
+                "provider": "agent-dispatch",
+                "target_id": "task-9",
+                "task": {"status": "completed", "owner_session_id": "s-1"},
+                "attachments": [],
+            },
+        }))
+
+    with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
+        t = await CliNamespaceResolver("dispatch", "agent-dispatch", fb).resolve(
+            "task-9",
+        )
+    assert t.type == "session"
+    assert t.worktree_id is None
+    assert t.spawn_command is None
+    assert t.venue["task"]["owner_session_id"] == "s-1"
+    assert "resolve" not in fb.calls
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("payload", "message"),
     [

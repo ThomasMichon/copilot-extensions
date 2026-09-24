@@ -111,6 +111,35 @@ def test_resolves_current_owner_live_session(app, client):
     assert resp.json()["session_id"] == "session-current"
 
 
+def test_resolves_completed_headless_task_via_session_type_spawn_target(
+    app, client,
+):
+    """A completed headless body (board-sweep/review worker) never binds a
+    worktree -- the resolver returns `type: "session"` (no worktree_id,
+    nothing spawnable), and the route resolves purely off `.venue`,
+    unaffected by `SpawnTarget.type` (#3389 extension, Phase 2.5a)."""
+    _live_session(app, "session-headless")
+    resolver = _FakeDispatchResolver(
+        task={"status": "completed", "owner_session_id": "session-headless"},
+    )
+
+    async def _resolve_as_session(name, *, extra_plugins=(), repo=None, repo_remote=None):
+        return SpawnTarget(
+            type="session",
+            venue={
+                "provider": "agent-dispatch", "target_id": name,
+                "task": resolver._task, "attachments": [],
+            },
+        )
+
+    resolver.resolve = _resolve_as_session
+    app.state.resolver.register_namespace_resolver(resolver)
+
+    resp = client.get("/api/v1/dispatch-tasks/task-headless/session")
+    assert resp.status_code == 200
+    assert resp.json()["session_id"] == "session-headless"
+
+
 def test_falls_through_to_attachment_history_when_owner_has_nothing_live(
     app, client,
 ):
