@@ -458,16 +458,28 @@ Round 2 (operator's response to that evaluation):
     state -- still a plain forward commit, never a force-push/rewrite.
 
 ### Phase 5 — Cutover
-- [ ] **Blocked on ThomasMichon/copilot-extensions#3512**: the promotion
-      pipeline has never actually executed (0 runs ever — see 2026-09-23/24
-      Journal entry). Fix and prove a real end-to-end promotion before
-      treating any of the items below as safe to start.
+- [x] ~~Blocked on ThomasMichon/copilot-extensions#3512~~ — **resolved,
+      2026-09-24.** The dead `workflow_run`/`branches: [dev]` filter was
+      replaced with a real `git merge-base --is-ancestor` dev-ancestry check
+      (#3512, PRs #3521/#3522). A live full end-to-end promotion was then
+      proven for the first time (PR #3533, admin-merged since the default
+      `GITHUB_TOKEN` never triggers downstream workflows — that gap tracked
+      separately as #3534). #3534 itself later closed once
+      `APERTURE_RELEASE_TOKEN` (an operator-minted fine-grained PAT) was
+      wired into `promote.yml` (PRs #3539/#3540); PR #3541 then auto-merged
+      fully unattended end-to-end, confirming the whole chain works for real
+      traffic.
 - [ ] Confirm the auto-updater coverage fix (Phase 1) is live before or with
       cutover, so existing harness sessions discover the new contribution
       flow on next pull rather than following stale guidance.
-- [ ] Ensure a PR opened against `main` post-cutover is bounced with guidance
+- [x] Ensure a PR opened against `main` post-cutover is bounced with guidance
       pointing at `dev` (branch protection message, PR template, or a bot
       comment).
+  - **Done, 2026-09-24.** `main`'s ruleset now runs a single fast required
+    `main source gate` CI job that hard-blocks any non-promotion PR (and
+    skips the full guard/test matrix for a legitimate promotion PR);
+    Copilot's redundant auto-review on `main` was also removed as
+    redundant with that gate (PRs #3529/#3530).
 - [x] Flip `.agent-worktrees/config.yaml`'s `default_branch: main` to `dev`
       (ThomasMichon/copilot-extensions#3512's sibling finding, same Journal
       entry) so `agent-worktrees create-pr`/`push-changes` — the harness's
@@ -489,6 +501,12 @@ Round 2 (operator's response to that evaluation):
       those two remaining items normally; they are not blocked by this one
       landing early.
 - [ ] Announce cutover; watch the first few real promotion cycles closely.
+  - **In progress.** Several real cycles have now run and been watched
+    closely by this effort itself (not yet a separate, deliberate
+    post-announcement observation period): PR #3541 (first fully unattended
+    auto-merge), PR #3544 (surfaced the version-regression bug below), PR
+    #3545 (changefile-sweep verification), and the corrective PR #3548.
+    A formal announcement to other contributors has not happened yet.
 
 ### Phase 6 — Maturity walk-back
 - [ ] Define success criteria for relaxing the admin-escalation gate on
@@ -1158,4 +1176,124 @@ generator contract details here or in a linked sub-doc._
   guard for stray PRs against `main`) also remain open. Whoever picks up
   #3512 next should treat this journal entry, not just the checklist, as
   the current ground truth for what's actually flipped live.
+
+### 2026-09-24 — #3512 fixed, first real end-to-end promotion proven, `main`
+### hardened, and a critical version-regression found and corrected
+
+This was a long, multi-hour push (resumed via `context-handoff` more than
+once along the way) that took the pipeline from "never actually run" to
+"proven live and hardened," then caught and fixed a serious correctness bug
+the hardening itself exposed. In order:
+
+1. **Identifier scrub landed** (#3511), with a clarified allowlist worked
+   out with the operator: `ThomasMichon`/`OneDrive` references are fine to
+   keep (the operator's own public identity/product), but
+   `tmichon_microsoft`/`odsp-web`/`gim-home` are not — those are the
+   internal-only identifiers that actually needed scrubbing from the
+   leaked content #3511 tracked.
+2. **Fixed the dead Promote/Validation-Gate `workflow_run` trigger**
+   (#3512, PRs #3521/#3522). Replaced the unreliable `branches: [dev]`
+   filter (which compared against `head_branch`, always `"main"` on this
+   repo regardless of which branch's commit actually triggered the run —
+   see the prior Journal entry's finding) with a real
+   `git merge-base --is-ancestor` check confirming the triggering
+   `head_sha` genuinely descends from `dev`.
+3. **Five real, previously-never-executed-on-Linux latent `agent-worktrees`
+   bugs** surfaced and fixed once the trigger fix let a workflow actually
+   run to completion on GitHub's Linux runners for the first time (PRs
+   #3523/#3524/#3525/#3526) — these were genuine platform-specific bugs
+   (path handling, quoting, and similar cross-platform gaps), not new
+   regressions, simply never exercised because nothing had run the
+   pipeline end-to-end on Linux before.
+4. **Proved Promote actually works end-to-end for the first time** (PR
+   #3533, admin-merged directly since the default `GITHUB_TOKEN` a
+   workflow runs under is deliberately prevented by GitHub from triggering
+   further downstream workflow runs — filed that gap as #3534 rather than
+   working around it silently).
+5. **Hardened `main`**: removed Copilot's redundant automatic PR review
+   from `main`'s branch ruleset, and added a fast, single required
+   `main source gate` CI job — now the *only* check `main`'s ruleset
+   requires — that hard-blocks any PR against `main` that isn't a
+   legitimate promotion PR, while skipping the full guard/test matrix
+   entirely for one that is (PRs #3529/#3530). This is what closes the
+   Phase 5 "bounce a stray PR against `main`" checklist item above.
+6. **Operator minted `APERTURE_RELEASE_TOKEN`** (a fine-grained PAT scoped
+   to Contents + Pull Requests: Read and write) and wired it into
+   `promote.yml` (PRs #3539/#3540), closing #3534 — a PAT-authenticated
+   push does trigger downstream workflows, unlike the default token.
+   Verified live: PR #3541 auto-merged fully unattended, with the PAT's
+   own identity (`ThomasMichon` — this repo has no separate bot account)
+   correctly passing `main-gate`'s promotion-author check.
+7. **Changefile re-application bug**, flagged by the operator: Promote
+   never mutates `dev`'s own tree, so an already-consumed changefile just
+   sits on `dev` indefinitely and gets re-read on every future promotion.
+   Fixed in two parts (PRs #3542/#3543, both bootstrapped onto `main` too,
+   per this effort's standing practice for pipeline-tooling fixes):
+   - Bump computation now skips any changefile that already existed in
+     `dev` as of the *previous* promotion's own recorded
+     `last_promotion.dev_head` (checked live via `git cat-file -e` against
+     that historical commit — deliberately not a persisted "ever
+     consumed" list, per the operator's explicit direction to keep the
+     skip logic anchored to real git history rather than accreted state).
+   - `promote.yml` gained a "Clear consumed changefiles on dev" step: after
+     every successful promotion, it opens (and auto-merges) a small async
+     cleanup PR against `dev` deleting the changefiles that promotion just
+     consumed. Verified live: this swept all 19 changefiles that had
+     accumulated on `dev` under the old bug, in one PR (#3545), immediately
+     after the fix landed.
+8. **CRITICAL version-regression bug** — found by the *operator* directly
+   inspecting a live promotion's diff, not caught by this session's own
+   verification, which is itself a real gap in this session's rigor worth
+   naming plainly rather than glossing over. Root cause:
+   `compute()`/`read_plugin_json_version()` in the bump-computation path
+   read each plugin's "current" version straight from `dev`'s own
+   `plugin.json` — but `dev`'s `plugin.json` is **never bumped** (only
+   `main`'s generated snapshot carries the real, shipped version numbers).
+   As long as the changefile-re-application bug (item 7) was still active,
+   every promotion re-read the same stale changefile and re-derived the
+   same (correct, by luck) bump every time. The moment item 7's fix
+   correctly stopped re-applying an already-consumed changefile, any
+   plugin with *no* genuinely new changefile in a given round silently
+   **regressed** back to `dev`'s frozen baseline version in the newly
+   generated `main` tree — discarding whatever version a past promotion
+   had already shipped. Confirmed live: PR #3544, the very next real
+   promotion after #3542/#3543 landed, regressed 11 of 13 plugins on
+   `main` (e.g. `agent-bridge 0.4.1-dev1` -> `0.4.0-dev551`,
+   `agent-worktrees 1.5.6-dev1` -> `1.5.5-dev265`, marketplace
+   `metadata.version 1.5.6-dev1` -> `1.7.7-dev219`).
+   - **Root-cause fix** (PRs #3546/#3547, dev + `main` bootstrap): added a
+     new `_seed_versions_from_main()` step to `tools/promote_release.py`
+     that runs *before* any bump computation and overwrites every
+     already-shipped plugin's version-bearing surfaces in the scratch tree
+     with `main`'s own last snapshot (reusing `accumulate_bumps.apply()`'s
+     exact write helpers) — so `dev`'s frozen literal version is only ever
+     treated as the true baseline for a plugin `main` has genuinely never
+     shipped before. Added a direct regression test,
+     `test_promote_preserves_shipped_version_when_no_new_changefile_at_all`,
+     proving the exact live scenario, and updated a prior regression
+     test's assertion to match the now-correct continuity behavior. All 13
+     `tools/test_promote_release.py` tests pass.
+   - **Corrective one-time restore** (PR #3548, admin-merged directly onto
+     `main` — not flowed through `dev`, since `dev` never carries bumped
+     versions in the first place): manually restored the exact 11
+     regressed plugin versions plus marketplace `metadata.version` to
+     their pre-regression values (matching commit `26f53d573`/PR #3541,
+     the last known-good state), applied via `accumulate_bumps.apply()`
+     directly through a one-off script rather than hand-editing JSON.
+     Verified via `git diff --stat` (only the 23 expected version-bearing
+     files touched) and `check-version-consistency.py`. **Confirmed live
+     on `main`'s tip as of this entry**: `agent-worktrees 1.5.6-dev1`,
+     `agent-bridge 0.4.1-dev1`, `agent-dispatch 0.1.2-dev199`,
+     `metadata.version 1.5.6-dev1` — all correct.
+
+**Status as of this entry**: every fix above is merged on both `dev` and
+`main`; the live version regression is corrected; no code-side work from
+this push remains outstanding. `dev` continues to be the trunk everyone
+should contribute to, `main` continues to update only through Promote, and
+Promote has now demonstrably run correctly, end-to-end, more than once.
+Remaining open Phase 5 items: confirming the auto-updater coverage fix is
+live, and moving "watch the first few cycles closely" from an implicit,
+in-the-moment activity to a deliberate observation window before formally
+announcing cutover to other contributors. #3534 is closed. No other open
+PRs, held claims, or background flows remain from this session.
 
