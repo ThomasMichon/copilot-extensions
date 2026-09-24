@@ -38,6 +38,7 @@ from ..models import (
 )
 from ..events import EventLog
 from ..live_representation import (
+    progress_from_events,
     await_turn_reply,
     build_progress_snapshot,
     derive_turn_state,
@@ -263,7 +264,8 @@ async def create_cli_mode_reservation(
         )
     now = time.time()
     reservation_id = db.create_cli_mode_reservation(
-        worktree_id, now=now, ttl_seconds=body.ttl_seconds
+        worktree_id, now=now, ttl_seconds=body.ttl_seconds,
+        venue=body.venue.model_dump_json() if body.venue else None,
     )
     if reservation_id is None:
         # One-host-per-cwd-lane (§one-host-per-cwd-lane): a not-yet-expired
@@ -275,7 +277,11 @@ async def create_cli_mode_reservation(
     row = db.get_cli_mode_reservation(worktree_id)
     if row is None:  # pragma: no cover -- write-then-read on the same connection
         raise HTTPException(status_code=500, detail="reservation not persisted")
-    return CliModeReservationInfo(**row)
+    return _reservation_info(row)
+
+
+def _reservation_info(row: dict[str, Any]) -> CliModeReservationInfo:
+    return CliModeReservationInfo(**{**row, "venue": _parse_venue(row.get("venue"))})
 
 
 @router.get(
@@ -288,15 +294,19 @@ async def get_cli_mode_reservation(
     row = db.get_cli_mode_reservation(worktree_id)
     if row is None:
         raise HTTPException(status_code=404, detail="no reservation for worktree")
-    return CliModeReservationInfo(**row)
+    return _reservation_info(row)
 
 
 @router.delete("/cli-mode-reservations/{worktree_id}")
 async def release_cli_mode_reservation(
-    worktree_id: str, request: Request
+    worktree_id: str, request: Request, reservation_id: str | None = None,
 ) -> dict[str, int]:
+    """Release a reservation; with ``?reservation_id=`` only that exact one
+    (compare-and-delete), never a newer reservation created since."""
     db = _db(request)
-    removed = db.release_cli_mode_reservation(worktree_id)
+    removed = db.release_cli_mode_reservation(
+        worktree_id, reservation_id=reservation_id,
+    )
     return {"removed": removed}
 
 
@@ -510,6 +520,14 @@ async def ingest_live_events(
         db.update_live_turn_state(
             session_id, turn_state=new_state, last_activity_at=time.time()
         )
+    beat = progress_from_events(
+        raw, _parse_progress(registration.get("latest_progress")), ts=time.time(),
+    )
+    if beat is not None:
+        db.update_live_progress(
+            session_id, latest_progress=json.dumps(beat, separators=(",", ":")),
+            now=time.time(),
+        )
     log = store.get(session_id)
     last_id = log.latest_id if log is not None else 0
     return IngestLiveEventsResult(
@@ -600,6 +618,7 @@ async def post_live_message(
         now=now,
         reply_to=body.reply_to,
         kind=body.kind,
+        delivery=body.delivery,
         expected_session_id=body.expected_session_id,
         idempotency_key=body.idempotency_key,
     )
@@ -682,6 +701,7 @@ async def list_live_messages(
                 body=r["body"],
                 reply_to=r.get("reply_to"),
                 kind=r.get("kind") or "prompt",
+                delivery=r.get("delivery") or "queue",
                 created_at=r["created_at"],
             )
             for r in rows

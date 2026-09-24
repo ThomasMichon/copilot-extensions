@@ -231,7 +231,7 @@ class TestCmdCopilotAnchorDefault:
             "agent_codespaces.relay_launch.effective_relay_port", lambda config: 9857,
         )
         monkeypatch.setattr(
-            "agent_codespaces.relay_token.token_for", lambda name: "tok-1",
+            "agent_codespaces.relay_token.token_for", lambda name, **kw: "tok-1",
         )
 
         rc = copilot_venue.cmd_copilot(
@@ -266,7 +266,7 @@ class TestCmdCopilotAnchorDefault:
             "agent_codespaces.relay_launch.effective_relay_port", lambda config: 9857,
         )
         monkeypatch.setattr(
-            "agent_codespaces.relay_token.token_for", lambda name: "tok-1",
+            "agent_codespaces.relay_token.token_for", lambda name, **kw: "tok-1",
         )
 
         rc = copilot_venue.cmd_copilot(_ns(), interactive_ssh=lambda *a, **kw: 0)
@@ -304,7 +304,7 @@ class TestCmdCopilotAnchorDefault:
             "agent_codespaces.relay_launch.effective_relay_port", lambda config: 9857,
         )
         monkeypatch.setattr(
-            "agent_codespaces.relay_token.token_for", lambda name: "tok-1",
+            "agent_codespaces.relay_token.token_for", lambda name, **kw: "tok-1",
         )
 
         holds_before = owner._read_holds()
@@ -335,7 +335,7 @@ class TestCmdCopilotAnchorDefault:
             "agent_codespaces.relay_launch.effective_relay_port", lambda config: 9857,
         )
         monkeypatch.setattr(
-            "agent_codespaces.relay_token.token_for", lambda name: "tok-1",
+            "agent_codespaces.relay_token.token_for", lambda name, **kw: "tok-1",
         )
 
         with pytest.raises(RuntimeError, match="ssh dropped"):
@@ -387,7 +387,7 @@ class TestCmdCopilotAnchorDefault:
             "agent_codespaces.relay_launch.effective_relay_port", lambda config: 9857,
         )
         monkeypatch.setattr(
-            "agent_codespaces.relay_token.token_for", lambda name: "tok-1",
+            "agent_codespaces.relay_token.token_for", lambda name, **kw: "tok-1",
         )
 
         rc = copilot_venue.cmd_copilot(
@@ -416,7 +416,7 @@ class TestCmdCopilotClaimEnforcement:
             "agent_codespaces.relay_launch.effective_relay_port", lambda config: 9857,
         )
         monkeypatch.setattr(
-            "agent_codespaces.relay_token.token_for", lambda name: "tok-1",
+            "agent_codespaces.relay_token.token_for", lambda name, **kw: "tok-1",
         )
 
     def test_claim_conflict_refuses_before_connecting(
@@ -534,7 +534,7 @@ class TestCmdCopilotTargetLockEnforcement:
             "agent_codespaces.relay_launch.effective_relay_port", lambda config: 9857,
         )
         monkeypatch.setattr(
-            "agent_codespaces.relay_token.token_for", lambda name: "tok-1",
+            "agent_codespaces.relay_token.token_for", lambda name, **kw: "tok-1",
         )
         from agent_codespaces import lease
         monkeypatch.setattr(lease, "claim_for_connect", lambda *a, **kw: None)
@@ -657,7 +657,7 @@ class TestEnsureAgentBridgePlugin:
             "agent_codespaces.relay_launch.effective_relay_port", lambda config: 9857,
         )
         monkeypatch.setattr(
-            "agent_codespaces.relay_token.token_for", lambda name: "tok-1",
+            "agent_codespaces.relay_token.token_for", lambda name, **kw: "tok-1",
         )
 
         seen = {}
@@ -683,7 +683,7 @@ class TestEnsureAgentBridgePlugin:
             async def ensure_connected(self, name, source, forwards):
                 return None
 
-            async def exec_command(self, host, script):
+            async def exec_command(self, host, script, timeout=None):
                 return argparse.Namespace(stdout="", exit_code=0, stderr="")
 
             async def disconnect(self, name):
@@ -736,7 +736,7 @@ class TestEnsureAgentBridgePlugin:
             async def ensure_connected(self, name, source, forwards):
                 return None
 
-            async def exec_command(self, host, script):
+            async def exec_command(self, host, script, timeout=None):
                 return argparse.Namespace(stdout="", exit_code=0, stderr="")
 
             async def disconnect(self, name):
@@ -799,7 +799,7 @@ class TestProvisionRegistrationCredentials:
             async def ensure_connected(self, name, source, forwards):
                 return None
 
-            async def exec_command(self, host, script):
+            async def exec_command(self, host, script, timeout=None):
                 exec_calls.append(script)
                 return argparse.Namespace(stdout="", exit_code=0, stderr="")
 

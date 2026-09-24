@@ -13,7 +13,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 22
 
 # Post-base ``sessions`` columns ensured idempotently on every init, independent
 # of ``schema_version``. Version-gated ``ALTER TABLE ... ADD COLUMN`` migrations
@@ -211,6 +211,7 @@ CREATE TABLE IF NOT EXISTS live_messages (
     body TEXT NOT NULL,
     reply_to TEXT,
     kind TEXT NOT NULL DEFAULT 'prompt',
+    delivery TEXT NOT NULL DEFAULT 'queue',
     idempotency_key TEXT,
     created_at REAL NOT NULL,
     delivered_at REAL
@@ -228,7 +229,8 @@ CREATE TABLE IF NOT EXISTS cli_mode_reservations (
     reservation_id TEXT NOT NULL,
     created_at REAL NOT NULL,
     expires_at REAL NOT NULL,
-    claimed_by_session_id TEXT
+    claimed_by_session_id TEXT,
+    venue TEXT
 );
 
 CREATE TABLE IF NOT EXISTS pending_prompts (

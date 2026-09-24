@@ -740,7 +740,7 @@ def config_contribution_anchor(
     anchor: str | Path, source_layer: str,
 ) -> str:
     """Tag one repository config anchor with its stable public source layer."""
-    layer = source_layer if source_layer in {"harness", "knowledge"} else "repository"
+    layer = source_layer if source_layer in {"harness", "machine", "knowledge"} else "repository"
     return _ConfigContributionAnchor(str(anchor), layer)
 
 
@@ -768,7 +768,7 @@ def entry_provenance(entry: RelatedEntry) -> dict[str, str]:
             "layer": "plugin",
             "plugin": entry.origin_plugin or "unknown",
         }
-    if entry.origin_layer in {"harness", "knowledge", "repository"}:
+    if entry.origin_layer in {"harness", "machine", "knowledge", "repository"}:
         return {"layer": entry.origin_layer}
     return {"layer": "unknown"}
 

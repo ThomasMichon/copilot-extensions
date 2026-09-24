@@ -13,6 +13,15 @@ from .db_core import (
     local_pid_alive,
 )
 
+LIVE_MESSAGE_DELIVERIES = {"queue", "steer", "interrupt"}
+
+
+def _validate_live_message_delivery(delivery: str | None) -> str:
+    value = delivery or "queue"
+    if value not in LIVE_MESSAGE_DELIVERIES:
+        raise ValueError(f"unsupported live-message delivery: {value!r}")
+    return value
+
 
 class _LiveSessionsMixin:
     """Extension-backed live-session registry and delivery helpers."""
@@ -75,7 +84,8 @@ class _LiveSessionsMixin:
             "machine=excluded.machine, cwd=excluded.cwd, "
             "worktree_id=excluded.worktree_id, repo=excluded.repo, "
             "branch=excluded.branch, pid=excluded.pid, role=excluded.role, "
-            "driven_by=excluded.driven_by, venue=excluded.venue, "
+            "driven_by=excluded.driven_by, "
+            "venue=COALESCE(excluded.venue, live_sessions.venue), "
             "status='live', updated_at=excluded.updated_at "
             "WHERE live_sessions.status != 'taken-over'",
             (session_id, machine, cwd, worktree_id, repo, branch, pid, role,
@@ -87,13 +97,18 @@ class _LiveSessionsMixin:
             # claimed by this registration and the row is marked accordingly.
             # Never blocks or reverses the registration above -- claiming is
             # honest bookkeeping, not an admission gate; an unclaimed or absent
-            # reservation is not an error.
+            # reservation is not an error. A venue descriptor recorded on the
+            # reservation by the reserving launcher is inherited here, so a
+            # remote session's venue comes from the trusted reservation.
             if worktree_id is not None and self.claim_cli_mode_reservation(
                 worktree_id, session_id, now=now
             ):
                 self.execute_write(
-                    "UPDATE live_sessions SET cli_mode=1 WHERE session_id=?",
-                    (session_id,),
+                    "UPDATE live_sessions SET cli_mode=1, venue=COALESCE("
+                    "(SELECT venue FROM cli_mode_reservations "
+                    " WHERE worktree_id=? AND claimed_by_session_id=?), venue) "
+                    "WHERE session_id=?",
+                    (worktree_id, session_id, session_id),
                 )
             return "live"
         # Rejected -- derive why for the caller's error (the authoritative
@@ -105,6 +120,7 @@ class _LiveSessionsMixin:
 
     def create_cli_mode_reservation(
         self, worktree_id: str, *, now: float, ttl_seconds: float = 300.0,
+        venue: str | None = None,
     ) -> str | None:
         """Atomically reserve a worktree's next CLI-mode Session Host.
 
@@ -115,6 +131,9 @@ class _LiveSessionsMixin:
         is silently replaced, whether or not it was ever claimed -- an expired
         reservation is not a live session.
 
+        ``venue`` is the optional opaque JSON venue descriptor the claiming
+        registration inherits into ``live_sessions.venue``.
+
         This is the explicit, operator-initiated half of
         §opt-in-not-ambient-default: nothing calls this on a caller's behalf,
         so no worktree is CLI-mode-eligible unless someone deliberately
@@ -124,14 +143,14 @@ class _LiveSessionsMixin:
         cur = self.execute_write(
             "INSERT INTO cli_mode_reservations "
             "(worktree_id, reservation_id, created_at, expires_at, "
-            "claimed_by_session_id) "
-            "VALUES (?, ?, ?, ?, NULL) "
+            "claimed_by_session_id, venue) "
+            "VALUES (?, ?, ?, ?, NULL, ?) "
             "ON CONFLICT(worktree_id) DO UPDATE SET "
             "reservation_id=excluded.reservation_id, "
             "created_at=excluded.created_at, expires_at=excluded.expires_at, "
-            "claimed_by_session_id=NULL "
+            "claimed_by_session_id=NULL, venue=excluded.venue "
             "WHERE cli_mode_reservations.expires_at <= excluded.created_at",
-            (worktree_id, reservation_id, now, now + ttl_seconds),
+            (worktree_id, reservation_id, now, now + ttl_seconds, venue),
         )
         return reservation_id if cur.rowcount == 1 else None
 
@@ -322,7 +341,7 @@ class _LiveSessionsMixin:
         # Phase 1 -- scan lapsed-live rows AND existing wedged rows (a wedged
         # row whose process later exits must still progress to expired/purge).
         scan = self.execute_read(
-            "SELECT session_id, pid, status FROM live_sessions "
+            "SELECT session_id, pid, status, venue FROM live_sessions "
             "WHERE (status='live' AND updated_at < ?) OR status='wedged'",
             (cutoff,),
         )
@@ -330,7 +349,11 @@ class _LiveSessionsMixin:
         wedge_from_live: list[str] = []
         expire_from_wedged: list[str] = []
         for row in scan:
-            alive = pid_alive(row["pid"])
+            # A venue-hosted session's pid belongs to the remote machine;
+            # probing it on this host is meaningless (it could even match an
+            # unrelated local process), so treat it as undeterminable and use
+            # the lease fallback.
+            alive = None if row["venue"] else pid_alive(row["pid"])
             if row["status"] == "live":
                 if alive is True:
                     wedge_from_live.append(row["session_id"])
@@ -668,6 +691,7 @@ class _LiveSessionsMixin:
     def enqueue_live_message(
         self, session_id: str, sender: str, body: str, now: float,
         reply_to: str | None = None, kind: str = "prompt",
+        delivery: str = "queue",
         idempotency_key: str | None = None,
     ) -> int:
         """Enqueue a message for delivery into a live session; return its id.
@@ -677,10 +701,12 @@ class _LiveSessionsMixin:
         new work). Rendered into the delivered envelope so the receiver reacts
         appropriately.
         """
+        delivery = _validate_live_message_delivery(delivery)
         cur = self.execute_write(
             "INSERT INTO live_messages (session_id, sender, body, reply_to, "
-            "kind, idempotency_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (session_id, sender, body, reply_to, kind, idempotency_key, now),
+            "kind, delivery, idempotency_key, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (session_id, sender, body, reply_to, kind, delivery, idempotency_key, now),
         )
         return int(cur.lastrowid or 0)
 
@@ -693,6 +719,7 @@ class _LiveSessionsMixin:
         now: float,
         reply_to: str | None = None,
         kind: str = "prompt",
+        delivery: str = "queue",
         expected_session_id: str | None = None,
         idempotency_key: str | None = None,
         stale_seconds: float = LIVE_SESSION_STALE_SECONDS,
@@ -718,11 +745,13 @@ class _LiveSessionsMixin:
         reason is derived from a follow-up read purely to shape the caller's
         error message; the accept/reject decision itself is the atomic insert.
         """
+        delivery = _validate_live_message_delivery(delivery)
         cutoff = now - stale_seconds
         cur = self.execute_write(
             "INSERT OR IGNORE INTO live_messages "
-            "(session_id, sender, body, reply_to, kind, idempotency_key, created_at) "
-            "SELECT ?, ?, ?, ?, ?, ?, ? "
+            "(session_id, sender, body, reply_to, kind, delivery, "
+            "idempotency_key, created_at) "
+            "SELECT ?, ?, ?, ?, ?, ?, ?, ? "
             "WHERE EXISTS ("
             "  SELECT 1 FROM live_sessions ls "
             "  WHERE ls.session_id = ? AND ls.status = 'live' "
@@ -738,7 +767,8 @@ class _LiveSessionsMixin:
             "    AND (? IS NULL OR ? = ls.session_id)"
             ")",
             (
-                session_id, sender, body, reply_to, kind, idempotency_key, now,
+                session_id, sender, body, reply_to, kind, delivery,
+                idempotency_key, now,
                 session_id, cutoff, cutoff,
                 expected_session_id, expected_session_id,
             ),
@@ -747,7 +777,7 @@ class _LiveSessionsMixin:
             return int(cur.lastrowid or 0), None
         if idempotency_key:
             existing = self.execute_read(
-                "SELECT id, session_id, sender, body, reply_to, kind "
+                "SELECT id, session_id, sender, body, reply_to, kind, delivery "
                 "FROM live_messages WHERE idempotency_key = ?",
                 (idempotency_key,),
             )
@@ -759,6 +789,7 @@ class _LiveSessionsMixin:
                     and original["body"] == body
                     and original["reply_to"] == reply_to
                     and original["kind"] == kind
+                    and original["delivery"] == delivery
                     and (
                         expected_session_id is None
                         or expected_session_id == session_id

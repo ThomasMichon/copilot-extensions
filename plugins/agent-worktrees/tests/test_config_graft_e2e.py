@@ -433,3 +433,60 @@ def test_harness_tree_stays_name_free(split, capfd):
         encoding="utf-8") == _HARNESS_RELATED
     # no narrative dir was created under the harness
     assert not (harness / ".agent-worktrees" / "related").exists()
+
+
+# ---------------------------------------------------------------------------
+# The machine-local project root (`get config-dir`) is an overlay source too:
+# harness setup writes machine-specific related entries there (#508).
+# ---------------------------------------------------------------------------
+
+def _machine_root(tmp_path, monkeypatch, related_yaml):
+    root = tmp_path / "machine-root"
+    (root / ".agent-worktrees").mkdir(parents=True)
+    (root / ".agent-worktrees" / "related.yaml").write_text(related_yaml, encoding="utf-8")
+    monkeypatch.setattr(cfg, "project_dir", lambda *a, **k: root)
+    return root
+
+
+_MACHINE_RELATED = """\
+related:
+  machine-only-web:
+    role: product
+    summary: "Written by harness setup on this machine."
+    locus: { preferred: codespace }
+    delegate: { via: agent-codespaces }
+"""
+
+
+def test_config_sources_include_the_machine_local_root_before_knowledge(split, tmp_path, monkeypatch):
+    harness, knowledge = split
+    root = _machine_root(tmp_path, monkeypatch, _MACHINE_RELATED)
+    srcs = sr.config_source_anchors(cfg.load_config(), base_anchor=str(harness))
+    assert [(s.origin, s.anchor) for s in srcs] == [
+        ("harness", str(harness)),
+        ("machine", str(root)),
+        ("knowledge", str(knowledge)),
+    ]
+
+
+def test_related_resolve_from_a_harness_checkout_sees_machine_local_entries(split, tmp_path, monkeypatch, capfd):
+    from agent_worktrees.__main__ import cmd_related_dispatch as run
+    harness, _ = split
+    _machine_root(tmp_path, monkeypatch, _MACHINE_RELATED)
+    assert run(["resolve", "machine-only-web", "--repo", str(harness)]) == 0
+    assert "Written by harness setup" in capfd.readouterr().out
+
+
+def test_machine_local_root_without_agent_config_is_not_a_source(split, tmp_path, monkeypatch):
+    harness, knowledge = split
+    empty = tmp_path / "empty-root"
+    empty.mkdir()
+    monkeypatch.setattr(cfg, "project_dir", lambda *a, **k: empty)
+    srcs = sr.config_source_anchors(cfg.load_config(), base_anchor=str(harness))
+    assert [s.origin for s in srcs] == ["harness", "knowledge"]
+
+
+def test_machine_local_root_is_not_duplicated_when_it_is_the_base(split, tmp_path, monkeypatch):
+    root = _machine_root(tmp_path, monkeypatch, _MACHINE_RELATED)
+    srcs = sr.config_source_anchors(cfg.load_config(), base_anchor=str(root))
+    assert [s.origin for s in srcs].count("machine") == 0

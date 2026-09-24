@@ -76,6 +76,7 @@ class RemoteLiveMessageRequest(BaseModel):
     sender: str = Field(min_length=1, max_length=128)
     message: str = Field(min_length=1, max_length=1_048_576)
     kind: str = Field(default="prompt")
+    delivery: str = Field(default="queue")
     expected_session_id: str | None = Field(
         default=None, min_length=1, max_length=256
     )
@@ -261,6 +262,7 @@ async def remote_send_live_message(
             sender=body.sender,
             message=body.message,
             kind=body.kind,
+            delivery=body.delivery,
             expected_session_id=body.expected_session_id,
             idempotency_key=body.idempotency_key,
             timeout=body.timeout,
