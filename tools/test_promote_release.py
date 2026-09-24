@@ -291,14 +291,55 @@ def test_promote_does_not_reapply_a_changefile_left_behind_on_dev(repo: Path):
 
     third = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
     assert third["promoted"] is True
-    # Still bumps from "0.1.0-dev1" (dev's own plugin.json is never touched
-    # by promote), never from the already-shipped "0.1.1-dev1" -- but the
-    # important assertion is that only ONE new bump/changefile drove it.
-    assert third["bumps"] == {"demo-plugin": ("0.1.0-dev1", "0.1.0-dev2")}
+    # Continues from main's actual last-shipped "0.1.1-dev1" (this test's
+    # seed step in action), never regressing to dev's frozen "0.1.0-dev1" --
+    # the important assertion is that only ONE new changefile drove it.
+    assert third["bumps"] == {"demo-plugin": ("0.1.1-dev1", "0.1.1-dev2")}
     assert third["changefiles_newly_applied"] == ["20260102-second-def456.json"]
     assert sorted(third["changefiles_consumed"]) == [
         "20260101-first-abc123.json", "20260102-second-def456.json",
     ]
+
+
+def test_promote_preserves_shipped_version_when_no_new_changefile_at_all(repo: Path):
+    """The exact regression this fix corrects: a promotion round with ZERO
+    new changefiles (an already-consumed one is still physically present,
+    but nothing genuinely new landed) must still carry main's actual
+    last-shipped version forward into the new snapshot -- never fall back
+    to dev's own frozen plugin.json literal. Confirmed live: the first
+    promotion after the "stop re-applying an already-consumed changefile"
+    fix landed regressed 11 of 13 real plugins on main this exact way."""
+    _git(["checkout", "-q", "dev"], repo)
+    _write_changefile(repo, "20260101-abc123.json", "demo-plugin", "patch")
+    (repo / "plugins" / "demo-plugin" / "new-file.txt").write_text("x\n", encoding="utf-8")
+    _commit(repo, "demo-plugin: change + changefile")
+    _git(["checkout", "-q", "main"], repo)
+
+    first = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
+    assert first["bumps"] == {"demo-plugin": ("0.1.0-dev1", "0.1.1-dev1")}
+    _git(["update-ref", "refs/heads/main", first["commit"]], repo)
+    _git(["reset", "--hard", "main"], repo)
+
+    # Unrelated new content on dev; the old changefile is still present but
+    # was already consumed, so this round drives NO new bump at all.
+    _git(["checkout", "-q", "dev"], repo)
+    (repo / "plugins" / "demo-plugin" / "another-file.txt").write_text("y\n", encoding="utf-8")
+    _commit(repo, "demo-plugin: unrelated change only")
+    _git(["checkout", "-q", "main"], repo)
+
+    second = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
+    assert second["promoted"] is True
+    assert second["bumps"] == {}
+
+    # The generated commit's own tree must still carry the SHIPPED
+    # "0.1.1-dev1" -- never dev's frozen "0.1.0-dev1".
+    plugin_json = _git(["show", f"{second['commit']}:plugins/demo-plugin/plugin.json"], repo)
+    assert json.loads(plugin_json)["version"] == "0.1.1-dev1"
+    marketplace_json = json.loads(
+        _git(["show", f"{second['commit']}:.github/plugin/marketplace.json"], repo)
+    )
+    entry = next(p for p in marketplace_json["plugins"] if p["name"] == "demo-plugin")
+    assert entry["version"] == "0.1.1-dev1"
 
 
 def test_promote_refuses_when_paused(repo: Path):
