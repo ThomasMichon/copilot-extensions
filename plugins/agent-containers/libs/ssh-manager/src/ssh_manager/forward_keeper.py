@@ -39,9 +39,10 @@ def _terminate_pid(pid: int) -> None:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 check=False,
+                timeout=30,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
-        except OSError:
+        except (OSError, subprocess.SubprocessError):
             pass
         return
     try:

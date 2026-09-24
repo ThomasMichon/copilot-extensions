@@ -96,6 +96,19 @@ class TestReserveCliMode:
         with pytest.raises(VenueCopilotError, match="boom"):
             reserve_cli_mode("wt-A", run=fake_run)
 
+    def test_a_wedged_bridge_call_is_bounded(self) -> None:
+        import subprocess
+
+        seen: dict[str, Any] = {}
+
+        def fake_run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
+            seen["timeout"] = kwargs.get("timeout")
+            raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
+
+        with pytest.raises(VenueCopilotError, match="did not answer"):
+            reserve_cli_mode("wt-A", run=fake_run)
+        assert seen["timeout"] and seen["timeout"] > 0
+
 
 class TestReleaseCliMode:
     def test_returns_removed_count(self, monkeypatch) -> None:

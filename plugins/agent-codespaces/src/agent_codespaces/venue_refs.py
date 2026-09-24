@@ -109,8 +109,8 @@ def deliver_note(session_id: str, note: str, *, run=subprocess.run) -> bool:
     try:
         result = run(
             [bridge, "send", session_id, "--prompt-file", "-", "--no-wait"],
-            input=note, capture_output=True, text=True,
+            input=note, capture_output=True, text=True, timeout=60,
         )
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         return False
     return getattr(result, "returncode", 1) == 0

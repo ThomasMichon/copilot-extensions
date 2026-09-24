@@ -186,10 +186,10 @@ without taking over the caller's terminal, use a trusted container:
 <catalog argv[0]> copilot <container-name> --stop
 ```
 
-`--detach` refuses restricted fleets, provisions the container's
-agent-bridge registration credentials, starts a small host-side forward keeper
-for the bridge and credential-relay reverse forwards, launches
-`agent-worktrees embody --json` in the container workspace, and waits for the
+`--detach` refuses restricted fleets, provisions the container's bridge
+registration credentials, starts a small host-side forward keeper for the
+bridge and credential-relay reverse forwards, launches the container's own
+worktree `embody` verb (JSON mode) in its workspace, and waits for the
 session to register with the host bridge before reporting success. Repeating
 `--copilot-arg ARG` passes extra Copilot CLI flags to the session. `--stop`
 kills and verifies the venue tmux session, stops the keeper, and deregisters

@@ -133,11 +133,11 @@ The target must already have `bash`, `tmux`, `copilot`, `agent-worktrees`, and
 the `agent-bridge` Copilot plugin installed. `--detach` provisions the host
 bridge registration credentials on the remote, starts a small keeper for the
 bridge reverse forward, reserves a venue-qualified CLI-mode identity
-(`anchor-<repo>@<ssh-target>`), runs `agent-worktrees embody --anchor --json`
-in the workspace, waits for registration, and prints a JSON handle with
-`status`/`observe`/`nudge`/`attach`/`stop` commands. Windows SSH targets are not
-supported yet; run the orchestrator on that machine and use a local
-`agent-worktrees embody`.
+(`anchor-<repo>@<ssh-target>`), runs the target's own worktree `embody` verb
+(anchor, JSON mode) in the workspace, waits for registration, and prints a JSON
+handle with `status`/`observe`/`nudge`/`attach`/`stop` commands. Windows SSH
+targets are not supported yet; run the orchestrator on that machine and embody
+the session there locally.
 
 ## Explore a machine
 

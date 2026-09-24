@@ -188,6 +188,9 @@ def observe_commands(session_id: str) -> dict[str, str]:
     }
 
 
+_BRIDGE_CALL_TIMEOUT = 60.0  # one local agent-bridge CLI call (reserve/release/lookup)
+
+
 def _run_bridge(
     argv: list[str], *, run: Callable[..., Any] = subprocess.run,
 ) -> dict[str, Any]:
@@ -202,7 +205,12 @@ def _run_bridge(
     resolved = shutil.which(argv[0]) or argv[0]
     argv = [resolved, *argv[1:]]
     env = {k: v for k, v in os.environ.items() if k not in _ENV_SCRUB}
-    result = run(argv, capture_output=True, text=True, env=env)
+    try:
+        result = run(argv, capture_output=True, text=True, env=env, timeout=_BRIDGE_CALL_TIMEOUT)
+    except subprocess.TimeoutExpired as exc:
+        raise VenueCopilotError(
+            f"`{' '.join(argv[:5])}` did not answer within {_BRIDGE_CALL_TIMEOUT:g}s"
+        ) from exc
     stdout = getattr(result, "stdout", None) or ""
     returncode = getattr(result, "returncode", 0)
     parsed: dict[str, Any] = {}
