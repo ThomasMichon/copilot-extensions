@@ -1,9 +1,0 @@
-{
-  "comment": "Auto-join occupied dispatch singleton sessions as ACP guests",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

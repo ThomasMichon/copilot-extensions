@@ -1,9 +1,0 @@
-{
-  "comment": "CLI-mode venue reservations and live-session venue rows, delivery urgency (queue/steer/interrupt) with interrupt-safe resend, bridge-endpoint re-resolution, progress beats, /ui live-sessions view and sign-in code",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

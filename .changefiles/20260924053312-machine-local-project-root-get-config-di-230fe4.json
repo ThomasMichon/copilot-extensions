@@ -1,9 +1,0 @@
-{
-  "comment": "Machine-local project root (get config-dir) is a related-config overlay source, so a stateless harness's setup-written related.yaml entries resolve from any of its checkouts",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
