@@ -133,8 +133,47 @@ def _inrepo(cwd: str | Path) -> dict:
         return {}
 
 
+def _registry_default_branch(cwd: str | Path) -> str | None:
+    """Best-effort ``default_branch`` via the SAME layered resolution every
+    other consumer (``create``/``push-changes``/``create-pr``) uses --
+    machine-local per-project override > in-repo config > registry fallback.
+
+    A bare git hook has no ``--project``/active-project context (#234 defect
+    3), so this can't call ``cfg.load_config()`` directly (it raises "No
+    active project"). Instead it maps the anchor path back to a project name
+    via the same repos.yaml/projects.yaml reverse lookup ``status``/``front-
+    door`` commands use, then loads THAT project's config explicitly via
+    ``cfg.load_project_config()`` -- which resolves the exact same
+    machine-local file (``~/.<project>/config.yaml``) ``create`` et al. read.
+    Without this, a machine-local override (e.g. pointing a repo at ``dev``
+    ahead of a repo's own in-repo config catching up) would silently NOT be
+    honored by the local pre-commit/pre-push guard, even though it already
+    governs every other PR-flow entry point. Never raises -- returns ``None``
+    on any resolution failure so callers fall through to their next tier.
+    """
+    try:
+        anchor = _anchor_from_cwd(cwd)
+        if anchor is None:
+            return None
+        from . import front_door_cli
+
+        name = front_door_cli._reverse_lookup_project(anchor)
+        if not name:
+            return None
+        branch = cfg.load_project_config(name).default_repo.default_branch
+        return str(branch) if branch else None
+    except Exception:
+        return None
+
+
 def _default_branch(cwd: str | Path) -> str | None:
-    """Best-effort default branch: in-repo config first, then origin/HEAD."""
+    """Best-effort default branch: registry/machine-local override first
+    (see :func:`_registry_default_branch`), then in-repo config, then
+    ``origin/HEAD``.
+    """
+    db = _registry_default_branch(cwd)
+    if db:
+        return db
     db = _inrepo(cwd).get("default_branch")
     if db:
         return str(db)

@@ -1,0 +1,9 @@
+{
+  "comment": "Local pre-commit/pre-push guard now honors the machine-local per-project default_branch override (the same tier create/push-changes/create-pr already read), not just the in-repo committed config",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

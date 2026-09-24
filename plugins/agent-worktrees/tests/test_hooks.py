@@ -62,6 +62,55 @@ class TestConfigResolution:
         assert hooks._pr_enabled(str(anchor)) is True
 
 
+class TestRegistryDefaultBranch:
+    """The local pre-commit/pre-push guard must honor the SAME machine-local
+    override every other PR-flow entry point (``create``/``push-changes``/
+    ``create-pr``) already does -- not just the in-repo committed config,
+    which can lag behind a deliberate per-machine override (e.g. pointing a
+    repo at ``dev`` ahead of the repo's own in-repo config catching up)."""
+
+    def test_falls_back_to_inrepo_when_unregistered(self, anchor_and_worktree):
+        anchor, wt = anchor_and_worktree
+        cfg_dir = anchor / ".agent-worktrees"
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        (cfg_dir / "config.yaml").write_text("default_branch: master\n")
+        assert hooks._default_branch(str(wt)) == "master"
+
+    def test_machine_local_override_wins_over_inrepo(
+        self, anchor_and_worktree, _isolate_agent_worktrees_home
+    ):
+        anchor, wt = anchor_and_worktree
+        fake_home = _isolate_agent_worktrees_home
+        cfg_dir = anchor / ".agent-worktrees"
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        (cfg_dir / "config.yaml").write_text("default_branch: master\n")
+
+        # Register the anchor in repos.yaml so the anchor path resolves back
+        # to a project name...
+        (fake_home / ".agent-worktrees" / "repos.yaml").write_text(
+            "schema_version: 1\n"
+            "repos:\n"
+            "  proj:\n"
+            "    class: worktree\n"
+            f"    windows: {anchor}\n"
+            f"    linux: {anchor}\n"
+            f"    wsl: {anchor}\n"
+        )
+        # ...then a machine-local per-project override points it at `dev`,
+        # exactly as ``~/.<project>/config.yaml`` does for every other
+        # pr-flow consumer.
+        proj_dir = fake_home / ".proj"
+        proj_dir.mkdir(parents=True, exist_ok=True)
+        (proj_dir / "config.yaml").write_text(
+            "repo_name: proj\n"
+            "repos:\n"
+            "  proj:\n"
+            f"    anchor: {anchor}\n"
+            "    default_branch: dev\n"
+        )
+        assert hooks._default_branch(str(wt)) == "dev"
+
+
 class TestPreCommit:
     def test_blocks_default_branch_commit_in_worktree(self, anchor_and_worktree, monkeypatch):
         anchor, wt = anchor_and_worktree
