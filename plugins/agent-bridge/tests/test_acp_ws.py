@@ -20,6 +20,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agent_bridge.acp_agent import BridgeAgent
+from agent_bridge.agent_registry import AgentResolver
 from agent_bridge.app import create_app
 from agent_bridge.events import EventLog
 from agent_bridge.models import ServiceConfig, SessionStatus
@@ -151,6 +152,37 @@ class TestAcpWebSocket:
             ) as ws:
                 assert ws.accepted_subprotocol == "acp.v1"
 
+    def test_initialize_handshake_allows_namespaced_agent_target(self, app):
+        class _DispatchResolver:
+            prefix = "dispatch"
+
+            async def ensure_ready(self, _name):
+                return None
+
+            async def list(self):
+                return []
+
+            async def resolve(self, name):  # pragma: no cover - initialize only
+                return SpawnTarget(type="local", cwd=f"/wt/{name}", worktree_id="wt-1")
+
+        with TestClient(app) as c:
+            resolver = AgentResolver({}, {})
+            resolver.register_namespace_resolver(_DispatchResolver())
+            app.state.resolver = resolver
+            with c.websocket_connect(
+                "/acp/dispatch:task-1",
+                subprotocols=["acp.v1", "bearer.test-token"],
+            ) as ws:
+                ws.send_text(json.dumps({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {"protocolVersion": 1},
+                }))
+                resp = json.loads(ws.receive_text())
+                assert resp["id"] == 1
+                assert "error" not in resp
+
 
 # ---------------------------------------------------------------------------
 # BridgeAgent adopt mode
@@ -166,6 +198,7 @@ class TestAdoptMode:
         resp = await agent.new_session(cwd="/tmp")
 
         assert resp.session_id == "s1"
+        assert resp.field_meta == {"agent-bridge": {"role": "guest"}}
         assert "s1" in agent._adopted_sessions
         assert "s1" not in agent._owned_sessions
         assert session.status == SessionStatus.IDLE  # not re-spawned

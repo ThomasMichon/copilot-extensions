@@ -288,6 +288,39 @@ update` invocation:
 The created Windows tasks run only when the user is logged on, matching the
 interactive credential/token needs of the dtssh watchdog and restore sweep.
 
+### `copilot-cli-update`
+
+Manage the Copilot CLI's own built-in self-updater. Windows only for now
+(singleton identity -- there is one Copilot CLI per machine, so unlike
+`self-update`/`fleet-update` there is no per-instance key such as `tier`).
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `type` | yes | `copilot-cli-update` |
+| `auto_update` | one of `auto_update` / `pinned_version` | `false` disables the CLI's own update check on startup; `true` (or omitted) restores its default (enabled). |
+| `pinned_version` | one of `auto_update` / `pinned_version` | Exact `FileVersionInfo.FileVersion` to converge the installed binstub to (e.g. `"1.0.88"`). |
+| `platforms` | no | Restrict to a subset of `windows` / `linux` / `wsl` (the handler itself is Windows-only regardless). |
+| `gate` | no | Restrict to specific machines (defaults to the package gate). |
+| `owner` | no | Override the collision owner label (defaults to the package name). |
+
+The CLI's self-updater hot-swaps the installed binary directly on launch
+(rotating the prior binary aside as `copilot.exe.old-<pid>-<unixms>` next to
+it under the WinGet Links directory), entirely independent of any package
+manager. Once it has touched a winget-installed binary, winget itself can no
+longer reconcile it (`winget install` refuses with "Unable to remove Portable
+package as it has been modified") -- this is why pinning the CLI needs its own
+resource type rather than `type: package`.
+
+- `auto_update: false` persists a `COPILOT_AUTO_UPDATE` user environment
+  variable via the registry (`HKCU\Environment`), which the CLI reads to skip
+  its own update check. `auto_update: true` removes any override.
+- `pinned_version` converges the installed binstub to an exact version by
+  restoring a backup the self-updater already rotated aside. It never
+  fabricates or downloads a binary: with no matching backup, the resource
+  reports **blocked** (a real precondition this run cannot satisfy) rather
+  than a false success. If the binstub itself is not found at the resolved
+  location (e.g. a non-WinGet install), the resource reports **skipped**.
+
 ## Path anchors
 
 | Anchor | Resolves to |
@@ -327,6 +360,7 @@ compatibility data from lower-authority declarations remain effective:
 | power setting conflicting `ac` or `dc` value | highest authority for that power source wins; equal-highest disagreement errors |
 | self-update `present` + `absent` | highest authority wins; equal-highest disagreement errors |
 | fleet-update `present` + `absent` | highest authority wins; equal-highest disagreement errors |
+| copilot-cli-update conflicting `auto_update` or `pinned_version` | highest authority wins; equal-highest disagreement errors |
 
 File `format` and `content` are selected from declarations participating in the
 winning strategy (`enforce` when present, otherwise `ensure-present`), so

@@ -14,38 +14,55 @@
 # the only machine-local config it needs is the project marker (repo_name +
 # headless). Read by agent-worktrees >= v1.5.3-dev34.
 
-default_branch: main
+default_branch: dev
 remote: origin
+
+# `main` is still this repo's actual GitHub default branch (releases are cut
+# from it), but `dev` is the contribution branch every agent forks worktrees
+# from and targets with PRs (see `default_branch` above + the PR workflow
+# note below). The pre-commit hook guard must therefore protect BOTH names
+# from direct in-worktree commits, not just `default_branch` -- list both
+# explicitly rather than relying on the single-branch default.
+protected_branches: [main, dev]
 
 # PR workflow (agent-worktrees hook facility + create-pr flow) — REQUIRED.
 #
 # copilot-extensions lands changes through pull requests, not direct pushes to
-# `main`. This is enforced on three layers that agree:
+# `dev` (the contribution branch -- see below). This is enforced on three
+# layers that agree:
 #
-#   1. This config (`required: true`) — `push-changes` REFUSES direct-to-`main`
+#   1. This config (`required: true`) — `push-changes` REFUSES direct-to-`dev`
 #      and steers every change through `create-pr`. `required` implies
 #      `enabled`, which also arms the plugin's PR-workflow git-hook shims
 #      (installed by `agent-worktrees register`, armed via
 #      `AGENT_WORKTREES_HOOKS=1` for `pr.enabled` repos): they block committing
-#      to `main` from a worktree and block pushing a worktree branch directly.
+#      to `dev` from a worktree and block pushing a worktree branch directly.
 #      The legitimate `create-pr` / `push-changes` push bypasses the pre-push
 #      guard via `AGENT_WORKTREES_PR_PUSH=1`.
 #   2. A GitHub repository ruleset ("Default-branch policy: PR-required +
 #      non-blocking Copilot review", id 18553911) with a `pull_request` rule --
-#      the FORMAL branch policy that blocks direct pushes to `main` server-side,
+#      the FORMAL branch policy that blocks direct pushes to `dev` server-side,
 #      so the enforcement holds even for a tool/path that predates or bypasses
 #      layer 1. (One nuance: a commit that is the head of an OPEN PR can still
-#      fast-forward `main` because GitHub counts it as "made through a PR"; an
+#      fast-forward `dev` because GitHub counts it as "made through a PR"; an
 #      unassociated direct commit is rejected. Layer 1 keeps agents off that
 #      path regardless.)
 #   3. The same ruleset's `copilot_code_review` rule auto-requests a
 #      **non-blocking** Copilot review on every PR (review_on_push: true). It is
 #      a review, not a required status check, so it never gates the merge.
 #
+# `dev` is the contribution branch; `main` ships releases. Plugins are
+# published/deployed from `main`, so `dev` is periodically promoted to `main`
+# through the release pipeline -- never by an individual contributor's PR.
+# The ONLY sanctioned exception is unsticking a broken release pipeline itself
+# (e.g. `main` needs a direct hotfix because the promotion job is down); that
+# is a deliberate, explicitly-called-out operator action, never a routine
+# contribution, and every other agent still defaults to `dev`.
+#
 # Flow for every agent (see CONTRIBUTING.md § "Contribution flow"):
 #   copilot-extensions create  ->  edit  ->  create-pr  (auto_open opens the PR)
 #   ->  Copilot posts its (non-blocking) review  ->  the submitter self-merges:
-#       agent-worktrees pr-merge <#> --now      (direct squash merge)
+#       agent-worktrees pr-merge <#> --now      (direct squash merge onto `dev`)
 #
 # This repo is a **submitter-self-merge** repo: it is PR-required, but the only
 # review is a NON-BLOCKING Copilot pass, so the PR author (the owner) approves

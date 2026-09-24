@@ -152,11 +152,30 @@ async def _run_bridge_ws(
         canonical = canonicalize(agent_name) if callable(canonicalize) else (
             agent_name if agent_name in resolver.agents else None
         )
-        if not isinstance(canonical, str) or not canonical:
-            log.warning("ACP WS unknown agent '%s'", agent_name)
-            await ws.close(code=1011)
-            return
-        agent_name = canonical
+        if isinstance(canonical, str) and canonical:
+            agent_name = canonical
+        else:
+            refresh = getattr(resolver, "refresh_provider_resolvers", None)
+            if callable(refresh):
+                refresh()
+            parse_namespaced = getattr(resolver, "_parse_namespaced_agent", None)
+            namespaced = callable(parse_namespaced) and (
+                parse_namespaced(agent_name) is not None
+            )
+            if not namespaced:
+                from .. import agent_registry as compat
+
+                repo, venue = compat._split_repo_venue(agent_name)
+                namespaced = bool(
+                    repo
+                    and venue
+                    and callable(parse_namespaced)
+                    and parse_namespaced(venue) is not None
+                )
+            if not namespaced:
+                log.warning("ACP WS unknown agent '%s'", agent_name)
+                await ws.close(code=1011)
+                return
     if adopt_session_id is not None and mgr.get_session(adopt_session_id) is None:
         log.warning("ACP WS unknown session '%s'", adopt_session_id)
         await ws.close(code=1011)

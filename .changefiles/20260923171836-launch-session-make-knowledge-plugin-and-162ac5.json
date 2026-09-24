@@ -1,9 +1,0 @@
-{
-  "comment": "launch-session: make knowledge-plugin and marketplace-override preflights retry-and-degrade instead of exiting the whole launch on a transient current-version swap race",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

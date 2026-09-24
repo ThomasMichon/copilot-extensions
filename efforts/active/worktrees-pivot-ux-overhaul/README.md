@@ -43,8 +43,9 @@ re-litigation of the broader Picker/Manager extraction, which
 
 ### Triage of prior art (2026-09-22)
 
-A sweep across `gim-home/odsp-web-harness`, `tmichon_microsoft/dotfiles`
-(the bound knowledge repo's issue tracker), and `copilot-extensions` itself
+A sweep across the operator's personal harness repo, their private
+knowledge repo (the bound knowledge repo's issue tracker), and
+`copilot-extensions` itself
 found substantial existing groundwork. Nothing below needs to be rebuilt;
 this effort's job is to **finish, adopt, or extend** it for the Worktrees
 pivot specifically.
@@ -76,10 +77,11 @@ pivot specifically.
   `scripts/preview-picker.ps1`/`.sh` already produce headless SVG captures
   against injected fixture/demo data (mock-data-backed, exactly per the
   wishlist). The blocker is a **known, already-triaged bug**:
-  `gim-home/odsp-web-harness#265` / `tmichon_microsoft/dotfiles#2120`
+  a real-world consuming harness's own tracker issue / the operator's
+  private knowledge-repo tracker
   ("Setup diagnostics: local Worktree Manager screenshot command crashes")
   — an active but not-yet-designed bug-triage effort exists at
-  `<knowledge-repo>/efforts/active/odsp-web-harness/setup-diagnostics-worktree-screenshot/README.md`.
+  `<knowledge-repo>/efforts/active/harness/setup-diagnostics-worktree-screenshot/README.md`.
   This effort's Phase 1 fixes that crash as a prerequisite, then captures the
   actual comparison baseline.
 - **Accelerator (fast claims/status reads) — already built and deployed.**
@@ -121,12 +123,13 @@ pivot specifically.
   orphan-pane-reaper and record-reconciliation phases remain a distinct,
   unclaimed gap this effort does **not** take on.
 - **`make-bulk-worktree-deletion-clear-and-safe`**
-  (gim-home/odsp-web-harness#430 / dotfiles#2158) — has its own design sketch
+  (a real-world consuming harness's own tracker issue and its knowledge-repo
+  cross-link) — has its own design sketch
   (multi-select bulk delete + force-flag plumbing + preflight grouping by
   `interpret_descriptor_payload` outcome). Touches the same Worktrees-pivot
   screen but is a distinct capability (destructive bulk action UX, not
   presentation/columns/ordering). Left alone; cross-link only.
-- **`gim-home/odsp-web-harness#1998`** ("Worktree Manager: Add
+- **A real-world consuming harness's own tracker issue #1998** ("Worktree Manager: Add
   cross-repository authoritative-agent picker") and **`#181`** ("Textual
   picker keyboard-dead over Windows OpenSSH") — tangential Worktrees-pivot
   bugs/asks unrelated to this effort's scope (input platform bug; a
@@ -192,8 +195,8 @@ parallelizable across worktrees.
 - [x] Fix the screenshot-command crash blocking `picker-shot.py` /
       `preview-picker.ps1`/`.sh` / `worktree-manager picker screenshot`.
       **Filed as [copilot-extensions#3319](https://github.com/ThomasMichon/copilot-extensions/issues/3319)**
-      (2026-09-22, closed 2026-09-23): the originally-reported crash
-      (gim-home/odsp-web-harness#265 / dotfiles#2120) traced to
+      (the originally-reported crash, tracked in a real-world consuming
+      harness's own tracker and its knowledge-repo cross-link) traced to
       `picker_tui/engine.py`, which no longer exists (retired with the
       bundled Picker per `worktree-manager-control-plane` Phase 6). Live
       reproduction found a **different, current** root cause instead: the
@@ -381,8 +384,8 @@ reviewed-plan PR per the standard effort review gate before Phase 1 begins._
 ## Journal
 
 ### 2026-09-22 — Kickoff: triage sweep + reviewed plan drafted
-- Swept `gim-home/odsp-web-harness`, `tmichon_microsoft/dotfiles` (bound
-  knowledge repo), and `copilot-extensions` itself for existing issues and
+- Swept the operator's personal harness repo, their private knowledge repo
+  (bound knowledge repo), and `copilot-extensions` itself for existing issues and
   efforts touching the Worktrees pivot / Textual picker.
 - Found and cited the directly reusable prior art: the shipped claims
   pecking-order module + its Codespaces/Containers adoption

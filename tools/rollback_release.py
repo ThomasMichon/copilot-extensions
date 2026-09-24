@@ -75,11 +75,15 @@ def _land_via_pr(
     ``base_ref``, merge it (squash -- this repo's ruleset allows no other
     method), and return the real, post-merge commit sha on ``base_ref``.
 
-    This is the only way to land a change on a branch protected by a
-    zero-bypass "pull request required" ruleset (personal GitHub accounts
-    cannot grant the GitHub Actions app -- or any other actor -- a bypass
-    the way an organization can) -- it is the same sanctioned path every
-    other change to this repo already uses."""
+    This is the only way to land a change automatically: a personal GitHub
+    account cannot grant the GitHub Actions app a bypass on a PR-required
+    ruleset the way an organization can (the ``Integration`` actor type is
+    rejected outright), so a raw push always fails. This is the same
+    sanctioned path every other change to this repo already uses. (A
+    genuine human-operator emergency retains a separate, narrower escape
+    hatch: ``main``'s ruleset also grants a ``RepositoryRole: admin``
+    bypass, usable via ``gh pr merge --admin`` -- never automated here,
+    reserved for a human deciding a true emergency merits it.)"""
     import json as _json
     import subprocess as _subprocess
 

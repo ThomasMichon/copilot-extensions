@@ -29,14 +29,34 @@ def register_process_cleanup(
     _CLEANUPS[id(process)] = _ProcessCleanup(process, close)
 
 
-async def run_process_cleanup(process: asyncio.subprocess.Process) -> None:
+async def run_process_cleanup(
+    process: asyncio.subprocess.Process, *, timeout: float | None = None,
+) -> None:
+    """Await the registered cleanup for ``process``, shielded from cancellation.
+
+    ``timeout``, when given, bounds how long THIS caller waits -- it does not
+    cancel the underlying cleanup (still ``shield``ed, so a kill already in
+    flight runs to completion in the background rather than being abandoned
+    mid-``taskkill``). Callers that need a hard cancellation guarantee should
+    keep the default unbounded wait; a bounded, best-effort caller (e.g. an
+    ambient background watcher whose sole owner is about to exit anyway)
+    should pass a modest ceiling so a slow remote process-tree kill can't
+    stall the whole caller indefinitely (observed on Windows: `taskkill /T
+    /F` against a `gh cs ssh --stdio` child can take 100+ seconds under
+    endpoint-protection scanning).
+    """
     entry = _CLEANUPS.get(id(process))
     if entry is None:
         return
     if entry.task is None:
         entry.task = asyncio.create_task(entry.close())
     try:
-        await asyncio.shield(entry.task)
+        if timeout is None:
+            await asyncio.shield(entry.task)
+        else:
+            await asyncio.wait_for(asyncio.shield(entry.task), timeout=timeout)
+    except (TimeoutError, asyncio.TimeoutError):
+        pass
     finally:
         if entry.task.done() and _CLEANUPS.get(id(process)) is entry:
             del _CLEANUPS[id(process)]

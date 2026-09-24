@@ -159,20 +159,20 @@ async def test_resolve_carries_venue_metadata():
     fb = _Fallback()
 
     container = {
-        "name": "odsp-web-1",
-        "workspace_folder": "/workspaces/odsp-web",
+        "name": "sample-web-1",
+        "workspace_folder": "/workspaces/sample-web",
         "security_profile": "trusted",
-        "ssh": {"host_alias": "agent-container-odsp-web-1"},
+        "ssh": {"host_alias": "agent-container-sample-web-1"},
         "provider_command": ["python", "-m", "agent_containers"],
     }
     venue = {
         "schema_version": 1,
         "provider": "agent-containers",
         "kind": "container",
-        "target_id": "container:odsp-web-1",
+        "target_id": "container:sample-web-1",
         "scope": "provider-instance",
         "instance_id": "instance-123",
-        "workspace_folder": "/workspaces/odsp-web",
+        "workspace_folder": "/workspaces/sample-web",
         "security_profile": "trusted",
         "ready": True,
         "posture_verified": False,
@@ -181,9 +181,9 @@ async def test_resolve_carries_venue_metadata():
     def _run(argv, **_kw):
         return _cp(0, json.dumps({
             "type": "command",
-            "spawn_command": ["c", "exec", "--stdio", "odsp-web-1"],
+            "spawn_command": ["c", "exec", "--stdio", "sample-web-1"],
             "user": "vscode",
-            "workspace_folder": "/workspaces/odsp-web",
+            "workspace_folder": "/workspaces/sample-web",
             "security_profile": "trusted",
             "container": container,
             "venue": venue,
@@ -191,7 +191,7 @@ async def test_resolve_carries_venue_metadata():
 
     with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
         t = await CliNamespaceResolver("container", "agent-containers", fb).resolve(
-            "odsp-web-1",
+            "sample-web-1",
         )
     assert t.venue == venue
     assert t.container == container

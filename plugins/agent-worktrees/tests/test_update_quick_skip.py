@@ -216,7 +216,7 @@ def test_prelaunch_selected_context_uses_validated_installer_environment(
         ),
     )
     monkeypatch.setattr(m, "_resolve_environment", lambda config: "test")
-    monkeypatch.setattr(m.svc, "discover_services", lambda *args, **kwargs: [])
+    monkeypatch.setattr(m._svc, "discover_services", lambda *args, **kwargs: [])
     monkeypatch.setattr(
         reconcile,
         "core_installed_payload_dir",
@@ -242,7 +242,7 @@ def test_prelaunch_selected_context_uses_validated_installer_environment(
             )
         ),
     )
-    monkeypatch.setattr(m.svc, "check_staleness", lambda *args: "behind")
+    monkeypatch.setattr(m._svc, "check_staleness", lambda *args: "behind")
 
     plan = m.plan_pre_launch()
 
@@ -288,7 +288,7 @@ def test_prelaunch_uses_marketplace_fingerprint_staleness_for_marketplace_kind(
         ),
     )
     monkeypatch.setattr(m, "_resolve_environment", lambda config: "test")
-    monkeypatch.setattr(m.svc, "discover_services", lambda *args, **kwargs: [])
+    monkeypatch.setattr(m._svc, "discover_services", lambda *args, **kwargs: [])
     monkeypatch.setattr(
         reconcile,
         "core_installed_payload_dir",
@@ -310,12 +310,12 @@ def test_prelaunch_uses_marketplace_fingerprint_staleness_for_marketplace_kind(
     )
     calls: dict[str, list] = {"staleness": [], "marketplace": []}
     monkeypatch.setattr(
-        m.svc,
+        m._svc,
         "check_staleness",
         lambda *a: calls["staleness"].append(a) or "unknown",
     )
     monkeypatch.setattr(
-        m.svc,
+        m._svc,
         "check_marketplace_staleness",
         lambda *a: calls["marketplace"].append(a) or "current",
     )
@@ -351,7 +351,7 @@ def test_prelaunch_legacy_default_uses_conventional_runtime(
         ),
     )
     monkeypatch.setattr(m, "_resolve_environment", lambda config: "test")
-    monkeypatch.setattr(m.svc, "discover_services", lambda *args, **kwargs: [])
+    monkeypatch.setattr(m._svc, "discover_services", lambda *args, **kwargs: [])
     monkeypatch.setattr(
         reconcile,
         "core_installed_payload_dir",
@@ -371,7 +371,7 @@ def test_prelaunch_legacy_default_uses_conventional_runtime(
             )
         ),
     )
-    monkeypatch.setattr(m.svc, "check_staleness", lambda *args: "behind")
+    monkeypatch.setattr(m._svc, "check_staleness", lambda *args: "behind")
 
     update = m.plan_pre_launch()["updates"][0]
 
@@ -429,7 +429,7 @@ def test_prelaunch_repo_service_only_bootstrapped_when_opted_in(
     monkeypatch.setattr(m, "_resolve_environment", lambda config: "test")
     vault_service = _fake_service(tmp_path, "vault")
     monkeypatch.setattr(
-        m.svc, "discover_services", lambda *args, **kwargs: [vault_service]
+        m._svc, "discover_services", lambda *args, **kwargs: [vault_service]
     )
     monkeypatch.setattr(
         reconcile,
@@ -452,9 +452,9 @@ def test_prelaunch_repo_service_only_bootstrapped_when_opted_in(
     )
     # agent-worktrees itself is current -- only the repo service's staleness
     # (if bootstrapped at all) can produce an update.
-    monkeypatch.setattr(m.svc, "check_staleness", lambda *args: "current")
+    monkeypatch.setattr(m._svc, "check_staleness", lambda *args: "current")
     monkeypatch.setattr(
-        m.svc,
+        m._svc,
         "get_service_status",
         lambda service, repo_dir: types.SimpleNamespace(staleness="behind"),
     )
@@ -484,7 +484,7 @@ def test_prelaunch_invalid_other_context_fails_closed(
         ),
     )
     monkeypatch.setattr(m, "_resolve_environment", lambda config: "test")
-    monkeypatch.setattr(m.svc, "discover_services", lambda *args, **kwargs: [])
+    monkeypatch.setattr(m._svc, "discover_services", lambda *args, **kwargs: [])
     monkeypatch.setattr(
         reconcile,
         "core_installed_payload_dir",

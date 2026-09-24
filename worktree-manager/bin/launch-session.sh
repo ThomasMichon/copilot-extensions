@@ -181,7 +181,8 @@ resolve_runtime_python() {
 #
 # #stale-venv-preflight: a background plugin update can flip `current-version`
 # to a brand-new slot WHILE this launch is mid-flight, and observed evidence
-# (odsp-web-harness#<incident>) shows the OLD, still-"current"-at-the-time
+# (a real-world consuming harness's own tracker issue) shows the OLD,
+# still-"current"-at-the-time
 # slot can transiently fail to import its own package during that swap (e.g.
 # "No module named agent_worktrees") even though the interpreter itself still
 # resolves and the slot is intact a moment later. Re-resolving the interpreter

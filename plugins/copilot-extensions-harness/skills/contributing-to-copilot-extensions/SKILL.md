@@ -83,9 +83,19 @@ installer. Know which kind you are changing.
    skips this with a word; a design change owes the reconcile. This is a guide,
    not a gate.
 1. **Isolate.** This is a worktree-class, **PR-required** repo — never edit the
-   anchor checkout and never push directly to `main`. Create a worktree with
-   `copilot-extensions create`, edit and commit there, then land through the
-   repo's `pr-self-merge` flow.
+   anchor checkout and never push directly to `dev` **or** `main`. Create a
+   worktree with `copilot-extensions create`, edit and commit there, then land
+   through the repo's `pr-self-merge` flow. **`dev` is the contribution
+   branch** — every worktree forks from it and every PR targets it (the
+   in-repo `default_branch` config). `main` remains the repo's formal GitHub
+   default and release branch: `dev` is periodically promoted to `main`
+   through the release pipeline, never by an individual contributor's PR. The
+   **only** sanctioned exception to landing on `dev` is a direct `main` change
+   to unstick a broken release pipeline itself — a deliberate, explicitly
+   named operator action, never a routine contribution. The pre-commit hook
+   guard blocks direct in-worktree commits to **both** `main` and `dev`
+   (`protected_branches` in the in-repo config), so this is enforced the same
+   way for every agent regardless of which branch it assumes is "the" default.
 2. **Edit in the repo, never the deployed copy.** The repo is the source of
    truth. Do **not** edit `~/.copilot/installed-plugins/...` (overwritten on
    update) or a runtime dir (`~/.agent-*/lib`, service venvs).
@@ -125,7 +135,7 @@ installer. Know which kind you are changing.
    worktree, push `pr/<slug>`, and open the GitHub PR (the repo config has
    `auto_open: true`). If review feedback requires more commits in the same
    worktree, use `copilot-extensions push-changes` to update the PR head — never
-   push a worktree branch or `main` by hand. Opening the PR is a progress
+   push a worktree branch or `dev`/`main` by hand. Opening the PR is a progress
    milestone, not a handoff or completion condition.
 7. **Steward the PR through self-merge and finalization.** This repo's effective profile is
    **`pr-self-merge`**: the GitHub ruleset blocks direct pushes and requests a
@@ -143,7 +153,7 @@ installer. Know which kind you are changing.
      genuinely worth addressing, or proceed straight to merge if nothing has
      landed yet. Do not loop indefinitely re-requesting a review chasing a
      zero-finding pass that may never come.
-   - Keep the branch current and mergeable. If `main` moves or conflicts appear,
+   - Keep the branch current and mergeable. If `dev` moves or conflicts appear,
      reconcile with the supported worktree PR verbs, re-run the required gates,
      and update the PR with `push-changes`.
    - When provider checks are slow, use `pr-watch` or the agent-dispatch
@@ -204,7 +214,7 @@ file-an-issue fallback:
 
 `copilot-extensions` is **public** and may be driven from **more than one
 private control repo at once** (for example a personal control repo and a work
-control repo). Everyone lands through the same PR-required `main`. Two
+control repo). Everyone lands through the same PR-required `dev`. Two
 disciplines keep them from colliding — and keep private context off the public
 face.
 
@@ -273,7 +283,7 @@ pre-publication search closes the cross-control-repo gap.
 
 ### Serial, single-writer merges
 
-Treat `main` as a single-writer lane:
+Treat `dev` as a single-writer lane:
 
 - Land one coherent change, then the next — avoid parallel in-flight PR merges from
   different worktrees or drivers.

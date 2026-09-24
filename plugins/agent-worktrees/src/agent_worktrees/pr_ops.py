@@ -1164,12 +1164,12 @@ def self_merge_bypass_note(
     ``eligible: false`` / ``reason: "not yet approved"`` verdict: on a
     ``pr-self-merge`` repo, "no verdict yet" does NOT necessarily mean merge
     is blocked -- the acting identity may hold **Maintainer bypass rights**
-    on the repo's own required-review rule (discovered landing
-    gim-home/odsp-web-harness#502/#504; see :meth:`GitHubProvider.
-    pull_review_gate`). Surfacing this explicitly at both ``pr-status`` and
-    ``create-pr`` matters because agents have been observed hesitating or
-    declaring "I can't self-merge" on exactly this state, even as a
-    Maintainer, when nothing was actually blocking them (#3296 follow-up).
+    on the repo's own required-review rule (discovered landing a live
+    ruleset requiring one approving review while granting the acting
+    Maintainer bypass rights; see :meth:`GitHubProvider.pull_review_gate`).
+    Surfacing this explicitly at both ``pr-status`` and ``create-pr``
+    matters because agents have been observed hesitating or declaring "I
+    can't self-merge" here, even as a Maintainer (#3296 follow-up).
 
     Only ever returns a note for the ``pr-self-merge`` profile, only when a
     provider exposes ``pull_review_gate`` (currently GitHub only, via

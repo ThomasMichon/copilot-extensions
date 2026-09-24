@@ -8,6 +8,7 @@ package manager or network is touched.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -24,6 +25,13 @@ from agent_machines.resources import (
     resolve_file_path,
     resolve_resources,
 )
+
+# Import only after `agent_machines.resources` has fully loaded above -- its
+# own module-level `HANDLERS = _build_handlers()` already imports this module
+# once (lazily, from inside a function); importing it directly any earlier in
+# this file's own top-level import order re-enters it before its class body
+# has executed, which is a circular-import error.
+from agent_machines import resource_copilot_cli_update as RCU
 
 from ._helpers import base_package, write_package
 
@@ -2377,4 +2385,215 @@ def test_self_update_resource_dry_run_reports_unavailable_without_systemd_manage
     assert res.changed is False
     assert res.skipped_reason is not None
     assert "systemd" in res.detail
+
+
+# --------------------------------------------------------------------------- #
+# copilot-cli-update handler (Windows: COPILOT_AUTO_UPDATE + binstub pin)
+# --------------------------------------------------------------------------- #
+_VERSION_EXPR_PATH_RE = re.compile(r"GetVersionInfo\('(.*)'\)\.FileVersion$")
+
+
+def _copilot_runner(reg_out: RunOutcome, versions: dict[str, str] | None = None):
+    """Scripted runner dispatching ``reg`` queries and ``pwsh`` FileVersion reads."""
+    versions = versions or {}
+    calls: list[list[str]] = []
+
+    def _run(argv: list[str]) -> RunOutcome:
+        calls.append(argv)
+        if argv[0] == "reg":
+            return reg_out
+        if argv[0] == "pwsh":
+            match = _VERSION_EXPR_PATH_RE.search(argv[-1])
+            path_str = match.group(1) if match else None
+            if path_str in versions:
+                return RunOutcome(0, versions[path_str], "")
+            return RunOutcome(1, "", "not found")
+        raise AssertionError(f"unexpected command: {argv!r}")
+
+    _run.calls = calls
+    return _run
+
+
+def test_copilot_cli_update_requires_a_field(tmp_path):
+    with pytest.raises(ManifestError):
+        _pkg(tmp_path, "acme/a", [{"type": "copilot-cli-update"}])
+
+
+def test_copilot_cli_update_bad_field_types_rejected(tmp_path):
+    with pytest.raises(ManifestError):
+        _pkg(tmp_path, "acme/a", [{"type": "copilot-cli-update", "auto_update": "false"}])
+    with pytest.raises(ManifestError):
+        _pkg(tmp_path, "acme/a", [{"type": "copilot-cli-update", "pinned_version": 108}])
+
+
+def test_copilot_cli_update_filtered_on_linux(tmp_path):
+    pkg = _pkg(tmp_path, "acme/a", [{"type": "copilot-cli-update", "auto_update": False}])
+    results = apply_resources(
+        [pkg], "box-1", "linux", _ctx(tmp_path, FakeRunner(), plat="linux"), dry_run=True
+    )
+    assert not [r for r in results if r.type == "copilot-cli-update"]
+
+
+def test_copilot_cli_update_auto_update_dry_run_sets_false(tmp_path, monkeypatch):
+    monkeypatch.setattr(RCU.shutil, "which", lambda _b: "/usr/bin/reg")
+    runner = _copilot_runner(RunOutcome(1, "", "not found"))
+    pkg = _pkg(tmp_path, "acme/a", [{"type": "copilot-cli-update", "auto_update": False}])
+    results = apply_resources([pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=True)
+    res = next(r for r in results if r.type == "copilot-cli-update")
+    assert res.changed and res.action == "write"
+    assert "would set COPILOT_AUTO_UPDATE=false" in res.detail
+
+
+def test_copilot_cli_update_auto_update_already_disabled_no_change(tmp_path, monkeypatch):
+    monkeypatch.setattr(RCU.shutil, "which", lambda _b: "/usr/bin/reg")
+    query_out = RunOutcome(0, "    COPILOT_AUTO_UPDATE    REG_SZ    false\n", "")
+    runner = _copilot_runner(query_out)
+    pkg = _pkg(tmp_path, "acme/a", [{"type": "copilot-cli-update", "auto_update": False}])
+    results = apply_resources([pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=False)
+    res = next(r for r in results if r.type == "copilot-cli-update")
+    assert not res.changed and res.action == "none"
+
+
+def test_copilot_cli_update_auto_update_true_removes_override(tmp_path, monkeypatch):
+    monkeypatch.setattr(RCU.shutil, "which", lambda _b: "/usr/bin/reg")
+    query_out = RunOutcome(0, "    COPILOT_AUTO_UPDATE    REG_SZ    false\n", "")
+    runner = _copilot_runner(query_out)
+    pkg = _pkg(tmp_path, "acme/a", [{"type": "copilot-cli-update", "auto_update": True}])
+    results = apply_resources([pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=False)
+    res = next(r for r in results if r.type == "copilot-cli-update")
+    assert res.changed and res.action == "write"
+    assert any(c[:2] == ["reg", "delete"] for c in runner.calls)
+
+
+def _make_links_dir(tmp_path) -> Path:
+    links = tmp_path / "Links"
+    links.mkdir(parents=True, exist_ok=True)
+    return links
+
+
+def test_copilot_cli_update_pin_dry_run_finds_backup(tmp_path, monkeypatch):
+    monkeypatch.setattr(RCU.shutil, "which", lambda _b: "/usr/bin/reg")
+    links = _make_links_dir(tmp_path)
+    current = links / "copilot.exe"
+    backup = links / "copilot.exe.old-111-222"
+    current.write_bytes(b"new")
+    backup.write_bytes(b"old")
+    runner = _copilot_runner(
+        RunOutcome(1, "", "not found"),
+        versions={str(current): "1.0.89-1", str(backup): "1.0.88"},
+    )
+    pkg = _pkg(
+        tmp_path,
+        "acme/a",
+        [
+            {
+                "type": "copilot-cli-update",
+                "pinned_version": "1.0.88",
+                "links_directory": str(links),
+            }
+        ],
+    )
+    results = apply_resources([pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=True)
+    res = next(r for r in results if r.type == "copilot-cli-update")
+    assert res.changed and res.action == "pin"
+    assert "would rotate current copilot.exe (1.0.89-1) aside" in res.detail
+    assert current.read_bytes() == b"new"  # dry-run never touches the filesystem
+
+
+def test_copilot_cli_update_pin_apply_swaps_binary(tmp_path, monkeypatch):
+    monkeypatch.setattr(RCU.shutil, "which", lambda _b: "/usr/bin/reg")
+    links = _make_links_dir(tmp_path)
+    current = links / "copilot.exe"
+    backup = links / "copilot.exe.old-111-222"
+    current.write_bytes(b"new-bytes")
+    backup.write_bytes(b"old-bytes")
+
+    # The real self-updater swaps the file in place, so a real FileVersionInfo
+    # read would naturally reflect that after the rename+copy. The fixture
+    # bytes here aren't a real PE, so model the same "before swap / after
+    # swap" transition with a call-count on the current path specifically.
+    current_calls = {"n": 0}
+
+    def runner(argv):
+        if argv[0] == "reg":
+            return RunOutcome(1, "", "not found")
+        if argv[0] == "pwsh":
+            expr = argv[-1]
+            if str(backup) in expr:
+                return RunOutcome(0, "1.0.88", "")
+            if str(current) in expr:
+                current_calls["n"] += 1
+                return RunOutcome(0, "1.0.89-1" if current_calls["n"] == 1 else "1.0.88", "")
+            raise AssertionError(expr)
+        raise AssertionError(f"unexpected command: {argv!r}")
+
+    pkg = _pkg(
+        tmp_path,
+        "acme/a",
+        [
+            {
+                "type": "copilot-cli-update",
+                "pinned_version": "1.0.88",
+                "links_directory": str(links),
+            }
+        ],
+    )
+    results = apply_resources([pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=False)
+    res = next(r for r in results if r.type == "copilot-cli-update")
+    assert res.changed and res.action == "pin" and res.ok
+    assert current.read_bytes() == b"old-bytes"
+    rotated = [p for p in links.glob("copilot.exe.old-*") if p.name != backup.name]
+    assert len(rotated) == 1
+    assert rotated[0].read_bytes() == b"new-bytes"
+
+
+def test_copilot_cli_update_pin_blocked_without_matching_backup(tmp_path, monkeypatch):
+    monkeypatch.setattr(RCU.shutil, "which", lambda _b: "/usr/bin/reg")
+    links = _make_links_dir(tmp_path)
+    current = links / "copilot.exe"
+    current.write_bytes(b"new")
+    runner = _copilot_runner(RunOutcome(1, "", "not found"), versions={str(current): "1.0.89-1"})
+    pkg = _pkg(
+        tmp_path,
+        "acme/a",
+        [
+            {
+                "type": "copilot-cli-update",
+                "pinned_version": "1.0.88",
+                "links_directory": str(links),
+            }
+        ],
+    )
+    results = apply_resources([pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=True)
+    res = next(r for r in results if r.type == "copilot-cli-update")
+    assert res.status == "blocked" and not res.ok
+    assert "no rotated-aside backup" in res.blocked_reason
+
+
+def test_copilot_cli_update_pin_skipped_when_binstub_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(RCU.shutil, "which", lambda _b: "/usr/bin/reg")
+    links = _make_links_dir(tmp_path)
+    runner = _copilot_runner(RunOutcome(1, "", "not found"))
+    pkg = _pkg(
+        tmp_path,
+        "acme/a",
+        [
+            {
+                "type": "copilot-cli-update",
+                "pinned_version": "1.0.88",
+                "links_directory": str(links),
+            }
+        ],
+    )
+    results = apply_resources([pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=True)
+    res = next(r for r in results if r.type == "copilot-cli-update")
+    assert res.status == "skipped"
+    assert "binstub not found" in res.skipped_reason
+
+
+def test_copilot_cli_update_auto_update_conflict(tmp_path):
+    a = _pkg(tmp_path, "acme/a", [{"type": "copilot-cli-update", "auto_update": False}])
+    b = _pkg(tmp_path, "acme/b", [{"type": "copilot-cli-update", "auto_update": True}])
+    findings = detect_conflicts([a, b], "box-1", "windows")
+    assert any(f.level == "error" and "conflicting values" in f.message for f in findings)
 

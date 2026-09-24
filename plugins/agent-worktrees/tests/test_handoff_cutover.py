@@ -642,6 +642,12 @@ class TestHeadlessNewSession:
     def test_headless_new_session_spawns_detached_with_native_seed_arg(
         self, monkeypatch,
     ):
+        # Force non-contained detachment kwargs so this assertion is
+        # deterministic regardless of the ambient test-runner env: CI (and
+        # any COPILOT_EXTENSIONS_TEST_CONTAINED=1 runner) suppresses
+        # start_new_session/creationflags by design (agent_procutil's own
+        # contained_test_mode()), which this test must not itself trip over.
+        monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
         captured = {}
 
         class _Proc:

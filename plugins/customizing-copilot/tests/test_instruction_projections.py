@@ -1390,6 +1390,7 @@ def test_context_handoff_handoff_fallback_projection_is_valid() -> None:
     assert {spec.source_id for spec in specs} == {
         "session-guidance",
         "handoff-fallback",
+        "awareness",
     }
     handoff_fallback = next(
         spec for spec in specs if spec.source_id == "handoff-fallback"

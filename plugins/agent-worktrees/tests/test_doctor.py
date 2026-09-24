@@ -12,8 +12,24 @@ from agent_worktrees import doctor, repos
 
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch) -> Path:
-    """Redirect ~ so both registries read/write under a tmp dir."""
-    monkeypatch.setattr(repos.Path, "home", lambda: tmp_path)
+    """Redirect ~ so both registries read/write under a tmp dir.
+
+    ``repos.py``'s registry-root resolution now delegates to
+    ``registry_paths.py`` (agent-worktrees' dispatch-table decoupling).
+    ``repos.read_registry()`` calls ``registry_paths.registry_path("repos.yaml")``
+    with no explicit ``legacy_root``, so it falls through to
+    ``registry_paths``' own env-var-aware default -- honoring ``AGENT_HOME``
+    before ever calling ``Path.home()`` -- meaning patching
+    ``repos.Path.home`` no longer has any effect on that read. But
+    ``doctor.py``'s own ``_read_projects``/``_anchor_from_project_config``
+    (projects.yaml/config.yaml) explicitly pass
+    ``legacy_root=Path.home() / ".agent-worktrees"`` using doctor.py's OWN
+    ``Path`` reference, which bypasses ``registry_paths``' env-var check
+    entirely -- so ``doctor.Path.home`` patching is still required there.
+    Both redirects are needed together; dropping either one silently
+    reads/writes the wrong directory for that half of the registry.
+    """
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path))
     monkeypatch.setattr(doctor.Path, "home", lambda: tmp_path)
     # Pin the platform so path keys are deterministic across CI hosts.
     monkeypatch.setattr(repos, "_current_platform", lambda: "linux")

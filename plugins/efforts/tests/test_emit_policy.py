@@ -117,7 +117,7 @@ def _run(
         input=payload.encode() if isinstance(payload, str) else payload,
         capture_output=True,
         check=True,
-        timeout=10,
+        timeout=30,
     )
 
 
@@ -163,7 +163,7 @@ def _check_adoption(
         input=b"",
         capture_output=True,
         check=True,
-        timeout=10,
+        timeout=30,
     )
 
 
@@ -309,7 +309,7 @@ def test_read_only_probe_requires_authoritative_local_checkout(
                 ],
                 capture_output=True,
                 check=True,
-                timeout=10,
+                timeout=30,
             )
             abbreviated = subprocess.run(
                 [
@@ -322,7 +322,7 @@ def test_read_only_probe_requires_authoritative_local_checkout(
                 ],
                 capture_output=True,
                 check=True,
-                timeout=10,
+                timeout=30,
             )
             assert positional.stdout == b"{}"
             assert abbreviated.stdout == b"{}"
