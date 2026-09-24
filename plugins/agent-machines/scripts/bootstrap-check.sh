@@ -174,7 +174,14 @@ if [ ! -f "$Manifest" ]; then
   _init="$ScriptDir/init.sh"
   if [ -f "$_init" ] && grep -q 'stamp)' "$_init" 2>/dev/null; then
     legacy_mutation_allowed || exit 0
-    bash "$_init" stamp >/dev/null 2>&1 || true
+    # Async (nohup ... &), matching the ContextSelected branch above and the
+    # final fallback branch below: a synchronous call here blocks the WHOLE
+    # sessionStart hook on the first-install stamp step -- measured at ~22s
+    # standalone in a fresh container (Windows sibling), well past this
+    # hook's 15s timeout (confirmed root cause of the HookTimeoutError
+    # observed in full-harness clean-room runs). `stamp` only needs to land
+    # before the binstub is next invoked, not before this session's first turn.
+    nohup bash "$_init" stamp >/dev/null 2>&1 &
   fi
   exit 0
 fi
