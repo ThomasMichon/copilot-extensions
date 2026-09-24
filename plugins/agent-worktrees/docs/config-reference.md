@@ -124,6 +124,8 @@ repos:
 | `repo_name` | string | `""` | Which `repos.<name>` is the default repo. Optional when exactly one repo is defined. |
 | `headless` | bool | `false` | CLI-only project: the bare binstub lists worktrees instead of launching an interactive Copilot session. |
 | `auto_fast_forward` | bool | `true` | On resume, fast-forward a clean worktree that is strictly behind upstream. Only ever a FF — never touches dirty / ahead / diverged worktrees. |
+| `default_copilot_account` | string | `""` | This machine's default **Copilot CLI** login for a repo with no explicit `copilot_account` override (see `repos.<name>.copilot_account`). Machine-local policy, not a portable knowledge-repo preference. Resolves machine-local `config.yaml` > global `~/.agent-worktrees/config.yaml` only. Empty means no machine-wide preference (ambient Copilot login). |
+| `copilot_identity_switch_enabled` | bool | `false` | Master switch for the Copilot CLI identity-enforcement feature (`copilot-identity ensure`, run automatically at the start of every session launch, and available manually). **Off by default** — when false, `ensure` is a pure no-op regardless of `default_copilot_account`/a repo's `copilot_account`: it never mints a `gh` token, shells out to `copilot login`, or reads `~/.copilot/config.json`. Deliberately config-file based (not an environment-variable opt-out) so the choice is durable and visible in `config.yaml`. Same tiering as `default_copilot_account`. |
 | `copilot_profiles` | list | `[]` | Selectable Copilot backend profiles (Tab-cycle in the picker). |
 | `profile_assignment` | map | absent/off | Optional balanced assignment policy over existing `copilot_profiles`. Only a user-owned global, knowledge-overlay, or machine-local/per-project block can set `armed: true`. |
 | `repos` | map | `{}` | Per-repo configuration, keyed by repo name. |
@@ -521,6 +523,8 @@ profile_assignment:
 | `copilot_profiles` | list | Machine-wide backend profiles. |
 | `profile_assignment` | map | Optional user-owned balanced assignment policy. |
 | `auto_fast_forward` / `headless` | bool | Machine-wide top-level defaults. |
+| `default_copilot_account` | string | Machine-wide default Copilot CLI login for repos with no explicit override (see the top-level keys table). |
+| `copilot_identity_switch_enabled` | bool | Machine-wide master switch for the Copilot identity-enforcement feature. **Off by default.** |
 
 A convention-adopted repo with its anchor in `~/.agent-worktrees/repos.yaml`,
 its settings in the in-repo config, and machine defaults here needs **no**
