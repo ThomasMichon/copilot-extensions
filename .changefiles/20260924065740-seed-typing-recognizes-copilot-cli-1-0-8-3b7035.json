@@ -1,9 +1,0 @@
-{
-  "comment": "Seed typing recognizes Copilot CLI 1.0.89's boxed input as ready, never types into a selection dialog, and decodes capture-pane as UTF-8 on Windows",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

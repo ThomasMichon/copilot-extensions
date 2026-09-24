@@ -1,9 +1,0 @@
-{
-  "comment": "Deliver idle-confirm as a resume prompt; idle is not completion",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "dev"
-    }
-  ]
-}

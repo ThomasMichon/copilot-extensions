@@ -1,9 +1,0 @@
-{
-  "comment": "Document dev as the contribution branch, main as the release branch, and the single sanctioned direct-to-main exception.",
-  "changes": [
-    {
-      "plugin": "copilot-extensions-harness",
-      "type": "patch"
-    }
-  ]
-}

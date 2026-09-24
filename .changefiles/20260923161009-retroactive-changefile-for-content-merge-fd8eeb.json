@@ -1,9 +1,0 @@
-{
-  "comment": "Retroactive changefile for content merged to main before dev-targeting was fully adopted (#3460)",
-  "changes": [
-    {
-      "plugin": "context-handoff",
-      "type": "patch"
-    }
-  ]
-}

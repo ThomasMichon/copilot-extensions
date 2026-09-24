@@ -1,9 +1,0 @@
-{
-  "comment": "Generalize the pre-commit branch guard to an optional protected_branches list so a repo can protect a contribution branch that differs from its GitHub default branch.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

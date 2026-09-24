@@ -1,9 +1,0 @@
-{
-  "comment": "Fix test_doctor.py's stale home-redirect fixture (registry_paths.py delegation regression, blocking Validation Gate)",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

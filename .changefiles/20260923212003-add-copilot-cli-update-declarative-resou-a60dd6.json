@@ -1,9 +1,0 @@
-{
-  "comment": "Add copilot-cli-update declarative resource to manage the Copilot CLI's own built-in self-updater (disable auto-update and/or pin the installed binstub to a known-good version)",
-  "changes": [
-    {
-      "plugin": "agent-machines",
-      "type": "patch"
-    }
-  ]
-}
