@@ -1,0 +1,9 @@
+{
+  "comment": "Nudge idle unfinished headless workers instead of auto-suspending",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "dev"
+    }
+  ]
+}
