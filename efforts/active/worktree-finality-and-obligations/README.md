@@ -195,9 +195,28 @@ below for the carved implementation plan.
 ## Plan
 
 ### Phase 1 - Lock the contracts with failing fixtures
-- [ ] Add focused fixtures for a retained finalized record that receives new
+- [x] Add focused fixtures for a retained finalized record that receives new
   work, a Git-settled record with held claims, and a Git-settled record with
-  multiple follow-ups.
+  multiple follow-ups. Re-audited (2026-09-23) rather than re-built: each
+  scenario already has a dedicated, focused fixture, just spread across the
+  test files each concern naturally belongs to rather than one consolidated
+  file --
+  **retained finalized record receiving new work:**
+  `test_claims_cmd.py::test_claims_add_allows_finalized_owner` (CLI level)
+  and `test_tracking.py`'s `TestFollowUpLedger::
+  test_adding_open_follow_up_reopens_finalized_owner` (ledger level);
+  **Git-settled with held claims:** `test_prune.py`'s
+  `test_held_resource_claim_blocks_cleanup_even_when_finalized`/
+  `test_at_rest_claim_also_blocks_cleanup` (disposition level) and
+  `test_closure_descriptor_wiring.py::test_closure_reports_merged_when_held_claim_present`
+  (descriptor level);
+  **Git-settled with multiple follow-ups:** `test_prune.py`'s
+  `TestClosureDescriptor::test_both_blockers_produce_both_markers`
+  (`open_follow_ups=3` renders `F3`) plus the cross-surface parity test's
+  own held-claim-and-follow-up case (`worktree-manager`'s
+  `test_closure_cross_surface_parity.py`, `C1 F1` across all three
+  surfaces). No new fixture needed; leaving these consolidated would
+  duplicate coverage already locking the same contract.
 - [x] Prune-verdict slice only: `cleanup_disposition` and
   `classify_managed_worktree` now treat a held resource claim
   (`active`/`at-rest`) as a blocker even when `status == finalized` or Git is
@@ -221,14 +240,92 @@ below for the carved implementation plan.
   worktree-manager's own suite, not agent-worktrees', since only that
   package's conftest (`ensure_engine_runtime`) puts a real `agent_worktrees`
   on `sys.path` for a test to genuinely import both sides.
-- [ ] Add compatibility fixtures for legacy boolean-only records and active
-  effort bindings.
-- [ ] Add stale-snapshot concurrency fixtures proving background stamp writes
-  cannot erase, resurrect, or reorder concurrently-mutated follow-ups.
-- [ ] Inventory every in-repo and known downstream consumer of literal `FINAL`,
+- [x] Add compatibility fixtures for legacy boolean-only records and active
+  effort bindings. Added `test_prune.py`'s
+  `test_legacy_boolean_follow_up_blocks_cleanup` (a pre-Phase-3 record with
+  no itemized `follow_ups` ledger, only the legacy `follow_up: true`
+  boolean, blocks `cleanup_disposition` exactly like an itemized open item)
+  and `test_active_effort_binding_blocks_cleanup_via_legacy_boolean` (the
+  record shape `effort-focus bind` actually produces -- an `active_effort`
+  pointer plus the legacy boolean via `set_disposition(follow_up=True)`, no
+  itemized entry -- proven end-to-end through `cleanup_disposition`, not
+  just `effective_open_follow_up_count` in isolation). Existing
+  `TestFollowUpLedger` tests already covered the derivation function itself
+  (`test_legacy_boolean_counts_as_one_when_ledger_empty`); these two close
+  the gap at the disposition/prune-verdict level the bullet actually names.
+- [x] Inventory every in-repo and known downstream consumer of literal `FINAL`,
   `status == finalized`, follow-up glyphs, and cleanup buckets before changing
   their meaning, including the agent-bridge worktree projection and cockpit
-  consumers.
+  consumers. Findings (2026-09-23):
+  - **Inside agent-worktrees itself:** `list_views_cli.py`/`__main__.py`
+    (list JSON's `closure` field), `status_bar_cli.py` (mux segment),
+    `cleanup_gc_cli.py`/`sweep.py`/`reap_cli.py`/`finalize_cli.py`
+    (cleanup/GC/sweep/finalize's own bucket consumption), `follow_ups_cli.py`,
+    `claims_cli.py`, `disposition_history.py`, `managed_worktree_guard.py`,
+    `reciprocal_presentation.py`, `resolve_system_cli.py` -- all consume
+    `prune`'s own types/functions directly (in-process), so they can never
+    drift from the canonical descriptor by construction. `picker_support/
+    derive.py` also reads `closure.label` directly but is **dead code**: not
+    imported by any production module (confirmed via repo-wide search) --
+    it predates the bundled-Picker retirement (see below) and is orphaned,
+    not a live consumer.
+  - **`worktree-manager` (the canonical remaining Picker):**
+    `production_picker/prune.py` (the version-checked shim,
+    `interpret_descriptor_payload`), `picker_tui/derive.py` (the Picker's
+    own consumption, gated through that shim), `picker_tui/engine_helpers.py`/
+    `obscure.py`/`styles.py` (rendering only, downstream of `derive.py`'s
+    already-gated output -- not independent consumers), and
+    `mux_companion.py` (the `visions/mux-companion` Companion explainer) --
+    **the one real gap found**: `_closure_explanation` reads `closure.get
+    ("label")` directly, with no `interpret_descriptor_payload`-style
+    version/support gate, unlike every other consumer. Assessed as **low
+    real-world risk, not fixed here**: `mux_companion.py` reaches
+    agent-worktrees exclusively through `engine_client`'s **same-machine
+    subprocess** call to the currently-installed CLI (never a cross-machine
+    crawl) -- the version-skew scenario the gate exists for (an
+    agent-bridge crawl reaching an older/newer remote) cannot occur on this
+    path. Noted here rather than patched to avoid scope creep into a
+    separate, still-v1 vision's file for a defense-in-depth-only gap;
+    revisit if `mux_companion` ever gains a remote/cross-machine data
+    source.
+  - **The bundled `agent-worktrees/picker_tui/` Picker** (the historical
+    duplicate) is not a live consumer to inventory at all: transplanted to
+    `worktree-manager` in #1244 and fully **retired** by the separate,
+    already-completed `worktree-manager-control-plane` Phase 3/6 effort
+    (Step 2 deletion, 2026-09-15/16) -- confirmed via that effort's own doc,
+    not re-derived.
+  - **Downstream consumers outside agent-worktrees/worktree-manager**
+    (`agent-bridge`, `agent-dispatch`, `agent-codespaces`): grepped for
+    `"FINAL"` / `== "finalized"` across every plugin. Every hit resolved to
+    either a docstring/comment, an unrelated `status_note_at` timestamp
+    field read, or an unrelated `"finalized"` reason string on a
+    codespace-recovery status -- **none branch on worktree-finality
+    semantics at all**. Confirms the effort's own earlier assessment
+    (Phase 5's still-unbuilt "agent-bridge cockpit consumer" item) that no
+    live downstream consumer needs updating yet; `agent-bridge`'s own
+    worktree-discovery crawl (Phase 5) threads the raw `closure` field
+    through opaquely without interpreting it, which is exactly why no
+    agent-bridge-side literal check exists to find.
+- [x] Add stale-snapshot concurrency fixtures proving background stamp writes
+  cannot erase, resurrect, or reorder concurrently-mutated follow-ups. This
+  was a REAL production gap, not just a missing test: `save_record`'s
+  `resources` ledger already had a per-ref merge-by-reservation
+  reconciliation against a concurrent writer's on-disk state, but
+  `follow_ups` had none -- Phase 3's own note already flagged "the
+  cross-writer merge-by-highest-revision path itself is not implemented
+  yet." Added a per-id, per-`FollowUpRecord.revision` merge clause right
+  alongside the `resources` merge in `_save_record_unlocked`: whichever
+  side (in-memory or on-disk) holds the higher revision for a given id
+  wins; an id present only on disk is never dropped. `TestFollowUpLedgerConcurrencyMerge`
+  in `test_tracking.py` (5 new tests) pins: a stale writer's save can't
+  erase a concurrently-added item, can't resurrect a resolved/dismissed
+  item back to open, a writer's OWN concurrent mutation still wins when its
+  revision is higher, and two independent concurrent additions are both
+  preserved. Full targeted suite (664 tests: tracking/claims/handoff) and
+  the full agent-worktrees suite (681 passed, same 12 pre-existing/
+  unrelated `test_doctor.py`/`test_context_resolution.py` failures
+  confirmed present on unmodified `origin/main`) pass; `ruff check`
+  byte-identical before/after (7 pre-existing findings).
 
 ### Phase 2 - Make finalized records resumable
 - [x] Centralize claim add/update/remove/settle/release mutations so direct list
@@ -298,9 +395,12 @@ below for the carved implementation plan.
   (YAML-round-tripped, emitted only when non-empty). Revision bumps on every
   mutation; deletion is a tombstone (state flips to
   resolved/dismissed/transferred, never a list removal) so history and
-  revision continuity survive -- but the **cross-writer merge-by-highest-
-  revision path itself is not implemented yet** (see the unchecked
-  concurrency item below and Validation Plan's **Concurrency** row).
+  revision continuity survive. **The cross-writer merge-by-highest-revision
+  path was NOT implemented when this bullet first landed -- it now is** (see
+  Phase 1's stale-snapshot concurrency fixture bullet and Validation Plan's
+  **Concurrency** row, both closed 2026-09-23): `save_record` reconciles
+  `follow_ups` per-id by highest `revision`, the same shape as the existing
+  `resources` merge.
 - [x] Add explicit list/add/resolve/dismiss ... CLI operations (`follow-ups
   [id]`, `follow-ups add <summary> [--ref kind:value]...`, `follow-ups
   resolve <id> [--result-ref <ref>]`, `follow-ups dismiss <id> --reason
@@ -490,12 +590,23 @@ below for the carved implementation plan.
   disposition.
 - [ ] Place each accepted public tracker item in exactly one existing phase,
   extending this plan before implementation when necessary.
-- [ ] Durable end-to-end lifecycle auditability: instrument session/handoff
+- [x] Durable end-to-end lifecycle auditability: instrument session/handoff
   cutover transitions (creation, transfer, completion, abandonment) so the
   full audit trail is traceable, closing the remaining cross-link/session-
   state trace gaps beyond what the session-claim lifecycle (Phase 8) already
   covers. Tracked in
   [#3113](https://github.com/ThomasMichon/copilot-extensions/issues/3113).
+  **Built as the corrected scope discovery found (2026-09-23), not the
+  literal title**: session/handoff *cutover*-stage auditability is already
+  covered elsewhere (Phase 8's session-claim register/deregister, plus the
+  separately-tracked `handoff-cutover-lifecycle-journal` effort/#2457's
+  13-stage model). The real residual gap was the **resource-claim and
+  follow-up ledgers having zero durable audit trail** -- closed via
+  `activity.log_event()` instrumentation on every real mutation point in
+  `claims_cli.py`, `follow_ups_cli.py`, and `claim_handoffs.py`'s CLI
+  dispatch (Slice 1, journaled below). Durable-persistence question
+  (whether these events also need `handoff_trace`-style storage) was
+  explicitly answered: no -- see the journal entry's rationale.
 - [x] Claim-safe terminal reclamation: finish reclaiming terminal workspaces
   with obligation-preserving release semantics -- inbound-claim release,
   multi-claim safety, and historical adoption/status surfaces -- rather than
@@ -942,7 +1053,7 @@ either.
   shipped path yet since that machinery isn't built (Phase 3 note).
 - [ ] **Regression:** existing ACTIVE, DIRTY, WIP, UNUSED, CONVO, GONE, ORPHAN,
   and UNKNOWN behavior remains stable when no closure blockers exist.
-- [ ] **Concurrency:** stale background record writers preserve every concurrent
+- [x] **Concurrency:** stale background record writers preserve every concurrent
   follow-up mutation through the ledger revision merge.
 - [ ] **Mixed versions:** a remote without the descriptor, or with an
   unsupported descriptor version, is provisional and never prune-safe.
@@ -2083,7 +2194,7 @@ The approved design is the faceted model in [design.md](design.md):
 
 - Resumed via the manual `/consume-handoff` path (deliberately not
   auto-triggered, per the retry-storm safety note on the prior handoff --
-  gim-home/odsp-web-harness#431). Verified before starting: Phase 9 fully
+  see the operator's own harness issue tracker #431). Verified before starting: Phase 9 fully
   merged, Phase 8's first sub-slice (PR #2824) merged, no other open PR
   touching Phase 8.
 - Built the second Phase 8 Plan bullet in a fresh `copilot-extensions`
@@ -2473,4 +2584,139 @@ The approved design is the faceted model in [design.md](design.md):
   failures in `test_data_ssh_sources.py` (confirmed present on `origin/main`
   before this change too -- a Windows path-format assertion, untouched
   file). `ruff check` clean on the new file.
+
+### 2026-09-23 (continued) - Phase 1: follow-up ledger concurrency merge (a real gap, not just a missing test)
+
+- Picked Phase 1's remaining stale-snapshot concurrency bullet. Investigating
+  it surfaced this was NOT purely a test gap: Phase 3's own note already
+  said "the cross-writer merge-by-highest-revision path itself is not
+  implemented yet" for `follow_ups`, unlike `resources`, which already had a
+  per-ref merge-by-reservation reconciliation in `save_record`
+  (`_save_record_unlocked`). Concretely: a stale background writer (e.g. a
+  liveness/title-stamp save that loaded the record before a concurrent
+  `follow-ups add`/`resolve`/`dismiss` landed) could silently erase that
+  mutation, or resurrect a resolved/dismissed item back to `open`, on its
+  own later save.
+- Fixed it: added a per-id, per-`FollowUpRecord.revision` merge clause
+  alongside the existing `resources` merge -- whichever side (in-memory or
+  on-disk) holds the higher revision for a given id wins; an id present
+  only on disk (added by a concurrent writer after this record was loaded)
+  is never dropped.
+- Added `TestFollowUpLedgerConcurrencyMerge` (5 tests) pinning: erase
+  prevention, resurrection prevention (resolved and dismissed cases), the
+  writer's OWN higher-revision mutation still winning (never
+  unconditionally trusting disk), and two independent concurrent additions
+  both surviving.
+- Updated Phase 3's own bullet and the Validation Plan's Concurrency row to
+  reflect this is now built, rather than leaving the stale "not implemented
+  yet" note standing after the fact was no longer true.
+- Validation: 664 targeted tests (tracking/claims/handoff) pass; full
+  agent-worktrees suite: 681 passed, the same 12 pre-existing/unrelated
+  `test_doctor.py`/`test_context_resolution.py` failures (confirmed present
+  on unmodified `origin/main` via `git stash` comparison, same as prior
+  sessions this effort). `ruff check` byte-identical before/after (7
+  pre-existing findings).
+- Phase 1's remaining open bullets: the three named fixtures (retained-
+  finalized-record / held-claims / multi-follow-up), legacy-boolean +
+  active-effort-binding compatibility fixtures, and the literal-`FINAL`/
+  status-consumer inventory. Not touched this session.
+
+### 2026-09-23 (continued) - Phase 1 complete: compatibility fixtures + consumer inventory
+
+- Closed out Phase 1's three remaining bullets in one pass:
+  - **Named fixtures re-audit**: the "retained finalized record / held
+    claims / multiple follow-ups" bullet's three scenarios each already had
+    a dedicated, focused test -- just spread across the files each concern
+    naturally belongs to (`test_claims_cmd.py`, `test_tracking.py`,
+    `test_prune.py`, `test_closure_descriptor_wiring.py`, and this
+    session's own cross-surface parity test). Marked complete with pointers
+    rather than consolidating into a new file that would duplicate the same
+    contract.
+  - **Compatibility fixtures**: added
+    `test_legacy_boolean_follow_up_blocks_cleanup` and
+    `test_active_effort_binding_blocks_cleanup_via_legacy_boolean` to
+    `test_prune.py` -- both prove a legacy-boolean-only record (no itemized
+    `follow_ups` ledger) blocks `cleanup_disposition` end-to-end, including
+    the exact record shape `effort-focus bind` actually produces
+    (`active_effort` pointer + `set_disposition(follow_up=True)`). Existing
+    tests only covered `effective_open_follow_up_count` in isolation, not
+    the full disposition path.
+  - **Consumer inventory**: walked every in-repo consumer of the closure
+    descriptor/literal FINAL-finalized semantics. Found one real, if
+    low-risk, gap: `worktree-manager`'s `mux_companion.py`
+    (`_closure_explanation`) reads `closure.label` with no version/support
+    gate, unlike every other consumer -- but assessed as safe-in-practice
+    (it reaches agent-worktrees only via a same-machine subprocess to the
+    currently-installed CLI, never the cross-machine crawl the gate exists
+    for) and left unpatched to avoid scope creep into a separate, still-v1
+    vision's file for a defense-in-depth-only concern. Confirmed
+    `picker_support/derive.py` (inside agent-worktrees) is dead code, not a
+    live consumer. Confirmed no downstream plugin (agent-bridge,
+    agent-dispatch, agent-codespaces) branches on worktree-finality
+    semantics at all (every grep hit was a docstring, an unrelated
+    `status_note_at` read, or an unrelated `"finalized"` reason string).
+- **Phase 1 is now fully complete** -- every Plan bullet checked. Validation:
+  125 targeted tests pass (agent-worktrees); `ruff check` clean/unchanged.
+  No code changes beyond the two new `test_prune.py` tests -- this session
+  was audit + documentation + two small compatibility tests, not a
+  production change.
+- Next open phases: Phase 4's remaining bullet (`cleanup`/`gc` -> descriptor
+  switch, deliberately deferred, higher-risk), Phase 5 (legend/filter parity
+  + agent-bridge cockpit consumer), Phase 6 (ship-it, last), and #3113
+  (the still-open half of Phase 7).
+
+### 2026-09-23 (continued) - Phase 7: #3113 discovery + claim/follow-up ledger `activity.log_event()` instrumentation (Slice 1)
+
+- **Discovery pass (no code)**: re-read #3113
+  ("Instrument session/handoff cutover lifecycle transitions for full
+  auditability") against current code and found its title description does
+  NOT match a real remaining gap -- session-claim register/deregister
+  already ships (Phase 8), and the 13-stage session-handoff-*cutover*
+  sequence specifically is the separately-tracked, already-active
+  `efforts/active/handoff-cutover-lifecycle-journal` effort (#2457), not
+  this one. The genuine residual gap, confirmed by grepping all three
+  files: the **resource-claim and follow-up ledgers had zero durable audit
+  trail** -- `claims_cli.py` (add/release/settle/sweep-abandon/cleanup-
+  reclaim/reconcile-at-rest), `follow_ups_cli.py` (add/resolve/dismiss),
+  and `claim_handoffs.py`'s CLI dispatch (offer/decline/cancel) never
+  called `activity.log_event()` anywhere. Posted the finding + a proposed
+  Slice 1 scope as a comment on
+  [#3113](https://github.com/ThomasMichon/copilot-extensions/issues/3113#issuecomment-5802473962).
+- **Slice 1 implemented**: added best-effort `activity.log_event()` calls
+  at every real ledger mutation point (not on read-only or dry-run/deferred
+  paths): `claim_added`, `claim_released`, `claim_settled`,
+  `claim_abandoned` (sweep `--apply` only), `claim_at_rest_reconciled`
+  (reconcile-at-rest `--apply` only), `claim_reclaimed` (cleanup `--apply`
+  only), `claim_handoff_offered`/`_declined`/`_cancelled`, `follow_up_added`,
+  `follow_up_resolved`, `follow_up_dismissed`. Each carries `worktree_id`
+  plus enough context (kind/ref/disposition/reason/bundle id/refs) to
+  reconstruct the mutation from the rolling `activity.jsonl` log alone.
+  Documented the new event names in `activity.py`'s module docstring
+  alongside the existing vocabulary.
+- **Explicit durable-persistence decision (per the roster's own ask)**:
+  these new events do **not** feed `handoff_trace`'s unrotated per-worktree
+  store. Rationale: a claim/follow-up's *current* disposition already lives
+  durably in its owning `WorktreeRecord` YAML -- unlike a handoff-cutover
+  race, there is no "truth" gap here, only a *history* gap (who mutated
+  what, when). The existing 7-day rolling `activity.jsonl` window is
+  sufficient for that; recorded the rationale directly in `activity.py`'s
+  docstring so it's discoverable without re-deriving it.
+- Added 15 new tests exercising every new call site (asserting the exact
+  event name + fields, and that dry-run/deferred paths do NOT log):
+  `test_claims_cmd.py` (add/release/settle), `test_obligation_sweep.py`
+  (sweep apply logs, dry-run doesn't), `test_claims_reconcile_at_rest.py`
+  (apply logs, dry-run doesn't), `test_cleanup.py` (cleanup apply logs),
+  `test_claim_handoffs.py` (offer/show/decline/cancel -- show asserted to
+  never log), `test_follow_ups_cmd.py` (add/resolve/dismiss).
+- Marked #3113's Phase 7 Plan bullet `[x]` below, with a corrected
+  description matching what was actually built (the ledger gap, not the
+  handoff-cutover-stage gap the original title implied). Phase 7 still has
+  other open bullets (`migration-intake` gate, scope revalidation, "place
+  each accepted item in exactly one phase", "keep fixtures synthetic") --
+  this slice closes only the #3113 bullet, not the whole phase. Validation: 250 targeted tests pass (agent-worktrees);
+  `ruff check` byte-identical before/after (`git stash` A/B, 8 pre-existing
+  errors unrelated to these files either side). The 12 `test_doctor.py`/
+  `test_context_resolution.py` failures seen in the full-suite run are
+  pre-existing on `origin/main` (confirmed via the same A/B) and unrelated
+  to this slice.
 

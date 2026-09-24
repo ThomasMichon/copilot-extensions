@@ -1,0 +1,40 @@
+<<TOPBAR>>
+  WORKTREES                                                                                           ⚙ Configuration
+───────────────────────────────────────────────────────── ▲ ──────────────────────────────────────────────────────────
+ Machine  Ctrl ◀▶                                                                      ● 1 active · 3 recent · 0 done
+    All     anomalous-potato Win ✓
+
+   + New worktree…     ✕ Clean     ⟳ Sync     creates on anomalous-potato Win  (this host)
+
+  ID     STATE    R   AGE    LIVE   T     PR
+  ── Active ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+☐ m001   ACTIVE       15m    ●1      12   —
+      Ship the release notes: active
+  ── Recent ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+☐ m002   DIRTY        2h     ·        3   —
+      Fix the flaky test: dirty
+☐ m003   UNUSED       1d     ·        0   —
+      Old idle wt: unused
+☐ m004   CLEAN        2d     ·        6   —
+      Docs pass: clean
+  ── Completed ───────────────────────────────────────────────────────────────────────────────────────────────────────
+    (none)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+───────────────────────────────────────────────────────── ▼ ──────────────────────────────────────────────────────────
+ Enter: new worktree on anomalous-potato Win · Tab region · ^◀▶ machine                                       · ready

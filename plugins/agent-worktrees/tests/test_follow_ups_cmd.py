@@ -156,3 +156,44 @@ def test_show_human_output_lists_legacy_boolean(tmp_path, monkeypatch, capfd):
     out = buf.getvalue()
     assert "1 open" in out
     assert "legacy boolean" in out
+
+
+# --- activity.log_event instrumentation (#3113) -----------------------------
+
+def test_add_logs_follow_up_added(tmp_path, monkeypatch, capfd):
+    _seed(tmp_path, monkeypatch)
+    logged = []
+    monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: logged.append((a, k)))
+    rc = m.cmd_follow_ups(_args(["add", "deploy", "the", "thing"]))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert len(logged) == 1
+    assert logged[0][0] == ("follow_up_added",)
+    assert logged[0][1]["worktree_id"] == "wt-A"
+    assert logged[0][1]["follow_up_id"] == out["id"]
+    assert logged[0][1]["summary"] == "deploy the thing"
+    assert logged[0][1]["reopened"] is False
+
+
+def test_resolve_and_dismiss_log_events(tmp_path, monkeypatch, capfd):
+    _seed(tmp_path, monkeypatch)
+    m.cmd_follow_ups(_args(["add", "item", "one"]))
+    added = json.loads(capfd.readouterr().out)
+
+    logged = []
+    monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: logged.append((a, k)))
+    rc = m.cmd_follow_ups(_args(["resolve", added["id"]], result_ref="org/repo#PR"))
+    assert rc == 0
+    capfd.readouterr()
+    assert logged == [(("follow_up_resolved",), {
+        "worktree_id": "wt-A", "follow_up_id": added["id"],
+        "result_ref": "org/repo#PR"})]
+
+    m.cmd_follow_ups(_args(["add", "item", "two"]))
+    added2 = json.loads(capfd.readouterr().out)
+    logged.clear()
+    rc = m.cmd_follow_ups(_args(["dismiss", added2["id"]], reason="not needed"))
+    assert rc == 0
+    assert logged == [(("follow_up_dismissed",), {
+        "worktree_id": "wt-A", "follow_up_id": added2["id"],
+        "reason": "not needed"})]

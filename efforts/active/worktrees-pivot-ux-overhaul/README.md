@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions (control-plane home; PR-required `main`, self-merge)
 - **Branch(es):** per-phase `pr/<slug>` worktrees → landed to `main`
 - **Created:** 2026-09-22
-- **Status:** Draft <!-- Draft | Active | Blocked | Done -->
+- **Status:** Active <!-- Draft | Active | Blocked | Done -->
 - **Vision:** vision-closing / vision-extending against:
   - [`visions/picker`](../../../visions/picker/README.md) — general Picker
     render/derive contract this pivot must keep honoring.
@@ -43,8 +43,9 @@ re-litigation of the broader Picker/Manager extraction, which
 
 ### Triage of prior art (2026-09-22)
 
-A sweep across `gim-home/odsp-web-harness`, `tmichon_microsoft/dotfiles`
-(the bound knowledge repo's issue tracker), and `copilot-extensions` itself
+A sweep across the operator's personal harness repo, their private
+knowledge repo (the bound knowledge repo's issue tracker), and
+`copilot-extensions` itself
 found substantial existing groundwork. Nothing below needs to be rebuilt;
 this effort's job is to **finish, adopt, or extend** it for the Worktrees
 pivot specifically.
@@ -76,10 +77,11 @@ pivot specifically.
   `scripts/preview-picker.ps1`/`.sh` already produce headless SVG captures
   against injected fixture/demo data (mock-data-backed, exactly per the
   wishlist). The blocker is a **known, already-triaged bug**:
-  `gim-home/odsp-web-harness#265` / `tmichon_microsoft/dotfiles#2120`
+  a real-world consuming harness's own tracker issue / the operator's
+  private knowledge-repo tracker
   ("Setup diagnostics: local Worktree Manager screenshot command crashes")
   — an active but not-yet-designed bug-triage effort exists at
-  `<knowledge-repo>/efforts/active/odsp-web-harness/setup-diagnostics-worktree-screenshot/README.md`.
+  `<knowledge-repo>/efforts/active/harness/setup-diagnostics-worktree-screenshot/README.md`.
   This effort's Phase 1 fixes that crash as a prerequisite, then captures the
   actual comparison baseline.
 - **Accelerator (fast claims/status reads) — already built and deployed.**
@@ -121,12 +123,13 @@ pivot specifically.
   orphan-pane-reaper and record-reconciliation phases remain a distinct,
   unclaimed gap this effort does **not** take on.
 - **`make-bulk-worktree-deletion-clear-and-safe`**
-  (gim-home/odsp-web-harness#430 / dotfiles#2158) — has its own design sketch
+  (a real-world consuming harness's own tracker issue and its knowledge-repo
+  cross-link) — has its own design sketch
   (multi-select bulk delete + force-flag plumbing + preflight grouping by
   `interpret_descriptor_payload` outcome). Touches the same Worktrees-pivot
   screen but is a distinct capability (destructive bulk action UX, not
   presentation/columns/ordering). Left alone; cross-link only.
-- **`gim-home/odsp-web-harness#1998`** ("Worktree Manager: Add
+- **A real-world consuming harness's own tracker issue #1998** ("Worktree Manager: Add
   cross-repository authoritative-agent picker") and **`#181`** ("Textual
   picker keyboard-dead over Windows OpenSSH") — tangential Worktrees-pivot
   bugs/asks unrelated to this effort's scope (input platform bug; a
@@ -188,12 +191,12 @@ before/after comparisons for every later phase; Phase 4 needs the
 accelerator, which is already done); otherwise independent and
 parallelizable across worktrees.
 
-### Phase 1 — Golden-screenshot baseline for visual regression
+### Phase 1 — Golden-screenshot baseline for visual regression (Done 2026-09-23)
 - [x] Fix the screenshot-command crash blocking `picker-shot.py` /
       `preview-picker.ps1`/`.sh` / `worktree-manager picker screenshot`.
       **Filed as [copilot-extensions#3319](https://github.com/ThomasMichon/copilot-extensions/issues/3319)**
-      (2026-09-22, closed 2026-09-23): the originally-reported crash
-      (gim-home/odsp-web-harness#265 / dotfiles#2120) traced to
+      (the originally-reported crash, tracked in a real-world consuming
+      harness's own tracker and its knowledge-repo cross-link) traced to
       `picker_tui/engine.py`, which no longer exists (retired with the
       bundled Picker per `worktree-manager-control-plane` Phase 6). Live
       reproduction found a **different, current** root cause instead: the
@@ -207,7 +210,7 @@ parallelizable across worktrees.
       '_in_ssh_session'` on every invocation. Fixed upstream; verified
       `worktree-manager picker screenshot --demo` now captures cleanly.
       Both stale issues cross-linked to #3319.
-- [ ] **Blocked on two more findings from verifying the #3319 fix
+- [x] **Blocked on two more findings from verifying the #3319 fix
       (2026-09-23):**
       - [copilot-extensions#3413](https://github.com/ThomasMichon/copilot-extensions/issues/3413)
         — `runner.capture()` (the real, non-demo production-Picker headless
@@ -218,6 +221,16 @@ parallelizable across worktrees.
         `production_picker`'s daily churn) — **not** the actual current
         Worktrees pivot. There is currently no way to headlessly capture
         the real pivot against deterministic mock data.
+        **Resolved 2026-09-23**: rebuilt `--demo`/`--preview` to render the
+        REAL `production_picker` by composing two existing seams —
+        `engine_client.set_engine_command` pointed at the existing
+        `demo_engine` fixture (worktree data), and a plain, schema-less
+        ("operator"-class) manifest injected into a temp
+        `AGENT_WORKTREES_PIVOTS_DIR` naming a new `demo_pivot` fixture
+        (pivot data) — through the *same* cross-plugin pivot-manifest
+        registry a real contributed pivot (Codespaces/Containers/…) uses,
+        zero engine code changes. `picker_app`'s demo-rendering functions
+        are no longer used by `--demo`. See `preview.py`'s module docstring.
       - [copilot-extensions#3418](https://github.com/ThomasMichon/copilot-extensions/issues/3418)
         — chasing why non-demo capture also *hangs* (not just lacks mock
         data) led to the real, generic root cause: `agent-worktrees list
@@ -229,33 +242,70 @@ parallelizable across worktrees.
         guessed. Unrelated to the Picker/worktree-manager at all; narrows
         and supersedes the initial (incorrect) theory in #3412, which is
         cross-linked and left open for the responsible agent to triage.
-      Phase 1's actual baseline capture is on hold until #3413 and/or #3418
-      land — whichever unblocks a real, representative capture first (a
-      mock-data path for `production_picker`, or a fast/bounded
-      `list --classify`).
-- [ ] Capture a current, mock-data-backed set of Worktrees-pivot renders
-      (the existing `capture.py` injected-source path) across representative
-      states (empty, ACTIVE-only, mixed ACTIVE+Recent+unused, claims present,
-      long-running worktree).
-- [ ] Locate the original Textual-picker-era screenshots (the ones taken
-      "when creating the Textual picker in the first place" — check
-      `worktree-manager/scripts/picker-snapshot/venue-preview/` history and
-      any linked PR/issue attachments) and produce a side-by-side comparison
-      documenting the intentional transformation since.
-- [ ] Wire the captured baseline into a checked-in golden-comparison step
-      (or confirm one already exists via `worktree-manager-control-plane`
-      Phase 3's "headless SVG capture for golden checks" and extend it) so
-      every later phase in this effort diffs against it before landing.
+        **Sidestepped for preview purposes** by #3413's fix above (the fake
+        engine never shells out to the real `list --classify`), but remains
+        open and worth fixing in its own right for real (non-preview)
+        capture and for `list --classify` generally.
+      Phase 1's golden-baseline capture is now unblocked via `--demo`/
+      `--preview` against the real Picker.
+- [x] Capture a current, mock-data-backed set of Worktrees-pivot renders
+      across representative states (empty, ACTIVE-only, mixed
+      ACTIVE+Recent+unused, claims present, long-running worktree).
+      **Done 2026-09-23**: added
+      `tests/production_picker/test_picker_capture_scenarios.py` (5 new
+      golden-compared tests) using the existing hermetic
+      `pcap.capture(source, live=False)` deterministic-renderer contract —
+      not the CLI `--demo` path (that's the human-facing preview tool
+      #3413 fixed; this is the checked-in regression artifact). The
+      long-running golden documents the CURRENT (pre-Phase-3) sort bug
+      directly: a 30-day-old, 47-turn worktree sorts BELOW a
+      created-yesterday/never-touched one in Recent, purely by
+      `started_at` — the exact "before" state Phase 3 should visibly flip.
+- [x] Locate the original Textual-picker-era screenshots and produce a
+      side-by-side comparison. **Done 2026-09-23**: found
+      `docs/assets/worktree-picker.png`/`.gif`, committed 2026-07-25
+      (`v1.0.0`, unmodified since) and still present. Full comparison in
+      [`screenshot-comparison.md`](screenshot-comparison.md). Headline
+      finding: the core design (sections, palette, header counters) is
+      unchanged; `SESS`→`LIVE` is a same-primitive rename; `T` (turn count)
+      is a genuine, welcome addition; **the `R` column has no historical
+      precedent at all** — direct evidence for wishlist item #5's
+      complaint, and freeing Phase 5 to redefine/retire it without a legacy
+      meaning to preserve.
+- [x] Wire the captured baseline into a checked-in golden-comparison step.
+      **Done 2026-09-23**: confirmed one already exists —
+      `tests/production_picker/test_picker_capture.py`'s
+      `GOLDEN_DIR`/`_golden()`/`AGENT_WORKTREES_UPDATE_GOLDENS=1` pattern —
+      and extended it with the 5 new scenario goldens above, in a sibling
+      file rather than duplicating the harness.
 
-### Phase 2 — Evaluate native Textual components for the Worktrees table
-- [ ] Audit `production_picker/picker_tui/engine_views.py`'s hand-rolled
+### Phase 2 — Evaluate native Textual components for the Worktrees table (Done 2026-09-23)
+- [x] Audit `production_picker/picker_tui/engine_views.py`'s hand-rolled
       Worktrees-table rendering against Textual's native `DataTable` (used
-      today only in `mux_companion.py`) and `OptionList`.
-- [ ] Name concrete benefits/costs (built-in selection, sorting, scrolling,
-      accessibility, theming vs. the current column-declarative
-      `pivot_manifest.py` model this pivot and its siblings share).
-- [ ] Decide: migrate, partially adopt, or explicitly keep custom with the
+      today only in `mux_companion.py`) and `OptionList`. **Done**: the
+      outer container already went native pre-effort
+      (`engine_regions._PickerNativeData(OptionList)`, #88 NF5-5) --
+      remaining question was the row-content model (two adjacent
+      `OptionList` options per record). `DataTable` ruled out: no colspan
+      for section bands (`── Active ──` etc.), a structural blocker, not a
+      preference.
+- [x] Name concrete benefits/costs. **Done**: full writeup in
+      [`phase2-native-textual-audit.md`](phase2-native-textual-audit.md),
+      including a real, runnable `ListView`-backed spike
+      (`production_picker/picker_tui/listview_proto.py` +
+      `scripts/listview_proto_compare.py`) captured against the real demo
+      fixture data -- confirmed atomic title+detail rows and a real
+      `Checkbox` are plausible, at the cost of re-implementing the
+      scroll-preservation/sticky-header/incremental-repaint/`sel`-sync
+      bridge `_PickerNativeData` already built for `OptionList`.
+- [x] Decide: migrate, partially adopt, or explicitly keep custom with the
       documented rationale recorded in this effort (not silently dropped).
+      **Decision**: keep `OptionList` as the Worktrees pivot's default;
+      introduce an opt-in-per-pivot `render_mode` (`"v1"`/`OptionList` vs.
+      `"v2"`/`ListView`) as its own tracked follow-up phase/issue once the
+      production `ListView` widget reaches bridge parity -- not folded into
+      this phase, and no built-in pivot opts in without its own explicit
+      review.
 
 ### Phase 3 — Fix Recent-section sort order (most-recently-used, not newest first)
 - [ ] Identify the current sort key driving the Recent section (a
@@ -334,8 +384,8 @@ reviewed-plan PR per the standard effort review gate before Phase 1 begins._
 ## Journal
 
 ### 2026-09-22 — Kickoff: triage sweep + reviewed plan drafted
-- Swept `gim-home/odsp-web-harness`, `tmichon_microsoft/dotfiles` (bound
-  knowledge repo), and `copilot-extensions` itself for existing issues and
+- Swept the operator's personal harness repo, their private knowledge repo
+  (bound knowledge repo), and `copilot-extensions` itself for existing issues and
   efforts touching the Worktrees pivot / Textual picker.
 - Found and cited the directly reusable prior art: the shipped claims
   pecking-order module + its Codespaces/Containers adoption
@@ -391,3 +441,131 @@ reviewed-plan PR per the standard effort review gate before Phase 1 begins._
 - Phase 1 remains blocked — now on #3413 and/or #3418 — before a real,
   representative golden baseline can be captured. No functional code
   changes made in this slice; investigation and filing only.
+
+### 2026-09-23 — Fixed #3413: real production Picker now has a mock-data preview
+- Rebuilt the `--demo`/`--preview` picker flow to render the REAL
+  `production_picker` (not the stale `picker_app`) by composing two
+  existing, unmodified seams rather than adding a Picker-specific mock
+  branch:
+  1. `engine_client.set_engine_command` pointed at the already-existing
+     `demo_engine` fixture subprocess — every consumer that shells out
+     through `engine_client` (including the real `data_local`/`data_ssh`)
+     transparently receives mock worktree rows.
+  2. A new `demo_pivot.py` fixture plus a plain, schema-less
+     ("operator"-class — always active, no plugin/root attribution
+     required) manifest injected into a temp `AGENT_WORKTREES_PIVOTS_DIR`,
+     read through the *same* cross-plugin pivot-manifest registry a real
+     contributed pivot (Codespaces/Containers/…) uses. Verified it renders
+     as a genuine extra pivot tab ("Demo Queue") with its own
+     declared columns (including a `claims_summary` column, previewing the
+     Phase 4 CLAIMS-column convention).
+- Verified live: `--demo` now captures the real Worktree Manager chrome,
+  real column layout (`ID STATE R AGE LIVE T PR`), the mocked Worktrees
+  rows, and the injected pivot's own table — through the actual
+  `runner.capture()` path, `--pivot`/`--wait` included.
+- Added `tests/test_picker_preview_mode.py` (11 tests): dispatch wiring,
+  `enable_preview_mode()`'s two injections, and the `demo_pivot` fixture.
+  Found and fixed a real test-isolation bug of my own along the way (env
+  vars set by `enable_preview_mode()` leaked across tests in the same
+  pytest process, breaking an unrelated `test_plugin_contracts.py` test);
+  fixed by explicit env cleanup on both sides of the fixture rather than
+  relying on `monkeypatch`'s auto-restore (which only covers state changed
+  *through* `monkeypatch` itself). Full suite: 1143 passed, 1 skipped.
+- `runner.capture()`'s underlying cost for a REAL (non-preview) capture is
+  still #3418 — sidestepped here for preview purposes (the fake engine
+  never reaches `list --classify`), but still open and worth its own fix.
+- Phase 1 is now unblocked for the actual golden-baseline capture next.
+
+### 2026-09-23 — Phase 1 complete: golden baseline captured + historical comparison
+- Added 5 new golden-compared scenario tests
+  (`test_picker_capture_scenarios.py`) using the existing hermetic capture
+  harness: empty, active-only, mixed, claims (open PR), and long-running.
+  The long-running golden deliberately documents today's sort bug as a
+  "before" baseline (a 47-turn/30-day worktree sorts below a
+  never-touched/1-day one, purely by `started_at`).
+- Found the original Textual-picker-era screenshot
+  (`docs/assets/worktree-picker.png`, `v1.0.0`, committed 2026-07-25,
+  unmodified since) and wrote the requested comparison in
+  `screenshot-comparison.md`. Key finding for later phases: the `R` column
+  has **no historical precedent** in the original design — confirms
+  wishlist item #5 and frees Phase 5 to redefine/retire it without a
+  legacy meaning to preserve; `SESS`→`LIVE` is a same-primitive rename;
+  `T` (turn count) is a genuinely new column since `v1.0.0`.
+- Confirmed the checked-in golden-comparison step already existed
+  (`test_picker_capture.py`'s `GOLDEN_DIR`/`AGENT_WORKTREES_UPDATE_GOLDENS`
+  pattern) and extended it rather than inventing a parallel one.
+- Full suite: 1155 passed, 1 skipped.
+- Phase 1 status: **Done**. Moving to Phase 2 (evaluate native Textual
+  components for the Worktrees table) next.
+
+### 2026-09-23 — Enriched the durable mock fixture with the scraped memo titles
+- Scraped the 18 "management memo" titles from the original v1.0.0
+  screenshot (`docs/assets/worktree-picker.png`) found while writing the
+  Phase 1 comparison — the terse, absurd, treats-employees-as-test-subjects
+  Cave Johnson register, distinct from `demo.py`'s original 7 "Portal quote"
+  rows. Folded them into `demo.py` as a durable, reusable `_MEMO_TITLES`
+  bank plus 18 new fixture rows (9 Active/9 Recent+Completed), reconstructed
+  with the same ids, relative ages, live/session indicators, follow-up
+  markers, and PR states the original screenshot showed. Kept the existing
+  7 rows byte-identical (nothing removed) so `test_picker_app.py`'s
+  "lemons"/"GLaDOS" assertions and row-count checks stay valid untouched.
+- `_MEMO_TITLES` is intentionally separated from the row-construction code
+  so a future combinatorial title generator (more volume than this fixed
+  25-row roster) has a clearly-labeled, reusable bank of on-theme phrasing
+  to start from, per the operator's "at least inspiration for the
+  generator" ask — not built this pass; the curated bank alone was judged
+  sufficient for now.
+- Verified live: `--demo` now shows "9 active · 10 recent · 6 done",
+  matching the original's section shape closely, with the same titles,
+  follow-up markers (✚), and PR numbers/states. Full suite: 1155 passed,
+  1 skipped.
+
+### 2026-09-23 — Filed screenshot evidence to OneDrive; effort marked Active
+- Installed `resvg` (`worktree-manager/scripts/picker-snapshot`, `npm
+  install`) as a deterministic PNG rasterizer — headless Edge hung
+  unrelated to this effort's own code (an environment quirk on this
+  machine, not a repo bug), `resvg` did not.
+- Captured and filed 3 screenshots to the operator's OneDrive
+  (`2026/09.22 Worktrees Pivot UX Overhaul/`, per their maintained
+  organization profile's "tied to a specific project with a known start
+  date" placement heuristic): the current Worktrees pivot (`--demo`,
+  enriched fixture), the injected "Demo Queue" mock pivot, and the
+  original `v1.0.0` baseline — with a short `README.md` index. Local
+  temp captures cleaned up; nothing else changed in-repo this slice.
+- Effort status promoted **Draft → Active** (Phase 1 shipped, work is
+  ongoing) — no plan changes.
+- **Next up: Phase 2** — evaluate native Textual components (`DataTable`/
+  `OptionList`) for the Worktrees table vs. the current hand-rolled
+  `engine_views.py` renderer. Not yet started.
+
+### 2026-09-23 — Phase 2 complete: DataTable ruled out, ListView spiked and evidenced
+- Corrected the starting premise mid-audit: the outer list *container* was
+  already migrated to a native `OptionList` pre-effort
+  (`engine_regions._PickerNativeData`, #88 NF5-5) — the open question was
+  really the row-*content* model (two adjacent options per record), not
+  container-vs-hand-rolled.
+- `DataTable` ruled out on a concrete structural blocker: no colspan, so it
+  cannot render the Active/Recent/Completed section bands at all — not a
+  stylistic preference.
+- Built and ran a real `ListView`-backed spike
+  (`worktree-manager/src/worktree_manager/production_picker/picker_tui/listview_proto.py`
+  + `worktree-manager/scripts/listview_proto_compare.py`) against the real
+  demo fixture roster (25 records, 3 sections), confirmed atomic
+  title+detail rows and a real `Checkbox` widget both work, and found (by
+  running it, not guessing) three concrete integration costs: default
+  `ListItem` chrome is visually heavier than today's flat rows,
+  `ListView.append`/`.extend()` must be awaited (async `on_mount`), and
+  height/CSS defaults need explicit pinning at every composition level.
+  Full writeup: [`phase2-native-textual-audit.md`](phase2-native-textual-audit.md).
+- **Decision**: keep `OptionList` as the Worktrees pivot's default (it
+  already has a working, tested bridge); ListView is plausible as an
+  opt-in-per-pivot `render_mode` (`"v1"` vs `"v2"`), but the production
+  widget's bridge parity (scroll preservation, sticky header, incremental
+  repaint, `sel` sync) is its own tracked follow-up — no built-in pivot
+  opts in without a separate, explicit review.
+- Neither new file is wired into any pivot's real render path — purely
+  additive, zero risk to the existing `OptionList` path or its golden
+  screenshots.
+- **Next up: Phase 3** — fix the Recent-section sort order
+  (most-recently-used, not newest-first). Not yet started.
+

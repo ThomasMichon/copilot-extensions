@@ -150,29 +150,53 @@ always declare a namespace.
   across review rounds again).
 
 ### Phase 2 — Provider registration in claim-owning plugins
-- [ ] Add a `register-claim-provider.sh`/`.ps1` pair to agent-dispatch,
+- [x] Add a `register-claim-provider.sh`/`.ps1` pair to agent-dispatch,
   modeled on agent-codespaces'/agent-containers' existing
   `register-bridge-provider.sh`/`.ps1`, declaring the `dispatch-task:`
   namespace and a `claim-status` subcommand.
-- [ ] Add the same to agent-codespaces (`codespace:` namespace) and
+- [x] Add the same to agent-codespaces (`codespace:` namespace) and
   agent-containers (`container:` namespace).
-- [ ] Each provider's `claim-status` subcommand returns the JSON contract
+- [x] Each provider's `claim-status` subcommand returns the JSON contract
   from Phase 1 for a ref in its own namespace.
 
 ### Phase 3 — Convert the two violation call sites
-- [ ] Convert `cleanup.py::_run_codespaces`'s orphan-reclaim path to resolve
+- [x] Convert `cleanup.py::_run_codespaces`'s orphan-reclaim path to resolve
   the `codespace:` claim provider and drive its declared command instead of
   ambient `shutil.which`.
-- [ ] Convert `claims_cli.py::_inbound_claims` to resolve the
+- [x] Convert `claims_cli.py::_inbound_claims` to resolve the
   `dispatch-task:` claim provider; rename it (and its docstring) to
   something that does not reuse the word "claims" for agent-dispatch's
   separate assigned/owned-task concept (e.g. `_dispatch_assigned_tasks`).
-- [ ] Preserve complete graceful degradation: an absent provider (dispatch/
+- [x] Preserve complete graceful degradation: an absent provider (dispatch/
   codespaces plugin not installed) must degrade exactly as today (`"agent-
   codespaces binstub unavailable"` / `{"available": false, ...}"`), not
   raise.
-- [ ] Add legacy-ref pattern-matching fallback for any existing unnamespaced
+- [x] Add legacy-ref pattern-matching fallback for any existing unnamespaced
   claim refs, so this conversion never breaks a pre-existing claim entry.
+
+### Phase 4 — Cross-plugin identity rebinding + codespaces atomic lease fence
+(follow-up filed as [#3461](https://github.com/ThomasMichon/copilot-extensions/issues/3461)
+after Phase 2/3 review, PR [#3388](https://github.com/ThomasMichon/copilot-extensions/pull/3388);
+design note for the rebinding work:
+[`phase-4-peer-rebinding-design.md`](phase-4-peer-rebinding-design.md))
+- [x] Build a `deploy_hold`-equivalent atomic admission fence for
+  agent-codespaces, mirroring
+  `plugins/agent-containers/src/agent_containers/lease.py`'s
+  `deploy_hold`/`DeployHold`/`_DEPLOY_HOLDS_FILE` mechanism, and wire it
+  into `agent-codespaces`' `claim_provider_cli.py::cmd_claim_reclaim` and
+  `lease.py::borrow()`'s admission check.
+- [ ] Register agent-worktrees as an owner/peer in agent-codespaces' and
+  agent-containers' own vendored `_peer_launch.py` (OWNERS/PEERS dicts),
+  and add matching wiring in `agent_worktrees.claim_providers.peer_env()`
+  so it REBINDS to each target plugin's own validated installation context
+  before invoking a sibling claim-provider callback, instead of stripping
+  `COPILOT_EXTENSIONS_CONTEXT`/`COPILOT_PLUGIN_ROOT`/`GH_TOKEN`/
+  `GITHUB_TOKEN` and letting the sibling fall back to legacy/ambient mode.
+- [ ] Once rebinding lands, fix
+  `agent-codespaces/gh_account.py::mapped_accounts()`/`_lookup()`/
+  `_agent_worktrees_bin()` to prefer the same-cell `worktrees.run()` path
+  over the `shutil.which("agent-worktrees")` PATH fallback for this
+  cross-plugin call path.
 
 ## Validation Plan
 
@@ -191,12 +215,60 @@ always declare a namespace.
 - [ ] `check-version-bump.py`, `check-version-consistency.py`, `check-
   module-size.py`, `check-install-contract.py`, and `ruff check --select
   F,E9` all pass for every touched plugin.
+- [x] Phase 4: unit tests for the new agent-codespaces `deploy_hold`
+  equivalent (acquire/reject-when-held/heartbeat/expiry/cleanup) mirroring
+  `agent-containers`' `test_lease.py` coverage shape; `cmd_claim_reclaim`
+  proven to hold the fence for the full destructive-reclaim duration.
+- [ ] Phase 4: unit tests proving `peer_env()` rebinds (not strips) target
+  identity when a registered peer exists, and still degrades to today's
+  strip-and-fallback behavior for any plugin that hasn't registered as a
+  peer.
+- [ ] Phase 4: full test suites for agent-worktrees, agent-codespaces, and
+  agent-containers pass on both Windows and WSL/Linux after each Phase 4
+  slice.
 
 ## Proposal
 
 _Pending._
 
 ## Journal
+
+### 2026-09-23 — Phase 4 slice: agent-codespaces atomic deploy hold
+- Added an agent-codespaces provider `deploy_hold` fence mirroring
+  agent-containers' hold-record pattern (`DeployHold`,
+  `_DEPLOY_HOLDS_FILE`, heartbeat thread, fail-closed admission reads,
+  expiry/uncertain handling) and wired `lease.borrow()` to reject new
+  admissions while a destructive reclaim hold is live.
+- Wrapped `claim_provider_cli.py::cmd_claim_reclaim` in that fence so the
+  hold spans the full session-recovery + delete window, not just a
+  best-effort lease re-check immediately before the delete.
+- Extended agent-codespaces lease/claim-provider tests to cover hold
+  acquisition, rejection while held, heartbeat + expiry, cleanup of stale
+  corrupt state, uncertain hold persistence, and callback ordering proving
+  the fence stays live through recovery and deletion.
+
+### 2026-09-23 — Phase 2/3 landed; Phase 4 opened from review follow-up
+- PR [#3388](https://github.com/ThomasMichon/copilot-extensions/pull/3388)
+  (Phase 2/3: provider registration in agent-dispatch/agent-codespaces/
+  agent-containers + conversion of both violation call sites) merged as
+  `2019e7b1e` after ~20 rounds of review. Safety-critical findings raised
+  during review (cmd.exe injection guards, TOCTOU lease re-checks, an
+  atomic `deploy_hold` fence for agent-containers reclaim, strict
+  single-CodeSpace status lookups with budget-timeout enforcement,
+  cross-account name-collision handling, fail-closed reclaim-chain error
+  propagation, exact-token credential threading) were all fixed inline and
+  landed with the PR.
+- Four related findings were deliberately left open because closing them
+  needs new cross-plugin infrastructure, not a bounded fix within #3388:
+  peer-launch identity rebinding (`agent_worktrees.claim_providers.
+  peer_env()` currently strips identity env vars rather than rebinding to
+  each target plugin's own validated context) and an agent-codespaces
+  atomic lease fence equivalent to agent-containers' `deploy_hold`. Filed
+  generically as
+  [#3461](https://github.com/ThomasMichon/copilot-extensions/issues/3461)
+  and folded in as this effort's own Phase 4 rather than a standalone
+  follow-on effort, since it's a direct continuation of the same
+  registry/rebinding work.
 
 ### 2026-09-22 — Phase 0-1 landed
 - Phase 0: added the **Claim provider** concept and the explicit 10-tier

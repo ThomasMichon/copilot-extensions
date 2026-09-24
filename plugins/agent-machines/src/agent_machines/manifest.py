@@ -59,12 +59,15 @@ BOOTSTRAP_CRITICAL_MARKETPLACES = ("copilot-extensions",)
 #: today -- ``package``, ``file`` (whole-file and managed-block),
 #: ``registry`` (Windows), ``feature`` (Windows optional features /
 #: capabilities and Linux/WSL units), ``power-setting`` (Windows power
-#: schemes), ``self-update`` (machine-local unattended tier opt-in), and
+#: schemes), ``self-update`` (machine-local unattended tier opt-in),
 #: ``fleet-update`` (machine-local unattended worktree-manager update
-#: sweep opt-in). See ``resources.py`` for the handlers.
+#: sweep opt-in), and ``copilot-cli-update`` (the Copilot CLI's own
+#: built-in self-updater: disable it and/or pin the installed binary to a
+#: known-good version -- Windows only for now). See ``resources.py`` for the
+#: handlers.
 KNOWN_RESOURCE_TYPES = (
     "package", "file", "registry", "feature", "power-setting", "self-update",
-    "fleet-update",
+    "fleet-update", "copilot-cli-update",
 )
 
 #: Minimal required identity fields per resource type (checked at load).
@@ -76,6 +79,7 @@ REQUIRED_FIELDS = {
     "power-setting": ("subgroup", "setting"),
     "self-update": ("tier",),
     "fleet-update": ("tier",),
+    "copilot-cli-update": (),
 }
 
 #: Accepted values for a resource's ``state`` / ``strategy`` selectors.
@@ -530,6 +534,23 @@ def load_package(
                 raise ManifestError(
                     f"{path}: fleet-update tier {tier!r} must be one of "
                     f"{FLEET_UPDATE_TIERS}"
+                )
+        if rtype == "copilot-cli-update":
+            auto_update = res.get("auto_update")
+            pinned_version = res.get("pinned_version")
+            if auto_update is None and pinned_version is None:
+                raise ManifestError(
+                    f"{path}: copilot-cli-update resource requires at least one of "
+                    "'auto_update' or 'pinned_version'"
+                )
+            if auto_update is not None and type(auto_update) is not bool:
+                raise ManifestError(
+                    f"{path}: copilot-cli-update 'auto_update' must be a boolean when declared"
+                )
+            if pinned_version is not None and not isinstance(pinned_version, str):
+                raise ManifestError(
+                    f"{path}: copilot-cli-update 'pinned_version' must be a string "
+                    "when declared"
                 )
         process_guard = res.get("process_guard")
         if process_guard is not None:

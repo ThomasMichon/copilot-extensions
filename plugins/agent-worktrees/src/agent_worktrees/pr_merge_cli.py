@@ -12,6 +12,7 @@ from pathlib import Path
 
 from . import config as cfg
 from . import output
+from . import pr_config
 from .pr_cli import (
     _classify_pr_operands,
     _infer_active_repo_slug,
@@ -286,9 +287,9 @@ def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
     # thing blocking the merge -- it queues indefinitely rather than
     # refusing -- so a pr-self-merge repo whose sole maintainer will never
     # supply that second review would otherwise sit "armed" forever (#3296
-    # follow-up: discovered landing gim-home/odsp-web-harness#502/#504,
-    # whose live ruleset requires 1 approving review but grants the acting
-    # Maintainer pull-request-scoped bypass rights). Only a provider that
+    # follow-up: discovered landing a real-world case with a live ruleset
+    # requiring 1 approving review but granting the acting Maintainer
+    # pull-request-scoped bypass rights). Only a provider that
     # exposes ``pull_review_gate`` (currently GitHub) is checked; other
     # providers' auto-merge already means what it says.
     bypass_review_gate = False
@@ -495,7 +496,7 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
         repo_cfg = config.default_repo
         prcfg = repo_cfg.pr
         default_branch = repo_cfg.default_branch
-        flow = _core()._pr_flow_profile(repo_cfg)
+        flow = pr_config._pr_flow_profile(repo_cfg)
 
         # --now: perform the direct submitter self-merge (pr-self-merge repos).
         if args.now:

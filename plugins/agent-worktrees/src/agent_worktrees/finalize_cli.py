@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import codename_tracking, config as cfg, finalize as fin, git_ops, output, pr_ops, tracking
+from . import context_cli
 
 
 def _core():
@@ -77,6 +78,11 @@ def add_parsers(sub) -> None:
     p.add_argument("worktree_id", nargs="?", default=None)
     p.add_argument("--title", default=None, help="Title for the squashed commit / PR slug")
     p.add_argument("--branch", default=None, help="Override the generated feature branch name")
+    p.add_argument(
+        "--topic",
+        default=None,
+        help="Optional mini-task token folded into the generated default branch name",
+    )
     p.add_argument(
         "--repo",
         default=None,
@@ -212,7 +218,7 @@ def cmd_post_exit(args: argparse.Namespace) -> int:
         output.ok(f"Worktree {worktree_id} already finalized.")
         rc = 0
     else:
-        rc = core._post_exit_gate(record, config)
+        rc = _post_exit_gate(record, config)
 
     _invoke_post_exit_sweep()
     return rc
@@ -380,7 +386,7 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
             allow_unsquashed=getattr(args, "allow_unsquashed", False),
         )
 
-        reminder = core._pr_reminder_for(
+        reminder = context_cli._pr_reminder_for(
             config,
             "push-changes",
             ok=bool(success),
@@ -454,6 +460,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                 config,
                 title=args.title,
                 branch=args.branch,
+                topic=getattr(args, "topic", None),
                 target_repo=getattr(args, "repo", None),
                 new=getattr(args, "new", False),
                 body=body,
@@ -468,7 +475,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             msg = str(e)
             return core._json_error(msg) if use_json else (output.err(msg) or 1)
 
-        reminder = core._pr_reminder_for(
+        reminder = context_cli._pr_reminder_for(
             config,
             "create-pr",
             state=("created" if result.get("success") else ""),
@@ -491,6 +498,8 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             remote = result.get("remote", "")
             provider = result.get("provider", "")
             output.ok(f"Feature branch '{branch}' pushed to {remote}.")
+            if result.get("topic_note"):
+                output.warn(result["topic_note"])
             print(
                 f"  base: {result.get('base_sha', '')[:10]}  "
                 f"head: {result.get('head_sha', '')[:10]}"

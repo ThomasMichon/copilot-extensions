@@ -176,6 +176,54 @@ resolve_runtime_python() {
     printf '%s\n' "$AW_PY"
 }
 
+# Runs a best-effort `agent_worktrees` preflight subcommand (knowledge
+# composition, marketplace overrides, ...) with retry-and-reresolve.
+#
+# #stale-venv-preflight: a background plugin update can flip `current-version`
+# to a brand-new slot WHILE this launch is mid-flight, and observed evidence
+# (a real-world consuming harness's own tracker issue) shows the OLD,
+# still-"current"-at-the-time
+# slot can transiently fail to import its own package during that swap (e.g.
+# "No module named agent_worktrees") even though the interpreter itself still
+# resolves and the slot is intact a moment later. Re-resolving the interpreter
+# on every attempt and retrying rides out that window instead of trusting a
+# single, possibly-stale snapshot of $PYTHON.
+#
+# These preflights are best-effort enrichments -- their output is only logged,
+# never consumed downstream -- so persistent failure (not just a transient
+# race) degrades to a warning rather than exiting the whole launch. Killing
+# the process here previously took the entire terminal tab down with no
+# recovery path.
+#
+# Usage: run_runtime_preflight "<label>" arg1 arg2 ...
+run_runtime_preflight() {
+    local label="$1"; shift
+    local max_attempts=3
+    local retry_delay_s=0.4
+    local attempt py output rc
+    for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+        py="$(resolve_runtime_python)" || py=""
+        [[ -n "$py" && -x "$py" ]] || py="$PYTHON"
+        if [[ -z "$py" || ! -x "$py" ]]; then
+            setup_log WARN "$label: runtime python unavailable on attempt $attempt/$max_attempts"
+        else
+            if output=$("$py" "$@" 2>&1); then
+                setup_log INFO "$label completed: $output"
+                return 0
+            fi
+            rc=$?
+            setup_log WARN "$label failed on attempt $attempt/$max_attempts (exit $rc): ${output:-no details}"
+        fi
+        if ((attempt < max_attempts)); then
+            sleep "$retry_delay_s"
+        fi
+    done
+    setup_log ERROR "$label failed after $max_attempts attempts -- continuing launch without it"
+    printf 'WARNING: %s failed after %s attempts -- continuing launch without it (see %s)\n' \
+        "$label" "$max_attempts" "${WORKTREE_SETUP_LOG:-the setup log}" >&2
+    return 1
+}
+
 if [[ -n "$PYTHON" && -x "$PYTHON" ]]; then
     setup_log INFO "Venv resolved: $RUNTIME_DIR"
 else
@@ -647,18 +695,22 @@ if [[ "$ACTION" == "refresh" ]]; then
             || setup_log WARN 'Full update returned non-zero -- continuing to reconcile/relaunch'
     fi
     invoke_update_apply 1 1
-    _RELAUNCH="$HOME/.agent-worktrees/bin/launch-session.sh"
-    if [[ -x "$_RELAUNCH" ]]; then
-        relaunch_args=()
-        [[ -n "$LAUNCH_PROJECT" ]] && relaunch_args+=(--project "$LAUNCH_PROJECT")
-        relaunch_args+=("$@")
-        if [[ ${#COPILOT_PASSTHROUGH[@]} -gt 0 ]]; then
-            relaunch_args+=(-- "${COPILOT_PASSTHROUGH[@]}")
-        fi
-        exec "$_RELAUNCH" "${relaunch_args[@]}"
+    # Relaunch through the Python entry point rather than re-resolving a
+    # launcher path by hand here: `agent_worktrees`'s own cmd_launch already
+    # owns (and keeps current) the "where does the live Worktree Manager
+    # launcher now live" resolution -- a retired "$HOME/.agent-worktrees/bin/
+    # launch-session.sh" path was never updated for the phase-3b relocation
+    # and hasn't existed since (worktree-manager-control-plane/phase-3b-mux-
+    # relocation.md), so hand-rolling it here silently broke every Picker
+    # "refresh" relaunch. Delegating re-resolves fresh, post-update, exactly
+    # like the `update` call above.
+    relaunch_args=(-m agent_worktrees)
+    [[ -n "$LAUNCH_PROJECT" ]] && relaunch_args+=(--project "$LAUNCH_PROJECT")
+    relaunch_args+=("$@")
+    if [[ ${#COPILOT_PASSTHROUGH[@]} -gt 0 ]]; then
+        relaunch_args+=(-- "${COPILOT_PASSTHROUGH[@]}")
     fi
-    setup_log WARN 'Relaunch launcher missing after refresh; exiting'
-    exit 1
+    exec "$PYTHON" "${relaunch_args[@]}"
 fi
 
 # ── Fast re-attach: skip the update when JOINING an already-live session ──
@@ -884,27 +936,11 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
     [[ -n "$LAUNCH_PROJECT" ]] \
         && _KNOWLEDGE_ARGS+=(--project "$LAUNCH_PROJECT")
     _KNOWLEDGE_ARGS+=(knowledge compose-plugins --cwd "$_KNOWLEDGE_CWD" --json)
-    if _KNOWLEDGE_JSON=$("$PYTHON" "${_KNOWLEDGE_ARGS[@]}" 2>&1); then
-        setup_log INFO "Knowledge plugin preflight completed: $_KNOWLEDGE_JSON"
-    else
-        _KNOWLEDGE_RC=$?
-        setup_log ERROR "Knowledge plugin preflight failed (exit $_KNOWLEDGE_RC): ${_KNOWLEDGE_JSON:-no details}"
-        printf 'ERROR: Knowledge plugin preflight failed: %s\n' \
-            "${_KNOWLEDGE_JSON:-no details}" >&2
-        exit "$_KNOWLEDGE_RC"
-    fi
+    run_runtime_preflight "Knowledge plugin preflight" "${_KNOWLEDGE_ARGS[@]}" || true
 
     _MARKETPLACE_ARGS=(-m agent_worktrees reconcile-marketplaces
         --cwd "$_KNOWLEDGE_CWD" --ensure-ignored --json)
-    if _MARKETPLACE_JSON=$("$PYTHON" "${_MARKETPLACE_ARGS[@]}" 2>&1); then
-        setup_log INFO "Marketplace override preflight completed: $_MARKETPLACE_JSON"
-    else
-        _MARKETPLACE_RC=$?
-        setup_log ERROR "Marketplace override preflight failed (exit $_MARKETPLACE_RC): ${_MARKETPLACE_JSON:-no details}"
-        printf 'ERROR: Marketplace override preflight failed: %s\n' \
-            "${_MARKETPLACE_JSON:-no details}" >&2
-        exit "$_MARKETPLACE_RC"
-    fi
+    run_runtime_preflight "Marketplace override preflight" "${_MARKETPLACE_ARGS[@]}" || true
 
     if [[ "$NO_MUX" == "1" ]]; then
         setup_log INFO "Mux disabled; launching directly"

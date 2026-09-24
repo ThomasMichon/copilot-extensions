@@ -371,8 +371,9 @@ def _resolve_terminal_fragment_machine(project: str | None, explicit: str | None
 
 def _cmd_terminal_fragment(rest: list[str]) -> int:
     """``worktree-manager terminal-fragment <project> [--machine K]
-    [--explain|--doctor|--migrate-selections]`` -- preview the Windows
-    Terminal fragment a machine's config would emit, without deploying it.
+    [--explain|--doctor|--migrate-selections|--deploy [--live]]`` -- preview
+    (or, with ``--deploy --live``, actually write) the Windows Terminal
+    fragment a machine's config would emit.
 
     Phase 3e Step 4 (copilot-extensions#3390): the read-only equivalent of
     agent-worktrees' own ``profiles``/``terminal-fragment`` CLI verbs, now
@@ -381,16 +382,23 @@ def _cmd_terminal_fragment(rest: list[str]) -> int:
     takes an **explicit** ``<project>`` positional (matching
     ``worktree-manager projects``/``repos``'s own convention) and resolves
     the machine key from that project's own config.yaml directly -- no
-    cwd-based ``config.load_config()`` needed. **Deploying** the fragment
-    (writing it to disk + reconciling Windows Terminal's live state) is
-    Phase 3e Step 5's scope (repointing ``install.ps1``), not this command.
+    cwd-based ``config.load_config()`` needed.
+
+    Phase 3e Step 5: ``--deploy`` computes the real deploy plan (fragment
+    write + ``state.json``/``settings.json`` reconciliation) via
+    :func:`terminal_fragment.deploy_fragment` and always previews it first.
+    Only ``--deploy --live`` together perform the actual writes -- ``--deploy``
+    alone is a dry run, on purpose: this surface has not yet had a live trial
+    against a real machine's Windows Terminal install (see the Phase 3e
+    effort doc's Step 5 blocker), so live writes stay behind an explicit,
+    separate flag until that trial happens.
     """
     from . import terminal_fragment as tf
 
     positionals, values = _parse_flagged_args(
         rest,
         flags_with_value={"machine"},
-        flags_bool={"explain", "doctor", "migrate_selections"},
+        flags_bool={"explain", "doctor", "migrate_selections", "deploy", "live"},
     )
     project = positionals[0] if positionals else None
     machine = _resolve_terminal_fragment_machine(project, values["machine"])
@@ -411,6 +419,9 @@ def _cmd_terminal_fragment(rest: list[str]) -> int:
 
     if values["doctor"]:
         return _terminal_fragment_doctor(tf, machine, project)
+
+    if values["deploy"]:
+        return _terminal_fragment_deploy(tf, machine, project, live=bool(values["live"]))
 
     result = tf.preview_local(machine, current_project=project)
 
@@ -497,17 +508,57 @@ def _terminal_fragment_doctor(tf, machine: str, project: str | None) -> int:
     return 0
 
 
+def _terminal_fragment_deploy(tf, machine: str, project: str | None, *, live: bool) -> int:
+    """``terminal-fragment <project> --deploy [--live]`` -- print the deploy
+    plan; only ``--live`` actually writes anything.
+
+    Phase 3e Step 5 (copilot-extensions#3390). Always prints the plan
+    (fragment path, what would change in ``generatedProfiles``/
+    ``settings.json``, and any operator-facing notes) before returning, so a
+    dry run and a live deploy report the exact same information -- the only
+    difference is whether ``deploy_fragment(..., apply=live)`` actually wrote
+    anything.
+    """
+    plan = tf.deploy_fragment(machine, current_project=project, apply=live)
+
+    print(f"Terminal fragment deploy plan for '{machine}':")
+    print(f"  fragment path     : {plan.fragment_path or '(unresolvable -- non-Windows?)'}")
+    print(f"  profiles (new)    : {len(plan.new_guids)}")
+    if plan.stale_guids:
+        print(f"  stale (removed)   : {len(plan.stale_guids)}")
+    if plan.changed_guids:
+        print(f"  changed (rediscover): {len(plan.changed_guids)}")
+    if plan.generated_plan is not None:
+        gp = plan.generated_plan
+        print(f"  generatedProfiles : {len(gp.keep)} kept, {len(gp.remove)} pruned"
+              f" ({len(gp.healed)} healed, {len(gp.reclaimed)} reclaimed orphans)")
+    if plan.settings_stale_count:
+        print(f"  settings.json     : {plan.settings_stale_count} stale profile(s) to remove")
+    for note in plan.notes:
+        print(f"  note: {note}")
+
+    if live:
+        print("  -> LIVE: writes applied." if plan.applied else "  -> LIVE requested but nothing was applied.")
+    else:
+        print("  -> DRY RUN: nothing was written. Pass --live to actually deploy.")
+    return 0
+
+
 def _cmd_profiles(rest: list[str]) -> int:
     """``worktree-manager profiles <project> get|apply [--machine K]
-    [--set JSON] [--json]`` -- read or write a machine's terminal-profile
-    column for ``<project>``.
+    [--set JSON] [--mirror [--live]] [--json]`` -- read or write a machine's
+    terminal-profile column for ``<project>``.
 
     Phase 3e Step 4 (copilot-extensions#3390): the equivalent of
     agent-worktrees' own ``profiles get/apply`` CLI verb, backed by the
-    relocated ``terminal_profiles`` module. **Mirroring** the selection to a
-    real Windows Terminal fragment on disk is Phase 3e Step 5's scope (this
-    command persists the selection but never deploys it); ``apply`` always
-    reports ``mirrored: false`` until Step 5 lands.
+    relocated ``terminal_profiles`` module.
+
+    Phase 3e Step 5: ``apply --mirror`` computes what deploying the
+    resulting fragment would do (via ``terminal_fragment.deploy_fragment``)
+    and includes it as a preview; only ``apply --mirror --live`` together
+    perform the actual write. Without ``--mirror``, ``apply`` behaves exactly
+    as before Step 5 -- it persists the selection and reports
+    ``mirrored: false``, deliberately never mirroring by default.
     """
     from . import terminal_fragment as tf
     from . import terminal_profiles as profiles
@@ -515,13 +566,14 @@ def _cmd_profiles(rest: list[str]) -> int:
 
     if not rest or rest[0].startswith("-"):
         print("usage: worktree-manager profiles <project> get|apply "
-              "[--machine K] [--set '<json-array>'] [--json]")
+              "[--machine K] [--set '<json-array>'] [--mirror [--live]] [--json]")
         return 2
     project = rest[0]
     action = rest[1] if len(rest) > 1 and not rest[1].startswith("-") else "get"
     flag_rest = rest[2:] if len(rest) > 1 and not rest[1].startswith("-") else rest[1:]
     _, values = _parse_flagged_args(
-        flag_rest, flags_with_value={"machine", "set"}, flags_bool={"json"}
+        flag_rest, flags_with_value={"machine", "set"},
+        flags_bool={"json", "mirror", "live"},
     )
     machine = _resolve_terminal_fragment_machine(project, values["machine"])
     if not machine:
@@ -585,14 +637,31 @@ def _cmd_profiles(rest: list[str]) -> int:
     payload = {
         "machine": machine, "env": env,
         "targets": [s.as_dict() for s in written],
-        # Not yet wired: mirroring to a real WT fragment is Phase 3e Step 5.
         "mirrored": False,
     }
+
+    mirror_note = "not yet mirrored to disk -- see Phase 3e Step 5"
+    if values["mirror"]:
+        live = bool(values["live"])
+        plan = tf.deploy_fragment(machine, current_project=project, apply=live)
+        payload["mirrored"] = plan.applied
+        payload["mirror_plan"] = {
+            "would_change": plan.would_change,
+            "new_profiles": len(plan.new_guids),
+            "stale_profiles": len(plan.stale_guids),
+            "changed_profiles": len(plan.changed_guids),
+            "notes": plan.notes,
+        }
+        mirror_note = (
+            "mirrored to disk" if plan.applied
+            else "mirror previewed (dry run) -- pass --mirror --live to write it"
+        )
+
     if values["json"]:
         print(json.dumps(payload))
     else:
         print(f"Saved {len(written)} terminal profile(s) for {machine} {env} "
-              "(not yet mirrored to disk -- see Phase 3e Step 5)")
+              f"({mirror_note})")
     return 0
 
 
@@ -760,7 +829,7 @@ def _cmd_picker(rest: list[str]) -> int:
     flags: set[str] = set()
     positionals: list[str] = []
     value_options = {"--screenshot", "--out", "--format", "--pivot", "--wait"}
-    flag_options = {"--demo", "--local", "--live", "--json"}
+    flag_options = {"--demo", "--preview", "--local", "--live", "--json"}
     index = 0
     while index < len(args):
         token = args[index]
@@ -785,7 +854,7 @@ def _cmd_picker(rest: list[str]) -> int:
         print("error: picker accepts at most one project name")
         return 2
 
-    demo_mode = "--demo" in flags
+    demo_mode = "--demo" in flags or "--preview" in flags
     legacy_screenshot = values.get("--screenshot")
     if legacy_screenshot:
         action = "screenshot"
@@ -803,14 +872,19 @@ def _cmd_picker(rest: list[str]) -> int:
         return 2
 
     if demo_mode:
-        from . import picker_app
-        from .demo import DEMO_PROJECT
-        project = DEMO_PROJECT
-        source = picker_app.demo_source()
-        subtitle = f"{project} · demo (Aperture Labs)"
-        on_launch = _demo_launch_preview
-        contributions = ()
-        context_source = None
+        # Preview mode: render the REAL production Picker (not a stand-in
+        # app) against deterministic mock data -- see preview.py's module
+        # docstring for the two injections this composes (a fake-engine
+        # worktree data source + a manifest-injected mock pivot). This
+        # requires the named project to be a genuine locally-registered
+        # agent-worktrees project (its identity/config still resolves
+        # normally); only the worktree/pivot DATA is faked.
+        from . import preview as preview_mod
+
+        preview_mod.enable_preview_mode()
+        project = positionals[0] if positionals else preview_mod.DEMO_PROJECT
+        if action == "run":
+            return _run_production_picker(project)
     else:
         if action == "run" and not engine_available():
             print()
@@ -856,80 +930,54 @@ def _cmd_picker(rest: list[str]) -> int:
         if action == "run":
             return _run_production_picker(project)
 
-        from .production_picker import runner
+    from .production_picker import runner
 
-        if action == "mock":
-            try:
-                decision = runner.run(
-                    project,
-                    mock_mode=True,
-                    local="--local" in flags,
-                )
-            except Exception as error:
-                print(f"error: production Picker mock failed: {error}")
-                return 1
-            if "--json" in flags:
-                print(json.dumps({"mock": True, "decision": decision}))
-            else:
-                print(f"mock picker exited - decision: {decision!r}")
-            return 0
-
+    if action == "mock":
         try:
-            captures = runner.capture(
+            decision = runner.run(
                 project,
-                live="--live" in flags,
-                pivot=values.get("--pivot"),
-                wait_pivot=wait_pivot,
+                mock_mode=True,
+                local="--local" in flags,
             )
         except Exception as error:
-            print(f"error: production Picker capture failed: {error}")
+            print(f"error: production Picker mock failed: {error}")
             return 1
-        content = captures[capture_format]
-        if screenshot_out:
-            with open(screenshot_out, "w", encoding="utf-8", newline="\n") as fh:
-                fh.write(content)
-            if "--json" in flags:
-                print(json.dumps({
-                    "screenshot": screenshot_out,
-                    "format": capture_format,
-                    "bytes": len(content),
-                }))
-            else:
-                print(
-                    f"  wrote {capture_format} screenshot: {screenshot_out} "
-                    f"({len(content)} bytes)"
-                )
+        if "--json" in flags:
+            print(json.dumps({"mock": True, "decision": decision}))
         else:
-            sys.stdout.write(content)
-            if not content.endswith("\n"):
-                sys.stdout.write("\n")
+            print(f"mock picker exited - decision: {decision!r}")
         return 0
 
-    if action == "screenshot":
-        svg = picker_app.capture_svg(
-            source,
-            project=project,
-            subtitle=subtitle,
-            contributions=contributions,
-            context_source=context_source,
+    try:
+        captures = runner.capture(
+            project,
+            live="--live" in flags,
+            pivot=values.get("--pivot"),
+            wait_pivot=wait_pivot,
         )
-        if screenshot_out:
-            with open(screenshot_out, "w", encoding="utf-8", newline="\n") as fh:
-                fh.write(svg)
-            print(f"  wrote screenshot: {screenshot_out}")
+    except Exception as error:
+        print(f"error: production Picker capture failed: {error}")
+        return 1
+    content = captures[capture_format]
+    if screenshot_out:
+        with open(screenshot_out, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(content)
+        if "--json" in flags:
+            print(json.dumps({
+                "screenshot": screenshot_out,
+                "format": capture_format,
+                "bytes": len(content),
+            }))
         else:
-            sys.stdout.write(svg)
-            if not svg.endswith("\n"):
-                sys.stdout.write("\n")
-        return 0
-    return picker_app.run_picker(
-        source,
-        project=project,
-        subtitle=subtitle,
-        on_launch=on_launch,
-        contributions=contributions,
-        context_source=context_source,
-    )
+            print(
+                f"  wrote {capture_format} screenshot: {screenshot_out} "
+                f"({len(content)} bytes)"
+            )
+    else:
+        sys.stdout.write(content)
+        if not content.endswith("\n"):
+            sys.stdout.write("\n")
+    return 0
 
 
 def _remote_machine_env(decision: dict) -> tuple[str | None, str | None]:
@@ -1315,27 +1363,6 @@ def _run_launch(req) -> int:
     return launcher.launch(plan, want_mux=not getattr(req, "no_mux", False))
 
 
-def _demo_launch_preview(req) -> int:
-    """Show what the launch/resume *would* run, without starting anything.
-
-    Exercises the same resolve -> compose path (through the fake Aperture engine)
-    the real launch uses, then prints the composed argv instead of executing it --
-    so the demo never spawns a Copilot session.
-    """
-    from . import launcher
-    plan, code = _resolve_for(req)
-    if plan is None:
-        return code
-    le = launcher.compose_launch(plan)
-    print()
-    target = req.worktree_id or "a new worktree"
-    print(f"  demo launch ({req.mode}) — {target}")
-    print(f"    action: {plan.action}   muxed: {le.muxed}   cwd: {le.cwd}")
-    print(f"    argv:   {' '.join(le.argv)}")
-    print("  (demo mode — not executed)")
-    print()
-    return 0
-
 
 def _prereq_line(s) -> str:
     if not s.present:
@@ -1653,7 +1680,10 @@ def main(argv: list[str] | None = None) -> int:
         print("                         production UX with simulated mutations")
         print("  picker screenshot [<project>] [--format svg|text|ansi] [--out F]")
         print("                         capture the production Picker headlessly")
-        print("  picker --demo          preview the retired minimal scaffold")
+        print("  picker [screenshot] --demo|--preview [<project>]")
+        print("                         same, against deterministic mock data (no live")
+        print("                         engine/session state required); real Picker,")
+        print("                         real project identity, faked worktree/pivot data")
         print("                         (in the Picker: l launch/resume · b bare-resume · n new)")
         print("  companion              Mux Companion: read-only status + session lineage for the current worktree (visions/mux-companion)")
         print()

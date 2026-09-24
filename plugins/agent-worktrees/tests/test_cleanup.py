@@ -315,7 +315,7 @@ def test_reclaim_worktree_falls_back_to_global_repo_registry(
     monkeypatch.setattr(
         cleanup.tracking, "load_orphaned_obligations_strict",
         lambda project=None: [])
-    r = cleanup.reclaim_worktree("m/dev.tmichon/child", _config(), apply=True)
+    r = cleanup.reclaim_worktree("m/dev.operator/child", _config(), apply=True)
     assert r.status == "reclaimed"
     assert seen["cwd"] == str(anchor)
 
@@ -459,12 +459,17 @@ def test_claims_cleanup_verb_json(tmp_path, monkeypatch, capfd):
         [_claim("codespace", "cs-a")], source_worktree="wt", config=_config())
     monkeypatch.setattr(cleanup, "_run_codespaces",
                         lambda *a, **k: _proc(0, stdout=json.dumps({"reclaimed": True})))
+    logged = []
+    monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: logged.append((a, k)))
     rc = m.cmd_claims(_cleanup_args(apply=True, json_=True))
     assert rc == 0
     out = json.loads(capfd.readouterr().out)
     assert out["applied"] is True and out["reclaimed"] == 1
     assert out["results"][0]["ref"] == "cs-a"
     assert tracking.load_orphaned_obligations() == []
+    assert logged == [(("claim_reclaimed",), {
+        "worktree_id": "wt", "kind": "codespace", "ref": "cs-a",
+        "handoff_to": ""})]
 
 
 def test_claims_cleanup_verb_empty_text(tmp_path, monkeypatch, capfd):

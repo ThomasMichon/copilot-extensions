@@ -203,10 +203,43 @@ class TestPRHeadName:
         repo = tmp_path / "r"
         repo.mkdir()
         _git("init", cwd=repo)
-        _git("config", "user.email", "tmichon@example.com", cwd=repo)
+        _git("config", "user.email", "operator@example.com", cwd=repo)
         prcfg = cfg.PRConfig(enabled=True, provider="azure-devops", head_scheme="refspec")
         name = pr_ops.pr_head_name(prcfg, "Some title", "wt-x-a1b2", cwd=str(repo))
-        assert name == "user/tmichon/some-title-a1b2"
+        assert name == "user/operator/some-title-a1b2"
+
+    def test_snapshot_default_inserts_topic_when_supplied(self):
+        prcfg = cfg.PRConfig(enabled=True, branch_prefix="feature", head_scheme="snapshot")
+        name = pr_ops.pr_head_name(prcfg, "Add auth", "wt-x-aaaa", topic="Hot Fix!!")
+        assert name == "feature/add-auth-hot-fix-aaaa"
+
+    def test_refspec_default_inserts_topic_when_supplied(self):
+        prcfg = cfg.PRConfig(enabled=True, provider="github", head_scheme="refspec")
+        name = pr_ops.pr_head_name(prcfg, "Add auth", "wt-x-aaaa", topic="Mini Task")
+        assert name == "pr/add-auth-mini-task-aaaa"
+
+    def test_azure_devops_default_inserts_topic_when_supplied(self, tmp_path):
+        repo = tmp_path / "r"
+        repo.mkdir()
+        _git("init", cwd=repo)
+        _git("config", "user.email", "operator@example.com", cwd=repo)
+        prcfg = cfg.PRConfig(enabled=True, provider="azure-devops", head_scheme="refspec")
+        name = pr_ops.pr_head_name(
+            prcfg, "Some title", "wt-x-a1b2", cwd=str(repo), topic="Topic!! Name"
+        )
+        assert name == "user/operator/some-title-topic-name-a1b2"
+
+    def test_blank_topic_preserves_existing_default_output(self):
+        prcfg = cfg.PRConfig(enabled=True, provider="github", head_scheme="refspec")
+        assert pr_ops.pr_head_name(prcfg, "Add auth", "wt-x-aaaa", topic="") == \
+            "pr/add-auth-aaaa"
+        assert pr_ops.pr_head_name(prcfg, "Add auth", "wt-x-aaaa", topic="   ") == \
+            "pr/add-auth-aaaa"
+
+    def test_explicit_pattern_can_reference_topic(self):
+        prcfg = cfg.PRConfig(enabled=True, head_pattern="submit/{slug}-{topic}-{suffix}")
+        name = pr_ops.pr_head_name(prcfg, "Add auth", "wt-x-aaaa", topic="Hot Fix")
+        assert name == "submit/add-auth-hot-fix-aaaa"
 
     def test_sanitizes_unresolved_segments(self):
         # No cwd -> username falls back to "user"; no empty // segments.
@@ -440,9 +473,62 @@ class TestCreatePR:
         assert (
             "Feature branch 'feature/add-feature-aaaa' already exists locally or on 'origin'."
         ) in res["error"]
+        assert "--topic <token>" in res["error"]
         assert "--branch" in res["error"]
         assert "'feature/add-feature-aaaa-2'" in res["error"]
         assert "mini-task" in res["error"]
+
+    def test_topic_extends_generated_default_branch_name(self, pr_repo):
+        config, wid, wt_path, _remote_dir = pr_repo
+        res = pr_ops.create_pr(wid, config, title="Add feature", topic="Hot Fix!!")
+
+        assert res["success"] is True, res
+        assert res["branch"] == "feature/add-feature-hot-fix-aaaa"
+        assert git_ops.remote_branch_exists(
+            "origin", "feature/add-feature-hot-fix-aaaa", cwd=str(wt_path)
+        )
+
+    def test_explicit_head_pattern_without_topic_slot_ignores_topic_with_note(self, pr_repo):
+        import dataclasses
+
+        config, wid, _wt_path, _ = pr_repo
+        repo = dataclasses.replace(
+            config.repos["ext"],
+            pr=cfg.PRConfig(
+                enabled=True,
+                provider="gitea",
+                head_scheme="snapshot",
+                branch_prefix="feature",
+                head_pattern="submit/{slug}-{suffix}",
+            ),
+        )
+        config = dataclasses.replace(config, repos={"ext": repo})
+
+        res = pr_ops.create_pr(wid, config, title="Add feature", topic="Hot Fix")
+
+        assert res["success"] is True, res
+        assert res["branch"] == "submit/add-feature-aaaa"
+        assert res["topic_note"] == (
+            "Ignoring --topic because explicit pr.head_pattern does not "
+            "reference {topic}."
+        )
+
+    def test_branch_override_wins_over_topic(self, pr_repo):
+        config, wid, _wt_path, _ = pr_repo
+        res = pr_ops.create_pr(
+            wid,
+            config,
+            title="Add feature",
+            branch="feature/manual-branch",
+            topic="Ignored Topic",
+            dry_run=True,
+        )
+
+        assert res["success"] is True, res
+        assert res["branch"] == "feature/manual-branch"
+        assert res["topic_note"] == (
+            "Ignoring --topic because --branch fully overrides the head name."
+        )
 
     def test_dirty_worktree_blocks(self, pr_repo):
         config, wid, wt_path, _ = pr_repo
@@ -3490,3 +3576,79 @@ class TestCreatePRCLIPolicyError:
         assert rc == 1
         assert "Traceback" not in captured.out + captured.err
         assert "custom codename wordlist" in json.loads(captured.out)["error"]
+
+
+class TestCreatePRCLIArgs:
+    def test_topic_flag_is_parsed_and_forwarded(self, pr_repo, monkeypatch):
+        config, wid, _wt_path, _ = pr_repo
+        captured: dict[str, object] = {}
+
+        monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
+        monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: candidate)
+        monkeypatch.setattr(m, "_resolve_worktree_id", lambda candidate: candidate)
+
+        def _fake_create_pr(worktree_id, passed_config, **kwargs):
+            captured["worktree_id"] = worktree_id
+            captured["config"] = passed_config
+            captured["kwargs"] = kwargs
+            return {
+                "success": True,
+                "branch": "feature/add-feature-hot-fix-aaaa",
+                "remote": "origin",
+                "provider": "gitea",
+                "base_sha": "a" * 40,
+                "head_sha": "b" * 40,
+                "draft": False,
+            }
+
+        monkeypatch.setattr(m.pr_ops, "create_pr", _fake_create_pr)
+
+        args = m.build_parser().parse_args([
+            "create-pr", wid, "--title", "Add feature", "--topic", "Hot Fix",
+        ])
+
+        rc = m.cmd_create_pr(args)
+
+        assert rc == 0
+        assert captured["worktree_id"] == wid
+        assert captured["config"] is config
+        assert captured["kwargs"]["title"] == "Add feature"
+        assert captured["kwargs"]["topic"] == "Hot Fix"
+
+    def test_topic_flag_coexists_with_branch_override(self, pr_repo, monkeypatch):
+        config, wid, _wt_path, _ = pr_repo
+        captured: dict[str, object] = {}
+
+        monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
+        monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: candidate)
+        monkeypatch.setattr(m, "_resolve_worktree_id", lambda candidate: candidate)
+
+        def _fake_create_pr(_worktree_id, _config, **kwargs):
+            captured["kwargs"] = kwargs
+            return {
+                "success": True,
+                "branch": kwargs["branch"],
+                "remote": "origin",
+                "provider": "gitea",
+                "base_sha": "a" * 40,
+                "head_sha": "b" * 40,
+                "draft": False,
+                "topic_note": "Ignoring --topic because --branch fully overrides the head name.",
+            }
+
+        monkeypatch.setattr(m.pr_ops, "create_pr", _fake_create_pr)
+
+        args = m.build_parser().parse_args([
+            "create-pr",
+            wid,
+            "--branch",
+            "feature/manual-branch",
+            "--topic",
+            "Hot Fix",
+        ])
+
+        rc = m.cmd_create_pr(args)
+
+        assert rc == 0
+        assert captured["kwargs"]["branch"] == "feature/manual-branch"
+        assert captured["kwargs"]["topic"] == "Hot Fix"

@@ -38,8 +38,11 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
+import os
 import subprocess
 import sys
+import tempfile
 import time
 import types
 from pathlib import Path
@@ -49,6 +52,15 @@ REPO = Path(__file__).resolve().parent.parent
 # Never let importing the scratch worktree's own tooling modules leave
 # __pycache__ directories behind to pollute the promotion tree diff.
 sys.dont_write_bytecode = True
+
+#: Where the promotion pipeline's own cross-run state lives -- a small
+#: main-only artifact (pause flag + last-promotion/last-rollback record)
+#: that is never part of dev's own content. It is injected directly into
+#: the generated commit's tree (see ``_write_pipeline_state_into_scratch``)
+#: rather than tracked in dev, so a promotion's own bookkeeping never needs
+#: dev to know or carry it.
+PIPELINE_STATE_PATH = ".github/release-pipeline-state.json"
+PIPELINE_STATE_SCHEMA = "copilot-extensions.release-pipeline-state"
 
 
 class PromotionError(RuntimeError):
@@ -137,6 +149,41 @@ def consume_pending_changes(scratch: Path) -> dict:
     }
 
 
+def _read_pipeline_state(main_head: str, *, repo: Path) -> dict:
+    """Read the pipeline state committed at ``main_head``, or a fresh
+    default state if the commit predates this file's introduction."""
+    raw = _git(
+        ["show", f"{main_head}:{PIPELINE_STATE_PATH}"], cwd=repo, check=False
+    )
+    if not raw:
+        return {
+            "schema": PIPELINE_STATE_SCHEMA,
+            "version": 1,
+            "paused": False,
+            "pause_reason": None,
+            "last_promotion": None,
+            "last_rollback": None,
+        }
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise PromotionError(f"pipeline state at {main_head} is not valid JSON: {exc}")
+
+
+def _write_pipeline_state_into_scratch(scratch: Path, state: dict) -> None:
+    path = scratch / PIPELINE_STATE_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+class PromotionPaused(PromotionError):
+    pass
+
+
+class NonIncrementalPromotion(PromotionError):
+    pass
+
+
 def _remove_pycache(root: Path) -> None:
     """Delete any ``__pycache__`` directories left by importing the scratch
     worktree's own tooling modules (importlib bytecode-caches next to the
@@ -182,16 +229,57 @@ def format_promotion_message(
     return "\n".join(lines) + "\n"
 
 
+def _tree_excluding_state(tree_sha: str, *, repo: Path) -> str:
+    """Return a tree identical to ``tree_sha`` but with
+    ``PIPELINE_STATE_PATH`` removed, via a throwaway index -- so comparing
+    it against the scratch worktree's own (state-file-free) tree is a fair,
+    content-only comparison that never treats a mere bookkeeping update as
+    a real promotion."""
+    with tempfile.TemporaryDirectory() as tmp:
+        index_file = Path(tmp) / "index"
+        env = {**os.environ, "GIT_INDEX_FILE": str(index_file)}
+        subprocess.run(
+            ["git", "read-tree", tree_sha], cwd=str(repo), env=env,
+            check=True, capture_output=True,
+        )
+        subprocess.run(
+            ["git", "rm", "--cached", "-q", "--ignore-unmatch", PIPELINE_STATE_PATH],
+            cwd=str(repo), env=env, check=True, capture_output=True,
+        )
+        result = subprocess.run(
+            ["git", "write-tree"], cwd=str(repo), env=env,
+            capture_output=True, text=True, check=True,
+        )
+        return result.stdout.strip()
+
+
 def promote(
     *,
     repo: Path = REPO,
     dev_ref: str = "origin/dev",
     main_ref: str = "origin/main",
     push: bool = False,
+    force: bool = False,
     tag_prefix: str = "promote",
+    candidate_branch: str | None = None,
 ) -> dict:
     """Run one full promotion cycle. Returns a report dict; never raises for
-    "nothing to promote" (reported via ``report["promoted"] is False``)."""
+    "nothing to promote" (reported via ``report["promoted"] is False``).
+
+    ``candidate_branch``, when given, changes what ``push=True`` actually
+    does: instead of pushing the generated commit directly to ``main_ref``'s
+    branch (which a real, protected ``main`` will reject -- a personal
+    GitHub account's branch rulesets have no way to grant a bypass to the
+    GitHub Actions app the way an organization's can), the commit is pushed
+    to ``refs/heads/<candidate_branch>`` and the caller (``promote.yml``,
+    via ``gh pr create``/``gh pr merge``) is responsible for landing it on
+    ``main`` through a real pull request -- the same sanctioned path every
+    other change to this repo already uses. The tag is intentionally left
+    unpushed in that mode: its target should be the real post-merge commit
+    on ``main``, not this pre-merge candidate, whose sha a squash-merge
+    replaces. Without ``candidate_branch``, the original direct-push
+    behavior is unchanged (used by the test suite and any trusted/
+    unprotected repo)."""
     dev_head = _rev_parse(dev_ref, cwd=repo)
     if dev_head is None:
         raise PromotionError(f"cannot resolve dev ref: {dev_ref!r}")
@@ -200,25 +288,65 @@ def promote(
         raise PromotionError(f"cannot resolve main ref: {main_ref!r}")
     main_tree = _git(["rev-parse", f"{main_head}^{{tree}}"], cwd=repo)
 
+    state = _read_pipeline_state(main_head, repo=repo)
+    if state.get("paused"):
+        raise PromotionPaused(
+            "promotion is paused: "
+            f"{state.get('pause_reason') or '(no reason recorded)'} -- "
+            "run tools/rollback_release.py resume once safe to continue"
+        )
+    last_rollback = state.get("last_rollback")
+    if (
+        last_rollback
+        and not force
+        and last_rollback.get("reverted_dev_head") == dev_head
+    ):
+        raise NonIncrementalPromotion(
+            f"refusing to re-promote dev@{dev_head[:12]}: this exact dev state "
+            "was already rolled back "
+            f"({last_rollback.get('reason') or 'no reason recorded'}). "
+            "dev must move forward with an actual fix before promoting again "
+            "-- or pass --force to override this guard deliberately."
+        )
+
     scratch = add_scratch_worktree(dev_head, repo=repo)
     try:
         summary = consume_pending_changes(scratch)
-        new_tree = build_promotion_tree(scratch)
+        content_tree = build_promotion_tree(scratch)
+        main_content_tree = _tree_excluding_state(main_tree, repo=repo)
 
-        if new_tree == main_tree:
+        if content_tree == main_content_tree:
             return {"promoted": False, "reason": "no content change vs. main", **summary}
 
         base = _git(["merge-base", main_head, dev_head], cwd=repo, check=False) or main_head
         message = format_promotion_message(dev_range=(base, dev_head), summary=summary)
+        tag_name = f"{tag_prefix}-{time.strftime('%Y%m%d%H%M%S')}"
+
+        new_state = dict(state)
+        new_state["last_promotion"] = {
+            "dev_head": dev_head,
+            "main_before": main_head,
+            "tag": tag_name,
+            "promoted_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        _write_pipeline_state_into_scratch(scratch, new_state)
+        new_tree = build_promotion_tree(scratch)
+
         commit = _git(
             ["commit-tree", new_tree, "-p", main_head, "-m", message], cwd=scratch
         )
-        tag_name = f"{tag_prefix}-{time.strftime('%Y%m%d%H%M%S')}-{commit[:8]}"
-        _git(["tag", "-a", tag_name, "-m", message, commit], cwd=scratch)
+        tag_name = f"{tag_name}-{commit[:8]}"
 
-        if push:
-            _git(["push", "origin", f"{commit}:refs/heads/main"], cwd=scratch)
-            _git(["push", "origin", tag_name], cwd=scratch)
+        if push and candidate_branch:
+            # Land via a real PR, not a direct push (see promote()'s
+            # docstring) -- the tag is created by the caller against the
+            # actual post-merge commit, not this pre-merge candidate.
+            _git(["push", "origin", f"{commit}:refs/heads/{candidate_branch}"], cwd=scratch)
+        else:
+            _git(["tag", "-a", tag_name, "-m", message, commit], cwd=scratch)
+            if push:
+                _git(["push", "origin", f"{commit}:refs/heads/main"], cwd=scratch)
+                _git(["push", "origin", tag_name], cwd=scratch)
 
         return {
             "promoted": True,
@@ -227,6 +355,7 @@ def promote(
             "main_before": main_head,
             "dev_head": dev_head,
             "pushed": push,
+            "candidate_branch": candidate_branch if (push and candidate_branch) else None,
             **summary,
         }
     finally:
@@ -237,15 +366,34 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
+    ap.add_argument("--repo", type=Path, default=REPO, help="repo root (default: this checkout)")
     ap.add_argument("--dev-ref", default="origin/dev")
     ap.add_argument("--main-ref", default="origin/main")
+    ap.add_argument(
+        "--force", action="store_true",
+        help="override the non-incremental-promotion guard after a rollback",
+    )
+    ap.add_argument(
+        "--candidate-branch", default=None,
+        help="push the candidate commit here instead of main directly, for a "
+             "caller (promote.yml) to land via a real PR + merge",
+    )
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true", help="default: do not push")
     mode.add_argument("--push", action="store_true", help="push the generated commit + tag")
     args = ap.parse_args(argv)
 
     try:
-        report = promote(dev_ref=args.dev_ref, main_ref=args.main_ref, push=args.push)
+        report = promote(
+            repo=args.repo, dev_ref=args.dev_ref, main_ref=args.main_ref,
+            push=args.push, force=args.force, candidate_branch=args.candidate_branch,
+        )
+    except PromotionPaused as exc:
+        # A pause is an expected, intentional operator action (part of the
+        # rollback procedure), not a pipeline failure -- exit 0 so a CI run
+        # reports this as a normal no-op rather than a red build.
+        print(f"promote-release: {exc}")
+        return 0
     except PromotionError as exc:
         print(f"promote-release: {exc}", file=sys.stderr)
         return 1
@@ -259,7 +407,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  dev head:    {report['dev_head']}")
     for plugin, (old, new) in sorted(report["bumps"].items()):
         print(f"  bump: {plugin} {old} -> {new}")
-    if not report["pushed"]:
+    if report.get("candidate_branch"):
+        print(f"  pushed candidate branch: {report['candidate_branch']} "
+              "(land it on main via a real PR + merge; tag the actual merged commit)")
+    elif not report["pushed"]:
         print("  (dry run -- nothing pushed; re-run with --push to update origin/main)")
     return 0
 

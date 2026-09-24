@@ -159,20 +159,20 @@ async def test_resolve_carries_venue_metadata():
     fb = _Fallback()
 
     container = {
-        "name": "odsp-web-1",
-        "workspace_folder": "/workspaces/odsp-web",
+        "name": "sample-web-1",
+        "workspace_folder": "/workspaces/sample-web",
         "security_profile": "trusted",
-        "ssh": {"host_alias": "agent-container-odsp-web-1"},
+        "ssh": {"host_alias": "agent-container-sample-web-1"},
         "provider_command": ["python", "-m", "agent_containers"],
     }
     venue = {
         "schema_version": 1,
         "provider": "agent-containers",
         "kind": "container",
-        "target_id": "container:odsp-web-1",
+        "target_id": "container:sample-web-1",
         "scope": "provider-instance",
         "instance_id": "instance-123",
-        "workspace_folder": "/workspaces/odsp-web",
+        "workspace_folder": "/workspaces/sample-web",
         "security_profile": "trusted",
         "ready": True,
         "posture_verified": False,
@@ -181,9 +181,9 @@ async def test_resolve_carries_venue_metadata():
     def _run(argv, **_kw):
         return _cp(0, json.dumps({
             "type": "command",
-            "spawn_command": ["c", "exec", "--stdio", "odsp-web-1"],
+            "spawn_command": ["c", "exec", "--stdio", "sample-web-1"],
             "user": "vscode",
-            "workspace_folder": "/workspaces/odsp-web",
+            "workspace_folder": "/workspaces/sample-web",
             "security_profile": "trusted",
             "container": container,
             "venue": venue,
@@ -191,7 +191,7 @@ async def test_resolve_carries_venue_metadata():
 
     with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
         t = await CliNamespaceResolver("container", "agent-containers", fb).resolve(
-            "odsp-web-1",
+            "sample-web-1",
         )
     assert t.venue == venue
     assert t.container == container
@@ -438,6 +438,36 @@ async def test_resolve_worktree_type_with_host_becomes_ssh_target():
     assert t.type == "ssh"
     assert t.host == "wheatley"
     assert t.worktree_id == "wt-7"
+
+
+@pytest.mark.asyncio
+async def test_resolve_session_type_carries_venue_unspawnable():
+    """A provider with no spawnable target at all (e.g. agent-dispatch's
+    `dispatch:` namespace resolving a completed headless task, #3389
+    extension) -- only a durable session reference for read-only
+    resolve-by-any-origin-reference lookup, never a worktree/spawn_command."""
+    fb = _Fallback()
+
+    def _run(argv, **_kw):
+        return _cp(0, json.dumps({
+            "type": "session",
+            "venue": {
+                "provider": "agent-dispatch",
+                "target_id": "task-9",
+                "task": {"status": "completed", "owner_session_id": "s-1"},
+                "attachments": [],
+            },
+        }))
+
+    with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
+        t = await CliNamespaceResolver("dispatch", "agent-dispatch", fb).resolve(
+            "task-9",
+        )
+    assert t.type == "session"
+    assert t.worktree_id is None
+    assert t.spawn_command is None
+    assert t.venue["task"]["owner_session_id"] == "s-1"
+    assert "resolve" not in fb.calls
 
 
 @pytest.mark.asyncio

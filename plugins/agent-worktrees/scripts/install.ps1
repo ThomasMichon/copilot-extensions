@@ -2639,22 +2639,21 @@ function Deploy-WslBinstub {
         return $false
     }
 
-    # Generate thin launcher with helpful error when not yet installed
+    # Generate thin launcher with helpful error when not yet installed. Routes
+    # through the WSL-side `agent-worktrees` tool binstub (deployed by its own
+    # install.sh's deploy_tool_binstub at $HOME/.local/bin/agent-worktrees) via
+    # `--project`, exactly like every other modern project binstub -- NOT the
+    # shared launch-session.sh script, which was retired from agent-worktrees
+    # in the phase-3b relocation (worktree-manager-control-plane/phase-3b-mux-
+    # relocation.md) and hasn't been deployed at its old install path since.
     $binstubScript = @"
 #!/usr/bin/env bash
 # agent-worktrees project binstub
 # Thin binstub for $ProjectName - deployed by agent-worktrees (Windows)
 # Requires agent-worktrees to be installed in WSL via the copilot-extensions plugin.
-# This thin launcher only starts a session (no CLI dispatch), so it passes the
-# project directly to the shared launcher.
-_launcher="`$HOME/.agent-worktrees/bin/launch-session.sh"
+_launcher="`$HOME/.local/bin/agent-worktrees"
 if [[ -x "`$_launcher" ]]; then
-    if grep -q -- 'elif \[\[ "`$arg" == "--project" \]\]' "`$_launcher"; then
-        exec "`$_launcher" --project "$ProjectName" "`$@"
-    fi
-    echo "agent-worktrees in WSL is too old for explicit project routing." >&2
-    echo "Update the copilot-extensions plugins in WSL, then retry." >&2
-    exit 1
+    exec "`$_launcher" --project "$ProjectName" "`$@"
 else
     echo "agent-worktrees is not installed in WSL." >&2
     echo "To set up:" >&2
@@ -2699,9 +2698,80 @@ fi
     }
 }
 
-function Deploy-Shortcuts {
-    <# Deploy Windows Terminal fragment (with remote SSH profiles) and create .lnk shortcuts.
-       Handles WT state cleanup so new/changed profiles appear correctly on next WT launch. #>
+function Test-WorktreeManagerVersionAtLeast {
+    <# Compare a captured ``--version`` output string against a minimum
+       (major, minor, patch, dev) tuple -- mirrors agent_worktrees' own
+       Python ``_probe_worktree_manager_version``/``_WORKTREE_MANAGER_MIN_
+       PICKER_VERSION`` comparison so both sides of the health-check use the
+       same semantics (a release build, with no ``-devN`` suffix, always
+       compares as newer than any dev build of the same major.minor.patch). #>
+    param([string]$VersionText, [int[]]$Minimum)
+    if ($VersionText -notmatch '(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?') { return $false }
+    $dev = if ($Matches[4]) { [int]$Matches[4] } else { 1000000 }
+    $parts = @([int]$Matches[1], [int]$Matches[2], [int]$Matches[3], $dev)
+    for ($i = 0; $i -lt 4; $i++) {
+        if ($parts[$i] -gt $Minimum[$i]) { return $true }
+        if ($parts[$i] -lt $Minimum[$i]) { return $false }
+    }
+    return $true
+}
+
+# The lowest worktree-manager version that has terminal-fragment --deploy /
+# profiles apply --mirror (Phase 3e Step 5a, 0.1.0-dev75).
+$script:WorktreeManagerDeployMinVersion = @(0, 1, 0, 75)
+
+function Get-UsableWorktreeManagerBin {
+    <# Resolve the Worktree Manager binstub on PATH, but only if it is
+       actually invocable AND new enough to support the deploy mechanism
+       (mirrors agent_worktrees' own Python ``_usable_worktree_manager()``
+       PATH + ``--version`` health-check + minimum-version guard) -- a
+       stale, broken, or too-old binstub falls back to the local
+       implementation instead of silently failing or erroring on an
+       unrecognized flag. #>
+    $cmd = Get-Command worktree-manager -ErrorAction SilentlyContinue
+    if (-not $cmd) { return $null }
+    try {
+        $verOut = & $cmd.Source --version 2>&1
+    } catch {
+        return $null
+    }
+    if ($LASTEXITCODE -ne 0) { return $null }
+    if (-not (Test-WorktreeManagerVersionAtLeast -VersionText ($verOut -join ' ') -Minimum $script:WorktreeManagerDeployMinVersion)) {
+        return $null
+    }
+    return $cmd.Source
+}
+
+function Deploy-TerminalFragmentViaWorktreeManager {
+    <# Phase 3e Step 5b (copilot-extensions#3390): deploy the Windows Terminal
+       fragment through the relocated ``worktree_manager.terminal_fragment
+       .deploy_fragment`` mechanism when a usable Worktree Manager install is
+       on PATH. Returns ``$true`` only when the deploy actually ran and
+       succeeded (exit 0) -- callers fall back to the local implementation on
+       ``$false``, the same present-or-fallback shape as the interactive mux
+       launch's own Worktree-Manager check (Phase 3b Sub-slice 2a). #>
+    param([string]$Machine, [string]$ProjectName)
+
+    $wmBin = Get-UsableWorktreeManagerBin
+    if (-not $wmBin) { return $false }
+
+    & $wmBin terminal-fragment $ProjectName --machine $Machine --deploy --live 2>&1 |
+        ForEach-Object { Write-ServiceChanged "terminal-fragment: $_" }
+    if ($LASTEXITCODE -ne 0) {
+        Write-ServiceWarn "Worktree Manager terminal-fragment --deploy failed (exit $LASTEXITCODE) -- falling back to the local implementation"
+        return $false
+    }
+    Write-ServiceOk "Windows Terminal profiles deployed via Worktree Manager"
+    return $true
+}
+
+function Deploy-TerminalFragmentLocally {
+    <# The pre-Phase-3e-Step-5b implementation: generate the fragment via
+       agent_worktrees' own ``terminal-fragment`` verb, reconcile WT state,
+       and write the fragment file. Kept as the fallback for a machine
+       without a usable Worktree Manager install. Returns ``$false`` only
+       when fragment generation itself failed (matching the historical
+       ``Deploy-Shortcuts`` behaviour of skipping shortcut creation too). #>
     param([string]$Machine)
 
     # Deploy WT fragment - use a shared fragment directory for all projects
@@ -2730,7 +2800,7 @@ function Deploy-Shortcuts {
     $fragment = & $VenvPython -m agent_worktrees terminal-fragment --machine $Machine
     if ($LASTEXITCODE -ne 0 -or -not $fragment) {
         Write-ServiceErr "Fragment generation failed (agent_worktrees terminal-fragment exited $LASTEXITCODE)"
-        return
+        return $false
     }
     $newFragObj = $fragment | ConvertFrom-Json
     $newFragGuids = @($newFragObj.profiles | ForEach-Object { $_.guid.ToLower() })
@@ -2766,6 +2836,24 @@ function Deploy-Shortcuts {
     # Write the new fragment
     $fragment | Set-Content $fragmentDst -Encoding UTF8
     Write-ServiceOk "Windows Terminal profiles deployed (fragment with all registered projects)"
+    return $true
+}
+
+function Deploy-Shortcuts {
+    <# Deploy Windows Terminal fragment (with remote SSH profiles) and create .lnk shortcuts.
+       Handles WT state cleanup so new/changed profiles appear correctly on next WT launch.
+
+       Phase 3e Step 5b (copilot-extensions#3390): prefers the relocated
+       Worktree Manager deploy mechanism when a usable install is on PATH,
+       falling back to the local implementation otherwise -- the same
+       present-or-fallback shape Phase 3b's mux launch repoint used. #>
+    param([string]$Machine)
+
+    $deployed = Deploy-TerminalFragmentViaWorktreeManager -Machine $Machine -ProjectName $ProjectName
+    if (-not $deployed) {
+        $deployed = Deploy-TerminalFragmentLocally -Machine $Machine
+    }
+    if (-not $deployed) { return }
 
     # Create .lnk shortcuts for each registered project
     $shell = New-Object -ComObject WScript.Shell

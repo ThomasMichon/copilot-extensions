@@ -1,49 +1,49 @@
 name: Promote dev to main
 
-# Phase 3 of the dev-branch-release-pipeline effort
-# (ThomasMichon/copilot-extensions#3336): once `CI` (.github/workflows/ci.yml)
-# finishes GREEN on `dev`, generate a single wholesale-replace commit onto
-# `main` -- never a merge of `dev` into `main` -- via tools/promote_release.py.
-# See that effort's README (Plan > Phase 3, and the Phase 2 sequencing note)
-# for the full design and for what remains deliberately NOT wired yet
-# (the changefile-presence guard, CONTRIBUTING.md/AGENTS.md going live, and
-# branch protection on `main` are all still gated on this pipeline being
-# demonstrated end-to-end first).
+# Phase 3/5 of the dev-branch-release-pipeline effort
+# (ThomasMichon/copilot-extensions#3336): once `Validation Gate`
+# (.github/workflows/validation-gate.yml, itself chained after `CI` going
+# green) finishes GREEN on `dev`, generate a single wholesale-replace commit
+# and land it on `main` -- never a merge of `dev` into `main` -- via
+# tools/promote_release.py. See that effort's README (Plan > Phase 3/5) for
+# the full design.
 #
-# Admin-escalation gate (Phase 3's last checklist item): this job runs under
-# the `main-promotion` GitHub Environment. That environment itself is NOT
-# something this workflow file can configure -- a repo admin must add
-# required reviewers to it (Settings > Environments > main-promotion) before
-# this can ever auto-promote unattended. Until that's done, this workflow
-# will simply wait indefinitely for that environment's approval on every run,
-# which is the intended fail-safe default, not a bug.
+# Admin-escalation gate: this job runs under the `main-promotion` GitHub
+# Environment. That environment itself is NOT something this workflow file
+# can configure -- a repo admin must add required reviewers to it
+# (Settings > Environments > main-promotion) before this gate actually
+# blocks anything unattended. Until that's done, the job runs without a
+# human approval step (but every other guard below still applies).
 #
-# A SECOND, deliberate belt-and-suspenders layer on top of that (not required
-# by the Plan): the automatic `workflow_run` trigger always runs in
-# report-only mode (no `--push`), regardless of environment approval. Real
-# pushes to `main` only ever happen from an explicit `workflow_dispatch` with
-# `push: true`.
+# `main` carries a zero-bypass "pull request required" ruleset (a personal
+# GitHub account cannot grant the GitHub Actions app -- or any other actor
+# -- a bypass the way an organization can), so this job can never push to
+# `main` directly. It pushes the generated commit to a throwaway
+# `release/promote-<run id>` branch instead, opens a PR against `main`, and
+# squash-merges it via the `gh` CLI (the same sanctioned path every other
+# change to this repo already lands through) -- then tags the REAL,
+# post-merge commit on `main` (a squash-merge produces a new sha; the
+# pre-merge candidate commit this job built locally is never the thing
+# that actually lands).
 #
-# This is not just extra caution -- it is currently load-bearing. A real
-# dry run (2026-09-23) against this repo's actual origin/dev confirmed
-# origin/main is running AHEAD of origin/dev (nobody targets `dev` yet, so
-# it goes stale relative to real development). Flipping the automatic
-# trigger to `--push` before Phase 5's real cutover (once `dev` is the
-# trunk every PR actually targets) would regress `main` to `dev`'s older
-# content. Do not flip this until Phase 5 is live -- update this comment and
-# the effort's Plan/Journal in the same change when it is.
+# Emergency rollback: `python tools/rollback_release.py pause --reason "..."
+# --push` BEFORE `revert --reason "..." --push` -- run by a human operator
+# with their own `gh` credentials (see tools/rollback_release.py's own
+# docstring), not from this workflow. `tools/promote_release.py` itself
+# refuses to run while paused, and refuses to re-promote the exact `dev`
+# state a rollback just reverted (the non-incremental-update guard) unless
+# `--force` is passed after `dev` has moved forward with a real fix.
 
 on:
   workflow_run:
-    workflows: ["CI"]
-    branches: [dev]
+    workflows: ["Validation Gate"]
     types: [completed]
   workflow_dispatch:
     inputs:
       push:
-        description: "Push the generated commit + tag to main (default: dry run)"
+        description: "Push the generated commit + tag to main (default: true)"
         required: false
-        default: "false"
+        default: "true"
 
 concurrency:
   group: promote-dev-to-main
@@ -51,6 +51,7 @@ concurrency:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   promote:
@@ -60,6 +61,9 @@ jobs:
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     environment: main-promotion
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CANDIDATE_BRANCH: release/promote-${{ github.run_id }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -70,11 +74,66 @@ jobs:
           python-version: "3.12"
       - name: Configure git identity for the generated commit
         run: |
-          git config user.name "copilot-extensions-release-bot"
-          git config user.email "release-bot@users.noreply.github.com"
-      - name: Dry run (report only; no push)
-        if: github.event_name == 'workflow_run' || github.event.inputs.push != 'true'
-        run: python tools/promote_release.py --dev-ref origin/dev --main-ref origin/main
-      - name: Promote (push generated commit + tag)
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.push == 'true'
-        run: python tools/promote_release.py --dev-ref origin/dev --main-ref origin/main --push
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+      - name: Confirm this run is genuinely for a dev commit
+        id: gate
+        # `branches: [dev]` on the workflow_run trigger above looks like the
+        # obvious filter, but it is unreliable in practice: GitHub's
+        # workflow_run event consistently reports `head_branch` as the
+        # repository's *default* branch (main), never the branch that
+        # actually produced the triggering Validation Gate run -- confirmed
+        # empirically across many real runs (dev-branch-release-pipeline
+        # effort, promote-trigger finding: this left the whole pipeline
+        # dead, 0 real triggers ever). Verify real dev-ancestry with git
+        # instead of trusting that event metadata.
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "is_dev=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch origin dev
+          sha="${{ github.event.workflow_run.head_sha }}"
+          if git merge-base --is-ancestor "$sha" origin/dev; then
+            echo "is_dev=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_dev=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::$sha is not on origin/dev's history -- skipping (this Validation Gate completion was for a different branch/PR)."
+          fi
+      - name: Promote (push a candidate branch; report-only if push=false)
+        id: promote
+        if: steps.gate.outputs.is_dev == 'true'
+        env:
+          PUSH_INPUT: ${{ github.event.inputs.push }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$PUSH_INPUT" = "false" ]; then
+            python tools/promote_release.py --dev-ref origin/dev --main-ref origin/main
+            echo "land=false" >> "$GITHUB_OUTPUT"
+          else
+            python tools/promote_release.py --dev-ref origin/dev --main-ref origin/main \
+              --push --candidate-branch "$CANDIDATE_BRANCH"
+            echo "land=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Land the candidate branch on main via PR + squash-merge
+        id: land
+        if: steps.promote.outputs.land == 'true'
+        run: |
+          if ! git ls-remote --exit-code --heads origin "$CANDIDATE_BRANCH" > /dev/null; then
+            echo "No candidate branch pushed (nothing to promote) -- skipping."
+            echo "candidate_pushed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "candidate_pushed=true" >> "$GITHUB_OUTPUT"
+          pr_number=$(gh pr create --base main --head "$CANDIDATE_BRANCH" \
+            --title "release: promote dev to main ($CANDIDATE_BRANCH)" \
+            --body "Generated by tools/promote_release.py. Do not edit by hand." \
+            --json number --jq .number)
+          gh pr merge "$pr_number" --squash --auto
+      - name: Tag the real post-merge commit
+        if: steps.promote.outputs.land == 'true' && steps.land.outputs.candidate_pushed == 'true'
+        run: |
+          git fetch origin main
+          new_sha=$(git rev-parse origin/main)
+          tag_name="promote-$(date -u +%Y%m%d%H%M%S)-${new_sha:0:8}"
+          git tag -a "$tag_name" -m "release: promote dev to main ($CANDIDATE_BRANCH -> $new_sha)" "$new_sha"
+          git push origin "$tag_name"

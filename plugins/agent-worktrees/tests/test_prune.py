@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agent_worktrees import git_ops, prune, tracking
+from agent_worktrees import effort_focus, git_ops, prune, tracking
 
 S = git_ops.WorktreeState
 
@@ -388,6 +388,39 @@ class TestCleanupDisposition:
             tracking.FollowUpRecord(id="fu-1", summary="deploy it",
                                     state="pending-transfer")
         ]
+        d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
+        assert d.cleanable is False and d.bucket == "follow-up"
+
+    def test_legacy_boolean_follow_up_blocks_cleanup(self):
+        # worktree-finality-and-obligations Phase 1: a pre-Phase-3 record
+        # with no itemized `follow_ups` ledger at all -- only the legacy
+        # `follow_up: true` boolean a real old YAML on disk would carry --
+        # must still block cleanup exactly like an itemized open item does,
+        # via `effective_open_follow_up_count`'s legacy-boolean fallback.
+        rec = _rec(status="finalized")
+        rec.follow_up = True
+        assert rec.follow_ups == []
+        d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
+        assert d.cleanable is False and d.bucket == "follow-up"
+        assert "1 open follow-up" in d.reason
+
+    def test_active_effort_binding_blocks_cleanup_via_legacy_boolean(self):
+        # worktree-finality-and-obligations Phase 1: `effort-focus bind`
+        # binds a worktree to an active effort by calling
+        # `set_disposition(follow_up=True, ...)` -- it does not itemize a
+        # `follow_ups` entry. Prove the record this actually produces (an
+        # `active_effort` pointer + the legacy boolean, no itemized ledger)
+        # is treated as an effective open obligation the same way a bare
+        # legacy boolean is, end-to-end through `cleanup_disposition` (not
+        # just `effective_open_follow_up_count` in isolation).
+        rec = _rec(status="finalized")
+        rec.active_effort = effort_focus.ActiveEffort(
+            path="efforts/active/some-effort/README.md",
+            participant="maintainer",
+            slice="Phase 1",
+        )
+        tracking.set_disposition(rec, follow_up=True, save=False)
+        assert rec.follow_ups == []
         d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
         assert d.cleanable is False and d.bucket == "follow-up"
 

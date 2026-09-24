@@ -157,10 +157,11 @@ def _pr_reminder_for(
     reason: str = "",
 ):
     """Build this repo's stay-on-rails PR reminder for ``verb`` (or ``None``)."""
+    from . import pr_config
     from . import pr_contract as pc
 
     try:
-        flow = _core()._pr_flow_profile(config.default_repo)
+        flow = pr_config._pr_flow_profile(config.default_repo)
         return pc.pr_reminder(flow, verb, state, ok=ok, reason=reason)
     except Exception:
         return None
@@ -365,35 +366,35 @@ def cmd_get(args: argparse.Namespace) -> int:
         else ""
     )
     values = {
-        "repo-dir": repo.anchor,
-        "worktree-dir": current_worktree,
-        "worktree-id": wt_id or "",
-        "session-scope-id": session_scope_id,
-        "worktree-state-dir": (str(state_dir) if state_dir is not None else ""),
-        "worktrees-root": repo.worktree_root,
-        "src-dir": config.srcroot,
-        "config-dir": str(cfg.project_dir()),
-        "machine": config.machine,
-        "platform": config.platform,
-        "project": config.repo_name,
-        "owner-ref": (
+        "repo-dir": lambda: repo.anchor,
+        "worktree-dir": lambda: current_worktree,
+        "worktree-id": lambda: wt_id or "",
+        "session-scope-id": lambda: session_scope_id,
+        "worktree-state-dir": lambda: (str(state_dir) if state_dir is not None else ""),
+        "worktrees-root": lambda: repo.worktree_root,
+        "src-dir": lambda: config.srcroot,
+        "config-dir": lambda: str(cfg.project_dir()),
+        "machine": lambda: config.machine,
+        "platform": lambda: config.platform,
+        "project": lambda: config.repo_name,
+        "owner-ref": lambda: (
             tracking.format_claim_ref(config.machine, config.repo_name, wt_id, session_id)
             if wt_id
             else ""
         ),
-        "repo-remote": _core()._resolve_repo_remote(config, repo),
-        "lease-origin": _core()._resolve_lease_origin(),
-        "pr-enabled": "true" if repo.pr.enabled else "false",
-        "pr-required": "true" if repo.pr.required else "false",
-        "pr-provider": repo.pr.provider if repo.pr.enabled else "",
-        "pr-profile": _core()._pr_flow_profile(repo).profile,
+        "repo-remote": lambda: _core()._resolve_repo_remote(config, repo),
+        "lease-origin": lambda: _core()._resolve_lease_origin(),
+        "pr-enabled": lambda: "true" if repo.pr.enabled else "false",
+        "pr-required": lambda: "true" if repo.pr.required else "false",
+        "pr-provider": lambda: repo.pr.provider if repo.pr.enabled else "",
+        "pr-profile": lambda: _core()._pr_flow_profile(repo).profile,
     }
 
     if key not in values:
         output.err(f"Unknown key: {key!r}. Use 'get keys' to list available keys.")
         return 1
 
-    print(values[key])
+    print(values[key]())
     return 0
 
 

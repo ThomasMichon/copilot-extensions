@@ -21,6 +21,7 @@ import pytest
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import config as cfg
+from agent_worktrees import picker_profiles_cli
 from agent_worktrees import reconcile
 
 
@@ -215,7 +216,7 @@ def test_prelaunch_selected_context_uses_validated_installer_environment(
         ),
     )
     monkeypatch.setattr(m, "_resolve_environment", lambda config: "test")
-    monkeypatch.setattr(m.svc, "discover_services", lambda *args, **kwargs: [])
+    monkeypatch.setattr(m._svc, "discover_services", lambda *args, **kwargs: [])
     monkeypatch.setattr(
         reconcile,
         "core_installed_payload_dir",
@@ -241,7 +242,7 @@ def test_prelaunch_selected_context_uses_validated_installer_environment(
             )
         ),
     )
-    monkeypatch.setattr(m.svc, "check_staleness", lambda *args: "behind")
+    monkeypatch.setattr(m._svc, "check_staleness", lambda *args: "behind")
 
     plan = m.plan_pre_launch()
 
@@ -287,7 +288,7 @@ def test_prelaunch_uses_marketplace_fingerprint_staleness_for_marketplace_kind(
         ),
     )
     monkeypatch.setattr(m, "_resolve_environment", lambda config: "test")
-    monkeypatch.setattr(m.svc, "discover_services", lambda *args, **kwargs: [])
+    monkeypatch.setattr(m._svc, "discover_services", lambda *args, **kwargs: [])
     monkeypatch.setattr(
         reconcile,
         "core_installed_payload_dir",
@@ -309,12 +310,12 @@ def test_prelaunch_uses_marketplace_fingerprint_staleness_for_marketplace_kind(
     )
     calls: dict[str, list] = {"staleness": [], "marketplace": []}
     monkeypatch.setattr(
-        m.svc,
+        m._svc,
         "check_staleness",
         lambda *a: calls["staleness"].append(a) or "unknown",
     )
     monkeypatch.setattr(
-        m.svc,
+        m._svc,
         "check_marketplace_staleness",
         lambda *a: calls["marketplace"].append(a) or "current",
     )
@@ -350,7 +351,7 @@ def test_prelaunch_legacy_default_uses_conventional_runtime(
         ),
     )
     monkeypatch.setattr(m, "_resolve_environment", lambda config: "test")
-    monkeypatch.setattr(m.svc, "discover_services", lambda *args, **kwargs: [])
+    monkeypatch.setattr(m._svc, "discover_services", lambda *args, **kwargs: [])
     monkeypatch.setattr(
         reconcile,
         "core_installed_payload_dir",
@@ -370,7 +371,7 @@ def test_prelaunch_legacy_default_uses_conventional_runtime(
             )
         ),
     )
-    monkeypatch.setattr(m.svc, "check_staleness", lambda *args: "behind")
+    monkeypatch.setattr(m._svc, "check_staleness", lambda *args: "behind")
 
     update = m.plan_pre_launch()["updates"][0]
 
@@ -428,7 +429,7 @@ def test_prelaunch_repo_service_only_bootstrapped_when_opted_in(
     monkeypatch.setattr(m, "_resolve_environment", lambda config: "test")
     vault_service = _fake_service(tmp_path, "vault")
     monkeypatch.setattr(
-        m.svc, "discover_services", lambda *args, **kwargs: [vault_service]
+        m._svc, "discover_services", lambda *args, **kwargs: [vault_service]
     )
     monkeypatch.setattr(
         reconcile,
@@ -451,9 +452,9 @@ def test_prelaunch_repo_service_only_bootstrapped_when_opted_in(
     )
     # agent-worktrees itself is current -- only the repo service's staleness
     # (if bootstrapped at all) can produce an update.
-    monkeypatch.setattr(m.svc, "check_staleness", lambda *args: "current")
+    monkeypatch.setattr(m._svc, "check_staleness", lambda *args: "current")
     monkeypatch.setattr(
-        m.svc,
+        m._svc,
         "get_service_status",
         lambda service, repo_dir: types.SimpleNamespace(staleness="behind"),
     )
@@ -483,7 +484,7 @@ def test_prelaunch_invalid_other_context_fails_closed(
         ),
     )
     monkeypatch.setattr(m, "_resolve_environment", lambda config: "test")
-    monkeypatch.setattr(m.svc, "discover_services", lambda *args, **kwargs: [])
+    monkeypatch.setattr(m._svc, "discover_services", lambda *args, **kwargs: [])
     monkeypatch.setattr(
         reconcile,
         "core_installed_payload_dir",
@@ -523,7 +524,7 @@ def test_skip_still_reconciles_terminal_state_on_windows(wired, monkeypatch):
                         lambda name, home=None, **kwargs: "1.5.3-dev9")
     monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
     refreshed = {"n": 0}
-    monkeypatch.setattr(m, "_refresh_terminal_profiles",
+    monkeypatch.setattr(picker_profiles_cli, "_refresh_terminal_profiles",
                         lambda: refreshed.__setitem__("n", refreshed["n"] + 1) or True)
     assert m.cmd_update(_args()) == 0
     assert not _installer_ran(wired), "heavy installer still skipped when current"
@@ -537,7 +538,7 @@ def test_skip_does_not_reconcile_terminal_on_non_windows(wired, monkeypatch):
                         lambda name, home=None, **kwargs: "1.5.3-dev9")
     monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
     refreshed = {"n": 0}
-    monkeypatch.setattr(m, "_refresh_terminal_profiles",
+    monkeypatch.setattr(picker_profiles_cli, "_refresh_terminal_profiles",
                         lambda: refreshed.__setitem__("n", refreshed["n"] + 1) or True)
     assert m.cmd_update(_args()) == 0
     assert refreshed["n"] == 0

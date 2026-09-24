@@ -327,16 +327,31 @@ Round 2 (operator's response to that evaluation):
   - **Done, 2026-09-23, ~3 AM.** Pushed `dev` pointing at `origin/main`'s
     then-current (fully green) tip. Purely additive — no CI/contributor
     behavior changed by this alone; nothing requires anyone to use it yet.
-- [ ] Retire `tools/check-version-bump.py`'s manual-bump requirement in favor
+- [x] Retire `tools/check-version-bump.py`'s manual-bump requirement in favor
       of a changefile-presence check.
-  - **Guard built, tested, NOT yet wired into CI:** `tools/check-changefile-presence.py`
-    (5 tests). Reuses `check-version-bump.py`'s plugin-diff detection so the
-    "which plugin(s) did this touch" rule stays a single source of truth.
-    Deliberately not turned on in `.github/workflows/ci.yml` tonight — see
-    the sequencing note below.
-- [ ] Land the real CONTRIBUTING.md / AGENTS.md rewrite as the live contract.
-- [ ] Add branch protection: block direct pushes/merges to `main` except
+  - **Done, 2026-09-23 (cutover session).** `.github/workflows/ci.yml`'s
+    PR-time step now runs `tools/check-changefile-presence.py` for PRs
+    targeting `dev`; `check-version-bump.py` is no longer enforced there
+    (kept as a standalone tool, not deleted).
+- [x] Land the real CONTRIBUTING.md / AGENTS.md rewrite as the live contract.
+  - **Done, 2026-09-23 (cutover session).** Both docs now describe the
+    dev-targeting, changefile-based flow; also fixed a pre-existing
+    inconsistency (five per-plugin sections still said "push to main"
+    even before this change) and a private-identifier leak the pre-push
+    guard surfaced.
+- [x] Add branch protection: block direct pushes/merges to `main` except
       through the CI-run promotion job (or explicit admin-escalation).
+  - **Done differently than originally envisioned, 2026-09-23 (cutover
+    session) — see that entry's full account.** This repo's existing
+    branch ruleset is already zero-bypass PR-required for `main`; a
+    personal (non-org) GitHub account cannot grant the GitHub Actions app
+    (or any actor) a bypass the way an organization can, so "except
+    through the CI-run promotion job" is achieved by having the promotion
+    job land through a real PR + squash-merge (`gh pr create`/`gh pr
+    merge`) rather than a raw push — never by a bypass grant. Also added
+    an explicit, separate PR-required ruleset for `dev` (it has none when
+    it isn't the default branch, which is now permanent — `main` must stay
+    default for Copilot's marketplace resolution, confirmed the hard way).
 
 > **Sequencing correction found while starting this phase (agent-recommended,
 > not yet operator-confirmed): these four items are NOT independently safe to
@@ -415,24 +430,51 @@ Round 2 (operator's response to that evaluation):
     Walk-back criteria are Phase 6's job, not this one.
 
 ### Phase 4 — Rollback & hotfix procedures
-- [ ] Implement the CI guard against producing a non-incremental (out-of-order)
+- [x] Implement the CI guard against producing a non-incremental (out-of-order)
       `main` update after a manual rollback.
-- [ ] Add an explicit **pause-CI** step to the rollback procedure: the
+  - **Done, 2026-09-23 (cutover session).** `promote_release.py`'s pipeline
+    state (`.github/release-pipeline-state.json`) records the last
+    rollback's `reverted_dev_head`; `promote()` refuses to re-promote that
+    exact `dev` state unless `--force`.
+- [x] Add an explicit **pause-CI** step to the rollback procedure: the
       promotion pipeline must be paused before a rollback commit lands, not
       just guarded after the fact, per the operator's stated rollback flow.
+  - **Done, 2026-09-23 (cutover session).** `tools/rollback_release.py
+    pause --reason "..." --push` lands first; `promote_release.py` refuses
+    to run while paused (`PromotionPaused`, exit 0 -- not a CI failure).
 - [ ] Document and rehearse the hotfix flow: fork last-known-good `dev`, run
       the snapshot tool, hot-patch `main` directly, cherry-pick the fix back
       to `dev`.
-- [ ] Document the rollback flow: pause CI, `git revert` the generated commit
+- [x] Document the rollback flow: pause CI, `git revert` the generated commit
       + re-tag, never force-push, then resume CI.
+  - **Done, 2026-09-23 (cutover session), implemented differently than
+    "`git revert`" literally says.** `tools/rollback_release.py`'s own
+    docstring is the canonical procedure. It does NOT use `git revert`'s
+    content-diff/merge machinery -- that conflicts whenever the pause
+    commit (previous item) sits on top of the promotion commit being
+    reverted, since both touch the same state-file path. Instead it
+    restores the pre-promotion tree wholesale (the same philosophy
+    `promote_release.py` itself uses) and overlays the updated rollback
+    state -- still a plain forward commit, never a force-push/rewrite.
 
 ### Phase 5 — Cutover
+- [ ] **Blocked on ThomasMichon/copilot-extensions#3512**: the promotion
+      pipeline has never actually executed (0 runs ever — see 2026-09-23/24
+      Journal entry). Fix and prove a real end-to-end promotion before
+      treating any of the items below as safe to start.
 - [ ] Confirm the auto-updater coverage fix (Phase 1) is live before or with
       cutover, so existing harness sessions discover the new contribution
       flow on next pull rather than following stale guidance.
 - [ ] Ensure a PR opened against `main` post-cutover is bounced with guidance
       pointing at `dev` (branch protection message, PR template, or a bot
       comment).
+- [ ] Flip `.agent-worktrees/config.yaml`'s `default_branch: main` to `dev`
+      (ThomasMichon/copilot-extensions#3512's sibling finding, same Journal
+      entry) so `agent-worktrees create-pr`/`push-changes` — the harness's
+      own standard contribution tooling — actually opens PRs against `dev`
+      by default, matching what CONTRIBUTING.md already claims happens.
+      Not yet done; needs operator confirmation since it changes live
+      tooling behavior for every future worktree/PR against this repo.
 - [ ] Announce cutover; watch the first few real promotion cycles closely.
 
 ### Phase 6 — Maturity walk-back
@@ -812,3 +854,243 @@ generator contract details here or in a linked sub-doc._
   then return to Phase 2's remaining three items in the order the
   sequencing note describes, ideally during a lower-traffic window with the
   operator present.
+
+### 2026-09-23, later same day — fixed the main-red from the Phase 3 merge
+- Operator asked to fix `main`'s CI before getting serious about cutover.
+  Root-caused and fixed the pre-existing failure noted above (issue #3429):
+  `customizing-copilot`'s output-free-stack scan was misclassifying
+  `agent-index`'s session-start hook because its second sessionStart entry
+  (a fire-and-forget `install.ps1|sh ensure` re-run) wasn't recognized by
+  the scan's named-marker/script-content proof path. It's actually provably
+  output-free by construction (every stream redirected to null, errors
+  swallowed, unconditional canonical `{}` tail) — added a second, narrowly
+  scoped acceptance path in `scan_session_context.py`
+  (`_command_is_suppressed_maintenance_invocation`) rather than loosening
+  the existing path. 2 new tests, including one that proves the hardening
+  (top-level statement splitting) actually rejects an unsafe variant an
+  earlier, looser draft of the same predicate would have wrongly accepted.
+  Landed as PR #3437 (closes #3429).
+- **Then hit the recurring module-size baseline-drift pattern again** —
+  same class as the Phase 2 kickoff session flagged, now on its third
+  occurrence this effort alone. Widened via the same mechanical
+  `--refresh-baseline --allow-widen` process (PR #3441). This really is a
+  recurring pattern at this point (3 occurrences across 2 sessions in under
+  a day) — worth its own tracked issue/automation rather than continuing to
+  absorb it ad hoc each time it blocks an unrelated PR; still not filed.
+- After both merged, one further `main` CI run failed on an unrelated
+  `efforts` plugin test (`test_exact_adoption_config_emits_bounded_owned_policy`,
+  a `pwsh` subprocess timing out at exactly its 10s budget) — confirmed
+  transient by re-running the same commit's CI, which then passed clean.
+  Not a code issue; flagging only in case the timeout margin is worth
+  revisiting if it recurs.
+- **`main` is green as of commit `d1d171063` (my widen) / `decb2b9af`**
+  (a later, unrelated merge from another contributor) at the time of this
+  entry. Cutover-adjacent work (Phase 3's remaining validation-gate item, or
+  circling back to Phase 2) can proceed from a healthy baseline.
+
+### 2026-09-23, later still — the real cutover: validation gate, rollback, branch protection
+- Operator: "we need to get moving on adding the branch protection and the
+  cutover; parallel contributors will just have to deal. Make the
+  validation gate, ensure we have an emergency rollback strategy, then
+  let's get to guarding the branch."
+- **Phase 3's last item — validation gate**: `.github/workflows/validation-gate.yml`,
+  the broader (full per-plugin suite + full-tree guards, target 10-30 min)
+  check that gates promotion beyond fast smoke CI. Chained via
+  `workflow_run` after `CI` goes green on `dev`; `promote.yml` now waits on
+  *this* workflow, not just fast CI.
+- **Phase 4 — emergency rollback**: `tools/rollback_release.py` (pause /
+  resume / revert). Rewrote `git revert`'s content-diff approach to pure
+  git plumbing (a throwaway index + tree-overlay) after discovering it
+  conflicts whenever a pause bookkeeping commit sits on top of the
+  promotion being reverted — the exact "pause, THEN revert" operator flow
+  this tool exists for. `tools/promote_release.py` gained a
+  `.github/release-pipeline-state.json` written into every generated
+  commit (pause flag, last-promotion, last-rollback record) and now
+  refuses to run while paused or to re-promote a just-rolled-back `dev`
+  state without `--force` (the Phase 4 non-incremental-update guard). Both
+  tools gained `--repo` (closing a real gap: the CLI always defaulted to
+  *this* checkout's path, silently mutating the wrong repo for any other
+  caller, including tests). 19 tests total across both tools.
+- **Retired the manual version-bump guard**: `ci.yml`'s PR-time step now
+  runs `check-changefile-presence.py` for PRs targeting `dev`, not
+  `check-version-bump.py`. CONTRIBUTING.md/AGENTS.md's dev-targeting
+  content went live (changefiles, the wait-and-preview tools, the rollback
+  procedure) — including fixing five per-plugin "Deployment Pipeline"
+  sections that still said "push to main" even before this change (a
+  pre-existing inconsistency with the already-live PR-required policy,
+  corrected in the same pass), and redacting a pre-existing private-
+  identifier leak (a private cross-repo reference -> `#3876`) that the
+  pre-push guard surfaced once this PR also touched the same file. Landed
+  as PR #3464 (to `main` — this repo's default branch could not move yet,
+  see below, so this PR necessarily still targeted `main`).
+- **The near-miss**: attempted to flip the repository's default branch to
+  `dev` so ordinary PRs would target it without extra steps. **The
+  operator caught this immediately** — Copilot's marketplace/update
+  resolution needs `main` to stay the default branch, full stop. Reverted
+  within minutes (`gh repo edit --default-branch main`). Real lesson:
+  changing repo-level settings that other live systems depend on needs a
+  positive confirmation of every dependency first, not just this effort's
+  own assumptions about "the PR target."
+- **Discovered while investigating branch protection**: this repo's
+  existing "Default-branch policy" ruleset targets `~DEFAULT_BRANCH`
+  (dynamically whatever the default branch is), not a fixed name -- so the
+  brief default-branch flip *also* silently stripped `main`'s protection
+  and moved it onto `dev` for those few minutes. Reverting the default
+  branch restored `main`'s protection automatically, but exposed that
+  `dev` has **zero** protection whenever it isn't the default branch (which
+  is permanent now). Fixed by creating an **explicit, separate ruleset**
+  for `dev` (`refs/heads/dev`, not `~DEFAULT_BRANCH`) mirroring the same
+  PR-required + non-blocking-Copilot-review policy, independent of
+  whichever branch happens to be default.
+- **The bigger discovery**: this repo's branch rulesets have
+  `bypass_actors: []` — literally nobody, not even repo admins, can push
+  directly to a PR-required branch. Classic branch protection's
+  `restrictions.apps`/`users`/`teams` (the obvious "let only CI push"
+  primitive) is **an organization-only feature** — this repo is a personal
+  GitHub account, so that path is closed. Ruleset `bypass_actors` with
+  `actor_type: "Integration"` for the built-in GitHub Actions app
+  (app id 15368) is *also* rejected here ("must be part of the ruleset
+  source or owner organization") for the same reason.
+- **The fix, and it's a better design than a bypass would have been**:
+  redesigned the whole promotion/rollback landing mechanism to go through
+  a real `gh pr create` + `gh pr merge --squash`, exactly the same
+  sanctioned path every other change to this repo already uses — never a
+  raw push to `main`. `promote_release.py` gained `candidate_branch`: with
+  it, `--push` lands the generated commit on a throwaway
+  `release/promote-<run id>` branch instead of `main` directly, and defers
+  tagging (a squash-merge mints a new sha; the pre-merge candidate is never
+  what actually lands). `rollback_release.py`'s pause/resume/revert do the
+  same via a new `_land_via_pr()` helper, defaulting to it (`--no-pr` keeps
+  the old raw-push path for tests/trusted repos). `promote.yml` now pushes
+  the candidate branch, opens+merges the PR via `gh`, then tags the real
+  post-merge commit. This means "only the CI worker can push to main" is
+  true not because of any bypass grant, but because **only the promotion
+  workflow ever opens a PR from a `release/promote-*` branch** — ordinary
+  contributors have no reason to and are blocked by the `dev`-only
+  convention anyway.
+- **Bootstrapping wrinkle**: `workflow_run`-triggered workflows always
+  resolve their *own* YAML from the repository's default branch (`main`),
+  never the branch that triggered them (`dev`) — so this whole redesign
+  had to land on `main` directly too, not just `dev` (PR #3474, the same
+  named bootstrapping exception PR #3464 used). The pipeline can't fix
+  itself via its own not-yet-working promotion path.
+- **Recurring friction, same pattern as before, now compounded by two
+  branches**: hit the module-size baseline drift guard four more times
+  landing this batch of PRs (#3427/#3441/#3427-style widens, now also
+  needing separate widens on `dev` *and* `main` independently since they'd
+  diverged) and the new changefile-presence guard correctly refusing two
+  PRs that had landed content on `main` directly under the old convention
+  (added retroactive changefiles for `agent-codespaces`/`agent-worktrees`
+  and `context-handoff` rather than fighting the guard). A `dev`<->`main`
+  sync attempt hit a real (if trivial, one-line) merge conflict in
+  `tools/module-size-baseline.json` from independent widens on each
+  branch — resolved by an actual `git merge` instead of repeated
+  from-scratch branch attempts.
+- **State at the end of this entry**: `dev` has an explicit PR-required
+  ruleset (Copilot review, zero bypass); `main` keeps its existing
+  zero-bypass PR-required ruleset (via `~DEFAULT_BRANCH`, now that default
+  is back to `main` for good); the promotion/rollback pipeline lands
+  everything through real PRs; `dev` and `main` are synced as of this
+  entry but will keep drifting again — that's expected and fine, it's what
+  the next real promotion run is for. **Not yet done**: `dev`'s
+  marketplace.json should be replaced with a deliberately non-functional
+  placeholder (operator's explicit ask: "ensure dev doesn't have a valid
+  marketplace definition; we'll generate that during the snapshot-to-main")
+  so nobody can accidentally point a live Copilot CLI at `dev` as an
+  install source. This needs `accumulate_bumps.py`/`promote_release.py` to
+  *generate* `marketplace.json` fresh from each plugin's own `plugin.json`
+  during promotion (every field marketplace.json carries per-plugin is
+  already derivable from plugin.json) rather than incrementally patching
+  an existing valid file, plus teaching `check-version-consistency.py`
+  (and possibly `check-docs-consistency.py`/`check-runbook-references.py`)
+  to recognize and skip cross-checking against a placeholder. Scoped out
+  of this session given everything else already landed; flagging as the
+  next concrete slice.
+
+### 2026-09-23/24 — First main→dev reconciliation sync + a critical promotion-pipeline finding
+- Resumed via `context-handoff`/`consume_handoff` (task-backed handoff
+  `8f4f8a9b8b60489bb7b6aaeb21966e9c`). Performed the first periodic
+  `dev`↔`main` reconciliation merge (this effort's accepted ongoing reality:
+  concurrent sessions under this identity use `pr-merge --now`'s
+  admin-escalation bypass on `main`'s `~DEFAULT_BRANCH` ruleset routinely,
+  so `main` keeps moving independently of `dev` even after the previous
+  entry's redesign landed the promotion path through real PRs).
+  - Branched `sync-main-to-dev-1` off `dev`, merged `origin/main` (6
+    conflicts — version-bump/marketplace numbers, plus a real
+    superset-vs-subset content conflict in `claim-provider-pattern/README.md`
+    — resolved by taking whichever side was strictly newer/more complete),
+    all guards + touched tests green, landed as
+    ThomasMichon/copilot-extensions#3510 (squash, admin-bypass — this
+    repo's sanctioned self-merge pattern, not a special exception).
+  - **Ancestry note for future syncs**: this repo's merge method is squash,
+    not a real merge commit, so `git rev-list --count origin/dev..origin/main`
+    / `origin/main..origin/dev` do **not** converge toward zero after a
+    reconciliation — squash mints new commit hashes with no shared ancestry
+    to `main`'s originals. Verify success via bidirectional `git diff`
+    content comparison instead: post-merge, the only remaining `main`↔`dev`
+    differences should be `dev` being strictly ahead (its own unpromoted
+    work), confirming no `main`-only content is missing from `dev`.
+  - **Known leftover debt, explicitly deferred (operator decision — scrub
+    later, don't block the sync)**: the merge pulled in real leaked
+    internal identifiers that had entered `main` via earlier admin-bypass
+    commits — test fixtures using literal operator/machine names, a real
+    cross-repo issue citation in a code comment, and (most notably) a full
+    personal effort README merged wholesale into this public repo. Filed as
+    ThomasMichon/copilot-extensions#3511.
+- **Operator then asked to go further: confirm the cutover is actually
+  complete, not just this one sync — and this is where it got serious.**
+  Two real, previously-undiscovered gaps surfaced, on top of everything the
+  prior entry already fixed:
+  1. **`.agent-worktrees/config.yaml`'s `default_branch: main` still drives
+     `create-pr`/`push-changes`, even after everything else in the prior
+     entry landed.** `providers/base.py`'s `scope_from_create_result()` sets
+     the PR base straight from `repo.default_branch`, sourced from this
+     in-repo config — so the harness's own standard contribution tooling
+     still opens PRs against `main` today, directly contradicting
+     CONTRIBUTING.md's claim that "`dev` is this repo's default branch, so
+     an ordinary PR already targets it without needing to specify a base
+     branch" (a claim that was true only briefly, during the near-miss the
+     prior entry describes, before the operator correctly reverted GitHub's
+     actual default branch back to `main` for marketplace resolution).
+     This is a **config bug, not a GitHub-setting bug** — GitHub's real
+     default branch correctly stays `main`; the fix is flipping this one
+     harness-tooling key to `dev`, independent of that. **Not changed this
+     session** — flagged to the operator (added to Phase 5 above) rather
+     than flipped unilaterally, since it changes live tooling behavior for
+     every future worktree/PR against this repo.
+  2. **The `Promote dev to main` workflow has never once executed** — `0`
+     total runs, confirmed via
+     `gh api repos/.../actions/workflows/<promote-id>/runs`. This is a
+     *different, more severe* bug than the prior entry's already-documented
+     "bootstrapping wrinkle" (workflow_run always resolving its own YAML
+     from the default branch, which #3464/#3474 already worked around by
+     landing the pipeline on `main` directly). Even with the redesigned
+     PR-landing mechanism correctly bootstrapped onto both branches, the
+     trigger condition itself silently never matches: `promote.yml`'s
+     `workflow_run: workflows: ["Validation Gate"], branches: [dev]` filter
+     compares against a `head_branch` that GitHub reports as `"main"` —
+     the repo's default branch — even when the real triggering commit's
+     `head_sha` genuinely belongs to `dev`'s history (confirmed via raw
+     API on a live run, not a `gh` CLI display artifact:
+     `{"event":"workflow_run","head_branch":"main","head_sha":"<dev-tip-sha>"}`).
+     This means **no automated promotion has ever reached `main`**; every
+     `main` advance to date has been a direct/admin-bypass PR — exactly the
+     traffic this whole effort exists to eliminate. Filed as
+     ThomasMichon/copilot-extensions#3512 — needs a real trigger-chain
+     redesign (drop the branch filter and gate on `head_sha` ancestry, a
+     push-triggered chain, or `repository_dispatch` from CI itself), not a
+     quick patch, given the live-pipeline risk of guessing wrong.
+  3. Also reconfirmed Validation Gate is currently red on `dev`'s real tip,
+     but both failures are pre-existing and already tracked (`#3503`'s
+     fetch-depth fix and a `load_config()` double-call bug in
+     `agent-worktrees`), not new regressions from this sync.
+- **Net effect**: Phase 2-4 are further along than they look at a glance
+  (mostly done, per the prior entry), but Phase 5 cutover cannot be
+  considered real yet — the mechanism it depends on has never actually run.
+  Recommended order for whoever resumes: (1) get operator confirmation and
+  flip `.agent-worktrees/config.yaml`'s `default_branch` to `dev`; (2)
+  design + fix the Promote trigger chain (#3512) and prove a real
+  end-to-end promotion (dev commit -> candidate branch -> PR -> squash-merge
+  -> tag) before trusting it for real traffic; (3) only then work through
+  the rest of Phase 5's checklist; (4) scrub #3511's leaked identifiers
+  whenever convenient, unblocked by the above.

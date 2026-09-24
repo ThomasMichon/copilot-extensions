@@ -1910,6 +1910,91 @@ def test_named_bootstrap_check_with_stdout_text_is_rejected(
     assert inventory["plugins"][0]["possible_non_empty"] == "yes"
 
 
+def test_suppressed_maintenance_invocation_alongside_standard_writer_is_output_free(
+    tmp_path: Path,
+):
+    """A second sessionStart entry that fires an arbitrary fire-and-forget
+    maintenance script (e.g. an idempotent installer 'ensure' re-run) is
+    output-free when every stream from that invocation is redirected to null
+    and the command unconditionally ends with the canonical empty-JSON
+    literal -- matching agent-index's real hooks.json shape
+    (ThomasMichon/copilot-extensions#3429)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    plugin = _session_plugin(repo, "plugins", "agent-index-like")
+    hooks = json.loads((plugin / "hooks.json").read_text(encoding="utf-8"))
+    hooks["hooks"]["sessionStart"][0]["bash"] = (
+        's="$COPILOT_PLUGIN_ROOT/scripts/write-session-guidance.sh"; bash "$s"'
+    )
+    hooks["hooks"]["sessionStart"][0]["powershell"] = (
+        "$s = Join-Path $env:COPILOT_PLUGIN_ROOT "
+        "'scripts\\write-session-guidance.ps1'; & $s"
+    )
+    hooks["hooks"]["sessionStart"].append({
+        "type": "command",
+        "bash": (
+            'r="${COPILOT_PLUGIN_ROOT:-$PWD}"; s="$r/scripts/install.sh"; '
+            'if [ -f "$s" ]; then bash "$s" ensure >/dev/null 2>&1 || true; fi; '
+            "printf '{}'"
+        ),
+        "powershell": (
+            "$r = $env:COPILOT_PLUGIN_ROOT; $s = (Join-Path $r 'scripts\\install.ps1'); "
+            "try { if (Test-Path -LiteralPath $s -PathType Leaf) { & $s ensure *> $null } } "
+            "catch {}; [Console]::Out.Write('{}')"
+        ),
+    })
+    (plugin / "hooks.json").write_text(json.dumps(hooks), encoding="utf-8")
+    _write_standard_writer(plugin)
+    source = scan.PluginSource(
+        skills_root=plugin / "skills",
+        origin="copilot-extensions/agent-index-like",
+        controlled=True,
+    )
+    report = scan.Report()
+
+    inventory = scan.scan_session_context(repo, [source], report)
+
+    assert scan._session_start_is_structurally_output_free(plugin) is True
+    assert inventory["disposition"] == "output-free-stack"
+    assert inventory["plugins"][0]["role"] == "proven-output-free"
+    assert report.blocking == 0
+
+
+def test_suppressed_maintenance_invocation_without_guaranteed_tail_is_rejected(
+    tmp_path: Path,
+):
+    """The suppressed-invocation acceptance path requires the command to
+    unconditionally end with the canonical empty-JSON literal -- redirecting
+    output alone is not sufficient, since a command that could still emit
+    something else afterward is not provably output-free."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    plugin = _session_plugin(repo, "plugins", "half-suppressed")
+    hooks = json.loads((plugin / "hooks.json").read_text(encoding="utf-8"))
+    hooks["hooks"]["sessionStart"][0]["bash"] = (
+        'r="${COPILOT_PLUGIN_ROOT:-$PWD}"; s="$r/scripts/install.sh"; '
+        'if [ -f "$s" ]; then bash "$s" ensure >/dev/null 2>&1 || true; fi; '
+        "echo done; printf '{}'"
+    )
+    hooks["hooks"]["sessionStart"][0]["powershell"] = (
+        "$r = $env:COPILOT_PLUGIN_ROOT; $s = (Join-Path $r 'scripts\\install.ps1'); "
+        "try { if (Test-Path -LiteralPath $s -PathType Leaf) { & $s ensure *> $null } } "
+        "catch {}; Write-Host 'done'; [Console]::Out.Write('{}')"
+    )
+    (plugin / "hooks.json").write_text(json.dumps(hooks), encoding="utf-8")
+    source = scan.PluginSource(
+        skills_root=plugin / "skills",
+        origin="copilot-extensions/half-suppressed",
+        controlled=True,
+    )
+    report = scan.Report()
+
+    inventory = scan.scan_session_context(repo, [source], report)
+
+    assert scan._session_start_is_structurally_output_free(plugin) is False
+    assert inventory["plugins"][0]["role"] == "legacy-direct-or-unknown"
+
+
 def test_session_context_accepts_one_declared_output(
     tmp_path: Path, monkeypatch,
 ):

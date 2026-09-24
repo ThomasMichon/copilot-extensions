@@ -36,6 +36,7 @@ See ``docs/plans/pr-workflow.md`` in test-chamber.
 from __future__ import annotations
 
 import re
+import string
 from pathlib import Path
 
 from . import config as cfg
@@ -196,6 +197,8 @@ def _resolve_username(cwd: str | None) -> str:
             if slug:
                 return slug
     return "user"
+
+
 def resolve_head_pattern(prcfg) -> str:
     """The PR head-name template for *prcfg* (explicit override or default).
 
@@ -210,6 +213,41 @@ def resolve_head_pattern(prcfg) -> str:
     if getattr(prcfg, "head_scheme", "snapshot") == "refspec":
         return "pr/{slug}-{suffix}"
     return "{prefix}/{slug}-{suffix}"
+
+
+def _pattern_references_token(pattern: str, token: str) -> bool:
+    """Whether ``pattern`` contains a ``str.format`` field for ``token``."""
+    for _literal, field_name, _format_spec, _conversion in string.Formatter().parse(pattern):
+        if not field_name:
+            continue
+        root = field_name.split(".", 1)[0].split("[", 1)[0]
+        if root == token:
+            return True
+    return False
+
+
+def _augment_default_head_pattern_for_topic(pattern: str, *, has_topic: bool) -> str:
+    """Insert ``{topic}`` ahead of ``{suffix}`` for default head patterns only."""
+    if not has_topic or "{suffix}" not in pattern:
+        return pattern
+    return pattern.replace("{suffix}", "{topic}-{suffix}", 1)
+
+
+def _effective_head_pattern(prcfg, *, topic: str = "") -> tuple[str, str | None]:
+    """Resolved head pattern plus an optional note about ignored ``topic``."""
+    pattern = resolve_head_pattern(prcfg)
+    if not topic:
+        return pattern, None
+    if getattr(prcfg, "head_pattern", ""):
+        if _pattern_references_token(pattern, "topic"):
+            return pattern, None
+        return pattern, (
+            "Ignoring --topic because explicit pr.head_pattern does not "
+            "reference {topic}."
+        )
+    return _augment_default_head_pattern_for_topic(pattern, has_topic=True), None
+
+
 def audit_attribution_risk(config: Config) -> list[str]:
     """Migration audit (pr-attribution-codenames Phase 5): flag this repo's
     configured ``pr.head_pattern`` for the branch-name leak class.
@@ -239,23 +277,33 @@ def audit_attribution_risk(config: Config) -> list[str]:
         source_attribution=reported_attribution,
         head_pattern=getattr(prcfg, "head_pattern", "") or "",
     )
+
+
 def pr_head_name(
-    prcfg, title: str, worktree_id: str, *, cwd: str | None = None, machine: str = "",
+    prcfg,
+    title: str,
+    worktree_id: str,
+    *,
+    cwd: str | None = None,
+    machine: str = "",
+    topic: str = "",
 ) -> str:
     """Build the PR head branch name from the repo's configured template.
 
     Resolves the ``head_pattern`` template (scheme-aware default) against the
     ``{prefix}`` / ``{slug}`` / ``{suffix}`` / ``{username}`` / ``{machine}``
-    tokens.  With the ``snapshot`` default this returns exactly
+    / ``{topic}`` tokens. With the ``snapshot`` default this returns exactly
     ``feature_branch_name(prefix, title, worktree_id)``.
     """
-    pattern = resolve_head_pattern(prcfg)
+    topic = slugify(topic) if topic.strip() else ""
+    pattern, _topic_note = _effective_head_pattern(prcfg, topic=topic)
     tokens = {
         "prefix": (getattr(prcfg, "branch_prefix", "") or "feature"),
         "slug": slugify(title),
         "suffix": _worktree_suffix(worktree_id),
         "username": _resolve_username(cwd),
         "machine": machine or "",
+        "topic": topic,
     }
     try:
         name = pattern.format(**tokens)
@@ -464,6 +512,7 @@ def create_pr(
     *,
     title: str | None = None,
     branch: str | None = None,
+    topic: str | None = None,
     target_repo: str | None = None,
     new: bool = False,
     body: str | None = None,
@@ -508,6 +557,11 @@ def create_pr(
     (merged/closed) -- or ``new`` is set, or none exists -- a *fresh* PR is
     appended (new branch off the current default-branch tip).  When a **live**
     (open/creating) PR exists, its branch is reused and the call iterates it.
+
+    ``topic`` (``--topic``) is an optional mini-task token folded into the
+    generated default head name. Explicit ``--branch`` still fully overrides
+    head naming, and an explicit ``pr.head_pattern`` only uses ``topic`` when
+    it actually references ``{topic}``.
 
     ``target_repo`` (``--repo owner/name``) records the PR's target repo;
     it defaults to the worktree's own repo.
@@ -707,15 +761,21 @@ def create_pr(
                 ),
             }
 
+    topic_slug = slugify(topic) if (topic or "").strip() else ""
+    topic_note = None
+
     # Resolve the feature branch name: explicit > live active PR > derived.
     if branch:
         feature_branch = branch
+        if topic_slug:
+            topic_note = "Ignoring --topic because --branch fully overrides the head name."
     elif active_is_live and not new and active.branch:
         feature_branch = active.branch
     else:
+        _pattern, topic_note = _effective_head_pattern(prcfg, topic=topic_slug)
         feature_branch = pr_head_name(
             prcfg, eff_title, worktree_id,
-            cwd=worktree_path, machine=config.machine,
+            cwd=worktree_path, machine=config.machine, topic=topic_slug,
         )
 
     # Branch-name leak class (pr-attribution-codenames Phase 5): whichever way
@@ -745,12 +805,15 @@ def create_pr(
         return {**base, "error": str(exc)}
 
     if dry_run:
-        return {
+        result = {
             **base, "success": True, "dry_run": True,
             "branch": feature_branch, "remote": remote,
             "provider": prcfg.provider, "default_branch": repo.default_branch,
             "draft": want_draft,
         }
+        if topic_note:
+            result["topic_note"] = topic_note
+        return result
 
     # Resolve the PR's target repo as the hosting ``owner/name`` slug (what the
     # provider API needs), in order: explicit --repo > the remote's slug > a
@@ -859,8 +922,9 @@ def create_pr(
             return {**base, "error": (
                 f"Feature branch '{feature_branch}' already exists locally or on "
                 f"'{publish_remote}'. If this is a different mini-task within the same "
-                f"effort/worktree, retry with an explicit --branch that adds a "
-                f"distinguishing suffix (for example '{feature_branch}-2' or a short task token)."
+                f"effort/worktree, retry with --topic <token> or an explicit --branch "
+                f"that adds a distinguishing suffix (for example '{feature_branch}-2' "
+                f"or a short task token)."
             )}
 
     if not ahead:
@@ -1085,6 +1149,8 @@ def create_pr(
     if observation_error:
         result["pr_head_observation_error"] = observation_error
 
+    if topic_note:
+        result["topic_note"] = topic_note
     return result
 
 
@@ -1098,12 +1164,12 @@ def self_merge_bypass_note(
     ``eligible: false`` / ``reason: "not yet approved"`` verdict: on a
     ``pr-self-merge`` repo, "no verdict yet" does NOT necessarily mean merge
     is blocked -- the acting identity may hold **Maintainer bypass rights**
-    on the repo's own required-review rule (discovered landing
-    gim-home/odsp-web-harness#502/#504; see :meth:`GitHubProvider.
-    pull_review_gate`). Surfacing this explicitly at both ``pr-status`` and
-    ``create-pr`` matters because agents have been observed hesitating or
-    declaring "I can't self-merge" on exactly this state, even as a
-    Maintainer, when nothing was actually blocking them (#3296 follow-up).
+    on the repo's own required-review rule (discovered landing a live
+    ruleset requiring one approving review while granting the acting
+    Maintainer bypass rights; see :meth:`GitHubProvider.pull_review_gate`).
+    Surfacing this explicitly at both ``pr-status`` and ``create-pr``
+    matters because agents have been observed hesitating or declaring "I
+    can't self-merge" here, even as a Maintainer (#3296 follow-up).
 
     Only ever returns a note for the ``pr-self-merge`` profile, only when a
     provider exposes ``pull_review_gate`` (currently GitHub only, via

@@ -204,10 +204,13 @@ class PRConfig:
     #   master while the PR is open; a later ``git sync`` reconciles it on merge).
     #
     # ``head_pattern`` is the PR head-name template (tokens ``{prefix}``, ``{slug}``,
-    # ``{suffix}``, ``{username}``, ``{machine}``). Empty means the provider-aware
-    # default: Azure DevOps uses ``user/{username}/{slug}-{suffix}``; all other
-    # providers fall back to the scheme default (``pr/{slug}-{suffix}`` under
-    # ``refspec`` and ``{prefix}/{slug}-{suffix}`` under ``snapshot`` / ``feature/<slug>``).
+    # ``{suffix}``, ``{username}``, ``{machine}``, ``{topic}``). Empty means the
+    # provider-aware default: Azure DevOps uses ``user/{username}/{slug}-{suffix}``;
+    # all other providers fall back to the scheme default (``pr/{slug}-{suffix}``
+    # under ``refspec`` and ``{prefix}/{slug}-{suffix}`` under ``snapshot`` /
+    # ``feature/<slug>``). A caller-supplied ``--topic`` is only folded into those
+    # generated defaults automatically; an explicit pattern must reference
+    # ``{topic}`` itself to use it.
     head_scheme: str = "refspec"   # refspec (default) | snapshot
     head_pattern: str = ""         # empty -> provider-aware default (see above)
     # Provider-plugin settings (PR creation via a provider CLI). ``api_base``

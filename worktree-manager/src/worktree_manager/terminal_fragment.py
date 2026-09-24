@@ -30,6 +30,11 @@ This module supplies:
 - :func:`reconcile_generated_profiles` / :func:`diagnose_wt_state` -- the
   live Windows Terminal ``state.json``/``settings.json`` reconciliation and
   read-only drift diagnosis.
+- :func:`deploy_fragment` (Phase 3e Step 5) -- the only function in this
+  module that writes to disk, and only when explicitly asked to
+  (``apply=True``). Computes the fragment JSON, the ``generatedProfiles``
+  reconciliation, and the ``settings.json`` cleanup a real deploy would
+  perform; everything else here stays read-only.
 
 **Machine identity is the roster key (full name).** A selection target's
 ``machine`` matches on the machines.yaml **key** (e.g. ``tmichon-book2``), and
@@ -51,6 +56,7 @@ import socket
 import struct
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from . import terminal_profiles as profiles
 from .harness_state import RosterMachine, SshEnvironment
@@ -59,6 +65,7 @@ __all__ = [
     "COLOR_SCHEME_NAME",
     "DEFAULT_ICON",
     "EmittedProfile",
+    "FragmentDeployPlan",
     "FragmentResult",
     "GeneratedProfilesPlan",
     "ProjectInput",
@@ -70,6 +77,7 @@ __all__ = [
     "collect_local_projects",
     "color_scheme",
     "default_selection_keys",
+    "deploy_fragment",
     "detect_env_label",
     "detect_platform",
     "diagnose_wt_state",
@@ -975,3 +983,274 @@ def diagnose_wt_state() -> WtStateDiagnosis | None:
         reclaimable_orphans=reclaimable,
         foreign_orphans=foreign,
     )
+
+
+# ---------------------------------------------------------------------------
+# Deploy -- Phase 3e Step 5. Everything above this point is read-only; only
+# :func:`deploy_fragment` (and, when it is explicitly asked to, its
+# ``apply=True`` path) ever writes to disk.
+# ---------------------------------------------------------------------------
+
+@dataclass
+class FragmentDeployPlan:
+    """What deploying this machine's fragment to disk would do.
+
+    Computed unconditionally by :func:`deploy_fragment` -- printing or
+    inspecting a plan never mutates anything. Only ``apply=True`` performs
+    the writes described here; ``applied`` records whether that happened for
+    *this* plan instance.
+    """
+
+    fragment_path: Path | None
+    old_guids: list[str]
+    new_guids: list[str]
+    changed_guids: list[str]
+    stale_guids: list[str]
+    generated_plan: GeneratedProfilesPlan | None
+    settings_stale_count: int
+    wt_running: bool
+    fragment: dict
+    applied: bool = False
+    notes: list[str] = field(default_factory=list)
+
+    @property
+    def would_change(self) -> bool:
+        """Whether applying this plan would touch anything on disk at all."""
+        return bool(
+            self.old_guids != self.new_guids
+            or self.changed_guids
+            or (self.generated_plan is not None and self.generated_plan.changed)
+            or self.settings_stale_count
+        )
+
+
+def _settings_profile_list(local_state_dir) -> list[dict]:
+    data = _read_json(Path(local_state_dir) / "settings.json") or {}
+    lst = (((data.get("profiles") or {}).get("list"))
+           if isinstance(data, dict) else None)
+    return [p for p in (lst or []) if isinstance(p, dict)]
+
+
+def _wt_process_running() -> bool:
+    """Best-effort, read-only check for a live ``WindowsTerminal.exe``.
+
+    Never raises -- a detection failure just means the "close WT for new
+    profiles to appear" note is skipped, not a hard error.
+    """
+    if os.name != "nt":
+        return False
+    try:
+        import subprocess
+
+        r = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq WindowsTerminal.exe"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return "WindowsTerminal.exe" in (r.stdout or "")
+    except Exception:
+        return False
+
+
+def deploy_fragment(
+    machine: str,
+    *,
+    current_project: str | None = None,
+    apply: bool = False,
+) -> FragmentDeployPlan:
+    """Compute (and, when ``apply=True``, perform) this machine's Step 5 deploy.
+
+    Mirrors ``install.ps1``'s ``Deploy-Shortcuts``/``Sync-TerminalState``/
+    ``Get-SettingsProfileGuids``/``Clean-TerminalSettingsJson`` for the
+    fragment-write half only -- ``.lnk`` shortcut creation stays in
+    ``install.ps1``, out of this relocation's scope.
+
+    ``apply=False`` (the default) computes the **full** plan -- the new
+    fragment JSON, which GUIDs are stale/changed, and the resulting
+    ``generatedProfiles``/``settings.json`` reconciliation -- without
+    touching disk at all: a caller can always preview exactly what a real
+    deploy would do. Only ``apply=True`` performs the writes, in the same
+    order the PowerShell installer uses (reconcile ``state.json`` /
+    ``settings.json`` BEFORE writing the new fragment file, to avoid a race
+    where WT reads the new fragment while stale GUIDs are still present).
+    """
+    frag_dir = _wt_fragments_dir()
+    local_state = _wt_local_state_dir()
+    fragment_dst = (
+        (frag_dir / "AgentWorktrees" / "agent-worktrees.json") if frag_dir else None
+    )
+
+    old_frag = _read_json(fragment_dst) if fragment_dst is not None else None
+    old_profiles = [
+        p for p in ((old_frag or {}).get("profiles") or []) if isinstance(p, dict)
+    ]
+    old_guids = [
+        str(p["guid"]).lower() for p in old_profiles if p.get("guid")
+    ]
+
+    result = preview_local(machine, current_project=current_project)
+    new_fragment = result.fragment()
+    new_profiles = [p for p in new_fragment.get("profiles", []) if isinstance(p, dict)]
+    new_guids = [str(p["guid"]).lower() for p in new_profiles if p.get("guid")]
+
+    old_by_guid = {
+        str(p["guid"]).lower(): p for p in old_profiles if p.get("guid")
+    }
+    new_by_guid = {
+        str(p["guid"]).lower(): p for p in new_profiles if p.get("guid")
+    }
+    changed_guids = [
+        g for g in new_guids
+        if g in old_by_guid
+        and (
+            old_by_guid[g].get("commandline") != new_by_guid[g].get("commandline")
+            or old_by_guid[g].get("name") != new_by_guid[g].get("name")
+        )
+    ]
+    stale_guids = [g for g in old_guids if g not in new_guids]
+
+    generated_plan: GeneratedProfilesPlan | None = None
+    settings_stale_count = 0
+    notes: list[str] = []
+
+    if local_state is not None and Path(local_state).exists():
+        settings_profiles = _settings_profile_list(local_state)
+        settings_guids = {
+            str(p["guid"]).lower() for p in settings_profiles if p.get("guid")
+        }
+        state = _read_json(Path(local_state) / "state.json") or {}
+        generated = list(
+            (state.get("generatedProfiles") or []) if isinstance(state, dict) else []
+        )
+
+        # Union of every INSTALLED fragment's GUIDs (ours -- freshly computed
+        # -- plus any other extension's on-disk fragment), so orphan reclaim
+        # never prunes a GUID a foreign fragment still emits.
+        all_fragment_guids = set(new_guids)
+        if frag_dir is not None and Path(frag_dir).exists():
+            for jf in Path(frag_dir).rglob("*.json"):
+                data = _read_json(jf)
+                if isinstance(data, dict):
+                    for p in (data.get("profiles") or []):
+                        if isinstance(p, dict) and p.get("guid"):
+                            all_fragment_guids.add(str(p["guid"]).lower())
+
+        generated_plan = reconcile_generated_profiles(
+            new_guids,
+            settings_guids,
+            generated,
+            stale_guids=stale_guids,
+            changed_guids=changed_guids,
+            all_fragment_guids=all_fragment_guids,
+        )
+
+        remove_set = {g.lower() for g in (list(stale_guids) + list(changed_guids))}
+        new_guid_set = set(new_guids)
+        for p in settings_profiles:
+            if p.get("source") != "AgentWorktrees":
+                continue
+            g = str(p["guid"]).lower() if p.get("guid") else None
+            if g is None or g in remove_set or g not in new_guid_set:
+                settings_stale_count += 1
+    else:
+        notes.append(
+            "Windows Terminal local state unavailable (non-Windows, or WT "
+            "not installed) -- the fragment would be written but "
+            "state.json/settings.json reconciliation is skipped."
+        )
+
+    wt_running = _wt_process_running()
+    if wt_running:
+        notes.append(
+            "Windows Terminal is running -- close it fully and redeploy for "
+            "new/changed profiles to appear."
+        )
+
+    plan = FragmentDeployPlan(
+        fragment_path=fragment_dst,
+        old_guids=old_guids,
+        new_guids=new_guids,
+        changed_guids=changed_guids,
+        stale_guids=stale_guids,
+        generated_plan=generated_plan,
+        settings_stale_count=settings_stale_count,
+        wt_running=wt_running,
+        fragment=new_fragment,
+        notes=notes,
+    )
+
+    if apply:
+        _apply_deploy_plan(plan, local_state)
+        plan.applied = True
+
+    return plan
+
+
+def _apply_deploy_plan(plan: FragmentDeployPlan, local_state) -> None:
+    """Write ``state.json``/``settings.json``/the fragment file to disk.
+
+    Only ever called from :func:`deploy_fragment` when explicitly asked to
+    ``apply`` -- never invoked implicitly, and never called by any read-only
+    preview/doctor path. Mirrors ``install.ps1``'s write order: reconcile
+    live WT state BEFORE writing the new fragment (the race the PowerShell
+    installer's own comment calls out: writing the fragment first risks WT
+    reading it while stale GUIDs are still present in ``state.json``).
+    """
+    import json
+
+    if local_state is not None and Path(local_state).exists():
+        if plan.generated_plan is not None and plan.generated_plan.changed:
+            state_path = Path(local_state) / "state.json"
+            state = _read_json(state_path)
+            if isinstance(state, dict):
+                state["generatedProfiles"] = plan.generated_plan.keep
+                state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+        if plan.stale_guids or plan.changed_guids or plan.settings_stale_count:
+            settings_path = Path(local_state) / "settings.json"
+            settings = _read_json(settings_path)
+            if isinstance(settings, dict):
+                prof = settings.get("profiles")
+                if isinstance(prof, dict) and isinstance(prof.get("list"), list):
+                    remove_set = {
+                        g.lower() for g in (plan.stale_guids + plan.changed_guids)
+                    }
+                    new_guid_set = set(plan.new_guids)
+
+                    def _keep(p):
+                        if not isinstance(p, dict):
+                            return True
+                        if p.get("source") != "AgentWorktrees":
+                            g = str(p["guid"]).lower() if p.get("guid") else None
+                            return not (g and g in remove_set)
+                        g = str(p["guid"]).lower() if p.get("guid") else None
+                        if g is None:
+                            return False
+                        if g in remove_set:
+                            return False
+                        return g in new_guid_set
+
+                    before = len(prof["list"])
+                    prof["list"] = [p for p in prof["list"] if _keep(p)]
+                    if len(prof["list"]) != before:
+                        import datetime
+
+                        backup = settings_path.with_name(
+                            settings_path.name
+                            + ".wt-backup-"
+                            + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+                        )
+                        backup.write_text(
+                            settings_path.read_text(encoding="utf-8"),
+                            encoding="utf-8",
+                        )
+                        settings_path.write_text(
+                            json.dumps(settings, indent=2), encoding="utf-8"
+                        )
+
+    if plan.fragment_path is not None:
+        plan.fragment_path.parent.mkdir(parents=True, exist_ok=True)
+        plan.fragment_path.write_text(
+            json.dumps(plan.fragment, indent=2), encoding="utf-8"
+        )

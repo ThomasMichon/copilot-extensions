@@ -497,10 +497,26 @@ call site.
       an explicit `<project>` positional (this CLI's own convention) instead
       of agent-worktrees' cwd-based default; `apply` persists but doesn't
       yet mirror to disk (`mirrored: false` — Step 5's scope).
-- [ ] **Step 5 — repoint `install.ps1`'s** `Deploy-TerminalScripts`/
-      `Sync-TerminalState`/`Get-SettingsProfileGuids`/
-      `Clean-TerminalSettingsJson` at the new owner, following Phase 3b
-      Slice 2a's launcher-script repoint pattern.
+- [x] **Step 5a — build the real deploy/mirror mechanism** in
+      worktree-manager: `terminal_fragment.deploy_fragment()` computes the
+      fragment write + `generatedProfiles`/`settings.json` reconciliation
+      unconditionally; only `apply=True` writes anything. Wired as
+      `terminal-fragment --deploy [--live]` / `profiles apply --mirror
+      [--live]`, both defaulting to dry-run per operator direction (no safe
+      CI test path for live Windows Terminal state).
+  - [x] **Step 5b — repointed `install.ps1`'s** `Deploy-TerminalScripts`/
+        `Sync-TerminalState`/`Get-SettingsProfileGuids`/
+        `Clean-TerminalSettingsJson` at the new owner (PR #3457), following
+        Phase 3b Slice 2a's launcher-script repoint pattern: health-checked,
+        version-gated (`>= 0.1.0-dev75`) present-or-fallback to the
+        unchanged local implementation.
+  - [x] **Step 5c — live-machine validation trial**, operator-supervised on
+        tmichon-book2: confirmed the installed `install.ps1` actually ran
+        the new Worktree Manager path (`--live: writes applied`) and left
+        the real fragment/`state.json`/`settings.json` byte-identical to
+        before (idempotent, non-destructive). `--live` is proven safe on
+        this machine; still off by default everywhere else until
+        independently exercised.
 - [ ] **Step 6 — clean, decisive cutover** (Mux/AHP precedent): delete
       agent-worktrees' `profiles`/`terminal-fragment` CLI verbs, the
       terminal-mirroring parts of `repair`, and (pending the bundled-Picker
@@ -629,6 +645,64 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-09-23** — Landed Phase 3e Step 5b/5c (install.ps1 repoint + live
+  trial), PR [#3457](https://github.com/ThomasMichon/copilot-extensions/pull/3457).
+  Asked the operator how to proceed before touching `install.ps1` (this
+  step, unlike 5a, cannot be a pure dry-run: repointing the installer means
+  the next real update/install exercises the new write path for real).
+  Operator direction: "repoint and trial now" -- treat this machine's own
+  `agent-worktrees update` as the supervised live trial. Repointed
+  `Deploy-Shortcuts` to call a new `Deploy-TerminalFragmentViaWorktreeManager`
+  first: resolves the `worktree-manager` binstub via `Get-
+  UsableWorktreeManagerBin` (PATH lookup + `--version` health check +
+  `Test-WorktreeManagerVersionAtLeast` >= `0.1.0-dev75`, the version that
+  added `--deploy`/`--mirror`), and calls `terminal-fragment <project>
+  --machine <k> --deploy --live`; falls back to the pre-existing PowerShell
+  implementation (extracted verbatim into `Deploy-TerminalFragmentLocally`,
+  behaviourally unchanged) when Worktree Manager is absent, unhealthy, or
+  too old -- the same present-or-fallback shape Phase 3b Sub-slice 2a's mux
+  relocation used. Validated in stages before landing: a dry-run preview
+  proved worktree-manager's fragment output was byte-identical to the
+  already-installed fragment and converged to zero plan changes. After
+  landing, ran `worktree-manager update` (`0.1.0-dev65` -> `dev75`) and
+  `agent-worktrees update` (`1.5.5-dev260` -> `dev261`) on tmichon-book2,
+  then invoked the installed `install.ps1`'s `refresh-profiles` action
+  directly: its own output confirmed the NEW path ran ("Windows Terminal
+  profiles deployed via Worktree Manager" + the deploy plan's `-> LIVE:
+  writes applied.`), and a before/after diff of the real fragment/
+  `state.json`/`settings.json` showed everything byte-identical with no
+  spurious `settings.json.wt-backup-*` file created -- a clean, idempotent,
+  non-destructive real deploy. `--live` is proven safe on this machine
+  (Step 5c done here); it remains off by default everywhere else until
+  independently exercised. Bumped `agent-worktrees` `1.5.5-dev260` ->
+  `dev261`.
+- **2026-09-23** — Landed Phase 3e Step 5a (deploy/mirror mechanism), PR
+  [#3445](https://github.com/ThomasMichon/copilot-extensions/pull/3445).
+  Added `terminal_fragment.deploy_fragment(machine, current_project=None,
+  apply=False)`: computes the new fragment JSON, GUID staleness/change
+  detection against the on-disk fragment, and the
+  `generatedProfiles`/`settings.json` reconciliation (reusing the
+  already-ported `reconcile_generated_profiles`) unconditionally; only
+  `apply=True` performs any write, in the same reconcile-before-write order
+  `install.ps1`'s `Deploy-Shortcuts`/`Sync-TerminalState` used (avoids the
+  race where WT reads the new fragment while stale GUIDs are still in
+  `state.json`). Before starting this slice, flagged the live-state risk to
+  the operator per the predecessor handoff's explicit blocker: chose
+  "dry-run flag first, defer live writes until proven safe." Wired
+  accordingly: `terminal-fragment <project> --deploy [--live]` and
+  `profiles <project> apply --mirror [--live]` both default to a full
+  preview and only write with the explicit `--live` flag; `apply` without
+  `--mirror` is byte-for-byte unchanged. Added
+  `test_terminal_fragment_deploy.py` (dry-run-never-writes, apply-writes-
+  and-reconciles-a-fixture-WT-state, idempotent-second-dry-run) plus 4 new
+  CLI-dispatch tests. Full non-picker suite green (51/51 in the touched
+  suites; 1134 passed / 3 pre-existing unrelated Windows path-validation
+  failures across the full suite via a real venv install). Bumped
+  `0.1.0-dev74` -> `dev75`. **Still open, tracked in the phase doc:** Step
+  5b (repoint `install.ps1`) and Step 5c (an operator-supervised live trial
+  of `--live` against a real Windows Terminal install, before this
+  mechanism is treated as proven safe or agent-worktrees' own deploy path
+  is retired).
 - **2026-09-23** — Landed Phase 3e Step 4 (CLI surface): added
   `worktree-manager terminal-fragment <project> [--machine K]
   [--explain|--doctor|--migrate-selections]` and `worktree-manager profiles

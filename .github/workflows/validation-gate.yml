@@ -1,0 +1,163 @@
+name: Validation Gate
+
+# Phase 3 of the dev-branch-release-pipeline effort
+# (ThomasMichon/copilot-extensions#3336): the broader (target 10-30 min),
+# steady test-suite validation that gates promotion beyond the fast smoke CI
+# in .github/workflows/ci.yml. Runs every plugin's FULL suite (matching
+# ci.yml's own `full` workflow_dispatch job, kept here as a separate
+# workflow file rather than a job there for the same reason
+# context-handoff-exhaustive.yml is separate: a trigger declared on one
+# workflow applies to every job in it, and this one's dev-push trigger has
+# no business also re-triggering the whole fast/smoke/full matrix).
+#
+# This workflow only ever runs after CI has already gone green on `dev`
+# (workflow_run), so its own failures are never the FIRST signal a
+# contributor sees -- fast smoke CI still catches most regressions in
+# under 5 minutes. This is the deeper, slower pass that
+# .github/workflows/promote.yml actually waits on before promoting.
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+  workflow_dispatch:
+
+concurrency:
+  group: validation-gate-${{ github.event.workflow_run.head_sha || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: gate (confirm this is a dev commit)
+    # `branches: [dev]` on the workflow_run trigger above looks like the
+    # obvious filter, but it is unreliable in practice: GitHub's
+    # workflow_run event consistently reports `head_branch` as the
+    # repository's *default* branch (main), not the branch that actually
+    # produced the triggering CI run -- confirmed empirically across many
+    # real runs here, including successful push-triggered CI runs on dev
+    # whose own head_branch correctly says "dev". Trusting that field left
+    # this whole pipeline dead: 0 real triggers ever
+    # (dev-branch-release-pipeline effort, promote-trigger finding).
+    # Verify real dev-ancestry with git instead of the event metadata.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      is_dev: ${{ steps.check.outputs.is_dev }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: check
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "is_dev=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          sha="${{ github.event.workflow_run.head_sha }}"
+          git fetch origin dev
+          if git merge-base --is-ancestor "$sha" origin/dev; then
+            echo "is_dev=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_dev=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::$sha is not on origin/dev's history -- skipping (this CI completion was for a different branch/PR)."
+          fi
+
+  full:
+    name: full - ${{ matrix.plugin }}
+    needs: gate
+    if: needs.gate.outputs.is_dev == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        plugin:
+          - agent-bridge
+          - agent-codespaces
+          - agent-containers
+          - agent-dispatch
+          - agent-logger
+          - agent-mcp
+          - agent-ssh
+          - agent-vault
+          - agent-worktrees
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - name: Ensure full history is actually present
+        # actions/checkout's fetch-depth: 0 is unreliable when combined with
+        # an explicit detached-commit-sha ref (as this job needs, to pin to
+        # the exact commit CI already validated rather than whatever dev's
+        # tip has moved to since) -- confirmed live: agent-bridge's
+        # test_session_host_fixture_matches_generation_one (a `git show
+        # <historical-sha>:path` test) still failed with the same shallow-
+        # clone error even with fetch-depth: 0 set (actions/checkout#1515:
+        # an explicit SHA ref can silently produce a single-commit shallow
+        # clone regardless of fetch-depth). The prior fix here
+        # (`git fetch --prune --unshallow || true`) was itself broken: run
+        # against an already-complete clone, `--unshallow` errors out
+        # ("does not make sense on a complete repository") and the bare
+        # `|| true` silently swallowed that, so the step never actually did
+        # anything. Only unshallow when the clone genuinely is shallow, and
+        # always also register every remote branch explicitly -- an SHA-ref
+        # checkout may leave `origin/*` remote-tracking refs entirely
+        # unpopulated, which an unshallow alone would not fix either.
+        run: |
+          if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+            git fetch --prune --unshallow
+          fi
+          git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Full suite - ${{ matrix.plugin }}
+        run: python tools/run-plugin-tests.py ${{ matrix.plugin }}
+
+  worktree-manager:
+    name: worktree-manager (out-of-plugin, full)
+    needs: gate
+    if: needs.gate.outputs.is_dev == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Test worktree-manager
+        working-directory: worktree-manager
+        run: uv run --extra dev pytest -q
+
+  guards-full-sweep:
+    name: guards (full-tree, non-PR-scoped)
+    needs: gate
+    if: needs.gate.outputs.is_dev == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip pytest pyyaml ruff
+      - name: Module size (full sweep, unconditional)
+        run: python tools/check-module-size.py
+      - name: Version consistency
+        run: python tools/check-version-consistency.py
+      - name: Vendored library synchronization
+        run: python tools/check-vendored-libs-sync.py
+      - name: Docs consistency
+        run: python tools/check-docs-consistency.py
