@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -147,6 +148,77 @@ class CommandResult:
             raise subprocess.CalledProcessError(
                 self.exit_code, "ssh", self.stdout, self.stderr
             )
+
+
+# The dev-tunnel service behind CodeSpace SSH resets a share of connections
+# mid-flight ("An existing connection was forcibly closed", "error getting
+# tunnel", an RPC "Unavailable", a bare exit 255). These signatures classify
+# such a transient transport failure so idempotent callers can retry instead
+# of failing an operation that would succeed on a second try. ssh_manager owns
+# CommandResult, so this is the one shared definition for every plugin.
+_TRANSIENT_SSH_EXIT = 255
+TRANSIENT_SSH_STDERR = re.compile(
+    r"forcibly closed|connection reset|broken pipe|closed network connection|"
+    r"connection closed|wsarecv|kex_exchange_identification|error getting tunnel|"
+    r"code = Unavailable|server preface|Connection timed out|"
+    r"Timeout, server .* not responding",
+    re.IGNORECASE,
+)
+
+
+def is_transient_ssh_failure(result: CommandResult) -> bool:
+    """True when ``result`` is a transient SSH/tunnel failure, not a genuine
+    nonzero exit of the remote command."""
+    if getattr(result, "timed_out", False):
+        return True
+    code = getattr(result, "exit_code", None)
+    if code == _TRANSIENT_SSH_EXIT:
+        return True
+    return bool(
+        code not in (0, None)
+        and TRANSIENT_SSH_STDERR.search(getattr(result, "stderr", "") or "")
+    )
+
+
+async def exec_with_retry(
+    manager: "ConnectionManager",
+    host: str,
+    command: str,
+    *,
+    timeout: float | None = 60.0,
+    input_bytes: bytes | None = None,
+    attempts: int = 3,
+    reconnect=None,
+) -> CommandResult:
+    """``exec_command`` with retry and backoff on transient SSH/tunnel failures.
+
+    Only for IDEMPOTENT commands -- a retry may re-run the command. A genuine
+    nonzero exit of the remote command is returned at once. Between attempts
+    it best-effort awaits ``reconnect()`` to heal a dropped ControlMaster (a
+    no-op for direct SSH, where each exec is a fresh connection).
+    """
+    kwargs: dict = {"timeout": timeout}
+    if input_bytes is not None:
+        kwargs["input_bytes"] = input_bytes
+    result = await manager.exec_command(host, command, **kwargs)
+    delay = 2.0
+    for attempt in range(1, attempts):
+        if not is_transient_ssh_failure(result):
+            return result
+        log.warning(
+            "Transient SSH failure on %s (attempt %d/%d, exit %s); retrying in %.0fs: %s",
+            host, attempt, attempts, getattr(result, "exit_code", None), delay,
+            (getattr(result, "stderr", "") or "").strip()[:200],
+        )
+        if reconnect is not None:
+            try:
+                await reconnect()
+            except Exception as exc:  # noqa: BLE001 -- best-effort heal
+                log.debug("Reconnect before retry on %s failed: %s", host, exc)
+        await asyncio.sleep(delay)
+        delay = min(delay * 2, 8.0)
+        result = await manager.exec_command(host, command, **kwargs)
+    return result
 
 
 @dataclass
@@ -294,7 +366,7 @@ class ConnectionManager:
         )
 
         if self._platform.supports_control_master:
-            proc = await self._start_control_master(
+            proc = await self._connect_with_retry(
                 config, socket, port_forwards, env=env,
             )
         else:
@@ -324,6 +396,33 @@ class ConnectionManager:
             socket,
         )
         return info
+
+    async def _connect_with_retry(
+        self,
+        config: SSHConfig,
+        socket: Path,
+        port_forwards: list[str],
+        *,
+        env: dict[str, str] | None = None,
+        attempts: int = 3,
+    ) -> asyncio.subprocess.Process:
+        """Start the ControlMaster, retrying a transient tunnel reset (2 s, 4 s)."""
+        delay = 2.0
+        for attempt in range(1, attempts + 1):
+            try:
+                return await self._start_control_master(
+                    config, socket, port_forwards, env=env,
+                )
+            except ConnectionError as exc:
+                if attempt >= attempts:
+                    raise
+                log.warning(
+                    "SSH connect to %s failed (attempt %d/%d); retrying in %.0fs: %s",
+                    config.ssh_target, attempt, attempts, delay, exc,
+                )
+                await asyncio.sleep(delay)
+                delay *= 2
+        raise ConnectionError(f"ControlMaster failed to establish for {config.ssh_target}")
 
     async def _start_control_master(
         self,
@@ -401,6 +500,10 @@ class ConnectionManager:
         args.extend([
             "-o", "ConnectTimeout=15",
             "-o", "ServerAliveInterval=30",
+            # Ride out a brief tunnel stall (30 s x 6 = 180 s, up from
+            # OpenSSH's default of 3) instead of dropping a live session.
+            "-o", "ServerAliveCountMax=6",
+            "-o", "TCPKeepAlive=yes",
             "-o", "BatchMode=yes",
             "-T",  # no PTY
         ])

@@ -7029,61 +7029,7 @@ def build_parser() -> argparse.ArgumentParser:
     pane_lifecycle.register_cli(sub)
     handoff_cli.add_parsers(sub)
 
-    # copilot (the human/TTY-facing counterpart of embody -- deliver a TTY
-    # Copilot session in THIS terminal, the canonical "___ copilot" verb also
-    # implemented by agent-codespaces/agent-containers for a remote venue)
-    p = sub.add_parser(
-        "copilot",
-        help="Deliver a TTY Copilot session to the user in this terminal "
-        "(create-or-resume like embody, then attach this terminal to it; "
-        "refuses without a controlling terminal)",
-    )
-    g = p.add_mutually_exclusive_group()
-    g.add_argument(
-        "--worktree-id", dest="worktree_id", default=None,
-        help="Deliver a Copilot session for this existing worktree",
-    )
-    g.add_argument(
-        "--new", action="store_true", help="Create a fresh worktree first, then deliver Copilot in it"
-    )
-    g.add_argument(
-        "--codename", default=None,
-        help="Same codename resolution as `embody --codename` (local first, "
-        "then a cross-machine SSH scan; fails closed on a different machine).",
-    )
-    g.add_argument(
-        "--anchor", action="store_true",
-        help="Deliver a Copilot session directly in the active project's "
-        "anchor checkout instead of any worktree -- same as "
-        "`embody --anchor`, see its help for the full rationale.",
-    )
-    p.add_argument(
-        "--seed", default=None,
-        help="Seed prompt injected as the session's first interactive turn once Copilot is ready",
-    )
-    p.add_argument(
-        "--seed-ready-timeout", dest="seed_ready_timeout", type=float, default=180.0,
-        metavar="SECONDS",
-        help="How long to wait for Copilot's input prompt before typing --seed (default 180)",
-    )
-    p.add_argument(
-        "--driver", default=None,
-        help="Label of the agent steering this session; stamps the "
-        "'driven by <agent>' banner (AGENT_BRIDGE_DRIVEN_BY)",
-    )
-    p.add_argument(
-        "--recovery", action="store_true", help="Use the repo's recovery launch command"
-    )
-    p.add_argument(
-        "--ensure-mux", dest="ensure_mux", action="store_true",
-        help="Best-effort self-heal a missing tmux/psmux before creating the "
-        "session (same explicit opt-in as `embody --ensure-mux`).",
-    )
-    p.add_argument(
-        "--mux", default=None,
-        help="Override the mux binary used to attach (default: auto-detect "
-        "tmux/psmux, same resolution as the rest of agent-worktrees)",
-    )
+    handoff_cli.add_copilot_parser(sub)
 
     list_cli.add_parsers(sub)
     claims_cli.add_parsers(sub)

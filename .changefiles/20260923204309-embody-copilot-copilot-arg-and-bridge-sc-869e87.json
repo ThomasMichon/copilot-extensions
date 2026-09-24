@@ -1,0 +1,9 @@
+{
+  "comment": "embody/copilot --copilot-arg and --bridge-scope-id; anchor guards honor projects.yaml base_repo",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

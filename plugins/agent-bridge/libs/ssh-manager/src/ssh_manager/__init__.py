@@ -43,15 +43,19 @@ from .forward import LocalForward, build_forward_ssh_args, build_remote_exec_arg
 from .health import HealthStatus, check_health, ensure_healthy
 from .locks import LockHolder, TargetBusyError, TargetLock, locks_dir, pid_alive
 from .manager import (
+    TRANSIENT_SSH_STDERR,
     CommandResult,
     ConnectionInfo,
     ConnectionManager,
+    exec_with_retry,
     get_default_manager,
+    is_transient_ssh_failure,
 )
 from .platform import MultiplexMode, PlatformInfo, detect_platform
 from .relay_channel import SupervisedRelayForward
 
 __all__ = [
+    "TRANSIENT_SSH_STDERR",
     "CommandResult",
     "CarrierBackpressure",
     "CarrierError",
@@ -86,8 +90,10 @@ __all__ = [
     "detect_platform",
     "ensure_healthy",
     "encode_envelope",
+    "exec_with_retry",
     "get_default_manager",
     "hello_envelope",
+    "is_transient_ssh_failure",
     "locks_dir",
     "pick_free_local_port",
     "pid_alive",

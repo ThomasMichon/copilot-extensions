@@ -202,6 +202,19 @@ def _worktree_class_anchor(cwd: str | Path):
         return None
 
 
+def _adopted_as_base_repo(name: str) -> bool:
+    """True when ``projects.yaml`` adopts *name* in base-repo (no-worktree) mode,
+    its authoritative home. Such an anchor is edited in place by design, even
+    when ``repos.yaml`` lists the repo ``class: worktree``. Never raises."""
+    try:
+        from . import installer
+
+        proj = (installer.read_projects_registry().get("projects") or {}).get(name)
+        return isinstance(proj, dict) and proj.get("base_repo") is True
+    except Exception:
+        return False
+
+
 def _pre_commit() -> int:
     cwd = os.getcwd()
     if not in_worktree(cwd):
@@ -218,6 +231,8 @@ def _pre_commit() -> int:
         entry = _worktree_class_anchor(cwd)
         if entry is None:
             return 0  # not a worktree-class anchor -> allow (base-repo mode)
+        if _adopted_as_base_repo(entry.name):
+            return 0  # base-repo adoption: the anchor is the working checkout
         from . import allow_edits
         if allow_edits.is_active(entry.name):
             return 0  # live break-glass grant

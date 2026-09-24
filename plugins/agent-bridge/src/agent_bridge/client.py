@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Iterator
 
 import yaml
 
+from .client_cli_mode import CliModeClientMixin
 from .client_worktree_restart import WorktreeRestartMixin
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -142,7 +143,7 @@ class SseStream(Iterator[dict[str, Any]]):
             response.close()
 
 
-class BridgeClient(WorktreeRestartMixin):
+class BridgeClient(CliModeClientMixin, WorktreeRestartMixin):
     """Sync HTTP client for the agent-bridge REST API."""
 
     def __init__(
@@ -753,45 +754,10 @@ class BridgeClient(WorktreeRestartMixin):
                 return {}
             raise
 
-    def create_cli_mode_reservation(
-        self, worktree_id: str, *, ttl_seconds: float = 300.0,
-    ) -> dict[str, Any]:
-        """POST /api/v1/live-sessions/cli-mode-reservations/{worktree_id}.
-
-        Explicitly, per-request allocates the worktree's next CLI-mode Session
-        Host (agent-bridge-cli-mode-sessions Phase 2, §opt-in-not-ambient-default).
-        Raises ``BridgeClientError`` (status 409) if a not-yet-expired
-        reservation already holds this worktree (§one-host-per-cwd-lane).
-        """
-        return self._request(
-            "POST",
-            f"/api/v1/live-sessions/cli-mode-reservations/{worktree_id}",
-            {"worktree_id": worktree_id, "ttl_seconds": ttl_seconds},
-        ) or {}
-
-    def get_cli_mode_reservation(self, worktree_id: str) -> dict[str, Any]:
-        """GET /api/v1/live-sessions/cli-mode-reservations/{worktree_id}; {} if none."""
-        try:
-            return self._request(
-                "GET",
-                f"/api/v1/live-sessions/cli-mode-reservations/{worktree_id}",
-            ) or {}
-        except BridgeClientError as exc:
-            if exc.status == 404:
-                return {}
-            raise
-
-    def release_cli_mode_reservation(self, worktree_id: str) -> int:
-        """DELETE /api/v1/live-sessions/cli-mode-reservations/{worktree_id}."""
-        resp = self._request(
-            "DELETE",
-            f"/api/v1/live-sessions/cli-mode-reservations/{worktree_id}",
-        )
-        return (resp or {}).get("removed", 0)
-
     def send_live_message(
         self, session_id: str, *, sender: str, body: str,
         reply_to: str | None = None, kind: str = "prompt",
+        delivery: str = "queue",
         wait: bool = False, wait_timeout: float | None = None,
         idempotency_key: str | None = None,
         expected_session_id: str | None = None,
@@ -810,6 +776,8 @@ class BridgeClient(WorktreeRestartMixin):
             payload["reply_to"] = reply_to
         if kind and kind != "prompt":
             payload["kind"] = kind
+        if delivery and delivery != "queue":
+            payload["delivery"] = delivery
         if idempotency_key:
             payload["idempotency_key"] = idempotency_key
         if expected_session_id:
@@ -1603,6 +1571,7 @@ class BridgeClient(WorktreeRestartMixin):
         sender: str,
         message: str,
         kind: str = "prompt",
+        delivery: str = "queue",
         expected_session_id: str | None = None,
         idempotency_key: str | None = None,
         timeout: float = 20.0,
@@ -1621,6 +1590,7 @@ class BridgeClient(WorktreeRestartMixin):
                 "sender": sender,
                 "message": message,
                 "kind": kind,
+                "delivery": delivery,
                 "expected_session_id": expected_session_id,
                 "idempotency_key": idempotency_key,
                 "timeout": timeout,

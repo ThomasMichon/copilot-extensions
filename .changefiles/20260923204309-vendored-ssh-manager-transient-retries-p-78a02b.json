@@ -1,0 +1,9 @@
+{
+  "comment": "Vendored ssh-manager (transient retries, proxy drain) and venue-copilot (venue reservations, expandable staged plugin dirs) updates",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

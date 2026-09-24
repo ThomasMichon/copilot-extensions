@@ -1,0 +1,9 @@
+{
+  "comment": "Detached, agent-facing CLI-mode venue sessions (copilot --detach/--stop, --ref-file, --reverse-forward), Connection Owner session tenants and forwards, scoped relay tokens, dev-tunnel retries, staged plugin dirs that load",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}
