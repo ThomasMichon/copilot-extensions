@@ -2135,17 +2135,17 @@ def mux_seed_pane(
         try:
             r = subprocess.run(
                 [mux_bin, "capture-pane", "-p", "-t", pane_id],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True, text=True, timeout=5, encoding="utf-8", errors="replace",
             )
-            return r.stdout if r.returncode == 0 else ""
+            return (r.stdout or "") if r.returncode == 0 else ""
         except (OSError, subprocess.TimeoutExpired):
             return ""
 
     def _is_copilot_ready(cap: str) -> bool:
         low = cap.lower()
-        # Copilot-specific cues only: the input caret, or the interrupt footer.
-        # A bare rule line (``─────``) is NOT trusted -- banners/spinners draw it.
-        return ("❯" in cap) or ("esc" in low and "interrupt" in low)
+        # Caret, interrupt footer, or 1.0.89's boxed input; never a selection dialog's caret.
+        return "enter to select" not in low and (
+            "❯" in cap or ("esc" in low and "interrupt" in low) or ("╻▄" in cap and "╹▀" in cap))
 
     # Readiness must be STABLE (two consecutive sightings) so a single transient
     # frame (a startup banner, a spinner) is not mistaken for the input prompt.

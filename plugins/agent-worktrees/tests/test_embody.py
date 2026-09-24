@@ -635,3 +635,124 @@ class TestCmdEmbodyAnchor:
         assert rc == 4
         assert "boom" in capfd.readouterr().out
 
+
+
+class TestEmbodyLaunchPassthrough:
+    """`--copilot-arg` / `--bridge-scope-id` (venue CLI-mode detached launch)."""
+
+    def _spawn_capture(self, monkeypatch):
+        spawned = {}
+
+        def _spawn(wt, wd, cmd, env, **k):
+            spawned.update(wt=wt, env=dict(env or {}))
+            return {"ok": True, "session": f"wt-{wt}", "new_pane": "%9", "error": None}
+
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)
+        monkeypatch.setattr(sessions, "mux_new_session", _spawn)
+        return spawned
+
+    def test_parser_accepts_repeatable_copilot_args_and_scope(self):
+        parser = m.build_parser()
+        for verb in ("embody", "copilot"):
+            args = parser.parse_args([
+                verb, "--anchor",
+                "--copilot-arg=--plugin-dir=/stage/example-agent",
+                "--copilot-arg=--no-ask-user",
+                "--bridge-scope-id", "anchor-example-web@cs-1",
+            ])
+            assert args.copilot_args == [
+                "--plugin-dir=/stage/example-agent", "--no-ask-user",
+            ]
+            assert args.bridge_scope_id == "anchor-example-web@cs-1"
+
+    def test_parser_defaults_are_inert(self):
+        args = m.build_parser().parse_args(["embody", "--anchor"])
+        assert args.copilot_args == []
+        assert args.bridge_scope_id is None
+
+    def test_anchor_exports_bridge_scope_but_keeps_mux_name(self, monkeypatch, capfd):
+        _stub_anchor_config(monkeypatch)
+        spawned = self._spawn_capture(monkeypatch)
+
+        rc = m.cmd_embody(_ns(anchor=True, bridge_scope_id="anchor-example-web@cs-1"))
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["session"] == "wt-anchor-odsp-web"
+        assert spawned["wt"] == "anchor-odsp-web"
+        assert spawned["env"]["AGENT_BRIDGE_SCOPE_ID"] == "anchor-example-web@cs-1"
+
+    def test_no_scope_means_no_env_override(self, monkeypatch, capfd):
+        _stub_anchor_config(monkeypatch)
+        spawned = self._spawn_capture(monkeypatch)
+
+        assert m.cmd_embody(_ns(anchor=True)) == 0
+        assert "AGENT_BRIDGE_SCOPE_ID" not in spawned["env"]
+
+    def test_copilot_args_reach_the_launch_builder(self, monkeypatch, capfd):
+        _stub_anchor_config(monkeypatch)
+        self._spawn_capture(monkeypatch)
+        seen = {}
+
+        def _build(c, a, w, **k):
+            seen["copilot_args"] = list(getattr(a, "copilot_args", []))
+            return ["copilot", *seen["copilot_args"]]
+
+        monkeypatch.setattr(m, "_build_launch_cmd", _build)
+
+        rc = m.cmd_embody(_ns(anchor=True, copilot_args=["--plugin-dir=/p"]))
+
+        assert rc == 0
+        assert seen["copilot_args"] == ["--plugin-dir=/p"]
+
+    @pytest.mark.parametrize(
+        "bad", ["--acp", "--stdio", "-p", "--prompt=do it", "-i", "--interactive=x"],
+    )
+    def test_mode_changing_copilot_args_are_refused(self, monkeypatch, capfd, bad):
+        _stub_anchor_config(monkeypatch)
+        monkeypatch.setattr(
+            sessions, "mux_new_session",
+            lambda *a, **k: pytest.fail("a refused passthrough must not spawn"),
+        )
+
+        rc = m.cmd_embody(_ns(anchor=True, copilot_args=[bad]))
+
+        assert rc == 2
+        assert "not allowed" in capfd.readouterr().out
+
+    def test_worktree_path_also_exports_bridge_scope(self, monkeypatch, capfd, tmp_path):
+        _stub_config(monkeypatch)
+        spawned = self._spawn_capture(monkeypatch)
+        wt_root = tmp_path / "trk"
+        wt_root.mkdir()
+        (wt_root / "wt1.yaml").write_text("x")
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: wt_root)
+        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: r)
+
+        class _Rec:
+            worktree_id = "wt1"
+            worktree_path = str(tmp_path)
+            branch = None
+            repo = None
+            kind = "session"
+            status = "active"
+
+        monkeypatch.setattr(m.tracking, "load_record", lambda p: _Rec())
+        monkeypatch.setattr(m, "_unsupported_hosted_launch", lambda r, v: None)
+        monkeypatch.setattr(
+            m, "_launch_profile_selection",
+            lambda *a, **k: m.profile_assignment.LaunchProfileSelection(profile=None),
+        )
+        monkeypatch.setattr(m, "_reflect_assignment", lambda r, s: None)
+        monkeypatch.setattr(
+            m, "_apply_assignment_env", lambda env, s: env,
+        )
+        monkeypatch.setattr(
+            m, "_repo_for_record",
+            lambda c, r: type("R", (), {"worktree_root": str(tmp_path)})(),
+        )
+
+        rc = m.cmd_embody(_ns(worktree_id="wt1", bridge_scope_id="scope-x"))
+
+        assert rc == 0, capfd.readouterr().out
+        assert spawned["env"]["AGENT_BRIDGE_SCOPE_ID"] == "scope-x"

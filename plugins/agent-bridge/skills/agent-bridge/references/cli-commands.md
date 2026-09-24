@@ -19,6 +19,7 @@ catalog; never resolve it through ambient `PATH`.
 - List Available Agents / Machines
 - Send a Prompt to an Agent (sync / async, sessions, timeouts)
 - Session management
+- Detached CLI-mode session on a CodeSpace; browser view (`ui`)
 - Config (adopt / show)
 - Service control
 
@@ -144,6 +145,67 @@ For a **singleton repo** (one anchor checkout, no worktree isolation),
 `create` is also a declared refusal: there is no second checkout to create.
 Use `resume <repo-or-agent>` to load/take over the anchor's current head, or
 `handoff <repo-or-agent>` to roll it forward deliberately.
+
+### Detached CLI-mode session on a CodeSpace (observable, steerable)
+
+`create <venue-target> --cli` delivers a real interactive Copilot CLI session
+on the venue into **this** terminal. An orchestrating agent that must not hand
+its terminal away adds `--detach`: the venue verb starts (or rejoins) the
+session in the background, seeds it with the prompt, waits until it is
+registered with this bridge, and prints a JSON handle. CodeSpace targets only.
+
+```bash
+<agent-bridge catalog argv[0]> create codespace:<name> --cli --detach \
+  --prompt-file ./task.md --driver orchestrator
+# -> {"ok": true, "session_id": "<sid>", "scope_id": "anchor-<repo>@<name>",
+#     "commands": {"status": ..., "observe": ..., "nudge": ..., "attach": ..., "stop": ...}}
+```
+
+The session is an ordinary **live session** from then on -- observe and steer it
+with bounded reads instead of streaming its transcript into your context:
+
+```bash
+<agent-bridge catalog argv[0]> --json live-sessions resolve --handle <sid>   # status, liveness, turn_state, latest_progress
+<agent-bridge catalog argv[0]> result <sid> --json --max-items 5 --max-text-chars 2000 [--position <p>]
+<agent-bridge catalog argv[0]> send <sid> "focus on the failing test first" --no-wait   # default: queue after current turn
+<agent-bridge catalog argv[0]> send <sid> "check the next test step" --steer --no-wait  # join the running turn at its next step
+<agent-bridge catalog argv[0]> send <sid> "stop and handle this now" --interrupt --no-wait  # abort current turn first
+```
+
+Live-session `send` defaults to `--delivery queue`, preserving the receiver's
+current turn and running after it ends. `--steer` uses SDK immediate delivery to
+join the running turn at its next step without cancelling it. `--interrupt`
+aborts the current turn first, then sends the message as the fresh next turn.
+
+The handle's `commands.attach` lets a human attach the real terminal (tmux),
+and `commands.stop` is the verified stop (it deregisters the session and
+releases its forwards); run them exactly as printed.
+
+An abruptly killed CLI cannot deregister itself; a launcher that has verified
+its session's process is gone removes the row with
+`live-sessions deregister --session-id <sid>` (exact id, idempotent) instead of
+leaving it to the stale-heartbeat reaper.
+
+The underlying verb is the agent-codespaces plugin's `copilot <name> --detach`
+(`--seed-file`, `--copilot-arg`, `--register-timeout`, `--dry-run`, and `--effort` for the
+CodeSpace claim); use it directly when you need those -- `create --cli
+--detach` forwards only the prompt and `--driver` (`create --effort` is the
+session's reasoning effort, not a coordination effort). Each CodeSpace registers
+under a venue-qualified identity (`<identity>@<codespace>`), so several
+CodeSpaces of one repo stay distinct.
+
+### Browser view (`ui`)
+
+```bash
+<agent-bridge catalog argv[0]> ui              # start the daemon if needed; open /ui already signed in
+<agent-bridge catalog argv[0]> ui --print-url  # print a one-time signed-in link instead
+```
+
+Sign-in uses a one-time login code (single use, 60 s) in the URL fragment,
+which the page trades for the bearer token; the token itself never enters a
+URL or browser history. The page lists agents, ACP sessions, and live sessions; **Watch** streams a live
+session's represented activity (messages, reasoning, tool calls, questions) and
+the composer messages it (or queues a follow-up turn for an ACP session).
 
 ### Choosing send vs create — check for an outstanding session first
 

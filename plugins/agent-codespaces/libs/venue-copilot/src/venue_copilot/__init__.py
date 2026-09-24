@@ -100,11 +100,16 @@ def reserve_cli_mode(
     worktree_id: str,
     *,
     ttl_seconds: float = DEFAULT_TTL_SECONDS,
+    venue: dict[str, Any] | None = None,
     bridge_bin: str = "agent-bridge",
     run: Callable[..., Any] = subprocess.run,
 ) -> dict[str, Any]:
     """Reserve ``worktree_id``'s next CLI-mode Session Host slot on the host
     daemon (``agent-bridge --json live-sessions cli-mode reserve``).
+
+    ``venue`` (``{"kind", "target", "mux_session_name"}``) is recorded on the
+    reservation and inherited by the claiming live session, so the host bridge
+    knows where a remote session lives without trusting the registering client.
 
     Raises :class:`VenueCopilotError` (never a provider-specific exception) on
     any failure -- including an already-active reservation (HTTP 409) -- so a
@@ -115,6 +120,8 @@ def reserve_cli_mode(
         bridge_bin, "--json", "live-sessions", "cli-mode", "reserve",
         "--worktree-id", worktree_id, "--ttl-seconds", str(ttl_seconds),
     ]
+    if venue:
+        argv += ["--venue-json", json.dumps(venue, separators=(",", ":"))]
     reservation = _run_bridge(argv, run=run)
     if reservation.get("error"):
         raise VenueCopilotError(
@@ -124,13 +131,35 @@ def reserve_cli_mode(
     return reservation
 
 
-def release_cli_mode(
+def get_cli_mode_reservation(
     worktree_id: str,
     *,
     bridge_bin: str = "agent-bridge",
     run: Callable[..., Any] = subprocess.run,
+) -> dict[str, Any]:
+    """The worktree's current CLI-mode reservation (``{}`` when none).
+
+    ``claimed_by_session_id`` names the exact live session that registered
+    against it -- how a detached launcher learns its session's identity.
+    """
+    argv = [
+        bridge_bin, "--json", "live-sessions", "cli-mode", "status",
+        "--worktree-id", worktree_id,
+    ]
+    return _run_bridge(argv, run=run)
+
+
+def release_cli_mode(
+    worktree_id: str,
+    *,
+    reservation_id: str | None = None,
+    bridge_bin: str = "agent-bridge",
+    run: Callable[..., Any] = subprocess.run,
 ) -> int:
     """Best-effort release of ``worktree_id``'s CLI-mode reservation.
+
+    With ``reservation_id``, only that exact reservation is removed
+    (compare-and-delete), never a newer one created since.
 
     Never raises: called from a ``finally`` after the interactive session
     already ran, so a release failure must only be swallowed (the reservation
@@ -141,10 +170,50 @@ def release_cli_mode(
             bridge_bin, "--json", "live-sessions", "cli-mode", "release",
             "--worktree-id", worktree_id,
         ]
+        if reservation_id:
+            argv += ["--reservation-id", reservation_id]
         result = _run_bridge(argv, run=run)
         return int(result.get("removed", 0) or 0)
     except VenueCopilotError:
         return 0
+
+
+def live_session_for(
+    handle: str,
+    *,
+    bridge_bin: str = "agent-bridge",
+    run: Callable[..., Any] = subprocess.run,
+) -> dict[str, Any]:
+    """The live session a session id or worktree handle resolves to (``{}`` when none). Never raises."""
+    try:
+        return _run_bridge(
+            [bridge_bin, "--json", "live-sessions", "resolve", "--handle", handle], run=run,
+        )
+    except (VenueCopilotError, OSError):
+        return {}
+
+
+def deregister_live_session(
+    session_id: str,
+    *,
+    bridge_bin: str = "agent-bridge",
+    run: Callable[..., Any] = subprocess.run,
+) -> bool:
+    """Best-effort removal of one exact live session whose process is gone.
+
+    For a launcher that has just verified its session's process stopped: an
+    abruptly killed CLI never deregisters itself, and the bridge would
+    otherwise keep advertising it until the stale-heartbeat reaper runs.
+    Never raises.
+    """
+    try:
+        _run_bridge(
+            [bridge_bin, "--json", "live-sessions", "deregister", "--session-id", session_id],
+            run=run,
+        )
+        return True
+    except (VenueCopilotError, OSError):
+        return False
 
 
 def build_copilot_remote_command(
@@ -155,6 +224,10 @@ def build_copilot_remote_command(
     seed: str | None = None,
     ensure_mux: bool = True,
     embody_bin: str = "agent-worktrees",
+    detach: bool = False,
+    bridge_scope_id: str | None = None,
+    copilot_args: list[str] | None = None,
+    login_shell: bool = True,
 ) -> str:
     """The remote shell command a venue runs to deliver a TTY Copilot session.
 
@@ -163,6 +236,14 @@ def build_copilot_remote_command(
     rather than reimplementing attach logic a third time. The venue must
     already carry a *full* ``agent-worktrees`` install (not just its lean
     self-provisioned tools) for this to resolve.
+
+    ``detach=True`` runs ``agent-worktrees embody`` instead -- the same
+    create-or-resume of the muxed session, but it returns a JSON result
+    instead of attaching, and never re-seeds a session that already exists.
+    ``bridge_scope_id`` / ``copilot_args`` forward ``--bridge-scope-id`` /
+    ``--copilot-arg`` (the registration identity and extra Copilot flags such
+    as ``--plugin-dir=...``). ``login_shell=False`` returns the bare command
+    for a caller that already wraps it in its own login shell.
 
     ``anchor=True`` forwards ``--anchor`` instead of ``--worktree-id
     <worktree_id>`` -- a CodeSpace/container venue is conventionally
@@ -185,7 +266,7 @@ def build_copilot_remote_command(
     and layered underneath, the already-tracked "venue lacks a full install"
     gap.
     """
-    argv = [embody_bin, "copilot"]
+    argv = [embody_bin, "embody" if detach else "copilot"]
     argv += ["--anchor"] if anchor else ["--worktree-id", worktree_id]
     if driver:
         argv += ["--driver", driver]
@@ -193,8 +274,32 @@ def build_copilot_remote_command(
         argv += ["--seed", seed]
     if ensure_mux:
         argv.append("--ensure-mux")
-    inner = " ".join(shlex.quote(part) for part in argv)
-    return f"bash -lc {shlex.quote(inner)}"
+    if bridge_scope_id:
+        argv += ["--bridge-scope-id", bridge_scope_id]
+    home_expandable: set[int] = set()
+    for extra in copilot_args or []:
+        if "$HOME" in extra:
+            home_expandable.add(len(argv))
+        argv.append(f"--copilot-arg={extra}")
+    if detach:
+        argv.append("--json")
+    inner = " ".join(
+        _quote_expanding_home(part) if i in home_expandable else shlex.quote(part)
+        for i, part in enumerate(argv)
+    )
+    return f"bash -lc {shlex.quote(inner)}" if login_shell else inner
+
+
+def _quote_expanding_home(part: str) -> str:
+    """Shell-quote ``part`` but leave each literal ``$HOME`` expandable.
+
+    Staged ``--plugin-dir`` paths are ``$HOME/...`` (the remote home is not
+    known host-side). ``embody`` hands ``--copilot-arg`` values to the mux
+    without a shell and Copilot never expands ``$HOME`` itself, so a fully
+    single-quoted arg reaches Copilot as a literal (cwd-relative) path and the
+    plugin silently fails to load. Only the remote shell can expand it.
+    """
+    return '"$HOME"'.join(shlex.quote(p) for p in part.split("$HOME"))
 
 
 def run_venue_copilot(

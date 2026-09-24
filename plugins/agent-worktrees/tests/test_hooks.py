@@ -289,6 +289,22 @@ class TestAnchorCommitGuard:
         monkeypatch.setattr(allow_edits, "is_active", lambda name: name == "myrepo")
         assert hooks._pre_commit() == 0
 
+    def test_base_repo_adoption_allows_anchor_commit(self, anchor_and_worktree, monkeypatch):
+        """A worktree-class repo adopted in base-repo mode is edited in place
+        (e.g. a CodeSpace's single-task checkout); its anchor is not guarded."""
+        anchor, _ = anchor_and_worktree
+        monkeypatch.chdir(anchor)
+        monkeypatch.delenv("ANCHOR_WRITE_GUARD", raising=False)
+        monkeypatch.setattr(hooks, "_worktree_class_anchor", lambda cwd: self._fake_entry())
+        from agent_worktrees import allow_edits, installer
+        monkeypatch.setattr(allow_edits, "is_active", lambda name: False)
+        monkeypatch.setattr(installer, "read_projects_registry",
+                            lambda: {"projects": {"myrepo": {"base_repo": True}}})
+        assert hooks._pre_commit() == 0
+        monkeypatch.setattr(installer, "read_projects_registry",
+                            lambda: {"projects": {"myrepo": {"base_repo": False}}})
+        assert hooks._pre_commit() == 1
+
     def test_non_worktree_class_anchor_allowed(self, anchor_and_worktree, monkeypatch):
         anchor, _ = anchor_and_worktree
         monkeypatch.chdir(anchor)

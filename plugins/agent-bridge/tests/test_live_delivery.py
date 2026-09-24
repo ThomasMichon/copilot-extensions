@@ -62,6 +62,20 @@ class TestLiveMessageQueue:
         assert pending[0]["kind"] == "prompt"
         assert pending[1]["kind"] == "status-check"
 
+    def test_enqueue_carries_delivery_default_queue(self, tmp_db: Database) -> None:
+        now = time.time()
+        tmp_db.enqueue_live_message("s", "alice", "do it", now)  # default
+        tmp_db.enqueue_live_message("s", "bob", "now", now, delivery="interrupt")
+        pending = tmp_db.list_pending_live_messages("s")
+        assert pending[0]["delivery"] == "queue"
+        assert pending[1]["delivery"] == "interrupt"
+
+    def test_enqueue_rejects_unknown_delivery(self, tmp_db: Database) -> None:
+        with pytest.raises(ValueError, match="unsupported live-message delivery"):
+            tmp_db.enqueue_live_message(
+                "s", "alice", "do it", time.time(), delivery="fast"
+            )
+
     def test_ack_empty_ids_is_noop(self, tmp_db: Database) -> None:
         assert tmp_db.ack_live_messages("s", [], now=time.time()) == 0
 
@@ -146,6 +160,41 @@ def test_migration_v8_to_v9_adds_kind(tmp_path: Path) -> None:
         pending = db.list_pending_live_messages("s")
         assert pending[0]["kind"] == "prompt"       # legacy row default
         assert pending[1]["kind"] == "status-check"  # explicit kind persisted
+    finally:
+        db.close()
+
+
+def test_migration_v21_to_v22_adds_delivery(tmp_path: Path) -> None:
+    """A pre-v22 database bumps to v22 with live_messages.delivery."""
+    db_path = tmp_path / "old.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        "CREATE TABLE schema_version (version INTEGER NOT NULL);"
+        "INSERT INTO schema_version (version) VALUES (21);"
+        "CREATE TABLE live_messages ("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,"
+        " sender TEXT NOT NULL, body TEXT NOT NULL, reply_to TEXT,"
+        " kind TEXT NOT NULL DEFAULT 'prompt', idempotency_key TEXT,"
+        " created_at REAL NOT NULL, delivered_at REAL);"
+    )
+    conn.commit()
+    conn.close()
+
+    db = Database(db_path)
+    try:
+        ver = db.execute_read("SELECT version FROM schema_version")[0]["version"]
+        assert ver == SCHEMA_VERSION
+        db.execute_write(
+            "INSERT INTO live_messages (session_id, sender, body, created_at) "
+            "VALUES ('s', 'old', 'legacy', ?)", (time.time(),)
+        )
+        mid = db.enqueue_live_message(
+            "s", "alice", "now", time.time(), delivery="interrupt"
+        )
+        assert mid > 0
+        pending = db.list_pending_live_messages("s")
+        assert pending[0]["delivery"] == "queue"
+        assert pending[1]["delivery"] == "interrupt"
     finally:
         db.close()
 
@@ -256,6 +305,33 @@ def test_message_post_rejects_idempotency_key_reuse_for_different_request(
     assert "already bound" in conflict.json()["detail"]
 
 
+def test_message_post_idempotency_key_compares_delivery(
+    client: TestClient,
+) -> None:
+    _register(client)
+    first = client.post(
+        "/api/v1/live-sessions/cli-1/messages",
+        json={
+            "sender": "worker",
+            "body": "resume",
+            "delivery": "queue",
+            "idempotency_key": "wake:task-1:2:1",
+        },
+    )
+    conflict = client.post(
+        "/api/v1/live-sessions/cli-1/messages",
+        json={
+            "sender": "worker",
+            "body": "resume",
+            "delivery": "steer",
+            "idempotency_key": "wake:task-1:2:1",
+        },
+    )
+    assert first.status_code == 200
+    assert conflict.status_code == 409
+    assert "already bound" in conflict.json()["detail"]
+
+
 def test_poll_and_ack_require_registration(client: TestClient) -> None:
     assert client.get("/api/v1/live-sessions/ghost/messages").status_code == 404
     assert client.post(
@@ -284,6 +360,35 @@ def test_message_carries_kind_over_route(client: TestClient) -> None:
     )
     listed = client.get("/api/v1/live-sessions/cli-1/messages").json()["messages"]
     assert listed[0]["kind"] == "status-check"
+
+
+def test_message_carries_delivery_over_route(client: TestClient) -> None:
+    _register(client)
+    client.post(
+        "/api/v1/live-sessions/cli-1/messages",
+        json={"sender": "peer", "body": "now", "delivery": "interrupt"},
+    )
+    listed = client.get("/api/v1/live-sessions/cli-1/messages").json()["messages"]
+    assert listed[0]["delivery"] == "interrupt"
+
+
+def test_message_delivery_defaults_to_queue_over_route(client: TestClient) -> None:
+    _register(client)
+    client.post(
+        "/api/v1/live-sessions/cli-1/messages",
+        json={"sender": "peer", "body": "do the thing"},
+    )
+    listed = client.get("/api/v1/live-sessions/cli-1/messages").json()["messages"]
+    assert listed[0]["delivery"] == "queue"
+
+
+def test_message_rejects_unknown_delivery_over_route(client: TestClient) -> None:
+    _register(client)
+    r = client.post(
+        "/api/v1/live-sessions/cli-1/messages",
+        json={"sender": "peer", "body": "do it", "delivery": "fast"},
+    )
+    assert r.status_code == 422
 
 
 def test_message_kind_defaults_to_prompt_over_route(client: TestClient) -> None:

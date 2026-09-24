@@ -46,6 +46,24 @@ class TestRelayToken:
         relay_token.revoke("cs-1")
         assert relay_token.validate(tok) is False
 
+    def test_connect_path_token_authorizes_the_default_azure_scope(self, isolated_tokens):
+        """The ssh/copilot connect paths mint through ``scoped_relay_token``: an
+        unscoped mint recorded ``allowed_resources: []`` and the relay denied
+        every get-azure-token, so a CodeSpace's cloud-cache login fell through
+        to an interactive browser flow that hangs unattended."""
+        from agent_codespaces import config as cfg
+        from agent_codespaces.relay_launch import scoped_relay_token
+
+        stale = relay_token.token_for("cs-1")  # the old unscoped mint
+        storage = {"scope": "https://storage.azure.com/.default"}
+        assert relay_token.authorize_azure(stale, "get-azure-token", storage) is False
+        tok = scoped_relay_token("cs-1", cfg.CodespacesConfig())
+        assert tok == stale  # same secret, re-scoped in place
+        assert relay_token.authorize_azure(tok, "get-azure-token", storage) is True
+        assert relay_token.authorize_azure(
+            tok, "get-azure-token", {"scope": "https://graph.microsoft.com/.default"},
+        ) is False
+
 
 class TestRegisterRelay:
     def test_enables_ado_rest_azure_gated_by_codespace_token(self, isolated_tokens):
