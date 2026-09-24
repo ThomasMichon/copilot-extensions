@@ -8,6 +8,7 @@ import types
 
 import pytest
 import venue_copilot
+from venue_copilot import detached as venue_detached
 from ssh_manager import forward_keeper as shared_forward_keeper
 
 from agent_containers import copilot_detach as detach
@@ -86,20 +87,20 @@ def seams(monkeypatch):
     monkeypatch.setattr(resolver_mod, "resolve_live_exec_target", lambda name, config=None: target)
     monkeypatch.setattr(ssh_manager, "TargetLock", _FakeLock)
     _FakeLock.instances.clear()
-    monkeypatch.setattr(venue_copilot, "resolve_daemon_port", lambda: 41234)
-    monkeypatch.setattr(venue_copilot, "resolve_local_auth_token", lambda: "tok")
+    monkeypatch.setattr(venue_detached, "resolve_daemon_port", lambda: 41234)
+    monkeypatch.setattr(venue_detached, "resolve_local_auth_token", lambda: "tok")
     monkeypatch.setattr(
-        venue_copilot,
-        "reserve_cli_mode",
-        lambda scope, ttl_seconds, venue: calls.reserve.append((scope, venue)) or {"reservation_id": "r1"},
+        venue_detached,
+        "reserve_with_retry",
+        lambda scope, venue, **kw: calls.reserve.append((scope, venue)) or {"reservation_id": "r1"},
     )
     monkeypatch.setattr(
-        venue_copilot,
+        venue_detached,
         "await_claim",
         lambda scope, rid, timeout: "sid-42",
     )
     monkeypatch.setattr(
-        venue_copilot,
+        venue_detached,
         "release_cli_mode",
         lambda scope, reservation_id=None: calls.release.append((scope, reservation_id)) or 1,
     )
@@ -108,7 +109,7 @@ def seams(monkeypatch):
         "venue": {"target": "repo-1"},
     })
     monkeypatch.setattr(
-        venue_copilot,
+        venue_detached,
         "deregister_live_session",
         lambda sid: calls.deregister.append(sid) or True,
     )
@@ -212,7 +213,7 @@ def test_restricted_container_is_refused(monkeypatch, capsys):
 
 
 def test_missing_daemon_port_fails_before_keeper(seams, monkeypatch):
-    monkeypatch.setattr(venue_copilot, "resolve_daemon_port", lambda: None)
+    monkeypatch.setattr(venue_detached, "resolve_daemon_port", lambda: None)
     rc = detach.cmd_detach(_args(), require_live_relay_port=lambda: 1, relay_healthy=lambda p: True)
     assert rc == 1
     assert seams.keeper == []

@@ -20,22 +20,10 @@ from agent_procutil import (
 from ssh_manager import SSHProfileSource, SupervisedRelayForward, build_remote_exec_args
 from ssh_manager.forward_keeper import KeeperStore, run_supervised_loop, spawn_keeper
 from venue_copilot import (
-    VenueCopilotError,
-    await_claim,
-    bridge_probe_script,
-    build_copilot_remote_command,
-    last_json,
-    observe_commands,
     read_seed,
-    registration_credentials_script,
-    release_cli_mode,
-    reserve_with_retry,
     resolve_daemon_port,
-    resolve_local_auth_token,
-    seed_delivery,
-    trust_folder_command,
-    with_new_session,
 )
+from venue_copilot.detached import launch_detached, stop_detached
 
 _RESERVATION_TTL = 900.0
 _RESERVE_RETRY_WINDOW = 90.0
@@ -60,19 +48,21 @@ def plan_for(args: argparse.Namespace) -> dict[str, Any]:
         "scope_id": scope,
         "mux_session": mux,
         "venue": {"kind": "ssh", "target": args.target, "mux_session_name": mux},
-    }
-
-
-def _commands(plan: dict[str, Any], session_id: str) -> dict[str, str]:
-    target = plan["target"]
-    mux = plan["mux_session"]
-    return {
-        **observe_commands(session_id),
-        "attach": f"ssh -t {shlex.quote(target)} tmux attach -t {shlex.quote(mux)}",
-        "stop": (
-            f"agent-ssh copilot {shlex.quote(target)} --stop "
-            f"--workspace {shlex.quote(plan['workspace'])}"
+        "anchor": True,
+        "reservation_ttl": _RESERVATION_TTL,
+        "reserve_retry_window": _RESERVE_RETRY_WINDOW,
+        "registration_error": "could not provision registration credentials on the SSH target",
+        "bridge_probe_error": (
+            "the SSH target cannot reach the host bridge through the forward "
+            "(authenticated probe failed)"
         ),
+        "missing_agent_worktrees_error": "agent-worktrees is not installed on the SSH target",
+        "old_agent_worktrees_error": (
+            "the SSH target's agent-worktrees is too old for detached launch "
+            "(--bridge-scope-id/--copilot-arg); update agent-worktrees"
+        ),
+        "reservation_wait": "another launch on this SSH target holds the reservation",
+        "launch_detail": "`agent-worktrees embody` on the SSH target",
     }
 
 
@@ -80,6 +70,13 @@ def _fail(message: str, plan: dict[str, Any] | None = None, **extra: Any) -> int
     print(f"[FAIL] {message}", file=sys.stderr)
     print(json.dumps({"ok": False, "error": message, **(plan or {}), **extra}, indent=2))
     return 1
+
+
+def _emit(rc: int, payload: dict[str, Any]) -> int:
+    if not payload.get("ok"):
+        print(f"[FAIL] {payload.get('error')}", file=sys.stderr)
+    print(json.dumps(payload, indent=2))
+    return rc
 
 
 def _ssh_config(target: str) -> Any:
@@ -134,18 +131,6 @@ def _ensure_remote_tooling(ssh_config: Any) -> None:
         )
 
 
-def _bridge_path_ok(ssh_config: Any, port: int) -> bool:
-    for attempt in range(_PROBE_ATTEMPTS):
-        rc, _out, _err = _remote(ssh_config, _bash(bridge_probe_script(port)), timeout=30.0)
-        if rc == 0:
-            return True
-        if attempt + 1 < _PROBE_ATTEMPTS:
-            import time
-
-            time.sleep(5.0)
-    return False
-
-
 def _state_key(target: str) -> str:
     return target
 
@@ -191,37 +176,36 @@ def ensure_keeper(target: str, *, venue_port: int, mux: str) -> dict[str, Any]:
     return {"started": True, "state": state}
 
 
-def _launch_command(plan: dict[str, Any], args: argparse.Namespace, seed: str | None) -> str:
-    copilot_args = with_new_session(list(getattr(args, "copilot_args", None) or []))
-    typed_seed, seed_prefix = seed_delivery(seed, plan["scope_id"])
-    command = seed_prefix + build_copilot_remote_command(
-        plan["identity"],
-        anchor=True,
-        driver=args.driver,
-        seed=typed_seed,
-        ensure_mux=True,
-        detach=True,
-        bridge_scope_id=plan["scope_id"],
-        copilot_args=copilot_args,
-        login_shell=False,
-    )
-    workspace = plan["workspace"]
-    return _bash(
-        f"cd {shlex.quote(workspace)} && {trust_folder_command(workspace)} && {command}"
-    )
+class _SshAdapter:
+    probe_attempts = _PROBE_ATTEMPTS
 
+    def __init__(self, *, target: str, ssh_config: Any) -> None:
+        self.target = target
+        self.ssh_config = ssh_config
 
-def _kill_mux(ssh_config: Any, mux: str) -> tuple[int, str, str]:
-    mux_target = shlex.quote("=" + mux)
-    return _remote(
-        ssh_config,
-        _bash(
-            f"tmux kill-session -t {mux_target} 2>/dev/null; sleep 1; "
-            f"if tmux has-session -t {mux_target} 2>/dev/null; "
-            "then echo STILL_RUNNING; exit 3; fi; echo STOPPED"
-        ),
-        timeout=120.0,
-    )
+    def run(self, command: str, *, timeout: float) -> tuple[int, str, str]:
+        return _remote(self.ssh_config, _bash(command), timeout=timeout)
+
+    def launch(self, command: str, *, timeout: float) -> tuple[int, str, str]:
+        return self.run(command, timeout=timeout)
+
+    def ensure_keeper(self, *, venue_port: int, mux: str) -> dict[str, Any]:
+        return ensure_keeper(self.target, venue_port=venue_port, mux=mux)
+
+    def stop_keeper(self) -> bool:
+        return stop_keeper(self.target)
+
+    def attach_command(self, plan: dict[str, Any]) -> str:
+        return (
+            f"ssh -t {shlex.quote(self.target)} tmux attach -t "
+            f"{shlex.quote(plan['mux_session'])}"
+        )
+
+    def stop_command(self, plan: dict[str, Any]) -> str:
+        return (
+            f"agent-ssh copilot {shlex.quote(self.target)} --stop "
+            f"--workspace {shlex.quote(plan['workspace'])}"
+        )
 
 
 def cmd_detach(args: argparse.Namespace) -> int:
@@ -234,98 +218,27 @@ def cmd_detach(args: argparse.Namespace) -> int:
         print(json.dumps({"ok": True, "dry_run": True, **plan, "seed_len": len(seed or "")}, indent=2))
         return 0
 
-    reservation: dict[str, Any] | None = None
-    created = False
-    keeper_started = False
-    ok = False
     ssh_config = _ssh_config(args.target)
     try:
         _ensure_posix(ssh_config)
         _ensure_remote_tooling(ssh_config)
-        daemon_port = resolve_daemon_port()
-        if not daemon_port:
-            return _fail("the host agent-bridge daemon is not running (no routing table)", plan)
-        token = resolve_local_auth_token()
-        if not token:
-            return _fail("the host agent-bridge daemon has no readable auth token", plan)
-
-        rc, _out, err = _remote(
-            ssh_config,
-            _bash(registration_credentials_script(token, daemon_port)),
-            timeout=60.0,
+        rc, payload = launch_detached(
+            _SshAdapter(target=args.target, ssh_config=ssh_config),
+            plan,
+            seed=seed,
+            driver=args.driver,
+            copilot_args=list(getattr(args, "copilot_args", None) or []),
+            ensure_mux=True,
+            register_timeout=float(args.register_timeout),
+            progress=_progress,
         )
-        if rc != 0:
-            return _fail("could not provision registration credentials on the SSH target", plan, detail=err)
-        keeper = ensure_keeper(args.target, venue_port=daemon_port, mux=plan["mux_session"])
-        keeper_started = bool(keeper.get("started"))
-        if not _bridge_path_ok(ssh_config, daemon_port):
-            return _fail(
-                "the SSH target cannot reach the host bridge through the forward "
-                "(authenticated probe failed)",
-                plan,
-            )
-        reservation = reserve_with_retry(
-            plan["scope_id"],
-            plan["venue"],
-            ttl_seconds=_RESERVATION_TTL,
-            retry_window=_RESERVE_RETRY_WINDOW,
-            on_wait=lambda: _progress("waiting", "another launch on this SSH target holds the reservation"),
-        )
-        proc_rc, stdout, stderr = _remote(
-            ssh_config,
-            _launch_command(plan, args, seed),
-            timeout=float(args.register_timeout) + 300.0,
-        )
-        embodied = last_json(stdout)
-        if "agent-worktrees: command not found" in stderr + stdout:
-            return _fail("agent-worktrees is not installed on the SSH target", plan)
-        if "unrecognized arguments" in stderr or "unrecognized arguments" in stdout:
-            return _fail(
-                "the SSH target's agent-worktrees is too old for detached launch "
-                "(--bridge-scope-id/--copilot-arg); update agent-worktrees",
-                plan,
-            )
-        if proc_rc != 0 or not embodied.get("ok"):
-            return _fail(
-                f"remote embody failed: {embodied.get('error') or stderr.strip()[-2000:] or f'exit {proc_rc}'}",
-                plan,
-            )
-        created = bool(embodied.get("created"))
-        actual_mux = embodied.get("session")
-        if actual_mux and actual_mux != plan["mux_session"]:
-            plan["mux_session"] = actual_mux
-            plan["venue"]["mux_session_name"] = actual_mux
-        if created and seed and not embodied.get("seed_submitted"):
-            return _fail("Copilot never reached a ready prompt, so the seed was not submitted", plan)
-        session_id = await_claim(plan["scope_id"], reservation["reservation_id"], args.register_timeout)
-        if not session_id:
-            return _fail("the session is running but never registered with the host bridge", plan)
-        ok = True
-        print(json.dumps({
-            "ok": True,
-            **plan,
-            "session_id": session_id,
-            "created": created,
-            "resumed": not created,
-            "seeded": bool(created and seed),
-            "keeper": keeper,
-            "commands": _commands(plan, session_id),
-        }, indent=2))
-        return 0
-    except (RuntimeError, VenueCopilotError, subprocess.SubprocessError) as exc:
+        return _emit(rc, payload)
+    except (RuntimeError, subprocess.SubprocessError) as exc:
         return _fail(str(exc), plan)
-    finally:
-        if reservation:
-            release_cli_mode(plan["scope_id"], reservation_id=reservation.get("reservation_id"))
-        if not ok:
-            if created:
-                _kill_mux(ssh_config, plan["mux_session"])
-            if keeper_started:
-                stop_keeper(args.target)
 
 
 def cmd_stop(args: argparse.Namespace) -> int:
-    from venue_copilot import deregister_live_session, live_session_for
+    from venue_copilot import live_session_for
 
     plan = plan_for(args)
     state = read_keeper_state(args.target)
@@ -333,26 +246,17 @@ def cmd_stop(args: argparse.Namespace) -> int:
         plan["mux_session"] = str(state["mux"])
         plan["venue"]["mux_session_name"] = plan["mux_session"]
     row = live_session_for(plan["scope_id"])
-    session_id = row.get("session_id") if (row.get("venue") or {}).get("target") == args.target else None
     ssh_config = _ssh_config(args.target)
     try:
         _ensure_posix(ssh_config)
-        rc, out, err = _kill_mux(ssh_config, plan["mux_session"])
     except (RuntimeError, subprocess.SubprocessError) as exc:
         return _fail(str(exc), plan)
-    if rc != 0 or "STOPPED" not in out:
-        return _fail("could not verify the session stopped; nothing was released", plan, detail=err)
-    keeper_stopped = stop_keeper(args.target)
-    release_cli_mode(plan["scope_id"])
-    deregistered = bool(session_id) and deregister_live_session(str(session_id))
-    print(json.dumps({
-        "ok": True,
-        "stopped": True,
-        "keeper_stopped": keeper_stopped,
-        "deregistered": session_id if deregistered else None,
-        **plan,
-    }, indent=2))
-    return 0
+    rc, payload = stop_detached(
+        _SshAdapter(target=args.target, ssh_config=ssh_config),
+        plan,
+        session_row=row,
+    )
+    return _emit(rc, payload)
 
 
 def _mux_exists(ssh_config: Any, mux: str) -> bool:

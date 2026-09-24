@@ -5,6 +5,7 @@ import json
 import types
 
 import pytest
+from venue_copilot import detached as venue_detached
 
 from agent_ssh import copilot_detach as detach
 
@@ -37,16 +38,16 @@ def seams(monkeypatch):
         deregister=[],
     )
     monkeypatch.setattr(detach, "_ssh_config", lambda target: object())
-    monkeypatch.setattr(detach, "resolve_daemon_port", lambda: 41234)
-    monkeypatch.setattr(detach, "resolve_local_auth_token", lambda: "tok")
+    monkeypatch.setattr(venue_detached, "resolve_daemon_port", lambda: 41234)
+    monkeypatch.setattr(venue_detached, "resolve_local_auth_token", lambda: "tok")
     monkeypatch.setattr(
-        detach,
+        venue_detached,
         "reserve_with_retry",
         lambda scope, venue, **kw: calls.reserve.append((scope, venue, kw)) or {"reservation_id": "r1"},
     )
-    monkeypatch.setattr(detach, "await_claim", lambda scope, rid, timeout: "sid-42")
+    monkeypatch.setattr(venue_detached, "await_claim", lambda scope, rid, timeout: "sid-42")
     monkeypatch.setattr(
-        detach,
+        venue_detached,
         "release_cli_mode",
         lambda scope, reservation_id=None: calls.release.append((scope, reservation_id)) or 1,
     )
@@ -62,7 +63,7 @@ def seams(monkeypatch):
         lambda handle: {"session_id": "sid-42", "venue": {"target": "devbox"}},
     )
     monkeypatch.setattr(
-        "venue_copilot.deregister_live_session",
+        "venue_copilot.detached.deregister_live_session",
         lambda sid: calls.deregister.append(sid) or True,
     )
     created = json.dumps({

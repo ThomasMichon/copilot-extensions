@@ -410,3 +410,170 @@ class TestDetachedSharedHelpers:
             "observe": "agent-bridge result sid-1 --json --max-items 5 --max-text-chars 2000",
             "nudge": 'agent-bridge send sid-1 "<message>" --no-wait',
         }
+
+
+class _Adapter:
+    def __init__(self, launch_payload: dict[str, Any] | None = None) -> None:
+        self.launch_payload = launch_payload or {
+            "ok": True,
+            "created": True,
+            "seed_submitted": True,
+            "session": "wt-anchor-repo",
+        }
+        self.calls: list[tuple[str, str]] = []
+        self.keeper_stopped = False
+
+    def run(self, command: str, *, timeout: float) -> tuple[int, str, str]:
+        self.calls.append(("run", command))
+        if "curl" in command:
+            return 0, "", ""
+        if "tmux kill-session" in command:
+            return 0, "STOPPED\n", ""
+        return 0, "", ""
+
+    def launch(self, command: str, *, timeout: float) -> tuple[int, str, str]:
+        self.calls.append(("launch", command))
+        return 0, json.dumps(self.launch_payload), ""
+
+    def ensure_keeper(self, *, venue_port: int, mux: str) -> dict[str, Any]:
+        self.calls.append(("keeper", f"{venue_port}:{mux}"))
+        return {"started": True, "state": {"pid": 123}}
+
+    def stop_keeper(self) -> bool:
+        self.keeper_stopped = True
+        return True
+
+    def attach_command(self, plan: dict[str, Any]) -> str:
+        return f"attach {plan['mux_session']}"
+
+    def stop_command(self, plan: dict[str, Any]) -> str:
+        return f"stop {plan['mux_session']}"
+
+
+class TestDetachedRunner:
+    def _plan(self) -> dict[str, Any]:
+        return {
+            "identity": "anchor-repo",
+            "scope_id": "anchor-repo@venue",
+            "mux_session": "wt-anchor-repo",
+            "workspace": "/workspaces/repo",
+            "anchor": True,
+            "venue": {"kind": "ssh", "target": "venue", "mux_session_name": "wt-anchor-repo"},
+        }
+
+    def test_launch_detached_happy_path(self, monkeypatch) -> None:
+        from venue_copilot import detached
+
+        adapter = _Adapter()
+        monkeypatch.setattr("venue_copilot.detached.resolve_daemon_port", lambda: 41234)
+        monkeypatch.setattr("venue_copilot.detached.resolve_local_auth_token", lambda: "tok")
+        monkeypatch.setattr(
+            "venue_copilot.detached.reserve_with_retry",
+            lambda scope, venue, **kw: {"reservation_id": "r1"},
+        )
+        monkeypatch.setattr("venue_copilot.detached.await_claim", lambda scope, rid, timeout: "sid-42")
+        released = []
+        monkeypatch.setattr(
+            "venue_copilot.detached.release_cli_mode",
+            lambda scope, reservation_id=None: released.append((scope, reservation_id)) or 1,
+        )
+
+        rc, payload = detached.launch_detached(
+            adapter,
+            self._plan(),
+            seed="do it",
+            driver="orchestrator",
+            copilot_args=["--no-ask-user"],
+            ensure_mux=True,
+            register_timeout=0.0,
+            progress=lambda *a: None,
+        )
+
+        assert rc == 0
+        assert payload["session_id"] == "sid-42"
+        assert payload["commands"] == {
+            "status": "agent-bridge --json live-sessions resolve --handle sid-42",
+            "observe": "agent-bridge result sid-42 --json --max-items 5 --max-text-chars 2000",
+            "nudge": 'agent-bridge send sid-42 "<message>" --no-wait',
+            "attach": "attach wt-anchor-repo",
+            "stop": "stop wt-anchor-repo",
+        }
+        assert any("auth.yaml" in command for kind, command in adapter.calls if kind == "run")
+        launch = next(command for kind, command in adapter.calls if kind == "launch")
+        assert "cd /workspaces/repo" in launch
+        assert "--bridge-scope-id anchor-repo@venue" in launch
+        assert "--copilot-arg=--no-ask-user" in launch
+        assert released == [("anchor-repo@venue", "r1")]
+
+    def test_launch_failure_stops_created_unrepresented_session(self, monkeypatch) -> None:
+        from venue_copilot import detached
+
+        adapter = _Adapter({"ok": True, "created": True, "seed_submitted": False})
+        monkeypatch.setattr("venue_copilot.detached.resolve_daemon_port", lambda: 41234)
+        monkeypatch.setattr("venue_copilot.detached.resolve_local_auth_token", lambda: "tok")
+        monkeypatch.setattr(
+            "venue_copilot.detached.reserve_with_retry",
+            lambda scope, venue, **kw: {"reservation_id": "r1"},
+        )
+        monkeypatch.setattr("venue_copilot.detached.release_cli_mode", lambda *a, **k: 1)
+
+        rc, payload = detached.launch_detached(
+            adapter,
+            self._plan(),
+            seed="do it",
+            driver="d",
+            copilot_args=[],
+            ensure_mux=True,
+            register_timeout=0.0,
+            progress=lambda *a: None,
+        )
+
+        assert rc == 1
+        assert "seed was not submitted" in payload["error"]
+        assert adapter.keeper_stopped is True
+        assert any("tmux kill-session" in command for kind, command in adapter.calls if kind == "run")
+
+    def test_stop_detached_verifies_releases_and_deregisters(self, monkeypatch) -> None:
+        from venue_copilot import detached
+
+        adapter = _Adapter()
+        released = []
+        deregistered = []
+        monkeypatch.setattr(
+            "venue_copilot.detached.release_cli_mode",
+            lambda scope, reservation_id=None: released.append((scope, reservation_id)) or 1,
+        )
+        monkeypatch.setattr(
+            "venue_copilot.detached.deregister_live_session",
+            lambda sid: deregistered.append(sid) or True,
+        )
+
+        rc, payload = detached.stop_detached(
+            adapter,
+            self._plan(),
+            session_row={"session_id": "sid-42", "venue": {"target": "venue"}},
+        )
+
+        assert rc == 0
+        assert payload["stopped"] is True
+        assert payload["deregistered"] == "sid-42"
+        assert adapter.keeper_stopped is True
+        assert released == [("anchor-repo@venue", None)]
+        assert deregistered == ["sid-42"]
+
+    def test_stop_detached_failure_releases_nothing(self, monkeypatch) -> None:
+        from venue_copilot import detached
+
+        adapter = _Adapter()
+        adapter.run = lambda command, *, timeout: (3, "STILL_RUNNING\n", "")
+        released = []
+        monkeypatch.setattr(
+            "venue_copilot.detached.release_cli_mode",
+            lambda *a, **k: released.append(a) or 1,
+        )
+
+        rc, payload = detached.stop_detached(adapter, self._plan(), session_row={})
+
+        assert rc == 1
+        assert "could not verify" in payload["error"]
+        assert released == []
