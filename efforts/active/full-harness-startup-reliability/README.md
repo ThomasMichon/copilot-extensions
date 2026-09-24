@@ -233,8 +233,12 @@ correction inline, per the effort's own journal discipline)._
   already used by the file's own sibling branches and by agent-bridge's
   reference `bootstrap-check.ps1`. `stamp` only needs to land before the
   binstub is next invoked, not before the session's first turn. PR:
-  ThomasMichon/copilot-extensions#3332 (branch
-  `worktree/tmichon-book2-win-20260922-201924-820e`).
+  ThomasMichon/copilot-extensions#3332 (dedicated per-fix worktree branch) —
+  **correction:** #3332's branch/worktree was later reused for unrelated
+  manual work (see Journal, 2026-09-23), contaminating its diff with 4
+  unrelated commits. #3332 was closed and superseded by a clean cherry-pick
+  of the same fix onto current `main`: PR ThomasMichon/copilot-extensions#3501,
+  which carries this round's actual landed fix.
 - **Re-verified:** on a second genuinely fresh container/plugin-install with
   the fix applied, the same standalone invocation dropped to **9.23s** — a
   real, substantial improvement, but **not a full fix**: a *separate*,
@@ -280,3 +284,25 @@ correction inline, per the effort's own journal discipline)._
   validated working in the seeding investigation; Phase 1 here is about
   making that repeatable and instrumented for 20-in-a-row runs, not building
   it from scratch.
+
+### 2026-09-23 — PR #3332 contamination found and remediated (Round 2 pickup)
+
+- On resuming via handoff for Round 2, found PR #3332 (Round 1's fix) had 5
+  commits instead of 1: the legitimate async-stamp fix (`bb9e05ecc`) plus 4
+  unrelated commits authored directly (no Copilot co-author, no session-store
+  trace) for a separate `context-handoff-overhaul` effort (PRs #3440/#3459/
+  #3460). Root cause: PR #3332's own head branch/worktree was reused for
+  manual, unrelated git work after the fix commit landed, without checking
+  out a fresh branch first, dragging PR #3332's diff along.
+- Swept all other open `worktree/*`-headed PRs on this repo (#3305, #3310,
+  #3348) for the same pattern — all clean, single-topic. #3332 was the only
+  one affected.
+- Remediation: cherry-picked `bb9e05ecc` cleanly onto current `main` in a
+  fresh worktree (`fix/agent-machines-async-stamp-clean`), resolved the
+  now-stale version-bump conflict (`main` had since moved `agent-machines` to
+  `0.1.0-dev135`; re-bumped to `0.1.0-dev136` across all four required
+  version surfaces), pushed, and opened PR #3501 as the replacement. Closed
+  #3332 with a comment explaining the contamination and linking #3501.
+- Takeaway for future rounds: never reuse a fix/effort worktree for unrelated
+  manual work — create a fresh worktree per unrelated task instead, even for
+  quick one-off git operations.
