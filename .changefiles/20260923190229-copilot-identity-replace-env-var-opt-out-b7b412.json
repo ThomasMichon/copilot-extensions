@@ -1,0 +1,9 @@
+{
+  "comment": "copilot-identity: replace env-var opt-out with a config-file switch (copilot_identity_switch_enabled, default false)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

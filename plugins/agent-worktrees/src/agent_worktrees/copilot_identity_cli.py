@@ -125,7 +125,7 @@ def cmd_copilot_identity_dispatch(argv: list[str]) -> int:
         if not copilot_identity.switch_enabled():
             result = copilot_identity.IdentityResult(
                 "disabled",
-                copilot_identity.current_login(),
+                None,
                 account,
                 "Copilot identity switching is disabled (set "
                 "'copilot_identity_switch_enabled: true' in config.yaml to "

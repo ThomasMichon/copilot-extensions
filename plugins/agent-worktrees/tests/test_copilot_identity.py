@@ -270,6 +270,63 @@ def test_ensure_login_no_gate_when_already_correct(home: Path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# copilot_identity_switch_enabled -- loader mapping (default / global /
+# machine-local precedence), exercised through the real cfg.load_config()
+# YAML parsing rather than a hand-built Config, per review feedback that the
+# monkeypatched-Config tests below never cover the loader site itself.
+# ---------------------------------------------------------------------------
+
+def _write_machine_config(path: Path, extra_line: str = "") -> None:
+    path.write_text(
+        "repo_name: ext\n"
+        "srcroot: /tmp/src\n"
+        "machine: anomalous-potato\n"
+        "platform: wsl\n"
+        f"{extra_line}"
+        "repos:\n"
+        "  ext:\n"
+        "    anchor: /tmp/src/ext\n"
+        "    worktree_root: /tmp/src/.worktrees/ext\n"
+        "    default_branch: main\n"
+        "    remote: origin\n",
+        encoding="utf-8",
+    )
+
+
+def test_loader_copilot_identity_switch_defaults_false(home: Path):
+    cfgfile = home / "config.yaml"
+    _write_machine_config(cfgfile)
+    conf = cfg.load_config(cfgfile)
+    assert conf.copilot_identity_switch_enabled is False
+
+
+def test_loader_copilot_identity_switch_true_from_global_tier(home: Path):
+    global_dir = home / ".agent-worktrees"
+    global_dir.mkdir(parents=True, exist_ok=True)
+    (global_dir / "config.yaml").write_text(
+        "copilot_identity_switch_enabled: true\n", encoding="utf-8"
+    )
+    cfgfile = home / "machine" / "config.yaml"
+    cfgfile.parent.mkdir(parents=True, exist_ok=True)
+    _write_machine_config(cfgfile)
+    conf = cfg.load_config(cfgfile)
+    assert conf.copilot_identity_switch_enabled is True
+
+
+def test_loader_copilot_identity_switch_machine_overrides_global(home: Path):
+    global_dir = home / ".agent-worktrees"
+    global_dir.mkdir(parents=True, exist_ok=True)
+    (global_dir / "config.yaml").write_text(
+        "copilot_identity_switch_enabled: true\n", encoding="utf-8"
+    )
+    cfgfile = home / "machine" / "config.yaml"
+    cfgfile.parent.mkdir(parents=True, exist_ok=True)
+    _write_machine_config(cfgfile, "copilot_identity_switch_enabled: false\n")
+    conf = cfg.load_config(cfgfile)
+    assert conf.copilot_identity_switch_enabled is False
+
+
+# ---------------------------------------------------------------------------
 # The config-file switch_enabled() gate (replaces an env-var opt-out)
 # ---------------------------------------------------------------------------
 
@@ -303,8 +360,9 @@ def test_switch_enabled_fails_closed_on_config_error(home: Path, monkeypatch):
 def test_cli_ensure_is_noop_when_disabled(home: Path, monkeypatch):
     """The CLI dispatch -- the single path both launch-session.ps1 and a
     manual invocation go through -- must short-circuit before ever minting a
-    token or shelling out, when the machine has not opted in."""
-    _write_copilot_config(home, "ThomasMichon")
+    token, shelling out, or reading ~/.copilot/config.json, when the machine
+    has not opted in. No `_write_copilot_config` here on purpose: reading
+    ``current_login()`` on this path would need it, and must not happen."""
     monkeypatch.setattr(
         cfg, "load_config",
         lambda *a, **k: cfg.Config(
@@ -323,6 +381,7 @@ def test_cli_ensure_is_noop_when_disabled(home: Path, monkeypatch):
     out = json.loads(buf.getvalue())
     assert out["status"] == "disabled"
     assert out["target"] == "tmichon_microsoft"
+    assert out["previous"] is None
 
 
 def test_cli_ensure_switches_when_enabled(home: Path, monkeypatch):
