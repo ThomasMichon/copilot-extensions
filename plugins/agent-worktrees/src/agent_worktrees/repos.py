@@ -472,8 +472,7 @@ def resolve_copilot_account(entry: RepoEntry | None) -> str | None:
 
 
 def copilot_account_for(name: str) -> str | None:
-    """Resolve the intended Copilot CLI login: explicit ``copilot_account:``
-    -> ``default_copilot_account`` -> None. See #3296."""
+    """Resolve the Copilot CLI login: ``copilot_account:`` -> ``default_copilot_account`` -> None. See #3296."""
     entry = find_repo(name)
     explicit = resolve_copilot_account(entry)
     if explicit:
@@ -482,20 +481,22 @@ def copilot_account_for(name: str) -> str | None:
         from . import config as _config
         return _config.load_config().default_copilot_account or None
     except Exception:
-        return no_project_top_level_defaults()[0] or None
+        return no_project_top_level_defaults(name)[0] or None
 
 
-def no_project_top_level_defaults() -> tuple[str, bool]:
+def no_project_top_level_defaults(project: str | None = None) -> tuple[str, bool]:
     """Read account/switch defaults from global + machine-local config tiers
-    directly, bypassing repo resolution (``load_config()`` always raises for
-    a no-project command, e.g. ``copilot-identity``)."""
+    directly, bypassing repo resolution (``load_config()`` raises for a
+    no-project command). Pass the caller's known ``--repo`` as ``project`` so
+    ``project_dir(project)`` can still resolve the machine-local tier."""
     from . import config as _config
     try:
         global_raw = _config._load_yaml_safe(_config.global_config_path())
     except Exception:
         return "", False
     try:
-        machine_raw = _config._load_yaml_safe(_config.default_config_path())
+        machine_path = _config.project_dir(project) / "config.yaml"
+        machine_raw = _config._load_yaml_safe(machine_path)
     except Exception:
         machine_raw = {}
     account = str(machine_raw.get("default_copilot_account", global_raw.get("default_copilot_account", "")) or "")

@@ -355,6 +355,22 @@ def test_intended_account_resolves_without_an_active_project(home: Path, monkeyp
     assert copilot_identity.intended_account(None) == "tmichon_microsoft"
 
 
+def test_switch_enabled_machine_local_resolves_with_explicit_repo(home: Path, monkeypatch):
+    """The no-project fallback must still consult the *machine-local* tier
+    (not only global) when the caller passes its known --repo -- e.g.
+    launch-session.ps1 always does -- overriding the global tier."""
+    monkeypatch.setattr(cfg, "_ACTIVE_PROJECT", "")
+    global_dir = home / ".agent-worktrees"
+    global_dir.mkdir(parents=True, exist_ok=True)
+    (global_dir / "config.yaml").write_text(
+        "copilot_identity_switch_enabled: false\n", encoding="utf-8"
+    )
+    machine_path = cfg.project_dir("myproj") / "config.yaml"
+    machine_path.parent.mkdir(parents=True, exist_ok=True)
+    machine_path.write_text("copilot_identity_switch_enabled: true\n", encoding="utf-8")
+    assert copilot_identity.switch_enabled("myproj") is True
+
+
 # ---------------------------------------------------------------------------
 # The config-file switch_enabled() gate (replaces an env-var opt-out)
 # ---------------------------------------------------------------------------

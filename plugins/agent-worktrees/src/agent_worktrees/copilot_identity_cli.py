@@ -122,7 +122,7 @@ def cmd_copilot_identity_dispatch(argv: list[str]) -> int:
             account = copilot_identity.intended_account(repo)
         dry_run = "--dry-run" in rest
         force = "--force" in rest
-        if not copilot_identity.switch_enabled():
+        if not copilot_identity.switch_enabled(repo):
             result = copilot_identity.IdentityResult(
                 "disabled",
                 None,

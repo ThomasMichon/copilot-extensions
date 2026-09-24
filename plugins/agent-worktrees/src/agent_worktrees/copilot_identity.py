@@ -118,10 +118,10 @@ def intended_account(repo_name: str | None) -> str | None:
 
         return _config.load_config().default_copilot_account or None
     except Exception:
-        return repos.no_project_top_level_defaults()[0] or None
+        return repos.no_project_top_level_defaults(repo_name)[0] or None
 
 
-def switch_enabled() -> bool:
+def switch_enabled(repo_name: str | None = None) -> bool:
     """Return whether the identity-switch feature is enabled for this
     machine (``config.yaml``'s ``copilot_identity_switch_enabled``, default
     false). This is the single gate consulted by both the automatic
@@ -129,15 +129,20 @@ def switch_enabled() -> bool:
     CLI command -- there is no separate environment-variable opt-out.
     ``copilot-identity`` is a no-project command (see
     ``front_door_cli._NO_PROJECT_COMMANDS``), so a plain :func:`config.load_config`
-    failure falls back to :func:`repos.no_project_top_level_defaults` rather
-    than always reporting "disabled" -- otherwise the switch could never be
-    turned on through the real CLI. Any resolution failure still fails closed."""
+    failure falls back to :func:`repos.no_project_top_level_defaults`, passing
+    through the caller's known ``--repo`` (``repo_name``) so the machine-local
+    tier can still resolve, rather than always reporting "disabled" -- which
+    would otherwise make the switch impossible to turn on through the real
+    CLI, or per-repo via a machine-local override. Any resolution failure
+    still fails closed."""
     try:
         from . import config as _config
 
         return bool(_config.load_config().copilot_identity_switch_enabled)
     except Exception:
         from . import repos
+
+        return repos.no_project_top_level_defaults(repo_name)[1]
 
         return repos.no_project_top_level_defaults()[1]
 
