@@ -315,7 +315,7 @@ def test_reclaim_worktree_falls_back_to_global_repo_registry(
     monkeypatch.setattr(
         cleanup.tracking, "load_orphaned_obligations_strict",
         lambda project=None: [])
-    r = cleanup.reclaim_worktree("m/dev.tmichon/child", _config(), apply=True)
+    r = cleanup.reclaim_worktree("m/dev.operator/child", _config(), apply=True)
     assert r.status == "reclaimed"
     assert seen["cwd"] == str(anchor)
 

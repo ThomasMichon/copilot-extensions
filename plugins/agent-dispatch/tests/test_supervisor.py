@@ -404,7 +404,7 @@ def test_poll_skips_a_held_queued_task(q, client):
     `claim_one` fails on the hold, and the stray reservation is left
     behind."""
     t = q.create("work")
-    q.set_hold(t.id, reason="operator paused before spawn", actor="tmichon")
+    q.set_hold(t.id, reason="operator paused before spawn", actor="operator")
     spawn = _ok_spawn()
     sup = Supervisor(client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5)
 
@@ -412,7 +412,7 @@ def test_poll_skips_a_held_queued_task(q, client):
     assert spawn.calls == []
     assert q.latest_reservation(t.id) is None
 
-    q.clear_hold(t.id, actor="tmichon")
+    q.clear_hold(t.id, actor="operator")
     assert sup.poll_once() == [t.id]
 
 
