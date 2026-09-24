@@ -84,6 +84,39 @@ def test_session_guidance_projection_points_to_hook_written_file():
                 "applyTo": "**",
                 "legacyMarkers": [],
             },
+            {
+                "id": "head-claim-fallback",
+                "template": "instructions/head-claim-fallback.instructions.md",
+                "destination": (
+                    ".github/instructions/agent-worktrees/"
+                    "head-claim-fallback.instructions.md"
+                ),
+                "customizationKind": "instructions",
+                "applyTo": "**",
+                "legacyMarkers": [],
+            },
+            {
+                "id": "cli-fallback",
+                "template": "instructions/cli-fallback.instructions.md",
+                "destination": (
+                    ".github/instructions/agent-worktrees/"
+                    "cli-fallback.instructions.md"
+                ),
+                "customizationKind": "instructions",
+                "applyTo": "**",
+                "legacyMarkers": [],
+            },
+            {
+                "id": "ownership-boundary-fallback",
+                "template": "instructions/ownership-boundary-fallback.instructions.md",
+                "destination": (
+                    ".github/instructions/agent-worktrees/"
+                    "ownership-boundary-fallback.instructions.md"
+                ),
+                "customizationKind": "instructions",
+                "applyTo": "**",
+                "legacyMarkers": [],
+            },
         ],
     }
     template = (
