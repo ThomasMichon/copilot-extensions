@@ -26,6 +26,20 @@ name: Promote dev to main
 # pre-merge candidate commit this job built locally is never the thing
 # that actually lands).
 #
+# `main` also requires a fixed set of unconditional CI job contexts to pass
+# before that squash-merge can complete (`gh pr merge --squash --auto`
+# waits for them): `guards + lint`, `Git hooks (Windows)`,
+# `worktree-manager (out-of-plugin)`, `test runner (ubuntu-latest)`,
+# `test runner (windows-latest)`, `discover suites` -- deliberately never a
+# per-plugin `smoke`/matrix job, since those conditionally skip entirely
+# depending on which plugins changed and a required check that never runs
+# would permanently block every merge. This re-validates the exact
+# materialized artifact (post version-bump, post vendor-materialize)
+# independently of `dev`'s own already-green CI/Validation Gate passes. A
+# genuine human-operator emergency retains a narrow escape hatch: `main`'s
+# ruleset also grants a `RepositoryRole: admin` bypass
+# (`gh pr merge --admin`), never exercised by this workflow itself.
+#
 # Emergency rollback: `python tools/rollback_release.py pause --reason "..."
 # --push` BEFORE `revert --reason "..." --push` -- run by a human operator
 # with their own `gh` credentials (see tools/rollback_release.py's own
