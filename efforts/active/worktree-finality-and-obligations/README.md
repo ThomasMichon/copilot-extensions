@@ -2194,7 +2194,7 @@ The approved design is the faceted model in [design.md](design.md):
 
 - Resumed via the manual `/consume-handoff` path (deliberately not
   auto-triggered, per the retry-storm safety note on the prior handoff --
-  gim-home/odsp-web-harness#431). Verified before starting: Phase 9 fully
+  see the operator's own harness issue tracker #431). Verified before starting: Phase 9 fully
   merged, Phase 8's first sub-slice (PR #2824) merged, no other open PR
   touching Phase 8.
 - Built the second Phase 8 Plan bullet in a fresh `copilot-extensions`

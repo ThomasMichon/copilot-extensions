@@ -27,7 +27,12 @@ if [[ ${#PY[@]} -eq 0 ]]; then
     exit 0
 fi
 # No-op unless a private denylist is configured (env / ~/.agent-codespaces).
-"${PY[@]}" "$ROOT/tools/check-no-internal-identifiers.py"
+# Scoped to origin/dev, not the script's own origin/main default: dev is this
+# repo's real contribution trunk (CONTRIBUTING.md), and dev/main have
+# diverged enough (dev-branch-release-pipeline effort) that diffing against
+# origin/main would sweep in dev's entire independent history on every push,
+# not just this push's own changes.
+COPILOT_EXTENSIONS_GUARD_BASE=origin/dev "${PY[@]}" "$ROOT/tools/check-no-internal-identifiers.py"
 "${PY[@]}" "$ROOT/tools/check-install-contract.py"
 # Shared production libraries are shipped from multiple plugin payloads; every
 # copy must remain byte-identical before the launch guard scans each one.
@@ -46,21 +51,22 @@ fi
 "${PY[@]}" "$ROOT/tools/check-version-consistency.py"
 # Lint any effort/vision README.md touched by this push against the canonical
 # section-set contract (efforts/README.md, visions/README.md § Local
-# conventions) -- diff-scoped vs origin/main, so pre-existing debt in a doc
+# conventions) -- diff-scoped vs origin/dev (this repo's real contribution
+# trunk; see the identifier-guard note above), so pre-existing debt in a doc
 # this push doesn't touch never blocks.
-"${PY[@]}" "$ROOT/tools/check-effort-vision-structure.py"
+"${PY[@]}" "$ROOT/tools/check-effort-vision-structure.py" --base origin/dev
 # No config/Dockerfile/install-script/CI-workflow file may hardcode a public
 # package-feed URL as the only usable endpoint (this repo runs on machines
 # whose default feed is network-blocked and replaced with an internal mirror).
 "${PY[@]}" "$ROOT/tools/check-feed-neutrality.py"
 # Freeze registered agent-bridge contracts and require a registry update when a
 # contract-sensitive source changes.
-"${PY[@]}" "$ROOT/tools/check-agent-bridge-contracts.py" --base origin/main
+"${PY[@]}" "$ROOT/tools/check-agent-bridge-contracts.py" --base origin/dev
 # Require a pending changefile whenever a plugin's content -- or a vendored lib
 # it ships -- changes. Dev-branch promotion consumes the changefile into the
 # real version fields; contributors no longer hand-edit versions in ordinary
 # dev PRs.
-"${PY[@]}" "$ROOT/tools/check-changefile-presence.py"
+"${PY[@]}" "$ROOT/tools/check-changefile-presence.py" --base origin/dev
 # Every tracked, non-test source module must stay within its line-count cap
 # (or its shrink-only grandfathered ceiling, for pre-existing offenders) --
 # a componentization failure (queue.py's ~7,200 lines) had no automated guard
