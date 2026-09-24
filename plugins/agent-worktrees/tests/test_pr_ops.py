@@ -203,10 +203,10 @@ class TestPRHeadName:
         repo = tmp_path / "r"
         repo.mkdir()
         _git("init", cwd=repo)
-        _git("config", "user.email", "tmichon@example.com", cwd=repo)
+        _git("config", "user.email", "operator@example.com", cwd=repo)
         prcfg = cfg.PRConfig(enabled=True, provider="azure-devops", head_scheme="refspec")
         name = pr_ops.pr_head_name(prcfg, "Some title", "wt-x-a1b2", cwd=str(repo))
-        assert name == "user/tmichon/some-title-a1b2"
+        assert name == "user/operator/some-title-a1b2"
 
     def test_snapshot_default_inserts_topic_when_supplied(self):
         prcfg = cfg.PRConfig(enabled=True, branch_prefix="feature", head_scheme="snapshot")
@@ -222,12 +222,12 @@ class TestPRHeadName:
         repo = tmp_path / "r"
         repo.mkdir()
         _git("init", cwd=repo)
-        _git("config", "user.email", "tmichon@example.com", cwd=repo)
+        _git("config", "user.email", "operator@example.com", cwd=repo)
         prcfg = cfg.PRConfig(enabled=True, provider="azure-devops", head_scheme="refspec")
         name = pr_ops.pr_head_name(
             prcfg, "Some title", "wt-x-a1b2", cwd=str(repo), topic="Topic!! Name"
         )
-        assert name == "user/tmichon/some-title-topic-name-a1b2"
+        assert name == "user/operator/some-title-topic-name-a1b2"
 
     def test_blank_topic_preserves_existing_default_output(self):
         prcfg = cfg.PRConfig(enabled=True, provider="github", head_scheme="refspec")
