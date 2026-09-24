@@ -1,8 +1,12 @@
 # Review guidance — copilot-extensions
 
 This file is read by GitHub Copilot code review specifically (this repo's
-`copilot_code_review` branch-protection rule auto-requests it, non-blocking,
-on every PR) — see [Customizing Copilot's reviews with custom
+`dev` branch ruleset's `copilot_code_review` rule auto-requests it,
+non-blocking, on every PR targeting `dev` — `main`'s ruleset no longer
+requests Copilot review at all, since only the promotion pipeline's own
+automated snapshot PR ever targets `main`, and re-reviewing regenerated,
+already-validated content there is redundant) — see [Customizing Copilot's
+reviews with custom
 instructions](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#customizing-copilots-reviews-with-custom-instructions).
 Unlike [`.github/copilot-instructions.md`](.github/copilot-instructions.md)
 (which also shapes Chat and the coding agent), this file's guidance is
@@ -21,16 +25,18 @@ specifically when reviewing a pull request, not a replacement for them.
   wholesale by this repo's own CI promotion pipeline
   (`.github/workflows/promote.yml`, dev-branch-release-pipeline effort,
   ThomasMichon/copilot-extensions#3336) via an automated snapshot PR: base
-  `main`, head branch matching `release/promote-<run id>`, authored by the
-  pipeline's own worker identity (the `github-actions[bot]` account).
+  `main`, head branch matching `release/promote-<run id>`, authored via the
+  `APERTURE_RELEASE_TOKEN` fine-grained PAT (a personal token minted under
+  the maintainer's own account -- this repo has no separate bot identity --
+  so the PR's author is `ThomasMichon`, not a bot login).
   Contributors always target `dev` — a PR whose base is `main` and that
   does NOT match BOTH that branch-naming convention AND that author is not
   a legitimate use of this repo's PR flow (the repo's own CI has a hard
   guard checking the same two conditions, but that only fails the build;
   this comment is the visible signal on the PR itself, since Copilot
-  review never blocks a merge here). Post this comment, verbatim, exactly
-  once per PR (do not repeat it on subsequent review passes of the same
-  PR):
+  review is disabled on `main`'s ruleset -- the hard block is the sole
+  gate). Post this comment, verbatim, exactly once per PR (do not repeat it
+  on subsequent review passes of the same PR):
 
   > This PR targets `main` directly. `main` is only ever updated by this
   > repo's own CI promotion pipeline (dev-branch-release-pipeline effort,
