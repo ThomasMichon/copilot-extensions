@@ -390,12 +390,30 @@ class PickerScreenRuntimeMixin:
                 ),
                 None,
             )
-            if local is None:
-                try:
-                    local = self.src.LOCAL
-                except Exception:
-                    local = self._source_local
+            # Warm ``self.src.LOCAL`` unconditionally, inside the cache scope,
+            # even when ``local`` was already found via ``source_tabs`` above
+            # (the real ``data_ssh`` source always sets a ``"local"`` key per
+            # tab, so the ``if local is None:`` fallback below was otherwise
+            # dead in practice). ``data_ssh.LOCAL`` is a PEP 562 module
+            # attribute resolved lazily on first access via an uncached
+            # ``load_config()`` call (several real seconds on a fleet with
+            # many registered repos) and memoized forever after -- it must be
+            # touched HERE, inside a cache scope already running off the
+            # render thread, not left for whichever later render-thread
+            # comparison (e.g. ``_wt_submenu_verbs()``'s
+            # ``(machine, env) == self.src.LOCAL``, reached the instant the
+            # operator opens ANY worktree row's Actions menu) touches it first
+            # (#picker-menu-open-latency).
             with self._load_config_cache_scope():
+                try:
+                    self.src.LOCAL
+                except Exception:
+                    pass
+                if local is None:
+                    try:
+                        local = self.src.LOCAL
+                    except Exception:
+                        local = self._source_local
                 try:
                     source_repo_branch = (
                         getattr(self.src, "REPO", "") or "",
