@@ -1525,6 +1525,28 @@ not yet written up as a dedicated entry here since no code changed):
    it would need to detect that state and fall back to printing the
    exact path for a human to add through the Windows Security app
    itself. On-demand only, never run as a side effect of anything else.
+3. **Duplicate resident status-monitor instances.** Live-observed
+   (2026-09-22, sweep-CPU investigation): killing the status-monitor and
+   waiting a few seconds repeatedly produced 2-3 simultaneously running
+   `agent_worktrees status-monitor` processes, at least one spawned as a
+   direct child of another. Whatever guards this daemon's own single-
+   instance invariant (the `agent-single-instance-lease` primitive
+   exists elsewhere in this codebase) is not preventing this -- needs
+   its own dedicated investigation into the status-monitor's own
+   spawn/cutover path, not folded into an unrelated fix.
+4. **Stale system-Python site-packages contamination.** Live-observed
+   on the same machine/investigation: the system Python interpreter
+   (distinct from any versioned runtime slot) carries `.pth`-based
+   editable installs of `agent-worktrees` and sibling libs pointing at
+   *specific, already-finalized temporary worktree checkouts* rather
+   than a stable location. A caller that resolves to bare/system
+   `python` instead of the properly-resolved versioned interpreter runs
+   permanently stale, uncoordinated code that no `agent-worktrees update
+   --force` ever reaches. Needs a dedicated cleanup (remove the stray
+   `__editable__.*.pth` files) plus tracing which launch path let a
+   caller resolve system Python at all, since every documented launch
+   path is supposed to resolve solely through the marker-based versioned
+   interpreter.
 
 ### 2026-09-21 — `_check_freshness` flagged demand-scoped staleness as a sweep bug
 A scheduled `worktree-status-audit` run reported a real, growing
@@ -1653,3 +1675,229 @@ performance/correctness fix to the accelerator's own compute and timeout
 behavior; the wire contract, cache semantics, and every consumer-facing
 API are unchanged.
 
+### 2026-09-22 — Sweep thread was saturating a full CPU core; raised DEFAULT_TTL_SECONDS and added a per-tick refresh cap
+The operator flagged, unprompted, that the resident status-monitor
+daemon might be "murdering CPU with unlimited, continuous status
+sweeps." Investigated live: found the daemon's Windows process
+sustaining ~83-99% CPU continuously for hours, with only 7 demanded
+worktrees in the cache.
+
+Root cause: `DEFAULT_TTL_SECONDS` (20.0) was set when the effort assumed
+a cheap ~5-git-call bundle; the accelerator-perf-fix work earlier this
+session established the real cost is ~5-6s per compute (the unavoidable
+`fetch=True` git call), never re-tuned after that discovery. With N
+demanded worktrees each costing ~6s and a 20s TTL, the sweep needs
+`N * 6s` of CPU-bound work every 20s window -- already exceeding one
+core's capacity at N >= ~4, so the single-threaded sweep loop runs
+almost continuously back-to-back rather than mostly idling between
+ticks (`SWEEP_INTERVAL_SECONDS` is 10s, so it wakes far more often than
+it can ever finish its own backlog).
+
+Fixed two ways:
+1. Raised `DEFAULT_TTL_SECONDS` from 20.0 to 180.0 -- live-verified this
+   is safe in isolation: `worktree_status_audit.py`'s own freshness
+   bound is computed as `DEFAULT_TTL_SECONDS + SWEEP_INTERVAL_SECONDS +
+   FRESHNESS_SLACK_SECONDS`, so it moves with the constant rather than
+   being a fixed ceiling this change could violate (confirmed via a live
+   audit run showing 0 `cache_freshness_bounds` mismatches at the new
+   TTL).
+2. Added a `max_refresh_per_sweep` cap (default 4) to `sweep_due()` as
+   defense-in-depth: even after the TTL fix, an operator with more
+   demanded worktrees than one core can refresh within a TTL window
+   would reproduce the same symptom at a higher N. The cap bounds
+   worst-case per-tick cost to a fixed number of entries, prioritizing
+   the STALEST-ATTEMPTED entries first (see the 2026-09-23 Journal
+   entry below -- refined to `_last_attempted`, not bare `computed_at`,
+   after a follow-up review round caught that a persistently-failing
+   entry's `computed_at` never advances) -- demand beyond capacity
+   degrades as wider staleness for the excess entries, served on
+   subsequent ticks, rather than unbounded CPU growth with N.
+
+Added two new unit tests (`test_sweep_caps_per_tick_refreshes_
+prioritizing_the_stalest_entries`, `test_sweep_does_not_cap_when_due_
+entries_are_within_the_limit`) plus the existing 22 `worktree_status_
+cache` tests and 45 `worktree_status_audit` tests all still pass (69
+total for this targeted run).
+
+**Live verification was significantly confounded by two separate,
+pre-existing bugs unrelated to this fix**, both discovered mid-
+investigation and captured in this README's own Follow-ups section
+below rather than fixed here:
+- **Duplicate resident daemon instances.** Killing the daemon and
+  waiting a few seconds repeatedly produced 2-3 *simultaneously running*
+  `agent_worktrees status-monitor` processes rather than one -- at least
+  one spawned as a direct child of another (a self-respawn/cutover path
+  spawning a second instance rather than replacing itself), inflating
+  observed CPU by however many redundant instances exist regardless of
+  any single instance's own sweep tuning. The `agent-single-instance-
+  lease` primitive exists in this codebase; whatever guards the
+  status-monitor's own single-instance invariant is evidently not
+  preventing this.
+- **Stale system-Python site-packages contamination.** This machine's
+  system Python (`...\Programs\Python\Python312\python.exe`, distinct
+  from any versioned runtime slot) carries `.pth`-based editable installs
+  of `agent-worktrees` and several sibling libs pointing directly at
+  *specific, temporary worktree checkouts* (some from days earlier,
+  long since finalized) rather than a stable location -- meaning any
+  caller that ends up invoking bare/system `python` instead of the
+  properly-resolved versioned interpreter runs stale, uncoordinated code
+  that no `agent-worktrees update --force` ever reaches. Confirmed this
+  is pre-existing (the editable-install pointers predate this session)
+  and reproducible: several `status-monitor` respawns during this
+  investigation resolved through this contaminated path rather than the
+  correct versioned slot.
+
+Both are real, live bugs on this operator's machine, but out of scope
+for this fix's own object (the sweep tuning itself, which is correct and
+independently unit-tested) -- pursuing them fully would have meant
+chasing a moving target indefinitely on a busy, shared, concurrently-
+updating machine rather than landing a validated, scoped fix.
+
+**Documentation impact:** no user-facing/authoritative documentation
+required updating -- `DEFAULT_TTL_SECONDS`/`max_refresh_per_sweep` are
+internal tuning constants with no public contract change (the wire
+protocol, cache schema, and every consumer-facing API are unchanged);
+this effort's own README (here) is the authoritative record of the
+investigation and fix, per this effort's own established convention for
+this kind of tuning change (see the 2026-09-22 `REQUEST_DEADLINE_S`
+entry above, which took the identical position).
+
+### 2026-09-23 — PR #3348 review: sweep cap could starve on a persistently-failing entry
+Copilot's review of the sweep-cap PR caught a real correctness bug the
+cap introduced: `computed_at` only advances on a *successful* refresh,
+so a chronically-broken worktree (a deleted worktree still tracked, a
+persistent git/permissions failure, etc.) would remain "the stalest"
+entry on every subsequent sweep tick and monopolize every
+`max_refresh_per_sweep` slot forever -- directly contradicting the
+cap's own claim (in its docstring) that excess demand is served on
+later ticks. In the worst case (`max_refresh_per_sweep=1` and one
+permanently-failing entry), every *other* demanded worktree would never
+be refreshed again for as long as the daemon runs.
+
+Fixed by tracking a separate `_last_attempted` timestamp, updated on
+every sweep attempt regardless of outcome (success or exception), and
+using it -- not bare `computed_at` -- for the stalest-first priority
+ordering. A failing entry now rotates to the back of the queue exactly
+like a succeeding one, so demand beyond capacity is served round-robin
+across attempts instead of jamming on one broken worktree. Added
+`test_sweep_cap_does_not_let_a_persistently_failing_entry_starve_others`
+(cap=1, a permanently-failing entry demanded first, two healthy entries
+after -- confirms all three get attempted across three sweep ticks; the
+bug would have re-selected the failing entry every single tick).
+
+The same review round also flagged that `worktree_status_audit
+._check_freshness`'s fixed freshness bound doesn't account for the new
+per-tick refresh cap: once the number of currently-demanded entries
+exceeds `max_refresh_per_sweep`, an entry's own turn in the sweep's
+round-robin can legitimately take several extra ticks to arrive, so a
+fixed bound would false-positive under real load proportional to how
+far demand exceeds the cap. Added a `demanded_count` parameter to
+`_check_freshness`/`audit_one` (threaded from `run_audit`'s own
+`len(cache_rows)`) that widens the bound by
+`SWEEP_INTERVAL_SECONDS * ceil(demanded_count / cap)` extra ticks of
+slack. Added `test_check_freshness_bound_widens_with_demanded_count_
+past_the_sweep_cap` proving the same stale age is flagged at
+`demanded_count=1` but tolerated once demand exceeds the cap enough to
+explain the delay.
+
+Full targeted run: 71 tests pass (25 `worktree_status_cache` + 46
+`worktree_status_audit`).
+
+### 2026-09-23 — PR #3348 review round 3: negative-cap validation, dormant-row inflation, refresh-duration accounting, and unrelated-baseline revert
+Another review pass on the same PR caught four more real issues:
+
+1. **Unvalidated negative `max_refresh_per_sweep`.** A negative value
+   makes `stalest[:-1]` (a negative Python slice bound) refresh every
+   due entry except one -- the CPU-saturation guard this parameter
+   exists to provide becomes effectively unbounded as demand grows,
+   exactly the failure mode the whole mechanism was added to prevent.
+   `WorktreeStatusCache.__init__` now rejects a non-int or negative
+   value with `ValueError`; 0 remains a valid (if extreme) "pause all
+   sweeping" configuration. Added three tests covering the negative,
+   non-int, and zero-boundary cases.
+2. **`demanded_count` inflated by dormant rows.** The cap-aware
+   freshness bound (added in the prior round) used `len(cache_rows)`
+   directly, but that count includes rows whose demand has already
+   aged past `DEMAND_TTL_SECONDS` -- `sweep_due` evicts those instead
+   of refreshing them, so counting them inflates the bound for every
+   genuinely active entry, and enough abandoned rows could let a real
+   stuck sweep slip past the audit entirely. Added `_count_actively_
+   demanded()`, applied in `run_audit`, and a regression test.
+3. **The cap-aware bound ignored each batch's own compute time.** The
+   prior round's bound counted only `SWEEP_INTERVAL_SECONDS` per extra
+   tick, but the daemon's inter-tick sleep only starts once a tick's
+   whole batch of up to `max_refresh_per_sweep` entries has finished
+   computing (each costing ~5-6s of real git-fetch work) -- with enough
+   active entries, a genuinely healthy sweep could still exceed the
+   bound before an entry's turn arrives. Added a
+   `WORST_CASE_REFRESH_SECONDS` constant and folded
+   `WORST_CASE_REFRESH_SECONDS * cap * extra_ticks` into the bound.
+4. **Unrelated module-size-baseline widening.** The prior round's
+   commit had widened `tracking.py`'s and `worktree-manager/__main__
+   .py`'s ceilings to fix red-main growth this PR's own diff never
+   touched -- against this repo's own shrink-only baseline policy
+   (`CONTRIBUTING.md`), an untouched file's ceiling must never move in
+   an unrelated PR. Reverted by taking `tools/module-size-baseline
+   .json` verbatim from `origin/main` (which had, by this point in a
+   very fast-moving day, already absorbed the same fix upstream) rather
+   than hand-editing -- confirms zero unrelated diff remains.
+
+Also bumped the marketplace catalog's own top-level `metadata.version`
+(a separate, required surface distinct from the `agent-worktrees`
+plugin entry -- flagged as missing) and corrected the Journal's own
+description of the cap's priority ordering (it prioritizes
+`_last_attempted`, not bare `computed_at`, per the starvation fix two
+entries above -- the summary above had drifted out of sync with that
+fix).
+
+**Documentation impact:** none of `agent-worktrees`' user-facing
+documentation, the wire contract, or the durable cache schema changed
+in this round -- purely internal validation, an audit-side bound
+correction, and a housekeeping baseline/version fix. This effort README
+remains the authoritative record, consistent with every prior entry's
+own position on this question.
+
+Full targeted run: 75 tests pass (28 `worktree_status_cache` + 47
+`worktree_status_audit`).
+
+### 2026-09-23 — PR #3348 review round 4: heapq.nsmallest for cap selection
+Addressed the latest Copilot review round on PR #3348:
+
+- **`sweep_due()`'s cap-selection step** used `sorted(sampled.items(), ...)`
+  to find the `max_refresh_per_sweep` stalest-attempted entries, which sorts
+  the *entire* sampled set -- O(N log N) once the demanded set exceeds the
+  cap. Replaced with `heapq.nsmallest(cap, sampled.items(), key=...)`,
+  which is O(N log cap) instead: a real complexity difference once the
+  demanded-worktree count grows well past the cap.
+- The reviewer separately noted that even with `heapq.nsmallest`, the
+  due/expired bookkeeping (the dict comprehensions scanning
+  `self._entries` to find what's due at all) is still O(N) in the
+  demanded-worktree count, so the "hard CPU ceiling independent of N"
+  claim isn't literally true for the *bookkeeping* cost. Reworded
+  `DEFAULT_MAX_REFRESH_PER_SWEEP`'s docstring to scope that claim
+  precisely: the cap bounds worst-case *recompute* cost (the expensive
+  per-entry work this whole cap exists to protect against -- an
+  unavoidable ~5-6s `git fetch`) independent of N; the O(N) bookkeeping
+  around it is N cheap dict/heap operations, several orders of magnitude
+  below one recompute, a different cost class from what the cap actually
+  protects against. A persistent priority index would remove even that
+  O(N) scan if ever needed at a much larger N than this accelerator
+  currently targets -- noted as a possible future improvement, not
+  implemented here (same scope-boundary judgment as PR #3348's other
+  already-accepted follow-ups).
+- The reviewer also flagged the PR description's own Testing section as
+  stale (still reporting "two new tests, 69 passing" from the initial
+  fix, not the later rounds' 75 passing / 28+47 split). Attempted to
+  update the PR body directly (`gh pr edit`); blocked by the same
+  Enterprise Managed User GraphQL restriction that already prevents
+  posting PR comments from this session (`Unauthorized: As an Enterprise
+  Managed User, you cannot access this content`) -- an account/API
+  permission limitation, not something fixable from this session. The
+  accurate final numbers are recorded here and in this PR's own commit
+  history instead.
+- Verified: targeted `worktree_status_cache`/`worktree_status_audit` run
+  -- 75 passed, no regressions.
+
+No consumer-facing documentation changes needed -- this round is purely an
+internal complexity optimization and docstring-precision fix; the wire
+contract, cache semantics, and every consumer-facing API are unchanged.

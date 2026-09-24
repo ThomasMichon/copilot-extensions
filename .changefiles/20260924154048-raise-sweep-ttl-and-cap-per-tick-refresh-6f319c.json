@@ -1,0 +1,9 @@
+{
+  "comment": "raise sweep TTL and cap per-tick refresh count to avoid CPU pressure from frequent worktree status audits",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
