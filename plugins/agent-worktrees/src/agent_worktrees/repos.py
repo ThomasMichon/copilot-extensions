@@ -448,13 +448,9 @@ def account_from_map(owner: str | None) -> str | None:
 
 
 def resolve_account(entry: RepoEntry | None) -> str | None:
-    """Resolve the preferred GitHub account for a repo entry.
-
-    Order: explicit ``account:`` -> ``account_map`` (owner->login) -> owner
-    derived from a github.com remote -> None.  None means "no account
-    preference" -- git/gh operations use the ambient ``gh`` account exactly as
-    before (additive + safe).
-    """
+    """Resolve the preferred GitHub account for a repo entry: explicit
+    ``account:`` -> ``account_map`` -> owner from a github.com remote ->
+    None (ambient ``gh`` account)."""
     if entry is None:
         return None
     if entry.account:
@@ -467,53 +463,33 @@ def resolve_account(entry: RepoEntry | None) -> str | None:
 
 
 def resolve_copilot_account(entry: RepoEntry | None) -> str | None:
-    """Resolve this repo's explicit **Copilot CLI identity** override, or None.
-
-    Repo-keyed only -- unlike :func:`resolve_account`, there is no
-    owner-derivation fallback, because a repo with no GitHub owner at all
-    (e.g. a private Gitea remote) can still need a pinned Copilot identity.
-    Callers wanting the full precedence chain (explicit -> machine default ->
-    none) should use :func:`copilot_account_for`, which also consults
-    ``config.Config.default_copilot_account``.
-    """
+    """Resolve this repo's explicit **Copilot CLI identity** override, or
+    None. Repo-keyed only, unlike :func:`resolve_account`. See
+    :func:`copilot_account_for` for the full chain."""
     if entry is None:
         return None
     return entry.copilot_account or None
 
 
 def copilot_account_for(name: str) -> str | None:
-    """Resolve the intended Copilot CLI login for a **registered repo name**.
-
-    Order: this repo's explicit ``copilot_account:`` override ->
-    the machine's ``default_copilot_account`` (``config.yaml``, machine-local
-    or global tier) -> None (no preference; leave Copilot's ambient login
-    alone). Unlike the ``account``/``account_map`` chain this never derives
-    from a GitHub owner: Copilot's own inference identity is a per-repo/
-    per-machine policy independent of where (or whether) a repo is hosted on
-    GitHub. See ThomasMichon/copilot-extensions#3296.
-    """
+    """Resolve the intended Copilot CLI login: explicit ``copilot_account:``
+    -> ``default_copilot_account`` -> None. See #3296."""
     entry = find_repo(name)
     explicit = resolve_copilot_account(entry)
     if explicit:
         return explicit
     try:
         from . import config as _config
-
         return _config.load_config().default_copilot_account or None
     except Exception:
         return no_project_top_level_defaults()[0] or None
 
 
 def no_project_top_level_defaults() -> tuple[str, bool]:
-    """Read ``default_copilot_account``/``copilot_identity_switch_enabled``
-    directly from the global + machine-local config tiers, bypassing full
-    repo resolution. ``config.load_config()`` always raises for a
-    **no-project command** (``front_door_cli._NO_PROJECT_COMMANDS``, e.g.
-    ``copilot-identity``) -- it never resolves an active project, and that
-    function also requires resolving a repo. Returns ``("", False)`` on any
-    failure; never raises."""
+    """Read account/switch defaults from global + machine-local config tiers
+    directly, bypassing repo resolution (``load_config()`` always raises for
+    a no-project command, e.g. ``copilot-identity``)."""
     from . import config as _config
-
     try:
         global_raw = _config._load_yaml_safe(_config.global_config_path())
     except Exception:
@@ -522,12 +498,8 @@ def no_project_top_level_defaults() -> tuple[str, bool]:
         machine_raw = _config._load_yaml_safe(_config.default_config_path())
     except Exception:
         machine_raw = {}
-    account = str(machine_raw.get(
-        "default_copilot_account",
-        global_raw.get("default_copilot_account", "")) or "")
-    enabled = bool(machine_raw.get(
-        "copilot_identity_switch_enabled",
-        global_raw.get("copilot_identity_switch_enabled", False)))
+    account = str(machine_raw.get("default_copilot_account", global_raw.get("default_copilot_account", "")) or "")
+    enabled = bool(machine_raw.get("copilot_identity_switch_enabled", global_raw.get("copilot_identity_switch_enabled", False)))
     return account, enabled
 
 
