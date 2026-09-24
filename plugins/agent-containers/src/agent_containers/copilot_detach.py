@@ -60,7 +60,7 @@ def plan_for(args: argparse.Namespace, target: Any) -> dict[str, Any]:
 
 def _fail(message: str, plan: dict[str, Any] | None = None, **extra: Any) -> int:
     print(f"[FAIL] {message}", file=sys.stderr)
-    print(json.dumps({"ok": False, "error": message, **(plan or {}), **extra}, indent=2))
+    print(json.dumps({"ok": False, "error": message, **public_plan(plan or {}), **extra}, indent=2))
     return 1
 
 
@@ -95,19 +95,28 @@ def _remote(
     return result.returncode, result.stdout or "", result.stderr or ""
 
 
-def _relay_launch_env(
+def _launch_env(
     args: argparse.Namespace,
     target: Any,
     *,
     require_live_relay_port: Callable[[], int],
     relay_healthy: Callable[[int], bool],
 ) -> tuple[dict[str, str], int | None, int | None]:
-    if getattr(args, "no_relay", False):
-        return {}, None, None
     config = target.config
-    _forward, relay_enabled = config.credentials_for(target.fleet)
-    if not relay_enabled:
-        return {}, None, None
+    forward, relay_enabled = config.credentials_for(target.fleet)
+    env: dict[str, str] = {}
+    if forward:
+        from .resolver import host_gh_token
+
+        github_token = host_gh_token()
+        if not github_token:
+            raise RuntimeError(
+                "forward_gh_token is enabled but `gh auth token` returned nothing; "
+                "the container's Copilot CLI would start signed out"
+            )
+        env["GH_TOKEN"] = github_token
+    if getattr(args, "no_relay", False) or not relay_enabled:
+        return env, None, None
     from .container_shims import deploy as deploy_shims
     from .container_shims import git_credential_environment
     from .relay_provider import token_for
@@ -120,12 +129,12 @@ def _relay_launch_env(
             "restart agent-bridge or set relay.enabled: false in containers.yaml"
         )
     deploy_shims(args.name, ado=True)
-    env = {
+    env.update({
         "LC_GIT_CREDENTIAL_RELAY_HOST": "127.0.0.1",
         "LC_GIT_CREDENTIAL_RELAY": str(config.relay_port),
         "LC_GIT_CREDENTIAL_RELAY_TOKEN": token_for(args.name),
         **git_credential_environment(),
-    }
+    })
     return env, int(config.relay_port), int(host_relay_port)
 
 
@@ -241,14 +250,17 @@ def cmd_detach(
 
     remote_env: str | None = None
     try:
-        relay_env, relay_port, host_relay_port = _relay_launch_env(
-            args,
-            target,
-            require_live_relay_port=require_live_relay_port,
-            relay_healthy=relay_healthy,
-        )
-        remote_env = _prepare_remote_env(args, target, relay_env)
-        ssh_config = prepare_ssh_config(args.name, target.user)
+        try:
+            launch_env, relay_port, host_relay_port = _launch_env(
+                args,
+                target,
+                require_live_relay_port=require_live_relay_port,
+                relay_healthy=relay_healthy,
+            )
+            remote_env = _prepare_remote_env(args, target, launch_env)
+            ssh_config = prepare_ssh_config(args.name, target.user)
+        except RuntimeError as exc:
+            return _fail(str(exc), plan)
         adapter = _ContainerAdapter(
             name=args.name,
             ssh_config=ssh_config,

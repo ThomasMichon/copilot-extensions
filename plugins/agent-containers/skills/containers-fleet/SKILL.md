@@ -195,6 +195,14 @@ session to register with the host bridge before reporting success. Repeating
 kills and verifies the venue tmux session, stops the keeper, and deregisters
 the exact live-session row.
 
+The fleet image must carry Copilot CLI, the agent-bridge plugin, tmux, sshd,
+and the container's own worktree manager with the workspace already adopted
+as a project (the launch fails with "Could not resolve a project" otherwise).
+With `forward_gh_token` on (the default), the host `gh auth token` is staged
+as `GH_TOKEN` through the same stdin-only launch file as the relay values, so
+the container's Copilot starts signed in; the launch fails early if the host
+has no token rather than starting a signed-out session.
+
 For a named restricted OpenSSH target:
 
 ```bash

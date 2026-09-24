@@ -68,7 +68,7 @@ def plan_for(args: argparse.Namespace) -> dict[str, Any]:
 
 def _fail(message: str, plan: dict[str, Any] | None = None, **extra: Any) -> int:
     print(f"[FAIL] {message}", file=sys.stderr)
-    print(json.dumps({"ok": False, "error": message, **(plan or {}), **extra}, indent=2))
+    print(json.dumps({"ok": False, "error": message, **public_plan(plan or {}), **extra}, indent=2))
     return 1
 
 

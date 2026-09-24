@@ -198,6 +198,41 @@ def test_detach_success_provisions_credentials_starts_keeper_and_reports_handle(
     assert "--json" in launch
     assert seams.release == [("anchor-repo@repo-1", "r1")]
     assert _FakeLock.instances[0].released is True
+    assert "GH_TOKEN" not in seams.remote_env[0]
+
+
+def test_detach_forwards_the_host_github_token_when_enabled(seams, monkeypatch, capsys):
+    import agent_containers.resolver as resolver_mod
+
+    target = resolver_mod.resolve_live_exec_target("repo-1")
+    target.config.forward_gh_token = True
+    monkeypatch.setattr(resolver_mod, "host_gh_token", lambda: "gho_host")
+    rc = detach.cmd_detach(
+        _args(), require_live_relay_port=lambda: 61234, relay_healthy=lambda p: True,
+    )
+    assert rc == 0
+    assert seams.remote_env[0]["GH_TOKEN"] == "gho_host"
+    assert seams.remote_env[0]["LC_GIT_CREDENTIAL_RELAY_TOKEN"] == "relay-token"
+    assert all("gho_host" not in cmd for cmd in seams.run)  # staged over stdin, never argv
+    assert "gho_host" not in capsys.readouterr().out
+
+
+def test_detach_fails_before_launch_when_the_forwarded_token_is_missing(seams, monkeypatch, capsys):
+    import agent_containers.resolver as resolver_mod
+
+    target = resolver_mod.resolve_live_exec_target("repo-1")
+    target.config.forward_gh_token = True
+    monkeypatch.setattr(resolver_mod, "host_gh_token", lambda: None)
+    rc = detach.cmd_detach(
+        _args(), require_live_relay_port=lambda: 61234, relay_healthy=lambda p: True,
+    )
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "signed out" in captured.err
+    failure = json.loads(captured.out)
+    assert failure["ok"] is False and "launch_detail" not in failure and "reservation_ttl" not in failure
+    assert not any("agent-worktrees embody" in cmd for cmd in seams.run)
+    assert _FakeLock.instances[0].released is True
 
 
 def test_restricted_container_is_refused(monkeypatch, capsys):
