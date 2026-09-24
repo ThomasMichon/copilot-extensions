@@ -23,7 +23,7 @@ from venue_copilot import (
     read_seed,
     resolve_daemon_port,
 )
-from venue_copilot.detached import launch_detached, stop_detached
+from venue_copilot.detached import launch_detached, public_plan, stop_detached
 
 _RESERVATION_TTL = 900.0
 _RESERVE_RETRY_WINDOW = 90.0
@@ -215,7 +215,7 @@ def cmd_detach(args: argparse.Namespace) -> int:
     except (OSError, ValueError) as exc:
         return _fail(str(exc), plan)
     if getattr(args, "dry_run", False):
-        print(json.dumps({"ok": True, "dry_run": True, **plan, "seed_len": len(seed or "")}, indent=2))
+        print(json.dumps({"ok": True, "dry_run": True, **public_plan(plan), "seed_len": len(seed or "")}, indent=2))
         return 0
 
     ssh_config = _ssh_config(args.target)

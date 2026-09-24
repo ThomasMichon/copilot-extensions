@@ -518,6 +518,27 @@ class TestDetachedRunner:
         assert "--copilot-arg=--no-ask-user" in launch
         assert released == [("anchor-repo@venue", "r1")]
 
+    def test_handle_never_echoes_runner_configuration(self, monkeypatch) -> None:
+        from venue_copilot import detached
+
+        monkeypatch.setattr("venue_copilot.detached.resolve_daemon_port", lambda: 41234)
+        monkeypatch.setattr("venue_copilot.detached.resolve_local_auth_token", lambda: "tok")
+        monkeypatch.setattr(
+            "venue_copilot.detached.reserve_with_retry",
+            lambda scope, venue, **kw: {"reservation_id": "r1"},
+        )
+        monkeypatch.setattr("venue_copilot.detached.await_claim", lambda scope, rid, timeout: "sid-42")
+        monkeypatch.setattr("venue_copilot.detached.release_cli_mode", lambda *a, **k: 1)
+        plan = {**self._plan(), "registration_error": "x", "reservation_ttl": 5.0, "launch_detail": "y"}
+        rc, payload = detached.launch_detached(
+            _Adapter(), plan, seed="do it", driver=None, copilot_args=[], ensure_mux=True,
+            register_timeout=0.0, progress=lambda *a: None,
+        )
+        assert rc == 0
+        assert not {"registration_error", "reservation_ttl", "launch_detail"} & payload.keys()
+        assert payload["scope_id"] == "anchor-repo@venue"
+        assert detached.public_plan(plan) == self._plan()
+
     def test_launch_failure_stops_created_unrepresented_session(self, monkeypatch) -> None:
         from venue_copilot import detached
 

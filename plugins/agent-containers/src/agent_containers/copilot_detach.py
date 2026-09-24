@@ -13,7 +13,7 @@ from typing import Any
 
 from agent_procutil import no_window_flags
 from venue_copilot import read_seed
-from venue_copilot.detached import launch_detached, stop_detached
+from venue_copilot.detached import launch_detached, public_plan, stop_detached
 
 _BUSY_EXIT = 75
 _RESERVATION_TTL = 900.0
@@ -229,7 +229,7 @@ def cmd_detach(
     except (OSError, ValueError) as exc:
         return _fail(str(exc), plan)
     if getattr(args, "dry_run", False):
-        print(json.dumps({"ok": True, "dry_run": True, **plan, "seed_len": len(seed or "")}, indent=2))
+        print(json.dumps({"ok": True, "dry_run": True, **public_plan(plan), "seed_len": len(seed or "")}, indent=2))
         return 0
 
     target_lock = TargetLock(f"container:{args.name}", op="copilot")

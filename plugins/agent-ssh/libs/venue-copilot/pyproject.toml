@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 # "venue-copilot") to prevent dependency-confusion; the import module stays
 # ``venue_copilot``. Mirrors agent-ssh-manager / agent-credential-relay.
 name = "agent-venue-copilot"
-version = "0.1.0-dev10"
+version = "0.1.0-dev11"
 description = "Provider-agnostic reserve/connect/release orchestration for a venue's CLI-mode `copilot` verb"
 readme = "README.md"
 license = "MIT"

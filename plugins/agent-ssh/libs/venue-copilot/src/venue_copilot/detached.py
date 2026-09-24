@@ -51,8 +51,22 @@ class DetachAdapter(Protocol):
         ...
 
 
+# Runner configuration a venue passes in its plan: never part of a printed handle.
+_RUNNER_CONFIG_KEYS = frozenset({
+    "reservation_ttl", "reserve_retry_window", "registration_error", "bridge_probe_error",
+    "missing_agent_worktrees_error", "old_agent_worktrees_error", "reservation_wait",
+    "launch_detail",
+})
+
+
+def public_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    """``plan`` without the runner-configuration keys (for handles and dry runs)."""
+    return {k: v for k, v in plan.items() if k not in _RUNNER_CONFIG_KEYS}
+
+
 def _payload(ok: bool, plan: dict[str, Any], **extra: Any) -> dict[str, Any]:
-    return {"ok": ok, **extra, **plan} if ok else {"ok": False, **plan, **extra}
+    shown = public_plan(plan)
+    return {"ok": ok, **extra, **shown} if ok else {"ok": False, **shown, **extra}
 
 
 def _venue_text(plan: dict[str, Any], key: str, default: str) -> str:
