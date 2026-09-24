@@ -25,7 +25,9 @@ A copilot-extensions plugin that provides:
   steerable through agent-bridge; `--ref-file <path>` hands the worker a
   reference file (HAR trace, transcript, logs) without the orchestrator
   reading it; `--reverse-forward VENUE:HOST` keeps a host port (e.g. a
-  browser's DevTools) reachable inside the venue; `--stop` ends it. See the
+  browser's DevTools) reachable inside the venue; `--forward PORT[:VENUE]`
+  keeps a venue port (e.g. the worker's dev server) reachable on this host;
+  `--stop` ends it. See the
   `codespaces-lifecycle` skill.
 - **Resource obligations** -- a borrowed CodeSpace is an accountable
   **obligation** on the borrowing worktree: `ssh` journals an `active`
