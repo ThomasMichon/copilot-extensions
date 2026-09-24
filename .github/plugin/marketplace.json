@@ -85,11 +85,7 @@
     {
       "name": "agent-dispatch",
       "description": "Portable durable agent task-loop + per-host coordinator: a single-writer SQLite work queue (eight-state model with owner-preserving suspension, capability-gated atomic claim, affinity routing, liveness-reconciled recovery) so agents coordinate without push latency or an account per agent.",
-<<<<<<< HEAD
-      "version": "0.1.2-dev196",
-=======
       "version": "0.1.2-dev198",
->>>>>>> e30bf9e35 (Deliver idle-confirm as a resume prompt; idle is not completion.)
       "source": "plugins/agent-dispatch"
     },
     {

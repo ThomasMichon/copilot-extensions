@@ -4,11 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-dispatch"
-<<<<<<< HEAD
-version = "0.1.2-dev196"
-=======
 version = "0.1.2-dev198"
->>>>>>> e30bf9e35 (Deliver idle-confirm as a resume prompt; idle is not completion.)
 description = "Portable agent task-queue + per-host coordinator: a single-writer SQLite work queue so agents coordinate without push latency or an account per agent."
 readme = "README.md"
 license = "MIT"
