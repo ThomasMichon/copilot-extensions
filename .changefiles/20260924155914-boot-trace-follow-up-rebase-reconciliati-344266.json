@@ -1,0 +1,53 @@
+{
+  "comment": "boot-trace follow-up rebase reconciliation",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-index",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-logger",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-machines",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-pull-requests",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-vault",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    },
+    {
+      "plugin": "budget-guidance",
+      "type": "dev"
+    }
+  ]
+}
