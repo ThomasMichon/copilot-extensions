@@ -19,7 +19,6 @@ name: Validation Gate
 on:
   workflow_run:
     workflows: ["CI"]
-    branches: [dev]
     types: [completed]
   workflow_dispatch:
 
@@ -31,11 +30,48 @@ permissions:
   contents: read
 
 jobs:
-  full:
-    name: full - ${{ matrix.plugin }}
+  gate:
+    name: gate (confirm this is a dev commit)
+    # `branches: [dev]` on the workflow_run trigger above looks like the
+    # obvious filter, but it is unreliable in practice: GitHub's
+    # workflow_run event consistently reports `head_branch` as the
+    # repository's *default* branch (main), not the branch that actually
+    # produced the triggering CI run -- confirmed empirically across many
+    # real runs here, including successful push-triggered CI runs on dev
+    # whose own head_branch correctly says "dev". Trusting that field left
+    # this whole pipeline dead: 0 real triggers ever
+    # (dev-branch-release-pipeline effort, promote-trigger finding).
+    # Verify real dev-ancestry with git instead of the event metadata.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      is_dev: ${{ steps.check.outputs.is_dev }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: check
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "is_dev=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          sha="${{ github.event.workflow_run.head_sha }}"
+          git fetch origin dev
+          if git merge-base --is-ancestor "$sha" origin/dev; then
+            echo "is_dev=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_dev=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::$sha is not on origin/dev's history -- skipping (this CI completion was for a different branch/PR)."
+          fi
+
+  full:
+    name: full - ${{ matrix.plugin }}
+    needs: gate
+    if: needs.gate.outputs.is_dev == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -88,9 +124,8 @@ jobs:
 
   worktree-manager:
     name: worktree-manager (out-of-plugin, full)
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+    needs: gate
+    if: needs.gate.outputs.is_dev == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -105,9 +140,8 @@ jobs:
 
   guards-full-sweep:
     name: guards (full-tree, non-PR-scoped)
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+    needs: gate
+    if: needs.gate.outputs.is_dev == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
