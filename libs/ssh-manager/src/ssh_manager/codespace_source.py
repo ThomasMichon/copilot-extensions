@@ -46,14 +46,37 @@ class CodespaceConfigSource:
         codespace_name: str,
         *,
         config_dir: Path | str | None = None,
+        gh_env: dict | None = None,
     ) -> None:
         self._codespace_name = codespace_name
         self._config_dir = Path(config_dir) if config_dir else _DEFAULT_CONFIG_DIR
         self._config: SSHConfig | None = None
+        # Optional environment for the ``gh`` subprocess -- lets agent-codespaces
+        # pin ``gh codespace ssh --config`` to the account that owns this
+        # CodeSpace (multi-account: GH_TOKEN). None => inherit the ambient env.
+        self._gh_env = gh_env
 
     @property
     def codespace_name(self) -> str:
         return self._codespace_name
+
+    @property
+    def gh_env(self) -> dict | None:
+        """The pinned ``gh`` subprocess environment, or ``None`` (ambient).
+
+        Read by :class:`~ssh_manager.manager.ConnectionManager` (duck-typed
+        via ``getattr(config_source, "gh_env", None)``, so a plain
+        ``ConfigSource`` without this property is unaffected) and threaded
+        onto every SSH subprocess for the resulting connection -- not just
+        this source's own ``gh codespace ssh --config`` fetch. Without this,
+        the config fetch could be correctly pinned to the CodeSpace's owning
+        account while the actual connection (and, on Windows, the embedded
+        ProxyCommand's ``gh cs ssh --stdio`` child) silently fell back to
+        the ambient/active ``gh`` account -- a confusing 404 ("getting full
+        codespace details") whenever that ambient account differs from the
+        CodeSpace's owner.
+        """
+        return self._gh_env
 
     def get_ssh_config(self) -> SSHConfig:
         if self._config is not None:
@@ -81,7 +104,7 @@ class CodespaceConfigSource:
             try:
                 result = subprocess.run(
                     args, capture_output=True, text=True, timeout=timeout,
-                    creationflags=_creation_flags(),
+                    creationflags=_creation_flags(), env=self._gh_env,
                 )
             except FileNotFoundError:
                 raise RuntimeError(

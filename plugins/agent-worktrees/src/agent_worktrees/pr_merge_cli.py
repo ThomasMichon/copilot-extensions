@@ -287,9 +287,9 @@ def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
     # thing blocking the merge -- it queues indefinitely rather than
     # refusing -- so a pr-self-merge repo whose sole maintainer will never
     # supply that second review would otherwise sit "armed" forever (#3296
-    # follow-up: discovered landing gim-home/odsp-web-harness#502/#504,
-    # whose live ruleset requires 1 approving review but grants the acting
-    # Maintainer pull-request-scoped bypass rights). Only a provider that
+    # follow-up: discovered landing a real-world case with a live ruleset
+    # requiring 1 approving review but granting the acting Maintainer
+    # pull-request-scoped bypass rights). Only a provider that
     # exposes ``pull_review_gate`` (currently GitHub) is checked; other
     # providers' auto-merge already means what it says.
     bypass_review_gate = False

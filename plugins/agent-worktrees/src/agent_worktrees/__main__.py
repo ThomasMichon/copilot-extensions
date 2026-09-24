@@ -7499,7 +7499,7 @@ def _load_full_command_surface() -> None:
     global _FULL_SURFACE_LOADED
     if _FULL_SURFACE_LOADED:
         return
-    global COMMAND_MAP, CoordinationReadinessFailure, RevalidationResult, _CONCLUDED_STATES, _DESCRIPTOR_STYLE_BG, _ENV_BG, _GET_KEYS, _INSTRUCTION_MARKER
+    global COMMAND_MAP, CoordinationReadinessFailure, RevalidationResult, _CONCLUDED_STATES, _DESCRIPTOR_STYLE_BG, _ENV_BG, _GET_KEYS, _INSTRUCTION_MARKER, discover_plugin_dir
     global _PR_NAMESPACE, _PluginActivation, _RegisteredPluginTarget, _SEGMENT_STYLE, _WORKTREE_VERBS, _activate_project_for_path, _activate_project_for_worktree_id, _activate_session_binding
     global _all_tracking_dirs, _append_update_if_stale, _apply_assignment_env, _auto_clean_grace_secs, _aw_runtime_home, _background_environment, _bind_nudge_decision, _bind_nudge_should_fire
     global _browse_marketplace_plugins, _build_installer_argv, _build_list_json_payload, _capture_session_title, _claim_from_run_output, _claim_handoff_actor, _claims_add, _claims_cleanup

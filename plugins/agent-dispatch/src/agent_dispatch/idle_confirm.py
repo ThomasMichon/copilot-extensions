@@ -20,23 +20,32 @@ IdleConfirmNudgeFn = Callable[[str, dict], bool]
 IDLE_CONFIRM_COOLDOWN = 60.0
 
 
-def default_idle_confirm_nudge(target: str, task: dict) -> bool:
-    """Ask an idle headless worker to confirm the task is actually done."""
-    from . import bridge
-
+def idle_confirm_message(task: dict) -> str:
+    """Work-bearing idle prompt: idle is not done; continue or complete for real."""
     tid = task.get("id") or "unknown"
     title = str(task.get("title") or "").strip()
     named = f"task {tid}" + (f" ({title})" if title else "")
-    message = (
-        f"I see you are idle, but have not reported status. Please confirm that "
-        f"you are, in fact, done with {named}. If you are not done, continue "
-        "driving (load any needed skills, then act) until you can complete the "
-        "task or must steer. If you are done, complete it."
+    criteria = str(task.get("done_criteria") or task.get("goal") or "").strip()
+    criteria_line = f"\nDone-criteria: {criteria}" if criteria else ""
+    return (
+        f"I see you are idle, but you have not completed {named}. "
+        "Idle after loading a skill or ending a turn is not completion. "
+        "Continue the original goal now; do not complete just to clear this prompt."
+        f"{criteria_line}\n"
+        f"Only if those criteria are actually met, run `agent-dispatch complete {tid}`. "
+        "If you cannot proceed, post a steering card with --request-input."
     )
+
+
+def default_idle_confirm_nudge(target: str, task: dict) -> bool:
+    """Resume the idle session with a real prompt (not a notify-kind nudge)."""
+    from . import bridge
+
     host = task.get("_idle_host")
-    if isinstance(host, str) and host.strip():
-        return bridge.resume_session(target, message, host=host.strip(), wait=False)
-    return bridge.send_nudge(target, message)
+    host_s = host.strip() if isinstance(host, str) and host.strip() else None
+    return bridge.resume_session(
+        target, idle_confirm_message(task), host=host_s, wait=False
+    )
 
 
 def nudge_idle_headless_tasks(supervisor: Any, *, now: float) -> int:
