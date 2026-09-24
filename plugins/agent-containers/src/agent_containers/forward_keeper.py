@@ -11,7 +11,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from agent_procutil import (
     no_window_flags,
@@ -195,6 +195,36 @@ def _mux_exists(ssh_config: Any, mux: str) -> bool:
     return result.returncode == 0
 
 
+async def _run_supervised_mux_loop(
+    keepers: list[Any],
+    *,
+    mux_exists: Callable[[], bool],
+    write_state: Callable[[], None],
+    remove_state: Callable[[], None],
+    probe_interval: float,
+    startup_grace: float,
+) -> int:
+    write_state()
+    try:
+        for keeper in keepers:
+            await keeper.start()
+        startup_deadline = asyncio.get_running_loop().time() + max(0.0, startup_grace)
+        while True:
+            if await asyncio.to_thread(mux_exists):
+                break
+            if asyncio.get_running_loop().time() >= startup_deadline:
+                return 0
+            await asyncio.sleep(min(5.0, max(1.0, probe_interval)))
+        while True:
+            await asyncio.sleep(max(1.0, probe_interval))
+            if not await asyncio.to_thread(mux_exists):
+                return 0
+    finally:
+        for keeper in reversed(keepers):
+            await keeper.stop()
+        remove_state()
+
+
 async def _run(args: argparse.Namespace) -> int:
     from venue_copilot import resolve_daemon_port
 
@@ -223,27 +253,14 @@ async def _run(args: argparse.Namespace) -> int:
             )
         )
     ensure_private_dir(_STATE_DIR)
-    _write_self_state(args)
-    try:
-        for keeper in keepers:
-            await keeper.start()
-        startup_deadline = (
-            asyncio.get_running_loop().time() + max(0.0, float(args.startup_grace))
-        )
-        while True:
-            if await asyncio.to_thread(_mux_exists, ssh_config, args.mux):
-                break
-            if asyncio.get_running_loop().time() >= startup_deadline:
-                return 0
-            await asyncio.sleep(min(5.0, max(1.0, float(args.probe_interval))))
-        while True:
-            await asyncio.sleep(max(1.0, float(args.probe_interval)))
-            if not await asyncio.to_thread(_mux_exists, ssh_config, args.mux):
-                return 0
-    finally:
-        for keeper in reversed(keepers):
-            await keeper.stop()
-        _remove_self_state(args.name)
+    return await _run_supervised_mux_loop(
+        keepers,
+        mux_exists=lambda: _mux_exists(ssh_config, args.mux),
+        write_state=lambda: _write_self_state(args),
+        remove_state=lambda: _remove_self_state(args.name),
+        probe_interval=float(args.probe_interval),
+        startup_grace=float(args.startup_grace),
+    )
 
 
 def add_subparser(sub) -> None:
