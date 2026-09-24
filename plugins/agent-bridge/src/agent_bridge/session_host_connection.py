@@ -9,9 +9,10 @@ from dataclasses import is_dataclass
 from typing import Any
 
 from .acp_client import AcpClient
+from .acp_diagnostics import capture_acp_parse_errors, describe_truncated_child
 from .connect import ConnectError, ConnectStage
 from .models import SessionStatus
-from .session_manager import _AcpLaunchTiming, _default_cwd, Session, log
+from .session_manager import Session, _AcpLaunchTiming, _default_cwd, log
 from .transport import SpawnTarget
 
 
@@ -144,116 +145,124 @@ class _SessionHostConnectionMixin:
             client.session_host_client = sock
             if permission_callback:
                 client.auto_approve = False
-            try:
-                step_started = time.monotonic()
-                await asyncio.wait_for(
-                    client.start_streams(
-                        streams.reader, streams.writer,
-                        child_pid=spawned.child_pid, closer=_closer,
-                    ),
-                    timeout=self._timeouts.session_start,
-                )
-                timing.add("acp_initialize", time.monotonic() - step_started)
-                if streams.child_exit_code is not None:
-                    client.mark_host_child_exited(streams.child_exit_code)
-                    raise ConnectionError(
-                        "Session Host child exited during ACP startup "
-                        f"(code={streams.child_exit_code})"
-                    )
-                session_cwd = remote_cwd or target.cwd or _default_cwd(target)
-                if load_session_id:
+            with capture_acp_parse_errors() as parse_errors:
+                try:
                     step_started = time.monotonic()
                     await asyncio.wait_for(
-                        client.load_session(
-                            cwd=session_cwd,
-                            session_id=load_session_id,
-                            mcp_servers=mcp_servers,
-                            timing_callback=timing.add,
+                        client.start_streams(
+                            streams.reader, streams.writer,
+                            child_pid=spawned.child_pid, closer=_closer,
                         ),
-                        timeout=self._timeouts.session_new,
+                        timeout=self._timeouts.session_start,
                     )
-                    timing.add("session_load_total", time.monotonic() - step_started)
-                    acp_sid = load_session_id
-                else:
-                    step_started = time.monotonic()
-                    acp_sid = await asyncio.wait_for(
-                        client.new_session(
-                            cwd=session_cwd,
-                            mcp_servers=mcp_servers,
-                            timing_callback=timing.add,
-                        ),
-                        timeout=self._timeouts.session_new,
+                    timing.add("acp_initialize", time.monotonic() - step_started)
+                    if streams.child_exit_code is not None:
+                        client.mark_host_child_exited(streams.child_exit_code)
+                        raise ConnectionError(
+                            "Session Host child exited during ACP startup "
+                            f"(code={streams.child_exit_code})"
+                        )
+                    session_cwd = remote_cwd or target.cwd or _default_cwd(target)
+                    if load_session_id:
+                        step_started = time.monotonic()
+                        await asyncio.wait_for(
+                            client.load_session(
+                                cwd=session_cwd,
+                                session_id=load_session_id,
+                                mcp_servers=mcp_servers,
+                                timing_callback=timing.add,
+                            ),
+                            timeout=self._timeouts.session_new,
+                        )
+                        timing.add("session_load_total", time.monotonic() - step_started)
+                        acp_sid = load_session_id
+                    else:
+                        step_started = time.monotonic()
+                        acp_sid = await asyncio.wait_for(
+                            client.new_session(
+                                cwd=session_cwd,
+                                mcp_servers=mcp_servers,
+                                timing_callback=timing.add,
+                            ),
+                            timeout=self._timeouts.session_new,
+                        )
+                        timing.add("session_new_total", time.monotonic() - step_started)
+                    log.info("ACP launch timing: result=ok %s", timing.summary())
+                except (TimeoutError, asyncio.TimeoutError) as exc:
+                    # Leave a queryable marker so a stalled session-host resume/launch
+                    # is not a silent [starting]->[stopped] (#1468). The child's
+                    # stderr lives in the Session Host here (not this frontend), so
+                    # the tail is empty -- the always-logged child stderr carries it.
+                    with contextlib.suppress(Exception):
+                        on_acp_event("acp_launch_timeout", {
+                            "stage": "LAUNCH_ACP",
+                            "mode": "session-host",
+                            "handshake_timeout_s": self._timeouts.session_start,
+                            "session_new_timeout_s": self._timeouts.session_new,
+                            "timing_ms": timing.step_map_ms(),
+                        })
+                    log.warning("ACP launch timing: result=timeout %s", timing.summary())
+                    cleanup_confirmed = await self._rollback_failed_host_launch(
+                        spawner,
+                        spawned,
+                        sock,
+                        streams,
+                        session_id,
+                        parity_fault_result,
                     )
-                    timing.add("session_new_total", time.monotonic() - step_started)
-                log.info("ACP launch timing: result=ok %s", timing.summary())
-            except (TimeoutError, asyncio.TimeoutError) as exc:
-                # Leave a queryable marker so a stalled session-host resume/launch
-                # is not a silent [starting]->[stopped] (#1468). The child's
-                # stderr lives in the Session Host here (not this frontend), so
-                # the tail is empty -- the always-logged child stderr carries it.
-                with contextlib.suppress(Exception):
-                    on_acp_event("acp_launch_timeout", {
-                        "stage": "LAUNCH_ACP",
-                        "mode": "session-host",
-                        "handshake_timeout_s": self._timeouts.session_start,
-                        "session_new_timeout_s": self._timeouts.session_new,
-                        "timing_ms": timing.step_map_ms(),
-                    })
-                log.warning("ACP launch timing: result=timeout %s", timing.summary())
-                cleanup_confirmed = await self._rollback_failed_host_launch(
-                    spawner,
-                    spawned,
-                    sock,
-                    streams,
-                    session_id,
-                    parity_fault_result,
-                )
-                if not cleanup_confirmed:
-                    from .session_host.spawner import (
-                        RemoteSpawnCleanupPendingError,
-                    )
+                    if not cleanup_confirmed:
+                        from .session_host.spawner import (
+                            RemoteSpawnCleanupPendingError,
+                        )
 
-                    raise RemoteSpawnCleanupPendingError(
-                        "remote Session Host ACP initialization failed and "
-                        f"cleanup is inconclusive for {session_id}; retaining "
-                        "target ownership"
+                        raise RemoteSpawnCleanupPendingError(
+                            "remote Session Host ACP initialization failed and "
+                            f"cleanup is inconclusive for {session_id}; retaining "
+                            "target ownership"
+                        ) from exc
+                    raise ConnectError(
+                        ConnectStage.LAUNCH_ACP,
+                        f"Copilot ACP launch (session host) timed out "
+                        f"(handshake {self._timeouts.session_start}s / "
+                        f"session/new {self._timeouts.session_new}s). A cold "
+                        f"session/new on a large workspace may need a larger "
+                        f"budget -- raise timeouts.session_new in "
+                        f"~/.agent-bridge/config.yaml and restart the daemon.",
+                        retryable=False,
+                        cause=exc,
                     ) from exc
-                raise ConnectError(
-                    ConnectStage.LAUNCH_ACP,
-                    f"Copilot ACP launch (session host) timed out "
-                    f"(handshake {self._timeouts.session_start}s / "
-                    f"session/new {self._timeouts.session_new}s). A cold "
-                    f"session/new on a large workspace may need a larger "
-                    f"budget -- raise timeouts.session_new in "
-                    f"~/.agent-bridge/config.yaml and restart the daemon.",
-                    retryable=False,
-                    cause=exc,
-                ) from exc
-            except Exception as exc:
-                log.warning(
-                    "ACP launch timing: result=error error=%s %s",
-                    type(exc).__name__,
-                    timing.summary(),
-                )
-                cleanup_confirmed = await self._rollback_failed_host_launch(
-                    spawner,
-                    spawned,
-                    sock,
-                    streams,
-                    session_id,
-                    parity_fault_result,
-                )
-                if not cleanup_confirmed:
-                    from .session_host.spawner import (
-                        RemoteSpawnCleanupPendingError,
+                except Exception as exc:
+                    log.warning(
+                        "ACP launch timing: result=error error=%s %s",
+                        type(exc).__name__,
+                        timing.summary(),
                     )
+                    cleanup_confirmed = await self._rollback_failed_host_launch(
+                        spawner,
+                        spawned,
+                        sock,
+                        streams,
+                        session_id,
+                        parity_fault_result,
+                    )
+                    if not cleanup_confirmed:
+                        from .session_host.spawner import (
+                            RemoteSpawnCleanupPendingError,
+                        )
 
-                    raise RemoteSpawnCleanupPendingError(
-                        "remote Session Host ACP initialization failed and "
-                        f"cleanup is inconclusive for {session_id}; retaining "
-                        "target ownership"
-                    ) from exc
-                raise
+                        raise RemoteSpawnCleanupPendingError(
+                            "remote Session Host ACP initialization failed and "
+                            f"cleanup is inconclusive for {session_id}; retaining "
+                            "target ownership"
+                        ) from exc
+                    truncation_note = describe_truncated_child(parse_errors)
+                    if truncation_note:
+                        log.error(
+                            "connect[%s] stage 7/LAUNCH_ACP: %s",
+                            session_id, truncation_note,
+                        )
+                        raise ConnectionError(f"{exc} -- {truncation_note}") from exc
+                    raise
 
         if self._host_index is not None:
             self._host_index.register(HostRecord(
