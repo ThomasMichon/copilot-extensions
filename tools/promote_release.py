@@ -108,10 +108,45 @@ def remove_scratch_worktree(scratch: Path, *, repo: Path = REPO) -> None:
     _git(["worktree", "remove", "--force", str(scratch)], cwd=repo, check=False)
 
 
-def consume_pending_changes(scratch: Path) -> dict:
+def _changefile_existed_at(rev: str, name: str, *, repo: Path) -> bool:
+    """True if ``.changefiles/<name>`` was already present in ``dev`` at
+    ``rev`` (a real, historical commit -- typically the last promotion's own
+    ``dev_head``). Uses the real repo's object store, which a scratch
+    worktree shares (``git worktree add`` never creates a second store), so
+    this works regardless of which checkout the caller passes."""
+    result = subprocess.run(
+        ["git", "cat-file", "-e", f"{rev}:.changefiles/{name}"],
+        cwd=str(repo), capture_output=True, text=True,
+    )
+    return result.returncode == 0
+
+
+def consume_pending_changes(
+    scratch: Path, *, last_dev_head: str | None = None, repo: Path = REPO
+) -> dict:
     """Run accumulate_bumps' compute/apply against the scratch worktree's own
     copy of the tooling, and materialize_main's pointer expansion. Returns a
-    summary dict used for the tag/commit message and tests."""
+    summary dict used for the tag/commit message and tests.
+
+    ``last_dev_head`` is the ``dev`` commit the PREVIOUS promotion actually
+    promoted (persisted as ``last_promotion.dev_head`` in the pipeline state
+    committed on ``main`` -- see ``_read_pipeline_state``), or ``None`` for
+    the very first promotion ever. Bump computation only considers a pending
+    changefile that did NOT already exist in ``dev`` at that commit --
+    verified by sweeping every changefile currently present and checking
+    each one's presence at that exact boundary, never by keeping a
+    persisted "have we ever seen this filename" list. `dev`'s own tree is
+    never mutated by a promotion (see this module's docstring), so an
+    already-consumed changefile can keep sitting on `dev` for a while after
+    landing (the async "clear consumed changefiles on dev" cleanup PR is
+    best-effort/eventual, not synchronous with promotion) -- without this
+    filter, every later promotion would re-read it and recompute the exact
+    same bump target from `dev`'s still-unbumped plugin.json, colliding
+    with whatever real new version actually shipped in between (confirmed
+    live: two consecutive real promotions both computed identical
+    "agent-bridge 0.4.0-dev551 -> 0.4.1-dev1"). Every changefile physically
+    present is still deleted from the scratch tree regardless -- main must
+    never carry any, newly-applied or not."""
     # accumulate_bumps.py does a bare ``from changefile import
     # read_changefiles`` -- a plain import checks sys.modules by name FIRST,
     # before consulting sys.path, so if anything else in this process has
@@ -128,11 +163,28 @@ def consume_pending_changes(scratch: Path) -> dict:
         acc = _load_module(scratch / "tools" / "accumulate_bumps.py", "promote_accumulate_bumps")
         mm = _load_module(scratch / "tools" / "materialize_main.py", "promote_materialize_main")
 
-        changefile_names = [p.name for p, _data in acc.read_changefiles()]
-        grouped = acc.pending_bumps()
+        all_changefiles = list(acc.read_changefiles())
+        changefile_names = [p.name for p, _data in all_changefiles]
+        if last_dev_head is None:
+            new_entries = all_changefiles
+        else:
+            new_entries = [
+                (path, data) for path, data in all_changefiles
+                if not _changefile_existed_at(last_dev_head, path.name, repo=repo)
+            ]
+        newly_applied_names = [path.name for path, _data in new_entries]
+
+        grouped: dict[str, list[str]] = {}
+        for _path, data in new_entries:
+            for change in data.get("changes", []):
+                grouped.setdefault(change["plugin"], []).append(change["type"])
         computed = acc.compute(grouped)
         applied = acc.apply(computed) if computed else []
-        if computed:
+        if all_changefiles:
+            # Delete every changefile physically present, not just the ones
+            # that drove a bump this round -- an already-consumed changefile
+            # left un-deleted here would otherwise leak straight into main's
+            # generated tree (main must never carry any .changefiles/*).
             acc._consume_changefiles()
 
         materialize_log = mm.materialize(scratch, canonical_root=scratch)
@@ -145,6 +197,7 @@ def consume_pending_changes(scratch: Path) -> dict:
     return {
         "bumps": {p: computed[p] for p in applied},
         "changefiles_consumed": changefile_names,
+        "changefiles_newly_applied": newly_applied_names,
         "materialize_log": materialize_log,
     }
 
@@ -311,7 +364,10 @@ def promote(
 
     scratch = add_scratch_worktree(dev_head, repo=repo)
     try:
-        summary = consume_pending_changes(scratch)
+        last_promotion = state.get("last_promotion") or {}
+        summary = consume_pending_changes(
+            scratch, last_dev_head=last_promotion.get("dev_head"), repo=repo,
+        )
         content_tree = build_promotion_tree(scratch)
         main_content_tree = _tree_excluding_state(main_tree, repo=repo)
 
