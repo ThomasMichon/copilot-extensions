@@ -1460,7 +1460,77 @@ def test_cold_resume_process_failure_backs_off_before_retry(q, client):
     assert attempts == ["blocked-session", "blocked-session"]
 
 
-def test_idle_headless_turn_auto_suspends_and_cools(q, client):
+def test_idle_confirm_nudge_asks_whether_the_task_is_done(monkeypatch):
+    sent = []
+    monkeypatch.setattr(
+        "agent_dispatch.bridge.resume_session",
+        lambda target, message, **k: sent.append((target, k.get("host"), message))
+        or True,
+    )
+    from agent_dispatch.idle_confirm import default_idle_confirm_nudge
+
+    assert default_idle_confirm_nudge(
+        "sid-1",
+        {
+            "id": "abc",
+            "title": "do the thing",
+            "done_criteria": "comment posted",
+        },
+    )
+    assert sent[0][0] == "sid-1"
+    assert sent[0][1] is None
+    msg = sent[0][2]
+    assert "I see you are idle, but you have not completed task abc (do the thing)" in msg
+    assert "Idle after loading a skill or ending a turn is not completion" in msg
+    assert "agent-dispatch complete abc" in msg
+    assert "Done-criteria: comment posted" in msg
+    assert "do not complete just to clear this prompt" in msg
+
+
+def test_idle_headless_fleet_nudge_includes_remote_host(q, client):
+    task = q.create("review turn", labels=["review"])
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        reservation.key, session_handle="fleet-body:host-a:sess-9"
+    )
+    q.claim_one("headless-owner", task_id=task.id)
+    q.start(task.id, "headless-owner")
+    nudged = []
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        labels=["review"],
+        fleet_activity_fn=lambda _host, _sid: "IDLE",
+        idle_nudge_fn=lambda target, t: nudged.append(
+            (target, t.get("_idle_host"))
+        )
+        or True,
+    )
+
+    assert sup.poll_once() == []
+    assert nudged == [("sess-9", "host-a")]
+    assert q.get(task.id).status == Status.STARTED
+
+
+def test_idle_confirm_nudge_routes_fleet_via_resume_session(monkeypatch):
+    sent = []
+    monkeypatch.setattr(
+        "agent_dispatch.bridge.resume_session",
+        lambda target, message, **k: sent.append((target, k.get("host"), message))
+        or True,
+    )
+    from agent_dispatch.idle_confirm import default_idle_confirm_nudge
+
+    assert default_idle_confirm_nudge(
+        "sess-9", {"id": "abc", "_idle_host": "host-a"}
+    )
+    assert sent[0][0] == "sess-9"
+    assert sent[0][1] == "host-a"
+    assert "have not completed task abc" in sent[0][2]
+
+
+def test_idle_headless_turn_nudges_confirm_done_instead_of_suspend(q, client):
     task = q.create("review turn", labels=["review"])
     reservation, _ = q.reserve_spawn(task.id)
     q.record_spawn(
@@ -1469,6 +1539,7 @@ def test_idle_headless_turn_auto_suspends_and_cools(q, client):
     q.claim_one("headless-owner", task_id=task.id)
     q.start(task.id, "headless-owner")
     stopped = []
+    nudged = []
     sup = Supervisor(
         client,
         spawn_fn=_ok_spawn(),
@@ -1477,14 +1548,18 @@ def test_idle_headless_turn_auto_suspends_and_cools(q, client):
         local_body_activity_fn=lambda _session_id: "IDLE",
         local_cold_fn=lambda session_id: stopped.append(session_id) or True,
         local_body_verdict_fn=lambda _session_id: "live",
+        idle_nudge_fn=lambda target, t: nudged.append((target, t["id"])) or True,
     )
 
     assert sup.poll_once() == []
     current = q.get(task.id)
-    assert current.status == Status.SUSPENDED
+    assert current.status == Status.STARTED
     assert current.activity == "IDLE"
-    assert q.get_reservation(reservation.key).state == SpawnState.COLD
-    assert stopped == ["review-session"]
+    assert q.get_reservation(reservation.key).state == SpawnState.SPAWNED
+    assert stopped == []
+    assert nudged == [("review-session", task.id)]
+    assert sup.poll_once() == []
+    assert nudged == [("review-session", task.id)]
 
 
 def test_supervisor_binds_headless_owner_to_acp_session(q, client):
