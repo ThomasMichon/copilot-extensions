@@ -282,6 +282,62 @@ function Resolve-RuntimePython {
     return $AwPy
 }
 
+function Invoke-RuntimePreflight {
+    # Runs a best-effort `agent_worktrees` preflight subcommand (knowledge
+    # composition, marketplace overrides, ...) with retry-and-reresolve.
+    #
+    # #stale-venv-preflight: a background plugin update can flip
+    # `current-version` to a brand-new slot WHILE this launch is mid-flight,
+    # and observed evidence (odsp-web-harness#<incident>) shows the OLD,
+    # still-"current"-at-the-time slot can transiently fail to import its own
+    # package during that swap (e.g. "No module named agent_worktrees") even
+    # though the interpreter itself still resolves and the slot is intact a
+    # moment later. Re-resolving the interpreter on every attempt and retrying
+    # rides out that window instead of trusting a single, possibly-stale
+    # snapshot of $VenvPython.
+    #
+    # These preflights are best-effort enrichments -- their output is only
+    # logged, never consumed downstream -- so persistent failure (not just a
+    # transient race) degrades to a warning rather than exiting the whole
+    # launch. Killing the process here previously took the entire terminal
+    # tab down with no recovery path (#stale-venv-preflight).
+    param(
+        [Parameter(Mandatory)][string]$Label,
+        [Parameter(Mandatory)][string[]]$PreflightArgs,
+        [int]$MaxAttempts = 3,
+        [int]$RetryDelayMs = 400
+    )
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        $py = Resolve-RuntimePython
+        if (-not $py -or -not (Test-Path -LiteralPath $py)) {
+            $py = $script:VenvPython
+        }
+        if (-not $py -or -not (Test-Path -LiteralPath $py)) {
+            Write-SetupLog "${Label}: runtime python unavailable on attempt ${attempt}/${MaxAttempts}" 'WARN'
+        } else {
+            $savedErrorAction = $ErrorActionPreference
+            try {
+                $ErrorActionPreference = 'Continue'
+                $output = & $py @PreflightArgs 2>&1
+                $exitCode = $LASTEXITCODE
+            } finally {
+                $ErrorActionPreference = $savedErrorAction
+            }
+            $text = (($output | ForEach-Object { "$_" }) -join '').Trim()
+            if ($exitCode -eq 0) {
+                Write-SetupLog "${Label} completed: $text"
+                return $true
+            }
+            Write-SetupLog "${Label} failed on attempt ${attempt}/${MaxAttempts} (exit ${exitCode}): $text" 'WARN'
+        }
+        if ($attempt -lt $MaxAttempts) { Start-Sleep -Milliseconds $RetryDelayMs }
+    }
+    $degradeMessage = "${Label} failed after ${MaxAttempts} attempts -- continuing launch without it (see $script:SetupLog)"
+    Write-SetupLog $degradeMessage 'ERROR'
+    Write-Host "WARNING: $degradeMessage" -ForegroundColor Yellow
+    return $false
+}
+
 $VenvPython = $AwPy
 
 if ($VenvPython -and (Test-Path -LiteralPath $VenvPython)) {
@@ -894,43 +950,11 @@ if ($script:LaunchProject) {
     $knowledgeArgs += @('--project', $script:LaunchProject)
 }
 $knowledgeArgs += @('knowledge', 'compose-plugins', '--cwd', $knowledgeCwd, '--json')
-$savedErrorAction = $ErrorActionPreference
-try {
-    # Handle native non-zero explicitly even when the host enabled
-    # PSNativeCommandUseErrorActionPreference.
-    $ErrorActionPreference = 'Continue'
-    $knowledgeOutput = & $VenvPython @knowledgeArgs 2>&1
-    $knowledgeExit = $LASTEXITCODE
-} finally {
-    $ErrorActionPreference = $savedErrorAction
-}
-$knowledgeText = (($knowledgeOutput | ForEach-Object { "$_" }) -join '').Trim()
-if ($knowledgeExit -eq 0) {
-    Write-SetupLog "Knowledge plugin preflight completed: $knowledgeText"
-} else {
-    Write-SetupLog "Knowledge plugin preflight failed (exit ${knowledgeExit}): $knowledgeText" 'ERROR'
-    [Console]::Error.WriteLine("ERROR: Knowledge plugin preflight failed: $knowledgeText")
-    exit $knowledgeExit
-}
+Invoke-RuntimePreflight -Label 'Knowledge plugin preflight' -PreflightArgs $knowledgeArgs | Out-Null
 
 $marketplaceArgs = @('-m', 'agent_worktrees', 'reconcile-marketplaces',
     '--cwd', $knowledgeCwd, '--ensure-ignored', '--json')
-$savedErrorAction = $ErrorActionPreference
-try {
-    $ErrorActionPreference = 'Continue'
-    $marketplaceOutput = & $VenvPython @marketplaceArgs 2>&1
-    $marketplaceExit = $LASTEXITCODE
-} finally {
-    $ErrorActionPreference = $savedErrorAction
-}
-$marketplaceText = (($marketplaceOutput | ForEach-Object { "$_" }) -join '').Trim()
-if ($marketplaceExit -eq 0) {
-    Write-SetupLog "Marketplace override preflight completed: $marketplaceText"
-} else {
-    Write-SetupLog "Marketplace override preflight failed (exit ${marketplaceExit}): $marketplaceText" 'ERROR'
-    [Console]::Error.WriteLine("ERROR: Marketplace override preflight failed: $marketplaceText")
-    exit $marketplaceExit
-}
+Invoke-RuntimePreflight -Label 'Marketplace override preflight' -PreflightArgs $marketplaceArgs | Out-Null
 
 # Apply environment variables from the launch plan
 if ($plan.env) {

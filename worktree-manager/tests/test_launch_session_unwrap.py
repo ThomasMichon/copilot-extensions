@@ -345,9 +345,13 @@ def test_launchers_compose_after_plan_before_copilot_handoff():
     assert sh_refresh < sh_compose
     assert 'PYTHON="$_REFRESHED_PYTHON"' in sh[sh_refresh:sh_compose]
     assert "runtime is unavailable after update apply" in sh[sh_refresh:sh_compose]
-    assert '"${_KNOWLEDGE_ARGS[@]}" 2>&1' in sh
-    assert 'exit "$_KNOWLEDGE_RC"' in sh
-    assert "Knowledge plugin preflight failed" in sh
+    # The preflight itself goes through the retry-and-degrade helper
+    # (#stale-venv-preflight) rather than a raw inline invocation/exit --
+    # a transient current-version swap must not kill the whole launch.
+    assert (
+        'run_runtime_preflight "Knowledge plugin preflight" '
+        '"${_KNOWLEDGE_ARGS[@]}"'
+    ) in sh
     assert sh_compose < sh.index('PANE_CMD=("${CLEAN_ENV[@]}"')
     assert sh_compose < sh.index('"${CLEAN_ENV[@]}" "${CMD_ARRAY[@]}"')
 
@@ -359,10 +363,50 @@ def test_launchers_compose_after_plan_before_copilot_handoff():
     assert ps_refresh < ps_compose
     assert "$VenvPython = $refreshedVenvPython" in ps[ps_refresh:ps_compose]
     assert "runtime is unavailable after update apply" in ps[ps_refresh:ps_compose]
-    assert "$knowledgeOutput = & $VenvPython @knowledgeArgs 2>&1" in ps
-    assert "exit $knowledgeExit" in ps
-    assert "Knowledge plugin preflight failed" in ps
+    assert (
+        "Invoke-RuntimePreflight -Label 'Knowledge plugin preflight' "
+        "-PreflightArgs $knowledgeArgs"
+    ) in ps
     assert ps_compose < ps.index("& $cmd[0] $cmd[1..($cmd.Count - 1)]")
+
+
+def test_knowledge_and_marketplace_preflights_retry_and_degrade_not_exit():
+    """#stale-venv-preflight: a background plugin update can flip
+    current-version to a brand-new runtime slot mid-launch, and the
+    still-"current"-at-the-time slot can transiently fail to import its own
+    package during that swap. The knowledge-plugin and marketplace-override
+    preflights must ride that out with a retry-and-reresolve helper and
+    degrade to a warning on persistent failure, never `exit` the whole
+    launcher (which -- with no wrapping shell -- used to kill the entire
+    terminal tab with no recovery path)."""
+    sh = _LAUNCH_SCRIPT.read_text(encoding="utf-8")
+    ps = _LAUNCH_PS1.read_text(encoding="utf-8")
+
+    # bash: shared helper retries, re-resolving the interpreter each attempt,
+    # and degrades to a warning rather than exiting.
+    assert "run_runtime_preflight() {" in sh
+    assert 'py="$(resolve_runtime_python)"' in sh
+    assert "for ((attempt = 1; attempt <= max_attempts; attempt++))" in sh
+    assert "continuing launch without it" in sh
+    assert (
+        'run_runtime_preflight "Marketplace override preflight" '
+        '"${_MARKETPLACE_ARGS[@]}"'
+    ) in sh
+    # No more fatal exits keyed to preflight-specific exit codes.
+    assert "exit $_KNOWLEDGE_RC" not in sh
+    assert "exit $_MARKETPLACE_RC" not in sh
+
+    # PowerShell: same contract.
+    assert "function Invoke-RuntimePreflight" in ps
+    assert "$py = Resolve-RuntimePython" in ps
+    assert "for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++)" in ps
+    assert "continuing launch without it" in ps
+    assert (
+        "Invoke-RuntimePreflight -Label 'Marketplace override preflight' "
+        "-PreflightArgs $marketplaceArgs"
+    ) in ps
+    assert "exit $knowledgeExit" not in ps
+    assert "exit $marketplaceExit" not in ps
 
 
 def test_launchers_prefer_resolved_plan_project_over_ambient():
