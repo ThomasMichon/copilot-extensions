@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 from typing import Any
 
 from acp import (
@@ -78,6 +79,7 @@ _SINGLETON_GUEST_JOIN_STATUSES = frozenset({
     SessionStatus.IDLE,
 })
 _singleton_slot_locks: dict[str, asyncio.Lock] = {}
+_singleton_slot_locks_guard = asyncio.Lock()
 
 
 def _normalize_stop_reason(reason: str | None) -> str:
@@ -152,6 +154,29 @@ def _event_to_acp_update(event: SseEvent) -> Any | None:
         )
 
     return None
+
+
+@asynccontextmanager
+async def _hold_singleton_slot_lock(slot_key: str):
+    """Acquire a per-slot lock and prune it once it goes fully idle."""
+    async with _singleton_slot_locks_guard:
+        lock = _singleton_slot_locks.get(slot_key)
+        if lock is None:
+            lock = asyncio.Lock()
+            _singleton_slot_locks[slot_key] = lock
+    await lock.acquire()
+    try:
+        yield
+    finally:
+        lock.release()
+        async with _singleton_slot_locks_guard:
+            waiters = getattr(lock, "_waiters", None)
+            if (
+                _singleton_slot_locks.get(slot_key) is lock
+                and not lock.locked()
+                and not waiters
+            ):
+                _singleton_slot_locks.pop(slot_key, None)
 
 
 class BridgeAgent(Agent):
@@ -233,8 +258,7 @@ class BridgeAgent(Agent):
         target = await self._resolve_target(cwd, agent_name)
         singleton_slot = self._singleton_slot_key(target)
         if singleton_slot is not None:
-            lock = _singleton_slot_locks.setdefault(singleton_slot, asyncio.Lock())
-            async with lock:
+            async with _hold_singleton_slot_lock(singleton_slot):
                 incumbent = self._latest_singleton_occupant(target)
                 if incumbent is not None:
                     return await self._adopt_existing(

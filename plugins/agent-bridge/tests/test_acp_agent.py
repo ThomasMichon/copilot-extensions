@@ -22,6 +22,7 @@ from agent_bridge.acp_agent import (
     _event_to_acp_update,
     _extract_text,
     _normalize_stop_reason,
+    _singleton_slot_locks,
 )
 from agent_bridge.db import Database
 from agent_bridge.events import EventLog, SseEvent
@@ -330,6 +331,37 @@ class TestBridgeAgentSessions:
             assert "s-owner" in agent_b._adopted_sessions
         finally:
             sm.start_session = real_start  # type: ignore[method-assign]
+
+    @pytest.mark.asyncio
+    async def test_singleton_lock_registry_prunes_idle_slot(self, sm):
+        _singleton_slot_locks.clear()
+
+        class _Resolver:
+            async def resolve_async(self, _agent_name):
+                return SpawnTarget(
+                    type="local",
+                    cwd="/tmp",
+                    worktree_id="wt-prune",
+                    venue={"provider": "agent-dispatch", "target_id": "task-1"},
+                )
+
+        real_start = sm.start_session
+
+        async def _fake_start_session(target, agent_name=None, permission_callback=None):
+            session = Session("s-owner", "owner", target, agent_name)
+            session.status = SessionStatus.IDLE
+            session.event_log = EventLog()
+            sm._sessions[session.session_id] = session
+            return session
+
+        sm.start_session = _fake_start_session  # type: ignore[method-assign]
+        try:
+            agent = BridgeAgent(sm, resolver=_Resolver(), default_agent="dispatch:task-1")
+            await agent.new_session(cwd="/tmp")
+        finally:
+            sm.start_session = real_start  # type: ignore[method-assign]
+
+        assert _singleton_slot_locks == {}
 
     @pytest.mark.asyncio
     async def test_close_session(self, bridge_agent, sm):
