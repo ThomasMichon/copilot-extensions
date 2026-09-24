@@ -56,10 +56,11 @@ fi
 # Freeze registered agent-bridge contracts and require a registry update when a
 # contract-sensitive source changes.
 "${PY[@]}" "$ROOT/tools/check-agent-bridge-contracts.py" --base origin/main
-# Require a version bump whenever a plugin's content -- or a vendored lib it
-# ships -- changes, so new code never serves under a stale version (the silent
-# stale-deploy gap, dotfiles #1025). Diffs the push against origin/main.
-"${PY[@]}" "$ROOT/tools/check-version-bump.py"
+# Require a pending changefile whenever a plugin's content -- or a vendored lib
+# it ships -- changes. Dev-branch promotion consumes the changefile into the
+# real version fields; contributors no longer hand-edit versions in ordinary
+# dev PRs.
+"${PY[@]}" "$ROOT/tools/check-changefile-presence.py"
 # Every tracked, non-test source module must stay within its line-count cap
 # (or its shrink-only grandfathered ceiling, for pre-existing offenders) --
 # a componentization failure (queue.py's ~7,200 lines) had no automated guard
