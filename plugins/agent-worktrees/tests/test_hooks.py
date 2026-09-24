@@ -76,6 +76,40 @@ class TestRegistryDefaultBranch:
         (cfg_dir / "config.yaml").write_text("default_branch: master\n")
         assert hooks._default_branch(str(wt)) == "master"
 
+    def test_unconfigured_repo_falls_through_to_origin_head_not_fabricated_master(
+        self, anchor_and_worktree, _isolate_agent_worktrees_home
+    ):
+        """Regression (PR #3517 review finding): a registered repo with NO
+        explicit ``default_branch`` anywhere (no machine-local, no in-repo)
+        must resolve via ``origin/HEAD`` -- never the ``RepoConfig``
+        dataclass's fabricated ``"master"`` fallback, which would make an
+        unconfigured repo whose real default is e.g. ``main`` look like an
+        explicit ``master`` override and silently disable the guard on the
+        real default branch."""
+        anchor, wt = anchor_and_worktree
+        fake_home = _isolate_agent_worktrees_home
+
+        # Registered (so the anchor resolves to a project name)...
+        (fake_home / ".agent-worktrees" / "repos.yaml").write_text(
+            "schema_version: 1\n"
+            "repos:\n"
+            "  proj:\n"
+            "    class: worktree\n"
+            f"    windows: {anchor}\n"
+            f"    linux: {anchor}\n"
+            f"    wsl: {anchor}\n"
+        )
+        # ...but with NO default_branch configured anywhere, and a real
+        # remote whose HEAD is `main` (not the fixture's local `master`).
+        remote = anchor.parent / "remote.git"
+        git_ops.git("init", "--bare", "-b", "main", str(remote))
+        _git("branch", "-m", "master", "main", cwd=anchor)
+        _git("remote", "add", "origin", str(remote), cwd=anchor)
+        _git("push", "origin", "main", cwd=anchor)
+        _git("remote", "set-head", "origin", "main", cwd=anchor)
+
+        assert hooks._default_branch(str(wt)) == "main"
+
     def test_machine_local_override_wins_over_inrepo(
         self, anchor_and_worktree, _isolate_agent_worktrees_home
     ):
