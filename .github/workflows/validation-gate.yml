@@ -54,7 +54,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - name: Ensure full history is actually present
+        # actions/checkout's fetch-depth: 0 is unreliable when combined with
+        # an explicit detached-commit-sha ref (as this job needs, to pin to
+        # the exact commit CI already validated rather than whatever dev's
+        # tip has moved to since) -- confirmed live: agent-bridge's
+        # test_session_host_fixture_matches_generation_one (a `git show
+        # <historical-sha>:path` test) still failed with the same shallow-
+        # clone error even with fetch-depth: 0 set (actions/checkout#1515:
+        # an explicit SHA ref can silently produce a single-commit shallow
+        # clone regardless of fetch-depth). The prior fix here
+        # (`git fetch --prune --unshallow || true`) was itself broken: run
+        # against an already-complete clone, `--unshallow` errors out
+        # ("does not make sense on a complete repository") and the bare
+        # `|| true` silently swallowed that, so the step never actually did
+        # anything. Only unshallow when the clone genuinely is shallow, and
+        # always also register every remote branch explicitly -- an SHA-ref
+        # checkout may leave `origin/*` remote-tracking refs entirely
+        # unpopulated, which an unshallow alone would not fix either.
+        run: |
+          if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+            git fetch --prune --unshallow
+          fi
+          git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*'
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -72,6 +96,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Test worktree-manager
