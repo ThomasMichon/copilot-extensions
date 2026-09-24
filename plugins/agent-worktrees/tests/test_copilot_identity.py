@@ -371,6 +371,24 @@ def test_switch_enabled_machine_local_resolves_with_explicit_repo(home: Path, mo
     assert copilot_identity.switch_enabled("myproj") is True
 
 
+def test_switch_enabled_machine_local_config_d_dropin_resolves(home: Path, monkeypatch):
+    """A service-registered config.d drop-in (e.g. the vault pattern) must
+    also be honored in the no-project fallback, same as the normal loader --
+    not just an explicit machine-local config.yaml."""
+    monkeypatch.setattr(cfg, "_ACTIVE_PROJECT", "")
+    global_dir = home / ".agent-worktrees"
+    global_dir.mkdir(parents=True, exist_ok=True)
+    (global_dir / "config.yaml").write_text(
+        "copilot_identity_switch_enabled: false\n", encoding="utf-8"
+    )
+    cdir = cfg.project_dir("myproj") / "config.d"
+    cdir.mkdir(parents=True, exist_ok=True)
+    (cdir / "vault.yaml").write_text(
+        "copilot_identity_switch_enabled: true\n", encoding="utf-8"
+    )
+    assert copilot_identity.switch_enabled("myproj") is True
+
+
 # ---------------------------------------------------------------------------
 # The config-file switch_enabled() gate (replaces an env-var opt-out)
 # ---------------------------------------------------------------------------

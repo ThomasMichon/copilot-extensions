@@ -449,8 +449,7 @@ def account_from_map(owner: str | None) -> str | None:
 
 def resolve_account(entry: RepoEntry | None) -> str | None:
     """Resolve the preferred GitHub account for a repo entry: explicit
-    ``account:`` -> ``account_map`` -> owner from a github.com remote ->
-    None (ambient ``gh`` account)."""
+    ``account:`` -> ``account_map`` -> remote owner -> None (ambient)."""
     if entry is None:
         return None
     if entry.account:
@@ -463,16 +462,13 @@ def resolve_account(entry: RepoEntry | None) -> str | None:
 
 
 def resolve_copilot_account(entry: RepoEntry | None) -> str | None:
-    """Resolve this repo's explicit **Copilot CLI identity** override, or
-    None. Repo-keyed only, unlike :func:`resolve_account`. See
+    """Resolve this repo's explicit Copilot identity override, or None. See
     :func:`copilot_account_for` for the full chain."""
-    if entry is None:
-        return None
-    return entry.copilot_account or None
+    return (entry.copilot_account or None) if entry else None
 
 
 def copilot_account_for(name: str) -> str | None:
-    """Resolve the Copilot CLI login: ``copilot_account:`` -> ``default_copilot_account`` -> None. See #3296."""
+    """Resolve the Copilot CLI login: ``copilot_account:`` -> default -> None. See #3296."""
     entry = find_repo(name)
     explicit = resolve_copilot_account(entry)
     if explicit:
@@ -486,17 +482,20 @@ def copilot_account_for(name: str) -> str | None:
 
 def no_project_top_level_defaults(project: str | None = None) -> tuple[str, bool]:
     """Read account/switch defaults from global + machine-local config tiers
-    directly, bypassing repo resolution (``load_config()`` raises for a
-    no-project command). Pass the caller's known ``--repo`` as ``project`` so
-    ``project_dir(project)`` can still resolve the machine-local tier."""
+    (plus config.d drop-ins) directly, bypassing repo resolution
+    (``load_config()`` raises for a no-project command). Pass the caller's
+    known ``--repo`` as ``project`` so ``project_dir(project)`` can resolve."""
     from . import config as _config
     try:
         global_raw = _config._load_yaml_safe(_config.global_config_path())
     except Exception:
         return "", False
     try:
-        machine_path = _config.project_dir(project) / "config.yaml"
-        machine_raw = _config._load_yaml_safe(machine_path)
+        mdir = _config.project_dir(project)
+        machine_raw = _config._load_yaml_safe(mdir / "config.yaml")
+        dropins = _config._load_config_d(mdir / "config.d", project_name=project or "")
+        if dropins:
+            machine_raw = _config._deep_merge(dropins, machine_raw)
     except Exception:
         machine_raw = {}
     account = str(machine_raw.get("default_copilot_account", global_raw.get("default_copilot_account", "")) or "")

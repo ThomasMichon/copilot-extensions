@@ -144,8 +144,6 @@ def switch_enabled(repo_name: str | None = None) -> bool:
 
         return repos.no_project_top_level_defaults(repo_name)[1]
 
-        return repos.no_project_top_level_defaults()[1]
-
 
 def other_copilot_sessions_running() -> int:
     """Count Copilot CLI processes on this machine other than the caller.
