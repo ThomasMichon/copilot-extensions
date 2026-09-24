@@ -157,10 +157,11 @@ def _pr_reminder_for(
     reason: str = "",
 ):
     """Build this repo's stay-on-rails PR reminder for ``verb`` (or ``None``)."""
+    from . import pr_config
     from . import pr_contract as pc
 
     try:
-        flow = _core()._pr_flow_profile(config.default_repo)
+        flow = pr_config._pr_flow_profile(config.default_repo)
         return pc.pr_reminder(flow, verb, state, ok=ok, reason=reason)
     except Exception:
         return None

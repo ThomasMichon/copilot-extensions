@@ -7,6 +7,7 @@ import subprocess
 
 from . import config as cfg
 from . import output, state_root as state_root_mod
+from . import status_updater_cli
 
 
 def _core():
@@ -151,14 +152,14 @@ def _related_lookup_anchors(
 ) -> tuple[list[str], bool]:
     from . import related
 
-    anchors = _core()._related_config_source_anchors(anchor)
+    anchors = _related_config_source_anchors(anchor)
     if _related_opt(rest, "--repo"):
         return anchors, False
     if related.get_related_grafted(anchors, name) is not None:
         return anchors, False
     cp = related.find_control_plane_anchor()
     if cp and os.path.abspath(cp) != os.path.abspath(anchor):
-        cp_anchors = _core()._related_config_source_anchors(cp)
+        cp_anchors = _related_config_source_anchors(cp)
         if related.get_related_grafted(cp_anchors, name) is not None:
             return cp_anchors, True
     return anchors, False
@@ -205,10 +206,10 @@ def _hunt_checkout(name: str) -> str | None:
 def _related_doctor(anchor: str, rest: list[str], json_out: bool) -> int:
     from . import related, repos
 
-    anchors = _core()._related_config_source_anchors(anchor)
+    anchors = _related_config_source_anchors(anchor)
     rc = related.read_related_grafted(anchors)
 
-    current_machine = _core()._related_current_machine(anchors, anchor)
+    current_machine = _related_current_machine(anchors, anchor)
 
     machines_known_available = True
     machine_entries: dict = {}
@@ -310,7 +311,7 @@ def _related_conduct(anchor: str) -> int:
     except Exception:
         return 0
 
-    anchors = _core()._related_config_source_anchors(anchor)
+    anchors = _related_config_source_anchors(anchor)
     rel = related.read_related_grafted(anchors)
     related_count = len(rel.related)
     if not config.repos and not related_count:
@@ -362,9 +363,9 @@ def cmd_related_dispatch(argv: list[str]) -> int:
             cp = related.find_control_plane_anchor()
         except Exception:
             cp = None
-        base = cp or _core()._related_anchor(rest)
+        base = cp or _related_anchor(rest)
         owners = (
-            related.owned_targets_grafted(_core()._related_config_source_anchors(base))
+            related.owned_targets_grafted(_related_config_source_anchors(base))
             if base
             else []
         )
@@ -383,7 +384,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
     if not cfg.active_project():
         explicit = _related_opt(rest, "--repo")
         if explicit:
-            _core()._activate_project_for_path(explicit)
+            status_updater_cli._activate_project_for_path(explicit)
         else:
             project, _assumed = _core()._resolve_active_project(None)
             if project:
@@ -392,7 +393,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
         output.err("The current repo is not an adopted agent-worktrees project.")
         return 1
 
-    anchor = _core()._related_anchor(rest)
+    anchor = _related_anchor(rest)
     if not anchor:
         output.err("Could not resolve the current repo. Run inside a repo, or pass --repo <path>.")
         return 1
@@ -404,7 +405,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
 
     if sub == "list":
         role = _related_opt(rest, "--role")
-        anchors = _core()._related_config_source_anchors(anchor)
+        anchors = _related_config_source_anchors(anchor)
         entries = related.list_related_grafted(anchors, role=role)
         primary = related.get_primary_grafted(anchors)
         if json_out:
@@ -451,7 +452,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
             output.err("Usage: related show <name>")
             return 1
         name = rest[0]
-        anchors, _via_cp = _core()._related_lookup_anchors(rest, anchor, name)
+        anchors, _via_cp = _related_lookup_anchors(rest, anchor, name)
         e = related.get_related_grafted(anchors, name)
         if e is None:
             output.err(f"'{name}' is not a related repo.")
@@ -606,7 +607,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
             output.err("Usage: related doc <name>")
             return 1
         name = rest[0]
-        anchors, _via_cp = _core()._related_lookup_anchors(rest, anchor, name)
+        anchors, _via_cp = _related_lookup_anchors(rest, anchor, name)
         e = related.get_related_grafted(anchors, name)
         if e is None:
             output.err(f"'{name}' is not a related repo. Link it first: related add {name}")
@@ -620,26 +621,26 @@ def cmd_related_dispatch(argv: list[str]) -> int:
     if sub == "primary":
         if rest and not rest[0].startswith("-"):
             name = rest[0]
-            if related.get_related_grafted(_core()._related_config_source_anchors(anchor), name) is None:
+            if related.get_related_grafted(_related_config_source_anchors(anchor), name) is None:
                 output.err(f"'{name}' is not a related repo. Link it first.")
                 return 1
             related.set_primary(anchor, name)
             output.ok(f"primary = {name}")
         else:
-            print(related.get_primary_grafted(_core()._related_config_source_anchors(anchor)) or "(unset)")
+            print(related.get_primary_grafted(_related_config_source_anchors(anchor)) or "(unset)")
         return 0
 
     if sub == "resolve":
         from . import doctor
 
         explicit_name = rest[0] if rest and not rest[0].startswith("-") else None
-        anchors = _core()._related_config_source_anchors(anchor)
+        anchors = _related_config_source_anchors(anchor)
         name = explicit_name or related.get_primary_grafted(anchors)
         via_cp = False
         if not name and not _related_opt(rest, "--repo"):
             cp = related.find_control_plane_anchor()
             if cp and os.path.abspath(cp) != os.path.abspath(anchor):
-                cp_anchors = _core()._related_config_source_anchors(cp)
+                cp_anchors = _related_config_source_anchors(cp)
                 cp_primary = related.get_primary_grafted(cp_anchors)
                 if cp_primary:
                     anchors, name, via_cp = cp_anchors, cp_primary, True
@@ -647,13 +648,13 @@ def cmd_related_dispatch(argv: list[str]) -> int:
             output.err("Usage: related resolve <name>  (or set a primary first)")
             return 1
         if explicit_name:
-            anchors, via_cp = _core()._related_lookup_anchors(rest, anchor, name)
+            anchors, via_cp = _related_lookup_anchors(rest, anchor, name)
         entry = related.get_related_grafted(anchors, name)
         if entry is None:
             output.err(f"'{name}' is not a related repo.")
             return 1
         reg = repos.find_repo(name)
-        current_machine = _core()._related_current_machine(anchors, anchor)
+        current_machine = _related_current_machine(anchors, anchor)
         try:
             projects = doctor._read_projects()
         except Exception:

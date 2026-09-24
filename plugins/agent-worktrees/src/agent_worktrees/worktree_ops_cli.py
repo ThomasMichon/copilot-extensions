@@ -11,8 +11,10 @@ import sys
 from pathlib import Path
 
 from . import activity, finalize as fin, git_ops, obligations, output, sessions, tracking
+from . import claims_cli
 from . import config as cfg
 from . import managed_worktree_guard as remove_guard
+from . import reap_cli
 
 
 def _core():
@@ -53,7 +55,7 @@ def _json_output(*args, **kwargs):
 
 
 def _remove_managed_worktree(*args, **kwargs):
-    return _core()._remove_managed_worktree(*args, **kwargs)
+    return reap_cli._remove_managed_worktree(*args, **kwargs)
 
 
 def _resolve_worktree_id(*args, **kwargs):
@@ -275,7 +277,7 @@ def cmd_create(args: argparse.Namespace) -> int:
         else (
             getattr(args, "owner_ref", None)
             or os.environ.get("AGENT_WORKTREES_OWNER_REF")
-            or _core()._resolve_owner_ref()
+            or _resolve_owner_ref()
             or None
         )
     )
@@ -344,8 +346,8 @@ def cmd_create(args: argparse.Namespace) -> int:
                 bound_agent=getattr(args, "bound_agent", None),
                 no_pair=getattr(args, "no_pair", False),
             )
-        except _core().CoordinationReadinessFailure as exc:
-            return _core()._emit_coordination_rejection(exc.readiness, json_out=args.json)
+        except claims_cli.CoordinationReadinessFailure as exc:
+            return claims_cli._emit_coordination_rejection(exc.readiness, json_out=args.json)
         except Exception as e:
             if args.json:
                 return _json_error(str(e))
@@ -540,7 +542,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             "ownership before creation"
         )
         return 1
-    readiness = _core()._coordination_readiness_for_owner_ref(owner_ref, run_config)
+    readiness = claims_cli._coordination_readiness_for_owner_ref(owner_ref, run_config)
     if not readiness.ready:
         output.err(f"run: {readiness.code}: {readiness.error}")
         return 3
@@ -552,7 +554,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     pending_ref = ""
     if owner_ref:
         try:
-            owner_path, _owner_id, owner_err = _core()._resolve_owner_ref_record_path(
+            owner_path, _owner_id, owner_err = claims_cli._resolve_owner_ref_record_path(
                 owner_ref, run_config
             )
             if owner_err:

@@ -18,6 +18,7 @@ from agent_procutil import windowless_python
 
 from . import activity, locks, sessions_pane_retire, tracking
 from . import config as cfg
+from . import status_updater_cli
 
 
 def _core():
@@ -492,7 +493,7 @@ def _spawn_detached(argv: list[str]) -> bool:
         "stdout": subprocess.DEVNULL,
         "stderr": subprocess.DEVNULL,
         "cwd": os.path.expanduser("~"),
-        "env": _core()._background_environment(),
+        "env": _core_helper("_background_environment", status_updater_cli._background_environment)(),
     }
     kwargs.update(_core().windowless_daemon_kwargs(breakaway=True))
     try:
@@ -515,7 +516,8 @@ def _ensure_status_monitor() -> bool:
         data = _locks.read_lock(_monitor_lock_path())
         if _locks.lock_is_live(data) and isinstance(data, dict):
             other_prefix = data.get("prefix")
-            if not other_prefix or not _core()._runtime_superseded(prefix=other_prefix):
+            superseded_fn = _core_helper("_runtime_superseded", status_updater_cli._runtime_superseded)
+            if not other_prefix or not superseded_fn(prefix=other_prefix):
                 import shutil
 
                 caller_has_mux = bool(shutil.which("psmux") or shutil.which("tmux"))

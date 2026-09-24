@@ -567,6 +567,9 @@ def test_cmd_worktree_status_audit_exit_code_clean(tmp_path, monkeypatch):
         _ensure_status_monitor=lambda: True,
     )
     monkeypatch.setattr(wsa, "_core", lambda: fake_core)
+    monkeypatch.setattr(wsa.status_monitor_runtime, "_aw_runtime_home", fake_core._aw_runtime_home)
+    monkeypatch.setattr(wsa.status_monitor_runtime, "_status_monitor_enabled", fake_core._status_monitor_enabled)
+    monkeypatch.setattr(wsa.status_monitor_runtime, "_ensure_status_monitor", fake_core._ensure_status_monitor)
     bundle = _bundle("p", "wt1", git_state={"state": "clean"})
     _write_cache_row(wsa.cache_db_path(tmp_path), "p", "wt1", bundle)
     monkeypatch.setattr(wsa.worktree_status_compute, "compute", lambda project, wt_id: bundle)
@@ -597,6 +600,9 @@ def test_cmd_worktree_status_audit_passes_ensure_monitor_when_enabled(tmp_path, 
         _ensure_status_monitor=sentinel_ensure_monitor,
     )
     monkeypatch.setattr(wsa, "_core", lambda: fake_core)
+    monkeypatch.setattr(wsa.status_monitor_runtime, "_aw_runtime_home", fake_core._aw_runtime_home)
+    monkeypatch.setattr(wsa.status_monitor_runtime, "_status_monitor_enabled", fake_core._status_monitor_enabled)
+    monkeypatch.setattr(wsa.status_monitor_runtime, "_ensure_status_monitor", fake_core._ensure_status_monitor)
     captured = {}
     real_run_audit = wsa.run_audit
 
@@ -635,6 +641,9 @@ def test_cmd_worktree_status_audit_omits_ensure_monitor_when_disabled(tmp_path, 
         _ensure_status_monitor=lambda: True,
     )
     monkeypatch.setattr(wsa, "_core", lambda: fake_core)
+    monkeypatch.setattr(wsa.status_monitor_runtime, "_aw_runtime_home", fake_core._aw_runtime_home)
+    monkeypatch.setattr(wsa.status_monitor_runtime, "_status_monitor_enabled", fake_core._status_monitor_enabled)
+    monkeypatch.setattr(wsa.status_monitor_runtime, "_ensure_status_monitor", fake_core._ensure_status_monitor)
     captured = {}
     real_run_audit = wsa.run_audit
 
@@ -657,6 +666,9 @@ def test_cmd_worktree_status_audit_exit_code_nonzero_on_mismatch(tmp_path, monke
         _ensure_status_monitor=lambda: True,
     )
     monkeypatch.setattr(wsa, "_core", lambda: fake_core)
+    monkeypatch.setattr(wsa.status_monitor_runtime, "_aw_runtime_home", fake_core._aw_runtime_home)
+    monkeypatch.setattr(wsa.status_monitor_runtime, "_status_monitor_enabled", fake_core._status_monitor_enabled)
+    monkeypatch.setattr(wsa.status_monitor_runtime, "_ensure_status_monitor", fake_core._ensure_status_monitor)
     cached = _bundle("p", "wt1", git_state={"state": "clean"})
     live = _bundle("p", "wt1", git_state={"state": "dirty"})
     _write_cache_row(wsa.cache_db_path(tmp_path), "p", "wt1", cached)
@@ -675,6 +687,9 @@ def test_cmd_worktree_status_audit_respects_no_log(tmp_path, monkeypatch):
         _ensure_status_monitor=lambda: True,
     )
     monkeypatch.setattr(wsa, "_core", lambda: fake_core)
+    monkeypatch.setattr(wsa.status_monitor_runtime, "_aw_runtime_home", fake_core._aw_runtime_home)
+    monkeypatch.setattr(wsa.status_monitor_runtime, "_status_monitor_enabled", fake_core._status_monitor_enabled)
+    monkeypatch.setattr(wsa.status_monitor_runtime, "_ensure_status_monitor", fake_core._ensure_status_monitor)
     monkeypatch.setattr(
         wsa.worktree_status_compute, "compute", lambda project, wt_id: _bundle(project, wt_id)
     )
@@ -692,6 +707,9 @@ def test_cmd_worktree_status_audit_uses_explicit_log_path(tmp_path, monkeypatch)
         _ensure_status_monitor=lambda: True,
     )
     monkeypatch.setattr(wsa, "_core", lambda: fake_core)
+    monkeypatch.setattr(wsa.status_monitor_runtime, "_aw_runtime_home", fake_core._aw_runtime_home)
+    monkeypatch.setattr(wsa.status_monitor_runtime, "_status_monitor_enabled", fake_core._status_monitor_enabled)
+    monkeypatch.setattr(wsa.status_monitor_runtime, "_ensure_status_monitor", fake_core._ensure_status_monitor)
     monkeypatch.setattr(
         wsa.worktree_status_compute, "compute", lambda project, wt_id: _bundle(project, wt_id)
     )

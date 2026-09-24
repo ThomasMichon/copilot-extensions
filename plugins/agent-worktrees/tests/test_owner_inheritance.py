@@ -16,6 +16,7 @@ import pytest
 from agent_worktrees import __main__ as m
 from agent_worktrees import config as cfg
 from agent_worktrees import state_root
+from agent_worktrees import worktree_ops_cli
 
 # ── _self_owner_ref ──────────────────────────────────────────────────────────
 
@@ -115,7 +116,7 @@ def _patch_core(monkeypatch, captured):
 
     monkeypatch.setattr(m, "_create_worktree_core", fake_core)
     # cwd inference: pretend the caller is inside worktree "cwd/p/w"
-    monkeypatch.setattr(m, "_resolve_owner_ref", lambda: "cwd/proj/parent")
+    monkeypatch.setattr(worktree_ops_cli, "_resolve_owner_ref", lambda: "cwd/proj/parent")
 
 
 def test_cmd_create_explicit_owner_ref_wins(monkeypatch):

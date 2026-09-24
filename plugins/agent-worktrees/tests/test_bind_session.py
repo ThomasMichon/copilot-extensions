@@ -15,6 +15,7 @@ from pathlib import Path
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import activity, tracking
+from agent_worktrees import status_updater_cli
 from agent_worktrees.tracking import WorktreeRecord, load_record, save_record
 
 
@@ -51,7 +52,7 @@ def _args(**kw) -> argparse.Namespace:
 
 
 def _neutralize(monkeypatch, captured: dict) -> None:
-    monkeypatch.setattr(m, "_activate_project_for_path", lambda c: None)
+    monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
     monkeypatch.setattr(m, "_spawn_status_updater", lambda wt, path: True)
     monkeypatch.setattr(m, "_json_output", lambda data: captured.update(data))
 
@@ -321,7 +322,7 @@ class TestBindNudgeCmd:
     def test_untracked_cwd_emits_empty(
         self, tmp_tracking_dir, monkeypatch_config, monkeypatch, capsys
     ):
-        monkeypatch.setattr(m, "_activate_project_for_path", lambda c: None)
+        monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
         rc = m.cmd_bind_nudge(argparse.Namespace(cwd="/tmp/not/a/wt", stdin=False))
         assert rc == 0
         assert capsys.readouterr().out.strip() == "{}"
@@ -330,7 +331,7 @@ class TestBindNudgeCmd:
         self, tmp_tracking_dir, monkeypatch_config, monkeypatch, capsys
     ):
         _save_record(tmp_tracking_dir, "wt-p", "/tmp/src/wt-p")
-        monkeypatch.setattr(m, "_activate_project_for_path", lambda c: None)
+        monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
         rc = m.cmd_bind_nudge(argparse.Namespace(cwd="/tmp/src/wt-p", stdin=False))
         assert rc == 0
         out1 = capsys.readouterr().out
@@ -355,7 +356,7 @@ class TestBindNudgeCmd:
             head_session="s1",
         )
         save_record(rec, tmp_tracking_dir / "wt-q.yaml")
-        monkeypatch.setattr(m, "_activate_project_for_path", lambda c: None)
+        monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
         rc = m.cmd_bind_nudge(argparse.Namespace(cwd="/tmp/src/wt-q", stdin=False))
         assert rc == 0
         assert capsys.readouterr().out.strip() == "{}"
@@ -365,7 +366,7 @@ class TestBindNudgeCmd:
     ):
         _save_record(tmp_tracking_dir, "wt-deadline", "/tmp/src/wt-deadline")
         monkeypatch.setattr(
-            m, "_activate_project_for_path", lambda c, force=False: None)
+            status_updater_cli, "_activate_project_for_path", lambda c, force=False: None)
         assert m._bind_nudge_decision(
             "/tmp/src/wt-deadline", deadline=0
         ) == {}
@@ -388,7 +389,7 @@ class TestHistoryDigestCmd:
                   title=None, follow_up=False, changed=["summary"],
                   session_id="sess-h")
         activated = {}
-        monkeypatch.setattr(m, "_activate_project_for_path",
+        monkeypatch.setattr(status_updater_cli, "_activate_project_for_path",
                             lambda c: activated.update(cwd=c))
         monkeypatch.setattr(m, "_infer_worktree_id", lambda wid, cfg=None: "wt-h")
         monkeypatch.setattr(m, "_resolve_worktree_id", lambda wid: wid)
@@ -405,7 +406,7 @@ class TestHistoryDigestCmd:
     def test_digest_cmd_empty_when_no_worktree(
         self, tmp_tracking_dir, monkeypatch_config, monkeypatch, capsys
     ):
-        monkeypatch.setattr(m, "_activate_project_for_path", lambda c: None)
+        monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
         monkeypatch.setattr(m, "_infer_worktree_id", lambda wid, cfg=None: None)
         rc = m.cmd_history_digest(argparse.Namespace(worktree_id=None, limit=8))
         assert rc == 0
@@ -419,7 +420,7 @@ class TestNoteHandoff:
         import agent_worktrees.disposition_history as dh
 
         _save_record(tmp_tracking_dir, "wt-hd", "/tmp/src/wt-hd")
-        monkeypatch.setattr(m, "_activate_project_for_path", lambda c: None)
+        monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
         monkeypatch.setattr(m, "find_worktree_id_by_cwd", lambda c: "wt-hd", raising=False)
         monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: "wt-hd")
         captured = {}
@@ -444,7 +445,7 @@ class TestNoteHandoff:
     def test_untracked_is_silent_noop(
         self, tmp_tracking_dir, monkeypatch_config, monkeypatch
     ):
-        monkeypatch.setattr(m, "_activate_project_for_path", lambda c: None)
+        monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
         monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: None)
         captured = {}
         monkeypatch.setattr(m, "_json_output", lambda o: captured.update(o))

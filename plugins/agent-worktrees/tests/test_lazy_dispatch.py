@@ -230,6 +230,13 @@ def _deferred_only_global_names() -> frozenset[str]:
         ("status-context", ["status-context"]),
         ("status-segment", ["status-segment", "--json"]),
         ("profiles", ["profiles", "get", "--json"]),
+        ("follow-ups", ["follow-ups", "--json"]),
+        ("session-role", ["session-role", "--json"]),
+        ("history-digest", ["history-digest"]),
+        ("pr-status", ["pr-status", "--json"]),
+        ("pre-launch", ["pre-launch"]),
+        ("reconcile-plugins", ["reconcile-plugins", "--peek"]),
+        ("worktree-status-audit", ["worktree-status-audit", "--sample", "1", "--no-log", "--seed", "1"]),
     ],
 )
 def test_cluster_free_command_handler_body_runs_without_cluster(command, argv, monkeypatch, capsys):
@@ -274,6 +281,14 @@ def test_cluster_free_command_handler_body_runs_without_cluster(command, argv, m
     monkeypatch.setattr(m, "_ensure_cluster_loaded", lambda: calls.append(1))
     monkeypatch.setattr(m, "_load_full_command_surface", lambda: calls.append(1))
 
+    if command == "worktree-status-audit":
+        # Copilot review: this generic smoke test must not start a real
+        # detached status-monitor process when none is already live --
+        # isolate it exactly like the dedicated monitor-enabled test does.
+        from agent_worktrees import status_monitor_runtime
+
+        monkeypatch.setattr(status_monitor_runtime.subprocess, "Popen", lambda *a, **k: None)
+
     try:
         rc = m._dispatch_lazy(command, argv)
         assert isinstance(rc, int)
@@ -295,6 +310,42 @@ def test_cluster_free_command_handler_body_runs_without_cluster(command, argv, m
         )
 
     assert calls == [], f"{command!r} ({module_name}) must not load the cluster"
+
+
+def test_worktree_status_audit_monitor_enabled_path_skips_cluster(monkeypatch):
+    """Copilot review on #3473: `worktree_status_audit`'s handler reaches
+    `status_monitor_runtime._ensure_status_monitor()`, whose OWN body (when
+    the resident monitor is enabled, the default) calls
+    `_spawn_detached()` -> `_background_environment()`/`_runtime_superseded()`
+    -- both owned by `status_updater_cli`. The handler-body test above
+    exercises this with `--no-log` but doesn't force the monitor-enabled
+    branch specifically; this test does, forcing `_status_monitor_enabled`
+    True and letting the real `_ensure_status_monitor()` run end-to-end."""
+    from agent_worktrees import status_monitor_runtime
+
+    module_name, _ = m._LAZY_DISPATCH_TABLE["worktree-status-audit"]
+    assert module_name in m._CLUSTER_FREE_MODULES
+
+    for name in _deferred_only_global_names():
+        monkeypatch.delitem(m.__dict__, name, raising=False)
+    monkeypatch.setattr(m, "_FULL_SURFACE_LOADED", False, raising=False)
+    monkeypatch.setattr(m, "_CLUSTER_LOADED", False, raising=False)
+
+    calls = []
+    monkeypatch.setattr(m, "_ensure_cluster_loaded", lambda: calls.append(1))
+    monkeypatch.setattr(m, "_load_full_command_surface", lambda: calls.append(1))
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+    # Exercise _spawn_detached()'s own body (the env=/kwargs= construction
+    # that reaches _background_environment()/windowless_daemon_kwargs())
+    # without actually spawning a real background process -- Copilot review
+    # correctly flagged that this test would otherwise start a genuine
+    # detached status-monitor and mutate host state when no monitor is
+    # already live.
+    monkeypatch.setattr(status_monitor_runtime.subprocess, "Popen", lambda *a, **k: None)
+
+    result = status_monitor_runtime._ensure_status_monitor()
+    assert isinstance(result, bool)
+    assert calls == [], "the monitor-enabled path must not load the cluster"
 
 
 @pytest.mark.parametrize("command", ["get", "worktree-lineage", "session-lifecycle"])

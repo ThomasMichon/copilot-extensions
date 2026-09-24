@@ -36,3 +36,4 @@ uv.lock
 /.test-venvs/
 
 .venv-tools/
+plugins/agent-worktrees/full_test_run*.log

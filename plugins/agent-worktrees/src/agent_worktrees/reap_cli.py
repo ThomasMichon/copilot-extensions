@@ -34,7 +34,10 @@ def _iso_epoch(*args, **kwargs): return _core()._iso_epoch(*args, **kwargs)
 def _json_output(*args, **kwargs): return _core()._json_output(*args, **kwargs)
 def _normalize_path(*args, **kwargs): return _core()._normalize_path(*args, **kwargs)
 def _reap_worktree(*args, **kwargs): return _core()._reap_worktree(*args, **kwargs)
-def _revalidate_cleanup_safety(*args, **kwargs): return _core()._revalidate_cleanup_safety(*args, **kwargs)
+def _revalidate_cleanup_safety(*args, **kwargs):
+    from . import cleanup_gc_cli
+
+    return cleanup_gc_cli._revalidate_cleanup_safety(*args, **kwargs)
 def reap_orphan_mux_sessions(*args, **kwargs): return _core().reap_orphan_mux_sessions(*args, **kwargs)
 def select_orphan_launcher_shells(*args, **kwargs): return _core().select_orphan_launcher_shells(*args, **kwargs)
 

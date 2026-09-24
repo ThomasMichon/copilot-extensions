@@ -43,6 +43,7 @@ from pathlib import Path
 from . import config as cfg
 from . import installer as inst
 from . import locks
+from . import status_monitor_runtime
 from . import tracking
 from . import worktree_status_compute
 from .worktree_status_cache import DEFAULT_TTL_SECONDS
@@ -646,7 +647,7 @@ def cmd_worktree_status_audit(args: argparse.Namespace) -> int:
     human.
     """
     core = _core()
-    runtime_home = core._aw_runtime_home()
+    runtime_home = status_monitor_runtime._aw_runtime_home()
     if getattr(args, "no_log", False):
         log_path = None
     elif getattr(args, "log_path", None):
@@ -663,7 +664,7 @@ def cmd_worktree_status_audit(args: argparse.Namespace) -> int:
     # (`AGENT_WORKTREES_STATUS_MONITOR=0`) that disables the resident
     # monitor -- an operator who's turned it off deliberately should never
     # have this audit spawn one anyway.
-    ensure_monitor = core._ensure_status_monitor if core._status_monitor_enabled() else None
+    ensure_monitor = status_monitor_runtime._ensure_status_monitor if status_monitor_runtime._status_monitor_enabled() else None
 
     report = run_audit(
         runtime_home=runtime_home,

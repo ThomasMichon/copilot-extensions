@@ -177,8 +177,10 @@ def _follow_ups_show(args: argparse.Namespace, worktree_id: str | None) -> int:
 
 
 def _follow_ups_add(args: argparse.Namespace, summary: str) -> int:
+    from . import claims_cli
+
     config = cfg.load_config()
-    blocked = _core()._require_coordination_readiness(config, json_out=args.json)
+    blocked = claims_cli._require_coordination_readiness(config, json_out=args.json)
     if blocked is not None:
         return blocked
     wt_id, rec_path = _follow_ups_record_path(args, config)
