@@ -23,6 +23,13 @@ any other Copilot process is currently running, unless the caller passes
 ``force=True`` with informed consent. This intentionally still does not try
 to *coordinate* with those other sessions (e.g. asking them to re-read
 config) -- it only avoids stepping on them silently.
+
+Machine-wide **off by default**: the whole feature is gated behind
+``config.yaml``'s ``copilot_identity_switch_enabled`` (see
+:func:`switch_enabled`, consulted by the ``copilot-identity ensure`` CLI
+dispatch). Deliberately a config-file setting rather than an
+environment-variable opt-out, so the choice is durable and visible in the
+committed/machine-local config rather than only in a shell's environment.
 """
 
 from __future__ import annotations
@@ -43,6 +50,7 @@ Status = Literal[
     "login-failed",
     "no-target",
     "other-sessions-active",
+    "disabled",
 ]
 
 
@@ -55,7 +63,7 @@ class IdentityResult:
 
     @property
     def ok(self) -> bool:
-        return self.status in ("already-correct", "switched")
+        return self.status in ("already-correct", "switched", "disabled")
 
 
 def _copilot_home() -> Path:
@@ -111,6 +119,22 @@ def intended_account(repo_name: str | None) -> str | None:
         return _config.load_config().default_copilot_account or None
     except Exception:
         return None
+
+
+def switch_enabled() -> bool:
+    """Return whether the identity-switch feature is enabled for this
+    machine (``config.yaml``'s ``copilot_identity_switch_enabled``, default
+    false). This is the single gate consulted by both the automatic
+    ``launch-session.ps1`` check and the manual ``copilot-identity ensure``
+    CLI command -- there is no separate environment-variable opt-out.
+    Any resolution failure is treated as disabled (fails closed).
+    """
+    try:
+        from . import config as _config
+
+        return bool(_config.load_config().copilot_identity_switch_enabled)
+    except Exception:
+        return False
 
 
 def other_copilot_sessions_running() -> int:

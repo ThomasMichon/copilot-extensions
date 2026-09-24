@@ -46,6 +46,11 @@ def _usage() -> None:
     print("switching underneath a running session risks splicing its billing")
     print("across accounts, invalidating its prompt cache, and auth errors.")
     print()
+    print("'ensure' is a no-op unless this machine's config.yaml sets")
+    print("  copilot_identity_switch_enabled: true")
+    print("(default false -- opt in per machine, no environment-variable")
+    print("override).")
+    print()
     print("Examples:")
     print(f"  {project} copilot-identity status --repo my-personal-repo")
     print(f"  {project} copilot-identity ensure --repo my-work-repo")
@@ -117,7 +122,17 @@ def cmd_copilot_identity_dispatch(argv: list[str]) -> int:
             account = copilot_identity.intended_account(repo)
         dry_run = "--dry-run" in rest
         force = "--force" in rest
-        result = copilot_identity.ensure_login(account, dry_run=dry_run, force=force)
+        if not copilot_identity.switch_enabled():
+            result = copilot_identity.IdentityResult(
+                "disabled",
+                copilot_identity.current_login(),
+                account,
+                "Copilot identity switching is disabled (set "
+                "'copilot_identity_switch_enabled: true' in config.yaml to "
+                "enable it).",
+            )
+        else:
+            result = copilot_identity.ensure_login(account, dry_run=dry_run, force=force)
         if json_out:
             _core()._json_output(
                 {
@@ -137,6 +152,8 @@ def cmd_copilot_identity_dispatch(argv: list[str]) -> int:
             )
         elif result.status == "no-target":
             output.info("No intended Copilot account resolved; nothing to do.")
+        elif result.status == "disabled":
+            output.info(f"{result.detail}")
         elif result.status == "other-sessions-active":
             output.warn(f"{result.detail}")
         else:

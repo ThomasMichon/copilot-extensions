@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from agent_worktrees import config as cfg
-from agent_worktrees import copilot_identity, repos
+from agent_worktrees import copilot_identity, copilot_identity_cli, output, repos
 
 
 @pytest.fixture
@@ -267,3 +267,96 @@ def test_ensure_login_no_gate_when_already_correct(home: Path, monkeypatch):
     monkeypatch.setattr(copilot_identity, "other_copilot_sessions_running", _boom)
     result = copilot_identity.ensure_login("tmichon_microsoft")
     assert result.status == "already-correct"
+
+
+# ---------------------------------------------------------------------------
+# The config-file switch_enabled() gate (replaces an env-var opt-out)
+# ---------------------------------------------------------------------------
+
+def test_switch_enabled_defaults_false(home: Path, monkeypatch):
+    monkeypatch.setattr(
+        cfg, "load_config",
+        lambda *a, **k: cfg.Config(srcroot=str(home), machine="test", platform="windows"),
+    )
+    assert copilot_identity.switch_enabled() is False
+
+
+def test_switch_enabled_true_when_configured(home: Path, monkeypatch):
+    monkeypatch.setattr(
+        cfg, "load_config",
+        lambda *a, **k: cfg.Config(
+            srcroot=str(home), machine="test", platform="windows",
+            copilot_identity_switch_enabled=True,
+        ),
+    )
+    assert copilot_identity.switch_enabled() is True
+
+
+def test_switch_enabled_fails_closed_on_config_error(home: Path, monkeypatch):
+    def _boom(*_a, **_k):
+        raise RuntimeError("config unreadable")
+
+    monkeypatch.setattr(cfg, "load_config", _boom)
+    assert copilot_identity.switch_enabled() is False
+
+
+def test_cli_ensure_is_noop_when_disabled(home: Path, monkeypatch):
+    """The CLI dispatch -- the single path both launch-session.ps1 and a
+    manual invocation go through -- must short-circuit before ever minting a
+    token or shelling out, when the machine has not opted in."""
+    _write_copilot_config(home, "ThomasMichon")
+    monkeypatch.setattr(
+        cfg, "load_config",
+        lambda *a, **k: cfg.Config(
+            srcroot=str(home), machine="test", platform="windows",
+            default_copilot_account="tmichon_microsoft",
+        ),
+    )
+
+    def _boom(*_a, **_k):
+        raise AssertionError("must not shell out while switching is disabled")
+
+    monkeypatch.setattr(copilot_identity.subprocess, "run", _boom)
+    with output.capture_json_output() as buf:
+        rc = copilot_identity_cli.cmd_copilot_identity_dispatch(["ensure", "--json"])
+    assert rc == 0
+    out = json.loads(buf.getvalue())
+    assert out["status"] == "disabled"
+    assert out["target"] == "tmichon_microsoft"
+
+
+def test_cli_ensure_switches_when_enabled(home: Path, monkeypatch):
+    _write_copilot_config(home, "ThomasMichon")
+    monkeypatch.setattr(
+        cfg, "load_config",
+        lambda *a, **k: cfg.Config(
+            srcroot=str(home), machine="test", platform="windows",
+            default_copilot_account="tmichon_microsoft",
+            copilot_identity_switch_enabled=True,
+        ),
+    )
+    monkeypatch.setattr(copilot_identity.shutil, "which", lambda _name: "/usr/bin/x")
+    monkeypatch.setattr(copilot_identity, "other_copilot_sessions_running", lambda: 0)
+
+    class _Proc:
+        def __init__(self, returncode, stdout=""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = ""
+
+    def _run(cmd, **kwargs):
+        if cmd[:3] == ["gh", "auth", "token"]:
+            return _Proc(0, stdout="fake-token-value\n")
+        if cmd[:2] == ["copilot", "login"]:
+            return _Proc(0, stdout="Signed in successfully.\n")
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    monkeypatch.setattr(copilot_identity.subprocess, "run", _run)
+    with output.capture_json_output() as buf:
+        rc = copilot_identity_cli.cmd_copilot_identity_dispatch(["ensure", "--json"])
+    assert rc == 0
+    out = json.loads(buf.getvalue())
+    assert out["status"] == "switched"
+    assert out["target"] == "tmichon_microsoft"
+
+

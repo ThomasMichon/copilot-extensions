@@ -547,6 +547,20 @@ class Config:
     machine-local ``config.yaml`` > global ``~/.agent-worktrees/config.yaml``
     only. Empty means no machine-wide preference (ambient Copilot login,
     today's behavior). See ThomasMichon/copilot-extensions#3296."""
+    copilot_identity_switch_enabled: bool = False
+    """Master switch for the :mod:`copilot_identity` enforcement (both the
+    automatic check that ``launch-session.ps1`` runs at the start of every
+    session, and the manual ``copilot-identity ensure`` CLI command).
+    **Default false** -- the feature is opt-in. When false, ``ensure`` is a
+    pure no-op (status ``"disabled"``): it never mints a ``gh`` token, never
+    shells out to ``copilot login``, and never touches
+    ``~/.copilot/config.json``, regardless of :attr:`default_copilot_account`
+    or a repo's ``copilot_account`` override. Deliberately config-file based
+    rather than an environment-variable opt-out, so the choice is durable,
+    machine-local, and visible in ``config.yaml`` rather than living only in
+    a shell/session's environment. Resolves machine-local ``config.yaml`` >
+    global ``~/.agent-worktrees/config.yaml`` only, same tier order as
+    :attr:`default_copilot_account`. See ThomasMichon/copilot-extensions#3296."""
 
     @property
     def default_repo(self) -> RepoConfig:
@@ -1232,6 +1246,12 @@ def _load_config_uncached(
                 global_raw.get("default_copilot_account", ""),
             )
             or ""
+        ),
+        copilot_identity_switch_enabled=bool(
+            machine_raw.get(
+                "copilot_identity_switch_enabled",
+                global_raw.get("copilot_identity_switch_enabled", False),
+            )
         ),
     )
 
