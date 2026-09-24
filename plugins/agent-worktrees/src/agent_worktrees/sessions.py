@@ -2135,8 +2135,7 @@ def mux_seed_pane(
         try:
             r = subprocess.run(
                 [mux_bin, "capture-pane", "-p", "-t", pane_id],
-                capture_output=True, text=True, timeout=5,
-                encoding="utf-8", errors="replace",
+                capture_output=True, text=True, timeout=5, encoding="utf-8", errors="replace",
             )
             return (r.stdout or "") if r.returncode == 0 else ""
         except (OSError, subprocess.TimeoutExpired):
@@ -2144,18 +2143,9 @@ def mux_seed_pane(
 
     def _is_copilot_ready(cap: str) -> bool:
         low = cap.lower()
-        # A modal selection dialog (trust / extension-permission prompt) draws
-        # its own "❯ 1. Yes" caret; typed keys there pick options, never seed.
-        if "enter to select" in low:
-            return False
-        # Copilot-specific cues only: the input caret, the interrupt footer, or
-        # the boxed input (CLI >= 1.0.89 draws ``╻▄▄▄`` / ``╹▀▀▀`` and no caret).
-        # A bare rule line (``─────``) is NOT trusted -- banners/spinners draw it.
-        return (
-            ("❯" in cap)
-            or ("esc" in low and "interrupt" in low)
-            or ("╻▄" in cap and "╹▀" in cap)
-        )
+        # Caret, interrupt footer, or 1.0.89's boxed input; never a selection dialog's caret.
+        return "enter to select" not in low and (
+            "❯" in cap or ("esc" in low and "interrupt" in low) or ("╻▄" in cap and "╹▀" in cap))
 
     # Readiness must be STABLE (two consecutive sightings) so a single transient
     # frame (a startup banner, a spinner) is not mistaken for the input prompt.
