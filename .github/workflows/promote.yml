@@ -26,6 +26,18 @@ name: Promote dev to main
 # pre-merge candidate commit this job built locally is never the thing
 # that actually lands).
 #
+# Token: uses the `APERTURE_RELEASE_TOKEN` repository secret (a
+# fine-grained PAT scoped to this repo, Contents: Read and write +
+# Pull requests: Read and write), NOT the default `github.token`. GitHub
+# never fires other workflow events (including `pull_request`) for content
+# pushed/authored with the default `GITHUB_TOKEN` -- a documented
+# anti-recursion safeguard -- so a `GITHUB_TOKEN`-authored candidate PR
+# never triggers `ci.yml`'s required `main source gate` check and `gh pr
+# merge --auto` sits permanently blocked (confirmed live on the very first
+# real --push run, #3533 -- had to be merged with a manual admin bypass).
+# A PAT-authored push/PR does trigger downstream workflows normally, making
+# the merge genuinely turn-key.
+#
 # Emergency rollback: `python tools/rollback_release.py pause --reason "..."
 # --push` BEFORE `revert --reason "..." --push` -- run by a human operator
 # with their own `gh` credentials (see tools/rollback_release.py's own
@@ -62,13 +74,14 @@ jobs:
     runs-on: ubuntu-latest
     environment: main-promotion
     env:
-      GH_TOKEN: ${{ github.token }}
+      GH_TOKEN: ${{ secrets.APERTURE_RELEASE_TOKEN }}
       CANDIDATE_BRANCH: release/promote-${{ github.run_id }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: main
+          token: ${{ secrets.APERTURE_RELEASE_TOKEN }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
