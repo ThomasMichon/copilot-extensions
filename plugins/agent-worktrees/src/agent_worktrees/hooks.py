@@ -133,11 +133,124 @@ def _inrepo(cwd: str | Path) -> dict:
         return {}
 
 
+def _project_name_for_anchor(anchor: Path) -> str | None:
+    """Map an anchor path back to its registered project name, or ``None``.
+
+    Lazily imports ``front_door_cli`` (a CLI module) to avoid pulling it in
+    for every hook invocation and to sidestep any import-order risk -- it has
+    no import of this module, so there is no cycle, but the module is not a
+    low-level primitive and callers of this file should not pay its cost
+    unless a project-name lookup is actually needed.
+    """
+    from . import front_door_cli
+
+    return front_door_cli._reverse_lookup_project(anchor)
+
+
+def _machine_local_default_branch(name: str) -> str | None:
+    """Raw (never dataclass-defaulted) machine-local ``default_branch``
+    override for project *name*, or ``None`` if unset.
+
+    Reads ``~/.<project>/config.yaml`` -- deep-merged with its ``config.d``
+    drop-ins UNDER it, exactly as ``cfg.load_config()`` layers them (a
+    service-contributed drop-in ``repos.<name>.default_branch`` must be
+    honored here too, or the hook can diverge from create/push-changes) --
+    directly, rather than going through ``cfg.load_project_config()``. That
+    function's ``RepoConfig`` ALWAYS materializes ``default_branch`` as
+    ``"master"`` when nothing configured it (``config.py``'s dataclass
+    default), which would make every repo with a real, merely-unconfigured
+    ``origin/HEAD`` (e.g. ``main``) look like an explicit ``master``
+    override and permanently hide the ``origin/HEAD`` fallback tier below.
+    Never raises -- returns ``None`` on any problem.
+    """
+    try:
+        project_dir = cfg.project_dir(name)
+        raw = cfg._load_yaml_safe(project_dir / "config.yaml")
+        dropins = cfg._load_config_d(project_dir / "config.d", project_name=name)
+        if dropins:
+            raw = cfg._deep_merge(dropins, raw)
+        repo_raw = (raw.get("repos") or {}).get(name)
+        if isinstance(repo_raw, dict) and repo_raw.get("default_branch"):
+            return str(repo_raw["default_branch"])
+    except Exception:
+        pass
+    return None
+
+
+def _registry_default_branch(name: str) -> str | None:
+    """Raw ``default_branch`` fallback for project *name* -- ``repos.yaml``,
+    then the legacy ``projects.yaml`` adoption registry -- or ``None``.
+
+    Mirrors ``cfg._resolve_adoption_defaults_from_registry``'s own two-tier
+    fallback (``repos.yaml`` first, ``projects.yaml`` only when that has no
+    value) so a repo whose ``default_branch`` lives only in the legacy
+    registry still resolves here exactly as every other PR-flow entry point
+    does. Both sources default their own field to ``""``/absent (never a
+    fabricated guess like the merged ``RepoConfig`` does), so an absent value
+    here is genuinely absent. Never raises.
+    """
+    try:
+        from . import repos as repos_mod
+
+        entry = repos_mod.read_registry().repos.get(name)
+        if entry is not None and entry.default_branch:
+            return str(entry.default_branch)
+    except Exception:
+        pass
+    try:
+        from . import installer
+
+        proj = (installer.read_projects_registry().get("projects") or {}).get(name)
+        if isinstance(proj, dict) and proj.get("default_branch"):
+            return str(proj["default_branch"])
+    except Exception:
+        pass
+    return None
+
+
 def _default_branch(cwd: str | Path) -> str | None:
-    """Best-effort default branch: in-repo config first, then origin/HEAD."""
+    """Best-effort default branch, in the SAME precedence every other
+    consumer (``create``/``push-changes``/``create-pr``, via
+    ``cfg.load_config()``) uses: machine-local per-project override >
+    in-repo committed config > registry (``repos.yaml``) fallback >
+    ``origin/HEAD``.
+
+    A bare git hook has no ``--project``/active-project context (#234
+    defect 3), so the machine-local/registry tiers can't go through
+    ``cfg.load_config()`` directly (it raises "No active project", and
+    ``cfg.load_project_config()`` would paper over an unset value with its
+    ``RepoConfig`` dataclass's fabricated ``"master"`` default -- see
+    :func:`_machine_local_default_branch`). Instead the anchor path is
+    mapped back to a project name (the same repos.yaml/projects.yaml
+    reverse lookup ``front_door_cli`` uses), and each tier's RAW,
+    never-defaulted config is read directly. Without this, a machine-local
+    override (e.g. pointing a repo at ``dev`` ahead of that repo's own
+    in-repo config catching up) would silently NOT be honored by the local
+    pre-commit/pre-push guard, even though it already governs every other
+    PR-flow entry point.
+    """
+    name: str | None = None
+    try:
+        anchor = _anchor_from_cwd(cwd)
+        if anchor is not None:
+            name = _project_name_for_anchor(anchor)
+    except Exception:
+        name = None
+
+    if name:
+        db = _machine_local_default_branch(name)
+        if db:
+            return db
+
     db = _inrepo(cwd).get("default_branch")
     if db:
         return str(db)
+
+    if name:
+        db = _registry_default_branch(name)
+        if db:
+            return db
+
     r = git_ops.git(
         "symbolic-ref", "--short", "refs/remotes/origin/HEAD", cwd=cwd, check=False
     )

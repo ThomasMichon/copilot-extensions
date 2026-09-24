@@ -62,7 +62,146 @@ class TestConfigResolution:
         assert hooks._pr_enabled(str(anchor)) is True
 
 
-class TestPreCommit:
+class TestRegistryDefaultBranch:
+    """The local pre-commit/pre-push guard must honor the SAME machine-local
+    override every other PR-flow entry point (``create``/``push-changes``/
+    ``create-pr``) already does -- not just the in-repo committed config,
+    which can lag behind a deliberate per-machine override (e.g. pointing a
+    repo at ``dev`` ahead of the repo's own in-repo config catching up)."""
+
+    def test_falls_back_to_inrepo_when_unregistered(self, anchor_and_worktree):
+        anchor, wt = anchor_and_worktree
+        cfg_dir = anchor / ".agent-worktrees"
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        (cfg_dir / "config.yaml").write_text("default_branch: master\n")
+        assert hooks._default_branch(str(wt)) == "master"
+
+    def test_unconfigured_repo_falls_through_to_origin_head_not_fabricated_master(
+        self, anchor_and_worktree, _isolate_agent_worktrees_home
+    ):
+        """Regression (PR #3517 review finding): a registered repo with NO
+        explicit ``default_branch`` anywhere (no machine-local, no in-repo)
+        must resolve via ``origin/HEAD`` -- never the ``RepoConfig``
+        dataclass's fabricated ``"master"`` fallback, which would make an
+        unconfigured repo whose real default is e.g. ``main`` look like an
+        explicit ``master`` override and silently disable the guard on the
+        real default branch."""
+        anchor, wt = anchor_and_worktree
+        fake_home = _isolate_agent_worktrees_home
+
+        # Registered (so the anchor resolves to a project name)...
+        (fake_home / ".agent-worktrees" / "repos.yaml").write_text(
+            "schema_version: 1\n"
+            "repos:\n"
+            "  proj:\n"
+            "    class: worktree\n"
+            f"    windows: {anchor}\n"
+            f"    linux: {anchor}\n"
+            f"    wsl: {anchor}\n"
+        )
+        # ...but with NO default_branch configured anywhere, and a real
+        # remote whose HEAD is `main` (not the fixture's local `master`).
+        remote = anchor.parent / "remote.git"
+        git_ops.git("init", "--bare", "-b", "main", str(remote))
+        _git("branch", "-m", "master", "main", cwd=anchor)
+        _git("remote", "add", "origin", str(remote), cwd=anchor)
+        _git("push", "origin", "main", cwd=anchor)
+        _git("remote", "set-head", "origin", "main", cwd=anchor)
+
+        assert hooks._default_branch(str(wt)) == "main"
+
+    def test_machine_local_override_wins_over_inrepo(
+        self, anchor_and_worktree, _isolate_agent_worktrees_home
+    ):
+        anchor, wt = anchor_and_worktree
+        fake_home = _isolate_agent_worktrees_home
+        cfg_dir = anchor / ".agent-worktrees"
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        (cfg_dir / "config.yaml").write_text("default_branch: master\n")
+
+        # Register the anchor in repos.yaml so the anchor path resolves back
+        # to a project name...
+        (fake_home / ".agent-worktrees" / "repos.yaml").write_text(
+            "schema_version: 1\n"
+            "repos:\n"
+            "  proj:\n"
+            "    class: worktree\n"
+            f"    windows: {anchor}\n"
+            f"    linux: {anchor}\n"
+            f"    wsl: {anchor}\n"
+        )
+        # ...then a machine-local per-project override points it at `dev`,
+        # exactly as ``~/.<project>/config.yaml`` does for every other
+        # pr-flow consumer.
+        proj_dir = fake_home / ".proj"
+        proj_dir.mkdir(parents=True, exist_ok=True)
+        (proj_dir / "config.yaml").write_text(
+            "repo_name: proj\n"
+            "repos:\n"
+            "  proj:\n"
+            f"    anchor: {anchor}\n"
+            "    default_branch: dev\n"
+        )
+        assert hooks._default_branch(str(wt)) == "dev"
+
+    def test_config_d_dropin_default_branch_honored(
+        self, anchor_and_worktree, _isolate_agent_worktrees_home
+    ):
+        """A service-contributed ``config.d`` drop-in (e.g. vault-style
+        machine-local contribution) must be honored here exactly as
+        ``cfg.load_config()`` honors it for every other consumer."""
+        anchor, wt = anchor_and_worktree
+        fake_home = _isolate_agent_worktrees_home
+        (fake_home / ".agent-worktrees" / "repos.yaml").write_text(
+            "schema_version: 1\n"
+            "repos:\n"
+            "  proj:\n"
+            "    class: worktree\n"
+            f"    windows: {anchor}\n"
+            f"    linux: {anchor}\n"
+            f"    wsl: {anchor}\n"
+        )
+        proj_dir = fake_home / ".proj"
+        (proj_dir / "config.d").mkdir(parents=True, exist_ok=True)
+        (proj_dir / "config.d" / "dropin.yaml").write_text(
+            "repos:\n"
+            "  proj:\n"
+            "    default_branch: dev\n"
+        )
+        assert hooks._default_branch(str(wt)) == "dev"
+
+    def test_projects_yaml_legacy_fallback_honored(
+        self, anchor_and_worktree, _isolate_agent_worktrees_home, monkeypatch
+    ):
+        """The legacy adoption registry (``projects.yaml``) is a fallback
+        ``cfg._resolve_adoption_defaults_from_registry`` also consults after
+        ``repos.yaml``. NOTE: ``default_branch`` is retired from
+        ``projects.yaml`` as of schema v2 (``config_migrations``'s
+        ``_projects_v1_to_v2`` strips it on every load, matching its
+        ``repos.yaml``-is-the-single-owner comment) -- so this fallback is
+        already dead in practice via the real on-disk registry. Stub
+        ``installer.read_projects_registry`` directly (bypassing that
+        migration) to exercise the fallback's own logic/precedence, matching
+        how ``cfg._resolve_adoption_defaults_from_registry`` still reads it."""
+        anchor, wt = anchor_and_worktree
+        fake_home = _isolate_agent_worktrees_home
+        (fake_home / ".agent-worktrees" / "repos.yaml").write_text(
+            "schema_version: 1\n"
+            "repos:\n"
+            "  proj:\n"
+            "    class: worktree\n"
+            f"    windows: {anchor}\n"
+            f"    linux: {anchor}\n"
+            f"    wsl: {anchor}\n"
+        )
+        from agent_worktrees import installer
+
+        monkeypatch.setattr(
+            installer,
+            "read_projects_registry",
+            lambda: {"projects": {"proj": {"default_branch": "dev"}}},
+        )
+        assert hooks._default_branch(str(wt)) == "dev"
     def test_blocks_default_branch_commit_in_worktree(self, anchor_and_worktree, monkeypatch):
         anchor, wt = anchor_and_worktree
         monkeypatch.chdir(wt)
