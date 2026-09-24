@@ -56,7 +56,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from .config import RUNTIME_DIR, ensure_runtime_dir
 from .owner_ports import sanitize_port as _sanitize_port
-from .owner_ports import sanitize_reverse_forwards
+from .owner_ports import sanitize_local_forwards, sanitize_reverse_forwards
 
 if TYPE_CHECKING:
     from .session_forwards import SessionForwards
@@ -95,7 +95,8 @@ class OwnerHold:
     launcher exits. ``sessions`` records, per such tenant, only transport facts
     the Owner needs to renew it on its own: the remote ``mux_session`` whose
     existence keeps the tenant alive and an absolute ``expires_at`` lease cap.
-    ``reverse_forwards`` ({venue port: fixed host port}) lives as long as ``daemon_port``.
+    ``reverse_forwards`` ({venue port: fixed host port}) and ``local_forwards``
+    ({host port: venue port}) live as long as ``daemon_port``.
     """
 
     codespace: str
@@ -107,6 +108,7 @@ class OwnerHold:
     daemon_port: int | None = None
     sessions: dict[str, dict[str, Any]] = field(default_factory=dict)
     reverse_forwards: dict[str, int] = field(default_factory=dict)
+    local_forwards: dict[str, int] = field(default_factory=dict)
 
     def live_tenants(self, ttl: float = DEFAULT_TTL) -> dict[str, float]:
         """Tenants whose heartbeat is within ``ttl``."""
@@ -196,6 +198,7 @@ def _read_holds() -> dict[str, OwnerHold]:
         hold.tenants = tenants
         hold.daemon_port = _sanitize_port(hold.daemon_port)
         hold.reverse_forwards = sanitize_reverse_forwards(hold.reverse_forwards)
+        hold.local_forwards = sanitize_local_forwards(hold.local_forwards)
         sessions: dict[str, dict[str, Any]] = {}
         if isinstance(hold.sessions, dict):
             for tenant, meta in hold.sessions.items():
@@ -250,6 +253,7 @@ def _prune_hold(hold: OwnerHold, ttl: float) -> None:
         # The daemon forward exists only for session tenants.
         hold.daemon_port = None
         hold.reverse_forwards = {}
+        hold.local_forwards = {}
 
 
 def _prune(holds: dict[str, OwnerHold], ttl: float) -> dict[str, OwnerHold]:
@@ -307,6 +311,7 @@ def hold(
     fresh: bool = False,
     restore: dict | None = None,
     reverse_forwards: dict[int, int] | None = None,
+    local_forwards: dict[int, int] | None = None,
 ) -> OwnerHold:
     """Register (or refresh) ``tenant`` on the connection to ``codespace``.
 
@@ -327,7 +332,8 @@ def hold(
     generation (unconfirmed, new lease), so nothing -- neither an older
     session's confirmation nor an in-flight probe of it -- can release the new
     launch; ``restore`` puts back a session entry exactly as it was before a
-    failed relaunch. ``reverse_forwards``, when given, replaces the hold's extra forwards.
+    failed relaunch. ``reverse_forwards`` / ``local_forwards``, when given, replace the
+    hold's extra forwards of that direction.
     """
     if not codespace:
         raise RuntimeError("hold requires a CodeSpace name")
@@ -362,6 +368,8 @@ def hold(
             existing.daemon_port = port
         if reverse_forwards is not None:
             existing.reverse_forwards = sanitize_reverse_forwards(reverse_forwards)
+        if local_forwards is not None:
+            existing.local_forwards = sanitize_local_forwards(local_forwards)
         _write_holds(holds)
         return existing
 
@@ -419,6 +427,7 @@ def release(
             if not existing.sessions:
                 existing.daemon_port = None
                 existing.reverse_forwards = {}
+                existing.local_forwards = {}
         if unpin:
             existing.pinned = False
         existing.heartbeat_at = time.time()

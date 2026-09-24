@@ -204,6 +204,14 @@ worker should control. A rejoin without the flag keeps the session's forwards.
 The launch reports `reverse_forwards_ready` per venue port (it checks each one
 accepts a connection); `false` usually means a Connection Owner that predates
 this option is still running -- it exits once it holds nothing.
+`--forward PORT[:VENUE_PORT]` (repeatable) is the other direction: the Owner
+keeps this host's `127.0.0.1:PORT` forwarded to the CodeSpace's
+`127.0.0.1:VENUE_PORT` (default: the same port) for the session's life -- for
+example the worker's dev server at a fixed `--port`, so a browser on this host
+loads `https://localhost:PORT`. The forward can exist before the server
+starts. A rejoin without the flag keeps it; `--stop` removes it. The launch
+reports `local_forwards_ready` per host port (bound locally); `false` usually
+means the host port is taken or a pre-`--forward` Owner is still running.
 A multi-line or long seed is written to `~/.agent-bridge/seeds/` on the venue and
 seeded as a one-line pointer (tmux-typed input must be a single line). It
 succeeds only once the session is registered with the host bridge (and its seed

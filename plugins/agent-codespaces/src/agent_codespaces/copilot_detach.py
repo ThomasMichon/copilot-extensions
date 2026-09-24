@@ -205,6 +205,30 @@ def parse_reverse_forwards(specs: list[str]) -> dict[int, int]:
         out[v] = h
     return out
 
+
+def parse_local_forwards(specs: list[str]) -> dict[int, int]:
+    """``["PORT[:VENUE_PORT]", ...]`` -> ``{host_port: venue_port}``.
+
+    Each asks the Connection Owner to keep this host's ``127.0.0.1:PORT``
+    forwarded to the CodeSpace's ``127.0.0.1:VENUE_PORT`` (default: the same
+    port) for the session's life -- for example the worker's dev server, so a
+    browser on this host can load ``https://localhost:PORT``.
+    """
+    out: dict[int, int] = {}
+    for spec in specs:
+        host, sep, venue = str(spec).partition(":")
+        try:
+            h, v = int(host), int(venue if sep else host)
+        except ValueError:
+            h = v = 0
+        if not (0 < h < 65536 and 0 < v < 65536):
+            raise ValueError(f"--forward expects PORT or PORT:VENUE_PORT, got {spec!r}")
+        if h in out and out[h] != v:
+            raise ValueError(f"--forward names host port {h} twice")
+        out[h] = v
+    return out
+
+
 def _send_refs(name: str, upload: tuple[str, bytes, list[tuple[str, int]]]) -> str | None:
     """Copy one reference batch into the venue; the worker-facing note, or ``None``."""
     from .venue_refs import refs_note
@@ -317,6 +341,24 @@ def _venue_ports_listening(name: str, ports: list[int], *, attempts: int = 6) ->
         got = _remote(name, probe, timeout=30.0)
         if got:
             ready = {int(t) for t in got[1].split() if t.isdigit()}
+        if ready >= set(ports) or attempt + 1 == attempts:
+            break
+        time.sleep(5.0)
+    return {p: p in ready for p in ports}
+
+
+def _host_ports_listening(ports: list[int], *, attempts: int = 6) -> dict[int, bool]:
+    """Which host loopback ports the Owner's local forwards have bound."""
+    import socket
+
+    ready: set[int] = set()
+    for attempt in range(attempts):
+        for port in ports:
+            try:
+                with socket.create_connection(("127.0.0.1", int(port)), timeout=2.0):
+                    ready.add(int(port))
+            except OSError:
+                pass
         if ready >= set(ports) or attempt + 1 == attempts:
             break
         time.sleep(5.0)
@@ -437,6 +479,7 @@ def cmd_detach(
     copilot_args = with_new_session(list(getattr(args, "copilot_args", None) or []))
     try:
         reverse_forwards = parse_reverse_forwards(getattr(args, "reverse_forwards", None) or [])
+        local_forwards = parse_local_forwards(getattr(args, "local_forwards", None) or [])
     except ValueError as exc:
         return _fail(str(exc), plan)
     ref_files = list(getattr(args, "ref_files", None) or [])
@@ -450,6 +493,7 @@ def cmd_detach(
     if getattr(args, "dry_run", False):
         print(json.dumps({"ok": True, "dry_run": True, **plan, "seed_len": len(seed or ""),
                           "copilot_args": copilot_args, "reverse_forwards": reverse_forwards,
+                          "local_forwards": local_forwards,
                           "ref_files": [n for n, _ in refs_upload[2]] if ref_files else []}, indent=2))
         return 0
 
@@ -472,10 +516,12 @@ def cmd_detach(
     held = owner.get_hold(args.name)
     prior_session = dict((held.sessions.get(plan["tenant"]) if held else None) or {}) or None
     prior_forwards = dict(getattr(held, "reverse_forwards", None) or {})
+    prior_local = dict(getattr(held, "local_forwards", None) or {})
     owner.hold(
         args.name, plan["tenant"], daemon_port=daemon_port,
         mux_session=plan["mux_session"], fresh=True,
         **({"reverse_forwards": reverse_forwards} if reverse_forwards else {}),
+        **({"local_forwards": local_forwards} if local_forwards else {}),
     )
     ok = False
     created = False
@@ -629,6 +675,7 @@ def cmd_detach(
         forwards_ready = (
             _venue_ports_listening(args.name, sorted(reverse_forwards)) if reverse_forwards else {}
         )
+        local_ready = _host_ports_listening(sorted(local_forwards)) if local_forwards else {}
         print(json.dumps({
             "ok": True, **plan, "session_id": session_id, "created": created,
             **({"ref_files": refs_note_text.splitlines()[1:], "refs_delivered": refs_delivered}
@@ -637,6 +684,8 @@ def cmd_detach(
             "plugin_dirs": captured.get("plugin_dirs", []),
             **({"reverse_forwards": reverse_forwards,
                 "reverse_forwards_ready": forwards_ready} if reverse_forwards else {}),
+            **({"local_forwards": local_forwards,
+                "local_forwards_ready": local_ready} if local_forwards else {}),
             "commands": _commands(plan, session_id, getattr(args, "effort", None)),
         }, indent=2))
         return 0
@@ -654,6 +703,7 @@ def cmd_detach(
                     args.name, plan["tenant"], daemon_port=daemon_port,
                     mux_session=prior_session["mux_session"], restore=prior_session,
                     reverse_forwards=prior_forwards,
+                    local_forwards=prior_local,
                 )
             else:
                 owner.release(args.name, plan["tenant"])

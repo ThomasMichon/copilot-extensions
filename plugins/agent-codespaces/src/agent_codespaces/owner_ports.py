@@ -16,10 +16,19 @@ def sanitize_port(value: Any) -> int | None:
 
 def sanitize_reverse_forwards(value: Any) -> dict[str, int]:
     """``{venue_port: host_port}`` with both valid ports; anything else dropped."""
+    return _port_map(value)
+
+
+def sanitize_local_forwards(value: Any) -> dict[str, int]:
+    """``{host_port: venue_port}`` with both valid ports; anything else dropped."""
+    return _port_map(value)
+
+
+def _port_map(value: Any) -> dict[str, int]:
     out: dict[str, int] = {}
     if isinstance(value, dict):
-        for venue, host in value.items():
-            v, h = sanitize_port(venue), sanitize_port(host)
-            if v is not None and h is not None:
-                out[str(v)] = h
+        for key, port in value.items():
+            k, p = sanitize_port(key), sanitize_port(port)
+            if k is not None and p is not None:
+                out[str(k)] = p
     return out
