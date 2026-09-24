@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions (control-plane home; PR-required `main`, self-merge)
 - **Branch(es):** per-phase `pr/<slug>` worktrees → landed to `main`
 - **Created:** 2026-09-22
-- **Status:** Draft <!-- Draft | Active | Blocked | Done -->
+- **Status:** Active <!-- Draft | Active | Blocked | Done -->
 - **Vision:** vision-closing / vision-extending against:
   - [`visions/picker`](../../../visions/picker/README.md) — general Picker
     render/derive contract this pivot must keep honoring.
@@ -498,3 +498,21 @@ reviewed-plan PR per the standard effort review gate before Phase 1 begins._
   matching the original's section shape closely, with the same titles,
   follow-up markers (✚), and PR numbers/states. Full suite: 1155 passed,
   1 skipped.
+
+### 2026-09-23 — Filed screenshot evidence to OneDrive; effort marked Active
+- Installed `resvg` (`worktree-manager/scripts/picker-snapshot`, `npm
+  install`) as a deterministic PNG rasterizer — headless Edge hung
+  unrelated to this effort's own code (an environment quirk on this
+  machine, not a repo bug), `resvg` did not.
+- Captured and filed 3 screenshots to the operator's OneDrive
+  (`2026/09.22 Worktrees Pivot UX Overhaul/`, per their maintained
+  organization profile's "tied to a specific project with a known start
+  date" placement heuristic): the current Worktrees pivot (`--demo`,
+  enriched fixture), the injected "Demo Queue" mock pivot, and the
+  original `v1.0.0` baseline — with a short `README.md` index. Local
+  temp captures cleaned up; nothing else changed in-repo this slice.
+- Effort status promoted **Draft → Active** (Phase 1 shipped, work is
+  ongoing) — no plan changes.
+- **Next up: Phase 2** — evaluate native Textual components (`DataTable`/
+  `OptionList`) for the Worktrees table vs. the current hand-rolled
+  `engine_views.py` renderer. Not yet started.
