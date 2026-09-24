@@ -121,8 +121,53 @@ def _changefile_existed_at(rev: str, name: str, *, repo: Path) -> bool:
     return result.returncode == 0
 
 
+def _seed_versions_from_main(scratch: Path, main_head: str, *, acc, repo: Path) -> None:
+    """Overwrite every plugin's version-bearing surfaces in the scratch tree
+    with whatever ``main`` last actually shipped for it, BEFORE any new bump
+    is computed.
+
+    ``main`` is the SOLE source of truth for a plugin's real, shipped
+    version -- ``dev``'s own ``plugin.json`` is a stale literal that
+    ``promote()`` never writes back to (see this module's docstring: it
+    only ever generates a NEW commit on ``main``, never mutates ``dev``).
+    ``compute()``/``read_plugin_json_version()`` read "current" straight
+    from whatever is checked out in ``scratch`` -- which starts as a plain
+    checkout of ``dev``. Skipping this seed step would silently regress
+    every plugin that gets NO new changefile in a given promotion round
+    back to ``dev``'s frozen baseline in the newly generated snapshot,
+    discarding whatever real version a PAST promotion already shipped.
+    Confirmed live: the very first promotion after the "stop re-applying an
+    already-consumed changefile" fix landed (#3542) regressed 11 of 13
+    plugins on `main` back to their pre-bump versions this exact way (e.g.
+    agent-bridge 0.4.1-dev1 -> 0.4.0-dev551) -- that fix was necessary but
+    not sufficient on its own; this seed step is the other required half."""
+    plugins_dir = scratch / "plugins"
+    if not plugins_dir.is_dir():
+        return
+    seed_result: dict[str, tuple[str, str]] = {}
+    for plugin_dir in sorted(plugins_dir.iterdir()):
+        if not plugin_dir.is_dir():
+            continue
+        plugin = plugin_dir.name
+        main_pj_raw = _git(
+            ["show", f"{main_head}:plugins/{plugin}/plugin.json"], cwd=repo, check=False,
+        )
+        if not main_pj_raw:
+            continue  # never shipped on main yet -- dev's own literal stands as-is
+        try:
+            main_version = json.loads(main_pj_raw)["version"]
+        except (json.JSONDecodeError, KeyError):
+            continue
+        dev_version = acc.read_plugin_json_version(plugin)
+        if dev_version is None or dev_version == main_version:
+            continue
+        seed_result[plugin] = (dev_version, main_version)
+    if seed_result:
+        acc.apply(seed_result)
+
+
 def consume_pending_changes(
-    scratch: Path, *, last_dev_head: str | None = None, repo: Path = REPO
+    scratch: Path, *, last_dev_head: str | None = None, main_head: str, repo: Path = REPO
 ) -> dict:
     """Run accumulate_bumps' compute/apply against the scratch worktree's own
     copy of the tooling, and materialize_main's pointer expansion. Returns a
@@ -162,6 +207,8 @@ def consume_pending_changes(
     try:
         acc = _load_module(scratch / "tools" / "accumulate_bumps.py", "promote_accumulate_bumps")
         mm = _load_module(scratch / "tools" / "materialize_main.py", "promote_materialize_main")
+
+        _seed_versions_from_main(scratch, main_head, acc=acc, repo=repo)
 
         all_changefiles = list(acc.read_changefiles())
         changefile_names = [p.name for p, _data in all_changefiles]
@@ -366,7 +413,10 @@ def promote(
     try:
         last_promotion = state.get("last_promotion") or {}
         summary = consume_pending_changes(
-            scratch, last_dev_head=last_promotion.get("dev_head"), repo=repo,
+            scratch,
+            last_dev_head=last_promotion.get("dev_head"),
+            main_head=main_head,
+            repo=repo,
         )
         content_tree = build_promotion_tree(scratch)
         main_content_tree = _tree_excluding_state(main_tree, repo=repo)
