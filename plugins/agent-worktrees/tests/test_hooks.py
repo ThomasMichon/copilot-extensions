@@ -84,6 +84,26 @@ class TestPreCommit:
         # An UNREGISTERED (non-worktree-class) anchor is base-repo mode -> allowed.
         assert hooks._pre_commit() == 0
 
+    def test_blocks_commit_on_any_configured_protected_branch(
+        self, anchor_and_worktree, monkeypatch
+    ):
+        """#dev-branch-policy: a repo can protect more than one branch (e.g. a
+        contribution branch that differs from the formal GitHub default)."""
+        anchor, wt = anchor_and_worktree
+        monkeypatch.chdir(wt)
+        monkeypatch.setattr(hooks, "_inrepo", lambda cwd: {"protected_branches": ["main", "dev"]})
+        monkeypatch.setattr(hooks, "_current_branch", lambda cwd: "dev")
+        assert hooks._pre_commit() == 1
+        monkeypatch.setattr(hooks, "_current_branch", lambda cwd: "main")
+        assert hooks._pre_commit() == 1
+        monkeypatch.setattr(hooks, "_current_branch", lambda cwd: "worktree/wt-aaaa")
+        assert hooks._pre_commit() == 0
+
+    def test_protected_branches_falls_back_to_default_branch(self, monkeypatch):
+        monkeypatch.setattr(hooks, "_inrepo", lambda cwd: {})
+        monkeypatch.setattr(hooks, "_default_branch", lambda cwd: "master")
+        assert hooks._protected_branches("/irrelevant") == ["master"]
+
 
 class TestAnchorCommitGuard:
     """The session-independent anchor guard: a worktree-class repo's ANCHOR must

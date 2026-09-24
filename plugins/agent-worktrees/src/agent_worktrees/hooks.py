@@ -146,6 +146,25 @@ def _default_branch(cwd: str | Path) -> str | None:
     return None
 
 
+def _protected_branches(cwd: str | Path) -> list[str]:
+    """Branches the pre-commit guard blocks direct commits to.
+
+    Most repos protect exactly one branch (``default_branch``, the
+    contribution branch worktrees fork from and PRs target). A repo whose
+    *contribution* branch differs from its actual GitHub default branch (e.g.
+    contributions land on ``dev`` while ``main`` stays the formal default,
+    released separately) can list every branch that must stay commit-free
+    in-worktree via the optional in-repo ``protected_branches`` key. Falls
+    back to ``[default_branch]`` when absent, so every other repo is
+    unaffected.
+    """
+    raw = _inrepo(cwd).get("protected_branches")
+    if isinstance(raw, list) and raw:
+        return [str(b) for b in raw]
+    db = _default_branch(cwd)
+    return [db] if db else []
+
+
 def _pr_enabled(cwd: str | Path) -> bool:
     """Return True when the repo at *cwd* has PR mode enabled.
 
@@ -233,14 +252,15 @@ def _pre_commit() -> int:
         )
         return 1
     branch = _current_branch(cwd)
-    default_branch = _default_branch(cwd)
-    if branch and default_branch and branch == default_branch:
+    protected = _protected_branches(cwd)
+    if branch and branch in protected:
         _err(
-            f"BLOCKED: You are in a worktree but committing to the default "
-            f"branch '{default_branch}'. Commits in a worktree belong on the "
-            f"worktree branch (worktree/<id>) or a feature branch. To submit "
-            f"work, create a feature branch and open a pull request "
-            f"(agent-worktrees create-pr)."
+            f"BLOCKED: You are in a worktree but committing to protected "
+            f"branch '{branch}' ({', '.join(protected)} are protected here). "
+            f"Commits in a worktree belong on the worktree branch "
+            f"(worktree/<id>) or a feature branch. To submit work, create a "
+            f"feature branch and open a pull request (agent-worktrees "
+            f"create-pr)."
         )
         return 1
     return 0
