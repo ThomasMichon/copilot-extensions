@@ -169,3 +169,55 @@ Write-Output "EXITCODE=$($result.ExitCode)"
     result = _run_harness(plugin_dir, stub, extra)
     assert "EXITCODE=0" in result.stdout
     assert "residue still present" not in result.stderr
+
+
+def test_local_vendored_source_dir_is_also_scrubbed(tmp_path: Path) -> None:
+    """Regression (copilot-extensions#3456 review): agent-bridge installs
+    vendored dependencies (ssh-manager, credential-relay, zdd, ...) from
+    their OWN local source trees, not from $PluginDir. Those trees use the
+    same setuptools src-layout and accumulate the identical stale
+    build/egg-info residue -- a $PluginDir-only scrub never reaches it, so
+    passing -SourceDir must scrub that tree too."""
+    plugin_dir = tmp_path / "plugin"
+    plugin_dir.mkdir()
+    vendored_dir = tmp_path / "ssh-manager"
+    vendored_dir.mkdir()
+    _seed_build_residue(vendored_dir)
+    _seed_src_layout_egg_info(vendored_dir)
+    stub = """
+function uv { Write-Output 'Installed 1 package'; $global:LASTEXITCODE = 0 }
+"""
+    extra = f"""
+$result = Invoke-UvPipInstallResilient -SourceDir "{vendored_dir}" @('some-package')
+Write-Output "EXITCODE=$($result.ExitCode)"
+"""
+    result = _run_harness(plugin_dir, stub, extra)
+    assert "EXITCODE=0" in result.stdout
+    assert not (vendored_dir / "build").exists()
+    assert not (vendored_dir / "some_pkg.egg-info").exists()
+    assert not (vendored_dir / "src" / "some_pkg.egg-info").exists()
+
+
+def test_local_vendored_source_dir_scrub_does_not_touch_unrelated_plugin_dir(
+    tmp_path: Path,
+) -> None:
+    """The vendored-source scrub is additive, not a replacement: $PluginDir
+    residue unrelated to the vendored install must be left alone."""
+    plugin_dir = tmp_path / "plugin"
+    plugin_dir.mkdir()
+    unrelated = plugin_dir / "unrelated.txt"
+    unrelated.write_text("keep me\n", encoding="utf-8")
+    vendored_dir = tmp_path / "ssh-manager"
+    vendored_dir.mkdir()
+    _seed_build_residue(vendored_dir)
+    stub = """
+function uv { Write-Output 'Installed 1 package'; $global:LASTEXITCODE = 0 }
+"""
+    extra = f"""
+$result = Invoke-UvPipInstallResilient -SourceDir "{vendored_dir}" @('some-package')
+Write-Output "EXITCODE=$($result.ExitCode)"
+"""
+    result = _run_harness(plugin_dir, stub, extra)
+    assert "EXITCODE=0" in result.stdout
+    assert not (vendored_dir / "build").exists()
+    assert unrelated.exists()
