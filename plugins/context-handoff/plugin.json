@@ -1,7 +1,7 @@
 {
   "name": "context-handoff",
   "description": "Context window monitoring and session handoff for Copilot CLI -- a session-start continuity kernel plus an extension that tracks token utilization via session.usage_info, stores handoffs as worktree-pinned agent-dispatch tasks when available or one-time worktree-state files otherwise, and always makes a manual continuation available; soft/hard context-pressure warnings fire under the default manual-only mode too, while the force tier's automatic trigger before auto-compaction and live pending-handoff pickup signaling remain opt-in (mode: auto in .context-handoff/config.yaml -- the default, manual-only, never performs process management)",
-  "version": "0.1.2-dev1",
+  "version": "0.1.1-dev48",
   "runtimeScope": "none",
   "hooks": "hooks.json",
   "sessionContext": "session-context.json",
