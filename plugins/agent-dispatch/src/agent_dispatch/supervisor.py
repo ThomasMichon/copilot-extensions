@@ -3431,7 +3431,7 @@ class Supervisor:
         self.reconcile_reserving()
         self.release_requested_bodies(now=now)
         self.bind_headless_owner_sessions()
-        self.nudge_idle_headless_tasks()
+        self.nudge_idle_headless_tasks(now=now)
         self.cool_dormant_bodies()
         self.release_resumed_cold_tasks(now=now)
         if self.evaluator is not None:

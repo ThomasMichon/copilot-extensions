@@ -1476,6 +1476,49 @@ def test_idle_confirm_nudge_asks_whether_the_task_is_done(monkeypatch):
     assert "done with task abc (do the thing)" in sent[0][1]
 
 
+def test_idle_headless_fleet_nudge_includes_remote_host(q, client):
+    task = q.create("review turn", labels=["review"])
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        reservation.key, session_handle="fleet-body:host-a:sess-9"
+    )
+    q.claim_one("headless-owner", task_id=task.id)
+    q.start(task.id, "headless-owner")
+    nudged = []
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        labels=["review"],
+        fleet_activity_fn=lambda _host, _sid: "IDLE",
+        idle_nudge_fn=lambda target, t: nudged.append(
+            (target, t.get("_idle_host"))
+        )
+        or True,
+    )
+
+    assert sup.poll_once() == []
+    assert nudged == [("sess-9", "host-a")]
+    assert q.get(task.id).status == Status.STARTED
+
+
+def test_idle_confirm_nudge_routes_fleet_via_resume_session(monkeypatch):
+    sent = []
+    monkeypatch.setattr(
+        "agent_dispatch.bridge.resume_session",
+        lambda target, message, **k: sent.append((target, k.get("host"), message))
+        or True,
+    )
+    from agent_dispatch.idle_confirm import default_idle_confirm_nudge
+
+    assert default_idle_confirm_nudge(
+        "sess-9", {"id": "abc", "_idle_host": "host-a"}
+    )
+    assert sent[0][0] == "sess-9"
+    assert sent[0][1] == "host-a"
+    assert "done with task abc" in sent[0][2]
+
+
 def test_idle_headless_turn_nudges_confirm_done_instead_of_suspend(q, client):
     task = q.create("review turn", labels=["review"])
     reservation, _ = q.reserve_spawn(task.id)

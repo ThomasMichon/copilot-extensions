@@ -33,6 +33,9 @@ def default_idle_confirm_nudge(target: str, task: dict) -> bool:
         "driving (load any needed skills, then act) until you can complete the "
         "task or must steer. If you are done, complete it."
     )
+    host = task.get("_idle_host")
+    if isinstance(host, str) and host.strip():
+        return bridge.resume_session(target, message, host=host.strip(), wait=False)
     return bridge.send_nudge(target, message)
 
 
@@ -79,8 +82,11 @@ def nudge_idle_headless_tasks(supervisor: Any, *, now: float) -> int:
         )
         if not target:
             continue
+        payload = dict(task)
+        if fleet is not None:
+            payload["_idle_host"] = fleet[0]
         try:
-            if not supervisor.idle_nudge_fn(target, task):
+            if not supervisor.idle_nudge_fn(target, payload):
                 continue
             supervisor._last_idle_nudge[tid] = now
             try:
