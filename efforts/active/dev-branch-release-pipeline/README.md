@@ -458,12 +458,23 @@ Round 2 (operator's response to that evaluation):
     state -- still a plain forward commit, never a force-push/rewrite.
 
 ### Phase 5 — Cutover
+- [ ] **Blocked on ThomasMichon/copilot-extensions#3512**: the promotion
+      pipeline has never actually executed (0 runs ever — see 2026-09-23/24
+      Journal entry). Fix and prove a real end-to-end promotion before
+      treating any of the items below as safe to start.
 - [ ] Confirm the auto-updater coverage fix (Phase 1) is live before or with
       cutover, so existing harness sessions discover the new contribution
       flow on next pull rather than following stale guidance.
 - [ ] Ensure a PR opened against `main` post-cutover is bounced with guidance
       pointing at `dev` (branch protection message, PR template, or a bot
       comment).
+- [ ] Flip `.agent-worktrees/config.yaml`'s `default_branch: main` to `dev`
+      (ThomasMichon/copilot-extensions#3512's sibling finding, same Journal
+      entry) so `agent-worktrees create-pr`/`push-changes` — the harness's
+      own standard contribution tooling — actually opens PRs against `dev`
+      by default, matching what CONTRIBUTING.md already claims happens.
+      Not yet done; needs operator confirmation since it changes live
+      tooling behavior for every future worktree/PR against this repo.
 - [ ] Announce cutover; watch the first few real promotion cycles closely.
 
 ### Phase 6 — Maturity walk-back
@@ -995,3 +1006,91 @@ generator contract details here or in a linked sub-doc._
   to recognize and skip cross-checking against a placeholder. Scoped out
   of this session given everything else already landed; flagging as the
   next concrete slice.
+
+### 2026-09-23/24 — First main→dev reconciliation sync + a critical promotion-pipeline finding
+- Resumed via `context-handoff`/`consume_handoff` (task-backed handoff
+  `8f4f8a9b8b60489bb7b6aaeb21966e9c`). Performed the first periodic
+  `dev`↔`main` reconciliation merge (this effort's accepted ongoing reality:
+  concurrent sessions under this identity use `pr-merge --now`'s
+  admin-escalation bypass on `main`'s `~DEFAULT_BRANCH` ruleset routinely,
+  so `main` keeps moving independently of `dev` even after the previous
+  entry's redesign landed the promotion path through real PRs).
+  - Branched `sync-main-to-dev-1` off `dev`, merged `origin/main` (6
+    conflicts — version-bump/marketplace numbers, plus a real
+    superset-vs-subset content conflict in `claim-provider-pattern/README.md`
+    — resolved by taking whichever side was strictly newer/more complete),
+    all guards + touched tests green, landed as
+    ThomasMichon/copilot-extensions#3510 (squash, admin-bypass — this
+    repo's sanctioned self-merge pattern, not a special exception).
+  - **Ancestry note for future syncs**: this repo's merge method is squash,
+    not a real merge commit, so `git rev-list --count origin/dev..origin/main`
+    / `origin/main..origin/dev` do **not** converge toward zero after a
+    reconciliation — squash mints new commit hashes with no shared ancestry
+    to `main`'s originals. Verify success via bidirectional `git diff`
+    content comparison instead: post-merge, the only remaining `main`↔`dev`
+    differences should be `dev` being strictly ahead (its own unpromoted
+    work), confirming no `main`-only content is missing from `dev`.
+  - **Known leftover debt, explicitly deferred (operator decision — scrub
+    later, don't block the sync)**: the merge pulled in real leaked
+    internal identifiers that had entered `main` via earlier admin-bypass
+    commits — test fixtures using literal operator/machine names, a real
+    cross-repo issue citation in a code comment, and (most notably) a full
+    personal effort README merged wholesale into this public repo. Filed as
+    ThomasMichon/copilot-extensions#3511.
+- **Operator then asked to go further: confirm the cutover is actually
+  complete, not just this one sync — and this is where it got serious.**
+  Two real, previously-undiscovered gaps surfaced, on top of everything the
+  prior entry already fixed:
+  1. **`.agent-worktrees/config.yaml`'s `default_branch: main` still drives
+     `create-pr`/`push-changes`, even after everything else in the prior
+     entry landed.** `providers/base.py`'s `scope_from_create_result()` sets
+     the PR base straight from `repo.default_branch`, sourced from this
+     in-repo config — so the harness's own standard contribution tooling
+     still opens PRs against `main` today, directly contradicting
+     CONTRIBUTING.md's claim that "`dev` is this repo's default branch, so
+     an ordinary PR already targets it without needing to specify a base
+     branch" (a claim that was true only briefly, during the near-miss the
+     prior entry describes, before the operator correctly reverted GitHub's
+     actual default branch back to `main` for marketplace resolution).
+     This is a **config bug, not a GitHub-setting bug** — GitHub's real
+     default branch correctly stays `main`; the fix is flipping this one
+     harness-tooling key to `dev`, independent of that. **Not changed this
+     session** — flagged to the operator (added to Phase 5 above) rather
+     than flipped unilaterally, since it changes live tooling behavior for
+     every future worktree/PR against this repo.
+  2. **The `Promote dev to main` workflow has never once executed** — `0`
+     total runs, confirmed via
+     `gh api repos/.../actions/workflows/<promote-id>/runs`. This is a
+     *different, more severe* bug than the prior entry's already-documented
+     "bootstrapping wrinkle" (workflow_run always resolving its own YAML
+     from the default branch, which #3464/#3474 already worked around by
+     landing the pipeline on `main` directly). Even with the redesigned
+     PR-landing mechanism correctly bootstrapped onto both branches, the
+     trigger condition itself silently never matches: `promote.yml`'s
+     `workflow_run: workflows: ["Validation Gate"], branches: [dev]` filter
+     compares against a `head_branch` that GitHub reports as `"main"` —
+     the repo's default branch — even when the real triggering commit's
+     `head_sha` genuinely belongs to `dev`'s history (confirmed via raw
+     API on a live run, not a `gh` CLI display artifact:
+     `{"event":"workflow_run","head_branch":"main","head_sha":"<dev-tip-sha>"}`).
+     This means **no automated promotion has ever reached `main`**; every
+     `main` advance to date has been a direct/admin-bypass PR — exactly the
+     traffic this whole effort exists to eliminate. Filed as
+     ThomasMichon/copilot-extensions#3512 — needs a real trigger-chain
+     redesign (drop the branch filter and gate on `head_sha` ancestry, a
+     push-triggered chain, or `repository_dispatch` from CI itself), not a
+     quick patch, given the live-pipeline risk of guessing wrong.
+  3. Also reconfirmed Validation Gate is currently red on `dev`'s real tip,
+     but both failures are pre-existing and already tracked (`#3503`'s
+     fetch-depth fix and a `load_config()` double-call bug in
+     `agent-worktrees`), not new regressions from this sync.
+- **Net effect**: Phase 2-4 are further along than they look at a glance
+  (mostly done, per the prior entry), but Phase 5 cutover cannot be
+  considered real yet — the mechanism it depends on has never actually run.
+  Recommended order for whoever resumes: (1) get operator confirmation and
+  flip `.agent-worktrees/config.yaml`'s `default_branch` to `dev`; (2)
+  design + fix the Promote trigger chain (#3512) and prove a real
+  end-to-end promotion (dev commit -> candidate branch -> PR -> squash-merge
+  -> tag) before trusting it for real traffic; (3) only then work through
+  the rest of Phase 5's checklist; (4) scrub #3511's leaked identifiers
+  whenever convenient, unblocked by the above.
