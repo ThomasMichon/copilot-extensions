@@ -699,7 +699,10 @@ $ErrorActionPreference = 'Continue'
 Remove-ConsoleTrampolines -VenvDir $VenvDir
 $vendoredDependencies = @(
     (Join-Path $PluginDir 'libs\agent-procutil'),
-    (Join-Path $PluginDir 'libs\dropin-registry')
+    (Join-Path $PluginDir 'libs\dropin-registry'),
+    (Join-Path $PluginDir 'libs\ssh-manager'),
+    (Join-Path $PluginDir 'libs\venue-copilot'),
+    (Join-Path $PluginDir 'libs\zdd')
 )
 $pkgInstalled = Install-AgentSshPackage `
     -Python $VenvPython `

@@ -17,11 +17,25 @@ agent-ssh verify --timeout 8 my-machine
 agent-ssh explore my-machine --json
 agent-ssh mesh-status
 agent-ssh refresh-mesh --json
+agent-ssh copilot my-machine --detach --workspace /workspaces/repo --seed-file task.md
+agent-ssh copilot my-machine --stop --workspace /workspaces/repo
 ```
 
 The CLI manages only SSH aliases. Once `ssh <name>` works, sibling plugins such
 as agent-bridge or agent-codespaces can use that OpenSSH surface, but agent-ssh
 does not import their runtimes or require them to be installed.
+
+`copilot <ssh-target> --detach --workspace <remote-checkout>` starts or rejoins
+an observable Copilot CLI session on a POSIX SSH target without taking over the
+caller terminal. The remote machine must already have `bash`, `tmux`, `copilot`,
+`agent-worktrees`, and the `agent-bridge` Copilot plugin installed. The command
+provisions the host bridge registration token on the target, keeps the bridge
+reverse forward alive with a small keeper process, reserves a venue-qualified
+CLI-mode identity (`anchor-<repo>@<ssh-target>`), runs
+`agent-worktrees embody --anchor --bridge-scope-id ... --json` in the requested
+workspace, and prints a JSON handle with `status`, `observe`, `nudge`, `attach`,
+and `stop` commands. Windows SSH targets are not supported yet; run the
+orchestrator on that machine and use local `agent-worktrees embody` there.
 
 `restore-host` exposes transport-owned host setup to declarative orchestrators
 without requiring them to know installed payload paths:

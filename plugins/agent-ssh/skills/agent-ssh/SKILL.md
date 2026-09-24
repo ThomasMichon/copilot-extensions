@@ -116,6 +116,29 @@ point remotely, invoke that repository's published binstub through the same
 profile. Transport setup and repair remain in the dedicated client, host, key,
 and troubleshooting skills shipped by this plugin.
 
+## Detached CLI-mode session on a machine
+
+For an observable Copilot CLI session on a POSIX SSH machine without handing
+over the caller terminal:
+
+```bash
+<catalog argv[0]> copilot <ssh-target> --detach \
+  --workspace /path/to/remote/checkout \
+  --seed-file task.md
+<catalog argv[0]> copilot <ssh-target> --stop \
+  --workspace /path/to/remote/checkout
+```
+
+The target must already have `bash`, `tmux`, `copilot`, `agent-worktrees`, and
+the `agent-bridge` Copilot plugin installed. `--detach` provisions the host
+bridge registration credentials on the remote, starts a small keeper for the
+bridge reverse forward, reserves a venue-qualified CLI-mode identity
+(`anchor-<repo>@<ssh-target>`), runs `agent-worktrees embody --anchor --json`
+in the workspace, waits for registration, and prints a JSON handle with
+`status`/`observe`/`nudge`/`attach`/`stop` commands. Windows SSH targets are not
+supported yet; run the orchestrator on that machine and use a local
+`agent-worktrees embody`.
+
 ## Explore a machine
 
 ```bash
