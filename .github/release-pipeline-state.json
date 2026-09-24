@@ -1,0 +1,13 @@
+{
+  "last_promotion": {
+    "dev_head": "a78eb3e46a16ea431cdd27d08e2fe60091cea7e5",
+    "main_before": "1f9779e7a1eaf16e79671cf1bff09cc7ff437149",
+    "promoted_at": "2026-09-24T08:49:19Z",
+    "tag": "promote-20260924084919"
+  },
+  "last_rollback": null,
+  "pause_reason": null,
+  "paused": false,
+  "schema": "copilot-extensions.release-pipeline-state",
+  "version": 1
+}

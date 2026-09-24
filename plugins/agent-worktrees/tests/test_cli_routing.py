@@ -762,7 +762,7 @@ def test_bare_terminal_fragment_without_project_dispatches(monkeypatch, capsys):
     from agent_worktrees import terminal_fragment as tf
     monkeypatch.setattr(tf, "collect_local_projects", lambda current_project=None: [])
 
-    rc = m.main(["terminal-fragment", "--machine", "tmichon-book2"])
+    rc = m.main(["terminal-fragment", "--machine", "operator-machine"])
     out = capsys.readouterr()
     assert rc == 0
     assert "Could not resolve a project" not in out.err
