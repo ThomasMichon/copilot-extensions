@@ -272,7 +272,7 @@ def test_self_missing_triggers_anchor_heal(tmp_path, monkeypatch):
     _git("push", "origin", "master", cwd=seed)
 
     _install_config(monkeypatch, anchor)
-    monkeypatch.setattr(m.socket, "gethostname", lambda: "testbox")
+    monkeypatch.setattr(m._socket, "gethostname", lambda: "testbox")
 
     # Precondition: the stale anchor lacks this machine's self-entry.
     assert cfg.find_machine_entry(cfg.load_machines_yaml(anchor), "testbox") is None
@@ -295,7 +295,7 @@ def test_self_present_skips_heal(tmp_path, monkeypatch):
     _git("push", "origin", "master", cwd=seed)
 
     _install_config(monkeypatch, anchor)
-    monkeypatch.setattr(m.socket, "gethostname", lambda: "testbox")
+    monkeypatch.setattr(m._socket, "gethostname", lambda: "testbox")
 
     m._heal_stale_anchor_if_self_missing(cfg.load_config())
 
@@ -305,7 +305,7 @@ def test_self_present_skips_heal(tmp_path, monkeypatch):
 def test_heal_non_fatal_when_ff_raises(tmp_path, monkeypatch):
     _seed, anchor = _make_origin_anchor(tmp_path, ["otherbox"])
     _install_config(monkeypatch, anchor)
-    monkeypatch.setattr(m.socket, "gethostname", lambda: "testbox")
+    monkeypatch.setattr(m._socket, "gethostname", lambda: "testbox")
 
     def _boom() -> None:
         raise RuntimeError("ff failed")
@@ -323,7 +323,7 @@ def test_unreadable_registry_does_not_trigger_heal(tmp_path, monkeypatch):
     _seed, anchor = _make_origin_anchor(tmp_path, ["otherbox"])
     (anchor / "machines.yaml").unlink()
     _install_config(monkeypatch, anchor)
-    monkeypatch.setattr(m.socket, "gethostname", lambda: "testbox")
+    monkeypatch.setattr(m._socket, "gethostname", lambda: "testbox")
 
     called = {"ff": 0}
     monkeypatch.setattr(
