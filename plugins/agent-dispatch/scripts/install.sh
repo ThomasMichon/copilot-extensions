@@ -746,21 +746,7 @@ _ensure_runtime() {
         agent-plugin-resolve
         agent-single-instance-lease
     )
-    _pip_install() {  # $1 = package spec
-        local rc
-        if [[ "$have_uv" -eq 1 ]]; then
-            local refresh_flags=()
-            local pkg
-            for pkg in "${_STALE_CACHE_REFRESH_PACKAGES[@]}"; do
-                refresh_flags+=(--reinstall-package "$pkg" --refresh-package "$pkg")
-            done
-            uv pip install --python "$VENV_PYTHON" "${refresh_flags[@]}" "$1"
-            rc=$?
-        else
-            "$VENV_PYTHON" -m pip install --force-reinstall --no-deps "$1" \
-                && "$VENV_PYTHON" -m pip install "$1"
-            rc=$?
-        fi
+    _scrub_payload_build_artifacts() {
         # Installing FROM the pristine payload directory ("$PLUGIN_DIR",
         # under ~/.copilot/installed-plugins/) leaves setuptools' own
         # build/lib + *.egg-info staging behind IN that tree -- pip's build
@@ -770,16 +756,54 @@ _ensure_runtime() {
         # build/lib/ can silently shadow fresh src/ on a later install if
         # setuptools' incremental-build mtime check decides nothing
         # "changed" (the exact failure mode that crashed agent-bridge's
-        # deployed daemon in a restart loop -- aperture-labs#7281/#7279).
-        # Scrub on every attempt (success or not) so the payload directory
-        # stays the pristine clone it's supposed to be. The src-layout
-        # egg-info (src/agent_dispatch.egg-info) sits ONE LEVEL DEEPER than
-        # the root-level glob below reaches -- a bare "$PLUGIN_DIR"/*.egg-info
-        # never matches it, so it survived every cleanup pass and shadowed a
-        # real upstream fix (registrar.py's `no_pair` field) on a live
-        # deployment. Clean both locations.
+        # deployed daemon in a restart loop, and later agent-dispatch's
+        # supervisor daemon -- see copilot-extensions#3444).
+        # The src-layout egg-info (src/agent_dispatch.egg-info) sits ONE
+        # LEVEL DEEPER than the root-level glob reaches -- a bare
+        # "$PLUGIN_DIR"/*.egg-info never matches it, so it survived every
+        # cleanup pass and shadowed a real upstream fix (registrar.py's
+        # `no_pair` field) on a live deployment. Clean both locations.
         rm -rf "$PLUGIN_DIR/build" "$PLUGIN_DIR"/*.egg-info \
                "$PLUGIN_DIR"/src/*.egg-info 2>/dev/null || true
+    }
+    _pip_install() {  # $1 = package spec
+        local rc
+        # Scrub BEFORE installing too, not just after: residue left behind by
+        # an earlier attempt (a marketplace resync, a failed prior install, a
+        # concurrent process) is already sitting in "$PLUGIN_DIR" the moment
+        # THIS install starts, so an after-only scrub cleans up for next time
+        # but does nothing to stop setuptools' incremental-build mtime check
+        # from shadowing THIS build with that stale build/lib -- confirmed
+        # live (2026-09-23): a truncated recipes_cli.py (missing
+        # register_recipes_commands, present in the fresh src/ copy the whole
+        # time) got installed this way, crash-looping the supervisor daemon
+        # for ~8h before anyone noticed. See #2863 background below.
+        _scrub_payload_build_artifacts
+        if [[ "$have_uv" -eq 1 ]]; then
+            local refresh_flags=()
+            local pkg
+            for pkg in "${_STALE_CACHE_REFRESH_PACKAGES[@]}"; do
+                refresh_flags+=(--reinstall-package "$pkg" --refresh-package "$pkg")
+            done
+            uv pip install --python "$VENV_PYTHON" "${refresh_flags[@]}" "$1"
+            rc=$?
+        else
+            # Two sequential pip calls, not one: the first (--force-reinstall
+            # --no-deps) can itself recreate build/egg-info residue before the
+            # second call's own build starts, so that second build can still
+            # shadow-consume stale artifacts the way the pre-first-call scrub
+            # above exists to prevent. Re-scrub between the two calls too.
+            "$VENV_PYTHON" -m pip install --force-reinstall --no-deps "$1"
+            rc=$?
+            if [[ "$rc" -eq 0 ]]; then
+                _scrub_payload_build_artifacts
+                "$VENV_PYTHON" -m pip install "$1"
+                rc=$?
+            fi
+        fi
+        # Scrub after too (success or not) so the payload directory stays the
+        # pristine clone it's supposed to be for the NEXT install attempt.
+        _scrub_payload_build_artifacts
         return "$rc"
     }
     if _pip_install "${PLUGIN_DIR}[mcp]" >/dev/null 2>&1; then

@@ -1,4 +1,5 @@
-"""POSIX regression coverage for install.sh's post-install payload scrub.
+"""POSIX regression coverage for install.sh's build-artifact scrub (before AND
+after an install attempt, not just after).
 
 Installing FROM the pristine payload directory (``$PLUGIN_DIR``, under
 ``~/.copilot/installed-plugins/``) leaves setuptools' own ``build/lib`` +
@@ -71,6 +72,8 @@ def _run_harness(
         f'have_uv={have_uv}\n'
         'VENV_PYTHON="python3"\n'
         '_STALE_CACHE_REFRESH_PACKAGES=(agent-dispatch)\n'
+        + _extract_function("_scrub_payload_build_artifacts")
+        + "\n\n"
         + _extract_function("_pip_install")
         + "\n\n"
         + uv_stub_body
@@ -170,6 +173,46 @@ fi
     result = _run_harness(plugin_dir, uv_stub, extra, have_uv="0")
     assert "EXIT:0" in result.stdout
     assert not (plugin_dir / "build").exists()
+
+
+def test_plain_pip_fallback_rescrubs_between_the_two_calls(tmp_path: Path) -> None:
+    """Regression: the no-uv fallback runs TWO sequential pip calls
+    (--force-reinstall --no-deps, then a plain install). The first call can
+    itself recreate build/egg-info residue before the second call's own
+    build starts -- confirm the second call sees a clean directory, not
+    residue the first call just left behind."""
+    plugin_dir = tmp_path / "plugin"
+    plugin_dir.mkdir()
+    _seed_build_residue(plugin_dir)
+    uv_stub = f"""
+python3() {{
+    shift  # drop -m
+    shift  # drop pip
+    if [ "$1" = "install" ] && [ "$2" = "--force-reinstall" ]; then
+        # Simulate the first call recreating residue as a side effect.
+        mkdir -p "{plugin_dir}/build/lib/some_pkg"
+        mkdir -p "{plugin_dir}/some_pkg.egg-info"
+        return 0
+    fi
+    if [ -e "{plugin_dir}/build" ] || [ -e "{plugin_dir}/some_pkg.egg-info" ]; then
+        echo 'residue still present before the second pip call' >&2
+        return 1
+    fi
+    return 0
+}}
+"""
+    extra = """
+if _pip_install "$PLUGIN_DIR"; then
+    echo "EXIT:0"
+else
+    echo "EXIT:1"
+fi
+"""
+    result = _run_harness(plugin_dir, uv_stub, extra, have_uv="0")
+    assert "EXIT:0" in result.stdout
+    assert "residue still present" not in result.stderr
+    assert not (plugin_dir / "build").exists()
+    assert not (plugin_dir / "some_pkg.egg-info").exists()
     assert not (plugin_dir / "some_pkg.egg-info").exists()
 
 
@@ -212,3 +255,40 @@ fi
     assert not (plugin_dir / "build").exists()
     assert not (plugin_dir / "some_pkg.egg-info").exists()
     assert not (plugin_dir / "src" / "some_pkg.egg-info").exists()
+
+
+def test_preexisting_residue_is_gone_before_the_install_call_runs(tmp_path: Path) -> None:
+    """Regression (2026-09-23, copilot-extensions#3444): an after-only scrub
+    cleans up for the NEXT install but does nothing to stop stale
+    build/lib/*.egg-info -- already sitting in $PLUGIN_DIR from an earlier
+    attempt, a marketplace resync, or a concurrent process -- from shadowing
+    THIS install's own build via setuptools' incremental-build mtime check.
+    Confirmed live: a truncated recipes_cli.py shipped this way and
+    crash-looped a production supervisor daemon for ~8h. The stub `uv`
+    below asserts the residue is already gone by the time it's invoked,
+    not merely gone by the time `_pip_install` returns."""
+    plugin_dir = tmp_path / "plugin"
+    plugin_dir.mkdir()
+    _seed_build_residue(plugin_dir)
+    _seed_src_layout_egg_info(plugin_dir)
+    uv_stub = f"""
+uv() {{
+    if [ -e "{plugin_dir}/build" ] || [ -e "{plugin_dir}/some_pkg.egg-info" ] \\
+        || [ -e "{plugin_dir}/src/some_pkg.egg-info" ]; then
+        echo 'residue still present at install time' >&2
+        return 1
+    fi
+    echo 'Installed 1 package'
+    return 0
+}}
+"""
+    extra = """
+if _pip_install "$PLUGIN_DIR"; then
+    echo "EXIT:0"
+else
+    echo "EXIT:1"
+fi
+"""
+    result = _run_harness(plugin_dir, uv_stub, extra)
+    assert "EXIT:0" in result.stdout
+    assert "residue still present" not in result.stderr

@@ -359,20 +359,48 @@ _is_venv_corruption() {
 # fresh src/ on a later install if setuptools' own incremental-build mtime
 # check decides nothing "changed" (observed live: a stale build/lib/
 # transport.py missing a since-added function crashed the deployed daemon in
-# a restart loop -- see aperture-labs#7281/#7279 sibling issue). Scrub it
+# a restart loop -- see copilot-extensions#3444 sibling incident). Scrub it
 # after every successful install so the payload directory stays the pristine
 # clone it's supposed to be; a versioned runtime slot under
 # ~/.agent-bridge/versions/<ver>/ is the only place build output should end
 # up living.
+#
+# Also scrub BEFORE installing, not just after: residue already sitting in
+# "$PLUGIN_DIR" the moment an install starts (left by an earlier failed
+# attempt, a marketplace resync, or a concurrent process) shadows THIS
+# build too -- an after-only scrub only protects the NEXT install, not this
+# one. Confirmed live in the agent-dispatch sibling (copilot-extensions#3444,
+# 2026-09-23): a truncated recipes_cli.py shipped this way and crash-looped a
+# production supervisor daemon for ~8h. Also reaches the src-layout egg-info
+# (src/agent_bridge.egg-info), one level deeper than the root-level glob --
+# the exact location that shadowed a real fix and broke a live deployment
+# before being caught (registrar.py's `no_pair` field, same incident).
 _scrub_payload_build_artifacts() {
-    rm -rf "$PLUGIN_DIR/build" "$PLUGIN_DIR"/*.egg-info 2>/dev/null || true
+    # $1 (optional): an additional local source directory to scrub, for a
+    # vendored dependency (ssh-manager, credential-relay, zdd, ...) installed
+    # from its OWN source tree rather than "$PLUGIN_DIR" -- that tree uses the
+    # same setuptools src-layout and accumulates the identical stale
+    # build/egg-info residue, which "$PLUGIN_DIR"-only scrubbing never
+    # reaches (copilot-extensions#3456 review).
+    rm -rf "$PLUGIN_DIR/build" "$PLUGIN_DIR"/*.egg-info \
+           "$PLUGIN_DIR"/src/*.egg-info 2>/dev/null || true
+    local extra_dir="$1"
+    if [[ -n "$extra_dir" && "$extra_dir" != "$PLUGIN_DIR" ]]; then
+        rm -rf "$extra_dir/build" "$extra_dir"/*.egg-info \
+               "$extra_dir"/src/*.egg-info 2>/dev/null || true
+    fi
 }
 
 _uv_pip_install_resilient() {
+    # $1: the local source directory this install actually builds from (pass
+    # "" when it's "$PLUGIN_DIR", already covered unconditionally above) --
+    # every other argument is forwarded verbatim to `uv pip install`.
+    local scrub_dir="$1"; shift
     local out delay
+    _scrub_payload_build_artifacts "$scrub_dir"
     if out="$(uv pip install "$@" 2>&1)"; then
         printf '%s\n' "$out"
-        _scrub_payload_build_artifacts
+        _scrub_payload_build_artifacts "$scrub_dir"
         return 0
     fi
     for delay in 3 6 10; do
@@ -381,9 +409,15 @@ _uv_pip_install_resilient() {
         fi
         _warn "uv build hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying in ${delay}s"
         sleep "$delay"
+        # Re-scrub before every retry, not just the first attempt: the failed
+        # attempt above (or a concurrent installer racing this one during the
+        # sleep) can recreate build/egg-info residue, which would otherwise
+        # shadow THIS retry's build the same way the pre-first-attempt scrub
+        # exists to prevent.
+        _scrub_payload_build_artifacts "$scrub_dir"
         if out="$(uv pip install "$@" 2>&1)"; then
             printf '%s\n' "$out"
-            _scrub_payload_build_artifacts
+            _scrub_payload_build_artifacts "$scrub_dir"
             return 0
         fi
     done
@@ -1237,7 +1271,7 @@ do_install() {
     _step "Installing agent-bridge package..."
     local ssh_manager_dir
     if ssh_manager_dir="$(_resolve_ssh_manager)"; then
-        if ! _uv_pip_install_resilient --python "$VENV_DIR/bin/python" \
+        if ! _uv_pip_install_resilient "$ssh_manager_dir" --python "$VENV_DIR/bin/python" \
                 --reinstall-package agent-ssh-manager --refresh-package agent-ssh-manager \
                 "$ssh_manager_dir" --quiet; then
             _fail "ssh-manager install failed"
@@ -1252,7 +1286,7 @@ do_install() {
     # credential-relay (the relay framework agent-bridge runs in its daemon).
     local cred_relay_dir
     if cred_relay_dir="$(_resolve_credential_relay)"; then
-        if ! _uv_pip_install_resilient --python "$VENV_DIR/bin/python" \
+        if ! _uv_pip_install_resilient "$cred_relay_dir" --python "$VENV_DIR/bin/python" \
                 --reinstall-package agent-credential-relay --refresh-package agent-credential-relay \
                 "$cred_relay_dir" --quiet; then
             _fail "credential-relay install failed"
@@ -1267,7 +1301,7 @@ do_install() {
     # zdd (zero-downtime cutover primitives: routing table + orchestrator).
     local zdd_dir
     if zdd_dir="$(_resolve_zdd)"; then
-        if ! _uv_pip_install_resilient --python "$VENV_DIR/bin/python" \
+        if ! _uv_pip_install_resilient "$zdd_dir" --python "$VENV_DIR/bin/python" \
                 --reinstall-package agent-zdd --refresh-package agent-zdd \
                 "$zdd_dir" --quiet; then
             _fail "zdd install failed"
@@ -1282,7 +1316,7 @@ do_install() {
     # single-instance-lease (one active daemon per host: lease + self-retire + reaper).
     local sil_dir
     if sil_dir="$(_resolve_single_instance_lease)"; then
-        if ! _uv_pip_install_resilient --python "$VENV_DIR/bin/python" --reinstall-package agent-single-instance-lease --refresh-package agent-single-instance-lease "$sil_dir" --quiet; then
+        if ! _uv_pip_install_resilient "$sil_dir" --python "$VENV_DIR/bin/python" --reinstall-package agent-single-instance-lease --refresh-package agent-single-instance-lease "$sil_dir" --quiet; then
             _fail "single-instance-lease install failed"
             exit 1
         fi
@@ -1295,7 +1329,7 @@ do_install() {
     # config-migrate (config schema versioning + migration).
     local cfg_migrate_dir
     if cfg_migrate_dir="$(_resolve_config_migrate)"; then
-        if ! _uv_pip_install_resilient --python "$VENV_DIR/bin/python" \
+        if ! _uv_pip_install_resilient "$cfg_migrate_dir" --python "$VENV_DIR/bin/python" \
                 --reinstall-package agent-config-migrate --refresh-package agent-config-migrate \
                 "$cfg_migrate_dir" --quiet; then
             _fail "config-migrate install failed"
@@ -1320,7 +1354,7 @@ do_install() {
     # outage window -- session_host/launcher.py imports agent_procutil at
     # module level, so a stale build there crashes every headless-spawn
     # session host launch.
-    if ! _uv_pip_install_resilient --python "$VENV_DIR/bin/python" \
+    if ! _uv_pip_install_resilient "" --python "$VENV_DIR/bin/python" \
             --reinstall-package agent-bridge --refresh-package agent-bridge \
             --reinstall-package agent-procutil --refresh-package agent-procutil \
             --reinstall-package agent-plugin-resolve --refresh-package agent-plugin-resolve \
@@ -1792,7 +1826,7 @@ _update_core() {
     _step "Updating agent-bridge package..."
     local ssh_manager_dir
     if ssh_manager_dir="$(_resolve_ssh_manager)"; then
-        if ! _uv_pip_install_resilient --python "$VENV_DIR/bin/python" --reinstall-package agent-ssh-manager --refresh-package agent-ssh-manager \
+        if ! _uv_pip_install_resilient "$ssh_manager_dir" --python "$VENV_DIR/bin/python" --reinstall-package agent-ssh-manager --refresh-package agent-ssh-manager \
                 "$ssh_manager_dir" --quiet; then
             _fail "ssh-manager update failed"
             return 1
@@ -1807,7 +1841,7 @@ _update_core() {
     # without a version bump (uv otherwise skips a same-version path dep).
     local cred_relay_dir
     if cred_relay_dir="$(_resolve_credential_relay)"; then
-        if ! _uv_pip_install_resilient --python "$VENV_DIR/bin/python" --reinstall-package agent-credential-relay --refresh-package agent-credential-relay \
+        if ! _uv_pip_install_resilient "$cred_relay_dir" --python "$VENV_DIR/bin/python" --reinstall-package agent-credential-relay --refresh-package agent-credential-relay \
                 "$cred_relay_dir" --quiet; then
             _fail "credential-relay update failed"
             return 1
@@ -1822,7 +1856,7 @@ _update_core() {
     # version bump (uv otherwise skips a same-version path dep).
     local zdd_dir
     if zdd_dir="$(_resolve_zdd)"; then
-        if ! _uv_pip_install_resilient --python "$VENV_DIR/bin/python" --reinstall-package agent-zdd --refresh-package agent-zdd \
+        if ! _uv_pip_install_resilient "$zdd_dir" --python "$VENV_DIR/bin/python" --reinstall-package agent-zdd --refresh-package agent-zdd \
                 "$zdd_dir" --quiet; then
             _fail "zdd update failed"
             return 1
@@ -1836,7 +1870,7 @@ _update_core() {
     # single-instance-lease: force-reinstall so a local code change propagates.
     local sil_dir
     if sil_dir="$(_resolve_single_instance_lease)"; then
-        if ! _uv_pip_install_resilient --python "$VENV_DIR/bin/python" --reinstall-package agent-single-instance-lease --refresh-package agent-single-instance-lease \
+        if ! _uv_pip_install_resilient "$sil_dir" --python "$VENV_DIR/bin/python" --reinstall-package agent-single-instance-lease --refresh-package agent-single-instance-lease \
                 "$sil_dir" --quiet; then
             _fail "single-instance-lease update failed"
             return 1
@@ -1850,7 +1884,7 @@ _update_core() {
     # config-migrate: force-reinstall so a local code change propagates.
     local cfg_migrate_dir
     if cfg_migrate_dir="$(_resolve_config_migrate)"; then
-        if ! _uv_pip_install_resilient --python "$VENV_DIR/bin/python" --reinstall-package agent-config-migrate --refresh-package agent-config-migrate \
+        if ! _uv_pip_install_resilient "$cfg_migrate_dir" --python "$VENV_DIR/bin/python" --reinstall-package agent-config-migrate --refresh-package agent-config-migrate \
                 "$cfg_migrate_dir" --quiet; then
             _fail "config-migrate update failed"
             return 1
@@ -1868,7 +1902,7 @@ _update_core() {
     # agent-procutil was directly implicated in a live LAUNCH_ACP "session
     # host exited early" incident (#2863's sibling defect class) caused by
     # exactly this gap.
-    if ! _uv_pip_install_resilient --python "$VENV_DIR/bin/python" --reinstall-package agent-bridge --refresh-package agent-bridge \
+    if ! _uv_pip_install_resilient "" --python "$VENV_DIR/bin/python" --reinstall-package agent-bridge --refresh-package agent-bridge \
             --reinstall-package agent-procutil --refresh-package agent-procutil \
             --reinstall-package agent-plugin-resolve --refresh-package agent-plugin-resolve \
             --reinstall-package agent-dropin-registry --refresh-package agent-dropin-registry \
