@@ -195,11 +195,10 @@ async def _retire_previous_daemon(
     drain_timeout: float = _SUPERSESSION_DRAIN_TIMEOUT_S,
 ) -> None:
     """Drain and gracefully retire the predecessor atomically demoted at start."""
-    from zdd import routing
-    from zdd.routing import Endpoint
-
     from .client import BridgeClient, BridgeClientError, BridgeConnectionError
     from .config import config_dir
+    from zdd import routing
+    from zdd.routing import Endpoint
 
     def read_active():
         table = routing.read_table(config_dir())
@@ -372,7 +371,7 @@ async def lifespan(app: FastAPI):
     mgr = session_manager_from_config(db, cfg)
     app.state.session_manager = mgr
     governance = LoopGovernance()
-    app.state.resolver = AgentResolver({}, {}, live_sessions_provider=mgr.list_sessions)
+    app.state.resolver = AgentResolver({}, {})
     mgr.set_resolver(app.state.resolver)
     app.state.ready = False
     app.state.readiness_error = None
@@ -390,11 +389,10 @@ async def lifespan(app: FastAPI):
     if getattr(app.state, "publish_on_ready", False):
         import os as _os
 
-        from zdd import routing
-
         from . import __version__ as _ver
         from . import lifecycle_hooks
         from .config import config_dir
+        from zdd import routing
 
         _bound_port = getattr(app.state, "bound_port", cfg.port)
         await asyncio.to_thread(lifecycle_hooks.startup_sweep, config_dir())
@@ -466,11 +464,6 @@ async def lifespan(app: FastAPI):
                     if getattr(app.state, "background_readiness", False)
                     else daemon_resolver(cfg)
                 )
-                set_live_sessions_provider = getattr(
-                    resolver, "set_live_sessions_provider", None,
-                )
-                if callable(set_live_sessions_provider):
-                    set_live_sessions_provider(mgr.list_sessions)
                 app.state.resolver = resolver
                 mgr.set_resolver(resolver)
                 app.state.topology_ready = True
@@ -975,7 +968,6 @@ async def lifespan(app: FastAPI):
     import os as _os
 
     from zdd import routing
-
     from . import lifecycle_hooks
     from .config import config_dir
     # STOP only if we emitted a matching START (the server confirmed

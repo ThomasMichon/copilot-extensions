@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -226,7 +227,7 @@ class TestBridgeAgentSessions:
 
     @pytest.mark.asyncio
     async def test_new_session_auto_adopts_singleton_occupant(self, sm):
-        target = SpawnTarget(type="local", cwd="/tmp")
+        target = SpawnTarget(type="local", cwd="/tmp", worktree_id="wt-1")
         session = Session("s-adopt", "test", target)
         session.status = SessionStatus.IDLE
         session.event_log = EventLog()
@@ -241,8 +242,7 @@ class TestBridgeAgentSessions:
                     type="local",
                     cwd="/tmp",
                     worktree_id="wt-1",
-                    adopt_session_id="s-adopt",
-                    session_role="guest",
+                    venue={"provider": "agent-dispatch", "target_id": "task-1"},
                 )
 
         agent = BridgeAgent(sm, resolver=_Resolver(), default_agent="dispatch:task-1")
@@ -253,6 +253,83 @@ class TestBridgeAgentSessions:
         assert resp.field_meta == {"agent-bridge": {"role": "guest"}}
         assert "s-adopt" in agent._adopted_sessions
         assert "s-adopt" not in agent._owned_sessions
+
+    @pytest.mark.asyncio
+    async def test_new_session_treats_starting_singleton_as_occupied(self, sm):
+        target = SpawnTarget(type="local", cwd="/tmp", worktree_id="wt-1")
+        session = Session("s-starting", "test", target)
+        session.status = SessionStatus.STARTING
+        session.event_log = EventLog()
+        sm._sessions["s-starting"] = session
+
+        class _Resolver:
+            async def resolve_async(self, _agent_name):
+                return SpawnTarget(
+                    type="local",
+                    cwd="/tmp",
+                    worktree_id="wt-1",
+                    venue={"provider": "agent-dispatch", "target_id": "task-1"},
+                )
+
+        agent = BridgeAgent(sm, resolver=_Resolver(), default_agent="dispatch:task-1")
+
+        resp = await agent.new_session(cwd="/tmp")
+
+        assert resp.session_id == "s-starting"
+        assert resp.field_meta == {"agent-bridge": {"role": "guest"}}
+        assert "s-starting" in agent._adopted_sessions
+        assert "s-starting" not in agent._owned_sessions
+
+    @pytest.mark.asyncio
+    async def test_new_session_serializes_dispatch_singleton_ownership(self, sm):
+        started = asyncio.Event()
+        release = asyncio.Event()
+        created: list[str] = []
+        real_start = sm.start_session
+
+        async def _fake_start_session(target, agent_name=None, permission_callback=None):
+            session = Session("s-owner", "owner", target, agent_name)
+            session.status = SessionStatus.STARTING
+            session.event_log = EventLog()
+            sm._sessions[session.session_id] = session
+            created.append(session.session_id)
+            started.set()
+            await release.wait()
+            session.status = SessionStatus.IDLE
+            return session
+
+        sm.start_session = _fake_start_session  # type: ignore[method-assign]
+
+        class _Resolver:
+            async def resolve_async(self, _agent_name):
+                return SpawnTarget(
+                    type="local",
+                    cwd="/tmp",
+                    worktree_id="wt-1",
+                    venue={"provider": "agent-dispatch", "target_id": "task-1"},
+                )
+
+        agent_a = BridgeAgent(sm, resolver=_Resolver(), default_agent="dispatch:task-1")
+        agent_b = BridgeAgent(sm, resolver=_Resolver(), default_agent="dispatch:task-1")
+        try:
+            first = asyncio.create_task(agent_a.new_session(cwd="/tmp"))
+            await started.wait()
+            second = asyncio.create_task(agent_b.new_session(cwd="/tmp"))
+            await asyncio.sleep(0)
+            assert not second.done()
+
+            release.set()
+            first_resp, second_resp = await asyncio.gather(first, second)
+
+            assert first_resp.session_id == "s-owner"
+            assert first_resp.field_meta == {"agent-bridge": {"role": "owner"}}
+            assert second_resp.session_id == "s-owner"
+            assert second_resp.field_meta == {"agent-bridge": {"role": "guest"}}
+            assert created == ["s-owner"]
+            assert "s-owner" in agent_a._owned_sessions
+            assert "s-owner" in agent_b._adopted_sessions
+        finally:
+            sm.start_session = real_start  # type: ignore[method-assign]
 
     @pytest.mark.asyncio
     async def test_close_session(self, bridge_agent, sm):

@@ -15,6 +15,7 @@ connects via ``copilot --acp --stdio`` or equivalent.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -70,6 +71,13 @@ _VALID_STOP_REASONS = frozenset({
     "end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled",
 })
 _SESSION_ROLE_META_KEY = "agent-bridge"
+_DISPATCH_SINGLETON_PROVIDER = "agent-dispatch"
+_SINGLETON_GUEST_JOIN_STATUSES = frozenset({
+    SessionStatus.STARTING,
+    SessionStatus.RUNNING,
+    SessionStatus.IDLE,
+})
+_singleton_slot_locks: dict[str, asyncio.Lock] = {}
 
 
 def _normalize_stop_reason(reason: str | None) -> str:
@@ -223,35 +231,17 @@ class BridgeAgent(Agent):
 
         agent_name = self._default_agent
         target = await self._resolve_target(cwd, agent_name)
-        if target.adopt_session_id:
-            return await self._adopt_existing(
-                target.adopt_session_id,
-                role=target.session_role or "guest",
-            )
-
-        # Build permission callback for this session
-        permission_cb = self._make_permission_callback()
-
-        session = await self._sm.start_session(
-            target,
-            agent_name=agent_name,
-            permission_callback=permission_cb,
-        )
-
-        if session.status == SessionStatus.FAILED:
-            raise RequestError.internal_error(
-                f"Failed to start session for agent '{agent_name}'"
-            )
-
-        self._owned_sessions.add(session.session_id)
-        log.info(
-            "Upstream new_session -> bridge session %s (agent=%s)",
-            session.session_id, agent_name,
-        )
-        return self._session_response(
-            session.session_id,
-            role=target.session_role or "owner",
-        )
+        singleton_slot = self._singleton_slot_key(target)
+        if singleton_slot is not None:
+            lock = _singleton_slot_locks.setdefault(singleton_slot, asyncio.Lock())
+            async with lock:
+                incumbent = self._latest_singleton_occupant(target)
+                if incumbent is not None:
+                    return await self._adopt_existing(
+                        incumbent.session_id, role="guest",
+                    )
+                return await self._start_owned_session(target, agent_name)
+        return await self._start_owned_session(target, agent_name)
 
     async def prompt(
         self,
@@ -407,6 +397,53 @@ class BridgeAgent(Agent):
             session_id=session_id,
             _meta={_SESSION_ROLE_META_KEY: {"role": role}},
         )
+
+    async def _start_owned_session(
+        self, target: SpawnTarget, agent_name: str | None,
+    ) -> NewSessionResponse:
+        """Start a fresh owned bridge session for this connection."""
+        permission_cb = self._make_permission_callback()
+
+        session = await self._sm.start_session(
+            target,
+            agent_name=agent_name,
+            permission_callback=permission_cb,
+        )
+
+        if session.status == SessionStatus.FAILED:
+            raise RequestError.internal_error(
+                f"Failed to start session for agent '{agent_name}'"
+            )
+
+        self._owned_sessions.add(session.session_id)
+        log.info(
+            "Upstream new_session -> bridge session %s (agent=%s)",
+            session.session_id, agent_name,
+        )
+        return self._session_response(session.session_id, role="owner")
+
+    def _singleton_slot_key(self, target: SpawnTarget) -> str | None:
+        """Return the singleton-slot coordination key for guest-join targets."""
+        venue = target.venue if isinstance(target.venue, dict) else None
+        if (
+            not target.worktree_id
+            or not venue
+            or venue.get("provider") != _DISPATCH_SINGLETON_PROVIDER
+        ):
+            return None
+        # Phase 2.5b scopes the automatic guest-join path to dispatch-backed
+        # worktree targets first. Codespace/container singleton auto-join
+        # remains the explicit follow-on once this path is proven.
+        return f"dispatch:{target.worktree_id}"
+
+    def _latest_singleton_occupant(self, target: SpawnTarget) -> Session | None:
+        """Return the newest live/starting session occupying ``target``."""
+        for session in self._sm.list_sessions():
+            if getattr(session.target, "worktree_id", None) != target.worktree_id:
+                continue
+            if session.status in _SINGLETON_GUEST_JOIN_STATUSES:
+                return session
+        return None
 
     async def _adopt_existing(
         self, session_id: str, *, role: str = "guest",

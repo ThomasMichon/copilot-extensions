@@ -128,8 +128,6 @@ class SpawnTarget:
     #                            readiness, transport, and capability posture.
     #                            Persisted unchanged so the bridge never invents
     #                            a parallel venue identity.
-    adopt_session_id: str | None = None  # pre-existing bridge session to join
-    session_role: str | None = None  # "owner" | "guest" for the current connect
     auth_hooks: list[dict] = field(default_factory=list)  # serializable auth hook dicts
     mcp_servers: list[dict[str, Any]] = field(default_factory=list)
     #   Copied from the resolved AgentConfig.mcp_servers (see agent_registry.py)
