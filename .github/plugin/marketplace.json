@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, budget posture, coordinator-first delegation, publication safety, WSL environment setup, and CLI customization",
-    "version": "1.7.7-dev218"
+    "version": "1.7.7-dev219"
   },
   "plugins": [
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.5.5-dev264",
+      "version": "1.5.5-dev265",
       "source": "plugins/agent-worktrees"
     },
     {
@@ -97,7 +97,7 @@
     {
       "name": "copilot-extensions-harness",
       "description": "Operator harness for the copilot-extensions repo. Primary: help any consumer identify which local scripts/processes belong to this suite and enforce never-monkey-patch (file a bug upstream or auto-update instead). Secondary: portable contribution, deployment, and clean-room validation guidance plus an ambient pointer to the general-purpose, organization-neutral contribution boundary.",
-      "version": "0.1.0-dev46",
+      "version": "0.1.0-dev47",
       "source": "plugins/copilot-extensions-harness"
     },
     {
