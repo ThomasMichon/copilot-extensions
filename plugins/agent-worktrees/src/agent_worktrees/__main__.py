@@ -2154,6 +2154,7 @@ def _carve_paired_knowledge(
     try:
         permissions.clone_permissions(knowledge_anchor, knowledge_wt_path)
         permissions.add_trusted_folder(knowledge_wt_path)
+        permissions.ensure_extension_permission_approvals(knowledge_wt_path)
     except Exception:
         pass
     activity.log_event(
@@ -2612,6 +2613,12 @@ def _create_worktree_core(
     # Trust the new worktree path
     if permissions.add_trusted_folder(worktree_path):
         print("Added worktree path to trustedFolders.", file=sys.stderr)
+
+    # Pre-approve the facility's own extension-permission-access gate so the
+    # first launch here never blocks on an interactive prompt no one is
+    # necessarily present to answer (github/copilot-agent-runtime#22266).
+    if permissions.ensure_extension_permission_approvals(worktree_path):
+        print("Pre-approved facility extension permissions for worktree path.", file=sys.stderr)
 
     # citadel paired -harness/-knowledge worktree lifecycle (#957): when this is
     # a stateless harness bound to a knowledge repo, carve/stamp the knowledge
