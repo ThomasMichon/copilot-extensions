@@ -6,9 +6,10 @@ Logger, Agent Index, and Agent Machines. `tools/sync-peer-launch.py` packages
 byte-identical copies alongside each consumer's `_installation_context.py`;
 `tools/sync-installation-context.py` owns those validator bytes. Neither
 bootstrap imports a validator through an unvalidated payload pointer.
-Supported peers are `agent-worktrees`, `agent-bridge`, and `agent-ssh` --
-each a canonical `libs/installation-context` adopter in its own right, so
-adding a peer is just a `PEERS` mapping entry with no boundary changes.
+Supported peers are `agent-worktrees`, `agent-bridge`, `agent-codespaces`,
+`agent-containers`, `agent-dispatch`, and `agent-ssh` -- each a canonical
+`libs/installation-context` adopter in its own right, so adding a peer is
+just a `PEERS` mapping entry with no boundary changes.
 
 `launch_prefix(owner, own_root, raw_context, peer)` returns a composable native
 Python argv prefix. At execution the boundary validates active owner, namespace,

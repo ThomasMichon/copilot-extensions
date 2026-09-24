@@ -68,7 +68,9 @@ from agent_procutil import no_window_kwargs
 from dropin_registry import EntryDecision, EntryStatus, Finding, scan_directory
 from plugin_activation import ActivationReport, resolve_active_plugins
 
+from ._peer_launch import PEERS
 from .claim_kinds_registry import installed_plugins_dir
+from . import peer_launch_adapter
 
 log = logging.getLogger("agent-worktrees")
 
@@ -483,10 +485,31 @@ def resolve_provider_argv(
     provider = providers.get(namespace)
     if provider is None:
         return None
+    return build_provider_argv_for_manifest(provider, kind=kind)
+
+
+def build_provider_argv_for_manifest(
+    provider: ClaimProviderManifest,
+    *extra: tuple[str, bool],
+    kind: str = "status",
+) -> tuple[str, ...] | None:
+    """Build a provider command from an already-resolved manifest.
+
+    Mirrors :func:`build_provider_argv`, but lets a caller reuse the manifest
+    it already resolved (for example to pair the legacy wrapped command with
+    raw callback args for peer-launch).
+    """
+    if kind not in ("status", "reclaim"):
+        raise ValueError("kind must be 'status' or 'reclaim'")
     command = provider.status_command if kind == "status" else provider.reclaim_command
     if command is None:
         return None
-    return tuple(_windows_batch_argv(command))
+    tokens: list[str] = []
+    for token, trusted in extra:
+        if not trusted and not is_safe_argument(token):
+            return None
+        tokens.append(token)
+    return (*_windows_batch_argv(command), *tokens)
 
 
 def build_provider_argv(
@@ -522,15 +545,11 @@ def build_provider_argv(
     Returns ``None`` when no provider is registered, it declares no command
     of the requested ``kind``, OR any ``trusted=False`` token fails
     :func:`is_safe_argument`."""
-    command = resolve_provider_argv(namespace, kind=kind, plugins_root=plugins_root)
-    if command is None:
+    providers, _findings = discover_claim_providers(plugins_root)
+    provider = providers.get(namespace)
+    if provider is None:
         return None
-    tokens: list[str] = []
-    for token, trusted in extra:
-        if not trusted and not is_safe_argument(token):
-            return None
-        tokens.append(token)
-    return (*command, *tokens)
+    return build_provider_argv_for_manifest(provider, *extra, kind=kind)
 
 
 def _windows_batch_argv(command: tuple[str, ...]) -> list[str]:
@@ -563,7 +582,7 @@ def _windows_batch_argv(command: tuple[str, ...]) -> list[str]:
 
 
 def peer_env() -> dict[str, str] | None:
-    """Environment for invoking a resolved SIBLING plugin's binstub.
+    """Legacy environment for invoking a resolved SIBLING plugin's binstub.
 
     ``agent-worktrees`` ships with ``installationContext: required``
     (``payload-invocation.json``), so ``COPILOT_EXTENSIONS_CONTEXT`` is
@@ -572,6 +591,11 @@ def peer_env() -> dict[str, str] | None:
     whenever that variable was set, which silently disabled this entire
     registry in every normal marketplace installation (a strictly worse
     outcome than the residual risk below).
+
+    This path now exists only for callers with NO explicit installation
+    context at all. When ``COPILOT_EXTENSIONS_CONTEXT`` is present and the
+    sibling is a registered peer-launch target, the caller must rebind into
+    the peer's own validated context instead of stripping and downgrading.
 
     Strips ``COPILOT_EXTENSIONS_CONTEXT``, ``COPILOT_PLUGIN_ROOT``, AND
     ``GH_TOKEN``/``GITHUB_TOKEN`` before the child inherits any of them
@@ -605,15 +629,69 @@ def peer_env() -> dict[str, str] | None:
     return env
 
 
-def _run_callback(
-    command: tuple[str, ...], *, timeout: float, required_bool_field: str
-) -> dict | None:
+def _provider_plugin_id(provider: ClaimProviderManifest) -> str:
+    plugin, sep, _marketplace = provider.plugin.partition("@")
+    if sep and plugin:
+        return plugin
+    root_name = Path(provider.plugin_root).name
+    return root_name or provider.plugin
+
+
+def _run_legacy_command(
+    command: tuple[str, ...], *, timeout: float, cwd: str | None = None,
+) -> subprocess.CompletedProcess[str] | None:
     try:
-        proc = subprocess.run(
-            _windows_batch_argv(command), capture_output=True, text=True, timeout=timeout,
-            encoding="utf-8", errors="replace", env=peer_env(), **no_window_kwargs(),
+        return subprocess.run(
+            list(command),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            encoding="utf-8",
+            errors="replace",
+            env=peer_env(),
+            cwd=cwd,
+            **no_window_kwargs(),
         )
     except (subprocess.SubprocessError, OSError, ValueError):
+        return None
+
+
+def _run_provider_process(
+    provider: ClaimProviderManifest,
+    *,
+    callback_args: tuple[str, ...],
+    legacy_command: tuple[str, ...],
+    timeout: float,
+    cwd: str | None = None,
+) -> subprocess.CompletedProcess[str] | None:
+    plugin_id = _provider_plugin_id(provider)
+    if peer_launch_adapter.explicit_context():
+        if plugin_id not in PEERS:
+            return None
+        try:
+            return peer_launch_adapter.run(plugin_id, *callback_args, timeout=timeout, cwd=cwd)
+        except peer_launch_adapter.ContextRefused:
+            return None
+    return _run_legacy_command(legacy_command, timeout=timeout, cwd=cwd)
+
+
+def _run_callback(
+    provider: ClaimProviderManifest,
+    *,
+    callback_args: tuple[str, ...],
+    legacy_command: tuple[str, ...],
+    timeout: float,
+    required_bool_field: str,
+    cwd: str | None = None,
+) -> dict | None:
+    proc = _run_provider_process(
+        provider,
+        callback_args=callback_args,
+        legacy_command=legacy_command,
+        timeout=timeout,
+        cwd=cwd,
+    )
+    if proc is None:
         return None
     if proc.returncode != 0:
         return None
@@ -690,9 +768,21 @@ def resolve_claim_status(
             "available": False,
             "reason": f"{provider.plugin} is a claim provider for '{namespace}:' but declares no status_command",
         }
+    callback_args = ("claim-status", identifier)
+    legacy_command = build_provider_argv_for_manifest(
+        provider,
+        ("claim-status", True),
+        (identifier, False),
+        kind="status",
+    )
+    if legacy_command is None:
+        return {"available": False, "reason": f"{provider.plugin} claim-status callback failed"}
     result = _run_callback(
-        (*provider.status_command, "claim-status", identifier),
-        timeout=timeout, required_bool_field="exists",
+        provider,
+        callback_args=callback_args,
+        legacy_command=legacy_command,
+        timeout=timeout,
+        required_bool_field="exists",
     )
     if result is None:
         return {"available": False, "reason": f"{provider.plugin} claim-status callback failed"}
@@ -734,10 +824,22 @@ def resolve_claim_reclaim(
             "available": False,
             "reason": f"{provider.plugin} is a claim provider for '{namespace}:' but declares no reclaim_command",
         }
-    argv = [*provider.reclaim_command, "claim-reclaim", identifier]
+    callback_args = ("claim-reclaim", identifier, *(("--apply",) if apply else ()))
+    legacy_tokens: list[tuple[str, bool]] = [("claim-reclaim", True), (identifier, False)]
     if apply:
-        argv.append("--apply")
-    result = _run_callback(tuple(argv), timeout=timeout, required_bool_field="reclaimed")
+        legacy_tokens.append(("--apply", True))
+    legacy_command = build_provider_argv_for_manifest(
+        provider, *legacy_tokens, kind="reclaim",
+    )
+    if legacy_command is None:
+        return {"available": False, "reason": f"{provider.plugin} claim-reclaim callback failed"}
+    result = _run_callback(
+        provider,
+        callback_args=callback_args,
+        legacy_command=legacy_command,
+        timeout=timeout,
+        required_bool_field="reclaimed",
+    )
     if result is None:
         return {"available": False, "reason": f"{provider.plugin} claim-reclaim callback failed"}
     return {**{k: v for k, v in result.items() if k != "available"}, "available": True}

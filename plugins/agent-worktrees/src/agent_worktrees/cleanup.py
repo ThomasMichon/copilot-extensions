@@ -99,18 +99,27 @@ def _run_codespaces(args: list[tuple[str, bool]], *, timeout: float = 660.0):
     """
     from . import claim_providers
 
-    full_argv = claim_providers.build_provider_argv("codespace", *args, kind="reclaim")
+    providers, _findings = claim_providers.discover_claim_providers()
+    provider = providers.get("codespace")
+    if provider is None:
+        return None
+    full_argv = claim_providers.build_provider_argv_for_manifest(
+        provider,
+        *args,
+        kind="reclaim",
+    )
     if full_argv is None:
         return None
-    try:
-        return subprocess.run(
-            list(full_argv),
-            capture_output=True, text=True, timeout=timeout,
-            creationflags=_creationflags(), env=claim_providers.peer_env(),
-        )
-    except Exception as exc:  # binstub vanished / exec error
-        log.debug("agent-codespaces %s failed to run: %s", [t for t, _ in args][:2], exc)
+    proc = claim_providers._run_provider_process(
+        provider,
+        callback_args=tuple(token for token, _trusted in args),
+        legacy_command=full_argv,
+        timeout=timeout,
+    )
+    if proc is None:
+        log.debug("agent-codespaces %s failed to run", [t for t, _ in args][:2])
         return None
+    return proc
 
 
 def _run_worktrees(args: list[str], *, cwd: str | None = None,

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 from pathlib import Path
 
 from . import activity, claim_handoffs, claims_owner, obligations, output, tracking
@@ -149,29 +148,27 @@ def _dispatch_assigned_tasks(machine: str, worktree_id: str, cwd: str) -> dict:
     """
     from . import claim_providers
 
-    full_argv = claim_providers.build_provider_argv(
-        "dispatch-task",
-        ("worktree-status", True), ("--machine", True), (machine, False),
-        ("--worktree", True), (worktree_id, False),
-        kind="status")
-    if full_argv is None:
+    providers, _findings = claim_providers.discover_claim_providers()
+    provider = providers.get("dispatch-task")
+    if provider is None:
         return {"available": False, "reason": "agent-dispatch not installed"}
-    try:
-        proc = subprocess.run(
-            full_argv,
-            cwd=cwd if cwd and Path(cwd).exists() else None,
-            capture_output=True,
-            text=True,
-            timeout=15,
-            env=claim_providers.peer_env(),
-        )
-    except (subprocess.SubprocessError, OSError) as e:
-        return {"available": False, "reason": f"agent-dispatch call failed: {e}"}
+    callback_args = ("worktree-status", "--machine", machine, "--worktree", worktree_id)
+    full_argv = claim_providers.build_provider_argv_for_manifest(
+        provider, ("worktree-status", True), ("--machine", True), (machine, False),
+        ("--worktree", True), (worktree_id, False), kind="status")
+    if full_argv is None:
+        return {"available": False, "reason": "agent-dispatch call failed"}
+    proc = claim_providers._run_provider_process(
+        provider,
+        callback_args=callback_args,
+        legacy_command=full_argv,
+        timeout=15,
+        cwd=cwd if cwd and Path(cwd).exists() else None,
+    )
+    if proc is None:
+        return {"available": False, "reason": "agent-dispatch call failed"}
     if proc.returncode != 0:
-        return {
-            "available": False,
-            "reason": (proc.stderr or "").strip() or "agent-dispatch error",
-        }
+        return {"available": False, "reason": (proc.stderr or "").strip() or "agent-dispatch error"}
     try:
         data = json.loads(proc.stdout)
     except (ValueError, TypeError):

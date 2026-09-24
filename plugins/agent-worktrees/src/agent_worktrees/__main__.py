@@ -2152,7 +2152,11 @@ def _carve_paired_knowledge(
                 f"{exc} A harness worktree/branch was already created "
                 "before this policy violation was detected and is left in "
                 f"place (no automatic rollback): worktree="
-                f"{harness_worktree_path!r} branch={f'worktree/{harness_id}'!r}. "
+                # Quote for readability WITHOUT `!r` -- Windows paths
+                # contain backslashes, and Python's repr() doubles every
+                # backslash, silently corrupting the path for anything
+                # that greps/copy-pastes it verbatim from this message.
+                f"'{harness_worktree_path}' branch='worktree/{harness_id}'. "
                 "Remove it manually with `git worktree remove` if unwanted."
             ) from exc
         knowledge_codename = codename_tracking.assign_new_codename(
