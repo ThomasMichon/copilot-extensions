@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from agent_procutil import (
+    no_window_flags,
     windowless_daemon_kwargs,
     windowless_python,
     windowless_python_env,
@@ -126,7 +127,7 @@ def _mux_exists(ssh_config: Any, mux: str) -> bool:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=60.0,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            creationflags=no_window_flags(),
         )
     except (OSError, subprocess.SubprocessError):
         return False
