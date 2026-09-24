@@ -152,6 +152,42 @@ def registration_credentials_script(token: str, port: int) -> str:
     )
 
 
+def bridge_probe_script(port: int) -> str:
+    """Authenticated curl probe for a venue-side agent-bridge reverse forward."""
+    return (
+        "t=$(sed -n 's/^[[:space:]]*token:[[:space:]]*//p' "
+        "~/.agent-bridge/auth.yaml | tr -d \"'\\\"\"); "
+        f"curl -fsS -m 5 -o /dev/null -H \"Authorization: Bearer $t\" "
+        f"http://127.0.0.1:{int(port)}/api/v1/live-sessions"
+    )
+
+
+def last_json(text: str) -> dict[str, Any]:
+    """The last complete JSON object in ``text`` (embody may pretty-print)."""
+    start = text.rfind("{")
+    while start != -1:
+        try:
+            value = json.loads(text[start:])
+            if isinstance(value, dict):
+                return value
+        except ValueError:
+            pass
+        start = text.rfind("{", 0, start)
+    return {}
+
+
+def observe_commands(session_id: str) -> dict[str, str]:
+    """Venue-neutral observation/steering commands for a live session."""
+    return {
+        "status": f"agent-bridge --json live-sessions resolve --handle {session_id}",
+        "observe": (
+            f"agent-bridge result {session_id} --json --max-items 5 "
+            "--max-text-chars 2000"
+        ),
+        "nudge": f"agent-bridge send {session_id} \"<message>\" --no-wait",
+    }
+
+
 def _run_bridge(
     argv: list[str], *, run: Callable[..., Any] = subprocess.run,
 ) -> dict[str, Any]:
@@ -217,6 +253,43 @@ def reserve_cli_mode(
             f"{reservation['error']}"
         )
     return reservation
+
+
+def reserve_with_retry(
+    worktree_id: str,
+    venue: dict[str, Any],
+    *,
+    ttl_seconds: float = DEFAULT_TTL_SECONDS,
+    ttl: float | None = None,
+    retry_window: float = 90.0,
+    on_wait: Callable[[], None] | None = None,
+    bridge_bin: str = "agent-bridge",
+    run: Callable[..., Any] = subprocess.run,
+) -> dict[str, Any]:
+    """Reserve CLI mode, retrying briefly while another launch holds it."""
+    deadline = time.monotonic() + retry_window
+    ttl_value = ttl if ttl is not None else ttl_seconds
+    while True:
+        try:
+            try:
+                return reserve_cli_mode(
+                    worktree_id,
+                    ttl_seconds=ttl_value,
+                    venue=venue,
+                    bridge_bin=bridge_bin,
+                    run=run,
+                )
+            except TypeError:
+                try:
+                    return reserve_cli_mode(worktree_id, ttl_seconds=ttl_value, venue=venue)
+                except TypeError:
+                    return reserve_cli_mode(worktree_id, ttl_value, venue)
+        except VenueCopilotError as exc:
+            if "reservation_active" not in str(exc) or time.monotonic() >= deadline:
+                raise
+            if on_wait:
+                on_wait()
+            time.sleep(5.0)
 
 
 def get_cli_mode_reservation(

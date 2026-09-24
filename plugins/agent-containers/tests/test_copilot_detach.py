@@ -8,6 +8,7 @@ import types
 
 import pytest
 import venue_copilot
+from ssh_manager import forward_keeper as shared_forward_keeper
 
 from agent_containers import copilot_detach as detach
 from agent_containers import forward_keeper
@@ -140,8 +141,6 @@ def seams(monkeypatch):
         lambda name: calls.stop_keeper.append(name) or True,
     )
     monkeypatch.setattr(forward_keeper, "read_state", lambda name: None)
-    monkeypatch.setattr(detach.time, "sleep", lambda s: None)
-
     created = json.dumps({
         "ok": True,
         "created": True,
@@ -269,15 +268,15 @@ def test_stop_kills_mux_stops_keeper_and_deregisters(seams, capsys):
 
 
 def test_forward_keeper_state_reuse_and_replace(tmp_path, monkeypatch):
-    monkeypatch.setattr(forward_keeper, "_STATE_DIR", tmp_path)
-    monkeypatch.setattr(forward_keeper, "pid_alive", lambda pid: pid == 100)
+    monkeypatch.setattr(forward_keeper, "_STORE", shared_forward_keeper.KeeperStore(tmp_path))
+    monkeypatch.setattr(shared_forward_keeper, "pid_alive", lambda pid: pid == 100)
     stopped = []
     monkeypatch.setattr(forward_keeper, "stop_keeper", lambda name: stopped.append(name) or True)
 
     class Proc:
         pid = 200
 
-    forward_keeper._write_state("repo-1", {
+    forward_keeper._STORE.write("repo-1", {
         "pid": 100,
         "mux": "wt-anchor-repo",
         "venue_port": 41234,
@@ -294,7 +293,7 @@ def test_forward_keeper_state_reuse_and_replace(tmp_path, monkeypatch):
 
 
 def test_forward_keeper_exits_when_mux_is_gone(tmp_path, monkeypatch):
-    monkeypatch.setattr(forward_keeper, "_STATE_DIR", tmp_path)
+    monkeypatch.setattr(forward_keeper, "_STORE", shared_forward_keeper.KeeperStore(tmp_path))
     monkeypatch.setattr("agent_containers.resolver.resolve_live_exec_target", lambda name: _target())
     monkeypatch.setattr("agent_containers.ssh_transport.prepare_ssh_config", lambda name, user: object())
     monkeypatch.setattr(forward_keeper, "_mux_exists", lambda cfg, mux: False)

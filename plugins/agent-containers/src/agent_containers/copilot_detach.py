@@ -8,12 +8,17 @@ import os
 import shlex
 import subprocess
 import sys
-import time
 from collections.abc import Callable
 from typing import Any
 
 from agent_procutil import no_window_flags
-from venue_copilot import read_seed
+from venue_copilot import (
+    bridge_probe_script,
+    last_json,
+    observe_commands,
+    read_seed,
+    reserve_with_retry,
+)
 
 _BUSY_EXIT = 75
 _RESERVATION_TTL = 900.0
@@ -44,9 +49,7 @@ def plan_for(args: argparse.Namespace, target: Any) -> dict[str, Any]:
 def _commands(plan: dict[str, Any], session_id: str) -> dict[str, str]:
     name = plan["container"]
     return {
-        "status": f"agent-bridge --json live-sessions resolve --handle {session_id}",
-        "observe": f"agent-bridge result {session_id} --json --max-items 5 --max-text-chars 2000",
-        "nudge": f"agent-bridge send {session_id} \"<message>\" --no-wait",
+        **observe_commands(session_id),
         "attach": f"agent-containers copilot {name}",
         "stop": f"agent-containers copilot {name} --stop",
     }
@@ -83,12 +86,7 @@ def _remote(
 
 
 def _bridge_path_ok(ssh_config: Any, port: int) -> bool:
-    probe = (
-        "t=$(sed -n 's/^[[:space:]]*token:[[:space:]]*//p' "
-        "~/.agent-bridge/auth.yaml | tr -d \"'\\\"\"); "
-        f"curl -fsS -m 5 -o /dev/null -H \"Authorization: Bearer $t\" "
-        f"http://127.0.0.1:{int(port)}/api/v1/live-sessions"
-    )
+    probe = bridge_probe_script(port)
     for attempt in range(_PROBE_ATTEMPTS):
         rc, _out, _err = _remote(ssh_config, probe, timeout=30.0)
         if rc == 0:
@@ -98,33 +96,16 @@ def _bridge_path_ok(ssh_config: Any, port: int) -> bool:
     return False
 
 
-def _last_json(text: str) -> dict[str, Any]:
-    start = text.rfind("{")
-    while start != -1:
-        try:
-            value = json.loads(text[start:])
-            if isinstance(value, dict):
-                return value
-        except ValueError:
-            pass
-        start = text.rfind("{", 0, start)
-    return {}
-
-
 def _reserve(plan: dict[str, Any]) -> dict[str, Any]:
-    from venue_copilot import VenueCopilotError, reserve_cli_mode
-
-    deadline = time.monotonic() + _RESERVE_RETRY_WINDOW
-    while True:
-        try:
-            return reserve_cli_mode(
-                plan["scope_id"], ttl_seconds=_RESERVATION_TTL, venue=plan["venue"]
-            )
-        except VenueCopilotError as exc:
-            if "reservation_active" not in str(exc) or time.monotonic() >= deadline:
-                raise
-            _progress("waiting", "another launch on this container holds the reservation")
-            time.sleep(5.0)
+    return reserve_with_retry(
+        plan["scope_id"],
+        plan["venue"],
+        ttl_seconds=_RESERVATION_TTL,
+        retry_window=_RESERVE_RETRY_WINDOW,
+        on_wait=lambda: _progress(
+            "waiting", "another launch on this container holds the reservation",
+        ),
+    )
 
 
 def _relay_launch_env(
@@ -328,7 +309,7 @@ def cmd_detach(
         )
         stdout = proc.stdout or ""
         stderr = proc.stderr or ""
-        embodied = _last_json(stdout)
+        embodied = last_json(stdout)
         if "agent-worktrees: command not found" in stderr + stdout:
             return _fail(
                 "agent-worktrees is not installed in the container; install it on "
@@ -413,10 +394,10 @@ def cmd_stop(args: argparse.Namespace) -> int:
     row = live_session_for(plan["scope_id"])
     session_id = row.get("session_id") if (row.get("venue") or {}).get("target") == args.name else None
     ssh_config = prepare_ssh_config(args.name, target.user)
-    target = shlex.quote("=" + plan["mux_session"])
+    mux_target = shlex.quote("=" + plan["mux_session"])
     script = (
-        f"tmux kill-session -t {target} 2>/dev/null; sleep 1; "
-        f"if tmux has-session -t {target} 2>/dev/null; then echo STILL_RUNNING; exit 3; fi; "
+        f"tmux kill-session -t {mux_target} 2>/dev/null; sleep 1; "
+        f"if tmux has-session -t {mux_target} 2>/dev/null; then echo STILL_RUNNING; exit 3; fi; "
         "echo STOPPED"
     )
     rc, out, err = _remote(ssh_config, script, timeout=120.0)

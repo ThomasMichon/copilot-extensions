@@ -38,7 +38,11 @@ from venue_copilot import (
     MAX_SEED_CHARS,
     _TRUST_FOLDER,
     await_claim as _await_claim,
+    bridge_probe_script,
+    last_json,
+    observe_commands,
     read_seed,
+    reserve_with_retry,
     seed_delivery,
     trust_folder_command,
     with_new_session,
@@ -130,6 +134,7 @@ def _remote(
 
 _CONNECT_ATTEMPTS = 2
 _LAUNCH_ATTEMPTS = 2
+_last_json = last_json
 
 
 def _transient(text: str) -> bool:
@@ -207,11 +212,7 @@ def _bridge_path_ok(name: str, port: int) -> bool:
     alone does not prove its remote bind succeeded) and that the provisioned
     token is accepted -- i.e. the session will be able to register.
     """
-    probe = (
-        "t=$(sed -n 's/^[[:space:]]*token:[[:space:]]*//p' ~/.agent-bridge/auth.yaml | tr -d \"'\\\"\"); "
-        f"curl -fsS -m 5 -o /dev/null -H \"Authorization: Bearer $t\" "
-        f"http://127.0.0.1:{int(port)}/api/v1/live-sessions"
-    )
+    probe = bridge_probe_script(port)
     got = None
     for attempt in range(_PROBE_ATTEMPTS):
         got = _remote(name, probe, timeout=30.0)
@@ -269,42 +270,22 @@ def _commands(plan: dict[str, Any], session_id: str, effort: str | None = None) 
     # the CodeSpace's claim refuses them as busy.
     claim = f" --effort {shlex.quote(effort)}" if effort else ""
     return {
-        "status": f"agent-bridge --json live-sessions resolve --handle {session_id}",
-        "observe": f"agent-bridge result {session_id} --json --max-items 5 --max-text-chars 2000",
-        "nudge": f"agent-bridge send {session_id} \"<message>\" --no-wait",
+        **observe_commands(session_id),
         "attach": f"agent-codespaces copilot {cs}{claim}",
         "stop": f"agent-codespaces copilot {cs} --stop{claim}",
     }
 
 
 def _reserve(plan: dict[str, Any]) -> dict[str, Any]:
-    from venue_copilot import VenueCopilotError, reserve_cli_mode
-
-    deadline = time.monotonic() + _RESERVE_RETRY_WINDOW
-    while True:
-        try:
-            return reserve_cli_mode(
-                plan["scope_id"], ttl_seconds=_RESERVATION_TTL, venue=plan["venue"],
-            )
-        except VenueCopilotError as exc:
-            if "reservation_active" not in str(exc) or time.monotonic() >= deadline:
-                raise
-            _progress("waiting", "another launch on this CodeSpace holds the reservation")
-            time.sleep(5.0)
-
-
-def _last_json(text: str) -> dict[str, Any]:
-    """The last complete JSON object in ``text`` (embody may pretty-print)."""
-    start = text.rfind("{")
-    while start != -1:
-        try:
-            value = json.loads(text[start:])
-            if isinstance(value, dict):
-                return value
-        except ValueError:
-            pass
-        start = text.rfind("{", 0, start)
-    return {}
+    return reserve_with_retry(
+        plan["scope_id"],
+        plan["venue"],
+        ttl_seconds=_RESERVATION_TTL,
+        retry_window=_RESERVE_RETRY_WINDOW,
+        on_wait=lambda: _progress(
+            "waiting", "another launch on this CodeSpace holds the reservation",
+        ),
+    )
 
 
 def _fail(message: str, plan: dict[str, Any], **extra: Any) -> int:

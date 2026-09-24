@@ -11,10 +11,14 @@ import pytest
 
 from venue_copilot import (
     VenueCopilotError,
+    bridge_probe_script,
     build_copilot_remote_command,
     daemon_port_reverse_forward,
+    last_json,
+    observe_commands,
     release_cli_mode,
     reserve_cli_mode,
+    reserve_with_retry,
     resolve_daemon_port,
     run_venue_copilot,
 )
@@ -366,3 +370,43 @@ class TestDetachedLaunchAdditions:
         inner = shlex.split(cmd)[2]
         assert shlex.split(inner)[:3] == ["agent-worktrees", "copilot", "--anchor"]
         assert "--json" not in inner
+
+
+class TestDetachedSharedHelpers:
+    def test_last_json_returns_the_last_object(self) -> None:
+        assert last_json('noise {"a": 1}\n{"b": 2}') == {"b": 2}
+        assert last_json("no json") == {}
+
+    def test_reserve_with_retry_waits_on_active_reservation(self, monkeypatch) -> None:
+        calls = []
+        sleeps = []
+
+        def fake_reserve(scope, *, ttl_seconds, venue, bridge_bin="agent-bridge", run=None):
+            calls.append((scope, ttl_seconds, venue))
+            if len(calls) == 1:
+                raise VenueCopilotError("reservation_active")
+            return {"reservation_id": "r2"}
+
+        monkeypatch.setattr("venue_copilot.reserve_cli_mode", fake_reserve)
+        monkeypatch.setattr("venue_copilot.time.sleep", lambda delay: sleeps.append(delay))
+        waits = []
+        got = reserve_with_retry(
+            "scope",
+            {"kind": "ssh", "target": "host", "mux_session_name": "wt-x"},
+            ttl=42,
+            retry_window=60,
+            on_wait=lambda: waits.append("wait"),
+        )
+        assert got == {"reservation_id": "r2"}
+        assert len(calls) == 2 and calls[0][1] == 42
+        assert waits == ["wait"] and sleeps == [5.0]
+
+    def test_bridge_probe_script_and_observe_commands(self) -> None:
+        script = bridge_probe_script(41234)
+        assert "auth.yaml" in script
+        assert "http://127.0.0.1:41234/api/v1/live-sessions" in script
+        assert observe_commands("sid-1") == {
+            "status": "agent-bridge --json live-sessions resolve --handle sid-1",
+            "observe": "agent-bridge result sid-1 --json --max-items 5 --max-text-chars 2000",
+            "nudge": 'agent-bridge send sid-1 "<message>" --no-wait',
+        }

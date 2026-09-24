@@ -4,55 +4,31 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import os
-import re
 import subprocess
-import sys
-import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from agent_procutil import (
-    no_window_flags,
     windowless_daemon_kwargs,
     windowless_python,
     windowless_python_env,
 )
 from ssh_manager import SupervisedRelayForward
-from ssh_manager.locks import pid_alive
+from ssh_manager.forward_keeper import KeeperStore, run_supervised_loop, spawn_keeper
 
 from .config import RESTRICTED_PROFILE, RUNTIME_DIR
-from .private_state import atomic_write_json, ensure_private_dir
 
 _STATE_DIR = RUNTIME_DIR / "forward-keepers"
-
-
-def _safe(name: str) -> str:
-    return (re.sub(r"[^A-Za-z0-9_.-]+", "-", name).strip("-") or "container")[:120]
+_STORE = KeeperStore(_STATE_DIR)
 
 
 def state_path(name: str) -> Path:
-    return _STATE_DIR / f"{_safe(name)}.json"
+    return _STORE.state_path(name)
 
 
 def read_state(name: str) -> dict[str, Any] | None:
-    try:
-        data = json.loads(state_path(name).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    return data if isinstance(data, dict) else None
-
-
-def _write_state(name: str, payload: dict[str, Any]) -> None:
-    atomic_write_json(state_path(name), payload, indent=2, sort_keys=True)
-
-
-def _state_alive(state: dict[str, Any] | None) -> bool:
-    try:
-        return bool(state and pid_alive(int(state.get("pid") or 0)))
-    except (TypeError, ValueError):
-        return False
+    return _STORE.read(name)
 
 
 def ensure_running(
@@ -67,7 +43,7 @@ def ensure_running(
     """Start a keeper unless a live one already owns this container session."""
     existing = read_state(name)
     if (
-        _state_alive(existing)
+        _STORE.alive(name)
         and existing.get("mux") == mux
         and int(existing.get("venue_port") or 0) == int(venue_port)
     ):
@@ -94,66 +70,29 @@ def ensure_running(
             str(int(host_relay_port)),
         ]
     env = {**os.environ, **windowless_python_env()}
-    proc = popen(
+    state = spawn_keeper(
         argv,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        env=env,
-        **windowless_daemon_kwargs(breakaway=True),
+        env,
+        {
+            "container": name,
+            "venue_port": int(venue_port),
+            "mux": mux,
+            "relay_port": int(relay_port) if relay_port else None,
+            "host_relay_port": int(host_relay_port) if host_relay_port else None,
+        },
+        popen=popen,
+        popen_kwargs=windowless_daemon_kwargs(breakaway=True),
     )
-    state = {
-        "pid": int(proc.pid),
-        "container": name,
-        "venue_port": int(venue_port),
-        "mux": mux,
-        "relay_port": int(relay_port) if relay_port else None,
-        "host_relay_port": int(host_relay_port) if host_relay_port else None,
-        "started_at": time.time(),
-    }
-    _write_state(name, state)
+    _STORE.write(name, state)
     return {"started": True, "state": state}
 
 
-def _terminate_pid(pid: int) -> None:
-    if pid <= 0 or not pid_alive(pid):
-        return
-    if sys.platform == "win32":
-        try:
-            subprocess.run(
-                ["taskkill", "/PID", str(pid), "/T", "/F"],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-                creationflags=no_window_flags(),
-            )
-        except OSError:
-            pass
-        return
-    try:
-        os.kill(pid, 15)
-    except OSError:
-        return
-
-
 def stop_keeper(name: str) -> bool:
-    state = read_state(name)
-    if not state:
-        return False
-    try:
-        pid = int(state.get("pid") or 0)
-    except (TypeError, ValueError):
-        pid = 0
-    alive = pid_alive(pid) if pid > 0 else False
-    if alive:
-        _terminate_pid(pid)
-    state_path(name).unlink(missing_ok=True)
-    return alive
+    return _STORE.stop(name)
 
 
 def _write_self_state(args: argparse.Namespace) -> None:
-    _write_state(
+    _STORE.write(
         args.name,
         {
             "pid": os.getpid(),
@@ -164,7 +103,6 @@ def _write_self_state(args: argparse.Namespace) -> None:
             "host_relay_port": (
                 int(args.host_relay_port) if args.host_relay_port else None
             ),
-            "started_at": time.time(),
         },
     )
 
@@ -172,7 +110,7 @@ def _write_self_state(args: argparse.Namespace) -> None:
 def _remove_self_state(name: str) -> None:
     state = read_state(name)
     if state and int(state.get("pid") or 0) == os.getpid():
-        state_path(name).unlink(missing_ok=True)
+        _STORE.remove(name)
 
 
 def _mux_exists(ssh_config: Any, mux: str) -> bool:
@@ -188,41 +126,11 @@ def _mux_exists(ssh_config: Any, mux: str) -> bool:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=60.0,
-            creationflags=no_window_flags(),
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except (OSError, subprocess.SubprocessError):
         return False
     return result.returncode == 0
-
-
-async def _run_supervised_mux_loop(
-    keepers: list[Any],
-    *,
-    mux_exists: Callable[[], bool],
-    write_state: Callable[[], None],
-    remove_state: Callable[[], None],
-    probe_interval: float,
-    startup_grace: float,
-) -> int:
-    write_state()
-    try:
-        for keeper in keepers:
-            await keeper.start()
-        startup_deadline = asyncio.get_running_loop().time() + max(0.0, startup_grace)
-        while True:
-            if await asyncio.to_thread(mux_exists):
-                break
-            if asyncio.get_running_loop().time() >= startup_deadline:
-                return 0
-            await asyncio.sleep(min(5.0, max(1.0, probe_interval)))
-        while True:
-            await asyncio.sleep(max(1.0, probe_interval))
-            if not await asyncio.to_thread(mux_exists):
-                return 0
-    finally:
-        for keeper in reversed(keepers):
-            await keeper.stop()
-        remove_state()
 
 
 async def _run(args: argparse.Namespace) -> int:
@@ -252,10 +160,9 @@ async def _run(args: argparse.Namespace) -> int:
                 monitor_interval=15.0,
             )
         )
-    ensure_private_dir(_STATE_DIR)
-    return await _run_supervised_mux_loop(
+    return await run_supervised_loop(
         keepers,
-        mux_exists=lambda: _mux_exists(ssh_config, args.mux),
+        session_alive=lambda: _mux_exists(ssh_config, args.mux),
         write_state=lambda: _write_self_state(args),
         remove_state=lambda: _remove_self_state(args.name),
         probe_interval=float(args.probe_interval),
