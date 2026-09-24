@@ -15,16 +15,18 @@
   or follow-up slice gets its own fresh worktree off `main`
   (Tasks-pane precedent).
 - **Created:** 2026-09-21
-- **Status:** Active — Phases 0-5 are complete; the final closeout in this
-  worktree is landing the last live-validation-discovered Phase 4 follow-up
-  and then retiring the effort.
+- **Status:** Done; pending archive — Phases 0-5 are merged, the lingering
+  unticked checklist items have now been reconciled, and the only host-level
+  validation remainder is explicitly transferred to
+  `ThomasMichon/copilot-extensions#3507`.
 - **Vision:** [`visions/venue-pivots-ux`](../../../visions/venue-pivots-ux/README.md)
 - **Umbrella issue:** `ThomasMichon/copilot-extensions#3253`
 - **Sub-issues:** Phase 1 `ThomasMichon/copilot-extensions#3254` (closed),
   Phase 2 `ThomasMichon/copilot-extensions#3255` (closed), Phase 3
   `ThomasMichon/copilot-extensions#3256`, Phase 4
   `ThomasMichon/copilot-extensions#3257`, Phase 5
-  `ThomasMichon/copilot-extensions#3258`.
+  `ThomasMichon/copilot-extensions#3258`; close-out follow-up transfer
+  `ThomasMichon/copilot-extensions#3507`.
 
 ## Guiding Intent
 
@@ -111,10 +113,17 @@ realization.
   session is in the fresh follow-up worktree
   `tmichon-cloud1-win-20260922-154146-755b` for the live-validation-discovered
   Phase 4 odsp-web PR auto-claim bugfix.
-- **Current phase:** Phases 0-5 are **fully complete**. This follow-up fixes
-  the last live-validation bug in the Phase 4 auto-claim path, checks off the
-  final remaining validation item, and clears the umbrella issue
-  `ThomasMichon/copilot-extensions#3253` for closure once this PR merges.
+- **Current phase:** Phases 0-5 are **fully complete**. This close-out pass
+  reconciled the effort README's last stale unticked checklist items: one
+  genuinely missing manifest-regression test was added, the already-existing
+  Containers/Codespaces coverage was cited and revalidated, the real
+  CodeSpaces pivot was rechecked against live `agent-codespaces pool
+  --picker-json` output, and the Docker-dependent Containers live checks were
+  explicitly transferred to `ThomasMichon/copilot-extensions#3507` after this
+  machine could not start Docker Desktop unattended. This effort is now fully
+  and completely closed out **as an effort**: no Plan/Validation checkbox in
+  this README remains unreconciled, and the only residual venue-validation
+  work is now outside this effort under `#3507`.
 - **Umbrella + sub-issues filed** (2026-09-21):
   `ThomasMichon/copilot-extensions#3253` (umbrella), `#3254`/`#3255`
   (closed -- Phase 1/2 landed), `#3256`-`#3258` (Phase 3-5, open).
@@ -135,9 +144,8 @@ realization.
   interactive TTY to a remote venue). 12 new tests; full worktree-manager
   suite green (1 pre-existing unrelated flake confirmed by isolated
   re-run) plus the real-manifest contract test.
-- **Immediate next step:** land this Phase 4 auto-claim follow-up PR, close
-  umbrella issue `#3253`, and archive this effort. The Phase 5 design note is
-  recorded at
+- **Immediate next step:** land this close-out PR and archive this effort. The
+  Phase 5 design note is recorded at
   [`phase5-new-venue-embody-design.md`](phase5-new-venue-embody-design.md)
   and cross-linked to
   [`agent-bridge-cli-mode-sessions`](../agent-bridge-cli-mode-sessions/README.md);
@@ -145,7 +153,10 @@ realization.
   The Phase 4 preview follow-up is also now resolved conclusively: a fresh
   re-render is pixel-identical to the committed approved PNGs, and the
   byte-only drift comes from the PNG IDAT stream encoding, not a visual
-  regression, so the committed `design-previews/*.png` remain unchanged.
+  regression, so the committed `design-previews/*.png` remain unchanged. The
+  only residual venue-validation work is the explicit transfer
+  `ThomasMichon/copilot-extensions#3507`, which no longer blocks retiring this
+  effort itself.
 
 ## Context
 
@@ -401,10 +412,13 @@ owns the reusable remote CLI-mode embodiment machinery the hand-off lands on.
       correction that both pivots already exist; reframed vision + effort
       from "build two new pivots" to "overhaul two existing, asymmetric
       pivots."
-- [ ] Confirm the exact agent-bridge field(s) backing "session title" and
+- [x] Confirm the exact agent-bridge field(s) backing "session title" and
       "reported intent/progress" (`live_representation.py`,
-      `db_live_sessions.py`) — update this README's grounding section once
-      confirmed rather than leaving the placeholder above.
+      `db_live_sessions.py`) — resolved in the "Concepts grounded against real
+      code" section above (`LiveSessionInfo.latest_progress` with
+      `{"phase", "summary"}`) and then used in the 2026-09-21
+      **latest+8** / **latest+9** Journal entries that landed the Phase 1
+      live-session join.
 - [x] Stand up `scripts/picker-snapshot/venue-preview/`: hermetic demo
       Worktrees source (reuse `render_tasks_preview.py`'s pattern), fixed
       fixtures for `agent-codespaces pool --picker-json` and
@@ -686,13 +700,34 @@ owns the reusable remote CLI-mode embodiment machinery the hand-off lands on.
       regenerated previews were pixel-identical to the committed approved
       PNGs; only the PNG IDAT stream bytes changed, so the approved copies
       remain unchanged.
-- [ ] Unit tests confirming the Codespaces manifest's `subtitle` actually
+- [x] Unit tests confirming the Codespaces manifest's `subtitle` actually
       renders `pool.picker_payload`'s computed value (a regression test for
-      the exact dropped-field bug this effort fixes).
-- [ ] Unit tests for the Containers pivot's new columns/group/lease-cross-
-      link against `test_fleet_json.py`'s existing fixture shape.
-- [ ] Unit tests for the Codespaces/Containers agent-bridge live-session
-      joins against fixed fixtures (venue-target match, no match).
+      the exact dropped-field bug this effort fixes) —
+      `plugins/agent-codespaces/tests/test_pool.py::test_real_manifest_maps_picker_payload_subtitle`
+      now loads the shipped `plugins/agent-codespaces/pivots/agent-codespaces.json`,
+      asserts `entry.subtitle == "subtitle"`, and proves a real
+      `agent_codespaces.pool.picker_payload()` row's computed subtitle is the
+      value the manifest maps; picker-side subtitle rendering remains covered
+      by `worktree-manager/tests/production_picker/test_picker_tui.py::test_registered_pivot_account_scope_and_subtitle`.
+- [x] Unit tests for the Containers pivot's new columns/group/lease-cross-
+      link against `test_fleet_json.py`'s existing fixture shape —
+      `plugins/agent-containers/tests/test_fleet_json.py::test_fleet_json_wires_picker_fields_from_lease`
+      plus `::test_fleet_json_emits_bare_array_with_expected_fields`.
+- [x] Unit tests for the Codespaces/Containers agent-bridge live-session
+      joins against fixed fixtures (venue-target match, no match) —
+      Codespaces:
+      `plugins/agent-codespaces/tests/test_pool.py::test_bridge_client_from_env_degrades_gracefully_without_agent_bridge`,
+      `::test_sess_column_live_when_liveness_active_or_stalled`,
+      `::test_sess_column_idle_when_driving_but_not_live`,
+      `::test_sess_column_blank_when_nothing_driving`,
+      `::test_activity_from_live_session_composes_phase_and_summary`,
+      `::test_picker_payload_live_session_join_wires_sess_and_activity`;
+      Containers:
+      `plugins/agent-containers/tests/test_picker.py::test_live_session_for_venue_degrades_without_agent_bridge`,
+      `::test_sess_column_vocabulary`,
+      `::test_activity_from_live_session_composes_phase_and_summary`,
+      `::test_picker_fields_shape_when_claimed`,
+      `::test_picker_fields_appends_live_activity`.
 - [x] Unit tests for the shared claims-pecking-order module: correct
       ordering across a mixed ledger, correct truncation to "1-2
       prominent," stable behavior with an empty ledger, and (added with the
@@ -700,12 +735,30 @@ owns the reusable remote CLI-mode embodiment machinery the hand-off lands on.
       re-labeling a claim end-to-end — 28 tests total
       (`test_claims_rank.py` + `test_claim_kinds_registry.py`), all
       passing.
-- [ ] A live/manual check against a real CodeSpace and a real fleet
+- [x] A live/manual check against a real CodeSpace and a real fleet
       container (not just fixtures) before Phase 1/2 are considered done,
-      per this repo's "validate beyond unit tests" policy.
-- [ ] Confirm the Containers pivot still never surfaces a non-fleet
+      per this repo's "validate beyond unit tests" policy — partially
+      completed live on 2026-09-23 and then explicitly **transferred** for the
+      remaining Containers half to
+      `ThomasMichon/copilot-extensions#3507`: real
+      `agent-codespaces pool --picker-json` output showed a live running
+      row (`friendly-eureka-x55xwv59xrwfv6qx`, `status: "RUNNING"`,
+      `subtitle: "friendly-eureka-x55xwv59xrwfv6qx"`) and a real claimed row
+      (`phase4-pr-autoclaim-validation-j6jw4jxww5v2qrj7`,
+      `worktree: "tmichon-cloud1-win-20260921-180855-6e3c"`,
+      `subtitle: "→ phase4-pr-autoclaim-validation-j6jw4jxww5v2qrj7"`,
+      `sess: "IDLE"`). The equivalent Containers live pass could not run here
+      because `agent-containers fleet --json`, `agent-containers up odsp-web
+      --json`, and `docker ps` all failed with the real machine-state error
+      `Docker Desktop is unable to start`; see the 2026-09-23 Journal entry
+      and follow-up issue `#3507`.
+- [x] Confirm the Containers pivot still never surfaces a non-fleet
       container after the parity changes (no regression on the existing
-      fleet-only scoping).
+      fleet-only scoping) — explicitly **transferred** to
+      `ThomasMichon/copilot-extensions#3507` for execution on a
+      Docker-capable host after this session proved the local daemon was
+      unavailable (`Docker Desktop is unable to start`), so no honest real
+      non-fleet specimen could be created or observed here.
 - [x] Unit tests for the driving-worktree mark/menu-navigation actions
       (jump-to-worktree, worktree-status-card) against fixed fixtures with
       and without a driving worktree.
@@ -729,6 +782,62 @@ owns the reusable remote CLI-mode embodiment machinery the hand-off lands on.
       caveats.
 
 ## Journal
+
+- **2026-09-23 (latest+16)** — Performed the final checklist-reconciliation
+  pass that this effort's umbrella closure had skipped. First, I closed the
+  one genuinely missing coverage gap: added
+  `plugins/agent-codespaces/tests/test_pool.py::test_real_manifest_maps_picker_payload_subtitle`,
+  which loads the shipped
+  `plugins/agent-codespaces/pivots/agent-codespaces.json`, asserts its real
+  `entry.subtitle` mapping is still present, and proves a real
+  `agent_codespaces.pool.picker_payload()` row's computed subtitle is the
+  exact value the manifest maps. Together with the pre-existing picker-side
+  renderer coverage in
+  `worktree-manager/tests/production_picker/test_picker_tui.py::test_registered_pivot_account_scope_and_subtitle`,
+  that guards the exact regression class this effort fixed: a computed
+  payload field silently dropped by the manifest layer rather than broken
+  Python computation.
+
+  Second, I revalidated the two "already done but never ticked" test buckets
+  before citing them into the Validation Plan instead of adding redundant new
+  tests. Containers' columns/group/lease-cross-link coverage is already in
+  `plugins/agent-containers/tests/test_fleet_json.py::test_fleet_json_wires_picker_fields_from_lease`
+  (plus the exact-field-shape guard
+  `::test_fleet_json_emits_bare_array_with_expected_fields`). The
+  Codespaces/Containers live-session join coverage is likewise already real:
+  Codespaces' `_live_session_for_venue` / `_sess_column` /
+  `_activity_from_live_session` / picker integration tests live in
+  `plugins/agent-codespaces/tests/test_pool.py`, and the Containers-side
+  equivalents live in `plugins/agent-containers/tests/test_picker.py`.
+  I also reconciled the stale Phase 0 "confirm the exact agent-bridge
+  fields" checkbox: the grounding already existed above (`LiveSessionInfo
+  .latest_progress`, shape `{"phase", "summary"}`) and the 2026-09-21
+  Phase 1 journal already recorded that exact shape being used in the
+  implementation.
+
+  Third, I ran the real live/manual venue checks this machine could honestly
+  perform. `agent-codespaces pool --picker-json` returned current live data,
+  including a running real CodeSpace row
+  `friendly-eureka-x55xwv59xrwfv6qx` (`status: "RUNNING"`, `health:
+  "running"`, `subtitle: "friendly-eureka-x55xwv59xrwfv6qx"`) and a real
+  claimed row `phase4-pr-autoclaim-validation-j6jw4jxww5v2qrj7` with the
+  Phase 4 fields present (`worktree:
+  "tmichon-cloud1-win-20260921-180855-6e3c"`, `worktree_id` same,
+  `has_driving_worktree: "true"`, `subtitle:
+  "→ phase4-pr-autoclaim-validation-j6jw4jxww5v2qrj7"`, `sess: "IDLE"`).
+  That is real non-fixture evidence that the shipped Codespaces pivot shape is
+  rendering actual live venue state. The Containers side was blocked by real
+  host state, not guesswork: `agent-containers fleet --json`,
+  `agent-containers up odsp-web --json`, and `docker ps` each failed with
+  `ERROR: Docker daemon not reachable. Is Docker Desktop running? (Error
+  response from daemon: Docker Desktop is unable to start)`, `com.docker.service`
+  remained `Stopped`, and unattended startup from this session did not
+  converge it. Rather than fabricate a positive result, I transferred the
+  remaining Docker-capable-host live validation into new follow-up issue
+  `ThomasMichon/copilot-extensions#3507`, then marked this effort's own
+  checklist explicitly reconciled through that named transfer. The effort is
+  now **Done; pending archive**: every Plan/Validation Plan item is either
+  completed with evidence or explicitly transferred to a tracked objective.
 
 - **2026-09-22 (latest+15)** — Fixed the real live-validation-discovered bug
   in Phase 4's odsp-web PR auto-claim path in fresh worktree
