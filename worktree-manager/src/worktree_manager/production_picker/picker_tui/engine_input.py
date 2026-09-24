@@ -190,7 +190,10 @@ class PickerScreenInputMixin:
         self.app.push_screen(QuitConfirmScreen(), _after)
     def _rotate_machine(self, d):
         was_in_table = self.sel[0] == "L"
+        prev_key = self._current_tab_key()
+        prev_was_all = self.is_all()
         self.machine_idx = (self.machine_idx + d) % len(self.machines)
+        self._activate_current_machine_tab(prev_key, prev_was_all)
         if self.sel not in self.stops():
             self.sel = self.default_sel()
         # A machine switch lands on a different list, so drop the whole

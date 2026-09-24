@@ -223,6 +223,50 @@ class PickerScreenModelMixin:
         return m, e, ok
     def _current_tab(self):
         return self.source_tabs[self.machine_idx]
+    def _current_tab_key(self):
+        """The current tab's canonical loader key: its ``source_id`` when it
+        has one, else its ``(machine, env)`` pair. ``None`` on the "All" tab
+        (index 0), which has neither."""
+        if self.is_all():
+            return None
+        tab = self._current_tab()
+        return tab.get("source_id") or (tab.get("machine"), tab.get("env"))
+    def _activate_current_machine_tab(self, prev_key=None, prev_was_all=False):
+        """Lazily start (or keep alive) the current tab's real load
+        (picker-lazy-per-machine-loading): call this after any change to
+        ``machine_idx``. On the "All" tab, ensures every ready machine is
+        fully loaded (aggregation needs everyone); on a specific machine
+        tab, ensures just that one, and -- since the operator is done
+        looking at wherever they just left -- cancels ``prev_key``'s
+        in-flight load if it was ALSO a specific machine tab (never the
+        "All" tab, which legitimately wants every machine kept loading).
+        Best-effort and silently absent on a source/loader that predates
+        these methods (an older engine, or a bare test fixture)."""
+        loader = getattr(self, "loader", None)
+        if loader is None:
+            return
+        if self.is_all():
+            ensure_all = getattr(loader, "ensure_all_loaded", None)
+            if callable(ensure_all):
+                try:
+                    ensure_all()
+                except Exception:
+                    pass
+            return
+        key = self._current_tab_key()
+        ensure = getattr(loader, "ensure_loaded", None)
+        if callable(ensure) and key:
+            try:
+                ensure(key)
+            except Exception:
+                pass
+        if prev_key and not prev_was_all and prev_key != key:
+            cancel = getattr(loader, "cancel_source", None)
+            if callable(cancel):
+                try:
+                    cancel(prev_key)
+                except Exception:
+                    pass
     @staticmethod
     def _record_supports(rec, capability):
         if rec.get("source_kind", "machine-ssh") == "machine-ssh":

@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 import time
 
-from .engine_helpers import _DEFAULT_HOST_COLS, _DEFAULT_TARGET_ENVS, target_rows
+from .engine_helpers import _DEFAULT_HOST_COLS, _DEFAULT_TARGET_ENVS, start_loader, target_rows
 from .selection import ListSelection
 from .. import update_stage
 
@@ -343,7 +343,12 @@ class PickerScreenRuntimeMixin:
                 if source_snapshot is not None
                 else self.src.make_loader()
             )
-            self.loader.start()
+            # Load only the local tab in full up front; every other ready
+            # remote gets a cheap connectivity ping instead until the
+            # operator actually navigates onto its tab
+            # (picker-lazy-per-machine-loading; see LiveLoader.start's own
+            # docstring). ``local`` is a plain (machine, env) tuple or None.
+            start_loader(self.loader, focus_keys={local} if local else None)
             self.data = self.loader.records()
         else:
             self.data = self.src.load()

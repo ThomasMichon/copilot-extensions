@@ -136,6 +136,32 @@ def _register_shift_enter_key() -> None:
 _register_shift_enter_key()
 
 
+def start_loader(loader, *, focus_keys):
+    """Start ``loader``, passing ``focus_keys`` only if its ``start()``
+    actually accepts one.
+
+    The Manager resolves ``agent_worktrees`` (and its ``LiveLoader``) as a
+    separate, independently versioned runtime slot -- an older engine's
+    ``LiveLoader.start()`` takes no argument at all. Checking the callable's
+    own signature (rather than calling with the keyword and catching
+    ``TypeError``) tells "this loader doesn't support focus_keys" apart from
+    "the loader accepted the call and failed for its own reason" -- a broad
+    ``except TypeError`` around the call would swallow (and silently retry,
+    duplicating any threads already spawned) a real bug inside the CURRENT
+    ``start()`` implementation, not just an old-engine signature mismatch.
+    """
+    import inspect
+
+    try:
+        accepts_focus = "focus_keys" in inspect.signature(loader.start).parameters
+    except (TypeError, ValueError):
+        accepts_focus = False
+    if accepts_focus:
+        loader.start(focus_keys=focus_keys)
+    else:
+        loader.start()
+
+
 def _resolve_version() -> str:
     """Real package version for the picker banner.
 
