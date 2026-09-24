@@ -407,6 +407,21 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  dev head:    {report['dev_head']}")
     for plugin, (old, new) in sorted(report["bumps"].items()):
         print(f"  bump: {plugin} {old} -> {new}")
+    for name in report.get("changefiles_consumed", []):
+        # Machine-readable marker: promote.yml greps these to know exactly
+        # which .changefiles/*.json to delete from dev in a follow-up PR.
+        # This tool NEVER touches dev's own tree itself -- `consume_pending_
+        # changes()` only deletes changefiles inside the isolated scratch
+        # worktree that becomes main's snapshot, so dev's real files are
+        # untouched by this run. Without that follow-up cleanup, the same
+        # already-landed changefiles keep being read from dev's still-
+        # unbumped plugin.json on every later promotion, recomputing the
+        # identical target version each time -- harmless only until a
+        # genuine new changefile for the same plugin lands and collides
+        # with that stale target (confirmed live: two consecutive real
+        # promotions computed the exact same "agent-bridge 0.4.0-dev551 ->
+        # 0.4.1-dev1" bump).
+        print(f"  changefile-consumed: {name}")
     if report.get("candidate_branch"):
         print(f"  pushed candidate branch: {report['candidate_branch']} "
               "(land it on main via a real PR + merge; tag the actual merged commit)")
