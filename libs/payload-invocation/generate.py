@@ -25,6 +25,7 @@ _PURPOSE = re.compile(r"^[A-Za-z0-9 ._/-]+$")
 _OUTPUT_DIR = re.compile(r"^[a-z0-9][a-z0-9_./-]*$")
 _INSTALLER = re.compile(r"^[a-z][a-z0-9-]*$")
 _DISPATCHER = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_./-]*$")
+_BOOT_TRACE_LOG_FILE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_./-]*$")
 _WINDOWS_CATALOG_SHIMS = {"powershell", "cmd"}
 _POSIX_CATALOG_MODES = {"python", "shell"}
 _PROVISION_MODES = {"snapshot", "direct"}
@@ -181,6 +182,21 @@ def load_manifest(path: Path) -> dict[str, object]:
         payload_root_env and not _ENV.fullmatch(payload_root_env)
     ):
         raise ValueError(f"{path}: invalid payloadRootEnv: {payload_root_env!r}")
+    boot_trace_log_file = data.get("bootTraceLogFile", "logs/boot-trace.jsonl")
+    if (
+        not isinstance(boot_trace_log_file, str)
+        or not _BOOT_TRACE_LOG_FILE.fullmatch(boot_trace_log_file)
+        # The character-class regex above permits an empty path component
+        # (e.g. "logs//boot.jsonl", a leading/trailing "/") since "/" is a
+        # valid character anywhere in the class; reject those explicitly,
+        # since an empty component would silently break the writer's
+        # directory-creation logic at runtime (Copilot review, PR #3310).
+        or not all(boot_trace_log_file.split("/"))
+        or ".." in Path(boot_trace_log_file).parts
+    ):
+        raise ValueError(
+            f"{path}: invalid bootTraceLogFile: {boot_trace_log_file!r}"
+        )
     payload_dispatcher = data.get("payloadDispatcher", {})
     if not isinstance(payload_dispatcher, dict):
         raise ValueError(
@@ -241,6 +257,7 @@ def load_manifest(path: Path) -> dict[str, object]:
     data["provisionMode"] = provision_mode
     data["sessionStartBootstrap"] = session_start_bootstrap
     data["payloadRootEnv"] = payload_root_env
+    data["bootTraceLogFile"] = boot_trace_log_file
     data["payloadDispatcher"] = normalized_dispatcher
     data["catalogGate"] = catalog_gate
     data["plugin"] = plugin
@@ -350,6 +367,8 @@ def render(
         "COMMAND": str(selected["command"]),
         "MODULE": str(selected["module"]),
         "RUNTIME_ROOT": str(data["runtimeRoot"]),
+        "BOOT_TRACE_LOG_FILE": str(data["bootTraceLogFile"]),
+        "BOOT_TRACE_LOG_FILE_PS": str(data["bootTraceLogFile"]).replace("/", "\\"),
         "NO_SELFPROVISION_ENV": str(data["noSelfProvisionEnv"]),
         "PURPOSE": str(selected["purpose"]),
         "OUTPUT_DIR": str(data["outputDir"]),

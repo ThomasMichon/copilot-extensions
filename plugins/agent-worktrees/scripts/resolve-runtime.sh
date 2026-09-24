@@ -26,6 +26,9 @@ _awr="${AGENT_RT_ROOT:-$HOME/.agent-worktrees}"
 _awv=""
 _aw_trace_source=""
 _aw_trace_version=""
+_aw_bt_plugin="${COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN:-${_awr##*/}}"
+_aw_bt_plugin="${_aw_bt_plugin#.}"
+_aw_bt_log_path="${COPILOT_EXTENSIONS_BOOT_TRACE_LOG_PATH:-$_awr/logs/activity.jsonl}"
 
 _aw_boot_trace_ms() {
   _aw_bt_raw=""
@@ -55,17 +58,81 @@ _aw_boot_trace_ms() {
   printf '0000000000000\n'
 }
 
+_aw_boot_trace_iso() {
+  if _aw_bt_iso="$(date -u +%Y-%m-%dT%H:%M:%S+00:00 2>/dev/null)"; then
+    printf '%s\n' "$_aw_bt_iso"
+    return 0
+  fi
+  printf '1970-01-01T00:00:00+00:00\n'
+}
+
+_aw_boot_trace_log() {
+  [ -n "${_aw_bt_log_path:-}" ] || return 0
+  [ -d "$_awr" ] || return 0
+  _aw_phase="$1"
+  _aw_now_ms="$2"
+  _aw_emitter="$3"
+  _aw_resolution_source="${4-}"
+  _aw_result="${5-}"
+  _aw_version="${6-}"
+  _aw_dispatch_path="${7-}"
+  _aw_bt_log_dir="${_aw_bt_log_path%/*}"
+  if [ ! -d "$_aw_bt_log_dir" ]; then
+    mkdir -p "$_aw_bt_log_dir" 2>/dev/null || return 0
+  fi
+  _aw_bt_line="{\"ts\":\"$(_aw_boot_trace_iso)\",\"event\":\"boot_trace\",\"plugin\":\"$_aw_bt_plugin\",\"phase\":\"$_aw_phase\",\"t_ms\":$_aw_now_ms,\"pid\":$$"
+  if [ -n "${HOSTNAME:-}" ]; then
+    _aw_bt_line="$_aw_bt_line,\"host\":\"$HOSTNAME\""
+  fi
+  _aw_bt_line="$_aw_bt_line,\"source\":\"$_aw_emitter\""
+  if [ -n "$_aw_resolution_source" ]; then
+    _aw_bt_line="$_aw_bt_line,\"resolution_source\":\"$_aw_resolution_source\""
+  fi
+  if [ -n "$_aw_result" ]; then
+    _aw_bt_line="$_aw_bt_line,\"result\":\"$_aw_result\""
+  fi
+  if [ -n "$_aw_version" ]; then
+    _aw_bt_line="$_aw_bt_line,\"version\":\"$_aw_version\""
+  fi
+  if [ -n "$_aw_dispatch_path" ]; then
+    _aw_bt_line="$_aw_bt_line,\"path\":\"$_aw_dispatch_path\""
+  fi
+  _aw_bt_line="$_aw_bt_line}"
+  { printf '%s\n' "$_aw_bt_line" >> "$_aw_bt_log_path"; } 2>/dev/null || true
+}
+
 _aw_boot_trace() {
+  _aw_phase="$1"
+  _aw_emitter="${2-}"
+  _aw_resolution_source="${3-}"
+  _aw_result="${4-}"
+  _aw_version="${5-}"
+  _aw_dispatch_path="${6-}"
+  _aw_now_ms="$(_aw_boot_trace_ms)"
+  [ -n "$_aw_emitter" ] || _aw_emitter="resolver"
+  _aw_boot_trace_log \
+    "$_aw_phase" "$_aw_now_ms" "$_aw_emitter" \
+    "$_aw_resolution_source" "$_aw_result" "$_aw_version" "$_aw_dispatch_path"
   [ -n "${COPILOT_EXTENSIONS_BOOT_TRACE:-}" ] || return 0
-  _aw_bt_plugin="${COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN:-${_awr##*/}}"
-  _aw_bt_plugin="${_aw_bt_plugin#.}"
-  _aw_bt_extra="${2-}"
+  _aw_bt_extra=""
+  if [ -n "$_aw_resolution_source" ]; then
+    _aw_bt_extra="source=$_aw_resolution_source"
+  fi
+  if [ -n "$_aw_result" ]; then
+    _aw_bt_extra="${_aw_bt_extra}${_aw_bt_extra:+ }result=$_aw_result"
+  fi
+  if [ -n "$_aw_version" ]; then
+    _aw_bt_extra="${_aw_bt_extra}${_aw_bt_extra:+ }version=$_aw_version"
+  fi
+  if [ -n "$_aw_dispatch_path" ]; then
+    _aw_bt_extra="${_aw_bt_extra}${_aw_bt_extra:+ }path=$_aw_dispatch_path"
+  fi
   if [ -n "$_aw_bt_extra" ]; then
     printf '::boot-trace:: plugin=%s phase=%s t=%s %s\n' \
-      "$_aw_bt_plugin" "$1" "$(_aw_boot_trace_ms)" "$_aw_bt_extra" >&2
+      "$_aw_bt_plugin" "$_aw_phase" "$_aw_now_ms" "$_aw_bt_extra" >&2
   else
     printf '::boot-trace:: plugin=%s phase=%s t=%s\n' \
-      "$_aw_bt_plugin" "$1" "$(_aw_boot_trace_ms)" >&2
+      "$_aw_bt_plugin" "$_aw_phase" "$_aw_now_ms" >&2
   fi
 }
 
@@ -121,32 +188,30 @@ _aw_version_key() {
 }
 
 # Tier 1: the `current-version` marker (source of truth; atomically written).
-_aw_boot_trace resolver-marker-start 'source=current-version'
+_aw_boot_trace resolver-marker-start resolver current-version
 [ -f "$_awr/current-version" ] && _awv=$(tr -d ' \t\r\n' < "$_awr/current-version" 2>/dev/null)
 [ -n "$_awv" ] && _aw_try_slot "$_awv"
 if [ -n "$AW_PY" ]; then
   _aw_trace_source="current-version"
   _aw_trace_version="$_awv"
-  _aw_boot_trace resolver-marker-result \
-    "source=current-version result=hit version=$_awv"
+  _aw_boot_trace resolver-marker-result resolver current-version hit "$_awv"
 else
-  _aw_boot_trace resolver-marker-result 'source=current-version result=miss'
+  _aw_boot_trace resolver-marker-result resolver current-version miss
 fi
 
 # Tier 2: marker absent/stale -> the last version the installer activated
 # (`last-known-good`), preferred over a newest-slot guess. Read only here, so the
 # common tier-1 path pays nothing.
 if [ -z "$AW_PY" ] && [ -f "$_awr/last-known-good" ]; then
-  _aw_boot_trace resolver-marker-start 'source=last-known-good'
+  _aw_boot_trace resolver-marker-start resolver last-known-good
   _awlkg=$(tr -d ' \t\r\n' < "$_awr/last-known-good" 2>/dev/null)
   _aw_try_slot "$_awlkg"
   if [ -n "$AW_PY" ]; then
     _aw_trace_source="last-known-good"
     _aw_trace_version="$_awlkg"
-    _aw_boot_trace resolver-marker-result \
-      "source=last-known-good result=hit version=$_awlkg"
+    _aw_boot_trace resolver-marker-result resolver last-known-good hit "$_awlkg"
   else
-    _aw_boot_trace resolver-marker-result 'source=last-known-good result=miss'
+    _aw_boot_trace resolver-marker-result resolver last-known-good miss
   fi
 fi
 
@@ -165,13 +230,16 @@ if [ -z "$AW_PY" ]; then
   done
 fi
 if [ -n "$AW_PY" ]; then
-  _aw_boot_trace resolver-slot-result \
-    "source=$_aw_trace_source result=resolved version=$_aw_trace_version"
+  _aw_boot_trace resolver-slot-result resolver "$_aw_trace_source" resolved "$_aw_trace_version"
 else
-  _aw_boot_trace resolver-slot-result 'source=none result=miss'
+  _aw_boot_trace resolver-slot-result resolver none miss
 fi
 AGENT_RT_PY="$AW_PY"
 unset _awr _awv _awlkg _sub _slot _aw_trace_source _aw_trace_version \
-  _aw_bt_raw _aw_bt_plugin _aw_bt_extra 2>/dev/null || true
+  _aw_bt_raw _aw_bt_plugin _aw_bt_extra _aw_bt_log_path _aw_bt_log_dir \
+  _aw_bt_line _aw_bt_iso _aw_phase _aw_now_ms _aw_emitter \
+  _aw_resolution_source _aw_result _aw_version _aw_dispatch_path \
+  2>/dev/null || true
 unset -f _aw_marker_valid _aw_try_slot _aw_version_key \
-  _aw_boot_trace_ms _aw_boot_trace 2>/dev/null || true
+  _aw_boot_trace_ms _aw_boot_trace_iso _aw_boot_trace_log _aw_boot_trace \
+  2>/dev/null || true

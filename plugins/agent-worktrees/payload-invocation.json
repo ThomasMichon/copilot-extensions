@@ -7,6 +7,7 @@
   "installationContext": "required",
   "noSelfProvisionEnv": "AGENT_WORKTREES_NO_SELFPROVISION",
   "payloadRootEnv": "AGENT_WORKTREES_PAYLOAD_ROOT",
+  "bootTraceLogFile": "logs/activity.jsonl",
   "purpose": "Manage worktrees and project lifecycle",
   "payloadDispatcher": {
     "posix": "scripts/invoke-payload-runtime.sh",

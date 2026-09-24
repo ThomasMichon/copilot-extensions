@@ -18,7 +18,7 @@
     {
       "name": "agent-pull-requests",
       "description": "Cross-repository pull-request CLI for API-driven status/create/merge/wait flows, addressed directly by owner/repo with no local checkout required. Deployed as a self-contained versioned runtime via the shared vendored installer engine, with a real agent-pull-requests binstub; initially mediated through agent-worktrees account resolution.",
-      "version": "0.1.0-dev4",
+      "version": "0.1.0-dev5",
       "source": "plugins/agent-pull-requests",
       "defaultEnabled": false
     },
@@ -37,25 +37,25 @@
     {
       "name": "agent-containers",
       "description": "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver with trusted OpenSSH and restricted provider-exec transport",
-      "version": "0.1.2-dev161",
+      "version": "0.1.2-dev162",
       "source": "plugins/agent-containers"
     },
     {
       "name": "agent-mcp",
       "description": "Swiss-army MCP bridge - wrap an upstream MCP server (HTTP or stdio) as a local stdio MCP, inject host credentials, and apply a decorator stack (filter, rename, defer, code-mode, storage, transform, gate, input_gate). Dual-era: speaks modern MCP 2.x (2026-07-28) and the legacy handshake, in both directions.",
-      "version": "0.2.0-dev137",
+      "version": "0.2.0-dev138",
       "source": "plugins/agent-mcp"
     },
     {
       "name": "agent-ssh",
       "description": "SSH connectivity layer for the agent fabric: emit and verify machine-name SSH profiles from a normalized registry, and define the public transport-provider contract for pluggable direct or tunnel transports.",
-      "version": "0.1.0-dev102",
+      "version": "0.1.0-dev103",
       "source": "plugins/agent-ssh"
     },
     {
       "name": "agent-logger",
       "description": "Reusable Copilot CLI session logging - segment sessions into digestible chunks, write Markdown session logs, sync local or validated provider-rescued sessions to a configurable target, and optionally run a scheduled orchestrator that crunches a backlog into committed logs",
-      "version": "0.1.2-dev34",
+      "version": "0.1.2-dev35",
       "source": "plugins/agent-logger"
     },
     {
@@ -91,7 +91,7 @@
     {
       "name": "agent-vault",
       "description": "Local KeePassXC-backed secret store for Copilot CLI agents. A machine-local service caches the KeePass master password with a TTL and auto-prompts on lock; a CLI fetches API keys, SSH keys, and account credentials on demand and manages entries (get/has/search/list/show/add/set-password/set-username/remove/move/import-key/export-key) without hardcoding, committing, or exporting them. Destructive edits are scoped to the configured vault group unless forced. Includes a SUDO_ASKPASS helper for sudo -A, a git-credential helper that delegates allowlisted HTTPS hosts to Git Credential Manager, an envelope-KEK seal/unseal facility (DPAPI-wrapped on Windows) for encrypting a consumer's own token cache at rest, and an opt-in encrypted persistent cache that serves reads across restarts and while the vault is locked.",
-      "version": "0.1.0-dev114",
+      "version": "0.1.0-dev115",
       "source": "plugins/agent-vault"
     },
     {
@@ -109,13 +109,13 @@
     {
       "name": "agent-index",
       "description": "Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem, with good-citizen ingestion.",
-      "version": "0.1.0-dev207",
+      "version": "0.1.0-dev208",
       "source": "plugins/agent-index"
     },
     {
       "name": "agent-machines",
       "description": "Portable machine setup and restore for Copilot CLI. Derives setup from declared topology, enabled capabilities, and in-repo requirement packages, then converges the current machine through Copilot settings, resources, and repo-local modules. Organization policy and per-machine values remain downstream while the engine and conductor stay generic.",
-      "version": "0.1.0-dev135",
+      "version": "0.1.0-dev136",
       "source": "plugins/agent-machines"
     },
     {
@@ -139,7 +139,7 @@
     {
       "name": "budget-guidance",
       "description": "Provider-neutral current usage-budget posture with strict static readings, deterministic field-level source resolution, sustainable-rate arithmetic, and shared human and machine-readable status.",
-      "version": "0.1.0-dev15",
+      "version": "0.1.0-dev16",
       "source": "plugins/budget-guidance"
     }
   ]

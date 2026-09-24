@@ -17,15 +17,123 @@ $runtimeResolver = Join-Path $scriptDir 'resolve-runtime.ps1'
 $installer = Join-Path $scriptDir 'install.ps1'
 $legacyRoot = Join-Path $env:USERPROFILE '.agent-worktrees' # marketplace-isolation: allow legacy compatibility root
 
-function Write-BootTrace([string]$Phase, [string]$Extra = '') {
+function Get-BootTraceIsoTimestamp {
+    return [DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:sszzz')
+}
+
+function Escape-BootTraceJson([string]$Value) {
+    if ($null -eq $Value) { return '' }
+    return $Value.Replace('\', '\\').Replace('"', '\"')
+}
+
+function Write-BootTraceRecord(
+    [string]$Phase,
+    [long]$TimestampMs,
+    [string]$DispatchPath = ''
+) {
+    if (-not $runtimeRoot) { return }
+    # Never force-create the LEGACY root purely to write a boot-trace
+    # record: an ordinary read-only command (e.g. --version) against an
+    # already-resolved runtime in legacy-default mode must stay side-
+    # effect-free, an invariant this repo tests extensively (Copilot
+    # review follow-up, PR #3310 -- distinct from the namespaced-cell
+    # case below, where a resolved ACTIVE context is always expected to
+    # get its own directory touched regardless). A genuine first-ever
+    # legacy install is NOT suppressed by this guard: `$script:willProvision`
+    # is set true as soon as self-provisioning is actually committed to
+    # (see the call site below), which creates the legacy root eagerly so
+    # even the earlier `resolver-loaded`/`shim-start` phases -- emitted
+    # before `provision-start`'s own explicit `New-Item` -- are captured
+    # instead of silently dropped (Copilot review follow-up, PR #3310).
+    if ($runtimeRoot -eq $legacyRoot -and -not (Test-Path -LiteralPath $runtimeRoot)) {
+        if (-not $script:willProvision) { return }
+        try {
+            New-Item -ItemType Directory -Path $runtimeRoot -Force -ErrorAction Stop | Out-Null
+        } catch {
+            return
+        }
+    }
+    $bootTraceLogPath = Join-Path $runtimeRoot 'logs\activity.jsonl'
+    try {
+        [IO.Directory]::CreateDirectory((Split-Path -Parent $bootTraceLogPath)) | Out-Null
+        $parts = [System.Collections.Generic.List[string]]::new()
+        [void]$parts.Add('"ts":"' + (Escape-BootTraceJson (Get-BootTraceIsoTimestamp)) + '"')
+        [void]$parts.Add('"event":"boot_trace"')
+        [void]$parts.Add('"plugin":"agent-worktrees"')
+        [void]$parts.Add('"phase":"' + (Escape-BootTraceJson $Phase) + '"')
+        [void]$parts.Add('"t_ms":' + $TimestampMs)
+        [void]$parts.Add('"pid":' + $PID)
+        $hostName = [Environment]::MachineName
+        if ($hostName) {
+            [void]$parts.Add('"host":"' + (Escape-BootTraceJson $hostName) + '"')
+        }
+        [void]$parts.Add('"source":"launcher"')
+        if ($DispatchPath) {
+            [void]$parts.Add('"path":"' + (Escape-BootTraceJson $DispatchPath) + '"')
+        }
+        $line = '{' + ($parts -join ',') + '}'
+        # See `powershell-shim.tmpl`'s own identical `AppendAllText` comment
+        # for the full synchronous-write-latency rationale (Copilot review,
+        # PR #3310): a real, bounded tradeoff, never a fire-and-forget
+        # guarantee, kept synchronous deliberately rather than backgrounded.
+        [IO.File]::AppendAllText(
+            $bootTraceLogPath,
+            $line + [Environment]::NewLine,
+            [Text.UTF8Encoding]::new($false)
+        )
+        Invoke-BootTraceMaybePrune -LogPath $bootTraceLogPath
+    } catch {}
+}
+
+# Mirrors agent_worktrees.activity._maybe_prune/_prune's own retention window
+# (RETENTION_DAYS=7, _PRUNE_SIZE_BYTES=512*1024) so a launch that emits
+# boot_trace lines but never triggers a later Python-side log_event() call
+# does not grow activity.jsonl unbounded. Best-effort and lossy under a
+# concurrent writer during the rewrite, same posture as the Python pruner's
+# own documented tradeoff. Never lets a pruning failure affect the caller.
+function Invoke-BootTraceMaybePrune([string]$LogPath) {
+    try {
+        $info = Get-Item -LiteralPath $LogPath -ErrorAction Stop
+        if ($info.Length -lt 524288) { return }
+        $cutoff = [DateTimeOffset]::UtcNow.AddDays(-7).ToString('yyyy-MM-ddTHH:mm:sszzz')
+        $tmp = "$LogPath.prune.$PID"
+        $kept = [System.Collections.Generic.List[string]]::new()
+        foreach ($line in [IO.File]::ReadLines($LogPath)) {
+            # Tolerate both the compact form this launcher writes
+            # ("ts":"...") and the space-after-colon form Python's
+            # json.dumps (default separators) writes for every other
+            # activity.jsonl event ("ts": "...") -- matching only the
+            # compact form previously treated every real Python-emitted
+            # record as unparseable, retaining them forever (Copilot
+            # review, PR #3310).
+            $match = [regex]::Match($line, '"ts"\s*:\s*"')
+            if (-not $match.Success) { [void]$kept.Add($line); continue }
+            $rest = $line.Substring($match.Index + $match.Length)
+            $endIdx = $rest.IndexOf('"')
+            if ($endIdx -lt 0) { [void]$kept.Add($line); continue }
+            $ts = $rest.Substring(0, $endIdx)
+            if ([string]::CompareOrdinal($ts, $cutoff) -ge 0) { [void]$kept.Add($line) }
+        }
+        [IO.File]::WriteAllLines($tmp, $kept, [Text.UTF8Encoding]::new($false))
+        Move-Item -LiteralPath $tmp -Destination $LogPath -Force
+    } catch {
+        if ($tmp -and (Test-Path -LiteralPath $tmp)) {
+            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Write-BootTrace([string]$Phase, [string]$DispatchPath = '') {
+    $timestampMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    Write-BootTraceRecord -Phase $Phase -TimestampMs $timestampMs -DispatchPath $DispatchPath
     if (-not $env:COPILOT_EXTENSIONS_BOOT_TRACE) { return }
     $plugin = if ($env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN) {
         $env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN
     } else {
         'agent-worktrees'
     }
-    $line = "::boot-trace:: plugin=$plugin phase=$Phase t=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
-    if ($Extra) { $line += " $Extra" }
+    $line = "::boot-trace:: plugin=$plugin phase=$Phase t=$timestampMs"
+    if ($DispatchPath) { $line += " path=$DispatchPath" }
     [Console]::Error.WriteLine($line)
 }
 if (
@@ -284,9 +392,27 @@ function Invoke-AgentWorktreesRuntime([string]$Python) {
 }
 
 $python = Resolve-AgentWorktreesRuntime
+# Commit to self-provisioning (and, in doing so, permit the boot-trace
+# writer to eagerly create a not-yet-existing legacy root) as soon as we
+# actually know provisioning will happen -- i.e. no runtime resolved AND
+# self-provisioning isn't disabled -- so the traces below, which fire
+# strictly before `provision-start`'s own `New-Item`, are captured on a
+# genuine first-ever launch instead of silently dropped (Copilot review
+# follow-up, PR #3310).
+$script:willProvision = (-not $python) -and (-not $env:AGENT_WORKTREES_NO_SELFPROVISION)
 Write-BootTrace 'resolver-loaded'
+# Log the outer dispatcher template's own 'shim-start' phase here, now
+# that $runtimeRoot reflects whichever root (legacy or an active
+# namespaced context) is genuinely active -- the outer template forwards
+# its own timestamp via this env var but never writes the durable record
+# itself, precisely because it cannot know which root is correct
+# (Copilot review, PR #3310; see the outer dispatcher-powershell.tmpl's
+# own comment for the full rationale).
+if ($env:COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS) {
+    Write-BootTraceRecord -Phase 'shim-start' -TimestampMs ([long]$env:COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS)
+}
 if ($python) {
-    Write-BootTrace 'dispatch' 'path=fast'
+    Write-BootTrace 'dispatch' 'fast'
     Invoke-AgentWorktreesRuntime $python
 }
 if ($env:AGENT_WORKTREES_NO_SELFPROVISION) {
@@ -332,7 +458,7 @@ try {
     $python = Resolve-AgentWorktreesRuntime
     Write-BootTrace 'resolver-loaded'
     if ($python) {
-        Write-BootTrace 'dispatch' 'path=locked-fast'
+        Write-BootTrace 'dispatch' 'locked-fast'
         Invoke-AgentWorktreesRuntime $python
     }
 
@@ -395,7 +521,7 @@ try {
     $python = Resolve-AgentWorktreesRuntime
     Write-BootTrace 'resolver-loaded'
     if ($python) {
-        Write-BootTrace 'dispatch' 'path=provisioned'
+        Write-BootTrace 'dispatch' 'provisioned'
         Invoke-AgentWorktreesRuntime $python
     }
 } finally {

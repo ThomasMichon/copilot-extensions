@@ -43,16 +43,122 @@ boot_trace_ms() {
     printf '0000000000000\n'
 }
 
+boot_trace_iso() {
+    local raw=""
+    if raw="$(date -u +%Y-%m-%dT%H:%M:%S+00:00 2>/dev/null)"; then
+        printf '%s\n' "$raw"
+        return 0
+    fi
+    printf '1970-01-01T00:00:00+00:00\n'
+}
+
+boot_trace_log() {
+    [[ -n "${RUNTIME_ROOT:-}" ]] || return 0
+    # Never force-create the LEGACY root purely to write a boot-trace
+    # record -- see invoke-payload-runtime.ps1's own identical guard for
+    # the full rationale (Copilot review follow-up, PR #3310). A genuine
+    # first-ever legacy install is NOT suppressed: WILL_PROVISION is set
+    # true as soon as self-provisioning is actually committed to (see the
+    # call site below), which creates the legacy root eagerly so even the
+    # earlier `resolver-loaded`/`shim-start` phases -- emitted before
+    # `provision-start`'s own explicit `mkdir -p` -- are captured instead
+    # of silently dropped.
+    if [[ "$RUNTIME_ROOT" == "$LEGACY_ROOT" && ! -d "$RUNTIME_ROOT" ]]; then
+        [[ -n "${WILL_PROVISION:-}" ]] || return 0
+        mkdir -p "$RUNTIME_ROOT" 2>/dev/null || return 0
+    fi
+    local phase="$1" now_ms="$2" dispatch_path="${3-}"
+    local log_path="$RUNTIME_ROOT/logs/activity.jsonl"
+    local log_dir="${log_path%/*}"
+    [[ -d "$log_dir" ]] || mkdir -p "$log_dir" 2>/dev/null || return 0
+    local line
+    line="{\"ts\":\"$(boot_trace_iso)\",\"event\":\"boot_trace\",\"plugin\":\"agent-worktrees\",\"phase\":\"$(boot_trace_escape_json "$phase")\",\"t_ms\":$now_ms,\"pid\":$$"
+    [[ -n "${HOSTNAME:-}" ]] && line="$line,\"host\":\"$(boot_trace_escape_json "$HOSTNAME")\""
+    line="$line,\"source\":\"launcher\""
+    [[ -n "$dispatch_path" ]] && line="$line,\"path\":\"$(boot_trace_escape_json "$dispatch_path")\""
+    line="$line}"
+    { printf '%s\n' "$line" >> "$log_path"; } 2>/dev/null || true
+    boot_trace_maybe_prune "$log_path"
+}
+
+# Escapes backslash and double-quote so an inherited/environment-sourced
+# value (HOSTNAME) can never produce a malformed JSONL line (Copilot
+# review, PR #3310). Bash builtin substitution -- no subprocess spawn,
+# unlike the plain-POSIX-sh templates' sed-based equivalent.
+boot_trace_escape_json() {
+    local v="$1"
+    v="${v//\\/\\\\}"
+    v="${v//\"/\\\"}"
+    printf '%s' "$v"
+}
+
+# Mirrors agent_worktrees.activity._maybe_prune/_prune's own retention window
+# (RETENTION_DAYS=7, _PRUNE_SIZE_BYTES=512*1024) so a launch that emits
+# boot_trace lines but never triggers a later Python-side log_event() call
+# (e.g. it exits before the real module runs any activity-logging code path)
+# does not grow activity.jsonl unbounded. Best-effort and lossy under a
+# concurrent writer during the rewrite, same posture as the Python pruner's
+# own documented tradeoff. Never lets a pruning failure affect the caller.
+boot_trace_maybe_prune() {
+    local log_path="$1" size
+    size="$(wc -c < "$log_path" 2>/dev/null)" || return 0
+    size="${size//[[:space:]]/}"
+    [[ "$size" =~ ^[0-9]+$ ]] || return 0
+    (( size >= 524288 )) || return 0
+    local cutoff
+    cutoff="$(boot_trace_prune_cutoff_iso)" || return 0
+    local tmp="${log_path}.prune.$$"
+    if LC_ALL=C awk -v cutoff="$cutoff" '
+        {
+            # Tolerate both the compact form this shell writer produces
+            # ("ts":"...") and the space-after-colon form Python'"'"'s
+            # json.dumps (default separators) writes for every OTHER
+            # activity.jsonl event ("ts": "...") -- matching only the
+            # compact form previously treated every real Python-emitted
+            # record as unparseable, retaining them forever and defeating
+            # the whole point of this prune (Copilot review, PR #3310).
+            match($0, /"ts"[[:space:]]*:[[:space:]]*"/)
+            if (RSTART == 0) { print; next }
+            rest = substr($0, RSTART + RLENGTH)
+            j = index(rest, "\"")
+            if (j == 0) { print; next }
+            ts = substr(rest, 1, j - 1)
+            if (ts >= cutoff) print
+        }
+    ' "$log_path" > "$tmp" 2>/dev/null; then
+        mv -f "$tmp" "$log_path" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
+    else
+        rm -f "$tmp" 2>/dev/null || true
+    fi
+}
+
+boot_trace_prune_cutoff_iso() {
+    local now cutoff raw
+    now="$(date +%s 2>/dev/null)" || return 1
+    cutoff=$((now - 7 * 86400))
+    if raw="$(date -u -d "@$cutoff" +%Y-%m-%dT%H:%M:%S+00:00 2>/dev/null)"; then
+        printf '%s\n' "$raw"
+        return 0
+    fi
+    if raw="$(date -u -r "$cutoff" +%Y-%m-%dT%H:%M:%S+00:00 2>/dev/null)"; then
+        printf '%s\n' "$raw"
+        return 0
+    fi
+    return 1
+}
+
 boot_trace() {
+    local phase="$1" dispatch_path="${2-}" now_ms
+    now_ms="$(boot_trace_ms)"
+    boot_trace_log "$phase" "$now_ms" "$dispatch_path"
     [[ -n "${COPILOT_EXTENSIONS_BOOT_TRACE:-}" ]] || return 0
-    local phase="$1" extra="${2-}"
     local plugin="${COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN:-agent-worktrees}"
-    if [[ -n "$extra" ]]; then
-        printf '::boot-trace:: plugin=%s phase=%s t=%s %s\n' \
-            "$plugin" "$phase" "$(boot_trace_ms)" "$extra" >&2
+    if [[ -n "$dispatch_path" ]]; then
+        printf '::boot-trace:: plugin=%s phase=%s t=%s path=%s\n' \
+            "$plugin" "$phase" "$now_ms" "$dispatch_path" >&2
     else
         printf '::boot-trace:: plugin=%s phase=%s t=%s\n' \
-            "$plugin" "$phase" "$(boot_trace_ms)" >&2
+            "$plugin" "$phase" "$now_ms" >&2
     fi
 }
 
@@ -300,9 +406,29 @@ installation_resolution_current() {
 }
 
 resolve_runtime
+# Commit to self-provisioning (and, in doing so, permit boot_trace_log to
+# eagerly create a not-yet-existing legacy root) as soon as we actually
+# know provisioning will happen -- i.e. no runtime resolved AND
+# self-provisioning isn't disabled -- so the traces below, which fire
+# strictly before `provision-start`'s own `mkdir -p`, are captured on a
+# genuine first-ever launch instead of silently dropped (Copilot review
+# follow-up, PR #3310).
+if [[ -z "${AGENT_RT_PY:-}" && -z "${AGENT_WORKTREES_NO_SELFPROVISION:-}" ]]; then
+    WILL_PROVISION=1
+fi
 boot_trace resolver-loaded
+# Log the outer dispatcher template's own `shim-start` phase here, now
+# that RUNTIME_ROOT reflects whichever root (legacy or an active
+# namespaced context) is genuinely active -- the outer template forwards
+# its own timestamp via this env var but never writes the durable record
+# itself, precisely because it cannot know which root is correct
+# (Copilot review, PR #3310; see the outer dispatcher-posix.tmpl's own
+# comment for the full rationale).
+if [[ -n "${COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS:-}" ]]; then
+    boot_trace_log "shim-start" "$COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS" ""
+fi
 if [[ -n "${AGENT_RT_PY:-}" ]]; then
-    boot_trace dispatch 'path=fast'
+    boot_trace dispatch fast
     run_runtime "$@"
 fi
 if [[ -n "${AGENT_WORKTREES_NO_SELFPROVISION:-}" ]]; then
@@ -374,7 +500,7 @@ if [[ -n "${AGENT_RT_PY:-}" ]]; then
     unlock_provision
     trap - EXIT INT TERM
     boot_trace resolver-loaded
-    boot_trace dispatch 'path=locked-fast'
+    boot_trace dispatch locked-fast
     run_runtime "$@"
 fi
 
@@ -406,7 +532,7 @@ boot_trace resolver-loaded
 if [[ -n "${AGENT_RT_PY:-}" ]]; then
     unlock_provision
     trap - EXIT INT TERM
-    boot_trace dispatch 'path=provisioned'
+    boot_trace dispatch provisioned
     run_runtime "$@"
 fi
 printf '[agent-worktrees] provisioning completed without a resolvable runtime.\n' >&2
