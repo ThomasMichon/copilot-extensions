@@ -17,17 +17,44 @@ specifically when reviewing a pull request, not a replacement for them.
 
 ## Directives for the automatic code-review agent
 
+- **Flag any PR whose base is `main` directly.** `main` is regenerated
+  wholesale by this repo's own CI promotion pipeline
+  (`.github/workflows/promote.yml`, dev-branch-release-pipeline effort,
+  ThomasMichon/copilot-extensions#3336) via an automated snapshot PR: base
+  `main`, head branch matching `release/promote-<run id>`, authored by the
+  pipeline's own worker identity (the `github-actions[bot]` account).
+  Contributors always target `dev` — a PR whose base is `main` and that
+  does NOT match BOTH that branch-naming convention AND that author is not
+  a legitimate use of this repo's PR flow (the repo's own CI has a hard
+  guard checking the same two conditions, but that only fails the build;
+  this comment is the visible signal on the PR itself, since Copilot
+  review never blocks a merge here). Post this comment, verbatim, exactly
+  once per PR (do not repeat it on subsequent review passes of the same
+  PR):
+
+  > This PR targets `main` directly. `main` is only ever updated by this
+  > repo's own CI promotion pipeline (dev-branch-release-pipeline effort,
+  > `.github/workflows/promote.yml`) via an automated snapshot PR from a
+  > `release/promote-*` branch. Please retarget this PR's base branch to
+  > `dev` — see `CONTRIBUTING.md` § Release & Versioning.
 - **Scope to the diff.** Review the code the PR actually changes. The repo
   carries pre-existing style debt — do **not** demand repo-wide cleanup or
   flag untouched code.
 - **Concrete over cosmetic.** Prefer flagging concrete violations of
   `AGENTS.md`'s and `CONTRIBUTING.md`'s standards over stylistic nitpicks.
-- **Lead with the highest-signal miss: the version-bump triplet.** For any
-  changed plugin *payload*, verify all three version locations moved
-  together (`plugins/<name>/plugin.json`, `plugins/<name>/pyproject.toml` --
-  runtime plugins only -- and that plugin's entry in
-  `.github/plugin/marketplace.json`) — a partial/missing bump silently
-  breaks machine updates. This is the single most valuable thing to catch.
+- **Lead with the highest-signal miss: the changefile requirement.** For any
+  changed plugin *payload* in a PR targeting `dev`, verify a pending
+  changefile names it (`python tools/changefile.py add --plugin <name>
+  --type <major|minor|patch|dev> --comment "..."`) — a missing changefile
+  means the CI promotion pipeline has nothing to bump for that plugin when
+  it next regenerates `main`, so the marketplace silently keeps serving the
+  old version. This replaced the old three-file hand-bump convention:
+  contributors no longer hand-edit `plugin.json` / `pyproject.toml` /
+  `marketplace.json` version fields themselves — the promotion pipeline's
+  `tools/accumulate_bumps.py` writes the real version numbers mechanically
+  when it consumes pending changefiles. Do not ask for a hand-bumped
+  triplet on an ordinary PR; that is now only correct on the pipeline's own
+  generated snapshot commit.
 - **Tests for runtime logic.** Flag PRs that change a runtime plugin's logic
   without adding or updating that plugin's `tests/`.
 - **Test portfolio growth.** Flag new exhaustive matrices, repeated process
