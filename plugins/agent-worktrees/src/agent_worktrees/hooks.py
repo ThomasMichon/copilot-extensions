@@ -151,16 +151,24 @@ def _machine_local_default_branch(name: str) -> str | None:
     """Raw (never dataclass-defaulted) machine-local ``default_branch``
     override for project *name*, or ``None`` if unset.
 
-    Reads ``~/.<project>/config.yaml`` directly rather than going through
-    ``cfg.load_project_config()`` -- that function's ``RepoConfig`` ALWAYS
-    materializes ``default_branch`` as ``"master"`` when nothing configured
-    it (``config.py``'s dataclass default), which would make every repo with
-    a real, merely-unconfigured ``origin/HEAD`` (e.g. ``main``) look like an
-    explicit ``master`` override and permanently hide the ``origin/HEAD``
-    fallback tier below. Never raises -- returns ``None`` on any problem.
+    Reads ``~/.<project>/config.yaml`` -- deep-merged with its ``config.d``
+    drop-ins UNDER it, exactly as ``cfg.load_config()`` layers them (a
+    service-contributed drop-in ``repos.<name>.default_branch`` must be
+    honored here too, or the hook can diverge from create/push-changes) --
+    directly, rather than going through ``cfg.load_project_config()``. That
+    function's ``RepoConfig`` ALWAYS materializes ``default_branch`` as
+    ``"master"`` when nothing configured it (``config.py``'s dataclass
+    default), which would make every repo with a real, merely-unconfigured
+    ``origin/HEAD`` (e.g. ``main``) look like an explicit ``master``
+    override and permanently hide the ``origin/HEAD`` fallback tier below.
+    Never raises -- returns ``None`` on any problem.
     """
     try:
-        raw = cfg._load_yaml_safe(cfg.project_dir(name) / "config.yaml")
+        project_dir = cfg.project_dir(name)
+        raw = cfg._load_yaml_safe(project_dir / "config.yaml")
+        dropins = cfg._load_config_d(project_dir / "config.d", project_name=name)
+        if dropins:
+            raw = cfg._deep_merge(dropins, raw)
         repo_raw = (raw.get("repos") or {}).get(name)
         if isinstance(repo_raw, dict) and repo_raw.get("default_branch"):
             return str(repo_raw["default_branch"])
@@ -170,11 +178,16 @@ def _machine_local_default_branch(name: str) -> str | None:
 
 
 def _registry_default_branch(name: str) -> str | None:
-    """Raw ``repos.yaml`` ``default_branch`` for project *name*, or ``None``.
+    """Raw ``default_branch`` fallback for project *name* -- ``repos.yaml``,
+    then the legacy ``projects.yaml`` adoption registry -- or ``None``.
 
-    ``RepoEntry.default_branch`` defaults to ``""`` (never a fabricated
-    guess like the merged ``RepoConfig`` does), so an absent value here is
-    genuinely absent. Never raises.
+    Mirrors ``cfg._resolve_adoption_defaults_from_registry``'s own two-tier
+    fallback (``repos.yaml`` first, ``projects.yaml`` only when that has no
+    value) so a repo whose ``default_branch`` lives only in the legacy
+    registry still resolves here exactly as every other PR-flow entry point
+    does. Both sources default their own field to ``""``/absent (never a
+    fabricated guess like the merged ``RepoConfig`` does), so an absent value
+    here is genuinely absent. Never raises.
     """
     try:
         from . import repos as repos_mod
@@ -182,6 +195,14 @@ def _registry_default_branch(name: str) -> str | None:
         entry = repos_mod.read_registry().repos.get(name)
         if entry is not None and entry.default_branch:
             return str(entry.default_branch)
+    except Exception:
+        pass
+    try:
+        from . import installer
+
+        proj = (installer.read_projects_registry().get("projects") or {}).get(name)
+        if isinstance(proj, dict) and proj.get("default_branch"):
+            return str(proj["default_branch"])
     except Exception:
         pass
     return None

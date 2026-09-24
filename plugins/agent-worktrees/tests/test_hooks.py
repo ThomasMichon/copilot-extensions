@@ -144,8 +144,64 @@ class TestRegistryDefaultBranch:
         )
         assert hooks._default_branch(str(wt)) == "dev"
 
+    def test_config_d_dropin_default_branch_honored(
+        self, anchor_and_worktree, _isolate_agent_worktrees_home
+    ):
+        """A service-contributed ``config.d`` drop-in (e.g. vault-style
+        machine-local contribution) must be honored here exactly as
+        ``cfg.load_config()`` honors it for every other consumer."""
+        anchor, wt = anchor_and_worktree
+        fake_home = _isolate_agent_worktrees_home
+        (fake_home / ".agent-worktrees" / "repos.yaml").write_text(
+            "schema_version: 1\n"
+            "repos:\n"
+            "  proj:\n"
+            "    class: worktree\n"
+            f"    windows: {anchor}\n"
+            f"    linux: {anchor}\n"
+            f"    wsl: {anchor}\n"
+        )
+        proj_dir = fake_home / ".proj"
+        (proj_dir / "config.d").mkdir(parents=True, exist_ok=True)
+        (proj_dir / "config.d" / "dropin.yaml").write_text(
+            "repos:\n"
+            "  proj:\n"
+            "    default_branch: dev\n"
+        )
+        assert hooks._default_branch(str(wt)) == "dev"
 
-class TestPreCommit:
+    def test_projects_yaml_legacy_fallback_honored(
+        self, anchor_and_worktree, _isolate_agent_worktrees_home, monkeypatch
+    ):
+        """The legacy adoption registry (``projects.yaml``) is a fallback
+        ``cfg._resolve_adoption_defaults_from_registry`` also consults after
+        ``repos.yaml``. NOTE: ``default_branch`` is retired from
+        ``projects.yaml`` as of schema v2 (``config_migrations``'s
+        ``_projects_v1_to_v2`` strips it on every load, matching its
+        ``repos.yaml``-is-the-single-owner comment) -- so this fallback is
+        already dead in practice via the real on-disk registry. Stub
+        ``installer.read_projects_registry`` directly (bypassing that
+        migration) to exercise the fallback's own logic/precedence, matching
+        how ``cfg._resolve_adoption_defaults_from_registry`` still reads it."""
+        anchor, wt = anchor_and_worktree
+        fake_home = _isolate_agent_worktrees_home
+        (fake_home / ".agent-worktrees" / "repos.yaml").write_text(
+            "schema_version: 1\n"
+            "repos:\n"
+            "  proj:\n"
+            "    class: worktree\n"
+            f"    windows: {anchor}\n"
+            f"    linux: {anchor}\n"
+            f"    wsl: {anchor}\n"
+        )
+        from agent_worktrees import installer
+
+        monkeypatch.setattr(
+            installer,
+            "read_projects_registry",
+            lambda: {"projects": {"proj": {"default_branch": "dev"}}},
+        )
+        assert hooks._default_branch(str(wt)) == "dev"
     def test_blocks_default_branch_commit_in_worktree(self, anchor_and_worktree, monkeypatch):
         anchor, wt = anchor_and_worktree
         monkeypatch.chdir(wt)
