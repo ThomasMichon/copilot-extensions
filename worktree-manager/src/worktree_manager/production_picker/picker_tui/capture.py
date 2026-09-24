@@ -168,6 +168,14 @@ async def capture_async(
                 scr.machine_idx = scr.local_index()
             except Exception:
                 pass
+        # Route this programmatic tab selection through the same activation
+        # hook navigation uses (picker-lazy-per-machine-loading): otherwise a
+        # live "all" capture leaves every deferred remote ping-only, and its
+        # documented All view is captured missing rows.
+        try:
+            scr._activate_current_machine_tab()
+        except Exception:
+            pass
         await pilot.pause()
         if pivot:
             await _select_pivot(scr, pilot, pivot, wait_pivot)
@@ -289,6 +297,14 @@ async def capture_frames_async(
                 scr.machine_idx = scr.local_index()
             except Exception:
                 pass
+        # Route this programmatic tab selection through the same activation
+        # hook navigation uses (picker-lazy-per-machine-loading): otherwise a
+        # live "all" capture leaves every deferred remote ping-only, and its
+        # documented All view is captured missing rows.
+        try:
+            scr._activate_current_machine_tab()
+        except Exception:
+            pass
         if update_state is not None:
             scr.update_state = update_state
         await pilot.pause()
@@ -348,6 +364,14 @@ async def capture_modal_async(
                 scr.machine_idx = scr.local_index()
             except Exception:
                 pass
+        # Route this programmatic tab selection through the same activation
+        # hook navigation uses (picker-lazy-per-machine-loading): otherwise a
+        # live "all" capture leaves every deferred remote ping-only, and its
+        # documented All view is captured missing rows.
+        try:
+            scr._activate_current_machine_tab()
+        except Exception:
+            pass
         await pilot.pause()
         await opener(scr, pilot)
         await pilot.pause()

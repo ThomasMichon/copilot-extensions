@@ -191,6 +191,7 @@ class Supervisor:
         fleet_cold_fn: FleetColdFn | None = None,
         fleet_end_fn: FleetEndFn | None = None,
         nudge_fn: NudgeFn | None = None,
+        idle_nudge_fn: Any | None = None,
         redrive_fn: RedriveFn | None = None,
         disposable_cli_labels: Sequence[str] | None = None,
         conclusion_fn: ConclusionFn | None = None,
@@ -311,6 +312,10 @@ class Supervisor:
         self._resume_retry_after: dict[str, float] = {}
         #: Nudge sender used by :meth:`nudge_stalled`. Injectable for tests.
         self.nudge_fn = nudge_fn or _default_nudge
+        #: Idle-confirm sender used by :meth:`nudge_idle_headless_tasks`.
+        from .idle_confirm import default_idle_confirm_nudge
+
+        self.idle_nudge_fn = idle_nudge_fn or default_idle_confirm_nudge
         #: Re-drive sender used when a spawned CLI body is alive but still has
         #: not claimed its queued task after a supervisor/bridge restart.
         self.redrive_fn = redrive_fn or _default_redrive
@@ -339,6 +344,8 @@ class Supervisor:
         #: task_id -> last nudge ts (in-memory cooldown so a persistently-quiet
         #: live worker is nudged at most once per stall window, not every cycle).
         self._last_nudge: dict[str, float] = {}
+        #: task_id -> last idle-confirm nudge ts (separate from stall nudges).
+        self._last_idle_nudge: dict[str, float] = {}
         #: reservation key -> redrive attempted in this supervisor process. A
         #: restarted supervisor may retry; a healthy worker claims promptly.
         self._redriven_spawn_keys: set[str] = set()
@@ -699,47 +706,15 @@ class Supervisor:
                 self._cold_retry_after[key] = now + 60.0
         return cooled
 
+    def nudge_idle_headless_tasks(self, *, now: float | None = None) -> int:
+        """Idle is not done. Ask the worker to confirm, then keep going."""
+        from .idle_confirm import nudge_idle_headless_tasks as _nudge
+
+        return _nudge(self, now=time.time() if now is None else now)
+
     def suspend_idle_headless_tasks(self) -> int:
-        """Treat a headless ACP turn-end as an implicit suspend request."""
-        suspended = 0
-        for res in self._pool_reservations(state=SpawnState.SPAWNED):
-            try:
-                task = self.client.get(res["task_id"])
-            except DispatchError:
-                continue
-            if (
-                not self._matches_pool(task)
-                or task.get("status") != Status.STARTED
-                or not task.get("owner")
-            ):
-                continue
-            activity = None
-            fleet = _parse_fleet_body_handle(res.get("session_handle"))
-            local_sid = _parse_local_body_handle(res.get("session_handle"))
-            try:
-                if fleet is not None:
-                    activity = self.fleet_activity_fn(*fleet)
-                elif local_sid is not None:
-                    activity = self.local_body_activity_fn(local_sid)
-            except Exception:
-                log.exception(
-                    "failed to read headless turn state for task %s",
-                    task.get("id"),
-                )
-                continue
-            if activity != "IDLE":
-                continue
-            try:
-                self.client.suspend(
-                    task["id"],
-                    task["owner"],
-                    reason="headless ACP turn ended",
-                )
-                self.client.set_activity(task["id"], "IDLE", reservation_key=res["key"])
-                suspended += 1
-            except DispatchError:
-                log.exception("failed to suspend idle headless task %s", task.get("id"))
-        return suspended
+        """Compatibility alias -- idle unfinished workers are nudged, not suspended."""
+        return self.nudge_idle_headless_tasks()
 
     def bind_headless_owner_sessions(self) -> int:
         """Attach held local headless tasks to their durable ACP session id.
@@ -3456,7 +3431,7 @@ class Supervisor:
         self.reconcile_reserving()
         self.release_requested_bodies(now=now)
         self.bind_headless_owner_sessions()
-        self.suspend_idle_headless_tasks()
+        self.nudge_idle_headless_tasks(now=now)
         self.cool_dormant_bodies()
         self.release_resumed_cold_tasks(now=now)
         if self.evaluator is not None:

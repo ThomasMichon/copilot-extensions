@@ -23,6 +23,7 @@ import pytest
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import pr_cli
+from agent_worktrees import pr_config
 from agent_worktrees import pr_merge_cli
 from agent_worktrees import config as cfg
 from agent_worktrees import git_ops
@@ -206,7 +207,7 @@ class TestPrMergeDispatcherInference:
             raise AssertionError("inference must not run when a slug is explicit")
         monkeypatch.setattr(pr_merge_cli, "_infer_active_repo_slug", _must_not_call)
         # Halt just past the inference point so we never hit the network.
-        monkeypatch.setattr(m, "_pr_flow_profile",
+        monkeypatch.setattr(pr_config, "_pr_flow_profile",
                             lambda repo_cfg: (_ for _ in ()).throw(_Stop()))
 
         with pytest.raises(_Stop):
