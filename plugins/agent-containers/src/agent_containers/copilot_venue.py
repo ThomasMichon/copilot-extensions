@@ -62,6 +62,39 @@ def add_copilot_subparser(sub) -> None:
         "--force", action="store_true",
         help="Terminate a live SSH holder and take over this trusted container",
     )
+    lifecycle = copilot_p.add_mutually_exclusive_group()
+    lifecycle.add_argument(
+        "--detach", action="store_true",
+        help="Start (or rejoin) the trusted container's CLI-mode Copilot "
+             "session in the background, wait until it registers with the "
+             "host agent-bridge, and print a JSON handle.",
+    )
+    lifecycle.add_argument(
+        "--stop", action="store_true",
+        help="Stop the trusted container's detached session, release its "
+             "forward keeper, and deregister its live-session row.",
+    )
+    copilot_p.add_argument(
+        "--seed-file", dest="seed_file", default=None, metavar="PATH",
+        help="With --detach or attached launch: read the seed from PATH "
+             "('-' = stdin) instead of --seed.",
+    )
+    copilot_p.add_argument(
+        "--copilot-arg", dest="copilot_args", action="append", default=[],
+        metavar="ARG",
+        help="With --detach: extra Copilot argument for the launched session "
+             "(repeatable).",
+    )
+    copilot_p.add_argument(
+        "--register-timeout", dest="register_timeout", type=float, default=180.0,
+        metavar="SECS",
+        help="With --detach: how long to wait for the session to register with "
+             "the host bridge after it starts (default 180).",
+    )
+    copilot_p.add_argument(
+        "--dry-run", dest="dry_run", action="store_true",
+        help="With --detach: print the resolved plan without touching anything.",
+    )
 
 
 def cmd_copilot(
@@ -94,6 +127,18 @@ def cmd_copilot(
     Every ``__main__``-private helper is injected rather than imported, to
     avoid a circular import between this module and ``__main__``.
     """
+    if getattr(args, "stop", False) or getattr(args, "detach", False):
+        from . import copilot_detach
+
+        if getattr(args, "stop", False):
+            return copilot_detach.cmd_stop(args)
+        return copilot_detach.cmd_detach(
+            args,
+            require_live_relay_port=require_live_relay_port,
+            relay_healthy=relay_healthy,
+            busy_exit=busy_exit,
+        )
+
     from venue_copilot import VenueCopilotError, resolve_daemon_port, run_venue_copilot
 
     from .config import RESTRICTED_PROFILE

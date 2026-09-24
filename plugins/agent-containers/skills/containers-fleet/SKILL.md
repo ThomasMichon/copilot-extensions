@@ -175,6 +175,26 @@ for a trusted fleet that intentionally needs no host credential path.
 Those are the **trusted-profile** defaults. A restricted fleet launches only its
 explicit `acp_command` and forwards neither host credential path.
 
+## Detached CLI-mode sessions
+
+For an observable, steerable Copilot CLI session that survives the launcher
+without taking over the caller's terminal, use a trusted container:
+
+```bash
+<catalog argv[0]> copilot <container-name> --detach --seed-file task.md
+# -> JSON with session_id, scope_id, venue, and status/observe/nudge/attach/stop commands
+<catalog argv[0]> copilot <container-name> --stop
+```
+
+`--detach` refuses restricted fleets, provisions the container's
+agent-bridge registration credentials, starts a small host-side forward keeper
+for the bridge and credential-relay reverse forwards, launches
+`agent-worktrees embody --json` in the container workspace, and waits for the
+session to register with the host bridge before reporting success. Repeating
+`--copilot-arg ARG` passes extra Copilot CLI flags to the session. `--stop`
+kills and verifies the venue tmux session, stops the keeper, and deregisters
+the exact live-session row.
+
 For a named restricted OpenSSH target:
 
 ```bash

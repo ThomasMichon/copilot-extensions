@@ -246,7 +246,11 @@ def _ensure_agent_bridge_plugin(name: str) -> None:
                         file=sys.stderr,
                     )
 
-            from venue_copilot import resolve_daemon_port, resolve_local_auth_token
+            from venue_copilot import (
+                registration_credentials_script,
+                resolve_daemon_port,
+                resolve_local_auth_token,
+            )
 
             daemon_port = resolve_daemon_port()
             token = resolve_local_auth_token()
@@ -259,13 +263,7 @@ def _ensure_agent_bridge_plugin(name: str) -> None:
                     file=sys.stderr,
                 )
                 return
-            script = (
-                "mkdir -p ~/.agent-bridge && "
-                f"printf 'token: %s\\n' {shlex.quote(token)} "
-                "> ~/.agent-bridge/auth.yaml && "
-                f"printf '{{\"active\": {{\"port\": {int(daemon_port)}}}}}' "
-                "> ~/.agent-bridge/active.json"
-            )
+            script = registration_credentials_script(token, daemon_port)
             result = await exec_with_retry(manager, name, f"bash -lc {shlex.quote(script)}")
             if getattr(result, "exit_code", 1) != 0:
                 print(
