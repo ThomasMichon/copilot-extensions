@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, budget posture, coordinator-first delegation, publication safety, WSL environment setup, and CLI customization",
-    "version": "1.7.7-dev219"
+    "version": "1.5.6-dev1"
   },
   "plugins": [
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.5.5-dev265",
+      "version": "1.5.6-dev1",
       "source": "plugins/agent-worktrees"
     },
     {
@@ -25,25 +25,25 @@
     {
       "name": "agent-bridge",
       "description": "Live cross-boundary inter-agent communication service - conversation transport, session management, SSE event streaming, agent subprocess spawning, and ACP-over-WebSocket support for external clients",
-      "version": "0.4.0-dev551",
+      "version": "0.4.1-dev1",
       "source": "plugins/agent-bridge"
     },
     {
       "name": "agent-codespaces",
       "description": "GitHub Codespaces lifecycle management, SSH transport, credential relay, and agent-bridge provider integration",
-      "version": "0.4.0-dev168",
+      "version": "0.4.1-dev1",
       "source": "plugins/agent-codespaces"
     },
     {
       "name": "agent-containers",
       "description": "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver with trusted OpenSSH and restricted provider-exec transport",
-      "version": "0.1.2-dev161",
+      "version": "0.1.3-dev1",
       "source": "plugins/agent-containers"
     },
     {
       "name": "agent-mcp",
       "description": "Swiss-army MCP bridge - wrap an upstream MCP server (HTTP or stdio) as a local stdio MCP, inject host credentials, and apply a decorator stack (filter, rename, defer, code-mode, storage, transform, gate, input_gate). Dual-era: speaks modern MCP 2.x (2026-07-28) and the legacy handshake, in both directions.",
-      "version": "0.2.0-dev137",
+      "version": "0.2.1-dev1",
       "source": "plugins/agent-mcp"
     },
     {
@@ -61,13 +61,13 @@
     {
       "name": "context-handoff",
       "description": "Context window monitoring and session handoff - a session-start continuity kernel plus a Copilot CLI extension that tracks token utilization, stores handoffs as worktree-pinned agent-dispatch tasks when available or one-time worktree-state files otherwise, and always makes a manual continuation available; soft/hard usage warnings fire under the default manual-only mode too, but the force tier's automatic trigger and live pending-handoff pickup signaling are opt-in (mode: auto) and never perform process management",
-      "version": "0.1.1-dev48",
+      "version": "0.1.2-dev1",
       "source": "plugins/context-handoff"
     },
     {
       "name": "efforts",
       "description": "Efforts planning system - comprehensive planning folders with explicit repository adoption, a read-only target capability probe, a README-as-shared-contract, a static completion-gate fallback, and a staged session policy producer; ships the planning-efforts and efforts-setup skills",
-      "version": "0.1.0-dev22",
+      "version": "0.1.1-dev1",
       "source": "plugins/efforts"
     },
     {
@@ -79,13 +79,13 @@
     {
       "name": "customizing-copilot",
       "description": "Customize, diagnose, and extend the Copilot CLI - authoring skills, defining sub-agents, registering MCP servers, installing plugins, building an agent control-harness, reviewing customizations, diagnosing startup hangs, hoisting plugin agents around a delegation limitation, componentizing oversized modules, orchestrating multi-file componentization campaigns, authoring <repo>-harness plugins, and setting up an instruction-projection sync worker - with the per-skill folder conventions and Agent Skills best practices; ships twelve focused skills",
-      "version": "0.1.0-dev94",
+      "version": "0.1.1-dev1",
       "source": "plugins/customizing-copilot"
     },
     {
       "name": "agent-dispatch",
       "description": "Portable durable agent task-loop + per-host coordinator: a single-writer SQLite work queue (eight-state model with owner-preserving suspension, capability-gated atomic claim, affinity routing, liveness-reconciled recovery) so agents coordinate without push latency or an account per agent.",
-      "version": "0.1.2-dev198",
+      "version": "0.1.2-dev199",
       "source": "plugins/agent-dispatch"
     },
     {
@@ -97,7 +97,7 @@
     {
       "name": "copilot-extensions-harness",
       "description": "Operator harness for the copilot-extensions repo. Primary: help any consumer identify which local scripts/processes belong to this suite and enforce never-monkey-patch (file a bug upstream or auto-update instead). Secondary: portable contribution, deployment, and clean-room validation guidance plus an ambient pointer to the general-purpose, organization-neutral contribution boundary.",
-      "version": "0.1.0-dev47",
+      "version": "0.1.1-dev1",
       "source": "plugins/copilot-extensions-harness"
     },
     {
@@ -115,7 +115,7 @@
     {
       "name": "agent-machines",
       "description": "Portable machine setup and restore for Copilot CLI. Derives setup from declared topology, enabled capabilities, and in-repo requirement packages, then converges the current machine through Copilot settings, resources, and repo-local modules. Organization policy and per-machine values remain downstream while the engine and conductor stay generic.",
-      "version": "0.1.0-dev135",
+      "version": "0.1.1-dev1",
       "source": "plugins/agent-machines"
     },
     {
