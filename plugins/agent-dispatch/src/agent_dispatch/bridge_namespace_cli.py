@@ -26,13 +26,21 @@ through as opaque `venue` passthrough data (`venue["task"]`/
 owned -- keeps working unchanged, just fed from this process boundary
 instead of a direct HTTP fetch.
 
-Scope (2026-09-23, `agent-fabric-endpoint-discovery` Phase 2.5a): only a
-task already bound to a worktree (claimed, started, or pinned via
-``target_worktree``) resolves. An unassigned task with no pinned worktree at
-all, or a task bound to a *different* machine's coordinator (cross-machine
-dispatch), is bad-state (exit 4) for now -- claim-on-resolve and
-cross-machine reach are explicitly out of scope here (see Phase 2.5b/c in
-the effort README), not silently guessed at.
+Scope (2026-09-23, `agent-fabric-endpoint-discovery` Phase 2.5a, extended
+same day): a task bound to a worktree (claimed, started, or pinned via
+``target_worktree``) resolves `type: "worktree"`. A task with no worktree
+binding at all -- the normal, permanent state for a completed *headless*
+body (a board-sweep/review worker never binds a worktree; its `owner`
+clears to `None` on completion) -- falls back to `type: "session"` when the
+task's own `owner_session_id` (or an attachment's `session_id`) is durably
+recorded, carrying the same `task`/`attachments` venue payload for the
+caller's own *resolve-by-any-origin-reference* ranking
+(`agent_bridge.dispatch_task_resolution.candidate_session_ids`). A truly
+unassigned task with no worktree binding AND no recorded session at all,
+or a task bound to a *different* machine's coordinator (cross-machine
+dispatch), is still bad-state (exit 4) -- real claim-on-resolve for a
+never-started task and cross-machine reach remain explicitly out of scope
+here (see Phase 2.5b/c in the effort README), not silently guessed at.
 """
 
 from __future__ import annotations
@@ -63,8 +71,8 @@ def _cmd_namespace_list() -> int:
 
 
 def _cmd_namespace_resolve(args: argparse.Namespace) -> int:
-    """Print a JSON `{"type": "worktree", "worktree_id", "venue"}` spec
-    resolving a dispatch-task id to the worktree it's bound to.
+    """Print a JSON `{"type": "worktree"|"session", ...}` spec resolving a
+    dispatch-task id to where it can be reached.
 
     ``name`` is `<task_id>` optionally suffixed `@<venue>` (agent-bridge's
     general `<name>@<venue>` addressing) -- a single local coordinator has
@@ -97,12 +105,59 @@ def _cmd_namespace_resolve(args: argparse.Namespace) -> int:
         worktree_id = task.get("target_worktree")
 
     if not worktree_id:
-        print(
-            f"dispatch task {task_id} is not yet bound to a worktree "
-            "(claim-on-resolve is not implemented -- see Phase 2.5b/c)",
-            file=sys.stderr,
-        )
-        return _NS_BAD_STATE_EXIT
+        # A headless body (e.g. a board-sweep/review worker) never binds a
+        # worktree at all -- its ownership record clears on completion
+        # (`owner` -> None), but the durable `owner_session_id` (the ACP
+        # session that actually did the work) and any prior attachment
+        # history survive independently of worktree binding. A caller
+        # holding only the task id should still resolve to that session --
+        # this is exactly *resolve-by-any-origin-reference*
+        # (`visions/plugins/agent-bridge`), just without a worktree hop.
+        # Real claim-on-resolve for a genuinely unassigned task (no session
+        # ever recorded at all) remains out of scope -- see Phase 2.5b/c.
+        session_id = task.get("owner_session_id")
+        if not session_id and isinstance(attachments, list):
+            for entry in attachments:
+                if isinstance(entry, dict) and entry.get("session_id"):
+                    session_id = entry["session_id"]
+                    break
+        if not session_id:
+            print(
+                f"dispatch task {task_id} is not yet bound to a worktree "
+                "and carries no resolvable session "
+                "(claim-on-resolve is not implemented -- see Phase 2.5b/c)",
+                file=sys.stderr,
+            )
+            return _NS_BAD_STATE_EXIT
+
+        local_machine = _local_machine_name()
+        if machine and local_machine and machine != local_machine:
+            print(
+                f"dispatch task {task_id} is bound to machine {machine!r}, "
+                f"not this coordinator's machine {local_machine!r} -- "
+                "cross-machine dispatch-task resolution is not implemented",
+                file=sys.stderr,
+            )
+            return _NS_BAD_STATE_EXIT
+        if requested_machine and local_machine and requested_machine != local_machine:
+            print(
+                f"requested venue {requested_machine!r} does not match this "
+                f"coordinator's machine {local_machine!r}",
+                file=sys.stderr,
+            )
+            return _NS_BAD_STATE_EXIT
+
+        spec = {
+            "type": "session",
+            "venue": {
+                "provider": "agent-dispatch",
+                "target_id": task_id,
+                "task": task,
+                "attachments": attachments,
+            },
+        }
+        print(json.dumps(spec))
+        return 0
 
     local_machine = _local_machine_name()
     if machine and local_machine and machine != local_machine:
