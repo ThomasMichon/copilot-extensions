@@ -688,6 +688,99 @@ def test_load_config_cache_scope_shares_across_threads():
     assert results == ["config-value", "config-value"]
 
 
+def test_prepare_live_source_warms_src_local_even_when_tabs_already_have_it():
+    """``_prepare_live_source`` must touch ``self.src.LOCAL`` unconditionally,
+    not only as a fallback when ``tabs`` scanning fails to find a local
+    entry. On the real ``data_ssh`` source, every ``source_tabs()`` tab
+    already carries its own ``"local"`` key, so the OLD code's
+    ``if local is None: local = self.src.LOCAL`` fallback was dead in
+    practice -- ``data_ssh.LOCAL`` (a PEP 562 module attribute resolved
+    lazily via an uncached ``load_config()`` call, then memoized forever)
+    was never touched during startup at all. Its first REAL access then
+    happened later, outside any cache scope -- e.g. ``_wt_submenu_verbs()``'s
+    ``(machine, env) == self.src.LOCAL`` comparison on the operator's first
+    Enter press of a worktree row -- reproducing as a synchronous,
+    spinner-less multi-second UI freeze (#picker-menu-open-latency). This
+    method runs inside ``_load_config_cache_scope()``, so warming LOCAL here
+    is nearly free (shared with whatever else that scope already computed)."""
+    pytest.importorskip("textual")
+    from worktree_manager.production_picker.picker_tui import engine as eng
+
+    local_accesses = []
+
+    class Src:
+        REPO = "r"
+        BRANCH = "b"
+
+        @staticmethod
+        def source_tabs(_snapshot=None):
+            # Mirrors data_ssh.source_tabs(): every tab already carries its
+            # own "local" key, so `tabs` scanning alone would always find a
+            # match and never fall through to the LOCAL fallback.
+            return [
+                {"label": "book2 Win", "machine": "book2", "env": "Win",
+                 "ready": True, "local": True, "source_kind": "machine-ssh",
+                 "source_id": None, "capabilities": {}},
+            ]
+
+        @staticmethod
+        def setup_metadata(_snapshot):
+            return {}
+
+        @property
+        def LOCAL(self):
+            local_accesses.append(1)
+            return ("book2", "Win")
+
+    screen = eng.PickerScreen(Src(), live=True)
+    screen._prepare_live_source(None)
+
+    assert local_accesses, "self.src.LOCAL must be touched during _prepare_live_source"
+
+
+def test_setup_warms_src_local_even_when_tabs_already_have_it():
+    """The same fix as ``_prepare_live_source``'s (above), applied to
+    ``setup()`` -- the manual 'r' reload path, and the non-live/fixture
+    ``on_mount`` path -- for defense in depth: if a live picker's operator
+    manages to press 'r' before ``_setup_live_async()``'s own background
+    warm-up has completed, ``setup()`` must not leave the same dead LOCAL
+    fallback unwarmed."""
+    pytest.importorskip("textual")
+    from worktree_manager.production_picker.picker_tui import engine as eng
+
+    local_accesses = []
+
+    class Src:
+        REPO = "r"
+        BRANCH = "b"
+
+        @staticmethod
+        def source_tabs(_snapshot=None):
+            return [
+                {"label": "book2 Win", "machine": "book2", "env": "Win",
+                 "ready": True, "local": True, "source_kind": "machine-ssh",
+                 "source_id": None, "capabilities": {}},
+            ]
+
+        @staticmethod
+        def make_loader(*_a, **_k):
+            return None
+
+        @staticmethod
+        def load():
+            return []
+
+        @property
+        def LOCAL(self):
+            local_accesses.append(1)
+            return ("book2", "Win")
+
+    screen = eng.PickerScreen(Src(), live=False)
+    screen.setup()
+
+    assert local_accesses, "self.src.LOCAL must be touched during setup()"
+
+
 def test_setup_live_async_records_failure():
     pytest.importorskip("textual")
     from worktree_manager.production_picker.picker_tui import engine as eng

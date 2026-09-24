@@ -326,6 +326,28 @@ class PickerScreenLoadingMixin:
             ),
             None,
         )
+        # Warm ``self.src.LOCAL`` here even when ``local`` was already found
+        # above from ``tabs``: on a live source (``data_ssh``), ``LOCAL`` is a
+        # module-level attribute resolved lazily on FIRST access (PEP 562
+        # ``__getattr__``, see ``data_ssh._resolve_local()``) and memoized
+        # forever after -- but that first resolution itself calls
+        # ``agent_worktrees.config.load_config()``, whose control-plane
+        # discovery is expensive (several real seconds) unless it runs inside
+        # a cache scope. This method is the only place ``self.src.LOCAL`` was
+        # reliably touched inside ``_load_config_cache_scope()`` (via the
+        # fallback branch below) -- everywhere else that compares against it
+        # (e.g. ``_wt_submenu_verbs()``'s ``(machine, env) == self.src.LOCAL``,
+        # reached synchronously on the render thread the first time the
+        # operator opens ANY worktree's Actions menu) runs with no cache scope
+        # of its own. Without this unconditional warm-up, whichever of those
+        # call sites the operator happens to hit FIRST pays that full,
+        # uncached cost instead -- reproduced as a many-second UI freeze with
+        # no spinner (it blocks before anything mounts) on the very first
+        # Enter press of a session (#picker-menu-open-latency).
+        try:
+            self.src.LOCAL
+        except Exception:
+            pass
         if local is None:
             try:
                 local = self.src.LOCAL

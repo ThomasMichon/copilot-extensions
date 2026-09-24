@@ -309,11 +309,25 @@ class PickerScreenRuntimeMixin:
             ),
             None,
         )
-        if local is None:
+        # Warm ``self.src.LOCAL`` unconditionally, inside the cache scope, even
+        # when ``local`` was already found via ``source_tabs`` above (the real
+        # ``data_ssh`` source always sets a ``"local"`` key per tab, so this
+        # fallback was otherwise dead in practice). See
+        # ``_prepare_live_source``'s matching fix (#picker-menu-open-latency)
+        # for the full rationale: ``data_ssh.LOCAL`` is resolved lazily on
+        # first access via an uncached ``load_config()`` call and memoized
+        # forever after, so it must be touched HERE, inside a cache scope, not
+        # left for whichever later render-thread comparison touches it first.
+        with self._load_config_cache_scope():
             try:
-                local = self.src.LOCAL
+                self.src.LOCAL
             except Exception:
-                local = self._source_local
+                pass
+            if local is None:
+                try:
+                    local = self.src.LOCAL
+                except Exception:
+                    local = self._source_local
         self._source_local = local or self._source_local
         with self._load_config_cache_scope():
             try:
