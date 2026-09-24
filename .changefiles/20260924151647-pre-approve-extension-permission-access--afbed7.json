@@ -1,0 +1,9 @@
+{
+  "comment": "Pre-approve extension-permission-access at worktree creation",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
