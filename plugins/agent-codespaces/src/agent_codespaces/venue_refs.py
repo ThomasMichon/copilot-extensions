@@ -104,13 +104,18 @@ def batch_id(scope: str) -> str:
 
 
 def deliver_note(session_id: str, note: str, *, run=subprocess.run) -> bool:
-    """Tell a running session about new reference files (over stdin; never raises)."""
+    """Tell a running session about new reference files (over stdin; never raises).
+
+    Steered into the running turn (not queued behind it, where a worker that is
+    about to report DONE would never see it) and bounded, so a wedged bridge
+    cannot block the rejoin that delivers it.
+    """
     bridge = shutil.which("agent-bridge") or "agent-bridge"
     try:
         result = run(
-            [bridge, "send", session_id, "--prompt-file", "-", "--no-wait"],
-            input=note, capture_output=True, text=True,
+            [bridge, "send", session_id, "--prompt-file", "-", "--no-wait", "--steer"],
+            input=note, capture_output=True, text=True, timeout=60,
         )
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         return False
     return getattr(result, "returncode", 1) == 0

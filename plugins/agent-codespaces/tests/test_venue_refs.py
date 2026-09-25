@@ -76,5 +76,24 @@ def test_deliver_note_sends_over_stdin():
 
     assert venue_refs.deliver_note("sid-1", "see /x/y.har", run=run)
     argv, stdin = calls[0]
-    assert argv[1:] == ["send", "sid-1", "--prompt-file", "-", "--no-wait"]
+    assert argv[1:] == ["send", "sid-1", "--prompt-file", "-", "--no-wait", "--steer"]
     assert stdin == "see /x/y.har"
+
+def test_deliver_note_is_steered_and_bounded():
+    seen = {}
+
+    def run(argv, **kw):
+        seen.update(kw)
+        return type("R", (), {"returncode": 0})()
+
+    assert venue_refs.deliver_note("sid-1", "note", run=run)
+    assert seen.get("timeout") == 60
+
+
+def test_a_wedged_bridge_reports_failed_delivery():
+    import subprocess
+
+    def run(argv, **kw):
+        raise subprocess.TimeoutExpired(cmd=argv, timeout=60)
+
+    assert venue_refs.deliver_note("sid-1", "note", run=run) is False
