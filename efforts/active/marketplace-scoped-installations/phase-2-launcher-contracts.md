@@ -77,10 +77,36 @@ own fresh family pass" note further down):
   these look like incidental drift from unrelated feature work in each
   plugin rather than a pattern, but were not individually traced.
 
+**Current per-plugin `global-plugin-binstub` counts (2026-09-25, 83 total):**
+
+| Plugin | Findings | Delta vs. 2026-08-26 |
+|--------|---------:|-----------------------|
+| `agent-worktrees` | 18 | unchanged |
+| `agent-machines` | 8 | +3 (new, see above) |
+| `agent-vault` | 8 | unchanged |
+| `agent-codespaces` | 7 | -2 (durable provider manifests converted) |
+| `agent-index` | 6 | +1 (untraced) |
+| `agent-ssh` | 6 | unchanged (payload-owned self-wrappers already converted) |
+| `agent-dispatch` | 5 | unchanged |
+| `agent-containers` | 4 | -2 (durable provider manifests converted) |
+| `agent-logger` | 4 | +1 (untraced) |
+| `agent-pull-requests` | 4 | new plugin, not in 2026-08-26 baseline |
+| `budget-guidance` | 4 | new plugin, not in 2026-08-26 baseline |
+| `agent-bridge` | 3 | +1 (untraced) |
+| `agent-mcp` | 3 | -1 (untraced) |
+| `copilot-extensions-harness` | 3 | unchanged |
+| `harness-knowledge` | 0 | -2 (moved to `path-sibling-launch`/`unqualified-runtime-root`) |
+| `customizing-copilot` | 0 | -1 (annotated as a documentation false positive) |
+
+This table is the current count per plugin; it is not yet split by contract
+family the way the 2026-08-26 table below is — that per-finding family
+re-derivation (which of the 83 belongs to which retirement-dependency
+bucket) is the fresh pass still needed.
+
 The table below is retained as the historical 2026-08-26 record (do not
 edit it to match the current count) — the accurate, current per-plugin
-breakdown lives in the 2026-09-25 note above and needs its own fresh family
-pass before being restated as a table.
+breakdown is the table immediately above, and a family re-derivation for it
+is still a fresh pass needed.
 
 | Contract family (2026-08-26 snapshot) | Findings | Phase | Reason |
 |-----------------|---------:|-------|--------|

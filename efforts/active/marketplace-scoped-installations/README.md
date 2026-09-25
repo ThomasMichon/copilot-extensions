@@ -153,7 +153,9 @@ because they provide tools or services.
   require attributable external-launch contracts before their compatibility
   wrappers can be retired. The
   [Phase 2 launcher contract inventory](phase-2-launcher-contracts.md) accounts
-  for all 86 guard-visible findings, records known guard-invisible callers, and
+  for the 86 guard-visible findings at its 2026-08-26 baseline (83 as of the
+  2026-09-25 re-audit, with a full family re-derivation still pending),
+  records known guard-invisible callers, and
   maps their Phase 2, Phase 3, Phase 4, and Phase 6 dependencies.
   - [x] Preserve complete default-legacy fallback coverage while migration is
     incomplete: every runtime `agent-*` stamp publishes every declared payload
@@ -472,7 +474,9 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   intentional-legacy triage this note applied to the small plugins. Phase 2's
   own tracked subset (`phase-2-launcher-contracts.md`, baselined at 80
   `global-plugin-binstub` findings across 14 plugins) needs re-syncing against
-  the current count before its own numbers can be trusted.
+  the current count before its own numbers can be trusted. **Done in the
+  2026-09-25 entry below** (83 findings, count plus partial triage; a full
+  family re-derivation is still pending).
 
 ### 2026-09-21 — `agent-bridge` registered as a new OWNERS member; `handoff-check` converted
 
