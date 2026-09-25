@@ -1,0 +1,9 @@
+{
+  "comment": "copilot --stop --keep-claim: stop the detached session without settling the CodeSpace claim, so close-out (finalize) runs while the task still owns the box",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

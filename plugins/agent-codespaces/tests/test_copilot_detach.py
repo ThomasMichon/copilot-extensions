@@ -272,6 +272,15 @@ def test_stop_verifies_before_releasing(seams, capsys):
     assert json.loads(capsys.readouterr().out)["deregistered"] == "sid-42"
 
 
+def test_stop_keep_claim_never_settles_the_claim_on_disconnect(seams, capsys):
+    rc = detach.cmd_stop(_args(stop=True, detach=False, keep_claim=True),
+                         ssh_session=_ssh(seams, stdout="STOPPED\n"))
+    assert rc == 0
+    assert "kill-session" in seams.ssh[0]["remote"]
+    assert seams.ssh[0]["settle"] is False  # the task keeps the box for finalize
+    assert seams.deregistered == ["sid-42"]  # the session itself is still fully stopped
+
+
 def test_stop_without_a_live_session_deregisters_nothing(seams, capsys):
     seams.live_rows.clear()
     rc = detach.cmd_stop(_args(stop=True, detach=False), ssh_session=_ssh(seams, stdout="STOPPED\n"))
