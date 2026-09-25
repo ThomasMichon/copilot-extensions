@@ -18,8 +18,8 @@
 
 ## Guiding Intent
 
-`agent-containers` just closed a real gap (aperture-labs#7543 /
-`ThomasMichon/copilot-extensions#3574`): its restricted-fleet Copilot
+`agent-containers` just closed a real gap
+(`ThomasMichon/copilot-extensions#3574`): its restricted-fleet Copilot
 session-state rescue was only ever triggered by destructive replacement
 (stop/remove), so a single shared, deliberately-never-recycled container
 never surrendered its session evidence at all. The fix added a non-destructive
@@ -73,19 +73,19 @@ Coordination._
 
 ### Where this came from
 
-Landed same-session as this effort's creation: `aperture-labs#7543` /
+Landed same-session as this effort's creation:
 `ThomasMichon/copilot-extensions#3574` (`agent-containers rescue-capture
-<fleet>`), part of aperture-labs' `dampener-reviewer-containerization`
-effort's Phase 3. That work reused `_restricted_member_action`'s exact
-admission/idleness/policy/liveness gating with the destructive action step
-skipped (`action=None`), added a `captured: list[str]` result field, and
-wired a `~20min` systemd user timer plus a paired `session-sync rescue-push`
-timer. Full detail: that effort's `journal.md` (2026-09-24/25 entries) and
-`ThomasMichon/copilot-extensions#3574`'s own review history (which caught
+<fleet>`), driven by a downstream consuming project's own containerized
+always-on reviewer service hitting exactly this gap. That work reused
+`_restricted_member_action`'s exact admission/idleness/policy/liveness
+gating with the destructive action step skipped (`action=None`), added a
+`captured: list[str]` result field, and wired a periodic host-side timer
+plus a paired publish step. Full detail lives in
+`ThomasMichon/copilot-extensions#3574`'s own review history, which caught
 two real correctness gaps worth re-checking against any codespaces port:
 never unpause a paused venue just to capture it, and a non-running/absent
 venue must defer with the same message every code path produces, not a
-second ad-hoc one).
+second ad-hoc one.
 
 ### What already exists on the codespaces side
 
@@ -154,11 +154,14 @@ container. This is the concrete candidate for the shared vendored piece
 
 This repo already vendors shared code byte-identically per consuming
 plugin — `plugins/<plugin>/libs/<lib>/`, auto-discovered (no registry file)
-and guarded by `tools/check-vendored-libs-sync.py` (`--list` shows the
-current map: `ssh-manager`, `credential-relay`, `config-migrate`,
-`agent-procutil`, `dropin-registry`, `plugin-activation`, `plugin-resolve`,
-`zdd`, `venue-copilot`, all already vendored into both `agent-containers`
-and `agent-codespaces` today). Adding a new shared lib is: create
+and guarded by `tools/check-vendored-libs-sync.py` (`--list` confirmed the
+current map, 2026-09-25). Six libs are already vendored into **both**
+`agent-containers` and `agent-codespaces` today: `ssh-manager`,
+`credential-relay`, `config-migrate`, `agent-procutil`, `venue-copilot`, and
+`zdd`. (Three more — `dropin-registry`, `plugin-activation`,
+`plugin-resolve` — are vendored into `agent-codespaces` but NOT
+`agent-containers`; don't assume they're shared without re-checking
+`--list`.) Adding a new shared lib is: create
 `plugins/agent-containers/libs/<new-lib>/` and
 `plugins/agent-codespaces/libs/<new-lib>/` with identical `src/` trees and
 matching `pyproject.toml` versions, add each consuming plugin's own
@@ -283,11 +286,11 @@ itself did not specify phasing)_
       including the new liveness-gate regression test and CLI-dispatch
       tests.
 - [ ] Phase 4: a real leased CodeSpace is captured and published
-      end-to-end (mirroring the container-side validation already recorded
-      in aperture-labs' `dampener-reviewer-containerization` journal) —
-      published session readable from the same agent-logger hub tree the
-      CodeSpace's own teardown-time capture already lands in, and the
-      CodeSpace's lease/connection state unaffected before/after.
+      end-to-end (mirroring the container-side end-to-end validation
+      already proven for `rescue-capture`) — published session readable
+      from the same agent-logger hub tree the CodeSpace's own teardown-time
+      capture already lands in, and the CodeSpace's lease/connection state
+      unaffected before/after.
 - [ ] Both providers' module-size guards (`tools/check-module-size.py`) and
       `ruff check` stay clean on every touched file.
 
@@ -300,11 +303,11 @@ _Pending._
 ### 2026-09-25 — Kickoff
 - Effort created directly following `ThomasMichon/copilot-extensions#3574`
   (agent-containers `rescue-capture`) landing and being deployed +
-  validated end-to-end in aperture-labs' `dampener-reviewer-containerization`
-  effort (Phase 3). Operator asked whether the same architecture applies to
-  `agent-codespaces`; comparison above (`sync_codespace_sessions()` already
-  exists but is lifecycle-transition-only, exactly the gap containers just
-  closed) confirmed it does, plus one real difference (codespaces currently
-  has no liveness gate at all before pulling). Operator directed carving
-  this effort to align the two behaviors and share what's genuinely common
-  via the repo's existing vendored-lib mechanism.
+  validated end-to-end downstream. Operator asked whether the same
+  architecture applies to `agent-codespaces`; comparison above
+  (`sync_codespace_sessions()` already exists but is lifecycle-transition-
+  only, exactly the gap containers just closed) confirmed it does, plus one
+  real difference (codespaces currently has no liveness gate at all before
+  pulling). Operator directed carving this effort to align the two
+  behaviors and share what's genuinely common via the repo's existing
+  vendored-lib mechanism.
