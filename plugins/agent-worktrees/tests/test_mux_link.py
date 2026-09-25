@@ -1,9 +1,12 @@
 """Tests for ``mux_link`` -- the resident manager-observation IPC seam
 (Phase 3b Slice 2 Sub-slice 3 Step 1, ``worktree-manager-control-plane``
-effort). Mirrors ``test_worktree_status_daemon.py``'s style."""
+effort). Mirrors ``test_worktree_status_daemon.py``'s style. Payload shapes
+match the documented ``mux-live-v1`` contract in
+``efforts/active/worktree-manager-control-plane/phase-3b-substatus-monitor-relocation.md``."""
 
 from __future__ import annotations
 
+import json
 import time
 
 from agent_worktrees import mux_link
@@ -13,10 +16,18 @@ def _endpoint_dict(server) -> dict:
     return mux_link.rendezvous_fields(server)
 
 
-def _obs(worktree_id="wt-1", session="wt-1", revision=1, live=True, **extra) -> dict:
+def _obs(
+    project="proj",
+    worktree_id="wt-1",
+    mux_session="wt-1",
+    revision=1,
+    live=True,
+    **extra,
+) -> dict:
     payload = {
+        "project": project,
         "worktree_id": worktree_id,
-        "session": session,
+        "mux_session": mux_session,
         "mapping_revision": revision,
         "live": live,
     }
@@ -33,7 +44,8 @@ def test_apply_observation_stores_a_new_mapping():
     assert result == {"applied": True, "revision": 1}
     entry = cache.get("wt-1")
     assert entry is not None
-    assert entry["session"] == "wt-1"
+    assert entry["project"] == "proj"
+    assert entry["mux_session"] == "wt-1"
     assert entry["live"] is True
     assert entry["mapping_revision"] == 1
 
@@ -64,13 +76,14 @@ def test_apply_observation_accepts_a_replayed_equal_revision():
     assert cache.get("wt-1")["live"] is False
 
 
-def test_apply_observation_requires_worktree_id_and_session():
+def test_apply_observation_requires_project_worktree_id_and_mux_session():
     cache = mux_link.ManagedMuxCache()
     for bad in (
-        {"session": "wt-1", "mapping_revision": 1},
-        {"worktree_id": "wt-1", "mapping_revision": 1},
-        {"worktree_id": "", "session": "wt-1", "mapping_revision": 1},
-        {"worktree_id": "wt-1", "session": 5, "mapping_revision": 1},
+        {"worktree_id": "wt-1", "mux_session": "wt-1", "mapping_revision": 1},
+        {"project": "proj", "mux_session": "wt-1", "mapping_revision": 1},
+        {"project": "proj", "worktree_id": "wt-1", "mapping_revision": 1},
+        {"project": "proj", "worktree_id": "", "mux_session": "wt-1", "mapping_revision": 1},
+        {"project": "proj", "worktree_id": "wt-1", "mux_session": 5, "mapping_revision": 1},
     ):
         try:
             cache.apply_observation(bad)
@@ -116,25 +129,57 @@ def test_apply_observation_defaults_live_to_true_and_sanitizes_optional_fields()
     cache = mux_link.ManagedMuxCache()
     cache.apply_observation(
         {
+            "project": "proj",
             "worktree_id": "wt-2",
-            "session": "wt-2",
+            "mux_session": "wt-2",
             "mapping_revision": 1,
             "panes": "not-a-list",
-            "incarnation": 5,
+            "session_incarnation": 5,
             "attached_clients": "two",
         }
     )
     entry = cache.get("wt-2")
     assert entry["live"] is True
     assert entry["panes"] == []
-    assert entry["incarnation"] == ""
+    assert entry["session_incarnation"] == ""
     assert entry["attached_clients"] == 0
+    assert isinstance(entry["observed_at"], str) and entry["observed_at"]
+
+
+def test_apply_observation_preserves_a_caller_supplied_observed_at():
+    cache = mux_link.ManagedMuxCache()
+    cache.apply_observation(_obs(observed_at="2026-09-17T08:00:00Z"))
+    assert cache.get("wt-1")["observed_at"] == "2026-09-17T08:00:00Z"
+
+
+def test_apply_observation_normalizes_pane_objects_and_drops_malformed_ones():
+    cache = mux_link.ManagedMuxCache()
+    cache.apply_observation(
+        _obs(
+            panes=[
+                {"pane_id": "%1", "role": "head", "live": True},
+                {"pane_id": "%2"},  # role/live default
+                {"role": "orphan"},  # missing pane_id -- dropped
+                "not-a-dict",  # dropped
+                123,  # dropped
+            ]
+        )
+    )
+    entry = cache.get("wt-1")
+    assert entry["panes"] == [
+        {"pane_id": "%1", "role": "head", "live": True},
+        {"pane_id": "%2", "role": "", "live": True},
+    ]
 
 
 def test_live_session_names_only_includes_currently_live_entries():
     cache = mux_link.ManagedMuxCache()
-    cache.apply_observation(_obs(worktree_id="wt-a", session="wt-a", revision=1, live=True))
-    cache.apply_observation(_obs(worktree_id="wt-b", session="wt-b", revision=1, live=False))
+    cache.apply_observation(
+        _obs(worktree_id="wt-a", mux_session="wt-a", revision=1, live=True)
+    )
+    cache.apply_observation(
+        _obs(worktree_id="wt-b", mux_session="wt-b", revision=1, live=False)
+    )
     assert cache.live_session_names() == {"wt-a"}
 
 
@@ -148,18 +193,22 @@ def test_snapshot_is_a_defensive_copy():
 
 def test_get_and_snapshot_deep_copy_the_panes_list():
     """Copilot review finding: ``dict(entry)`` alone leaves the stored
-    ``panes`` list shared -- a caller mutating a returned list would
-    silently corrupt the live cache without holding its lock."""
+    ``panes`` list (and each pane dict within it) shared -- a caller
+    mutating a returned list/dict would silently corrupt the live cache
+    without holding its lock."""
     cache = mux_link.ManagedMuxCache()
-    cache.apply_observation(_obs(panes=["%1", "%2"]))
+    cache.apply_observation(_obs(panes=[{"pane_id": "%1", "role": "head", "live": True}]))
 
     got = cache.get("wt-1")
-    got["panes"].append("INJECTED")
-    assert cache.get("wt-1")["panes"] == ["%1", "%2"]  # mutation never leaked back
+    got["panes"].append({"pane_id": "INJECTED", "role": "", "live": True})
+    got["panes"][0]["role"] = "TAMPERED"
+    fresh = cache.get("wt-1")
+    assert len(fresh["panes"]) == 1
+    assert fresh["panes"][0]["role"] == "head"
 
     snap = cache.snapshot()
-    snap["wt-1"]["panes"].append("INJECTED")
-    assert cache.get("wt-1")["panes"] == ["%1", "%2"]
+    snap["wt-1"]["panes"][0]["live"] = False
+    assert cache.get("wt-1")["panes"][0]["live"] is True
 
 
 def test_has_any_live_reflects_current_state():
@@ -188,24 +237,38 @@ def test_stale_live_mapping_is_excluded_from_live_views_but_kept_in_get(monkeypa
     assert cache.get("wt-1")["live"] is True  # raw record still reports its true bit
 
 
+def test_staleness_is_tracked_against_local_receipt_time_not_observed_at(monkeypatch):
+    """A skewed/old caller-supplied ``observed_at`` must never make a
+    mapping look artificially stale (or fresh) -- freshness is judged
+    against this process's own receipt time."""
+    cache = mux_link.ManagedMuxCache()
+    cache.apply_observation(_obs(observed_at="2000-01-01T00:00:00Z"))
+    assert cache.live_session_names() == {"wt-1"}  # fresh: received just now
+
+
+# -- persistence -----------------------------------------------------------
+
+
 def test_cache_survives_a_simulated_daemon_restart_via_persist_path(tmp_path):
     """Contract-level requirement (Step 1 validation): a mapping must
     survive one daemon restart via its runtime snapshot."""
     persist_path = tmp_path / "managed-mux-cache.json"
     first = mux_link.ManagedMuxCache(persist_path=persist_path)
-    first.apply_observation(_obs(panes=["%1"], attached_clients=2))
+    first.apply_observation(
+        _obs(panes=[{"pane_id": "%1", "role": "head", "live": True}], attached_clients=2)
+    )
 
     # Simulate a restart: a brand new cache instance loads the same file.
     second = mux_link.ManagedMuxCache(persist_path=persist_path)
     entry = second.get("wt-1")
     assert entry is not None
-    assert entry["session"] == "wt-1"
-    assert entry["panes"] == ["%1"]
+    assert entry["mux_session"] == "wt-1"
+    assert entry["panes"] == [{"pane_id": "%1", "role": "head", "live": True}]
     assert entry["attached_clients"] == 2
     assert second.live_session_names() == {"wt-1"}
 
 
-def test_cache_without_persist_path_does_not_survive_a_restart(tmp_path):
+def test_cache_without_persist_path_does_not_survive_a_restart():
     first = mux_link.ManagedMuxCache()
     first.apply_observation(_obs())
     second = mux_link.ManagedMuxCache()
@@ -230,21 +293,21 @@ def test_warm_load_rejects_an_entry_whose_key_disagrees_with_its_worktree_id(tmp
     outer key would let a later legitimate update for the entry's *actual*
     worktree_id bypass this stale record's revision guard entirely, since
     apply_observation only ever looks up self._entries[worktree_id]."""
-    import json
-
     persist_path = tmp_path / "managed-mux-cache.json"
     persist_path.write_text(
         json.dumps(
             {
                 "wt-a": {
+                    "project": "proj",
                     "worktree_id": "wt-b",  # mismatched key vs. field
-                    "session": "wt-b",
+                    "mux_session": "wt-b",
                     "mapping_revision": 99,
                     "live": True,
                     "panes": [],
-                    "incarnation": "",
+                    "session_incarnation": "",
                     "attached_clients": 0,
-                    "updated_at": time.time(),
+                    "observed_at": "2026-09-17T08:00:00Z",
+                    "received_at": time.time(),
                 }
             }
         ),
@@ -253,7 +316,9 @@ def test_warm_load_rejects_an_entry_whose_key_disagrees_with_its_worktree_id(tmp
     cache = mux_link.ManagedMuxCache(persist_path=persist_path)
     assert cache.snapshot() == {}  # rejected entirely, neither key nor field trusted
     # A legitimate wt-b observation must not be blocked by the rejected entry.
-    result = cache.apply_observation(_obs(worktree_id="wt-b", session="wt-b", revision=1))
+    result = cache.apply_observation(
+        _obs(worktree_id="wt-b", mux_session="wt-b", revision=1)
+    )
     assert result == {"applied": True, "revision": 1}
 
 
@@ -265,6 +330,23 @@ def test_apply_observation_still_rejects_stale_revision_after_restart(tmp_path):
     second = mux_link.ManagedMuxCache(persist_path=persist_path)
     result = second.apply_observation(_obs(revision=3, live=False))
     assert result == {"applied": False, "reason": "stale_revision", "current_revision": 5}
+
+
+def test_warm_loaded_entry_carries_forward_its_original_received_at(tmp_path, monkeypatch):
+    """A restart must not reset the freshness clock -- a genuinely stale
+    mapping (per receipt time) must stay stale across a restart instead of
+    looking artificially fresh again."""
+    persist_path = tmp_path / "managed-mux-cache.json"
+    first = mux_link.ManagedMuxCache(persist_path=persist_path)
+    first.apply_observation(_obs())
+    assert first.live_session_names() == {"wt-1"}
+
+    monkeypatch.setattr(mux_link, "MAPPING_STALE_AFTER_SECONDS", 0.0)
+    time.sleep(0.01)
+    assert first.live_session_names() == set()  # now stale on the original instance
+
+    second = mux_link.ManagedMuxCache(persist_path=persist_path)
+    assert second.live_session_names() == set()  # still stale after "restart"
 
 
 # -- compute / wire wrappers ---------------------------------------------
@@ -287,6 +369,10 @@ def test_build_compute_applies_through_to_the_cache():
     result = compute(mux_link.KIND, _obs())
     assert result == {"applied": True, "revision": 1}
     assert cache.get("wt-1") is not None
+
+
+def test_kind_matches_the_documented_mux_live_v1_contract():
+    assert mux_link.KIND == "mux-live-v1"
 
 
 def test_rendezvous_fields_are_namespaced_and_parseable():
@@ -313,9 +399,7 @@ def test_rendezvous_fields_are_namespaced_and_parseable():
 def test_endpoint_from_rendezvous_rejects_malformed_or_absent_data():
     assert mux_link.endpoint_from_rendezvous(None) is None
     assert mux_link.endpoint_from_rendezvous({}) is None
-    assert (
-        mux_link.endpoint_from_rendezvous({"managed_mux_endpoint": "bad"}) is None
-    )
+    assert mux_link.endpoint_from_rendezvous({"managed_mux_endpoint": "bad"}) is None
     assert (
         mux_link.endpoint_from_rendezvous(
             {"managed_mux_endpoint": "127.0.0.1:9", "managed_mux_token": ""}
@@ -331,9 +415,7 @@ def test_mux_live_via_daemon_uses_fallback_when_no_lock_data():
         calls["fallback"] += 1
         return {"from": "fallback"}
 
-    result = mux_link.mux_live_via_daemon(
-        None, key="wt-1", payload=_obs(), fallback=fallback
-    )
+    result = mux_link.mux_live_via_daemon(None, key="wt-1", payload=_obs(), fallback=fallback)
     assert result == {"from": "fallback"}
     assert calls["fallback"] == 1
 

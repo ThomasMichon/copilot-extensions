@@ -302,8 +302,9 @@ def test_sweep_merges_managed_mux_cache_into_catalog_observation_only(tmp_path, 
     cache = mux_link.ManagedMuxCache()
     cache.apply_observation(
         {
+            "project": "proj",
             "worktree_id": "wt-manager-owned",
-            "session": "wt-manager-owned",
+            "mux_session": "wt-manager-owned",
             "mapping_revision": 1,
             "live": True,
         }

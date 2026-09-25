@@ -33,6 +33,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 
 from work_coalescing_singleton import CoalescingServer
@@ -66,16 +67,25 @@ SUBSCRIBER_TTL_SECONDS = 30.0
 #: indefinitely. The future Manager daemon is expected to re-push a live
 #: mapping on a cadence well under this window (a heartbeat, or any real
 #: mapping-changed event) to keep it fresh; a one-shot push alone will go
-#: stale after this long with no follow-up.
+#: stale after this long with no follow-up. This freshness window is a
+#: local implementation detail of this cache, not part of the documented
+#: wire contract below -- it is tracked against local receipt time
+#: (``time.time()`` at the moment this process accepted the observation),
+#: never the caller-supplied ``observed_at``, so a skewed sender clock can
+#: never make a mapping look artificially fresh or stale.
 MAPPING_STALE_AFTER_SECONDS = 45.0
 
-_REQUIRED_STR_FIELDS = ("worktree_id", "session")
+#: Required string fields per the documented ``mux-live-v1`` payload
+#: (``phase-3b-substatus-monitor-relocation.md``'s "Message contracts"
+#: section): ``project``, ``worktree_id``, and ``mux_session``.
+_REQUIRED_STR_FIELDS = ("project", "worktree_id", "mux_session")
 
 
 class ManagedMuxCache:
     """Thread-safe store of Manager-reported ``worktree_id`` ⇄ mux
-    session/pane mapping observations, with a best-effort on-disk snapshot
-    so a mapping survives one resident-monitor restart.
+    session/pane mapping observations (the documented ``mux-live-v1``
+    payload shape), with a best-effort on-disk snapshot so a mapping
+    survives one resident-monitor restart.
 
     Keyed by ``worktree_id``. Each observation carries a ``mapping_revision``
     (a non-negative integer the *reporting* Manager mux-companion daemon
@@ -158,16 +168,16 @@ class ManagedMuxCache:
             pass
 
     def apply_observation(self, payload: dict) -> dict:
-        """Validate and apply one observation.
+        """Validate and apply one ``mux-live-v1`` observation.
 
         Raises ``ValueError`` for a structurally malformed payload (missing
-        ``worktree_id``/``session``, or a non-integer ``mapping_revision``)
-        -- the same "never silently accept garbage" contract
-        ``worktree_status_daemon.build_cached_compute`` uses for its own
-        request validation. Returns ``{"applied": True, "revision": <int>}``
-        on success, or ``{"applied": False, "reason": "stale_revision",
-        "current_revision": <int>}`` when a newer revision is already on
-        file.
+        ``project``/``worktree_id``/``mux_session``, or a non-integer
+        ``mapping_revision``) -- the same "never silently accept garbage"
+        contract ``worktree_status_daemon.build_cached_compute`` uses for
+        its own request validation. Returns ``{"applied": True, "revision":
+        <int>}`` on success, or ``{"applied": False, "reason":
+        "stale_revision", "current_revision": <int>}`` when a newer revision
+        is already on file.
         """
         entry = _normalize_entry(payload)
         worktree_id = entry["worktree_id"]
@@ -191,16 +201,17 @@ class ManagedMuxCache:
             return _deep_copy_entry(entry) if entry is not None else None
 
     def live_session_names(self) -> set[str]:
-        """Session names for every currently-live, **fresh** (not yet stale
-        per :data:`MAPPING_STALE_AFTER_SECONDS`) managed mapping -- the seam
-        ``_monitor_sweep`` merges into its own direct mux-scan observation,
-        per this step's scope (observation only, no writes)."""
+        """Mux session names (``mux_session``) for every currently-live,
+        **fresh** (not yet stale per :data:`MAPPING_STALE_AFTER_SECONDS`)
+        managed mapping -- the seam ``_monitor_sweep`` merges into its own
+        direct mux-scan observation, per this step's scope (observation
+        only, no writes)."""
         now = time.time()
         with self._lock:
             return {
-                e["session"]
+                e["mux_session"]
                 for e in self._entries.values()
-                if e["live"] and now - e["updated_at"] <= MAPPING_STALE_AFTER_SECONDS
+                if e["live"] and now - e["received_at"] <= MAPPING_STALE_AFTER_SECONDS
             }
 
     def snapshot(self) -> dict[str, dict]:
@@ -212,69 +223,110 @@ class ManagedMuxCache:
         now = time.time()
         with self._lock:
             return any(
-                e["live"] and now - e["updated_at"] <= MAPPING_STALE_AFTER_SECONDS
+                e["live"] and now - e["received_at"] <= MAPPING_STALE_AFTER_SECONDS
                 for e in self._entries.values()
             )
 
 
 def _normalize_entry(payload: dict) -> dict:
     """Validate + normalize one observation payload into a stored entry
-    shape. Raises ``ValueError`` for anything structurally malformed.
-    Shared by :meth:`ManagedMuxCache.apply_observation` (an untrusted wire
-    payload) and :meth:`ManagedMuxCache._warm_load` (a previously-persisted,
+    shape, matching the documented ``mux-live-v1`` payload in
+    ``phase-3b-substatus-monitor-relocation.md``'s "Message contracts"
+    section (``project``, ``worktree_id``, ``worktree_path``,
+    ``mux_session``, ``session_incarnation``, ``panes`` -- a list of
+    ``{pane_id, role, live}`` objects --, ``attached_clients``, ``live``,
+    ``mapping_revision``, ``observed_at``). Raises ``ValueError`` for
+    anything structurally malformed. Shared by
+    :meth:`ManagedMuxCache.apply_observation` (an untrusted wire payload)
+    and :meth:`ManagedMuxCache._warm_load` (a previously-persisted,
     already-normalized record -- re-validated anyway since a corrupt/
     tampered on-disk snapshot must not be trusted blindly, mirroring
     ``worktree_status_daemon.validated_refresh``'s own precedent)."""
     for field in _REQUIRED_STR_FIELDS:
         value = payload.get(field)
         if not isinstance(value, str) or not value:
-            raise ValueError(f"mux_live observation missing '{field}'")
+            raise ValueError(f"mux-live-v1 observation missing '{field}'")
+    project = payload["project"]
     worktree_id = payload["worktree_id"]
-    session = payload["session"]
+    mux_session = payload["mux_session"]
     revision_raw = payload.get("mapping_revision")
     if isinstance(revision_raw, bool) or not isinstance(revision_raw, int):
-        raise ValueError("mux_live observation requires an integer mapping_revision")
+        raise ValueError("mux-live-v1 observation requires an integer mapping_revision")
     revision = revision_raw
     if revision < 0:
-        raise ValueError("mux_live observation mapping_revision must be non-negative")
+        raise ValueError("mux-live-v1 observation mapping_revision must be non-negative")
     live_raw = payload.get("live", True)
     if not isinstance(live_raw, bool):
-        raise ValueError("mux_live observation 'live' must be a boolean")
+        raise ValueError("mux-live-v1 observation 'live' must be a boolean")
     live = live_raw
-    path = payload.get("path")
-    panes = payload.get("panes")
-    if not isinstance(panes, list) or not all(isinstance(p, str) for p in panes):
-        panes = []
-    incarnation = payload.get("incarnation")
-    if not isinstance(incarnation, str):
-        incarnation = ""
+    worktree_path = payload.get("worktree_path")
+    panes = _normalize_panes(payload.get("panes"))
+    session_incarnation = payload.get("session_incarnation")
+    if not isinstance(session_incarnation, str):
+        session_incarnation = ""
     attached_clients = payload.get("attached_clients")
     if isinstance(attached_clients, bool) or not isinstance(attached_clients, int):
         attached_clients = 0
-    updated_at = payload.get("updated_at")
-    if not isinstance(updated_at, (int, float)) or isinstance(updated_at, bool):
-        updated_at = time.time()
+    observed_at = payload.get("observed_at")
+    if not isinstance(observed_at, str) or not observed_at:
+        observed_at = datetime.now(timezone.utc).isoformat()
+    # Local-receipt timestamp for this cache's own freshness/staleness
+    # window -- deliberately independent of the caller-supplied
+    # `observed_at` (see `MAPPING_STALE_AFTER_SECONDS`'s own docstring). A
+    # warm-loaded record carries its original `received_at` forward rather
+    # than resetting it, so a genuinely stale mapping stays stale across a
+    # restart instead of looking artificially fresh again.
+    received_at = payload.get("received_at")
+    if not isinstance(received_at, (int, float)) or isinstance(received_at, bool):
+        received_at = time.time()
 
     return {
+        "project": project,
         "worktree_id": worktree_id,
-        "session": session,
-        "path": path if isinstance(path, str) else None,
-        "panes": list(panes),
-        "incarnation": incarnation,
+        "worktree_path": worktree_path if isinstance(worktree_path, str) else None,
+        "mux_session": mux_session,
+        "session_incarnation": session_incarnation,
+        "panes": panes,
         "attached_clients": attached_clients,
         "mapping_revision": revision,
         "live": live,
-        "updated_at": updated_at,
+        "observed_at": observed_at,
+        "received_at": received_at,
     }
 
 
+def _normalize_panes(raw) -> list[dict]:
+    """Sanitize the documented ``panes`` list (``[{pane_id, role, live}]``).
+    A malformed list, or one containing a non-dict/missing-``pane_id``
+    element, drops just that element rather than the whole list -- panes are
+    informational (never gate ``live_session_names``/``has_any_live``, which
+    key off the top-level ``live`` bit only)."""
+    if not isinstance(raw, list):
+        return []
+    normalized = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        pane_id = item.get("pane_id")
+        if not isinstance(pane_id, str) or not pane_id:
+            continue
+        role = item.get("role")
+        if not isinstance(role, str):
+            role = ""
+        pane_live = item.get("live")
+        if not isinstance(pane_live, bool):
+            pane_live = True
+        normalized.append({"pane_id": pane_id, "role": role, "live": pane_live})
+    return normalized
+
+
 def _deep_copy_entry(entry: dict) -> dict:
-    """Copy of ``entry`` whose ``panes`` list is independent of the stored
-    one -- ``dict(entry)`` alone leaves ``panes`` shared, so a caller
-    mutating the returned list would silently corrupt the live cache
-    without holding its lock."""
+    """Copy of ``entry`` whose ``panes`` list (and each pane dict within it)
+    is independent of the stored one -- ``dict(entry)`` alone leaves
+    ``panes`` shared, so a caller mutating the returned list/dicts would
+    silently corrupt the live cache without holding its lock."""
     copied = dict(entry)
-    copied["panes"] = list(entry["panes"])
+    copied["panes"] = [dict(pane) for pane in entry["panes"]]
     return copied
 
 
