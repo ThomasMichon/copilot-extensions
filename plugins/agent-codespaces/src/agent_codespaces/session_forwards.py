@@ -46,6 +46,12 @@ log = logging.getLogger("agent-codespaces")
 # (``ssh_manager.SupervisedRelayForward`` is port-generic).
 DaemonForwardFactory = Callable[..., RelayChannel]
 
+# Build a (not-yet-started) local forward from this host into a CodeSpace:
+# ``(codespace, host_port, venue_port) -> channel`` that listens on host
+# ``127.0.0.1:host_port`` and connects to the CodeSpace's ``127.0.0.1:venue_port``
+# (for example a worker's dev server that a host browser must load).
+LocalForwardFactory = Callable[[str, int, int], RelayChannel]
+
 # Probe a CodeSpace for its session tenants' mux sessions:
 # ``(codespace, [mux_session, ...]) -> {mux_session: True|False|None}`` where
 # True = still running (renew), False = provably gone or the CodeSpace is no
@@ -68,14 +74,17 @@ class SessionForwards:
         ttl: float = DEFAULT_TTL,
         probe_interval: float = DEFAULT_SESSION_PROBE_INTERVAL,
         clock: Callable[[], float] = time.monotonic,
+        local_factory: LocalForwardFactory | None = None,
     ) -> None:
         self._daemon_factory = daemon_factory
+        self._local_factory = local_factory
         self._probe = session_probe
         self._ttl = ttl
         self._probe_interval = probe_interval
         self._clock = clock
         self._channels: dict[str, tuple[int, RelayChannel]] = {}
         self._extra: dict[tuple[str, int], tuple[int, RelayChannel]] = {}
+        self._local: dict[tuple[str, int], tuple[int, RelayChannel]] = {}
         self._last_probe: dict[str, float] = {}
 
     def active(self) -> dict[str, int]:
@@ -88,6 +97,14 @@ class SessionForwards:
         for (cs, venue), (host, ch) in self._extra.items():
             if ch.is_alive:
                 out.setdefault(cs, {})[venue] = host
+        return out
+
+    def active_local_forwards(self) -> dict[str, dict[int, int]]:
+        """CodeSpace -> {host port: venue port} of each live local forward."""
+        out: dict[str, dict[int, int]] = {}
+        for (cs, host), (venue, ch) in self._local.items():
+            if ch.is_alive:
+                out.setdefault(cs, {})[host] = venue
         return out
 
     async def _ensure(self, label: str, channel: RelayChannel) -> bool:
@@ -122,6 +139,27 @@ class SessionForwards:
             if not await self._ensure(f"bridge forward for {codespace}", entry[1]):
                 self._channels.pop(codespace, None)
         await self._reconcile_extra(holds)
+        await self._reconcile_local(holds)
+
+    async def _reconcile_local(self, holds: dict[str, OwnerHold]) -> None:
+        wanted = {
+            (cs, int(host)): venue
+            for cs, hold in holds.items()
+            for host, venue in (getattr(hold, "local_forwards", None) or {}).items()
+        }
+        for key, (venue, channel) in list(self._local.items()):
+            if wanted.get(key) != venue or self._local_factory is None:
+                self._local.pop(key, None)
+                await channel.stop()
+        if self._local_factory is None:
+            return
+        for key, venue in wanted.items():
+            entry = self._local.get(key)
+            if entry is None:
+                entry = (venue, self._local_factory(key[0], key[1], venue))
+                self._local[key] = entry
+            if not await self._ensure(f"local forward {key[1]}->{venue} for {key[0]}", entry[1]):
+                self._local.pop(key, None)
 
     async def _reconcile_extra(self, holds: dict[str, OwnerHold]) -> None:
         wanted = {
@@ -185,6 +223,9 @@ class SessionForwards:
         for key, (_host, channel) in list(self._extra.items()):
             self._extra.pop(key, None)
             await channel.stop()
+        for key, (_venue, channel) in list(self._local.items()):
+            self._local.pop(key, None)
+            await channel.stop()
 
 
 def owner_serves_bridge(codespace: str, now: float | None = None) -> bool:
@@ -239,6 +280,56 @@ def make_supervised_daemon_forward_factory(
         ssh_config = config_source_cls(codespace, gh_env=gh_env).get_ssh_config()
         resolve = (lambda: host_port) if host_port else (lambda: port_resolver() or 0)
         return relay_cls(ssh_config, listen_port, host_port_resolver=resolve)
+
+    return factory
+
+
+class _LocalForwardChannel:
+    """``ssh_manager.LocalForward`` in the Owner's channel shape (start/stop/is_alive).
+
+    The Owner's reconcile loop restarts a channel that is not alive, so the
+    forward heals after a transport drop without a monitor of its own.
+    """
+
+    def __init__(self, forward: Any) -> None:
+        self._forward = forward
+
+    @property
+    def is_alive(self) -> bool:
+        return bool(self._forward.is_alive)
+
+    async def start(self) -> None:
+        await self._forward.establish()
+
+    async def stop(self) -> None:
+        await self._forward.cancel()
+
+
+def make_local_forward_factory(
+    *,
+    gh_env: dict | None = None,
+    forward_cls: type | None = None,
+    config_source_cls: type | None = None,
+) -> LocalForwardFactory:
+    """Build a :data:`LocalForwardFactory` backed by ``ssh_manager.LocalForward``.
+
+    Each forward listens on the fixed host loopback port (never a fallback
+    port: the caller told the worker and the browser that port) and connects
+    to the CodeSpace's ``127.0.0.1:<venue_port>``. Same seams as
+    :func:`make_supervised_daemon_forward_factory`.
+    """
+    if forward_cls is None:
+        from ssh_manager.forward import LocalForward
+
+        forward_cls = LocalForward
+    if config_source_cls is None:
+        from ssh_manager.codespace_source import CodespaceConfigSource
+
+        config_source_cls = CodespaceConfigSource
+
+    def factory(codespace: str, host_port: int, venue_port: int) -> RelayChannel:
+        ssh_config = config_source_cls(codespace, gh_env=gh_env).get_ssh_config()
+        return _LocalForwardChannel(forward_cls(ssh_config, venue_port, local_port=host_port))
 
     return factory
 

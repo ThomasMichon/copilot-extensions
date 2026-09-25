@@ -295,6 +295,24 @@ rebuildable-from-sidecars, never a second source of truth.
   resolves every catalog hit through the existing three-tier
   `resolve_session()`, silently skipping anything this host can't resolve
   (unreachable session treated as "not found", never an error).
+- `agent-logger annotate <session-id> --repo R --pr-number N
+  [--role reviewer] [--recorded-at ISO]` — the cross-repo process-boundary
+  write path, the same integration shape `session-fetch` already
+  establishes for reads (a caller in a different repository shells out
+  rather than importing agent-logger as a library). Resolves `session-id`
+  against the local live session-state tier only (never an archive --
+  `write_review_annotation` requires a live session to mutate), calls
+  `write_review_annotation(..., index=default_index())` so the catalog
+  stays in sync as a side effect, and exits non-zero with a clear stderr
+  message on a missing session or a write failure.
+- `agent-logger catalog query --repo R --pr-number N [--since ISO]
+  [--until ISO]` — the cross-repo process-boundary **read** path, the same
+  integration shape `annotate` establishes for writes (a caller such as
+  a downstream review-link fallback chain shells out rather
+  than importing agent-logger as a library). Thin wrapper over
+  `cold_store.query_reviewer_sessions()`; always exits `0` and prints
+  `{"repo": ..., "pr_number": ..., "sessions": [{"session_id": ..., "kind":
+  "live"|"archive"}, ...]}` — an empty/unresolvable result is not an error.
 
 ## Configuration
 

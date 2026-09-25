@@ -515,6 +515,45 @@ def test_failed_rejoin_restores_the_sessions_reverse_forwards(seams, monkeypatch
     restore = [k for _a, k in seams.holds if k.get("restore") is not None]
     assert restore[0]["reverse_forwards"] == {"9222": 50111}
 
+
+def test_local_forward_specs_are_validated():
+    assert detach.parse_local_forwards(["41909", "8080:3000"]) == {41909: 41909, 8080: 3000}
+    for bad in (["x"], ["0"], ["70000"], ["1:x"], ["41909:1", "41909:2"]):
+        with pytest.raises(ValueError):
+            detach.parse_local_forwards(bad)
+
+
+def test_launch_holds_requested_local_forwards_and_reports_readiness(seams, monkeypatch, capsys):
+    monkeypatch.setattr(detach, "_host_ports_listening", lambda ports: {p: True for p in ports})
+    rc = detach.cmd_detach(_args(local_forwards=["41909"]), ssh_session=_ssh(seams, stdout=_CREATED))
+    assert rc == 0
+    assert seams.holds[0][1].get("local_forwards") == {41909: 41909}
+    out = json.loads(capsys.readouterr().out)
+    assert out["local_forwards"] == {"41909": 41909}
+    assert out["local_forwards_ready"] == {"41909": True}
+
+
+def test_launch_without_local_forwards_keeps_existing_ones(seams, capsys):
+    detach.cmd_detach(_args(), ssh_session=_ssh(seams, stdout=_CREATED))
+    assert "local_forwards" not in seams.holds[0][1]
+
+
+def test_failed_rejoin_restores_the_sessions_local_forwards(seams, monkeypatch, capsys):
+    prior = {"mux_session": "wt-anchor-example-web", "confirmed": True,
+             "expires_at": 123.0, "generation": "g-old"}
+    held = types.SimpleNamespace(sessions={"cli:anchor-example-web@cs-1": prior},
+                                 local_forwards={"41909": 41909})
+    monkeypatch.setattr(owner, "get_hold", lambda *a, **k: held)
+    monkeypatch.setattr(detach, "_bridge_path_ok", lambda n, p: False)
+    detach.cmd_detach(_args(local_forwards=["5000"]), ssh_session=_ssh(seams))
+    restore = [k for _a, k in seams.holds if k.get("restore") is not None]
+    assert restore[0]["local_forwards"] == {"41909": 41909}
+
+
+def test_host_port_probe_reports_a_port_that_never_binds(monkeypatch):
+    monkeypatch.setattr(detach.time, "sleep", lambda s: None)
+    assert detach._host_ports_listening([1], attempts=2) == {1: False}
+
 def test_failed_fresh_launch_after_a_dead_session_releases(seams, monkeypatch, capsys):
     prior = {"mux_session": "wt-anchor-example-web", "confirmed": True, "generation": "g-old"}
     held = types.SimpleNamespace(sessions={"cli:anchor-example-web@cs-1": prior})

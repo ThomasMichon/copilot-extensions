@@ -260,6 +260,128 @@ def _cmd_catalog_rebuild(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_catalog_query(args: argparse.Namespace) -> int:
+    """Read-side cross-repo query verb: given ``(repo, pr_number)``, return
+    every session this host can resolve for it, same process-boundary shape
+    ``annotate`` establishes for the write side (a caller in a different
+    repository, e.g. a downstream review-link fallback chain, shells out
+    to this CLI rather than importing agent-logger as a library).
+
+    Backed by :func:`agent_logger.cold_store.query_reviewer_sessions` --
+    see that function's docstring for the resolution/ordering/dedup
+    contract. Always exits ``0``; an empty catalog, a query that matches
+    nothing this host can resolve, and a catalog storage failure (a corrupt
+    or unavailable SQLite database, or a ``--pr-number`` too large for
+    SQLite's 64-bit ``INTEGER`` column) all print ``{"sessions": []}``
+    rather than raising -- this is a best-effort fallback-tier read for a
+    caller that has already exhausted its own faster resolution paths, so a
+    storage-layer hiccup here must degrade to "nothing found", never an
+    uncaught traceback.
+    """
+    import sqlite3
+
+    from agent_logger.cold_store import query_reviewer_sessions
+
+    try:
+        refs = query_reviewer_sessions(
+            args.repo, args.pr_number, since=args.since, until=args.until
+        )
+    except (OSError, sqlite3.Error, OverflowError):
+        refs = []
+    print(
+        json.dumps(
+            {
+                "repo": args.repo,
+                "pr_number": args.pr_number,
+                "sessions": [{"session_id": ref.id, "kind": ref.kind} for ref in refs],
+            }
+        )
+    )
+    return 0
+
+
+def _cmd_catalog_annotate(args: argparse.Namespace) -> int:
+    """Write one review annotation for a LIVE local session, across a
+    process boundary -- the same cross-repo integration shape ``session-fetch``
+    already establishes (a caller in a different repository, e.g. an external
+    reviewer-identity backfill tool, shells out to this CLI rather than
+    importing agent-logger as a library).
+
+    Only ever resolves the local live session-state tier (never an archive):
+    :func:`agent_logger.sessions.write_review_annotation` requires a live
+    session directory to mutate, matching its own contract. Rejects an unsafe
+    ``session_id`` (path separator, ``..``, absolute anchor), a session
+    directory that resolves through a symlink/reparse point, and any real
+    directory lacking the live-session marker
+    (:data:`agent_logger.sessions.EVENTS_MEMBER`) -- the same checks
+    :mod:`agent_logger.sessions`/:mod:`agent_logger.cold_store` already apply
+    to a read, since a process-boundary caller here is just as untrusted as
+    one there. Exits non-zero with a clear message when the session id isn't
+    found locally or isn't safe, or the write itself fails (a lock timeout, a
+    catalog database error, or a ``--pr-number`` too large for SQLite's
+    64-bit ``INTEGER`` column -- the sidecar write may already have succeeded
+    even if the catalog side then fails, so the caller should know about it
+    rather than have it silently discarded). A malformed *existing* sidecar
+    is not a failure here: :func:`write_review_annotation` treats it the same
+    as a missing one and simply overwrites it with a fresh, well-formed
+    entry.
+    """
+    import sqlite3
+
+    from agent_logger.catalog import default_index
+    from agent_logger.cold_store import _is_safe_session_id
+    from agent_logger.segmenter.collate import find_copilot_dir
+    from agent_logger.sessions import (
+        EVENTS_MEMBER,
+        SESSION_STATE_SUBDIR,
+        write_review_annotation,
+    )
+    from agent_logger.sync.provenance import existing_real_directory
+
+    if not _is_safe_session_id(args.session_id):
+        print(f"error: {args.session_id!r} is not a valid session id", file=sys.stderr)
+        return 1
+    try:
+        state_root = find_copilot_dir() / SESSION_STATE_SUBDIR
+    except FileNotFoundError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    session_dir = state_root / args.session_id
+    real_session_dir = existing_real_directory(session_dir)
+    if real_session_dir is None or not (real_session_dir / EVENTS_MEMBER).is_file():
+        print(
+            f"error: no local live session directory for {args.session_id!r} "
+            f"(looked under {state_root})",
+            file=sys.stderr,
+        )
+        return 1
+
+    cfg = load_config()
+    try:
+        write_review_annotation(
+            session_dir,
+            repo=args.repo,
+            pr_number=args.pr_number,
+            role=args.role,
+            recorded_at=args.recorded_at,
+            index=default_index(cfg),
+        )
+    except (OSError, TimeoutError, sqlite3.Error, OverflowError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(
+        json.dumps(
+            {
+                "session_id": args.session_id,
+                "repo": args.repo,
+                "pr_number": args.pr_number,
+                "role": args.role,
+            }
+        )
+    )
+    return 0
+
+
 def _cmd_origin_backfill_local(args: argparse.Namespace) -> int:
     """Backfill origin.json across the LOCAL session store (this machine)."""
     from pathlib import Path
@@ -418,6 +540,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_session_fetch.set_defaults(func=_cmd_session_fetch)
 
+    p_annotate = sub.add_parser(
+        "annotate",
+        help="write one review annotation for a local live session (cross-repo "
+        "callers use this instead of importing agent-logger as a library)",
+    )
+    p_annotate.add_argument("session_id", help="the local live session id to annotate")
+    p_annotate.add_argument("--repo", required=True, help="e.g. owner/name")
+    p_annotate.add_argument("--pr-number", required=True, type=int)
+    p_annotate.add_argument("--role", default="reviewer")
+    p_annotate.add_argument(
+        "--recorded-at",
+        help="ISO-8601 timestamp (default: now)",
+    )
+    p_annotate.set_defaults(func=_cmd_catalog_annotate)
+
     p_migrate = sub.add_parser(
         "config-migrate", help="migrate machine-local config.yaml schema (idempotent)"
     )
@@ -442,6 +579,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="live session-state root (default: this host's ~/.copilot/session-state)",
     )
     cat_rebuild.set_defaults(func=_cmd_catalog_rebuild)
+    cat_query = cat_sub.add_parser(
+        "query",
+        help="(repo, pr_number) -> resolvable sessions -- the cross-repo read "
+        "side fallback tier (e.g. a downstream review-link fallback chain)",
+    )
+    cat_query.add_argument("--repo", required=True, help="e.g. owner/name")
+    cat_query.add_argument("--pr-number", required=True, type=int)
+    cat_query.add_argument(
+        "--since", help="ISO-8601 lower bound on the annotation's recorded_at"
+    )
+    cat_query.add_argument(
+        "--until", help="ISO-8601 upper bound on the annotation's recorded_at"
+    )
+    cat_query.set_defaults(func=_cmd_catalog_query)
 
     p_origin = sub.add_parser(
         "origin", help="session origin sidecars -- backfill/tag existing sessions"

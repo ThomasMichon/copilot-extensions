@@ -1068,3 +1068,7 @@ host. See the plugin README and `docs/repository-issue-loop.md`. Adopting a
 new declaration from scratch? Start with
 `docs/repository-issue-loop-adoption.md` (schema reference, worker identity
 library, worked example) instead.
+
+## See Also
+
+- [docs/entity-relationship-model.md](../../docs/entity-relationship-model.md) -- the suite-wide diagnostic playbook: given a task id, which command resolves its worktree/session/bridge state (and the reverse: session -> tasks via `find-by-session`)

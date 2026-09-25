@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 
 from . import __version__
 from . import protocol as proto
@@ -93,9 +94,23 @@ class OneShotSession:
 
     A ``transport`` may be injected (tests, or a pre-built connection); otherwise
     it is constructed from ``cfg`` exactly as the bridge would.
+
+    ``on_stage``, when given, is called with a short stage name (``"auth"``,
+    ``"transport-connect"``, ``"handshake"``, ``"ready"``) as each connection
+    layer is *entered* -- not necessarily completed, since a failure inside a
+    layer raises before the next stage name is reached. :attr:`stage` always
+    holds the last-entered stage name, so a caller that catches an exception
+    from ``__aenter__`` can read ``session.stage`` to learn which connectivity
+    layer actually failed (used by ``agent-mcp diagnose``).
     """
 
-    def __init__(self, cfg: BridgeConfig, *, transport: Transport | None = None) -> None:
+    def __init__(
+        self,
+        cfg: BridgeConfig,
+        *,
+        transport: Transport | None = None,
+        on_stage: Callable[[str], None] | None = None,
+    ) -> None:
         self.cfg = cfg
         self._transport = transport
         self._client: UpstreamClient | None = None
@@ -107,9 +122,18 @@ class OneShotSession:
         # then stamp on / speak.
         self._modern: bool = False
         self._protocol_version: str = proto.LEGACY
+        self._on_stage = on_stage
+        self.stage: str = "init"
+
+    def _set_stage(self, name: str) -> None:
+        self.stage = name
+        if self._on_stage is not None:
+            self._on_stage(name)
 
     async def __aenter__(self) -> OneShotSession:
+        self._set_stage("auth")
         injector = build_injector(self.cfg)
+        self._set_stage("transport-connect")
         transport = self._transport or build_transport(self.cfg, injector)
         self._transport = transport
         client = UpstreamClient(transport)
@@ -148,7 +172,9 @@ class OneShotSession:
             # ``_negotiate`` already applies and could swallow its more
             # specific "did not respond" error under a generic one.
             await asyncio.wait_for(transport.start(), timeout=self.cfg.timeout)
+            self._set_stage("handshake")
             await self._negotiate()
+            self._set_stage("ready")
         except BaseException as exc:
             # __aexit__ is not called when __aenter__ raises, so tear the
             # transport down here or a spawned upstream child would leak.
@@ -365,6 +391,59 @@ class OneShotSession:
         if self._ctx is None:
             raise RuntimeError("OneShotSession used outside its async context")
         tools = await fetch_all_tools(self._paginated_request, self._ctx)
+        return filter_tools(tools, self.cfg.tools)
+
+    async def list_tools_checked(self) -> list[dict]:
+        """Like :meth:`list_tools`, but raises :class:`UpstreamError` on any
+        malformed or error ``tools/list`` response instead of silently
+        truncating the catalog.
+
+        :func:`agent_mcp.decorators._catalog.fetch_all_tools` treats *any*
+        response missing a well-formed top-level ``result`` -- a genuine
+        JSON-RPC ``error``, a non-dict response, or a ``result`` that isn't a
+        mapping -- as "no more pages" and returns whatever it already
+        collected (possibly an empty list). That's the right lenient default
+        for a live decorator (``defer``/``code-mode``) mid-session, but it
+        means a caller that needs to know the catalog fetch itself *failed*
+        (``agent-mcp diagnose``) cannot tell a healthy empty catalog from a
+        broken one via :meth:`list_tools` alone. This variant duplicates the
+        same bounded pagination loop, treating every one of those shapes as a
+        hard failure rather than an early, silent stop.
+        """
+        client = self._need_client()
+        if self._ctx is None:
+            raise RuntimeError("OneShotSession used outside its async context")
+        tools: list[dict] = []
+        cursor: str | None = None
+        for _ in range(100):  # same safety bound as fetch_all_tools' _PAGE_LIMIT
+            params: dict[str, str] = {"cursor": cursor} if cursor else {}
+            req = {"jsonrpc": "2.0", "id": client.new_id(), "method": "tools/list",
+                   "params": params}
+            resp = await self._paginated_request(req)
+            if isinstance(resp, dict) and "error" in resp:
+                _raise_error(resp["error"], context="tools/list")
+            if not isinstance(resp, dict) or not isinstance(resp.get("result"), dict):
+                raise UpstreamError(
+                    f"tools/list: malformed response (expected a 'result' "
+                    f"object, got {resp!r})"
+                )
+            result = resp["result"]
+            page = result.get("tools")
+            if not isinstance(page, list):
+                raise UpstreamError(
+                    f"tools/list: malformed response (expected 'result.tools' "
+                    f"to be a list, got {page!r})"
+                )
+            for entry in page:
+                if not isinstance(entry, dict):
+                    raise UpstreamError(
+                        f"tools/list: malformed response (expected every "
+                        f"'result.tools' entry to be an object, got {entry!r})"
+                    )
+                tools.append(entry)
+            cursor = result.get("nextCursor")
+            if not cursor:
+                break
         return filter_tools(tools, self.cfg.tools)
 
     async def call_tool(self, name: str, arguments: dict) -> dict:

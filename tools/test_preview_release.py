@@ -133,3 +133,49 @@ def test_materialize_into_preview_writes_only_into_dest_never_real_repo(
     assert (dest / "libs" / "shared-lib" / "src" / "__init__.py").read_text() == "fresh = True\n"
     # ...but the real plugin directory in this checkout was never touched.
     assert (real_copy / "__init__.py").read_text() == "stale = True\n"
+
+
+class _FakeMaterializeMain:
+    """Stands in for the real (importlib-loaded) module so the
+    file-pointer-materialize-into-preview wiring can be tested without
+    touching any real canonical doc on disk."""
+
+    def __init__(self, canonical_root: Path):
+        self._canonical_root = canonical_root
+        self.calls: list[Path] = []
+
+    def materialize_file_pointers(self, dest: Path, *, canonical_root: Path) -> list[str]:
+        self.calls.append(dest)
+        assert canonical_root == self._canonical_root
+        pointer = dest / "docs" / "thing.md"
+        canonical = canonical_root / "docs/patterns/thing.md"
+        if not pointer.exists():
+            return []
+        pointer.write_text(canonical.read_text(), encoding="utf-8")
+        return [f"OK   {pointer} (file pointer) <- docs/patterns/thing.md"]
+
+
+def test_materialize_file_pointers_into_preview_writes_only_into_dest(
+    isolated: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    plugin_dir = _plugin(isolated, "agent-bridge", "1.0.0")
+    pointer = plugin_dir / "docs" / "thing.md"
+    pointer.parent.mkdir(parents=True)
+    pointer.write_text(
+        "<!-- VENDOR_POINTER: source=docs/patterns/thing.md kind=file -->\nstub\n",
+        encoding="utf-8",
+    )
+    (isolated / "docs/patterns").mkdir(parents=True)
+    (isolated / "docs/patterns/thing.md").write_text("canonical content\n", encoding="utf-8")
+
+    fake = _FakeMaterializeMain(isolated)
+    monkeypatch.setattr(preview_release, "_load_materialize_main", lambda: fake)
+
+    dest = preview_release.build("agent-bridge", isolated / "work")
+
+    assert (dest / "docs" / "thing.md").read_text() == "canonical content\n"
+    # The real plugin directory's stub was never touched.
+    assert pointer.read_text().startswith("<!-- VENDOR_POINTER:")
+    manifest = json.loads((dest / "PREVIEW.json").read_text())
+    assert any("(file pointer)" in line for line in manifest["vendored_file_pointers_materialize_log"])
+

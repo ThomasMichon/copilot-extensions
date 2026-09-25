@@ -74,3 +74,23 @@ Instead, resolve the other repo like any related work:
 
 If a repo genuinely isn't registered anywhere, that's a topology gap to fix
 in the registry (or ask the operator), not a reason for `git clone` here.
+
+## Diagnosing across entities (worktree, session, task, bridge, ...)
+
+Given a session/worktree/task id, need to resolve the rest of the chain (its
+assigned worktree, all its sessions, its handoff chain, its active bridge
+state)? Don't grep this plugin's `--help` or a sibling's private database --
+read the suite-wide diagnostic playbook this plugin ships its own copy of:
+
+```bash
+AW_ROOT="${COPILOT_PLUGIN_ROOT:-$HOME/.copilot/installed-plugins/copilot-extensions/agent-worktrees}"
+cat "$AW_ROOT/docs/entity-relationship-model.md"
+```
+
+(PowerShell: same `$AW_ROOT` resolution, default
+`$HOME\.copilot\installed-plugins\copilot-extensions\agent-worktrees`.) It
+maps each of the ten tracked entity types to its owning plugin and gives the
+exact current command for each cross-entity traversal question -- or the
+tracked issue if no command exists yet. `agent-bridge` and `agent-dispatch`
+ship an identical mirrored copy at the same relative path under their own
+installed root, if either is also installed.

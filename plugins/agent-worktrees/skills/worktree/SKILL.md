@@ -413,6 +413,7 @@ Copilot CLI session
 
 ## See Also
 
+- [docs/entity-relationship-model.md](../../docs/entity-relationship-model.md) -- the suite-wide diagnostic playbook: given a session/worktree/task, which command resolves the rest (assigned worktree, sessions, bridge state, handoff chain)
 - [references/pr-workflow.md](references/pr-workflow.md) -- full PR-mode reference
 - [references/obligations.md](references/obligations.md) -- finalize's outbound-resource obligation gate
 - [references/cleanup-details.md](references/cleanup-details.md) -- per-worktree dirty resolution and cleanup safety guarantees

@@ -851,9 +851,50 @@ through stdin or `--request-file`, never as inline JSON.
 
 ## Troubleshooting
 
-There is no special bridge resolver, agent-bridge daemon, or
-`agent-mcp-troubleshooting` command. Diagnose the exact bridge process the agent
-will spawn:
+`agent-mcp diagnose <bridge>` runs the same config/auth/transport/protocol
+path `call`/`bridge` use, one layer at a time, and reports exactly which layer
+failed instead of one opaque top-level error:
+
+```sh
+agent-mcp diagnose .github/agents/ado.mcp.yaml
+```
+
+```text
+[1/5] config: OK -- .github/agents/ado.mcp.yaml -> http https://dev.azure.com/...
+[2/5] auth: OK
+[3/5] transport-connect: OK
+[4/5] handshake: FAILED -- initialize: HTTP error: <urlopen error [Errno 111] Connection refused>
+  hint: The transport connected but no valid MCP response came back before
+  timeout -- for http/sse this covers both network reachability
+  (refused/timed out/5xx) and auth (401/403): check the upstream service is
+  running and reachable, and that the resolved credential is valid.
+```
+
+The five layers, and what a failure at each one means:
+
+| Stage | What it proves when it succeeds | A failure here means |
+|-------|----------------------------------|-----------------------|
+| `config` | The bridge file parses and schema-validates (same as `validate`) | Fix the config -- run `agent-mcp validate <bridge>` for the exact error |
+| `auth` | The configured auth injector constructed without raising | The `auth:` block itself is malformed (an unknown `kind`, a bad URL for `git-credential`, etc.) |
+| `transport-connect` | The transport started -- for `stdio` this is a successful subprocess spawn; for `http`/`sse` this stage is a no-op (the transport is stateless, so a real connection only happens on the first request -- see below) | The upstream binary couldn't be spawned, or is missing from `PATH` |
+| `handshake` | The MCP `initialize`/`discover` exchange completed and returned a `serverInfo` | For `stdio`: the child process didn't speak MCP correctly. For `http`/`sse`: this is where auth headers are actually sent and the network round-trip actually happens, so a connection-refused, timeout, 5xx, or 401/403 all surface **here**, not at `transport-connect` |
+| `catalog` | `tools/list` returned successfully | An upstream-side error on an otherwise healthy connection |
+
+Because `http`/`sse` transports are stateless (`Transport.start()` is a no-op --
+there's no persistent connection to hold open between requests), the
+network-reachability and credential checks for those bridges both land on the
+`handshake` stage, not `transport-connect`. Only a `stdio` bridge's process
+spawn is a genuinely separate step from its handshake.
+
+`--no-tools` stops after a successful handshake (skips `tools/list`);
+`--json` emits a machine-readable report (`{"bridge", "ok", "tool_count",
+"stages": [{"name", "ok", "detail"}, ...]}`) instead of the staged text
+progress -- useful for scripted health checks. Exit code is `0` when every
+attempted stage succeeded, `1` otherwise.
+
+There is no separate bridge resolver or agent-bridge daemon. `diagnose` above
+covers the staged connectivity check; for a lower-level look at the exact
+bridge process the agent will spawn:
 
 ```sh
 agent-mcp validate .github/agents/ado.mcp.yaml

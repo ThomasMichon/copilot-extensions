@@ -10,6 +10,10 @@ Subcommands:
                                 serve session-host and pump stdio<->socket, with a
                                 direct-bridge fallback (the #744 multiplexer child).
   validate <name|FILE>          Parse + schema-check a bridge config (no run).
+  diagnose <name|FILE>          Staged connectivity check: config -> auth ->
+                                transport -> handshake -> catalog. Reports
+                                exactly which layer failed instead of one
+                                opaque top-level error.
   status                        Show prerequisites and available bridges.
   clean-tool-cache               Detect/purge stale-schema entries in the
                                 persisted MCP tool-snapshot cache (the runtime
@@ -101,6 +105,20 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     print(f"OK: {where} -- {cfg.server.type} -> "
           f"{cfg.server.launch_desc} (auth: {auth_desc})")
     return 0
+
+
+def _cmd_diagnose(args: argparse.Namespace) -> int:
+    import asyncio
+
+    from .diagnose import diagnose
+
+    printer = (lambda _line: None) if args.json else print
+    report = asyncio.run(
+        diagnose(args.name, list_tools=not args.no_tools, printer=printer)
+    )
+    if args.json:
+        print(json.dumps(report.to_dict(), indent=2))
+    return 0 if report.ok else 1
 
 
 def _cmd_status(_args: argparse.Namespace) -> int:
@@ -706,6 +724,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_validate = sub.add_parser("validate", help="validate a bridge config")
     p_validate.add_argument("name", help="bridge name or path to a config file")
     p_validate.set_defaults(func=_cmd_validate)
+
+    p_diagnose = sub.add_parser(
+        "diagnose",
+        help="staged connectivity check for one bridge: config -> auth -> "
+             "transport -> handshake -> catalog, reporting exactly which "
+             "layer failed",
+    )
+    p_diagnose.add_argument("name", help="bridge name or path to a config file")
+    p_diagnose.add_argument("--no-tools", action="store_true",
+                            help="stop after a successful handshake -- skip tools/list")
+    p_diagnose.add_argument("--json", action="store_true",
+                            help="emit a JSON report instead of the staged text progress")
+    p_diagnose.set_defaults(func=_cmd_diagnose)
 
     p_status = sub.add_parser("status", help="show prerequisites and bridges")
     p_status.set_defaults(func=_cmd_status)

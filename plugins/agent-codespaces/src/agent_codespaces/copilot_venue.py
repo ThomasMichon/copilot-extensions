@@ -132,6 +132,15 @@ def add_copilot_subparser(sub) -> None:
              "rejoin without it keeps the session's existing forwards.",
     )
     copilot_parser.add_argument(
+        "--forward", dest="local_forwards", action="append", default=[],
+        metavar="PORT[:VENUE_PORT]",
+        help="With --detach: keep this host's 127.0.0.1:PORT forwarded to the "
+             "CodeSpace's 127.0.0.1:VENUE_PORT (default: the same port) for the "
+             "session's life, e.g. a worker's dev server that a host browser "
+             "loads. The forward may exist before the server starts. Repeatable; "
+             "a rejoin without it keeps the session's existing forwards.",
+    )
+    copilot_parser.add_argument(
         "--copilot-arg", dest="copilot_args", action="append", default=[],
         metavar="ARG",
         help="With --detach: extra Copilot argument for the launched session "
@@ -391,6 +400,10 @@ def cmd_copilot(
     if getattr(args, "ref_files", None) and not getattr(args, "detach", False):
         print("[FAIL] --ref-file requires --detach", file=sys.stderr)
         return 2
+    for flag, dest in (("--reverse-forward", "reverse_forwards"), ("--forward", "local_forwards")):
+        if getattr(args, dest, None) and not getattr(args, "detach", False):
+            print(f"[FAIL] {flag} requires --detach", file=sys.stderr)
+            return 2
     if getattr(args, "stop", False) or getattr(args, "detach", False):
         from . import copilot_detach
 

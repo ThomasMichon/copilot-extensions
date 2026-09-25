@@ -458,16 +458,28 @@ Round 2 (operator's response to that evaluation):
     state -- still a plain forward commit, never a force-push/rewrite.
 
 ### Phase 5 — Cutover
-- [ ] **Blocked on ThomasMichon/copilot-extensions#3512**: the promotion
-      pipeline has never actually executed (0 runs ever — see 2026-09-23/24
-      Journal entry). Fix and prove a real end-to-end promotion before
-      treating any of the items below as safe to start.
+- [x] ~~Blocked on ThomasMichon/copilot-extensions#3512~~ — **resolved,
+      2026-09-24.** The dead `workflow_run`/`branches: [dev]` filter was
+      replaced with a real `git merge-base --is-ancestor` dev-ancestry check
+      (#3512, PRs #3521/#3522). A live full end-to-end promotion was then
+      proven for the first time (PR #3533, admin-merged since the default
+      `GITHUB_TOKEN` never triggers downstream workflows — that gap tracked
+      separately as #3534). #3534 itself later closed once
+      `APERTURE_RELEASE_TOKEN` (an operator-minted fine-grained PAT) was
+      wired into `promote.yml` (PRs #3539/#3540); PR #3541 then auto-merged
+      fully unattended end-to-end, confirming the whole chain works for real
+      traffic.
 - [ ] Confirm the auto-updater coverage fix (Phase 1) is live before or with
       cutover, so existing harness sessions discover the new contribution
       flow on next pull rather than following stale guidance.
-- [ ] Ensure a PR opened against `main` post-cutover is bounced with guidance
+- [x] Ensure a PR opened against `main` post-cutover is bounced with guidance
       pointing at `dev` (branch protection message, PR template, or a bot
       comment).
+  - **Done, 2026-09-24.** `main`'s ruleset now runs a single fast required
+    `main source gate` CI job that hard-blocks any non-promotion PR (and
+    skips the full guard/test matrix for a legitimate promotion PR);
+    Copilot's redundant auto-review on `main` was also removed as
+    redundant with that gate (PRs #3529/#3530).
 - [x] Flip `.agent-worktrees/config.yaml`'s `default_branch: main` to `dev`
       (ThomasMichon/copilot-extensions#3512's sibling finding, same Journal
       entry) so `agent-worktrees create-pr`/`push-changes` — the harness's
@@ -489,6 +501,37 @@ Round 2 (operator's response to that evaluation):
       those two remaining items normally; they are not blocked by this one
       landing early.
 - [ ] Announce cutover; watch the first few real promotion cycles closely.
+  - **In progress.** Several real cycles have now run and been watched
+    closely by this effort itself (not yet a separate, deliberate
+    post-announcement observation period): PR #3541 (first fully unattended
+    auto-merge), PR #3544 (surfaced the version-regression bug below), PR
+    #3545 (changefile-sweep verification), and the corrective PR #3548.
+  - **Done, 2026-09-24.** Swept every open PR authored under this identity
+    (14 total) for the residual "jam" a mid-flight default-branch flip
+    predictably leaves behind: 5 were still targeting `main` and CONFLICTING
+    (#3226, #3248, #3305, #3440, #3456 — GitHub auto-retargets an open PR's
+    base when a repo's default branch changes, but does not rebase it), and
+    2 more already targeted `dev` but were CONFLICTING against its current
+    tip (#3348, #3310). All 7 were retargeted (where needed) and rebased
+    clean via parallel background agents following the safe
+    backup-branch-then-rebase/cherry-pick recipe, keeping `dev`'s newer
+    plugin-version/baseline files while preserving each PR's real functional
+    content; backup branches (`backup/pr-<N>-before-rebase`) were kept
+    locally for anyone who wants to audit a resolution. Traced local
+    ownership via the claimant graph first: only 2 of the 14 PRs (#3505,
+    #3498) had a worktree registered on this machine, one of them (#3505)
+    genuinely live/being driven — left untouched (it was already clean); the
+    other 12 traced to a different machine (`tmichon-cloud1`) or an
+    already-finalized/pruned worktree here, confirming it was safe to fix
+    them directly. This produced the written-up **migration guide** below (this
+    same entry) as the natural next artifact, since the flip's residual
+    friction is exactly the "contributors get bitten by the old flow"
+    problem a migration note exists to prevent.
+  - **Formal announcement to other contributors still not done** — this
+    phase item stays checked for "watch the first few cycles" (now
+    genuinely exercised across ~10 promotions) but the written-up migration
+    guide (CONTRIBUTING.md, see Journal) is the announcement vehicle; no
+    separate broadcast has gone out yet.
 
 ### Phase 6 — Maturity walk-back
 - [ ] Define success criteria for relaxing the admin-escalation gate on
@@ -1158,4 +1201,227 @@ generator contract details here or in a linked sub-doc._
   guard for stray PRs against `main`) also remain open. Whoever picks up
   #3512 next should treat this journal entry, not just the checklist, as
   the current ground truth for what's actually flipped live.
+
+### 2026-09-24 — #3512 fixed, first real end-to-end promotion proven, `main`
+### hardened, and a critical version-regression found and corrected
+
+This was a long, multi-hour push (resumed via `context-handoff` more than
+once along the way) that took the pipeline from "never actually run" to
+"proven live and hardened," then caught and fixed a serious correctness bug
+the hardening itself exposed. In order:
+
+1. **Identifier scrub landed** (#3511), with a clarified allowlist worked
+   out with the operator: `ThomasMichon`/`OneDrive` references are fine to
+   keep (the operator's own public identity/product), but
+   `tmichon_microsoft`/`odsp-web`/`gim-home` are not — those are the
+   internal-only identifiers that actually needed scrubbing from the
+   leaked content #3511 tracked.
+2. **Fixed the dead Promote/Validation-Gate `workflow_run` trigger**
+   (#3512, PRs #3521/#3522). Replaced the unreliable `branches: [dev]`
+   filter (which compared against `head_branch`, always `"main"` on this
+   repo regardless of which branch's commit actually triggered the run —
+   see the prior Journal entry's finding) with a real
+   `git merge-base --is-ancestor` check confirming the triggering
+   `head_sha` genuinely descends from `dev`.
+3. **Five real, previously-never-executed-on-Linux latent `agent-worktrees`
+   bugs** surfaced and fixed once the trigger fix let a workflow actually
+   run to completion on GitHub's Linux runners for the first time (PRs
+   #3523/#3524/#3525/#3526) — these were genuine platform-specific bugs
+   (path handling, quoting, and similar cross-platform gaps), not new
+   regressions, simply never exercised because nothing had run the
+   pipeline end-to-end on Linux before.
+4. **Proved Promote actually works end-to-end for the first time** (PR
+   #3533, admin-merged directly since the default `GITHUB_TOKEN` a
+   workflow runs under is deliberately prevented by GitHub from triggering
+   further downstream workflow runs — filed that gap as #3534 rather than
+   working around it silently).
+5. **Hardened `main`**: removed Copilot's redundant automatic PR review
+   from `main`'s branch ruleset, and added a fast, single required
+   `main source gate` CI job — now the *only* check `main`'s ruleset
+   requires — that hard-blocks any PR against `main` that isn't a
+   legitimate promotion PR, while skipping the full guard/test matrix
+   entirely for one that is (PRs #3529/#3530). This is what closes the
+   Phase 5 "bounce a stray PR against `main`" checklist item above.
+6. **Operator minted `APERTURE_RELEASE_TOKEN`** (a fine-grained PAT scoped
+   to Contents + Pull Requests: Read and write) and wired it into
+   `promote.yml` (PRs #3539/#3540), closing #3534 — a PAT-authenticated
+   push does trigger downstream workflows, unlike the default token.
+   Verified live: PR #3541 auto-merged fully unattended, with the PAT's
+   own identity (`ThomasMichon` — this repo has no separate bot account)
+   correctly passing `main-gate`'s promotion-author check.
+7. **Changefile re-application bug**, flagged by the operator: Promote
+   never mutates `dev`'s own tree, so an already-consumed changefile just
+   sits on `dev` indefinitely and gets re-read on every future promotion.
+   Fixed in two parts (PRs #3542/#3543, both bootstrapped onto `main` too,
+   per this effort's standing practice for pipeline-tooling fixes):
+   - Bump computation now skips any changefile that already existed in
+     `dev` as of the *previous* promotion's own recorded
+     `last_promotion.dev_head` (checked live via `git cat-file -e` against
+     that historical commit — deliberately not a persisted "ever
+     consumed" list, per the operator's explicit direction to keep the
+     skip logic anchored to real git history rather than accreted state).
+   - `promote.yml` gained a "Clear consumed changefiles on dev" step: after
+     every successful promotion, it opens (and auto-merges) a small async
+     cleanup PR against `dev` deleting the changefiles that promotion just
+     consumed. Verified live: this swept all 19 changefiles that had
+     accumulated on `dev` under the old bug, in one PR (#3545), immediately
+     after the fix landed.
+8. **CRITICAL version-regression bug** — found by the *operator* directly
+   inspecting a live promotion's diff, not caught by this session's own
+   verification, which is itself a real gap in this session's rigor worth
+   naming plainly rather than glossing over. Root cause:
+   `compute()`/`read_plugin_json_version()` in the bump-computation path
+   read each plugin's "current" version straight from `dev`'s own
+   `plugin.json` — but `dev`'s `plugin.json` is **never bumped** (only
+   `main`'s generated snapshot carries the real, shipped version numbers).
+   As long as the changefile-re-application bug (item 7) was still active,
+   every promotion re-read the same stale changefile and re-derived the
+   same (correct, by luck) bump every time. The moment item 7's fix
+   correctly stopped re-applying an already-consumed changefile, any
+   plugin with *no* genuinely new changefile in a given round silently
+   **regressed** back to `dev`'s frozen baseline version in the newly
+   generated `main` tree — discarding whatever version a past promotion
+   had already shipped. Confirmed live: PR #3544, the very next real
+   promotion after #3542/#3543 landed, regressed 11 of 13 plugins on
+   `main` (e.g. `agent-bridge 0.4.1-dev1` -> `0.4.0-dev551`,
+   `agent-worktrees 1.5.6-dev1` -> `1.5.5-dev265`, marketplace
+   `metadata.version 1.5.6-dev1` -> `1.7.7-dev219`).
+   - **Root-cause fix** (PRs #3546/#3547, dev + `main` bootstrap): added a
+     new `_seed_versions_from_main()` step to `tools/promote_release.py`
+     that runs *before* any bump computation and overwrites every
+     already-shipped plugin's version-bearing surfaces in the scratch tree
+     with `main`'s own last snapshot (reusing `accumulate_bumps.apply()`'s
+     exact write helpers) — so `dev`'s frozen literal version is only ever
+     treated as the true baseline for a plugin `main` has genuinely never
+     shipped before. Added a direct regression test,
+     `test_promote_preserves_shipped_version_when_no_new_changefile_at_all`,
+     proving the exact live scenario, and updated a prior regression
+     test's assertion to match the now-correct continuity behavior. All 13
+     `tools/test_promote_release.py` tests pass.
+   - **Corrective one-time restore** (PR #3548, admin-merged directly onto
+     `main` — not flowed through `dev`, since `dev` never carries bumped
+     versions in the first place): manually restored the exact 11
+     regressed plugin versions plus marketplace `metadata.version` to
+     their pre-regression values (matching commit `26f53d573`/PR #3541,
+     the last known-good state), applied via `accumulate_bumps.apply()`
+     directly through a one-off script rather than hand-editing JSON.
+     Verified via `git diff --stat` (only the 23 expected version-bearing
+     files touched) and `check-version-consistency.py`. **Confirmed live
+     on `main`'s tip as of this entry**: `agent-worktrees 1.5.6-dev1`,
+     `agent-bridge 0.4.1-dev1`, `agent-dispatch 0.1.2-dev199`,
+     `metadata.version 1.5.6-dev1` — all correct.
+
+**Status as of this entry**: every fix above is merged on both `dev` and
+`main`; the live version regression is corrected; no code-side work from
+this push remains outstanding. `dev` continues to be the trunk everyone
+should contribute to, `main` continues to update only through Promote, and
+Promote has now demonstrably run correctly, end-to-end, more than once.
+Remaining open Phase 5 items: confirming the auto-updater coverage fix is
+live, and moving "watch the first few cycles closely" from an implicit,
+in-the-moment activity to a deliberate observation window before formally
+announcing cutover to other contributors. #3534 is closed. No other open
+PRs, held claims, or background flows remain from this session.
+
+### 2026-09-24 — PR-jam sweep across all open contributor PRs + a written
+### migration guide
+
+Follow-up to the entry immediately above, prompted by the operator's
+concern that the mid-flight `main`→`dev` default-branch flip would leave
+other in-flight PRs (this identity's own backlog, standing in for any
+contributor's) silently jammed.
+
+- **Surveyed every open PR authored under this identity** (14 total via `gh
+  pr list --search "author:ThomasMichon"`) for base-branch correctness and
+  merge cleanliness:
+  - **5 still targeted `main` and were CONFLICTING**: #3226, #3248, #3305,
+    #3440, #3456. Root cause confirmed via GitHub's own behavior: when a
+    repo's default branch changes, GitHub auto-retargets any *open* PR that
+    was pointed at the old default — but it does **not** rebase the branch,
+    so each surfaced as a real merge conflict against `dev`'s tip once
+    retargeted (or, for these 5, hadn't even been auto-retargeted yet since
+    they predated GitHub's retarget sweep).
+  - **2 already targeted `dev` but were CONFLICTING**: #3348, #3310 (both
+    from a different machine, `tmichon-cloud1`).
+  - The other 7 were already clean against `dev` — no action needed.
+  - A stray `main source gate` check failure seen on a couple of PRs (e.g.
+    #3495, #3310) turned out to be a **stale check, not a live bug**: that
+    job's own `if: base.ref == 'main'` guard is correct on current `dev`;
+    the failing runs were simply the last CI execution from *before*
+    GitHub's auto-retarget flipped that PR's base to `dev`, and no new push
+    had happened since to re-evaluate it under the corrected base. Confirmed
+    by reading the actual failing run's logs and comparing its recorded
+    `head_branch`/base against the PR's current state — not a pipeline
+    defect, and (since `main source gate` is only a required check on
+    `main`'s own ruleset, never `dev`'s) not a merge blocker either way.
+- **Fixed all 7 broken PRs** using 7 parallel background agents, one per PR,
+  each following the safe backup-branch-then-rebase (falling back to
+  reset-and-cherry-pick when a rebase got tangled) recipe: retarget to `dev`
+  where needed (`gh pr edit --base dev`), rebase onto current `dev`,
+  resolve conflicts by actually reading both sides (mostly version-file/
+  changefile-baseline drift — resolved by keeping `dev`'s newer values while
+  preserving each PR's real functional diff), force-push back to the PR's
+  own existing head ref (never a new branch/PR), and verify
+  `mergeStateStatus`/`mergeable` came back clean. All 7 confirmed
+  `MERGEABLE` afterward; two (#3310, #3348) show a residual `UNSTABLE`
+  `mergeStateStatus` from the same stale-check pattern above (harmless,
+  non-required on `dev`) rather than an actual conflict. Backup branches
+  (`backup/pr-<N>-before-rebase`) retained locally on this machine for
+  anyone who wants to audit a resolution before it's rebased away.
+- **Traced ownership before touching anything cross-machine.** Used the
+  `tracing-claimant-graphs` skill's two-hop recipe (`claims <id>` →
+  `claimant-liveness`) to confirm no *live* session anywhere would be
+  clobbered: only 2 of the 14 PRs had a worktree registered on this
+  machine at all (#3505, #3498) — one (#3505) genuinely live and mid-turn
+  (left untouched; it was already clean, so no action was needed on it
+  regardless), the other (#3498) `active` in the registry but with an
+  `ambiguous`/`incomplete-projection` reciprocal relation and zero recorded
+  turns (idle-looking, also already clean, also left alone). The remaining
+  12 — including all 7 that needed fixing — had no local worktree record at
+  all (`agent-worktrees claims <id>` returned "worktree not found" for
+  every raw `worktree/tmichon-cloud1-*`/`worktree/tmichon-book2-*` head
+  branch checked), meaning either a different machine or an
+  already-finalized/pruned worktree here — confirming it was safe to work
+  on them directly. Also traced one hop further for #3505: its owning
+  `copilot-extensions` worktree is itself owned by a long-lived,
+  currently-very-active `aperture-labs` worktree (a *root* claim, no further
+  owner recorded) — not an `odsp-web-harness` worktree; #3498's worktree has
+  no recorded owner at all (a root itself, or created out-of-band).
+- **Wrote the migration guide the sweep itself proved necessary.** Added a
+  `> ### Migrating from the old main-targeting flow` callout directly under
+  CONTRIBUTING.md's "Contribution flow (PR-required)" intro (there was no
+  dedicated migration-note surface before this — the `dev`-is-default
+  information existed, but scattered, with nothing addressed to a
+  contributor still muscle-memoried onto `main`), covering exactly the three
+  things this sweep ran into in practice:
+  1. Retarget-and-rebase-don't-refile guidance for a PR still open against
+     `main`.
+  2. **A red `dev` CI run blocks every pending release, not just the PR that
+     broke it** — confirmed mechanically, not just asserted: `Validation
+     Gate` only runs `if: ... == 'success'` on `CI`, and `Promote` only runs
+     `if: ... == 'success'` on `Validation Gate`, so a red `dev` commit
+     produces zero downstream triggers until a later green commit — with
+     everything accumulated on `dev` in the meantime shipping together on
+     that later trigger. Contributors are now expected to fix-forward or
+     revert immediately, not investigate at leisure, since every other
+     contributor's already-merged work is stuck behind them too.
+  3. **Set the ~10-20 minute release-lag expectation** (CI → Validation Gate
+     → Promote's generated `release/promote-<run id>` candidate PR → that
+     PR's own fast check → auto-merge), with the exact `gh pr list --search
+     "is:merged head:release/promote-"` command to confirm a real release
+     landed, and a note that a small "clear consumed changefiles on dev"
+     housekeeping PR normally follows a few minutes after every successful
+     promotion (expected, not actionable). The timing figure was
+     cross-checked against real recent promotion runs (Validation Gate
+     completing in ~12s once triggered, Promote itself completing in
+     ~15-20s, the slower/variable part being `dev`'s own CI queue+runtime)
+     rather than asserted from feel.
+  - Also expanded the pre-existing "The wait, and how to preview past it"
+    section in CONTRIBUTING.md with the same hard-chain-gating explanation
+    and the release-confirmation command, so the technical depth lives
+    there and the migration callout stays a short pointer to it.
+- **Not done in this entry**: the PR itself carrying these CONTRIBUTING.md
+  changes has not yet been opened/merged — see whoever picks this up next,
+  or the same session if it continues. No other PRs were merged or closed
+  in this entry; the 7 fixed PRs remain open, un-merged, exactly as before
+  (only retargeted/rebased), per the operator's actual ask.
 
