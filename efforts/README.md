@@ -14,6 +14,7 @@ that pattern to this repository.
 | [Worktree Head-Succession Hardening](active/worktree-head-succession-hardening/README.md) | Draft | #3584 |
 | [Picker Creature Comforts](active/picker-creature-comforts/README.md) | Draft | #3586 |
 | [Dev/Main Release Pipeline](active/dev-branch-release-pipeline/README.md) | Draft | #3336 |
+| [Promotion-Failure Reactive Fix Agent](active/promotion-failure-reactive-fix-agent/README.md) | Draft | _TBD_ |
 | [Vendored Doc Pointers](active/vendored-doc-pointers/README.md) | Done; pending archive | #3565 |
 | [Ambient Guidance Navigability](active/ambient-guidance-navigability/README.md) | Active | #3033 |
 | [Unified Skill Review](active/unified-skill-review/README.md) | Draft | #2847 |

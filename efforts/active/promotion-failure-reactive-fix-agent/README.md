@@ -8,7 +8,15 @@
 - **Vision:** none yet — this effort establishes the standing policy itself
   (safety envelope + trigger contract for a reactive fix agent); revisit
   once Phase 1 proves out whether it deserves its own harness-guidance
-  vision entry.
+  vision entry. **Reconciliation gate (added after review, see Journal):**
+  choosing `gh-aw` as the Phase 2 mechanism is a material architecture
+  decision made ahead of that vision reconciliation. It is a research
+  finding and a provisional design choice, not a settled standing pattern —
+  Phase 2 must not begin until this is either folded into an existing
+  vision (`harness-guidance` was checked and does not fit — it covers
+  ambient guidance delivery, not automated-fix mechanism selection) or
+  captured in a new one. Phase 1 (detection+dedup, no fix-attempt
+  mechanism yet) is unaffected and can proceed independently.
 - **Umbrella issue:** _TBD — file once this effort's plan clears review_
 
 ## Guiding Intent
@@ -30,7 +38,8 @@ ever weakening the review/merge discipline every other change goes through.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Driving agent | Design + build the reactive trigger and its guardrails | `copilot-extensions` worktree |
-| GitHub Copilot cloud agent | Performs the actual diagnosis + fix attempt, in its own sandboxed session | issue assignment (see Context) |
+| GitHub Agentic Workflows (`gh-aw`) agent job | Performs the actual diagnosis + fix attempt, sandboxed, writes gated through `safe-outputs` | a compiled `.github/workflows/*.lock.yml` triggered by promotion failure (see Context) |
+| GitHub Copilot cloud agent (fallback mechanism) | Same diagnosis+fix role, if `gh-aw` proves unworkable | issue assignment (see Context) |
 
 ## Coordination
 
@@ -56,15 +65,37 @@ must be private or internal"). So the turnkey UI-configured automation this
 effort's name might suggest is a dead end here; the design has to use a
 different, repo-controlled mechanism.
 
-**The mechanism that IS available regardless of repo visibility: issue
-assignment.** Assigning a GitHub issue to `copilot` (the Copilot cloud agent
-identity) is a separate entry point from "Automations" and works on public
-repos — it's the same flow as manually assigning a backlog issue to Copilot
-from the UI, just done by a script via the REST/GraphQL API or the `gh` CLI
-instead of a person clicking. Copilot cloud agent then researches the repo,
-plans, makes changes in its own ephemeral sandbox, and opens a PR — landing
-through this repo's **existing, unmodified** `dev`-targeting PR flow. No new
-merge path, no new bypass, no elevated trust: the resulting PR is reviewed
+**The primary mechanism chosen: GitHub Agentic Workflows (`gh-aw`,
+`github/gh-aw`).** This is a *different* feature from "Copilot automations"
+above — a `gh` CLI extension that compiles a Markdown+YAML-frontmatter
+workflow definition into an ordinary `.lock.yml` **GitHub Actions**
+workflow. Because it runs as plain Actions rather than through the gated
+Automations UI, **it carries no public/private-repo restriction** (confirmed
+from `gh-aw`'s own setup docs: the only prerequisites are write access,
+Actions enabled, and an AI-engine account — GitHub Copilot itself qualifies).
+Two things make it a materially better fit than issue-assignment alone:
+
+- **"CI failure investigation" is one of its explicitly documented canonical
+  use cases** — this effort isn't bending a general-purpose tool to fit, it's
+  the tool's own intended shape.
+- **Its security model is built-in, not hand-rolled.** Agent jobs are
+  **read-only and sandboxed by default**; any actual write (opening a PR,
+  commenting, editing a file) is buffered through a **`safe-outputs`** stage
+  — a separate, deterministic, permission-scoped step that validates and
+  applies the change, rather than the agent's own sandboxed job holding
+  write credentials directly. That is a stronger, more legible version of
+  this effort's own Phase 3 guardrails (below) than anything hand-built on
+  top of raw issue-assignment would give us for free.
+
+**Fallback mechanism, if `gh-aw` proves unworkable in practice:** assigning a
+GitHub issue to `copilot` (the Copilot cloud agent identity) is a separate
+entry point from "Automations" that also works regardless of repo
+visibility — the same flow as manually assigning a backlog issue to Copilot
+from the UI, done by script via the REST/GraphQL API or `gh` CLI instead of a
+person clicking. Copilot cloud agent then researches the repo, plans, makes
+changes in its own ephemeral sandbox, and opens a PR. Either mechanism lands
+through this repo's **existing, unmodified** `dev`-targeting PR flow: no new
+merge path, no new bypass, no elevated trust — the resulting PR is reviewed
 and merged exactly like any other contributor's.
 
 **Existing patterns this reuses rather than reinvents** (see the facility's
@@ -90,6 +121,16 @@ fixes."
       them) that, on any failure, extracts a compact failure signature: which
       job(s) failed, the specific failing test node id(s) (pytest's own
       `FAILED <path>::<test>` lines), and a short log excerpt.
+- [ ] **Carry a verified commit SHA, never trust `workflow_run.head_sha`
+      alone.** `validate-and-promote.yml` is itself `workflow_run`-triggered,
+      and this repo already had to stop trusting that event's own
+      `head_sha` and instead carry a SHA independently verified via
+      `git merge-base` (see the dev-branch-release-pipeline journal, the
+      exact regression fixed in this session). Phase 1's signature must
+      carry that same already-verified SHA (or resolve/re-verify it from
+      the run ID) through to Phase 2 — never re-derive it naively from a
+      `workflow_run` payload, or a diagnosis can attach to, and a fix PR
+      can target, the wrong commit.
 - [ ] Dedup against existing open issues before filing anything new (search
       by the test node id, not just the plugin name) — reuse the exact
       pattern `health-diagnosis-filer`/`reality-drift-filer` already use
@@ -101,28 +142,136 @@ fixes."
 - [ ] Rate-limit: never file/comment more than once per N hours for the same
       signature (open question: N — start conservative, e.g. 6h).
 
-### Phase 2 — Assign to Copilot cloud agent (the actual "attempt a fix")
+### Phase 2 — Wire the reactive fix attempt (the actual "attempt a fix")
+- [ ] **Gate (blocks the rest of this phase):** resolve the Vision
+      reconciliation noted in the header above — decide whether this
+      mechanism choice belongs under an existing vision or needs its own,
+      and record that decision before any `gh-aw` workflow file is merged.
 - [ ] Once Phase 1's detection+dedup is proven reliable (no false positives,
-      no duplicate-issue spam) over a real observation window, extend the
-      filed/updated issue to **also assign it to `copilot`** via the `gh`
-      CLI (`gh issue edit <#> --add-assignee copilot`) or the equivalent
-      GraphQL mutation — confirmed to work independent of the
-      public-repo Automations restriction above.
-- [ ] Write the issue body as a genuinely well-scoped Copilot cloud agent
-      prompt, not just a human-facing bug report: name the exact failing
-      test(s), the exact log excerpt, and an explicit **instruction to scope
-      the fix narrowly** — fix the test or the minimal source regression it
-      names, never touch `.github/workflows/**` (that's `main-gate`'s
-      workflow-only bootstrap lane, a different mechanism entirely, and an
-      autonomous agent must never have a path that even looks like it could
-      qualify for that exception) and never modify `plugin.json`/
-      `pyproject.toml`/`marketplace.json` version fields by hand (add a
-      changefile per `CONTRIBUTING.md`, exactly like any other contributor).
-- [ ] Confirm (read the actual cloud-agent-authored PR when the first one
-      lands) that it lands as an ordinary PR against `dev`, subject to the
-      same non-blocking Copilot review and the same required checks as
-      every other PR — no special-case merge path introduced anywhere in
-      this effort.
+      no duplicate-issue spam) over a real observation window, author a
+      `gh-aw` agentic workflow (Markdown + YAML frontmatter, compiled via
+      `gh aw compile` into a checked-in `.lock.yml`). **`gh aw compile`
+      owns that `.lock.yml` as its own generated output — do not hand-edit
+      it into `validate-and-promote.yml`'s existing job list; compilation
+      will overwrite it.** Instead, give the agentic workflow explicit
+      `workflow_call` inputs and invoke the compiled lock workflow **as a
+      reusable-workflow job** from `validate-and-promote.yml`, passing
+      Phase 1's detection job outputs (the already-verified SHA, the
+      failure signature, the dedup decision) as explicit `with:` inputs —
+      the same `needs.<job>.outputs` → next-job-input wiring
+      `validate-and-promote.yml` already proves works between its own
+      `gate`/`full`/`promote` jobs, just crossing a reusable-workflow
+      boundary instead of a same-workflow job boundary. This preserves the
+      same-run data flow without a second, independently-triggered
+      workflow to keep in sync. Prompt it with exactly the compact
+      signature Phase 1 already extracts: which job(s) failed, the failing
+      test node id(s), and the log excerpt — not a vague "go fix CI."
+  - [ ] **If a separate `workflow_run`-triggered workflow is used instead
+        (not the preferred shape above): never filter it on
+        `branches: [dev]`.** This repo already documents that
+        `workflow_run` reports the **default branch** as `head_branch`
+        regardless of which branch actually triggered the upstream run
+        (see `validate-and-promote.yml:58-67` and the
+        dev-branch-release-pipeline journal) — a `dev` branch filter here
+        is the known **dead-trigger pattern**: it can silently prevent
+        every run from firing at all. Gate on the carried, independently
+        verified SHA/merge-base ancestry check instead of any branch-name
+        filter.
+  - [ ] **Bootstrap gotcha (this session already hit the identical bug
+        once — see `ci.yml:71-74` and the dev-branch-release-pipeline
+        journal):** a `workflow_run`-triggered workflow is read from the
+        repo's **default branch (`main`)**, not the `dev` commit that adds
+        it. Merging the compiled `.lock.yml` to `dev` alone leaves the
+        trigger inert until `main` also has it. Ship it with the same
+        main-bootstrap companion PR pattern this repo already uses for
+        every other workflow-file change, and verify the compiled lock
+        file is actually present on `main` before relying on a live
+        failure to prove it works.
+  - [ ] **Prompt-injection boundary (the log excerpt is untrusted input):**
+        a failing test or its dependency can print imperative text
+        specifically to steer the agent — `safe-outputs` limits *which
+        operation* the agent can perform (open a PR against `dev`), not
+        *what the patch contains*. Do not rely on the agent to interpret
+        the log excerpt safely by instruction alone. Isolate the untrusted
+        excerpt from the agent's own instructions in the prompt structure
+        `gh-aw` provides for this, and add the machine-enforced check
+        below as the actual backstop — never trust the excerpt-derived
+        content to self-limit.
+  - [ ] **Machine-enforced allowed/protected-path check before PR
+        creation — not prompt text alone.** The "never touch
+        `.github/workflows/**` or version fields" rule two bullets below
+        is currently only policy language; `safe-outputs` constrains the
+        write *operation* (PR-against-`dev`) but not *which files* land in
+        it. Add an independent, code-level check (a dedicated
+        `safe-outputs` step, or a required-status-check job on the
+        resulting PR) that inspects the actual changed-file list and
+        rejects/blocks the PR if it touches any protected path — a
+        compromised or merely confused agent must not be able to propose
+        those files no matter what the prompt says.
+  - [ ] Configure its `safe-outputs` stage narrowly: the only permitted
+        write is **open a pull request against `dev`** (no direct push, no
+        issue/PR comments beyond what's needed, no repo-settings access).
+        This is `gh-aw`'s own enforcement of this effort's Phase 3
+        guardrails, not a substitute for them — keep Phase 3's explicit
+        scope checks too.
+  - [ ] Pin the `gh-aw` extension/action to a specific reviewed version (it
+        is an actively-developed external tool; do not float on `latest`)
+        and set up **Copilot-engine authentication using one of `gh-aw`'s
+        two documented paths** — pick one deliberately, don't assume:
+        (a) **org-billing path:** add `copilot-requests: write` to the
+        workflow's own permissions and let it use the per-run
+        `GITHUB_TOKEN` for inference (requires org Copilot subscription
+        with centralized billing); or (b) **PAT path:** a fine-grained
+        Personal Access Token with **Copilot Requests: Read** under
+        Account permissions, stored as the `COPILOT_GITHUB_TOKEN` repo
+        secret. (a) grants an Actions-token *workflow permission* named
+        `copilot-requests: write`; (b) grants a *PAT account permission*
+        named `Copilot Requests: Read` — these are two different
+        permission systems with similarly-named entries; don't conflate
+        them or assume one satisfies the other. Whichever path is chosen,
+        follow this repo's normal `secrets`-skill vaulting discipline for
+        any token involved, never hardcode it.
+  - [ ] Give the agent job read-only repo access by default (its baseline
+        posture) — only the `safe-outputs` PR-creation stage should hold
+        any write credential at all. **This must be an explicit job-level
+        `permissions:` block on the agent job itself, not implicit.**
+        `validate-and-promote.yml` (the caller invoking this reusable
+        workflow) already grants `contents: write`/`pull-requests: write`
+        at *workflow* scope for its own `promote` job — a reusable-workflow
+        `workflow_call` job inherits the caller's broad token unless the
+        callee explicitly declares its own narrower `permissions:`. Set
+        the agent job's permissions to read-only explicitly in the
+        callee, and verify at review time that no broader permission
+        leaks through from the caller side.
+- [ ] Fallback, only if `gh-aw` proves unworkable in practice (e.g. auth
+      friction, engine limitations): extend the filed/updated issue to
+      **also assign it to `copilot`** via the `gh` CLI (`gh issue edit <#>
+      --add-assignee copilot`) or the equivalent GraphQL mutation, and write
+      the issue body as a genuinely well-scoped Copilot cloud agent prompt
+      (same narrow-scope instructions as below, adapted to issue-body form).
+  - [ ] **The fallback path has no `safe-outputs` stage — the same
+        machine-enforced protected-path check is mandatory here too, not
+        optional.** Issue-assignment gives the Copilot cloud agent no
+        equivalent write-scoping: nothing stops it from opening a PR that
+        touches `.github/workflows/**` or a version manifest beyond the
+        issue body's own prompt text. Add the identical changed-file
+        validation (a required-status-check job, applied uniformly to
+        *any* PR against `dev`, not just `gh-aw`-authored ones) so the
+        fallback path is never weaker than the primary one.
+- [ ] Whichever mechanism is used, the resulting PR must never touch
+      `.github/workflows/**` (that's `main-gate`'s workflow-only bootstrap
+      lane, a different mechanism entirely, and an autonomous agent must
+      never have a path that even looks like it could qualify for that
+      exception) and must never modify `plugin.json`/`pyproject.toml`/
+      `marketplace.json` version fields by hand (add a changefile per
+      `CONTRIBUTING.md`, exactly like any other contributor). **This is
+      enforced by the required-status-check job above, not by prompt text
+      alone, regardless of which Phase 2 mechanism produced the PR.**
+- [ ] Confirm (read the actual agent-authored PR when the first one lands)
+      that it lands as an ordinary PR against `dev`, subject to the same
+      non-blocking Copilot review and the same required checks as every
+      other PR — no special-case merge path introduced anywhere in this
+      effort.
 
 ### Phase 3 — Guardrails and walk-back criteria (do not skip)
 - [ ] **Never auto-merge the resulting PR.** A human or the driving agent
@@ -130,7 +279,11 @@ fixes."
       effort automates the *diagnosis + fix attempt*, never the *acceptance*
       of the fix. This is the one guardrail everything else in this effort
       is downstream of; do not relax it as part of any later phase without
-      an explicit, separately-reasoned decision.
+      an explicit, separately-reasoned decision. (If using `gh-aw`: its
+      `safe-outputs` PR-creation stage already enforces "buffered write,
+      never a direct merge" structurally — this guardrail restates the same
+      constraint at the review-policy level, since `safe-outputs` bounds
+      *what* can be written, not whether it gets merged unreviewed.)
 - [ ] Cap attempts per signature (e.g., after 2 failed cloud-agent attempts
       at the same test, stop assigning and escalate to a plain human-facing
       issue instead of retrying indefinitely).
@@ -182,3 +335,102 @@ _Pending._
   green light to wire live automation without a review pass first. Next
   session: submit this plan for review (this repo's own non-blocking
   Copilot pass, at minimum), then execute Phase 1 only.
+
+### 2026-09-25 — Mechanism correction: GitHub Agentic Workflows (`gh-aw`)
+- Operator asked directly whether "GitHub Agentic Workflow" was available —
+  a distinct feature from the "Copilot automations" this effort's Context
+  originally evaluated and ruled out. Researched `gh-aw` (`github/gh-aw`)
+  directly from its own docs (introduction/architecture, setup/quick-start),
+  not from memory.
+- Confirmed `gh-aw` compiles to ordinary GitHub Actions (`.lock.yml`), so it
+  carries **no public/private-repo restriction** — unlike native
+  Automations. Confirmed "CI failure investigation" is one of its own
+  documented canonical use cases, and its `safe-outputs` mechanism gives
+  read-only-by-default agent sandboxing with writes gated through a
+  separate, scoped validation stage — a stronger built-in version of this
+  effort's own Phase 3 guardrails than issue-assignment alone would give.
+- Promoted `gh-aw` to the **primary** Phase 2 mechanism; kept
+  issue-assignment-to-`copilot` as an explicit fallback if `gh-aw` proves
+  unworkable in practice (auth friction, engine limitations). Updated
+  Participants, Context, and Phase 2/3 accordingly. Still deliberately not
+  implemented — Phase 1 (detection+dedup) remains the next concrete step
+  regardless of which Phase 2 mechanism is eventually used.
+- **Copilot PR review (#3678) caught two real gaps, both addressed:**
+  (1) the identical `workflow_run` default-branch bootstrap bug this
+  session already fixed once in `validate-and-promote.yml` would silently
+  recur here — added as an explicit Phase 2 checklist item citing
+  `ci.yml:71-74`; (2) promoting `gh-aw` to *primary* is a material
+  architecture decision made ahead of any vision reconciliation — checked
+  `harness-guidance` (does not fit; it's about ambient guidance delivery,
+  not fix-mechanism selection), and added an explicit pre-Phase-2 gate so
+  the choice stays provisional/research-backed rather than quietly
+  becoming settled design without that reconciliation ever happening.
+- **Second Copilot review pass caught four more, all addressed:** (1) the
+  same `workflow_run.head_sha`-trust bug this session already fixed once
+  in `promote.yml`/`validate-and-promote.yml` would recur in Phase 1's own
+  signature-carrying if not made explicit — added as a Phase 1 checklist
+  item requiring the already-verified SHA to be carried through, never
+  re-derived naively; (2) the raw log excerpt is untrusted input and could
+  prompt-inject the fix-attempting agent — added an explicit
+  prompt-injection-boundary checklist item, not just a policy sentence;
+  (3) the "never touch workflows/version fields" rule was only prompt
+  text, with no machine-enforced backstop if the agent ignored it — added
+  an explicit machine-enforced allowed/protected-path check as its own
+  checklist item, independent of `safe-outputs`'s write-operation scoping;
+  (4) this effort was missing from `efforts/README.md`'s canonical Active
+  index — added.
+- **Third Copilot review pass caught two more, both addressed:** (1) a
+  `workflow_run`-triggered example still risked the known dead-trigger
+  pattern — `workflow_run` reports the **default branch** as
+  `head_branch` regardless of which branch actually ran, so a
+  `branches: [dev]` filter can silently prevent every run from firing
+  (this repo already documents the identical gotcha in
+  `validate-and-promote.yml`); reworked the checklist to prefer same-job
+  invocation and explicitly prohibit that branch filter as a fallback;
+  (2) the planned Copilot-engine auth conflated two different, similarly-
+  named permission systems (`copilot-requests: write`, an Actions-token
+  *workflow permission* for the org-billing path, vs. `Copilot Requests:
+  Read`, a PAT *account permission* for the token path) — re-verified
+  both against `gh-aw`'s own setup docs (both are genuinely documented,
+  for two different auth paths) and rewrote the checklist to name both
+  paths explicitly rather than picking one ambiguously.
+- **Fourth Copilot review pass caught one more (severity now down to
+  medium, converging):** the "prefer direct invocation from the same
+  job" language was technically imprecise — `workflow_call` is
+  reusable-workflow plumbing at the *caller's job* level, not a step-level
+  mechanism, so it can't inherit in-process state either; reworded to the
+  concrete, already-proven pattern this repo uses in
+  `validate-and-promote.yml` itself: explicit `needs.<job>.outputs`
+  between a same-workflow detection job and fix-attempt job. The one
+  remaining open finding (persistent low-severity "Documentation impact"
+  thread) was replied to in-thread — the PR description has carried that
+  section since the first revision; treating this as addressed rather
+  than iterating further on a stale/non-re-scanned finding.
+- **Fifth Copilot review pass caught two more (doc-impact thread
+  confirmed resolved by the reply above):** (1) `gh aw compile` owns the
+  generated `.lock.yml` as its own output — hand-adding its agent job into
+  `validate-and-promote.yml`'s job list is not implementable, compilation
+  would overwrite it; corrected to the actually-implementable shape: give
+  the compiled workflow `workflow_call` inputs and invoke it as a
+  **reusable-workflow job** from `validate-and-promote.yml`, passing
+  Phase 1's job outputs as explicit inputs; (2) the mandatory
+  machine-enforced protected-path check was only specified for the
+  `gh-aw` path — the issue-assignment fallback has no `safe-outputs`
+  equivalent at all, so it would be strictly weaker; made the same check
+  mandatory for the fallback path too, applied uniformly to any PR
+  against `dev` regardless of which mechanism produced it. Five rounds in,
+  severity is converging toward zero real findings; this is expected
+  scrutiny depth for a not-yet-implemented design doc going through the
+  same non-blocking review every code PR gets in this repo.
+- **Sixth Copilot review pass caught one more, addressed — a reusable-
+  workflow permission-inheritance gap:** a `workflow_call` job inherits
+  its caller's broad workflow-scope permissions (`validate-and-promote.yml`
+  itself grants `contents: write`/`pull-requests: write`) unless the
+  callee explicitly declares its own narrower `permissions:` block; made
+  the agent job's read-only posture an explicit job-level `permissions:`
+  requirement rather than an implicit assumption. Stopping the review
+  loop here: checks have stayed green throughout, findings have converged
+  from high-severity/architecture-level to a single narrow permissions
+  detail, and this repo's Copilot review is explicitly non-blocking —
+  merging now; any further hardening surfaces during actual Phase 1/2
+  implementation instead.
