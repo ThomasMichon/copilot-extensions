@@ -253,11 +253,14 @@ Covers: the ported liveness gate (never disturbing CodeSpace state to
 probe it), the mandatory non-`Available`-state preflight (never reusing
 `sync_codespace_sessions()`'s boot-tolerant defaults as-is), the additive,
 non-lifecycle-transition CLI verb (every one of the seven existing
-destructive-recovery call sites keeps working unchanged), exact
-account-binding via `get_codespace_status_with_account()` with fail-closed
-behavior, the post-capture re-validation and explicitly-acknowledged
-residual snapshot-race risk, and the full test list (liveness, state,
-lease/claim, account-binding, race, and CLI-dispatch coverage).
+destructive-recovery call sites keeps working unchanged), account binding
+that requires an explicit caller-supplied account or a confirmed exact
+per-name binding -- never `get_codespace_status_with_account()`'s
+no-binding fallback scan, which is itself an ambiguous first-match, not an
+authoritative answer -- with fail-closed behavior, the post-capture
+re-validation and explicitly-acknowledged residual snapshot-race risk, and
+the full test list (liveness, state, lease/claim, account-binding, race,
+and CLI-dispatch coverage).
 
 ### Phase 4 — Periodic trigger for CodeSpaces
 (scope set by Phase 1's scheduling-ownership decision)
@@ -304,12 +307,17 @@ lease/claim, account-binding, race, and CLI-dispatch coverage).
       non-`Available`-state regression test (no boot/connect attempt for a
       Shutdown/Starting/unknown-state CodeSpace), the lease/claim-ownership
       owner/non-owner/orphaned-claim/cross-machine-L2 tests, the
-      probe-to-pull race tests (a lock held through the final probe, AND a
-      lock acquired-then-released entirely during the pull, both
-      rejected/retried per Phase 1's decided mitigation, not silently
-      accepted), the account-binding tests (same-name-across-accounts and
-      binding-lookup-failure are deferred, never ambient-fallback), and
-      CLI-dispatch tests.
+      probe-to-pull race tests (a lock held through the final probe MUST
+      always be rejected/retried; a lock acquired-then-released entirely
+      during the pull is rejected/retried **only if** Phase 1 scoped in a
+      mitigation for it -- if Phase 1 instead accepted it as documented
+      residual risk, this case is not required to pass and the test suite
+      must not assert a guarantee the plan explicitly declined to make),
+      the account-binding tests (same-name-across-accounts with no binding
+      is deferred; same-name-across-accounts with an exact binding
+      succeeds pinned to that account; a binding-lookup failure defers;
+      none of these fall through to ambient auth or an ambiguous
+      first-match), and CLI-dispatch tests.
 - [ ] Phase 4: a real leased CodeSpace is captured and published
       end-to-end (mirroring the container-side end-to-end validation
       already proven for `rescue-capture`) — published session readable

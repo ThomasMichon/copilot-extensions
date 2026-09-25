@@ -41,23 +41,31 @@ Back to [README.md](README.md).
       then; every one of them keeps calling `sync_codespace_sessions()`
       exactly as today, unchanged.
 - [ ] **Bind the standalone capture to the exact owning account, never
-      ambient-fallback.** `sync_codespace_sessions()`'s default account
-      resolution (when `account`/`token` are omitted) goes through
-      `account_for_codespace()`'s best-effort path, which can silently fall
-      back to ambient credentials -- safe enough for an interactive
-      delete/finalize call by the owning operator, but not for an
-      unattended periodic/standalone sweep, where a same-named CodeSpace
-      across accounts or a sweep running outside the owning project could
-      pull the wrong venue's sessions. The new capture path must resolve
-      and pass an explicit, validated `account`/`token` (reusing the
-      pinning parameters `sync_codespace_sessions()` already accepts, per
-      its own docstring) via `lifecycle.get_codespace_status_with_account()`
-      -- **not** plain `get_codespace_status()`, which returns only
-      `(exists, state)` with no account -- and **fail closed** (defer the
-      capture, do not fall through to ambient auth) whenever that call
-      cannot resolve an owning account. Tests: same-name-across-accounts
-      and an account-resolution-failure case, both asserting deferral, not
-      an ambient-fallback connection attempt.
+      ambient-fallback and never an ambiguous multi-candidate match.**
+      `sync_codespace_sessions()`'s default account resolution (when
+      `account`/`token` are omitted) goes through `account_for_codespace()`'s
+      best-effort path, which can silently fall back to ambient credentials
+      -- safe enough for an interactive delete/finalize call by the owning
+      operator, but not for an unattended periodic/standalone sweep,
+      where a same-named CodeSpace across accounts or a sweep running
+      outside the owning project could pull the wrong venue's sessions.
+      **`get_codespace_status_with_account()` alone does not fully solve
+      this**: it only returns an unambiguous, authoritative account when an
+      exact per-name binding exists (`account_binding.bound_account(name)`);
+      with no binding at all, it falls through to a generic multi-candidate
+      scan across mapped/bound accounts and returns the FIRST one that
+      confirms existence -- which is exactly the same same-name-across-
+      accounts ambiguity this item exists to close. The new capture path
+      must therefore require **either** an explicit caller-supplied
+      `account`, **or** a confirmed exact per-name binding (never the
+      generic fallback scan's first match) before minting/passing
+      credentials, and **fail closed** (defer the capture) whenever
+      neither is available. Tests: same-name-across-accounts **with no
+      binding** (must defer, not accept the scan's first match),
+      same-name-across-accounts **with a binding** (must succeed, pinned to
+      the bound account), and an account-resolution-failure case -- all
+      three asserting deferral or exact-match, never an ambient-fallback or
+      ambiguous-match connection attempt.
 - [ ] **Re-validate liveness after the pull, not only before it.** A single
       preflight probe immediately before `_pull_tar_bytes` does not close
       the window where a Copilot process acquires `inuse.*.lock` during or
