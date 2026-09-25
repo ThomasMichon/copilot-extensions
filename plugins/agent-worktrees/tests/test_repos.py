@@ -1144,3 +1144,137 @@ def test_sync_repo_surfaces_git_ops_fetch_error(home: Path, tmp_path: Path):
     state, detail = repos.sync_repo(e, plat="windows")
     assert state == "error"
     assert detail
+
+
+def _write_inrepo_default_branch(path: Path, branch: str, *, commit: bool = False) -> None:
+    """Write the legacy in-repo config form ``<path>/.agent-worktrees/config.yaml``
+    declaring ``default_branch``, matching how copilot-extensions itself
+    declares its own contribution branch. ``commit=True`` also stages and
+    commits it (matching reality: this file is tracked repo content, not a
+    local override -- an untracked copy would otherwise make ``sync_repo``
+    see a dirty tree and skip before ever reaching the branch logic)."""
+    cfg_dir = path / ".agent-worktrees"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    (cfg_dir / "config.yaml").write_text(
+        f"default_branch: {branch}\n", encoding="utf-8"
+    )
+    if commit:
+        _git(path, "add", "-A")
+        _git(path, "commit", "-m", "declare default_branch")
+
+
+def test_inrepo_declared_default_branch_reads_legacy_config(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_inrepo_default_branch(repo, "dev")
+    assert repos.inrepo_declared_default_branch(str(repo)) == "dev"
+
+
+def test_inrepo_declared_default_branch_empty_when_undeclared(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    assert repos.inrepo_declared_default_branch(str(repo)) == ""
+
+
+def test_inrepo_declared_default_branch_never_raises_on_bad_path(tmp_path: Path):
+    assert repos.inrepo_declared_default_branch(str(tmp_path / "nonexistent")) == ""
+
+
+def test_sync_repo_self_heals_branch_drift_to_inrepo_declared_default(
+    home: Path, tmp_path: Path,
+):
+    """A checkout left on the wrong branch (e.g. GitHub's advertised HEAD,
+    `main`, when the repo actually declares `dev` as its contribution
+    branch) is corrected back onto the declared branch instead of being
+    permanently skipped -- the registry's stale `default_branch` must not
+    keep winning over the repo's own live declaration."""
+    upstream = tmp_path / "upstream"
+    _init_repo(upstream, branch="main")
+    _write_inrepo_default_branch(upstream, "dev", commit=True)
+    _git(upstream, "checkout", "-b", "dev")
+    (upstream / "DEV.md").write_text("dev work\n")
+    _git(upstream, "add", "-A")
+    _git(upstream, "commit", "-m", "dev commit")
+
+    clone = tmp_path / "clone"
+    subprocess.run(["git", "clone", str(upstream), str(clone)],
+                    check=True, capture_output=True, text=True)
+    # Clone checks out `main` (the advertised HEAD) by default; simulate the
+    # stale-anchor scenario by leaving it there while the repo itself
+    # declares `dev` (already tracked content from the commit above).
+    _git(clone, "checkout", "main")
+
+    # Advance the upstream `dev` past the clone so the fetch has real work.
+    _git(upstream, "checkout", "dev")
+    (upstream / "MORE.md").write_text("more dev work\n")
+    _git(upstream, "add", "-A")
+    _git(upstream, "commit", "-m", "second dev commit")
+
+    e = repos.RepoEntry(name="repo-e", repo_class="worktree",
+                        default_branch="main",  # stale registry value
+                        paths={"windows": str(clone)})
+    state, detail = repos.sync_repo(e, plat="windows")
+    assert state == "synced"
+    assert detail == "dev"
+    current = subprocess.run(["git", "-C", str(clone), "branch", "--show-current"],
+                             capture_output=True, text=True).stdout.strip()
+    assert current == "dev"
+    head = subprocess.run(["git", "-C", str(clone), "log", "-1", "--format=%s"],
+                          capture_output=True, text=True).stdout.strip()
+    assert head == "second dev commit"
+
+
+def test_sync_repo_reports_checkout_failure_when_declared_branch_unreachable(
+    home: Path, tmp_path: Path,
+):
+    """When the declared branch can't actually be checked out (e.g. it was
+    never fetched/doesn't exist), sync_repo must report a clear skip reason
+    rather than raising or silently proceeding on the wrong branch."""
+    work = tmp_path / "repo-f"
+    _init_repo(work, branch="main")
+    _write_inrepo_default_branch(work, "nonexistent-branch", commit=True)
+    e = repos.RepoEntry(name="repo-f", repo_class="singleton",
+                        default_branch="main",
+                        paths={"windows": str(work)})
+    state, detail = repos.sync_repo(e, plat="windows")
+    assert state == "skipped"
+    assert "nonexistent-branch" in detail
+
+
+def test_add_repo_cli_auto_derives_default_branch_from_inrepo_config(
+    home: Path, tmp_path: Path,
+):
+    """``repos add`` without --default-branch should pick up a repo's own
+    declared default_branch instead of leaving it empty (and requiring the
+    operator to duplicate a value the repo already states)."""
+    from agent_worktrees import repos_cli
+
+    repo = tmp_path / "already-cloned"
+    repo.mkdir()
+    _write_inrepo_default_branch(repo, "dev")
+
+    rc = repos_cli.cmd_repos_dispatch(["add", "some-repo", str(repo)])
+    assert rc == 0
+    entry = repos.find_repo("some-repo")
+    assert entry is not None
+    assert entry.default_branch == "dev"
+
+
+def test_add_repo_cli_explicit_flag_wins_over_inrepo_declaration(
+    home: Path, tmp_path: Path,
+):
+    """An explicit --default-branch always overrides auto-derivation."""
+    from agent_worktrees import repos_cli
+
+    repo = tmp_path / "already-cloned-2"
+    repo.mkdir()
+    _write_inrepo_default_branch(repo, "dev")
+
+    rc = repos_cli.cmd_repos_dispatch(
+        ["add", "some-other-repo", str(repo), "--default-branch", "release"]
+    )
+    assert rc == 0
+    entry = repos.find_repo("some-other-repo")
+    assert entry is not None
+    assert entry.default_branch == "release"
+
