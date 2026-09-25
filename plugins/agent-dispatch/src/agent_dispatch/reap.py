@@ -199,6 +199,26 @@ def is_live_coordinator_pid(
     return any(p.pid == pid for p in procs)
 
 
+def _confirmed_gone_or_reused(
+    pid: int, *, list_procs: Callable[[], list[CoordProc]] = iter_coordinator_processes,
+) -> bool:
+    """True only when enumeration *succeeded* and confirms ``pid`` is no
+    longer our coordinator (already gone, or the OS recycled the number to
+    an unrelated process). ``False`` -- meaning "do not skip escalation" --
+    covers both "it's still our coordinator" and an indeterminate outcome
+    (enumeration itself failed, e.g. a transient ``ps``/CIM error): a failed
+    probe must never be read as proof of a safe-to-skip pid reuse, or a
+    flaky enumeration call would silently spare a genuine straggler and
+    recreate the very false-"reaped" result this module exists to prevent.
+    """
+    try:
+        procs = list_procs()
+    except Exception:  # best-effort; indeterminate, not a confirmed mismatch
+        log.debug("coordinator enumeration failed", exc_info=True)
+        return False
+    return not any(p.pid == pid for p in procs)
+
+
 def select_superseded_pids(
     procs: list[CoordProc], keep_pids: set[int],
 ) -> list[int]:
@@ -225,7 +245,7 @@ def terminate_pid(
     kill_grace_seconds: float | None = None,
     sleep: Callable[[float], None] = time.sleep,
     pid_alive: Callable[[int], bool] = _pid_alive,
-    confirm_identity: Callable[[int], bool] | None = is_live_coordinator_pid,
+    confirmed_gone_or_reused: Callable[[int], bool] | None = _confirmed_gone_or_reused,
     is_windows: bool = os.name == "nt",
 ) -> bool:
     """Terminate ``pid`` and confirm it is actually gone before reporting so.
@@ -234,12 +254,12 @@ def terminate_pid(
     unconditional, immediate kill, so there is nothing to escalate. On POSIX,
     ``SIGTERM`` is cooperative: a stuck process (wedged, or blocked in
     uninterruptible IO) can simply never act on it. This waits up to
-    ``grace_seconds`` confirming real death via ``pid_alive``, then -- only
-    after re-validating (via ``confirm_identity``) that ``pid`` is *still the
-    same coordinator process* and not an unrelated one that has since reused
-    the number -- escalates to ``SIGKILL``, then confirms *that* death too
-    within ``kill_grace_seconds`` (defaults to ``grace_seconds``). A process
-    that survives even SIGKILL (stuck in uninterruptible IO) is reported as a
+    ``grace_seconds`` confirming real death via ``pid_alive``, then -- unless
+    ``confirmed_gone_or_reused`` reports the pid was definitively recycled to
+    an unrelated process in the meantime (an *indeterminate* probe never
+    counts) -- escalates to ``SIGKILL``, then confirms *that* death too within
+    ``kill_grace_seconds`` (defaults to ``grace_seconds``). A process that
+    survives even SIGKILL (stuck in uninterruptible IO) is reported as a
     failure rather than a false "reaped". ``True`` only on confirmed death (or
     an already-gone process); ``False`` when a signal could not be delivered,
     or the process is still alive after every step above.
@@ -270,14 +290,14 @@ def terminate_pid(
     if not pid_alive(pid):
         return True
 
-    if confirm_identity is not None and not confirm_identity(pid):
-        # The original pid is gone -- pid_alive found *something* alive at
-        # that number, but it is no longer our coordinator, meaning the OS
+    if confirmed_gone_or_reused is not None and confirmed_gone_or_reused(pid):
+        # pid_alive found *something* alive at that number, but enumeration
+        # positively confirms it is no longer our coordinator -- the OS
         # already recycled it to an unrelated process in the tiny window
         # since our last check. Escalating here would SIGKILL a stranger;
         # the process we actually meant to terminate is already gone.
         log.debug(
-            "pid=%s no longer identifies as our coordinator -- treating as "
+            "pid=%s confirmed no longer our coordinator -- treating as "
             "already gone rather than escalating against a reused pid", pid,
         )
         return True
@@ -326,6 +346,16 @@ def reap_superseded_coordinators(
     (the reaper never terminates the sole coordinator when it cannot anchor on an
     active). Best-effort and fail-soft: returns a :class:`ReapResult`, never
     raises.
+
+    Candidates are terminated **concurrently** (a small thread pool), not one
+    at a time: ``terminate`` (``terminate_pid`` by default) can itself take up
+    to a ``grace_seconds`` + ``kill_grace_seconds`` wait per pid to confirm
+    real death before escalating, and this reap pass runs synchronously on a
+    deploy's critical path -- serially summing that wait across several
+    simultaneously-wedged stragglers would turn an accumulation of zombies
+    into an effectively hung deploy. Running them in parallel bounds the
+    whole pass to roughly one candidate's worst-case wait, regardless of how
+    many stragglers are found.
     """
     keep = {int(p) for p in keep_pids if p}
     result = ReapResult(skipped_keep=sorted(keep))
@@ -338,8 +368,15 @@ def reap_superseded_coordinators(
     except Exception as exc:  # best-effort: enumeration failure is non-fatal
         result.errors.append(f"enumeration failed: {exc}")
         return result
-    for pid in select_superseded_pids(procs, keep):
-        if terminate(pid):
+    pids = select_superseded_pids(procs, keep)
+    if not pids:
+        return result
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=len(pids)) as pool:
+        outcomes = dict(zip(pids, pool.map(terminate, pids), strict=True))
+    for pid in pids:
+        if outcomes[pid]:
             result.reaped.append(pid)
         else:
             result.errors.append(f"terminate pid={pid} failed")

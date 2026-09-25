@@ -9,6 +9,7 @@ import pytest
 from agent_dispatch.reap import (
     CoordProc,
     ReapResult,
+    _confirmed_gone_or_reused,
     is_coordinator_cmdline,
     is_live_coordinator_pid,
     parse_ps_output,
@@ -111,8 +112,10 @@ def test_reap_terminates_all_but_kept():
         list_procs=_fixed_list([100, 200, 300, 999]),
         terminate=lambda pid: killed.append(pid) or True,
     )
-    assert killed == [200, 300]
-    assert res.reaped == [200, 300]
+    # Candidates run concurrently now (bounded-cleanup fix), so side-effect
+    # order across threads isn't guaranteed -- only the resulting sets are.
+    assert sorted(killed) == [200, 300]
+    assert res.reaped == [200, 300]  # result ordering is still deterministic
     assert res.ok
 
 
@@ -212,7 +215,7 @@ def test_terminate_pid_escalates_to_sigkill_when_stuck(monkeypatch):
         kill_grace_seconds=1.0,
         sleep=lambda _s: None,
         pid_alive=_pid_alive,
-        confirm_identity=lambda pid: True,  # still our coordinator, just stuck
+        confirmed_gone_or_reused=lambda pid: False,  # still our coordinator, just stuck
         is_windows=False,
     )
     assert ok is True
@@ -230,11 +233,44 @@ def test_terminate_pid_never_escalates_against_a_reused_pid(monkeypatch):
         poll_seconds=1.0,
         sleep=lambda _s: None,
         pid_alive=lambda pid: True,  # *something* alive at that number
-        confirm_identity=lambda pid: False,  # ...but it's not our coordinator
+        confirmed_gone_or_reused=lambda pid: True,  # ...but it's not our coordinator
         is_windows=False,
     )
     assert ok is True
     assert sent == [signal.SIGTERM]  # SIGKILL never sent to the stranger
+
+
+def test_confirmed_gone_or_reused_treats_enumeration_failure_as_indeterminate():
+    """An enumeration failure must never read as a confirmed pid reuse."""
+
+    def _boom():
+        raise RuntimeError("ps exploded")
+
+    assert _confirmed_gone_or_reused(123, list_procs=_boom) is False
+
+
+def test_terminate_pid_escalates_despite_indeterminate_enumeration(monkeypatch):
+    """A transient enumeration failure must not spare a genuine straggler."""
+    if not hasattr(signal, "SIGKILL"):
+        pytest.skip("SIGKILL is POSIX-only; no distinct escalation signal here")
+    sent: list[int] = []
+    monkeypatch.setattr("os.kill", lambda pid, sig: sent.append(sig))
+
+    def _boom(pid):
+        raise RuntimeError("ps exploded")
+
+    ok = terminate_pid(
+        123,
+        grace_seconds=1.0,
+        poll_seconds=1.0,
+        kill_grace_seconds=1.0,
+        sleep=lambda _s: None,
+        pid_alive=lambda pid: True,
+        confirmed_gone_or_reused=lambda pid: _confirmed_gone_or_reused(pid, list_procs=_boom),
+        is_windows=False,
+    )
+    assert ok is True
+    assert sent == [signal.SIGTERM, _SIGKILL]  # escalated despite the failure
 
 
 def test_terminate_pid_survives_sigkill_reports_failure(monkeypatch):
@@ -249,7 +285,7 @@ def test_terminate_pid_survives_sigkill_reports_failure(monkeypatch):
         kill_grace_seconds=1.0,
         sleep=lambda _s: None,
         pid_alive=lambda pid: True,  # never reports dead, even post-SIGKILL
-        confirm_identity=lambda pid: True,
+        confirmed_gone_or_reused=lambda pid: False,
         is_windows=False,
     )
     assert ok is False
@@ -289,7 +325,7 @@ def test_terminate_pid_sigkill_failure_reports_false(monkeypatch):
         poll_seconds=0.1,
         sleep=lambda _s: None,
         pid_alive=lambda pid: True,
-        confirm_identity=lambda pid: True,
+        confirmed_gone_or_reused=lambda pid: False,
         is_windows=False,
     )
     assert ok is False
