@@ -148,6 +148,35 @@ def resolve_model_config(override: dict[str, Any] | None = None) -> dict[str, st
         return {}
 
 
+def model_copilot_args(existing: list[str] | None = None) -> list[str]:
+    """Copilot args that start a detached (interactive) venue session on the
+    caller's own model, reasoning effort, and context tier.
+
+    Same resolution as :func:`build_model_flags` (explicit env, then host
+    ``~/.copilot/settings.json``; ``AGENT_CODESPACES_MODEL_PROPAGATE=0`` opts
+    out), emitted as single ``--flag=value`` tokens for the launch's
+    ``--copilot-arg`` list. A flag the caller already passed in ``existing``
+    wins and is not duplicated. Degrade-safe: never raises.
+    """
+    try:
+        resolved = resolve_model_config()
+    except Exception:
+        return []
+    given = {str(arg).split("=", 1)[0] for arg in existing or []}
+    out: list[str] = []
+    for key, flag in (
+        ("model", "--model"),
+        ("effort", "--reasoning-effort"),
+        ("context", "--context"),
+    ):
+        value = resolved.get(key)
+        if value and flag not in given:
+            out.append(f"{flag}={value}")
+    if out:
+        log.info("Propagating model flags to detached session: %s", " ".join(out))
+    return out
+
+
 def build_model_flags(cfg: dict[str, Any] | None = None) -> str:
     """Build a shell-safe suffix for ``copilot --acp`` model flags.
 
