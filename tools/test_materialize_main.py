@@ -110,6 +110,122 @@ def test_find_pointers_returns_sorted_paths(tmp_path: Path):
     assert [p.parent.parent.parent.name for p in found] == ["alpha-plugin", "zeta-plugin"]
 
 
+def _file_pointer(root: Path, plugin: str, rel: str, *, source: str) -> Path:
+    """Create a vendored *file* pointer stub at ``plugins/<plugin>/<rel>``."""
+    d = root / "plugins" / plugin
+    path = d / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"<!-- VENDOR_POINTER: source={source} kind=file -->\n\n"
+        "This file is a vendored pointer; see the canonical source above.\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _canonical_file(root: Path, rel: str, *, content: str) -> Path:
+    path = root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def test_materialize_expands_file_pointer_from_canonical(tmp_path: Path):
+    root = tmp_path / "repo"
+    _canonical_file(root, "docs/patterns/thing.md", content="# Thing\n\nreal content\n")
+    pointer = _file_pointer(root, "agent-bridge", "docs/thing.md",
+                             source="docs/patterns/thing.md")
+
+    log = mm.materialize(root, canonical_root=root)
+
+    assert any("(file pointer)" in line and line.startswith("OK") for line in log)
+    assert pointer.read_text() == "# Thing\n\nreal content\n"
+
+
+def test_materialize_skips_file_pointer_with_missing_canonical(tmp_path: Path):
+    root = tmp_path / "repo"
+    pointer = _file_pointer(root, "agent-bridge", "docs/ghost.md",
+                             source="docs/patterns/ghost.md")
+
+    log = mm.materialize(root, canonical_root=root)
+    assert any("SKIP" in line and "(file pointer)" in line and "not found" in line
+               for line in log)
+    # Left untouched -- still the stub, since nothing was expanded.
+    assert pointer.read_text().startswith("<!-- VENDOR_POINTER:")
+
+
+def test_materialize_refuses_absolute_source_path(tmp_path: Path):
+    root = tmp_path / "repo"
+    secret = tmp_path / "outside-repo-secret.txt"
+    secret.write_text("do not leak\n", encoding="utf-8")
+    pointer = _file_pointer(root, "agent-bridge", "docs/evil.md", source=str(secret))
+
+    log = mm.materialize(root, canonical_root=root)
+    assert any("SKIP" in line and "escapes the canonical root" in line for line in log)
+    assert pointer.read_text().startswith("<!-- VENDOR_POINTER:")
+
+
+def test_materialize_refuses_traversal_source_path(tmp_path: Path):
+    root = tmp_path / "repo"
+    secret = tmp_path / "outside-repo-secret.txt"
+    secret.write_text("do not leak\n", encoding="utf-8")
+    pointer = _file_pointer(root, "agent-bridge", "docs/evil.md",
+                             source="../outside-repo-secret.txt")
+
+    log = mm.materialize(root, canonical_root=root)
+    assert any("SKIP" in line and "escapes the canonical root" in line for line in log)
+    assert pointer.read_text().startswith("<!-- VENDOR_POINTER:")
+
+
+def test_resolve_within_allows_legitimate_nested_source(tmp_path: Path):
+    root = tmp_path / "repo"
+    _canonical_file(root, "docs/patterns/deep/thing.md", content="ok\n")
+    resolved = mm._resolve_within(root, "docs/patterns/deep/thing.md")
+    assert resolved == (root / "docs/patterns/deep/thing.md").resolve()
+
+
+def test_materialize_expands_multiple_file_pointers_for_same_doc(tmp_path: Path):
+    root = tmp_path / "repo"
+    _canonical_file(root, "docs/patterns/shared.md", content="shared doc\n")
+    pointers = [
+        _file_pointer(root, plugin, "docs/shared.md", source="docs/patterns/shared.md")
+        for plugin in ("agent-bridge", "agent-worktrees", "agent-dispatch")
+    ]
+
+    log = mm.materialize(root, canonical_root=root)
+    assert sum(1 for line in log if line.startswith("OK") and "(file pointer)" in line) == 3
+    for pointer in pointers:
+        assert pointer.read_text() == "shared doc\n"
+
+
+def test_find_file_pointers_ignores_non_pointer_files(tmp_path: Path):
+    root = tmp_path / "repo"
+    _file_pointer(root, "agent-bridge", "docs/real-pointer.md",
+                   source="docs/patterns/thing.md")
+    (root / "plugins/agent-bridge/docs").mkdir(parents=True, exist_ok=True)
+    (root / "plugins/agent-bridge/docs/plain.md").write_text("# Not a pointer\n",
+                                                              encoding="utf-8")
+
+    found = mm.find_file_pointers(root)
+    assert [p.name for p in found] == ["real-pointer.md"]
+
+
+def test_build_materializes_file_pointers_end_to_end(tmp_path: Path):
+    source = tmp_path / "source"
+    _canonical_file(source, "docs/patterns/thing.md", content="canonical\n")
+    _file_pointer(source, "agent-bridge", "docs/thing.md", source="docs/patterns/thing.md")
+
+    dest = tmp_path / "dest"
+    log = mm.build(dest, source_root=source)
+
+    assert any("(file pointer)" in line and line.startswith("OK") for line in log)
+    assert (dest / "plugins/agent-bridge/docs/thing.md").read_text() == "canonical\n"
+    # The source checkout itself must never be mutated by build().
+    assert (source / "plugins/agent-bridge/docs/thing.md").read_text().startswith(
+        "<!-- VENDOR_POINTER:"
+    )
+
+
 def test_main_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
     source = tmp_path / "source"
     _canonical_lib(source, "zdd", version="0.1.0-dev1", content="x\n")
