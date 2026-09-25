@@ -649,6 +649,10 @@ def cmd_stop(args: argparse.Namespace, *, ssh_session: Callable[..., int]) -> in
             rc = ssh_session(
                 _ssh_namespace(args, f"bash -lc {shlex.quote(script)}", timeout=120.0),
                 result_sink=sink,
+                # --keep-claim: the caller still owns the box (finalize / retire
+                # next), so a clean checkout must not settle the claim at-rest,
+                # which would release it to the next borrower mid-close-out.
+                settle_on_disconnect=not getattr(args, "keep_claim", False),
             )
         except ContextRefused as exc:
             print(f"[BLOCKED] CodeSpace installation context refused: {exc}", file=sys.stderr)

@@ -111,6 +111,13 @@ def add_copilot_subparser(sub) -> None:
              "The CodeSpace itself and the conversation state are kept.",
     )
     copilot_parser.add_argument(
+        "--keep-claim", dest="keep_claim", action="store_true",
+        help="With --stop: keep this task's claim on the CodeSpace (a clean "
+             "checkout otherwise settles it at-rest, releasing the box to the "
+             "next borrower). Use it when close-out continues, e.g. `finalize`, "
+             "then release the claim last.",
+    )
+    copilot_parser.add_argument(
         "--seed-file", dest="seed_file", default=None, metavar="PATH",
         help="Read the seed from PATH ('-' = stdin) instead of --seed; use for "
              "long or multi-line prompts.",
@@ -402,6 +409,9 @@ def cmd_copilot(
         if getattr(args, dest, None) and not getattr(args, "detach", False):
             print(f"[FAIL] {flag} requires --detach", file=sys.stderr)
             return 2
+    if getattr(args, "keep_claim", False) and not getattr(args, "stop", False):
+        print("[FAIL] --keep-claim requires --stop", file=sys.stderr)
+        return 2
     if getattr(args, "stop", False) or getattr(args, "detach", False):
         from . import copilot_detach
 
