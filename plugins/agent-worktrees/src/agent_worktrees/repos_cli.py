@@ -255,6 +255,12 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         rclass = _opt("--class") or _opt("--type") or rclass
         remote = _opt("--remote") or remote
         default_branch = _opt("--default-branch") or default_branch
+        if not default_branch:
+            # The repo may already declare its own default_branch via its
+            # in-repo .agent-worktrees/config.yaml (e.g. a contribution
+            # branch distinct from GitHub's advertised HEAD) -- prefer that
+            # over requiring the operator to know and pass it by hand.
+            default_branch = repos.inrepo_declared_default_branch(path)
         contributing = _opt("--contributing") or contributing
         account = _opt("--account") or ""
         raw_tags = _opt("--tags")
