@@ -1,0 +1,9 @@
+{
+  "comment": "Fix Windows-only WSL-bash test resolution for issue #3461 validation",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

@@ -49,11 +49,23 @@ def _resolve_bash() -> str:
     from a Windows-style argv path (POSIX shells don't treat `\\` as a path
     separator), mangling `D:\\Src\\...\\script.sh` into a nonexistent
     filename. Prefer the real Git Bash location, which accepts Windows
-    paths natively.
+    paths natively. The bare fallback also excludes the known WSL launcher
+    locations (System32 and the WindowsApps Store alias) so it never
+    silently selects one when Git Bash is absent.
     """
     git_bash = Path(r"C:\Program Files\Git\bin\bash.exe")
     if git_bash.is_file():
         return str(git_bash)
+    path = os.environ.get("PATH")
+    if path:
+        filtered = os.pathsep.join(
+            part for part in path.split(os.pathsep)
+            if "windowsapps" not in part.lower()
+            and part.rstrip("\\").lower() != r"c:\windows\system32"
+        )
+        found = shutil.which("bash", path=filtered)
+        if found:
+            return found
     return "bash"
 
 
