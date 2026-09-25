@@ -486,6 +486,26 @@ def _age_secs(w):
         return 1 << 40
 
 
+def _last_active_secs(w):
+    """Seconds since the worktree was last GENUINELY used, for the Recent
+    section's sort order (#3307 Phase 3) -- distinct from ``_age_secs``
+    (creation/status-transition age, still used for the displayed AGE
+    column). Prefers ``last_resumed_at`` (set on every real resume); a
+    worktree that has never been resumed since creation falls back to the
+    record's own already-computed ``age_secs`` (this function receives
+    NORMALIZED records -- ``norm()`` never emits a bare ``started_at`` key,
+    only the derived ``age``/``age_secs`` pair). A long-running but
+    recently-resumed worktree therefore sorts by when it was last touched,
+    not by how long ago it was first created."""
+    ts = w.get("last_resumed_at")
+    if not ts:
+        return w.get("age_secs", 1 << 40)
+    try:
+        return (NOW - _dt.datetime.fromisoformat(ts)).total_seconds()
+    except ValueError:
+        return w.get("age_secs", 1 << 40)
+
+
 def _bucket_from_raw(w):
     """Cleanup bucket for a raw worktree dict.
 
@@ -616,10 +636,15 @@ def _sessionless(w):
 
 
 #: (label, key_fn) pairs the Worktrees list's `s` cycles through (#2228
-#: Phase 4). "age" (default, each section's own most-recent-first order) is
-#: index 0 so cycling always starts from the familiar order.
+#: Phase 4). "age" (default, index 0 so cycling always starts from the
+#: familiar order) is every section's own most-recently-used-first order
+#: (``_last_active_secs``, #3307 Phase 3) -- NOT raw creation age, since
+#: ``current_list_visible()`` applies this key unconditionally to every
+#: render (not just an operator-engaged "/" cycle), so it IS the section's
+#: at-rest order, and ``bucket()``'s own internal per-section sort is
+#: otherwise immediately overridden by it.
 WT_SORT_KEYS = [
-    ("age", lambda w: w.get("age_secs", 0)),
+    ("age", _last_active_secs),
     ("title", lambda w: (w.get("title") or "").casefold()),
     ("state", lambda w: w.get("state") or ""),
 ]
@@ -774,6 +799,8 @@ def norm(
         "session_count": w.get("session_count"),
         "sessionless": _sessionless(w),
         "pr": _pr(w),
+        # #3307 Phase 3: raw pass-through of the worktree's last real resume
+        "last_resumed_at": w.get("last_resumed_at"),
         "cleanup_bucket": _bucket_from_raw(w),
         "ff_eligible": _ff_from_raw(w),
         "attached": bool(w.get("mux_attached")),
@@ -896,16 +923,21 @@ def annotate_pairs(rows):
 
 
 def bucket(wts):
-    """Split into (active, recent, completed), each most-recent-first.
+    """Split into (active, recent, completed).
 
     Sections key off the canonical *state*, not the tracking status:
 
     * **active**    -- in session (state ``ACTIVE``: a live Copilot/mux session
-      owns the worktree). NOT merely "status active / not finalized".
+      owns the worktree). NOT merely "status active / not finalized". Sorted
+      newest-started-first (``age_secs``).
     * **completed** -- finalized or merged (state ``FINAL`` or ``MERGED`` --
       see ``_state``'s Phase 5 closure-descriptor split), regardless of age.
+      Sorted newest-completed-first (``age_secs``).
     * **recent**    -- everything else (WIP / UNUSED / CONVO / DIRTY / ORPHAN /
-      GONE): not in session and not final.
+      GONE): not in session and not final. Sorted **most-recently-used**
+      first (``_last_active_secs``, #3307 Phase 3) rather than by creation
+      age, so a long-running worktree the operator just resumed doesn't sink
+      below one that is merely newer but untouched since it was created.
     """
     active = sorted((w for w in wts if w["state"] == "ACTIVE"),
                     key=lambda w: w["age_secs"])
@@ -913,5 +945,6 @@ def bucket(wts):
                        key=lambda w: w["age_secs"])
     recent = sorted(
         (w for w in wts if w["state"] not in ("ACTIVE", "FINAL", "MERGED")),
-        key=lambda w: w["age_secs"])
+        key=_last_active_secs)
     return active, recent, completed
+
