@@ -246,6 +246,29 @@ def test_staleness_is_tracked_against_local_receipt_time_not_observed_at(monkeyp
     assert cache.live_session_names() == {"wt-1"}  # fresh: received just now
 
 
+def test_apply_observation_ignores_a_caller_supplied_received_at():
+    """Copilot review finding: the wire payload is untrusted, but
+    ``_normalize_entry`` previously copied any caller-supplied
+    ``received_at`` verbatim -- a future timestamp could keep a live mapping
+    fresh indefinitely, while a past one made it immediately stale,
+    contradicting the stated local-receipt freshness contract.
+    ``apply_observation`` (the untrusted wire path) must always stamp its
+    own receipt time, ignoring anything the caller supplies for this
+    internal-only field."""
+    cache = mux_link.ManagedMuxCache()
+    far_future = time.time() + 10_000_000
+    cache.apply_observation(_obs(received_at=far_future))
+    entry = cache.get("wt-1")
+    assert entry["received_at"] != far_future
+    assert abs(entry["received_at"] - time.time()) < 5  # stamped with real receipt time
+
+    far_past = time.time() - 10_000_000
+    cache.apply_observation(_obs(revision=2, received_at=far_past))
+    entry2 = cache.get("wt-1")
+    assert entry2["received_at"] != far_past
+    assert cache.live_session_names() == {"wt-1"}  # not incorrectly marked stale
+
+
 # -- persistence -----------------------------------------------------------
 
 

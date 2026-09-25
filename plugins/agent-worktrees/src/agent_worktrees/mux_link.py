@@ -135,7 +135,7 @@ class ManagedMuxCache:
             if not isinstance(worktree_id, str) or not isinstance(entry, dict):
                 continue
             try:
-                normalized = _normalize_entry(entry)
+                normalized = _normalize_entry(entry, trust_received_at=True)
             except ValueError:
                 continue
             # Reject a snapshot whose JSON key disagrees with its own
@@ -228,7 +228,7 @@ class ManagedMuxCache:
             )
 
 
-def _normalize_entry(payload: dict) -> dict:
+def _normalize_entry(payload: dict, *, trust_received_at: bool = False) -> dict:
     """Validate + normalize one observation payload into a stored entry
     shape, matching the documented ``mux-live-v1`` payload in
     ``phase-3b-substatus-monitor-relocation.md``'s "Message contracts"
@@ -237,11 +237,19 @@ def _normalize_entry(payload: dict) -> dict:
     ``{pane_id, role, live}`` objects --, ``attached_clients``, ``live``,
     ``mapping_revision``, ``observed_at``). Raises ``ValueError`` for
     anything structurally malformed. Shared by
-    :meth:`ManagedMuxCache.apply_observation` (an untrusted wire payload)
-    and :meth:`ManagedMuxCache._warm_load` (a previously-persisted,
-    already-normalized record -- re-validated anyway since a corrupt/
-    tampered on-disk snapshot must not be trusted blindly, mirroring
-    ``worktree_status_daemon.validated_refresh``'s own precedent)."""
+    :meth:`ManagedMuxCache.apply_observation` (an untrusted wire payload --
+    ``trust_received_at=False``, the default: any caller-supplied
+    ``received_at`` is ignored and replaced with this process's own receipt
+    time, since trusting it would let a future timestamp keep a mapping
+    artificially fresh forever, or a past one make it immediately stale,
+    defeating the local-receipt freshness contract) and
+    :meth:`ManagedMuxCache._warm_load` (a previously-persisted,
+    already-normalized record -- passes ``trust_received_at=True`` so a
+    warm-loaded mapping's original receipt time carries forward instead of
+    being reset to "now" on every restart; still re-validated for structure
+    since a corrupt/tampered on-disk snapshot must not be trusted blindly,
+    mirroring ``worktree_status_daemon.validated_refresh``'s own
+    precedent)."""
     for field in _REQUIRED_STR_FIELDS:
         value = payload.get(field)
         if not isinstance(value, str) or not value:
@@ -272,12 +280,14 @@ def _normalize_entry(payload: dict) -> dict:
         observed_at = datetime.now(timezone.utc).isoformat()
     # Local-receipt timestamp for this cache's own freshness/staleness
     # window -- deliberately independent of the caller-supplied
-    # `observed_at` (see `MAPPING_STALE_AFTER_SECONDS`'s own docstring). A
-    # warm-loaded record carries its original `received_at` forward rather
-    # than resetting it, so a genuinely stale mapping stays stale across a
-    # restart instead of looking artificially fresh again.
-    received_at = payload.get("received_at")
-    if not isinstance(received_at, (int, float)) or isinstance(received_at, bool):
+    # `observed_at`. Never trusted from an untrusted wire payload (see this
+    # function's own docstring); only a warm-loaded, already-normalized
+    # snapshot record carries its original value forward.
+    if trust_received_at:
+        received_at = payload.get("received_at")
+        if not isinstance(received_at, (int, float)) or isinstance(received_at, bool):
+            received_at = time.time()
+    else:
         received_at = time.time()
 
     return {
