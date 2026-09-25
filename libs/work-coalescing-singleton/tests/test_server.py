@@ -295,32 +295,46 @@ def test_start_itself_closes_a_partially_started_server_before_reraising():
     assert not server._serve_thread.is_alive()
 
 
+@pytest.mark.filterwarnings(
+    "ignore::pytest.PytestUnhandledThreadExceptionWarning"
+)
 def test_close_does_not_call_shutdown_before_serve_forever_is_confirmed_running(monkeypatch):
     """Copilot review finding: ``Thread.start()`` returning successfully
     only proves the OS thread object was created, not that
-    ``serve_forever()`` has actually begun executing yet. ``close()`` must
-    gate ``self._server.shutdown()`` on ``_serve_running`` (set only once
-    the thread's target callable truly starts), never on ``_serve_started``
-    (thread-creation) alone -- otherwise a ``close()`` racing an in-flight
-    ``start()`` could call ``shutdown()`` before the loop is running."""
+    ``serve_forever()`` has actually begun executing yet -- and even once
+    the thread's target callable is running, ``serve_forever()`` itself
+    hasn't necessarily entered its accept loop. ``close()`` must gate
+    ``self._server.shutdown()`` on ``_serve_running`` (set only from
+    ``_Server.service_actions()``, a hook ``serve_forever()`` itself calls
+    on every accept-loop iteration -- the earliest point that genuinely
+    proves the loop entered), never on ``_serve_started`` (thread-creation)
+    alone -- otherwise a ``close()`` racing an in-flight ``start()`` could
+    call ``shutdown()`` before the loop is truly running.
+
+    This test deliberately drives the pathological "loop never confirms
+    running" path documented in ``close()``'s own docstring: since
+    ``_serve_running`` is never set here, ``close()`` correctly skips
+    ``shutdown()`` and never signals the real (still-running)
+    ``serve_forever()`` loop to stop. That loop's own next
+    ``selector.select()`` against the now-closed socket then raises an
+    ``OSError`` and the daemon thread dies noisily but harmlessly --
+    exactly the documented fallback for a thread that "does eventually
+    run" after ``close()`` gave up waiting. Suppressing the resulting
+    ``PytestUnhandledThreadExceptionWarning`` here is deliberate, not a
+    swallowed real failure: it is intrinsic to this specific edge case,
+    not present in the ordinary start/close path (see the sibling
+    ``test_close_shuts_down_promptly_...`` test)."""
     server = _make_server()
     gate = threading.Event()
-    real_run = server._run_serve_forever
+    real_service_actions = server._server.service_actions
 
-    def _delayed_run():
+    def _delayed_service_actions():
         gate.wait(timeout=5)  # simulates a real scheduling delay
         if server._closed:
-            return  # close() already tore the socket down; nothing left to serve
-        real_run()
+            return
+        real_service_actions()
 
-    monkeypatch.setattr(server, "_run_serve_forever", _delayed_run)
-    # Replace the pre-built serve thread with one bound to the delayed
-    # target (the original was already bound to the un-patched callable at
-    # __init__ time), then start it for real -- the OS thread genuinely
-    # exists and is alive, it just hasn't reached `serve_forever()` yet.
-    server._serve_thread = threading.Thread(
-        target=server._run_serve_forever, name="work-coalescing-singleton", daemon=True
-    )
+    monkeypatch.setattr(server._server, "service_actions", _delayed_service_actions)
     server._serve_thread.start()
     server._serve_started = True
     assert not server._serve_running.is_set()
@@ -334,6 +348,11 @@ def test_close_does_not_call_shutdown_before_serve_forever_is_confirmed_running(
         )
     finally:
         gate.set()  # release the delayed thread so it can finish cleanly
+        # Bound how long the now-orphaned real serve thread (see this
+        # test's own docstring) lingers before this test function returns,
+        # so its resulting exception is attributed here rather than
+        # surfacing asynchronously during a later, unrelated test.
+        server._serve_thread.join(timeout=1)
 
 
 def test_close_shuts_down_promptly_once_serve_forever_is_confirmed_running():
@@ -344,7 +363,10 @@ def test_close_shuts_down_promptly_once_serve_forever_is_confirmed_running():
     server = _make_server()
     server.start()
     try:
-        assert server._serve_running.is_set()
+        # service_actions() (which sets this) only runs after
+        # serve_forever()'s first selector.select(poll_interval) returns --
+        # wait for it rather than asserting instantly.
+        assert server._serve_running.wait(timeout=2.0)
     finally:
         started = time.time()
         server.close()

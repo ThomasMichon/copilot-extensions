@@ -51,6 +51,17 @@ class _Server(socketserver.ThreadingTCPServer):
         self.owner = owner
         super().__init__(address, handler_cls)
 
+    def service_actions(self) -> None:
+        # Called by `serve_forever()` itself on every accept-loop iteration
+        # -- the earliest point that genuinely proves the loop has entered
+        # and is actually polling, unlike merely setting a flag from inside
+        # the thread's target callable *before* calling `serve_forever()`
+        # (Copilot review finding: that still leaves a -- much narrower,
+        # but real -- window where a concurrent `close()` could observe
+        # "running" and call `shutdown()` before the loop truly started).
+        # Repeated calls are harmless (`Event.set()` is idempotent).
+        self.owner._serve_running.set()
+
 
 class _Handler(socketserver.StreamRequestHandler):
     def handle(self) -> None:
@@ -156,19 +167,26 @@ class CoalescingServer:
         self._reap_started = False
         # `Thread.start()` returning successfully only proves the OS thread
         # object was created -- it does not prove the target callable has
-        # actually begun executing yet (a real scheduling gap, however
-        # short) (Copilot review finding). `close()` must not call
-        # `self._server.shutdown()` -- which blocks waiting for
-        # `serve_forever()`'s own exit -- until `serve_forever()` is
-        # *confirmed* running, never merely inferred from `.start()`
-        # succeeding. `_run_serve_forever` sets this the instant the
-        # thread's target callable actually begins.
+        # actually begun executing yet, let alone that `serve_forever()`'s
+        # own accept loop has truly started polling (Copilot review
+        # finding). `close()` must not call `self._server.shutdown()` --
+        # which blocks waiting for `serve_forever()`'s own exit -- until
+        # that loop is *confirmed* running. Set only from
+        # `_Server.service_actions()`, a hook `serve_forever()` itself
+        # calls on every accept-loop iteration -- the earliest point that
+        # genuinely proves the loop entered, not merely that the thread's
+        # target callable was invoked.
         self._serve_running = threading.Event()
         self._reap_stop = threading.Event()
 
         self._server = _Server(("127.0.0.1", 0), _Handler, owner=self)
         self._serve_thread = threading.Thread(
-            target=self._run_serve_forever,
+            # A short poll_interval (vs. serve_forever's 0.5s default) so
+            # service_actions() -- and therefore _serve_running -- fires
+            # promptly after the loop starts, keeping close()'s own wait
+            # for confirmed readiness fast on the ordinary path.
+            target=self._server.serve_forever,
+            args=(0.05,),
             name="work-coalescing-singleton",
             daemon=True,
         )
@@ -177,10 +195,6 @@ class CoalescingServer:
             name="work-coalescing-singleton-reaper",
             daemon=True,
         )
-
-    def _run_serve_forever(self) -> None:
-        self._serve_running.set()
-        self._server.serve_forever()
 
     # -- lifecycle -------------------------------------------------------
 
@@ -240,6 +254,13 @@ class CoalescingServer:
         # (never blocks process exit) if it does eventually run.
         if self._serve_started and self._serve_running.wait(timeout=_CLOSE_SERVE_WAIT_S):
             self._server.shutdown()
+            # `shutdown()` only guarantees `serve_forever()`'s own while
+            # loop noticed the request and its `finally` block ran -- join
+            # the thread here too (bounded) so `server_close()` below never
+            # races an iteration still mid-flight inside the selector
+            # (observed as a benign but noisy "operation on something that
+            # is not a socket" `OSError` on a short poll_interval).
+            self._serve_thread.join(timeout=2)
         self._server.server_close()
         if self._serve_started:
             self._serve_thread.join(timeout=2)

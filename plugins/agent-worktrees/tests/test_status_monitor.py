@@ -342,6 +342,40 @@ def test_sweep_without_managed_mux_cache_observes_only_the_direct_scan(tmp_path,
     assert observed == [{"wt-a"}]  # unchanged when managed_mux_cache is None
 
 
+def test_sweep_observes_managed_mux_cache_even_with_no_mux_binary(tmp_path):
+    """Copilot review finding: the Manager observation cache exists
+    independently of this resident process's own direct mux-binary
+    discovery -- a Manager-reported live session must still reach
+    ``catalog_observer`` when ``mux_bin`` is absent (e.g. neither
+    ``psmux`` nor ``tmux`` is installed on this host), not only when a
+    direct mux scan is also possible."""
+    from agent_worktrees import mux_link
+
+    cache = mux_link.ManagedMuxCache()
+    cache.apply_observation(
+        {
+            "project": "proj",
+            "worktree_id": "wt-manager-owned",
+            "mux_session": "wt-manager-owned",
+            "mapping_revision": 1,
+            "live": True,
+        }
+    )
+    observed: list[set[str]] = []
+
+    served = m._monitor_sweep(
+        None,  # no mux_bin discovered on this host
+        "T",
+        "P",
+        set(),
+        catalog_observer=observed.append,
+        managed_mux_cache=cache,
+    )
+
+    assert served == 0  # no direct-scan serving happens without a mux binary
+    assert observed == [{"wt-manager-owned"}]
+
+
 def test_sweep_ctx_rendered_once(tmp_path, monkeypatch):
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)

@@ -4976,7 +4976,12 @@ def _monitor_sweep(
     reported live session is observed by ``session_catalog`` even on this
     tick's direct scan alone -- but it never adds an entry to ``served`` and
     never changes which sessions this sweep writes ``set-option`` for. That
-    writer-ownership cutover is a later, separate step.
+    writer-ownership cutover is a later, separate step. This observation is
+    independent of whether this host has a locally-discoverable mux binary
+    (Copilot review finding): a Manager-reported live session must still
+    reach ``catalog_observer`` even when ``mux_bin`` is absent, since the
+    Manager observation endpoint and cache exist independently of this
+    resident process's own direct mux-binary discovery.
     """
     # Stage D: resolve deferred names via _self_override (cluster-free owners).
     from . import list_cli as _list_cli
@@ -4997,15 +5002,13 @@ def _monitor_sweep(
     reg_dir = _monitor_registry_dir()
     registry = _read_monitor_registry(reg_dir)
     served: list[tuple[str, str]] = []
+    managed_live = managed_mux_cache.live_session_names() if managed_mux_cache is not None else set()
     if mux_bin:
         live = _monitor_list_sessions(mux_bin)
         if live is None:
             return -1
         if catalog_observer is not None:
-            observed = set(live)
-            if managed_mux_cache is not None:
-                observed |= managed_mux_cache.live_session_names()
-            catalog_observer(observed)
+            catalog_observer(set(live) | managed_live)
         live_wt = {n for n in live if n.startswith("wt-")}
         stale_sessions = [s for s in registry if s not in live_wt]
         if stale_sessions:
@@ -5031,6 +5034,12 @@ def _monitor_sweep(
                             published.pop(key, None)
                 incarnations[sess] = incarnation
         served = [(s, p) for s, p in registry.items() if s in live_wt and p]
+    elif catalog_observer is not None and managed_live:
+        # No locally-discoverable mux binary on this host, but the Manager
+        # observation cache may still have live sessions to report -- that
+        # endpoint exists independently of this process's own direct mux
+        # discovery.
+        catalog_observer(managed_live)
     if session_projects is not None:
         registered_paths: set[str] = set()
         for path in registry.values():

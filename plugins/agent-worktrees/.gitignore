@@ -28,3 +28,4 @@ uv.lock
 
 pytest_out*.log
 pytest_err*.log
+pytest_final*.log
