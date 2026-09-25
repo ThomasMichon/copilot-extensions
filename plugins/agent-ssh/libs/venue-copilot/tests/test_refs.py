@@ -76,5 +76,5 @@ def test_deliver_note_sends_over_stdin():
 
     assert venue_refs.deliver_note("sid-1", "see /x/y.har", run=run)
     argv, stdin = calls[0]
-    assert argv[1:] == ["send", "sid-1", "--prompt-file", "-", "--no-wait"]
+    assert argv[1:] == ["send", "sid-1", "--prompt-file", "-", "--no-wait", "--steer"]
     assert stdin == "see /x/y.har"
