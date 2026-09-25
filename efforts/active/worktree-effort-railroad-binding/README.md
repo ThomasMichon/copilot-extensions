@@ -10,7 +10,7 @@
   §Concepts/Current-slice derivation, §Features/railroad-nudge-at-drift,
   §Behaviors/journal-is-ground-truth
 - **Umbrella issue:** #3581
-- **Sub-issues:** #3581 · #3582 · #3583
+- **Sub-issues:** #3582 · #3583
 
 ## Guiding Intent
 
@@ -23,13 +23,13 @@ plan the way a long or context-pressured session tends to today.
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|--------------|
-| lambda-core | Authors and drives all three phases | `copilot-extensions.worktrees/lambda-core-wsl-20260924-231629-a05a` |
+| Driving agent | Authors and drives all three phases | The effort's active worktree |
 
 ## Coordination
 
 - **Topology:** independent per-phase PRs (each phase is independently
   reviewable and shippable).
-- **Host (owns PRs):** lambda-core.
+- **Host (owns PRs):** Driving agent.
 - **Delegates:** none currently.
 - **Handoff:** n/a (single participant today).
 

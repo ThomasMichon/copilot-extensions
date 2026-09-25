@@ -10,7 +10,7 @@
   §Features/single-authorized-head-claimant, §Features/duplicate-effort-discovery,
   §Behaviors/yield-clears-before-claim-arrives
 - **Umbrella issue:** #3584
-- **Sub-issues:** #3584 · #3585
+- **Sub-issues:** #3585
 
 ## Guiding Intent
 
@@ -24,12 +24,12 @@ driving the same objective elsewhere in the fleet.
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|--------------|
-| lambda-core | Authors and drives both phases | `copilot-extensions.worktrees/lambda-core-wsl-20260924-231629-a05a` |
+| Driving agent | Authors and drives both phases | The effort's active worktree |
 
 ## Coordination
 
 - **Topology:** independent per-phase PRs.
-- **Host (owns PRs):** lambda-core.
+- **Host (owns PRs):** Driving agent.
 - **Delegates:** none currently.
 - **Handoff:** n/a (single participant today).
 
@@ -61,7 +61,8 @@ objective can be a worktree other than the one nearest at hand.
 ## Request
 
 > "Still present session-tracking bugs between agent-worktrees and
-> content-handoff mean that when I do resume worktrees, a non-current session
+> context-handoff [sic, corrected from the original "content-handoff"] mean
+> that when I do resume worktrees, a non-current session
 > resumes in the worktree... This makes me reluctant to resume old worktrees
 > that did handoffs, because the process to get back and going is very
 > tedious."
