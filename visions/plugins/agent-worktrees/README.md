@@ -5,7 +5,7 @@
   obligations, disposition, and source-control completion.
 - **Scope:** leaf (concrete component; child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-09-23
+- **Last revised:** 2026-09-24
 - **Reality docs:** the agent-worktrees plugin `docs/`
 - **Supersedes / superseded by:** none
 
@@ -107,6 +107,31 @@ relationships, succession lineage, claims, obligations, and completion state.
 The worktree is not itself a process. It is the durable vessel to which one or
 more execution legs may bind over time.
 
+### Title and naming
+
+A worktree's displayed title is durable identity, not a transcript of "what I'm
+doing right now." When a worktree is bound to a canonical effort, the title is
+**anchored to that effort's slug** for the binding's whole lifetime — a short
+machine-relatable form (`slug:phase`) or a friendly-prose equivalent ("Improve
+worktree tracking: Phase 4, slice A") — rather than a fresh, disconnected
+headline each time an agent happens to describe its current activity. An
+unbound worktree still carries a durable title, but nothing anchors it against
+drift the way an effort slug does. This directly counters the churn where a
+title mutates dramatically across a handoff because the successor summarized
+only its own moment instead of the durable objective: a bound worktree's title
+changes when the effort's phase changes, not when a new session merely
+rephrases the same phase.
+
+### Discovery for duplicate-effort detection
+
+Before starting work that could already be underway elsewhere, an agent (or the
+operator, through the agent) can cheaply enumerate the fleet's current worktrees
+and their bound objectives to check for an existing claimant. Where a chain of
+worktrees or repos relates to one activity (a driving worktree plus the repos it
+touches), discovery surfaces the **root claimant** — the worktree actually
+driving the effort — not merely the nearest or most-recently-touched member of
+the chain, which may be a passive participant rather than an agent of its own.
+
 ### Execution legs and observations
 
 An execution leg is an externally hosted session acting for a worktree. The
@@ -129,6 +154,19 @@ Handoff records predecessor and successor relationships independently of the
 mechanism that launched either session. Moving the head is a deliberate,
 fenced state transition; a host reporting that it started a process is not by
 itself proof of takeover.
+
+Claiming the head is an **affirmative, exclusively-owned act**, never an
+incidental side effect of an unrelated hook running first. Exactly one
+mechanism — the session-start binding step — is authorized to seat a new head,
+and only when the head slot is genuinely vacant; every other hook or extension
+point observes the current head rather than competing to set it. A session
+that must yield the head (a handoff, a deliberate stand-down) makes that
+vacancy unambiguous — recording itself as the most recent predecessor and
+clearing the head slot atomically — so the next session-start has a clean,
+uncontested claim rather than racing a predecessor that never let go. A
+resuming session therefore always lands as the *rightful* current leg, never
+as a second, uncoordinated voice re-entering a conversation its predecessor
+already concluded.
 
 ### Claims, leases, and obligations
 
@@ -228,6 +266,27 @@ interaction mechanics.
 
 The current execution head and reciprocal predecessor/successor lineage are
 durable, explicit, and independent of process timestamps or UI attachment.
+
+### single-authorized-head-claimant
+
+Exactly one code path is authorized to seat a worktree's head, gated on the
+slot being vacant; a session-start integration always resolves the head
+question before any other hook or extension can observe or act on it, so no
+secondary mechanism can ever claim, overwrite, or race a live head.
+
+### effort-anchored-title
+
+A worktree bound to a canonical effort carries a title anchored to that
+effort's slug and current phase, stable across handoffs and resumed sessions,
+rather than a headline that reflects only the most recent session's framing of
+"what we're doing now."
+
+### duplicate-effort-discovery
+
+A cheap, ambient path exists to check the fleet for a worktree already driving
+a given effort or objective before starting parallel, duplicative work, and it
+resolves to the **root claimant** in a related chain rather than a passive
+downstream member.
 
 ### asserted-disposition
 
@@ -373,6 +432,15 @@ evidence supplied by a host, but never silently creates responsibility.
 A newly launched process or newly observed session does not become the worktree
 head until the governing lifecycle transition acknowledges it. Failed or
 duplicate launches therefore cannot steal authority.
+
+### yield-clears-before-claim-arrives
+
+A session standing down as head (a handoff, a deliberate conclusion) records
+its own predecessor status and vacates the head slot as one atomic step, before
+any successor is expected to claim it. A successor's session-start never has to
+guess whether a predecessor "really" finished — the slot's vacancy is the
+proof — and a predecessor that crashes without yielding leaves an unambiguous,
+recoverable non-vacant state rather than a false claim of succession.
 
 ### derive-dont-duplicate
 
