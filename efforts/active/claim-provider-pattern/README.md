@@ -198,6 +198,13 @@ design note for the rebinding work:
   over the `shutil.which("agent-worktrees")` PATH fallback for this
   cross-plugin call path.
 
+### Bug sweep — linked open bugs (2026-09-24)
+
+_Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
+
+- [ ] **#2631** agent-worktrees: three traceability gaps -- unclear effort-focus validation errors, silent activity-log worktree-id resolution, no retroactive claims annotation
+  - Names claims annotation traceability directly -- this is exactly the claim-provider-pattern's scope.
+
 ## Validation Plan
 
 - [ ] Unit tests for the claim-provider registry primitive (manifest
