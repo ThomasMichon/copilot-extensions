@@ -130,6 +130,19 @@ objective can be a worktree other than the one nearest at hand.
       — and permit exactly that launch through, while still refusing any
       *other* new-session attempt against a live head. Break-glass remains
       for the case with no such token.
+- [ ] **Fence the token to single consumption.** A further review round
+      correctly caught that recognizing a valid token is not by itself
+      enough: `context-handoff-lifecycle` already anticipates that two
+      independent launch attempts can observe the *same* persisted baton
+      (e.g. a genuine retry racing a still-in-flight original launch), and
+      leans on task-backed consumption writing a durable checkpoint before
+      a one-time consume to keep that safe (its own "same-successor retry
+      resumes from checkpoint instead of replaying a consumed task"
+      invariant). The creation-guard's token check must compose with that
+      same atomic single-consumption fence — admitting exactly one launch
+      attempt through per token, resolving a genuine retry to the *same*
+      successor rather than spawning a second competing one — not merely
+      pattern-match "does this look like a valid token."
 - [ ] Reconcile with #912 and #3000's overlapping scope so the three don't
       land contradictory mechanisms.
 
@@ -161,6 +174,11 @@ objective can be a worktree other than the one nearest at hand.
       authenticated persisted token) is let through the same guard without
       needing break-glass, while an unrelated ad-hoc new-session attempt
       against the same live head is still refused.
+- [ ] Simulate two near-simultaneous legitimate launch attempts presenting
+      the *same* handoff token (a genuine retry racing the still-in-flight
+      original): exactly one successor results, the other resolves to the
+      same successor rather than spawning a second competing one, and the
+      token cannot be replayed to admit a third.
 - [ ] A fleet with an existing worktree bound to effort X surfaces that
       worktree (and, where a chain is involved, the root claimant) when a
       second agent checks before starting work on X.
@@ -235,6 +253,19 @@ repo's `pr-self-merge` profile before Phase 1 implementation begins._
   authoritative claim, no competing overwrite path -- leaving which
   mechanism enforces it (session-start hook or otherwise) to this effort's
   own Plan rather than the vision.
+
+### 2026-09-25 — Fenced the handoff token to single consumption
+- Review caught that recognizing a valid handoff token isn't by itself
+  enough: `context-handoff-lifecycle` already anticipates two independent
+  launch attempts observing the same persisted baton (a genuine retry
+  racing a still-in-flight original) and relies on task-backed consumption
+  writing a durable checkpoint before a one-time consume to stay safe.
+  Added an explicit Plan item requiring the creation-guard's token check to
+  compose with that same atomic single-consumption fence -- admitting
+  exactly one launch per token and resolving a genuine retry to the same
+  successor, not a competing second one -- plus a matching Validation Plan
+  bullet simulating two near-simultaneous legitimate launch attempts.
+
 
 
 

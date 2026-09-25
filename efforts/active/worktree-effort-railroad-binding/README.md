@@ -112,9 +112,23 @@ fresh):
       unchanged (rule (d) above).
 
 ### Phase 2 — Auto-derived current slice + mid-session railroad nudge (#3583)
+- [ ] **Establish one canonical source of truth for the binding's slice.**
+      `ActiveEffort.slice` is persisted and already consumed by
+      `inspect_effort()`, `orientation()`, binding validation, and
+      `duplicate_binding()`; deriving a *different* value only for the
+      orientation/nudge path (without updating the persisted field) would
+      leave those other consumers stale and create two disagreeing notions
+      of "current slice." Specify the atomic update/revalidation semantics
+      before implementing: when the derived value (first unchecked
+      checklist item) differs from the persisted `--slice`, the persisted
+      binding is revalidated and updated to match at a defined point (e.g.
+      on each orientation/nudge computation, or on the operation that
+      changed the checklist) — never left to silently diverge.
 - [ ] Extend `effort_focus.py` to derive "current slice" from the first
       unchecked Plan/Validation Plan item, falling back to the declared
-      `--slice` string only when the effort has no checklist structure yet.
+      `--slice` string only when the effort has no checklist structure yet,
+      and writing the derived value back per the canonicalization rule
+      above.
 - [ ] Add a `postToolUse` hook (new script, or an extension of
       `nudge_status.py`'s drift-counter pattern) that periodically injects an
       `additionalContext` reminder naming the bound effort, its current
@@ -153,6 +167,11 @@ fresh):
 - [ ] A test effort with a partially-checked Plan is bound; `orientation()`
       (or its Phase 2 successor) reports the first unchecked item as the
       current slice without requiring a manual `--slice` re-bind.
+- [ ] After a checklist item is ticked, the persisted `ActiveEffort.slice`
+      itself updates to match the newly-derived value (not merely the
+      orientation/nudge display) — confirmed by reading the binding through
+      `inspect_effort()`/`duplicate_binding()`, not only through
+      `orientation()`.
 - [ ] A long simulated session (tool-call count past threshold) receives
       exactly one railroad nudge per drift window, matching
       `nudge_status.py`'s existing no-spam guarantee.
@@ -196,5 +215,17 @@ repo's `pr-self-merge` profile before Phase 1 implementation begins._
   bound) could end up unanchored despite the binding. Added explicit
   precedence/migration rules for bind, write-while-bound, re-bind/phase
   transition, and unbind, plus a matching Validation Plan bullet.
+
+### 2026-09-25 — Canonicalize the derived slice against the persisted binding
+- Review caught that Phase 2's auto-derivation, as written, only fed the
+  orientation/nudge display -- but `ActiveEffort.slice` is already the
+  persisted field `inspect_effort()`, binding validation, and
+  `duplicate_binding()` all read, so a derived value that never wrote back
+  would leave those consumers looking at a stale slice. Added an explicit
+  canonicalization requirement (one source of truth, atomic
+  update/revalidation semantics) as its own Plan item ahead of the
+  derivation work, plus a Validation Plan bullet confirming the persisted
+  field itself updates, not merely the display.
+
 
 
