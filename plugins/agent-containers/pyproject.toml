@@ -20,6 +20,7 @@ dependencies = [
     "agent-procutil",
     "agent-venue-copilot",
     "agent-zdd",
+    "agent-session-liveness-probe",
 ]
 
 [tool.uv.sources]
@@ -41,6 +42,10 @@ agent-venue-copilot = { path = "libs/venue-copilot" }
 # `copilot` verb's daemon-port reverse forward. Shared with agent-bridge/
 # agent-codespaces.
 agent-zdd = { path = "libs/zdd" }
+# Transport-agnostic Copilot CLI session-liveness probe (inuse.*.lock +
+# /proc backstop, module ``session_liveness_probe``). Shared with
+# agent-codespaces.
+agent-session-liveness-probe = { path = "libs/session-liveness-probe" }
 
 [project.scripts]
 agent-containers = "agent_containers.__main__:main"

@@ -332,7 +332,12 @@ recycled** venue — so it can be **mined later for logging and usage telemetry*
 The provider's job is to make the capture **comprehensive** (nothing an ephemeral
 venue produced is silently lost to teardown) and hand it to the fabric's memory
 layer; that layer owns compiling and analyzing it (see Non-Goals). Ephemerality
-of the machine never means loss of the record.
+of the machine never means loss of the record. A peer, on-demand,
+non-destructive capture target — pulling session-state while a CodeSpace stays
+leased and running, gated by the same active-session liveness probe used
+before destructive teardown so a live turn is never snapshotted mid-write —
+sits alongside teardown/recycle capture; whether/how it runs periodically is
+downstream consumer configuration, not something this plugin schedules itself.
 
 ### discoverable-relay-endpoint
 The credential relay is reached at an endpoint **discovered from the service's
