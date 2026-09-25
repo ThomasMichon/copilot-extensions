@@ -233,7 +233,7 @@ with submitting this effort's plan as a PR (this repo's automated-review
 gate) before Phase 2 starts.
 
 ### Phase 2 — Extract the shared liveness-probe as a vendored lib
-- [ ] Extract the portable liveness-probe logic from
+- [x] Extract the portable liveness-probe logic from
       `agent_containers.replacement` into the vendored lib decided in
       Phase 1, with the container-specific `docker exec` call factored out
       behind a small injected transport callable per Phase 1's
@@ -254,12 +254,36 @@ gate) before Phase 2 starts.
       `[tool.uv.sources]` entries for the new lib too (both entries, per
       `CONTRIBUTING.md`'s vendoring guidance and this effort's own Context
       note -- this is not codespaces-only wiring).
-- [ ] Vendor the identical copy into `plugins/agent-codespaces/libs/`, wire
+
+      **Done:** new lib `libs/session-liveness-probe/` (distribution
+      `agent-session-liveness-probe`, module `session_liveness_probe`)
+      owns `build_probe_script()` + `parse_probe_output()`. Chose the thin
+      compatibility wrapper: `replacement.py` still defines a real,
+      patchable `probe_session_liveness()` and keeps calling its own
+      module-level `_docker` (imported from `.lifecycle`, unchanged) --
+      it now calls the vendored `build_probe_script()`/`parse_probe_output()`
+      instead of inlining the script/parser, and re-exports `SessionLiveness`
+      from the vendored lib so `replacement.SessionLiveness(...)` keeps
+      working. Zero test edits needed; full `agent-containers` suite passes
+      (`tools/run-plugin-tests.py agent-containers --reinstall`: 495
+      passed, 4 skipped, 1 pre-existing unrelated WSL-environment failure in
+      `test_worktrees_peer.py` confirmed present on `origin/dev` too).
+      `pyproject.toml` wired with both `[project].dependencies` and
+      `[tool.uv.sources]` entries.
+- [x] Vendor the identical copy into `plugins/agent-codespaces/libs/`, wire
       its `pyproject.toml`'s **both** `[project].dependencies` entry and
       matching `[tool.uv.sources]` entry (per Context's clarification --
       `[tool.uv.sources]` alone does not install the package into a
       standalone marketplace environment), and confirm
       `tools/check-vendored-libs-sync.py` passes.
+
+      **Done:** byte-identical copy vendored into
+      `plugins/agent-codespaces/libs/session-liveness-probe/`, both
+      `pyproject.toml` entries wired, `check-vendored-libs-sync.py` passes
+      (11 shared libs in sync), and a real `--reinstall` build of
+      `agent-codespaces` (its own full suite, 1353 passed, 13 skipped)
+      confirms the fresh-install path -- not just the sync guard -- actually
+      resolves the new dependency.
 
 ### Phase 3 — CodeSpaces: non-destructive capture verb + liveness gate
 
@@ -371,3 +395,31 @@ _Pending._
   pulling). Operator directed carving this effort to align the two
   behaviors and share what's genuinely common via the repo's existing
   vendored-lib mechanism.
+
+### 2026-09-25 — Phase 1 + Phase 2 (handoff pickup)
+- Continued from a cross-repo handoff after the effort's Plan merged as
+  `#3643`. Recorded every open Phase 1 decision in `phase-1-design.md`
+  (transport seam confirmed, plain vendored-copy shape chosen, publish
+  paths kept separate, lease/claim defer-on-any-hold decision across all
+  four holder shapes, snapshot-race default reconfirmed, lock-widening
+  decision recorded for Phase 3, `docs/patterns/README.md` invariants
+  #1/#3/#4 confirmed satisfied, scheduling ownership confirmed
+  consumer-owned after checking `run_owner_daemon` is per-connection
+  idle-shutdown, not an always-on sweep) and reconciled both visions
+  (`agent-containers` `rescue-before-destructive-replacement`,
+  `agent-codespaces` `telemetry-grade-session-capture`).
+- Extracted `libs/session-liveness-probe/` (new vendored lib,
+  `agent-session-liveness-probe` / `session_liveness_probe`) from
+  `agent_containers.replacement.probe_session_liveness`, splitting the
+  transport (`docker exec`, stays in `replacement.py`) from the pure
+  script + parser (now shared). Kept `replacement.py`'s existing
+  monkeypatchable seam intact -- zero test edits. Vendored the
+  byte-identical copy into `agent-codespaces`, wired both plugins'
+  `pyproject.toml` dependency + `uv.sources` entries, added a changefile
+  (patch/patch). Validated: both plugins' full suites green via
+  `tools/run-plugin-tests.py --reinstall` (agent-containers 495 passed/4
+  skipped/1 pre-existing unrelated failure; agent-codespaces 1353
+  passed/13 skipped), `check-vendored-libs-sync.py` OK (11 libs), `ruff
+  check` clean on all touched/new files.
+- Next: open the Phase 1+2 PR, drive it through review/merge, then start
+  Phase 3 (CodeSpaces capture verb + liveness gate) in a fresh PR.
