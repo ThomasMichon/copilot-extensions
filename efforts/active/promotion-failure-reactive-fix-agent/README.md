@@ -150,14 +150,21 @@ fixes."
 - [ ] Once Phase 1's detection+dedup is proven reliable (no false positives,
       no duplicate-issue spam) over a real observation window, author a
       `gh-aw` agentic workflow (Markdown + YAML frontmatter, compiled via
-      `gh aw compile` into a checked-in `.lock.yml`). **Prefer invoking it
-      directly from the same job as Phase 1's detection step** (a
-      `workflow_call`/direct-invocation shape, not a separate
-      `workflow_run`-triggered workflow) so it inherits the already-verified
-      SHA and dedup decision in-process, with no second trigger to get
-      wrong. Prompt it with exactly the compact signature Phase 1 already
-      extracts: which job(s) failed, the failing test node id(s), and the
-      log excerpt — not a vague "go fix CI."
+      `gh aw compile` into a checked-in `.lock.yml`). **Prefer a same-workflow
+      job**, not a separate `workflow_run`-triggered workflow: add the
+      compiled agent job to `validate-and-promote.yml` itself (or a
+      workflow it directly triggers via `needs`), passing the already-
+      verified SHA and dedup decision as explicit **job outputs** from
+      Phase 1's detection job into Phase 2's job inputs (the exact
+      `needs.<job>.outputs` pattern `validate-and-promote.yml` already uses
+      between its own `gate`/`full`/`promote` jobs) — never assume in-
+      process state carries across job boundaries on its own; a
+      `workflow_call` invocation is reusable-workflow plumbing at the
+      caller's job level and cannot inherit a step's in-process state
+      either, so it doesn't solve this without the same explicit
+      output/input wiring. Prompt it with exactly the compact signature
+      Phase 1 already extracts: which job(s) failed, the failing test
+      node id(s), and the log excerpt — not a vague "go fix CI."
   - [ ] **If a separate `workflow_run`-triggered workflow is used instead
         (not the preferred shape above): never filter it on
         `branches: [dev]`.** This repo already documents that
@@ -366,3 +373,15 @@ _Pending._
   both against `gh-aw`'s own setup docs (both are genuinely documented,
   for two different auth paths) and rewrote the checklist to name both
   paths explicitly rather than picking one ambiguously.
+- **Fourth Copilot review pass caught one more (severity now down to
+  medium, converging):** the "prefer direct invocation from the same
+  job" language was technically imprecise — `workflow_call` is
+  reusable-workflow plumbing at the *caller's job* level, not a step-level
+  mechanism, so it can't inherit in-process state either; reworded to the
+  concrete, already-proven pattern this repo uses in
+  `validate-and-promote.yml` itself: explicit `needs.<job>.outputs`
+  between a same-workflow detection job and fix-attempt job. The one
+  remaining open finding (persistent low-severity "Documentation impact"
+  thread) was replied to in-thread — the PR description has carried that
+  section since the first revision; treating this as addressed rather
+  than iterating further on a stale/non-re-scanned finding.
