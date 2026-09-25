@@ -410,6 +410,13 @@ RESOLVED 2026-09-20, using the standard already-established discovery flow:**
       mismatches once it came up -- closing this effort's own "a live
       end-to-end check" Validation Plan item below.
 
+### Bug sweep — linked open bugs (2026-09-24)
+
+_Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
+
+- [ ] **#2339** agent-worktrees status-monitor: handoff nudge for one worktree delivered into an unrelated session's mux pane
+  - A status-monitor nudge landing in the wrong session's pane is exactly this effort's external-status-consumer scope.
+
 ## Validation Plan
 
 - [x] Every phase's own unit tests pass (`plugins/agent-worktrees` suite).
