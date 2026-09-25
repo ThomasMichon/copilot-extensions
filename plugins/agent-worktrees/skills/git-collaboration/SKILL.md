@@ -161,10 +161,11 @@ decision buried in it.
 The fix is to collapse the noise before touching the moved file at all:
 
 1. **Squash your PR's commits into one, against its *original* merge-base**
-   (not the current tip): `git reset --soft <original-merge-base>` on a
-   scratch copy of your branch, then a single `git commit` capturing the
-   whole diff. This is a size reduction, not a rebase -- it never touches the
-   target branch, so do it before fetching anything new.
+   (not the current tip): tag a backup ref first (`git branch
+   backup/<slug>-presquash`), then `git reset --soft <original-merge-base>`
+   and a single `git commit` capturing the whole diff. This is a size
+   reduction, not a rebase -- it never touches the target branch, so do it
+   before fetching anything new.
 2. **Fetch and rebase that single squashed commit onto the current target
    tip.** Now there is exactly one conflict to resolve per moved file, not
    one per original commit -- because there is only one commit left.
@@ -172,9 +173,13 @@ The fix is to collapse the noise before touching the moved file at all:
    now belongs in `new_module_a.py` instead of `old_module.py`" rather than
    fighting the rebase machinery's per-commit view of the same move.
 4. Continue as a normal single-commit rebase from here (`git rebase
-   --continue`, then force-push with lease) -- the squash was scaffolding for
-   the conflict resolution, not a permanent change to your commit history
-   unless the repo's own convention already prefers a single commit per PR.
+   --continue`), then force-push with lease **once the result is confirmed
+   correct locally** -- this genuinely rewrites the published PR branch's
+   history down to one commit (the same single-commit-per-PR invariant this
+   repo's worktree/PR flow already expects, see the `worktree` skill's own
+   reference doc). Keep the `backup/<slug>-presquash` ref around until that
+   push lands and CI picks it up; only delete it once the rewritten branch
+   is confirmed on the remote.
 
 This is a variant of the same problem class as the backup-branch +
 cherry-pick technique above (many concurrent commits against a moving base),
