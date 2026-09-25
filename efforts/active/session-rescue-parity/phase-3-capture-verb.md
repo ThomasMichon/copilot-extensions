@@ -2,7 +2,13 @@
 
 Back to [README.md](README.md).
 
-- [ ] **Coordinate capture with concurrent lifecycle operations, not just
+**Status: done.** See the README's own Phase 3 "Done" note for the
+implementation summary (the `sync-sessions` verb, `capture_codespace_sessions()`,
+the `lock=` widening seam across all seven destructive call sites, and the
+20 new tests). Every item below is checked as implemented; kept here for
+the detailed rationale each item originally carried.
+
+- [x] **Coordinate capture with concurrent lifecycle operations, not just
       with itself.** `sync_codespace_sessions()` already takes a
       `TargetLock(name, op="session-sync")` for its own sync sub-step, but
       `_cmd_stop` (`__main__.py:3615-3632`) calls that sync, **releases the
@@ -26,7 +32,7 @@ Back to [README.md](README.md).
       code; call this out explicitly rather than silently, so a reader does
       not read this widened lock as closing every actor's race, only this
       repo's own in-process ones.
-- [ ] **Default resolution for the acquire-then-release-during-the-pull
+- [x] **Default resolution for the acquire-then-release-during-the-pull
       snapshot race** _(agent-recommended default; the Phase 1 implementer
       may revise with new information, but the plan should not ship this
       question fully open)_: accept it as a documented residual risk for a
@@ -41,7 +47,7 @@ Back to [README.md](README.md).
       `agent_containers.replacement.probe_session_liveness` already
       documents its own best-effort nature) so a future reader does not
       mistake the two-probe approach for a stronger guarantee than it is.
-- [ ] Add a CodeSpace-side liveness check (using the Phase 2 vendored lib,
+- [x] Add a CodeSpace-side liveness check (using the Phase 2 vendored lib,
       transport = the existing SSH `ConnectionManager`/`exec_with_retry`)
       that a new capture-only path calls before pulling, mirroring
       containers' "defer instead of capture mid-write" contract -- including
@@ -52,7 +58,7 @@ Back to [README.md](README.md).
       for "not safely capturable right now" (containers' analog: the
       fleet-level check must delegate to the same per-member helper, not a
       second ad-hoc message).
-- [ ] **This capture path must not simply call `sync_codespace_sessions()`
+- [x] **This capture path must not simply call `sync_codespace_sessions()`
       with its existing defaults.** That function boots a `Shutdown`
       CodeSpace whenever `skip_if_shutdown` is false, and only special-cases
       the `Shutdown` state by name (`lifecycle._SHUTDOWN_STATE`) -- every
@@ -67,7 +73,7 @@ Back to [README.md](README.md).
       `stop`/`rm`'s boot-tolerant or stopped-instance-evidence paths. Do not
       reuse `sync_codespace_sessions()`'s existing state handling as-is; it
       is destroy/finalize-shaped, not capture-only-shaped.
-- [ ] Add a standalone, non-lifecycle-transition CLI verb (e.g.
+- [x] Add a standalone, non-lifecycle-transition CLI verb (e.g.
       `agent-codespaces sync-sessions <name>`) that calls the gated capture
       without stopping/finalizing/deleting the CodeSpace and without ever
       booting it. **This is additive, not a replacement**: `sync_codespace_sessions()`
@@ -79,7 +85,7 @@ Back to [README.md](README.md).
       Phase 3 starts rather than trusting this count to still be exact by
       then; every one of them keeps calling `sync_codespace_sessions()`
       exactly as today, unchanged.
-- [ ] **Bind the standalone capture to the exact owning account, never
+- [x] **Bind the standalone capture to the exact owning account, never
       ambient-fallback and never an ambiguous multi-candidate match.**
       `sync_codespace_sessions()`'s default account resolution (when
       `account`/`token` are omitted) goes through `account_for_codespace()`'s
@@ -105,7 +111,7 @@ Back to [README.md](README.md).
       the bound account), and an account-resolution-failure case -- all
       three asserting deferral or exact-match, never an ambient-fallback or
       ambiguous-match connection attempt.
-- [ ] **Re-validate liveness after the pull, not only before it.** A single
+- [x] **Re-validate liveness after the pull, not only before it.** A single
       preflight probe immediately before `_pull_tar_bytes` does not close
       the window where a Copilot process acquires `inuse.*.lock` during or
       after the tar -- the capture could still snapshot a session mid-write.
@@ -131,7 +137,7 @@ Back to [README.md](README.md).
       guarantee it is not. The regression test must include an
       acquire-then-release-during-the-pull case, not only a lock that
       remains held through the final probe.
-- [ ] Tests: CLI-dispatch coverage (text + `--json`, mirroring
+- [x] Tests: CLI-dispatch coverage (text + `--json`, mirroring
       `test_rescue_capture_cli.py`'s shape), a liveness-gate regression test
       (mid-write session is deferred, not captured), a
       non-`Available`-state regression test (a `Shutdown`/`Starting`/

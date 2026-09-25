@@ -28,9 +28,10 @@ import time
 from pathlib import Path
 
 from plugin_activation import ActivePlugin, resolve_active_plugins
+from session_liveness_probe import SessionLiveness, build_probe_script, parse_probe_output
 
-from .codespace_config import CodespaceSource
 from ._ssh_retry import exec_with_retry
+from .codespace_config import CodespaceSource
 
 log = logging.getLogger("agent-codespaces")
 
@@ -295,6 +296,7 @@ def sync_codespace_sessions(
     skip_if_shutdown: bool = False,
     account: str | None = None,
     token: str | None = None,
+    lock: TargetLock | None = None,  # noqa: F821 - ssh_manager, imported lazily
 ) -> dict:
     """Pull a CodeSpace's Copilot session-state and land it in the agent-logger
     hub under ``.codespaces/<name>``.
@@ -309,6 +311,19 @@ def sync_codespace_sessions(
     silently ambient-fallback) credentials for ``account`` moments later
     (claim-provider-pattern effort review finding: "Preserve validated
     credentials during status and reclaim").
+
+    ``lock`` -- when given, an ALREADY-ACQUIRED ``ssh_manager.TargetLock``
+    for ``name`` that this call reuses instead of acquiring/releasing its
+    own. This is the session-rescue-parity Phase 3 lock-widening seam: a
+    destructive caller (stop/finalize/delete/prune/reclaim) that must hold
+    the target lock across its own **entire** sync-then-act sequence (not
+    only this sync sub-step) acquires the lock itself, passes it here, and
+    releases it only after its own destructive action completes -- closing
+    the window where a concurrent capture could pass its liveness probe and
+    pull between "sync finished" and "the destructive action actually
+    ran". When ``lock`` is None (the default), this function acquires and
+    releases its own lock exactly as before -- unchanged for every
+    preserving/no-widening caller.
 
     Returns a result dict: ``{ok, session_count, detail, skipped?}``. Never
     raises for routine connect/pull failures -- callers (delete hook, finalize)
@@ -342,12 +357,14 @@ def sync_codespace_sessions(
 
     from ssh_manager import ConnectionManager, TargetBusyError, TargetLock
 
-    lock = TargetLock(name, op="session-sync")
-    try:
-        lock.acquire(force=False)
-    except TargetBusyError as busy:
-        return {"ok": False, "skipped": True, "session_count": 0,
-                "detail": f"target busy, skipped sync: {busy}"}
+    owns_lock = lock is None
+    if owns_lock:
+        lock = TargetLock(name, op="session-sync")
+        try:
+            lock.acquire(force=False)
+        except TargetBusyError as busy:
+            return {"ok": False, "skipped": True, "session_count": 0,
+                    "detail": f"target busy, skipped sync: {busy}"}
 
     manager = ConnectionManager()
 
@@ -379,5 +396,218 @@ def sync_codespace_sessions(
         # finalize/delete can proceed rather than aborting.
         return {"ok": False, "session_count": 0,
                 "detail": f"session recovery error: {exc}"}
+    finally:
+        if owns_lock:
+            lock.release()
+
+
+def _capture_hold_reason(name: str, *, account: str | None) -> str | None:
+    """Return a defer reason if *name* is held by any of the four holder
+    shapes ``pool.derive_disposition`` treats as ``IN_USE`` (a local lease,
+    a ``#897`` claim -- which shows up as a local lease too, a
+    cross-machine L2 Git-ref lease overlay, or a live display-name beacon),
+    else ``None``.
+
+    session-rescue-parity Phase 1's recorded decision: capture defers on
+    ANY of these four regardless of holder identity -- a capture requires
+    no lease/claim identity of its own to invoke, so the safety property is
+    this disposition check, not caller identity (mirroring
+    ``agent_containers.replacement``'s unconditional
+    ``get_lease(...) is not None`` defer for ``rescue-capture``) -- **except**
+    an *orphaned* ``#897`` claim (the owning worktree path positively gone,
+    per ``pool._holder_worktree_gone``): nothing is heartbeating it anymore,
+    so it is not treated as a live hold here, mirroring how ``pool.py``
+    itself surfaces (but does not gate on) ``orphaned``.
+    """
+    from .lease import get_lease
+    from .pool import _holder_worktree_gone
+
+    lease = get_lease(name)
+    if lease is not None and not _holder_worktree_gone(lease.worktree):
+        return f"CodeSpace has an active lease (effort {lease.effort!r})"
+
+    beacon = None
+    try:
+        from .lifecycle import _list_codespaces_under
+        from .pool import _beacon_id
+
+        entries = _list_codespaces_under(account)
+        info = next((cs for cs in entries if cs.name == name), None)
+        if info is not None:
+            beacon = _beacon_id(info.display_name)
+    except Exception:
+        beacon = None  # best-effort; a listing failure never falsely clears a hold
+    if beacon is not None:
+        return "CodeSpace has a live cross-machine display-name beacon"
+
+    try:
+        from . import coordination
+
+        l2 = (coordination.list_leases() or {}).get(name)
+    except Exception:
+        l2 = None
+    if l2 is not None and getattr(l2, "live", False):
+        return "CodeSpace has a live cross-machine L2 lease overlay"
+    return None
+
+
+async def _probe_codespace_liveness(manager, name: str, *, timeout: float) -> SessionLiveness:
+    """Run the vendored, transport-agnostic liveness probe over this
+    CodeSpace's existing SSH connection.
+
+    Uses ``session_liveness_probe`` (session-rescue-parity Phase 2): the
+    script requires Bash, so it is always invoked via ``bash -c``, and the
+    exit code comes from ``CommandResult.exit_code`` (ssh-manager's
+    ``exec_with_retry``), never ``.returncode``.
+    """
+    import shlex
+
+    command = f"bash -c {shlex.quote(build_probe_script())}"
+    result = await exec_with_retry(manager, name, command, timeout=timeout)
+    return parse_probe_output(result.exit_code, result.stdout, result.stderr)
+
+
+def capture_codespace_sessions(
+    name: str,
+    *,
+    account: str | None = None,
+    timeout: float = 300.0,
+    verbose: bool = False,
+) -> dict:
+    """Non-destructive, non-lifecycle-transition session capture: pull a
+    CodeSpace's Copilot session-state while it stays leased and running.
+
+    This is the CodeSpaces peer to ``agent-containers``' ``rescue-capture``
+    (``ThomasMichon/copilot-extensions#3574``) -- session-rescue-parity
+    Phase 3. Unlike :func:`sync_codespace_sessions`, this function:
+
+    - **never boots or connects to a non-``Available`` CodeSpace.** A hard
+      preflight (list/inspect state only) defers immediately for any state
+      other than ``Available`` -- this is capture-only-shaped, not
+      destroy/finalize-shaped; it never reuses
+      :func:`sync_codespace_sessions`'s boot-tolerant ``skip_if_shutdown``
+      special-case, which still boots every OTHER non-Shutdown,
+      non-Available state.
+    - **defers on any active hold** (local lease, ``#897`` claim,
+      cross-machine L2, beacon) regardless of holder identity -- see
+      :func:`_capture_hold_reason`.
+    - **requires an unambiguous account**: an explicit ``account`` or a
+      confirmed exact per-name binding (``account_binding.bound_account``)
+      -- never ``get_codespace_status_with_account``'s generic
+      multi-candidate scan, whose first-match semantics are exactly the
+      same-name-across-accounts ambiguity this item exists to close. Fails
+      closed (defers) when neither is available.
+    - **gates the pull on the vendored liveness probe both before AND
+      after** the pull, never capturing a session whose state is anything
+      but ``idle`` at either checkpoint. This narrows, but does not close,
+      the underlying race: a session that both acquires AND releases its
+      ``inuse.*.lock`` entirely within the pull's own duration is invisible
+      to both probes alike -- an explicitly accepted residual risk for a
+      periodic/advisory capture (session-rescue-parity Phase 1's recorded
+      decision), identical in kind to what ``rescue-capture`` already
+      accepts.
+
+    Returns ``{ok, session_count, detail, deferred}``. Never raises.
+    """
+    from .account_binding import bound_account
+    from .lifecycle import _AVAILABLE_STATE, get_codespace_status_with_account
+
+    if account is None:
+        account = bound_account(name)
+        if account is None:
+            return {
+                "ok": False, "deferred": True, "session_count": 0,
+                "detail": (
+                    f"no explicit account and no exact account binding for "
+                    f"{name!r}; refusing to guess which account owns it "
+                    f"(a same-named CodeSpace can exist under a different "
+                    f"account)"
+                ),
+            }
+
+    try:
+        exists, state, _confirmed_account = get_codespace_status_with_account(
+            name, account,
+        )
+    except RuntimeError as exc:
+        return {"ok": False, "deferred": True, "session_count": 0,
+                "detail": f"could not confirm CodeSpace status: {exc}"}
+    if not exists:
+        return {"ok": False, "deferred": True, "session_count": 0,
+                "detail": f"CodeSpace {name!r} not found under account {account!r}"}
+    if state != _AVAILABLE_STATE:
+        return {
+            "ok": False, "deferred": True, "session_count": 0,
+            "detail": (
+                f"CodeSpace state {state!r} is not Available; capture never "
+                f"boots or connects to a non-running venue"
+            ),
+        }
+
+    hold_reason = _capture_hold_reason(name, account=account)
+    if hold_reason is not None:
+        return {"ok": False, "deferred": True, "session_count": 0,
+                "detail": hold_reason}
+
+    from ssh_manager import ConnectionManager, TargetBusyError, TargetLock
+
+    lock = TargetLock(name, op="codespace-capture")
+    try:
+        lock.acquire(force=False)
+    except TargetBusyError as busy:
+        return {"ok": False, "deferred": True, "session_count": 0,
+                "detail": f"target busy, skipped capture: {busy}"}
+
+    manager = ConnectionManager()
+
+    async def _run() -> dict:
+        try:
+            await _connect_with_retry(
+                manager, name, timeout=timeout, account=account, token=None,
+            )
+        except (ConnectionError, TimeoutError, RuntimeError) as exc:
+            return {"ok": False, "deferred": True, "session_count": 0,
+                    "detail": f"could not connect: {exc}"}
+        try:
+            liveness = await _probe_codespace_liveness(manager, name, timeout=30.0)
+            if liveness.state != "idle":
+                return {
+                    "ok": False, "deferred": True, "session_count": 0,
+                    "detail": (
+                        f"session liveness is {liveness.state!r} "
+                        f"({liveness.reason or 'active session-state lock present'}); "
+                        f"capture-only never disturbs a mid-write session"
+                    ),
+                }
+            tar_bytes = await _pull_tar_bytes(manager, name, timeout=timeout)
+            if not tar_bytes:
+                return {"ok": True, "deferred": False, "session_count": 0,
+                        "detail": "no sessions on CodeSpace"}
+            # Re-validate AFTER the pull, not only before it (Phase 3's own
+            # item): narrows, but -- per this function's docstring -- does
+            # not close, the acquire-then-release-within-the-pull race.
+            post_liveness = await _probe_codespace_liveness(
+                manager, name, timeout=30.0,
+            )
+            if post_liveness.state != "idle":
+                return {
+                    "ok": False, "deferred": True, "session_count": 0,
+                    "detail": (
+                        f"session became {post_liveness.state!r} during the "
+                        f"pull; discarding this capture rather than staging "
+                        f"a possibly mid-write snapshot"
+                    ),
+                }
+        finally:
+            await manager.disconnect(name)
+        result = _stage_and_push(tar_bytes, name, verbose=verbose)
+        result["deferred"] = False
+        return result
+
+    try:
+        return asyncio.run(_run())
+    except Exception as exc:
+        return {"ok": False, "deferred": True, "session_count": 0,
+                "detail": f"capture error: {exc}"}
     finally:
         lock.release()
