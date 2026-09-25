@@ -1285,8 +1285,7 @@ def picker_payload(
             status = "STOPPED"
         # Grouping key: repo @ account (the account is a shared-pool axis).
         group = f"{_short_repo(m.repository)} @ {m.account or 'ambient'}"
-        # Second-line fallback (durable id + claim) kept for pivots that opt into
-        # a subtitle; the compact grouped layout uses columns instead.
+        # Second-line fallback (durable id + claim); the grouped layout uses columns.
         subtitle = m.name if friendly != m.name else ""
         if m.holder_effort:
             claim = f"claimed by {m.holder_effort}"
@@ -1335,6 +1334,7 @@ def picker_payload(
             "worktree_id": driving_worktree_id,  # full tracked id for drill-in
             "has_driving_worktree": "true" if has_driving_worktree else "false",
             "subtitle": subtitle,      # optional 2nd line (durable id + claim)
+            "activity": activity,      # worker's latest progress (worktree-row worker line)
             "worktree_status": _worktree_status_for_worktree(driving_worktree_id),
             # Phase 1 (picker-venue-pivots): the claiming worktree's own ranked
             # claims-list (PR/bug/etc.), via the shared claims_rank module --

@@ -58,6 +58,7 @@ def test_activity_from_live_session_composes_phase_and_summary():
 def test_picker_fields_shape_when_unclaimed():
     assert picker_fields("free-1", None) == {
         "subtitle": "",
+        "activity": "",
         "claims_summary": "",
         "sess": "",
         "worktree_id": "",
@@ -105,6 +106,7 @@ def test_picker_fields_appends_live_activity(monkeypatch):
     monkeypatch.setattr(picker, "driving_worktree_id_for", lambda wt: "host-win-20260922-111111-a1c4")
     fields = picker_fields("box-1", "3bac")
     assert fields["subtitle"] == "→ claimed by 3bac - impl: wiring"
+    assert fields["activity"] == "impl: wiring"
     assert fields["sess"] == "LIVE"
 
 

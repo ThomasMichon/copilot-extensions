@@ -56,7 +56,14 @@ Version-1 compatibility also covers the existing declarative fields:
 - optional action `shortcut`, used by the generic interaction shell to expose
   the action's keyboard affordance without hard-coding a provider's keys;
 - top-level `worktree_actions`;
-- top-level `config_sections`.
+- top-level `config_sections`;
+- optional top-level `worker` — `{"worktree": <field>, "label"?: <field>,
+  "live"?: <field>, "activity"?: <field>}` — marking the pivot's rows as remote
+  workers a worktree supervises. The Manager joins cached rows to Worktrees rows
+  by the full driving-worktree id in `worktree`, renders a
+  `→ <label> <live> <activity>` line under the supervising worktree, keeps the
+  pivot loaded in the background, and never treats such a pivot as a claiming
+  task (no phase badge). `label` defaults to `entry.id`.
 
 The command arrays are process-boundary contracts. The Manager invokes the
 contributing plugin's canonical CLI; it never imports the plugin runtime or

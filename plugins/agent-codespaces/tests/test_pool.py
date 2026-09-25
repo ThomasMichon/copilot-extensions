@@ -781,6 +781,7 @@ def test_picker_payload_live_session_join_wires_sess_and_activity(monkeypatch):
     assert seen == [("codespace", "held")]
     assert e["sess"] == "LIVE"
     assert e["subtitle"].endswith("impl: wiring")
+    assert e["activity"] == "impl: wiring"  # the worktree-row worker line's source
     assert "claimed by 3bac on dev6" in e["subtitle"]  # durable half preserved
 
 
@@ -1110,6 +1111,7 @@ def test_picker_payload_sess_blank_and_no_activity_when_no_live_session():
     e = picker_payload(members, budget)["entries"][0]
     assert e["sess"] == ""
     assert e["subtitle"] == ""
+    assert e["activity"] == ""
 
 
 # --- picker_stream_frames + diff_entries (D2 NDJSON streaming) -------------

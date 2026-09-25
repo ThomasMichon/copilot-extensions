@@ -147,6 +147,42 @@ class Column:
 
 
 @dataclass(frozen=True)
+class WorkerSpec:
+    """Opt-in ``worker`` block: this pivot's rows are remote workers a
+    worktree supervises (a venue session), so the Worktrees pane can show them
+    on the supervising worktree's row. Each value names an entry field."""
+
+    worktree_field: str
+    label_field: str
+    live_field: str | None = None
+    activity_field: str | None = None
+
+
+def _parse_worker(raw: object, *, id_field: str) -> WorkerSpec | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise ManifestError("`worker` must be an object when present")
+    unsupported = set(raw) - {"worktree", "label", "live", "activity"}
+    if unsupported:
+        raise ManifestError(f"`worker` has unsupported keys: {', '.join(sorted(unsupported))}")
+    values: dict[str, str | None] = {}
+    for key in ("worktree", "label", "live", "activity"):
+        val = raw.get(key)
+        if val is not None and (not isinstance(val, str) or not val.strip()):
+            raise ManifestError(f"`worker.{key}` must be a non-empty string")
+        values[key] = val.strip() if isinstance(val, str) else None
+    if not values["worktree"]:
+        raise ManifestError("`worker.worktree` is required")
+    return WorkerSpec(
+        worktree_field=values["worktree"],
+        label_field=values["label"] or id_field,
+        live_field=values["live"],
+        activity_field=values["activity"],
+    )
+
+
+@dataclass(frozen=True)
 class RegisteredPivot:
     """A pivot contributed by another plugin via a filesystem manifest."""
 
@@ -195,6 +231,9 @@ class RegisteredPivot:
     #: file. This keeps configured, plugin-owned views out of unconfigured
     #: users' tab rows without executing the provider.
     visible_when_state_root_file: str | None = None
+    #: Optional remote-worker join (see :class:`WorkerSpec`). ``None`` => the
+    #: pivot's rows are not shown on Worktrees rows.
+    worker: WorkerSpec | None = None
 
     @property
     def account_scoped(self) -> bool:
@@ -571,6 +610,7 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
         stream=stream,
         subscribe=subscribe,
         visible_when_state_root_file=state_root_file,
+        worker=_parse_worker(data.get("worker"), id_field=id_field),
     )
 
 
