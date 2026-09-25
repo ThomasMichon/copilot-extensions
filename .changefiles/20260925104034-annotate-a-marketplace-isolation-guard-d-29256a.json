@@ -1,9 +1,0 @@
-{
-  "comment": "Annotate a marketplace-isolation guard doc false positive (localhost:2200 SSH port note)",
-  "changes": [
-    {
-      "plugin": "agent-ssh",
-      "type": "patch"
-    }
-  ]
-}
