@@ -1,0 +1,9 @@
+{
+  "comment": "Fix template->plugin.json version tag drift (retroactive #3378 recurrence heal, ThomasMichon/copilot-extensions#3336)",
+  "changes": [
+    {
+      "plugin": "efforts",
+      "type": "dev"
+    }
+  ]
+}
