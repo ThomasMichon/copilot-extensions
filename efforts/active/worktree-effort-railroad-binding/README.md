@@ -144,6 +144,18 @@ fresh):
       `--slice` string only when the effort has no checklist structure yet,
       and writing the derived value back per the canonicalization rule
       above.
+- [ ] _(agent-recommended, added from PR review analysis)_ **Define the
+      terminal case — a checklist that exists but has nothing left
+      unchecked.** The "no checklist structure" fallback only covers an
+      effort with no checklist at all; it says nothing about an *open*
+      effort whose Plan/Validation checklist is fully checked (mid-way
+      through closing out, before `Status: Done` lands). There is then no
+      "first unchecked item" to derive from, yet the persisted
+      `ActiveEffort.slice`, `validate_binding()`, `orientation()`, and the
+      anchored title all still require *some* value. Define an explicit
+      terminal-state slice (e.g. a fixed "closing out" identifier, or the
+      last checked item) before implementing derivation, rather than
+      leaving this case to fail or silently fall back unpredictably.
 - [ ] Add a `postToolUse` hook (new script, or an extension of
       `nudge_status.py`'s drift-counter pattern) that periodically injects an
       `additionalContext` reminder naming the bound effort, its current
@@ -191,6 +203,11 @@ fresh):
       `inspect_effort()`/`duplicate_binding()`, not only through
       `orientation()` — and `validate_binding()` accepts the derived form
       without rejecting it as an undeclared slice or an over-length label.
+- [ ] A test effort whose Plan/Validation checklist is fully checked (but
+      `Status` is not yet `Done`) is bound: derivation resolves to the
+      defined terminal-state slice rather than erroring or falling back
+      unpredictably, and every consumer (`validate_binding()`,
+      `orientation()`, the anchored title) agrees on that same value.
 - [ ] A long simulated session (tool-call count past threshold) receives
       exactly one railroad nudge per drift window, matching
       `nudge_status.py`'s existing no-spam guarantee.
@@ -266,6 +283,15 @@ repo's `pr-self-merge` profile before Phase 1 implementation begins._
   `planning-efforts` skill's demarcation rule. Added explicit
   `(agent-recommended)` tags to those bullets so a later reader can
   distinguish settled operator scope from agent recommendation.
+
+### 2026-09-25 — Defined the terminal (fully-checked-but-not-Done) slice case
+- Review caught that the "no checklist structure" fallback didn't cover an
+  *open* effort whose checklist is fully checked but not yet `Status: Done`
+  -- there is then no "first unchecked item" to derive from, yet every
+  consumer (`ActiveEffort.slice`, `validate_binding()`, `orientation()`,
+  the anchored title) still needs a value. Added an explicit terminal-state
+  slice requirement and a matching Validation Plan bullet.
+
 
 
 

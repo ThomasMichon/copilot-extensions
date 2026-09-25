@@ -124,32 +124,42 @@ objective can be a worktree other than the one nearest at hand.
       existing live one" guarantee would be unmet. This item is load-bearing
       for that guarantee, not optional polish.
 - [ ] _(agent-recommended, added from PR review analysis)_ **Carve out the
-      legitimate handoff launch.** The default-refuse rule above must not
-      also block `context-handoff-lifecycle`'s own normal step 4 ("launch
-      the successor without changing the worktree head" — i.e. the
-      successor session is deliberately created *while the predecessor is
-      still head*, by design). A review round correctly caught that an
-      undifferentiated guard would make ordinary handoff indistinguishable
-      from break-glass. The guard must recognize an **authenticated,
-      persisted handoff token/successor identity** — the same baton
-      `context-handoff-lifecycle` already persists before launch — and
-      permit exactly that launch through, while still refusing any *other*
-      new-session attempt against a live head. Break-glass remains for the
-      case with no such token.
-- [ ] _(agent-recommended, added from PR review analysis)_ **Fence the
-      token to single consumption.** A further review round correctly
-      caught that recognizing a valid token is not by itself enough:
-      `context-handoff-lifecycle` already anticipates that two
-      independent launch attempts can observe the *same* persisted baton
-      (e.g. a genuine retry racing a still-in-flight original launch), and
-      leans on task-backed consumption writing a durable checkpoint before
-      a one-time consume to keep that safe (its own "same-successor retry
-      resumes from checkpoint instead of replaying a consumed task"
-      invariant). The creation-guard's token check must compose with that
-      same atomic single-consumption fence — admitting exactly one launch
-      attempt through per token, resolving a genuine retry to the *same*
-      successor rather than spawning a second competing one — not merely
-      pattern-match "does this look like a valid token."
+      legitimate handoff launch — as an explicit cross-plugin dependency,
+      not a self-contained Phase 1 mechanism.** The default-refuse rule
+      above must not also block `context-handoff-lifecycle`'s own normal
+      step 4 ("launch the successor without changing the worktree head" —
+      i.e. the successor session is deliberately created *while the
+      predecessor is still head*, by design). A review round correctly
+      caught that an undifferentiated guard would make ordinary handoff
+      indistinguishable from break-glass — and a further review round
+      correctly caught that the carve-out as first written assumed an
+      "authenticated, persisted handoff token carrying successor identity"
+      that doesn't actually exist yet in this shape:
+      `context-handoff-lifecycle` persists a task/file **continuation**
+      before launch, but the real session identity is only created after
+      prompt submission and acknowledged later — nothing today assigns
+      which plugin (context-handoff, agent-bridge, or agent-worktrees
+      itself) owns minting and verifying the identity the creation-guard
+      would need to distinguish a legitimate handoff from an ad-hoc launch.
+      This item is therefore **an open cross-plugin design question to
+      resolve during Phase 1's own implementation-time design**, not a
+      pre-solved mechanism: name the owning plugin and the contract before
+      the creation-guard can rely on it.
+- [ ] _(agent-recommended, added from PR review analysis)_ **Reserve the
+      successor idempotently across retries — never a one-shot admission.**
+      A further review round correctly caught that "admitting exactly one
+      launch attempt per token" contradicts the cited lifecycle's own retry
+      contract: a failed or uncertain *first* launch must be able to resume
+      from its checkpoint for the *same* successor (the "same-successor
+      retry resumes from checkpoint instead of replaying a consumed task"
+      invariant already recorded in `context-handoff-lifecycle`), while only
+      the final **takeover/acknowledgement** step is truly one-time. The
+      creation-guard's token check must therefore *idempotently reserve or
+      identify the same successor* across repeated presentations of the
+      same token — not treat the first admission as the only permissible
+      launch attempt, which would incorrectly block the pattern's own
+      legitimate retry path. Break-glass remains for the case with no such
+      token at all.
 - [ ] Reconcile with #912 and #3000's overlapping scope so the three don't
       land contradictory mechanisms.
 
@@ -178,14 +188,16 @@ objective can be a worktree other than the one nearest at hand.
       sunset reason, never silently allowed to proceed; a break-glass
       override is available, explicit, and attributable.
 - [ ] A legitimate `context-handoff-lifecycle` handoff launch (carrying its
-      authenticated persisted token) is let through the same guard without
-      needing break-glass, while an unrelated ad-hoc new-session attempt
-      against the same live head is still refused.
-- [ ] Simulate two near-simultaneous legitimate launch attempts presenting
-      the *same* handoff token (a genuine retry racing the still-in-flight
-      original): exactly one successor results, the other resolves to the
-      same successor rather than spawning a second competing one, and the
-      token cannot be replayed to admit a third.
+      authenticated persisted token, once the owning plugin and contract are
+      named per the open cross-plugin question above) is let through the
+      same guard without needing break-glass, while an unrelated ad-hoc
+      new-session attempt against the same live head is still refused.
+- [ ] Simulate a failed/uncertain first launch retrying with the *same*
+      handoff token: the retry resumes toward the *same* successor from its
+      checkpoint (never refused as a "second" launch, and never spawning a
+      competing successor); only the final takeover/acknowledgement step is
+      one-time, and only a genuinely *different* token can seat a different
+      successor.
 - [ ] A fleet with an existing worktree bound to effort X surfaces that
       worktree (and, where a chain is involved, the root claimant) when a
       second agent checks before starting work on X.
@@ -282,6 +294,24 @@ repo's `pr-self-merge` profile before Phase 1 implementation begins._
   demarcation rule. Added explicit `(agent-recommended)` tags to those
   bullets so a later reader can distinguish the operator's own
   head/backup-slot request from the agent's corrected realization of it.
+
+### 2026-09-25 — Corrected the token model: idempotent reservation, and named as an open cross-plugin question
+- Two further review catches on the round-8 token-fencing item: (1) "admit
+  exactly one launch attempt per token" actually contradicted the cited
+  lifecycle's own retry contract (a failed/uncertain first launch must
+  resume toward the *same* successor from checkpoint; only the final
+  takeover/acknowledgement is one-time) -- reworded to require idempotent
+  reservation/identification of the same successor across retries, not
+  one-shot admission. (2) The whole carve-out assumed an "authenticated
+  persisted handoff token carrying successor identity" that doesn't
+  actually exist in that shape yet -- `context-handoff-lifecycle` persists
+  a task/file *continuation* pre-launch, but real session identity forms
+  only after prompt submission and is acknowledged later, and nothing
+  today assigns which plugin owns minting/verifying it. Reframed this item
+  as an explicit open cross-plugin design question for Phase 1's own
+  implementation-time design, rather than a pre-solved mechanism this
+  effort's planning could take for granted.
+
 
 
 
