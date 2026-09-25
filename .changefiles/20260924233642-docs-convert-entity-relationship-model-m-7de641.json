@@ -1,0 +1,9 @@
+{
+  "comment": "docs: convert entity-relationship-model.md mirror to a vendor pointer",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
