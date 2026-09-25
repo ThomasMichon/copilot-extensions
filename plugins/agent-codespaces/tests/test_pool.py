@@ -514,6 +514,30 @@ def test_picker_payload_effort_lease_resolves_journaled_claim_owner(monkeypatch)
     assert e["worktree_status"]["title"] == "Worktree example-win-FEAT-1a2b"
 
 
+def test_picker_payload_unresolved_effort_lease_keeps_idle_sess(monkeypatch):
+    """An effort-held CodeSpace whose owner can't be resolved still reads as
+    driven (IDLE) and still looks its claims up by the effort label."""
+    from agent_codespaces import pool as pool_mod
+    now = time.time()
+    borrow = Lease(codespace="held", effort="my-effort", pid=1, host="dev6",
+                   acquired_at=now, heartbeat_at=now)
+    members, budget = build_pool(
+        budget_cores=64, now=now, codespaces=[_cs("held", state="Available")],
+        leases=[borrow], markers={},
+    )
+    seen = []
+    monkeypatch.setattr(pool_mod, "codespace_claim_owner_worktrees", lambda names: {})
+    monkeypatch.setattr(
+        pool_mod, "_claims_summary_for_worktree",
+        lambda worktree_id: seen.append(worktree_id) or "",
+    )
+    e = pool_mod.picker_payload(members, budget)["entries"][0]
+    assert e["worktree"] == "my-effort"
+    assert e["has_driving_worktree"] == "false"
+    assert e["sess"] == "IDLE"
+    assert seen == ["my-effort"]
+
+
 def test_picker_payload_friendly_name_and_subtitle():
     import time as _t
     from agent_codespaces.pool import picker_payload

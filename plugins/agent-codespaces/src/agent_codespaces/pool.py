@@ -1340,10 +1340,10 @@ def picker_payload(
             # claims-list (PR/bug/etc.), via the shared claims_rank module --
             # "" when unclaimed, unresolvable, or agent-worktrees isn't
             # installed alongside (see _claims_summary_for_worktree).
-            "claims_summary": _claims_summary_for_worktree(driving_worktree_id),
+            "claims_summary": _claims_summary_for_worktree(driving_worktree_id or worktree),
             # Phase 1: the Worktrees pane's own compact sess/live column,
             # reused as-is -- LIVE/IDLE/blank (see _sess_column).
-            "sess": _sess_column(live_session, driving_worktree_id),
+            "sess": _sess_column(live_session, worktree),
             "repository": m.repository,
             "repo": _short_repo(m.repository),
             "branch": m.branch,
