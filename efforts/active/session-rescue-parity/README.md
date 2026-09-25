@@ -186,8 +186,14 @@ matching `pyproject.toml` versions, then in **each** consuming plugin's own
 resolves; without the `[project].dependencies` entry too, the vendored
 package is never installed into a standalone marketplace environment and
 the new imports fail there even though a same-checkout dev run might not
-catch it. The guard picks
-it up automatically once both entries are present. `docs/patterns/README.md`'s `versioned-runtime`
+catch it. **`tools/check-vendored-libs-sync.py` does not validate this
+wiring** -- it only discovers `libs/<lib>` copies under `plugins/*/libs` and
+checks `src/` byte-identity + declared versions between them; it never
+inspects either consumer's `[project].dependencies` or `[tool.uv.sources]`.
+A dropped `[project].dependencies` entry can pass that guard while a real
+standalone install still fails, so the Validation Plan must exercise an
+actual fresh install (not just the sync guard) to catch it -- see Phase 2's
+Validation Plan item. `docs/patterns/README.md`'s `versioned-runtime`
 paragraph documents the same fan-out pattern for a single canonical source
 (`libs/versioned-runtime/versioned_runtime.py`) synced by a dedicated tool
 (`tools/sync-versioned-runtime.py`) rather than the plain byte-identical
@@ -377,10 +383,13 @@ itself did not specify phasing)_
       pull the wrong venue's sessions. The new capture path must resolve
       and pass an explicit, validated `account`/`token` (reusing the
       pinning parameters `sync_codespace_sessions()` already accepts, per
-      its own docstring -- e.g. via whatever confirms account ownership
-      today, such as `lifecycle.get_codespace_status()`), never falling
-      through to the default. Tests: same-name-across-accounts and a
-      binding-lookup-failure case (deferred, not ambient-fallback).
+      its own docstring) via `lifecycle.get_codespace_status_with_account()`
+      -- **not** plain `get_codespace_status()`, which returns only
+      `(exists, state)` with no account -- and **fail closed** (defer the
+      capture, do not fall through to ambient auth) whenever that call
+      cannot resolve an owning account. Tests: same-name-across-accounts
+      and an account-resolution-failure case, both asserting deferral, not
+      an ambient-fallback connection attempt.
 - [ ] **Re-validate liveness after the pull, not only before it.** A single
       preflight probe immediately before `_pull_tar_bytes` does not close
       the window where a Copilot process acquires `inuse.*.lock` during or
@@ -433,7 +442,13 @@ itself did not specify phasing)_
 - [ ] Phase 2: `tools/check-vendored-libs-sync.py` passes with the new lib
       listed in both consumers; agent-containers' existing full test suite
       (`python tools/run-plugin-tests.py agent-containers`) still passes
-      unchanged after the extraction.
+      unchanged after the extraction. **Additionally**, since the sync guard
+      does not validate `[project].dependencies`/`[tool.uv.sources]` wiring
+      (see Context), force a genuinely fresh install for both consumers
+      (e.g. a from-scratch venv rebuild rather than trusting a cached one --
+      `run-plugin-tests.py`'s own `--reinstall`, or an equivalent explicit
+      `uv sync`/install dry-run) and confirm the new import actually
+      resolves in each, not only that the sync guard is green.
 - [ ] Phase 3: agent-codespaces' test suite
       (`python tools/run-plugin-tests.py agent-codespaces`) passes,
       including the new liveness-gate regression test, the
