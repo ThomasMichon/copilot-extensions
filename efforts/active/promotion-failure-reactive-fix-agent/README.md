@@ -134,6 +134,16 @@ fixes."
       from the same job). Prompt it with exactly the compact signature
       Phase 1 already extracts: which job(s) failed, the failing test
       node id(s), and the log excerpt — not a vague "go fix CI."
+  - [ ] **Bootstrap gotcha (this session already hit the identical bug
+        once — see `ci.yml:71-74` and the dev-branch-release-pipeline
+        journal):** a `workflow_run`-triggered workflow is read from the
+        repo's **default branch (`main`)**, not the `dev` commit that adds
+        it. Merging the compiled `.lock.yml` to `dev` alone leaves the
+        trigger inert until `main` also has it. Ship it with the same
+        main-bootstrap companion PR pattern this repo already uses for
+        every other workflow-file change, and verify the compiled lock
+        file is actually present on `main` before relying on a live
+        failure to prove it works.
   - [ ] Configure its `safe-outputs` stage narrowly: the only permitted
         write is **open a pull request against `dev`** (no direct push, no
         issue/PR comments beyond what's needed, no repo-settings access).
