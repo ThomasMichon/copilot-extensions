@@ -534,6 +534,120 @@ def test_mcp_retry_fill_emits_result_recorded_not_duplicate_completion(
     assert types.count("task.result_recorded") == 1
 
 
+def test_mcp_complete_releases_handoff_claim(coord, monkeypatch):
+    """dispatch_complete calls queue.complete_with_outcome directly
+    (in-process), bypassing the coordinator's own HTTP routes entirely -- so
+    the release must be wired into mcp_http's own _mutate, not just
+    coordinator_tasks.py's _guard."""
+    import asyncio
+
+    from agent_dispatch import handoff_claim_release
+
+    client = DispatchClient(coord)
+    task = client.create(
+        "work", repo=TEST_REPO, labels=["handoff"], target_worktree="wt-9",
+    )
+    owner = client.claim(
+        worker_id="m/wt-9", repo=TEST_REPO, task_id=task["id"],
+        machine="m", worktree="wt-9",
+    )["owner"]
+    client.start(task["id"], owner)
+
+    calls = []
+    monkeypatch.setattr(
+        handoff_claim_release, "_release_task_claim",
+        lambda task_id, **k: calls.append((task_id, k.get("worktree"))),
+    )
+    asyncio.new_event_loop().run_until_complete(
+        _call(
+            coord, "dispatch_complete",
+            {"task_id": task["id"], "worker_id": owner},
+        )
+    )
+    time.sleep(0.1)  # release runs on a background thread
+    assert calls == [(task["id"], "wt-9")]
+
+
+def test_mcp_complete_never_releases_a_non_handoff_task(coord, monkeypatch):
+    import asyncio
+
+    from agent_dispatch import handoff_claim_release
+
+    client = DispatchClient(coord)
+    task = client.create("work")
+    owner = client.claim(worker_id="worker-1", repo=TEST_REPO)["owner"]
+    client.start(task["id"], owner)
+
+    calls = []
+    monkeypatch.setattr(
+        handoff_claim_release, "_release_task_claim",
+        lambda task_id, **k: calls.append(task_id),
+    )
+    asyncio.new_event_loop().run_until_complete(
+        _call(
+            coord, "dispatch_complete",
+            {"task_id": task["id"], "worker_id": owner},
+        )
+    )
+    time.sleep(0.1)
+    assert calls == []
+
+
+def test_mcp_abandon_releases_handoff_claim(coord, monkeypatch):
+    import asyncio
+
+    from agent_dispatch import handoff_claim_release
+
+    client = DispatchClient(coord)
+    task = client.create(
+        "work", repo=TEST_REPO, labels=["handoff"], target_worktree="wt-9",
+    )
+
+    calls = []
+    monkeypatch.setattr(
+        handoff_claim_release, "_release_task_claim",
+        lambda task_id, **k: calls.append((task_id, k.get("worktree"))),
+    )
+    asyncio.new_event_loop().run_until_complete(
+        _call(
+            coord, "dispatch_abandon",
+            {"task_id": task["id"], "permit": True},
+        )
+    )
+    time.sleep(0.1)
+    assert calls == [(task["id"], "wt-9")]
+
+
+def test_mcp_idempotent_abandon_retry_does_not_re_release(coord, monkeypatch):
+    """PR #3248 review: the MCP abandon tool passed a constant
+    `"task.abandoned"` into `_mutate` unconditionally, so a retry against
+    an already-abandoned task (idempotent, no error) re-fired the release
+    hook every time. `abandon_with_outcome` fixes this the same way
+    `complete_with_outcome` already does for completion retries."""
+    import asyncio
+
+    from agent_dispatch import handoff_claim_release
+
+    client = DispatchClient(coord)
+    task = client.create(
+        "work", repo=TEST_REPO, labels=["handoff"], target_worktree="wt-9",
+    )
+    asyncio.new_event_loop().run_until_complete(
+        _call(coord, "dispatch_abandon", {"task_id": task["id"], "permit": True})
+    )
+
+    calls = []
+    monkeypatch.setattr(
+        handoff_claim_release, "_release_task_claim",
+        lambda task_id, **k: calls.append(task_id),
+    )
+    asyncio.new_event_loop().run_until_complete(
+        _call(coord, "dispatch_abandon", {"task_id": task["id"], "permit": True})
+    )
+    time.sleep(0.1)
+    assert calls == []
+
+
 def test_mcp_complete_rejects_null_result(coord):
     import asyncio
 

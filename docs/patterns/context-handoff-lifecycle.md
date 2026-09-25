@@ -71,6 +71,29 @@ checkpoint instead of replaying a consumed task.
 6. **Effort support is enrichment.** A valid active effort selects a compact
    relay delta; without one, the stored continuation is standalone. A knowledge
    repository is not a storage or lifecycle dependency.
+7. **A task-pinned worktree cannot be finalized while its handoff is open.**
+   Storing a task-backed handoff also journals a `task`-kind agent-worktrees
+   claim on the target worktree (a bookkeeping resource obligation, distinct
+   from the task's own claim/ownership state, which stays unclaimed for its
+   intended successor). `agent-worktrees finalize`'s existing, kind-agnostic
+   obligation-settlement gate refuses to finalize that worktree until the
+   claim is released -- which happens once the handoff task reaches a
+   terminal state (consumed to completion, or explicitly abandoned). An
+   unresolved handoff can therefore no longer be silently forgotten when its
+   worktree is retired.
+
+   Both the claim and its release are **best-effort, not a hard guarantee**:
+   a missing `agent-worktrees` CLI, a spawn/timeout failure, or a
+   coordinator/MCP process whose working directory does not resolve the
+   claim's target project can each leave no claim journaled at creation time,
+   or leave an active claim after the handoff task is genuinely terminal. In
+   either case the failure mode is the same cheap, safe one finalize's own
+   obligation gate already relies on elsewhere: `finalize` still blocks (or
+   still proceeds, if no claim was ever journaled) rather than silently
+   corrupting state, and an operator who notices a blocked finalize can
+   inspect and release the stale claim manually (`agent-worktrees claims
+   release <task-id> --worktree <id>`, qualified by an explicit project/owner
+   reference when the release is not run from within the target project).
 
 ## Ownership and retirement invariants
 
