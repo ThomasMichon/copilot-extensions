@@ -6,11 +6,12 @@
 - **Created:** 2026-09-25
 - **Status:** Draft <!-- Draft | Active | Blocked | Done -->
 - **Vision:** extends `visions/plugins/agent-containers/README.md`
-  §`rescue-before-destructive-replacement` (generalizing it to a periodic,
-  non-destructive trigger — see Context) and
+  §`rescue-before-destructive-replacement` (generalizing it to an
+  on-demand, non-destructive trigger independent of replacement — see
+  Context; periodic scheduling itself stays a consumer concern) and
   `visions/plugins/agent-codespaces/README.md` §`telemetry-grade-session-capture`
-  (generalizing "captured on teardown/recycle" to "captured continuously while
-  leased/running"); touches `visions/venue-parity/README.md` only as a
+  (generalizing "captured on teardown/recycle" to "capturable on demand
+  while leased/running"); touches `visions/venue-parity/README.md` only as a
   boundary note (see Context — this is deliberately NOT a venue-parity
   extension).
 - **Umbrella issue:** [#3642](https://github.com/ThomasMichon/copilot-extensions/issues/3642)
@@ -24,8 +25,12 @@ session-state rescue was only ever triggered by destructive replacement
 (stop/remove), so a single shared, deliberately-never-recycled container
 never surrendered its session evidence at all. The fix added a non-destructive
 `agent-containers rescue-capture <fleet>` verb — reusing the existing
-admission/liveness gating, callable on a schedule, wired to a periodic
-systemd timer.
+admission/liveness gating, callable on demand or on any caller-chosen
+schedule. **Note:** `#3574` itself adds only the verb + gating + capture/
+publish path in this repository; the periodic systemd timer that actually
+calls it on a schedule is downstream consumer configuration (this repo has
+no scheduling of its own for it) — see the same clarification repeated at
+each Plan/Context reference below.
 
 `agent-codespaces` has the **identical shape of gap**. Its
 `sync_codespace_sessions()` (in `sessions.py`) already pulls
@@ -78,14 +83,16 @@ Landed same-session as this effort's creation:
 <fleet>`), driven by a downstream consuming project's own containerized
 always-on reviewer service hitting exactly this gap. That work reused
 `_restricted_member_action`'s exact admission/idleness/policy/liveness
-gating with the destructive action step skipped (`action=None`), added a
-`captured: list[str]` result field, and wired a periodic host-side timer
-plus a paired publish step. Full detail lives in
-`ThomasMichon/copilot-extensions#3574`'s own review history, which caught
-two real correctness gaps worth re-checking against any codespaces port:
-never unpause a paused venue just to capture it, and a non-running/absent
-venue must defer with the same message every code path produces, not a
-second ad-hoc one.
+gating with the destructive action step skipped (`action=None`) and added a
+`captured: list[str]` result field — this repository's own scope. The
+downstream consumer separately wired a periodic host-side timer plus a
+paired publish step calling this new verb on a schedule; that scheduling
+lives entirely in the consumer's own repo, not here. Full detail on the
+`#3574` change itself lives in its own review history, which caught two
+real correctness gaps worth re-checking against any codespaces port: never
+unpause a paused venue just to capture it, and a non-running/absent venue
+must defer with the same message every code path produces, not a second
+ad-hoc one.
 
 ### What already exists on the codespaces side
 
@@ -212,12 +219,15 @@ itself did not specify phasing)_
       impact" / vision-reconciliation obligation): revise
       `visions/plugins/agent-containers/README.md`'s
       `rescue-before-destructive-replacement` behavior description to note
-      the now-realized periodic/non-destructive trigger as a peer of the
-      destructive-replacement trigger (not a replacement for it), and
+      the now-realized non-destructive capture trigger (independent of
+      destructive replacement; whether/how it runs periodically remains a
+      consumer scheduling concern, not something this repo provides) as a
+      peer of the destructive-replacement trigger, and
       `visions/plugins/agent-codespaces/README.md`'s
-      `telemetry-grade-session-capture` to note periodic capture while
-      leased/running as a target alongside teardown/recycle capture. Do
-      **not** touch `visions/venue-parity/README.md`'s trusted-only scope
+      `telemetry-grade-session-capture` to note on-demand, non-destructive
+      capture while leased/running as a target alongside teardown/recycle
+      capture. Do **not** touch `visions/venue-parity/README.md`'s
+      trusted-only scope
       boundary — this effort is a structural peer to it, not an extension
       (see Context).
 - [ ] Submit this effort's plan as a PR (this repo's automated-review gate)
