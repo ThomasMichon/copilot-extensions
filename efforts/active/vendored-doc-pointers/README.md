@@ -198,7 +198,7 @@ _Status: designed, implemented, and merged via PR
 
 ## Validation Plan
 
-- [ ] `tools/materialize_main.py`'s test suite covers the new pointer kind
+- [x] `tools/materialize_main.py`'s test suite covers the new pointer kind
       with the same rigor as the existing lib case (byte-identical
       round-trip, refuses on missing/stale source).
 - [ ] A real `python tools/preview_release.py <plugin>` run for each of the
