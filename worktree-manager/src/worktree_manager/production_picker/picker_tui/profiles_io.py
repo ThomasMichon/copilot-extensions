@@ -128,7 +128,12 @@ def apply_column(machine, env, sels, *, mirror=True, runner=_default_runner):
             # "saved" rather than raise when a mirror attempt fails.
             try:
                 from ... import terminal_fragment as tf
-                plan = tf.deploy_fragment(machine, apply=True)
+                try:
+                    current_project = cfg.project_name()
+                except (RuntimeError, ValueError):
+                    current_project = None
+                plan = tf.deploy_fragment(
+                    machine, current_project=current_project, apply=True)
                 mirrored = plan.applied
             except Exception:
                 mirrored = False

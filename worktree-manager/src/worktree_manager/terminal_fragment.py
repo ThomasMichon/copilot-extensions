@@ -1182,7 +1182,7 @@ def deploy_fragment(
 
     if apply:
         _apply_deploy_plan(plan, local_state)
-        plan.applied = True
+        plan.applied = plan.fragment_path is not None  # only if it wrote
 
     return plan
 

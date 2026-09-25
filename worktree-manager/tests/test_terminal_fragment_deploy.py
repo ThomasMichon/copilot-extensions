@@ -61,6 +61,24 @@ def test_deploy_fragment_dry_run_never_touches_disk(monkeypatch, tmp_path):
     assert any("unavailable" in note for note in plan.notes)
 
 
+def test_deploy_fragment_apply_without_localappdata_reports_not_applied(
+    monkeypatch, tmp_path
+):
+    """``apply=True`` with no resolvable Fragments dir (no LOCALAPPDATA, e.g.
+    non-Windows) must not claim success -- nothing was actually written.
+    Regression test: ``deploy_fragment`` used to set ``plan.applied = True``
+    unconditionally whenever ``apply=True`` was passed, even when
+    ``fragment_path`` was ``None`` and ``_apply_deploy_plan`` wrote nothing."""
+    _make_home(tmp_path)
+    _set_home(monkeypatch, tmp_path)
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+
+    plan = tf.deploy_fragment("book2", current_project="myproj", apply=True)
+
+    assert plan.fragment_path is None
+    assert plan.applied is False
+
+
 def test_deploy_fragment_apply_writes_and_reconciles(monkeypatch, tmp_path):
     _make_home(tmp_path)
     _set_home(monkeypatch, tmp_path)
