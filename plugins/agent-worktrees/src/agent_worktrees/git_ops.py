@@ -138,11 +138,10 @@ class GitError(Exception):
 
 
 #: A hooks directory guaranteed to hold no hooks, used to disable a repo's
-#: *client-side* guard hooks for the plugin's own trusted mechanical git ops
-#: (squash re-commit / rebase / push -- see :func:`git` ``no_hooks``). ``/dev/null``
-#: is the portable idiom: git looks for hook files under this path, finds none,
-#: and runs no hook -- on POSIX and on Git-for-Windows alike. Server-side branch
-#: protection is unaffected (it is not a client hook). #3707.
+#: client-side guard hooks for trusted mechanical git ops (squash re-commit /
+#: rebase -- NOT ``push()``, which must let a repo's real pre-push release
+#: guard run -- #3561; see :func:`git` ``no_hooks``). Server-side branch
+#: protection is unaffected. #3707.
 _NO_HOOKS_PATH = "/dev/null"
 
 
@@ -168,16 +167,12 @@ def git(
             (worktree classification) pass a bound so a single stalled ``git``
             spawn cannot hang them indefinitely.
         no_hooks: If True, run with ``-c core.hooksPath=<empty>`` so a repo's
-            **client-side** guard hooks (a branch-protection ``pre-commit`` /
-            ``pre-push`` / ``pre-rebase``) cannot block or corrupt the tool's own
-            trusted, mechanical plumbing (the squash re-commit, rebase, push).
-            Only *client-side* hooks are disabled -- server-side branch
-            protection (Gitea/GitHub rulesets) is untouched -- and only for
-            operations that re-arrange or re-commit ALREADY-committed content, so
-            content-quality checks that ran at original-commit time still hold.
-            This is **not** ``--no-verify`` (disallowed for agent-authored
-            commits): it scopes the disable to the plugin's internal git ops via
-            a config override. See #3707.
+            client-side guard hooks cannot block/corrupt trusted plumbing
+            that only re-arranges ALREADY-committed content (squash
+            re-commit, rebase). **``push()`` never passes this** (#3561): a
+            real pre-push release guard (e.g. ``check-changefile-presence.py``)
+            must be allowed to block a non-compliant push. Not
+            ``--no-verify``: scopes the disable to internal git ops. #3707.
 
     Returns:
         CompletedProcess with stdout/stderr as strings.
@@ -873,13 +868,17 @@ def push(
     caller's retry loop can surface the real error (a pre-push hook decline, an
     auth 403, a protected-branch block) and fail fast instead of masking every
     failure as a generic "rejected" and retrying a doomed push (#993).
+
+    Unlike ``rebase``, this is NEVER given ``no_hooks=True`` (#3561): a real
+    pre-push release guard must be allowed to block a non-compliant push.
+    Worktree-originated callers wrap this with ``hooks.allow_pr_push()``.
     """
     extra = ["--force-with-lease"] if force_with_lease else []
     auth_args = _auth_config_args(remote, cwd=cwd)
     result = git(
         *auth_args,
         "push", remote, branch, *extra, "--quiet",
-        cwd=cwd, check=False, no_hooks=True,
+        cwd=cwd, check=False,
     )
     if result.returncode == 0:
         return PushResult(ok=True)
@@ -892,7 +891,7 @@ def push(
     if auth_args:
         retry = git(
             "push", remote, branch, *extra, "--quiet",
-            cwd=cwd, check=False, no_hooks=True,
+            cwd=cwd, check=False,
         )
         if retry.returncode == 0:
             return PushResult(ok=True)

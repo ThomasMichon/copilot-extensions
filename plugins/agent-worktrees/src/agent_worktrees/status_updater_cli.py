@@ -56,19 +56,29 @@ def _reverse_lookup_project(anchor: Path):
 
 
 def _status_monitor_enabled() -> bool:
-    return _core()._status_monitor_enabled()
+    from . import status_monitor_runtime
+
+    return _core_helper("_status_monitor_enabled", status_monitor_runtime._status_monitor_enabled)()
 
 
 def _register_session_for_monitor(sess: str, path: str | None) -> bool:
-    return _core()._register_session_for_monitor(sess, path)
+    from . import status_monitor_runtime
+
+    return _core_helper("_register_session_for_monitor", status_monitor_runtime._register_session_for_monitor)(
+        sess, path
+    )
 
 
 def _ensure_status_monitor() -> bool:
-    return _core()._ensure_status_monitor()
+    from . import status_monitor_runtime
+
+    return _core_helper("_ensure_status_monitor", status_monitor_runtime._ensure_status_monitor)()
 
 
 def _render_status_context(path: str | None = None, plain: bool = False) -> str:
-    return _core()._render_status_context(path, plain=plain)
+    from . import status_bar_cli
+
+    return _core_helper("_render_status_context", status_bar_cli._render_status_context)(path, plain=plain)
 
 
 def _render_status_segment(
@@ -78,7 +88,9 @@ def _render_status_segment(
     no_title: bool = False,
     persist_title: bool = False,
 ) -> str:
-    return _core()._render_status_segment(
+    from . import status_bar_cli
+
+    return _core_helper("_render_status_segment", status_bar_cli._render_status_segment)(
         path,
         fetch=fetch,
         plain=plain,
@@ -383,7 +395,7 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
     # project for us -- but the status renderers need one to find the
     # worktree's tracking record (repo:id locus + session title).  Resolve it
     # git-like from --path before rendering anything.
-    _core()._activate_project_for_path(path)
+    _core_helper("_activate_project_for_path", _activate_project_for_path)(path)
 
     def _mux(*a: str) -> subprocess.CompletedProcess[str] | None:
         try:
