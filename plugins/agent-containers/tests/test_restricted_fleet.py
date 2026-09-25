@@ -719,6 +719,8 @@ def test_rescue_capture_fleet_captures_running_members_without_stopping(monkeypa
 
 
 def test_rescue_capture_fleet_defers_nonrunning_members(monkeypatch):
+    from agent_containers import replacement
+
     config = ContainersConfig(
         fleets={
             "sandbox": FleetConfig(
@@ -740,12 +742,21 @@ def test_rescue_capture_fleet_defers_nonrunning_members(monkeypatch):
         )
     ]
     monkeypatch.setattr(fleet_mod, "_fleet_members", lambda *_args: members)
+    monkeypatch.setattr(
+        replacement,
+        "rescue_capture_restricted_member",
+        lambda *_args, **_kwargs: replacement.DestructiveResult(
+            "sandbox-1",
+            "deferred",
+            "container is not running; nothing to capture",
+        ),
+    )
 
     result = fleet_mod.rescue_capture_fleet(config, "sandbox")
 
     assert result.captured == []
     assert result.deferred == {
-        "sandbox-1": "container state 'exited' is not capturable"
+        "sandbox-1": "container is not running; nothing to capture"
     }
 
 

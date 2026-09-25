@@ -829,9 +829,6 @@ def rescue_capture_fleet(
                 "restricted container has no matching restricted fleet configuration"
             )
             continue
-        if c.state != "running":
-            result.deferred[c.name] = f"container state {c.state!r} is not capturable"
-            continue
 
         from .replacement import rescue_capture_restricted_member
         from .rescue import RescueError
