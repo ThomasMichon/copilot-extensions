@@ -441,7 +441,18 @@ def _capture_hold_reason(name: str, *, account: str | None) -> str | None:
 
         entries = _list_codespaces_under(account)
         info = next((cs for cs in entries if cs.name == name), None)
-        beacon = _beacon_id(info.display_name) if info is not None else None
+        if info is None:
+            # The status preflight already confirmed this exact name exists
+            # under this exact account -- an absent entry here means
+            # `_list_codespaces_under`'s own listing is incomplete (its
+            # ``--limit 50`` cap, or malformed-output normalization to an
+            # empty list), not that the CodeSpace has no beacon. Treat an
+            # unknown beacon state as a hold, never as cleared.
+            return (
+                "could not confirm cross-machine beacon state (fail-closed): "
+                "CodeSpace missing from the account's own listing"
+            )
+        beacon = _beacon_id(info.display_name)
     except Exception as exc:
         return f"could not confirm cross-machine beacon state (fail-closed): {exc}"
     if beacon is not None:
@@ -450,7 +461,16 @@ def _capture_hold_reason(name: str, *, account: str | None) -> str | None:
     try:
         from . import coordination
 
-        l2 = (coordination.list_leases() or {}).get(name)
+        l2_leases = coordination.list_leases()
+        if l2_leases is None:
+            # None means the L2 store itself was unreadable -- fail closed
+            # rather than coercing it to an empty map via `or {}`, which
+            # would silently let capture proceed past an unknown holder.
+            return (
+                "could not confirm cross-machine L2 lease state (fail-closed): "
+                "the L2 store is unavailable"
+            )
+        l2 = l2_leases.get(name)
     except Exception as exc:
         return f"could not confirm cross-machine L2 lease state (fail-closed): {exc}"
     if l2 is not None and getattr(l2, "live", False):

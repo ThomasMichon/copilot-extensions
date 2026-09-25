@@ -141,6 +141,39 @@ def test_capture_hold_reason_fails_closed_on_l2_read_error(monkeypatch):
     assert "fail-closed" in reason
 
 
+def test_capture_hold_reason_fails_closed_when_missing_from_listing(monkeypatch):
+    """The status preflight already confirmed this exact name exists under
+    this exact account -- an absent entry in `_list_codespaces_under`'s own
+    listing (its `--limit 50` cap, or malformed-output normalization) means
+    the beacon state is UNKNOWN, not that there is no beacon."""
+    import agent_codespaces.lease as lease_mod
+    monkeypatch.setattr(lease_mod, "get_lease", lambda name: None)
+    monkeypatch.setattr(
+        "agent_codespaces.lifecycle._list_codespaces_under", lambda account: [],
+    )
+
+    reason = sessions._capture_hold_reason("cs", account=None)
+    assert reason is not None
+    assert "fail-closed" in reason
+
+
+def test_capture_hold_reason_fails_closed_when_l2_store_unavailable(monkeypatch):
+    """`coordination.list_leases()` returns None (not `{}`) when the L2
+    store itself is unreadable -- `(None or {}).get(name)` would silently
+    coerce that into "no L2 hold", defeating the fail-closed contract."""
+    import agent_codespaces.lease as lease_mod
+    monkeypatch.setattr(lease_mod, "get_lease", lambda name: None)
+    monkeypatch.setattr(
+        "agent_codespaces.lifecycle._list_codespaces_under", lambda account: [_info("cs")],
+    )
+    import agent_codespaces.coordination as coordination
+    monkeypatch.setattr(coordination, "list_leases", lambda: None)
+
+    reason = sessions._capture_hold_reason("cs", account=None)
+    assert reason is not None
+    assert "fail-closed" in reason
+
+
 # --- capture_codespace_sessions: preflight, account binding, gating ---
 
 def test_capture_defers_on_non_available_state(monkeypatch):

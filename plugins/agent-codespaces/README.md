@@ -165,7 +165,7 @@ agent-codespaces allocate <owner/repo> # Reuse/create/recycle/pressure decision
 agent-codespaces create <owner/repo>  # Create, guarded by reuse/budget checks
 agent-codespaces wait <name>          # Patiently wait for Available
 agent-codespaces stop <name>          # Recover sessions, then stop (preserve)
-agent-codespaces sync-sessions <name> # Non-destructive session capture (stays leased/running; never boots/stops/deletes; defers if unheld/unbound/mid-write)
+agent-codespaces sync-sessions <name> # Non-destructive session capture (stays leased/running; never boots/stops/deletes; defers if held/unbound/mid-write)
 agent-codespaces finalize <name>      # Recover, stop, mark recovered/reusable
 agent-codespaces finalize <name> --delete  # Recover, verify off-box safety, delete
 agent-codespaces verify <name>        # Publish git-cleanliness safety verdict
