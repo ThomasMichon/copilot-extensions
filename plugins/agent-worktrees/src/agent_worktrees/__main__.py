@@ -7352,15 +7352,20 @@ _ALL_KNOWN_VERBS: frozenset[str] = frozenset(_LAZY_DISPATCH_TABLE.keys()) | froz
 # real commands end-to-end, not just `--help`.
 _CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "claims_cli",
+    "context_cli",
     "follow_ups_cli",
+    "installation_cli",
     "maintenance_cli",
     "pane_lifecycle",
     "picker_profiles_cli",
     "pr_state_cli",
     "reclaim_cli",
     "session_metadata_cli",
+    "session_tracking_cli",
     "status_bar_cli",
     "status_cli",
+    "status_monitor_runtime",
+    "status_updater_cli",
     "update_cli",
     "worktree_status_audit",
 })

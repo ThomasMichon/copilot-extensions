@@ -119,6 +119,14 @@ copilot-extensions finalize          # clean up the worktree
   approval or a zero-finding pass that may never come. If a PR has had a
   review and nothing has happened since, that is a stuck PR: merge it or
   explicitly abandon it, don't leave it idle.
+- **Ignore `pr-status`/`pr-watch`'s `eligible: false` / `reason: "not yet
+  approved"` fields as a blocker on this repo.** Those fields report a
+  generic contract that assumes an approval gate exists; on this repo's
+  `pr-self-merge` profile with 0 required approvals, they do **not** mean a
+  review is pending or required -- they are a known tooling-wording gap
+  (copilot-extensions#3638), not a live merge gate. Trust the prose above
+  (checks green + no `CHANGES_REQUESTED` + the ~5 minute window is enough),
+  not that one field, when deciding whether to self-merge.
 - **Do not comment `@copilot review` (or similar) to request a fresh pass.**
   An `@copilot` mention on GitHub does not nudge the `copilot-pull-request-reviewer`
   bot -- it delegates a task to the separate Copilot **cloud coding agent**,

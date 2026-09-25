@@ -10,6 +10,7 @@ from pathlib import Path
 
 from . import git_ops, installer as inst, output
 from . import config as cfg
+from . import picker_profiles_cli, repos_cli, status_bar_cli
 
 
 def _core():
@@ -24,12 +25,15 @@ def _core_helper(name: str, local):
     return local
 
 
-def _clarify_registration_account(*args, **kwargs): return _core()._clarify_registration_account(*args, **kwargs)
+def _clarify_registration_account(*args, **kwargs):
+    return _core_helper("_clarify_registration_account", repos_cli._clarify_registration_account)(*args, **kwargs)
 def _find_repo_dir(*args, **kwargs): return _core()._find_repo_dir(*args, **kwargs)
-def _resolve_remote_default_branch(*args, **kwargs): return _core()._resolve_remote_default_branch(*args, **kwargs)
+def _resolve_remote_default_branch(*args, **kwargs):
+    return _core_helper("_resolve_remote_default_branch", status_bar_cli._resolve_remote_default_branch)(*args, **kwargs)
 def _write_config(*args, **kwargs): return _core()._write_config(*args, **kwargs)
 def _write_global_config(*args, **kwargs): return _core()._write_global_config(*args, **kwargs)
-def _refresh_terminal_profiles(*args, **kwargs): return _core()._refresh_terminal_profiles(*args, **kwargs)
+def _refresh_terminal_profiles(*args, **kwargs):
+    return _core_helper("_refresh_terminal_profiles", picker_profiles_cli._refresh_terminal_profiles)(*args, **kwargs)
 
 
 def add_parsers(sub) -> None:

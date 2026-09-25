@@ -16,12 +16,20 @@ from pathlib import Path
 from . import config as cfg
 from . import git_ops, output, sessions, state_root as state_root_mod, tracking
 from . import installer as inst
+from . import installation_cli, pr_config, session_binding_cli, status_updater_cli
 
 
 def _core():
     from . import __main__ as core
 
     return core
+
+
+def _core_helper(name: str, local):
+    candidate = vars(_core()).get(name)
+    if callable(candidate) and candidate is not local:
+        return candidate
+    return local
 
 
 _GET_KEYS: dict[str, str] = {
@@ -198,7 +206,7 @@ def cmd_deploy_instructions(args: argparse.Namespace) -> int:
         registry = cfg.load_machines_yaml(repo_dir)
     except FileNotFoundError:
         output.skipped("No machines.yaml found (optional)")
-        _core()._cleanup_stale_instructions(cfg.project_dir(project))
+        _core_helper("_cleanup_stale_instructions", installation_cli._cleanup_stale_instructions)(cfg.project_dir(project))
         return 0
     except ValueError as exc:
         output.err(f"Cannot load machines.yaml: {exc}")
@@ -210,7 +218,7 @@ def cmd_deploy_instructions(args: argparse.Namespace) -> int:
 
     proj_dir = cfg.project_dir(project)
     proj_dir.mkdir(parents=True, exist_ok=True)
-    _core()._deploy_copilot_instructions(
+    _core_helper("_deploy_copilot_instructions", installation_cli._deploy_copilot_instructions)(
         proj_dir,
         registry[machine],
         project=project,
@@ -288,14 +296,14 @@ def cmd_get(args: argparse.Namespace) -> int:
     session_wt_id = None
     session_cwd = None
     if session_id:
-        session_wt_id = _core()._activate_session_binding(session_id)
+        session_wt_id = _core_helper("_activate_session_binding", session_binding_cli._activate_session_binding)(session_id)
         if not session_wt_id:
             try:
                 session_cwd = sessions.session_cwd(session_id)
             except Exception:
                 session_cwd = None
             if session_cwd is not None:
-                _core()._activate_project_for_path(str(session_cwd))
+                _core_helper("_activate_project_for_path", status_updater_cli._activate_project_for_path)(str(session_cwd))
 
     try:
         config = cfg.load_config(
@@ -382,12 +390,12 @@ def cmd_get(args: argparse.Namespace) -> int:
             if wt_id
             else ""
         ),
-        "repo-remote": lambda: _core()._resolve_repo_remote(config, repo),
-        "lease-origin": lambda: _core()._resolve_lease_origin(),
+        "repo-remote": lambda: _core_helper("_resolve_repo_remote", pr_config._resolve_repo_remote)(config, repo),
+        "lease-origin": lambda: _core_helper("_resolve_lease_origin", _resolve_lease_origin)(),
         "pr-enabled": lambda: "true" if repo.pr.enabled else "false",
         "pr-required": lambda: "true" if repo.pr.required else "false",
         "pr-provider": lambda: repo.pr.provider if repo.pr.enabled else "",
-        "pr-profile": lambda: _core()._pr_flow_profile(repo).profile,
+        "pr-profile": lambda: _core_helper("_pr_flow_profile", pr_config._pr_flow_profile)(repo).profile,
     }
 
     if key not in values:
@@ -637,7 +645,7 @@ def cmd_knowledge_dispatch(argv: list[str]) -> int:
         if args.harness_path:
             summary = knowledge_plugins.compose(args.harness_path, args.knowledge_path)
         else:
-            _core()._activate_project_for_path(args.cwd)
+            _core_helper("_activate_project_for_path", status_updater_cli._activate_project_for_path)(args.cwd)
             summary = knowledge_plugins.compose_from_pair(cwd=args.cwd)
     except knowledge_plugins.KnowledgePluginError as exc:
         summary = {

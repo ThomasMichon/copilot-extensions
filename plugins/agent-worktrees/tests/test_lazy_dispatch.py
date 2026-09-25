@@ -237,6 +237,9 @@ def _deferred_only_global_names() -> frozenset[str]:
         ("pre-launch", ["pre-launch"]),
         ("reconcile-plugins", ["reconcile-plugins", "--peek"]),
         ("worktree-status-audit", ["worktree-status-audit", "--sample", "1", "--no-log", "--seed", "1"]),
+        ("machine-context", ["machine-context"]),
+        ("list-sessions", ["list-sessions"]),
+        ("reconcile-sessions", ["reconcile-sessions"]),
     ],
 )
 def test_cluster_free_command_handler_body_runs_without_cluster(command, argv, monkeypatch, capsys):
@@ -348,7 +351,7 @@ def test_worktree_status_audit_monitor_enabled_path_skips_cluster(monkeypatch):
     assert calls == [], "the monitor-enabled path must not load the cluster"
 
 
-@pytest.mark.parametrize("command", ["get", "worktree-lineage", "session-lifecycle"])
+@pytest.mark.parametrize("command", ["cleanup", "reap-sessions", "session-lifecycle"])
 def test_not_yet_decoupled_command_still_loads_cluster(command, monkeypatch):
     """A command whose module is NOT in `_CLUSTER_FREE_MODULES` must still
     load the cluster -- the safe, unchanged Phase 1 behavior. Proves the
@@ -356,7 +359,11 @@ def test_not_yet_decoupled_command_still_loads_cluster(command, monkeypatch):
     always-skip), and that a not-yet-decoupled command takes on zero
     incremental risk from Phase 1b. `session-lifecycle` is a deliberate
     regression guard: it was briefly (incorrectly) cluster-free earlier in
-    this change -- see the previous test's own docstring."""
+    this change -- see the previous test's own docstring. `cleanup`/
+    `reap-sessions` replace Stage B's `get`/`worktree-lineage` examples,
+    which Stage C decoupled (`context_cli`/`session_tracking_cli`) -- both
+    still transitively depend on a deferred-only global reached through a
+    `cleanup_gc_cli`/`reap_cli` function itself (see the effort's Journal)."""
     module_name, _ = m._LAZY_DISPATCH_TABLE[command]
     assert module_name not in m._CLUSTER_FREE_MODULES
 

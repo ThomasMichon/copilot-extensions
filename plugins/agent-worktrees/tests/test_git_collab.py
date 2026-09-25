@@ -6,6 +6,7 @@ These exercise the real git operations against the shared ``pr_repo`` fixture
 
 from __future__ import annotations
 
+import stat
 from pathlib import Path
 
 from agent_worktrees import git_collab, git_ops
@@ -18,6 +19,19 @@ def _git(*args: str, cwd) -> str:
 def _ahead(branch: str, upstream: str, *, cwd) -> int:
     out = _git("rev-list", "--count", f"{upstream}..{branch}", cwd=cwd)
     return int(out or "0")
+
+
+def _install_failing_pre_push_hook(worktree_path: Path) -> None:
+    """#3561: push() no longer bypasses hooks -- install a real, always-
+    failing pre-push hook (standing in for a repo release guard) to confirm
+    git_collab's two push call sites surface the real failure."""
+    common_dir = Path(_git("rev-parse", "--git-common-dir", cwd=worktree_path))
+    if not common_dir.is_absolute():
+        common_dir = worktree_path / common_dir
+    hook_path = common_dir / "hooks" / "pre-push"
+    hook_path.parent.mkdir(parents=True, exist_ok=True)
+    hook_path.write_text("#!/bin/sh\necho 'BLOCKED: release guard' >&2\nexit 1\n")
+    hook_path.chmod(hook_path.stat().st_mode | stat.S_IEXEC)
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +155,13 @@ class TestFeatureBranch:
 
         assert git_collab.manage_feature_branch(wid, config, "shared") is False
 
+    def test_manage_feature_branch_reports_pre_push_hook_failure(self, pr_repo, capsys):
+        config, wid, wt_path, _remote = pr_repo
+        _install_failing_pre_push_hook(wt_path)
+
+        assert git_collab.manage_feature_branch(wid, config, "shared", push=True) is False
+        assert "BLOCKED: release guard" in capsys.readouterr().out
+
 
 # ---------------------------------------------------------------------------
 # merge_to_feature
@@ -206,3 +227,14 @@ class TestMergeToFeature:
         ) is True
         (wt_path / "dirty.txt").write_text("uncommitted\n")
         assert git_collab.merge_to_feature(wid, config, "shared") is False
+
+    def test_merge_to_feature_reports_pre_push_hook_failure(self, pr_repo, capsys):
+        config, wid, wt_path, _remote = pr_repo
+        assert git_collab.manage_feature_branch(wid, config, "shared", push=True) is True
+        (wt_path / "slice.txt").write_text("delegate slice\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "delegate work", cwd=wt_path)
+        _install_failing_pre_push_hook(wt_path)
+
+        assert git_collab.merge_to_feature(wid, config, "shared") is False
+        assert "BLOCKED: release guard" in capsys.readouterr().out

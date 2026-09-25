@@ -1677,6 +1677,37 @@ efforts' own PRs).
     anchor to `dev` (its old branch was already merged; nothing lost).
     GitHub's actual repo default branch and git's remote `HEAD` both
     correctly remain `main` — untouched, as they should be; only the
+    contribution-routing config was wrong. **`tmichon-cloud1` swept
+    (2026-09-25):** confirmed the identical staleness on this second
+    machine, independently, while attempting `create-pr` for an unrelated
+    `agent-worktrees` PR (Phase 1b Stage C, `agent-cli-lazy-dispatch`
+    effort) — `create-pr`'s pre-squash rebase step failed with "hit genuine
+    conflicts" against `origin/main`, even though the worktree itself was
+    already correctly based on current `origin/dev`, because
+    `repo.default_branch` resolved to `main` from this machine's own stale
+    anchor (`C:\Data\Src\copilot-extensions`, sitting on an old `main` ref
+    at commit `6766cc192`, ~67 commits behind `dev`, with its on-disk
+    `.agent-worktrees/config.yaml` still reading `default_branch: main`
+    from before this effort's Phase 5 flip). Fixed identically: logged
+    break-glass edit (`repos allow-edits copilot-extensions --reason ...`),
+    switched the anchor to `dev` and fast-forwarded (`git checkout dev &&
+    git pull --ff-only`; the old `main` local branch had nothing
+    unmerged), reverted the grant, and confirmed
+    `cfg.load_config().default_repo.default_branch == "dev"` directly.
+    **Structural gap this confirms, not yet fixed:** the anchor
+    fast-forward is not part of any automated flow a session naturally
+    runs (`agent-worktrees update` explicitly reported this exact anchor as
+    `"dirty -- left untouched"` earlier in the same session, due to an
+    unrelated stray untracked file, and silently skipped the fast-forward
+    it would otherwise have done) — nothing surfaces "your anchor's
+    contribution-routing config disagrees with its own registry/in-repo
+    state" as an actionable warning before a PR attempt fails on it. Worth
+    a follow-up: either have `create-pr`/`push-changes` sanity-check
+    `repo.default_branch` against the *worktree's own* in-repo config (not
+    only the anchor's) before attempting the pre-squash rebase, or have
+    `agent-worktrees doctor` flag an anchor whose in-repo `default_branch`
+    disagrees with `repos.yaml`'s registry entry for the same repo.
+    correctly remain `main` — untouched, as they should be; only the
     contribution-routing config was wrong. **Not yet audited**: whether
     other machines' anchors (e.g. `tmichon-cloud1`) carry the same staleness
     — worth a sweep next time that machine is active.

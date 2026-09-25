@@ -5,7 +5,7 @@
   Copilot execution.
 - **Scope:** leaf (cross-cutting capability within the agent fabric)
 - **Status:** Active
-- **Last revised:** 2026-09-18
+- **Last revised:** 2026-09-24
 - **Reality docs:** [`plugins/agent-bridge/docs/architecture.md`](../../plugins/agent-bridge/docs/architecture.md) ·
   [`plugins/agent-worktrees/docs/architecture.md`](../../plugins/agent-worktrees/docs/architecture.md)
 
@@ -166,6 +166,16 @@ spawn receipt.
 
 Users can add a hosting integration without modifying the generic worktree,
 handoff, or presentation layers.
+
+### host-native-title-projection
+
+Where the hosting technology has its own native window/tab title (a
+multiplexer pane title, a terminal emulator tab), the provider projects the
+worktree's durable title into it — composed with the wrapped process's own
+title hint rather than replacing it, so an operator scanning terminal tabs
+recognizes a worktree by name without switching into it first. This is a
+per-provider mechanic (opaque host evidence, per *Host-owned execution
+identity*), not a new durable field the agency ledger stores.
 
 ### provider-neutral-human-control
 
