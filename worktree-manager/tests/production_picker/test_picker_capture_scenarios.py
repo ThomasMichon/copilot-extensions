@@ -140,18 +140,21 @@ def test_claims_worktree_matches_golden(monkeypatch, tmp_path):
 
 
 def test_long_running_worktree_matches_golden(monkeypatch, tmp_path):
-    """A worktree started weeks ago, with substantial session history, but
-    NOT currently attached (so it lands in Recent, not Active) -- next to a
-    worktree created yesterday that has never been touched since. Documents
-    the CURRENT (pre-Phase-3) sort bug: Recent orders purely by
-    ``started_at``/age, with no "last used" signal at all, so the genuinely
-    stale-but-newly-created row 2 sorts ABOVE the long-running, heavily-used
-    row 1 -- "newest to oldest" by creation, not by last use. Phase 3 fixes
-    the sort; this golden is the "before" baseline it should visibly change
-    (row 1 should sort first once Phase 3 lands)."""
+    """A worktree started weeks ago, with substantial session history and a
+    RECENT real resume (``last_resumed_at``), but NOT currently attached (so
+    it lands in Recent, not Active) -- next to a worktree created yesterday
+    that has never been touched since. Documents the Phase-3 fix: Recent
+    orders by most-recently-used (``last_resumed_at``, falling back to
+    ``started_at`` when a worktree has never been resumed), not by creation
+    age -- so the long-running, heavily-used, recently-resumed row 1 sorts
+    ABOVE the merely-newer-but-untouched row 2, even though row 1's
+    ``started_at`` is far older. Before Phase 3 (no ``last_resumed_at``
+    signal at all), row 2 would have sorted first purely by creation age;
+    this golden is the corrected "after" baseline."""
     raws = [
         {"id": "anomalous-potato-win-20260528-l001", "title": "Long-haul migration",
          "status": "active", "started_at": "2026-05-28T09:00:00",
+         "last_resumed_at": "2026-06-27T16:30:00",
          "turn_count": 47, "state": "wip", "ahead": 5, "behind": 2},
         {"id": "anomalous-potato-win-20260626-l002", "title": "Created yesterday, untouched",
          "status": "active", "started_at": "2026-06-26T17:00:00",
