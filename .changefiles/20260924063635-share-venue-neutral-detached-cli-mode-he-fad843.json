@@ -1,9 +1,0 @@
-{
-  "comment": "Share venue-neutral detached CLI-mode helpers.",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

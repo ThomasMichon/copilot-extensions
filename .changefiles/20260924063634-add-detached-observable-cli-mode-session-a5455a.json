@@ -1,9 +1,0 @@
-{
-  "comment": "Add detached observable CLI-mode sessions for trusted containers.",
-  "changes": [
-    {
-      "plugin": "agent-containers",
-      "type": "patch"
-    }
-  ]
-}

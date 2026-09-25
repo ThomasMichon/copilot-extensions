@@ -1,9 +1,0 @@
-{
-  "comment": "copilot --detach --ref-file: copy operator reference files into the container outside the checkout and name them to the worker",
-  "changes": [
-    {
-      "plugin": "agent-containers",
-      "type": "patch"
-    }
-  ]
-}
