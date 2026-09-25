@@ -5,7 +5,7 @@
       {
         "type": "command",
         "bash": "if [ -z \"${COPILOT_PLUGIN_ROOT:-}\" ]; then exit 0; fi; if command -v python3 >/dev/null 2>&1; then PY=python3; elif command -v python >/dev/null 2>&1; then PY=python; else exit 0; fi; \"$PY\" \"$COPILOT_PLUGIN_ROOT/scripts/copilot-mention-guard.py\"",
-        "powershell": "if (-not $env:COPILOT_PLUGIN_ROOT) { exit 0 }; $py = Get-Command python -ErrorAction SilentlyContinue; if (-not $py) { exit 0 }; & $py.Source (Join-Path $env:COPILOT_PLUGIN_ROOT 'scripts\\copilot-mention-guard.py')",
+        "powershell": "if (-not $env:COPILOT_PLUGIN_ROOT) { exit 0 }; $py = $null; foreach ($candidate in @('python3','python','py')) { $found = Get-Command $candidate -CommandType Application -All -ErrorAction SilentlyContinue | Where-Object { $_.Source -notmatch '\\\\WindowsApps\\\\' } | Select-Object -First 1; if ($found) { $py = $found; break } }; if (-not $py) { exit 0 }; & $py.Source (Join-Path $env:COPILOT_PLUGIN_ROOT 'scripts\\copilot-mention-guard.py')",
         "timeoutSec": 15
       }
     ]

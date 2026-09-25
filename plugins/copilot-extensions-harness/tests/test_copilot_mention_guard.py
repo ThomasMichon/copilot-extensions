@@ -227,6 +227,41 @@ def test_pr_create_with_explicit_body_is_still_scanned() -> None:
     assert guard.command_publishes_copilot_mention(allowed) is None
 
 
+def test_unresolved_body_file_variable_is_denied_fail_closed() -> None:
+    """PR #3663 review (round 8): _read_bounded() previously returned "" for
+    any OSError, making an uninspectable body file look identical to an
+    empty, harmless one. `BODY_FILE=x.md; gh pr comment ... --body-file
+    "$BODY_FILE"` is valid shell -- this tokenizer sees the literal
+    (unexpanded) '$BODY_FILE' string, the open() fails, and the guard must
+    NOT read that failure as "nothing to worry about"."""
+    guard = _load_guard()
+    cmd = 'gh pr comment 1 -R owner/repo --body-file "$BODY_FILE_DOES_NOT_EXIST"'
+    assert guard.command_publishes_copilot_mention(cmd) == "unscannable"
+
+
+def test_missing_body_file_equals_form_is_denied_fail_closed() -> None:
+    guard = _load_guard()
+    cmd = "gh pr comment 1 -R owner/repo --body-file=/nonexistent/path.md"
+    assert guard.command_publishes_copilot_mention(cmd) == "unscannable"
+
+
+def test_missing_api_f_body_file_is_denied_fail_closed() -> None:
+    guard = _load_guard()
+    cmd = "gh api repos/o/r/pulls/1/comments -F body=@/nonexistent/path.md"
+    assert guard.command_publishes_copilot_mention(cmd) == "unscannable"
+
+
+def test_readable_body_file_is_still_scanned_normally(tmp_path: Path) -> None:
+    """Companion true-negative: a body file that DOES exist and contains no
+    mention must still be allowed -- the fail-closed fix must not turn
+    every --body-file into an automatic deny."""
+    guard = _load_guard()
+    body_file = tmp_path / "body.md"
+    body_file.write_text("Looks good, thanks!\n", encoding="utf-8")
+    cmd = f'gh pr comment 1 -R owner/repo --body-file "{body_file}"'
+    assert guard.command_publishes_copilot_mention(cmd) is None
+
+
 # ---------------------------------------------------------------------------
 # Repo scoping -- this guard applies ONLY to this plugin's own repo.
 # ---------------------------------------------------------------------------

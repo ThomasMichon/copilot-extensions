@@ -314,12 +314,17 @@ def _is_api_comment_or_review_write(tokens: list[str]) -> bool:
     )
 
 
-def _read_bounded(path: str, limit: int = 200_000) -> str:
+def _read_bounded(path: str, limit: int = 200_000) -> str | None:
+    """Contents of *path* (bounded), or ``None`` if it can't be read --
+    NEVER an empty string on failure, which would make an uninspectable
+    body file (e.g. a variable-expanded path this best-effort tokenizer
+    couldn't resolve, or a genuinely missing file) look identical to an
+    empty, harmless one and silently pass it through."""
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
             return fh.read(limit)
     except OSError:
-        return ""
+        return None
 
 
 _UNSCANNABLE = object()  # sentinel: the body is sourced from stdin, which a
@@ -350,7 +355,7 @@ def _extract_input_json_body(path: str) -> str | object:
 
 def _is_create_subcommand(tokens: list[str]) -> bool:
     """``pr create``/``issue create`` can derive their body from an
-    interactive prompt or ``--fill`` (commit messages) when no explict
+    interactive prompt or ``--fill`` (commit messages) when no explicit
     ``--body``/``--body-file``/``--input`` is given -- content that never
     appears in argv at all, so it can't be scanned (see
     ``_extract_body_text``'s fail-closed handling for this case)."""
@@ -386,14 +391,20 @@ def _extract_body_text(tokens: list[str]) -> str | object:
             if token == flag and index + 1 < len(tokens):
                 if tokens[index + 1] == "-":
                     return _UNSCANNABLE
-                parts.append(_read_bounded(tokens[index + 1]))
+                content = _read_bounded(tokens[index + 1])
+                if content is None:
+                    return _UNSCANNABLE
+                parts.append(content)
                 matched = True
                 break
             if token.startswith(flag + "="):
                 value = token[len(flag) + 1 :]
                 if value == "-":
                     return _UNSCANNABLE
-                parts.append(_read_bounded(value))
+                content = _read_bounded(value)
+                if content is None:
+                    return _UNSCANNABLE
+                parts.append(content)
                 matched = True
                 break
         if matched:
@@ -421,7 +432,10 @@ def _extract_body_text(tokens: list[str]) -> str | object:
                 if value == "@-":
                     return _UNSCANNABLE
                 if token == "-F" and value.startswith("@"):
-                    parts.append(_read_bounded(value[1:]))
+                    content = _read_bounded(value[1:])
+                    if content is None:
+                        return _UNSCANNABLE
+                    parts.append(content)
                 else:
                     parts.append(value)
             index += 2
