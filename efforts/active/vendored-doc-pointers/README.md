@@ -112,19 +112,24 @@ Per operator direction (session that authored PR #3554):
 ## Plan
 
 ### Phase 1 — Design the generalized pointer mechanism
-- [x] Read `tools/materialize_main.py`, `tools/sync-vendored-libs.py`, and the
+
+_Status: designed and implemented in PR [#3575](https://github.com/ThomasMichon/copilot-extensions/pull/3575)
+(not yet merged as of this writing). Checked off here only once that PR lands
+on `dev` -- this branch's own checkout does not yet contain the code below._
+
+- [ ] Read `tools/materialize_main.py`, `tools/sync-vendored-libs.py`, and the
       `VENDOR_POINTER.json` schema in full; confirm exactly what would need to
       generalize (currently hardcoded to `libs/<lib>/src` + a version-line
       rewrite in `pyproject.toml` — neither applies to a plain doc file).
-      **Confirmed:** neither script's directory-pointer logic (copytree +
-      version-line rewrite) applies to a single file; the new file-pointer
-      kind needed its own find/expand functions rather than reusing the lib
-      case's internals.
-- [x] Decide the pointer shape for a non-lib file: reuse
+      Confirmed in PR #3575: neither script's directory-pointer logic
+      (copytree + version-line rewrite) applies to a single file; the new
+      file-pointer kind needed its own find/expand functions rather than
+      reusing the lib case's internals.
+- [ ] Decide the pointer shape for a non-lib file: reuse
       `VENDOR_POINTER.json` with a generalized `source`/`kind` field, or a
       distinct format. Justify the choice against issue #3565's stated
-      preference for an in-language marker. **Decided:** a distinct format --
-      a single-line HTML-comment marker
+      preference for an in-language marker. Decided in PR #3575: a distinct
+      format -- a single-line HTML-comment marker
       (`<!-- VENDOR_POINTER: source=<repo-relative-path> kind=file -->`) as
       the file's own first line, not a JSON sidecar. A directory/lib pointer
       can be an empty stub next to a real sibling file (`pyproject.toml`), but
@@ -132,22 +137,22 @@ Per operator direction (session that authored PR #3554):
       second file appearing in the mirror location -- and issue #3565 asked
       specifically for content an agent can read directly, in the file's own
       language, without first discovering `VENDOR_POINTER.json`'s schema.
-      See `tools/materialize_main.py`'s module docstring for the full
-      rationale and both pointer kinds side by side.
-- [x] Prototype the in-language marker for Markdown specifically (e.g. an
+      See `tools/materialize_main.py`'s module docstring (PR #3575) for the
+      full rationale and both pointer kinds side by side.
+- [ ] Prototype the in-language marker for Markdown specifically (e.g. an
       HTML comment header) and confirm it round-trips: a human/agent reading
       the `dev`-branch file understands it's a mirror without external docs,
-      and the promotion tooling can still parse it mechanically. **Done:**
-      `materialize_main._file_pointer_source()` matches the marker line
-      exactly (`kind=file`, `source=` required) via `_FILE_POINTER_RE`; an
-      HTML comment is invisible when the Markdown renders but plainly visible
-      in source, and materializing overwrites the stub's own content with the
-      canonical file's bytes in place (no separate pointer file to delete,
-      unlike the lib case).
-- [x] Extend `tools/materialize_main.py` (and its test suite) to expand the
+      and the promotion tooling can still parse it mechanically. Built in PR
+      #3575: `materialize_main._file_pointer_source()` matches the marker
+      line exactly (`kind=file`, `source=` required) via `_FILE_POINTER_RE`;
+      an HTML comment is invisible when the Markdown renders but plainly
+      visible in source, and materializing overwrites the stub's own content
+      with the canonical file's bytes in place (no separate pointer file to
+      delete, unlike the lib case).
+- [ ] Extend `tools/materialize_main.py` (and its test suite) to expand the
       new pointer kind, with the same non-regression guarantees the lib case
       has (never silently wipes canonical, refuses to materialize from a
-      stale/missing source). **Done:** `find_file_pointers()` +
+      stale/missing source). Built in PR #3575: `find_file_pointers()` +
       `materialize_file_pointers()`, wired into `materialize()`/`build()`;
       6 new tests (byte-identical round-trip, missing-canonical SKIP leaves
       the stub untouched, multiple mirrors of the same doc, non-pointer files
@@ -155,7 +160,7 @@ Per operator direction (session that authored PR #3554):
       `tools/preview_release.py`'s per-plugin materializer
       (`_materialize_file_pointers_into_preview`) to expand file pointers
       into a single-plugin preview copy, matching a gap the Copilot reviewer
-      caught on PR #3566 (the per-plugin preview tool only expanded lib
+      caught on this PR (the per-plugin preview tool only expanded lib
       pointers, so Phase 2's own preview-validation step could not have
       passed without this).
 
@@ -210,8 +215,9 @@ Per operator direction (session that authored PR #3554):
 
 ## Proposal
 
-**File-pointer format (decided in Phase 1):** a vendored file's first line is
-an HTML comment marker:
+**File-pointer format (decided in Phase 1, implemented in PR
+[#3575](https://github.com/ThomasMichon/copilot-extensions/pull/3575), not
+yet merged):** a vendored file's first line is an HTML comment marker:
 
 ```
 <!-- VENDOR_POINTER: source=<repo-relative-path> kind=file -->
@@ -237,17 +243,18 @@ comparison and `tools/test_materialize_main.py` /
 ## Journal
 
 ### 2026-09-24 — Kickoff
-- Effort created after landing PR #3554
-  (`docs/patterns/entity-relationship-model.md`) surfaced two related
-  findings: (1) the same doc-duplication problem `dev-branch-release-pipeline`
-  already solved for shared libs, not yet generalized to docs, and (2) a real
-  bug in `agent-worktrees push()` that silently bypasses the pre-push
-  release-guard hooks documented as the local enforcement point for exactly
-  this kind of drift. Filed the umbrella issue (#3565) and cross-referenced
-  the pre-existing hook-bypass issue (#3561). Handed off immediately after
-  kickoff per operator direction — no phase work started yet.
+- Effort created while working on PR #3554
+  (`docs/patterns/entity-relationship-model.md`, still open at the time)
+  surfaced two related findings: (1) the same doc-duplication problem
+  `dev-branch-release-pipeline` already solved for shared libs, not yet
+  generalized to docs, and (2) a real bug in `agent-worktrees push()` that
+  silently bypasses the pre-push release-guard hooks documented as the local
+  enforcement point for exactly this kind of drift. Filed the umbrella issue
+  (#3565) and cross-referenced the pre-existing hook-bypass issue (#3561).
+  Handed off immediately after kickoff per operator direction — no phase work
+  started yet.
 
-### 2026-09-24/25 — Phase 1 landed
+### 2026-09-24/25 — Phase 1 opened as PR #3575 (not yet merged)
 - Designed and built the generalized file-pointer mechanism: an in-language
   HTML-comment marker (see Proposal above), `materialize_main.py`'s
   `find_file_pointers()`/`materialize_file_pointers()`, and
@@ -255,10 +262,10 @@ comparison and `tools/test_materialize_main.py` /
   `test_materialize_main.py` and `test_preview_release.py`, all passing;
   `ruff check` clean; `check-docs-consistency.py` and
   `check-changefile-presence.py` both pass (no changefile needed -- these are
-  repo-root `tools/` changes, not a plugin payload). Landed as its own PR per
-  this effort's own per-phase-PR coordination rule, in a fresh worktree (not
-  PR #3554's or #3566's) since neither of those branches was the right home
-  for Phase 1 code.
+  repo-root `tools/` changes, not a plugin payload). Opened as its own PR
+  (#3575, not yet merged) per this effort's own per-phase-PR coordination
+  rule, in a fresh worktree (not PR #3554's or #3566's) since neither of
+  those branches was the right home for Phase 1 code.
 - Two review rounds on PR #3554 and #3566 (the two prior open PRs, watched
   through to keep them from going stale) caught: a false-positive "ten
   durable" claim on #3554 (checked -- both the PR description and the doc
