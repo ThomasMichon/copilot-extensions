@@ -326,7 +326,7 @@ the exact config path** the frontmatter uses — e.g. the `--config <path>` the
   single upstream tool and print the result (pipeable; also reads the args JSON on
   stdin).
 - **`<agent-mcp catalog argv[0]> materialize <bridge>`** — project the whole `tools/list` catalog
-  into a discoverable CLI stub fleet under `~/.agent-mcp/materialized/<server>/`
+  into a discoverable CLI stub fleet under `~/.agent-mcp/materialized/<server>/` <!-- marketplace-isolation: allow doc-example -->
   (each stub forwards through the legacy global `agent-mcp call` management <!-- marketplace-isolation: allow materialized-stub-management -->
   wrapper, so tools are invocable by name and pipe
   like any command; `--windows` emits a `.ps1`/`.cmd` shim farm). Re-running

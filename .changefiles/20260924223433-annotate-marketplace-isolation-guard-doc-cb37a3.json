@@ -1,0 +1,13 @@
+{
+  "comment": "Annotate marketplace-isolation guard documentation false positives",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    },
+    {
+      "plugin": "wsl-setup",
+      "type": "patch"
+    }
+  ]
+}
