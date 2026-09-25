@@ -651,7 +651,9 @@ this file's own Journal (below) naming the exact sub-item before starting it,
 and check the Journal's most recent entries for an unreleased claim before
 picking up new work — the same discipline the closed issue used to host,
 just recorded here instead. Land changes serially through the PR-required
-`main`. Downstream private plans may **link to** this effort and
+`dev` branch (`main` only ever moves via the CI promotion pipeline, never a
+direct PR target — see CONTRIBUTING.md). Downstream private plans may
+**link to** this effort and
 its issues; the public artifacts stay self-contained and general-purpose.
 
 This effort has already paid the cost of two sessions landing independently
@@ -699,8 +701,10 @@ claiming discipline alone.
   skipped; the targeted `test_mux_link.py`/`test_status_monitor.py` suites
   are fully green (120/120). `ruff check --select F,E9`,
   `check-module-size.py`, `check-install-contract.py`, and
-  `check-version-consistency.py` all clean. Bumped `agent-worktrees`
-  `1.5.5-dev265` -> `dev266`.
+  `check-version-consistency.py` all clean. Added a pending
+  `.changefiles/*.json` entry naming `agent-worktrees` (patch) per
+  CONTRIBUTING.md's changefile flow -- the real version bump is applied by
+  the promotion pipeline, not hand-edited in this tree.
 
 - **2026-09-23** — Landed Phase 3e Step 5b/5c (install.ps1 repoint + live
   trial), PR [#3457](https://github.com/ThomasMichon/copilot-extensions/pull/3457).

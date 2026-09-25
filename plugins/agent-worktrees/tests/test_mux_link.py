@@ -389,6 +389,42 @@ def test_warm_load_rejects_a_non_finite_received_at_and_falls_back_to_now(tmp_pa
     assert abs(entry["received_at"] - time.time()) < 5  # fell back to real "now"
 
 
+def test_warm_load_rejects_an_out_of_float_range_received_at_and_falls_back_to_now(tmp_path):
+    """Copilot review finding: a syntactically valid but out-of-float-range
+    JSON integer (e.g. ``10**1000``) reaches ``math.isfinite`` and raises
+    ``OverflowError`` -- ``_warm_load``'s own per-entry ``try/except``
+    previously caught only ``ValueError``, so this would abort
+    ``ManagedMuxCache.__init__`` entirely (not just skip the one bad entry),
+    which ``InProcessRuntime.start()``'s broad ``except Exception`` then
+    turns into silently disabling this whole endpoint."""
+    huge_int = 10**1000
+    persist_path = tmp_path / "managed-mux-cache.json"
+    persist_path.write_text(
+        json.dumps(
+            [
+                {
+                    "project": "proj",
+                    "worktree_id": "wt-1",
+                    "mux_session": "wt-1",
+                    "mapping_revision": 1,
+                    "live": True,
+                    "panes": [],
+                    "session_incarnation": "",
+                    "attached_clients": 0,
+                    "observed_at": "2026-09-17T08:00:00Z",
+                    "received_at": huge_int,
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    cache = mux_link.ManagedMuxCache(persist_path=persist_path)  # must not raise
+    entry = cache.get("proj", "wt-1")
+    assert entry is not None
+    assert entry["received_at"] != huge_int
+    assert abs(entry["received_at"] - time.time()) < 5  # fell back to real "now"
+
+
 def test_warm_load_keys_entries_by_their_own_project_and_worktree_id(tmp_path):
     """Copilot review finding: the persisted snapshot is a JSON *array* of
     self-describing entries (never a JSON object keyed by a separately-

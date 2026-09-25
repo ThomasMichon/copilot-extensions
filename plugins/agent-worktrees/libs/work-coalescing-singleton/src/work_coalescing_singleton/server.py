@@ -165,11 +165,28 @@ class CoalescingServer:
     # -- lifecycle -------------------------------------------------------
 
     def start(self) -> None:
-        self._serve_thread.start()
-        self._serve_started = True
-        self._reap_thread.start()
-        self._reap_started = True
-        self._started = True
+        """Start both background threads, or clean up fully on any failure.
+
+        Exception-safe (Copilot review finding): if the reap thread's own
+        ``.start()`` raises *after* the serve thread already launched
+        successfully, this must not leave that now-accepting server/thread
+        running with no owner -- a caller that (like several existing
+        consumers, e.g. the resident status-monitor's classify/hook server
+        startup) wraps ``start()`` in a bare ``try/except`` and discards the
+        reference on failure would otherwise leak an accepting daemon
+        indefinitely. ``start()`` therefore calls :meth:`close` itself
+        before re-raising, so every caller gets an all-or-nothing outcome
+        without needing to remember to clean up a partial failure.
+        """
+        try:
+            self._serve_thread.start()
+            self._serve_started = True
+            self._reap_thread.start()
+            self._reap_started = True
+            self._started = True
+        except BaseException:
+            self.close()
+            raise
 
     def rendezvous(self) -> dict:
         host, port = self._server.server_address

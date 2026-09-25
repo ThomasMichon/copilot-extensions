@@ -262,3 +262,34 @@ def test_close_after_a_failed_reap_thread_launch_still_stops_the_serve_loop():
     close_thread.join(timeout=3)
     assert not close_thread.is_alive(), "close() hung despite a real running serve loop"
     assert not server._serve_thread.is_alive()  # actually shut down, not leaked
+
+
+def test_start_itself_closes_a_partially_started_server_before_reraising():
+    """Copilot review finding: if the reap thread's launch fails after the
+    serve thread already started, the server would otherwise be left
+    accepting connections with no owner -- several existing consumers (e.g.
+    the resident status-monitor's classify/hook server startup) wrap
+    ``start()`` in a bare ``try/except`` and discard the reference on
+    failure, which would leak that accepting daemon forever. ``start()``
+    must close itself before re-raising, so the server is already fully
+    torn down by the time the caller's ``except`` block even runs -- no
+    caller-side cleanup required."""
+    server = _make_server()
+    real_start = threading.Thread.start
+
+    def _boom(self):
+        if self.name == "work-coalescing-singleton-reaper":
+            raise RuntimeError("simulated thread-creation failure")
+        return real_start(self)
+
+    threading.Thread.start = _boom
+    try:
+        with pytest.raises(RuntimeError):
+            server.start()
+    finally:
+        threading.Thread.start = real_start
+
+    # No explicit close() call here at all -- start() must have already
+    # torn everything down on its own.
+    assert server._closed is True
+    assert not server._serve_thread.is_alive()

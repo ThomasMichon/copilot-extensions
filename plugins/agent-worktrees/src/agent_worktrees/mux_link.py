@@ -324,11 +324,23 @@ def _normalize_entry(payload: dict, *, trust_received_at: bool = False) -> dict:
         # MAPPING_STALE_AFTER_SECONDS` true forever, letting a corrupt/
         # tampered snapshot defeat the stale-mapping safeguard permanently
         # (Copilot review finding). Require a genuinely finite number.
-        if (
-            not isinstance(received_at, (int, float))
-            or isinstance(received_at, bool)
-            or not math.isfinite(received_at)
-        ):
+        # `math.isfinite` itself raises `OverflowError` for a syntactically
+        # valid but out-of-float-range JSON integer (e.g. `10**1000`) --
+        # letting that propagate would abort `ManagedMuxCache.__init__`
+        # entirely for a single bad entry, which `InProcessRuntime.start()`'s
+        # broad `except Exception` then turns into silently disabling this
+        # whole endpoint (Copilot review finding). Treat that the same as
+        # "not finite": fall back to real "now" rather than letting it blow
+        # up construction.
+        try:
+            is_finite = (
+                isinstance(received_at, (int, float))
+                and not isinstance(received_at, bool)
+                and math.isfinite(received_at)
+            )
+        except OverflowError:
+            is_finite = False
+        if not is_finite:
             received_at = time.time()
     else:
         received_at = time.time()
