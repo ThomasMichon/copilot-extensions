@@ -241,8 +241,9 @@ def _has_write_subcommand(tokens: list[str]) -> bool:
 
 
 def _is_api_comment_or_review_write(tokens: list[str]) -> bool:
-    """``gh api ...`` writing a body via ``-f``/``-F`` to a comments/reviews
-    endpoint (PR review-comment replies, issue comments via the raw API)."""
+    """``gh api ...`` writing a body via ``-f``/``-F``/``--input`` to a
+    comments/reviews endpoint (PR review-comment replies, issue comments via
+    the raw API)."""
     lowered = [t.lower() for t in tokens[1:]]
     if "api" not in lowered:
         return False
@@ -252,7 +253,11 @@ def _is_api_comment_or_review_write(tokens: list[str]) -> bool:
         or token.startswith(("-f", "-F", "--field=", "--raw-field=")) and "body=" in token
         for index, token in enumerate(tokens[1:], start=1)
     )
-    if not has_body_field:
+    has_input = any(
+        token in {"--input"} or token.startswith("--input=")
+        for token in tokens[1:]
+    )
+    if not (has_body_field or has_input):
         return False
     return any(
         "/comments" in t or "/reviews" in t
@@ -274,6 +279,25 @@ _UNSCANNABLE = object()  # sentinel: the body is sourced from stdin, which a
 # no visibility into whatever gets piped into its future stdin) -- treat as
 # unscannable and FAIL CLOSED (deny) rather than silently pass an
 # unverifiable publish through.
+
+
+def _extract_input_json_body(path: str) -> str | object:
+    """``gh api --input <file>`` (or ``--input -`` for stdin) sends a raw
+    JSON request body -- read *path*, parse it, and return its ``"body"``
+    field if present as a string. Any failure (stdin, unreadable file,
+    invalid JSON, no string ``"body"`` field) returns ``_UNSCANNABLE``: fail
+    closed rather than assume an unparseable payload is safe."""
+    if path == "-":
+        return _UNSCANNABLE
+    try:
+        with open(path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except (OSError, ValueError):
+        return _UNSCANNABLE
+    if not isinstance(payload, dict):
+        return _UNSCANNABLE
+    body = payload.get("body")
+    return body if isinstance(body, str) else _UNSCANNABLE
 
 
 def _extract_body_text(tokens: list[str]) -> str | object:
@@ -313,6 +337,20 @@ def _extract_body_text(tokens: list[str]) -> str | object:
                 break
         if matched:
             index += 2 if token in FILE_BODY_FLAGS else 1
+            continue
+        if token == "--input" and index + 1 < len(tokens):
+            result = _extract_input_json_body(tokens[index + 1])
+            if result is _UNSCANNABLE:
+                return _UNSCANNABLE
+            parts.append(result)
+            index += 2
+            continue
+        if token.startswith("--input="):
+            result = _extract_input_json_body(token[len("--input=") :])
+            if result is _UNSCANNABLE:
+                return _UNSCANNABLE
+            parts.append(result)
+            index += 1
             continue
         # ``gh api ... -f body=VALUE`` / ``-F body=@path`` / ``-F body=@-``.
         if token in {"-f", "-F"} and index + 1 < len(tokens):

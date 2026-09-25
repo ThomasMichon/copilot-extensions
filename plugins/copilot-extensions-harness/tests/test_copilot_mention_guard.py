@@ -144,6 +144,48 @@ def test_api_stdin_field_is_denied_fail_closed() -> None:
     assert guard.command_publishes_copilot_mention(cmd) == "unscannable"
 
 
+def test_api_input_file_with_mention_is_denied(tmp_path: Path) -> None:
+    """PR #3663 review (round 6): gh api also accepts --input <file>/--input -
+    to send a raw JSON request body -- the -f/-F body= detector alone missed
+    this entirely, so a mention inside the JSON body field published
+    unchecked."""
+    guard = _load_guard()
+    payload = tmp_path / "body.json"
+    payload.write_text('{"body": "@copilot review"}', encoding="utf-8")
+    cmd = f"gh api repos/owner/repo/issues/1/comments --method POST --input {payload}"
+    assert guard.command_publishes_copilot_mention(cmd) == "mention"
+
+
+def test_api_input_file_without_mention_is_allowed(tmp_path: Path) -> None:
+    guard = _load_guard()
+    payload = tmp_path / "body.json"
+    payload.write_text('{"body": "Looks good, thanks!"}', encoding="utf-8")
+    cmd = f"gh api repos/owner/repo/issues/1/comments --method POST --input {payload}"
+    assert guard.command_publishes_copilot_mention(cmd) is None
+
+
+def test_api_input_equals_form_with_mention_is_denied(tmp_path: Path) -> None:
+    guard = _load_guard()
+    payload = tmp_path / "body.json"
+    payload.write_text('{"body": "@copilot review"}', encoding="utf-8")
+    cmd = f"gh api repos/owner/repo/issues/1/comments --method POST --input={payload}"
+    assert guard.command_publishes_copilot_mention(cmd) == "mention"
+
+
+def test_api_input_stdin_is_denied_fail_closed() -> None:
+    guard = _load_guard()
+    cmd = "printf '{}' | gh api repos/owner/repo/issues/1/comments --method POST --input -"
+    assert guard.command_publishes_copilot_mention(cmd) == "unscannable"
+
+
+def test_api_input_unparseable_json_is_denied_fail_closed(tmp_path: Path) -> None:
+    guard = _load_guard()
+    payload = tmp_path / "body.json"
+    payload.write_text("not valid json", encoding="utf-8")
+    cmd = f"gh api repos/owner/repo/issues/1/comments --method POST --input {payload}"
+    assert guard.command_publishes_copilot_mention(cmd) == "unscannable"
+
+
 def test_mention_and_unscannable_are_distinct_reasons() -> None:
     guard = _load_guard()
     mention_cmd = 'gh pr comment 1 -R owner/repo --body "@copilot review"'
