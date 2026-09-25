@@ -121,6 +121,16 @@ fixes."
       them) that, on any failure, extracts a compact failure signature: which
       job(s) failed, the specific failing test node id(s) (pytest's own
       `FAILED <path>::<test>` lines), and a short log excerpt.
+- [ ] **Carry a verified commit SHA, never trust `workflow_run.head_sha`
+      alone.** `validate-and-promote.yml` is itself `workflow_run`-triggered,
+      and this repo already had to stop trusting that event's own
+      `head_sha` and instead carry a SHA independently verified via
+      `git merge-base` (see the dev-branch-release-pipeline journal, the
+      exact regression fixed in this session). Phase 1's signature must
+      carry that same already-verified SHA (or resolve/re-verify it from
+      the run ID) through to Phase 2 — never re-derive it naively from a
+      `workflow_run` payload, or a diagnosis can attach to, and a fix PR
+      can target, the wrong commit.
 - [ ] Dedup against existing open issues before filing anything new (search
       by the test node id, not just the plugin name) — reuse the exact
       pattern `health-diagnosis-filer`/`reality-drift-filer` already use
@@ -156,6 +166,27 @@ fixes."
         every other workflow-file change, and verify the compiled lock
         file is actually present on `main` before relying on a live
         failure to prove it works.
+  - [ ] **Prompt-injection boundary (the log excerpt is untrusted input):**
+        a failing test or its dependency can print imperative text
+        specifically to steer the agent — `safe-outputs` limits *which
+        operation* the agent can perform (open a PR against `dev`), not
+        *what the patch contains*. Do not rely on the agent to interpret
+        the log excerpt safely by instruction alone. Isolate the untrusted
+        excerpt from the agent's own instructions in the prompt structure
+        `gh-aw` provides for this, and add the machine-enforced check
+        below as the actual backstop — never trust the excerpt-derived
+        content to self-limit.
+  - [ ] **Machine-enforced allowed/protected-path check before PR
+        creation — not prompt text alone.** The "never touch
+        `.github/workflows/**` or version fields" rule two bullets below
+        is currently only policy language; `safe-outputs` constrains the
+        write *operation* (PR-against-`dev`) but not *which files* land in
+        it. Add an independent, code-level check (a dedicated
+        `safe-outputs` step, or a required-status-check job on the
+        resulting PR) that inspects the actual changed-file list and
+        rejects/blocks the PR if it touches any protected path — a
+        compromised or merely confused agent must not be able to propose
+        those files no matter what the prompt says.
   - [ ] Configure its `safe-outputs` stage narrowly: the only permitted
         write is **open a pull request against `dev`** (no direct push, no
         issue/PR comments beyond what's needed, no repo-settings access).
@@ -282,3 +313,17 @@ _Pending._
   not fix-mechanism selection), and added an explicit pre-Phase-2 gate so
   the choice stays provisional/research-backed rather than quietly
   becoming settled design without that reconciliation ever happening.
+- **Second Copilot review pass caught four more, all addressed:** (1) the
+  same `workflow_run.head_sha`-trust bug this session already fixed once
+  in `promote.yml`/`validate-and-promote.yml` would recur in Phase 1's own
+  signature-carrying if not made explicit — added as a Phase 1 checklist
+  item requiring the already-verified SHA to be carried through, never
+  re-derived naively; (2) the raw log excerpt is untrusted input and could
+  prompt-inject the fix-attempting agent — added an explicit
+  prompt-injection-boundary checklist item, not just a policy sentence;
+  (3) the "never touch workflows/version fields" rule was only prompt
+  text, with no machine-enforced backstop if the agent ignored it — added
+  an explicit machine-enforced allowed/protected-path check as its own
+  checklist item, independent of `safe-outputs`'s write-operation scoping;
+  (4) this effort was missing from `efforts/README.md`'s canonical Active
+  index — added.
