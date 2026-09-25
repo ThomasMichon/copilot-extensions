@@ -59,7 +59,7 @@ _B64_CHARS = frozenset(string.ascii_letters + string.digits + "+/=")
 _PULL_CMD = (
     "cd ~/.copilot 2>/dev/null && "
     "files=$(ls -d session-state session-store.db session-store.db-wal "
-    'session-store.db-shm 2>/dev/null) && [ -n "$files" ] && '
+    'session-store.db-shm 2>/dev/null); [ -n "$files" ] && '
     "{ echo " + _B64_START + "; tar czf - $files 2>/dev/null | base64 -w0; "
     "echo; echo " + _B64_END + "; } || true"
 )
@@ -426,20 +426,31 @@ def _capture_hold_reason(name: str, *, account: str | None) -> str | None:
     silently treated as *unheld*, which would defeat the whole point of this
     gate (review finding on the original cut of this function).
     """
-    from .lease import LEASE_FILE, get_lease
+    from .lease import LEASE_FILE, Lease, get_lease
     from .pool import _holder_worktree_gone
 
     if LEASE_FILE.exists():
         # `lease.get_lease()`/`_read_leases()` intentionally degrade a
-        # corrupt/unreadable ``leases.json`` to ``{}`` for pool.py's
-        # display-only purposes -- exactly the "no lease" outcome this
-        # gate must never silently accept. Read it directly first so an
-        # unreadable store is caught HERE as an unknown-state defer,
+        # corrupt/unreadable ``leases.json``, OR a syntactically-valid file
+        # whose record for THIS codespace fails to construct a ``Lease``
+        # (a ``TypeError``, silently ``continue``'d past), to ``{}``/absent
+        # for pool.py's display-only purposes -- exactly the "no lease"
+        # outcome this gate must never silently accept. Read it directly
+        # first so either failure is caught HERE as an unknown-state defer,
         # before ever calling into the degrade-safe helper.
         try:
-            json.loads(LEASE_FILE.read_text(encoding="utf-8"))
+            raw = json.loads(LEASE_FILE.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             return f"could not confirm lease state (fail-closed): leases.json unreadable: {exc}"
+        rec = (raw or {}).get(name) if isinstance(raw, dict) else None
+        if rec is not None:
+            try:
+                Lease(**rec)
+            except TypeError as exc:
+                return (
+                    f"could not confirm lease state (fail-closed): "
+                    f"malformed lease record for {name!r}: {exc}"
+                )
 
     try:
         lease = get_lease(name)
@@ -449,6 +460,20 @@ def _capture_hold_reason(name: str, *, account: str | None) -> str | None:
         return f"CodeSpace has an active lease (effort {lease.effort!r})"
 
     try:
+        from . import gh_account
+
+        # Re-verify the account is still authenticatable immediately before
+        # this listing -- `_list_codespaces_under` re-derives its own
+        # environment via `env_for_account`, which silently falls back to
+        # ambient auth on a minting failure; that would let an ambient
+        # listing (possibly a DIFFERENT account's same-named CodeSpace) be
+        # read here instead of the resolved account's real beacon state.
+        if not gh_account.token_for_account(account):
+            return (
+                "could not confirm cross-machine beacon state (fail-closed): "
+                f"could not authenticate as account {account!r}"
+            )
+
         from .lifecycle import _list_codespaces_under
         from .pool import _beacon_id
 
@@ -479,6 +504,14 @@ def _capture_hold_reason(name: str, *, account: str | None) -> str | None:
             # None means the L2 store itself was unreadable -- fail closed
             # rather than coercing it to an empty map via `or {}`, which
             # would silently let capture proceed past an unknown holder.
+            # Note (accepted narrower residual): `list_leases()` silently
+            # drops an individual malformed record rather than failing the
+            # whole read, so a record malformed for THIS exact target only
+            # is not distinguished from "no L2 hold" here -- unlike the
+            # local-lease check above, which validates the exact target's
+            # record directly. Closing that would require duplicating
+            # `coordination.py`'s own subprocess/JSON parsing rather than
+            # reusing its public, already degrade-safe `list_leases()`.
             return (
                 "could not confirm cross-machine L2 lease state (fail-closed): "
                 "the L2 store is unavailable"
@@ -630,78 +663,84 @@ def capture_codespace_sessions(
         return {"ok": False, "deferred": True, "session_count": 0,
                 "detail": f"target busy, skipped capture: {busy}"}
 
-    manager = ConnectionManager()
-
-    async def _run() -> dict:
-        # Re-check the hold status INSIDE the fence too -- the checks above
-        # all ran before this lock was acquired, leaving a window in which
-        # a lease/claim/beacon/L2 hold could still appear between that
-        # check and the lock actually taking effect.
-        fenced_hold_reason = _capture_hold_reason(name, account=account)
-        if fenced_hold_reason is not None:
-            return {"ok": False, "deferred": True, "session_count": 0,
-                    "detail": fenced_hold_reason}
-        try:
-            await _connect_with_retry(
-                manager, name, timeout=timeout, account=account, token=token,
-            )
-        except (ConnectionError, TimeoutError, RuntimeError) as exc:
-            return {"ok": False, "deferred": True, "session_count": 0,
-                    "detail": f"could not connect: {exc}"}
-        try:
-            liveness = await _probe_codespace_liveness(manager, name, timeout=30.0)
-            if liveness.state != "idle":
-                return {
-                    "ok": False, "deferred": True, "session_count": 0,
-                    "detail": (
-                        f"session liveness is {liveness.state!r} "
-                        f"({liveness.reason or 'active session-state lock present'}); "
-                        f"capture-only never disturbs a mid-write session"
-                    ),
-                }
-            tar_bytes = await _pull_tar_bytes(manager, name, timeout=timeout)
-            if not tar_bytes:
-                return {"ok": True, "deferred": False, "session_count": 0,
-                        "detail": "no sessions on CodeSpace"}
-            # Re-validate AFTER the pull, not only before it (Phase 3's own
-            # item): narrows, but -- per this function's docstring -- does
-            # not close, the acquire-then-release-within-the-pull race.
-            post_liveness = await _probe_codespace_liveness(
-                manager, name, timeout=30.0,
-            )
-            if post_liveness.state != "idle":
-                return {
-                    "ok": False, "deferred": True, "session_count": 0,
-                    "detail": (
-                        f"session became {post_liveness.state!r} during the "
-                        f"pull; discarding this capture rather than staging "
-                        f"a possibly mid-write snapshot"
-                    ),
-                }
-            # Re-check the hold status too, not just liveness: a lease/claim
-            # is acquired through the lease/coordination store, not this SSH
-            # target lock, so a new holder can appear while the pull itself
-            # is in progress. Treat a failed re-check the same as a found
-            # hold -- defer rather than stage/push.
-            try:
-                post_hold_reason = _capture_hold_reason(name, account=account)
-            except Exception as exc:
-                post_hold_reason = f"could not confirm hold state after pull: {exc}"
-            if post_hold_reason is not None:
-                return {
-                    "ok": False, "deferred": True, "session_count": 0,
-                    "detail": (
-                        f"{post_hold_reason} (appeared during the pull); "
-                        f"discarding this capture rather than staging it"
-                    ),
-                }
-        finally:
-            await manager.disconnect(name)
-        result = _stage_and_push(tar_bytes, name, verbose=verbose)
-        result["deferred"] = False
-        return result
-
     try:
+        # ``ConnectionManager()`` construction lives inside this protected
+        # block too: if it raises (e.g. local SSH configuration), the lock
+        # acquired above must still be released, and this function's own
+        # never-raises contract must still hold.
+        manager = ConnectionManager()
+
+        async def _run() -> dict:
+            # Re-check the hold status INSIDE the fence too -- the checks
+            # above all ran before this lock was acquired, leaving a window
+            # in which a lease/claim/beacon/L2 hold could still appear
+            # between that check and the lock actually taking effect.
+            fenced_hold_reason = _capture_hold_reason(name, account=account)
+            if fenced_hold_reason is not None:
+                return {"ok": False, "deferred": True, "session_count": 0,
+                        "detail": fenced_hold_reason}
+            try:
+                await _connect_with_retry(
+                    manager, name, timeout=timeout, account=account, token=token,
+                )
+            except (ConnectionError, TimeoutError, RuntimeError) as exc:
+                return {"ok": False, "deferred": True, "session_count": 0,
+                        "detail": f"could not connect: {exc}"}
+            try:
+                liveness = await _probe_codespace_liveness(manager, name, timeout=30.0)
+                if liveness.state != "idle":
+                    return {
+                        "ok": False, "deferred": True, "session_count": 0,
+                        "detail": (
+                            f"session liveness is {liveness.state!r} "
+                            f"({liveness.reason or 'active session-state lock present'}); "
+                            f"capture-only never disturbs a mid-write session"
+                        ),
+                    }
+                tar_bytes = await _pull_tar_bytes(manager, name, timeout=timeout)
+                if not tar_bytes:
+                    return {"ok": True, "deferred": False, "session_count": 0,
+                            "detail": "no sessions on CodeSpace"}
+                # Re-validate AFTER the pull, not only before it (Phase 3's
+                # own item): narrows, but -- per this function's docstring --
+                # does not close, the acquire-then-release-within-the-pull
+                # race.
+                post_liveness = await _probe_codespace_liveness(
+                    manager, name, timeout=30.0,
+                )
+                if post_liveness.state != "idle":
+                    return {
+                        "ok": False, "deferred": True, "session_count": 0,
+                        "detail": (
+                            f"session became {post_liveness.state!r} during "
+                            f"the pull; discarding this capture rather than "
+                            f"staging a possibly mid-write snapshot"
+                        ),
+                    }
+                # Re-check the hold status too, not just liveness: a
+                # lease/claim is acquired through the lease/coordination
+                # store, not this SSH target lock, so a new holder can
+                # appear while the pull itself is in progress. Treat a
+                # failed re-check the same as a found hold -- defer rather
+                # than stage/push.
+                try:
+                    post_hold_reason = _capture_hold_reason(name, account=account)
+                except Exception as exc:
+                    post_hold_reason = f"could not confirm hold state after pull: {exc}"
+                if post_hold_reason is not None:
+                    return {
+                        "ok": False, "deferred": True, "session_count": 0,
+                        "detail": (
+                            f"{post_hold_reason} (appeared during the pull); "
+                            f"discarding this capture rather than staging it"
+                        ),
+                    }
+            finally:
+                await manager.disconnect(name)
+            result = _stage_and_push(tar_bytes, name, verbose=verbose)
+            result["deferred"] = False
+            return result
+
         return asyncio.run(_run())
     except Exception as exc:
         return {"ok": False, "deferred": True, "session_count": 0,

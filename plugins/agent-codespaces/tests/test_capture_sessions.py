@@ -7,9 +7,19 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from agent_codespaces import sessions
 from agent_codespaces.lease import Lease
 from agent_codespaces.lifecycle import CodespaceInfo
+
+
+@pytest.fixture(autouse=True)
+def _default_mintable_token(monkeypatch):
+    """`_capture_hold_reason`'s beacon check re-verifies the account is
+    still authenticatable before listing. Default every test to a
+    successful mint; tests exercising the failure path override this."""
+    monkeypatch.setattr("agent_codespaces.gh_account.token_for_account", lambda account: "tok")
 
 
 def _lease(name: str, *, worktree: str = "") -> Lease:
@@ -69,6 +79,49 @@ def test_capture_hold_reason_fails_closed_on_corrupt_lease_file(monkeypatch, tmp
     assert reason is not None
     assert "fail-closed" in reason
     assert "unreadable" in reason
+
+
+def test_capture_hold_reason_fails_closed_on_malformed_record_for_target(monkeypatch, tmp_path):
+    """``json.loads`` validates only syntax, while ``lease._read_leases()``
+    catches ``TypeError`` for a malformed record and silently drops it -- a
+    syntactically-valid ``leases.json`` with a malformed record for THIS
+    codespace must still defer, not read as unheld."""
+    import json as _json
+
+    import agent_codespaces.lease as lease_mod
+    malformed = tmp_path / "leases.json"
+    # Missing every required Lease field except `codespace` -- Lease(**rec)
+    # raises TypeError, exactly what `_read_leases()` silently `continue`s past.
+    malformed.write_text(_json.dumps({"cs": {"codespace": "cs"}}), encoding="utf-8")
+    monkeypatch.setattr(lease_mod, "LEASE_FILE", malformed)
+
+    # Confirm get_lease() itself would silently swallow this too.
+    assert lease_mod.get_lease("cs") is None
+
+    reason = sessions._capture_hold_reason("cs", account=None)
+    assert reason is not None
+    assert "fail-closed" in reason
+    assert "malformed" in reason
+
+
+def test_capture_hold_reason_fails_closed_when_account_unmintable_before_listing(monkeypatch):
+    """`_list_codespaces_under` re-derives its own env via `env_for_account`,
+    which silently falls back to ambient auth on a minting failure -- must
+    defer instead of listing (possibly a different account's same-named
+    CodeSpace) under ambient credentials."""
+    import agent_codespaces.lease as lease_mod
+    monkeypatch.setattr(lease_mod, "get_lease", lambda name: None)
+    monkeypatch.setattr("agent_codespaces.gh_account.token_for_account", lambda account: None)
+
+    def _explode(account):
+        raise AssertionError("must never list once the account is unmintable")
+
+    monkeypatch.setattr("agent_codespaces.lifecycle._list_codespaces_under", _explode)
+
+    reason = sessions._capture_hold_reason("cs", account="acct")
+    assert reason is not None
+    assert "fail-closed" in reason
+    assert "authenticate" in reason
 
 
 def test_capture_hold_reason_proceeds_on_orphaned_claim(monkeypatch, tmp_path):
@@ -614,6 +667,49 @@ def test_capture_target_busy_defers(monkeypatch):
     assert "busy" in res["detail"]
 
 
+def test_capture_releases_lock_and_never_raises_when_manager_construction_fails(monkeypatch):
+    """``ConnectionManager()`` must be constructed inside the same protected
+    block that releases the target lock: if it raises (e.g. local SSH
+    configuration), the lock acquired just before must still be released,
+    and this function's own never-raises contract must still hold."""
+    import ssh_manager
+
+    monkeypatch.setattr(
+        "agent_codespaces.account_binding.bound_account", lambda name: "acct",
+    )
+    monkeypatch.setattr(
+        "agent_codespaces.lifecycle.get_codespace_status_with_account",
+        lambda name, account: (True, "Available", "acct"),
+    )
+    monkeypatch.setattr(sessions, "_capture_hold_reason", lambda name, *, account: None)
+    monkeypatch.setattr("agent_codespaces.gh_account.token_for_account", lambda account: "tok")
+
+    released = []
+
+    class _RecordingLock:
+        def __init__(self, *a, **k):
+            pass
+
+        def acquire(self, *a, **k):
+            return self
+
+        def release(self):
+            released.append(True)
+
+    def _explode(*a, **k):
+        raise RuntimeError("local SSH configuration is broken")
+
+    monkeypatch.setattr(ssh_manager, "TargetLock", _RecordingLock)
+    monkeypatch.setattr(ssh_manager, "ConnectionManager", _explode)
+
+    res = sessions.capture_codespace_sessions("cs", account=None)
+
+    assert res["ok"] is False
+    assert res["deferred"] is True
+    assert "capture error" in res["detail"]
+    assert released == [True], "the lock must be released even when ConnectionManager() raises"
+
+
 # --- sync_codespace_sessions: the lock= widening seam ---
 
 def test_sync_reuses_a_passed_lock_and_never_releases_it(monkeypatch):
@@ -677,10 +773,8 @@ def test_capture_defers_while_a_destructive_caller_holds_the_widened_lock(monkey
     other_lock = ssh_manager.TargetLock("contended-cs", op="codespace-lifecycle")
     other_lock.path.parent.mkdir(parents=True, exist_ok=True)
     other_lock.path.write_text(
-        (
-            '{{"pid": {}, "op": "codespace-lifecycle", "target": "contended-cs", '
-            '"started_at": 0.0, "host": ""}}'
-        ).format(os.getppid()),
+        f'{{"pid": {os.getppid()}, "op": "codespace-lifecycle", "target": "contended-cs", '
+        f'"started_at": 0.0, "host": ""}}',
         encoding="utf-8",
     )
     try:
