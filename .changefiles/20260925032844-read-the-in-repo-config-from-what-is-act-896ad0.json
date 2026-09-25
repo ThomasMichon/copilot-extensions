@@ -1,0 +1,9 @@
+{
+  "comment": "Read the in-repo config from what is actually committed on the resolved default branch (via git show), not the anchor's checked-out working tree -- a stale/wrong local anchor branch could otherwise silently shadow the repo's real default_branch and other settings.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
