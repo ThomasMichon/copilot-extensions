@@ -8,7 +8,15 @@
 - **Vision:** none yet — this effort establishes the standing policy itself
   (safety envelope + trigger contract for a reactive fix agent); revisit
   once Phase 1 proves out whether it deserves its own harness-guidance
-  vision entry.
+  vision entry. **Reconciliation gate (added after review, see Journal):**
+  choosing `gh-aw` as the Phase 2 mechanism is a material architecture
+  decision made ahead of that vision reconciliation. It is a research
+  finding and a provisional design choice, not a settled standing pattern —
+  Phase 2 must not begin until this is either folded into an existing
+  vision (`harness-guidance` was checked and does not fit — it covers
+  ambient guidance delivery, not automated-fix mechanism selection) or
+  captured in a new one. Phase 1 (detection+dedup, no fix-attempt
+  mechanism yet) is unaffected and can proceed independently.
 - **Umbrella issue:** _TBD — file once this effort's plan clears review_
 
 ## Guiding Intent
@@ -125,6 +133,10 @@ fixes."
       signature (open question: N — start conservative, e.g. 6h).
 
 ### Phase 2 — Wire the reactive fix attempt (the actual "attempt a fix")
+- [ ] **Gate (blocks the rest of this phase):** resolve the Vision
+      reconciliation noted in the header above — decide whether this
+      mechanism choice belongs under an existing vision or needs its own,
+      and record that decision before any `gh-aw` workflow file is merged.
 - [ ] Once Phase 1's detection+dedup is proven reliable (no false positives,
       no duplicate-issue spam) over a real observation window, author a
       `gh-aw` agentic workflow (Markdown + YAML frontmatter, compiled via
@@ -260,3 +272,13 @@ _Pending._
   Participants, Context, and Phase 2/3 accordingly. Still deliberately not
   implemented — Phase 1 (detection+dedup) remains the next concrete step
   regardless of which Phase 2 mechanism is eventually used.
+- **Copilot PR review (#3678) caught two real gaps, both addressed:**
+  (1) the identical `workflow_run` default-branch bootstrap bug this
+  session already fixed once in `validate-and-promote.yml` would silently
+  recur here — added as an explicit Phase 2 checklist item citing
+  `ci.yml:71-74`; (2) promoting `gh-aw` to *primary* is a material
+  architecture decision made ahead of any vision reconciliation — checked
+  `harness-guidance` (does not fit; it's about ambient guidance delivery,
+  not fix-mechanism selection), and added an explicit pre-Phase-2 gate so
+  the choice stays provisional/research-backed rather than quietly
+  becoming settled design without that reconciliation ever happening.
