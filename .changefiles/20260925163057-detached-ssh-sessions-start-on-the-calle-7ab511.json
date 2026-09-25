@@ -1,0 +1,9 @@
+{
+  "comment": "Detached SSH sessions start on the caller's own model, reasoning effort, and context tier",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

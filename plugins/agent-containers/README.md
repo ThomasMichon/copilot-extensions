@@ -169,7 +169,10 @@ and prints a JSON handle with `session_id`, `scope_id`, and ready-made
 `status`/`observe`/`nudge`/`attach`/`stop` commands. `--stop` kills the
 container tmux session, verifies it is gone, stops the keeper, and deregisters
 the exact live-session row. Extra Copilot CLI flags can be repeated with
-`--copilot-arg`; use `--seed-file -` for long or multi-line prompts.
+`--copilot-arg`; use `--seed-file -` for long or multi-line prompts. A new
+session starts on the caller's own model, reasoning effort, and context tier
+(from `~/.copilot/settings.json`); an explicit `--copilot-arg=--model=...`
+wins and `AGENT_CODESPACES_MODEL_PROPAGATE=0` opts out.
 `--ref-file PATH` (repeatable, `--detach` only) copies an operator file outside
 the checkout to `~/.agent-bridge/refs/<batch>/` in the container and names it to
 the worker (seed for a new session, a message on rejoin).
