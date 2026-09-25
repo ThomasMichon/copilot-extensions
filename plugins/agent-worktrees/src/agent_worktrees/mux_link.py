@@ -52,6 +52,19 @@ from work_coalescing_singleton import client as wcs_client
 # `_interprocess_lock` (used by `apply_observation`, wrapping its entire
 # read-reconcile-write critical section, not just the final write) closes
 # this gap with a real OS-level advisory lock on a sidecar `.lock` file.
+#: Overall bound on how long `_lock_file` retries acquiring the lock before
+#: giving up (Copilot review finding): `msvcrt.locking(..., LK_LOCK, ...)`
+#: on Windows only retries a small, fixed number of times internally
+#: (roughly 10 attempts, ~1s apart) before raising `OSError` -- far too
+#: short a window for two monitor processes whose handoff genuinely
+#: overlaps for longer than that. `_lock_file` retries its own
+#: non-blocking attempts across this longer bound instead of trusting
+#: `LK_LOCK`'s own built-in retry count, so a slow overlap still
+#: acquires the lock rather than silently degrading to an unlocked
+#: critical section.
+_LOCK_ACQUIRE_TIMEOUT_S = 30.0
+_LOCK_RETRY_INTERVAL_S = 0.2
+
 if sys.platform == "win32":
     import msvcrt
 
@@ -63,8 +76,19 @@ if sys.platform == "win32":
         if fh.tell() == 0:
             fh.write(b"\0")
             fh.flush()
-        fh.seek(0)
-        msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+        deadline = time.time() + _LOCK_ACQUIRE_TIMEOUT_S
+        while True:
+            fh.seek(0)
+            try:
+                # LK_NBLCK: one non-blocking attempt, so *this* function --
+                # not `msvcrt`'s own internal retry count -- controls how
+                # long acquisition is retried.
+                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+                return
+            except OSError:
+                if time.time() >= deadline:
+                    raise
+                time.sleep(_LOCK_RETRY_INTERVAL_S)
 
     def _unlock_file(fh) -> None:
         fh.seek(0)
@@ -411,6 +435,18 @@ class ManagedMuxCache:
                 for e in self._entries.values()
             )
 
+    def has_any_entries(self) -> bool:
+        """Whether this cache has ever recorded *any* observation, live or
+        not (Copilot review finding). Distinct from :meth:`has_any_live`:
+        a tombstoned (``live: false``) or gone-stale mapping still counts
+        here, so a caller can distinguish "this cache has genuinely never
+        seen any Manager activity" (nothing to report, ever) from "this
+        cache once had a live mapping that is now empty/removed" (an
+        immediate empty observation must still be propagated, per
+        :meth:`live_session_names`'s own contract)."""
+        with self._lock:
+            return bool(self._entries)
+
 
 def _normalize_entry(payload: dict, *, trust_received_at: bool = False) -> dict:
     """Validate + normalize one observation payload into a stored entry
@@ -492,6 +528,15 @@ def _normalize_entry(payload: dict, *, trust_received_at: bool = False) -> dict:
         except OverflowError:
             is_finite = False
         if not is_finite:
+            received_at = time.time()
+        elif received_at > time.time():
+            # A finite but future persisted receipt time (a corrupt/
+            # tampered snapshot, or severe clock skew) would otherwise keep
+            # `now - received_at` negative -- always "fresh" -- defeating
+            # the stale-mapping safeguard indefinitely and potentially
+            # preventing monitor idle shutdown (Copilot review finding).
+            # Clamp to this process's own current time rather than
+            # trusting it.
             received_at = time.time()
     else:
         received_at = time.time()
@@ -804,6 +849,13 @@ class InProcessRuntime:
         if self.cache is None:
             return set()
         return self.cache.live_session_names()
+
+    def has_any_entries(self) -> bool:
+        """Whether the cache has ever recorded any observation (see
+        ``ManagedMuxCache.has_any_entries``'s own docstring)."""
+        if self.cache is None:
+            return False
+        return self.cache.has_any_entries()
 
     def has_active_demand(self) -> bool:
         if self.server is not None and self.server.subscriber_count() > 0:

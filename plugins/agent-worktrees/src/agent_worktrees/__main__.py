@@ -4971,17 +4971,12 @@ def _monitor_sweep(
 
     ``managed_mux_cache`` (a ``mux_link.ManagedMuxCache``, Phase 3b Slice 2
     Sub-slice 3 Step 1) is optional and, for this step, purely additive: its
-    currently-live session names are merged into the ``catalog_observer``
-    call alongside the direct mux scan's own set, so a Worktree-Manager-
-    reported live session is observed by ``session_catalog`` even on this
-    tick's direct scan alone -- but it never adds an entry to ``served`` and
-    never changes which sessions this sweep writes ``set-option`` for. That
-    writer-ownership cutover is a later, separate step. This observation is
-    independent of whether this host has a locally-discoverable mux binary
-    (Copilot review finding): a Manager-reported live session must still
-    reach ``catalog_observer`` even when ``mux_bin`` is absent, since the
-    Manager observation endpoint and cache exist independently of this
-    resident process's own direct mux-binary discovery.
+    currently-live session names are merged into ``catalog_observer``
+    alongside the direct mux scan's own set (or reported alone, including
+    an empty removal, when no mux binary exists -- see the ``elif`` branch
+    below) -- but it never adds an entry to ``served`` and never changes
+    which sessions this sweep writes ``set-option`` for. That
+    writer-ownership cutover is a later, separate step.
     """
     # Stage D: resolve deferred names via _self_override (cluster-free owners).
     from . import list_cli as _list_cli
@@ -5034,11 +5029,15 @@ def _monitor_sweep(
                             published.pop(key, None)
                 incarnations[sess] = incarnation
         served = [(s, p) for s, p in registry.items() if s in live_wt and p]
-    elif catalog_observer is not None and managed_live:
-        # No locally-discoverable mux binary on this host, but the Manager
-        # observation cache may still have live sessions to report -- that
-        # endpoint exists independently of this process's own direct mux
-        # discovery.
+    elif (
+        catalog_observer is not None
+        and managed_mux_cache is not None
+        and managed_mux_cache.has_any_entries()
+    ):
+        # No mux binary here, but the Manager cache once recorded
+        # something -- propagate even an empty managed_live so a
+        # tombstone/removal isn't silently withheld (Copilot review
+        # finding; see ManagedMuxCache.has_any_entries's own docstring).
         catalog_observer(managed_live)
     if session_projects is not None:
         registered_paths: set[str] = set()
