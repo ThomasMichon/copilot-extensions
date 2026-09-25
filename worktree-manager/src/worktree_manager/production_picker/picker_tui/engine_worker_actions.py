@@ -113,3 +113,48 @@ class PickerScreenWorkerActionsMixin:
         except OSError as exc:
             return False, f"could not start agent-bridge ui: {exc}"
         return True, "opening the live-session view"
+
+    def _send_worker_message(self, ctx):
+        """Internal verb ``send-worker-message``: prompt for text and deliver it
+        to the row's live session with ``agent-bridge send <sid> -`` (the text
+        rides stdin, so no quoting reaches a shell shim), steering the running
+        turn or interrupting it. The send runs off the render flow."""
+        sid = str(ctx.get("session_id") or "").strip()
+        if not sid:
+            return False, "no live session on this venue to message"
+        bridge = shutil.which("agent-bridge")
+        if not bridge:
+            return False, "'agent-bridge' is not on PATH"
+        from .engine_worker_dialogs import WorkerMessageScreen
+
+        target = str(ctx.get("title") or ctx.get("id") or sid)
+
+        def _after(result):
+            if not result:
+                self.debug = "message cancelled"
+                return
+            delivery, text = result
+            argv = worker_message_argv(bridge, sid, delivery)
+
+            def _work():
+                proc = subprocess.run(argv, input=text, capture_output=True, text=True, timeout=60)
+                return proc.returncode == 0, (proc.stdout or proc.stderr or "").strip()
+
+            def _done(res):
+                ok, out = res if res else (False, "send failed")
+                verb = "interrupted" if delivery == "interrupt" else "steered"
+                self.debug = (f"{verb} {target}" if ok
+                              else f"message to {target} failed: {out.splitlines()[0][:80] if out else ''}")
+                self.refresh()
+
+            self._run_bg(f"Messaging {target}", _work, _done)
+
+        self.app.push_screen(WorkerMessageScreen(target), _after)
+        return True, f"message {target}"
+
+
+def worker_message_argv(bridge, sid, delivery):
+    """``agent-bridge send`` argv for a stdin-borne message with the chosen
+    delivery (``interrupt`` aborts the turn; anything else steers it)."""
+    flag = "--interrupt" if delivery == "interrupt" else "--steer"
+    return [bridge, "send", sid, "-", "--no-wait", flag]

@@ -1334,11 +1334,10 @@ def picker_payload(
             "has_driving_worktree": "true" if has_driving_worktree else "false",
             "subtitle": subtitle,      # optional 2nd line (durable id + claim)
             "activity": activity,      # worker's latest progress (worktree-row worker line)
+            "session_id": (live_session or {}).get("session_id") or "",  # Send message target
             "worktree_status": _worktree_status_for_worktree(driving_worktree_id),
-            # Phase 1 (picker-venue-pivots): the claiming worktree's own ranked
-            # claims-list (PR/bug/etc.), via the shared claims_rank module --
-            # "" when unclaimed, unresolvable, or agent-worktrees isn't
-            # installed alongside (see _claims_summary_for_worktree).
+            # Phase 1 (picker-venue-pivots): the claiming worktree's ranked claims-list
+            # (via claims_rank) -- "" when unclaimed or agent-worktrees is absent.
             "claims_summary": _claims_summary_for_worktree(driving_worktree_id or worktree),
             # Phase 1: the Worktrees pane's own compact sess/live column,
             # reused as-is -- LIVE/IDLE/blank (see _sess_column).

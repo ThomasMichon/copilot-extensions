@@ -1,0 +1,9 @@
+{
+  "comment": "CodeSpaces pivot rows carry the live session id and offer Send message (steer or interrupt)",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

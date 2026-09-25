@@ -277,6 +277,7 @@ def picker_fields(container_name: str, lease_effort: str | None) -> dict[str, An
     return {
         "subtitle": subtitle,
         "activity": activity,
+        "session_id": (live_session or {}).get("session_id") or "",
         "claims_summary": claims_summary_for_worktree(lease_effort),
         "sess": sess_column(live_session, lease_effort),
         "worktree_id": driving_worktree_id,

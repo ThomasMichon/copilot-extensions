@@ -774,7 +774,8 @@ def test_picker_payload_live_session_join_wires_sess_and_activity(monkeypatch):
 
     def fake_join(kind, target):
         seen.append((kind, target))
-        return {"liveness": "active", "latest_progress": {"phase": "impl", "summary": "wiring"}}
+        return {"session_id": "sid-7", "liveness": "active",
+                "latest_progress": {"phase": "impl", "summary": "wiring"}}
 
     monkeypatch.setattr("agent_codespaces.pool._live_session_for_venue", fake_join)
     e = picker_payload(members, budget)["entries"][0]
@@ -783,6 +784,7 @@ def test_picker_payload_live_session_join_wires_sess_and_activity(monkeypatch):
     assert e["subtitle"].endswith("impl: wiring")
     assert e["activity"] == "impl: wiring"  # the worktree-row worker line's source
     assert e["effort"] == "3bac"            # claim owner, for an attach's --effort
+    assert e["session_id"] == "sid-7"       # Send message target
     assert "claimed by 3bac on dev6" in e["subtitle"]  # durable half preserved
 
 
