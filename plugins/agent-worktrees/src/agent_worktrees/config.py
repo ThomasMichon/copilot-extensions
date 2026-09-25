@@ -21,7 +21,7 @@ from typing import Any, Literal
 
 import yaml
 
-from . import config_migrations, project_state, registry_paths
+from . import config_migrations, inrepo_config_source, project_state, registry_paths
 from .codename_config import CodenameConfig, parse_codename
 from .config_cache import (  # noqa: F401 (re-exported)
     ConfigCacheSession,
@@ -1296,6 +1296,48 @@ def _load_yaml_safe(path: Path) -> dict[str, Any]:
         return {}
 
 
+def _load_inrepo_config(anchor: str) -> dict[str, Any]:
+    """Return the repo's in-repo flat settings dict, or ``{}``.
+
+    Prefers the config as **committed** on the resolved default branch
+    (:mod:`inrepo_config_source`) over the anchor's working tree -- a stale
+    or wrong local checkout can never shadow the real settings -- falling
+    back to disk (dir form, legacy dir form, legacy single file) only when
+    that resolves nothing (no remote/fetch/non-git). A marketplace overlay
+    still deep-merges on top either way. Never raises.
+    """
+    root = Path(anchor)
+    rel_candidates = (
+        inrepo_config_path(Path()),
+        legacy_inrepo_config_path(Path()),
+        Path(INREPO_CONFIG_FILENAME),
+    )
+
+    merged = inrepo_config_source.load_inrepo_config_from_committed_ref(
+        root, rel_candidates
+    )
+    if not merged:
+        base_path = next((root / rel for rel in rel_candidates if (root / rel).exists()), None)
+        merged = _load_yaml_safe(base_path) if base_path is not None else {}
+
+    context = registry_paths.installation_context()
+    marketplace_id = (
+        str(context.get("marketplaceId", "")).strip()
+        if isinstance(context, dict)
+        else ""
+    )
+    if marketplace_id:
+        overlay_path = (
+            root
+            / MARKETPLACE_OVERLAYS_DIR
+            / marketplace_id
+            / GLOBAL_CONFIG_FILENAME
+        )
+        if overlay_path.exists():
+            merged = _deep_merge(merged, _load_yaml_safe(overlay_path))
+    return merged
+
+
 def _load_config_d(
     config_d: Path,
     *,
@@ -1629,48 +1671,6 @@ def _build_repo_config(
         ),
         knowledge_only=bool(data.get("knowledge_only", False)),
     )
-
-
-def _load_inrepo_config(anchor: str) -> dict[str, Any]:
-    """Return the repo's in-repo flat settings dict, or ``{}``.
-
-    Reads ``<anchor>/.copilot-extensions/agent-worktrees/config.yaml`` first.
-    Falls back to legacy ``<anchor>/.agent-worktrees/config.yaml`` and then the
-    older single-file ``<anchor>/.agent-worktrees.yaml``. When explicit
-    installation context selects a marketplace, an opt-in overlay from
-    ``<anchor>/.copilot-extensions/agent-worktrees/marketplaces/<marketplace-id>/config.yaml``
-    deep-merges on top. Never raises: a missing or malformed file degrades to
-    an empty mapping so config loading cannot be broken by a bad committed
-    file.
-    """
-    root = Path(anchor)
-    base_path: Path | None = None
-    for candidate in (
-        inrepo_config_path(root),
-        legacy_inrepo_config_path(root),
-        root / INREPO_CONFIG_FILENAME,
-    ):
-        if candidate.exists():
-            base_path = candidate
-            break
-
-    merged = _load_yaml_safe(base_path) if base_path is not None else {}
-    context = registry_paths.installation_context()
-    marketplace_id = (
-        str(context.get("marketplaceId", "")).strip()
-        if isinstance(context, dict)
-        else ""
-    )
-    if marketplace_id:
-        overlay_path = (
-            root
-            / MARKETPLACE_OVERLAYS_DIR
-            / marketplace_id
-            / GLOBAL_CONFIG_FILENAME
-        )
-        if overlay_path.exists():
-            merged = _deep_merge(merged, _load_yaml_safe(overlay_path))
-    return merged
 
 
 def _control_plane_related_pr_map() -> dict[str, dict[str, Any]]:

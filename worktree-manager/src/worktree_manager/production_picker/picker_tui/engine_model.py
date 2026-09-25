@@ -328,12 +328,20 @@ class PickerScreenModelMixin:
         return cols, [("Active", a), ("Recent", r), ("Completed", c)]
     def current_list_visible(self):
         """current_list() narrowed/sorted by the "/" bar (#2228 P4) --
-        rendering/navigation ONLY; every other consumer keeps the full set."""
+        rendering/navigation ONLY; every other consumer keeps the full set.
+
+        worktree-finality-and-obligations Phase 5: the query also matches
+        against ``state`` (the derived FINAL/MERGED/ACTIVE/... label, already
+        closure-descriptor-aware via ``derive._state``) and ``status_markers``
+        (the raw ``C<N>``/``F<N>``/``U*``/``OC*`` compact tokens) -- an
+        operator can type "final", "merged", or a marker like "c1" to narrow
+        the list, not just title/id text."""
         cols, sections = self.current_list()
         if self._kind() != "worktrees":
             return cols, sections
         return cols, [(label, self.list_view.narrow(
-            rows, ("title", "id", "id4"), derive.wt_row_always_visible,
+            rows, ("title", "id", "id4", "state", "status_markers"),
+            derive.wt_row_always_visible,
             derive.WT_SORT_KEYS)) for label, rows in sections]
     def _wt_visible_records(self):
         """Flat, render-order VISIBLE Worktrees rows (nav-only counterpart to

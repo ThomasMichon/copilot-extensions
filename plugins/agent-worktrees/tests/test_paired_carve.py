@@ -472,7 +472,10 @@ class TestCarvePairedKnowledgeAttributionPolicy:
         harness_id = tk.list_records(tracking_path=tmp_path / "tracking")[
             0
         ].worktree_id
-        expected_path = str(harness_worktree_root / harness_id)
+        # The surfaced message embeds the path via `!r}` (repr), which on
+        # Windows renders backslashes doubled -- compare against that same
+        # repr, not the plain path string, or this never matches on Windows.
+        expected_path = repr(str(harness_worktree_root / harness_id))
         assert expected_path in message
         assert f"worktree/{harness_id}" in message
         assert "no automatic rollback" in message.lower() or "manually" in message.lower()
