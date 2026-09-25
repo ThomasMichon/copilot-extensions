@@ -920,6 +920,13 @@ either.
   documenting that `interpret_descriptor_payload` never reads `facts`
   in the first place (the version check IS the whole safety net).
 
+### Bug sweep — linked open bugs (2026-09-24)
+
+_Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
+
+- [ ] **#2640** agent-worktrees: cleanup's TOCTOU safety gaps remain beyond the initial dirty-worktree revalidation fix
+  - TOCTOU gaps in cleanup are exactly this effort's resource-claims/finality scope.
+
 ## Validation Plan
 
 - [x] **Sub-state decomposition** (Phase 9): the descriptor names

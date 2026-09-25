@@ -163,6 +163,15 @@ fleet, topology, or operating environment.
   Phase 3 acceptance is complete.
 - [ ] Keep examples synthetic and repository-neutral.
 
+### Bug sweep — linked open bugs (2026-09-24)
+
+_Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
+
+- [ ] **#1437** agent-machines: Filtered apply hangs before module launch
+  - A hang before module launch during a filtered apply is directly this effort's reconcile-engine scope.
+- [ ] **#1438** agent-machines: WSL restore hangs in ssh -G validation
+  - A hang during WSL restore's ssh -G validation is directly this effort's control-plane scope.
+
 ## Validation Plan
 
 - [ ] Invalid schemas, dependency cycles, duplicate ownership, and unknown

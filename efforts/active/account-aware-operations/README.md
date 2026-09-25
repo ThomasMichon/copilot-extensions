@@ -100,6 +100,13 @@ degradation without global identity mutation.
   correctly.
 - [ ] Keep examples synthetic and repository-neutral.
 
+### Bug sweep — linked open bugs (2026-09-24)
+
+_Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
+
+- [ ] **#545** agent-worktrees: <project> --version mis-routes to the bare Picker seam instead of the CLI
+  - `<project> --version` mis-routing is exactly this effort's `project-addressed-not-cwd-bound` scope.
+
 ## Validation Plan
 
 - [ ] Parallel child processes targeting repositories with different bindings

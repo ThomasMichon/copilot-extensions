@@ -408,6 +408,17 @@ engine under this effort.
       "Done" for this effort means *that* set is fully adopted, not "every
       plugin in the repo, no exceptions."
 
+### Bug sweep — linked open bugs (2026-09-24)
+
+_Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
+
+- [ ] **#777** deploy/installer: reinstall overwrites the LIVE versions/<v> slot in place (non-immutable) -- stomps a running daemon's venv -> resume/start FileNotFoundError [WinError 2]
+  - Overwriting a live versioned slot directly violates this effort's `immutable-versioned-runtime` feature.
+- [ ] **#776** reconcile/deploy: same-version redeploy (dev296->dev296) reinstalls the slot -- version identity isn't content-addressed (commit:null), so an already-installed build can't be skipped
+  - Non-content-addressed version identity directly violates this effort's `self-contained-runtime` feature.
+- [ ] **#438** agent-bridge: <repo> update leaves the running daemon on the old version; installer should own the zero-downtime cutover (restart == drain-safe deploy)
+  - The installer owning zero-downtime cutover is the same immutable-runtime-deploy scope this effort covers.
+
 ## Validation Plan
 
 - [ ] Phase 0's audit findings are recorded and reviewed (via the effort PR)

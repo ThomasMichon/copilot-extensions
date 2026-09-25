@@ -457,6 +457,13 @@ any-boundary resumption, stale-revision blocking, etc.) checkable against
   wrong-remote reconciliation gap surfaced by that flow's own review.
 - [ ] Keep examples synthetic and repository-neutral.
 
+### Bug sweep — linked open bugs (2026-09-24)
+
+_Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
+
+- [ ] **#2914** reviewer-recipe CodeSpace fallback stall: task never progresses after local-container-failure fallback decision (3rd recurrence)
+  - A recurring reviewer-recipe stall is squarely this effort's review-automation reliability scope.
+
 ## Validation Plan
 
 - [ ] Concurrent claim attempts yield exactly one review owner.

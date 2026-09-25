@@ -480,6 +480,13 @@ Verbatim from the operator:
       (retrofitting onto already-small, single-contract files is not
       required).
 
+### Bug sweep — linked open bugs (2026-09-24)
+
+_Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
+
+- [ ] **#3446** guards: module-size baseline/hard-cap drift is now a recurring pre-push blocker (3x in <24h)
+  - Module-size baseline/hard-cap drift is the exact policy surface this effort establishes.
+
 ## Validation Plan
 
 - [x] Phase 0: `python tools/check-module-size.py`,

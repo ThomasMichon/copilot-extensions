@@ -141,6 +141,19 @@ independently deciding a session's liveness without one arbiter.
       effort has now created the state machine's actual single arbiter; file a
       follow-on issue if a further consolidation is warranted.
 
+### Bug sweep — linked open bugs (2026-09-24)
+
+_Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
+
+- [ ] **#2379** agent-bridge: let an idle session with no ACP consumer go to sleep instead of retrying indefinitely
+  - An idle session retrying indefinitely instead of sleeping is directly this effort's lifetime-ownership scope.
+- [ ] **#2378** agent-bridge: back off SSH/container reconnect attempts under sustained failure
+  - Reconnect backoff under sustained failure is directly this effort's `connection-loss-never-destroys-the-target` behavior.
+- [ ] **#2041** agent-bridge: Reattach surviving provider Session Hosts instead of recreating sessions
+  - Reattaching instead of recreating is this effort's own named `reattach-never-kill` behavior, verbatim.
+- [ ] **#1362** agent-bridge daemon flapping: stale active.json port mapping + failed auto-update cutovers + wedge on remote-session-host recovery
+  - Daemon flapping / wedged remote-session-host recovery is the same lifecycle-truthfulness scope this effort closes.
+
 ## Validation Plan
 
 - [ ] A running turn whose transport drops mid-turn always produces exactly

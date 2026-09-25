@@ -330,6 +330,15 @@ because they provide tools or services.
       extending this plan before implementation when necessary.
 - [ ] Keep examples synthetic and distribution-neutral.
 
+### Bug sweep — linked open bugs (2026-09-24)
+
+_Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
+
+- [ ] **#107** agent-index installer: Register-ScheduledTask 'Access is denied' without elevation -- need a user-level logon task
+  - An installer elevation gap is this effort's installation-cells scope.
+- [ ] **#106** agent-index installer: uv venv selects a broken uv-managed Python on Dev Box (os error 448) -- pin --python
+  - A broken interpreter selection during install is this effort's installation-cells scope.
+
 ## Validation Plan
 
 - [ ] At each operative phase boundary, use read-only status/doctor checks to

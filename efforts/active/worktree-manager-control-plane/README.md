@@ -602,6 +602,13 @@ call site.
       does not land, since it already covers this exact scope.
 - [ ] Keep configuration examples synthetic and repository-neutral.
 
+### Bug sweep — linked open bugs (2026-09-24)
+
+_Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
+
+- [ ] **#2426** Worktree Manager/Picker can show/act on the wrong project's content
+  - Showing/acting on the wrong project's content is a direct control-plane bug.
+
 ## Validation Plan
 
 - **Headless render + golden checks.** The Manager Picker's `capture_svg` renders

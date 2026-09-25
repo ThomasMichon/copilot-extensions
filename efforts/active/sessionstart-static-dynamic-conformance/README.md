@@ -214,6 +214,13 @@ was "the point of this effort, or so I thought":
   since this is the follow-through the operator expected that effort to have
   covered — without reopening the archived effort itself.
 
+### Bug sweep — linked open bugs (2026-09-24)
+
+_Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
+
+- [ ] **#1946** diagnostics: Transient CLI resume stalls after plugin reconciliation drains
+  - A CLI resume stall after plugin reconciliation is this effort's session-start conformance scope.
+
 ## Validation Plan
 
 - [ ] Every plugin in the Phase 0 roster has a recorded classification in

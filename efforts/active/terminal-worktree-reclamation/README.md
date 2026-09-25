@@ -125,6 +125,13 @@ Additional operator request:
 - [ ] Document the producer boundary and remove producer-specific worktree
       deletion where the generic owner now covers it.
 
+### Bug sweep — linked open bugs (2026-09-24)
+
+_Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
+
+- [ ] **#1666** agent-worktrees: release claimant liveness after explicit headless session conclusion
+  - Claimant-liveness release after session conclusion is this effort's own `allocator-reclaims-what-it-creates` behavior.
+
 ## Validation Plan
 
 - [x] A completed task with landed work is reclaimed only after the worker is

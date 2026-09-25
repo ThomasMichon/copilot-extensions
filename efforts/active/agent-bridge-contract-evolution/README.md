@@ -213,6 +213,13 @@ runtime behavior.
 - [ ] Re-evaluate any larger protocol boundary only after the additive
       foundation and both convergence consumers have produced evidence.
 
+### Bug sweep — linked open bugs (2026-09-24)
+
+_Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
+
+- [ ] **#2991** agent-bridge contract registry: routes/sessions.py hash doesn't match its own committed content on main
+  - A contract-registry hash mismatch is exactly this effort's version-skew-safe-contract-evolution scope.
+
 ## Validation Plan
 
 - [ ] Every registered contract has exact old/new fixtures and release

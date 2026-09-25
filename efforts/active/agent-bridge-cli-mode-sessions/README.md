@@ -633,6 +633,13 @@ mechanism CLI mode binds through.
       (this closes existing intent) unless implementation surfaces a genuine
       should-be gap.
 
+### Bug sweep — linked open bugs (2026-09-24)
+
+_Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
+
+- [ ] **#1167** agent-bridge: project-scoped Windows SSH dispatch can launch at C:\ after resolver bootstrap failure
+  - Project-scoped Windows SSH dispatch landing at the wrong cwd is exactly this effort's CWD-keyed discovery scope.
+
 ## Validation Plan
 
 - [x] A represented interactive peer under concurrent `send` pressure never

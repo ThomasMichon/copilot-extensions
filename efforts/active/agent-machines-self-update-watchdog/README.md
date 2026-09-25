@@ -168,6 +168,15 @@ the proposal into an implementable plan.
   reflects reality before proposing wider mesh rollout (mesh rollout itself
   is private-repo scope, tracked in the `dotfiles` proposal doc).
 
+### Bug sweep — linked open bugs (2026-09-24)
+
+_Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
+
+- [ ] **#3444** agent-dispatch: 8h reviewer-pipeline outage from a truncated recipes_cli.py in a self-updated venv (stale build/egg-info shadowing, #2863-class recurrence)
+  - A self-updated venv silently going stale/truncated is exactly the failure mode this watchdog effort exists to catch.
+- [ ] **#3419** agent-dispatch: published dev193 marketplace payload has a truncated recipes_cli.py (missing register_recipes_commands, breaks CLI entirely)
+  - Same truncated-payload-after-self-update defect family as #3444 above.
+
 ## Validation Plan
 
 - [x] A stuck prior Tier-1 or Tier-2 run's lock is reclaimed only once both

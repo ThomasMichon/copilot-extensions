@@ -606,6 +606,13 @@ renumbering from the "acknowledges handoff" step onward.)
       / `agent-bridge handoff-check` for diagnosing a stuck cutover, cross-
       linked to the new architecture.md section.
 
+### Bug sweep — linked open bugs (2026-09-24)
+
+_Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
+
+- [ ] **#1246** context-handoff: transient worktree lookup failure is reported as missing baton
+  - Uses this effort's own "baton" lifecycle-journal language -- a direct match.
+
 ## Validation Plan
 
 - [ ] Unit/integration tests per plugin (existing test layout — see

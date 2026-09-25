@@ -209,6 +209,17 @@ suites first.
   extending this plan before implementation when necessary.
 - [ ] Use synthetic fixtures and reproducible public test cases.
 
+### Bug sweep — linked open bugs (2026-09-24)
+
+_Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
+
+- [ ] **#3497** tests: discourage real git subprocess calls against the ambient checkout (fragile across clone depths)
+  - Directly about discouraging real git subprocess calls in tests -- core test-portfolio scope.
+- [ ] **#2721** agent-codespaces: quota lifecycle tests bypass the mocked reclaim path
+  - Tests bypassing a mocked path is a test-quality/portfolio issue.
+- [ ] **#1052** agent-worktrees: full plugin suite can hang indefinitely without progress output
+  - A suite hang without progress output is a test-reliability/portfolio issue.
+
 ## Validation Plan
 
 - [ ] The containment harness kills and reaps all descendants after success,
