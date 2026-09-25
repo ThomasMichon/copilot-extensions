@@ -211,10 +211,26 @@ def test_terminate_pid_confirms_death_no_escalation(monkeypatch):
         poll_seconds=0.0,
         sleep=lambda _s: None,
         pid_alive=_pid_alive,
+        confirmed_gone_or_reused=lambda pid: False,  # still ours at the start
         is_windows=False,
     )
     assert ok is True
     assert sent == [signal.SIGTERM]  # never escalated
+
+
+def test_terminate_pid_skips_signal_when_already_confirmed_gone(monkeypatch):
+    """A stale candidate list can already be wrong by the time this runs --
+    never signal a pid confirmed gone/reused before the very first SIGTERM."""
+    sent: list[int] = []
+    monkeypatch.setattr("os.kill", lambda pid, sig: sent.append(sig))
+
+    ok = terminate_pid(
+        123,
+        confirmed_gone_or_reused=lambda pid: True,
+        is_windows=False,
+    )
+    assert ok is True
+    assert sent == []  # no signal ever sent to the (possibly reused) pid
 
 
 def test_terminate_pid_escalates_to_sigkill_when_stuck(monkeypatch):
@@ -250,9 +266,15 @@ def test_terminate_pid_escalates_to_sigkill_when_stuck(monkeypatch):
 
 
 def test_terminate_pid_never_escalates_against_a_reused_pid(monkeypatch):
-    """If the pid was recycled to an unrelated process, don't SIGKILL it."""
+    """If the pid is recycled to an unrelated process *after* the first
+    signal but before escalation, don't SIGKILL it."""
     sent: list[int] = []
     monkeypatch.setattr("os.kill", lambda pid, sig: sent.append(sig))
+    calls = {"n": 0}
+
+    def _confirmed(pid):
+        calls["n"] += 1
+        return calls["n"] > 1  # ours at entry; reused by the escalation check
 
     ok = terminate_pid(
         123,
@@ -260,7 +282,7 @@ def test_terminate_pid_never_escalates_against_a_reused_pid(monkeypatch):
         poll_seconds=1.0,
         sleep=lambda _s: None,
         pid_alive=lambda pid: True,  # *something* alive at that number
-        confirmed_gone_or_reused=lambda pid: True,  # ...but it's not our coordinator
+        confirmed_gone_or_reused=_confirmed,
         is_windows=False,
     )
     assert ok is True
@@ -349,7 +371,7 @@ def test_terminate_pid_already_gone_short_circuits(monkeypatch):
         raise ProcessLookupError()
 
     monkeypatch.setattr("os.kill", _kill)
-    assert terminate_pid(123) is True
+    assert terminate_pid(123, confirmed_gone_or_reused=lambda pid: False) is True
 
 
 def test_terminate_pid_returns_false_when_signal_delivery_fails(monkeypatch):
@@ -357,7 +379,7 @@ def test_terminate_pid_returns_false_when_signal_delivery_fails(monkeypatch):
         raise PermissionError()
 
     monkeypatch.setattr("os.kill", _kill)
-    assert terminate_pid(123) is False
+    assert terminate_pid(123, confirmed_gone_or_reused=lambda pid: False) is False
 
 
 def test_terminate_pid_sigkill_failure_reports_false(monkeypatch):
@@ -391,6 +413,7 @@ def test_terminate_pid_windows_path_never_escalates(monkeypatch):
     pid_alive_calls = []
     ok = terminate_pid(
         123, pid_alive=lambda pid: pid_alive_calls.append(pid) or True,
+        confirmed_gone_or_reused=lambda pid: False,
         is_windows=True,
     )
     assert ok is True

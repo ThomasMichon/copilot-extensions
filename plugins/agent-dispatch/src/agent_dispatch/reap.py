@@ -287,7 +287,23 @@ def terminate_pid(
     failure rather than a false "reaped". ``True`` only on confirmed death (or
     an already-gone process); ``False`` when a signal could not be delivered,
     or the process is still alive after every step above.
+
+    ``confirmed_gone_or_reused`` is also consulted *before the very first
+    signal*: a caller's own candidate list (an earlier enumeration pass) can
+    already be stale by the time this runs, so a coordinator this pid used to
+    identify may have already exited and had the number recycled before we
+    ever get here. This narrows -- it does not eliminate -- the inherent
+    pid-based TOCTOU race (a truly airtight guard needs an OS-bound process
+    handle/birth-time check that neither this module nor any of this
+    codebase's other pid-based termination paths currently use).
     """
+    if confirmed_gone_or_reused is not None and confirmed_gone_or_reused(pid):
+        log.debug(
+            "pid=%s already confirmed gone or reused before the first signal "
+            "-- skipping rather than signalling a stale candidate", pid,
+        )
+        return True
+
     if is_windows:
         try:
             os.kill(pid, signal.SIGTERM)
