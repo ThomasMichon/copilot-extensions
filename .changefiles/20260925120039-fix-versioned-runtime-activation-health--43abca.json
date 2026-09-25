@@ -1,0 +1,9 @@
+{
+  "comment": "Fix versioned-runtime activation health gate false-passing partial/interrupted installs (namespace-package false pass); clear PYTHONPATH around the probe.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
