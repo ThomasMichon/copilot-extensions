@@ -304,6 +304,38 @@ re-validation and explicitly-acknowledged residual snapshot-race risk, and
 the full test list (liveness, state, lease/claim, account-binding, race,
 lifecycle-contention, and CLI-dispatch coverage).
 
+**Done:** new `agent-codespaces sync-sessions <name>` verb
+(`capture_cli.py`) calling `sessions.capture_codespace_sessions()`. That
+function: (1) a hard state preflight via
+`get_codespace_status_with_account()` that defers on anything but
+`Available` without ever connecting; (2) `_capture_hold_reason()` defers on
+any of the four holder shapes (local lease, `#897` claim, cross-machine L2,
+beacon) except an orphaned claim (owning worktree positively gone, per
+`pool._holder_worktree_gone`), which is not treated as a live hold; (3)
+account binding requires an explicit `account` or `account_binding.bound_account()`'s
+exact per-name binding, never the generic scan -- fails closed otherwise;
+(4) the vendored `session_liveness_probe` lib gates the pull both **before**
+(defers if not `idle`) and **after** (discards/defers a became-active
+capture rather than staging/pushing it) -- the acquire-then-release-
+entirely-within-the-pull race remains an explicitly documented residual
+risk, per Phase 1's decision. `sync_codespace_sessions()` gained an optional
+`lock=` parameter (widening seam): all seven existing destructive call
+sites (`_cmd_delete`, `_cmd_finalize`, its JSON-modal variant, `_cmd_stop`,
+prune, `_reclaim_for_quota`'s total-limit path, and
+`claim_provider_cli.py`'s reclaim callback) now acquire their own
+`TargetLock` up front and hold it across their full sync-then-act sequence,
+passing it through so a concurrent capture sees `TargetBusyError` and
+defers for the whole transaction -- the external-actor exception (e.g. a
+human running `gh codespace stop` directly) is called out explicitly, not
+silently, exactly as planned. Tests: `test_capture_sessions.py` (hold-reason
+per holder shape including the orphaned-claim exception, state preflight,
+account-binding fail-closed/explicit-bypass, pre- and post-pull liveness
+gating, `TargetBusyError` handling, and a lock-contention regression using a
+genuinely different live pid) and `test_capture_cli.py` (CLI-dispatch text +
+`--json`, deferred exit code) -- 20 new tests, full `agent-codespaces` suite
+(1373 tests) green via `tools/run-plugin-tests.py --reinstall`, `ruff check`
+clean on every touched/new file.
+
 ### Phase 4 — Periodic trigger for CodeSpaces
 (scope set by Phase 1's scheduling-ownership decision)
 - [ ] If Phase 1 decided **consumer-owned** (the containers-precedent
@@ -423,3 +455,32 @@ _Pending._
   check` clean on all touched/new files.
 - Next: open the Phase 1+2 PR, drive it through review/merge, then start
   Phase 3 (CodeSpaces capture verb + liveness gate) in a fresh PR.
+
+### 2026-09-25 — Phase 3 (CodeSpaces capture verb + liveness gate)
+- Phase 1+2's PR (#3660) merged this same day; started a fresh worktree for
+  Phase 3 per the effort's own per-phase-PR Coordination rule.
+- Implemented `agent-codespaces sync-sessions <name>` (`capture_cli.py`) and
+  `sessions.capture_codespace_sessions()`: hard non-`Available`-state
+  preflight (never connects to a non-running venue), `_capture_hold_reason()`
+  covering all four holder shapes with the orphaned-claim exception, fail-
+  closed account binding (explicit or exact-bound only), and the vendored
+  liveness probe gating the pull both before and after (a became-active
+  capture during the pull is discarded, not staged/pushed). Added the
+  `lock=` widening seam to `sync_codespace_sessions()` and wired it through
+  all seven existing destructive call sites so each now holds its own
+  `TargetLock` across its full sync-then-act sequence -- closing the window
+  Phase 3's own item called out, with the external-actor exception called
+  out explicitly in code comments, not silently.
+- Fixed one pre-existing test's stubbed lambda that didn't accept the new
+  `lock=` kwarg (`test_claim_provider_cli.py`); otherwise zero regressions
+  across the full existing suite.
+- Validated: 20 new tests (`test_capture_sessions.py`, `test_capture_cli.py`)
+  plus the full existing suite -- 1373 tests total, all green via
+  `tools/run-plugin-tests.py agent-codespaces --reinstall`. `ruff check`
+  clean on every touched/new file (confirmed a pre-existing, unrelated
+  ~17-finding baseline on `__main__.py` is unchanged by this diff).
+  Changefile added (patch, per CONTRIBUTING.md's default-to-patch guidance).
+- Next: open Phase 3's own PR, drive it through review/merge, then Phase 4
+  (documentation-only, per Phase 1's consumer-owned scheduling decision)
+  and Phase 5 (close-out).
+

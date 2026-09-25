@@ -1,0 +1,9 @@
+{
+  "comment": "session-rescue-parity Phase 3: non-destructive sync-sessions capture verb + liveness gate + lock-widening",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}
