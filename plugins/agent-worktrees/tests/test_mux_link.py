@@ -7,6 +7,7 @@ match the documented ``mux-live-v1`` contract in
 from __future__ import annotations
 
 import json
+import threading
 import time
 
 from agent_worktrees import mux_link
@@ -311,6 +312,40 @@ def test_warm_load_ignores_a_corrupt_or_malformed_snapshot_file(tmp_path):
     assert cache2.snapshot() == {}
 
 
+def test_warm_load_rejects_a_non_finite_received_at_and_falls_back_to_now(tmp_path):
+    """Copilot review finding: ``json.loads`` permits non-finite numbers
+    (``Infinity``/``-Infinity``/``NaN``), and a plain ``isinstance(x, (int,
+    float))`` check accepts them too -- an ``Infinity`` ``received_at``
+    would make ``now - received_at <= MAPPING_STALE_AFTER_SECONDS`` true
+    forever, letting a corrupt/tampered snapshot defeat the stale-mapping
+    safeguard permanently."""
+    persist_path = tmp_path / "managed-mux-cache.json"
+    persist_path.write_text(
+        json.dumps(
+            {
+                "wt-1": {
+                    "project": "proj",
+                    "worktree_id": "wt-1",
+                    "mux_session": "wt-1",
+                    "mapping_revision": 1,
+                    "live": True,
+                    "panes": [],
+                    "session_incarnation": "",
+                    "attached_clients": 0,
+                    "observed_at": "2026-09-17T08:00:00Z",
+                    "received_at": float("inf"),
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    cache = mux_link.ManagedMuxCache(persist_path=persist_path)
+    entry = cache.get("wt-1")
+    assert entry is not None
+    assert entry["received_at"] != float("inf")
+    assert abs(entry["received_at"] - time.time()) < 5  # fell back to real "now"
+
+
 def test_warm_load_rejects_an_entry_whose_key_disagrees_with_its_worktree_id(tmp_path):
     """Copilot review finding: accepting a snapshot entry under the wrong
     outer key would let a later legitimate update for the entry's *actual*
@@ -370,6 +405,120 @@ def test_warm_loaded_entry_carries_forward_its_original_received_at(tmp_path, mo
 
     second = mux_link.ManagedMuxCache(persist_path=persist_path)
     assert second.live_session_names() == set()  # still stale after "restart"
+
+
+# -- _push_key (coalescing-key safety) --------------------------------------
+
+
+def test_push_key_differs_for_different_revisions_of_the_same_worktree():
+    """Copilot review finding: ``CoalescingServer`` coalesces concurrent
+    requests sharing one ``(kind, key)`` onto a single execution -- a key
+    that stayed constant across different observations for the same
+    worktree (e.g. a bare ``worktree_id``) could let two concurrent pushes
+    carrying two different ``mapping_revision``s coalesce onto one
+    execution, silently dropping the second real observation while its
+    caller still received the first's response as if its own had
+    succeeded."""
+    key1 = mux_link._push_key(_obs(revision=1))
+    key2 = mux_link._push_key(_obs(revision=2))
+    assert key1 != key2
+
+
+def test_push_key_is_identical_for_a_genuine_retry_of_the_same_revision():
+    key1 = mux_link._push_key(_obs(revision=7))
+    key2 = mux_link._push_key(_obs(revision=7))
+    assert key1 == key2
+
+
+def test_push_key_is_injective_despite_a_colon_in_worktree_id():
+    # Mirrors worktree_status_daemon.coalescing_key's own injective-key test:
+    # neither `worktree_id` nor the literal separator is restricted against
+    # `:`, so a naive `f"{worktree_id}:{revision}"` could collide.
+    key_a = mux_link._push_key({"worktree_id": "a", "mapping_revision": 23})
+    key_b = mux_link._push_key({"worktree_id": "a:2", "mapping_revision": 3})
+    assert key_a != key_b
+
+
+def test_push_key_requires_worktree_id_and_integer_mapping_revision():
+    for bad in (
+        {"mapping_revision": 1},
+        {"worktree_id": "", "mapping_revision": 1},
+        {"worktree_id": "wt-1"},
+        {"worktree_id": "wt-1", "mapping_revision": "1"},
+        {"worktree_id": "wt-1", "mapping_revision": True},
+    ):
+        try:
+            mux_link._push_key(bad)
+            raised = False
+        except ValueError:
+            raised = True
+        assert raised, bad
+
+
+def test_mux_live_via_daemon_concurrent_different_revisions_never_coalesce():
+    """End-to-end proof for the coalescing-key finding: two concurrent
+    pushes for the same worktree at two different revisions must **both**
+    actually reach ``apply_observation`` -- never silently coalesced so
+    only one of them ever runs. (Revision 1's own outcome legitimately
+    depends on real scheduling order against revision 2's unblocked push --
+    it may either apply before revision 2's or be correctly rejected as
+    stale by the monotonic-revision guard once revision 2 already landed.
+    What must never happen is revision 1 being silently dropped *without*
+    `apply_observation` ever running for it -- that's what a shared
+    coalescing key would cause.)"""
+    cache = mux_link.ManagedMuxCache()
+    gate = threading.Event()
+    entered_first = threading.Event()
+    invocations = []
+
+    real_apply = cache.apply_observation
+
+    def _gated_apply(payload):
+        invocations.append(payload["mapping_revision"])
+        if payload["mapping_revision"] == 1:
+            entered_first.set()
+            gate.wait(timeout=2)
+        return real_apply(payload)
+
+    cache.apply_observation = _gated_apply
+    server = mux_link.start_server(mux_link.build_compute(cache))
+    server.start()
+    try:
+        lock_data = _endpoint_dict(server)
+        results = {}
+
+        def _push(revision):
+            results[revision] = mux_link.mux_live_via_daemon(
+                lock_data,
+                payload=_obs(revision=revision),
+                fallback=lambda: {"from": "fallback"},
+                request_deadline_s=3.0,
+            )
+
+        t1 = threading.Thread(target=_push, args=(1,))
+        t1.start()
+        assert entered_first.wait(timeout=2)
+        t2 = threading.Thread(target=_push, args=(2,))
+        t2.start()
+        t2.join(timeout=3)
+        gate.set()
+        t1.join(timeout=3)
+
+        # The whole point: apply_observation actually ran for *both*
+        # revisions -- a shared coalescing key would have joined revision
+        # 1's caller onto revision 2's single execution, leaving this list
+        # with only one entry.
+        assert sorted(invocations) == [1, 2]
+        assert results[2] == {"applied": True, "revision": 2}
+        assert results[1] in (
+            {"applied": True, "revision": 1},
+            {"applied": False, "reason": "stale_revision", "current_revision": 2},
+        )
+        # The cache's actual final state reflects the later revision -- both
+        # observations were genuinely applied, neither silently dropped.
+        assert cache.get("wt-1")["mapping_revision"] == 2
+    finally:
+        server.close()
 
 
 # -- compute / wire wrappers ---------------------------------------------
@@ -438,7 +587,7 @@ def test_mux_live_via_daemon_uses_fallback_when_no_lock_data():
         calls["fallback"] += 1
         return {"from": "fallback"}
 
-    result = mux_link.mux_live_via_daemon(None, key="wt-1", payload=_obs(), fallback=fallback)
+    result = mux_link.mux_live_via_daemon(None, payload=_obs(), fallback=fallback)
     assert result == {"from": "fallback"}
     assert calls["fallback"] == 1
 
@@ -451,7 +600,6 @@ def test_mux_live_via_daemon_pushes_to_a_live_daemon():
         lock_data = _endpoint_dict(server)
         result = mux_link.mux_live_via_daemon(
             lock_data,
-            key="wt-1",
             payload=_obs(),
             fallback=lambda: {"from": "fallback"},
         )
@@ -473,7 +621,7 @@ def test_mux_live_via_daemon_registers_and_releases_a_client_id():
     try:
         lock_data = _endpoint_dict(server)
         mux_link.mux_live_via_daemon(
-            lock_data, key="wt-1", payload=_obs(), fallback=lambda: {"from": "fallback"}
+            lock_data, payload=_obs(), fallback=lambda: {"from": "fallback"}
         )
         assert observed_counts == [1]
         assert server.subscriber_count() == 0
@@ -502,7 +650,6 @@ def test_mux_live_with_boot_uses_default_request_deadline(monkeypatch):
             "managed_mux_token": "token",
         },
         ensure_monitor=None,
-        key="wt-1",
         payload=_obs(),
         fallback=lambda: {"from": "fallback"},
     )
@@ -525,7 +672,6 @@ def test_mux_live_with_boot_falls_back_when_no_daemon_ever_appears(monkeypatch):
     result = mux_link.mux_live_with_boot(
         read_lock_data=lambda: None,
         ensure_monitor=ensure_monitor,
-        key="wt-1",
         payload=_obs(),
         fallback=lambda: calls.__setitem__("fallback", calls["fallback"] + 1)
         or {"from": "fallback"},

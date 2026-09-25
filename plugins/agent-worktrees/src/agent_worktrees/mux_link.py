@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import math
 import os
 import tempfile
 import threading
@@ -285,7 +286,17 @@ def _normalize_entry(payload: dict, *, trust_received_at: bool = False) -> dict:
     # snapshot record carries its original value forward.
     if trust_received_at:
         received_at = payload.get("received_at")
-        if not isinstance(received_at, (int, float)) or isinstance(received_at, bool):
+        # `json.loads` permits non-finite numbers (`Infinity`/`-Infinity`/
+        # `NaN`), and `isinstance(x, (int, float))` accepts them too -- an
+        # `Infinity` value would make `now - received_at <=
+        # MAPPING_STALE_AFTER_SECONDS` true forever, letting a corrupt/
+        # tampered snapshot defeat the stale-mapping safeguard permanently
+        # (Copilot review finding). Require a genuinely finite number.
+        if (
+            not isinstance(received_at, (int, float))
+            or isinstance(received_at, bool)
+            or not math.isfinite(received_at)
+        ):
             received_at = time.time()
     else:
         received_at = time.time()
@@ -401,16 +412,60 @@ def endpoint_from_rendezvous(data: dict | None) -> tuple[str, int, str] | None:
     return host, port, token
 
 
+def _push_key(payload: dict) -> str:
+    """Derive the ``CoalescingServer`` coalescing key for one push from the
+    payload itself, rather than trust an arbitrary caller-supplied key.
+
+    ``CoalescingServer`` coalesces concurrent requests sharing the same
+    ``(kind, key)`` onto a single execution, joining late callers onto the
+    first one's in-flight result rather than starting a second (a contract
+    designed for idempotent *reads*, where any concurrent caller asking the
+    identical question is happy with the identical answer). A **push** is
+    not idempotent that way: if a caller used a key that stayed constant
+    across different observations for the same worktree (e.g. bare
+    ``worktree_id``), two concurrent pushes carrying two different
+    ``mapping_revision``s could coalesce onto one execution -- the second,
+    real observation would never reach :meth:`ManagedMuxCache
+    .apply_observation` at all, and that caller would receive the first
+    push's response as if its own had succeeded, silently dropping the
+    update with no way for the monotonic-revision guard to ever recover it
+    (Copilot review finding). Keying on ``(worktree_id, mapping_revision)``
+    instead makes every distinct observation its own coalescing slot --
+    only a genuine retry of the exact same revision is ever safe to
+    coalesce -- while still deduplicating truly-concurrent identical
+    retries the way the coalescing contract intends.
+
+    Raises ``ValueError`` for a payload missing either field, mirroring
+    :func:`_normalize_entry`'s own required-field validation so a caller
+    finds out before ever reaching the wire.
+    """
+    worktree_id = payload.get("worktree_id")
+    revision = payload.get("mapping_revision")
+    if not isinstance(worktree_id, str) or not worktree_id:
+        raise ValueError("mux-live-v1 push payload missing 'worktree_id'")
+    if isinstance(revision, bool) or not isinstance(revision, int):
+        raise ValueError("mux-live-v1 push payload requires an integer mapping_revision")
+    # Length-prefix worktree_id so the split point is unambiguous regardless
+    # of its own content (mirrors `worktree_status_daemon.coalescing_key`'s
+    # own injective-key rationale) -- `worktree_id` is caller-controlled and
+    # not restricted against a literal `:`.
+    return f"{len(worktree_id)}:{worktree_id}:{revision}"
+
+
 def mux_live_via_daemon(
     lock_data: dict | None,
     *,
-    key: str,
     payload: dict,
     fallback: Callable[[], dict],
     request_deadline_s: float = REQUEST_DEADLINE_S,
 ) -> dict:
     """Try a live daemon (per ``lock_data``'s rendezvous fields) first, else
     run ``fallback`` immediately. Never boots a daemon itself.
+
+    The coalescing key is derived internally from ``payload`` (see
+    :func:`_push_key`) rather than accepted from the caller, so a future
+    caller cannot accidentally choose an unsafe key that coalesces two
+    different observations together.
 
     Not yet called by anything in this step -- pinned here so the future
     Worktree Manager mux-companion daemon caller has an exact, already-
@@ -420,6 +475,7 @@ def mux_live_via_daemon(
     endpoint = endpoint_from_rendezvous(lock_data)
     if endpoint is None:
         return fallback()
+    key = _push_key(payload)
     host, port, token = endpoint
     client_id = wcs_client.new_client_id()
     try:
@@ -443,7 +499,6 @@ def mux_live_with_boot(
     *,
     read_lock_data: Callable[[], dict | None],
     ensure_monitor: Callable[[], bool] | None,
-    key: str,
     payload: dict,
     fallback: Callable[[], dict],
     request_deadline_s: float = REQUEST_DEADLINE_S,
@@ -455,8 +510,11 @@ def mux_live_with_boot(
     .classify_with_boot`` exactly: dial, boot-and-wait for the resident
     monitor's observation endpoint to appear if none is currently published,
     then push one observation with a fresh per-call client id (released in a
-    ``finally`` right after). Never raises past this call."""
+    ``finally`` right after). Never raises past this call except for a
+    malformed ``payload`` (see :func:`_push_key`) -- the coalescing key is
+    derived internally, never accepted from the caller."""
     started = time.time()
+    key = _push_key(payload)
 
     def _dial() -> tuple[str, int, str] | None:
         return endpoint_from_rendezvous(read_lock_data())
