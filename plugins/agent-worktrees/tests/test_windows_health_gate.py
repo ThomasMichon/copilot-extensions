@@ -36,12 +36,23 @@ checks as a side effect of loading).
 from __future__ import annotations
 
 import importlib.util
+import os
 import shutil
 import subprocess
 import venv
 from pathlib import Path
 
 import pytest
+
+# Windows-only: exercises install.ps1's PowerShell health gate via a real
+# `venv`-created interpreter at the Windows `Scripts\python.exe` layout.
+# Guard the WHOLE module (not just individual tests) -- POSIX's `venv.create`
+# produces `bin/python` instead, so the `bare_venv_python` fixture itself
+# would fail its own assertion before any test got a chance to skip.
+pytestmark = pytest.mark.skipif(
+    os.name != "nt",
+    reason="Windows-only: exercises install.ps1's PowerShell health gate",
+)
 
 PLUGIN = Path(__file__).resolve().parents[1]
 INSTALL_PS1 = PLUGIN / "scripts" / "install.ps1"
