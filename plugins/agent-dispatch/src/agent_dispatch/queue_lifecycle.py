@@ -526,24 +526,48 @@ class QueueLifecycleMixin:
         expected_owner_session_id: str | None = None,
         now: float | None = None,
     ) -> Task:
-        """Move a task to terminal ``abandoned`` -- requires ``permitted=True``."""
+        """Move a task to terminal ``abandoned`` -- requires ``permitted=True``.
+        See :meth:`abandon_with_outcome` for a replay-aware sibling.
+        """
+        return self.abandon_with_outcome(
+            task_id, worker_id=worker_id, permitted=permitted, reason=reason,
+            expected_status=expected_status, expected_generation=expected_generation,
+            expected_owner_session_id=expected_owner_session_id, now=now,
+        ).task
+
+    def abandon_with_outcome(
+        self,
+        task_id: str,
+        *,
+        worker_id: str | None = None,
+        permitted: bool = False,
+        reason: str | None = None,
+        expected_status: str | None = None,
+        expected_generation: int | None = None,
+        expected_owner_session_id: str | None = None,
+        now: float | None = None,
+    ) -> CompletionOutcome:
+        """Like :meth:`abandon`, but returns a :class:`CompletionOutcome`
+        (PR #3248 review) whose ``event_type`` is ``"task.abandoned"`` on a
+        genuine transition or ``None`` on an idempotent replay -- so a
+        terminal-transition side effect (e.g. releasing a context-handoff
+        claim) fires once per genuine abandon, never once per retry.
+        """
         if not permitted:
             raise TaskError("abandon requires permission (permitted=True)")
         allowed, to = _task_transition_spec("abandon")
-        return self._transition(
-            task_id,
-            allowed=allowed,
-            to=to,
-            worker_id=worker_id,
-            require_owner=False,
-            now=now,
-            note=reason or "abandon",
+        result = self._transition(
+            task_id, allowed=allowed, to=to, worker_id=worker_id,
+            require_owner=False, now=now, note=reason or "abandon",
             extra={"owner": None, "lease_expires_at": None},
             expected_generation=expected_generation,
             expected_owner_session_id=expected_owner_session_id,
             expected_status=expected_status,
-            idempotent_replay=True,
+            idempotent_replay=True, report_replay=True,
         )
+        assert isinstance(result, tuple)  # noqa: S101
+        task, is_replay = result
+        return CompletionOutcome(task, None if is_replay else "task.abandoned")
 
     def reset(
         self,
@@ -811,8 +835,15 @@ class QueueLifecycleMixin:
         reject_pending_steer: bool = False,
         reject_if_held: bool = False,
         idempotent_replay: bool = False,
-    ) -> Task:
-        """Generic fenced transition helper."""
+        report_replay: bool = False,
+    ) -> Task | tuple[Task, bool]:
+        """Generic fenced transition helper.
+
+        ``report_replay=True``: returns ``(Task, bool)`` -- ``True`` iff this
+        call hit the idempotent-replay no-op branch below (PR #3248 review).
+        Defaults to ``False``; every existing ``-> Task`` call site is
+        unaffected.
+        """
         ts = self._now(now)
         allowed_set = set(allowed)
         wake_enqueued = False
@@ -848,6 +879,8 @@ class QueueLifecycleMixin:
                         )
                         result = self._fetch(conn, task_id)
                         conn.execute("COMMIT")
+                        if report_replay:
+                            return result, True  # type: ignore[return-value]
                         return result  # type: ignore[return-value]
                 conn.execute("COMMIT")
                 raise TaskError(
@@ -960,4 +993,6 @@ class QueueLifecycleMixin:
             conn.execute("COMMIT")
         if wake_enqueued:
             self._notify_wake()
+        if report_replay:
+            return result, False  # type: ignore[return-value]
         return result  # type: ignore[return-value]

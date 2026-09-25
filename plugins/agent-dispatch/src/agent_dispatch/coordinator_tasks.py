@@ -300,6 +300,19 @@ def register_task_routes(
             msg = str(exc)
             status = 404 if msg.startswith("no such task") else 409
             raise HTTPException(status_code=status, detail=msg) from exc
+        if event_type in ("task.completed", "task.abandoned"):
+            # A shared terminal-transition hook: every caller that reaches a
+            # genuine (not idempotent-retry) completion or an abandon funnels
+            # through this same _guard, whether over HTTP (the CLI's own
+            # transport) or an in-process call from an MCP tool
+            # (mcp_http.py's dispatch_complete/dispatch_abandon, which call
+            # queue.complete_with_outcome/abandon directly, not through this
+            # route) -- so this alone does not cover MCP; mcp_http.py wires
+            # the same release call itself, right after its own equivalent
+            # mutation succeeds.
+            from . import handoff_claim_release
+
+            handoff_claim_release.release_if_handoff(result)
         if event_type is not None:
             _emit(event_type, result)
         return result
@@ -668,7 +681,7 @@ def register_task_routes(
     @app.post("/tasks/{task_id}/abandon")
     def abandon(task_id: str, body: AbandonBody) -> dict:
         return _guard(
-            lambda: queue.abandon(
+            lambda: queue.abandon_with_outcome(
                 task_id,
                 worker_id=body.worker_id,
                 permitted=body.permitted,
@@ -676,8 +689,7 @@ def register_task_routes(
                 expected_status=body.expected_status,
                 expected_generation=body.expected_generation,
                 expected_owner_session_id=body.expected_owner_session_id,
-            ),
-            "task.abandoned",
+            )
         )
 
     @app.post("/tasks/{task_id}/hold")

@@ -2046,6 +2046,70 @@ export function runAgentDispatchConsume(cwd, taskId, deferComplete) {
   return runCli("agent-dispatch", argv, { cwd, timeout: 20000 });
 }
 
+// A handoff task means "resume THIS worktree's work" -- until it is consumed
+// or abandoned, the worktree it targets must not be finalized out from under
+// it (the exact "forgotten handoff" failure mode this closes). Journals a
+// `task`-kind agent-worktrees claim on `worktree` (the same one the task
+// targets, since dispatchHandoff always runs from within it -- passed
+// explicitly via `--worktree` rather than left to cwd inference, so this
+// stays correct even if a future caller's cwd ever diverges) via the same
+// `claims add task <id>` primitive agent-dispatch's own
+// `hibernation_claims.add_hibernation_claim` uses for its own, unrelated
+// hibernation use case. This is deliberately a bookkeeping claim on the
+// WORKTREE's own resource ledger, NOT the task being claimed/self-assigned in
+// agent-dispatch's own sense -- the task stays `proposed`/unclaimed, free for
+// its intended successor to `consume` normally; only agent-worktrees'
+// finalize obligation-settlement gate (kind-agnostic; any unsettled claim
+// blocks) sees this. Best-effort and non-fatal: a worktree that cannot
+// journal the claim should still get its handoff task, since the claim is
+// defense in depth, not a precondition. The matching release lives
+// server-side in agent-dispatch (`handoff_claim_release.py`), hooked into the
+// coordinator's own complete/abandon entry points (shared by the CLI, MCP,
+// and any direct HTTP caller) rather than any one transport, and targets the
+// claim explicitly by the task's own `target_worktree` field -- so it fires
+// regardless of which process or cwd resolves the handoff.
+export function addHandoffClaim(cwd, taskId, worktree, execute = runCli) {
+  try {
+    execute(
+      "agent-worktrees",
+      [
+        "claims", "add", "task", taskId, "--note", "context handoff",
+        "--worktree", worktree, "--json",
+      ],
+      { cwd, timeout: 15000 },
+    );
+  } catch { /* best-effort -- defense in depth, not a precondition */ }
+}
+
+// PR #3248 review (comment 9): `dispatchHandoff` publishes the task (making
+// it immediately claimable) BEFORE `addHandoffClaim` journals its worktree
+// claim -- a fast successor can claim/complete/abandon it in that gap, so
+// the terminal-transition release hook (`handoff_claim_release.py`, server-
+// side in agent-dispatch) fires while no claim exists yet, then
+// `addHandoffClaim` creates one moments later for a task that is ALREADY
+// terminal. No further transition will ever happen to re-trigger that
+// release hook, so the claim sits there forever, blocking finalize. True
+// atomicity isn't available (task creation and claim journaling are two
+// separate CLI processes against two separate stores), so the practical
+// fix is this narrow post-claim reconciliation: immediately after
+// journaling, re-read the task's fresh status and release the claim inline
+// if it's already terminal -- closing the gap without needing the
+// asynchronous hook to have won the race.
+const HANDOFF_TERMINAL_STATUSES = new Set(["completed", "abandoned", "dead_letter"]);
+
+export function releaseHandoffClaimIfTerminal(cwd, taskId, worktree, execute = runCli) {
+  try {
+    const fresh = cliJson("agent-dispatch", ["show", taskId], cwd, 15000, execute);
+    if (!fresh || !HANDOFF_TERMINAL_STATUSES.has(fresh.status)) return;
+    execute(
+      "agent-worktrees",
+      ["claims", "release", taskId, "--worktree", worktree, "--json"],
+      { cwd, timeout: 15000 },
+    );
+  } catch { /* best-effort -- the async server-side hook already tried and
+               lost this exact race; an operator can still release by hand */ }
+}
+
 // Exported for testability (pure function, no I/O): the dedup key folds in a
 // short content hash rather than just the session id. agent-dispatch's
 // `create` is idempotent per dedup-key -- a repeat call with the SAME key
@@ -2083,7 +2147,15 @@ export function dispatchHandoff(promptText, sid, cwd, title) {
     ];
     if (machine) argv.push("--target-machine", machine);
     const task = JSON.parse(runCli("agent-dispatch", argv, { cwd, timeout: 15000 }));
-    if (task?.id) abandonSupersededHandoffs(cwd, worktree, task.id);
+    if (task?.id) {
+      addHandoffClaim(cwd, task.id, worktree);
+      // #3248 review comment 9: the task was already publicly claimable
+      // above, before this claim existed -- close that race's window right
+      // here rather than trusting only the async server-side hook, which
+      // may already have lost it.
+      releaseHandoffClaimIfTerminal(cwd, task.id, worktree);
+      abandonSupersededHandoffs(cwd, worktree, task.id);
+    }
     return task?.id ? { id: task.id, metadata: { ...metadata, taskId: task.id } } : null;
   } catch {
     return null;

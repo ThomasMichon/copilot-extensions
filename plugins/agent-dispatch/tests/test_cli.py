@@ -3125,11 +3125,15 @@ class _PickupClient:
         owner=None,
         owner_session_id=None,
         generation=0,
+        labels=None,
+        source=None,
     ):
         self.status = status
         self.owner = owner
         self.owner_session_id = owner_session_id
         self.generation = generation
+        self.labels = labels
+        self.source = source
         self.transitions: list[str] = []
         self.resume_kwargs: dict = {}
         self.complete_kwargs: dict = {}
@@ -3141,6 +3145,8 @@ class _PickupClient:
             "owner": self.owner,
             "owner_session_id": self.owner_session_id,
             "generation": self.generation,
+            "labels": self.labels,
+            "source": self.source,
         }
 
     def approve(self, task_id):
