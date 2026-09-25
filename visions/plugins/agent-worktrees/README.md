@@ -5,7 +5,7 @@
   obligations, disposition, and source-control completion.
 - **Scope:** leaf (concrete component; child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-09-23
+- **Last revised:** 2026-09-24
 - **Reality docs:** the agent-worktrees plugin `docs/`
 - **Supersedes / superseded by:** none
 
@@ -107,6 +107,31 @@ relationships, succession lineage, claims, obligations, and completion state.
 The worktree is not itself a process. It is the durable vessel to which one or
 more execution legs may bind over time.
 
+### Title and naming
+
+A worktree's displayed title is durable identity, not a transcript of "what I'm
+doing right now." When a worktree is bound to a canonical effort, the title is
+**anchored to that effort's slug** for the binding's whole lifetime — a short
+machine-relatable form (`slug:phase`) or a friendly-prose equivalent ("Improve
+worktree tracking: Phase 4, slice A") — rather than a fresh, disconnected
+headline each time an agent happens to describe its current activity. An
+unbound worktree still carries a durable title, but nothing anchors it against
+drift the way an effort slug does. This directly counters the churn where a
+title mutates dramatically across a handoff because the successor summarized
+only its own moment instead of the durable objective: a bound worktree's title
+changes when the effort's phase changes, not when a new session merely
+rephrases the same phase.
+
+### Discovery for duplicate-effort detection
+
+Before starting work that could already be underway elsewhere, an agent (or the
+operator, through the agent) can cheaply enumerate the fleet's current worktrees
+and their bound objectives to check for an existing claimant. Where a chain of
+worktrees or repos relates to one activity (a driving worktree plus the repos it
+touches), discovery surfaces the **root claimant** — the worktree actually
+driving the effort — not merely the nearest or most-recently-touched member of
+the chain, which may be a passive participant rather than an agent of its own.
+
 ### Execution legs and observations
 
 An execution leg is an externally hosted session acting for a worktree. The
@@ -129,6 +154,25 @@ Handoff records predecessor and successor relationships independently of the
 mechanism that launched either session. Moving the head is a deliberate,
 fenced state transition; a host reporting that it started a process is not by
 itself proof of takeover.
+
+Claiming the head is an **affirmative, exclusively-owned act**, never an
+incidental side effect of an unrelated code path running first. Seating a head
+where none has ever existed happens through exactly one authorized path; every
+other observer of worktree state reads the current head rather than competing
+to set it. Once a head exists, displacing it is never a two-phase "predecessor
+clears, successor later claims": the predecessor remains authoritative until
+the successor proves it can recover the baton, and that proof is what moves
+authority — in one guaranteed step, not two independent ones a delayed or
+failed launch could pull apart. A launch is provisional until that proof
+lands; nothing is ever surrendered without it. (This generalizes the existing
+`context-handoff-lifecycle` pattern's ownership invariant as the durable
+head-succession guarantee, not an orchestration-layer-only rule — see that
+pattern doc for the concrete mechanics.) A resuming session therefore always
+lands as the *rightful* current leg — either the sole claimant of a truly
+fresh head, or the acknowledged successor of a specific, still-identified
+predecessor — never a second, uncoordinated voice re-entering a conversation
+its predecessor already concluded, and never inheriting authority a
+predecessor gave up before a successor was actually ready for it.
 
 ### Claims, leases, and obligations
 
@@ -228,6 +272,29 @@ interaction mechanics.
 
 The current execution head and reciprocal predecessor/successor lineage are
 durable, explicit, and independent of process timestamps or UI attachment.
+
+### single-authorized-head-claimant
+
+A worktree's head-from-vacant claim (a fresh worktree, or a fully-recovered
+abandoned one) has exactly **one** authoritative outcome, with no competing
+path able to claim, overwrite, or race it once decided. Displacing an
+*existing* head is a distinct, acknowledgement-gated transfer (see
+*atomic-acknowledgement-transfer* below), never a second path to the same
+vacant-slot claim.
+
+### effort-anchored-title
+
+A worktree bound to a canonical effort carries a title anchored to that
+effort's slug and current phase, stable across handoffs and resumed sessions,
+rather than a headline that reflects only the most recent session's framing of
+"what we're doing now."
+
+### duplicate-effort-discovery
+
+A cheap, ambient path exists to check the fleet for a worktree already driving
+a given effort or objective before starting parallel, duplicative work, and it
+resolves to the **root claimant** in a related chain rather than a passive
+downstream member.
 
 ### asserted-disposition
 
@@ -373,6 +440,17 @@ evidence supplied by a host, but never silently creates responsibility.
 A newly launched process or newly observed session does not become the worktree
 head until the governing lifecycle transition acknowledges it. Failed or
 duplicate launches therefore cannot steal authority.
+
+### atomic-acknowledgement-transfer
+
+Moving the head from an existing predecessor to a successor is one atomic,
+acknowledgement-gated step — never an independent "predecessor clears" action
+followed later by "successor claims." The predecessor remains authoritative
+until the successor proves it can recover the baton; that single verified
+step both displaces the predecessor and seats the successor. A predecessor
+that crashes or fails before acknowledgement leaves the head exactly where it
+was — non-vacant, recoverable, and never falsely presumed conceded — rather
+than opening a race window a delayed or failed launch could exploit.
 
 ### derive-dont-duplicate
 
@@ -528,7 +606,10 @@ manager, or session-host implementation.
 - Presentation sibling: [picker](../../picker/README.md)
 - Coordination sibling:
   [plugins/agent-bridge](../agent-bridge/README.md)
-- Reality docs: the agent-worktrees plugin `docs/`
+- Reality docs: the agent-worktrees plugin `docs/`,
+  [`docs/patterns/context-handoff-lifecycle.md`](../../../docs/patterns/context-handoff-lifecycle.md)
+  (the ownership/retirement invariants this vision's head-succession guarantee
+  generalizes)
 
 ## Provenance
 

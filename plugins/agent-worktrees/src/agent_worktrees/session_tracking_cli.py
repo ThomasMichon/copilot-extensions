@@ -10,6 +10,7 @@ from pathlib import Path
 from . import config as cfg
 from . import installer as inst
 from . import profile_assignment, sessions, terminal_conclusion, tracking
+from . import reap_cli, status_monitor_runtime
 
 
 def _core():
@@ -17,6 +18,13 @@ def _core():
     from . import __main__ as core
 
     return core
+
+
+def _core_helper(name: str, local):
+    candidate = vars(_core()).get(name)
+    if callable(candidate) and candidate is not local:
+        return candidate
+    return local
 
 
 def add_parsers(sub) -> None:
@@ -594,13 +602,19 @@ def cmd_worktree_status_bundle(args: argparse.Namespace) -> int:
     def _fallback() -> dict:
         return fallback(project, worktree_id)
 
-    lock = core._monitor_lock_path()
+    lock = _core_helper("_monitor_lock_path", status_monitor_runtime._monitor_lock_path)()
     payload = {"project": project, "worktree_id": worktree_id, "force": force}
+    monitor_enabled = _core_helper("_status_monitor_enabled", status_monitor_runtime._status_monitor_enabled)()
+    ensure_monitor = (
+        _core_helper("_ensure_status_monitor", status_monitor_runtime._ensure_status_monitor)
+        if monitor_enabled
+        else None
+    )
     bundle = worktree_status_daemon.status_with_boot(
         read_lock_data=lambda: _locks.read_lock(lock),
         # Honor the resident-monitor opt-out (AGENT_WORKTREES_STATUS_
         # MONITOR=0), same as `_classify_records`'s own daemon fast path.
-        ensure_monitor=core._ensure_status_monitor if core._status_monitor_enabled() else None,
+        ensure_monitor=ensure_monitor,
         key=worktree_status_daemon.coalescing_key(project, worktree_id),
         payload=payload,
         fallback=_fallback,
@@ -769,7 +783,7 @@ def cmd_conclude_disposable(args: argparse.Namespace) -> int:
             raise
         if record.worktree_id != raw or record.worktree_id != yaml_path.stem:
             return _core()._json_error(f"Tracking record identity mismatch for exact id: {raw}")
-        repo = _core()._repo_for_record(config, record)
+        repo = _core_helper("_repo_for_record", tracking._repo_for_record)(config, record)
         if repo is None:
             _core()._json_output(
                 {
@@ -801,7 +815,7 @@ def cmd_conclude_disposable(args: argparse.Namespace) -> int:
                 return 0
             raise
         if getattr(args, "remove", False) and result.get("managed_gc_eligible"):
-            report = _core().sweep_managed_worktrees(
+            report = _core_helper("sweep_managed_worktrees", reap_cli.sweep_managed_worktrees)(
                 min_idle_secs=0,
                 config=config,
                 tracking_path=yaml_path.parent,

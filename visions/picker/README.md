@@ -5,7 +5,7 @@
   worktree-backed agents of a project.
 - **Scope:** leaf (concrete component; child of the agent-fabric vision)
 - **Status:** Active
-- **Last revised:** 2026-09-18
+- **Last revised:** 2026-09-24
 - **Home:** delivered by the **Installer & Configurator** (the optional worktree-
   and agent-control-plane) — see [installer](../installer/README.md). It is an
   **optional** surface: the plugins provide the in-session tools agents use and
@@ -128,6 +128,22 @@ Whenever the Picker is about to kick an agent off into a worktree, it makes the
 session-host provider owns the interaction, and whether a session will be
 created or resumed. The operator never launches unsure of where or how the
 agent will run.
+
+### detachable-launch-into-a-new-window
+Opening, resuming, or creating a worktree session does not have to consume the
+Picker's own window. The operator can choose to launch the target **detached
+into a new terminal window**, leaving the Picker itself running and ready to
+launch the next one — so recovering a whole fleet after a lost multiplexer
+server means stepping down the list and opening each into its own window,
+never closing and reopening the Picker per worktree.
+
+### worktree-search-and-filter
+A lightweight, keyboard-summoned search narrows the worktree list by substring
+match across every identifying facet an operator actually recognizes a
+worktree by — its short id, codename, title, current activity, and claim set —
+so a large fleet stays navigable by typing a fragment instead of scanning
+every row by age. Clearing the filter and returning to full keyboard
+navigation of the list are both a single, obvious keystroke away.
 
 ### fleet-recovery-relaunch
 When the underlying session-host process itself dies or is replaced — a
