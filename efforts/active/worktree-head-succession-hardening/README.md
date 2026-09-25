@@ -108,16 +108,28 @@ objective can be a worktree other than the one nearest at hand.
       journaling (every session ever associated with the worktree stays
       recorded independently of the current head).
 - [ ] Add the **creation-side guard** #84 already specifies: creating a new
-      session in a worktree whose head is still active is *refused*, not
-      silently permitted, with a structured reason enumerating the three
-      resolutions (reuse, hand off, sunset) plus an explicit, attributable
-      break-glass override — matching agent-bridge's existing `409
-      live_cli_holds_worktree` shape. Without this, restricting who can
+      session in a worktree whose head is still active is *refused* by
+      default, not silently permitted, with a structured reason enumerating
+      the three resolutions (reuse, hand off, sunset) plus an explicit,
+      attributable break-glass override — matching agent-bridge's existing
+      `409 live_cli_holds_worktree` shape. Without this, restricting who can
       *write* the head slot does not by itself stop a second session from
       being *created* while an existing head is still live, so the effort's
       "never a second session racing an existing live one" guarantee would be
       unmet. This item is load-bearing for that guarantee, not optional
       polish.
+- [ ] **Carve out the legitimate handoff launch.** The default-refuse rule
+      above must not also block `context-handoff-lifecycle`'s own normal
+      step 4 ("launch the successor without changing the worktree head" —
+      i.e. the successor session is deliberately created *while the
+      predecessor is still head*, by design). A review round correctly
+      caught that an undifferentiated guard would make ordinary handoff
+      indistinguishable from break-glass. The guard must recognize an
+      **authenticated, persisted handoff token/successor identity** — the
+      same baton `context-handoff-lifecycle` already persists before launch
+      — and permit exactly that launch through, while still refusing any
+      *other* new-session attempt against a live head. Break-glass remains
+      for the case with no such token.
 - [ ] Reconcile with #912 and #3000's overlapping scope so the three don't
       land contradictory mechanisms.
 
@@ -145,6 +157,10 @@ objective can be a worktree other than the one nearest at hand.
       active: the attempt is refused with the structured reuse/hand-off/
       sunset reason, never silently allowed to proceed; a break-glass
       override is available, explicit, and attributable.
+- [ ] A legitimate `context-handoff-lifecycle` handoff launch (carrying its
+      authenticated persisted token) is let through the same guard without
+      needing break-glass, while an unrelated ad-hoc new-session attempt
+      against the same live head is still refused.
 - [ ] A fleet with an existing worktree bound to effort X surfaces that
       worktree (and, where a chain is involved, the root claimant) when a
       second agent checks before starting work on X.
@@ -192,4 +208,23 @@ repo's `pr-self-merge` profile before Phase 1 implementation begins._
   conflated two distinct vacancy cases (fresh vs. confirmed-recovered);
   re-worded to enumerate them separately so an implementation can't
   accidentally reject the recovery case or permit an unverified reclaim.
+
+### 2026-09-25 — Carved out the legitimate handoff launch; pulled vision back to intent-level
+- Review caught that the round-3 creation-guard, as written, would also
+  refuse `context-handoff-lifecycle`'s own normal handoff launch (which
+  deliberately creates the successor while the predecessor is still head)
+  -- leaving break-glass as the only apparent way through, making ordinary
+  handoff indistinguishable from an unsafe override. Added an explicit
+  carve-out: the guard recognizes the authenticated persisted handoff
+  token/successor identity that pattern already produces, and permits
+  exactly that launch while still refusing unrelated ad-hoc attempts.
+  Added a matching Validation Plan bullet.
+- Separately, the vision's head-succession paragraph had drifted into
+  implementation protocol (naming the session-start hook specifically,
+  describing write ordering) rather than stating only the should-be
+  outcome -- against the vision template's own pure-intent rule. Rewrote it
+  to state the guarantee (successor proof moves authority; nothing is
+  surrendered without it) and pointed to `context-handoff-lifecycle.md` for
+  the actual mechanics rather than duplicating them in the vision.
+
 

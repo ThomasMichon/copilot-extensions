@@ -156,26 +156,23 @@ fenced state transition; a host reporting that it started a process is not by
 itself proof of takeover.
 
 Claiming the head is an **affirmative, exclusively-owned act**, never an
-incidental side effect of an unrelated hook running first. Exactly one
-mechanism — the session-start binding step — is authorized to seat a head for
-a worktree that has never had one, and only when the slot is genuinely vacant;
-every other hook or extension point observes the current head rather than
-competing to set it. Once a head exists, moving it to a successor is **one
-atomic acknowledgement step**, never a two-phase "predecessor clears, successor
-later claims": the predecessor remains authoritative right up until the
-successor proves it can recover the baton, and that single verified step both
-displaces the predecessor and seats the successor together. This closes the
-race an unconditional clear-then-claim would open — a delayed or failed
-launch can never strand the worktree with no authoritative head, because
-nothing is ever cleared without a proven successor on the other end of the
-same step. (This is the existing `context-handoff-lifecycle` pattern's
-ownership invariant, generalized as the durable head-succession guarantee
-rather than an orchestration-layer-only rule.) A resuming session therefore
-always lands as the *rightful* current leg — either the sole claimant of a
-truly fresh head, or the acknowledged successor of a specific, still-identified
+incidental side effect of an unrelated code path running first. Seating a head
+where none has ever existed happens through exactly one authorized path; every
+other observer of worktree state reads the current head rather than competing
+to set it. Once a head exists, displacing it is never a two-phase "predecessor
+clears, successor later claims": the predecessor remains authoritative until
+the successor proves it can recover the baton, and that proof is what moves
+authority — in one guaranteed step, not two independent ones a delayed or
+failed launch could pull apart. A launch is provisional until that proof
+lands; nothing is ever surrendered without it. (This generalizes the existing
+`context-handoff-lifecycle` pattern's ownership invariant as the durable
+head-succession guarantee, not an orchestration-layer-only rule — see that
+pattern doc for the concrete mechanics.) A resuming session therefore always
+lands as the *rightful* current leg — either the sole claimant of a truly
+fresh head, or the acknowledged successor of a specific, still-identified
 predecessor — never a second, uncoordinated voice re-entering a conversation
-its predecessor already concluded, and never inheriting a head left vacant by
-a predecessor that gave up too early.
+its predecessor already concluded, and never inheriting authority a
+predecessor gave up before a successor was actually ready for it.
 
 ### Claims, leases, and obligations
 
