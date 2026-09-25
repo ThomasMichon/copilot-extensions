@@ -770,9 +770,9 @@ def list_sessions_argv(
 def profiles_argv(machine, env, *, action, set_json=None, no_mirror=False):
     """SSH argv to run ``profiles get|apply`` on a remote host/env.
 
-    Returns the ssh argv, or ``None`` for the local host or an unknown /
-    not-ready target (the caller runs the local op in-process). ``set_json`` is
-    the column payload for ``apply``.
+    Phase 3e Step 6 (#3390): shells ``worktree-manager profiles <project>``
+    (the retired agent-worktrees verb); mirrors only via ``--mirror --live``,
+    passed when ``no_mirror`` is false. ``set_json`` is the ``apply`` payload.
     """
     project = _project()
     for s in _build_sources():
@@ -782,12 +782,12 @@ def profiles_argv(machine, env, *, action, set_json=None, no_mirror=False):
             if s.local or not s.ready or not s.alias:
                 return None
             if action == "get":
-                inner = f"{project} profiles get --json"
+                inner = "worktree-manager profiles " + project + " get --json"
             else:  # apply
-                flags = " --no-mirror" if no_mirror else ""
+                flags = "" if no_mirror else " --mirror --live"
                 payload = (set_json or "[]").replace("'", "'\\''")
-                inner = (f"{project} profiles apply --json{flags} "
-                         f"--set '{payload}'")
+                inner = (f"worktree-manager profiles {project} apply "
+                         f"--json{flags} --set '{payload}'")
             return _wrap_remote(s.shell, s.alias, inner)
     return None
 
