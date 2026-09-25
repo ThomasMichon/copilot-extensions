@@ -11,6 +11,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 
 import {
   HANDOFF_META_PREFIX,
+  addHandoffClaim,
   agentWorktreesGetResult,
   attemptWorktreeSync,
   buildResumePrompt,
@@ -29,6 +30,7 @@ import {
   plainGitSync,
   redactGitDiagnostics,
   processStartTimeMs,
+  releaseHandoffClaimIfTerminal,
   resolveRuntimePython,
   retryStoredHandoffCutover,
   resolveSystemCli,
@@ -330,6 +332,96 @@ test("retryStoredHandoffCutover shells to agent-worktrees handoff-cutover --retr
     argv: ["handoff-cutover", "--retry", "--session-id", "predecessor-1", "--json"],
     opts: { cwd: "C:\\repo", timeout: 30000 },
   }]);
+});
+
+test("addHandoffClaim journals a task-kind claim on the target worktree, never a self-assign", () => {
+  const calls = [];
+  addHandoffClaim("C:\\repo", "task-123", "wt-9", (bin, argv, opts) => {
+    calls.push({ bin, argv, opts });
+    return "{}";
+  });
+  assert.deepEqual(calls, [{
+    bin: "agent-worktrees",
+    argv: [
+      "claims", "add", "task", "task-123", "--note", "context handoff",
+      "--worktree", "wt-9", "--json",
+    ],
+    opts: { cwd: "C:\\repo", timeout: 15000 },
+  }]);
+  // Deliberately NOT "agent-dispatch claim" (which would self-assign/claim
+  // the task itself) -- only ever "agent-worktrees claims add task", a
+  // bookkeeping claim on the worktree's own resource ledger.
+  assert.ok(!calls.some((c) => c.bin === "agent-dispatch"));
+});
+
+test("addHandoffClaim is best-effort: a throwing executor never propagates", () => {
+  assert.doesNotThrow(() => {
+    addHandoffClaim("C:\\repo", "task-123", "wt-9", () => {
+      throw new Error("agent-worktrees CLI not found");
+    });
+  });
+});
+
+// #3248 review comment 9: dispatchHandoff publishes the task before
+// addHandoffClaim journals its claim -- a fast successor can claim/complete
+// it in that window before the claim exists, so the async terminal-
+// transition release hook fires too early and finds nothing to release.
+// releaseHandoffClaimIfTerminal is the post-claim reconciliation: re-read
+// the task right after journaling and release inline if it's already
+// terminal by then.
+test("releaseHandoffClaimIfTerminal releases the claim when the task is already terminal", () => {
+  const calls = [];
+  releaseHandoffClaimIfTerminal("C:\\repo", "task-123", "wt-9", (bin, argv, opts) => {
+    calls.push({ bin, argv, opts });
+    if (bin === "agent-dispatch") return JSON.stringify({ id: "task-123", status: "completed" });
+    return "{}";
+  });
+  assert.deepEqual(calls, [
+    {
+      bin: "agent-dispatch",
+      argv: ["show", "task-123"],
+      opts: { cwd: "C:\\repo", timeout: 15000 },
+    },
+    {
+      bin: "agent-worktrees",
+      argv: ["claims", "release", "task-123", "--worktree", "wt-9", "--json"],
+      opts: { cwd: "C:\\repo", timeout: 15000 },
+    },
+  ]);
+});
+
+test("releaseHandoffClaimIfTerminal does nothing when the task is still nonterminal", () => {
+  const calls = [];
+  releaseHandoffClaimIfTerminal("C:\\repo", "task-123", "wt-9", (bin, argv, opts) => {
+    calls.push({ bin, argv, opts });
+    return JSON.stringify({ id: "task-123", status: "proposed" });
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].bin, "agent-dispatch");
+  assert.ok(!calls.some((c) => c.bin === "agent-worktrees"));
+});
+
+test("releaseHandoffClaimIfTerminal treats each terminal status (completed/abandoned/dead_letter) as releasable", () => {
+  for (const status of ["completed", "abandoned", "dead_letter"]) {
+    const calls = [];
+    releaseHandoffClaimIfTerminal("C:\\repo", "task-123", "wt-9", (bin, argv, opts) => {
+      calls.push({ bin, argv, opts });
+      if (bin === "agent-dispatch") return JSON.stringify({ id: "task-123", status });
+      return "{}";
+    });
+    assert.ok(
+      calls.some((c) => c.bin === "agent-worktrees"),
+      `expected a release call for status ${status}`,
+    );
+  }
+});
+
+test("releaseHandoffClaimIfTerminal is best-effort: a throwing executor never propagates", () => {
+  assert.doesNotThrow(() => {
+    releaseHandoffClaimIfTerminal("C:\\repo", "task-123", "wt-9", () => {
+      throw new Error("agent-dispatch CLI not found");
+    });
+  });
 });
 
 test("session-state handoff records can be written and marked consumed", () => {

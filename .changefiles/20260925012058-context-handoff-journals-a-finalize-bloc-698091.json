@@ -1,0 +1,13 @@
+{
+  "comment": "context-handoff journals a finalize-blocking claim on a handoff task's target worktree; agent-dispatch releases it on genuine terminal transitions (complete/abandon), fencing out idempotent-retry re-firing and a publish-before-claim race",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "context-handoff",
+      "type": "patch"
+    }
+  ]
+}
