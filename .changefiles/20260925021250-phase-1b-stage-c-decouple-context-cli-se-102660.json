@@ -1,9 +1,0 @@
-{
-  "comment": "Phase 1b Stage C: decouple context_cli, session_tracking_cli, status_updater_cli, installation_cli, status_monitor_runtime from the eager cluster load (agent-cli-lazy-dispatch effort)",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
