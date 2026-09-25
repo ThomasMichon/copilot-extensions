@@ -89,13 +89,13 @@ effort.
 
 ### railroad-nudge-at-drift
 
-A bound worktree's orientation is not a one-time greeting: on a long session,
-the same channel that keeps the worktree's disposition honest re-surfaces the
-effort's **current slice** — derived fresh from the checklist, not a stale
-declared string — and its immediate next step, once the session has drifted
-far enough (in tool calls or elapsed time) since the last such reminder. The
-effort stays the session's railroad throughout its length, not only at the
-platform.
+A bound worktree's orientation is not a one-time greeting delivered only at
+session start: the same channel that keeps the worktree's disposition honest
+re-surfaces the effort's **current slice** — derived fresh from the checklist,
+not a stale declared string — and its immediate next step mid-session too,
+once the session has drifted far enough (in tool calls or elapsed time) since
+the last such reminder. The effort stays the session's railroad for the whole
+length of a long session, not only at its outset.
 
 ### cross-repository-effort-ownership
 

@@ -138,6 +138,12 @@ fresh):
 - [ ] A long simulated session (tool-call count past threshold) receives
       exactly one railroad nudge per drift window, matching
       `nudge_status.py`'s existing no-spam guarantee.
+- [ ] A test effort whose journal/checklist is deliberately left stale behind
+      real committed work (simulating the Phase 3 failure mode) is detected
+      by the staleness signal, or -- if that stretch item is not implemented
+      -- Phase 3 is explicitly narrowed to wording-only scope in its Plan so
+      this Validation Plan does not claim to cover behavior it doesn't
+      implement.
 - [ ] An unbound worktree's behavior (titling, nudges) is unchanged by this
       effort.
 
@@ -156,3 +162,11 @@ repo's `pr-self-merge` profile before Phase 1 implementation begins._
   flagged concern. Filed sub-issues #3581 (title), #3582 (journal ground
   truth), #3583 (auto-derived slice + nudge); related #3295 (claim-provider
   pattern) as Phase 4 prior art.
+
+### 2026-09-25 — Review fixes: validation coverage + wording
+- Review caught that Phase 3 (journal-as-ground-truth) had no matching
+  Validation Plan item -- added one, with a fallback narrowing instruction
+  if the staleness-signal stretch item isn't implemented. Also clarified
+  the vision's "railroad" metaphor ("not only at the platform" -> "not only
+  at its outset") which read as unclear rather than evocative.
+
