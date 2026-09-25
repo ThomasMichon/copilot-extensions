@@ -162,22 +162,36 @@ _Status: designed, implemented, and merged via PR
       passed without this).
 
 ### Phase 2 — Convert the entity-relationship-model.md mirrors
-- [ ] Convert `plugins/agent-worktrees/docs/entity-relationship-model.md`,
+- [x] Convert `plugins/agent-worktrees/docs/entity-relationship-model.md`,
       `plugins/agent-bridge/docs/entity-relationship-model.md`, and
       `plugins/agent-dispatch/docs/entity-relationship-model.md` (merged via
       PR #3554) from full hand-copies to real pointers referencing
-      `docs/patterns/entity-relationship-model.md`.
-- [ ] Confirm `tools/preview_release.py`/`tools/materialize_main.py` produce
+      `docs/patterns/entity-relationship-model.md`. Done: all three replaced
+      with the file-pointer stub (see below); a changefile added for each
+      touched plugin per `CONTRIBUTING.md`'s per-plugin-payload-change rule.
+- [x] Confirm `tools/preview_release.py`/`tools/materialize_main.py` produce
       byte-identical output to the current hand-copies for all three (Phase 1
       -- merged via PR #3575 -- already extends `preview_release.py`'s
       per-plugin materializer to expand the generalized file-pointer kind,
       not just the lib kind, so this validation can run per-plugin as
-      documented).
-- [ ] Update `docs/patterns/entity-relationship-model.md`'s own "See Also"
+      documented). Confirmed: `python tools/materialize_main.py --dest <dir>`
+      and `python tools/preview_release.py <plugin>` for all three plugins
+      both produced output byte-identical to the pre-conversion hand-copies
+      (which were themselves already confirmed byte-identical to canonical).
+- [x] Update `docs/patterns/entity-relationship-model.md`'s own "See Also"
       section (currently plain-text repo references because the mirrors
       couldn't resolve a relative link) once the mirrors are pointers instead
       of static copies — revisit whether relative links become viable again,
-      or whether the plain-text convention should stay regardless.
+      or whether the plain-text convention should stay regardless. Decided:
+      the plain-text convention stays. Materializing a pointer only
+      reproduces the canonical file's own bytes (including its relative
+      links) into `plugins/<plugin>/docs/`; the link *targets*
+      (`docs/patterns/*.md`) still aren't part of any plugin's marketplace
+      payload, so a relative link from the materialized copy would still
+      resolve to nothing in an installed-plugin context. Pointers fix the
+      hand-copy-drift problem, not the cross-payload-boundary problem the
+      plain-text convention exists for.
+
 
 ### Phase 3 — Fix the push() hook bypass
 - [ ] Read `plugins/agent-worktrees/src/agent_worktrees/git_ops.py`'s `push()`
@@ -201,15 +215,19 @@ _Status: designed, implemented, and merged via PR
 - [x] `tools/materialize_main.py`'s test suite covers the new pointer kind
       with the same rigor as the existing lib case (byte-identical
       round-trip, refuses on missing/stale source).
-- [ ] A real `python tools/preview_release.py <plugin>` run for each of the
+- [x] A real `python tools/preview_release.py <plugin>` run for each of the
       three converted plugins shows no diff against the current hand-copy
-      content.
+      content. Confirmed for agent-worktrees, agent-bridge, agent-dispatch --
+      each preview's materialized `docs/entity-relationship-model.md` is
+      byte-identical to `docs/patterns/entity-relationship-model.md`.
 - [ ] A reproduction of issue #3561's exact scenario (push a commit touching
       a plugin's payload with no changefile, through `push-changes`/
       `create-pr`, not raw `git push`) is now blocked locally, matching CI.
-- [ ] `python tools/check-changefile-presence.py` and
+- [x] `python tools/check-changefile-presence.py` and
       `python tools/check-docs-consistency.py` both pass after each phase's
-      changes.
+      changes. Confirmed after Phase 2 (a changefile was required and added
+      for each of the three touched plugins, unlike Phase 1's repo-root-only
+      `tools/` change).
 
 ## Proposal
 
@@ -289,3 +307,28 @@ comparison and `tools/test_materialize_main.py` /
   each merge, and the `dev` → `main` promotion pipeline fired successfully
   (release/promote-36100513912, merged). Phase 1 is complete; Phase 2 (convert
   the three real mirrors to file pointers) is next.
+
+### 2026-09-25 — Phase 2 opened
+
+- Converted all three real mirrors
+  (`plugins/agent-worktrees/docs/`, `plugins/agent-bridge/docs/`,
+  `plugins/agent-dispatch/docs/entity-relationship-model.md`) from hand-copies
+  to the file-pointer stub built in Phase 1. Confirmed before conversion that
+  each hand-copy's body (past its own 3-line header comment) was already
+  byte-identical to canonical -- so the conversion changes only *how* the
+  content stays in sync, not the content itself.
+- Validated both materializers: `tools/materialize_main.py --dest <dir>` and
+  `tools/preview_release.py <plugin>` for all three plugins both produced a
+  materialized `entity-relationship-model.md` byte-identical to
+  `docs/patterns/entity-relationship-model.md`.
+- Added a changefile for each of the three touched plugins
+  (`tools/changefile.py add --plugin <name> --type patch`), per
+  `CONTRIBUTING.md`'s per-plugin-payload-change rule -- Phase 1 didn't need
+  one (repo-root `tools/` only), Phase 2 does.
+- Decided the third checklist item (the doc's "See Also" section): the
+  plain-text link convention stays. A materialized pointer only reproduces
+  canonical's own bytes into `plugins/<plugin>/docs/`; the link targets
+  (`docs/patterns/*.md`) still aren't part of any plugin's marketplace
+  payload, so a relative link would still resolve to nothing installed. Left
+  `docs/patterns/entity-relationship-model.md`'s "See Also" section
+  unchanged.
