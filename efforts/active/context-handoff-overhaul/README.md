@@ -456,6 +456,13 @@ Verbatim from the operator:
   pointer to this troubleshooting guide too, since skills aren't reliably
   loading in the exact failure class this phase exists to fix.
 
+### Bug sweep — linked open bugs (2026-09-24)
+
+_Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
+
+- [ ] **#2660** context-handoff consume ETIMEDOUT: agent-dispatch identity/repo resolution shells out to `agent-worktrees get` twice, each costing 6.5-9.5s
+  - A context-handoff consume timeout is squarely this effort's plugin scope.
+
 ## Validation Plan
 
 - [ ] Force-tier: a live session artificially pushed past the force threshold
