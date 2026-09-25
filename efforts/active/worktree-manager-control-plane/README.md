@@ -639,10 +639,19 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
 ## Coordination
 
 `copilot-extensions` is public and may be driven from more than one private
-control repo. **[#352](https://github.com/ThomasMichon/copilot-extensions/issues/352)
-is the shared coordination token** for the remaining Worktree Manager work; claim
-a slice there (comment/assign) before starting, and land changes serially through
-the PR-required `main`. Downstream private plans may **link to** this effort and
+control repo. **Stale pointer, corrected 2026-09-25:** this section long named
+[#352](https://github.com/ThomasMichon/copilot-extensions/issues/352) as the
+shared coordination token, but #352 (the Installer & Configurator umbrella)
+was itself closed as completed on 2026-09-17 — after that point every
+"claim a slice on #352" comment landed on an already-closed issue with no
+one watching it, silently defeating the claiming discipline this section
+describes. **There is currently no dedicated open coordination-token issue
+for this effort.** Until one exists, claim a slice by adding a dated entry to
+this file's own Journal (below) naming the exact sub-item before starting it,
+and check the Journal's most recent entries for an unreleased claim before
+picking up new work — the same discipline the closed issue used to host,
+just recorded here instead. Land changes serially through the PR-required
+`main`. Downstream private plans may **link to** this effort and
 its issues; the public artifacts stay self-contained and general-purpose.
 
 This effort has already paid the cost of two sessions landing independently

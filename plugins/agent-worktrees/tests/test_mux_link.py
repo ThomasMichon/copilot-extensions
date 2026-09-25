@@ -225,6 +225,38 @@ def test_warm_load_ignores_a_corrupt_or_malformed_snapshot_file(tmp_path):
     assert cache2.snapshot() == {}
 
 
+def test_warm_load_rejects_an_entry_whose_key_disagrees_with_its_worktree_id(tmp_path):
+    """Copilot review finding: accepting a snapshot entry under the wrong
+    outer key would let a later legitimate update for the entry's *actual*
+    worktree_id bypass this stale record's revision guard entirely, since
+    apply_observation only ever looks up self._entries[worktree_id]."""
+    import json
+
+    persist_path = tmp_path / "managed-mux-cache.json"
+    persist_path.write_text(
+        json.dumps(
+            {
+                "wt-a": {
+                    "worktree_id": "wt-b",  # mismatched key vs. field
+                    "session": "wt-b",
+                    "mapping_revision": 99,
+                    "live": True,
+                    "panes": [],
+                    "incarnation": "",
+                    "attached_clients": 0,
+                    "updated_at": time.time(),
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    cache = mux_link.ManagedMuxCache(persist_path=persist_path)
+    assert cache.snapshot() == {}  # rejected entirely, neither key nor field trusted
+    # A legitimate wt-b observation must not be blocked by the rejected entry.
+    result = cache.apply_observation(_obs(worktree_id="wt-b", session="wt-b", revision=1))
+    assert result == {"applied": True, "revision": 1}
+
+
 def test_apply_observation_still_rejects_stale_revision_after_restart(tmp_path):
     persist_path = tmp_path / "managed-mux-cache.json"
     first = mux_link.ManagedMuxCache(persist_path=persist_path)

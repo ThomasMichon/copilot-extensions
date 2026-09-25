@@ -15,7 +15,8 @@
   (b) Mux `set-option` status-bar writes out of `agent-worktrees` and into a
   new Worktree Manager companion daemon, while keeping `agent-worktrees`
   as the sole owner/accumulator of worktree status data.
-- **Status:** Planned — docs-only ordered plan; implementation not started.
+- **Status:** In progress — Step 1 (of 6) landed 2026-09-25; Steps 2-6 not
+  yet implemented.
 
 ## Why this needs its own ordered plan
 

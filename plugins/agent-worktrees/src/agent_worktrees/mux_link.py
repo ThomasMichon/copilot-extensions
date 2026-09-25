@@ -125,9 +125,18 @@ class ManagedMuxCache:
             if not isinstance(worktree_id, str) or not isinstance(entry, dict):
                 continue
             try:
-                self._entries[worktree_id] = _normalize_entry(entry)
+                normalized = _normalize_entry(entry)
             except ValueError:
                 continue
+            # Reject a snapshot whose JSON key disagrees with its own
+            # `worktree_id` field (Copilot review finding): accepting it
+            # under the outer key would let a later legitimate update for
+            # the entry's *actual* `worktree_id` bypass this stale record's
+            # revision guard entirely, since `apply_observation` only ever
+            # looks up `self._entries[worktree_id]`.
+            if normalized["worktree_id"] != worktree_id:
+                continue
+            self._entries[worktree_id] = normalized
 
     def _persist_locked(self) -> None:
         """Best-effort atomic snapshot write. Caller already holds ``_lock``."""
