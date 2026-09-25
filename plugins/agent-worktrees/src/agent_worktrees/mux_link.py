@@ -30,6 +30,7 @@ import contextlib
 import json
 import math
 import os
+import sys
 import tempfile
 import threading
 import time
@@ -39,6 +40,43 @@ from pathlib import Path
 
 from work_coalescing_singleton import CoalescingServer
 from work_coalescing_singleton import client as wcs_client
+
+# Cross-process advisory file-lock primitives (Copilot review finding):
+# `_persist_locked`'s read-merge-write is not itself atomic across
+# processes -- `os.replace` only makes the final *write* atomic, it does
+# not serialize two processes each reading, merging, and replacing the
+# same file concurrently. During the documented monitor handoff, an old
+# (retiring) process could read a lower revision, a replacement process
+# could persist a higher one in between, and the old process's later
+# `os.replace` would still regress the file with its own stale merge.
+# `_interprocess_lock` (used by `apply_observation`, wrapping its entire
+# read-reconcile-write critical section, not just the final write) closes
+# this gap with a real OS-level advisory lock on a sidecar `.lock` file.
+if sys.platform == "win32":
+    import msvcrt
+
+    def _lock_file(fh) -> None:
+        # `msvcrt.locking` locks a byte range that must already exist in
+        # the file; ensure at least one byte is present before locking a
+        # freshly created (empty) lock file.
+        fh.seek(0, os.SEEK_END)
+        if fh.tell() == 0:
+            fh.write(b"\0")
+            fh.flush()
+        fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+
+    def _unlock_file(fh) -> None:
+        fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+else:
+    import fcntl
+
+    def _lock_file(fh) -> None:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+
+    def _unlock_file(fh) -> None:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
 #: The one request kind this daemon-link surface accepts. Matches the
 #: ``mux-live-v1`` event name used throughout
@@ -184,25 +222,70 @@ class ManagedMuxCache:
             entries[(normalized["project"], normalized["worktree_id"])] = normalized
         return entries
 
+    @contextlib.contextmanager
+    def _interprocess_lock(self):
+        """Best-effort cross-process advisory lock serializing the *entire*
+        read-reconcile-write critical section in :meth:`apply_observation`
+        against another process sharing the same ``persist_path`` (Copilot
+        review finding).
+
+        A per-process :attr:`_lock` alone cannot close this gap: the merge
+        in :meth:`_persist_locked` reads the current file, merges, then
+        calls ``os.replace`` -- but ``os.replace`` only makes the final
+        *write* atomic, it does not serialize two different processes each
+        reading, merging, and replacing the same file concurrently. During
+        the documented monitor handoff, an old (retiring) process could
+        read a lower revision, a replacement process could persist a
+        higher one in the gap before the old process's own ``os.replace``,
+        and the old process would still regress the file with its own
+        stale merge. Wrapping the whole read-through-write section (not
+        just the final write) in a real OS-level advisory lock on a
+        sidecar ``.lock`` file closes that gap.
+
+        Yields even when ``persist_path`` is ``None`` or the platform lock
+        primitive itself fails to acquire (degrades to no cross-process
+        lock, matching this module's existing best-effort persistence
+        philosophy -- this process's own :attr:`_lock` still serializes
+        concurrent callers *within* this process either way) -- never
+        raises past this call.
+        """
+        if self._persist_path is None:
+            yield
+            return
+        lock_path = self._persist_path.with_name(self._persist_path.name + ".lock")
+        try:
+            self._persist_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(lock_path, "a+b") as lock_fh:
+                try:
+                    _lock_file(lock_fh)
+                except OSError:
+                    yield
+                    return
+                try:
+                    yield
+                finally:
+                    with contextlib.suppress(OSError):
+                        _unlock_file(lock_fh)
+        except OSError:
+            yield
+
     def _persist_locked(self) -> None:
-        """Best-effort atomic snapshot write. Caller already holds ``_lock``.
+        """Best-effort atomic snapshot write. Caller already holds
+        ``_lock`` **and** :meth:`_interprocess_lock`.
 
         Merges this process's in-memory entries with whatever is currently
         on disk (keeping the higher ``mapping_revision`` per key) rather
         than blindly overwriting the file with only this process's own
-        view (Copilot review finding): the resident-monitor handoff can
-        briefly run an old (retiring) and a new monitor process
-        concurrently, each with its own in-memory ``ManagedMuxCache``
-        sharing this same ``persist_path``. A blind overwrite from an old
-        process's in-flight handler could otherwise clobber a newer
-        monitor's already-persisted mapping for a key the old process never
-        learned about, or hadn't yet seen the latest revision for. This
-        narrows (does not fully eliminate -- there is still a read-then-
-        atomic-replace window with no interprocess lock) that race: the
-        merge only ever *loses* data in the vanishingly narrow case of two
-        processes replacing the file at the exact same instant, never in
-        the ordinary "one process is simply behind" case this exists to
-        fix.
+        view: the resident-monitor handoff can briefly run an old
+        (retiring) and a new monitor process concurrently, each with its
+        own in-memory ``ManagedMuxCache`` sharing this same
+        ``persist_path``. A blind overwrite from an old process's in-flight
+        handler could otherwise clobber a newer monitor's already-persisted
+        mapping for a key the old process never learned about, or hadn't
+        yet seen the latest revision for. Combined with
+        :meth:`_interprocess_lock` wrapping this call, the read-merge-write
+        sequence below is now also serialized against another process
+        doing the same.
         """
         if self._persist_path is None:
             return
@@ -259,12 +342,21 @@ class ManagedMuxCache:
         would keep the file's higher revision), so this process's own
         ``live_session_names()``/``get()`` would report the regressed view
         even though the on-disk record never regressed.
+
+        The whole reconcile-decide-write sequence below runs inside
+        :meth:`_interprocess_lock`, not just the final write, so this
+        entire critical section -- not only :meth:`_persist_locked`'s own
+        merge -- is serialized against another process sharing the same
+        ``persist_path`` (Copilot review finding: reconciling against a
+        disk read taken *before* acquiring a cross-process lock would still
+        leave a window for a concurrent writer to land in between that read
+        and this process's own eventual write).
         """
         entry = _normalize_entry(payload)
         key = (entry["project"], entry["worktree_id"])
         revision = entry["mapping_revision"]
 
-        with self._lock:
+        with self._lock, self._interprocess_lock():
             if self._closed:
                 return {"applied": False, "reason": "closed"}
             current = self._entries.get(key)

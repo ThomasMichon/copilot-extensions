@@ -427,6 +427,83 @@ def test_apply_observation_reconciles_in_memory_view_against_a_newer_disk_write(
     assert old_process_cache.get("proj", "wt-1")["live"] is True
 
 
+def test_interprocess_lock_serializes_concurrent_apply_observation_across_instances(tmp_path):
+    """Copilot review finding: the read-merge-write in `_persist_locked`
+    is not itself atomic across processes -- `os.replace` only makes the
+    final *write* atomic. Simulating the documented handoff race with two
+    real threads each driving their own independent `ManagedMuxCache`
+    instance (standing in for two separate processes) sharing the same
+    `persist_path`, both racing to apply an observation for the SAME key at
+    increasing revisions, must never lose an update: the final on-disk
+    state must reflect the highest revision either instance ever applied,
+    and every individual `apply_observation` call must genuinely run
+    (never silently skipped)."""
+    persist_path = tmp_path / "managed-mux-cache.json"
+    applied_revisions = []
+    apply_lock = threading.Lock()  # protects the shared `applied_revisions` list only
+
+    def _worker(cache, start_revision, count):
+        for i in range(count):
+            revision = start_revision + i
+            result = cache.apply_observation(_obs(revision=revision))
+            with apply_lock:
+                applied_revisions.append((revision, result))
+
+    cache_a = mux_link.ManagedMuxCache(persist_path=persist_path)
+    cache_b = mux_link.ManagedMuxCache(persist_path=persist_path)
+
+    t1 = threading.Thread(target=_worker, args=(cache_a, 1, 20))
+    t2 = threading.Thread(target=_worker, args=(cache_b, 21, 20))
+    t1.start()
+    t2.start()
+    t1.join(timeout=10)
+    t2.join(timeout=10)
+
+    assert len(applied_revisions) == 40
+    highest_applied = max(rev for rev, result in applied_revisions if result["applied"])
+
+    reloaded = mux_link.ManagedMuxCache(persist_path=persist_path)
+    on_disk = reloaded.get("proj", "wt-1")
+    assert on_disk is not None
+    # The file must reflect the highest revision that was ever genuinely
+    # applied by either "process" -- never regressed by a racing writer.
+    assert on_disk["mapping_revision"] == highest_applied
+
+
+def test_lock_file_helpers_actually_exclude_a_second_acquirer(tmp_path):
+    """Direct unit coverage of the platform lock primitives themselves:
+    while one file handle holds the lock, a second concurrent attempt on
+    the same byte range from another handle must genuinely block until
+    the first releases -- not silently proceed as if unlocked."""
+    lock_path = tmp_path / "probe.lock"
+    fh1 = open(lock_path, "a+b")
+    fh2 = open(lock_path, "r+b")
+    try:
+        mux_link._lock_file(fh1)
+        acquired_second = threading.Event()
+
+        def _acquire_second():
+            mux_link._lock_file(fh2)  # must block until fh1 releases
+            acquired_second.set()
+            mux_link._unlock_file(fh2)
+
+        t = threading.Thread(target=_acquire_second, daemon=True)
+        t.start()
+        # Give the second attempt a real chance to (incorrectly) succeed
+        # while fh1 still holds the lock.
+        assert not acquired_second.wait(timeout=0.5), (
+            "second handle acquired the lock while the first still held it"
+        )
+        mux_link._unlock_file(fh1)
+        assert acquired_second.wait(timeout=15), (
+            "second handle never acquired the lock after the first released it"
+        )
+        t.join(timeout=2)
+    finally:
+        fh1.close()
+        fh2.close()
+
+
 def test_cache_without_persist_path_does_not_survive_a_restart():
     first = mux_link.ManagedMuxCache()
     first.apply_observation(_obs())
