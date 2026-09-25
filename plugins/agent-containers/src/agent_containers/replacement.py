@@ -388,6 +388,12 @@ def _restricted_member_action(
                     "container identity changed before lifecycle check",
                 )
             if current.state == "paused":
+                if action is None:
+                    return DestructiveResult(
+                        info.name,
+                        "deferred",
+                        "container is paused; capture-only never unpauses it",
+                    )
                 try:
                     unpause_container(current.container_id)
                 except RuntimeError as exc:

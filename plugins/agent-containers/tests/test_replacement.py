@@ -404,6 +404,25 @@ def test_rescue_capture_stopped_container_defers_without_stopped_path(monkeypatc
     assert "not running" in result.reason
 
 
+def test_rescue_capture_paused_container_defers_without_unpausing(monkeypatch):
+    config, fleet = _config()
+    info = _member()
+    info.state = "paused"
+    _safe_defaults(monkeypatch, info)
+    monkeypatch.setattr(
+        replacement,
+        "unpause_container",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("capture-only must never unpause a paused container")
+        ),
+    )
+
+    result = replacement.rescue_capture_restricted_member(config, fleet, info)
+
+    assert result.status == "deferred"
+    assert "capture-only never unpauses" in result.reason
+
+
 def test_force_abandon_accepts_only_rescue_loss(monkeypatch):
     config, fleet = _config()
     info = _member()

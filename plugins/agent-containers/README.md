@@ -321,7 +321,12 @@ for a fleet that is deliberately never recycled (an always-on service), where
 `down`/`rm`'s rescue-on-destruction would otherwise never fire: it lets an
 operator (or a periodic timer) shuttle a live member's session evidence out on
 a schedule instead. A member with an active/unknown session, an active lease,
-or a non-`running` state is deferred exactly as `down`/`rm` would defer it;
+or a paused state is deferred, same as `down`/`rm` -- capture-only never
+unpauses a container just to probe it. Unlike `down` (which reports an
+already-stopped member as unchanged) or `rm` (which follows the
+stopped-instance evidence/removal path), a non-`running` member is deferred
+immediately with "nothing to capture": capturing is only ever a live,
+in-place operation, never a fallback onto stale stopped-instance evidence.
 `--json` reports per-member `captured`/`deferred` results the same shape as
 `down`'s.
 
