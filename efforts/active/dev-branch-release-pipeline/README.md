@@ -561,6 +561,16 @@ Round 2 (operator's response to that evaluation):
       promotion remains workable once volume is understood, and consider a
       lightweight batching rule only if it proves necessary in practice — the
       decided default (Phase 3) is untriggered-by-schedule.
+- [x] Make `main-gate` content-aware so admin-bypass is never needed for a
+      legitimate landing on `main`, closing the gap that let an unrelated PR
+      (#3622) admin-merge directly onto `main` and strand content `dev`
+      never received. See Journal (2026-09-25) for the incident and fix
+      (PRs #3623/#3627/#3628).
+- [ ] Audit every machine's local `copilot-extensions` anchor checkout for
+      the same stale-`default_branch: main` config-resolution hazard found
+      on `lambda-core` (Journal, 2026-09-25) — at minimum `tmichon-cloud1`,
+      already known to carry other stale-vs-`dev` state from the same
+      migration window.
 
 ## Validation Plan
 
@@ -592,14 +602,20 @@ Round 2 (operator's response to that evaluation):
 - [ ] Confirm the auto-updater coverage fix: every harness worktree that
       depends on `copilot-extensions-harness` picks up its updates on the
       same cadence as `agent-*` plugins.
-- [ ] Confirm the merged `validate-and-promote.yml` (#3592) actually
+- [x] Confirm the merged `validate-and-promote.yml` (#3592) actually
       exhibits the rolling-queue guarantee live: trigger two rapid dev
       pushes and observe run 1 completes undisturbed while run 2 (queued)
       gets superseded/cancelled by a third rapid push, matching the
       documented model exactly (not just passing in isolation).
-  - **Not yet deliberately exercised** — no rapid-fire burst has landed on
-    `dev` since the merge to observe the queue/supersede behavior directly.
-    Revisit next time multiple PRs merge to `dev` in quick succession.
+  - **Done, 2026-09-25.** Confirmed by coincidence, not deliberate trigger:
+    the 20-PR bug-sweep merge burst (below) plus a concurrent unrelated
+    vision-doc PR produced exactly this pattern in `validate-and-promote.yml`'s
+    real run history — several runs showing `conclusion: cancelled` with
+    **zero jobs ever recorded** (superseded while still queued, never
+    picked up a runner), interleaved with runs that started and ran to
+    `success` undisturbed, and multiple `Promote dev -> main` runs
+    completing cleanly in sequence with no interleaving. Exactly the
+    documented model, under real concurrent load.
 - [x] Confirm the merged workflow's `promote` job correctly no-ops (does not
       block) when `gate`'s `is_dev` is false and its sibling jobs are
       `skipped` rather than `success` — this was the exact shape of the
@@ -1582,4 +1598,86 @@ session.
   pushes: one runs to completion, the other queues and gets superseded by a
   third) has not yet been deliberately exercised — left open on the
   Validation Plan for the next burst of concurrent `dev` merges.
+
+### 2026-09-25 — Bug-sweep burst confirmed the rolling-queue live, and it
+### surfaced a real incident: an unrelated PR admin-merged directly onto
+### `main`, plus a stale anchor on this machine
+
+Two things happened back-to-back while driving an unrelated 20-PR bug-linking
+sweep across other active efforts (not tracked in this file — see those
+efforts' own PRs).
+
+- **Rolling-queue confirmation (Validation Plan, above)**: the burst of 20
+  merges to `dev`, landing concurrently with an unrelated PR (#3622, below),
+  gave `validate-and-promote.yml`'s single top-level concurrency group real
+  load for the first time since #3592 merged. Confirmed exactly the
+  documented model: queued runs superseded cleanly (zero jobs ever spun up),
+  started runs ran to completion undisturbed, multiple `Promote dev -> main`
+  runs completed in clean sequence with no interleaving.
+- **Incident**: the operator flagged commit `38e75ffd` — PR #3622, a
+  legitimate vision-doc change (`visions(agent-dispatch): manual-task
+  primitives`) — landed as the direct tip of `main`, not through the
+  promotion pipeline. Investigation confirmed its base was `main` directly
+  (head `pr/visions-agent-dispatch-manual-task-primi-7609`), merged via
+  admin-bypass (this repo's `main` ruleset grants the Admin `RepositoryRole`
+  an unconditional `bypass_actors` entry — confirmed via the rulesets API;
+  `dev`'s ruleset, by contrast, has `bypass_actors: []`, genuinely
+  zero-bypass). `main-gate`'s required check *did* fail this PR (branch name
+  didn't match `release/promote-*`) exactly as designed, but a required
+  status check is exactly what admin-merge bypasses — the same mechanism
+  this effort's own bootstrap pattern (#3573/#3580/#3596) legitimately
+  relies on for workflow-file fixes. `dev` never received this content
+  (confirmed: blob shas differed on the two touched files), so the next
+  wholesale promotion would have silently reverted it off `main` — the
+  operator's exact concern, confirmed correct.
+  - **Immediate remediation**: forward-ported `38e75ffd` onto `dev` unchanged
+    (PR #3623) — confirmed byte-identical to `main`'s copy via `git diff
+    origin/main HEAD` on both files (empty). `dev` and `main` agree again;
+    the next promotion is now a safe no-op for this content instead of a
+    regression.
+  - **Structural fix, per the operator's explicit direction** ("hard-block
+    what happened... admin-ram is a thing, since we're maintainers, but we
+    still need to fail on a bad build unless we're fixing the workflow
+    itself"): rather than stripping admin-bypass capability (legitimately
+    ours to use) or relying on agent conduct alone, made `main-gate` itself
+    content-aware (PR #3627 dev / #3628 main bootstrap — the **last** PR
+    that needed the old branch-name-only gate to be overridden by anything,
+    and even that one turned out not to need `--admin`: see below). It now
+    recognizes two legitimate shapes by actual diff content: a
+    `release/promote-*` PR, or a PR whose entire diff is confined to
+    `.github/workflows/**` by the repo owner — enforced via `git diff
+    --name-only` against every changed path, not by trusting branch naming
+    or human override. This makes admin-bypass **never needed** going
+    forward for either legitimate case; any future reach for `--admin`
+    against a PR this gate rejects is now itself the signal something is
+    wrong. Also updated `REVIEW.md`'s Copilot-review directive and added an
+    explicit never-admin-merge-`main` conduct rule to `CONTRIBUTING.md`,
+    naming this incident.
+  - **Nice confirmation, unplanned**: because `ci.yml` is `pull_request`-
+    triggered (not `workflow_run`), GitHub resolves its workflow YAML from
+    the **PR's own head branch**, not `main`'s current tip the way
+    `workflow_run`-triggered workflows do. That meant PR #3628 (the
+    workflow-only main-bootstrap for this very fix) was evaluated by its
+    *own* new logic and passed `main-gate` cleanly, unassisted — merged with
+    a plain `gh pr merge --squash`, no `--admin` required, dogfooding the
+    fix on its first real use.
+  - **Separately, root-cause layer**: this machine's (`lambda-core`) local
+    **anchor checkout** of `copilot-extensions` was still sitting on an old,
+    already-merged topic branch (`fix/efforts-completion-gate-owner-version-
+    drift`) whose on-disk `.agent-worktrees/config.yaml` still read
+    `default_branch: main` — predating this effort's Phase 5 main→dev
+    contribution flip (PR #3518). Since that config resolves from the
+    anchor's own on-disk files, any anchor-adjacent tooling reading it
+    would default new PRs at `main` instead of `dev` — a plausible
+    contributing factor to how PR #3622 ended up targeting `main` in the
+    first place, though not confirmed as the specific cause (the erring
+    session may have run elsewhere, e.g. `tmichon-cloud1`, which was already
+    known to carry its own stale-vs-`dev` state earlier this same night).
+    Fixed via a logged break-glass edit (`repos allow-edits`): switched the
+    anchor to `dev` (its old branch was already merged; nothing lost).
+    GitHub's actual repo default branch and git's remote `HEAD` both
+    correctly remain `main` — untouched, as they should be; only the
+    contribution-routing config was wrong. **Not yet audited**: whether
+    other machines' anchors (e.g. `tmichon-cloud1`) carry the same staleness
+    — worth a sweep next time that machine is active.
 
