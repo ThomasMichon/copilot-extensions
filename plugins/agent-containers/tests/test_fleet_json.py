@@ -79,7 +79,7 @@ def test_fleet_json_emits_bare_array_with_expected_fields(monkeypatch, capsys):
         "configured_security_profile", "security_policy_current",
         "security_policy_errors", "network", "environment_names",
         "host_credentials", "lifecycle_hold", "rescue",
-        "subtitle", "activity", "claims_summary", "sess", "worktree_id",
+        "subtitle", "activity", "session_id", "claims_summary", "sess", "worktree_id",
         "has_driving_worktree", "worktree_status",
     }
     assert row["name"] == "aperture-1"
@@ -154,6 +154,7 @@ def test_fleet_json_picker_fields_blank_when_unclaimed_and_no_dependencies():
     assert picker_fields("free-1", None) == {
         "subtitle": "",
         "activity": "",
+        "session_id": "",
         "claims_summary": "",
         "sess": "",
         "worktree_id": "",

@@ -59,6 +59,7 @@ def test_picker_fields_shape_when_unclaimed():
     assert picker_fields("free-1", None) == {
         "subtitle": "",
         "activity": "",
+        "session_id": "",
         "claims_summary": "",
         "sess": "",
         "worktree_id": "",

@@ -68,8 +68,11 @@ Version-1 compatibility also covers the existing declarative fields:
   menu, which opens the venue row's own actions. Venue rows can use the
   internal verbs `open-venue-window` (attach with the provider's
   `copilot <id>` in a new tmux window or Windows Terminal tab, passing the
-  row's `effort` as `--effort` when present) and `open-bridge-ui` (the
-  agent-bridge live-session web view).
+  row's `effort` as `--effort` when present), `open-bridge-ui` (the
+  agent-bridge live-session web view), and `send-worker-message` (a small
+  modal that sends typed text to the row's live `session_id` — Ctrl+S steers
+  the running turn, Ctrl+X interrupts it — via `agent-bridge send <sid> -`
+  with the text on stdin).
 
 The command arrays are process-boundary contracts. The Manager invokes the
 contributing plugin's canonical CLI; it never imports the plugin runtime or

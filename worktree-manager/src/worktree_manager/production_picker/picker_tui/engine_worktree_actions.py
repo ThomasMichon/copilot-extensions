@@ -750,6 +750,8 @@ class PickerScreenWorktreeActionsMixin:
             return self._open_venue_window(ctx)
         if verb == "open-bridge-ui":
             return self._open_bridge_ui(ctx)
+        if verb == "send-worker-message":
+            return self._send_worker_message(ctx)
         if verb == "embody-cli":
             return self._embody_task_cli(ctx)
         return False, f"unknown internal action: {verb}"

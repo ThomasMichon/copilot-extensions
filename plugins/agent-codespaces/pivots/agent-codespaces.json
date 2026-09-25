@@ -44,6 +44,13 @@
       "when": {"sess": ["LIVE", "IDLE"]}
     },
     {
+      "key": "send-message",
+      "label": "Send message",
+      "kind": "internal",
+      "verb": "send-worker-message",
+      "when": {"sess": ["LIVE", "IDLE"]}
+    },
+    {
       "key": "jump-driving-worktree",
       "label": "View driving worktree",
       "kind": "internal",
