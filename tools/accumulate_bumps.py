@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import re
 import subprocess
 import sys
@@ -139,6 +140,55 @@ def _write_source_fallbacks(plugin: str, old_version: str, new_version: str) -> 
     return written
 
 
+def _write_instruction_projection_owners(plugin: str, old_version: str, new_version: str) -> int:
+    """Rewrite a literal ``[owner: <plugin>@<old_version>]`` tag to the new
+    version inside every instruction-projection TEMPLATE this plugin
+    declares (``instruction-projections.json``'s own ``template`` paths).
+
+    This is a source surface no other bump-application step here touches:
+    a projection's rendered destination is a derived copy of its template
+    (regenerated separately by
+    ``plugins/customizing-copilot/skills/reviewing-customizations/scripts/
+    manage-instruction-projections.py sync``), but the template itself is a
+    checked-in, hand-authored file whose body text embeds the owning
+    plugin's version verbatim -- nothing else keeps that string in lockstep
+    with plugin.json, so it silently drifted on every real bump until this
+    existed (confirmed live on `main`, ThomasMichon/copilot-extensions#3378
+    recurrence, 2026-09-25). Fixing the template here is what makes a
+    subsequent projection-sync pass (tools/promote_release.py) actually
+    correct -- sync alone only re-renders a destination FROM its template,
+    faithfully propagating whatever version string the template itself
+    still says."""
+    declaration_path = PLUGINS_DIR / plugin / "instruction-projections.json"
+    if not declaration_path.exists():
+        return 0
+    try:
+        declaration = json.loads(declaration_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return 0
+    projections = declaration.get("projections")
+    if not isinstance(projections, list):
+        return 0
+    old_tag = f"[owner: {plugin}@{old_version}]"
+    new_tag = f"[owner: {plugin}@{new_version}]"
+    written = 0
+    for entry in projections:
+        if not isinstance(entry, dict):
+            continue
+        template_rel = entry.get("template")
+        if not isinstance(template_rel, str):
+            continue
+        template_path = PLUGINS_DIR / plugin / template_rel
+        if not template_path.exists():
+            continue
+        text = template_path.read_text(encoding="utf-8")
+        if old_tag not in text:
+            continue
+        template_path.write_text(text.replace(old_tag, new_tag), encoding="utf-8")
+        written += 1
+    return written
+
+
 def _write_marketplace_entry(plugin: str, new_version: str, *, also_metadata: bool) -> bool:
     if not MARKETPLACE.exists():
         return False
@@ -187,6 +237,7 @@ def apply(result: dict[str, tuple[str, str]]) -> list[str]:
             plugin, new_version, also_metadata=plugin in CATALOG_METADATA_PLUGINS
         )
         _write_source_fallbacks(plugin, old, new_version)
+        _write_instruction_projection_owners(plugin, old, new_version)
         if ok_pj and ok_pp and ok_mkt:
             applied.append(plugin)
         else:

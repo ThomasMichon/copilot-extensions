@@ -166,6 +166,53 @@ def _seed_versions_from_main(scratch: Path, main_head: str, *, acc, repo: Path) 
         acc.apply(seed_result)
 
 
+def _sync_instruction_projections(scratch: Path) -> list[str]:
+    """Re-render any declarative instruction-projection files (e.g.
+    ``.github/instructions/efforts/completion-gate.instructions.md``) so
+    they reflect the version bumps ``consume_pending_changes`` just applied.
+
+    These projections embed their source plugin's version verbatim in
+    rendered content (``[owner: <plugin>@<version>]``) -- a version surface
+    neither ``accumulate_bumps.py`` nor ``check-version-consistency.py``
+    tracks, so it silently drifted on every real promotion that bumped a
+    plugin owning one until this call existed: confirmed live on `main`
+    (ThomasMichon/copilot-extensions#3378 fixed the symptom once by hand;
+    this closes the actual gap that let it recur, 2026-09-25). Delegates to
+    the plugin's own CLI (``manage-instruction-projections.py sync``)
+    rather than reimplementing its rendering/locking rules here.
+
+    Returns the list of destination paths that changed; an empty list if
+    the customizing-copilot plugin (or this script) isn't present in the
+    tree at all -- this sweep is best-effort and never a hard dependency of
+    promotion (a synthetic/stripped-down checkout, e.g. this module's own
+    test fixtures, simply has nothing to sync)."""
+    script = (
+        scratch / "plugins" / "customizing-copilot" / "skills"
+        / "reviewing-customizations" / "scripts" / "manage-instruction-projections.py"
+    )
+    if not script.exists():
+        return []
+    proc = subprocess.run(
+        [sys.executable, str(script), "sync", str(scratch), "--json"],
+        capture_output=True, text=True,
+    )
+    try:
+        payload = json.loads(proc.stdout) if proc.stdout.strip() else None
+    except json.JSONDecodeError:
+        payload = None
+    if payload is None or proc.returncode not in (0, 1):
+        raise PromotionError(
+            "instruction-projection sync crashed "
+            f"(exit {proc.returncode}): {proc.stderr.strip() or proc.stdout.strip()}"
+        )
+    if payload.get("blocking"):
+        raise PromotionError(
+            "instruction-projection sync reported blocking finding(s) -- "
+            f"refusing to promote unsynced projections: {json.dumps(payload.get('findings', []))}"
+        )
+    return list(payload.get("changed", []))
+
+
 def consume_pending_changes(
     scratch: Path, *, last_dev_head: str | None = None, main_head: str, repo: Path = REPO
 ) -> dict:
@@ -235,6 +282,7 @@ def consume_pending_changes(
             acc._consume_changefiles()
 
         materialize_log = mm.materialize(scratch, canonical_root=scratch)
+        projections_synced = _sync_instruction_projections(scratch)
     finally:
         if previous_changefile_mod is not None:
             sys.modules["changefile"] = previous_changefile_mod
@@ -245,6 +293,7 @@ def consume_pending_changes(
         "bumps": {p: computed[p] for p in applied},
         "changefiles_consumed": changefile_names,
         "changefiles_newly_applied": newly_applied_names,
+        "projections_synced": projections_synced,
         "materialize_log": materialize_log,
     }
 
@@ -530,6 +579,10 @@ def main(argv: list[str] | None = None) -> int:
         # promotions computed the exact same "agent-bridge 0.4.0-dev551 ->
         # 0.4.1-dev1" bump).
         print(f"  changefile-consumed: {name}")
+    for path in report.get("projections_synced", []):
+        # Confirms the version-drift sweep (#3378-recurrence) actually
+        # re-rendered something this run, not just ran silently.
+        print(f"  projection-synced: {path}")
     if report.get("candidate_branch"):
         print(f"  pushed candidate branch: {report['candidate_branch']} "
               "(land it on main via a real PR + merge; tag the actual merged commit)")

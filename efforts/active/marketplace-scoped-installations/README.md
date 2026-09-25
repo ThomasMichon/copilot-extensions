@@ -153,7 +153,9 @@ because they provide tools or services.
   require attributable external-launch contracts before their compatibility
   wrappers can be retired. The
   [Phase 2 launcher contract inventory](phase-2-launcher-contracts.md) accounts
-  for all 86 guard-visible findings, records known guard-invisible callers, and
+  for the 86 guard-visible findings at its 2026-08-26 baseline (83 as of the
+  2026-09-25 re-audit, with a full family re-derivation still pending),
+  records known guard-invisible callers, and
   maps their Phase 2, Phase 3, Phase 4, and Phase 6 dependencies.
   - [x] Preserve complete default-legacy fallback coverage while migration is
     incomplete: every runtime `agent-*` stamp publishes every declared payload
@@ -384,6 +386,43 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-25 — `phase-2-launcher-contracts.md` re-synced against current `origin/main`
+
+- The 2026-09-24 note flagged that the launcher-contract inventory's own
+  numbers needed re-syncing before they could be trusted. Re-ran
+  `check-marketplace-isolation.py --json` and re-read the full
+  `global-plugin-binstub` finding set line-by-line to get an accurate current
+  count plus a partial triage (83 findings, still 14 plugins, but a different
+  14 than the 2026-08-26 baseline) -- not a complete re-derivation of every
+  finding's family; see the explicit gaps below.
+- Confirmed two families are **fully converted and gone**, not merely
+  shrunk: the payload-owned self-wrappers (Phase 2, `agent-ssh`) and the
+  durable provider manifests (Phase 3, `agent-codespaces`/`agent-containers`
+  `register-bridge-provider`) — consistent with Phase 3 being fully checked
+  off in this README.
+- Confirmed `harness-knowledge`'s 2 prior findings moved to
+  `path-sibling-launch`/`unqualified-runtime-root` (already noted
+  2026-09-24) and `customizing-copilot`'s 1 finding is fixed (also already
+  noted).
+- Found two plugins new since the 2026-08-26 baseline that were never
+  triaged into this inventory: `budget-guidance` (4 findings, added
+  2026-09-05) and `agent-pull-requests` (4 findings, added 2026-09-22) —
+  both genuine, unconverted generic-installer backlog.
+- Found `agent-machines` gained 2 new findings from its post-rewrite
+  `cell_lifecycle.py` engine, including a `payload-invocation.json`
+  legacy-binstub-path declaration mirroring `agent-index`'s equivalent
+  field — plausibly intentional migration metadata analogous to
+  `agent-bridge`'s `legacyRuntimeRoot`, but not yet confirmed against the
+  install contract or annotated either way.
+- Left the 2026-08-26 family table in `phase-2-launcher-contracts.md` as a
+  historical record and added a dated re-audit note above it rather than
+  overwriting stale numbers with a guessed family split — a full family
+  re-derivation for the current 83 findings (which family each of the new
+  plugins' findings belongs to, whether the new `agent-machines` findings
+  are intentional or backlog) needs its own increment.
+- Validation: `check-marketplace-isolation.py --json` (used to derive the
+  numbers above), `check-docs-consistency.py` passed.
+
 ### 2026-09-24 — Guard re-audit against current `origin/main`; 4 documentation false positives annotated
 
 - Resumed after a prior worktree's unrelated stale diff (Agent Machines
@@ -435,7 +474,9 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   intentional-legacy triage this note applied to the small plugins. Phase 2's
   own tracked subset (`phase-2-launcher-contracts.md`, baselined at 80
   `global-plugin-binstub` findings across 14 plugins) needs re-syncing against
-  the current count before its own numbers can be trusted.
+  the current count before its own numbers can be trusted. **Done in the
+  2026-09-25 entry below** (83 findings, count plus partial triage; a full
+  family re-derivation is still pending).
 
 ### 2026-09-21 — `agent-bridge` registered as a new OWNERS member; `handoff-check` converted
 
