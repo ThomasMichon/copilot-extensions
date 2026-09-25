@@ -150,12 +150,25 @@ fixes."
 - [ ] Once Phase 1's detection+dedup is proven reliable (no false positives,
       no duplicate-issue spam) over a real observation window, author a
       `gh-aw` agentic workflow (Markdown + YAML frontmatter, compiled via
-      `gh aw compile` into a checked-in `.lock.yml`) triggered off the
-      dedup'd failure signal from Phase 1 (e.g. `workflow_run` on
-      `validate-and-promote.yml` conclusion `failure`, or invoked directly
-      from the same job). Prompt it with exactly the compact signature
-      Phase 1 already extracts: which job(s) failed, the failing test
-      node id(s), and the log excerpt — not a vague "go fix CI."
+      `gh aw compile` into a checked-in `.lock.yml`). **Prefer invoking it
+      directly from the same job as Phase 1's detection step** (a
+      `workflow_call`/direct-invocation shape, not a separate
+      `workflow_run`-triggered workflow) so it inherits the already-verified
+      SHA and dedup decision in-process, with no second trigger to get
+      wrong. Prompt it with exactly the compact signature Phase 1 already
+      extracts: which job(s) failed, the failing test node id(s), and the
+      log excerpt — not a vague "go fix CI."
+  - [ ] **If a separate `workflow_run`-triggered workflow is used instead
+        (not the preferred shape above): never filter it on
+        `branches: [dev]`.** This repo already documents that
+        `workflow_run` reports the **default branch** as `head_branch`
+        regardless of which branch actually triggered the upstream run
+        (see `validate-and-promote.yml:58-67` and the
+        dev-branch-release-pipeline journal) — a `dev` branch filter here
+        is the known **dead-trigger pattern**: it can silently prevent
+        every run from firing at all. Gate on the carried, independently
+        verified SHA/merge-base ancestry check instead of any branch-name
+        filter.
   - [ ] **Bootstrap gotcha (this session already hit the identical bug
         once — see `ci.yml:71-74` and the dev-branch-release-pipeline
         journal):** a `workflow_run`-triggered workflow is read from the
@@ -195,10 +208,21 @@ fixes."
         scope checks too.
   - [ ] Pin the `gh-aw` extension/action to a specific reviewed version (it
         is an actively-developed external tool; do not float on `latest`)
-        and set up the Copilot-engine auth it needs (`COPILOT_GITHUB_TOKEN`
-        fine-grained PAT scoped to Copilot Requests: Read, per its docs) —
+        and set up **Copilot-engine authentication using one of `gh-aw`'s
+        two documented paths** — pick one deliberately, don't assume:
+        (a) **org-billing path:** add `copilot-requests: write` to the
+        workflow's own permissions and let it use the per-run
+        `GITHUB_TOKEN` for inference (requires org Copilot subscription
+        with centralized billing); or (b) **PAT path:** a fine-grained
+        Personal Access Token with **Copilot Requests: Read** under
+        Account permissions, stored as the `COPILOT_GITHUB_TOKEN` repo
+        secret. (a) grants an Actions-token *workflow permission* named
+        `copilot-requests: write`; (b) grants a *PAT account permission*
+        named `Copilot Requests: Read` — these are two different
+        permission systems with similarly-named entries; don't conflate
+        them or assume one satisfies the other. Whichever path is chosen,
         follow this repo's normal `secrets`-skill vaulting discipline for
-        that token, never hardcode it.
+        any token involved, never hardcode it.
   - [ ] Give the agent job read-only repo access by default (its baseline
         posture) — only the `safe-outputs` PR-creation stage should hold
         any write credential at all.
@@ -327,3 +351,18 @@ _Pending._
   checklist item, independent of `safe-outputs`'s write-operation scoping;
   (4) this effort was missing from `efforts/README.md`'s canonical Active
   index — added.
+- **Third Copilot review pass caught two more, both addressed:** (1) a
+  `workflow_run`-triggered example still risked the known dead-trigger
+  pattern — `workflow_run` reports the **default branch** as
+  `head_branch` regardless of which branch actually ran, so a
+  `branches: [dev]` filter can silently prevent every run from firing
+  (this repo already documents the identical gotcha in
+  `validate-and-promote.yml`); reworked the checklist to prefer same-job
+  invocation and explicitly prohibit that branch filter as a fallback;
+  (2) the planned Copilot-engine auth conflated two different, similarly-
+  named permission systems (`copilot-requests: write`, an Actions-token
+  *workflow permission* for the org-billing path, vs. `Copilot Requests:
+  Read`, a PAT *account permission* for the token path) — re-verified
+  both against `gh-aw`'s own setup docs (both are genuinely documented,
+  for two different auth paths) and rewrote the checklist to name both
+  paths explicitly rather than picking one ambiguously.
