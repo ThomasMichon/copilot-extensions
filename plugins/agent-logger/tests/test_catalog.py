@@ -271,7 +271,7 @@ def test_write_review_annotation_with_default_index_populates_immediately(
 
 
 # --------------------------------------------------------------------------- #
-# CLI: `agent-logger catalog annotate` -- the cross-repo process-boundary path #
+# CLI: `agent-logger annotate` -- the cross-repo process-boundary write path #
 # --------------------------------------------------------------------------- #
 
 
@@ -302,7 +302,6 @@ def test_cli_annotate_writes_sidecar_and_populates_catalog(
         monkeypatch,
         tmp_path,
         [
-            "catalog",
             "annotate",
             "s1",
             "--repo",
@@ -332,7 +331,6 @@ def test_cli_annotate_missing_session_exits_nonzero(monkeypatch, tmp_path: Path)
         monkeypatch,
         tmp_path,
         [
-            "catalog",
             "annotate",
             "does-not-exist",
             "--repo",
@@ -343,3 +341,50 @@ def test_cli_annotate_missing_session_exits_nonzero(monkeypatch, tmp_path: Path)
     )
 
     assert rc != 0
+
+
+def test_cli_annotate_rejects_unsafe_session_id(monkeypatch, tmp_path: Path) -> None:
+    (tmp_path / ".copilot" / "session-state").mkdir(parents=True)
+
+    rc = _run_annotate_cli(
+        monkeypatch,
+        tmp_path,
+        [
+            "annotate",
+            "../escape",
+            "--repo",
+            "example/repo",
+            "--pr-number",
+            "6100",
+        ],
+    )
+
+    assert rc != 0
+    # Never even attempted to escape session-state and land a sidecar there.
+    assert not (tmp_path / ".copilot" / "escape").exists()
+
+
+def test_cli_annotate_rejects_symlinked_session_directory(
+    monkeypatch, tmp_path: Path
+) -> None:
+    state_root = tmp_path / ".copilot" / "session-state"
+    state_root.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (state_root / "s1").symlink_to(outside, target_is_directory=True)
+
+    rc = _run_annotate_cli(
+        monkeypatch,
+        tmp_path,
+        [
+            "annotate",
+            "s1",
+            "--repo",
+            "example/repo",
+            "--pr-number",
+            "6100",
+        ],
+    )
+
+    assert rc != 0
+    assert not (outside / "review-annotations.json").exists()

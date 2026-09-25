@@ -269,22 +269,35 @@ def _cmd_catalog_annotate(args: argparse.Namespace) -> int:
 
     Only ever resolves the local live session-state tier (never an archive):
     :func:`agent_logger.sessions.write_review_annotation` requires a live
-    session directory to mutate, matching its own contract. Exits non-zero
-    with a clear message when the session id isn't found locally, or the
-    write itself fails (a lock timeout, a malformed existing sidecar the
-    caller should know about rather than have silently discarded).
+    session directory to mutate, matching its own contract. Rejects an unsafe
+    ``session_id`` (path separator, ``..``, absolute anchor) and a session
+    directory that resolves through a symlink/reparse point -- the same two
+    checks :mod:`agent_logger.cold_store` already applies to a read, since a
+    process-boundary caller here is just as untrusted as one there. Exits
+    non-zero with a clear message when the session id isn't found locally or
+    isn't safe, or the write itself fails (a lock timeout, a malformed
+    existing sidecar, or a catalog database error -- the sidecar write may
+    already have succeeded even if the catalog side then fails, so the
+    caller should know about it rather than have it silently discarded).
     """
+    import sqlite3
+
     from agent_logger.catalog import default_index
+    from agent_logger.cold_store import _is_safe_session_id
     from agent_logger.segmenter.collate import find_copilot_dir
     from agent_logger.sessions import SESSION_STATE_SUBDIR, write_review_annotation
+    from agent_logger.sync.provenance import existing_real_directory
 
+    if not _is_safe_session_id(args.session_id):
+        print(f"error: {args.session_id!r} is not a valid session id", file=sys.stderr)
+        return 1
     try:
         state_root = find_copilot_dir() / SESSION_STATE_SUBDIR
     except FileNotFoundError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     session_dir = state_root / args.session_id
-    if not session_dir.is_dir():
+    if existing_real_directory(session_dir) is None:
         print(
             f"error: no local live session directory for {args.session_id!r} "
             f"(looked under {state_root})",
@@ -302,7 +315,7 @@ def _cmd_catalog_annotate(args: argparse.Namespace) -> int:
             recorded_at=args.recorded_at,
             index=default_index(cfg),
         )
-    except (OSError, TimeoutError) as exc:
+    except (OSError, TimeoutError, sqlite3.Error) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     print(
@@ -476,6 +489,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_session_fetch.set_defaults(func=_cmd_session_fetch)
 
+    p_annotate = sub.add_parser(
+        "annotate",
+        help="write one review annotation for a local live session (cross-repo "
+        "callers use this instead of importing agent-logger as a library)",
+    )
+    p_annotate.add_argument("session_id", help="the local live session id to annotate")
+    p_annotate.add_argument("--repo", required=True, help="e.g. owner/name")
+    p_annotate.add_argument("--pr-number", required=True, type=int)
+    p_annotate.add_argument("--role", default="reviewer")
+    p_annotate.add_argument(
+        "--recorded-at",
+        help="ISO-8601 timestamp (default: now)",
+    )
+    p_annotate.set_defaults(func=_cmd_catalog_annotate)
+
     p_migrate = sub.add_parser(
         "config-migrate", help="migrate machine-local config.yaml schema (idempotent)"
     )
@@ -500,20 +528,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="live session-state root (default: this host's ~/.copilot/session-state)",
     )
     cat_rebuild.set_defaults(func=_cmd_catalog_rebuild)
-    cat_annotate = cat_sub.add_parser(
-        "annotate",
-        help="write one review annotation for a local live session (cross-repo "
-        "callers use this instead of importing agent-logger as a library)",
-    )
-    cat_annotate.add_argument("session_id", help="the local live session id to annotate")
-    cat_annotate.add_argument("--repo", required=True, help="e.g. owner/name")
-    cat_annotate.add_argument("--pr-number", required=True, type=int)
-    cat_annotate.add_argument("--role", default="reviewer")
-    cat_annotate.add_argument(
-        "--recorded-at",
-        help="ISO-8601 timestamp (default: now)",
-    )
-    cat_annotate.set_defaults(func=_cmd_catalog_annotate)
+
 
     p_origin = sub.add_parser(
         "origin", help="session origin sidecars -- backfill/tag existing sessions"

@@ -295,7 +295,7 @@ rebuildable-from-sidecars, never a second source of truth.
   resolves every catalog hit through the existing three-tier
   `resolve_session()`, silently skipping anything this host can't resolve
   (unreachable session treated as "not found", never an error).
-- `agent-logger catalog annotate <session-id> --repo R --pr-number N
+- `agent-logger annotate <session-id> --repo R --pr-number N
   [--role reviewer] [--recorded-at ISO]` — the cross-repo process-boundary
   write path, the same integration shape `session-fetch` already
   establishes for reads (a caller in a different repository shells out
