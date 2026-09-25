@@ -1234,7 +1234,15 @@ def test_monitor_claim_handoff_cutover_stale_reclaim_is_single_winner(tmp_path, 
     monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
     monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR_HANDOFF_CLAIM_STALE_SECONDS", "1")
     monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: None)
-    monkeypatch.setattr(m.locks, "pid_alive", lambda pid: False)
+    # Only the pre-seeded dead claim's pid (777) is "gone" -- the current
+    # process's own pid must read alive, exactly like reality (a process is
+    # never dead to itself). Mocking pid_alive to unconditionally return
+    # False for *every* pid -- including the reclaiming thread's own live
+    # pid -- was the actual root cause of this test's flakiness: it let a
+    # slower thread's staleness check see the faster thread's already-
+    # published, genuinely-live winning claim as "stale" too (pid-gone),
+    # triggering a second, cascading reclaim that could steal the win.
+    monkeypatch.setattr(m.locks, "pid_alive", lambda pid: pid != 777)
     monkeypatch.setattr(m.locks, "process_start_time", lambda pid: f"start-{pid}")
     claim_path = tmp_path / "status-monitor-handoffs.d" / "a" / "handoff-1.json"
     claim_path.parent.mkdir(parents=True, exist_ok=True)

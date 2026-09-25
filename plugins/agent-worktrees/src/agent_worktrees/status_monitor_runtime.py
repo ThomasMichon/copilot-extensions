@@ -228,7 +228,24 @@ def _monitor_publish_handoff_cutover_claim(
 def _monitor_reclaim_stale_handoff_cutover_claim(
     path: Path,
     payload: dict[str, object],
+    *,
+    expected_stale_claim: dict[str, object] | None = None,
 ) -> tuple[bool, bool, str | None]:
+    """Displace a stale claim at ``path`` and publish ``payload`` in its place.
+
+    ``os.replace`` only guarantees exclusivity over the *name* ``path``, not
+    over *which claim* is currently sitting there -- if a second racing
+    reclaimer displaces ``path`` after a first reclaimer has already
+    displaced-and-republished it (both had assessed the *same original*
+    claim as stale, e.g. via a barrier synchronizing them at the staleness
+    check), the second reclaimer's ``os.replace`` silently steals the
+    first's brand-new, genuinely-live claim instead of the stale one either
+    of them actually meant to evict -- both then report ``claimed=True``.
+    When ``expected_stale_claim`` is given, verify the displaced content
+    still matches it before publishing; on a mismatch (someone else's live
+    claim was displaced instead), put it back and report "not reclaimed"
+    rather than silently overwriting live work.
+    """
     displaced = path.with_name(
         f".{path.name}.{os.getpid()}.{secrets.token_hex(8)}.stale"
     )
@@ -238,6 +255,13 @@ def _monitor_reclaim_stale_handoff_cutover_claim(
         return True, False, None
     except OSError as exc:
         return False, False, str(exc)
+    if expected_stale_claim is not None:
+        dc = locks.read_lock(displaced)
+        match = dc == expected_stale_claim
+        if not match:
+            with contextlib.suppress(OSError):
+                os.replace(displaced, path)
+            return True, False, None
     try:
         claimed, error = _monitor_publish_handoff_cutover_claim(path, payload)
         return error is None, claimed, error
@@ -266,6 +290,15 @@ def _monitor_claim_handoff_cutover(
         "pid": owner_pid,
         "start_time": locks.process_start_time(owner_pid),
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        # Disambiguates two claims that would otherwise be byte-for-byte
+        # identical (same pid, same start_time, same second-granularity
+        # timestamp -- routine for two threads/processes racing within the
+        # same wall-clock second). Without it, a reclaimer verifying "did I
+        # just displace the stale claim I inspected, or someone else's
+        # fresh one" can't tell the two apart by content alone and may
+        # wrongly treat a coincidental content match as a legitimate
+        # target.
+        "claim_nonce": secrets.token_hex(8),
     }
 
     def _acquired_response() -> dict[str, object]:
@@ -327,7 +360,9 @@ def _monitor_claim_handoff_cutover(
         reclaim_age_seconds = (
             float(reclaim_age_raw) if isinstance(reclaim_age_raw, (int, float)) else None
         )
-        ok, reclaimed, reclaim_error = _monitor_reclaim_stale_handoff_cutover_claim(path, payload)
+        ok, reclaimed, reclaim_error = _monitor_reclaim_stale_handoff_cutover_claim(
+            path, payload, expected_stale_claim=prior_claim,
+        )
         if reclaim_error is not None:
             activity.log_event(
                 "handoff_cutover_claim",
