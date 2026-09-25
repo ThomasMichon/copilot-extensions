@@ -25,3 +25,6 @@ dist/
 .testvenv/
 # Plugin-specific artifacts
 uv.lock
+
+pytest_out*.log
+pytest_err*.log
