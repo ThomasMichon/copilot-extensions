@@ -62,6 +62,12 @@ _COORD_NAMES = ("agent_dispatch", "agent-dispatch")
 _TERMINATE_GRACE_S = 5.0
 _TERMINATE_POLL_S = 0.2
 
+# reap_superseded_coordinators terminates candidates concurrently (see its
+# docstring) to bound total wall time, but an unbounded one-thread-per-pid
+# pool would itself become a resource spike against a large accumulation of
+# stragglers -- exactly the scenario this reaper exists to clean up. Cap it.
+_REAP_MAX_WORKERS = 8
+
 
 @dataclass(frozen=True)
 class CoordProc:
@@ -173,10 +179,21 @@ def _iter_windows() -> list[CoordProc]:
 def iter_coordinator_processes() -> list[CoordProc]:
     """Enumerate live coordinator processes (best-effort; ``[]`` on failure)."""
     try:
-        return _iter_windows() if os.name == "nt" else _iter_posix()
+        return _iter_coordinator_processes_strict()
     except Exception:  # best-effort: enumeration must never raise into a caller
         log.debug("coordinator enumeration failed", exc_info=True)
         return []
+
+
+def _iter_coordinator_processes_strict() -> list[CoordProc]:
+    """Like :func:`iter_coordinator_processes` but lets an enumeration failure
+    raise instead of collapsing it to ``[]``. :func:`_confirmed_gone_or_reused`
+    needs this distinction: if it were handed the fail-soft version, a
+    transient ``ps``/CIM failure would look identical to "enumerated fine,
+    pid not found" -- and get misread as *confirmed* pid reuse rather than an
+    indeterminate probe, silently sparing a genuine straggler from escalation.
+    """
+    return _iter_windows() if os.name == "nt" else _iter_posix()
 
 
 def is_live_coordinator_pid(
@@ -200,7 +217,9 @@ def is_live_coordinator_pid(
 
 
 def _confirmed_gone_or_reused(
-    pid: int, *, list_procs: Callable[[], list[CoordProc]] = iter_coordinator_processes,
+    pid: int,
+    *,
+    list_procs: Callable[[], list[CoordProc]] = _iter_coordinator_processes_strict,
 ) -> bool:
     """True only when enumeration *succeeded* and confirms ``pid`` is no
     longer our coordinator (already gone, or the OS recycled the number to
@@ -210,6 +229,11 @@ def _confirmed_gone_or_reused(
     probe must never be read as proof of a safe-to-skip pid reuse, or a
     flaky enumeration call would silently spare a genuine straggler and
     recreate the very false-"reaped" result this module exists to prevent.
+    The default ``list_procs`` is deliberately the *strict* (non-fail-soft)
+    enumerator -- the fail-soft ``iter_coordinator_processes`` would collapse
+    a real probe failure to ``[]``, which is indistinguishable here from "it
+    enumerated fine and the pid just isn't a coordinator" and would wrongly
+    read as a confirmed mismatch.
     """
     try:
         procs = list_procs()
@@ -373,7 +397,8 @@ def reap_superseded_coordinators(
         return result
     from concurrent.futures import ThreadPoolExecutor
 
-    with ThreadPoolExecutor(max_workers=len(pids)) as pool:
+    workers = min(len(pids), _REAP_MAX_WORKERS)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
         outcomes = dict(zip(pids, pool.map(terminate, pids), strict=True))
     for pid in pids:
         if outcomes[pid]:

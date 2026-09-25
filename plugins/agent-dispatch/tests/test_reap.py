@@ -105,6 +105,33 @@ def _fixed_list(pids):
     return lambda: [CoordProc(p, f"python -m agent_dispatch serve #{p}") for p in pids]
 
 
+def test_reap_caps_thread_pool_workers(monkeypatch):
+    """A large accumulation of stragglers must not spawn one thread each."""
+    import concurrent.futures
+
+    import agent_dispatch.reap as reap_mod
+
+    captured: dict = {}
+    real_pool = concurrent.futures.ThreadPoolExecutor
+
+    class _CapturingPool(real_pool):
+        def __init__(self, *args, **kwargs):
+            captured["max_workers"] = kwargs.get(
+                "max_workers", args[0] if args else None,
+            )
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(concurrent.futures, "ThreadPoolExecutor", _CapturingPool)
+    many_pids = list(range(200, 220))  # 20 candidates, well over the cap
+    reap_superseded_coordinators(
+        keep_pids={100},
+        list_procs=_fixed_list([100, *many_pids]),
+        terminate=lambda pid: True,
+    )
+    assert captured["max_workers"] == reap_mod._REAP_MAX_WORKERS
+    assert captured["max_workers"] < len(many_pids)
+
+
 def test_reap_terminates_all_but_kept():
     killed: list[int] = []
     res = reap_superseded_coordinators(
@@ -247,6 +274,21 @@ def test_confirmed_gone_or_reused_treats_enumeration_failure_as_indeterminate():
         raise RuntimeError("ps exploded")
 
     assert _confirmed_gone_or_reused(123, list_procs=_boom) is False
+
+
+def test_confirmed_gone_or_reused_default_does_not_swallow_probe_failure(monkeypatch):
+    """The default enumerator must be the *strict* one, not the fail-soft
+    ``iter_coordinator_processes`` -- a swallowed ``[]`` on real probe
+    failure is indistinguishable from "enumerated fine, pid not a
+    coordinator" and would wrongly read as a confirmed pid reuse."""
+    import agent_dispatch.reap as reap_mod
+
+    def _boom():
+        raise RuntimeError("ps exploded")
+
+    monkeypatch.setattr(reap_mod, "_iter_posix", _boom)
+    monkeypatch.setattr(reap_mod, "_iter_windows", _boom)
+    assert _confirmed_gone_or_reused(123) is False
 
 
 def test_terminate_pid_escalates_despite_indeterminate_enumeration(monkeypatch):
