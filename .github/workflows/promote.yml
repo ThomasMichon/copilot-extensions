@@ -64,6 +64,7 @@ concurrency:
 permissions:
   contents: write
   pull-requests: write
+  actions: read
 
 jobs:
   promote:
@@ -89,6 +90,23 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+      - name: Download the commit Validation Gate actually validated
+        id: validated-sha
+        # `github.event.workflow_run.head_sha` is Validation Gate's OWN run
+        # metadata -- and Validation Gate is itself triggered via
+        # `workflow_run`, so its top-level `head_sha` is subject to the exact
+        # same GitHub-documented unreliability the comment below describes
+        # (ThomasMichon/copilot-extensions#3567: it reflects whatever `main`'s
+        # tip was at trigger time, never the commit Validation Gate actually
+        # re-derived, checked out, and tested). Download the artifact
+        # Validation Gate's `gate` job uploaded with the commit it actually
+        # confirmed, instead of trusting that event field one hop removed.
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: validated-sha
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.APERTURE_RELEASE_TOKEN }}
       - name: Confirm this run is genuinely for a dev commit
         id: gate
         # `branches: [dev]` on the workflow_run trigger above looks like the
@@ -99,14 +117,16 @@ jobs:
         # empirically across many real runs (dev-branch-release-pipeline
         # effort, promote-trigger finding: this left the whole pipeline
         # dead, 0 real triggers ever). Verify real dev-ancestry with git
-        # instead of trusting that event metadata.
+        # instead of trusting that event metadata -- and, per #3567, verify
+        # the SHA Validation Gate actually validated (downloaded above), not
+        # its own run's `head_sha`.
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "is_dev=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           git fetch origin dev
-          sha="${{ github.event.workflow_run.head_sha }}"
+          sha="$(cat validated_sha.txt)"
           if git merge-base --is-ancestor "$sha" origin/dev; then
             echo "is_dev=true" >> "$GITHUB_OUTPUT"
           else
