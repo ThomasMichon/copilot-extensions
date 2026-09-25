@@ -145,6 +145,44 @@ below); the durable-safe move instead is:
 5. Delete the backup branch once your work is confirmed on the remote
    (`git branch -D backup/<slug>`) -- it's scaffolding, not a permanent ref.
 
+### When the base has drifted *and* your target files were split upstream: squash first, then rebase
+
+The cherry-pick recovery above assumes your own commits still apply cleanly
+one at a time onto the fresh base. That assumption breaks down when a PR sits
+open long enough (tens to hundreds of commits behind) *and* one of this
+repo's own campaigns (its module-size-discipline effort, enforced by
+`tools/check-module-size.py`) has meanwhile split the exact file your PR
+touches into two or more successors. A multi-commit rebase or a per-commit
+cherry-pick then has to resolve the *same* relocation conflict repeatedly --
+once per commit -- turning a single real change (a file moved) into an
+enormous, largely spurious conflict fight that obscures the one genuine
+decision buried in it.
+
+The fix is to collapse the noise before touching the moved file at all:
+
+1. **Squash your PR's commits into one, against its *original* merge-base**
+   (not the current tip): `git reset --soft <original-merge-base>` on a
+   scratch copy of your branch, then a single `git commit` capturing the
+   whole diff. This is a size reduction, not a rebase -- it never touches the
+   target branch, so do it before fetching anything new.
+2. **Fetch and rebase that single squashed commit onto the current target
+   tip.** Now there is exactly one conflict to resolve per moved file, not
+   one per original commit -- because there is only one commit left.
+3. **Resolve the relocation conflict once**, understanding it as "this hunk
+   now belongs in `new_module_a.py` instead of `old_module.py`" rather than
+   fighting the rebase machinery's per-commit view of the same move.
+4. Continue as a normal single-commit rebase from here (`git rebase
+   --continue`, then force-push with lease) -- the squash was scaffolding for
+   the conflict resolution, not a permanent change to your commit history
+   unless the repo's own convention already prefers a single commit per PR.
+
+This is a variant of the same problem class as the backup-branch +
+cherry-pick technique above (many concurrent commits against a moving base),
+with a different failure mode: a file *relocation*, not just conflicting
+hunks within an unmoved file. Reach for cherry-pick when your own commits are
+still individually clean against the new base; reach for squash-first when
+the base has reorganized the very files you touched.
+
 ### `git stash` is a shared stack across every worktree of one clone -- don't reach for it here
 
 `git stash` is **not** scoped to the worktree you run it in: worktrees of the
