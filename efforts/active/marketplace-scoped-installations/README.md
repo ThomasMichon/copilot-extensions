@@ -388,9 +388,11 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 - The 2026-09-24 note flagged that the launcher-contract inventory's own
   numbers needed re-syncing before they could be trusted. Re-ran
-  `check-marketplace-isolation.py --json` and re-derived the full
-  `global-plugin-binstub` finding set line-by-line (83 findings, still 14
-  plugins, but a different 14 than the 2026-08-26 baseline).
+  `check-marketplace-isolation.py --json` and re-read the full
+  `global-plugin-binstub` finding set line-by-line to get an accurate current
+  count plus a partial triage (83 findings, still 14 plugins, but a different
+  14 than the 2026-08-26 baseline) -- not a complete re-derivation of every
+  finding's family; see the explicit gaps below.
 - Confirmed two families are **fully converted and gone**, not merely
   shrunk: the payload-owned self-wrappers (Phase 2, `agent-ssh`) and the
   durable provider manifests (Phase 3, `agent-codespaces`/`agent-containers`

@@ -31,8 +31,12 @@ open.
 `python tools/check-marketplace-isolation.py --json` now reports **83**
 `global-plugin-binstub` findings across 14 plugins — a different 14 than the
 baseline's, and the per-family table below no longer sums cleanly against a
-single fixed snapshot. Re-deriving the full family taxonomy from a raw
-line-by-line re-read of all 83 current findings:
+single fixed snapshot. A raw line-by-line re-read of all 83 current findings
+produced an accurate current *count* plus a **partial** triage — enough to
+confirm which families converted, which findings moved category, and which
+plugins are newly unaccounted for, but not a complete re-derivation of every
+finding's family (see the explicit gaps called out below and the "needs its
+own fresh family pass" note further down):
 
 - **Payload-owned self-wrappers and durable provider manifests are both
   fully converted and no longer appear at all.** The `agent-ssh`
