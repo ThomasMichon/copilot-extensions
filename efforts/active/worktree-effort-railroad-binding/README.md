@@ -114,8 +114,24 @@ fresh):
 
 ### Phase 2 — Auto-derived current slice + mid-session railroad nudge (#3583)
 - [ ] _(agent-recommended, added from PR review analysis, not the original
+      operator request)_ **Limit auto-derivation to single-worktree
+      bindings; never auto-derive across a multi-worktree effort.** The
+      `plugins/efforts` vision explicitly permits several worktrees to
+      contribute *distinct declared slices* to the same effort, and
+      `duplicate_binding()` keys on `(effort path, slice)` to tell separate
+      contributors apart. An effort-wide "first unchecked checklist item"
+      auto-derivation would make every worktree bound to that effort
+      converge on the *same* derived slice, wrongly flagging legitimate
+      concurrent contributors as duplicates. Before canonicalizing anything:
+      auto-derivation applies **only** when the effort has exactly one
+      active binding (no other worktree currently holds a declared slice
+      against it); a binding with an explicitly reserved/declared slice — or
+      any effort with multiple concurrent bindings — is never overwritten by
+      auto-derivation and keeps its hand-declared `--slice` as-is.
+- [ ] _(agent-recommended, added from PR review analysis, not the original
       operator request)_ **Establish one canonical source of truth for the
-      binding's slice.** `ActiveEffort.slice` is persisted and already
+      binding's slice** (within the single-binding case the item above
+      scopes this to). `ActiveEffort.slice` is persisted and already
       consumed by `inspect_effort()`, `orientation()`, binding validation,
       and `duplicate_binding()`; deriving a *different* value only for the
       orientation/nudge path (without updating the persisted field) would
@@ -203,6 +219,12 @@ fresh):
       `inspect_effort()`/`duplicate_binding()`, not only through
       `orientation()` — and `validate_binding()` accepts the derived form
       without rejecting it as an undeclared slice or an over-length label.
+- [ ] Two worktrees bind distinct declared slices of the *same* effort:
+      auto-derivation never fires for either (multiple concurrent bindings
+      present), both keep their hand-declared slices untouched, and
+      `duplicate_binding()` still correctly distinguishes them. A *single*
+      worktree bound alone to an effort still gets auto-derivation as
+      designed.
 - [ ] A test effort whose Plan/Validation checklist is fully checked (but
       `Status` is not yet `Done`) is bound: derivation resolves to the
       defined terminal-state slice rather than erroring or falling back
@@ -291,6 +313,21 @@ repo's `pr-self-merge` profile before Phase 1 implementation begins._
   consumer (`ActiveEffort.slice`, `validate_binding()`, `orientation()`,
   the anchored title) still needs a value. Added an explicit terminal-state
   slice requirement and a matching Validation Plan bullet.
+
+### 2026-09-25 — Scoped auto-derivation to single-worktree bindings only
+- Review caught the most significant gap yet: the `plugins/efforts` vision
+  explicitly permits several worktrees to contribute distinct declared
+  slices to the *same* effort, and `duplicate_binding()` keys on
+  `(effort path, slice)` to tell them apart. Effort-wide "first unchecked
+  item" auto-derivation would make every worktree bound to that effort
+  converge on the same derived slice, wrongly flagging legitimate
+  concurrent contributors as duplicates. Added an explicit scoping rule
+  (auto-derivation applies only when an effort has exactly one active
+  binding; any multi-worktree or explicitly-reserved-slice binding keeps
+  its hand-declared slice untouched) ahead of the canonicalization work,
+  plus a matching Validation Plan bullet covering both the single- and
+  multi-worktree cases.
+
 
 
 
