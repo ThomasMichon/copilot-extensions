@@ -157,16 +157,25 @@ itself proof of takeover.
 
 Claiming the head is an **affirmative, exclusively-owned act**, never an
 incidental side effect of an unrelated hook running first. Exactly one
-mechanism — the session-start binding step — is authorized to seat a new head,
-and only when the head slot is genuinely vacant; every other hook or extension
-point observes the current head rather than competing to set it. A session
-that must yield the head (a handoff, a deliberate stand-down) makes that
-vacancy unambiguous — recording itself as the most recent predecessor and
-clearing the head slot atomically — so the next session-start has a clean,
-uncontested claim rather than racing a predecessor that never let go. A
-resuming session therefore always lands as the *rightful* current leg, never
-as a second, uncoordinated voice re-entering a conversation its predecessor
-already concluded.
+mechanism — the session-start binding step — is authorized to seat a head for
+a worktree that has never had one, and only when the slot is genuinely vacant;
+every other hook or extension point observes the current head rather than
+competing to set it. Once a head exists, moving it to a successor is **one
+atomic acknowledgement step**, never a two-phase "predecessor clears, successor
+later claims": the predecessor remains authoritative right up until the
+successor proves it can recover the baton, and that single verified step both
+displaces the predecessor and seats the successor together. This closes the
+race an unconditional clear-then-claim would open — a delayed or failed
+launch can never strand the worktree with no authoritative head, because
+nothing is ever cleared without a proven successor on the other end of the
+same step. (This is the existing `context-handoff-lifecycle` pattern's
+ownership invariant, generalized as the durable head-succession guarantee
+rather than a orchestration-layer-only rule.) A resuming session therefore
+always lands as the *rightful* current leg — either the sole claimant of a
+truly fresh head, or the acknowledged successor of a specific, still-identified
+predecessor — never a second, uncoordinated voice re-entering a conversation
+its predecessor already concluded, and never inheriting a head left vacant by
+a predecessor that gave up too early.
 
 ### Claims, leases, and obligations
 
@@ -269,10 +278,13 @@ durable, explicit, and independent of process timestamps or UI attachment.
 
 ### single-authorized-head-claimant
 
-Exactly one code path is authorized to seat a worktree's head, gated on the
-slot being vacant; a session-start integration always resolves the head
-question before any other hook or extension can observe or act on it, so no
-secondary mechanism can ever claim, overwrite, or race a live head.
+Exactly one code path is authorized to seat a worktree's head from vacant
+(a fresh worktree, or a fully-recovered abandoned one); a session-start
+integration always resolves the head question before any other hook or
+extension can observe or act on it, so no secondary mechanism can ever claim,
+overwrite, or race a live head. Displacing an *existing* head is a distinct,
+acknowledgement-gated transfer (see *atomic-acknowledgement-transfer* below),
+never a second path to the same vacant-slot claim.
 
 ### effort-anchored-title
 
@@ -433,14 +445,16 @@ A newly launched process or newly observed session does not become the worktree
 head until the governing lifecycle transition acknowledges it. Failed or
 duplicate launches therefore cannot steal authority.
 
-### yield-clears-before-claim-arrives
+### atomic-acknowledgement-transfer
 
-A session standing down as head (a handoff, a deliberate conclusion) records
-its own predecessor status and vacates the head slot as one atomic step, before
-any successor is expected to claim it. A successor's session-start never has to
-guess whether a predecessor "really" finished — the slot's vacancy is the
-proof — and a predecessor that crashes without yielding leaves an unambiguous,
-recoverable non-vacant state rather than a false claim of succession.
+Moving the head from an existing predecessor to a successor is one atomic,
+acknowledgement-gated step — never an independent "predecessor clears" action
+followed later by "successor claims." The predecessor remains authoritative
+until the successor proves it can recover the baton; that single verified
+step both displaces the predecessor and seats the successor. A predecessor
+that crashes or fails before acknowledgement leaves the head exactly where it
+was — non-vacant, recoverable, and never falsely presumed conceded — rather
+than opening a race window a delayed or failed launch could exploit.
 
 ### derive-dont-duplicate
 
@@ -596,7 +610,10 @@ manager, or session-host implementation.
 - Presentation sibling: [picker](../../picker/README.md)
 - Coordination sibling:
   [plugins/agent-bridge](../agent-bridge/README.md)
-- Reality docs: the agent-worktrees plugin `docs/`
+- Reality docs: the agent-worktrees plugin `docs/`,
+  [`docs/patterns/context-handoff-lifecycle.md`](../../../docs/patterns/context-handoff-lifecycle.md)
+  (the ownership/retirement invariants this vision's head-succession guarantee
+  generalizes)
 
 ## Provenance
 

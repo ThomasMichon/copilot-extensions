@@ -8,7 +8,7 @@
 - **Vision:** `plugins/agent-worktrees` §Concepts/Current head and succession,
   §Concepts/Discovery for duplicate-effort detection,
   §Features/single-authorized-head-claimant, §Features/duplicate-effort-discovery,
-  §Behaviors/yield-clears-before-claim-arrives
+  §Behaviors/atomic-acknowledgement-transfer
 - **Umbrella issue:** #3584
 - **Sub-issues:** #3585
 
@@ -85,16 +85,24 @@ objective can be a worktree other than the one nearest at hand.
 
 ## Plan
 
-### Phase 1 — Head/backup-slot succession (#3584, closes groundwork for #84)
-- [ ] Add the two-slot model to the worktree record: `head` (current
-      authoritative session) and `backup` (most recent predecessor).
-- [ ] Restrict head-claiming to the `sessionStart` hook alone, gated on `head`
-      being empty; no other hook/extension point may write it.
-- [ ] Make yielding atomic: the yielding session moves its own identity from
-      `head` to `backup` and clears `head` in one step.
+### Phase 1 — Acknowledgement-gated head succession (#3584, closes groundwork for #84)
+- [ ] Restrict head-claiming-from-vacant to the `sessionStart` hook alone,
+      gated on the head genuinely never having been set (a fresh worktree, or
+      one whose predecessor is confirmed fully abandoned through the existing
+      recovery procedure); no other hook/extension point may write it.
+- [ ] Model displacing an *existing* head as a single atomic,
+      acknowledgement-gated transfer — reconciled with
+      `docs/patterns/context-handoff-lifecycle.md`'s existing invariant that
+      **the predecessor remains head until the successor proves it can
+      recover the baton**. Explicitly reject the earlier
+      "predecessor-clears-then-successor-claims" two-phase design considered
+      during planning: a Copilot code review correctly flagged that an
+      unconditional clear-before-claim opens a race where a delayed or failed
+      launch strands the worktree with no authoritative head. The corrected
+      model never separates "vacate" from "claim" into two steps.
 - [ ] Confirm this composes with, not replaces, full session lineage
       journaling (every session ever associated with the worktree stays
-      recorded independently of the two live slots).
+      recorded independently of the current head).
 - [ ] Reconcile with #912 and #3000's overlapping scope so the three don't
       land contradictory mechanisms.
 
@@ -108,13 +116,16 @@ objective can be a worktree other than the one nearest at hand.
 
 ## Validation Plan
 
-- [ ] Simulate a handoff: predecessor yields, successor's `sessionStart`
-      claims a genuinely empty head; resuming does not land inside the
-      predecessor's concluded context.
-- [ ] Simulate a crash (predecessor never yields): head remains non-vacant and
-      recoverable, never falsely claimed by a session that raced in.
-- [ ] Confirm no non-`sessionStart` hook can write the head slot (a targeted
-      negative test).
+- [ ] Simulate a handoff: successor proves it can recover the baton and the
+      single atomic acknowledgement both displaces the predecessor and seats
+      the successor; resuming does not land inside the predecessor's
+      concluded context.
+- [ ] Simulate a delayed/failed launch (successor never acknowledges): head
+      remains with the predecessor, non-vacant and recoverable, never
+      falsely displaced by a launch that didn't complete.
+- [ ] Confirm no hook other than `sessionStart` can seat a head from vacant,
+      and no path can displace an existing head without a verified successor
+      acknowledgement (two targeted negative tests).
 - [ ] A fleet with an existing worktree bound to effort X surfaces that
       worktree (and, where a chain is involved, the root claimant) when a
       second agent checks before starting work on X.
@@ -133,3 +144,20 @@ repo's `pr-self-merge` profile before Phase 1 implementation begins._
   Filed #3584 (mechanism) and #3585 (discovery/root-claimant), folding the
   smaller discovery item in here rather than a fourth effort, since both are
   about "which agent has authority right now."
+
+### 2026-09-25 — Corrected the head-transfer mechanism against an existing invariant
+- The PR's automated review correctly flagged the original two-phase
+  "predecessor clears `head`, then a later `sessionStart` claims the vacant
+  slot" design: an unconditional clear-before-claim opens a race window where
+  a delayed or failed successor launch strands the worktree with no
+  authoritative head. It also flagged that this contradicted the already-shipped
+  `docs/patterns/context-handoff-lifecycle.md` invariant that **the
+  predecessor remains head until the successor proves it can recover the
+  baton**, with head movement and successor acknowledgement happening as one
+  atomic step. Revised the vision (`plugins/agent-worktrees` §Concepts/Current
+  head and succession, renamed Feature `atomic-acknowledgement-transfer`) and
+  this effort's Phase 1/Validation Plan to match the existing pattern instead
+  of introducing a second, weaker one. The two-slot vocabulary (`head`/`backup`)
+  from the original operator request is preserved as historical record in the
+  Request quote above, but the design itself now models succession as one
+  acknowledgement-gated transfer, not two independent slot writes.
