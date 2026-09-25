@@ -119,11 +119,23 @@ fresh):
       orientation/nudge path (without updating the persisted field) would
       leave those other consumers stale and create two disagreeing notions
       of "current slice." Specify the atomic update/revalidation semantics
-      before implementing: when the derived value (first unchecked
-      checklist item) differs from the persisted `--slice`, the persisted
-      binding is revalidated and updated to match at a defined point (e.g.
-      on each orientation/nudge computation, or on the operation that
-      changed the checklist) — never left to silently diverge.
+      before implementing: when the derived value differs from the
+      persisted `--slice`, the persisted binding is revalidated and updated
+      to match at a defined point (e.g. on each orientation/nudge
+      computation, or on the operation that changed the checklist) — never
+      left to silently diverge.
+- [ ] **Derive a stable phase/item representation, not raw bullet text.**
+      `validate_binding()` currently requires `ActiveEffort.slice` to match
+      a declaration in Plan/Coordination, and parses checklist bullets
+      separately for completion — writing the first unchecked bullet's raw
+      text back as the slice would both bypass that declared-match
+      requirement and risk exceeding the existing 180-character label
+      limit. Define a stable identifier instead (e.g. the enclosing Plan
+      phase heading, optionally with an item index within it — "Phase 2,
+      item 3" — never the free-text bullet body), and update
+      `validate_binding()` and every other slice consumer to recognize and
+      accept that derived form consistently, before implementing
+      derivation.
 - [ ] Extend `effort_focus.py` to derive "current slice" from the first
       unchecked Plan/Validation Plan item, falling back to the declared
       `--slice` string only when the effort has no checklist structure yet,
@@ -165,13 +177,17 @@ fresh):
       does not silently unanchor it. Unbinding restores ordinary freeform
       behavior.
 - [ ] A test effort with a partially-checked Plan is bound; `orientation()`
-      (or its Phase 2 successor) reports the first unchecked item as the
-      current slice without requiring a manual `--slice` re-bind.
+      (or its Phase 2 successor) reports the stable phase/item identifier
+      (a Plan heading, optionally with an in-phase item index) of the first
+      unchecked item as the current slice, without requiring a manual
+      `--slice` re-bind, and without ever surfacing raw bullet text as the
+      slice value.
 - [ ] After a checklist item is ticked, the persisted `ActiveEffort.slice`
-      itself updates to match the newly-derived value (not merely the
+      itself updates to match the newly-derived identifier (not merely the
       orientation/nudge display) — confirmed by reading the binding through
       `inspect_effort()`/`duplicate_binding()`, not only through
-      `orientation()`.
+      `orientation()` — and `validate_binding()` accepts the derived form
+      without rejecting it as an undeclared slice or an over-length label.
 - [ ] A long simulated session (tool-call count past threshold) receives
       exactly one railroad nudge per drift window, matching
       `nudge_status.py`'s existing no-spam guarantee.
@@ -226,6 +242,19 @@ repo's `pr-self-merge` profile before Phase 1 implementation begins._
   update/revalidation semantics) as its own Plan item ahead of the
   derivation work, plus a Validation Plan bullet confirming the persisted
   field itself updates, not merely the display.
+
+### 2026-09-25 — Stable phase/item identifier, not raw bullet text
+- Review caught that writing the first unchecked bullet's raw text back as
+  the slice would conflict with `validate_binding()`'s existing requirement
+  that `ActiveEffort.slice` match a declaration in Plan/Coordination, and
+  risked exceeding the 180-character label limit. Redefined the derived
+  value as a stable phase/item identifier (a Plan heading, optionally with
+  an in-phase item index) instead of free-text, and required
+  `validate_binding()` and every slice consumer to be updated to recognize
+  that form before implementing derivation. Updated the matching Validation
+  Plan bullets to check the identifier form and `validate_binding()`
+  acceptance explicitly.
+
 
 
 
