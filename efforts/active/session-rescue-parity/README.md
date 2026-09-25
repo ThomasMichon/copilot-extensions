@@ -357,14 +357,40 @@ itself did not specify phasing)_
 - [ ] Add a standalone, non-lifecycle-transition CLI verb (e.g.
       `agent-codespaces sync-sessions <name>`) that calls the gated capture
       without stopping/finalizing/deleting the CodeSpace and without ever
-      booting it. **This is additive, not a replacement**: every existing
-      destructive-recovery call site
-      (`_cmd_delete`/`_cmd_finalize`/`_cmd_stop` and their JSON-modal
-      variants, the prune path, `_reclaim_for_quota`'s total-limit path, and
-      `claim_provider_cli.py`'s reclaim callback — six sites, not three;
-      re-audit `__main__.py`/`claim_provider_cli.py` directly rather than
-      trusting this list to still be exhaustive by the time Phase 3 starts)
-      keeps calling `sync_codespace_sessions()` exactly as today, unchanged.
+      booting it. **This is additive, not a replacement**: `sync_codespace_sessions()`
+      currently has **seven** direct call sites in the current tree
+      (`_cmd_delete`, `_cmd_finalize`, its JSON-modal finalize variant,
+      `_cmd_stop`, the prune path, `_reclaim_for_quota`'s total-limit path --
+      all in `__main__.py` -- plus `claim_provider_cli.py`'s reclaim
+      callback). Re-audit `__main__.py`/`claim_provider_cli.py` directly when
+      Phase 3 starts rather than trusting this count to still be exact by
+      then; every one of them keeps calling `sync_codespace_sessions()`
+      exactly as today, unchanged.
+- [ ] **Bind the standalone capture to the exact owning account, never
+      ambient-fallback.** `sync_codespace_sessions()`'s default account
+      resolution (when `account`/`token` are omitted) goes through
+      `account_for_codespace()`'s best-effort path, which can silently fall
+      back to ambient credentials -- safe enough for an interactive
+      delete/finalize call by the owning operator, but not for an
+      unattended periodic/standalone sweep, where a same-named CodeSpace
+      across accounts or a sweep running outside the owning project could
+      pull the wrong venue's sessions. The new capture path must resolve
+      and pass an explicit, validated `account`/`token` (reusing the
+      pinning parameters `sync_codespace_sessions()` already accepts, per
+      its own docstring -- e.g. via whatever confirms account ownership
+      today, such as `lifecycle.get_codespace_status()`), never falling
+      through to the default. Tests: same-name-across-accounts and a
+      binding-lookup-failure case (deferred, not ambient-fallback).
+- [ ] **Re-validate liveness after the pull, not only before it.** A single
+      preflight probe immediately before `_pull_tar_bytes` does not close
+      the window where a Copilot process acquires `inuse.*.lock` during or
+      after the tar -- the capture could still snapshot a session mid-write.
+      Define an equivalent post-capture check (containers' own flow
+      re-probes after the rescue and before treating it as committed) or an
+      atomic snapshot/locking protocol, and add a test exercising the
+      probe-to-pull race (liveness acquired between the preflight and the
+      pull completing) to prove the capture is rejected/retried rather than
+      silently accepted.
 - [ ] Tests: CLI-dispatch coverage (text + `--json`, mirroring
       `test_rescue_capture_cli.py`'s shape), a liveness-gate regression test
       (mid-write session is deferred, not captured), a
@@ -413,8 +439,11 @@ itself did not specify phasing)_
       including the new liveness-gate regression test, the
       non-`Available`-state regression test (no boot/connect attempt for a
       Shutdown/Starting/unknown-state CodeSpace), the lease/claim-ownership
-      owner/non-owner/orphaned-claim/cross-machine-L2 tests, and
-      CLI-dispatch tests.
+      owner/non-owner/orphaned-claim/cross-machine-L2 tests, the
+      probe-to-pull race test (liveness acquired mid-capture is rejected/
+      retried, not silently accepted), the account-binding tests
+      (same-name-across-accounts and binding-lookup-failure are deferred,
+      never ambient-fallback), and CLI-dispatch tests.
 - [ ] Phase 4: a real leased CodeSpace is captured and published
       end-to-end (mirroring the container-side end-to-end validation
       already proven for `rescue-capture`) — published session readable
