@@ -145,10 +145,15 @@ container. This is the concrete candidate for the shared vendored piece
   deploy-hold + `active_session_admissions` + effort-lease + restricted-
   policy-validation gate (`_restricted_member_action`) before even probing
   liveness — necessary because a restricted container's identity/state can
-  itself drift or be attacked. CodeSpaces have a much simpler single-tenant
-  `lease.py` in-use signal (one effort holds one CodeSpace at a time; no
-  restricted-policy surface to validate). Porting the *liveness probe* does
-  not require porting the *admission-hold* machinery.
+  itself drift or be attacked. CodeSpaces have no restricted-policy surface
+  to validate, but their holder model is **not** simply single-tenant: a
+  CodeSpace can be held by a live local lease (`lease.py`), a `#897`
+  worktree claim, or a cross-machine L2 (Git-ref) lease overlay with no
+  local lease at all — `pool.py` derives `IN_USE` from any of the three.
+  Porting the *liveness probe* does not require porting the *admission-hold*
+  machinery, but a capture verb's own authorization check must account for
+  all three holder shapes (see Plan Phase 1's explicit lease/claim-ownership
+  decision), not just `get_lease()`.
 - **Destination push mechanism.** Containers publish via `agent-containers`'
   own rescue store (`$STATE_DIR/rescues/`) + `session-sync rescue-push`
   (hash-verified, allowlisted, capture-ID-pinned). CodeSpaces already push
@@ -234,20 +239,25 @@ itself did not specify phasing)_
       rescue-store + `rescue-push` vs. codespaces' direct `session-sync
       push`) or deliberately keep them separate -- record the decision and
       why; do not assume unification.
-- [ ] **Define CodeSpace lease ownership for capture, explicitly.**
+- [ ] **Define CodeSpace lease/claim ownership for capture, explicitly.**
       Containers' `rescue-capture` reuses `_restricted_member_action`'s
       full admission gating unconditionally, including deferring on any
       active effort lease (`get_lease(info.name) is not None`) -- even
-      though a pure read-only capture destroys nothing. Decide, for
-      CodeSpaces, whether the same "defer on any active lease regardless of
-      holder" rule applies, or whether a read-only capture is safe to run
-      against a leased CodeSpace regardless of who holds it (or only when
-      the caller IS the lease holder) -- and who/what is authorized to
-      *call* the capture verb in the first place (the lease holder only?
-      any host process? a periodic sweep with no effort identity at all?).
-      Record the decision and why; Phase 3's tests must cover both the
-      owner and non-owner/no-lease cases per that decision, not just the
-      happy path.
+      though a pure read-only capture destroys nothing. CodeSpaces'
+      authorization model is richer than a single local lease: `pool.py`
+      derives `IN_USE` from a live local lease **OR** a `#897` worktree
+      claim **OR** a cross-machine L2 (Git-ref) lease overlay with no local
+      lease at all (a box held from a different machine). Decide whether
+      the same "defer on any active hold regardless of holder" rule applies
+      across **all three** holder shapes, or whether a read-only capture is
+      safe to run against a held CodeSpace regardless of who holds it (or
+      only when the caller IS the holder) -- and who/what is authorized to
+      *call* the capture verb in the first place (the holder only? any host
+      process? a periodic sweep with no effort/claim identity at all?).
+      Record the decision and why; Phase 3's tests must cover the owner,
+      non-owner/no-lease, an orphaned/claim-holder-gone case, and a
+      cross-machine L2-only hold (no local lease) per that decision, not
+      just the plain `get_lease()` owner/non-owner happy path.
 - [ ] **Evaluate this effort's design against `docs/patterns/README.md`'s
       architecture-pattern invariants before implementation begins** --
       this introduces a new shared runtime boundary across two
@@ -351,8 +361,10 @@ itself did not specify phasing)_
       (mid-write session is deferred, not captured), a
       non-`Available`-state regression test (a `Shutdown`/`Starting`/
       unknown-state CodeSpace is deferred without a connection attempt),
-      and lease-ownership tests covering both the owner and non-owner/
-      no-lease cases per Phase 1's lease-ownership decision.
+      and lease/claim-ownership tests covering the owner, non-owner/
+      no-lease, an orphaned claim (holder worktree gone), and a
+      cross-machine L2-only hold (no local lease) case per Phase 1's
+      lease/claim-ownership decision.
 
 ### Phase 4 — Periodic trigger for CodeSpaces
 (scope set by Phase 1's scheduling-ownership decision)
@@ -391,8 +403,9 @@ itself did not specify phasing)_
       (`python tools/run-plugin-tests.py agent-codespaces`) passes,
       including the new liveness-gate regression test, the
       non-`Available`-state regression test (no boot/connect attempt for a
-      Shutdown/Starting/unknown-state CodeSpace), the lease-ownership
-      owner/non-owner tests, and CLI-dispatch tests.
+      Shutdown/Starting/unknown-state CodeSpace), the lease/claim-ownership
+      owner/non-owner/orphaned-claim/cross-machine-L2 tests, and
+      CLI-dispatch tests.
 - [ ] Phase 4: a real leased CodeSpace is captured and published
       end-to-end (mirroring the container-side end-to-end validation
       already proven for `rescue-capture`) — published session readable
