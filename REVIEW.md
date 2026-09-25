@@ -23,8 +23,8 @@ specifically when reviewing a pull request, not a replacement for them.
 
 - **Flag any PR whose base is `main` directly.** `main` is regenerated
   wholesale by this repo's own CI promotion pipeline
-  (`.github/workflows/promote.yml`, dev-branch-release-pipeline effort,
-  ThomasMichon/copilot-extensions#3336) via an automated snapshot PR: base
+  (`.github/workflows/validate-and-promote.yml`, dev-branch-release-pipeline
+  effort, ThomasMichon/copilot-extensions#3336) via an automated snapshot PR: base
   `main`, head branch matching `release/promote-<run id>`, authored via the
   `APERTURE_RELEASE_TOKEN` fine-grained PAT (a personal token minted under
   the maintainer's own account -- this repo has no separate bot identity --
@@ -40,7 +40,7 @@ specifically when reviewing a pull request, not a replacement for them.
 
   > This PR targets `main` directly. `main` is only ever updated by this
   > repo's own CI promotion pipeline (dev-branch-release-pipeline effort,
-  > `.github/workflows/promote.yml`) via an automated snapshot PR from a
+  > `.github/workflows/validate-and-promote.yml`) via an automated snapshot PR from a
   > `release/promote-*` branch. Please retarget this PR's base branch to
   > `dev` — see `CONTRIBUTING.md` § Release & Versioning.
 - **Scope to the diff.** Review the code the PR actually changes. The repo
