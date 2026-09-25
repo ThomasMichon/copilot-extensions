@@ -205,16 +205,46 @@ itself did not specify phasing)_
       identify exactly what is Docker-`exec`-specific (the transport call)
       vs. generic (the shell script + parsing), and sketch the
       transport-injection seam (a small callable the vendored lib takes,
-      rather than hardcoding `docker exec`).
+      rather than hardcoding `docker exec`). **The seam must be
+      async-compatible from the start**: containers' probe and `_docker`
+      call are synchronous, but codespaces' `exec_with_retry`/
+      `ConnectionManager` are `async def` and the capture path already runs
+      inside `asyncio.run(_run())` -- a directly-shared synchronous callable
+      would either return an unawaited coroutine or fail with "asyncio.run()
+      cannot be called from a running event loop." Design the vendored
+      lib's contract so the pure probe/parser logic is transport-agnostic
+      and callable from both a sync (containers) and an async (codespaces)
+      caller (e.g. the lib owns only the shell script + output-parsing pure
+      function, and each consumer supplies its own sync-or-async transport
+      call around it) -- do not assume one shared function signature covers
+      both without this split.
 - [ ] Decide the vendored lib's shape and name (e.g.
       `libs/session-liveness-probe/`) and whether it fits the plain
       byte-identical vendored-copy pattern or the adapter/sync-tool pattern
-      (see Context's vendoring-mechanism note) — record the decision and
+      (see Context's vendoring-mechanism note) -- record the decision and
       why.
 - [ ] Decide whether to unify the two publish paths (containers'
       rescue-store + `rescue-push` vs. codespaces' direct `session-sync
-      push`) or deliberately keep them separate — record the decision and
+      push`) or deliberately keep them separate -- record the decision and
       why; do not assume unification.
+- [ ] **Decide, explicitly and once, whether periodic CodeSpaces scheduling
+      is repository-owned or consumer-owned** -- this decision governs
+      Phase 4 and must be made before it starts, not assumed by it.
+      Candidates: (a) mirror the containers precedent exactly -- this repo
+      ships only the on-demand verb + liveness gate, and any actual
+      timer/cron/systemd-unit that calls it on a schedule is downstream
+      consumer configuration (matching `#3574`, which added no scheduling
+      of its own); or (b) hook it into an already-repo-owned periodic loop
+      that exists today (e.g. the Connection Owner daemon's
+      `run_owner_daemon` loop in `connection_owner.py`, or a pool-sweep
+      cycle in `pool.py`, if one already runs unconditionally for every
+      leased CodeSpace) -- only viable if such a loop is confirmed to exist
+      and already covers every venue this capability needs to reach. Record
+      the decision and why; then make Phase 4, the vision-reconciliation
+      wording below, and the Validation Plan all agree with whichever is
+      chosen -- an effort that says "consumer-owned" in one place and
+      commits to "wire the periodic trigger" in another is broken, not
+      merely incomplete.
 - [ ] Reconcile the two visions this effort touches (per the "Documentation
       impact" / vision-reconciliation obligation): revise
       `visions/plugins/agent-containers/README.md`'s
@@ -226,10 +256,11 @@ itself did not specify phasing)_
       `visions/plugins/agent-codespaces/README.md`'s
       `telemetry-grade-session-capture` to note on-demand, non-destructive
       capture while leased/running as a target alongside teardown/recycle
-      capture. Do **not** touch `visions/venue-parity/README.md`'s
-      trusted-only scope
-      boundary — this effort is a structural peer to it, not an extension
-      (see Context).
+      capture -- phrased to match whichever scheduling-ownership decision
+      the item above settles on. Do **not** touch
+      `visions/venue-parity/README.md`'s trusted-only scope boundary --
+      this effort is a structural peer to it, not an extension (see
+      Context).
 - [ ] Submit this effort's plan as a PR (this repo's automated-review gate)
       before starting Phase 2.
 
@@ -237,7 +268,8 @@ itself did not specify phasing)_
 - [ ] Extract the portable liveness-probe logic from
       `agent_containers.replacement` into the vendored lib decided in
       Phase 1, with the container-specific `docker exec` call factored out
-      behind a small injected transport callable. `agent-containers`
+      behind a small injected transport callable per Phase 1's
+      sync/async-split decision. `agent-containers`
       itself switches to consuming the vendored copy (no behavior change;
       existing tests must still pass unchanged).
 - [ ] Vendor the identical copy into `plugins/agent-codespaces/libs/`, wire
@@ -247,36 +279,59 @@ itself did not specify phasing)_
 ### Phase 3 — CodeSpaces: non-destructive capture verb + liveness gate
 - [ ] Add a CodeSpace-side liveness check (using the Phase 2 vendored lib,
       transport = the existing SSH `ConnectionManager`/`exec_with_retry`)
-      that `sync_codespace_sessions()` (or a new capture-only sibling) calls
-      before pulling, mirroring containers' "defer instead of capture
-      mid-write" contract — including the same corrected edge cases
-      `ThomasMichon/copilot-extensions#3574`'s review caught: never disturb
-      the CodeSpace's own state to get a liveness answer (containers'
-      analog: never unpause a paused container just to capture it), and a
-      single consistent deferral message/path for "not safely capturable
-      right now" (containers' analog: the fleet-level check must delegate
-      to the same per-member helper, not a second ad-hoc message).
+      that a new capture-only path calls before pulling, mirroring
+      containers' "defer instead of capture mid-write" contract -- including
+      the same corrected edge cases `ThomasMichon/copilot-extensions#3574`'s
+      review caught: never disturb the CodeSpace's own state to get a
+      liveness answer (containers' analog: never unpause a paused container
+      just to capture it), and a single consistent deferral message/path
+      for "not safely capturable right now" (containers' analog: the
+      fleet-level check must delegate to the same per-member helper, not a
+      second ad-hoc message).
+- [ ] **This capture path must not simply call `sync_codespace_sessions()`
+      with its existing defaults.** That function boots a `Shutdown`
+      CodeSpace whenever `skip_if_shutdown` is false, and only special-cases
+      the `Shutdown` state by name (`lifecycle._SHUTDOWN_STATE`) -- every
+      other non-`Available` state (starting, provisioning, failed, or any
+      future state) falls through to the same connect-and-maybe-boot path.
+      A periodic non-destructive capture must never boot, connect to, or
+      otherwise disturb a venue that isn't already `Available`/running: add
+      an explicit preflight (list/inspect state only, no connection
+      attempt) that defers immediately for any state other than the live,
+      connected one -- matching containers' `rescue-capture`, which defers
+      immediately on any non-`running` state rather than following
+      `stop`/`rm`'s boot-tolerant or stopped-instance-evidence paths. Do not
+      reuse `sync_codespace_sessions()`'s existing state handling as-is; it
+      is destroy/finalize-shaped, not capture-only-shaped.
 - [ ] Add a standalone, non-lifecycle-transition CLI verb (e.g.
       `agent-codespaces sync-sessions <name>`) that calls the gated capture
-      without stopping/finalizing/deleting the CodeSpace.
+      without stopping/finalizing/deleting the CodeSpace and without ever
+      booting it.
 - [ ] Tests: CLI-dispatch coverage (text + `--json`, mirroring
-      `test_rescue_capture_cli.py`'s shape) and a liveness-gate regression
-      test (mid-write session is deferred, not captured).
+      `test_rescue_capture_cli.py`'s shape), a liveness-gate regression test
+      (mid-write session is deferred, not captured), and a
+      non-`Available`-state regression test (a `Shutdown`/`Starting`/
+      unknown-state CodeSpace is deferred without a connection attempt).
 
 ### Phase 4 — Periodic trigger for CodeSpaces
-- [ ] Design the periodic trigger's *owner*: unlike a container fleet member
-      (always reachable on its host), a CodeSpace is remote and part of a
-      shared account-wide pool (`pool.py`) — decide whether the timer lives
-      on the machine that owns the lease, a machine that owns the pool, or
-      is folded into an existing pool-sweep/reconciliation loop that
-      already runs periodically. Record the decision and why before wiring
-      anything.
-- [ ] Wire the periodic trigger per that decision (systemd timer, existing
-      sweep hook, or other — whatever the design calls for).
-- [ ] Validate end-to-end against a real leased CodeSpace: a capture picks
-      up a real session, publishes it, and the CodeSpace's own state
-      (lease, connection) is unaffected — mirroring the container
-      validation's proof that `docker ps` uptime was unaffected.
+(scope set by Phase 1's scheduling-ownership decision)
+- [ ] If Phase 1 decided **consumer-owned** (the containers-precedent
+      default): this phase becomes documentation only -- record, in this
+      repo's own docs (e.g. a short section in `agent-codespaces`'s README
+      or the `codespaces-lifecycle` skill), how a consumer wires its own
+      periodic trigger against the Phase 3 verb, mirroring how the
+      containers-side downstream consumer did it. No new repository-owned
+      scheduling code is written under this branch.
+- [ ] If Phase 1 decided **repository-owned** (only viable if an existing
+      always-running loop was confirmed to cover every relevant venue):
+      wire the periodic capture into that already-existing loop; do not
+      introduce a new standalone timer/daemon that duplicates a mechanism
+      this repo already runs.
+- [ ] Validate end-to-end against a real leased CodeSpace, using whichever
+      trigger path Phase 1 chose: a capture picks up a real session,
+      publishes it, and the CodeSpace's own state (lease, connection) is
+      unaffected -- mirroring the container validation's proof that
+      `docker ps` uptime was unaffected.
 
 ### Phase 5 — Close-out
 - [ ] Confirm both providers' capture/publish result-shape fields are
@@ -293,8 +348,9 @@ itself did not specify phasing)_
       unchanged after the extraction.
 - [ ] Phase 3: agent-codespaces' test suite
       (`python tools/run-plugin-tests.py agent-codespaces`) passes,
-      including the new liveness-gate regression test and CLI-dispatch
-      tests.
+      including the new liveness-gate regression test, the
+      non-`Available`-state regression test (no boot/connect attempt for a
+      Shutdown/Starting/unknown-state CodeSpace), and CLI-dispatch tests.
 - [ ] Phase 4: a real leased CodeSpace is captured and published
       end-to-end (mirroring the container-side end-to-end validation
       already proven for `rescue-capture`) — published session readable
