@@ -118,6 +118,14 @@ async def diagnose(
         printer(f"{step(1, 'config')}: FAILED -- {exc}")
         report.stages.append(StageResult("config", False, str(exc)))
         return report
+    except (ValueError, TypeError) as exc:
+        # A parseable-but-malformed scalar (e.g. ``timeout: not-a-number``) --
+        # ``parse_config`` converts several fields (``timeout``, ``retries``,
+        # cache ``ttl``/``skew``, decorator options) via bare ``float()``/
+        # ``int()`` calls that raise unwrapped, outside ``ConfigError`` too.
+        printer(f"{step(1, 'config')}: FAILED -- {exc}")
+        report.stages.append(StageResult("config", False, str(exc)))
+        return report
     where = str(cfg.source_path) if cfg.source_path else name_or_path
     printer(f"{step(1, 'config')}: OK -- {where} -> {cfg.server.type} {cfg.server.launch_desc}")
     report.stages.append(StageResult("config", True, where))

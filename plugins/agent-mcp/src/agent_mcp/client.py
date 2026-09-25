@@ -394,19 +394,21 @@ class OneShotSession:
         return filter_tools(tools, self.cfg.tools)
 
     async def list_tools_checked(self) -> list[dict]:
-        """Like :meth:`list_tools`, but raises :class:`UpstreamError` on an
-        explicit JSON-RPC error response instead of silently truncating the
-        catalog.
+        """Like :meth:`list_tools`, but raises :class:`UpstreamError` on any
+        malformed or error ``tools/list`` response instead of silently
+        truncating the catalog.
 
         :func:`agent_mcp.decorators._catalog.fetch_all_tools` treats *any*
-        response missing a top-level ``result`` -- including a genuine
-        ``error`` -- as "no more pages" and returns whatever it already
+        response missing a well-formed top-level ``result`` -- a genuine
+        JSON-RPC ``error``, a non-dict response, or a ``result`` that isn't a
+        mapping -- as "no more pages" and returns whatever it already
         collected (possibly an empty list). That's the right lenient default
         for a live decorator (``defer``/``code-mode``) mid-session, but it
         means a caller that needs to know the catalog fetch itself *failed*
         (``agent-mcp diagnose``) cannot tell a healthy empty catalog from a
         broken one via :meth:`list_tools` alone. This variant duplicates the
-        same bounded pagination loop with one added check.
+        same bounded pagination loop, treating every one of those shapes as a
+        hard failure rather than an early, silent stop.
         """
         client = self._need_client()
         if self._ctx is None:
@@ -420,12 +422,19 @@ class OneShotSession:
             resp = await self._paginated_request(req)
             if isinstance(resp, dict) and "error" in resp:
                 _raise_error(resp["error"], context="tools/list")
-            if not isinstance(resp, dict) or "result" not in resp:
-                break
-            result = resp.get("result") or {}
+            if not isinstance(resp, dict) or not isinstance(resp.get("result"), dict):
+                raise UpstreamError(
+                    f"tools/list: malformed response (expected a 'result' "
+                    f"object, got {resp!r})"
+                )
+            result = resp["result"]
             page = result.get("tools")
-            if isinstance(page, list):
-                tools.extend(t for t in page if isinstance(t, dict))
+            if not isinstance(page, list):
+                raise UpstreamError(
+                    f"tools/list: malformed response (expected 'result.tools' "
+                    f"to be a list, got {page!r})"
+                )
+            tools.extend(t for t in page if isinstance(t, dict))
             cursor = result.get("nextCursor")
             if not cursor:
                 break

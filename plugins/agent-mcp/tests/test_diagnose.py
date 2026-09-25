@@ -41,6 +41,31 @@ for line in sys.stdin:
         sys.stdout.write(json.dumps(r)+"\n"); sys.stdout.flush()
 """
 
+# A stdio MCP child whose tools/list answer is well-formed JSON-RPC but has a
+# malformed *result* shape (no "tools" list at all) -- neither an explicit
+# error nor a valid catalog page. Regression for `list_tools_checked`.
+MCP_CHILD_MALFORMED_CATALOG = r"""
+import sys, json
+def handle(m):
+    mid = m.get("id"); method = m.get("method")
+    if method == "initialize":
+        return {"jsonrpc":"2.0","id":mid,"result":{
+            "protocolVersion":"2025-06-18",
+            "serverInfo":{"name":"malformed-catalog","version":"1"},"capabilities":{}}}
+    if method == "tools/list":
+        return {"jsonrpc":"2.0","id":mid,"result":{"notTools":"oops"}}
+    if mid is not None:
+        return {"jsonrpc":"2.0","id":mid,"result":{}}
+    return None
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    r = handle(json.loads(line))
+    if r is not None:
+        sys.stdout.write(json.dumps(r)+"\n"); sys.stdout.flush()
+"""
+
 
 def _cfg(extra: dict | None = None):
     data = {
@@ -146,3 +171,35 @@ async def test_diagnose_reports_catalog_stage_failure_not_empty_success(tmp_path
     assert failed.name == "catalog"
     assert "catalog backend down" in failed.detail
     assert report.tool_count is None
+
+
+async def test_diagnose_reports_malformed_catalog_shape_as_failure(tmp_path):
+    # Regression: a well-formed JSON-RPC response whose result has no
+    # "tools" list at all (no explicit error either) must still fail the
+    # catalog stage rather than silently succeed with an empty catalog.
+    path = _write_cfg(tmp_path, {
+        "server": {"type": "stdio", "command": [sys.executable, "-c", MCP_CHILD_MALFORMED_CATALOG]},
+        "auth": {"kind": "none"},
+    })
+    report = await diagnose(str(path), printer=lambda _line: None)
+
+    assert not report.ok
+    failed = report.failed_stage
+    assert failed is not None
+    assert failed.name == "catalog"
+    assert report.tool_count is None
+
+
+async def test_diagnose_reports_malformed_config_value_as_failure(tmp_path):
+    # Regression: `parse_config` converts `timeout` via a bare `float()` that
+    # raises `ValueError` unwrapped (outside `ConfigError`) for a non-numeric
+    # value -- must not escape `diagnose` as an unhandled traceback.
+    path = _write_cfg(tmp_path, {
+        "server": {"type": "stdio", "command": [sys.executable, "-c", MCP_CHILD]},
+        "auth": {"kind": "none"},
+        "timeout": "not-a-number",
+    })
+    report = await diagnose(str(path), printer=lambda _line: None)
+
+    assert not report.ok
+    assert [s.name for s in report.stages] == ["config"]
