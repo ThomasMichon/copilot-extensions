@@ -140,6 +140,11 @@ agent-containers leases              # show active leases
 agent-containers lifecycle-clear [name]
                                       # clear only expired/dead admission records
 agent-containers exec <name>         # run the ACP launch command (testing)
+agent-containers copilot <name>      # attach a trusted-container CLI session
+agent-containers copilot <name> --detach [--seed-file task.md]
+                                      # start/rejoin an observable background CLI session
+agent-containers copilot <name> --stop
+                                      # stop that detached session and its keeper
 agent-containers ssh-profile <name> [--alias <alias>]
                                       # publish a named restricted SSH target
 agent-containers ssh-profile <name> --project <project> [--label <label>]
@@ -154,6 +159,20 @@ agent-containers version             # show version
 
 Bridge-facing commands (`namespace-*`, `relay-profile`) and `ssh-stdio` are
 implementation seams and are not normally invoked by humans.
+
+Detached CLI-mode sessions are trusted-profile only. `--detach` reserves the
+host bridge's CLI-mode slot under `<identity>@<container>`, provisions
+agent-bridge registration credentials inside the container, starts a small
+host-side forward keeper for the bridge and credential-relay reverse forwards,
+runs `agent-worktrees embody --json` in the container workspace without a PTY,
+and prints a JSON handle with `session_id`, `scope_id`, and ready-made
+`status`/`observe`/`nudge`/`attach`/`stop` commands. `--stop` kills the
+container tmux session, verifies it is gone, stops the keeper, and deregisters
+the exact live-session row. Extra Copilot CLI flags can be repeated with
+`--copilot-arg`; use `--seed-file -` for long or multi-line prompts.
+`--ref-file PATH` (repeatable, `--detach` only) copies an operator file outside
+the checkout to `~/.agent-bridge/refs/<batch>/` in the container and names it to
+the worker (seed for a new session, a message on rejoin).
 
 ## Configuration
 

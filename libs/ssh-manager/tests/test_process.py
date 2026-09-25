@@ -77,6 +77,78 @@ def test_terminate_tree_ignores_already_exited_kill_race():
     asyncio.run(process.terminate_ssh_process_tree(FakeProc()))
 
 
+class _Transport:
+    def __init__(self):
+        self.closed = 0
+
+    def close(self):
+        self.closed += 1
+
+
+def test_a_cancelled_kill_closes_the_unreaped_transport():
+    """A kill cancelled at loop shutdown must not leave its transport to GC
+    (whose __del__ would print "Event loop is closed" after asyncio.run)."""
+
+    class HungProc:
+        returncode = None
+        pid = None
+
+        def __init__(self):
+            self._transport = _Transport()
+
+        async def wait(self):
+            await asyncio.sleep(3600)
+
+        def kill(self):
+            pass
+
+    proc = HungProc()
+
+    async def scenario():
+        try:
+            await asyncio.wait_for(process.terminate_ssh_process_tree(proc), timeout=0.05)
+        except (TimeoutError, asyncio.TimeoutError):
+            pass
+
+    asyncio.run(scenario())
+    assert proc._transport.closed == 1
+
+
+def test_a_reaped_process_keeps_its_transport_to_asyncio():
+    class ExitedProc:
+        returncode = 0
+        pid = 123
+
+        def __init__(self):
+            self._transport = _Transport()
+
+    proc = ExitedProc()
+    asyncio.run(process.terminate_ssh_process_tree(proc))
+    assert proc._transport.closed == 0
+
+
+def test_a_real_killed_subprocess_is_released_before_the_loop_closes():
+    import gc
+    import sys
+    import warnings
+
+    async def scenario():
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-c", "import time; time.sleep(30)",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        proc.kill()
+        process._close_unreaped_transport(proc)  # what a capped/cancelled kill now does
+        return proc
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", ResourceWarning)
+        leftover = asyncio.run(scenario())
+        assert leftover._transport.is_closing()
+        del leftover
+        gc.collect()
+
+
 def test_run_process_cleanup_timeout_does_not_block_caller():
     """A bounded caller must not be stuck behind a slow shielded cleanup.
 

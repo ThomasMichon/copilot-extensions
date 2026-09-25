@@ -455,7 +455,7 @@ def _cmd_create_cli(
     here would only be a second, divergent way to do what that verb already
     does.
 
-    ``detach=True`` forwards ``--detach`` (codespace venues only): the venue
+    ``detach=True`` forwards ``--detach`` (CodeSpace and container venues): the venue
     verb starts the session in the background and prints a JSON handle
     instead of taking over this terminal -- the shape an orchestrating agent
     needs. The seed then travels over stdin (``--seed-file -``) so a long,
@@ -471,14 +471,6 @@ def _cmd_create_cli(
             "       For a local session, use `agent-worktrees copilot "
             "--anchor` (or `--worktree-id <id>`) directly -- agent-bridge's "
             "mediation isn't needed on this machine.",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-    if detach and prefix != "codespace":
-        print(
-            f"[FAIL] --detach is currently supported for codespace:<name> "
-            f"targets only, got {target!r}. Attach interactively without "
-            "--detach instead.",
             file=sys.stderr,
         )
         sys.exit(2)

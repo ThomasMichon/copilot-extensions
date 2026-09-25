@@ -20,6 +20,9 @@ _install_agent_ssh_package() {
     "$VENV_PYTHON" -m pip install --quiet \
         "$PLUGIN_DIR/libs/agent-procutil" \
         "$PLUGIN_DIR/libs/dropin-registry" \
+        "$PLUGIN_DIR/libs/ssh-manager" \
+        "$PLUGIN_DIR/libs/venue-copilot" \
+        "$PLUGIN_DIR/libs/zdd" \
         "$PLUGIN_DIR" 2>/dev/null
 }
 

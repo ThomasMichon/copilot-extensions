@@ -147,10 +147,10 @@ def main(argv: list[str] | None = None) -> int:
         help="Terminate a live SSH holder and take over this trusted container",
     )
 
-    # --- copilot (agent-bridge-cli-mode-sessions Phase 4: venue launch) ---
     from .copilot_venue import add_copilot_subparser as _add_copilot_subparser
     _add_copilot_subparser(sub)
-
+    from .forward_keeper import add_subparser as _add_forward_keeper_subparser
+    _add_forward_keeper_subparser(sub)
     ssh_stdio_p = sub.add_parser(
         "ssh-stdio",
         help="Serve an SSH-compatible restricted provider target over stdio",

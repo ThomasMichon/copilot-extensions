@@ -785,8 +785,9 @@ two capabilities without the destructive take-over:
   Every field is hard-capped
   so the beat stays a status line, never a chat log. The bundled extension nudges
   an operator-driven session to emit one at a gentle cadence.
-- **A detached CLI-mode session on a CodeSpace** (`create codespace:<name> --cli
-  --detach`, see [cli-commands.md](references/cli-commands.md#detached-cli-mode-session-on-a-codespace-observable-steerable))
+- **A detached CLI-mode session on a CodeSpace or trusted container** (`create
+  codespace:<name> --cli --detach` / `create container:<name> --cli --detach`,
+  see [cli-commands.md](references/cli-commands.md#detached-cli-mode-session-on-a-codespace-or-trusted-container-observable-steerable))
   is this same surface: it registers here with its venue recorded, so an
   orchestrator observes it with `live-sessions resolve` / bounded `result`
   reads and steers it with `send`, while a human can attach its real terminal

@@ -22,10 +22,26 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
+import time
+import uuid
 from collections.abc import Callable
 from typing import Any
 
 DEFAULT_TTL_SECONDS = 300.0
+
+# The seed travels inside the remote command line; a Windows host caps a
+# process command line at ~32K characters, so refuse clearly well below that.
+MAX_SEED_CHARS = 24_000
+
+# `embody` types its seed into the TUI with `tmux send-keys`, which is only safe
+# for one line (a newline would submit a partial prompt). A multi-line or long
+# task is therefore written to a file on the venue and seeded as a one-line
+# pointer; the file also stays re-readable by the session after a resume.
+SEED_INLINE_MAX = 400
+SEED_DIR = "$HOME/.agent-bridge/seeds"
+
+SESSION_SELECTORS = ("--resume", "-r", "--continue", "--session-id")
 
 # The daemon's own config dir, matching agent-bridge's ``effective_config_dir()``
 # default -- overridable the same way, via ``AGENT_BRIDGE_CONFIG_DIR``.
@@ -53,6 +69,21 @@ _ENV_SCRUB = frozenset({
     "__PYVENV_LAUNCHER__",
 })
 
+_TRUST_FOLDER = (
+    "python3 -c 'import json,os,sys\n"
+    "p=os.path.expanduser(\"~/.copilot/config.json\")\n"
+    "head,body=[],[]\n"
+    "if os.path.exists(p):\n"
+    "    for line in open(p).read().splitlines():\n"
+    "        (head if not body and line.lstrip().startswith(\"//\") else body).append(line)\n"
+    "try: d=json.loads(chr(10).join(body)) if body else {}\n"
+    "except Exception: sys.exit(0)\n"
+    "t=d.setdefault(\"trustedFolders\",[])\n"
+    "t.append(sys.argv[1]) if sys.argv[1] not in t else None\n"
+    "os.makedirs(os.path.dirname(p),exist_ok=True)\n"
+    "open(p,\"w\").write(chr(10).join(head+[json.dumps(d,indent=2)])+chr(10))' "
+)
+
 
 class VenueCopilotError(RuntimeError):
     """Raised when reservation/release plumbing fails.
@@ -62,6 +93,102 @@ class VenueCopilotError(RuntimeError):
     :func:`release_cli_mode` never raises: a failed release must not mask the
     real outcome of an interactive session that already ran.
     """
+
+
+def read_seed(args: Any) -> str | None:
+    """The seed from ``--seed`` or ``--seed-file`` (``-`` = stdin)."""
+    path = getattr(args, "seed_file", None)
+    if path and getattr(args, "seed", None):
+        raise ValueError("--seed and --seed-file are mutually exclusive")
+    if not path:
+        seed = getattr(args, "seed", None)
+    elif path == "-":
+        seed = sys.stdin.read()
+    else:
+        with open(path, encoding="utf-8") as fh:
+            seed = fh.read()
+    if seed and len(seed) > MAX_SEED_CHARS:
+        raise ValueError(
+            f"seed is {len(seed)} characters (max {MAX_SEED_CHARS}); put the "
+            "details in a file the session can read and seed a short pointer"
+        )
+    return seed or None
+
+
+def with_new_session(copilot_args: list[str]) -> list[str]:
+    """Start a *new* Copilot session unless the caller chose one to resume."""
+    if any(a.split("=", 1)[0] in SESSION_SELECTORS for a in copilot_args):
+        return list(copilot_args)
+    return [*copilot_args, f"--session-id={uuid.uuid4()}"]
+
+
+def seed_delivery(seed: str | None, scope: str) -> tuple[str | None, str]:
+    """``(seed_to_type, shell_prefix)`` -- the prefix stages a file when needed."""
+    if not seed or ("\n" not in seed.strip() and len(seed) <= SEED_INLINE_MAX):
+        return (seed.strip() if seed else None), ""
+    safe = "".join(c if c.isalnum() or c in "-._" else "-" for c in scope)
+    path = f"{SEED_DIR}/{safe}-{int(time.time())}.md"
+    prefix = f'mkdir -p "{SEED_DIR}" && printf %s {shlex.quote(seed)} > "{path}" && '
+    pointer = (
+        f"Read the task file {path.replace('$HOME', '~')} now and carry it out "
+        "exactly as written; re-read it whenever you need the instructions again."
+    )
+    return pointer, prefix
+
+
+def trust_folder_command(folder: str) -> str:
+    """Shell snippet adding ``folder`` to the venue's Copilot ``trustedFolders``."""
+    return _TRUST_FOLDER + shlex.quote(folder)
+
+
+def registration_credentials_script(token: str, port: int) -> str:
+    """Shell snippet provisioning agent-bridge registration credentials."""
+    return (
+        "mkdir -p ~/.agent-bridge && "
+        f"printf 'token: %s\\n' {shlex.quote(token)} "
+        "> ~/.agent-bridge/auth.yaml && "
+        f"printf '{{\"active\": {{\"port\": {int(port)}}}}}' "
+        "> ~/.agent-bridge/active.json"
+    )
+
+
+def bridge_probe_script(port: int) -> str:
+    """Authenticated curl probe for a venue-side agent-bridge reverse forward."""
+    return (
+        "t=$(sed -n 's/^[[:space:]]*token:[[:space:]]*//p' "
+        "~/.agent-bridge/auth.yaml | tr -d \"'\\\"\"); "
+        f"curl -fsS -m 5 -o /dev/null -H \"Authorization: Bearer $t\" "
+        f"http://127.0.0.1:{int(port)}/api/v1/live-sessions"
+    )
+
+
+def last_json(text: str) -> dict[str, Any]:
+    """The last complete JSON object in ``text`` (embody may pretty-print)."""
+    start = text.rfind("{")
+    while start != -1:
+        try:
+            value = json.loads(text[start:])
+            if isinstance(value, dict):
+                return value
+        except ValueError:
+            pass
+        start = text.rfind("{", 0, start)
+    return {}
+
+
+def observe_commands(session_id: str) -> dict[str, str]:
+    """Venue-neutral observation/steering commands for a live session."""
+    return {
+        "status": f"agent-bridge --json live-sessions resolve --handle {session_id}",
+        "observe": (
+            f"agent-bridge result {session_id} --json --max-items 5 "
+            "--max-text-chars 2000"
+        ),
+        "nudge": f"agent-bridge send {session_id} \"<message>\" --no-wait",
+    }
+
+
+_BRIDGE_CALL_TIMEOUT = 60.0  # one local agent-bridge CLI call (reserve/release/lookup)
 
 
 def _run_bridge(
@@ -78,7 +205,12 @@ def _run_bridge(
     resolved = shutil.which(argv[0]) or argv[0]
     argv = [resolved, *argv[1:]]
     env = {k: v for k, v in os.environ.items() if k not in _ENV_SCRUB}
-    result = run(argv, capture_output=True, text=True, env=env)
+    try:
+        result = run(argv, capture_output=True, text=True, env=env, timeout=_BRIDGE_CALL_TIMEOUT)
+    except subprocess.TimeoutExpired as exc:
+        raise VenueCopilotError(
+            f"`{' '.join(argv[:5])}` did not answer within {_BRIDGE_CALL_TIMEOUT:g}s"
+        ) from exc
     stdout = getattr(result, "stdout", None) or ""
     returncode = getattr(result, "returncode", 0)
     parsed: dict[str, Any] = {}
@@ -131,6 +263,43 @@ def reserve_cli_mode(
     return reservation
 
 
+def reserve_with_retry(
+    worktree_id: str,
+    venue: dict[str, Any],
+    *,
+    ttl_seconds: float = DEFAULT_TTL_SECONDS,
+    ttl: float | None = None,
+    retry_window: float = 90.0,
+    on_wait: Callable[[], None] | None = None,
+    bridge_bin: str = "agent-bridge",
+    run: Callable[..., Any] = subprocess.run,
+) -> dict[str, Any]:
+    """Reserve CLI mode, retrying briefly while another launch holds it."""
+    deadline = time.monotonic() + retry_window
+    ttl_value = ttl if ttl is not None else ttl_seconds
+    while True:
+        try:
+            try:
+                return reserve_cli_mode(
+                    worktree_id,
+                    ttl_seconds=ttl_value,
+                    venue=venue,
+                    bridge_bin=bridge_bin,
+                    run=run,
+                )
+            except TypeError:
+                try:
+                    return reserve_cli_mode(worktree_id, ttl_seconds=ttl_value, venue=venue)
+                except TypeError:
+                    return reserve_cli_mode(worktree_id, ttl_value, venue)
+        except VenueCopilotError as exc:
+            if "reservation_active" not in str(exc) or time.monotonic() >= deadline:
+                raise
+            if on_wait:
+                on_wait()
+            time.sleep(5.0)
+
+
 def get_cli_mode_reservation(
     worktree_id: str,
     *,
@@ -147,6 +316,33 @@ def get_cli_mode_reservation(
         "--worktree-id", worktree_id,
     ]
     return _run_bridge(argv, run=run)
+
+
+def await_claim(
+    worktree_id: str,
+    reservation_id: str,
+    timeout: float,
+    *,
+    bridge_bin: str = "agent-bridge",
+    run: Callable[..., Any] = subprocess.run,
+) -> str | None:
+    """Wait until a CLI-mode reservation is claimed by a live session."""
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            try:
+                row = get_cli_mode_reservation(worktree_id, bridge_bin=bridge_bin, run=run)
+            except TypeError:
+                # Older tests monkeypatch ``get_cli_mode_reservation`` with a
+                # one-argument seam; keep the shared helper drop-in compatible.
+                row = get_cli_mode_reservation(worktree_id)
+        except VenueCopilotError:
+            row = {}
+        if row.get("reservation_id") == reservation_id and row.get("claimed_by_session_id"):
+            return str(row["claimed_by_session_id"])
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(3.0)
 
 
 def release_cli_mode(

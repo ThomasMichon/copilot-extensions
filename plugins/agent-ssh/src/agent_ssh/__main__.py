@@ -319,6 +319,11 @@ def build_parser() -> argparse.ArgumentParser:
     restore_host.add_argument("--json", action="store_true")
     restore_host.set_defaults(func=_cmd_restore_host)
 
+    from .copilot_detach import add_copilot_subparser, add_forward_keeper_subparser
+
+    add_copilot_subparser(sub)
+    add_forward_keeper_subparser(sub)
+
     sub.add_parser("version", help="Show version")
     return parser
 

@@ -223,7 +223,12 @@ launch confirmed the session; never by waking a stopped CodeSpace), up to a 24h
 cap, and both forwards follow a host bridge restart onto its new port. Observe and steer it through agent-bridge
 (`live-sessions resolve`, `result`, `send`, `ui`). A detached launch keeps the
 CodeSpace claim active; `--stop` settles it like any finished connection and
-deregisters the stopped session from the host bridge at once. A CodeSpace that
+deregisters the stopped session from the host bridge at once. When close-out
+continues on the box (for example `finalize` to recover its session state),
+pass `--stop --keep-claim`: the session is stopped and deregistered the same
+way, but a clean checkout does not settle the claim at-rest (which releases it
+to the next borrower), so no other task can take the box mid-recovery; release
+the claim last. A CodeSpace that
 is already `Shutdown` is never booted for `--stop`: its session is gone, so it
 only releases and deregisters (`already_shutdown`), and the claim is settled by
 the ordinary release/retire step.

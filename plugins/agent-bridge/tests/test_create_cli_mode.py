@@ -235,18 +235,19 @@ class TestCmdCreateCliDetach:
         ]
         assert seen["kwargs"]["input"] is None
 
-    def test_detach_refused_for_container_targets(self, monkeypatch, capsys) -> None:
-        self._capture(monkeypatch)
-        monkeypatch.setattr(
-            targeting.subprocess, "run",
-            lambda *a, **k: pytest.fail("must not launch"),
-        )
+    def test_detach_forwards_to_container_targets(self, monkeypatch) -> None:
+        seen = self._capture(monkeypatch)
+        prompt = "do the container work"
 
         with pytest.raises(SystemExit) as exc:
-            m._cmd_create(_ns(target="container:repo-1", detach=True))
+            m._cmd_create(_ns(target="container:repo-1", prompt=prompt, detach=True))
 
-        assert exc.value.code == 2
-        assert "codespace" in capsys.readouterr().err
+        assert exc.value.code == 0
+        assert seen["argv"] == [
+            "/bin/agent-containers", "copilot", "repo-1",
+            "--detach", "--seed-file", "-",
+        ]
+        assert seen["kwargs"]["input"] == prompt
 
     def test_detach_requires_cli(self, monkeypatch, capsys) -> None:
         with pytest.raises(SystemExit) as exc:

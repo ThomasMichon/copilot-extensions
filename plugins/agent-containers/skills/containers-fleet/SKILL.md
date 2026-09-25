@@ -176,6 +176,42 @@ for a trusted fleet that intentionally needs no host credential path.
 Those are the **trusted-profile** defaults. A restricted fleet launches only its
 explicit `acp_command` and forwards neither host credential path.
 
+## Detached CLI-mode sessions
+
+For an observable, steerable Copilot CLI session that survives the launcher
+without taking over the caller's terminal, use a trusted container:
+
+```bash
+<catalog argv[0]> copilot <container-name> --detach --seed-file task.md
+# -> JSON with session_id, scope_id, venue, and status/observe/nudge/attach/stop commands
+<catalog argv[0]> copilot <container-name> --stop
+```
+
+`--detach` refuses restricted fleets, provisions the container's bridge
+registration credentials, starts a small host-side forward keeper for the
+bridge and credential-relay reverse forwards, launches the container's own
+worktree `embody` verb (JSON mode) in its workspace, and waits for the
+session to register with the host bridge before reporting success. Repeating
+`--copilot-arg ARG` passes extra Copilot CLI flags to the session. `--stop`
+kills and verifies the venue tmux session, stops the keeper, and deregisters
+the exact live-session row.
+
+`--ref-file PATH` (repeatable; a file or a folder, up to 256 MiB per call)
+copies an operator file (a HAR, a log, a transcript) into the container at
+`~/.agent-bridge/refs/<batch>/`, outside the checkout, over the SSH channel's
+stdin, and tells the worker the exact paths: in the seed for a new session, or
+as a message when the same `--detach` rejoins a running one. The handle reports
+`ref_files` and `refs_delivered` (`seed`/`message`/`failed`). The orchestrator
+passes only the host path and never reads the file itself.
+
+The fleet image must carry Copilot CLI, the agent-bridge plugin, tmux, sshd,
+and the container's own worktree manager with the workspace already adopted
+as a project (the launch fails with "Could not resolve a project" otherwise).
+With `forward_gh_token` on (the default), the host `gh auth token` is staged
+as `GH_TOKEN` through the same stdin-only launch file as the relay values, so
+the container's Copilot starts signed in; the launch fails early if the host
+has no token rather than starting a signed-out session.
+
 For a named restricted OpenSSH target:
 
 ```bash
