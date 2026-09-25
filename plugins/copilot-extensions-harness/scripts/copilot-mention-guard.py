@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Decide whether a Copilot shell command posts an ``@copilot`` mention to a
 GitHub PR/issue comment or review, **scoped to this plugin's own repo**
-(``ThomasMichon/copilot-extensions``, read from ``plugin.json`` -- a fork or
-rename picks up the new target automatically).
+(``ThomasMichon/copilot-extensions``, read from ``plugin.json``'s
+``repository`` field -- a maintainer *rename* of that field retargets the
+guard without a second string to keep in sync; a *fork* does NOT, since a
+fork's checked-in ``plugin.json`` still names the upstream repo -- see
+``target_repo_from_manifest()``'s own docstring for that limit).
 
 On GitHub, an ``@copilot`` mention in a PR/issue comment or review does NOT
 nudge the ``copilot-pull-request-reviewer`` bot to re-review -- it delegates
@@ -76,8 +79,15 @@ def _basename(token: str) -> str:
 
 def target_repo_from_manifest(plugin_root: Path) -> str | None:
     """``owner/repo`` this guard applies to, read from this plugin's own
-    ``plugin.json`` ``repository``/``homepage`` field -- never hardcoded, so
-    a fork or rename retargets the guard automatically."""
+    ``plugin.json`` ``repository``/``homepage`` field rather than a second
+    hardcoded string -- so editing that ONE field (a maintainer rename) is
+    the only place to update. This does NOT auto-retarget on a GitHub
+    *fork*: a fork's checked-in ``plugin.json`` still names the upstream
+    repo, so the guard stays scoped to the upstream repo there too (a
+    conservative default -- the mention-post hazard this guard exists for
+    is a property of GitHub's Copilot cloud agent, not of any one repo, so
+    staying scoped to the plugin's declared home is a safe default even on
+    an unrelated fork; it is not a "this fork's own repo" retarget)."""
     try:
         manifest = json.loads((plugin_root / "plugin.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):

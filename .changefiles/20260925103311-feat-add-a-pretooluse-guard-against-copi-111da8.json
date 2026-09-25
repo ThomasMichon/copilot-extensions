@@ -3,7 +3,7 @@
   "changes": [
     {
       "plugin": "copilot-extensions-harness",
-      "type": "minor"
+      "type": "patch"
     }
   ]
 }

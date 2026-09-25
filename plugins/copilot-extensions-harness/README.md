@@ -46,13 +46,16 @@ The plugin also registers one **preToolUse** guard (`hooks.json` +
 `scripts/copilot-mention-guard.py`): it denies a `gh` invocation that would
 publish an `@copilot` mention in a PR/issue comment or review, scoped to this
 plugin's own repo (`ThomasMichon/copilot-extensions`, read live from
-`plugin.json` -- never hardcoded, so a fork retargets automatically). On
-GitHub, that mention doesn't nudge the review bot; it delegates to the
-separate Copilot **cloud coding agent**, which starts pushing its own commits
-directly to the PR branch. See `CONTRIBUTING.md`'s own "Do not comment
-`@copilot review`" rule for the written policy this hook mechanically
-enforces. A control repo enabling this plugin purely for its instruction
-projections is never touched by the guard -- it only fires for a `gh`
+`plugin.json`'s `repository` field rather than a second hardcoded string --
+a maintainer rename of that field is the only place to update; a GitHub
+*fork* does NOT retarget the guard, since a fork's checked-in `plugin.json`
+still names the upstream repo). On GitHub, that mention doesn't nudge the
+review bot; it delegates to the separate Copilot **cloud coding agent**,
+which starts pushing its own commits directly to the PR branch. See
+`CONTRIBUTING.md`'s own "Do not comment `@copilot review`" rule for the
+written policy this hook mechanically enforces. A control repo enabling this
+plugin purely for its instruction projections is never touched by the guard
+-- it only fires for a `gh`
 invocation whose current directory resolves to this plugin's own target repo.
 
 | Sub-agent | Covers |
