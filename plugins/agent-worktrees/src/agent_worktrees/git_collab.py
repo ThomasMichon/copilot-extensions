@@ -238,11 +238,14 @@ def manage_feature_branch(
         with hooks.allow_pr_push():
             pushed = git_ops.push(remote, feature, cwd=worktree_path)
         if not pushed:
-            output.err(
-                f"Push of {feature} to {remote} failed (likely non-ff). Run "
-                f"'git feature-branch {name} --sync' to pull the shared branch "
-                f"forward, then retry."
-            )
+            output.err(f"Push of {feature} to {remote} failed.")
+            if pushed.stderr:
+                output.err(pushed.stderr.strip())
+            if pushed.retryable:
+                output.err(
+                    f"Run 'git feature-branch {name} --sync' to pull the shared "
+                    "branch forward, then retry."
+                )
             return False
         print(f"[OK] {feature} pushed to {remote}.")
     return True
@@ -336,11 +339,14 @@ def merge_to_feature(
         with hooks.allow_pr_push():
             pushed = git_ops.push(remote, feature, cwd=worktree_path)
         if not pushed:
-            output.err(
-                f"Push of {feature} to {remote} failed (likely a concurrent update). "
-                f"Run 'git merge-to-feature {name}' again to rebase onto the latest "
-                f"and retry."
-            )
+            output.err(f"Push of {feature} to {remote} failed.")
+            if pushed.stderr:
+                output.err(pushed.stderr.strip())
+            if pushed.retryable:
+                output.err(
+                    f"Run 'git merge-to-feature {name}' again to rebase onto the "
+                    "latest and retry."
+                )
             return False
         print(f"[OK] {feature} pushed to {remote}.")
     return True

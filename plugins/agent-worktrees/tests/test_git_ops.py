@@ -52,10 +52,13 @@ class TestGitWrapper:
 
 
 class TestNoHooks:
-    """#3707: the plugin's mechanical git ops (squash re-commit / rebase / push)
+    """#3707: the plugin's mechanical git ops (squash re-commit / rebase)
     disable a repo's client-side guard hooks via ``-c core.hooksPath=`` so a
-    branch-protection pre-commit/pre-push/pre-rebase can't block or corrupt the
-    flow. Server-side protection is unaffected (not a client hook)."""
+    branch-protection pre-commit/pre-rebase can't block or corrupt the flow.
+    Server-side protection is unaffected (not a client hook). ``push()`` is
+    NOT one of these ops (#3561): it must let a repo's real pre-push release
+    guard run, so it never disables hooks -- see the ``TestPush`` class
+    below."""
 
     def _capture(self, monkeypatch):
         import subprocess as _sp
@@ -115,12 +118,14 @@ class TestNoHooks:
         assert seen["args"][:1] == ("rebase",)
         assert seen["no_hooks"] is True
 
+
+class TestPush:
+    """#3561: unlike ``TestNoHooks``'s squash/rebase plumbing, ``push()`` is
+    the terminal action that actually publishes to remote -- a real pre-push
+    release guard (e.g. ``check-changefile-presence.py``) must be allowed to
+    run and block a non-compliant push."""
+
     def test_push_does_not_bypass_hooks(self, monkeypatch):
-        """push() is the terminal action that actually publishes to remote --
-        a real pre-push release guard (e.g. check-changefile-presence.py)
-        must be allowed to run and block a non-compliant push (#3561), unlike
-        the internal squash/rebase plumbing above which legitimately bypasses
-        client-side hooks."""
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
         seen = {}
         monkeypatch.setattr(go, "git", lambda *a, cwd=None, check=True,

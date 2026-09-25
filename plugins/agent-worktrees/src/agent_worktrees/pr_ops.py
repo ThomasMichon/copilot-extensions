@@ -2368,9 +2368,9 @@ def _push_existing_feature(
     with hooks.allow_pr_push():
         pushed = git_ops.push(remote, feature_branch, cwd=worktree_path, force_with_lease=True)
     if not pushed:
-        return {**base, "error": (
-            f"Failed to (re)push '{feature_branch}' to '{remote}'."
-        )}
+        error = f"Failed to (re)push '{feature_branch}' to '{remote}'."
+        error += "\nThe remote branch advanced; rebase and retry." if pushed.retryable else ""
+        return {**base, "error": f"{error}\n{pushed.stderr.strip()}" if pushed.stderr else error}
     # Match the PRRecord for this branch (a worktree may track several); update
     # it in place rather than clobbering an unrelated active PR. A *terminal*
     # PR for this branch (merged/closed externally, e.g. via the auto-merge

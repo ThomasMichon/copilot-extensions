@@ -32,6 +32,57 @@ class TestSlugify:
         assert pr_ops.slugify("!!!") == "change"
 
 
+class TestExistingFeaturePush:
+    """#3561: push() no longer bypasses a real pre-push hook, so
+    _push_existing_feature's failure path needs to surface the real stderr
+    (a hook rejection) and, separately, offer retry guidance only when the
+    failure is actually retryable (a non-fast-forward race), not for every
+    failure -- a hook rejection is not fixed by rebase-and-retry."""
+
+    def test_reports_push_error(self, monkeypatch):
+        monkeypatch.setattr(pr_ops, "_rev", lambda *_args, **_kwargs: "deadbeef")
+        monkeypatch.setattr(
+            pr_ops.git_ops,
+            "push",
+            lambda *_args, **_kwargs: git_ops.PushResult(
+                ok=False, stderr="BLOCKED: release guard"
+            ),
+        )
+
+        result = pr_ops._push_existing_feature(
+            ".", "feature/change", "origin", None, None, None, {},
+            config=None, worktree_id="", title="", body=None, open_pr=None,
+            draft=False, attribution=None,
+        )
+
+        assert result["error"] == (
+            "Failed to (re)push 'feature/change' to 'origin'.\n"
+            "BLOCKED: release guard"
+        )
+
+    def test_reports_retry_guidance_for_non_fast_forward(self, monkeypatch):
+        monkeypatch.setattr(pr_ops, "_rev", lambda *_args, **_kwargs: "deadbeef")
+        monkeypatch.setattr(
+            pr_ops.git_ops,
+            "push",
+            lambda *_args, **_kwargs: git_ops.PushResult(
+                ok=False, stderr="[rejected] non-fast-forward"
+            ),
+        )
+
+        result = pr_ops._push_existing_feature(
+            ".", "feature/change", "origin", None, None, None, {},
+            config=None, worktree_id="", title="", body=None, open_pr=None,
+            draft=False, attribution=None,
+        )
+
+        assert result["error"] == (
+            "Failed to (re)push 'feature/change' to 'origin'.\n"
+            "The remote branch advanced; rebase and retry.\n"
+            "[rejected] non-fast-forward"
+        )
+
+
 class TestRequiredBodySections:
     def test_requires_visible_content_under_each_heading(self):
         body = (
