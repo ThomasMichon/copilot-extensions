@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from agent_logger.catalog import ReviewCatalogIndex, rebuild_from_sidecars
 from agent_logger.sessions import write_review_annotation
 
@@ -268,3 +270,369 @@ def test_write_review_annotation_with_default_index_populates_immediately(
     entries = fresh.query("example/repo", 6100)
     assert len(entries) == 1
     assert entries[0].session_id == "s1"
+
+
+# --------------------------------------------------------------------------- #
+# CLI: `agent-logger annotate` -- the cross-repo process-boundary write path #
+# --------------------------------------------------------------------------- #
+
+
+def _run_annotate_cli(monkeypatch, tmp_path: Path, argv: list[str]) -> int:
+    """Invoke the real CLI entry point with an isolated HOME/AGENT_LOGGER_HOME,
+    matching how ``find_copilot_dir``/``load_config`` resolve in production --
+    a session-fetch-style caller in another repository has no Python import
+    path into agent-logger, only this process boundary."""
+    from agent_logger import __main__ as cli
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("USERPROFILE", raising=False)
+    monkeypatch.setenv("AGENT_LOGGER_HOME", str(tmp_path / ".agent-logger"))
+    return cli.main(argv)
+
+
+def test_cli_annotate_writes_sidecar_and_populates_catalog(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    from agent_logger.catalog import ReviewCatalogIndex
+    from agent_logger.sessions import SessionRef, read_review_annotations
+
+    session_dir = tmp_path / ".copilot" / "session-state" / "s1"
+    session_dir.mkdir(parents=True)
+    (session_dir / "events.jsonl").write_text("", encoding="utf-8")
+
+    rc = _run_annotate_cli(
+        monkeypatch,
+        tmp_path,
+        [
+            "annotate",
+            "s1",
+            "--repo",
+            "example/repo",
+            "--pr-number",
+            "6100",
+        ],
+    )
+
+    assert rc == 0
+    entries = read_review_annotations(SessionRef(id="s1", kind="live", path=session_dir))
+    assert entries[0]["repo"] == "example/repo"
+    assert entries[0]["pr_number"] == 6100
+
+    index = ReviewCatalogIndex(tmp_path / ".agent-logger" / "review-catalog.db")
+    assert len(index.query("example/repo", 6100)) == 1
+
+    payload = capsys.readouterr().out
+    assert "s1" in payload
+    assert "example/repo" in payload
+
+
+def test_cli_annotate_missing_session_exits_nonzero(monkeypatch, tmp_path: Path) -> None:
+    (tmp_path / ".copilot" / "session-state").mkdir(parents=True)
+
+    rc = _run_annotate_cli(
+        monkeypatch,
+        tmp_path,
+        [
+            "annotate",
+            "does-not-exist",
+            "--repo",
+            "example/repo",
+            "--pr-number",
+            "6100",
+        ],
+    )
+
+    assert rc != 0
+
+
+def test_cli_annotate_rejects_directory_without_events_marker(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """A real directory under session-state that never held a session (no
+    events.jsonl) must not be treated as a live session -- matching
+    sessions.resolve_ref()'s own contract, and never getting a
+    review-annotations.json sidecar written into an unrelated directory."""
+    not_a_session = tmp_path / ".copilot" / "session-state" / "not-a-session"
+    not_a_session.mkdir(parents=True)
+
+    rc = _run_annotate_cli(
+        monkeypatch,
+        tmp_path,
+        [
+            "annotate",
+            "not-a-session",
+            "--repo",
+            "example/repo",
+            "--pr-number",
+            "6100",
+        ],
+    )
+
+    assert rc != 0
+    assert not (not_a_session / "review-annotations.json").exists()
+
+
+def test_cli_annotate_reports_out_of_range_pr_number_as_clear_error(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """A --pr-number beyond SQLite's 64-bit INTEGER range raises
+    OverflowError binding the catalog insert -- must surface as the promised
+    error: message, never an uncaught traceback."""
+    session_dir = tmp_path / ".copilot" / "session-state" / "s1"
+    session_dir.mkdir(parents=True)
+    (session_dir / "events.jsonl").write_text("", encoding="utf-8")
+
+    rc = _run_annotate_cli(
+        monkeypatch,
+        tmp_path,
+        [
+            "annotate",
+            "s1",
+            "--repo",
+            "example/repo",
+            "--pr-number",
+            str(2**63),
+        ],
+    )
+
+    assert rc != 0
+
+
+def test_cli_annotate_rejects_unsafe_session_id(monkeypatch, tmp_path: Path) -> None:
+    (tmp_path / ".copilot" / "session-state").mkdir(parents=True)
+
+    rc = _run_annotate_cli(
+        monkeypatch,
+        tmp_path,
+        [
+            "annotate",
+            "../escape",
+            "--repo",
+            "example/repo",
+            "--pr-number",
+            "6100",
+        ],
+    )
+
+    assert rc != 0
+    # Never even attempted to escape session-state and land a sidecar there.
+    assert not (tmp_path / ".copilot" / "escape").exists()
+
+
+def test_cli_annotate_rejects_symlinked_session_directory(
+    monkeypatch, tmp_path: Path
+) -> None:
+    state_root = tmp_path / ".copilot" / "session-state"
+    state_root.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    try:
+        (state_root / "s1").symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation not permitted in this environment")
+
+    rc = _run_annotate_cli(
+        monkeypatch,
+        tmp_path,
+        [
+            "annotate",
+            "s1",
+            "--repo",
+            "example/repo",
+            "--pr-number",
+            "6100",
+        ],
+    )
+
+    assert rc != 0
+
+
+# --------------------------------------------------------------------------- #
+# CLI: `agent-logger catalog query` -- the cross-repo process-boundary read  #
+# side fallback tier (a downstream review-link fallback chain)          #
+# --------------------------------------------------------------------------- #
+
+
+def _run_query_cli(monkeypatch, tmp_path: Path, argv: list[str]) -> tuple[int, str]:
+    """Invoke the real CLI entry point with an isolated HOME/AGENT_LOGGER_HOME
+    and capture stdout, mirroring ``_run_annotate_cli`` -- a caller in another
+    repository (a downstream review-link fallback chain) has no Python import path into
+    agent-logger, only this process boundary."""
+    import contextlib
+    import io
+
+    from agent_logger import __main__ as cli
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("USERPROFILE", raising=False)
+    monkeypatch.setenv("AGENT_LOGGER_HOME", str(tmp_path / ".agent-logger"))
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = cli.main(argv)
+    return rc, buf.getvalue()
+
+
+def test_cli_query_empty_catalog_returns_empty_list(monkeypatch, tmp_path: Path) -> None:
+    import json as _json
+
+    rc, out = _run_query_cli(
+        monkeypatch,
+        tmp_path,
+        ["catalog", "query", "--repo", "example/repo", "--pr-number", "6100"],
+    )
+
+    assert rc == 0
+    payload = _json.loads(out)
+    assert payload == {"repo": "example/repo", "pr_number": 6100, "sessions": []}
+
+
+def test_cli_query_resolves_annotated_live_session(monkeypatch, tmp_path: Path) -> None:
+    import json as _json
+
+    session_dir = tmp_path / ".copilot" / "session-state" / "s1"
+    session_dir.mkdir(parents=True)
+    (session_dir / "events.jsonl").write_text("", encoding="utf-8")
+
+    rc = _run_annotate_cli(
+        monkeypatch,
+        tmp_path,
+        ["annotate", "s1", "--repo", "example/repo", "--pr-number", "6100"],
+    )
+    assert rc == 0
+
+    rc, out = _run_query_cli(
+        monkeypatch,
+        tmp_path,
+        ["catalog", "query", "--repo", "example/repo", "--pr-number", "6100"],
+    )
+
+    assert rc == 0
+    payload = _json.loads(out)
+    assert payload["sessions"] == [{"session_id": "s1", "kind": "live"}]
+
+
+def test_cli_query_is_scoped_by_repo_and_pr_number(monkeypatch, tmp_path: Path) -> None:
+    import json as _json
+
+    session_dir = tmp_path / ".copilot" / "session-state" / "s1"
+    session_dir.mkdir(parents=True)
+    (session_dir / "events.jsonl").write_text("", encoding="utf-8")
+    _run_annotate_cli(
+        monkeypatch,
+        tmp_path,
+        ["annotate", "s1", "--repo", "example/repo", "--pr-number", "6100"],
+    )
+
+    rc, out = _run_query_cli(
+        monkeypatch,
+        tmp_path,
+        ["catalog", "query", "--repo", "example/repo", "--pr-number", "9999"],
+    )
+
+    assert rc == 0
+    assert _json.loads(out)["sessions"] == []
+
+
+def test_cli_query_forwards_since_and_until_to_query_reviewer_sessions(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The `--since`/`--until` flags must actually reach
+    `query_reviewer_sessions`'s own time-window filtering, not just be
+    accepted and silently dropped by the CLI layer."""
+    from agent_logger import cold_store
+
+    captured: dict[str, object] = {}
+
+    def fake_query(repo, pr_number, *, since=None, until=None, cfg=None):
+        captured["repo"] = repo
+        captured["pr_number"] = pr_number
+        captured["since"] = since
+        captured["until"] = until
+        return []
+
+    monkeypatch.setattr(cold_store, "query_reviewer_sessions", fake_query)
+
+    rc, _out = _run_query_cli(
+        monkeypatch,
+        tmp_path,
+        [
+            "catalog",
+            "query",
+            "--repo",
+            "example/repo",
+            "--pr-number",
+            "6100",
+            "--since",
+            "2026-01-01T00:00:00Z",
+            "--until",
+            "2026-12-31T23:59:59Z",
+        ],
+    )
+
+    assert rc == 0
+    assert captured == {
+        "repo": "example/repo",
+        "pr_number": 6100,
+        "since": "2026-01-01T00:00:00Z",
+        "until": "2026-12-31T23:59:59Z",
+    }
+
+
+def test_cli_query_skips_session_unresolvable_on_this_host(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """A catalog entry whose session this host cannot resolve (e.g. it lives
+    only on another machine's corpus) is silently skipped, matching
+    ``query_reviewer_sessions``'s own contract -- never an error."""
+    import json as _json
+
+    from agent_logger.catalog import default_index
+    from agent_logger.config import load_config
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("USERPROFILE", raising=False)
+    monkeypatch.setenv("AGENT_LOGGER_HOME", str(tmp_path / ".agent-logger"))
+    (tmp_path / ".copilot" / "session-state").mkdir(parents=True)
+
+    cfg = load_config(include_repo=False)
+    index = default_index(cfg)
+    index.record(
+        session_id="ghost-session",
+        repo="example/repo",
+        pr_number=6100,
+        role="reviewer",
+        recorded_at="2026-09-24T00:00:00Z",
+    )
+
+    rc, out = _run_query_cli(
+        monkeypatch,
+        tmp_path,
+        ["catalog", "query", "--repo", "example/repo", "--pr-number", "6100"],
+    )
+
+    assert rc == 0
+    assert _json.loads(out)["sessions"] == []
+
+
+def test_cli_query_survives_catalog_storage_failure(monkeypatch, tmp_path: Path) -> None:
+    """A corrupt/unavailable SQLite catalog or an out-of-range ``pr_number``
+    must degrade to an empty result, never an uncaught traceback -- this is
+    a best-effort fallback tier a caller reaches only after exhausting its
+    own faster resolution paths."""
+    import json as _json
+
+    from agent_logger import cold_store
+
+    def _raise(*args, **kwargs):
+        raise OverflowError("Python int too large to convert to SQLite INTEGER")
+
+    monkeypatch.setattr(cold_store, "query_reviewer_sessions", _raise)
+
+    rc, out = _run_query_cli(
+        monkeypatch,
+        tmp_path,
+        ["catalog", "query", "--repo", "example/repo", "--pr-number", "99999999999999999999"],
+    )
+
+    assert rc == 0
+    assert _json.loads(out)["sessions"] == []

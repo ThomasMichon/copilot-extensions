@@ -194,6 +194,71 @@ async def test_reverse_forward_follows_the_hold_with_its_fixed_host_port(store):
     assert forwards.active_reverse_forwards() == {}
 
 
+# -- local forwards (host port -> venue port) ------------------------------------
+
+def _local_factory(created):
+    def make(codespace, host_port, venue_port):
+        created[(codespace, host_port, venue_port)] = FakeChannel((codespace, host_port, venue_port))
+        return created[(codespace, host_port, venue_port)]
+    return make
+
+
+def test_local_forwards_persist_sanitized_and_clear_with_the_session(store):
+    owner.hold("cs-1", "ssh:1")
+    h = owner.hold("cs-1", "cli:t", daemon_port=41234, mux_session="wt-x",
+                   local_forwards={41909: 41909, 0: 1, "x": 5})
+    assert h.local_forwards == {"41909": 41909}
+    kept = owner.hold("cs-1", "cli:t", mux_session="wt-x")  # rejoin without the flag
+    assert kept.local_forwards == {"41909": 41909}
+    assert owner.release("cs-1", "cli:t").local_forwards == {}
+
+
+async def test_local_forward_follows_the_hold_and_stops_on_shutdown(store):
+    created = {}
+    forwards = sf.SessionForwards(_any_factory({}), local_factory=_local_factory(created))
+    owner.hold("cs-1", "cli:t", daemon_port=41234, mux_session="wt-x",
+               local_forwards={41909: 41909})
+    await forwards.reconcile({h.codespace: h for h in owner.list_holds()})
+    assert forwards.active_local_forwards() == {"cs-1": {41909: 41909}}
+
+    owner.hold("cs-1", "cli:t", mux_session="wt-x", local_forwards={41909: 5000})
+    await forwards.reconcile({h.codespace: h for h in owner.list_holds()})
+    assert created[("cs-1", 41909, 41909)].stops == 1
+    assert forwards.active_local_forwards() == {"cs-1": {41909: 5000}}
+
+    owner.release("cs-1", "cli:t")
+    await forwards.reconcile({h.codespace: h for h in owner.list_holds()})
+    assert forwards.active_local_forwards() == {}
+    assert created[("cs-1", 41909, 5000)].stops == 1
+
+
+async def test_local_forwards_are_ignored_without_a_local_factory(store):
+    forwards = sf.SessionForwards(_any_factory({}))
+    owner.hold("cs-1", "cli:t", daemon_port=41234, mux_session="wt-x", local_forwards={41909: 41909})
+    await forwards.reconcile({h.codespace: h for h in owner.list_holds()})
+    assert forwards.active_local_forwards() == {}
+
+
+def test_local_forward_factory_pins_the_host_port(store):
+    made = {}
+
+    class Forward:
+        def __init__(self, cfg, remote_port, *, local_port):
+            made.update(cfg=cfg, remote_port=remote_port, local_port=local_port)
+            self.is_alive = False
+
+    class Source:
+        def __init__(self, codespace, gh_env=None):
+            self.codespace = codespace
+
+        def get_ssh_config(self):
+            return f"cfg:{self.codespace}"
+
+    channel = sf.make_local_forward_factory(forward_cls=Forward, config_source_cls=Source)("cs-1", 41909, 5000)
+    assert made == {"cfg": "cfg:cs-1", "remote_port": 5000, "local_port": 41909}
+    assert channel.is_alive is False
+
+
 def test_supervised_factory_targets_a_fixed_host_port(store):
     made = {}
 

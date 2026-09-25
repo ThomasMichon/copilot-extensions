@@ -872,3 +872,7 @@ PR number) to get there — this route is the one shared primitive; see
   `<agent-bridge catalog argv[0]> machines` for
   SSH readiness status, then follow the guidebook without changing provider
   state.
+
+## See Also
+
+- [docs/entity-relationship-model.md](../../docs/entity-relationship-model.md) -- the suite-wide diagnostic playbook: given a session/worktree/task, which command resolves the rest (assigned worktree, bridge/liveness state, rendered history + usage stats)
