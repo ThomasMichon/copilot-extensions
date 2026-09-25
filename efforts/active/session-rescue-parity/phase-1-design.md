@@ -41,17 +41,25 @@ itself did not specify phasing)_
       authorization model is richer than a single local lease: `pool.py`
       derives `IN_USE` from a live local lease **OR** a `#897` worktree
       claim **OR** a cross-machine L2 (Git-ref) lease overlay with no local
-      lease at all (a box held from a different machine). Decide whether
-      the same "defer on any active hold regardless of holder" rule applies
-      across **all three** holder shapes, or whether a read-only capture is
-      safe to run against a held CodeSpace regardless of who holds it (or
-      only when the caller IS the holder) -- and who/what is authorized to
-      *call* the capture verb in the first place (the holder only? any host
-      process? a periodic sweep with no effort/claim identity at all?).
+      lease at all (a box held from a different machine) **OR** a live
+      display-name beacon (`pool.py:136-170,411-418` -- `derive_disposition`'s
+      own docstring calls the L2 overlay "the atomic successor to the
+      display-name beacon," implying the beacon signal is still checked
+      alongside it, not yet retired) -- **four** holder shapes, not three.
+      Decide whether the same "defer on any active hold regardless of
+      holder" rule applies across **all four** holder shapes, or whether a
+      read-only capture is safe to run against a held CodeSpace regardless
+      of who holds it (or only when the caller IS the holder) -- and
+      who/what is authorized to *call* the capture verb in the first place
+      (the holder only? any host process? a periodic sweep with no
+      effort/claim identity at all?). If the beacon signal is judged
+      genuinely superseded/retirable, retire it explicitly as part of this
+      decision rather than silently omitting it from the capture gate.
       Record the decision and why; Phase 3's tests must cover the owner,
-      non-owner/no-lease, an orphaned/claim-holder-gone case, and a
-      cross-machine L2-only hold (no local lease) per that decision, not
-      just the plain `get_lease()` owner/non-owner happy path.
+      non-owner/no-lease, an orphaned/claim-holder-gone case, a
+      cross-machine L2-only hold (no local lease), and a beacon-only hold,
+      per that decision, not just the plain `get_lease()` owner/non-owner
+      happy path.
 - [ ] **Snapshot-race mitigation: default decided, may be revised.**
       Phase 3 now carries an agent-recommended default -- accept the
       acquire-then-release-during-the-pull race as a documented residual

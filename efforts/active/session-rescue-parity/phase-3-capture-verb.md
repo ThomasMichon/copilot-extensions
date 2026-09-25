@@ -137,7 +137,7 @@ Back to [README.md](README.md).
       non-`Available`-state regression test (a `Shutdown`/`Starting`/
       unknown-state CodeSpace is deferred without a connection attempt),
       and lease/claim-ownership tests covering the owner, non-owner/
-      no-lease, an orphaned claim (holder worktree gone), and a
-      cross-machine L2-only hold (no local lease) case per Phase 1's
-      lease/claim-ownership decision.
+      no-lease, an orphaned claim (holder worktree gone), a
+      cross-machine L2-only hold (no local lease), and a beacon-only hold
+      case per Phase 1's lease/claim-ownership decision.
 

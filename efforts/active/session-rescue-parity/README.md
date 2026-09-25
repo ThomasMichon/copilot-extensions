@@ -150,11 +150,14 @@ container. This is the concrete candidate for the shared vendored piece
   itself drift or be attacked. CodeSpaces have no restricted-policy surface
   to validate, but their holder model is **not** simply single-tenant: a
   CodeSpace can be held by a live local lease (`lease.py`), a `#897`
-  worktree claim, or a cross-machine L2 (Git-ref) lease overlay with no
-  local lease at all — `pool.py` derives `IN_USE` from any of the three.
+  worktree claim, a cross-machine L2 (Git-ref) lease overlay with no
+  local lease at all, or a live display-name beacon — `pool.py` derives
+  `IN_USE` from any of these four (the L2 overlay is documented as the
+  beacon's intended atomic successor, but the beacon signal is still
+  checked today, not yet retired).
   Porting the *liveness probe* does not require porting the *admission-hold*
   machinery, but a capture verb's own authorization check must account for
-  all three holder shapes (see Plan Phase 1's explicit lease/claim-ownership
+  all four holder shapes (see Plan Phase 1's explicit lease/claim-ownership
   decision), not just `get_lease()`.
 - **Destination push mechanism.** Containers publish via `agent-containers`'
   own rescue store (`$STATE_DIR/rescues/`) + `session-sync rescue-push`
@@ -327,7 +330,7 @@ lifecycle-contention, and CLI-dispatch coverage).
       including the new liveness-gate regression test, the
       non-`Available`-state regression test (no boot/connect attempt for a
       Shutdown/Starting/unknown-state CodeSpace), the lease/claim-ownership
-      owner/non-owner/orphaned-claim/cross-machine-L2 tests, the
+      owner/non-owner/orphaned-claim/cross-machine-L2/beacon-only tests, the
       probe-to-pull race tests (a lock held through the final probe MUST
       always be rejected/retried; a lock acquired-then-released entirely
       during the pull is rejected/retried **only if** Phase 1 scoped in a
