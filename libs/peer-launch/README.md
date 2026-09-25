@@ -8,8 +8,18 @@ byte-identical copies alongside each consumer's `_installation_context.py`;
 bootstrap imports a validator through an unvalidated payload pointer.
 Supported peers are `agent-worktrees`, `agent-bridge`, `agent-codespaces`,
 `agent-containers`, `agent-dispatch`, and `agent-ssh` -- each a canonical
-`libs/installation-context` adopter in its own right, so adding a peer is
-just a `PEERS` mapping entry with no boundary changes.
+`libs/installation-context` adopter in its own right. Adding a peer requires
+three coordinated steps, not just a `PEERS` mapping entry: (1) the mapping
+entry itself; (2) target-specific environment rebinding in
+`peer_environment()` (its own runtime/state/credential variables --
+`AGENT_CODESPACES_HOME`, `AGENT_CONTAINERS_HOME`/`AGENT_CONTAINERS_STATE_DIR`,
+and the `AGENT_DISPATCH_*` install/routing/run-dir and credential vars are
+worked examples), since the generic prefix-based scrub in `peer_environment()`
+strips a new peer's variables just like any other unless re-added explicitly;
+and (3) registering the new peer as a `tools/sync-installation-context.py`
+destination (and, if it owns a caller-side `_peer_launch.py` copy of its own,
+a `tools/sync-peer-launch.py` destination too) so its packaged validator
+bytes and boundary module stay in sync with the canonical source.
 
 `launch_prefix(owner, own_root, raw_context, peer)` returns a composable native
 Python argv prefix. At execution the boundary validates active owner, namespace,

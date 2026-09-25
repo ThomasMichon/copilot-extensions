@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -20,6 +21,30 @@ _COMMANDS = (
     "ramp-up-session",
     "session-sync",
 )
+
+
+def _host_pip_index_url() -> str | None:
+    """Read a configured pip index-url straight from the well-known SYSTEM
+    config path, bypassing any per-process env-var sandboxing (this test's
+    own containment wrapper, or a caller's, may redirect `PROGRAMDATA`/
+    `APPDATA` env vars, but not the actual OS install location). Generic
+    and identifier-free: any host with a governed/offline pip feed
+    configured this standard way benefits, not just one particular venue.
+    """
+    candidates = (
+        Path(r"C:\ProgramData\pip\pip.ini"),
+        Path("/etc/pip.conf"),
+        Path("/etc/xdg/pip/pip.conf"),
+    )
+    for candidate in candidates:
+        try:
+            text = candidate.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        match = re.search(r"(?m)^\s*index-url\s*=\s*(\S+)\s*$", text)
+        if match:
+            return match.group(1)
+    return None
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX installer behavior")
@@ -357,15 +382,14 @@ def test_provision_publishes_durable_compatibility_wrappers(
     # `pip config get global.index-url` / pip.ini discovery that
     # `install.ps1`'s `Ensure-UvIndex` (and `install.sh`'s POSIX
     # equivalent) normally use to bridge a governed/offline venue's pip
-    # feed to uv can no longer find the real config, even though it exists
-    # on the actual host. Various venues legitimately block the public
-    # PyPI CDN (`files.pythonhosted.org`) while allowing an internal feed
-    # proxy -- `APERTURE_PYTHON_INDEX_URL` is this facility's stable env-var
-    # signal for that internal feed, and it passes through the containment
-    # wrapper UNCHANGED (it isn't one of the sandboxed names), so prefer it
-    # here explicitly rather than relying on file-based pip config
-    # discovery the sandbox has already redirected.
-    internal_index = os.environ.get("APERTURE_PYTHON_INDEX_URL")
+    # feed to uv can no longer find the real config via env vars, even
+    # though it exists on the actual host. Various venues legitimately
+    # block the public PyPI CDN (`files.pythonhosted.org`) while allowing
+    # an internal feed proxy -- `_host_pip_index_url()` reads the standard
+    # SYSTEM pip config file directly (unaffected by env-var sandboxing)
+    # and is fully generic/identifier-free, so prefer its result here
+    # explicitly.
+    internal_index = _host_pip_index_url()
     if internal_index and not (env.get("UV_DEFAULT_INDEX") or env.get("UV_INDEX_URL")):
         env["UV_DEFAULT_INDEX"] = internal_index
     if os.name == "nt":
