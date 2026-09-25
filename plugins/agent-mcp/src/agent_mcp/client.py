@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 
 from . import __version__
 from . import protocol as proto
@@ -93,9 +94,23 @@ class OneShotSession:
 
     A ``transport`` may be injected (tests, or a pre-built connection); otherwise
     it is constructed from ``cfg`` exactly as the bridge would.
+
+    ``on_stage``, when given, is called with a short stage name (``"auth"``,
+    ``"transport-connect"``, ``"handshake"``, ``"ready"``) as each connection
+    layer is *entered* -- not necessarily completed, since a failure inside a
+    layer raises before the next stage name is reached. :attr:`stage` always
+    holds the last-entered stage name, so a caller that catches an exception
+    from ``__aenter__`` can read ``session.stage`` to learn which connectivity
+    layer actually failed (used by ``agent-mcp diagnose``).
     """
 
-    def __init__(self, cfg: BridgeConfig, *, transport: Transport | None = None) -> None:
+    def __init__(
+        self,
+        cfg: BridgeConfig,
+        *,
+        transport: Transport | None = None,
+        on_stage: Callable[[str], None] | None = None,
+    ) -> None:
         self.cfg = cfg
         self._transport = transport
         self._client: UpstreamClient | None = None
@@ -107,9 +122,18 @@ class OneShotSession:
         # then stamp on / speak.
         self._modern: bool = False
         self._protocol_version: str = proto.LEGACY
+        self._on_stage = on_stage
+        self.stage: str = "init"
+
+    def _set_stage(self, name: str) -> None:
+        self.stage = name
+        if self._on_stage is not None:
+            self._on_stage(name)
 
     async def __aenter__(self) -> OneShotSession:
+        self._set_stage("auth")
         injector = build_injector(self.cfg)
+        self._set_stage("transport-connect")
         transport = self._transport or build_transport(self.cfg, injector)
         self._transport = transport
         client = UpstreamClient(transport)
@@ -148,7 +172,9 @@ class OneShotSession:
             # ``_negotiate`` already applies and could swallow its more
             # specific "did not respond" error under a generic one.
             await asyncio.wait_for(transport.start(), timeout=self.cfg.timeout)
+            self._set_stage("handshake")
             await self._negotiate()
+            self._set_stage("ready")
         except BaseException as exc:
             # __aexit__ is not called when __aenter__ raises, so tear the
             # transport down here or a spawned upstream child would leak.
