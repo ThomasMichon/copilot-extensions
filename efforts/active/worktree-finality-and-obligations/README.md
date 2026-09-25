@@ -590,14 +590,31 @@ below for the carved implementation plan.
 
 ### Phase 7 - Reconcile deferred backlog
 
-- [ ] Accept finality and obligation candidates only through
+- [x] Accept finality and obligation candidates only through
   [`migration-intake`](../migration-intake/README.md)'s deduplication and
-  ownership gate.
-- [ ] Revalidate accepted technical scope against the current lifecycle, claim,
+  ownership gate. **Verified 2026-09-25** against `migration-intake/ledger.md`:
+  the only two candidates ever accepted into this Phase -- #9 and #16 in the
+  ledger, published as public issues
+  [#3113](https://github.com/ThomasMichon/copilot-extensions/issues/3113) and
+  [#3114](https://github.com/ThomasMichon/copilot-extensions/issues/3114) --
+  were both routed here through the intake's own Phase 2 revalidation and
+  Phase 3 publication passes (2026-09-20 ledger entries), not accepted
+  ad hoc. No candidate has entered this Phase any other way.
+- [x] Revalidate accepted technical scope against the current lifecycle, claim,
   and follow-up contracts; return obsolete or unsafe candidates for explicit
-  disposition.
-- [ ] Place each accepted public tracker item in exactly one existing phase,
-  extending this plan before implementation when necessary.
+  disposition. **Already done, in substance, by the two build sessions
+  themselves** (2026-09-23 journal entries below): #3113's own discovery
+  pass found its literal title description did NOT match a real remaining
+  gap and corrected scope before building anything; #3114 was revalidated
+  against `terminal-worktree-reclamation`'s current Plan and found to
+  duplicate it, so it was transferred rather than built. Both are exactly
+  the "return obsolete/unsafe candidates for explicit disposition" this
+  bullet asks for -- checked off for the evidence already on record, not
+  new work.
+- [x] Place each accepted public tracker item in exactly one existing phase,
+  extending this plan before implementation when necessary. Both #3113 and
+  #3114 were placed in this exact Phase 7 (no new phase needed); neither
+  appears in any other phase's Plan.
 - [x] Durable end-to-end lifecycle auditability: instrument session/handoff
   cutover transitions (creation, transfer, completion, abandonment) so the
   full audit trail is traceable, closing the remaining cross-link/session-
@@ -630,7 +647,19 @@ below for the carved implementation plan.
   landed per its own journal). Building it a second time here would duplicate,
   not complete, that work. Satisfies this Plan bullet's own "complete OR
   transferred to a named tracked objective" bar.
-- [ ] Keep fixtures synthetic and independent of any adopting worktree registry.
+- [x] Keep fixtures synthetic and independent of any adopting worktree
+  registry. **Verified 2026-09-25**, not just assumed: both suites this
+  effort's fixtures live in --
+  `plugins/agent-worktrees/tests/conftest.py`'s `_isolate_agent_worktrees_home`
+  and `worktree-manager/tests/production_picker/conftest.py`'s identical
+  fixture -- are `autouse=True`, fake `HOME`/`AGENT_HOME`/`USERPROFILE` and
+  `pathlib.Path.home()` to a fresh `tmp_path_factory` directory for every
+  single test in the suite, and (the picker suite) redirect
+  `WORKTREE_MANAGER_ROOT` the same way. This is a structural guarantee, not
+  per-test discipline: no test in either suite can read or write a real
+  adopting registry (an actual adopter's `~/.agent-worktrees` state) even by
+  accident. Grepped both suites for a direct `Path.home()`/registry-path read
+  that could bypass this and found none.
 
 ### Phase 8 - Session-claim lifecycle (proposed 2026-09-14; designed 2026-09-16; build started 2026-09-17)
 
@@ -2792,4 +2821,44 @@ The approved design is the faceted model in [design.md](design.md):
   Phase 4's `cleanup`/`gc` descriptor-consumption bullet, Phase 6 (ship-it,
   last), and Phase 7's remaining process bullets (`migration-intake` gate,
   scope revalidation, synthetic-fixtures) are all still open.
+
+### 2026-09-25 (continued) - Phase 7 complete: the 3 process bullets were already satisfied by evidence on record
+
+- Re-read Phase 7's three remaining unchecked bullets (`migration-intake`
+  gate, scope revalidation, "place each item in exactly one phase") and
+  found none needed new work -- each was already satisfied by the concrete
+  history already on record, just never checked off:
+  - **`migration-intake` gate**: confirmed against `migration-intake/
+    ledger.md` that the only two candidates ever accepted into this Phase
+    (#9 and #16, published as #3113/#3114) were routed here through that
+    effort's own Phase 2 revalidation and Phase 3 publication passes
+    (2026-09-20 entries) -- no candidate has ever entered this Phase any
+    other way.
+  - **Scope revalidation**: the 2026-09-23 journal entries for both #3113
+    (discovery pass found the literal title didn't match a real remaining
+    gap, corrected scope before building) and #3114 (revalidated against
+    `terminal-worktree-reclamation`'s current Plan, found duplicative,
+    transferred instead of built) already ARE this bullet's "return
+    obsolete/unsafe candidates for explicit disposition" -- the bullet
+    described work the effort had already done, just hadn't credited.
+  - **One phase per item**: trivially true -- both items live only in this
+    Phase 7, never duplicated elsewhere.
+- Checked off Phase 7's remaining synthetic-fixtures bullet too, but with an
+  actual verification pass (not just an assumption): grepped both suites
+  this effort's tests live in (`plugins/agent-worktrees/tests/`,
+  `worktree-manager/tests/production_picker/`) for the closure-descriptor/
+  claims/follow-ups tests reading a real registry path directly -- found
+  none -- then confirmed the *structural* guarantee: each suite's
+  `conftest.py` has an `autouse=True` `_isolate_agent_worktrees_home`
+  fixture that fakes `HOME`/`AGENT_HOME`/`USERPROFILE`/`Path.home()` (and,
+  in the picker suite, `WORKTREE_MANAGER_ROOT`) to a fresh
+  `tmp_path_factory` directory for every test in the suite -- not per-test
+  discipline that could silently lapse, but a suite-wide guarantee no test
+  can reach a real adopter's `~/.agent-worktrees` state even by accident.
+- **Phase 7 is now fully complete** -- every Plan bullet checked; no
+  separate Phase 7 Validation Plan bullet exists to close alongside it.
+  Remaining open work: Phase 4's `cleanup`/`gc` descriptor-consumption
+  bullet, Phase 5's legend surface + agent-bridge cockpit consumer, and
+  Phase 6 (ship-it, last, and now the closest thing to "everything else is
+  done" this effort has been).
 
