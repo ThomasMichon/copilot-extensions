@@ -201,3 +201,64 @@ def test_touch_keeps_a_fire_and_forget_caller_alive():
         assert not idle.is_set()  # kept alive throughout by repeated touch()
     finally:
         server.close()
+
+
+def test_close_after_a_failed_serve_thread_launch_never_blocks():
+    """Copilot review finding: the previous single ``_started`` flag was
+    set to ``True`` *before* ``self._serve_thread.start()`` ran, so a
+    ``.start()`` failure (e.g. OS thread-creation exhaustion) left
+    ``_started=True`` even though ``serve_forever()`` was never entered.
+    ``close()``'s ``self._server.shutdown()`` then blocks forever waiting
+    for a ``serve_forever()`` loop that will never notice the shutdown
+    request, per ``socketserver``'s own documented behavior. ``close()``
+    must return promptly even when the serve thread's own launch failed."""
+    server = _make_server()
+    real_start = threading.Thread.start
+
+    def _boom(self):
+        if self.name == "work-coalescing-singleton":
+            raise RuntimeError("simulated thread-creation failure")
+        return real_start(self)
+
+    threading.Thread.start = _boom
+    try:
+        with pytest.raises(RuntimeError):
+            server.start()
+    finally:
+        threading.Thread.start = real_start
+    assert server._serve_started is False
+    assert server._reap_started is False
+    # The regression itself: this must return promptly, never hang.
+    close_thread = threading.Thread(target=server.close)
+    close_thread.start()
+    close_thread.join(timeout=3)
+    assert not close_thread.is_alive(), "close() hung waiting on a never-started server"
+
+
+def test_close_after_a_failed_reap_thread_launch_still_stops_the_serve_loop():
+    """The other half of the same finding: if the serve thread starts fine
+    but the *reap* thread's own launch fails, close() must still properly
+    shut down and join the serve loop that IS actually running (not treat
+    the whole start() as a no-op just because one of the two threads
+    failed)."""
+    server = _make_server()
+    real_start = threading.Thread.start
+
+    def _boom(self):
+        if self.name == "work-coalescing-singleton-reaper":
+            raise RuntimeError("simulated thread-creation failure")
+        return real_start(self)
+
+    threading.Thread.start = _boom
+    try:
+        with pytest.raises(RuntimeError):
+            server.start()
+    finally:
+        threading.Thread.start = real_start
+    assert server._serve_started is True
+    assert server._reap_started is False
+    close_thread = threading.Thread(target=server.close)
+    close_thread.start()
+    close_thread.join(timeout=3)
+    assert not close_thread.is_alive(), "close() hung despite a real running serve loop"
+    assert not server._serve_thread.is_alive()  # actually shut down, not leaked

@@ -671,13 +671,14 @@ claiming discipline alone.
   `mux_link.py`: rendezvous-parseable `managed_mux_*` fields published in
   the same `status-monitor.lock` alongside `HookIpcServer`/`classify_daemon`/
   `worktree_status_daemon`'s own namespaced fields; a thread-safe
-  `ManagedMuxCache` keyed by `worktree_id` whose `apply_observation` rejects
-  an incoming `mapping_revision` lower than the one already on file (so a
-  stale/out-of-order `live: false` event can never clobber a newer live
-  mapping); an `InProcessRuntime` wired into `cmd_status_monitor` the same
-  way `worktree_status_daemon.InProcessRuntime` is (lock-extra publication,
-  `has_active_demand()` feeding the monitor's own idle-strike/empty-exit
-  logic, shutdown in the same `finally`). `_monitor_sweep` gained an optional
+  `ManagedMuxCache` keyed by `(project, worktree_id)` whose `apply_observation`
+  rejects an incoming `mapping_revision` lower than the one already on file
+  (scoped per key, so a stale/out-of-order `live: false` event can never
+  clobber a newer live mapping); an `InProcessRuntime` wired into
+  `cmd_status_monitor` the same way `worktree_status_daemon.InProcessRuntime`
+  is (lock-extra publication, `has_active_demand()` feeding the monitor's own
+  idle-strike/empty-exit logic, shutdown in the same `finally`). `_monitor_sweep`
+  gained an optional
   `managed_mux_cache` parameter: when present, its currently-live session
   names are merged into the existing `catalog_observer` call alongside the
   direct mux scan's own set -- but never added to `served`, and never

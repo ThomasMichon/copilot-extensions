@@ -135,6 +135,19 @@ class CoalescingServer:
         self._linger_timer: threading.Timer | None = None
         self._closed = False
         self._started = False
+        # Independently tracked per-thread start success (Copilot review
+        # finding): the previous single `_started` flag flipped True
+        # *before* either thread's own `.start()` call, so a `.start()`
+        # failure (e.g. OS thread-creation exhaustion) left `_started=True`
+        # even though `serve_forever()` was never entered -- `close()`'s
+        # `self._server.shutdown()` then blocks forever waiting for a
+        # `serve_forever()` loop that will never notice the shutdown
+        # request, per `socketserver`'s own documented behavior. Each flag
+        # is set only immediately after its own thread's `.start()` call
+        # actually succeeds, so `close()` can precisely decide whether each
+        # wait/join is safe rather than assuming both-or-neither.
+        self._serve_started = False
+        self._reap_started = False
         self._reap_stop = threading.Event()
 
         self._server = _Server(("127.0.0.1", 0), _Handler, owner=self)
@@ -152,9 +165,11 @@ class CoalescingServer:
     # -- lifecycle -------------------------------------------------------
 
     def start(self) -> None:
-        self._started = True
         self._serve_thread.start()
+        self._serve_started = True
         self._reap_thread.start()
+        self._reap_started = True
+        self._started = True
 
     def rendezvous(self) -> dict:
         host, port = self._server.server_address
@@ -173,12 +188,15 @@ class CoalescingServer:
         # ``shutdown()`` blocks waiting for ``serve_forever()`` to notice --
         # forever, if that loop was never started (e.g. a unit test that
         # exercises ``handle_request``/refcounting directly, never calling
-        # ``start()``). Only wait on threads that actually began running.
-        if self._started:
+        # ``start()``, or a real ``start()`` whose serve-thread launch
+        # itself failed -- see `_serve_started`'s own docstring above).
+        # Only wait on/join a thread that actually began running.
+        if self._serve_started:
             self._server.shutdown()
         self._server.server_close()
-        if self._started:
+        if self._serve_started:
             self._serve_thread.join(timeout=2)
+        if self._reap_started:
             self._reap_thread.join(timeout=2)
 
     # -- subscriber ref-counting ------------------------------------------
