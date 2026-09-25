@@ -268,3 +268,78 @@ def test_write_review_annotation_with_default_index_populates_immediately(
     entries = fresh.query("example/repo", 6100)
     assert len(entries) == 1
     assert entries[0].session_id == "s1"
+
+
+# --------------------------------------------------------------------------- #
+# CLI: `agent-logger catalog annotate` -- the cross-repo process-boundary path #
+# --------------------------------------------------------------------------- #
+
+
+def _run_annotate_cli(monkeypatch, tmp_path: Path, argv: list[str]) -> int:
+    """Invoke the real CLI entry point with an isolated HOME/AGENT_LOGGER_HOME,
+    matching how ``find_copilot_dir``/``load_config`` resolve in production --
+    a session-fetch-style caller in another repository has no Python import
+    path into agent-logger, only this process boundary."""
+    from agent_logger import __main__ as cli
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("USERPROFILE", raising=False)
+    monkeypatch.setenv("AGENT_LOGGER_HOME", str(tmp_path / ".agent-logger"))
+    return cli.main(argv)
+
+
+def test_cli_annotate_writes_sidecar_and_populates_catalog(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    from agent_logger.catalog import ReviewCatalogIndex
+    from agent_logger.sessions import SessionRef, read_review_annotations
+
+    session_dir = tmp_path / ".copilot" / "session-state" / "s1"
+    session_dir.mkdir(parents=True)
+    (session_dir / "events.jsonl").write_text("", encoding="utf-8")
+
+    rc = _run_annotate_cli(
+        monkeypatch,
+        tmp_path,
+        [
+            "catalog",
+            "annotate",
+            "s1",
+            "--repo",
+            "example/repo",
+            "--pr-number",
+            "6100",
+        ],
+    )
+
+    assert rc == 0
+    entries = read_review_annotations(SessionRef(id="s1", kind="live", path=session_dir))
+    assert entries[0]["repo"] == "example/repo"
+    assert entries[0]["pr_number"] == 6100
+
+    index = ReviewCatalogIndex(tmp_path / ".agent-logger" / "review-catalog.db")
+    assert len(index.query("example/repo", 6100)) == 1
+
+    payload = capsys.readouterr().out
+    assert "s1" in payload
+    assert "example/repo" in payload
+
+
+def test_cli_annotate_missing_session_exits_nonzero(monkeypatch, tmp_path: Path) -> None:
+    (tmp_path / ".copilot" / "session-state").mkdir(parents=True)
+
+    rc = _run_annotate_cli(
+        monkeypatch,
+        tmp_path,
+        [
+            "catalog",
+            "annotate",
+            "does-not-exist",
+            "--repo",
+            "example/repo",
+            "--pr-number",
+            "6100",
+        ],
+    )
+
+    assert rc != 0

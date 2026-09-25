@@ -260,6 +260,64 @@ def _cmd_catalog_rebuild(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_catalog_annotate(args: argparse.Namespace) -> int:
+    """Write one review annotation for a LIVE local session, across a
+    process boundary -- the same cross-repo integration shape ``session-fetch``
+    already establishes (a caller in a different repository, e.g. an external
+    reviewer-identity backfill tool, shells out to this CLI rather than
+    importing agent-logger as a library).
+
+    Only ever resolves the local live session-state tier (never an archive):
+    :func:`agent_logger.sessions.write_review_annotation` requires a live
+    session directory to mutate, matching its own contract. Exits non-zero
+    with a clear message when the session id isn't found locally, or the
+    write itself fails (a lock timeout, a malformed existing sidecar the
+    caller should know about rather than have silently discarded).
+    """
+    from agent_logger.catalog import default_index
+    from agent_logger.segmenter.collate import find_copilot_dir
+    from agent_logger.sessions import SESSION_STATE_SUBDIR, write_review_annotation
+
+    try:
+        state_root = find_copilot_dir() / SESSION_STATE_SUBDIR
+    except FileNotFoundError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    session_dir = state_root / args.session_id
+    if not session_dir.is_dir():
+        print(
+            f"error: no local live session directory for {args.session_id!r} "
+            f"(looked under {state_root})",
+            file=sys.stderr,
+        )
+        return 1
+
+    cfg = load_config()
+    try:
+        write_review_annotation(
+            session_dir,
+            repo=args.repo,
+            pr_number=args.pr_number,
+            role=args.role,
+            recorded_at=args.recorded_at,
+            index=default_index(cfg),
+        )
+    except (OSError, TimeoutError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(
+        json.dumps(
+            {
+                "session_id": args.session_id,
+                "repo": args.repo,
+                "pr_number": args.pr_number,
+                "role": args.role,
+            }
+        )
+    )
+    return 0
+
+
 def _cmd_origin_backfill_local(args: argparse.Namespace) -> int:
     """Backfill origin.json across the LOCAL session store (this machine)."""
     from pathlib import Path
@@ -442,6 +500,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="live session-state root (default: this host's ~/.copilot/session-state)",
     )
     cat_rebuild.set_defaults(func=_cmd_catalog_rebuild)
+    cat_annotate = cat_sub.add_parser(
+        "annotate",
+        help="write one review annotation for a local live session (cross-repo "
+        "callers use this instead of importing agent-logger as a library)",
+    )
+    cat_annotate.add_argument("session_id", help="the local live session id to annotate")
+    cat_annotate.add_argument("--repo", required=True, help="e.g. owner/name")
+    cat_annotate.add_argument("--pr-number", required=True, type=int)
+    cat_annotate.add_argument("--role", default="reviewer")
+    cat_annotate.add_argument(
+        "--recorded-at",
+        help="ISO-8601 timestamp (default: now)",
+    )
+    cat_annotate.set_defaults(func=_cmd_catalog_annotate)
 
     p_origin = sub.add_parser(
         "origin", help="session origin sidecars -- backfill/tag existing sessions"
