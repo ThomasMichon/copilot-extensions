@@ -192,7 +192,10 @@ registration credentials, starts a small host-side forward keeper for the
 bridge and credential-relay reverse forwards, launches the container's own
 worktree `embody` verb (JSON mode) in its workspace, and waits for the
 session to register with the host bridge before reporting success. Repeating
-`--copilot-arg ARG` passes extra Copilot CLI flags to the session. `--stop`
+`--copilot-arg ARG` passes extra Copilot CLI flags to the session. A new
+session starts on the caller's own model, reasoning effort, and context tier
+(from `~/.copilot/settings.json`; an explicit `--copilot-arg=--model=...` wins,
+`AGENT_CODESPACES_MODEL_PROPAGATE=0` opts out). `--stop`
 kills and verifies the venue tmux session, stops the keeper, and deregisters
 the exact live-session row.
 

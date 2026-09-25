@@ -1,0 +1,9 @@
+{
+  "comment": "Share the caller-model resolver via venue-copilot (no behavior change for CodeSpaces)",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}
