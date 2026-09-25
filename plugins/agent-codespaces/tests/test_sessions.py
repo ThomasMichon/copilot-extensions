@@ -9,6 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
 from plugin_activation import ActivePlugin, ActivePluginRoot
 
 from agent_codespaces import sessions
@@ -34,6 +35,26 @@ def test_extract_b64_between_sentinels_drops_noise():
 
 def test_extract_b64_empty_when_no_sentinels():
     assert sessions._extract_b64("nothing here") == ""
+
+
+async def test_pull_tar_bytes_raises_on_undecodable_payload():
+    """An undecodable/corrupt payload must RAISE, not also return None --
+    the same None a genuinely session-less CodeSpace produces. Silently
+    reporting either outcome as "no sessions" would hide a truncated or
+    malformed transfer from both existing callers."""
+    result = SimpleNamespace(
+        stdout=f"{sessions._B64_START}\nnot-valid-base64!!!\n{sessions._B64_END}\n",
+        stderr="",
+    )
+    with patch.object(sessions, "exec_with_retry", return_value=result):
+        with pytest.raises(RuntimeError, match="undecodable"):
+            await sessions._pull_tar_bytes(object(), "cs", timeout=5.0)
+
+
+async def test_pull_tar_bytes_returns_none_for_genuinely_no_sessions():
+    result = SimpleNamespace(stdout="no sentinels here", stderr="")
+    with patch.object(sessions, "exec_with_retry", return_value=result):
+        assert await sessions._pull_tar_bytes(object(), "cs", timeout=5.0) is None
 
 
 def test_pull_cmd_produces_archive_with_only_session_state_present():

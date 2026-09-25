@@ -198,16 +198,26 @@ async def _connect_with_retry(
 
 
 async def _pull_tar_bytes(manager, name: str, *, timeout: float) -> bytes | None:
-    """Run the remote tar+base64 and return decoded gzip-tar bytes (or None)."""
+    """Run the remote tar+base64 and return decoded gzip-tar bytes.
+
+    Returns ``None`` ONLY when the remote genuinely reported no sessions
+    (no sentinel markers in its output) -- an undecodable/corrupt payload
+    RAISES ``RuntimeError`` instead of also returning ``None``, so a
+    truncated or malformed transfer is never silently reported as an
+    empty ("no sessions") capture by either caller (both already convert
+    an unexpected exception here into a failed-result, never a raise).
+    """
     result = await exec_with_retry(manager, name, _PULL_CMD, timeout=timeout)
     b64 = _extract_b64(result.stdout or "")
     if not b64:
         return None
     try:
         return base64.b64decode(b64)
-    except ValueError:  # binascii.Error is a ValueError subclass
+    except ValueError as exc:  # binascii.Error is a ValueError subclass
         log.warning("session pull from %s produced an undecodable payload", name)
-        return None
+        raise RuntimeError(
+            f"session pull produced an undecodable payload: {exc}"
+        ) from exc
 
 
 def _stage_and_push(tar_bytes: bytes, name: str, *, verbose: bool) -> dict:
@@ -402,6 +412,27 @@ def sync_codespace_sessions(
             lock.release()
 
 
+def _capture_worktree_gone(worktree: str | None) -> bool:
+    """Stricter, capture-only variant of ``pool._holder_worktree_gone``.
+
+    ``pool._holder_worktree_gone`` uses ``os.path.exists()``, which returns
+    ``False`` for ANY ``OSError`` (permission denied, a transient stat
+    failure, etc.), not just a genuine ``FileNotFoundError`` -- fine for
+    ``pool.py``'s own display-only ``orphaned`` annotation, but not for a
+    safety-gating decision: a temporarily inaccessible worktree must never
+    be mistaken for a positively gone owner. Raises the original
+    ``OSError`` for anything other than a confirmed absence, so the caller
+    can fail closed on it explicitly.
+    """
+    if not worktree or not os.path.isabs(worktree):
+        return False
+    try:
+        os.stat(worktree)
+    except FileNotFoundError:
+        return True
+    return False
+
+
 def _capture_hold_reason(name: str, *, account: str | None) -> str | None:
     """Return a defer reason if *name* is held by any of the four holder
     shapes ``pool.derive_disposition`` treats as ``IN_USE`` (a local lease,
@@ -416,9 +447,10 @@ def _capture_hold_reason(name: str, *, account: str | None) -> str | None:
     ``agent_containers.replacement``'s unconditional
     ``get_lease(...) is not None`` defer for ``rescue-capture``) -- **except**
     an *orphaned* ``#897`` claim (the owning worktree path positively gone,
-    per ``pool._holder_worktree_gone``): nothing is heartbeating it anymore,
+    per :func:`_capture_worktree_gone`): nothing is heartbeating it anymore,
     so it is not treated as a live hold here, mirroring how ``pool.py``
-    itself surfaces (but does not gate on) ``orphaned``.
+    itself surfaces (but does not gate on) its own, more lenient
+    ``orphaned`` annotation.
 
     **Fails closed on every signal, not just a confirmed hold**: a lease-store
     read failure, a listing failure for the beacon check, or an L2-overlay
@@ -427,7 +459,6 @@ def _capture_hold_reason(name: str, *, account: str | None) -> str | None:
     gate (review finding on the original cut of this function).
     """
     from .lease import LEASE_FILE, Lease, get_lease
-    from .pool import _holder_worktree_gone
 
     if LEASE_FILE.exists():
         # `lease.get_lease()`/`_read_leases()` intentionally degrade a
@@ -458,7 +489,16 @@ def _capture_hold_reason(name: str, *, account: str | None) -> str | None:
         return f"could not confirm lease state (fail-closed): {exc}"
     if lease is not None:
         try:
-            orphaned = _holder_worktree_gone(lease.worktree)
+            orphaned = _capture_worktree_gone(lease.worktree)
+        except OSError as exc:
+            # A stat failure other than a confirmed absence (permission
+            # denied, a transient error, ...) is an UNKNOWN owner state,
+            # never "gone" -- fail closed rather than risk capturing while
+            # a claim is genuinely still live.
+            return (
+                f"could not confirm lease state (fail-closed): worktree "
+                f"check failed: {exc}"
+            )
         except Exception as exc:
             # A syntactically-valid-but-schema-malformed record (e.g. a
             # non-string ``worktree``) can pass `Lease(**rec)` (a dataclass

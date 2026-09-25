@@ -107,7 +107,7 @@ def test_capture_hold_reason_fails_closed_on_malformed_record_for_target(monkeyp
 def test_capture_hold_reason_fails_closed_on_non_string_worktree_type(monkeypatch):
     """``Lease(**rec)`` validates the record's KEYS, not field TYPES -- a
     syntactically-valid record with a non-string ``worktree`` (e.g. an
-    int) passes construction but crashes ``_holder_worktree_gone()``'s
+    int) passes construction but crashes ``_capture_worktree_gone()``'s
     ``os.path.isabs()`` call. Evaluating the orphan check itself must be
     treated as an unknown lease state, not let the exception escape."""
     import agent_codespaces.lease as lease_mod
@@ -120,10 +120,61 @@ def test_capture_hold_reason_fails_closed_on_non_string_worktree_type(monkeypatc
     # Confirm the orphan check itself would raise (the exact blind spot the
     # try/except closes).
     with pytest.raises(TypeError):
-        from agent_codespaces.pool import _holder_worktree_gone
-        _holder_worktree_gone(bad_lease.worktree)
+        sessions._capture_worktree_gone(bad_lease.worktree)
 
     reason = sessions._capture_hold_reason("cs", account=None)
+    assert reason is not None
+    assert "fail-closed" in reason
+
+
+def test_capture_worktree_gone_distinguishes_absent_from_unknown(tmp_path):
+    """`pool._holder_worktree_gone` uses os.path.exists(), which returns
+    False for ANY OSError (permission denied, a transient stat failure),
+    not just a genuine absence -- the capture-only variant must not make
+    that mistake: a stat failure other than FileNotFoundError must raise,
+    never silently read as "gone".
+
+    Uses a REAL permission-denied filesystem scenario (a parent directory
+    with no execute permission) rather than monkeypatching `os.stat`
+    globally, which would also break pytest's own internals for the rest
+    of the run."""
+    gone = tmp_path / "does-not-exist"
+    assert sessions._capture_worktree_gone(str(gone)) is True
+
+    present = tmp_path / "still-here"
+    present.mkdir()
+    assert sessions._capture_worktree_gone(str(present)) is False
+
+    blocked_parent = tmp_path / "blocked"
+    child = blocked_parent / "child"
+    child.mkdir(parents=True)
+    blocked_parent.chmod(0o000)
+    try:
+        with pytest.raises(PermissionError):
+            sessions._capture_worktree_gone(str(child))
+    finally:
+        blocked_parent.chmod(0o755)
+
+
+def test_capture_hold_reason_fails_closed_on_worktree_stat_error(monkeypatch, tmp_path):
+    """A worktree-check failure other than a confirmed absence (permission
+    denied, etc.) is an UNKNOWN owner state -- must defer, never proceed
+    as if the claim were orphaned. Uses the same real permission-denied
+    scenario as the test above."""
+    import agent_codespaces.lease as lease_mod
+
+    blocked_parent = tmp_path / "blocked"
+    child = blocked_parent / "child"
+    child.mkdir(parents=True)
+    blocked_parent.chmod(0o000)
+    try:
+        monkeypatch.setattr(
+            lease_mod, "get_lease", lambda name: _lease("cs", worktree=str(child)),
+        )
+        reason = sessions._capture_hold_reason("cs", account=None)
+    finally:
+        blocked_parent.chmod(0o755)
+
     assert reason is not None
     assert "fail-closed" in reason
 
