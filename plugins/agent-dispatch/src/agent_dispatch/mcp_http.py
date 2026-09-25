@@ -153,6 +153,15 @@ def build_coordinator_mcp(
             result = asdict(mutation)
         except TaskError as exc:
             return {"error": str(exc)}
+        if event_type in ("task.completed", "task.abandoned"):
+            # Shared terminal-transition hook, mirroring coordinator_tasks.py's
+            # own _guard: MCP calls queue.complete_with_outcome/abandon
+            # directly (in-process), bypassing the HTTP routes entirely, so
+            # that hook alone doesn't cover this transport -- this is the
+            # matching one for MCP callers.
+            from . import handoff_claim_release
+
+            handoff_claim_release.release_if_handoff(result)
         if event_type is not None:
             _emit(event_type, result)
         return result
@@ -771,8 +780,10 @@ def build_coordinator_mcp(
     ) -> dict:
         """Terminally abandon a task -- requires ``permit=True`` (permission-gated)."""
         return _mutate(
-            lambda: queue.abandon(task_id, worker_id=worker_id, permitted=permit, reason=reason),
-            "task.abandoned",
+            lambda: queue.abandon_with_outcome(
+                task_id, worker_id=worker_id, permitted=permit, reason=reason
+            ),
+            None,
         )
 
     @mcp.tool(name="dispatch_heartbeat")
