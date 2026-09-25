@@ -1,0 +1,9 @@
+{
+  "comment": "Stage D (agent-cli-lazy-dispatch): decouple the remaining 9 lazy-dispatch modules from the __main__ cluster; all 26 modules now cluster-free",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

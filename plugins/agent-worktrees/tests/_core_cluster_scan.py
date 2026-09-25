@@ -301,6 +301,53 @@ def find_transitively_unsafe_functions(deferred_only_names: frozenset[str]) -> d
                 loads.add(node.id)
         return loads
 
+    def own_scope_bound_names(fn: ast.AST) -> set[str]:
+        """Names bound as a genuine local anywhere in `fn`'s OWN scope --
+        i.e. via ``name = <expr>``/``import ... as name``/a ``for``/``with``
+        target directly in `fn`'s body (including nested if/for/try/with
+        blocks), but NOT inside a nested function/lambda/class def, which
+        has its own separate scope. Per Python's own scoping rules, any such
+        binding makes the name local for `fn`'s **entire** body -- shadowing
+        an outer/global name of the same spelling even before the binding
+        line textually runs (a `NameError` on true out-of-order use is a
+        distinct, pre-existing bug class this deliberately doesn't chase).
+        Lets a Stage D fix that rebinds a deferred-owned name to a direct
+        sibling import (e.g. ``_revalidate_cleanup_safety = cleanup_gc_cli.
+        _revalidate_cleanup_safety`` inside ``reap_one``) read as genuinely
+        safe, instead of a permanent false positive from the bare `Name`
+        load at its call site.
+        """
+        bound: set[str] = set()
+
+        def visit(node: ast.AST, is_fn_scope: bool) -> None:
+            for child in ast.iter_child_nodes(node):
+                if not is_fn_scope and isinstance(
+                    child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+                ):
+                    continue
+                if isinstance(child, ast.Assign):
+                    for tgt in child.targets:
+                        for n in ast.walk(tgt):
+                            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store):
+                                bound.add(n.id)
+                elif isinstance(child, ast.AnnAssign) and isinstance(child.target, ast.Name):
+                    bound.add(child.target.id)
+                elif isinstance(child, ast.AugAssign) and isinstance(child.target, ast.Name):
+                    bound.add(child.target.id)
+                elif isinstance(child, (ast.Import, ast.ImportFrom)):
+                    for alias in child.names:
+                        bound.add(alias.asname or alias.name.split(".")[0])
+                elif isinstance(child, (ast.For, ast.AsyncFor)) and isinstance(child.target, ast.Name):
+                    bound.add(child.target.id)
+                elif isinstance(child, (ast.With, ast.AsyncWith)):
+                    for item in child.items:
+                        if isinstance(item.optional_vars, ast.Name):
+                            bound.add(item.optional_vars.id)
+                visit(child, False)
+
+        visit(fn, True)
+        return bound
+
     memo: dict[str, list[str] | None] = {}
 
     def check(fn_name: str, visiting: frozenset[str]) -> list[str] | None:
@@ -309,7 +356,7 @@ def find_transitively_unsafe_functions(deferred_only_names: frozenset[str]) -> d
         if fn_name in visiting or fn_name not in native_funcs:
             return None
         fn = native_funcs[fn_name]
-        loads = body_name_loads(fn)
+        loads = body_name_loads(fn) - own_scope_bound_names(fn)
         hit = loads & deferred_only_names
         if hit:
             memo[fn_name] = [fn_name, next(iter(hit))]

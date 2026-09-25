@@ -350,21 +350,23 @@ def test_worktree_status_audit_monitor_enabled_path_skips_cluster(monkeypatch):
     assert calls == [], "the monitor-enabled path must not load the cluster"
 
 
-@pytest.mark.parametrize("command", ["cleanup", "reap-sessions", "session-lifecycle"])
-def test_not_yet_decoupled_command_still_loads_cluster(command, monkeypatch):
+def test_not_yet_decoupled_command_still_loads_cluster(monkeypatch):
     """A command whose module is NOT in `_CLUSTER_FREE_MODULES` must still
     load the cluster -- the safe, unchanged Phase 1 behavior. Proves the
-    differentiation `_dispatch_lazy()` now makes is real (not vacuously
-    always-skip), and that a not-yet-decoupled command takes on zero
-    incremental risk from Phase 1b. `session-lifecycle` is a deliberate
-    regression guard: it was briefly (incorrectly) cluster-free earlier in
-    this change -- see the previous test's own docstring. `cleanup`/
-    `reap-sessions` replace Stage B's `get`/`worktree-lineage` examples,
-    which Stage C decoupled (`context_cli`/`session_tracking_cli`) -- both
-    still transitively depend on a deferred-only global reached through a
-    `cleanup_gc_cli`/`reap_cli` function itself (see the effort's Journal)."""
+    differentiation `_dispatch_lazy()` makes is real (not vacuously
+    always-skip). Stage D (agent-cli-lazy-dispatch) finished decoupling every
+    `_LAZY_DISPATCH_TABLE` module that existed at the time -- so there is no
+    longer a real, permanently-not-yet-decoupled command to name here (the
+    prior version of this test hardcoded `cleanup`/`reap-sessions`/
+    `session-lifecycle`, all now cluster-free per Stage D's own Journal
+    entry). Simulate the "not yet decoupled" case instead, via
+    `_CLUSTER_FREE_MODULES` itself, rather than asserting a module stays
+    permanently uncoupled -- a claim future work would falsify by design.
+    """
+    command = "cleanup"
     module_name, _ = m._LAZY_DISPATCH_TABLE[command]
-    assert module_name not in m._CLUSTER_FREE_MODULES
+    assert module_name in m._CLUSTER_FREE_MODULES  # sanity: Stage D really did decouple it
+    monkeypatch.setattr(m, "_CLUSTER_FREE_MODULES", frozenset(m._CLUSTER_FREE_MODULES - {module_name}))
 
     calls = []
     monkeypatch.setattr(m, "_ensure_cluster_loaded", lambda: calls.append(1))
@@ -372,4 +374,4 @@ def test_not_yet_decoupled_command_still_loads_cluster(command, monkeypatch):
     with pytest.raises(SystemExit):
         m._dispatch_lazy(command, [command, "--help"])
 
-    assert calls == [1], f"{command!r} ({module_name}) must still load the cluster"
+    assert calls == [1], f"{command!r} ({module_name}) must load the cluster when not in _CLUSTER_FREE_MODULES"
