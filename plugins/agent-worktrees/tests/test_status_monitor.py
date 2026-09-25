@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import threading
 import types
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 import agent_procutil
 import pytest
@@ -1230,11 +1232,85 @@ def test_monitor_claim_handoff_cutover_reclaims_expired_live_pid_claim(tmp_path,
     assert logged[-1][1]["stale_age_seconds"] >= 600
 
 
+def test_reclaim_does_not_overwrite_a_newer_live_claim_when_restoring(tmp_path):
+    """If the displaced content doesn't match what the staleness check
+    actually inspected (a third contender republished a genuinely live claim
+    at `path` in the interim), restoring must never clobber that live claim
+    -- even when something *else* has since occupied `path` a second time
+    before the restore itself runs."""
+    path = tmp_path / "handoff-1.json"
+    stale_claim = {"pid": 777, "token": "handoff-1"}
+    path.write_text(json.dumps(stale_claim), encoding="utf-8")
+
+    real_replace = os.replace
+    newer_claim = {"pid": 999, "token": "handoff-1", "created_at": "now"}
+
+    def replace_then_reoccupy(src, dst):
+        real_replace(src, dst)
+        # Simulate a third contender publishing a brand-new live claim at
+        # `path` in the exact window between our os.replace and our
+        # mismatch-driven restore attempt.
+        path.write_text(json.dumps(newer_claim), encoding="utf-8")
+
+    with patch("agent_worktrees.status_monitor_runtime.os.replace", side_effect=replace_then_reoccupy):
+        ok, reclaimed, error = m._monitor_reclaim_stale_handoff_cutover_claim(
+            path, {"pid": 111, "token": "handoff-1"},
+            expected_stale_claim={"pid": 42, "token": "handoff-1"},  # deliberate mismatch
+        )
+
+    assert (ok, reclaimed, error) == (True, False, None)
+    # The third contender's live claim must survive untouched.
+    assert json.loads(path.read_text(encoding="utf-8")) == newer_claim
+
+
+def test_reclaim_fails_closed_when_unreadable_claim_was_actually_live(tmp_path):
+    """A staleness check that found an unreadable/torn file (claim=None,
+    reason=age-expired via file mtime) must not let a reclaimer treat a
+    *now-readable, valid* claim at the same path as a match -- someone else
+    published a genuinely live claim there, not the torn file originally
+    assessed."""
+    path = tmp_path / "handoff-1.json"
+    live_claim = {"pid": 999, "token": "handoff-1"}
+    path.write_text(json.dumps(live_claim), encoding="utf-8")
+
+    ok, reclaimed, error = m._monitor_reclaim_stale_handoff_cutover_claim(
+        path, {"pid": 111, "token": "handoff-1"},
+        expected_stale_claim=None,  # the staleness check found no parseable claim
+    )
+
+    assert (ok, reclaimed, error) == (True, False, None)
+    assert json.loads(path.read_text(encoding="utf-8")) == live_claim
+
+
+def test_reclaim_proceeds_when_displaced_content_matches_expected(tmp_path):
+    """The ordinary, non-racing path: the displaced content matches exactly
+    what the staleness check inspected -- reclaim proceeds and publishes."""
+    path = tmp_path / "handoff-1.json"
+    stale_claim = {"pid": 777, "token": "handoff-1"}
+    path.write_text(json.dumps(stale_claim), encoding="utf-8")
+
+    ok, reclaimed, error = m._monitor_reclaim_stale_handoff_cutover_claim(
+        path, {"pid": 111, "token": "handoff-1"},
+        expected_stale_claim=stale_claim,
+    )
+
+    assert (ok, reclaimed, error) == (True, True, None)
+    assert json.loads(path.read_text(encoding="utf-8")) == {"pid": 111, "token": "handoff-1"}
+
+
 def test_monitor_claim_handoff_cutover_stale_reclaim_is_single_winner(tmp_path, monkeypatch):
     monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
     monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR_HANDOFF_CLAIM_STALE_SECONDS", "1")
     monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: None)
-    monkeypatch.setattr(m.locks, "pid_alive", lambda pid: False)
+    # Only the pre-seeded dead claim's pid (777) is "gone" -- the current
+    # process's own pid must read alive, exactly like reality (a process is
+    # never dead to itself). Mocking pid_alive to unconditionally return
+    # False for *every* pid -- including the reclaiming thread's own live
+    # pid -- was the actual root cause of this test's flakiness: it let a
+    # slower thread's staleness check see the faster thread's already-
+    # published, genuinely-live winning claim as "stale" too (pid-gone),
+    # triggering a second, cascading reclaim that could steal the win.
+    monkeypatch.setattr(m.locks, "pid_alive", lambda pid: pid != 777)
     monkeypatch.setattr(m.locks, "process_start_time", lambda pid: f"start-{pid}")
     claim_path = tmp_path / "status-monitor-handoffs.d" / "a" / "handoff-1.json"
     claim_path.parent.mkdir(parents=True, exist_ok=True)

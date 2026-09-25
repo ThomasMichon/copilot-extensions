@@ -1,0 +1,9 @@
+{
+  "comment": "fix flaky handoff-cutover-claim reclaim race (test_monitor_claim_handoff_cutover_stale_reclaim_is_single_winner)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
