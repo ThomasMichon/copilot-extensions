@@ -61,10 +61,12 @@ own fresh family pass" note further down):
   findings, unconverted) and `agent-pull-requests` (added 2026-09-22, 4
   generic-installer findings, unconverted). Neither has been triaged beyond
   confirming they're genuine, not annotated.
-- **`agent-machines` gained 3 new findings** tied to its post-rewrite
-  `cell_lifecycle.py` engine (the cross-platform lifecycle engine that
-  replaced the plugin's earlier `rollback-pin.py`/`runtime-gate.{sh,ps1}`
-  exemplar implementation): a
+- **`agent-machines` gained 2 new findings** (baseline was 6: 3 generic
+  installer + 2 operator/bootstrap + 1 descriptive "setup guidance", which is
+  the same `SKILL.md:54` finding present today, unchanged) tied to its
+  post-rewrite `cell_lifecycle.py` engine (the cross-platform lifecycle
+  engine that replaced the plugin's earlier
+  `rollback-pin.py`/`runtime-gate.{sh,ps1}` exemplar implementation): a
   `payload-invocation.json` legacy-binstub-path declaration (line 20, mirrors
   `agent-index/payload-invocation.json:22`'s equivalent declaration — both
   look like intentional migration metadata analogous to `agent-bridge`'s
@@ -73,7 +75,7 @@ own fresh family pass" note further down):
   `item["identity"].startswith(".local/bin/agent-machines")` (runtime code
   that recognizes the legacy binstub identity as part of its own migration
   logic — plausibly intentional, not yet reviewed or annotated). A fresh
-  slice should resolve all three rather than guessing their disposition here.
+  slice should resolve both rather than guessing their disposition here.
 - **`agent-bridge`, `agent-index`, and `agent-logger` each gained 1 finding**
   and **`agent-mcp` lost 1** since the baseline;
   these look like incidental drift from unrelated feature work in each
@@ -84,7 +86,7 @@ own fresh family pass" note further down):
 | Plugin | Findings | Delta vs. 2026-08-26 |
 |--------|---------:|-----------------------|
 | `agent-worktrees` | 18 | unchanged |
-| `agent-machines` | 8 | +3 (new, see above) |
+| `agent-machines` | 8 | +2 (new, see above) |
 | `agent-vault` | 8 | unchanged |
 | `agent-codespaces` | 7 | -2 (durable provider manifests converted) |
 | `agent-index` | 6 | +1 (untraced) |
@@ -123,7 +125,7 @@ is still a fresh pass needed.
 | Descriptive skills, help, and generated package metadata | 15 | Cleanup with the owning slice | These lines describe the legacy contract or duplicate package prose; they are not installed launchers. Correcting them prevents new consumers from depending on the old surface but does not by itself retire a wrapper. |
 | **Total** | **86** | | |
 
-## Detailed accounting
+## Detailed accounting (historical: 2026-08-26 snapshot, not current counts)
 
 ### Payload-owned self-wrappers - 6
 
