@@ -260,6 +260,46 @@ def _cmd_catalog_rebuild(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_catalog_query(args: argparse.Namespace) -> int:
+    """Read-side cross-repo query verb: given ``(repo, pr_number)``, return
+    every session this host can resolve for it, same process-boundary shape
+    ``annotate`` establishes for the write side (a caller in a different
+    repository, e.g. a downstream review-link fallback chain, shells out
+    to this CLI rather than importing agent-logger as a library).
+
+    Backed by :func:`agent_logger.cold_store.query_reviewer_sessions` --
+    see that function's docstring for the resolution/ordering/dedup
+    contract. Always exits ``0``; an empty catalog, a query that matches
+    nothing this host can resolve, and a catalog storage failure (a corrupt
+    or unavailable SQLite database, or a ``--pr-number`` too large for
+    SQLite's 64-bit ``INTEGER`` column) all print ``{"sessions": []}``
+    rather than raising -- this is a best-effort fallback-tier read for a
+    caller that has already exhausted its own faster resolution paths, so a
+    storage-layer hiccup here must degrade to "nothing found", never an
+    uncaught traceback.
+    """
+    import sqlite3
+
+    from agent_logger.cold_store import query_reviewer_sessions
+
+    try:
+        refs = query_reviewer_sessions(
+            args.repo, args.pr_number, since=args.since, until=args.until
+        )
+    except (OSError, sqlite3.Error, OverflowError):
+        refs = []
+    print(
+        json.dumps(
+            {
+                "repo": args.repo,
+                "pr_number": args.pr_number,
+                "sessions": [{"session_id": ref.id, "kind": ref.kind} for ref in refs],
+            }
+        )
+    )
+    return 0
+
+
 def _cmd_catalog_annotate(args: argparse.Namespace) -> int:
     """Write one review annotation for a LIVE local session, across a
     process boundary -- the same cross-repo integration shape ``session-fetch``
@@ -539,7 +579,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="live session-state root (default: this host's ~/.copilot/session-state)",
     )
     cat_rebuild.set_defaults(func=_cmd_catalog_rebuild)
-
+    cat_query = cat_sub.add_parser(
+        "query",
+        help="(repo, pr_number) -> resolvable sessions -- the cross-repo read "
+        "side fallback tier (e.g. a downstream review-link fallback chain)",
+    )
+    cat_query.add_argument("--repo", required=True, help="e.g. owner/name")
+    cat_query.add_argument("--pr-number", required=True, type=int)
+    cat_query.add_argument(
+        "--since", help="ISO-8601 lower bound on the annotation's recorded_at"
+    )
+    cat_query.add_argument(
+        "--until", help="ISO-8601 upper bound on the annotation's recorded_at"
+    )
+    cat_query.set_defaults(func=_cmd_catalog_query)
 
     p_origin = sub.add_parser(
         "origin", help="session origin sidecars -- backfill/tag existing sessions"
