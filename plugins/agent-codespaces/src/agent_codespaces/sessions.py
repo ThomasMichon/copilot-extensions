@@ -473,8 +473,20 @@ def _capture_hold_reason(name: str, *, account: str | None) -> str | None:
             raw = json.loads(LEASE_FILE.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             return f"could not confirm lease state (fail-closed): leases.json unreadable: {exc}"
-        rec = (raw or {}).get(name) if isinstance(raw, dict) else None
-        if rec is not None:
+        if isinstance(raw, dict) and name in raw:
+            # `name in raw` (a present KEY), not `rec is not None`: an
+            # explicit `null`/non-object record for this exact codespace
+            # must still be validated -- `rec is not None` would let a
+            # `null` value bypass validation entirely (indistinguishable
+            # from the key being absent), exactly what `_read_leases()`
+            # itself silently drops via `except TypeError: continue`.
+            rec = raw[name]
+            if not isinstance(rec, dict):
+                return (
+                    f"could not confirm lease state (fail-closed): "
+                    f"malformed lease record for {name!r}: expected an "
+                    f"object, got {type(rec).__name__}"
+                )
             try:
                 Lease(**rec)
             except TypeError as exc:

@@ -104,6 +104,28 @@ def test_capture_hold_reason_fails_closed_on_malformed_record_for_target(monkeyp
     assert "malformed" in reason
 
 
+def test_capture_hold_reason_fails_closed_on_null_record_for_target(monkeypatch, tmp_path):
+    """An explicit ``null`` value for THIS codespace's key must not bypass
+    validation: ``rec is not None`` would treat it the same as the key
+    being absent entirely, letting a malformed-but-present record slip
+    through as unheld -- must check for the KEY's presence, not just a
+    non-None value."""
+    import json as _json
+
+    import agent_codespaces.lease as lease_mod
+    malformed = tmp_path / "leases.json"
+    malformed.write_text(_json.dumps({"cs": None}), encoding="utf-8")
+    monkeypatch.setattr(lease_mod, "LEASE_FILE", malformed)
+
+    # Confirm get_lease() itself would silently swallow this too.
+    assert lease_mod.get_lease("cs") is None
+
+    reason = sessions._capture_hold_reason("cs", account=None)
+    assert reason is not None
+    assert "fail-closed" in reason
+    assert "malformed" in reason
+
+
 def test_capture_hold_reason_fails_closed_on_non_string_worktree_type(monkeypatch):
     """``Lease(**rec)`` validates the record's KEYS, not field TYPES -- a
     syntactically-valid record with a non-string ``worktree`` (e.g. an
