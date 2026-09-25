@@ -56,6 +56,7 @@
   "plugins/agent-mcp/scripts/versioned_runtime.py": 1415,
   "plugins/agent-mcp/src/agent_mcp/config.py": 1178,
   "plugins/agent-pull-requests/scripts/versioned_runtime.py": 1415,
+  "plugins/agent-ssh/libs/ssh-manager/src/ssh_manager/carrier.py": 1313,
   "plugins/agent-ssh/scripts/versioned_runtime.py": 1415,
   "plugins/agent-ssh/src/agent_ssh/fragment_registry.py": 1195,
   "plugins/agent-vault/scripts/versioned_runtime.py": 1415,

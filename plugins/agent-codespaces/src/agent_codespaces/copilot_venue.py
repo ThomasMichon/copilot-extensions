@@ -111,6 +111,13 @@ def add_copilot_subparser(sub) -> None:
              "The CodeSpace itself and the conversation state are kept.",
     )
     copilot_parser.add_argument(
+        "--keep-claim", dest="keep_claim", action="store_true",
+        help="With --stop: keep this task's claim on the CodeSpace (a clean "
+             "checkout otherwise settles it at-rest, releasing the box to the "
+             "next borrower). Use it when close-out continues, e.g. `finalize`, "
+             "then release the claim last.",
+    )
+    copilot_parser.add_argument(
         "--seed-file", dest="seed_file", default=None, metavar="PATH",
         help="Read the seed from PATH ('-' = stdin) instead of --seed; use for "
              "long or multi-line prompts.",
@@ -255,7 +262,11 @@ def _ensure_agent_bridge_plugin(name: str) -> None:
                         file=sys.stderr,
                     )
 
-            from venue_copilot import resolve_daemon_port, resolve_local_auth_token
+            from venue_copilot import (
+                registration_credentials_script,
+                resolve_daemon_port,
+                resolve_local_auth_token,
+            )
 
             daemon_port = resolve_daemon_port()
             token = resolve_local_auth_token()
@@ -268,13 +279,7 @@ def _ensure_agent_bridge_plugin(name: str) -> None:
                     file=sys.stderr,
                 )
                 return
-            script = (
-                "mkdir -p ~/.agent-bridge && "
-                f"printf 'token: %s\\n' {shlex.quote(token)} "
-                "> ~/.agent-bridge/auth.yaml && "
-                f"printf '{{\"active\": {{\"port\": {int(daemon_port)}}}}}' "
-                "> ~/.agent-bridge/active.json"
-            )
+            script = registration_credentials_script(token, daemon_port)
             result = await exec_with_retry(manager, name, f"bash -lc {shlex.quote(script)}")
             if getattr(result, "exit_code", 1) != 0:
                 print(
@@ -404,6 +409,9 @@ def cmd_copilot(
         if getattr(args, dest, None) and not getattr(args, "detach", False):
             print(f"[FAIL] {flag} requires --detach", file=sys.stderr)
             return 2
+    if getattr(args, "keep_claim", False) and not getattr(args, "stop", False):
+        print("[FAIL] --keep-claim requires --stop", file=sys.stderr)
+        return 2
     if getattr(args, "stop", False) or getattr(args, "detach", False):
         from . import copilot_detach
 

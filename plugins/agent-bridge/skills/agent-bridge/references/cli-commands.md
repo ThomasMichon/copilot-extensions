@@ -146,16 +146,20 @@ For a **singleton repo** (one anchor checkout, no worktree isolation),
 Use `resume <repo-or-agent>` to load/take over the anchor's current head, or
 `handoff <repo-or-agent>` to roll it forward deliberately.
 
-### Detached CLI-mode session on a CodeSpace (observable, steerable)
+### Detached CLI-mode session on a CodeSpace or trusted container (observable, steerable)
 
 `create <venue-target> --cli` delivers a real interactive Copilot CLI session
 on the venue into **this** terminal. An orchestrating agent that must not hand
 its terminal away adds `--detach`: the venue verb starts (or rejoins) the
 session in the background, seeds it with the prompt, waits until it is
-registered with this bridge, and prints a JSON handle. CodeSpace targets only.
+registered with this bridge, and prints a JSON handle. Supported venue targets
+are `codespace:<name>` and trusted `container:<name>` (restricted containers
+deliberately refuse CLI-mode session hosting).
 
 ```bash
 <agent-bridge catalog argv[0]> create codespace:<name> --cli --detach \
+  --prompt-file ./task.md --driver orchestrator
+<agent-bridge catalog argv[0]> create container:<name> --cli --detach \
   --prompt-file ./task.md --driver orchestrator
 # -> {"ok": true, "session_id": "<sid>", "scope_id": "anchor-<repo>@<name>",
 #     "commands": {"status": ..., "observe": ..., "nudge": ..., "attach": ..., "stop": ...}}
@@ -186,13 +190,14 @@ its session's process is gone removes the row with
 `live-sessions deregister --session-id <sid>` (exact id, idempotent) instead of
 leaving it to the stale-heartbeat reaper.
 
-The underlying verb is the agent-codespaces plugin's `copilot <name> --detach`
-(`--seed-file`, `--copilot-arg`, `--register-timeout`, `--dry-run`, and `--effort` for the
-CodeSpace claim); use it directly when you need those -- `create --cli
---detach` forwards only the prompt and `--driver` (`create --effort` is the
-session's reasoning effort, not a coordination effort). Each CodeSpace registers
-under a venue-qualified identity (`<identity>@<codespace>`), so several
-CodeSpaces of one repo stay distinct.
+The underlying verb is the venue plugin's `copilot <name> --detach`
+(`agent-codespaces` or `agent-containers`; both support `--seed-file`,
+`--copilot-arg`, `--register-timeout`, and `--dry-run`, while CodeSpaces also
+support `--effort` for the CodeSpace claim). Use it directly when you need those
+extra flags -- `create --cli --detach` forwards only the prompt and `--driver`
+(`create --effort` is the session's reasoning effort, not a coordination
+effort). Each venue registers under a venue-qualified identity
+(`<identity>@<venue-name>`), so several venues of one repo stay distinct.
 
 ### Browser view (`ui`)
 

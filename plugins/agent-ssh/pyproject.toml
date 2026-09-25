@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-ssh"
-version = "0.1.0-dev102"
+version = "0.1.1-dev1"
 description = "SSH profile emitter, verifier, and transport-provider contract for the agent fabric"
 readme = "README.md"
 license = "MIT"
@@ -14,6 +14,9 @@ authors = [
 ]
 dependencies = [
     "pyyaml>=6.0.3",
+    "agent-ssh-manager",
+    "agent-venue-copilot",
+    "agent-zdd",
     "agent-procutil",
     "agent-dropin-registry",
 ]
@@ -24,6 +27,12 @@ dependencies = [
 agent-procutil = { path = "libs/agent-procutil" }
 # Tri-state managed-fragment scans and bounded operational warnings.
 agent-dropin-registry = { path = "libs/dropin-registry" }
+# Shared OpenSSH process/config primitives.
+agent-ssh-manager = { path = "libs/ssh-manager" }
+# Provider-agnostic detached CLI-mode reservation/launch helpers.
+agent-venue-copilot = { path = "libs/venue-copilot" }
+# Routing-table reader used by venue-copilot for host bridge discovery.
+agent-zdd = { path = "libs/zdd" }
 
 [project.scripts]
 agent-ssh = "agent_ssh.__main__:main"
