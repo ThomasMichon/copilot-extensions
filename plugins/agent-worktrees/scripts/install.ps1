@@ -677,9 +677,17 @@ function Invoke-VersionedActivate {
     # transitive import chain (config, project_state, the internal `libs/*`
     # packages, etc.), so a partial install that dropped any of those pieces
     # fails the gate here instead of silently activating.
+    # Clear PYTHONPATH for the probe too: an inherited path pointing at a
+    # complete checkout/legacy package could satisfy the import even while
+    # $VenvPython resolves to the partial slot under test, defeating the
+    # gate (matches the isolation already used by Register-ProjectEntry and
+    # the package-stamping probe below).
     $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    $prevHealthPP = $env:PYTHONPATH
+    $env:PYTHONPATH = $null
     $healthOut = & $VenvPython -c 'import agent_worktrees.__main__' 2>&1
     $slotOk = ($LASTEXITCODE -eq 0)
+    $env:PYTHONPATH = $prevHealthPP
     $ErrorActionPreference = $prevEAP
     if (-not $slotOk) {
         Write-ServiceErr "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
