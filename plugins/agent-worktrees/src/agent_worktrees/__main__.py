@@ -704,6 +704,12 @@ def _classify_records(
         if project:
             from . import classify_daemon
             from . import locks as _locks
+            # Stage D: resolve via _self_override (cluster-free; test override safe).
+            from . import status_monitor_runtime as _smr
+
+            _monitor_lock_path = _self_override("_monitor_lock_path", _smr._monitor_lock_path)
+            _ensure_status_monitor = _self_override("_ensure_status_monitor", _smr._ensure_status_monitor)
+            _status_monitor_enabled = _self_override("_status_monitor_enabled", _smr._status_monitor_enabled)
 
             key = "|".join(
                 (
@@ -2259,6 +2265,11 @@ def _journal_owner_reciprocal_claim(
     """
     if not owner_ref:
         return False
+    # Stage D: real implementation lives in claims_cli (cluster-free).
+    from . import claims_cli as _claims_cli
+
+    _resolve_owner_ref_record_path = _self_override("_resolve_owner_ref_record_path", _claims_cli._resolve_owner_ref_record_path)
+
     try:
         owner_path, _owner_wt, _err = _resolve_owner_ref_record_path(owner_ref, config,)
         if owner_path is None or not owner_path.exists():
@@ -2394,6 +2405,20 @@ def _create_worktree_core(
 
     Raises ``RuntimeError`` on failure.
     """
+    # Stage D: local-shadow deferred names via _self_override (keeps create/worktree_ops_cli cluster-free).
+    from . import claims_cli as _claims_cli
+    from . import resolve_launch_cli as _resolve_launch_cli
+    from . import worktree_ops_cli as _worktree_ops_cli
+
+    _coordination_readiness_for_owner_ref = _self_override("_coordination_readiness_for_owner_ref", _claims_cli._coordination_readiness_for_owner_ref)
+    CoordinationReadinessFailure = _self_override("CoordinationReadinessFailure", _claims_cli.CoordinationReadinessFailure)
+    _resolve_owner_ref_record_path = _self_override("_resolve_owner_ref_record_path", _claims_cli._resolve_owner_ref_record_path)
+    _validate_profile_assignment_config = _self_override("_validate_profile_assignment_config", _resolve_launch_cli._validate_profile_assignment_config)
+    _apply_assignment_env = _self_override("_apply_assignment_env", _resolve_launch_cli._apply_assignment_env)
+    _launch_profile_selection = _self_override("_launch_profile_selection", _resolve_launch_cli._launch_profile_selection)
+    _reflect_assignment = _self_override("_reflect_assignment", _resolve_launch_cli._reflect_assignment)
+    _slugify = _self_override("_slugify", _worktree_ops_cli._slugify)
+
     repo = config.default_repo
     if kind != "system" and getattr(repo, "knowledge_only", False):
         raise RuntimeError(
@@ -3176,6 +3201,11 @@ def _resolve_handoff_cutover_target(
     session_id: str | None,
 ) -> tuple[int, dict[str, object]]:
     """Resolve the target worktree (or adopted anchor) for handoff cutover."""
+    # Stage D: session_binding_cli is cluster-free.
+    from . import session_binding_cli as _session_binding_cli
+
+    _activate_session_binding = _self_override("_activate_session_binding", _session_binding_cli._activate_session_binding)
+
     config = None
     if raw_id:
         wt_id = _resolve_worktree_id(raw_id)
@@ -3233,6 +3263,13 @@ def _handoff_cutover_spawn_result(
     args: argparse.Namespace,
 ) -> tuple[int, dict[str, object]]:
     """Return the spawn-mode ``handoff-cutover`` result without printing JSON."""
+    # Stage D: resolve_launch_cli is cluster-free.
+    from . import resolve_launch_cli as _resolve_launch_cli
+
+    _apply_assignment_env = _self_override("_apply_assignment_env", _resolve_launch_cli._apply_assignment_env)
+    _reflect_assignment = _self_override("_reflect_assignment", _resolve_launch_cli._reflect_assignment)
+    _launch_profile_selection = _self_override("_launch_profile_selection", _resolve_launch_cli._launch_profile_selection)
+
     seed = getattr(args, "seed", None)
     if not seed:
         return 1, {
@@ -3588,6 +3625,12 @@ def _handoff_cutover_retry_result(
     args: argparse.Namespace,
 ) -> tuple[int, dict[str, object]]:
     """Retry a stuck cutover without duplicating a live successor."""
+    # Stage D: status_monitor_runtime is cluster-free.
+    from . import status_monitor_runtime as _smr
+
+    _monitor_session_state_handoff_path = _self_override("_monitor_session_state_handoff_path", _smr._monitor_session_state_handoff_path)
+    _monitor_read_session_state_handoff = _self_override("_monitor_read_session_state_handoff", _smr._monitor_read_session_state_handoff)
+
     session_id = getattr(args, "session_id", None)
     rc, resolved = _resolve_handoff_cutover_target(
         getattr(args, "worktree_id", None),
@@ -3760,6 +3803,11 @@ def _maybe_emit_stage_13(
     if handoff is None or handoff.state != "linked":
         return
     digest = hashlib.sha256(f"{wt_id}\x00{handoff_token}".encode()).hexdigest()
+    # Stage D: status_monitor_runtime is cluster-free.
+    from . import status_monitor_runtime as _smr
+
+    _monitor_handoff_claim_root = _self_override("_monitor_handoff_claim_root", _smr._monitor_handoff_claim_root)
+
     claim_path = _monitor_handoff_claim_root() / "stage13" / f"{digest}.json"
     try:
         claim_path.parent.mkdir(parents=True, exist_ok=True)
@@ -4227,6 +4275,12 @@ def _sweep_finished_sessions_on_cadence() -> None:
     conservative safety exactly. Gated by the :func:`auto_clean_enabled`
     kill-switch and wrapped best-effort; never raises.
     """
+    # Stage D: reap_cli is cluster-free; resolve via _self_override.
+    from . import reap_cli as _reap_cli
+
+    auto_clean_enabled = _self_override("auto_clean_enabled", _reap_cli.auto_clean_enabled)
+    sweep_finished_session_worktrees = _self_override("sweep_finished_session_worktrees", _reap_cli.sweep_finished_session_worktrees)
+
     if not auto_clean_enabled():
         return
     try:
@@ -4242,11 +4296,14 @@ def _sweep_finished_sessions_on_cadence() -> None:
 
 
 def _write_session_lifecycle_receipt(payload: dict, state: str) -> None:
+    # Stage D: status_monitor_runtime is cluster-free.
+    from . import status_monitor_runtime as _smr
+
     version, _environment = _session_lifecycle_metadata(payload)
     launch_key = _session_lifecycle_launch_key(payload, version)
     if not launch_key:
         return
-    root = _aw_runtime_home() / ".session-context"
+    root = _self_override("_aw_runtime_home", _smr._aw_runtime_home)() / ".session-context"
     target = root / f"lifecycle-{launch_key}.json"
     temporary = target.with_name(f"{target.name}.{os.getpid()}.tmp")
     try:
@@ -4284,8 +4341,11 @@ def _sweep_managed_on_exit() -> None:
     session ending is exactly when its bridge worktree becomes reapable, so this
     boundary is where the accumulation is caught. Never raises.
     """
+    # Stage D: sweep_managed_worktrees is owned by reap_cli.
+    from . import reap_cli as _reap_cli
+
     try:
-        report = sweep_managed_worktrees()
+        report = _self_override("sweep_managed_worktrees", _reap_cli.sweep_managed_worktrees)()
         removed = report.get("removed") or []
         if removed:
             output.ok(
@@ -4308,8 +4368,11 @@ def _sweep_launcher_shells_on_exit() -> None:
     (self-preservation), and a live session's launcher is spared while its
     terminal (its parent) is alive. Never raises.
     """
+    # Stage D: reap_orphan_launcher_shells is owned by reap_cli.
+    from . import reap_cli as _reap_cli
+
     try:
-        payload = reap_orphan_launcher_shells(dry_run=False)
+        payload = _self_override("reap_orphan_launcher_shells", _reap_cli.reap_orphan_launcher_shells)(dry_run=False)
         reaped = payload.get("reaped") or []
         if reaped:
             output.ok(
@@ -4692,7 +4755,10 @@ def _monitor_pending_handoff_predecessor_retire(
     only opts a machine out of *automatic* sweeps, not out of an agent's
     ability to explicitly ask "is this worktree's cutover actually finished?".
     """
-    if require_monitor_enabled and not _status_monitor_enabled():
+    # Stage D: status_monitor_runtime is cluster-free.
+    from . import status_monitor_runtime as _smr
+
+    if require_monitor_enabled and not _self_override("_status_monitor_enabled", _smr._status_monitor_enabled)():
         return None
     requests = _pending_handoff_retire_requests(record)
     return requests[0] if requests else None
@@ -4846,7 +4912,10 @@ def _monitor_trigger_handoff_cutover(
 
 def _monitor_maybe_trigger_handoff_cutover(path: str, *, governance=None) -> None:
     """Pick up one actionable pending handoff for ``path`` if the monitor owns it."""
-    record = _find_record_for_path(path)
+    # Stage D: status_bar_cli is cluster-free.
+    from . import status_bar_cli as _status_bar_cli
+
+    record = _self_override("_find_record_for_path", _status_bar_cli._find_record_for_path)(path)
     if record is None:
         return
     _monitor_maybe_process_handoff_record(record, governance=governance)
@@ -4858,11 +4927,14 @@ def _monitor_maybe_process_handoff_record(
     governance=None,
 ) -> None:
     """Run the monitor's handoff retire/spawn checks for one tracking record."""
+    # Stage D: status_monitor_runtime is cluster-free.
+    from . import status_monitor_runtime as _smr
+
     retire_request = _monitor_pending_handoff_predecessor_retire(record)
     if retire_request is not None:
         _status_monitor_recheck(governance, "pre-mutation:handoff-predecessor-retire")
         _monitor_retire_handoff_predecessor(retire_request)
-    request = _monitor_pending_handoff_request(record)
+    request = _self_override("_monitor_pending_handoff_request", _smr._monitor_pending_handoff_request)(record)
     if request is None:
         return
     _status_monitor_recheck(governance, "pre-mutation:handoff-cutover")
@@ -4896,6 +4968,22 @@ def _monitor_sweep(
     coalesced into one process.  Registry entries whose session is definitively
     gone are pruned.
     """
+    # Stage D: resolve deferred names via _self_override (cluster-free owners).
+    from . import list_cli as _list_cli
+    from . import status_bar_cli as _status_bar_cli
+    from . import status_monitor_runtime as _smr
+    from . import status_updater_cli as _status_updater_cli
+
+    _monitor_list_sessions = _self_override("_monitor_list_sessions", _smr._monitor_list_sessions)
+    _monitor_registry_dir = _self_override("_monitor_registry_dir", _smr._monitor_registry_dir)
+    _activate_project_for_path = _self_override("_activate_project_for_path", _status_updater_cli._activate_project_for_path)
+    _monitor_mux_set = _self_override("_monitor_mux_set", _smr._monitor_mux_set)
+    _read_monitor_registry = _self_override("_read_monitor_registry", _smr._read_monitor_registry)
+    _remove_monitor_entry = _self_override("_remove_monitor_entry", _smr._remove_monitor_entry)
+    _warm_list_cache_for_active_project = _self_override("_warm_list_cache_for_active_project", _list_cli._warm_list_cache_for_active_project)
+    _render_status_segment = _self_override("_render_status_segment", _status_bar_cli._render_status_segment)
+    _render_status_context = _self_override("_render_status_context", _status_bar_cli._render_status_context)
+
     reg_dir = _monitor_registry_dir()
     registry = _read_monitor_registry(reg_dir)
     served: list[tuple[str, str]] = []
@@ -5256,6 +5344,11 @@ def _write_session_lifecycle_snapshot(
     payload: dict,
     output_text: str,
 ) -> None:
+    # Stage D: status_monitor_runtime is cluster-free.
+    from . import status_monitor_runtime as _smr
+
+    _aw_runtime_home = _self_override("_aw_runtime_home", _smr._aw_runtime_home)
+
     version, _environment = _session_lifecycle_metadata(payload)
     if not version:
         try:
@@ -5305,7 +5398,10 @@ def _registration_nudge_context(cwd: str) -> str:
             return ""
         import hashlib
 
-        marker_dir = _aw_runtime_home() / ".register-nudged"
+        # Stage D: status_monitor_runtime is cluster-free.
+        from . import status_monitor_runtime as _smr
+
+        marker_dir = _self_override("_aw_runtime_home", _smr._aw_runtime_home)() / ".register-nudged"
         marker = marker_dir / hashlib.sha1(str(top).encode("utf-8")).hexdigest()
         if marker.exists():
             return ""
@@ -5327,8 +5423,11 @@ def _start_project_session_hook(
     cwd: str,
     environment: dict[str, str],
 ) -> subprocess.Popen | None:
+    # Stage D: status_updater_cli is cluster-free.
+    from . import status_updater_cli as _status_updater_cli
+
     try:
-        _activate_project_for_path(cwd, force=True)
+        _self_override("_activate_project_for_path", _status_updater_cli._activate_project_for_path)(cwd, force=True)
         project = cfg.project_name()
     except Exception:
         return None
@@ -5500,8 +5599,10 @@ def _reconcile_knowledge_plugin_overlay(payload: dict, cwd: str) -> None:
     output_text = "{}"
     try:
         from . import knowledge_plugins
+        # Stage D: status_updater_cli is cluster-free.
+        from . import status_updater_cli as _status_updater_cli
 
-        _activate_project_for_path(cwd)
+        _self_override("_activate_project_for_path", _status_updater_cli._activate_project_for_path)(cwd)
         summary = knowledge_plugins.compose_from_pair(cwd=cwd)
         if summary.get("changed"):
             path = summary.get("settings_local", "settings.local.json")
@@ -5520,6 +5621,11 @@ def _reconcile_knowledge_plugin_overlay(payload: dict, cwd: str) -> None:
 
 
 def _provisioning_status_diagnostic(cwd: str) -> str:
+    # Stage D: status_monitor_runtime is cluster-free.
+    from . import status_monitor_runtime as _smr
+
+    _aw_runtime_home = _self_override("_aw_runtime_home", _smr._aw_runtime_home)
+
     status = _aw_runtime_home() / "logs" / "provision-status.json"
     try:
         previous = json.loads(status.read_text(encoding="utf-8"))
@@ -5551,13 +5657,16 @@ def _start_provisioning_if_needed(
     include_status_diagnostic: bool = True,
     process_holder: list[subprocess.Popen] | None = None,
 ) -> str:
+    # Stage D: status_monitor_runtime is cluster-free.
+    from . import status_monitor_runtime as _smr
+
     session_environment = session_environment or {}
     if (
         session_environment.get("WORKTREE_NO_RECONCILE") == "1"
         or session_environment.get("WORKTREE_NO_PROVISION") == "1"
     ):
         return ""
-    status = _aw_runtime_home() / "logs" / "provision-status.json"
+    status = _self_override("_aw_runtime_home", _smr._aw_runtime_home)() / "logs" / "provision-status.json"
     diagnostic = _provisioning_status_diagnostic(cwd) if include_status_diagnostic else ""
     try:
         from . import reconcile
@@ -5588,7 +5697,7 @@ def _start_provisioning_if_needed(
         str(status),
         "--apply",
     ]
-    argv[0] = _windowless_python()
+    argv[0] = _self_override("_windowless_python", _smr._windowless_python)()
     env = dict(os.environ)
     env.update(windowless_python_env(sys.executable))
     kwargs: dict = {
@@ -5652,7 +5761,10 @@ def _schedule_provisioning_if_needed(
                 process_holder=process_holder,
             )
             if worker_diagnostic:
-                log = _aw_runtime_home() / "logs" / "provision-preview.log"
+                # Stage D: status_monitor_runtime is cluster-free.
+                from . import status_monitor_runtime as _smr
+
+                log = _self_override("_aw_runtime_home", _smr._aw_runtime_home)() / "logs" / "provision-preview.log"
                 try:
                     log.parent.mkdir(parents=True, exist_ok=True)
                     with log.open("a", encoding="utf-8") as stream:
@@ -5980,6 +6092,13 @@ def _resident_hook_decision(
     deadline: float | None = None,
     provisioning_start_event: threading.Event | None = None,
 ) -> dict:
+    # Stage D: status_updater_cli/session_binding_cli are cluster-free.
+    from . import session_binding_cli as _session_binding_cli
+    from . import status_updater_cli as _status_updater_cli
+
+    _activate_project_for_path = _self_override("_activate_project_for_path", _status_updater_cli._activate_project_for_path)
+    _bind_nudge_decision = _self_override("_bind_nudge_decision", _session_binding_cli._bind_nudge_decision)
+
     cwd = _hook_payload_cwd(payload)
     previous_project = cfg.active_project()
     _activate_project_for_path(cwd, force=True)
@@ -6216,6 +6335,15 @@ def reap_one(
     result-returning core shared by the ``cleanup --worktree-id`` CLI and the
     picker's in-process local Cleanup executor.
     """
+    # Stage D: _revalidate_cleanup_safety's real implementation lives in
+    # cleanup_gc_cli (which itself calls back into this function via
+    # `_core_helper`); importing it directly here -- instead of the bare
+    # global name only bound during `_load_full_command_surface()` -- is
+    # what lets `cleanup`/`gc` (cleanup_gc_cli) stay cluster-free.
+    from . import cleanup_gc_cli as _cleanup_gc_cli
+
+    _revalidate_cleanup_safety = _self_override("_revalidate_cleanup_safety", _cleanup_gc_cli._revalidate_cleanup_safety)
+
     config = cfg.load_config()
     repo = config.default_repo
     tracking_path = cfg.tracking_dir()
@@ -6752,7 +6880,10 @@ def _enumerate_launcher_shells() -> list[dict] | None:
     """
     if platform.system() == "Windows":
         return _enumerate_launcher_shells_windows()
-    return _enumerate_launcher_shells_posix()
+    # Stage D: the real POSIX implementation lives in reap_cli.
+    from . import reap_cli as _reap_cli
+
+    return _self_override("_enumerate_launcher_shells_posix", _reap_cli._enumerate_launcher_shells_posix)()
 
 
 def _enumerate_launcher_shells_windows() -> list[dict] | None:
@@ -7386,21 +7517,30 @@ _ALL_KNOWN_VERBS: frozenset[str] = frozenset(_LAZY_DISPATCH_TABLE.keys()) | froz
 # real commands end-to-end, not just `--help`.
 _CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "claims_cli",
+    "cleanup_gc_cli",
     "context_cli",
+    "finalize_cli",
     "follow_ups_cli",
+    "handoff_cli",
     "installation_cli",
+    "list_cli",
     "maintenance_cli",
     "pane_lifecycle",
     "picker_profiles_cli",
     "pr_state_cli",
+    "reap_cli",
     "reclaim_cli",
+    "session_binding_cli",
+    "session_inspection_cli",
     "session_metadata_cli",
     "session_tracking_cli",
     "status_bar_cli",
     "status_cli",
+    "status_monitor_cli",
     "status_monitor_runtime",
     "status_updater_cli",
     "update_cli",
+    "worktree_ops_cli",
     "worktree_status_audit",
 })
 
@@ -7459,6 +7599,17 @@ def _dispatch_lazy(command: str, args_list: list[str]) -> int:
 # 1b) needs runtime-exercised verification of every fast-tracked command,
 # not static analysis alone.
 _CLUSTER_LOADED = False
+
+
+def _self_override(name: str, local):
+    """`__main__`-side mirror of every sibling module's `_core_helper`:
+    prefers a monkeypatched/pre-bound global on this module (e.g. a test's
+    ``monkeypatch.setattr(m, name, fake)``) over `local` (a direct sibling
+    import), so a Stage D local-shadow fix never bypasses such a test."""
+    candidate = globals().get(name)
+    if callable(candidate) and candidate is not local:
+        return candidate
+    return local
 
 
 def _ensure_cluster_loaded() -> None:

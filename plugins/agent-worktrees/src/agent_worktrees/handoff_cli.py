@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 from . import config as cfg, finalize as fin, output, profile_assignment, sessions, tracking
+from . import reclaim_cli, resolve_launch_cli
 
 
 def _core():
@@ -23,7 +24,7 @@ def _core_helper(name: str, local):
 
 LaunchPreflightError = _core().LaunchPreflightError
 
-def _apply_assignment_env(*args, **kwargs): return _core()._apply_assignment_env(*args, **kwargs)
+def _apply_assignment_env(*args, **kwargs): return _core_helper("_apply_assignment_env", resolve_launch_cli._apply_assignment_env)(*args, **kwargs)
 def _build_env(*args, **kwargs): return _core()._build_env(*args, **kwargs)
 def _build_launch_cmd(*args, **kwargs): return _core()._build_launch_cmd(*args, **kwargs)
 def _create_worktree_core(*args, **kwargs): return _core()._create_worktree_core(*args, **kwargs)
@@ -32,11 +33,11 @@ def _handoff_cutover_retry_result(*args, **kwargs): return _core()._handoff_cuto
 def _handoff_cutover_spawn_result(*args, **kwargs): return _core()._handoff_cutover_spawn_result(*args, **kwargs)
 def _json_error(*args, **kwargs): return _core()._json_error(*args, **kwargs)
 def _json_output(*args, **kwargs): return _core()._json_output(*args, **kwargs)
-def _launch_profile_selection(*args, **kwargs): return _core()._launch_profile_selection(*args, **kwargs)
-def _perform_remux(*args, **kwargs): return _core()._perform_remux(*args, **kwargs)
+def _launch_profile_selection(*args, **kwargs): return _core_helper("_launch_profile_selection", resolve_launch_cli._launch_profile_selection)(*args, **kwargs)
+def _perform_remux(*args, **kwargs): return _core_helper("_perform_remux", reclaim_cli._perform_remux)(*args, **kwargs)
 def _preflight_launch(*args, **kwargs): return _core()._preflight_launch(*args, **kwargs)
-def _reflect_assignment(*args, **kwargs): return _core()._reflect_assignment(*args, **kwargs)
-def _repo_for_record(*args, **kwargs): return _core()._repo_for_record(*args, **kwargs)
+def _reflect_assignment(*args, **kwargs): return _core_helper("_reflect_assignment", resolve_launch_cli._reflect_assignment)(*args, **kwargs)
+def _repo_for_record(*args, **kwargs): return _core_helper("_repo_for_record", tracking._repo_for_record)(*args, **kwargs)
 def _repo_session_env(*args, **kwargs): return _core()._repo_session_env(*args, **kwargs)
 def _resolve_worktree_id(*args, **kwargs): return _core()._resolve_worktree_id(*args, **kwargs)
 def _unsupported_hosted_launch(*args, **kwargs): return _core()._unsupported_hosted_launch(*args, **kwargs)
