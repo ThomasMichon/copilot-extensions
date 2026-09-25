@@ -28,6 +28,42 @@ it is never a place a PR merges into directly. `dev` is this repo's default
 branch, so an ordinary PR already targets it without needing to specify a
 base branch.
 
+> ### Migrating from the old `main`-targeting flow
+>
+> If you (or a stale worktree/bookmark) still opens PRs against `main`, three
+> things changed with this cutover that are easy to get bitten by:
+>
+> 1. **Retarget, don't fight it.** An open PR against `main` will show as
+>    conflicting/blocked once `main` starts moving only through generated
+>    promotion commits (it stops sharing history with ordinary `dev`-based
+>    branches). Retarget it — `gh pr edit <#> --base dev` — then rebase your
+>    branch onto current `dev` and resolve any conflicts for real (don't just
+>    take one side; `dev` may have moved the same files). There is no need to
+>    open a fresh PR; the existing one keeps its history/discussion.
+> 2. **A broken `dev` build blocks *every* release, not just your change.**
+>    The promotion pipeline only fires on a green `dev` CI run
+>    (`workflow_run` → `Validation Gate` → `Promote`); if the run your PR
+>    merged into is red, **nothing promotes to `main` until a later `dev`
+>    commit is green again** — your fix included. Contributors are expected to
+>    fix a CI failure on `dev` promptly (a revert is always acceptable if a
+>    same-day forward fix isn't ready) rather than leaving it red, because
+>    every other pending contributor's release is stuck behind it too.
+> 3. **A release is not instant — expect roughly 10-20 minutes**, not the old
+>    "merge = shipped" mental model: your merge has to (a) finish `dev`'s own
+>    CI, (b) clear the `Validation Gate`, (c) get promoted into a generated
+>    `release/promote-<run id>` candidate PR against `main`, and (d) have that
+>    candidate PR's own (fast) check pass before it auto-merges. If you want to
+>    confirm your change actually shipped, watch for that candidate PR
+>    merging (`gh pr list --search "is:merged head:release/promote-"`, or just
+>    watch `main`'s commit history) rather than assuming your `dev` merge was
+>    the release. A small, separate **"clear consumed changefiles on dev"**
+>    housekeeping PR normally follows each successful promotion a few minutes
+>    later — that one is routine cleanup, not something you need to review or
+>    act on, but don't be surprised to see it land right after yours.
+>
+> See "The wait, and how to preview past it" below for the full mechanics and
+> how to preview a pending release without waiting for a real promotion.
+
 **Every change lands through a pull request — direct pushes to `dev` are
 blocked, and `main` accepts pushes only from the promotion pipeline (or
 explicit admin escalation).** This is enforced on three layers that agree:
@@ -351,6 +387,38 @@ polls `main`. The CI promotion pipeline
 green `dev` build, not a schedule** — but there is a real wait between your
 merge landing on `dev` and a promotion actually shipping it to `main`, not
 an instant release.
+
+### The pipeline is a hard chain — a red `dev` build ships nothing
+
+`Validation Gate` only runs `if: github.event.workflow_run.conclusion ==
+'success'` on `CI`, and `Promote` only runs `if:
+github.event.workflow_run.conclusion == 'success'` on `Validation Gate`. If
+your merge leaves `dev`'s CI red, the chain simply never fires for that
+commit — **no candidate PR, no promotion, no release** — and this blocks
+every other contributor's already-merged work sitting on `dev` behind yours
+too, since the next successful trigger promotes everything accumulated on
+`dev` so far. Treat a red `dev` build as your first priority: land a forward
+fix immediately, or revert your own merge, rather than leaving it red while
+you investigate at leisure.
+
+### Expect roughly 10-20 minutes, and know what to watch
+
+Budget on the order of **10-20 minutes** from a green `dev` merge to a real
+`main` release, not an instant one: `CI` on `dev` (a few minutes) → `Validation
+Gate` → `Promote` opens a generated `release/promote-<run id>` candidate PR
+against `main` → that candidate PR's own fast `main source gate` check → auto-merge
+(via the pipeline's own `APERTURE_RELEASE_TOKEN`, not your account). To confirm
+your change actually shipped rather than assuming the `dev` merge itself was
+the release:
+
+```bash
+gh pr list --repo ThomasMichon/copilot-extensions --search "is:merged head:release/promote-" --limit 5
+```
+
+A small, separate **"clear consumed changefiles on dev"** housekeeping PR
+normally follows a few minutes after each successful promotion (it deletes
+the changefiles that promotion just consumed) — routine cleanup, not
+something you need to review, but expected to appear.
 
 Two tools close the impatience gap without waiting on a real promotion:
 
