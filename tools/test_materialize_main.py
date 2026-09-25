@@ -154,6 +154,36 @@ def test_materialize_skips_file_pointer_with_missing_canonical(tmp_path: Path):
     assert pointer.read_text().startswith("<!-- VENDOR_POINTER:")
 
 
+def test_materialize_refuses_absolute_source_path(tmp_path: Path):
+    root = tmp_path / "repo"
+    secret = tmp_path / "outside-repo-secret.txt"
+    secret.write_text("do not leak\n", encoding="utf-8")
+    pointer = _file_pointer(root, "agent-bridge", "docs/evil.md", source=str(secret))
+
+    log = mm.materialize(root, canonical_root=root)
+    assert any("SKIP" in line and "escapes the canonical root" in line for line in log)
+    assert pointer.read_text().startswith("<!-- VENDOR_POINTER:")
+
+
+def test_materialize_refuses_traversal_source_path(tmp_path: Path):
+    root = tmp_path / "repo"
+    secret = tmp_path / "outside-repo-secret.txt"
+    secret.write_text("do not leak\n", encoding="utf-8")
+    pointer = _file_pointer(root, "agent-bridge", "docs/evil.md",
+                             source="../outside-repo-secret.txt")
+
+    log = mm.materialize(root, canonical_root=root)
+    assert any("SKIP" in line and "escapes the canonical root" in line for line in log)
+    assert pointer.read_text().startswith("<!-- VENDOR_POINTER:")
+
+
+def test_resolve_within_allows_legitimate_nested_source(tmp_path: Path):
+    root = tmp_path / "repo"
+    _canonical_file(root, "docs/patterns/deep/thing.md", content="ok\n")
+    resolved = mm._resolve_within(root, "docs/patterns/deep/thing.md")
+    assert resolved == (root / "docs/patterns/deep/thing.md").resolve()
+
+
 def test_materialize_expands_multiple_file_pointers_for_same_doc(tmp_path: Path):
     root = tmp_path / "repo"
     _canonical_file(root, "docs/patterns/shared.md", content="shared doc\n")

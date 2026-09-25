@@ -121,6 +121,19 @@ def materialize(dest: Path, *, canonical_root: Path) -> list[str]:
     return log
 
 
+def _resolve_within(canonical_root: Path, source_rel: str) -> Path | None:
+    """Resolve ``source_rel`` against ``canonical_root``, refusing an absolute
+    path or any ``../`` traversal that would escape ``canonical_root``
+    (including via a symlink). Returns ``None`` when the candidate escapes."""
+    if Path(source_rel).is_absolute():
+        return None
+    candidate = (canonical_root / source_rel).resolve()
+    root = canonical_root.resolve()
+    if candidate != root and root not in candidate.parents:
+        return None
+    return candidate
+
+
 def materialize_file_pointers(dest: Path, *, canonical_root: Path) -> list[str]:
     """Expand every file pointer found under ``dest`` from ``canonical_root``.
 
@@ -130,8 +143,12 @@ def materialize_file_pointers(dest: Path, *, canonical_root: Path) -> list[str]:
     log: list[str] = []
     for pointer_path in find_file_pointers(dest):
         source_rel = _file_pointer_source(pointer_path)
-        canonical = canonical_root / source_rel
+        canonical = _resolve_within(canonical_root, source_rel)
 
+        if canonical is None:
+            log.append(f"SKIP {pointer_path} (file pointer): source {source_rel!r} "
+                        "escapes the canonical root -- refusing")
+            continue
         if not canonical.is_file():
             log.append(f"SKIP {pointer_path} (file pointer): canonical {source_rel} not found")
             continue
