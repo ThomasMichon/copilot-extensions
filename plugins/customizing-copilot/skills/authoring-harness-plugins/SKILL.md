@@ -209,7 +209,7 @@ honorer; declare it as a dependency, and use its two convention-discovered seams
    supplementary `.agent-codespaces/config.yaml` fragment under your
    `references/agent-codespaces/`, and add a `sessionStart` hook
    (`register-config-provider.{sh,ps1}`) that drops a **pointer** to it into
-   `~/.agent-codespaces/config.d/`. The crux is
+   `~/.agent-codespaces/config.d/`. <!-- marketplace-isolation: allow doc-example --> The crux is
    `repos.<vessel>.workspace_repo: <product>` — it makes the dispatched agent land
    in `/workspaces/<product>` (not the vessel folder) and sets its ACP cwd. The
    drop-in merges at **lowest precedence** (a consumer's adopted config still wins)

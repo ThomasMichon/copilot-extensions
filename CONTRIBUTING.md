@@ -438,6 +438,25 @@ If something promoted to `main` turns out to be bad, see
 commit, then resume once `dev` has an actual fix) rather than hand-editing
 `main`.
 
+### Never admin-merge a PR into `main` — not even "just this once"
+
+`main` only ever moves via a `release/promote-*` PR or a genuine
+workflow-file-ONLY bootstrap PR (see the `main-gate` job in `ci.yml`), and
+`main-gate` recognizes and passes **both** of those on its own —
+unassisted, no override needed. That means `gh pr merge --admin` (or the
+equivalent `--admin` flag on any PR-merge tool) has **no legitimate use
+against `main`** once this gate is in place: if `main-gate` is failing your
+PR, that is the gate correctly telling you the PR doesn't belong on `main`
+— retarget it to `dev`, don't override the check. This is not a hypothetical
+risk: a PR landed directly on `main` via admin-bypass once
+(ThomasMichon/copilot-extensions#3622-erratum), stranding content that the
+next wholesale dev→main promotion would have silently reverted, because
+`main`'s tree is regenerated entirely from `dev`'s current tip on every
+cycle — anything that only ever touched `main` is invisible to that diff
+and vanishes the next time anything else promotes. If you're an agent about
+to reach for `--admin` against this repo's `main`: stop, re-read this
+section, and retarget to `dev` instead.
+
 ## Deploying: one command — `<repo> update`
 
 **The canonical deploy is a single unified command: `<repo> update`**

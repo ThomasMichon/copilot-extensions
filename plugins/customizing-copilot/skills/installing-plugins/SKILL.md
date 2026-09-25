@@ -286,7 +286,7 @@ into `~/.copilot/installed-plugins/`.
 
 - A plugin that ships **only** skills/hooks/agents/extensions is fully deployed
   by the payload install; nothing else to do.
-- A plugin that ships a **runtime** (a venv, `~/.local/bin` binstubs, or a
+- A plugin that ships a **runtime** (a venv, `~/.local/bin` binstubs, or a <!-- marketplace-isolation: allow doc-example -->
   long-running service) **also** runs its own installer to deploy that runtime
   from the payload. For such a plugin, a full update is two steps: refresh the
   payload, **then** run the plugin's install/setup step. The plugin's own docs
