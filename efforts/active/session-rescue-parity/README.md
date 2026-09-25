@@ -480,7 +480,24 @@ _Pending._
   clean on every touched/new file (confirmed a pre-existing, unrelated
   ~17-finding baseline on `__main__.py` is unchanged by this diff).
   Changefile added (patch, per CONTRIBUTING.md's default-to-patch guidance).
-- Next: open Phase 3's own PR, drive it through review/merge, then Phase 4
-  (documentation-only, per Phase 1's consumer-owned scheduling decision)
-  and Phase 5 (close-out).
+- PR #3676 went through **7 substantive Copilot review rounds** before
+  merge -- all real, verified findings, not noise: the lock-widening
+  seam's `&&`/`;` fix itself briefly reintroduced a directory-scoping bug
+  (fixed with a `{ ... }` group, verified both directions with a bash
+  repro); `_capture_hold_reason()` was hardened to fail closed on every
+  read failure across all four holder shapes (lease-store unreadable,
+  a malformed-but-present record, an explicit `null` record, a beacon
+  listing failure, an L2-store-unavailable `None`, and a non-string
+  `worktree` type crashing the orphan check); account-token minting was
+  moved up front and re-verified before the beacon listing (closing an
+  ambient-fallback window); `ConnectionManager()` construction moved
+  inside the lock-releasing protected block; and a real, independent,
+  pre-existing bug in `_pull_tar_bytes`'s `_PULL_CMD` was fixed along the
+  way (a normal CodeSpace missing even one of four optional session-state
+  paths silently produced no archive at all, misreported as "no
+  sessions"). Final state: 33 new tests total across the PR's lifetime,
+  1429 tests green, zero open review threads. **Merged.**
+- Next: Phase 4 (documentation-only, per Phase 1's consumer-owned
+  scheduling decision) and Phase 5 (close-out) remain -- each its own PR
+  per the effort's Coordination rule.
 
