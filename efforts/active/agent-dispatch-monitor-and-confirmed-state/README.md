@@ -117,44 +117,61 @@ known end-states; a `monitors` system should complement `emitters`/
 
 ## Plan
 
-### Phase 1 — Declare the monitor + confirmed shape (data only, no runtime change)
-_(agent-recommended: sequencing shape, following `task_state_machine.py`'s
-own declare-then-wire pattern)_
-- [ ] Add `Status.CONFIRMED` to `queue_records.py`. Add it to `TERMINAL`.
-      **Do not remove `COMPLETED` from `TERMINAL` in this phase** — see
-      Phase 2's risk note; Phase 1 only adds the new state and its declared
-      transitions, it does not yet change what "terminal" means for
-      existing callers.
-- [ ] In `task_state_machine.py`: add `CONFIRMED` to `ALL_STATES`; add
-      `confirm` (`COMPLETED -> CONFIRMED`, `SAFE_RETRY`) and
-      `reopen_completed` (`COMPLETED -> QUEUED`, `SAFE_RETRY`, carrying
-      forward progress/goal per *resume-the-goal-not-restart-it*) to
-      `TRANSITIONS`. Run `states_without_exit()`/`terminal_states_with_exit()`
-      against the updated table and fix any finding.
-- [ ] Design (not yet implement) the **monitor** vocabulary: a small,
-      closed enum/registry of monitor kinds (starting with exactly one:
+### Phase 1 — The monitor vocabulary only (data only, no `Status`/table change)
+_(agent-recommended: sequencing shape, revised 2026-09-25 after actually
+running `test_task_state_machine.py` — see the Journal entry below for why.)_
+- [ ] Design and implement the **monitor** vocabulary as its own small,
+      dependency-free module (`monitors.py`), matching the codebase's
+      existing one-focused-module-per-concern convention: a small, closed
+      enum/registry of monitor kinds (starting with exactly one:
       `cooldown`), each carrying the data needed to resolve it (for
-      `cooldown`: a `not_before` timestamp) and a resolution check. Write
-      this as its own small module (e.g. `monitors.py`) rather than folding
-      it into `queue_lifecycle.py`, matching the codebase's existing
-      one-focused-module-per-concern convention.
-- [ ] Unit tests: table-shape checks (reachability, no dangling non-terminal
-      state, no terminal state with an exit) extended to cover `CONFIRMED`,
-      mirroring the existing Phase 9/10 tests in
-      `review-automation-reliability`.
+      `cooldown`: a `not_before` timestamp) and a pure resolution check
+      (`is_resolved(monitor, *, now) -> bool`). No wiring into `queue_*.py`
+      yet — this phase is pure, fake-clock-testable data + a resolver
+      function, deliberately kept independent of the state machine so it
+      can be built and tested before Phase 2's harder question is settled.
+- [ ] Unit tests: cooldown resolution at/before/after `not_before`; the
+      default-cooldown constructor; no live clock, no DB, no subprocess.
 
-### Phase 2 — Wire `confirmed` for real (the invasive phase — needs its own risk pass)
+### Phase 2 — `confirmed` requires resolving `COMPLETED`'s terminal-ness FIRST
+**Finding (2026-09-25, from actually running the suite, not just reading
+it):** `test_task_state_machine.py::test_no_transition_originates_from_a_
+terminal_state` actively asserts no declared transition may source from a
+terminal state. Since `Status.TERMINAL` already contains `COMPLETED`, a
+`confirm`/`reopen_completed` transition sourced from `COMPLETED` is
+**not decomposable** into "declare the transition now, resolve
+terminal-ness later" the way the original Phase 1 draft assumed — the
+table-shape test forces the terminal-ness question to be answered in the
+SAME change that adds either transition. There is no clean, purely-additive
+"Phase 1" for the state-machine table itself; Phase 2 below is now the
+single phase that must land both together.
+
 - [ ] **Risk-audit every `Status.TERMINAL`/`Status.COMPLETED` call site**
       across `queue*.py`, `coordinator_tasks.py`, `board_cli.py`,
-      `client.py`, `mcp_server.py`, `mcp_http.py`, the CLI, and tests before
-      changing terminal-ness. The safest shape found so far: leave
-      `COMPLETED` in `TERMINAL` (existing "done" semantics for
-      emitter/evaluator-driven and liveness-GC/reclamation code paths stay
-      byte-for-byte unchanged) and treat `confirm`/`reopen_completed` as
-      **additional, additive** transitions available from a state that
-      remains "terminal" for every pre-existing purpose. Revisit only if
-      that additive framing proves incoherent once every call site is
-      actually read.
+      `client.py`, `mcp_server.py`, `mcp_http.py`, the CLI, and tests
+      **before** changing terminal-ness — the additive-while-still-terminal
+      framing this bullet originally proposed does not hold (see the
+      finding above): `COMPLETED` must actually leave `Status.TERMINAL`,
+      with `CONFIRMED` taking its place as the new true terminal. Read
+      every site that branches on "is this task done" to confirm each one
+      either (a) already means "no more agent work will happen on this,"
+      which stays true for `COMPLETED` even once it's non-terminal (no
+      *agent* work resumes without an explicit `reopen`), or (b) genuinely
+      means "fully, durably closed," which now wants `CONFIRMED` instead.
+      Liveness-GC/reclamation are the likeliest to fall in bucket (a); audit
+      before assuming.
+- [ ] Update `task_state_machine.py`: add `CONFIRMED` to `ALL_STATES`; move
+      `COMPLETED` out of (and `CONFIRMED` into) the states this module
+      treats as terminal; add `confirm` (`COMPLETED -> CONFIRMED`,
+      `SAFE_RETRY`) and `reopen_completed` (`COMPLETED -> QUEUED`,
+      `SAFE_RETRY`, carrying forward progress/goal per
+      *resume-the-goal-not-restart-it*) to `TRANSITIONS`. Re-run
+      `test_task_state_machine.py` unmodified except for
+      `test_terminal_states_match_queue_status` (which must track whatever
+      `Status.TERMINAL` becomes) — every other structural assertion in that
+      file should keep passing against the new table with zero further
+      edits; treat a need to relax any other assertion there as a signal
+      the design needs more thought, not a test to loosen.
 - [ ] Implement `TaskQueue.confirm(task_id, ...)` (`COMPLETED -> CONFIRMED`)
       and `TaskQueue.reopen_completed(task_id, ..., steer_fields=None)`
       (`COMPLETED -> QUEUED`, carrying progress forward and, if given,
@@ -273,3 +290,28 @@ concrete API shapes then._
   than guessed at.
 - Per the `planning-efforts` skill's review gate: this README is submitted
   as a PR for automated review before any Phase 1 code lands.
+
+### 2026-09-25 — Plan PR (#3682) merged; Phase 1 execution begins, and immediately corrects itself
+- Plan cleared review and merged to `dev`. Began Phase 1 as originally
+  written (declare `CONFIRMED` + its transitions, keeping `COMPLETED`
+  terminal) — and immediately ran the existing
+  `test_task_state_machine.py` against a draft table edit rather than
+  reasoning from the docstrings alone.
+  `test_no_transition_originates_from_a_terminal_state` failed: it asserts,
+  as a hard structural invariant, that no declared transition may source
+  from a state in `TERMINAL_STATES`. Since `confirm`/`reopen_completed`
+  both source from `COMPLETED`, and `COMPLETED` is in `Status.TERMINAL`
+  today, there is no way to add either transition without also resolving
+  `COMPLETED`'s terminal-ness in the same change — the original Phase
+  1/Phase 2 split ("declare the transition now, decide terminal-ness
+  later") does not survive contact with the real test suite. Re-split the
+  Plan: Phase 1 is now *only* the standalone `monitors.py` module (no
+  `Status`/table touch at all, so it stays genuinely safe and independent);
+  the state-machine change is now entirely Phase 2, landing the
+  terminal-ness resolution and the two new transitions together, in one
+  reviewed change, rather than pretending the first half was decouplable.
+- This is exactly the kind of finding this effort's own Validation Plan
+  exists to catch, and exactly why the effort's Context section demanded
+  real source-reading over speculation — the difference here is running the
+  actual suite, not just reading the module.
+- Proceeding to implement the corrected Phase 1 (`monitors.py`) now.

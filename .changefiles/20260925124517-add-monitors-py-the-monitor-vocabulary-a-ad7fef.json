@@ -1,0 +1,9 @@
+{
+  "comment": "Add monitors.py: the monitor vocabulary (a suspend's companion resolution handler), starting with the default cooldown kind. Data-only -- not yet wired into suspend/wake.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "dev"
+    }
+  ]
+}
