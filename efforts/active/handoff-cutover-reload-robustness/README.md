@@ -244,6 +244,13 @@ to the runtime fix (#5253† / upstream #13494). Findings:
       nice-to-have follow-up — not blocking, given the live-box validation
       above; open a follow-up issue if pursued.
 
+### Bug sweep — linked open bugs (2026-09-24)
+
+_Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
+
+- [ ] **#2386** agent-dispatch: supervisor generation retirement leaves duplicate old+new processes running after update
+  - Duplicate processes surviving a generation retirement is exactly this effort's cutover/reload-robustness scope.
+
 ## Validation Plan
 
 - [x] **Clean-room robustness scenario** (`context-handoff-cutover`, Tier-P F1 in
