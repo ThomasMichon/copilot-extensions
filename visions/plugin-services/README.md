@@ -329,8 +329,9 @@ state and update user-level configuration. The verb name alone never grants
 repo-write authority.
 
 ### entity-relationship-diagnosability
-Every durable entity the suite tracks (worktree, session, task, machine, agent,
-repo, project, bridge, container, codespace) is owned by exactly one plugin
+Every entity the suite tracks (worktree, session, task, machine, repo,
+project, bridge, container, codespace — nine durable, plus the transient
+**agent** identity actively driving a session) is owned by exactly one plugin
 tier, and every cross-entity traversal an operator or agent actually needs
 (a session's worktree, a worktree's full session/handoff history, a task's
 current bridge/liveness state, a session's rendered conversation + usage stats,

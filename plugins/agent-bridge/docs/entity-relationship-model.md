@@ -1,3 +1,7 @@
+<!-- Mirrored from the copilot-extensions repo's docs/patterns/entity-relationship-model.md.
+     Edit the canonical copy there; this vendored mirror ships with the plugin's own
+     marketplace payload so it stays reachable without a repo checkout. -->
+
 # Pattern: entity-relationship model
 
 **Serves:** *Vision plugin-services* §Concepts &
