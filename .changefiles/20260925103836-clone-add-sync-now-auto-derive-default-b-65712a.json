@@ -1,9 +1,0 @@
-{
-  "comment": "clone/add/sync now auto-derive default_branch from a repo's own in-repo .agent-worktrees/config.yaml, and self-heal an anchor left on the wrong branch",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Fix a SKILL.md line-wrap false positive in the marketplace-isolation guard's bare-agent-command check",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}
