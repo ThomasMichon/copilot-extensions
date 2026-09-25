@@ -10,7 +10,7 @@ from contextlib import redirect_stdout
 import pytest
 
 from agent_worktrees import __main__ as m
-from agent_worktrees import claim_providers
+from agent_worktrees import claim_providers, claims_owner
 from agent_worktrees import state_root
 from agent_worktrees import tracking
 
@@ -44,6 +44,13 @@ def test_claims_mirror_status_parser():
 def test_claims_registered():
     assert m.COMMAND_MAP["claims"] is m.cmd_claims
     assert m._WORKTREE_VERBS.get("claims") == "claims"
+
+
+def test_claims_owner_parser():
+    args = m.build_parser().parse_args(
+        ["claims", "owner", "codespace", "cs-one", "--json", "--all-states"])
+    assert args.target == ["owner", "codespace", "cs-one"]
+    assert args.json is True and args.all_states is True
 
 
 # --- _dispatch_assigned_tasks degradation -----------------------------------
@@ -262,6 +269,93 @@ def test_claims_human_output(monkeypatch, tmp_path):
     assert "Claim ledger for wt-A" in text
     assert "anomalous-potato/copilot-extensions/wt-B" in text
     assert "Inbound" in text
+
+
+# --- claims owner -----------------------------------------------------------
+
+def _seed_project_record(tmp_path, monkeypatch, project, worktree_id, resources):
+    root = tmp_path / project
+    tdir = root / "worktrees"
+    tdir.mkdir(parents=True)
+    wdir = root / worktree_id
+    wdir.mkdir()
+    rec = tracking.create_new_record(
+        worktree_id, f"worktree/{worktree_id}", str(wdir), project,
+        "example-machine", "wsl", tdir,
+    )
+    for claim in resources:
+        tracking.add_resource_claim(rec, claim, save=False)
+    tracking.save_record(rec, tdir / f"{worktree_id}.yaml")
+    monkeypatch.setattr(
+        "agent_worktrees.installer.read_projects_registry",
+        lambda: {"projects": {"proj-a": {}, "proj-b": {}}},
+    )
+    monkeypatch.setattr(
+        "agent_worktrees.config.project_dir",
+        lambda name=None: tmp_path / (name or project),
+    )
+    return rec
+
+
+def test_find_claim_owners_across_registered_projects(monkeypatch, tmp_path):
+    _seed_project_record(
+        tmp_path, monkeypatch, "proj-a", "wt-a",
+        [tracking.ResourceClaim(kind="codespace", ref="cs-one", state="active")],
+    )
+    _seed_project_record(
+        tmp_path, monkeypatch, "proj-b", "wt-b",
+        [
+            tracking.ResourceClaim(kind="codespace", ref="cs-one", state="at-rest",
+                                   note="kept warm"),
+            tracking.ResourceClaim(kind="codespace", ref="cs-two", state="released"),
+        ],
+    )
+
+    owners = claims_owner.find_claim_owners("codespace", "cs-one")
+    assert [o["project"] for o in owners] == ["proj-a", "proj-b"]
+    assert [o["worktree_id"] for o in owners] == ["wt-a", "wt-b"]
+    assert owners[0]["qualified_ref"] == "example-machine/proj-a/wt-a"
+    assert owners[0]["owner_ref"] == "example-machine/proj-a/wt-a"
+    assert owners[1]["note"] == "kept warm"
+    assert claims_owner.find_claim_owners("codespace", "cs-two") == []
+    assert claims_owner.find_claim_owners(
+        "codespace", "cs-two", include_released=True)[0]["state"] == "released"
+
+
+def test_claims_owner_json_exit_codes(monkeypatch, tmp_path, capfd):
+    _seed_project_record(
+        tmp_path, monkeypatch, "proj-a", "wt-a",
+        [tracking.ResourceClaim(kind="codespace", ref="cs-one")],
+    )
+    _seed_project_record(tmp_path, monkeypatch, "proj-b", "wt-b", [])
+
+    rc = m.cmd_claims(argparse.Namespace(
+        target=["owner", "codespace", "cs-one"], json=True, all_states=False))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out["owners"][0]["worktree_id"] == "wt-a"
+
+    rc = m.cmd_claims(argparse.Namespace(
+        target=["owner", "codespace", "missing"], json=True, all_states=False))
+    assert rc == 1
+    out = json.loads(capfd.readouterr().out)
+    assert out["owners"] == []
+
+
+def test_find_claim_owners_skips_bad_records(monkeypatch):
+    class BadClaim:
+        @property
+        def kind(self):
+            raise ValueError("bad claim")
+
+    class BadRecord:
+        resources = [BadClaim()]
+
+    monkeypatch.setattr(
+        "agent_worktrees.claims_owner._iter_records",
+        lambda: [("proj-a", BadRecord())],
+    )
+    assert claims_owner.find_claim_owners("codespace", "cs-one") == []
 
 
 # --- claims release ---------------------------------------------------------

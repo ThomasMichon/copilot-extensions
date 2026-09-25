@@ -7,7 +7,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from . import activity, claim_handoffs, obligations, output, tracking
+from . import activity, claim_handoffs, claims_owner, obligations, output, tracking
 from . import config as cfg, state_root as state_root_mod
 
 
@@ -119,9 +119,8 @@ def add_parsers(sub) -> None:
         "machine/project/worktree_id followed by claim refs; "
         "values end at the next option",
     )
-    p.add_argument(
-        "--reason", default="", help="with handoff decline/cancel: required explanation"
-    )
+    p.add_argument("--reason", default="", help="with handoff decline/cancel: required explanation")
+    p.add_argument("--all-states", action="store_true", help="with owner: include released claims")
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
 
 
@@ -185,6 +184,7 @@ def _dispatch_assigned_tasks(machine: str, worktree_id: str, cwd: str) -> dict:
 def cmd_claims(args: argparse.Namespace) -> int:
     """Dispatch the claims verb."""
     target = list(getattr(args, "target", None) or [])
+    if target and target[0] == "owner": return claims_owner.cmd_claims_owner(args, target[1:])
     if target and target[0] == "handoff":
         return _claims_handoff(args, target[1:])
     if target and target[0] == "add":
