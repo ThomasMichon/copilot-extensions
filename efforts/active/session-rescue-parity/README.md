@@ -106,9 +106,11 @@ non-destructive function — genuinely closer to done than agent-containers
 was before Phase 3.
 
 Every current call site (`__main__.py`'s `_cmd_delete`/`_cmd_finalize`/
-`_cmd_stop` and their JSON-modal variants, `claim_provider_cli.py`'s reclaim
-callback) is a lifecycle transition. There is no standalone "pull now, keep
-the CodeSpace running" CLI verb, and no periodic timer.
+`_cmd_stop` and their JSON-modal variants, the ordinary prune path and
+`_reclaim_for_quota`'s total-limit path (both also in `__main__.py`), and
+`claim_provider_cli.py`'s reclaim callback) is a lifecycle transition. There
+is no standalone "pull now, keep the CodeSpace running" CLI verb, and no
+periodic timer.
 
 ### The one real safety gap codespaces has that containers doesn't
 
@@ -355,7 +357,14 @@ itself did not specify phasing)_
 - [ ] Add a standalone, non-lifecycle-transition CLI verb (e.g.
       `agent-codespaces sync-sessions <name>`) that calls the gated capture
       without stopping/finalizing/deleting the CodeSpace and without ever
-      booting it.
+      booting it. **This is additive, not a replacement**: every existing
+      destructive-recovery call site
+      (`_cmd_delete`/`_cmd_finalize`/`_cmd_stop` and their JSON-modal
+      variants, the prune path, `_reclaim_for_quota`'s total-limit path, and
+      `claim_provider_cli.py`'s reclaim callback — six sites, not three;
+      re-audit `__main__.py`/`claim_provider_cli.py` directly rather than
+      trusting this list to still be exhaustive by the time Phase 3 starts)
+      keeps calling `sync_codespace_sessions()` exactly as today, unchanged.
 - [ ] Tests: CLI-dispatch coverage (text + `--json`, mirroring
       `test_rescue_capture_cli.py`'s shape), a liveness-gate regression test
       (mid-write session is deferred, not captured), a
