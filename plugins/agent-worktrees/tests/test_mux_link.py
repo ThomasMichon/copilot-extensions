@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -522,45 +524,44 @@ def test_lock_file_helpers_actually_exclude_a_second_acquirer(tmp_path):
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="msvcrt-specific retry-count regression")
-def test_lock_file_retries_beyond_msvcrts_own_short_built_in_window(tmp_path, monkeypatch):
-    """Copilot review finding: on Windows, ``msvcrt.locking(...,
-    LK_LOCK, ...)`` only retries a small, fixed number of times internally
-    (roughly 10 attempts, ~1s apart) before raising ``OSError`` --
-    `_interprocess_lock` previously caught that and proceeded without any
-    cross-process lock at all, so a slow-but-realistic overlap between two
-    monitor processes longer than ~10s would silently lose the whole
-    protection this code claims to provide. ``_lock_file`` must retry its
-    *own* non-blocking attempts across a much longer bound instead of
-    trusting ``LK_LOCK``'s short built-in retry count."""
-    monkeypatch.setattr(mux_link, "_LOCK_ACQUIRE_TIMEOUT_S", 3.0)
-    monkeypatch.setattr(mux_link, "_LOCK_RETRY_INTERVAL_S", 0.05)
+@pytest.mark.skipif(sys.platform != "win32", reason="msvcrt-specific retry-loop coverage")
+def test_lock_file_retries_msvcrt_deterministically_past_repeated_failures(monkeypatch):
+    """Copilot review finding: the previous version of this test held the
+    lock for only 1.5s -- shorter than ``msvcrt.locking(..., LK_LOCK,
+    ...)``'s own built-in ~10s retry window, so it could pass even with the
+    OLD, buggy single-call implementation and never actually proved the new
+    retry loop. This test instead deterministically mocks
+    ``msvcrt.locking`` to fail many more times than any single call could
+    plausibly retry internally, then succeed, and asserts ``_lock_file``
+    still succeeds -- proving *this* function's own retry loop drives the
+    underlying primitive repeatedly, independent of real timing or
+    ``msvcrt``'s own internal behavior."""
+    monkeypatch.setattr(mux_link, "_LOCK_RETRY_INTERVAL_S", 0.001)
+    monkeypatch.setattr(mux_link, "_LOCK_ACQUIRE_TIMEOUT_S", 10.0)
 
-    lock_path = tmp_path / "probe.lock"
-    fh1 = open(lock_path, "a+b")
-    fh2 = open(lock_path, "r+b")
-    hold_seconds = 1.5  # comfortably longer than msvcrt's own ~10 x 1s window would allow
-    try:
-        mux_link._lock_file(fh1)
-        release_at = time.time() + hold_seconds
+    calls = {"n": 0}
+    # Comfortably more than msvcrt's own ~10-attempt built-in retry count
+    # could ever cover with a single LK_LOCK call.
+    fail_until_call = 50
+    real_locking = mux_link.msvcrt.locking
 
-        def _release_after_delay():
-            time.sleep(hold_seconds)
-            mux_link._unlock_file(fh1)
+    def _flaky_locking(fd, mode, nbytes):
+        calls["n"] += 1
+        if mode == mux_link.msvcrt.LK_NBLCK and calls["n"] < fail_until_call:
+            raise OSError("simulated sustained contention")
+        return real_locking(fd, mode, nbytes)
 
-        releaser = threading.Thread(target=_release_after_delay, daemon=True)
-        releaser.start()
+    monkeypatch.setattr(mux_link.msvcrt, "locking", _flaky_locking)
 
-        started = time.time()
-        mux_link._lock_file(fh2)  # must retry past the hold, not give up early
-        elapsed = time.time() - started
-        assert elapsed >= (release_at - started) - 0.2, (
-            "acquired the lock before it was actually released -- retry loop too eager"
-        )
-        mux_link._unlock_file(fh2)
-        releaser.join(timeout=2)
-    finally:
-        fh1.close()
-        fh2.close()
+    with tempfile.TemporaryDirectory() as td:
+        lock_path = Path(td) / "probe.lock"
+        fh = open(lock_path, "a+b")
+        try:
+            mux_link._lock_file(fh)  # must not raise despite 49 simulated failures
+            assert calls["n"] >= fail_until_call
+        finally:
+            mux_link._unlock_file(fh)
+            fh.close()
 
 
 def test_cache_without_persist_path_does_not_survive_a_restart():
