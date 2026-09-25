@@ -119,6 +119,7 @@ async def diagnose(
         # to crash -- catch broadly here rather than chase each conversion's
         # specific exception type one at a time.
         printer(f"{step(1, 'config')}: FAILED -- {exc}")
+        printer(f"  hint: {_HINTS['config']}")
         report.stages.append(StageResult("config", False, str(exc)))
         return report
     where = str(cfg.source_path) if cfg.source_path else name_or_path
