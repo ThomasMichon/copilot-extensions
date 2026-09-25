@@ -40,6 +40,7 @@ from datetime import datetime
 from typing import Any
 
 from .config import _repo_matches_codespace
+from .driving_worktrees import codespace_claim_owner_worktrees
 from .lease import Lease, list_leases
 from .lifecycle import CodespaceInfo, classify_state, list_codespaces
 from .status import STATE_PRUNABLE, STATE_RECOVERED, list_status
@@ -1256,6 +1257,7 @@ def picker_payload(
     actionable missing-``codespace``-scope notice (#980).
     """
     entries: list[dict] = []
+    claim_owner_worktrees = codespace_claim_owner_worktrees(m.name for m in members if m.holder_effort and not m.holder_worktree)
     for m in sorted(members, key=lambda x: (x.repository, x.disposition, x.name)):
         if m.holder_effort:
             holder = f"{m.holder_effort}@{m.holder_host or '?'}"
@@ -1266,15 +1268,13 @@ def picker_payload(
             holder = _short_claim_ref(m.l2_holder)
         else:
             holder = ""
-        driving_worktree_id = _driving_worktree_id(m)
+        driving_worktree_id = _driving_worktree_id(m) or claim_owner_worktrees.get(m.name, "")
         has_driving_worktree = bool(driving_worktree_id)
         friendly = m.display_name or m.name
-        # The claiming worktree's short id: the cross-machine beacon (the 4-hex
-        # borrowing-worktree id) when held elsewhere, else the local lease's
-        # effort id, else a #897 claim's owner worktree dir name (3b -- so a
-        # claim-held box surfaces WHICH worktree locks it, not a blank). The
-        # Picker correlates this to the worktree's TASK title.
-        worktree = m.beacon or m.holder_effort or _worktree_dir_id(m.holder_worktree)
+        worktree = (
+            m.beacon or driving_worktree_id or m.holder_effort
+            or _worktree_dir_id(m.holder_worktree)
+        )
         # A concise uppercase status for the compact table: RUNNING when live,
         # STALE for an aged recycle candidate, else STOPPED.
         if m.running:
@@ -1340,7 +1340,7 @@ def picker_payload(
             # claims-list (PR/bug/etc.), via the shared claims_rank module --
             # "" when unclaimed, unresolvable, or agent-worktrees isn't
             # installed alongside (see _claims_summary_for_worktree).
-            "claims_summary": _claims_summary_for_worktree(worktree),
+            "claims_summary": _claims_summary_for_worktree(driving_worktree_id or worktree),
             # Phase 1: the Worktrees pane's own compact sess/live column,
             # reused as-is -- LIVE/IDLE/blank (see _sess_column).
             "sess": _sess_column(live_session, worktree),

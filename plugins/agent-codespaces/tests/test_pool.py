@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sys
 import time
+import types
 
 from agent_codespaces.lease import Lease
 from agent_codespaces.lifecycle import CodespaceInfo
@@ -480,6 +482,62 @@ def test_advisory_borrow_never_orphaned():
     assert e["worktree"] == "my-effort"  # advisory borrow surfaces via effort id
 
 
+def test_picker_payload_effort_lease_resolves_journaled_claim_owner(monkeypatch):
+    from agent_codespaces import pool as pool_mod
+    now = time.time()
+    borrow = Lease(codespace="held", effort="my-effort", pid=1, host="dev6",
+                   acquired_at=now, heartbeat_at=now)
+    members, budget = build_pool(
+        budget_cores=64, now=now, codespaces=[_cs("held", state="Available")],
+        leases=[borrow], markers={},
+    )
+    monkeypatch.setattr(
+        pool_mod,
+        "codespace_claim_owner_worktrees",
+        lambda names: {"held": "example-win-FEAT-1a2b"},
+    )
+    monkeypatch.setattr(
+        pool_mod,
+        "_claims_summary_for_worktree",
+        lambda worktree_id: f"claims:{worktree_id}" if worktree_id else "",
+    )
+    monkeypatch.setattr(
+        pool_mod,
+        "_worktree_status_for_worktree",
+        lambda worktree_id: {"title": f"Worktree {worktree_id}"},
+    )
+    e = pool_mod.picker_payload(members, budget)["entries"][0]
+    assert e["worktree"] == "example-win-FEAT-1a2b"
+    assert e["worktree_id"] == "example-win-FEAT-1a2b"
+    assert e["has_driving_worktree"] == "true"
+    assert e["claims_summary"] == "claims:example-win-FEAT-1a2b"
+    assert e["worktree_status"]["title"] == "Worktree example-win-FEAT-1a2b"
+
+
+def test_picker_payload_unresolved_effort_lease_keeps_idle_sess(monkeypatch):
+    """An effort-held CodeSpace whose owner can't be resolved still reads as
+    driven (IDLE) and still looks its claims up by the effort label."""
+    from agent_codespaces import pool as pool_mod
+    now = time.time()
+    borrow = Lease(codespace="held", effort="my-effort", pid=1, host="dev6",
+                   acquired_at=now, heartbeat_at=now)
+    members, budget = build_pool(
+        budget_cores=64, now=now, codespaces=[_cs("held", state="Available")],
+        leases=[borrow], markers={},
+    )
+    seen = []
+    monkeypatch.setattr(pool_mod, "codespace_claim_owner_worktrees", lambda names: {})
+    monkeypatch.setattr(
+        pool_mod, "_claims_summary_for_worktree",
+        lambda worktree_id: seen.append(worktree_id) or "",
+    )
+    e = pool_mod.picker_payload(members, budget)["entries"][0]
+    assert e["worktree"] == "my-effort"
+    assert e["has_driving_worktree"] == "false"
+    assert e["sess"] == "IDLE"
+    assert seen == ["my-effort"]
+
+
 def test_picker_payload_friendly_name_and_subtitle():
     import time as _t
     from agent_codespaces.pool import picker_payload
@@ -568,11 +626,10 @@ def test_picker_payload_status_stale_and_stopped():
 
 # --- claims_summary (picker-venue-pivots Phase 1) --------------------------
 
-def test_picker_payload_claims_summary_wired_from_claiming_worktree(monkeypatch):
+def test_picker_payload_claims_summary_wired_from_resolved_worktree(monkeypatch):
     """The ``claims_summary`` entry field is the claiming worktree's ranked
     claims-list (via the shared ``agent_worktrees.claims_rank`` module),
-    looked up by the same ``worktree`` short id already used for the TASK
-    title cross-link."""
+    looked up by the resolved driving worktree id, not an effort label."""
     import time as _t
     from agent_codespaces.pool import picker_payload
     now = _t.time()
@@ -585,11 +642,15 @@ def test_picker_payload_claims_summary_wired_from_claiming_worktree(monkeypatch)
     members, budget = build_pool(now=now, codespaces=[held], leases=[lease], markers={})
     seen_ids = []
     monkeypatch.setattr(
+        "agent_codespaces.pool.codespace_claim_owner_worktrees",
+        lambda names: {"held": "wt-claiming"},
+    )
+    monkeypatch.setattr(
         "agent_codespaces.pool._claims_summary_for_worktree",
         lambda worktree_id: seen_ids.append(worktree_id) or "PR #2481",
     )
     e = picker_payload(members, budget)["entries"][0]
-    assert seen_ids == ["3bac"]              # looked up by the claiming worktree id
+    assert seen_ids == ["wt-claiming"]       # looked up by the driving worktree id
     assert e["claims_summary"] == "PR #2481"
 
 
@@ -612,6 +673,40 @@ def test_claims_summary_for_worktree_degrades_gracefully_without_agent_worktrees
     from agent_codespaces.pool import _claims_summary_for_worktree
     assert _claims_summary_for_worktree("") == ""
     assert _claims_summary_for_worktree("some-worktree-id") == ""
+
+
+def test_codespace_claim_owner_worktrees_prefers_single_active(monkeypatch):
+    from agent_codespaces.driving_worktrees import codespace_claim_owner_worktrees
+
+    class _ClaimsOwner:
+        @staticmethod
+        def find_claim_owners_for_refs(kind, refs):
+            assert kind == "codespace"
+            return {
+                "cs-one": [
+                    {"worktree_id": "wt-old", "status": "pushed"},
+                    {"worktree_id": "wt-active", "status": "active"},
+                ],
+                "cs-two": [
+                    {"worktree_id": "wt-a", "status": "active"},
+                    {"worktree_id": "wt-b", "status": "active"},
+                ],
+            }
+
+    monkeypatch.setitem(
+        sys.modules,
+        "agent_worktrees",
+        types.SimpleNamespace(claims_owner=_ClaimsOwner),
+    )
+    assert codespace_claim_owner_worktrees(["cs-one", "cs-two"]) == {
+        "cs-one": "wt-active",
+    }
+
+
+def test_codespace_claim_owner_worktrees_degrades_without_agent_worktrees(monkeypatch):
+    from agent_codespaces.driving_worktrees import codespace_claim_owner_worktrees
+    monkeypatch.setitem(sys.modules, "agent_worktrees", None)
+    assert codespace_claim_owner_worktrees(["cs-one"]) == {}
 
 
 # --- agent-bridge live-session join (picker-venue-pivots Phase 1) ---------
