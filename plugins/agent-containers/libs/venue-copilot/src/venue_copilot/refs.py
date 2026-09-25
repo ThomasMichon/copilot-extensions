@@ -132,7 +132,7 @@ def deliver_note(session_id: str, note: str, *, run=subprocess.run) -> bool:
     bridge = shutil.which("agent-bridge") or "agent-bridge"
     try:
         result = run(
-            [bridge, "send", session_id, "--prompt-file", "-", "--no-wait"],
+            [bridge, "send", session_id, "--prompt-file", "-", "--no-wait", "--steer"],
             input=note, capture_output=True, text=True, timeout=60,
         )
     except (OSError, subprocess.TimeoutExpired):
