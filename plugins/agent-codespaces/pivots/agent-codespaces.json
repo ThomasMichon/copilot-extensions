@@ -67,5 +67,6 @@
       "progress": true
     }
   ],
-  "empty_hint": "No CodeSpaces (is the GitHub CLI authenticated with the 'codespace' scope?)."
+  "empty_hint": "No CodeSpaces (is the GitHub CLI authenticated with the 'codespace' scope?).",
+  "worker": {"worktree": "worktree_id", "label": "display", "live": "sess", "activity": "activity"}
 }

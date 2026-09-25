@@ -1,0 +1,9 @@
+{
+  "comment": "fleet --json carries the worker's activity and the pivot declares a worker block, so a Worktrees row can show the container worker it supervises",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

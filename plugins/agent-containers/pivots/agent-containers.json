@@ -56,5 +56,6 @@
       "confirm": true
     }
   ],
-  "empty_hint": "No fleet containers (run `agent-containers up <fleet>`)."
+  "empty_hint": "No fleet containers (run `agent-containers up <fleet>`).",
+  "worker": {"worktree": "worktree_id", "label": "name", "live": "sess", "activity": "activity"}
 }

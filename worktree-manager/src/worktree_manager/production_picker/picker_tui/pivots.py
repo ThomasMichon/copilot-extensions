@@ -97,6 +97,10 @@ def find_claiming_task(pivots, pivot_runtimes, machine, wid, wid4):
         reg = d.get("pivot")
         if reg is None or not getattr(reg, "worktree_field", None):
             continue
+        # A venue pivot's rows are supervised workers, not claiming tasks --
+        # they surface through find_supervised_workers, never as a phase badge.
+        if getattr(reg, "worker", None) is not None:
+            continue
         rt = pivot_runtimes.get(reg.name)
         if rt is None:
             continue
@@ -111,6 +115,44 @@ def find_claiming_task(pivots, pivot_runtimes, machine, wid, wid4):
             if wt and (wt == wid or (wid4 and wt == wid4)):
                 return (row, getattr(reg, "group_field", None))
     return None
+
+
+def find_supervised_workers(pivots, pivot_runtimes, machine, wid):
+    """Every cached venue-pivot row naming worktree ``wid`` (the real, full id)
+    as its driving worktree, via each pivot's opt-in ``worker`` block, as
+    ``[{"pivot", "label", "live", "activity"}]`` in pivot order. Exact full-id
+    equality only (a 4-char id can collide across worktrees). Read-only like
+    :func:`find_claiming_task`: it never fetches, so an unloaded pivot simply
+    contributes nothing."""
+    wid = str(wid or "").strip().lower()
+    if not wid:
+        return []
+    out = []
+    for d in pivots:
+        reg = d.get("pivot")
+        spec = getattr(reg, "worker", None) if reg is not None else None
+        rt = pivot_runtimes.get(reg.name) if spec is not None else None
+        if rt is None:
+            continue
+        scope = "" if getattr(reg, "account_scoped", False) else machine
+        state, rows, _err = rt.get(scope)
+        if state != "ready":
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            if str(row.get(spec.worktree_field) or "").strip().lower() != wid:
+                continue
+            out.append({
+                "pivot": reg.name,
+                "label": str(row.get(spec.label_field) or "").strip(),
+                "live": str(row.get(spec.live_field) or "").strip() if spec.live_field else "",
+                "activity": (
+                    str(row.get(spec.activity_field) or "").strip()
+                    if spec.activity_field else ""
+                ),
+            })
+    return out
 
 
 # Kept for symmetry with maintenance.py's module layout; the engine imports the
@@ -132,6 +174,7 @@ __all__ = [
     "ensure_pivots",
     "entry_matches",
     "find_claiming_task",
+    "find_supervised_workers",
     "format_form_template",
     "format_template",
     "installed_plugins_dir",
