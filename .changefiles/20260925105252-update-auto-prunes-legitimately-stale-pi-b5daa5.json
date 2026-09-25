@@ -1,0 +1,9 @@
+{
+  "comment": "update auto-prunes legitimately stale Picker pivot manifests (duplicate/identity-mismatch/missing-target/invalid-entry) by default; opt out with --no-prune-pivots",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
