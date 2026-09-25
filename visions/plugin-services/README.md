@@ -78,6 +78,17 @@ thing, and it never spawns one just to be sure.
   never hardcodes a call to a specific higher-tier sibling's CLI. A missing
   provider degrades only that claim's status resolution, never agent-
   worktrees' own claims commands.
+- **Entity-relationship diagnosability** — the suite's durable entities
+  (worktree, session, task, machine, agent, repo, project, bridge, container,
+  codespace) and the claim refs that link them are each owned by exactly one
+  plugin tier, but an operator or agent diagnosing a problem routinely needs to
+  traverse *across* owners (a session's worktree, a worktree's handoff chain, a
+  task's bridge state). That traversal must be answerable by composing a small,
+  documented set of CLI commands — never by an ad-hoc script reading another
+  plugin's private database file directly. A plugin that introduces a new
+  cross-entity traversal question either points to the existing command(s) that
+  answer it or adds the missing one; it is never left to bit-rot as tribal
+  knowledge. See the `entity-relationship-model` pattern.
 - **Service-bearing plugin** — a plugin whose runtime includes a **long-lived
   local service** (an always-on daemon), as distinct from an on-demand CLI or a
   payload-only (skills/extension) plugin.
@@ -317,6 +328,21 @@ machine-local wiring, while a projection command may only read published repo
 state and update user-level configuration. The verb name alone never grants
 repo-write authority.
 
+### entity-relationship-diagnosability
+Every entity the suite tracks (worktree, session, task, machine, repo,
+project, bridge, container, codespace — nine durable, plus the transient
+**agent** identity actively driving a session) is owned by exactly one plugin
+tier, and every cross-entity traversal an operator or agent actually needs
+(a session's worktree, a worktree's full session/handoff history, a task's
+current bridge/liveness state, a session's rendered conversation + usage stats,
+and each direction's reverse lookup) resolves through a **documented,
+composable CLI command** — never by an ad-hoc script reading a sibling
+plugin's private on-disk database directly. A newly introduced entity or claim
+namespace ships with its position in the relationship model and either points
+to the existing command(s) answering each traversal question or adds the
+missing one, so the model never bit-rots into tribal knowledge scattered across
+session transcripts.
+
 ## Behaviors
 
 ### collision-free-endpoints
@@ -542,6 +568,14 @@ baked in as a snapshot at registration time. This is what keeps a
 registration meaningful across the registered repo's own moves, worktree
 churn, and reinstalls — the registration's identity never goes stale because
 it never held a path to begin with.
+
+### traversal-questions-stay-answerable
+The known cross-entity traversal questions (see
+`entity-relationship-diagnosability`) each resolve through at least one current
+CLI command, or the gap is a **named, tracked** issue — never a silent absence
+an agent rediscovers by trial and error each session. Adding a new entity kind
+or claim namespace without updating the traversal-question table is treated as
+an incomplete change, the same way an undocumented behavior change is.
 
 ## Non-Goals / Boundaries
 
