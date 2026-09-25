@@ -28,17 +28,26 @@ import pytest
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 _PS1 = _PLUGIN_ROOT / "scripts" / "bootstrap-check.ps1"
 _SH = _PLUGIN_ROOT / "scripts" / "bootstrap-check.sh"
-# Resolve bash to its FULL path rather than invoking the bare command name:
-# on Windows, a Windows App Execution Alias can intercept a bare "bash.exe"
-# process-creation call (routing it to WSL) even when shutil.which() finds
-# Git Bash first on PATH -- the alias interception happens below PATH search,
-# at CreateProcess time, unless the explicit resolved path is used.
 # A bare shutil.which("bash") can resolve to a Windows App Execution Alias
 # stub or the classic `C:\Windows\System32\bash.exe` WSL launcher (both
 # invoke an actual WSL distro rather than running this script in the
-# environment under test). Prefer the real Git Bash location when present.
+# environment under test). Prefer the real Git Bash location when present;
+# otherwise filter both known WSL-launcher locations out of PATH before
+# falling back to shutil.which, so this never silently selects one.
 _GIT_BASH = Path(r"C:\Program Files\Git\bin\bash.exe")
-_BASH = str(_GIT_BASH) if _GIT_BASH.is_file() else shutil.which("bash")
+def _resolve_bash() -> str | None:
+    if _GIT_BASH.is_file():
+        return str(_GIT_BASH)
+    path = os.environ.get("PATH")
+    if not path:
+        return None
+    filtered = os.pathsep.join(
+        part for part in path.split(os.pathsep)
+        if "windowsapps" not in part.lower()
+        and part.rstrip("\\").lower() != r"c:\windows\system32"
+    )
+    return shutil.which("bash", path=filtered)
+_BASH = _resolve_bash()
 
 
 def test_hook_scripts_exist():

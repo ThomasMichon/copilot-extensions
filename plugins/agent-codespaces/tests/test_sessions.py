@@ -57,6 +57,31 @@ async def test_pull_tar_bytes_returns_none_for_genuinely_no_sessions():
         assert await sessions._pull_tar_bytes(object(), "cs", timeout=5.0) is None
 
 
+def _resolve_bash() -> str | None:
+    """Prefer a real Git Bash over the WSL launcher stub. WSL's own PATH is
+    entirely separate from this test's Windows host (and this test module
+    hardcodes a POSIX-only `PATH=/usr/bin:/bin` for the child, which is
+    valid for MSYS/Git Bash's runtime translation but routes through a
+    genuinely different VM/runtime -- and therefore a different failure
+    surface -- when the WSL launcher is selected instead)."""
+    import shutil
+
+    git_bash = Path(r"C:\Program Files\Git\bin\bash.exe")
+    if git_bash.is_file():
+        return str(git_bash)
+    import os
+
+    path = os.environ.get("PATH")
+    if not path:
+        return None
+    filtered = os.pathsep.join(
+        part for part in path.split(os.pathsep)
+        if "windowsapps" not in part.lower()
+        and part.rstrip("\\").lower() != r"c:\windows\system32"
+    )
+    return shutil.which("bash", path=filtered)
+
+
 def test_pull_cmd_produces_archive_with_only_session_state_present():
     """Real regression for a fixed bug: `files=$(ls -d a b c d 2>/dev/null)`
     used the assignment's own exit code (`ls`'s, nonzero whenever ANY of
@@ -65,12 +90,12 @@ def test_pull_cmd_produces_archive_with_only_session_state_present():
     whole archive step via `&&`, so a normal CodeSpace missing just one
     optional file silently produced NO output at all (misreported as "no
     sessions" even though `session-state` existed)."""
-    import shutil
     import subprocess
     import tempfile
 
-    if shutil.which("bash") is None:
-        return  # environment without bash; nothing to verify here
+    bash = _resolve_bash()
+    if bash is None:
+        return  # environment without a real (non-WSL) bash; nothing to verify here
     with tempfile.TemporaryDirectory() as home:
         copilot = Path(home) / ".copilot"
         (copilot / "session-state").mkdir(parents=True)
@@ -78,7 +103,7 @@ def test_pull_cmd_produces_archive_with_only_session_state_present():
         # Deliberately no session-store.db / -wal / -shm -- exactly the
         # normal, common case the fixed bug silently lost.
         result = subprocess.run(
-            ["bash", "-c", sessions._PULL_CMD],  # noqa: S607 - test-only, fixed args
+            [bash, "-c", sessions._PULL_CMD],  # noqa: S607 - test-only, fixed args
             capture_output=True, text=True, timeout=10,
             env={"HOME": home, "PATH": "/usr/bin:/bin"},
         )
@@ -92,16 +117,16 @@ def test_pull_cmd_never_archives_outside_copilot_dir_when_cd_fails():
     never fall through to `tar` against the SSH default directory using an
     inherited/exported `files` environment variable, which would violate
     the command's stated session-state-only allowlist."""
-    import shutil
     import subprocess
     import tempfile
 
-    if shutil.which("bash") is None:
+    bash = _resolve_bash()
+    if bash is None:
         return
     with tempfile.TemporaryDirectory() as home:
         # No ~/.copilot at all -- `cd` fails.
         result = subprocess.run(
-            ["bash", "-c", sessions._PULL_CMD],  # noqa: S607 - test-only, fixed args
+            [bash, "-c", sessions._PULL_CMD],  # noqa: S607 - test-only, fixed args
             capture_output=True, text=True, timeout=10,
             # A nonempty inherited `files` env var is exactly the attack
             # this regression guards against: it must never reach `tar`.

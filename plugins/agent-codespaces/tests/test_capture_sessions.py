@@ -5,6 +5,7 @@ its ``_capture_hold_reason`` gate, and the ``sync_codespace_sessions``
 """
 from __future__ import annotations
 
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -167,6 +168,12 @@ def test_capture_worktree_gone_distinguishes_absent_from_unknown(tmp_path):
     present.mkdir()
     assert sessions._capture_worktree_gone(str(present)) is False
 
+    if os.name == "nt":
+        # `Path.chmod(0o000)` on NTFS only toggles the read-only attribute,
+        # not a real POSIX permission model -- it does not block the
+        # owning process from traversing the directory, so this scenario
+        # cannot be reproduced on native Windows.
+        pytest.skip("requires a real POSIX permission-denied filesystem")
     blocked_parent = tmp_path / "blocked"
     child = blocked_parent / "child"
     child.mkdir(parents=True)
@@ -183,6 +190,8 @@ def test_capture_hold_reason_fails_closed_on_worktree_stat_error(monkeypatch, tm
     denied, etc.) is an UNKNOWN owner state -- must defer, never proceed
     as if the claim were orphaned. Uses the same real permission-denied
     scenario as the test above."""
+    if os.name == "nt":
+        pytest.skip("requires a real POSIX permission-denied filesystem")
     import agent_codespaces.lease as lease_mod
 
     blocked_parent = tmp_path / "blocked"
