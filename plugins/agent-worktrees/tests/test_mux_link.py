@@ -390,6 +390,43 @@ def test_persist_merge_keeps_the_higher_revision_when_disk_is_ahead(tmp_path):
     assert reloaded.get("proj", "wt-1")["mapping_revision"] == 9  # disk's higher revision kept
 
 
+def test_apply_observation_reconciles_in_memory_view_against_a_newer_disk_write(tmp_path):
+    """Copilot review finding: the monotonic check previously consulted
+    only this process's in-memory entry. If an old (retiring) process's
+    in-memory cache is behind a replacement process's already-higher-
+    revision write, a genuinely lower-but-newer-to-this-process
+    observation could still get accepted into *this* process's own
+    in-memory entry even though `_persist_locked` protects the file's
+    higher revision -- so this process's own `live_session_names()`/
+    `get()` would report a regressed (stale) view even though the on-disk
+    record never regressed. `apply_observation` must reconcile against the
+    persisted disk state before deciding, and update its own in-memory view
+    to match whichever is newer."""
+    persist_path = tmp_path / "managed-mux-cache.json"
+
+    old_process_cache = mux_link.ManagedMuxCache(persist_path=persist_path)
+    old_process_cache.apply_observation(_obs(revision=1, live=True))
+
+    # A replacement process starts, warm-loads revision 1, then persists a
+    # newer live mapping the old process never learns about directly.
+    new_process_cache = mux_link.ManagedMuxCache(persist_path=persist_path)
+    new_process_cache.apply_observation(_obs(revision=5, live=True))
+
+    # The old process now receives a genuinely-newer-to-IT push (revision 2
+    # > its own last-known revision 1) that happens to be a removal --
+    # without reconciliation this would incorrectly regress old_process's
+    # own in-memory view to "not live", even though revision 5 (live) is
+    # already the true current state on disk.
+    result = old_process_cache.apply_observation(_obs(revision=2, live=False))
+
+    assert result == {"applied": False, "reason": "stale_revision", "current_revision": 5}
+    # The critical assertion: old_process_cache's OWN in-memory view must
+    # now correctly reflect the newer (live) state, not the rejected push.
+    assert old_process_cache.live_session_names() == {"wt-1"}
+    assert old_process_cache.get("proj", "wt-1")["mapping_revision"] == 5
+    assert old_process_cache.get("proj", "wt-1")["live"] is True
+
+
 def test_cache_without_persist_path_does_not_survive_a_restart():
     first = mux_link.ManagedMuxCache()
     first.apply_observation(_obs())

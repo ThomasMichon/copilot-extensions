@@ -246,6 +246,19 @@ class ManagedMuxCache:
         is already on file **for the same ``(project, worktree_id)``**, or
         ``{"applied": False, "reason": "closed"}`` when this cache has
         already been closed (see :meth:`close`).
+
+        When ``persist_path`` is set, the monotonic check first reconciles
+        this process's in-memory entry against whatever is currently
+        persisted on disk for the same key (Copilot review finding): an
+        overlapping-process handoff can leave *this* process's in-memory
+        view behind a replacement process's already-higher-revision write
+        that :meth:`_persist_locked` already protects the file itself
+        against. Without this reconciliation, a genuinely lower-but-still-
+        newer-to-this-process observation could still be accepted into
+        this process's own in-memory entry (even though ``_persist_locked``
+        would keep the file's higher revision), so this process's own
+        ``live_session_names()``/``get()`` would report the regressed view
+        even though the on-disk record never regressed.
         """
         entry = _normalize_entry(payload)
         key = (entry["project"], entry["worktree_id"])
@@ -255,6 +268,14 @@ class ManagedMuxCache:
             if self._closed:
                 return {"applied": False, "reason": "closed"}
             current = self._entries.get(key)
+            if self._persist_path is not None:
+                disk_current = self._read_persisted_entries().get(key)
+                if disk_current is not None and (
+                    current is None
+                    or disk_current["mapping_revision"] > current["mapping_revision"]
+                ):
+                    current = disk_current
+                    self._entries[key] = disk_current
             if current is not None and revision < current["mapping_revision"]:
                 return {
                     "applied": False,
