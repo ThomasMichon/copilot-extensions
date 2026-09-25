@@ -90,6 +90,7 @@ from .engine_rendering import PickerScreenRenderingMixin
 from .engine_runtime import PickerScreenRuntimeMixin
 from .engine_selection import PickerScreenSelectionMixin
 from .engine_views import MaintenanceView, TasksView, WorktreesView
+from .engine_worker_actions import PickerScreenWorkerActionsMixin
 from .engine_worktree_actions import PickerScreenWorktreeActionsMixin
 from .listview import ListView
 from .selection import ListSelection
@@ -185,6 +186,7 @@ class PickerScreen(
     PickerScreenInputMixin,
     PickerScreenMaintenanceActionsMixin,
     PickerScreenWorktreeActionsMixin,
+    PickerScreenWorkerActionsMixin,
     PickerScreenPivotActionsMixin,
     Widget,
 ):

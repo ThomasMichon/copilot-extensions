@@ -145,6 +145,7 @@ def find_supervised_workers(pivots, pivot_runtimes, machine, wid):
                 continue
             out.append({
                 "pivot": reg.name,
+                "id": str(row.get(getattr(reg, "id_field", "id")) or "").strip(),
                 "label": str(row.get(spec.label_field) or "").strip(),
                 "live": str(row.get(spec.live_field) or "").strip() if spec.live_field else "",
                 "activity": (
