@@ -150,21 +150,22 @@ fixes."
 - [ ] Once Phase 1's detection+dedup is proven reliable (no false positives,
       no duplicate-issue spam) over a real observation window, author a
       `gh-aw` agentic workflow (Markdown + YAML frontmatter, compiled via
-      `gh aw compile` into a checked-in `.lock.yml`). **Prefer a same-workflow
-      job**, not a separate `workflow_run`-triggered workflow: add the
-      compiled agent job to `validate-and-promote.yml` itself (or a
-      workflow it directly triggers via `needs`), passing the already-
-      verified SHA and dedup decision as explicit **job outputs** from
-      Phase 1's detection job into Phase 2's job inputs (the exact
-      `needs.<job>.outputs` pattern `validate-and-promote.yml` already uses
-      between its own `gate`/`full`/`promote` jobs) — never assume in-
-      process state carries across job boundaries on its own; a
-      `workflow_call` invocation is reusable-workflow plumbing at the
-      caller's job level and cannot inherit a step's in-process state
-      either, so it doesn't solve this without the same explicit
-      output/input wiring. Prompt it with exactly the compact signature
-      Phase 1 already extracts: which job(s) failed, the failing test
-      node id(s), and the log excerpt — not a vague "go fix CI."
+      `gh aw compile` into a checked-in `.lock.yml`). **`gh aw compile`
+      owns that `.lock.yml` as its own generated output — do not hand-edit
+      it into `validate-and-promote.yml`'s existing job list; compilation
+      will overwrite it.** Instead, give the agentic workflow explicit
+      `workflow_call` inputs and invoke the compiled lock workflow **as a
+      reusable-workflow job** from `validate-and-promote.yml`, passing
+      Phase 1's detection job outputs (the already-verified SHA, the
+      failure signature, the dedup decision) as explicit `with:` inputs —
+      the same `needs.<job>.outputs` → next-job-input wiring
+      `validate-and-promote.yml` already proves works between its own
+      `gate`/`full`/`promote` jobs, just crossing a reusable-workflow
+      boundary instead of a same-workflow job boundary. This preserves the
+      same-run data flow without a second, independently-triggered
+      workflow to keep in sync. Prompt it with exactly the compact
+      signature Phase 1 already extracts: which job(s) failed, the failing
+      test node id(s), and the log excerpt — not a vague "go fix CI."
   - [ ] **If a separate `workflow_run`-triggered workflow is used instead
         (not the preferred shape above): never filter it on
         `branches: [dev]`.** This repo already documents that
@@ -239,13 +240,24 @@ fixes."
       --add-assignee copilot`) or the equivalent GraphQL mutation, and write
       the issue body as a genuinely well-scoped Copilot cloud agent prompt
       (same narrow-scope instructions as below, adapted to issue-body form).
+  - [ ] **The fallback path has no `safe-outputs` stage — the same
+        machine-enforced protected-path check is mandatory here too, not
+        optional.** Issue-assignment gives the Copilot cloud agent no
+        equivalent write-scoping: nothing stops it from opening a PR that
+        touches `.github/workflows/**` or a version manifest beyond the
+        issue body's own prompt text. Add the identical changed-file
+        validation (a required-status-check job, applied uniformly to
+        *any* PR against `dev`, not just `gh-aw`-authored ones) so the
+        fallback path is never weaker than the primary one.
 - [ ] Whichever mechanism is used, the resulting PR must never touch
       `.github/workflows/**` (that's `main-gate`'s workflow-only bootstrap
       lane, a different mechanism entirely, and an autonomous agent must
       never have a path that even looks like it could qualify for that
       exception) and must never modify `plugin.json`/`pyproject.toml`/
       `marketplace.json` version fields by hand (add a changefile per
-      `CONTRIBUTING.md`, exactly like any other contributor).
+      `CONTRIBUTING.md`, exactly like any other contributor). **This is
+      enforced by the required-status-check job above, not by prompt text
+      alone, regardless of which Phase 2 mechanism produced the PR.**
 - [ ] Confirm (read the actual agent-authored PR when the first one lands)
       that it lands as an ordinary PR against `dev`, subject to the same
       non-blocking Copilot review and the same required checks as every
@@ -385,3 +397,19 @@ _Pending._
   thread) was replied to in-thread — the PR description has carried that
   section since the first revision; treating this as addressed rather
   than iterating further on a stale/non-re-scanned finding.
+- **Fifth Copilot review pass caught two more (doc-impact thread
+  confirmed resolved by the reply above):** (1) `gh aw compile` owns the
+  generated `.lock.yml` as its own output — hand-adding its agent job into
+  `validate-and-promote.yml`'s job list is not implementable, compilation
+  would overwrite it; corrected to the actually-implementable shape: give
+  the compiled workflow `workflow_call` inputs and invoke it as a
+  **reusable-workflow job** from `validate-and-promote.yml`, passing
+  Phase 1's job outputs as explicit inputs; (2) the mandatory
+  machine-enforced protected-path check was only specified for the
+  `gh-aw` path — the issue-assignment fallback has no `safe-outputs`
+  equivalent at all, so it would be strictly weaker; made the same check
+  mandatory for the fallback path too, applied uniformly to any PR
+  against `dev` regardless of which mechanism produced it. Five rounds in,
+  severity is converging toward zero real findings; this is expected
+  scrutiny depth for a not-yet-implemented design doc going through the
+  same non-blocking review every code PR gets in this repo.
