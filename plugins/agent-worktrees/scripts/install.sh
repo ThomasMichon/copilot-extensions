@@ -609,8 +609,22 @@ _versioned_activate() {
     # transitive import chain (config, project_state, the internal `libs/*`
     # packages, etc.), so a partial install that dropped any of those pieces
     # fails the gate here instead of silently activating.
+    #
+    # `import agent_worktrees.__main__` alone only exercises __main__'s EAGER
+    # imports -- the CLI defers ~35 submodules behind `_LAZY_DISPATCH_TABLE`/
+    # `_load_full_command_surface()`, so a slot missing one of those would
+    # still pass and only fail on its first real invocation. Call
+    # `_load_full_command_surface()` too so the completion marker means the
+    # complete CLI is importable, not just its entry point.
+    #
+    # Run with `-I` (isolated mode: ignores PYTHONPATH/other PYTHON* env vars
+    # AND excludes the working directory / script dir from sys.path) so a
+    # stale checkout's `src` dir or another on-disk `agent_worktrees` copy
+    # can't satisfy the import while $VENV_PYTHON points at the partial slot
+    # under test -- the explicit `PYTHONPATH=` clear below is kept as
+    # defense-in-depth.
     local health_out
-    if ! health_out="$(PYTHONPATH= "$VENV_PYTHON" -c 'import agent_worktrees.__main__' 2>&1)"; then
+    if ! health_out="$(PYTHONPATH= "$VENV_PYTHON" -I -c 'import agent_worktrees.__main__ as m; m._load_full_command_surface()' 2>&1)"; then
         err "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
         [[ -n "$health_out" ]] && err "  $health_out"
         return 1

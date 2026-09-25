@@ -677,15 +677,25 @@ function Invoke-VersionedActivate {
     # transitive import chain (config, project_state, the internal `libs/*`
     # packages, etc.), so a partial install that dropped any of those pieces
     # fails the gate here instead of silently activating.
-    # Clear PYTHONPATH for the probe too: an inherited path pointing at a
-    # complete checkout/legacy package could satisfy the import even while
-    # $VenvPython resolves to the partial slot under test, defeating the
-    # gate (matches the isolation already used by Register-ProjectEntry and
-    # the package-stamping probe below).
+    #
+    # `import agent_worktrees.__main__` alone only exercises __main__'s EAGER
+    # imports -- the CLI defers ~35 submodules behind `_LAZY_DISPATCH_TABLE`/
+    # `_load_full_command_surface()`, so a slot missing one of those would
+    # still pass and only fail on its first real invocation. Call
+    # `_load_full_command_surface()` too so the completion marker means the
+    # complete CLI is importable, not just its entry point.
+    #
+    # Run with `-I` (isolated mode: ignores PYTHONPATH/other PYTHON* env vars
+    # AND excludes the working directory / script dir from sys.path) so a
+    # stale checkout's `src` dir or another on-disk `agent_worktrees` copy
+    # can't satisfy the import while $VenvPython points at the partial slot
+    # under test -- the explicit PYTHONPATH clear below is kept as
+    # defense-in-depth (matches the isolation already used by
+    # Register-ProjectEntry and the package-stamping probe below).
     $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
     $prevHealthPP = $env:PYTHONPATH
     $env:PYTHONPATH = $null
-    $healthOut = & $VenvPython -c 'import agent_worktrees.__main__' 2>&1
+    $healthOut = & $VenvPython -I -c 'import agent_worktrees.__main__ as m; m._load_full_command_surface()' 2>&1
     $slotOk = ($LASTEXITCODE -eq 0)
     $env:PYTHONPATH = $prevHealthPP
     $ErrorActionPreference = $prevEAP

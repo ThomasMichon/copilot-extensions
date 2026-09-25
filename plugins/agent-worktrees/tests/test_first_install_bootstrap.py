@@ -358,6 +358,8 @@ case "${1:-}" in
 #!/bin/sh
 set -eu
 slot_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+_arg1="${1:-}"
+[ "$_arg1" = "-I" ] && shift
 if [ "${1:-}" = "-c" ]; then
   case "${2:-}" in
     *"import agent_worktrees, os"*)
@@ -472,6 +474,8 @@ case "${1:-}" in
     cat > "$target/bin/python" <<'PY'
 #!/bin/sh
 set -eu
+_arg1="${1:-}"
+[ "$_arg1" = "-I" ] && shift
 if [ "${1:-}" = "-c" ]; then
   case "${2:-}" in
     *"import agent_worktrees.__main__"*) exit 1 ;;
