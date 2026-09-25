@@ -275,13 +275,12 @@ durable, explicit, and independent of process timestamps or UI attachment.
 
 ### single-authorized-head-claimant
 
-Exactly one code path is authorized to seat a worktree's head from vacant
-(a fresh worktree, or a fully-recovered abandoned one); a session-start
-integration always resolves the head question before any other hook or
-extension can observe or act on it, so no secondary mechanism can ever claim,
-overwrite, or race a live head. Displacing an *existing* head is a distinct,
-acknowledgement-gated transfer (see *atomic-acknowledgement-transfer* below),
-never a second path to the same vacant-slot claim.
+A worktree's head-from-vacant claim (a fresh worktree, or a fully-recovered
+abandoned one) has exactly **one** authoritative outcome, with no competing
+path able to claim, overwrite, or race it once decided. Displacing an
+*existing* head is a distinct, acknowledgement-gated transfer (see
+*atomic-acknowledgement-transfer* below), never a second path to the same
+vacant-slot claim.
 
 ### effort-anchored-title
 

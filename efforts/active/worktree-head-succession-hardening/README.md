@@ -227,4 +227,14 @@ repo's `pr-self-merge` profile before Phase 1 implementation begins._
   surrendered without it) and pointed to `context-handoff-lifecycle.md` for
   the actual mechanics rather than duplicating them in the vision.
 
+### 2026-09-25 — Second intent-level scrub
+- The Concept paragraph's fix wasn't enough: the paired Feature
+  (`single-authorized-head-claimant`) still prescribed the realization
+  ("exactly one code path", "a session-start integration", hook/extension
+  write restrictions). Reworded to state only the outcome -- one
+  authoritative claim, no competing overwrite path -- leaving which
+  mechanism enforces it (session-start hook or otherwise) to this effort's
+  own Plan rather than the vision.
+
+
 

@@ -103,8 +103,11 @@ duplicate:
       rows only; clearing restores the full list; keyboard focus transitions
       (box <-> list) work as specified in both directions.
 - [ ] A launched worktree's terminal tab visibly shows the worktree's title
-      composed with the process's own title hint, on at least Windows
-      Terminal.
+      composed with the process's own title hint, verified on **every host
+      Phase 3's Plan names** — Windows Terminal and psmux/tmux — not merely
+      Windows Terminal; if research finds a host genuinely can't support
+      this, narrow Phase 3's Plan item to name that host's exclusion
+      explicitly rather than leaving an unvalidated gap.
 
 ## Proposal
 
@@ -117,3 +120,12 @@ repo's `pr-self-merge` profile before Phase 1 implementation begins._
 - Effort created from a facility planning session. Cited #3307 and #3390 as
   in-flight sibling work rather than duplicating either. Filed #3586, #3587,
   #3588.
+
+### 2026-09-25 — Validation gap: mux-host parity
+- Review caught that Phase 3's Plan names both Windows Terminal and
+  psmux/tmux for parity, but the Validation Plan only checked Windows
+  Terminal -- letting an implementation skip the mux hosts and still pass.
+  Widened the bullet to require validation on every host Phase 3 names,
+  with an explicit narrowing instruction if research finds a host that
+  can't support it.
+
