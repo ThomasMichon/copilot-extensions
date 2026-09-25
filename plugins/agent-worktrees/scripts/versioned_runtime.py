@@ -36,6 +36,18 @@ Commands (all take ``--root <dir>``; ``--json`` for machine output)::
     current                         print the active version (from the marker)
     resolve  [--subpath P]          print versions/<current>/<P> (the concrete slot)
     list                            list installed versions (+ which is current)
+    mark-complete <version> [--payload-hash H] [--pid P]
+                                    mark versions/<version> as a healthy,
+                                    complete build (after its health gate passes)
+    is-complete <version> [--expect-hash H]
+                                    exit 0 iff versions/<version> has a valid marker
+    invalidate <version>            remove versions/<version>'s completion marker
+                                    ONLY (never its other files); use when a
+                                    stricter health gate proves a previously-
+                                    marked-complete slot is actually broken, so
+                                    a later resolve/reuse-check stops trusting it
+    toss-incomplete                 remove non-current slots lacking a completion
+                                    marker (failed/partial builds)
     gc [--keep V ...] [--protect-pids] [--min-age-days N]
                                     remove version dirs that are not current,
                                     not kept, not (with --protect-pids) held by a
@@ -1211,6 +1223,38 @@ def mark_complete(root: Path, version: str, *, payload_hash: str | None = None,
     return dest
 
 
+def invalidate(root: Path, version: str) -> bool:
+    """Remove a slot's completion marker WITHOUT touching its other files.
+
+    For a slot whose marker was written by an older/buggier installer without
+    an adequate health gate (dotfiles #7561): a later, stricter gate can prove
+    the slot's payload is actually broken even though ``is_complete`` still
+    reports it healthy. Deleting only the marker (never the slot's venv/site-
+    packages) is safe even for the CURRENTLY ACTIVE slot -- a JSON marker file
+    is never held open by a running interpreter the way its own module files
+    might be, so this cannot collide with a live daemon's file locks the way
+    an in-place reinstall could (see ``Test-SlotAlreadyComplete`` /
+    ``_test_slot_already_complete``'s own reuse-safety comment).
+
+    Once invalidated, ``is_complete`` reports the slot unhealthy again, so:
+    (1) ``resolve_python`` stops trusting it and falls through its tiered
+    fallback (current -> last-known-good -> newest complete slot) to a slot
+    that actually works, and (2) the reuse-skip gate (which treats a valid
+    marker + matching payload hash as "nothing to do") no longer short-
+    circuits a future (re)install attempt for this exact version, so it gets
+    a real chance to rebuild instead of being reused forever.
+
+    Returns True iff a marker was present and removed; False if there was
+    nothing to invalidate (already absent).
+    """
+    p = marker_path(root, version)
+    try:
+        p.unlink()
+        return True
+    except FileNotFoundError:
+        return False
+
+
 def toss_incomplete(root: Path, link_name: str = CURRENT_LINK) -> list[str]:
     """Remove non-current slots that lack a valid completion marker.
 
@@ -1309,6 +1353,12 @@ def main(argv: list[str] | None = None) -> int:
     ip.add_argument("version")
     ip.add_argument("--expect-hash", default=None,
                     help="also require the recorded payload hash to match")
+    invp = sub.add_parser("invalidate",
+                          help="remove versions/<version>'s completion marker "
+                               "only (never its other files); use when a "
+                               "stricter health gate proves a previously-"
+                               "marked-complete slot is actually broken")
+    invp.add_argument("version")
     sub.add_parser("toss-incomplete",
                    help="remove non-current slots lacking a completion marker")
 
@@ -1386,6 +1436,10 @@ def main(argv: list[str] | None = None) -> int:
             _emit({"version": args.version, "complete": ok}, args.json) \
                 if args.json else None
             return 0 if ok else 1
+        elif args.cmd == "invalidate":
+            removed = invalidate(root, args.version)
+            _emit({"version": args.version, "invalidated": removed}, args.json) \
+                if args.json else None
         elif args.cmd == "toss-incomplete":
             tossed = toss_incomplete(root, link_name)
             _emit({"tossed": tossed} if args.json else tossed, args.json)

@@ -627,6 +627,16 @@ _versioned_activate() {
     if ! health_out="$(PYTHONPATH= "$VENV_PYTHON" -I -c 'import agent_worktrees.__main__ as m; m._load_full_command_surface()' 2>&1)"; then
         err "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
         [[ -n "$health_out" ]] && err "  $health_out"
+        # This slot may already carry a completion marker from an OLDER,
+        # less-strict installer run (dotfiles #7561): _test_slot_already_complete
+        # trusts a valid marker + matching payload hash and skips reinstalling,
+        # so without this the same stale-but-broken slot would keep failing this
+        # gate forever on every future run. Invalidate just the marker (never the
+        # slot's other files -- safe even if this happens to be the CURRENTLY
+        # ACTIVE slot, since a JSON marker is never held open by a running
+        # interpreter) so a future run stops trusting it and either rebuilds it
+        # fresh or falls back to last-known-good.
+        "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" invalidate "$SRC_VERSION" 2>&1 | sed 's/^/  → /' || true
         return 1
     fi
     _versioned_mark_complete

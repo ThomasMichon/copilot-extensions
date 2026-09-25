@@ -702,6 +702,17 @@ function Invoke-VersionedActivate {
     if (-not $slotOk) {
         Write-ServiceErr "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
         if ($healthOut) { Write-ServiceErr "  $healthOut" }
+        # This slot may already carry a completion marker from an OLDER,
+        # less-strict installer run (dotfiles #7561): Test-SlotAlreadyComplete
+        # trusts a valid marker + matching payload hash and skips reinstalling,
+        # so without this the same stale-but-broken slot would keep failing
+        # this gate forever on every future run. Invalidate just the marker
+        # (never the slot's other files -- safe even if this happens to be the
+        # CURRENTLY ACTIVE slot, since a JSON marker is never held open by a
+        # running interpreter) so a future run stops trusting it and either
+        # rebuilds it fresh or falls back to last-known-good.
+        & $py $vr --root $InstallDir --link-name '.venv' invalidate $SrcVersion 2>&1 |
+            ForEach-Object { Write-ServiceChanged $_ }
         return $false
     }
     Invoke-VersionedMarkComplete
