@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import signal
+
+import pytest
+
 from agent_dispatch.reap import (
     CoordProc,
     ReapResult,
@@ -12,6 +16,7 @@ from agent_dispatch.reap import (
     reap_abandoned_passive_backstop,
     reap_superseded_coordinators,
     select_superseded_pids,
+    terminate_pid,
 )
 
 # ---- is_coordinator_cmdline: precise coordinator matching -------------------
@@ -153,6 +158,103 @@ def test_reap_fail_soft_on_enumeration_error():
     assert res.reaped == []
     assert not res.ok
     assert any("enumeration failed" in e for e in res.errors)
+
+
+# ---- terminate_pid: confirmed-death escalation (generalizes #3068) ---------
+
+_SIGKILL = getattr(signal, "SIGKILL", signal.SIGTERM)  # SIGKILL is POSIX-only
+
+
+def test_terminate_pid_confirms_death_no_escalation(monkeypatch):
+    """A process that dies promptly after SIGTERM never gets SIGKILLed."""
+    sent: list[int] = []
+    monkeypatch.setattr("os.kill", lambda pid, sig: sent.append(sig))
+    alive_calls = {"n": 0}
+
+    def _pid_alive(pid):
+        alive_calls["n"] += 1
+        return alive_calls["n"] < 2  # alive once, then gone
+
+    ok = terminate_pid(
+        123,
+        grace_seconds=5.0,
+        poll_seconds=0.0,
+        sleep=lambda _s: None,
+        pid_alive=_pid_alive,
+        is_windows=False,
+    )
+    assert ok is True
+    assert sent == [signal.SIGTERM]  # never escalated
+
+
+def test_terminate_pid_escalates_to_sigkill_when_stuck(monkeypatch):
+    """A process that ignores SIGTERM for the whole grace window gets SIGKILLed."""
+    sent: list[int] = []
+    monkeypatch.setattr("os.kill", lambda pid, sig: sent.append(sig))
+
+    ok = terminate_pid(
+        123,
+        grace_seconds=1.0,
+        poll_seconds=1.0,  # one poll tick exhausts the grace window
+        sleep=lambda _s: None,
+        pid_alive=lambda pid: True,  # never reports dead
+        is_windows=False,
+    )
+    assert ok is True
+    assert sent == [signal.SIGTERM, _SIGKILL]
+
+
+def test_terminate_pid_already_gone_short_circuits(monkeypatch):
+    def _kill(pid, sig):
+        raise ProcessLookupError()
+
+    monkeypatch.setattr("os.kill", _kill)
+    assert terminate_pid(123) is True
+
+
+def test_terminate_pid_returns_false_when_signal_delivery_fails(monkeypatch):
+    def _kill(pid, sig):
+        raise PermissionError()
+
+    monkeypatch.setattr("os.kill", _kill)
+    assert terminate_pid(123) is False
+
+
+def test_terminate_pid_sigkill_failure_reports_false(monkeypatch):
+    if not hasattr(signal, "SIGKILL"):
+        pytest.skip("SIGKILL is POSIX-only; no distinct escalation signal here")
+    calls: list[int] = []
+
+    def _kill(pid, sig):
+        calls.append(sig)
+        if sig == _SIGKILL:
+            raise PermissionError()
+
+    monkeypatch.setattr("os.kill", _kill)
+    ok = terminate_pid(
+        123,
+        grace_seconds=0.1,
+        poll_seconds=0.1,
+        sleep=lambda _s: None,
+        pid_alive=lambda pid: True,
+        is_windows=False,
+    )
+    assert ok is False
+    assert calls == [signal.SIGTERM, _SIGKILL]
+
+
+def test_terminate_pid_windows_path_never_escalates(monkeypatch):
+    """On Windows, os.kill already maps to TerminateProcess -- no polling/escalation."""
+    sent: list[int] = []
+    monkeypatch.setattr("os.kill", lambda pid, sig: sent.append(sig))
+    pid_alive_calls = []
+    ok = terminate_pid(
+        123, pid_alive=lambda pid: pid_alive_calls.append(pid) or True,
+        is_windows=True,
+    )
+    assert ok is True
+    assert sent == [signal.SIGTERM]
+    assert pid_alive_calls == []  # never even consulted on the Windows path
 
 
 # ---- is_live_coordinator_pid: liveness + identity fused ---------------------

@@ -41,6 +41,7 @@ import os
 import shlex
 import signal
 import subprocess
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -50,6 +51,16 @@ log = logging.getLogger(__name__)
 
 _ENUM_TIMEOUT_S = 15.0
 _COORD_NAMES = ("agent_dispatch", "agent-dispatch")
+
+# SIGTERM is cooperative on POSIX: a stuck or uninterruptible-IO process can
+# ignore it forever, leaving :func:`terminate_pid`'s caller believing it
+# "reaped" a straggler that is, in fact, still alive -- the same
+# believes-it-cleaned-up-but-didn't shape as #3068's self-retire gap,
+# generalized to this module's own termination primitive. Confirm actual
+# death within this grace window before reporting success; escalate to
+# SIGKILL if it hasn't.
+_TERMINATE_GRACE_S = 5.0
+_TERMINATE_POLL_S = 0.2
 
 
 @dataclass(frozen=True)
@@ -195,18 +206,76 @@ def select_superseded_pids(
     return [p.pid for p in procs if p.pid not in keep_pids]
 
 
-def terminate_pid(pid: int) -> bool:
-    """Terminate ``pid`` (SIGTERM on POSIX -> uvicorn drains + exits cleanly;
-    ``TerminateProcess`` on Windows via ``os.kill``). ``True`` on a delivered
-    signal or an already-gone process; ``False`` on a real failure."""
+def _pid_alive(pid: int) -> bool:
+    """Best-effort POSIX liveness probe via a signal-0 kill (no side effect)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists but not ours to signal-probe -- assume alive
+    return True
+
+
+def terminate_pid(
+    pid: int,
+    *,
+    grace_seconds: float = _TERMINATE_GRACE_S,
+    poll_seconds: float = _TERMINATE_POLL_S,
+    sleep: Callable[[float], None] = time.sleep,
+    pid_alive: Callable[[int], bool] = _pid_alive,
+    is_windows: bool = os.name == "nt",
+) -> bool:
+    """Terminate ``pid`` and confirm it is actually gone before reporting so.
+
+    On Windows, ``os.kill`` maps straight to ``TerminateProcess`` -- already an
+    unconditional, immediate kill, so there is nothing to escalate. On POSIX,
+    ``SIGTERM`` is cooperative: a stuck process (wedged, or blocked in
+    uninterruptible IO) can simply never act on it. This waits up to
+    ``grace_seconds`` confirming real death via ``pid_alive``, then escalates
+    to ``SIGKILL`` so a caller is never told "reaped" for a process that is
+    still, in fact, alive. ``True`` on confirmed death (or an already-gone
+    process); ``False`` only when a signal could not be delivered at all.
+    """
+    if is_windows:
+        try:
+            os.kill(pid, signal.SIGTERM)
+            return True
+        except ProcessLookupError:
+            return True  # already gone -- the desired end state
+        except (PermissionError, OSError):
+            log.debug("could not terminate coordinator pid=%s", pid, exc_info=True)
+            return False
+
     try:
         os.kill(pid, signal.SIGTERM)
-        return True
     except ProcessLookupError:
         return True  # already gone -- the desired end state
     except (PermissionError, OSError):
         log.debug("could not terminate coordinator pid=%s", pid, exc_info=True)
         return False
+
+    deadline = time.monotonic() + grace_seconds
+    while time.monotonic() < deadline:
+        if not pid_alive(pid):
+            return True
+        sleep(poll_seconds)
+    if not pid_alive(pid):
+        return True
+
+    log.warning(
+        "pid=%s did not exit within %.1fs of SIGTERM -- escalating to SIGKILL "
+        "to avoid reporting a reap that never actually completed (see #3068)",
+        pid, grace_seconds,
+    )
+    try:
+        os.kill(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+    except ProcessLookupError:
+        return True  # exited in the tiny window between the last check and now
+    except (PermissionError, OSError):
+        log.debug("could not SIGKILL coordinator pid=%s", pid, exc_info=True)
+        return False
+    return True
 
 
 def reap_superseded_coordinators(

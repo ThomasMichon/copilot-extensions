@@ -1,0 +1,9 @@
+{
+  "comment": "reap: confirm death and escalate to SIGKILL if a superseded coordinator ignores SIGTERM (coordinator-zombie-hygiene Phase 2 audit)",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
