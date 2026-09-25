@@ -313,6 +313,32 @@ def stop_restricted_member(
     )
 
 
+def rescue_capture_restricted_member(
+    config: ContainersConfig,
+    fleet: FleetConfig,
+    info: DockerContainerInfo,
+    *,
+    timeout: float = 60.0,
+) -> DestructiveResult:
+    """Rescue-capture one restricted member's session evidence, non-destructively.
+
+    Reuses the exact same admission/idleness gating as ``destroy_restricted_member``
+    and ``stop_restricted_member`` (never runs against a live/unknown session), but
+    performs no stop or remove afterward -- the container keeps running untouched.
+    """
+    return _restricted_member_action(
+        config,
+        fleet,
+        info,
+        operation="rescue-capture",
+        force_abandon=False,
+        action=None,
+        confirm=None,
+        action_timeout=timeout,
+        success_status="captured",
+    )
+
+
 def _restricted_member_action(
     config: ContainersConfig,
     fleet: FleetConfig,
@@ -320,8 +346,8 @@ def _restricted_member_action(
     *,
     operation: str,
     force_abandon: bool,
-    action: Callable[[DockerContainerInfo, float], None],
-    confirm: Callable[[DockerContainerInfo], bool],
+    action: Callable[[DockerContainerInfo, float], None] | None,
+    confirm: Callable[[DockerContainerInfo], bool] | None,
     action_timeout: float,
     success_status: str,
 ) -> DestructiveResult:
@@ -421,6 +447,12 @@ def _restricted_member_action(
                 )
 
             if not current.is_running:
+                if action is None:
+                    return DestructiveResult(
+                        info.name,
+                        "deferred",
+                        "container is not running; nothing to capture",
+                    )
                 existing_rescue = verified_capture_for_instance(
                     info.name,
                     info.container_id,
@@ -616,15 +648,16 @@ def _restricted_member_action(
                 if rescue_pin is not None:
                     verify_pinned_capture(rescue_pin)
                 _verify_generation(latest.container_id, generation)
-                _perform_action(
-                    info.name,
-                    hold.token,
-                    hold.expires_at,
-                    latest,
-                    action=action,
-                    confirm=confirm,
-                    action_timeout=action_timeout,
-                )
+                if action is not None:
+                    _perform_action(
+                        info.name,
+                        hold.token,
+                        hold.expires_at,
+                        latest,
+                        action=action,
+                        confirm=confirm,
+                        action_timeout=action_timeout,
+                    )
                 return DestructiveResult(
                     info.name,
                     success_status,

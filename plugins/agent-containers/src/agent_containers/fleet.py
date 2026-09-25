@@ -69,6 +69,7 @@ class FleetOperationResult:
     unchanged: dict[str, str] = field(default_factory=dict)
     removed: list[str] = field(default_factory=list)
     recreated: list[str] = field(default_factory=list)
+    captured: list[str] = field(default_factory=list)
     deferred: dict[str, str] = field(default_factory=dict)
     rescues: dict[str, dict] = field(default_factory=dict)
     telemetry_abandoned: list[str] = field(default_factory=list)
@@ -796,6 +797,58 @@ def down(
         fleet_name,
         force_abandon=force_abandon,
     ).stopped
+
+
+def rescue_capture_fleet(
+    config: ContainersConfig,
+    fleet_name: str,
+) -> FleetOperationResult:
+    """Rescue-capture running restricted members' session evidence, non-destructively.
+
+    Reuses `down_fleet`'s exact same per-member admission/idleness gating (via
+    `replacement.rescue_capture_restricted_member`), but never stops or removes a
+    member -- an always-on fleet keeps running untouched while its Copilot
+    session-state evidence is periodically shuttled out to `$STATE_DIR/rescues/`
+    for `session-sync` to publish onward.
+    """
+    result = FleetOperationResult()
+    fleet = config.fleets.get(fleet_name)
+    for c in _fleet_members(config, fleet_name):
+        if c.fleet and c.fleet != fleet_name:
+            result.deferred[c.name] = (
+                f"container fleet label {c.fleet!r} conflicts with "
+                f"requested fleet {fleet_name!r}"
+            )
+            continue
+        restricted = (fleet and fleet.restricted) or c.security_profile == "restricted"
+        if not restricted or fleet is None or not fleet.restricted:
+            result.deferred[c.name] = (
+                "rescue-capture is restricted-fleet only" if not restricted else
+                "restricted container has no matching restricted fleet configuration"
+            )
+            continue
+        if c.state != "running":
+            result.deferred[c.name] = f"container state {c.state!r} is not capturable"
+            continue
+
+        from .replacement import rescue_capture_restricted_member
+        from .rescue import RescueError
+
+        try:
+            decision = rescue_capture_restricted_member(config, fleet, c)
+        except RescueError as exc:
+            result.deferred[c.name] = str(exc)
+            continue
+        except RuntimeError as exc:
+            result.deferred[c.name] = str(exc)
+            continue
+        if decision.status != "captured":
+            result.deferred[c.name] = decision.reason or "rescue-capture deferred"
+            continue
+        if decision.rescue:
+            result.rescues[c.name] = decision.rescue
+        result.captured.append(c.name)
+    return result
 
 
 def start(config: ContainersConfig, fleet_name: str) -> list[str]:

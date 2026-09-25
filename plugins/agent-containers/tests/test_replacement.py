@@ -319,6 +319,91 @@ def test_rescue_failure_leaves_old_container(monkeypatch):
     assert removed == []
 
 
+def test_rescue_capture_idle_session_captures_without_stopping(monkeypatch):
+    config, fleet = _config()
+    info = _member()
+    _safe_defaults(monkeypatch, info)
+    calls = []
+    monkeypatch.setattr(
+        replacement,
+        "probe_session_liveness",
+        lambda *_args, **_kwargs: replacement.SessionLiveness(
+            "idle",
+            [],
+            [],
+        ),
+    )
+    monkeypatch.setattr(
+        replacement,
+        "capture_restricted_sessions",
+        lambda *_args, **_kwargs: calls.append("rescue")
+        or {"status": "verified", "session_count": 1},
+    )
+    monkeypatch.setattr(
+        replacement,
+        "stop_container",
+        lambda *_args, **_kwargs: calls.append("stop"),
+    )
+    monkeypatch.setattr(
+        replacement,
+        "remove_container",
+        lambda *_args, **_kwargs: calls.append("remove"),
+    )
+
+    result = replacement.rescue_capture_restricted_member(config, fleet, info)
+
+    assert result.status == "captured"
+    assert result.rescue["status"] == "verified"
+    assert calls == ["rescue"]
+
+
+def test_rescue_capture_active_session_defers(monkeypatch):
+    config, fleet = _config()
+    info = _member()
+    _safe_defaults(monkeypatch, info)
+    monkeypatch.setattr(
+        replacement,
+        "probe_session_liveness",
+        lambda *_args, **_kwargs: replacement.SessionLiveness(
+            "active",
+            ["session-1"],
+            [],
+        ),
+    )
+    monkeypatch.setattr(
+        replacement,
+        "capture_restricted_sessions",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("must not capture during an active session")
+        ),
+    )
+
+    result = replacement.rescue_capture_restricted_member(config, fleet, info)
+
+    assert result.status == "deferred"
+    assert "active Copilot session-state lock present" in result.reason
+
+
+def test_rescue_capture_stopped_container_defers_without_stopped_path(monkeypatch):
+    config, fleet = _config()
+    info = _member()
+    info.state = "exited"
+    info.status = "Exited"
+    _safe_defaults(monkeypatch, info)
+    monkeypatch.setattr(
+        replacement,
+        "verified_capture_for_instance",
+        lambda *_args: (_ for _ in ()).throw(
+            AssertionError("capture-only must not consult stopped-instance evidence")
+        ),
+    )
+
+    result = replacement.rescue_capture_restricted_member(config, fleet, info)
+
+    assert result.status == "deferred"
+    assert "not running" in result.reason
+
+
 def test_force_abandon_accepts_only_rescue_loss(monkeypatch):
     config, fleet = _config()
     info = _member()

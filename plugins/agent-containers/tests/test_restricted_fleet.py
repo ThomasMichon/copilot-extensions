@@ -654,6 +654,101 @@ def test_requested_restricted_fleet_rejects_foreign_trusted_label(monkeypatch):
     assert "conflicts with requested fleet" in result.deferred["sandbox-1"]
 
 
+def test_rescue_capture_fleet_captures_running_members_without_stopping(monkeypatch):
+    from agent_containers import replacement
+
+    config = ContainersConfig(
+        fleets={
+            "sandbox": FleetConfig(
+                image="example/agent",
+                security_profile="restricted",
+                acp_command="minimal-agent --stdio",
+            )
+        }
+    )
+    members = [
+        DockerContainerInfo(
+            name=f"sandbox-{index}",
+            container_id=f"instance-{index}",
+            image="example/agent",
+            state="running",
+            status="Up",
+            fleet="sandbox",
+            security_profile="restricted",
+        )
+        for index in (1, 2)
+    ]
+    monkeypatch.setattr(fleet_mod, "_fleet_members", lambda *_args: members)
+    monkeypatch.setattr(
+        fleet_mod,
+        "stop_container",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("rescue-capture must not stop the container")
+        ),
+    )
+    monkeypatch.setattr(
+        fleet_mod,
+        "remove_container",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("rescue-capture must not remove the container")
+        ),
+    )
+
+    def safe_capture(_config, _fleet, info, **_kwargs):
+        if info.name == "sandbox-1":
+            return replacement.DestructiveResult(
+                info.name,
+                "captured",
+                rescue={"status": "verified"},
+            )
+        return replacement.DestructiveResult(
+            info.name,
+            "deferred",
+            "active Copilot session-state lock present",
+        )
+
+    monkeypatch.setattr(replacement, "rescue_capture_restricted_member", safe_capture)
+
+    result = fleet_mod.rescue_capture_fleet(config, "sandbox")
+
+    assert result.captured == ["sandbox-1"]
+    assert result.rescues == {"sandbox-1": {"status": "verified"}}
+    assert result.deferred == {
+        "sandbox-2": "active Copilot session-state lock present"
+    }
+
+
+def test_rescue_capture_fleet_defers_nonrunning_members(monkeypatch):
+    config = ContainersConfig(
+        fleets={
+            "sandbox": FleetConfig(
+                image="example/agent",
+                security_profile="restricted",
+                acp_command="minimal-agent --stdio",
+            )
+        }
+    )
+    members = [
+        DockerContainerInfo(
+            name="sandbox-1",
+            container_id="instance-1",
+            image="example/agent",
+            state="exited",
+            status="Exited",
+            fleet="sandbox",
+            security_profile="restricted",
+        )
+    ]
+    monkeypatch.setattr(fleet_mod, "_fleet_members", lambda *_args: members)
+
+    result = fleet_mod.rescue_capture_fleet(config, "sandbox")
+
+    assert result.captured == []
+    assert result.deferred == {
+        "sandbox-1": "container state 'exited' is not capturable"
+    }
+
+
 def test_restricted_down_uses_safe_per_member_stop(monkeypatch):
     from agent_containers import replacement
 
