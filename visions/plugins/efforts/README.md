@@ -4,7 +4,7 @@
   for multi-session, multi-wave work.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-08-27
+- **Last revised:** 2026-09-24
 - **Reality docs:** [`efforts/README.md`](../../../efforts/README.md) ·
   [`docs/harness-runbook.md`](../../../docs/harness-runbook.md) ·
   [`plugins/efforts/README.md`](../../../plugins/efforts/README.md) ·
@@ -44,6 +44,10 @@ activity when needed.
 - **Repository capability** determines cross-repository placement: a target that
   has adopted compatible efforts may own a sub-effort, while a target that has
   not adopted them is coordinated by the host effort.
+- **Current-slice derivation** treats the effort's own Plan/Validation Plan
+  checklists as the ground truth for "where things stand" — the first
+  unchecked item is the current slice — rather than a separately hand-typed
+  label that a busy session can forget to advance as work moves forward.
 
 ## Features
 
@@ -83,6 +87,16 @@ receive a concise pointer to the enforced effort policy, active effort, previous
 session, and pending handoff without loading transcripts or duplicating the
 effort.
 
+### railroad-nudge-at-drift
+
+A bound worktree's orientation is not a one-time greeting delivered only at
+session start: the same channel that keeps the worktree's disposition honest
+re-surfaces the effort's **current slice** — derived fresh from the checklist,
+not a stale declared string — and its immediate next step mid-session too,
+once the session has drifted far enough (in tool calls or elapsed time) since
+the last such reminder. The effort stays the session's railroad for the whole
+length of a long session, not only at its outset.
+
 ### cross-repository-effort-ownership
 
 Cross-repository work has one clear orchestration owner. A compatible target may
@@ -120,6 +134,16 @@ tracked objective; liveness is not inferred from prose or session activity.
 A successor first loads the active effort and resumes from its next incomplete
 slice. It uses predecessor-session ramp-up as a bounded supplement for immediate
 actions and observations, never as the durable source of truth.
+
+### journal-is-ground-truth
+
+The effort's journal and phase/checklist status are the **authoritative**
+record of what has actually been completed — never the conversation, a
+worktree's git cleanliness, or a session's own recollection. A participant
+updates the journal and checklist promptly enough that the file never falls
+behind real progress; an effort whose record lags its actual work is a defect
+in the effort, not a merely cosmetic gap, because every later resumption
+depends on that record being true.
 
 ### one-canonical-effort
 
