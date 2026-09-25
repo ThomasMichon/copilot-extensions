@@ -265,7 +265,8 @@ realized in `main`; unchecked items are the remaining delta.
             wired, and bumped `__version__` (`0.1.0-dev36` →
             `0.1.0-dev37`) so already-installed machines actually redeploy
             the corrected payload.
-      - [ ] **Sub-slice 3 (direction set 2026-09-14; planned 2026-09-17, not yet implemented):**
+      - [ ] **Sub-slice 3 (direction set 2026-09-14; planned 2026-09-17; Step 1
+            landed 2026-09-25; Steps 2-6 not yet implemented):**
             split the resident status-monitor's push/observe legs into
             Worktree Manager — agent-worktrees keeps sole ownership of
             accumulating/tracking session status; Worktree Manager takes a
@@ -274,6 +275,10 @@ realized in `main`; unchecked items are the remaining delta.
             panes, and applies the resident monitor's rendered status back
             into mux status bars. Reviewed, ordered plan:
             [`phase-3b-substatus-monitor-relocation.md`](phase-3b-substatus-monitor-relocation.md).
+            **Step 1 landed:** `mux_link.py`'s additive daemon-link contract
+            + resident `ManagedMuxCache` seam, wired into `cmd_status_monitor`
+            and merged (observation-only) into `_monitor_sweep`'s existing
+            `catalog_observer` call — see the phase doc's own Step 1 entry.
       - [x] **Sub-slice 4 (landed 2026-09-14): same-config marketplace-cell
             resolution + generic installed-binstub invocation.** Cross-cuts
             the `marketplace-scoped-installations` effort's installation-mode
@@ -651,6 +656,41 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-09-25** — Landed Phase 3b Slice 2 Sub-slice 3 Step 1 (additive
+  daemon-link contract + resident managed-mux cache seam), PR TBD. Added
+  `mux_link.py`: rendezvous-parseable `managed_mux_*` fields published in
+  the same `status-monitor.lock` alongside `HookIpcServer`/`classify_daemon`/
+  `worktree_status_daemon`'s own namespaced fields; a thread-safe
+  `ManagedMuxCache` keyed by `worktree_id` whose `apply_observation` rejects
+  an incoming `mapping_revision` lower than the one already on file (so a
+  stale/out-of-order `live: false` event can never clobber a newer live
+  mapping); an `InProcessRuntime` wired into `cmd_status_monitor` the same
+  way `worktree_status_daemon.InProcessRuntime` is (lock-extra publication,
+  `has_active_demand()` feeding the monitor's own idle-strike/empty-exit
+  logic, shutdown in the same `finally`). `_monitor_sweep` gained an optional
+  `managed_mux_cache` parameter: when present, its currently-live session
+  names are merged into the existing `catalog_observer` call alongside the
+  direct mux scan's own set -- but never added to `served`, and never
+  triggers a `set-option` write of its own, per this step's explicit
+  no-writer-ownership-change scope. Client-side `mux_live_via_daemon`/
+  `mux_live_with_boot` push helpers are pinned (mirroring
+  `worktree_status_daemon.status_via_daemon`/`status_with_boot` exactly) but
+  not yet called by anything -- Step 2's Worktree Manager mux-companion
+  daemon is the first real caller. No behavior change to ordinary sessions:
+  the cache starts (and, until a Manager daemon exists to push into it,
+  stays) empty. Added `tests/test_mux_link.py` (cache monotonicity/
+  validation/rendezvous/wire-helper/runtime-lifecycle coverage) plus two new
+  `_monitor_sweep` tests proving the merge is observation-only. Full
+  `agent-worktrees` suite run: 9 pre-existing failures confirmed unrelated
+  (git credential pinning, paired-carve harness attribution, update-stage
+  indicator state -- none touch status-monitor/mux_link, and `git diff`
+  confirms this change touches none of those files), 5459 passed, 51
+  skipped; the targeted `test_mux_link.py`/`test_status_monitor.py` suites
+  are fully green (120/120). `ruff check --select F,E9`,
+  `check-module-size.py`, `check-install-contract.py`, and
+  `check-version-consistency.py` all clean. Bumped `agent-worktrees`
+  `1.5.5-dev265` -> `dev266`.
 
 - **2026-09-23** — Landed Phase 3e Step 5b/5c (install.ps1 repoint + live
   trial), PR [#3457](https://github.com/ThomasMichon/copilot-extensions/pull/3457).

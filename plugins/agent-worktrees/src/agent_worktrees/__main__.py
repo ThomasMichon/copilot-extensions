@@ -4957,6 +4957,7 @@ def _monitor_sweep(
     project_lock=None,
     lifecycle_priority=None,
     governance=None,
+    managed_mux_cache=None,
 ) -> int:
     """One coalescing pass over all live, registered ``wt-*`` sessions.
 
@@ -4967,6 +4968,15 @@ def _monitor_sweep(
     ``@aw_seg`` every pass -- the same renders the per-session updater did,
     coalesced into one process.  Registry entries whose session is definitively
     gone are pruned.
+
+    ``managed_mux_cache`` (a ``mux_link.ManagedMuxCache``, Phase 3b Slice 2
+    Sub-slice 3 Step 1) is optional and, for this step, purely additive: its
+    currently-live session names are merged into the ``catalog_observer``
+    call alongside the direct mux scan's own set, so a Worktree-Manager-
+    reported live session is observed by ``session_catalog`` even on this
+    tick's direct scan alone -- but it never adds an entry to ``served`` and
+    never changes which sessions this sweep writes ``set-option`` for. That
+    writer-ownership cutover is a later, separate step.
     """
     # Stage D: resolve deferred names via _self_override (cluster-free owners).
     from . import list_cli as _list_cli
@@ -4992,7 +5002,10 @@ def _monitor_sweep(
         if live is None:
             return -1
         if catalog_observer is not None:
-            catalog_observer(set(live))
+            observed = set(live)
+            if managed_mux_cache is not None:
+                observed |= managed_mux_cache.live_session_names()
+            catalog_observer(observed)
         live_wt = {n for n in live if n.startswith("wt-")}
         stale_sessions = [s for s in registry if s not in live_wt]
         if stale_sessions:

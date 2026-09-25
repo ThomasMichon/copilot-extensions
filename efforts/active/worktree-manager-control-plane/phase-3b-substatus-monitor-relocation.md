@@ -322,8 +322,21 @@ Each step lands as its own PR. The sequence deliberately keeps earlier steps
 sessions, then deletes the redundant path. No step should leave a session in a
 state where two long-lived writers are both intended to own it.
 
-1. [ ] **Add the daemon-link contract and resident cache seam to
-       `agent-worktrees`, additive only.**
+1. [x] **Add the daemon-link contract and resident cache seam to
+       `agent-worktrees`, additive only.** Landed: `mux_link.py` (rendezvous-
+       parseable ``managed_mux_*`` fields in `status-monitor.lock`, mirroring
+       `hook_ipc`/`classify_daemon`/`worktree_status_daemon`), a thread-safe
+       `ManagedMuxCache` (monotonic `mapping_revision` guard rejects a
+       stale/out-of-order observation), and `InProcessRuntime` wired into
+       `cmd_status_monitor` (lock-extra publication, idle-strike
+       `has_active_demand()`, shutdown). `_monitor_sweep` merges the cache's
+       currently-live session names into its existing `catalog_observer` call
+       only -- never into `served`, never triggering a `set-option` write of
+       its own. Client-side `mux_live_via_daemon`/`mux_live_with_boot` push
+       helpers are pinned but not yet called by anything (Step 2's Worktree
+       Manager mux-companion daemon is the first real caller). No behavior
+       change to ordinary sessions: the cache starts (and stays) empty until
+       a Manager daemon exists to push into it.
    - Add a dedicated manager-observation IPC surface to `status-monitor.lock`
      (same loopback/token envelope as `HookIpcServer`).
    - Add a monitor-owned managed-mux cache abstraction that can store Manager

@@ -42,7 +42,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     import threading
     import time
 
-    from . import classify_daemon, loop_governance, monitor_roots, pane_reaper, registry_paths, session_catalog
+    from . import classify_daemon, loop_governance, monitor_roots, mux_link, pane_reaper, registry_paths, session_catalog
     from . import locks as _locks
     from . import status_monitor_runtime, status_updater_cli
     from . import worktree_status_daemon
@@ -200,6 +200,9 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         worktree_status_compute,
     )
 
+    managed_mux_runtime = mux_link.InProcessRuntime()
+    managed_mux_runtime.start()
+
     def _lock_extra() -> dict:
         extra = {"prefix": my_prefix, "mux": bool(mux_bin)}
         if isinstance(installation_context, dict):
@@ -215,6 +218,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         if classify_server is not None:
             extra.update(classify_daemon.rendezvous_fields(classify_server))
         extra.update(worktree_status_runtime.lock_extra())
+        extra.update(managed_mux_runtime.lock_extra())
         return extra
 
     _locks.write_lock(lock, extra=_lock_extra())
@@ -250,6 +254,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     project_lock=state_lock,
                     lifecycle_priority=lifecycle_priority,
                     governance=governance,
+                    managed_mux_cache=managed_mux_runtime.cache,
                 )
                 wait_for_lifecycle_priority(lifecycle_priority)
                 with state_lock:
@@ -284,6 +289,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 and not external_projects
                 and not reconciler.has_live_worktree_mux
                 and not worktree_status_runtime.has_active_demand()
+                and not managed_mux_runtime.has_active_demand()
             ):
                 empty_strikes += 1
                 if empty_strikes >= max_empty_strikes:
@@ -298,6 +304,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         or monitor_roots.live_picker_projects()
                         or core.list_cache.recent_demand_projects()
                         or worktree_status_runtime.has_active_demand()
+                        or managed_mux_runtime.has_active_demand()
                     ):
                         empty_strikes = 0
                     else:
@@ -311,6 +318,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         if classify_server is not None:
             classify_server.close()
         worktree_status_runtime.shutdown()
+        managed_mux_runtime.shutdown()
         d = _locks.read_lock(lock)
         if isinstance(d, dict) and d.get("pid") == os.getpid():
             _locks.remove_lock(lock)
