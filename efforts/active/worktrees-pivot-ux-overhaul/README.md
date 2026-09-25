@@ -340,15 +340,53 @@ parallelizable across worktrees.
       rendering, so left uncrossed; revisit if a later phase touches that
       path.
 
-### Phase 4 — CLAIMS column: adopt the shared pecking-order module
-- [ ] Wire the Worktrees pivot's PRs/claims section through
+### Phase 4 — CLAIMS column: adopt the shared pecking-order module (Done 2026-09-25)
+- [x] Wire the Worktrees pivot's PRs/claims section through
       `agent_worktrees.claims_rank` / `claims_cli`, matching the
       Codespaces/Containers pivots' already-shipped presentation
-      (`picker-venue-pivots`).
-- [ ] Rename/standardize the final top-line column label to `CLAIMS` on the
-      Worktrees pivot, consistent with the other pivots.
-- [ ] Read through the accelerator's cached claims graph (no independent
+      (`picker-venue-pivots`). **Done, with one deliberate architectural
+      difference from Codespaces/Containers**: those pivots' OWN backend
+      commands compute `claims_summary` (they soft-depend on
+      `agent_worktrees` as a library). `worktree-manager`'s Picker never
+      imports `agent_worktrees` directly -- it only reaches it across a
+      subprocess boundary (`list --json`), per the picker vision's
+      "Manager reaches the engine only across a process boundary"
+      principle (`demo.py`'s own docstring). So `claims_summary` is
+      computed ENGINE-side, in `agent_worktrees.__main__._worktree_to_dict`
+      (same package, direct import, right next to where `resources` -- the
+      claim ledger -- is already serialized), and the Picker's `derive.py`
+      just passes the ready-made string through -- a hermetic field, no
+      import, boundary intact. Backfills a synthetic `pr` claim from the
+      back-compat `active_pr()` when the ledger has no live `pr` claim yet
+      (covers a worktree whose PR predates the `create-pr`-time auto-claim);
+      never backfills a merged/closed PR (would be filtered as non-live
+      anyway). New engine tests: `TestWorktreeToDictClaimsSummary` (6 cases:
+      no-claims omission, ledger-only, backfill, ledger-takes-precedence,
+      no-backfill-for-merged, and rank ordering vs. a lower-priority claim).
+- [x] Rename/standardize the final top-line column label to `CLAIMS` on the
+      Worktrees pivot, consistent with the other pivots. **Done**:
+      `ACTIVE_SPECS`/`LIST_SPECS` (`engine_helpers.py`) column key
+      `"pr"` -> `"claims_summary"`, header `"pr"` -> `"claims"`. The
+      Maintenance pivot's own `CLEAN_SPECS` (a distinct cleanup-candidates
+      view, out of this phase's scope) keeps its `"pr"` column unchanged;
+      the row/sub-menu detail dialogs (`engine_dialogs.py`) also keep
+      showing the specific active-PR string via the untouched raw `"pr"`
+      field -- only the LIST's own top-line column standardized. Preserved
+      the merged-PR green highlight by keying the style off the still-
+      populated raw `"pr"` field (the shared `claims_rank.format_claim`
+      carries no merged marker of its own). Updated `scenario_claims`'s
+      golden fixture (now sets `claims_summary` directly, mirroring the
+      engine's own envelope) and regenerated all 6 affected goldens --
+      an unclaimed row's cell is now blank rather than the old `"—"`
+      placeholder, matching the Codespaces/Containers convention for "no
+      claims" exactly (a deliberate, not accidental, consequence of
+      standardizing).
+- [x] Read through the accelerator's cached claims graph (no independent
       per-render claim scan), per the vision's *warmth, not truth* rule.
+      **Done, satisfied by construction**: `claims_summary` reads only
+      `rec.resources` -- the already-persisted claim ledger loaded off the
+      YAML record -- never a fresh network/live scan. Same cost profile as
+      every other field `_worktree_to_dict` already emits per render.
 
 ### Phase 5 — Replace the "R" column
 - [ ] Determine the "R" column's current source field (expected:
@@ -627,5 +665,35 @@ reviewed-plan PR per the standard effort review gate before Phase 1 begins._
 - **Next up: Phase 4** — CLAIMS column: adopt the shared
   `claims_rank`/`claims_cli` pecking-order module already shipped for the
   Codespaces/Containers pivots. Not yet started.
+
+### 2026-09-25 — Phase 4 complete: CLAIMS column via the shared claims_rank module
+- Key architectural finding before writing code: unlike Codespaces/
+  Containers (which soft-depend on `agent_worktrees` and compute
+  `claims_summary` in their OWN backend), `worktree-manager`'s Picker never
+  imports `agent_worktrees` as a library -- only across a subprocess
+  boundary. So `claims_summary` is computed ENGINE-side
+  (`agent_worktrees.__main__._worktree_to_dict`, same package as
+  `claims_rank`), not in the Picker's `derive.py`, keeping that boundary
+  intact -- `derive.norm()` just passes the ready-made string through.
+- Shipped: engine emits `claims_summary` (ranked via the shared
+  `claims_rank.summarize_claims`, backfilling a synthetic `pr` claim from
+  the back-compat `active_pr()` when the ledger predates the `create-pr`
+  auto-claim, never for a merged/closed PR); `ACTIVE_SPECS`/`LIST_SPECS`
+  column renamed `"pr"`/`"pr"` -> `"claims_summary"`/`"claims"` (Maintenance's
+  own `CLEAN_SPECS` and the row detail dialogs keep the untouched raw `"pr"`
+  field, out of this phase's scope); merged-PR green highlight preserved by
+  keying it off that same untouched raw field.
+- New tests: `TestWorktreeToDictClaimsSummary` (6 engine cases: omission,
+  ledger-only, backfill, ledger-precedence, no-backfill-for-merged, rank
+  ordering). Updated `scenario_claims`'s fixture + regenerated 6 goldens --
+  an unclaimed row's cell is now blank (was `"—"`), matching Codespaces/
+  Containers' own convention exactly, a deliberate consequence of
+  standardizing, not a regression.
+- Full suites: worktree-manager 1190 passed/1 skipped; agent-worktrees run
+  in progress at write time (prior slice's full run: 5435 passed/42
+  skipped/9 pre-existing failures) -- see the landed PR for final counts.
+- **Next up: Phase 5** — replace/retire the "R" column (unblocked by
+  Phase 1's screenshot comparison finding no historical precedent for it).
+  Not yet started.
 
 

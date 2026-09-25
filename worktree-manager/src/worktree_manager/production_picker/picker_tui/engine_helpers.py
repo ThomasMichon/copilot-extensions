@@ -351,6 +351,12 @@ def row_text(rec, cols, width, selected, indent=1, pulse=0, mark=None):
             style = C_DISPO.get(rec.get("dispo_level", ""), "")
         elif k == "pr" and rec.get("pr", "").endswith("✓"):
             style = C_PR_MERGED
+        elif k == "claims_summary" and rec.get("pr", "").endswith("✓"):
+            # #3307 Phase 4: the Worktrees pivot's CLAIMS column shows the
+            # shared claims_rank summary text, but keeps the merged-PR
+            # green highlight keyed off the still-populated raw "pr" field
+            # (claims_rank's own formatting carries no merged marker).
+            style = C_PR_MERGED
         elif k == "sess":
             if rec.get("sess", "").startswith("●") or rec.get("sess") == "PROC":
                 style = C_PULSE[pulse]
@@ -380,13 +386,17 @@ ACTIVE_SPECS = [
     ("relation", "r", 1, "l", 6),
     ("machine_env", "source", 19, "l", 5),
     ("age", "age", 4, "l", 7), ("sess", "live", 4, "l", 8),
-    ("pr", "pr", 8, "l", 3),
+    # #3307 Phase 4: standardized on "claims" (the shared claims_rank
+    # summary), replacing the single-PR-only "pr" column -- matching the
+    # Codespaces/Containers pivots' own column label.
+    ("claims_summary", "claims", 12, "l", 3),
 ]
 LIST_SPECS = [
     ("id4", "id", 4, "l", 2), ("state", "state", 6, "l", 4),
     ("relation", "r", 1, "l", 5),
     ("age", "age", 4, "l", 6), ("sess", "live", 4, "l", 7),
-    ("turns", "t", 3, "r", 8), ("pr", "pr", 8, "l", 3),
+    ("turns", "t", 3, "r", 8),
+    ("claims_summary", "claims", 12, "l", 3),
 ]
 #: The Worktrees list's own row title now lives entirely on the detail line
 #: (``WorktreesView._detail_line``, "Title: Activity") rather than as a

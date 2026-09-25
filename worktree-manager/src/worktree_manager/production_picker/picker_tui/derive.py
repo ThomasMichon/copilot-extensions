@@ -799,6 +799,13 @@ def norm(
         "session_count": w.get("session_count"),
         "sessionless": _sessionless(w),
         "pr": _pr(w),
+        # #3307 Phase 4: the engine's already-ranked claims summary (computed
+        # in ``agent_worktrees.__main__._worktree_to_dict`` via the shared
+        # ``claims_rank`` module -- see that call site's own docstring for
+        # why it is NOT computed here: the Manager/engine subprocess
+        # boundary this module deliberately never crosses). A hermetic
+        # string pass-through; "" when unclaimed/unresolvable.
+        "claims_summary": w.get("claims_summary") or "",
         # #3307 Phase 3: raw pass-through of the worktree's last real resume
         "last_resumed_at": w.get("last_resumed_at"),
         "cleanup_bucket": _bucket_from_raw(w),

@@ -93,6 +93,8 @@ from agent_procutil import (
 
 from . import (
     activity,
+    claim_kinds_registry,
+    claims_rank,
     codename_tracking,
     disposition_history,
     effort_focus,
@@ -1383,6 +1385,31 @@ def _worktree_to_dict(
         d["pr"] = pr_ops._pr_to_dict(active) if active is not None else None
         d["prs"] = [pr_ops._pr_to_dict(p) for p in rec.prs]
         d["pr_count"] = len(rec.prs)
+    else:
+        active = None
+    # #3307 Phase 4: the Worktrees pivot's own ranked ``claims_summary``,
+    # computed HERE (not by the Picker) since this is the one process that
+    # can import ``claims_rank`` directly rather than crossing the
+    # Manager/engine subprocess boundary. See
+    # ``claims_rank.claims_summary_for_worktree``'s own docstring for the
+    # ranking + PR-backfill details.
+    try:
+        pecking_order = claim_kinds_registry.effective_pecking_order()
+        label_overrides = claim_kinds_registry.effective_label_overrides()
+    except Exception:
+        pecking_order = None
+        label_overrides = None
+    active_pr = ({"repo": active.repo, "number": active.number, "state": active.state}
+                 if active is not None else None)
+    try:
+        summary = claims_rank.claims_summary_for_worktree(
+            rec.resources, active_pr,
+            pecking_order=pecking_order, label_overrides=label_overrides,
+        )
+    except Exception:
+        summary = ""
+    if summary:
+        d["claims_summary"] = summary
     # #93: mark a worktree hosting a bare (un-muxed) bound Copilot so the picker
     # can annotate its row with an orphan marker (a Copilot the mux fleet view
     # cannot see). Set only when true, to keep the dict lean.
