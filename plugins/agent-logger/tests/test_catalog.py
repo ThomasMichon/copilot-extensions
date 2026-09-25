@@ -533,6 +533,51 @@ def test_cli_query_is_scoped_by_repo_and_pr_number(monkeypatch, tmp_path: Path) 
     assert _json.loads(out)["sessions"] == []
 
 
+def test_cli_query_forwards_since_and_until_to_query_reviewer_sessions(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The `--since`/`--until` flags must actually reach
+    `query_reviewer_sessions`'s own time-window filtering, not just be
+    accepted and silently dropped by the CLI layer."""
+    from agent_logger import cold_store
+
+    captured: dict[str, object] = {}
+
+    def fake_query(repo, pr_number, *, since=None, until=None, cfg=None):
+        captured["repo"] = repo
+        captured["pr_number"] = pr_number
+        captured["since"] = since
+        captured["until"] = until
+        return []
+
+    monkeypatch.setattr(cold_store, "query_reviewer_sessions", fake_query)
+
+    rc, _out = _run_query_cli(
+        monkeypatch,
+        tmp_path,
+        [
+            "catalog",
+            "query",
+            "--repo",
+            "example/repo",
+            "--pr-number",
+            "6100",
+            "--since",
+            "2026-01-01T00:00:00Z",
+            "--until",
+            "2026-12-31T23:59:59Z",
+        ],
+    )
+
+    assert rc == 0
+    assert captured == {
+        "repo": "example/repo",
+        "pr_number": 6100,
+        "since": "2026-01-01T00:00:00Z",
+        "until": "2026-12-31T23:59:59Z",
+    }
+
+
 def test_cli_query_skips_session_unresolvable_on_this_host(
     monkeypatch, tmp_path: Path
 ) -> None:
