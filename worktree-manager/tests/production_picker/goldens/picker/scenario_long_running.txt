@@ -6,13 +6,13 @@
 
    + New worktree…     ✕ Clean     ⟳ Sync     creates on anomalous-potato Win  (this host)
 
-  ID     STATE    R   AGE    LIVE   T     PR
+  ID     STATE    R   AGE    LIVE   T     CLAIMS
   ── Active ──────────────────────────────────────────────────────────────────────────────────────────────────────────
     (none)
   ── Recent ──────────────────────────────────────────────────────────────────────────────────────────────────────────
-☐ l001   WIP          30d    ·       47   —
+☐ l001   WIP          30d    ·       47
       Long-haul migration: wip
-☐ l002   UNUSED       1d     ·        0   —
+☐ l002   UNUSED       1d     ·        0
       Created yesterday, untouched: unused
   ── Completed ───────────────────────────────────────────────────────────────────────────────────────────────────────
     (none)

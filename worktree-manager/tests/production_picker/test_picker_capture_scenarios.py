@@ -127,13 +127,19 @@ def test_mixed_worktrees_list_matches_golden(monkeypatch, tmp_path):
 
 
 def test_claims_worktree_matches_golden(monkeypatch, tmp_path):
-    """A worktree carrying an open PR -- the PRs/claims column's non-empty
-    state (Phase 4 target: standardize this as a CLAIMS column)."""
+    """A worktree carrying an open PR -- the CLAIMS column's non-empty state
+    (#3307 Phase 4: standardized on the shared ``claims_rank`` module's
+    summary text, replacing the single-PR-only column). ``claims_summary``
+    is set directly here (rather than derived) because this fixture mimics
+    the ENGINE's already-serialized ``list --json`` envelope -- the real
+    computation lives in ``agent_worktrees.__main__._worktree_to_dict``, not
+    the Picker (see ``derive.norm()``'s own docstring on that pass-through)."""
     raws = [
         {"id": "anomalous-potato-win-20260627-c001", "title": "Add the retry budget",
          "status": "active", "started_at": "2026-06-27T15:00:00",
          "turn_count": 8, "state": "wip", "ahead": 3, "behind": 0,
-         "pr": {"number": 4821, "state": "open"}},
+         "pr": {"number": 4821, "state": "open"},
+         "claims_summary": "PR #4821"},
     ]
     grid = _capture_grid(monkeypatch, tmp_path, raws)
     assert grid == _golden("scenario_claims.txt", grid)
