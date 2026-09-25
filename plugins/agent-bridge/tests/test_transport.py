@@ -1170,7 +1170,7 @@ class TestLocalResolveBridgeFallback:
         ):
             args, cwd, _env = await resolve_local_launch(target)
 
-        assert args == ["/usr/bin/copilot", "--acp", "--stdio"]
+        assert args == ["/usr/bin/copilot", "--acp", "--stdio", "--no-auto-update"]
         assert cwd == "/tmp/wt-review"
 
     @pytest.mark.asyncio

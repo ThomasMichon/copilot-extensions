@@ -1,0 +1,9 @@
+{
+  "comment": "Pin every spawned copilot child with --no-auto-update (durable-pin regression: the CLI's background updater silently re-applied a broken build hours after settings.json alone disabled auto-update)",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
