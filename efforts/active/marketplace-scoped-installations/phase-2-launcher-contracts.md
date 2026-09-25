@@ -16,15 +16,17 @@ global plugin wrappers do not count as retired while any real external caller
 still depends on them. The 86 findings are the guard-visible baseline, not proof
 that the guard currently sees every caller.
 
-## Baseline
+## Baseline (historical snapshot, superseded by the 2026-09-25 re-audit below)
 
 On 2026-08-26, `python tools/check-marketplace-isolation.py --json` reported 86
 `global-plugin-binstub` findings across 14 plugins.
 
 After [#1187](https://github.com/ThomasMichon/copilot-extensions/pull/1187),
-the guard-visible count is 80. The six payload-owned self-wrapper findings are
-complete; every durable boundary and the generic wrapper retirement remain
-open.
+the guard-visible count was 80 as of that PR. The six payload-owned
+self-wrapper findings were complete at that point; every durable boundary and
+the generic wrapper retirement were still open as of 2026-08-26 -- the
+2026-09-25 re-audit below found the durable provider manifests have since
+converted too, so this paragraph no longer describes current state.
 
 ### 2026-09-25 re-audit
 
@@ -86,7 +88,7 @@ own fresh family pass" note further down):
 | `agent-vault` | 8 | unchanged |
 | `agent-codespaces` | 7 | -2 (durable provider manifests converted) |
 | `agent-index` | 6 | +1 (untraced) |
-| `agent-ssh` | 6 | unchanged (payload-owned self-wrappers already converted) |
+| `agent-ssh` | 6 | -6 (baseline was 12: 6 self-wrapper + 4 generic + 2 remote-transport; the 6 self-wrapper findings converted, leaving 6) |
 | `agent-dispatch` | 5 | unchanged |
 | `agent-containers` | 4 | -2 (durable provider manifests converted) |
 | `agent-logger` | 4 | +1 (untraced) |
