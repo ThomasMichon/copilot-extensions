@@ -416,7 +416,10 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   instead, needs its own design pass before touching these files. Left
   unconverted rather than risk a rushed, unverified change to a live skill
   entrypoint.
-- The 686 remaining findings (up from 675) span 17 plugins, dominated by
+- **698 findings remain** (702 minus the 4 annotated above): 689 in the 13
+  plugins outside this note's small cluster, plus the 9 genuine findings left
+  unconverted inside it (5 in `budget-guidance`, 2 in `customizing-copilot`,
+  2 in `harness-knowledge` — see above). The 13 outer plugins are dominated by
   `agent-worktrees` (168), `agent-dispatch` (76), `agent-codespaces` (69),
   `agent-index` (62), `agent-bridge` (55), `agent-vault` (52), and
   `agent-machines` (49); each needs the same file-by-file genuine-backlog-vs-
