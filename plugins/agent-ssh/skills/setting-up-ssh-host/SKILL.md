@@ -156,7 +156,7 @@ Host dt-<host>-wsl
   Conditional-Access-blocked).
 - **Works for any loopback listener** behind the host, not just WSL.
 
-> **Note on `HostName localhost` + `ProxyJump`.** `localhost:2200` is resolved on
+> **Note on `HostName localhost` + `ProxyJump`.** `localhost:2200` is resolved on <!-- marketplace-isolation: allow doc-example -->
 > the **jump host** (the Windows box), where WSL `localhostForwarding` maps it to
 > the WSL sshd. The `-W` forward the jump performs requires the dtssh host's sshd
 > to permit TCP forwarding (it does by default).

@@ -192,7 +192,12 @@ of session-state to a host-owned destination **while the container is still
 running**. A failed rescue blocks stop/removal unless an explicit force/abandon
 decision accepts the loss. Periodic or turn-boundary checkpoints may reduce the
 unrescued tail after an unexpected container loss; the next venue still starts
-clean.
+clean. A peer, non-destructive **capture** trigger (`rescue-capture`) may also
+pull session-state on demand while the container keeps running, independent of
+any destructive replacement -- gated by the same active-session liveness probe
+so a live turn is never snapshotted mid-write. Whether/how a capture runs
+periodically is downstream consumer configuration, not something this plugin
+schedules itself.
 
 ### drain-live-session-before-replace
 Provider and session liveness are checked immediately before replacement. A live
