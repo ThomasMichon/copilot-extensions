@@ -1,0 +1,9 @@
+{
+  "comment": "Add manifest regression coverage for the Codespaces picker subtitle",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

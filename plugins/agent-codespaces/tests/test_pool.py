@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 import time
 
 from agent_codespaces.lease import Lease
@@ -503,6 +505,31 @@ def test_picker_payload_friendly_name_and_subtitle():
     # Free box: display falls back to name; no redundant id, no claim -> blank subtitle.
     assert by["free"]["display"] == "free"
     assert by["free"]["subtitle"] == ""
+
+
+def test_real_manifest_maps_picker_payload_subtitle():
+    """Regression guard for the original dropped-field bug: the shipped
+    manifest must still map the real computed ``subtitle`` field."""
+    import time as _t
+    from agent_codespaces.pool import picker_payload
+
+    now = _t.time()
+    lease = Lease(codespace="held", effort="my-effort", pid=1, host="dev6",
+                  acquired_at=now, heartbeat_at=now)
+    held = CodespaceInfo(name="held", display_name="my-feature", repository="o/web-cs",
+                         branch="main", state="Available", machine="premiumLinux",
+                         account="acct1", last_used_at="")
+    members, budget = build_pool(now=now, codespaces=[held], leases=[lease], markers={})
+    entry = picker_payload(members, budget)["entries"][0]
+
+    manifest_path = Path(__file__).resolve().parents[1] / "pivots" / "agent-codespaces.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    subtitle_field = manifest["entry"]["subtitle"]
+
+    assert subtitle_field == "subtitle"
+    assert entry["subtitle"]
+    assert "claimed by my-effort on dev6" in entry[subtitle_field]
+    assert entry[subtitle_field] == entry["subtitle"]
 
 
 def test_picker_payload_group_status_worktree():
