@@ -12,7 +12,34 @@ import sys
 from agent_mcp.config import parse_config
 from agent_mcp.diagnose import diagnose
 
-from test_client import MCP_CHILD
+from .test_client import MCP_CHILD
+
+# A stdio MCP child that answers initialize fine but returns a genuine
+# JSON-RPC error for tools/list -- the regression case for the catalog
+# stage: `fetch_all_tools` treats any non-"result" response as "no more
+# pages" and returns an empty list, which must not be reported as a
+# healthy empty catalog.
+MCP_CHILD_BROKEN_CATALOG = r"""
+import sys, json
+def handle(m):
+    mid = m.get("id"); method = m.get("method")
+    if method == "initialize":
+        return {"jsonrpc":"2.0","id":mid,"result":{
+            "protocolVersion":"2025-06-18",
+            "serverInfo":{"name":"broken-catalog","version":"1"},"capabilities":{}}}
+    if method == "tools/list":
+        return {"jsonrpc":"2.0","id":mid,"error":{"code":-32603,"message":"catalog backend down"}}
+    if mid is not None:
+        return {"jsonrpc":"2.0","id":mid,"result":{}}
+    return None
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    r = handle(json.loads(line))
+    if r is not None:
+        sys.stdout.write(json.dumps(r)+"\n"); sys.stdout.flush()
+"""
 
 
 def _cfg(extra: dict | None = None):
@@ -102,3 +129,20 @@ def test_diagnose_report_to_dict_is_json_safe(tmp_path):
     report = asyncio.run(diagnose(str(path), printer=lambda _line: None))
     # Must not raise -- source_path (a Path) must already be stringified.
     json.dumps(report.to_dict())
+
+
+async def test_diagnose_reports_catalog_stage_failure_not_empty_success(tmp_path):
+    # Regression: a tools/list JSON-RPC error must surface as a FAILED
+    # catalog stage, never as a misleading "catalog: OK -- 0 tool(s))".
+    path = _write_cfg(tmp_path, {
+        "server": {"type": "stdio", "command": [sys.executable, "-c", MCP_CHILD_BROKEN_CATALOG]},
+        "auth": {"kind": "none"},
+    })
+    report = await diagnose(str(path), printer=lambda _line: None)
+
+    assert not report.ok
+    failed = report.failed_stage
+    assert failed is not None
+    assert failed.name == "catalog"
+    assert "catalog backend down" in failed.detail
+    assert report.tool_count is None

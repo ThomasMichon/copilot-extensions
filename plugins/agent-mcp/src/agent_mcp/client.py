@@ -393,6 +393,44 @@ class OneShotSession:
         tools = await fetch_all_tools(self._paginated_request, self._ctx)
         return filter_tools(tools, self.cfg.tools)
 
+    async def list_tools_checked(self) -> list[dict]:
+        """Like :meth:`list_tools`, but raises :class:`UpstreamError` on an
+        explicit JSON-RPC error response instead of silently truncating the
+        catalog.
+
+        :func:`agent_mcp.decorators._catalog.fetch_all_tools` treats *any*
+        response missing a top-level ``result`` -- including a genuine
+        ``error`` -- as "no more pages" and returns whatever it already
+        collected (possibly an empty list). That's the right lenient default
+        for a live decorator (``defer``/``code-mode``) mid-session, but it
+        means a caller that needs to know the catalog fetch itself *failed*
+        (``agent-mcp diagnose``) cannot tell a healthy empty catalog from a
+        broken one via :meth:`list_tools` alone. This variant duplicates the
+        same bounded pagination loop with one added check.
+        """
+        client = self._need_client()
+        if self._ctx is None:
+            raise RuntimeError("OneShotSession used outside its async context")
+        tools: list[dict] = []
+        cursor: str | None = None
+        for _ in range(100):  # same safety bound as fetch_all_tools' _PAGE_LIMIT
+            params: dict[str, str] = {"cursor": cursor} if cursor else {}
+            req = {"jsonrpc": "2.0", "id": client.new_id(), "method": "tools/list",
+                   "params": params}
+            resp = await self._paginated_request(req)
+            if isinstance(resp, dict) and "error" in resp:
+                _raise_error(resp["error"], context="tools/list")
+            if not isinstance(resp, dict) or "result" not in resp:
+                break
+            result = resp.get("result") or {}
+            page = result.get("tools")
+            if isinstance(page, list):
+                tools.extend(t for t in page if isinstance(t, dict))
+            cursor = result.get("nextCursor")
+            if not cursor:
+                break
+        return filter_tools(tools, self.cfg.tools)
+
     async def call_tool(self, name: str, arguments: dict) -> dict:
         """Invoke one tool; return the ``tools/call`` result mapping.
 

@@ -110,6 +110,14 @@ async def diagnose(
         printer(f"{step(1, 'config')}: FAILED -- {exc}")
         report.stages.append(StageResult("config", False, str(exc)))
         return report
+    except (OSError, UnicodeDecodeError) as exc:
+        # A config path that exists but can't be read (permissions, a broken
+        # symlink) or isn't valid UTF-8 -- a config-stage failure just like a
+        # schema/parse error, not an unhandled traceback (``_read_file``'s
+        # ``path.read_text()`` raises these unwrapped, outside ``ConfigError``).
+        printer(f"{step(1, 'config')}: FAILED -- {exc}")
+        report.stages.append(StageResult("config", False, str(exc)))
+        return report
     where = str(cfg.source_path) if cfg.source_path else name_or_path
     printer(f"{step(1, 'config')}: OK -- {where} -> {cfg.server.type} {cfg.server.launch_desc}")
     report.stages.append(StageResult("config", True, where))
@@ -153,7 +161,7 @@ async def diagnose(
         if list_tools:
             printer(f"{step(5, 'catalog')}: listing tools ...")
             try:
-                tools = await session.list_tools()
+                tools = await session.list_tools_checked()
             except UpstreamError as exc:
                 printer(f"{step(5, 'catalog')}: FAILED -- {exc}")
                 printer(f"  hint: {_HINTS['catalog']}")
