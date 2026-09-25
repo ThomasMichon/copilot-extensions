@@ -565,14 +565,20 @@ manager, or session-host implementation.
   reattach, prompt, interrupt, or terminate Copilot processes.
 - **Not a terminal or multiplexer owner.** TMux, PSMux, terminal windows, panes,
   and console choreography belong to an execution-host provider.
-- **Not a terminal-app *profile* owner.** Which launch targets a machine's
-  terminal application (Windows Terminal, Tabby, ...) carries a profile for —
-  the selection model, its persistence, and mirroring it into real terminal-app
+- **Not a Terminal Fragment owner.** Which launch targets a machine's terminal
+  application (Windows Terminal, Tabby, ...) carries a profile for — the
+  selection model, its persistence, and mirroring it into real terminal-app
   fragments — is being phased out of agent-worktrees into the Worktree Manager
   control-plane, the same relocation already applied to Mux presentation and
-  the AHP session backend (#2062). Terminal handling of every kind is leaving
-  this plugin; agent-worktrees ends up knowing nothing about how, or whether,
-  a session is ever attached to a terminal at all.
+  the AHP session backend (#2062). Terminal-app *profile*/fragment handling of
+  every kind is leaving this plugin; agent-worktrees ends up knowing nothing
+  about how, or whether, a session is ever attached to a terminal-app profile
+  at all. **This does not extend to per-project binstubs** (the PATH launcher
+  scripts a registered project resolves to, e.g. `my-project` /
+  `my-project.cmd`/`.ps1`): deploying, repairing, and reasoning about those
+  remains squarely agent-worktrees' own responsibility — a different, unrelated
+  artifact from a Terminal Fragment's WT/Tabby profile entry, and not part of
+  this relocation.
 - **Not a universal session host.** Copilot CLI, ACP, SDK, App, and third-party
   rigs retain their own hosting and interaction semantics.
 - **Not a home for a provider-specific config union.** agent-worktrees does not
@@ -613,6 +619,19 @@ manager, or session-host implementation.
 
 ## Provenance
 
+- **2026-09-25** — Renamed the *terminal-app profile owner* Non-Goal to
+  *Terminal Fragment owner* and added an explicit carve-out: per-project
+  binstub deployment/repair (the PATH launcher scripts a registered project
+  resolves to) is a different, unrelated artifact from a Terminal Fragment's
+  WT/Tabby profile entry and is **not** part of this relocation — it remains
+  agent-worktrees' own responsibility. Operator direction while landing Phase
+  3e Step 6 (copilot-extensions#3390): the code-level cutover (deleting
+  agent-worktrees' `profiles`/`terminal-fragment` CLI verbs) surfaced real
+  ambiguity between "terminal handling of every kind" (the prior wording) and
+  the still-owned `repair --binstubs` surface, so the vision is tightened to
+  match the intended, narrower boundary before the remaining fallout (a
+  broken `install.ps1` local fallback, and a separate `worktree-manager`
+  repo still calling the removed CLI verbs) is resolved.
 - **2026-09-23** — Added the Non-Goals *terminal-app profile owner* bullet.
   Operator direction while scoping copilot-extensions#3360 (retiring the
   Worktree Manager's in-process `_engine_runtime.py` boundary): terminal

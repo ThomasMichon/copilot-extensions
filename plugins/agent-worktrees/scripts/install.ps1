@@ -2766,77 +2766,21 @@ function Deploy-TerminalFragmentViaWorktreeManager {
 }
 
 function Deploy-TerminalFragmentLocally {
-    <# The pre-Phase-3e-Step-5b implementation: generate the fragment via
-       agent_worktrees' own ``terminal-fragment`` verb, reconcile WT state,
-       and write the fragment file. Kept as the fallback for a machine
-       without a usable Worktree Manager install. Returns ``$false`` only
-       when fragment generation itself failed (matching the historical
-       ``Deploy-Shortcuts`` behaviour of skipping shortcut creation too). #>
+    <# Phase 3e Step 6 (copilot-extensions#3390): Terminal Fragment generation
+       is no longer owned by agent-worktrees at all -- ``agent_worktrees``'s
+       own ``terminal-fragment``/``profiles`` verbs (the only thing this
+       function used to shell out to) were retired in Step 6; see
+       ``visions/plugins/agent-worktrees``'s *Not a Terminal Fragment owner*
+       Non-Goal. There is no local (non-Worktree-Manager) implementation left
+       to fall back to -- degrade loudly instead of attempting a command that
+       no longer exists. Always returns ``$false`` (matching the historical
+       ``Deploy-Shortcuts`` behaviour of skipping shortcut creation when the
+       fragment can't be deployed), so this machine's WT profiles/shortcuts
+       simply go stale until a usable Worktree Manager install is present. #>
     param([string]$Machine)
 
-    # Deploy WT fragment - use a shared fragment directory for all projects
-    $fragmentDir = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\AgentWorktrees'
-    if (-not (Test-Path $fragmentDir)) {
-        New-Item -ItemType Directory -Path $fragmentDir -Force | Out-Null
-    }
-
-    # Collect GUIDs from existing fragment BEFORE any overwrites.
-    # We need these to compute stale GUIDs for state cleanup later.
-    $oldFragGuids = @()
-    $fragmentDst = Join-Path $fragmentDir 'agent-worktrees.json'
-    if (Test-Path $fragmentDst) {
-        try {
-            $oldFrag = Get-Content $fragmentDst -Raw | ConvertFrom-Json
-            $oldFragGuids += @($oldFrag.profiles | ForEach-Object { $_.guid.ToLower() })
-        } catch { }
-    }
-    $oldFragGuids = @($oldFragGuids | Sort-Object -Unique)
-
-    # Generate the fragment from the Python single-source-of-truth generator.
-    # First normalize any legacy display-name selections to canonical machine
-    # keys (idempotent), then capture the fragment JSON (stdout is pure JSON).
-    & $VenvPython -m agent_worktrees terminal-fragment --machine $Machine --migrate-selections 2>&1 |
-        ForEach-Object { Write-ServiceChanged "profiles: $_" }
-    $fragment = & $VenvPython -m agent_worktrees terminal-fragment --machine $Machine
-    if ($LASTEXITCODE -ne 0 -or -not $fragment) {
-        Write-ServiceErr "Fragment generation failed (agent_worktrees terminal-fragment exited $LASTEXITCODE)"
-        return $false
-    }
-    $newFragObj = $fragment | ConvertFrom-Json
-    $newFragGuids = @($newFragObj.profiles | ForEach-Object { $_.guid.ToLower() })
-
-    # Detect changed profiles: same GUID but different content (e.g. renamed
-    # machine, changed SSH alias).  These need WT rediscovery even though the
-    # GUID didn't change.
-    $changedGuids = @()
-    if ($oldFragGuids.Count -gt 0) {
-        $commonGuids = @($oldFragGuids | Where-Object { $_ -in $newFragGuids })
-        foreach ($g in $commonGuids) {
-            $oldP = $oldFrag.profiles | Where-Object { $_.guid.ToLower() -eq $g }
-            $newP = $newFragObj.profiles | Where-Object { $_.guid.ToLower() -eq $g }
-            if ($oldP -and $newP) {
-                $oldCmd  = if ($oldP.PSObject.Properties['commandline']) { $oldP.commandline } else { '' }
-                $newCmd  = if ($newP.PSObject.Properties['commandline']) { $newP.commandline } else { '' }
-                $oldName = if ($oldP.PSObject.Properties['name']) { $oldP.name } else { '' }
-                $newName = if ($newP.PSObject.Properties['name']) { $newP.name } else { '' }
-                if ($oldCmd -ne $newCmd -or $oldName -ne $newName) {
-                    $changedGuids += $g
-                }
-            }
-        }
-        if ($changedGuids.Count -gt 0) {
-            Write-ServiceChanged "$($changedGuids.Count) profile(s) changed content -- will force WT rediscovery"
-        }
-    }
-
-    # Clean WT state BEFORE writing the new fragment to avoid a race where
-    # WT reads the new fragment while stale GUIDs are still in state.json.
-    Sync-TerminalState -OldFragmentGuids $oldFragGuids -NewFragmentGuids $newFragGuids -ChangedGuids $changedGuids
-
-    # Write the new fragment
-    $fragment | Set-Content $fragmentDst -Encoding UTF8
-    Write-ServiceOk "Windows Terminal profiles deployed (fragment with all registered projects)"
-    return $true
+    Write-ServiceWarn "Worktree Manager is required to deploy Windows Terminal profiles (agent-worktrees no longer owns Terminal Fragments -- see visions/plugins/agent-worktrees's 'Not a Terminal Fragment owner' Non-Goal). Install or repair Worktree Manager, then re-run 'refresh-profiles'."
+    return $false
 }
 
 function Deploy-Shortcuts {
