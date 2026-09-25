@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 # import module is ``session_liveness_probe``. Mirrors agent-procutil /
 # agent-ssh-manager.
 name = "agent-session-liveness-probe"
-version = "0.1.0-dev1"
+version = "0.1.0-dev2"
 description = "Shared Copilot CLI session-liveness probe (inuse.*.lock + /proc backstop), transport-agnostic"
 readme = "README.md"
 license = "MIT"

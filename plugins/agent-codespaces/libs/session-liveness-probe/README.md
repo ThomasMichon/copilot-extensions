@@ -6,7 +6,9 @@ marker's PID against `/proc/<pid>`, and backstops the result against a
 `*copilot*`/`--acp` process/cmdline scan. This is a property of the Copilot
 CLI's own session-state layout, not of any one transport, so the same probe
 script and parser run identically whether the caller reaches the venue via
-`docker exec` (agent-containers) or SSH (agent-codespaces).
+`docker exec` (agent-containers) or SSH (agent-codespaces). **The script
+requires Bash** (`set -o pipefail` is a Bash extension a plain POSIX
+`/bin/sh` rejects) -- invoke it with `bash -c`, not a bare shell.
 
 ```python
 from session_liveness_probe import build_probe_script, parse_probe_output
@@ -15,9 +17,10 @@ from session_liveness_probe import build_probe_script, parse_probe_output
 result = my_docker_exec([*prefix, "bash", "-c", build_probe_script()])
 liveness = parse_probe_output(result.returncode, result.stdout, result.stderr)
 
-# Async transport (e.g. SSH exec_with_retry):
-result = await my_ssh_exec(build_probe_script())
-liveness = parse_probe_output(result.returncode, result.stdout, result.stderr)
+# Async transport (e.g. ssh-manager's exec_with_retry, which returns a
+# CommandResult with an `exit_code` field, not `returncode`):
+result = await exec_with_retry(host, f"bash -c {shlex.quote(build_probe_script())}")
+liveness = parse_probe_output(result.exit_code, result.stdout, result.stderr)
 ```
 
 This lib owns only the shell script and the pure-Python output parser --

@@ -44,8 +44,13 @@ def build_probe_script() -> str:
     Scans ``~/.copilot/session-state`` for ``inuse.*.lock`` marker files,
     checks each marker's PID against ``/proc/<pid>``, and backstops the
     result against a ``*copilot*``/``--acp`` process/cmdline scan. Runs
-    identically over ``docker exec`` or an SSH session -- it only needs a
-    POSIX shell and ``/proc``.
+    identically over ``docker exec`` or an SSH session -- **it requires
+    Bash**, not a plain POSIX ``/bin/sh``: ``set -o pipefail`` is a Bash
+    extension that a strict POSIX shell (e.g. `dash`) rejects with
+    ``Illegal option -o pipefail`` before ever emitting ``ROOT``. A caller's
+    transport must invoke this script with ``bash -c`` (or an equivalent
+    Bash invocation), exactly as `agent-containers`' `docker exec` transport
+    already does.
     """
     return r"""
 set -o pipefail
