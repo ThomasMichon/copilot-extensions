@@ -601,6 +601,127 @@ def test_full_lifecycle_over_http(api):
     assert done["status"] == Status.COMPLETED
 
 
+def test_complete_over_http_releases_handoff_claim(api, monkeypatch):
+    """The `/tasks/{id}/complete` route's shared _guard hook releases a
+    handoff task's target-worktree claim on a genuine (non-retry)
+    completion -- covering the CLI, which always talks HTTP."""
+    from agent_dispatch import handoff_claim_release
+
+    tid = api.post(
+        "/tasks",
+        json={
+            "title": "x", "repo": TEST_REPO, "labels": ["handoff"],
+            "target_worktree": "wt-9",
+        },
+    ).json()["id"]
+    api.post(
+        "/claim",
+        json={"worker_id": "m/wt-9", "task_id": tid, "machine": "m", "worktree": "wt-9", "repo": TEST_REPO},
+    )
+    api.post(f"/tasks/{tid}/start", json={"worker_id": "m/wt-9"})
+
+    released = []
+    monkeypatch.setattr(
+        handoff_claim_release, "release_if_handoff",
+        lambda task, task_id=None: released.append((task.get("id"), task.get("target_worktree"))),
+    )
+    done = api.post(
+        f"/tasks/{tid}/complete", json={"worker_id": "m/wt-9", "result_ref": "pr/1"}
+    ).json()
+    assert done["status"] == Status.COMPLETED
+    assert released == [(tid, "wt-9")]
+
+
+def test_complete_over_http_never_releases_a_non_handoff_task(api, monkeypatch):
+    from agent_dispatch import handoff_claim_release
+
+    tid = api.post("/tasks", json={"title": "x"}).json()["id"]
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
+
+    calls = []
+    monkeypatch.setattr(
+        handoff_claim_release, "_release_task_claim",
+        lambda task_id, **k: calls.append(task_id),
+    )
+    api.post(f"/tasks/{tid}/complete", json={"worker_id": "w1", "result_ref": "pr/1"})
+    time.sleep(0.1)  # let any (wrongly-)spawned release thread run
+    assert calls == []
+
+
+def test_idempotent_result_recording_retry_does_not_re_release(api, monkeypatch):
+    """A retry that only attaches a missing result to an already-COMPLETED
+    task (event_type stays None) must not fire the release hook again."""
+    from agent_dispatch import handoff_claim_release
+
+    tid = api.post(
+        "/tasks",
+        json={"title": "x", "repo": TEST_REPO, "labels": ["handoff"], "target_worktree": "wt-9"},
+    ).json()["id"]
+    api.post(
+        "/claim",
+        json={"worker_id": "m/wt-9", "task_id": tid, "machine": "m", "worktree": "wt-9", "repo": TEST_REPO},
+    )
+    api.post(f"/tasks/{tid}/start", json={"worker_id": "m/wt-9"})
+    api.post(f"/tasks/{tid}/complete", json={"worker_id": "m/wt-9"})
+
+    released = []
+    monkeypatch.setattr(
+        handoff_claim_release, "release_if_handoff",
+        lambda task, task_id=None: released.append(task.get("id")),
+    )
+    # Retry attaching a result to the already-completed task.
+    api.post(
+        f"/tasks/{tid}/complete",
+        json={"worker_id": "m/wt-9", "result_ref": "pr/1", "result": {"ok": True}},
+    )
+    assert released == []
+
+
+def test_abandon_over_http_releases_handoff_claim(api, monkeypatch):
+    from agent_dispatch import handoff_claim_release
+
+    tid = api.post(
+        "/tasks", json={"title": "x", "repo": TEST_REPO, "labels": ["handoff"], "target_worktree": "wt-9"},
+    ).json()["id"]
+
+    released = []
+    monkeypatch.setattr(
+        handoff_claim_release, "release_if_handoff",
+        lambda task, task_id=None: released.append((task.get("id"), task.get("target_worktree"))),
+    )
+    abandoned = api.post(
+        f"/tasks/{tid}/abandon", json={"permitted": True, "reason": "test"}
+    ).json()
+    assert abandoned["status"] == Status.ABANDONED
+    assert released == [(tid, "wt-9")]
+
+
+def test_idempotent_abandon_retry_does_not_re_release(api, monkeypatch):
+    """PR #3248 review: `queue.abandon()` is `idempotent_replay=True` --  a
+    retry against an already-abandoned task returns 200 with no error, but
+    must not be treated as a fresh terminal transition. Before
+    `abandon_with_outcome`, the route hard-coded `event_type="task.abandoned"`
+    unconditionally, so every retry re-fired the (up to 15s) release
+    subprocess even though nothing changed."""
+    from agent_dispatch import handoff_claim_release
+
+    tid = api.post(
+        "/tasks", json={"title": "x", "repo": TEST_REPO, "labels": ["handoff"], "target_worktree": "wt-9"},
+    ).json()["id"]
+    first = api.post(f"/tasks/{tid}/abandon", json={"permitted": True, "reason": "test"})
+    assert first.json()["status"] == Status.ABANDONED
+
+    released = []
+    monkeypatch.setattr(
+        handoff_claim_release, "release_if_handoff",
+        lambda task, task_id=None: released.append(task.get("id")),
+    )
+    retry = api.post(f"/tasks/{tid}/abandon", json={"permitted": True, "reason": "retry"})
+    assert retry.json()["status"] == Status.ABANDONED
+    assert released == []
+
+
 def test_structured_result_is_full_on_show_bounded_in_bulk_and_retrievable(api):
     tid = api.post(
         "/tasks", json={"title": "x", "target_worktree": "wt-1"}

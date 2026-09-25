@@ -141,6 +141,21 @@ def test_abandon_replay_is_a_noop(q):
     assert replayed.status == Status.ABANDONED == first.status
 
 
+def test_abandon_with_outcome_reports_genuine_transition_then_replay(q):
+    """PR #3248 review: a caller wiring a terminal-transition side effect
+    (releasing a context-handoff claim) must be able to tell a genuine
+    abandon from an idempotent retry -- `abandon()` alone (above) cannot,
+    since both return the same terminal `Task`."""
+    task = q.create("t", status=Status.PROPOSED)
+    genuine = q.abandon_with_outcome(task.id, permitted=True)
+    assert genuine.task.status == Status.ABANDONED
+    assert genuine.event_type == "task.abandoned"
+
+    replay = q.abandon_with_outcome(task.id, permitted=True)
+    assert replay.task.status == Status.ABANDONED
+    assert replay.event_type is None
+
+
 def test_yield_task_replay_is_a_noop(q):
     task = q.create("t", status=Status.PROPOSED)
     q.approve(task.id)
