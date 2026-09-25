@@ -408,7 +408,7 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   triaged into this inventory: `budget-guidance` (4 findings, added
   2026-09-05) and `agent-pull-requests` (4 findings, added 2026-09-22) —
   both genuine, unconverted generic-installer backlog.
-- Found `agent-machines` gained 3 new findings from its post-rewrite
+- Found `agent-machines` gained 2 new findings from its post-rewrite
   `cell_lifecycle.py` engine, including a `payload-invocation.json`
   legacy-binstub-path declaration mirroring `agent-index`'s equivalent
   field — plausibly intentional migration metadata analogous to
