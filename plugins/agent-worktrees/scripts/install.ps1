@@ -706,13 +706,19 @@ function Invoke-VersionedActivate {
         # less-strict installer run (dotfiles #7561): Test-SlotAlreadyComplete
         # trusts a valid marker + matching payload hash and skips reinstalling,
         # so without this the same stale-but-broken slot would keep failing
-        # this gate forever on every future run. Invalidate just the marker
+        # this gate forever on every future run. Remove just the marker file
         # (never the slot's other files -- safe even if this happens to be the
         # CURRENTLY ACTIVE slot, since a JSON marker is never held open by a
-        # running interpreter) so a future run stops trusting it and either
-        # rebuilds it fresh or falls back to last-known-good.
-        & $py $vr --root $InstallDir --link-name '.venv' invalidate $SrcVersion 2>&1 |
-            ForEach-Object { Write-ServiceChanged $_ }
+        # running interpreter the way its own module files can be) so a future
+        # run stops trusting it and either rebuilds it fresh or falls back to
+        # last-known-good (resolve_python's tiered fallback in
+        # versioned_runtime.py already treats a markerless slot as unhealthy).
+        # Filename matches versioned_runtime.py's own COMPLETE_MARKER constant.
+        $staleMarker = Join-Path $VenvDir '.install-complete.json'
+        if (Test-Path $staleMarker) {
+            Remove-Item $staleMarker -Force -ErrorAction SilentlyContinue
+            Write-ServiceChanged "Invalidated stale completion marker (versions/$SrcVersion)"
+        }
         return $false
     }
     Invoke-VersionedMarkComplete
