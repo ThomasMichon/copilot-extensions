@@ -32,8 +32,7 @@ from pathlib import Path, PurePosixPath
 
 from agent_procutil import no_window_flags
 
-from . import __version__
-from . import claim_provider_cli
+from . import __version__, claim_provider_cli, rescue_capture_cli
 from .config import (
     RESTRICTED_PROFILE,
     SECURITY_PROFILE_LABEL,
@@ -100,7 +99,6 @@ def main(argv: list[str] | None = None) -> int:
         ("down", "Stop (keep warm) all containers in a fleet", "fleet"),
         ("start", "Start all stopped containers in a fleet", "fleet"),
         ("rm", "Remove all containers in a fleet (destructive)", "fleet"),
-        ("rescue-capture", "Capture session evidence for a fleet, non-destructively", "fleet"),
         ("stop", "Stop a single running container", "name"),
         ("remove", "Remove a single (stopped) container", "name"),
     ):
@@ -114,12 +112,11 @@ def main(argv: list[str] | None = None) -> int:
                 help="Accept unavailable/failed restricted session evidence. "
                 "Never overrides active or unknown liveness.",
             )
-        if name == "rescue-capture":
-            p.add_argument("--json", action="store_true", help="Emit operation result JSON")
         if name in {"rm", "remove"}:
             p.add_argument("--force", action="store_true", help="Force removal")
 
     claim_provider_cli.add_claim_provider_parsers(sub)
+    rescue_capture_cli.add_rescue_capture_parser(sub)
     borrow_p = sub.add_parser("borrow", help="Lease a free container to an effort")
     borrow_p.add_argument("effort", help="Effort name (lease holder)")
     borrow_p.add_argument("--container", help="Borrow a specific container")
@@ -297,7 +294,7 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_fleet(args)
         if args.command == "up":
             return _cmd_up(args)
-        if args.command in ("down", "start", "rm", "rescue-capture"):
+        if args.command in ("down", "start", "rm"):
             return _cmd_fleet_op(args)
         if args.command == "borrow":
             return _cmd_borrow(args)
@@ -835,17 +832,6 @@ def _cmd_fleet_op(args: argparse.Namespace) -> int:
                 "Telemetry abandoned: "
                 + ", ".join(result.telemetry_abandoned)
             )
-        deferred = bool(result.deferred)
-    elif args.command == "rescue-capture":
-        result = fleet_mod.rescue_capture_fleet(config, args.fleet)
-        if args.json:
-            print(json.dumps(asdict(result), indent=2))
-            return _BUSY_EXIT if result.deferred else 0
-        print(
-            f"Captured: {', '.join(result.captured) if result.captured else '(none)'}"
-        )
-        for name, reason in result.deferred.items():
-            print(f"Deferred: {name} ({reason})")
         deferred = bool(result.deferred)
     return _BUSY_EXIT if deferred else 0
 
