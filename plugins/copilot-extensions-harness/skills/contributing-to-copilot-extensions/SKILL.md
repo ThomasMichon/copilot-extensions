@@ -100,9 +100,31 @@ installer. Know which kind you are changing.
    truth. Do **not** edit `~/.copilot/installed-plugins/...` (overwritten on
    update) or a runtime dir (`~/.agent-*/lib`, service venvs).
 3. **Test.** Run `pytest` from the changed runtime plugin's dir
-   (`plugins/<plugin>/`). agent-worktrees has no suite yet — verify worktree ops
-   end-to-end. Lint touched Python with `ruff check --select F,E9`. Respect the
-   repo's `TESTING.md` for how to run the suites and the opt-in e2e smoke tests.
+   (`plugins/<plugin>/`). Lint touched Python with `ruff check --select F,E9`.
+   Respect the repo's `TESTING.md` for how to run the suites and the opt-in
+   e2e smoke tests.
+
+   **Fix every failing test you encounter — never label it "pre-existing" and
+   move on.** `dev` feeds a fully automated release pipeline
+   (`.github/workflows/validate-and-promote.yml`, the
+   dev-branch-release-pipeline effort, ThomasMichon/copilot-extensions#3336):
+   promotion only proceeds when the FULL per-plugin suite is genuinely green
+   against `dev`'s current tip, and a red build blocks **every** pending
+   contributor's already-merged work from ever reaching `main`, not just
+   yours. There is no separate human gatekeeper who re-triages "was this
+   pre-existing" before it jams the pipeline — you are the only checkpoint
+   that can prevent that. If a test fails while you're working — even one you
+   didn't write, in a plugin you didn't intend to touch, that only surfaces
+   in the full/slow suite rather than the fast smoke lane — you own fixing it
+   before you merge, exactly as if your own change had caused it. Do not
+   defer it, comment past it, or note it as "pre-existing, not my concern" in
+   a PR description and move on regardless — diagnose it and land a real fix
+   (or an honest revert of whatever actually regressed it) in the same PR or
+   an immediate follow-up before finalizing. The only exception is a failure
+   already tracked as a known, accepted flake/gap with its own open issue —
+   link that issue in your PR description rather than silently skipping past
+   an undocumented one.
+
    **Clean-room validation (install/bootstrap/provision/behavior changes).** When a
    change affects how a plugin installs, bootstraps, self-provisions, or behaves on
    a fresh machine, **run or extend the relevant clean-room scenario when
@@ -116,21 +138,27 @@ installer. Know which kind you are changing.
 4. **Install-contract gate (runtime plugins).** Run
    `python tools/check-install-contract.py` — it must report **zero
    violations**.
-5. **BUMP THE VERSION — mandatory, same commit.** This is the mistake that
-   silently swallows changes: the marketplace detects updates by comparing
-   versions, so an unbumped plugin change makes every machine report "already at
-   latest" and skip your change after merge. For the plugin you touched, bump
-   **together**:
-   - `plugins/<plugin>/plugin.json` → `version`
-   - `plugins/<plugin>/pyproject.toml` → `[project].version` (runtime plugins)
-   - `.github/plugin/marketplace.json` → that plugin's `plugins[N].version`
-   - the agent-worktrees plugin only: also `marketplace.json` `metadata.version` **and**
-     `plugins[0].version`. Adding a **new** plugin is a catalog change — bump
-     `metadata.version` too.
+5. **Add a changefile — mandatory, same commit. Never hand-edit a version
+   number.** This is the mistake that silently swallows changes: nothing
+   ships until a real version bump lands, and versions are no longer
+   hand-picked here — `main` is a wholesale-regenerated release snapshot the
+   CI promotion pipeline (dev-branch-release-pipeline effort,
+   ThomasMichon/copilot-extensions#3336) bumps and stamps automatically from
+   pending changefiles. For every plugin you touched, once per PR:
 
-   Default bump is **patch with a `-devN` suffix** (e.g. `1.3.1` → `1.3.2-dev1`);
-   never bump minor/major unless the maintainer asks. The exact per-plugin file
-   table is in `CONTRIBUTING.md` — follow it; entries drift, so trust the repo.
+   ```bash
+   python tools/changefile.py add --plugin <name> --type patch --comment "<summary>"
+   python tools/changefile.py list   # see what's pending
+   ```
+
+   Default to **`patch`** (or `dev` for an iterative fixup within the same
+   change); never request `minor`/`major` unless the maintainer asks. Do
+   **not** touch `plugin.json`'s `version`, `pyproject.toml`'s
+   `[project].version`, or `.github/plugin/marketplace.json` by hand — the
+   next promotion consumes your changefile and writes all three in lockstep.
+   The exact changefile schema and edge cases (renamed/split plugins, shared
+   libs) are in `CONTRIBUTING.md` § Release & Versioning — follow it; entries
+   drift, so trust the repo over this summary.
 6. **Open/update the PR.** Use `copilot-extensions create-pr` to squash the
    worktree, push `pr/<slug>`, and open the GitHub PR (the repo config has
    `auto_open: true`). If review feedback requires more commits in the same
@@ -196,10 +224,16 @@ file-an-issue fallback:
 
 ## What NOT to do
 
-- **Don't open/update a PR without the required version bump.** (See step 5.
-  This is the one.)
+- **Don't open/update a PR without a changefile for every touched plugin.**
+  (See step 5. This is the one.)
+- **Don't leave a test failure you encountered as "pre-existing."** (See
+  step 3.) That reasoning is exactly what jams the release pipeline for
+  everyone else.
+- **Don't hand-edit a plugin's version anywhere** (`plugin.json`,
+  `pyproject.toml`, `marketplace.json`) — add a changefile; the promotion
+  pipeline stamps every version surface for you.
 - **Don't edit installed/deployed copies** to "fix fast" — fix the repo source,
-  bump, PR/self-merge, deploy.
+  add a changefile, PR/self-merge, deploy.
 - **Don't hand-run `copilot plugin update` or a per-plugin `scripts/install.*` /
   `scripts/init.*`** — always deploy with the unified **`<repo> update`**
   (`agent-worktrees update`). <!-- marketplace-isolation: allow deployment-management -->
@@ -287,12 +321,14 @@ Treat `dev` as a single-writer lane:
 
 - Land one coherent change, then the next — avoid parallel in-flight PR merges from
   different worktrees or drivers.
-- **Rebase/update before PR publication or merge and re-check the version bump.**
-  A concurrent merge may have already consumed your `-devN`; if the marketplace
-  version moved under you, bump again on top of theirs (never reuse a version
-  another merge took).
-- If you pull and find another driver touched the same plugin, reconcile before
-  updating/merging your PR rather than force-landing.
+- **Changefiles make concurrent merges safe by design** — unlike a hand-picked
+  version, a changefile just accumulates; the promotion pipeline computes the
+  real version once, at promotion time, from whatever's pending. You do not
+  need to detect or react to another merge having "consumed" a version.
+- If you pull and find another driver touched the same plugin's *content*,
+  reconcile the actual conflict before updating/merging your PR rather than
+  force-landing — that's a real collision the changefile mechanism doesn't
+  paper over.
 
 ### Sanitization — keep private context off the public face
 
