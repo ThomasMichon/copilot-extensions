@@ -402,3 +402,117 @@ def test_promote_no_changefiles_reports_none():
     message = pr.format_promotion_message(dev_range=("a" * 40, "b" * 40), summary=summary)
     assert "Version bumps: none" in message
     assert "Changefiles consumed: none" in message
+
+
+def _copy_customizing_copilot_scripts(repo: Path) -> None:
+    src = (
+        _TOOLS.parent / "plugins" / "customizing-copilot" / "skills"
+        / "reviewing-customizations" / "scripts"
+    )
+    dest = (
+        repo / "plugins" / "customizing-copilot" / "skills"
+        / "reviewing-customizations" / "scripts"
+    )
+    dest.mkdir(parents=True, exist_ok=True)
+    for item in src.iterdir():
+        if item.is_file():
+            shutil.copy(item, dest / item.name)
+
+
+def _write_projection_plugin(repo: Path, plugin: str, version: str, tagged_version: str) -> None:
+    """A minimal plugin that ships a real instruction-projections.json
+    declaration + template, mirroring plugins/efforts's real shape -- its
+    template embeds ``[owner: <plugin>@<tagged_version>]``, independently of
+    ``version`` (the live plugin.json version), so a test can create a
+    real, pre-existing drift between the two the way a real un-synced
+    version bump does."""
+    _write_plugin(repo, plugin, version)
+    plugin_dir = repo / "plugins" / plugin
+    (plugin_dir / "instructions").mkdir(parents=True, exist_ok=True)
+    (plugin_dir / "instruction-projections.json").write_text(
+        json.dumps({
+            "schema": "copilot-extensions.instruction-projections",
+            "version": 1,
+            "projections": [{
+                "id": "demo-note",
+                "template": "instructions/demo-note.instructions.md",
+                "destination": f".github/instructions/{plugin}/demo-note.instructions.md",
+                "customizationKind": "instructions",
+                "applyTo": "**",
+                "legacyMarkers": [],
+            }],
+        }, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (plugin_dir / "instructions" / "demo-note.instructions.md").write_text(
+        '---\napplyTo: "**"\n---\n\n'
+        f"# Demo note\n\nFallback policy `[owner: {plugin}@{tagged_version}]`: static content.\n",
+        encoding="utf-8",
+    )
+
+
+def _write_enabled_settings(repo: Path, plugin: str) -> None:
+    settings_dir = repo / ".github" / "copilot"
+    settings_dir.mkdir(parents=True, exist_ok=True)
+    (settings_dir / "settings.json").write_text(
+        json.dumps({"enabledPlugins": {f"{plugin}@copilot-extensions": True}}) + "\n",
+        encoding="utf-8",
+    )
+
+
+def test_promote_syncs_instruction_projections_after_a_version_bump(tmp_path: Path):
+    """Regression for the #3378-recurrence found live on `main` 2026-09-25:
+    a plugin's version bump must also re-render any instruction-projection
+    file it owns (its rendered content embeds the plugin's version
+    verbatim), or the projected file silently drifts from the version the
+    very next promotion actually ships -- exactly what happened for real
+    (plugins/efforts bumped to 0.1.1-dev1 while its checked-in
+    .github/instructions/efforts/completion-gate.instructions.md still
+    read 0.1.0-dev22)."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    _git(["init", "-q", "-b", "main"], root)
+    (root / "tools").mkdir()
+    for name in _REQUIRED_TOOLS:
+        shutil.copy(_TOOLS / name, root / "tools" / name)
+
+    plugin = "demo-plugin-proj"
+    _write_projection_plugin(root, plugin, "0.1.0-dev1", "0.1.0-dev1")
+    _write_marketplace(root, {plugin: "0.1.0-dev1"})
+    _write_enabled_settings(root, plugin)
+    _copy_customizing_copilot_scripts(root)
+    (root / "README.md").write_text("hello\n", encoding="utf-8")
+    _commit(root, "initial")
+    _git(["branch", "dev"], root)
+
+    _git(["checkout", "-q", "dev"], root)
+    _write_changefile(root, "20260101-bump-abc123.json", plugin, "patch")
+    _commit(root, "add changefile")
+    _git(["checkout", "-q", "main"], root)
+
+    report = pr.promote(repo=root, dev_ref="dev", main_ref="main", push=False)
+
+    assert report["promoted"] is True
+    assert report["bumps"] == {plugin: ("0.1.0-dev1", "0.1.1-dev1")}
+    destination = f".github/instructions/{plugin}/demo-note.instructions.md"
+    assert destination in report["projections_synced"]
+
+    commit = report["commit"]
+    rendered = _git(["show", f"{commit}:{destination}"], root)
+    assert f"[owner: {plugin}@0.1.1-dev1]" in rendered
+    assert f"[owner: {plugin}@0.1.0-dev1]" not in rendered
+
+
+def test_promote_projection_sync_is_a_noop_without_customizing_copilot(repo: Path):
+    """The sweep is best-effort, never a hard dependency: a tree with no
+    plugins/customizing-copilot present at all (this shared fixture, and
+    every other test in this file) must promote exactly as before."""
+    _git(["checkout", "-q", "dev"], repo)
+    _write_changefile(repo, "20260101-test-abc123.json", "demo-plugin", "patch")
+    _commit(repo, "add changefile")
+    _git(["checkout", "-q", "main"], repo)
+
+    report = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
+
+    assert report["promoted"] is True
+    assert report["projections_synced"] == []

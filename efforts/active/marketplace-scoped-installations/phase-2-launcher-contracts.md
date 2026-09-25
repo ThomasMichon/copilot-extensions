@@ -16,17 +16,103 @@ global plugin wrappers do not count as retired while any real external caller
 still depends on them. The 86 findings are the guard-visible baseline, not proof
 that the guard currently sees every caller.
 
-## Baseline
+## Baseline (historical snapshot, superseded by the 2026-09-25 re-audit below)
 
 On 2026-08-26, `python tools/check-marketplace-isolation.py --json` reported 86
 `global-plugin-binstub` findings across 14 plugins.
 
 After [#1187](https://github.com/ThomasMichon/copilot-extensions/pull/1187),
-the guard-visible count is 80. The six payload-owned self-wrapper findings are
-complete; every durable boundary and the generic wrapper retirement remain
-open.
+the guard-visible count was 80 as of that PR. The six payload-owned
+self-wrapper findings were complete at that point; every durable boundary and
+the generic wrapper retirement were still open as of 2026-08-26 -- the
+2026-09-25 re-audit below found the durable provider manifests have since
+converted too, so this paragraph no longer describes current state.
 
-| Contract family | Findings | Phase | Reason |
+### 2026-09-25 re-audit
+
+`python tools/check-marketplace-isolation.py --json` now reports **83**
+`global-plugin-binstub` findings across 14 plugins — a different 14 than the
+baseline's, and the per-family table below no longer sums cleanly against a
+single fixed snapshot. A raw line-by-line re-read of all 83 current findings
+produced an accurate current *count* plus a **partial** triage — enough to
+confirm which families converted, which findings moved category, and which
+plugins are newly unaccounted for, but not a complete re-derivation of every
+finding's family (see the explicit gaps called out below and the "needs its
+own fresh family pass" note further down):
+
+- **Payload-owned self-wrappers and durable provider manifests are both
+  fully converted and no longer appear at all.** The `agent-ssh`
+  `emit-profile`/`verify` wrappers (Phase 2, done) and the
+  `agent-codespaces`/`agent-containers` `register-bridge-provider` durable
+  manifests (Phase 3, done — Phase 3 is fully checked off in the main
+  README) both dropped out of the guard-visible set entirely, not merely
+  shrunk.
+- **`harness-knowledge`'s 2 "operator/bootstrap/nudge" findings moved
+  category**, not disappeared: `assemble_plugins.py`'s
+  `shutil.which("agent-worktrees")` is now `path-sibling-launch` and
+  `bind_knowledge.py`'s `.agent-worktrees` path is now
+  `unqualified-runtime-root` (see the 2026-09-24 marketplace-scoped-
+  installations journal entry — these were sampled and left as genuine,
+  unconverted backlog needing a design pass, not annotated).
+- **`customizing-copilot`'s 1 descriptive finding is fixed** (the same
+  2026-09-24 journal entry annotated it as a documentation false positive).
+- **Two plugins are new since 2026-08-26** and were never part of the
+  original 14: `budget-guidance` (added 2026-09-05, 4 generic-installer
+  findings, unconverted) and `agent-pull-requests` (added 2026-09-22, 4
+  generic-installer findings, unconverted). Neither has been triaged beyond
+  confirming they're genuine, not annotated.
+- **`agent-machines` gained 2 new findings** (baseline was 6: 3 generic
+  installer + 2 operator/bootstrap + 1 descriptive "setup guidance", which is
+  the same `SKILL.md:54` finding present today, unchanged) tied to its
+  post-rewrite `cell_lifecycle.py` engine (the cross-platform lifecycle
+  engine that replaced the plugin's earlier
+  `rollback-pin.py`/`runtime-gate.{sh,ps1}` exemplar implementation): a
+  `payload-invocation.json` legacy-binstub-path declaration (line 20, mirrors
+  `agent-index/payload-invocation.json:22`'s equivalent declaration — both
+  look like intentional migration metadata analogous to `agent-bridge`'s
+  `legacyRuntimeRoot`, but neither has been confirmed against the install
+  contract or annotated) and `cell_lifecycle.py:294`'s
+  `item["identity"].startswith(".local/bin/agent-machines")` (runtime code
+  that recognizes the legacy binstub identity as part of its own migration
+  logic — plausibly intentional, not yet reviewed or annotated). A fresh
+  slice should resolve both rather than guessing their disposition here.
+- **`agent-bridge`, `agent-index`, and `agent-logger` each gained 1 finding**
+  and **`agent-mcp` lost 1** since the baseline;
+  these look like incidental drift from unrelated feature work in each
+  plugin rather than a pattern, but were not individually traced.
+
+**Current per-plugin `global-plugin-binstub` counts (2026-09-25, 83 total):**
+
+| Plugin | Findings | Delta vs. 2026-08-26 |
+|--------|---------:|-----------------------|
+| `agent-worktrees` | 18 | unchanged |
+| `agent-machines` | 8 | +2 (new, see above) |
+| `agent-vault` | 8 | unchanged |
+| `agent-codespaces` | 7 | -2 (durable provider manifests converted) |
+| `agent-index` | 6 | +1 (untraced) |
+| `agent-ssh` | 6 | -6 (baseline was 12: 6 self-wrapper + 4 generic + 2 remote-transport; the 6 self-wrapper findings converted, leaving 6) |
+| `agent-dispatch` | 5 | unchanged |
+| `agent-containers` | 4 | -2 (durable provider manifests converted) |
+| `agent-logger` | 4 | +1 (untraced) |
+| `agent-pull-requests` | 4 | new plugin, not in 2026-08-26 baseline |
+| `budget-guidance` | 4 | new plugin, not in 2026-08-26 baseline |
+| `agent-bridge` | 3 | +1 (untraced) |
+| `agent-mcp` | 3 | -1 (untraced) |
+| `copilot-extensions-harness` | 3 | unchanged |
+| `harness-knowledge` | 0 | -2 (moved to `path-sibling-launch`/`unqualified-runtime-root`) |
+| `customizing-copilot` | 0 | -1 (annotated as a documentation false positive) |
+
+This table is the current count per plugin; it is not yet split by contract
+family the way the 2026-08-26 table below is — that per-finding family
+re-derivation (which of the 83 belongs to which retirement-dependency
+bucket) is the fresh pass still needed.
+
+The table below is retained as the historical 2026-08-26 record (do not
+edit it to match the current count) — the accurate, current per-plugin
+breakdown is the table immediately above, and a family re-derivation for it
+is still a fresh pass needed.
+
+| Contract family (2026-08-26 snapshot) | Findings | Phase | Reason |
 |-----------------|---------:|-------|--------|
 | Payload-owned self-wrappers | 6 | Phase 2 | The checked-in `agent-ssh` `emit-profile` and `verify` wrappers start inside their own payload and can invoke that payload's generated command directly. |
 | Generic wrapper publication and plugin-specific PATH guidance | 36 | Phase 6 retirement | Installer declarations and compatibility guidance are the legacy generic plugin surface itself. They cannot disappear until cell-local runtimes and canonical launchers are healthy and ownership-checked. |
@@ -39,7 +125,7 @@ open.
 | Descriptive skills, help, and generated package metadata | 15 | Cleanup with the owning slice | These lines describe the legacy contract or duplicate package prose; they are not installed launchers. Correcting them prevents new consumers from depending on the old surface but does not by itself retire a wrapper. |
 | **Total** | **86** | | |
 
-## Detailed accounting
+## Detailed accounting (historical: 2026-08-26 snapshot, not current counts)
 
 ### Payload-owned self-wrappers - 6
 
