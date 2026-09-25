@@ -305,6 +305,14 @@ rebuildable-from-sidecars, never a second source of truth.
   `write_review_annotation(..., index=default_index())` so the catalog
   stays in sync as a side effect, and exits non-zero with a clear stderr
   message on a missing session or a write failure.
+- `agent-logger catalog query --repo R --pr-number N [--since ISO]
+  [--until ISO]` — the cross-repo process-boundary **read** path, the same
+  integration shape `annotate` establishes for writes (a caller such as
+  Intelligence Dampener's reviewer-link fallback chain shells out rather
+  than importing agent-logger as a library). Thin wrapper over
+  `cold_store.query_reviewer_sessions()`; always exits `0` and prints
+  `{"repo": ..., "pr_number": ..., "sessions": [{"session_id": ..., "kind":
+  "live"|"archive"}, ...]}` — an empty/unresolvable result is not an error.
 
 ## Configuration
 

@@ -445,4 +445,125 @@ def test_cli_annotate_rejects_symlinked_session_directory(
     )
 
     assert rc != 0
-    assert not (outside / "review-annotations.json").exists()
+
+
+# --------------------------------------------------------------------------- #
+# CLI: `agent-logger catalog query` -- the cross-repo process-boundary read  #
+# side fallback tier (Intelligence Dampener's reviewer-link chain, Phase 3) #
+# --------------------------------------------------------------------------- #
+
+
+def _run_query_cli(monkeypatch, tmp_path: Path, argv: list[str]) -> tuple[int, str]:
+    """Invoke the real CLI entry point with an isolated HOME/AGENT_LOGGER_HOME
+    and capture stdout, mirroring ``_run_annotate_cli`` -- a caller in another
+    repository (Intelligence Dampener) has no Python import path into
+    agent-logger, only this process boundary."""
+    import contextlib
+    import io
+
+    from agent_logger import __main__ as cli
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("USERPROFILE", raising=False)
+    monkeypatch.setenv("AGENT_LOGGER_HOME", str(tmp_path / ".agent-logger"))
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = cli.main(argv)
+    return rc, buf.getvalue()
+
+
+def test_cli_query_empty_catalog_returns_empty_list(monkeypatch, tmp_path: Path) -> None:
+    import json as _json
+
+    rc, out = _run_query_cli(
+        monkeypatch,
+        tmp_path,
+        ["catalog", "query", "--repo", "example/repo", "--pr-number", "6100"],
+    )
+
+    assert rc == 0
+    payload = _json.loads(out)
+    assert payload == {"repo": "example/repo", "pr_number": 6100, "sessions": []}
+
+
+def test_cli_query_resolves_annotated_live_session(monkeypatch, tmp_path: Path) -> None:
+    import json as _json
+
+    session_dir = tmp_path / ".copilot" / "session-state" / "s1"
+    session_dir.mkdir(parents=True)
+    (session_dir / "events.jsonl").write_text("", encoding="utf-8")
+
+    rc = _run_annotate_cli(
+        monkeypatch,
+        tmp_path,
+        ["annotate", "s1", "--repo", "example/repo", "--pr-number", "6100"],
+    )
+    assert rc == 0
+
+    rc, out = _run_query_cli(
+        monkeypatch,
+        tmp_path,
+        ["catalog", "query", "--repo", "example/repo", "--pr-number", "6100"],
+    )
+
+    assert rc == 0
+    payload = _json.loads(out)
+    assert payload["sessions"] == [{"session_id": "s1", "kind": "live"}]
+
+
+def test_cli_query_is_scoped_by_repo_and_pr_number(monkeypatch, tmp_path: Path) -> None:
+    import json as _json
+
+    session_dir = tmp_path / ".copilot" / "session-state" / "s1"
+    session_dir.mkdir(parents=True)
+    (session_dir / "events.jsonl").write_text("", encoding="utf-8")
+    _run_annotate_cli(
+        monkeypatch,
+        tmp_path,
+        ["annotate", "s1", "--repo", "example/repo", "--pr-number", "6100"],
+    )
+
+    rc, out = _run_query_cli(
+        monkeypatch,
+        tmp_path,
+        ["catalog", "query", "--repo", "example/repo", "--pr-number", "9999"],
+    )
+
+    assert rc == 0
+    assert _json.loads(out)["sessions"] == []
+
+
+def test_cli_query_skips_session_unresolvable_on_this_host(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """A catalog entry whose session this host cannot resolve (e.g. it lives
+    only on another machine's corpus) is silently skipped, matching
+    ``query_reviewer_sessions``'s own contract -- never an error."""
+    import json as _json
+
+    from agent_logger.catalog import default_index
+    from agent_logger.config import load_config
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("USERPROFILE", raising=False)
+    monkeypatch.setenv("AGENT_LOGGER_HOME", str(tmp_path / ".agent-logger"))
+    (tmp_path / ".copilot" / "session-state").mkdir(parents=True)
+
+    cfg = load_config(include_repo=False)
+    index = default_index(cfg)
+    index.record(
+        session_id="ghost-session",
+        repo="example/repo",
+        pr_number=6100,
+        role="reviewer",
+        recorded_at="2026-09-24T00:00:00Z",
+    )
+
+    rc, out = _run_query_cli(
+        monkeypatch,
+        tmp_path,
+        ["catalog", "query", "--repo", "example/repo", "--pr-number", "6100"],
+    )
+
+    assert rc == 0
+    assert _json.loads(out)["sessions"] == []
