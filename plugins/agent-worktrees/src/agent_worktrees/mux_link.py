@@ -83,20 +83,26 @@ _REQUIRED_STR_FIELDS = ("project", "worktree_id", "mux_session")
 
 
 class ManagedMuxCache:
-    """Thread-safe store of Manager-reported ``worktree_id`` ⇄ mux
-    session/pane mapping observations (the documented ``mux-live-v1``
+    """Thread-safe store of Manager-reported ``(project, worktree_id)`` ⇄
+    mux session/pane mapping observations (the documented ``mux-live-v1``
     payload shape), with a best-effort on-disk snapshot so a mapping
     survives one resident-monitor restart.
 
-    Keyed by ``worktree_id``. Each observation carries a ``mapping_revision``
-    (a non-negative integer the *reporting* Manager mux-companion daemon
-    owns and increments); an incoming observation whose revision is lower
-    than the currently stored one is rejected rather than applied, so a
-    stale/out-of-order ``live: false`` (or stale-pane) event can never
-    clobber a newer live mapping that already arrived out of send order over
-    a connectionless, potentially-concurrent transport. Revisions equal to
-    the stored one are accepted (idempotent replay -- e.g. a caller retrying
-    after a response it never saw).
+    Keyed by ``(project, worktree_id)`` -- ``worktree_id`` alone is not
+    guaranteed unique across two different projects (Copilot review
+    finding: keying on ``worktree_id`` alone let two projects' same-ID
+    worktrees overwrite each other's mapping, or wrongly reject a valid
+    lower revision as stale for an unrelated project, and could make
+    :meth:`live_session_names` silently lose a live session). Each
+    observation carries a ``mapping_revision`` (a non-negative integer the
+    *reporting* Manager mux-companion daemon owns and increments, scoped per
+    ``(project, worktree_id)``); an incoming observation whose revision is
+    lower than the currently stored one for that same key is rejected
+    rather than applied, so a stale/out-of-order ``live: false`` (or
+    stale-pane) event can never clobber a newer live mapping that already
+    arrived out of send order over a connectionless, potentially-concurrent
+    transport. Revisions equal to the stored one are accepted (idempotent
+    replay -- e.g. a caller retrying after a response it never saw).
 
     A live entry with no fresh observation for
     :data:`MAPPING_STALE_AFTER_SECONDS` is treated as stale/unconfirmed by
@@ -105,15 +111,20 @@ class ManagedMuxCache:
     (with its true ``live`` bit) for callers that want the raw record.
 
     When ``persist_path`` is given, every successful :meth:`apply_observation`
-    writes the full snapshot to that path (atomic replace, best-effort: a
+    writes the full snapshot -- a JSON **array** of already-self-describing
+    entries (never a JSON object keyed by a separately-trusted string,
+    which is exactly the shape that let an earlier revision of this cache
+    accept an entry under a JSON key that disagreed with its own
+    ``worktree_id`` field) -- to that path (atomic replace, best-effort: a
     write failure is swallowed rather than raised, matching the resident
     monitor's own tolerance for a non-fatal persistence hiccup), and the
-    constructor warm-loads any existing snapshot from it. This lets the
-    Step 1 seam's own contract-level requirement -- a mapping survives one
-    daemon restart -- hold even though ``InProcessRuntime`` itself is
-    otherwise stateless across restarts, matching
-    ``worktree_status_daemon.WorktreeStatusCache``'s own durable-across-
-    restart precedent.
+    constructor warm-loads any existing snapshot from it, re-deriving each
+    entry's storage key from its own validated ``project``/``worktree_id``
+    fields. This lets the Step 1 seam's own contract-level requirement -- a
+    mapping survives one daemon restart -- hold even though
+    ``InProcessRuntime`` itself is otherwise stateless across restarts,
+    matching ``worktree_status_daemon.WorktreeStatusCache``'s own
+    durable-across-restart precedent.
 
     :meth:`close` marks this cache permanently closed: every subsequent
     :meth:`apply_observation` call becomes a safe no-op instead of writing.
@@ -133,7 +144,7 @@ class ManagedMuxCache:
 
     def __init__(self, persist_path: Path | str | None = None) -> None:
         self._lock = threading.Lock()
-        self._entries: dict[str, dict] = {}
+        self._entries: dict[tuple[str, str], dict] = {}
         self._persist_path = Path(persist_path) if persist_path is not None else None
         self._closed = False
         self._warm_load()
@@ -146,24 +157,17 @@ class ManagedMuxCache:
             data = json.loads(raw)
         except (OSError, ValueError):
             return
-        if not isinstance(data, dict):
+        if not isinstance(data, list):
             return
-        for worktree_id, entry in data.items():
-            if not isinstance(worktree_id, str) or not isinstance(entry, dict):
+        for entry in data:
+            if not isinstance(entry, dict):
                 continue
             try:
                 normalized = _normalize_entry(entry, trust_received_at=True)
             except ValueError:
                 continue
-            # Reject a snapshot whose JSON key disagrees with its own
-            # `worktree_id` field (Copilot review finding): accepting it
-            # under the outer key would let a later legitimate update for
-            # the entry's *actual* `worktree_id` bypass this stale record's
-            # revision guard entirely, since `apply_observation` only ever
-            # looks up `self._entries[worktree_id]`.
-            if normalized["worktree_id"] != worktree_id:
-                continue
-            self._entries[worktree_id] = normalized
+            key = (normalized["project"], normalized["worktree_id"])
+            self._entries[key] = normalized
 
     def _persist_locked(self) -> None:
         """Best-effort atomic snapshot write. Caller already holds ``_lock``."""
@@ -176,7 +180,7 @@ class ManagedMuxCache:
             )
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                    json.dump(self._entries, fh, separators=(",", ":"))
+                    json.dump(list(self._entries.values()), fh, separators=(",", ":"))
                 os.replace(tmp_name, self._persist_path)
             finally:
                 with contextlib.suppress(OSError):
@@ -201,30 +205,31 @@ class ManagedMuxCache:
         its own request validation. Returns ``{"applied": True, "revision":
         <int>}`` on success, ``{"applied": False, "reason":
         "stale_revision", "current_revision": <int>}`` when a newer revision
-        is already on file, or ``{"applied": False, "reason": "closed"}``
-        when this cache has already been closed (see :meth:`close`).
+        is already on file **for the same ``(project, worktree_id)``**, or
+        ``{"applied": False, "reason": "closed"}`` when this cache has
+        already been closed (see :meth:`close`).
         """
         entry = _normalize_entry(payload)
-        worktree_id = entry["worktree_id"]
+        key = (entry["project"], entry["worktree_id"])
         revision = entry["mapping_revision"]
 
         with self._lock:
             if self._closed:
                 return {"applied": False, "reason": "closed"}
-            current = self._entries.get(worktree_id)
+            current = self._entries.get(key)
             if current is not None and revision < current["mapping_revision"]:
                 return {
                     "applied": False,
                     "reason": "stale_revision",
                     "current_revision": current["mapping_revision"],
                 }
-            self._entries[worktree_id] = entry
+            self._entries[key] = entry
             self._persist_locked()
         return {"applied": True, "revision": revision}
 
-    def get(self, worktree_id: str) -> dict | None:
+    def get(self, project: str, worktree_id: str) -> dict | None:
         with self._lock:
-            entry = self._entries.get(worktree_id)
+            entry = self._entries.get((project, worktree_id))
             return _deep_copy_entry(entry) if entry is not None else None
 
     def live_session_names(self) -> set[str]:
@@ -241,10 +246,11 @@ class ManagedMuxCache:
                 if e["live"] and now - e["received_at"] <= MAPPING_STALE_AFTER_SECONDS
             }
 
-    def snapshot(self) -> dict[str, dict]:
-        """A defensive (deep) copy of every entry, keyed by ``worktree_id``."""
+    def snapshot(self) -> dict[tuple[str, str], dict]:
+        """A defensive (deep) copy of every entry, keyed by
+        ``(project, worktree_id)``."""
         with self._lock:
-            return {wid: _deep_copy_entry(entry) for wid, entry in self._entries.items()}
+            return {key: _deep_copy_entry(entry) for key, entry in self._entries.items()}
 
     def has_any_live(self) -> bool:
         now = time.time()
