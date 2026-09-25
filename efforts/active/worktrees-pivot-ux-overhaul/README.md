@@ -307,15 +307,38 @@ parallelizable across worktrees.
       this phase, and no built-in pivot opts in without its own explicit
       review.
 
-### Phase 3 — Fix Recent-section sort order (most-recently-used, not newest first)
-- [ ] Identify the current sort key driving the Recent section (a
+### Phase 3 — Fix Recent-section sort order (most-recently-used, not newest first) (Done 2026-09-24)
+- [x] Identify the current sort key driving the Recent section (a
       status-transition/creation timestamp) vs. the correct key (last
       session activity / last resumed timestamp, sourced via the
-      accelerator).
-- [ ] Re-sort Recent by most-recently-used while keeping ACTIVE always
-      pinned first.
+      accelerator). **Done**: `derive.bucket()`'s own per-section sort keyed
+      `age_secs` (creation/status-transition age); but `WT_SORT_KEYS[0]`
+      ("age") ALSO applies unconditionally on every render via
+      `current_list_visible()`'s `list_view.narrow()`, so it — not
+      `bucket()`'s internal sort — is the section's real at-rest order (a
+      finding only surfaced by actually wiring the fix through and watching
+      the golden not change; both call sites needed the new key).
+- [x] Re-sort Recent by most-recently-used while keeping ACTIVE always
+      pinned first. **Done**: engine (`agent_worktrees/__main__.py`)
+      surfaces `WorktreeRecord.last_resumed_at` (already tracked, just not
+      serialized) in `list --json`'s per-worktree envelope; `derive.norm()`
+      passes it through; new `derive._last_active_secs()` prefers it,
+      falling back to the record's own `age_secs` for a worktree never
+      resumed since creation (NOT a raw `started_at` re-read — normalized
+      records never carry that key, only the derived `age`/`age_secs`
+      pair, a real bug caught by a diagnostic script before it reached a
+      test). Wired into both `bucket()`'s own Recent sort AND
+      `WT_SORT_KEYS[0]`. ACTIVE/Completed still sort by `age_secs`
+      (unchanged, per their own docstring). Golden
+      `scenario_long_running.txt` regenerated: the long-haul,
+      recently-resumed worktree now sorts above the merely-newer-but-
+      untouched one, confirmed by diff (2 lines changed, only the two
+      title/detail rows swapping order).
 - [ ] Cross-link dotfiles#1016 (indented sub-row nesting for paired
-      worktrees) if the same section-ordering code path is touched.
+      worktrees) if the same section-ordering code path is touched. **Not
+      done this slice** — the sort-key change didn't touch row-nesting
+      rendering, so left uncrossed; revisit if a later phase touches that
+      path.
 
 ### Phase 4 — CLAIMS column: adopt the shared pecking-order module
 - [ ] Wire the Worktrees pivot's PRs/claims section through
@@ -568,4 +591,41 @@ reviewed-plan PR per the standard effort review gate before Phase 1 begins._
   screenshots.
 - **Next up: Phase 3** — fix the Recent-section sort order
   (most-recently-used, not newest-first). Not yet started.
+
+### 2026-09-24 — Phase 3 complete: Recent sorts by last real resume, not creation age
+- Root-caused the actual at-rest sort mechanism: `bucket()`'s own per-section
+  sort is immediately overridden on every render by `current_list_visible()`
+  applying `WT_SORT_KEYS[0]` ("age") — both needed the new key, not just one.
+  Caught two real bugs by running a diagnostic script against the real fixture
+  data before trusting the golden: (1) the first cut of the fallback read a
+  bare `started_at` key off the NORMALIZED record, which `norm()` never emits
+  (only derived `age`/`age_secs`) — every never-resumed worktree silently hit
+  the sentinel instead of a real fallback; (2) only fixing `bucket()` left the
+  golden unchanged because `WT_SORT_KEYS` still won.
+- Shipped: `agent_worktrees/__main__.py` surfaces the already-tracked
+  `WorktreeRecord.last_resumed_at` in `list --json`'s per-worktree envelope
+  (previously computed but never serialized); `derive.py` adds
+  `_last_active_secs()` (prefers `last_resumed_at`, falls back to the
+  record's own `age_secs`), wired into both `bucket()`'s Recent sort and
+  `WT_SORT_KEYS[0]`. ACTIVE/Completed sections are unchanged (still
+  `age_secs`, per their own semantics).
+- New unit tests: `test_bucket_recent_sorts_by_last_resumed_not_creation_age`,
+  `test_bucket_recent_falls_back_to_started_at_when_never_resumed` (picker),
+  `test_worktree_to_dict_emits_last_resumed_at_when_set` /
+  `..._omits_..._when_never_resumed` (engine serialization). Regenerated
+  `scenario_long_running.txt` — diff is exactly the 2 lines documenting the
+  row-order flip; every other golden byte-identical.
+- Rebased twice mid-slice (repo landed 25 commits upstream while this ran);
+  re-verified 4 sampled pre-existing failures (`test_doctor`,
+  `test_git_ops::TestPinGitCredential`, `test_terminal_refresh`,
+  `test_update_stage`) reproduce identically on a clean, fully-rebased tree
+  with this slice's changes stashed out — confirmed environment/timing
+  artifacts (stale git-credential-helper state, a machine-local "update
+  paused" marker, a live-network-fetch race), not caused by this change.
+  Full suites: worktree-manager 1190 passed/1 skipped; agent-worktrees 5435
+  passed/42 skipped/9 failed (all 9 pre-existing per the above).
+- **Next up: Phase 4** — CLAIMS column: adopt the shared
+  `claims_rank`/`claims_cli` pecking-order module already shipped for the
+  Codespaces/Containers pivots. Not yet started.
+
 
