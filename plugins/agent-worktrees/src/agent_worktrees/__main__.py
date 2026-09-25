@@ -7308,7 +7308,6 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'pr-ready': ('pr_state_cli', 'cmd_pr_ready'),
     'pr-status': ('pr_state_cli', 'cmd_pr_status'),
     'pre-launch': ('update_cli', 'cmd_pre_launch'),
-    'profiles': ('picker_profiles_cli', 'cmd_profiles'),
     'push-changes': ('finalize_cli', 'cmd_push_changes'),
     'reap-sessions': ('reap_cli', 'cmd_reap_sessions'),
     'reap-shells': ('reap_cli', 'cmd_reap_shells'),
@@ -7341,7 +7340,6 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'status-segment': ('status_bar_cli', 'cmd_status_segment'),
     'status-updater': ('status_updater_cli', 'cmd_status_updater'),
     'sync': ('worktree_ops_cli', 'cmd_sync'),
-    'terminal-fragment': ('picker_profiles_cli', 'cmd_terminal_fragment'),
     'uninstall': ('installation_cli', 'cmd_uninstall'),
     'uninstall-plugins': ('update_cli', 'cmd_uninstall_plugins'),
     'update': ('update_cli', 'cmd_update'),
@@ -7497,22 +7495,22 @@ def _load_full_command_surface() -> None:
     global _find_tracking_file_by_session, _find_tracking_file_exact, _follow_up_to_json, _follow_ups_add, _follow_ups_dismiss, _follow_ups_record_path, _follow_ups_resolve, _follow_ups_show
     global _gh_env_for_repo, _git_positional, _git_resolve_target, _git_usage, _heal_stale_anchor_if_self_missing, _in_ssh_session, _dispatch_assigned_tasks, _infer_active_github_slug
     global _infer_active_repo_slug, _invocation_update_context, _is_copilot_plugin_name, _journal_run_claim, _launch_profile_selection, _list_error, _list_records_for_args, _load_all_machine_keys
-    global _load_remote_machines, _machine_key_for_display, _mirror_terminal_profiles, _module_names, _monitor_claim_handoff_cutover, _monitor_handoff_claim_created_at, _monitor_handoff_claim_path, _monitor_handoff_claim_root
+    global _load_remote_machines, _machine_key_for_display, _module_names, _monitor_claim_handoff_cutover, _monitor_handoff_claim_created_at, _monitor_handoff_claim_path, _monitor_handoff_claim_root
     global _monitor_handoff_claim_segment, _monitor_handoff_claim_staleness, _monitor_list_sessions, _monitor_lock_path, _monitor_mux_set, _monitor_pending_handoff_request, _monitor_read_session_state_handoff, _monitor_registry_dir
     global _monitor_reclaim_stale_handoff_cutover_claim
     global _monitor_session_state_handoff_path, _new_picker_blocked_by_ssh, _parse_follow_up_refs, _pending_handoff_predecessor_safe, _perform_remux, _picker_profile_choice, _platform_short, _plugin_managed_notice
     global _post_exit_gate, _pr_flow_profile, _pr_merge_now, _pr_merge_print_human, _pr_merge_usage, _pr_parse_repo, _pr_reminder_for, _pr_usage
-    global _pr_watch_review_blocking, _pr_watch_usage, _prepare_namespaced_project_state, _print_gc_managed, _print_gc_orphans, _print_gc_shells, _proc_boot_time, _profiles_host
+    global _pr_watch_review_blocking, _pr_watch_usage, _prepare_namespaced_project_state, _print_gc_managed, _print_gc_orphans, _print_gc_shells, _proc_boot_time
     global _project_for_tracking_file, _project_update_context, _prune_stale_pivots_after_update, _read_monitor_registry, _reconcile_one_runtime, _reconcile_registered_runtimes, _reflect_assignment, _refresh_list_record, _refresh_marketplace
-    global _refresh_terminal_profiles, _register_session_for_monitor, _registered_plugin_targets, _related_anchor, _related_conduct, _related_config_source_anchors, _related_current_machine, _related_doctor
+    global _register_session_for_monitor, _registered_plugin_targets, _related_anchor, _related_conduct, _related_config_source_anchors, _related_current_machine, _related_doctor
     global _related_lookup_anchors, _related_opt, _related_usage, _relocate_active_project_for_worktree, _remove_managed_file, _remove_managed_instruction, _remove_managed_worktree, _remove_monitor_entry
     global _render_doctor_report, _render_dropin_registry_report, _render_related_findings, _render_status_context, _render_status_segment, _repo_for_record, _require_coordination_readiness, _resolve_anchor_owner_ref
     global _resolve_base_repo, _resolve_codename_anywhere, _resolve_environment, _resolve_lease_origin, _resolve_machine_alias, _resolve_mux_worktree_id, _resolve_new, _resolve_owner_ref
-    global _resolve_owner_ref_record_path, _resolve_profile, _resolve_remote_default_branch, _resolve_repo_remote, _resolve_resume, _resolve_ssh_alias, _resolve_terminal_install_script, _resolve_worktree_for_read
+    global _resolve_owner_ref_record_path, _resolve_profile, _resolve_remote_default_branch, _resolve_repo_remote, _resolve_resume, _resolve_ssh_alias, _resolve_worktree_for_read
     global _restart_status_monitor, _restore_before_resume, _revalidate_cleanup_safety, _run_backfill, _run_machine_menu, _run_new_picker, _run_picker_housekeeping, _run_reciprocal_backfill
     global _run_system_menu, _runtime_superseded, _self_entry_present, _session_role, _slot_superseded, _slugify, _spawn_detached, _spawn_status_updater
     global _start_picker_monitor_root, _status_monitor_enabled, _status_segment_json, _succession_header, _sweep_orphans_on_exit, _sync_one_record, _system_cleanup, _system_pause
-    global _system_status, _system_update, _system_worktrees_browse, _terminal_fragment_doctor, _tracked_pr_head_evidence, _try_machine_handoff, _uninstall_one_plugin_payload, _update_flags
+    global _system_status, _system_update, _system_worktrees_browse, _tracked_pr_head_evidence, _try_machine_handoff, _uninstall_one_plugin_payload, _update_flags
     global _update_modules, _update_one_plugin_payload, _update_registered_plugins, _valid_monitor_session, _validate_machine_registry, _validate_profile_assignment_config, _warm_list_cache_for_active_project, _windowless_python
     global auto_clean_enabled, claims_cli, cleanup_gc_cli, cmd_accounts_dispatch, cmd_anchor_check, cmd_attribution_audit, cmd_backfill_sessions, cmd_bind_nudge
     global cmd_bind_session, cmd_claimant_liveness, cmd_claims, cmd_cleanup, cmd_codename_lookup, cmd_conclude_disposable, cmd_conclude_session, cmd_config_migrate
@@ -7521,13 +7519,13 @@ def _load_full_command_surface() -> None:
     global cmd_git_merge_to_feature, cmd_git_sync, cmd_handoff_cutover, cmd_handoff_trace, cmd_handoffs_check, cmd_head_session, cmd_history_digest, cmd_hygiene
     global cmd_install, cmd_install_status, cmd_installer_readiness, cmd_knowledge_dispatch, cmd_link_succession, cmd_list, cmd_list_sessions, cmd_machine_context
     global cmd_mark_complete, cmd_note_handoff, cmd_picker, cmd_post_exit, cmd_pr_complete, cmd_pr_dispatch, cmd_pr_merge_dispatch, cmd_pr_ready
-    global cmd_pr_research_dispatch, cmd_pr_status, cmd_pr_watch_dispatch, cmd_pre_launch, cmd_profiles, cmd_push_changes, cmd_reap_sessions, cmd_reap_shells
+    global cmd_pr_research_dispatch, cmd_pr_status, cmd_pr_watch_dispatch, cmd_pre_launch, cmd_push_changes, cmd_reap_sessions, cmd_reap_shells
     global cmd_recent_messages, cmd_reclaim, cmd_reconcile_binstubs, cmd_reconcile_marketplaces, cmd_reconcile_plugins, cmd_reconcile_sessions, cmd_register, cmd_register_project_entry
     global cmd_register_session, cmd_related_dispatch, cmd_remove_system, cmd_remux, cmd_repair, cmd_repos_dispatch, cmd_restart, cmd_run
     global cmd_services_dispatch, cmd_session_binding, cmd_session_lifecycle, cmd_session_lineage, cmd_session_lock, cmd_session_recovery, cmd_session_role
     global cmd_session_tail
     global cmd_session_transcript, cmd_set_pr, cmd_state_root_dispatch, cmd_status, cmd_status_context, cmd_status_monitor, cmd_status_monitor_restart, cmd_status_segment
-    global cmd_status_updater, cmd_sync, cmd_terminal_fragment, cmd_uninstall, cmd_uninstall_plugins, cmd_update, cmd_validate, cmd_worktree_dispatch
+    global cmd_status_updater, cmd_sync, cmd_uninstall, cmd_uninstall_plugins, cmd_update, cmd_validate, cmd_worktree_dispatch
     global cmd_worktree_lineage, cmd_worktree_status_bundle, context_cli, copilot_identity_cli, finalize_cli, finalize_one, follow_ups_cli, front_door_cli, git_cli
     global handoff_cli, handoff_diagnostics, installation_cli, list_cli, maintenance_cli, picker_profiles_cli, plan_pre_launch, pr_cli
     global pr_state_cli, reap_cli, reap_orphan_launcher_shells, reclaim_cli, reclaim_one, related_cli, repos_cli, resolve_cli
@@ -7844,15 +7842,8 @@ def _load_full_command_surface() -> None:
     _print_gc_managed = cleanup_gc_cli._print_gc_managed
     _print_gc_shells = cleanup_gc_cli._print_gc_shells
     cmd_gc = cleanup_gc_cli.cmd_gc
-    _profiles_host = picker_profiles_cli._profiles_host
-    cmd_profiles = picker_profiles_cli.cmd_profiles
-    _mirror_terminal_profiles = picker_profiles_cli._mirror_terminal_profiles
-    cmd_terminal_fragment = picker_profiles_cli.cmd_terminal_fragment
-    _terminal_fragment_doctor = picker_profiles_cli._terminal_fragment_doctor
     cmd_picker = picker_profiles_cli.cmd_picker
     cmd_validate = picker_profiles_cli.cmd_validate
-    _resolve_terminal_install_script = picker_profiles_cli._resolve_terminal_install_script
-    _refresh_terminal_profiles = picker_profiles_cli._refresh_terminal_profiles
     cmd_repair = picker_profiles_cli.cmd_repair
     cmd_hygiene = maintenance_cli.cmd_hygiene
     cmd_dev = maintenance_cli.cmd_dev
@@ -7966,8 +7957,6 @@ def _load_full_command_surface() -> None:
         "remux": cmd_remux,
         "restart": cmd_restart,
         "sync": cmd_sync,
-        "profiles": cmd_profiles,
-        "terminal-fragment": cmd_terminal_fragment,
         "repair": cmd_repair,
         "picker": cmd_picker,
         "validate": cmd_validate,

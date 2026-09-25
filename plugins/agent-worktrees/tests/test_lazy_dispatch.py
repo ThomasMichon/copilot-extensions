@@ -229,7 +229,6 @@ def _deferred_only_global_names() -> frozenset[str]:
         ("claims", ["claims", "--json"]),
         ("status-context", ["status-context"]),
         ("status-segment", ["status-segment", "--json"]),
-        ("profiles", ["profiles", "get", "--json"]),
         ("follow-ups", ["follow-ups", "--json"]),
         ("session-role", ["session-role", "--json"]),
         ("history-digest", ["history-digest"]),

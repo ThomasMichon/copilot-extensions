@@ -8,7 +8,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from . import git_ops, installer as inst, output
+from . import git_ops, installer as inst, output, picker_profiles_cli
 from . import config as cfg
 from . import picker_profiles_cli, repos_cli, status_bar_cli
 
@@ -768,7 +768,7 @@ def cmd_register(args: argparse.Namespace) -> int:
 
     # Refresh Windows Terminal profiles if installed via install.ps1
     if plat == "windows":
-        _core_helper("_refresh_terminal_profiles", _refresh_terminal_profiles)()
+        picker_profiles_cli._refresh_terminal_profiles()
 
     output.ok(f"Project '{project}' registered")
     print(f"  Config:  {config_path}")
@@ -821,5 +821,4 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
 
     output.ok("Uninstall complete")
     return 0
-
 
