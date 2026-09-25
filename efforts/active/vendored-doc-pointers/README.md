@@ -81,7 +81,8 @@ findings together.
 - The concrete pain that motivated this effort:
   `docs/patterns/entity-relationship-model.md` and its three mirrors
   (`plugins/agent-worktrees/docs/`, `plugins/agent-bridge/docs/`,
-  `plugins/agent-dispatch/docs/`), landed via PR #3554.
+  `plugins/agent-dispatch/docs/`), introduced by PR #3554 (still open as of
+  this writing).
 - The hook-bypass bug: `plugins/agent-worktrees/src/agent_worktrees/git_ops.py`
   `push()` — `no_hooks=True` unconditionally, on every push including the
   terminal publish push. See issue #3561 for the full reproduction (a raw
@@ -111,31 +112,64 @@ Per operator direction (session that authored PR #3554):
 ## Plan
 
 ### Phase 1 — Design the generalized pointer mechanism
-- [ ] Read `tools/materialize_main.py`, `tools/sync-vendored-libs.py`, and the
+- [x] Read `tools/materialize_main.py`, `tools/sync-vendored-libs.py`, and the
       `VENDOR_POINTER.json` schema in full; confirm exactly what would need to
       generalize (currently hardcoded to `libs/<lib>/src` + a version-line
       rewrite in `pyproject.toml` — neither applies to a plain doc file).
-- [ ] Decide the pointer shape for a non-lib file: reuse
+      **Confirmed:** neither script's directory-pointer logic (copytree +
+      version-line rewrite) applies to a single file; the new file-pointer
+      kind needed its own find/expand functions rather than reusing the lib
+      case's internals.
+- [x] Decide the pointer shape for a non-lib file: reuse
       `VENDOR_POINTER.json` with a generalized `source`/`kind` field, or a
       distinct format. Justify the choice against issue #3565's stated
-      preference for an in-language marker.
-- [ ] Prototype the in-language marker for Markdown specifically (e.g. an
+      preference for an in-language marker. **Decided:** a distinct format --
+      a single-line HTML-comment marker
+      (`<!-- VENDOR_POINTER: source=<repo-relative-path> kind=file -->`) as
+      the file's own first line, not a JSON sidecar. A directory/lib pointer
+      can be an empty stub next to a real sibling file (`pyproject.toml`), but
+      a single vendored file has no sibling to carry a sidecar without a
+      second file appearing in the mirror location -- and issue #3565 asked
+      specifically for content an agent can read directly, in the file's own
+      language, without first discovering `VENDOR_POINTER.json`'s schema.
+      See `tools/materialize_main.py`'s module docstring for the full
+      rationale and both pointer kinds side by side.
+- [x] Prototype the in-language marker for Markdown specifically (e.g. an
       HTML comment header) and confirm it round-trips: a human/agent reading
       the `dev`-branch file understands it's a mirror without external docs,
-      and the promotion tooling can still parse it mechanically.
-- [ ] Extend `tools/materialize_main.py` (and its test suite) to expand the
+      and the promotion tooling can still parse it mechanically. **Done:**
+      `materialize_main._file_pointer_source()` matches the marker line
+      exactly (`kind=file`, `source=` required) via `_FILE_POINTER_RE`; an
+      HTML comment is invisible when the Markdown renders but plainly visible
+      in source, and materializing overwrites the stub's own content with the
+      canonical file's bytes in place (no separate pointer file to delete,
+      unlike the lib case).
+- [x] Extend `tools/materialize_main.py` (and its test suite) to expand the
       new pointer kind, with the same non-regression guarantees the lib case
       has (never silently wipes canonical, refuses to materialize from a
-      stale/missing source).
+      stale/missing source). **Done:** `find_file_pointers()` +
+      `materialize_file_pointers()`, wired into `materialize()`/`build()`;
+      6 new tests (byte-identical round-trip, missing-canonical SKIP leaves
+      the stub untouched, multiple mirrors of the same doc, non-pointer files
+      ignored, full `build()` end-to-end). Also extended
+      `tools/preview_release.py`'s per-plugin materializer
+      (`_materialize_file_pointers_into_preview`) to expand file pointers
+      into a single-plugin preview copy, matching a gap the Copilot reviewer
+      caught on PR #3566 (the per-plugin preview tool only expanded lib
+      pointers, so Phase 2's own preview-validation step could not have
+      passed without this).
 
 ### Phase 2 — Convert the entity-relationship-model.md mirrors
 - [ ] Convert `plugins/agent-worktrees/docs/entity-relationship-model.md`,
       `plugins/agent-bridge/docs/entity-relationship-model.md`, and
-      `plugins/agent-dispatch/docs/entity-relationship-model.md` (landed via
-      PR #3554) from full hand-copies to real pointers referencing
-      `docs/patterns/entity-relationship-model.md`.
+      `plugins/agent-dispatch/docs/entity-relationship-model.md` (proposed by
+      PR #3554, still open) from full hand-copies to real pointers
+      referencing `docs/patterns/entity-relationship-model.md`.
 - [ ] Confirm `tools/preview_release.py`/`tools/materialize_main.py` produce
-      byte-identical output to the current hand-copies for all three.
+      byte-identical output to the current hand-copies for all three (Phase 1
+      already extends `preview_release.py`'s per-plugin materializer to
+      expand the generalized file-pointer kind, not just the lib kind, so
+      this validation can run per-plugin as documented).
 - [ ] Update `docs/patterns/entity-relationship-model.md`'s own "See Also"
       section (currently plain-text repo references because the mirrors
       couldn't resolve a relative link) once the mirrors are pointers instead
@@ -176,8 +210,29 @@ Per operator direction (session that authored PR #3554):
 
 ## Proposal
 
-_Pending — Phase 1 design work will produce the concrete pointer format and
-in-language marker convention here or in a linked sub-doc._
+**File-pointer format (decided in Phase 1):** a vendored file's first line is
+an HTML comment marker:
+
+```
+<!-- VENDOR_POINTER: source=<repo-relative-path> kind=file -->
+```
+
+This is distinct from the directory/lib pointer's `VENDOR_POINTER.json`
+sidecar -- a single vendored file has no sibling location to carry a JSON
+sidecar without introducing a second file at the mirror's path, and the
+kickoff request specifically asked for a marker readable in the file's own
+language, without needing to discover the JSON schema first. On `dev` the
+mirror file's content is a short stub (the marker line plus a one-paragraph
+human/agent-readable explanation); at promotion time
+`tools/materialize_main.py`'s `materialize_file_pointers()` overwrites that
+stub's content in place with the canonical file's bytes (no separate pointer
+file to delete, unlike the lib case, since the pointer *is* the mirrored
+file). `tools/preview_release.py`'s per-plugin preview materializer expands
+the same pointer kind, scoped to the one plugin being previewed.
+
+See `tools/materialize_main.py`'s module docstring for the full two-kind
+comparison and `tools/test_materialize_main.py` /
+`tools/test_preview_release.py` for the round-trip test coverage.
 
 ## Journal
 
@@ -191,3 +246,31 @@ in-language marker convention here or in a linked sub-doc._
   this kind of drift. Filed the umbrella issue (#3565) and cross-referenced
   the pre-existing hook-bypass issue (#3561). Handed off immediately after
   kickoff per operator direction — no phase work started yet.
+
+### 2026-09-24/25 — Phase 1 landed
+- Designed and built the generalized file-pointer mechanism: an in-language
+  HTML-comment marker (see Proposal above), `materialize_main.py`'s
+  `find_file_pointers()`/`materialize_file_pointers()`, and
+  `preview_release.py`'s per-plugin equivalent. 6 new tests in each of
+  `test_materialize_main.py` and `test_preview_release.py`, all passing;
+  `ruff check` clean; `check-docs-consistency.py` and
+  `check-changefile-presence.py` both pass (no changefile needed -- these are
+  repo-root `tools/` changes, not a plugin payload). Landed as its own PR per
+  this effort's own per-phase-PR coordination rule, in a fresh worktree (not
+  PR #3554's or #3566's) since neither of those branches was the right home
+  for Phase 1 code.
+- Two review rounds on PR #3554 and #3566 (the two prior open PRs, watched
+  through to keep them from going stale) caught: a false-positive "ten
+  durable" claim on #3554 (checked -- both the PR description and the doc
+  already correctly said "nine durable, one transient"; replied and requested
+  a fresh review rather than editing already-correct content); an
+  unresolvable Vision reference on #3566 (the cited `visions/plugin-services`
+  section doesn't exist on `dev` yet -- it's proposed by the still-open
+  PR #3554 -- made the dependency explicit); and an inaccurate "landed via
+  PR #3554" claim (that PR is still open) fixed to "introduced by"/"proposed
+  by" in two places. A third, structurally important finding on #3566 (this
+  effort's own Validation Plan calls for a per-plugin `preview_release.py`
+  run to show no diff, but that tool's materializer only expanded lib
+  pointers) became the extra `preview_release.py` extension folded into this
+  same Phase 1 PR rather than deferred to Phase 2, since Phase 2's validation
+  step cannot pass without it.
