@@ -152,6 +152,19 @@ class CoalescingServer:
         self._linger_timer: threading.Timer | None = None
         self._closed = False
         self._started = False
+        # Serializes the whole start()/close() state transition (Copilot
+        # review finding): without this, close() could run concurrently
+        # between a successful `Thread.start()` and its own following flag
+        # assignment (e.g. `self._serve_thread.start()` succeeds, then
+        # close() runs entirely -- sees `_serve_started` still False, skips
+        # shutdown/join, closes the socket -- before start() resumes and
+        # sets `_serve_started = True`, launches the reaper, and marks
+        # `_started = True`), leaving a closed server with inconsistent
+        # lifecycle flags despite this class's own docstrings describing
+        # that race as handled. Holding this lock for each method's entire
+        # body makes close() observe either the fully-pre-start or the
+        # fully-post-start state, never a state in between.
+        self._lifecycle_lock = threading.Lock()
         # Independently tracked per-thread start success (Copilot review
         # finding): the previous single `_started` flag flipped True
         # *before* either thread's own `.start()` call, so a `.start()`
@@ -211,14 +224,26 @@ class CoalescingServer:
         indefinitely. ``start()`` therefore calls :meth:`close` itself
         before re-raising, so every caller gets an all-or-nothing outcome
         without needing to remember to clean up a partial failure.
+
+        Serialized against :meth:`close` via ``_lifecycle_lock`` (see that
+        attribute's own docstring) -- a concurrent ``close()`` can only ever
+        observe this method's fully-pre-start or fully-post-start state,
+        never a partial one.
         """
         try:
-            self._serve_thread.start()
-            self._serve_started = True
-            self._reap_thread.start()
-            self._reap_started = True
-            self._started = True
+            with self._lifecycle_lock:
+                if self._closed:
+                    raise RuntimeError("cannot start an already-closed CoalescingServer")
+                self._serve_thread.start()
+                self._serve_started = True
+                self._reap_thread.start()
+                self._reap_started = True
+                self._started = True
         except BaseException:
+            # `with` has already released `_lifecycle_lock` by the time
+            # this runs (context-manager exit happens before the enclosing
+            # `except` body), so calling `close()` here -- which itself
+            # acquires that same lock -- cannot deadlock.
             self.close()
             raise
 
@@ -232,40 +257,47 @@ class CoalescingServer:
         }
 
     def close(self) -> None:
-        self._closed = True
-        self._reap_stop.set()
-        with self._lock:
-            self._cancel_linger_locked()
-        # ``shutdown()`` blocks waiting for ``serve_forever()`` to notice --
-        # forever, if that loop was never started (e.g. a unit test that
-        # exercises ``handle_request``/refcounting directly, never calling
-        # ``start()``, or a real ``start()`` whose serve-thread launch
-        # itself failed -- see `_serve_started`'s own docstring above).
-        # `_serve_started` alone only proves `Thread.start()` succeeded
-        # (the OS thread object exists), not that `serve_forever()` has
-        # actually begun executing (Copilot review finding) -- wait
-        # (bounded) for `_serve_running` before ever calling `shutdown()`,
-        # so a `close()` racing an in-flight `start()` never blocks on a
-        # loop that has not truly started yet. If the loop still hasn't
-        # confirmed running within that bound (a thread genuinely never
-        # got scheduled -- pathological, but not this method's job to wait
-        # out indefinitely), skip `shutdown()`: `server_close()` alone
-        # still releases the bound socket, and the thread stays daemon-only
-        # (never blocks process exit) if it does eventually run.
-        if self._serve_started and self._serve_running.wait(timeout=_CLOSE_SERVE_WAIT_S):
-            self._server.shutdown()
-            # `shutdown()` only guarantees `serve_forever()`'s own while
-            # loop noticed the request and its `finally` block ran -- join
-            # the thread here too (bounded) so `server_close()` below never
-            # races an iteration still mid-flight inside the selector
-            # (observed as a benign but noisy "operation on something that
-            # is not a socket" `OSError` on a short poll_interval).
-            self._serve_thread.join(timeout=2)
-        self._server.server_close()
-        if self._serve_started:
-            self._serve_thread.join(timeout=2)
-        if self._reap_started:
-            self._reap_thread.join(timeout=2)
+        """Serialized against :meth:`start` via ``_lifecycle_lock`` (see
+        that attribute's own docstring) -- this method's entire body runs
+        atomically with respect to a concurrent ``start()``, so it can
+        only ever observe the fully-pre-start or fully-post-start state.
+        """
+        with self._lifecycle_lock:
+            self._closed = True
+            self._reap_stop.set()
+            with self._lock:
+                self._cancel_linger_locked()
+            # ``shutdown()`` blocks waiting for ``serve_forever()`` to notice --
+            # forever, if that loop was never started (e.g. a unit test that
+            # exercises ``handle_request``/refcounting directly, never calling
+            # ``start()``, or a real ``start()`` whose serve-thread launch
+            # itself failed -- see `_serve_started`'s own docstring above).
+            # `_serve_started` alone only proves `Thread.start()` succeeded
+            # (the OS thread object exists), not that `serve_forever()` has
+            # actually begun executing (Copilot review finding) -- wait
+            # (bounded) for `_serve_running` before ever calling `shutdown()`,
+            # so a `close()` racing an in-flight `start()` never blocks on a
+            # loop that has not truly started yet. If the loop still hasn't
+            # confirmed running within that bound (a thread genuinely never
+            # got scheduled -- pathological, but not this method's job to wait
+            # out indefinitely), skip `shutdown()`: `server_close()` alone
+            # still releases the bound socket, and the thread stays daemon-only
+            # (never blocks process exit) if it does eventually run.
+            if self._serve_started and self._serve_running.wait(timeout=_CLOSE_SERVE_WAIT_S):
+                self._server.shutdown()
+                # `shutdown()` only guarantees `serve_forever()`'s own while
+                # loop noticed the request and its `finally` block ran --
+                # join the thread here too (bounded) so `server_close()`
+                # below never races an iteration still mid-flight inside
+                # the selector (observed as a benign but noisy "operation
+                # on something that is not a socket" `OSError` on a short
+                # poll_interval).
+                self._serve_thread.join(timeout=2)
+            self._server.server_close()
+            if self._serve_started:
+                self._serve_thread.join(timeout=2)
+            if self._reap_started:
+                self._reap_thread.join(timeout=2)
 
     # -- subscriber ref-counting ------------------------------------------
 

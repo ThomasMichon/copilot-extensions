@@ -4972,11 +4972,19 @@ def _monitor_sweep(
     ``managed_mux_cache`` (a ``mux_link.ManagedMuxCache``, Phase 3b Slice 2
     Sub-slice 3 Step 1) is optional and, for this step, purely additive: its
     currently-live session names are merged into ``catalog_observer``
-    alongside the direct mux scan's own set (or reported alone, including
-    an empty removal, when no mux binary exists -- see the ``elif`` branch
-    below) -- but it never adds an entry to ``served`` and never changes
-    which sessions this sweep writes ``set-option`` for. That
-    writer-ownership cutover is a later, separate step.
+    alongside the direct mux scan's own **complete** set -- but it never
+    adds an entry to ``served`` and never changes which sessions this
+    sweep writes ``set-option`` for. That writer-ownership cutover is a
+    later, separate step. This merge only happens inside the direct
+    ``mux_bin`` scan (Copilot review finding, reverting an earlier attempt
+    to also observe it standalone): ``catalog_observer``
+    (``ResidentSessionReconciler.observe_mux``) is a *complete-snapshot*
+    API -- any session name missing from the passed set is treated as
+    genuinely gone and reaped. Calling it with only the Manager-known
+    subset when no mux binary is locally discoverable would incorrectly
+    mark every *other*, ordinary session as dead too. A managed-only
+    partial view must never reach this API; a real completeness/managed-
+    scope path is a separate, later concern.
     """
     # Stage D: resolve deferred names via _self_override (cluster-free owners).
     from . import list_cli as _list_cli
@@ -5029,16 +5037,6 @@ def _monitor_sweep(
                             published.pop(key, None)
                 incarnations[sess] = incarnation
         served = [(s, p) for s, p in registry.items() if s in live_wt and p]
-    elif (
-        catalog_observer is not None
-        and managed_mux_cache is not None
-        and managed_mux_cache.has_any_entries()
-    ):
-        # No mux binary here, but the Manager cache once recorded
-        # something -- propagate even an empty managed_live so a
-        # tombstone/removal isn't silently withheld (Copilot review
-        # finding; see ManagedMuxCache.has_any_entries's own docstring).
-        catalog_observer(managed_live)
     if session_projects is not None:
         registered_paths: set[str] = set()
         for path in registry.values():

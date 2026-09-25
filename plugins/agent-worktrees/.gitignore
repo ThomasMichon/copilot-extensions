@@ -30,3 +30,4 @@ pytest_out*.log
 pytest_err*.log
 pytest_final*.log
 pytest_z*.log
+pytest_zz*.log

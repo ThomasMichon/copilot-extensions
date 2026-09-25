@@ -295,6 +295,66 @@ def test_start_itself_closes_a_partially_started_server_before_reraising():
     assert not server._serve_thread.is_alive()
 
 
+def test_close_racing_start_between_thread_launch_and_flag_assignment_is_serialized():
+    """Copilot review finding: ``close()`` could previously run entirely
+    between ``self._serve_thread.start()`` succeeding and the following
+    ``self._serve_started = True`` -- observing ``_serve_started`` still
+    ``False``, skipping shutdown/join, and closing the socket -- before
+    ``start()`` resumed, set ``_serve_started = True``, launched the
+    reaper, and marked ``_started = True``. That left a closed server with
+    inconsistent lifecycle flags. ``_lifecycle_lock`` must serialize the
+    two methods so ``close()`` only ever observes the fully-pre-start or
+    fully-post-start state, never a state in between."""
+    server = _make_server()
+    real_start = threading.Thread.start
+    entered_gap = threading.Event()
+    release_gap = threading.Event()
+
+    def _gated_start(self):
+        result = real_start(self)
+        if self.name == "work-coalescing-singleton":
+            # Simulate close() racing exactly in the gap between the serve
+            # thread's own successful .start() and start()'s following
+            # `_serve_started = True` assignment.
+            entered_gap.set()
+            release_gap.wait(timeout=5)
+        return result
+
+    threading.Thread.start = _gated_start
+    try:
+        start_thread = threading.Thread(target=server.start)
+        start_thread.start()
+        assert entered_gap.wait(timeout=2)
+
+        # close() must now block on _lifecycle_lock rather than running to
+        # completion mid-gap.
+        close_thread = threading.Thread(target=server.close)
+        close_thread.start()
+        close_thread.join(timeout=0.3)
+        assert close_thread.is_alive(), (
+            "close() ran through the gap instead of being serialized by _lifecycle_lock"
+        )
+
+        release_gap.set()
+        start_thread.join(timeout=5)
+        close_thread.join(timeout=5)
+        assert not close_thread.is_alive()
+        assert not start_thread.is_alive()
+
+        # The server must land in a fully-consistent post-start,
+        # post-close state -- never the inconsistent partial state the
+        # race used to produce.
+        assert server._serve_started is True
+        assert server._reap_started is True
+        assert server._started is True
+        assert server._closed is True
+        assert not server._serve_thread.is_alive()
+        assert not server._reap_thread.is_alive()
+    finally:
+        threading.Thread.start = real_start
+        release_gap.set()
+
+
 @pytest.mark.filterwarnings(
     "ignore::pytest.PytestUnhandledThreadExceptionWarning"
 )

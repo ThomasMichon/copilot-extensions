@@ -342,13 +342,17 @@ def test_sweep_without_managed_mux_cache_observes_only_the_direct_scan(tmp_path,
     assert observed == [{"wt-a"}]  # unchanged when managed_mux_cache is None
 
 
-def test_sweep_observes_managed_mux_cache_even_with_no_mux_binary(tmp_path):
-    """Copilot review finding: the Manager observation cache exists
-    independently of this resident process's own direct mux-binary
-    discovery -- a Manager-reported live session must still reach
-    ``catalog_observer`` when ``mux_bin`` is absent (e.g. neither
-    ``psmux`` nor ``tmux`` is installed on this host), not only when a
-    direct mux scan is also possible."""
+def test_sweep_never_calls_catalog_observer_with_a_partial_manager_only_view(tmp_path):
+    """Copilot review finding: ``catalog_observer``
+    (``ResidentSessionReconciler.observe_mux``) is a *complete-snapshot*
+    API -- any session name missing from the passed set is treated as
+    genuinely gone and reaped. An earlier revision of this seam called
+    ``catalog_observer(managed_live)`` when no mux binary was locally
+    discoverable, which would incorrectly mark every *other*, ordinary
+    (non-Manager) session as dead too, since only the Manager-known subset
+    was ever passed. The safe behavior (this test) is to never call
+    ``catalog_observer`` at all in the no-mux-binary path -- a managed-only
+    partial view must never reach this complete-snapshot API."""
     from agent_worktrees import mux_link
 
     cache = mux_link.ManagedMuxCache()
@@ -373,54 +377,7 @@ def test_sweep_observes_managed_mux_cache_even_with_no_mux_binary(tmp_path):
     )
 
     assert served == 0  # no direct-scan serving happens without a mux binary
-    assert observed == [{"wt-manager-owned"}]
-
-
-def test_sweep_propagates_an_empty_observation_after_managed_mapping_removal_no_mux(tmp_path):
-    """Copilot review finding: when a managed mapping is tombstoned
-    (``live=false``) while no local mux binary is available, the empty
-    ``managed_live`` set must still reach ``catalog_observer`` -- otherwise
-    ``ResidentSessionReconciler`` retains the previous non-empty live set
-    until its own 45s freshness timeout, missing the contractually
-    immediate removal. A cache that has never recorded anything must still
-    never trigger this branch at all (preserving the untouched-empty-cache
-    behavior for hosts with no mux/Manager activity)."""
-    from agent_worktrees import mux_link
-
-    # Untouched cache: never recorded anything -- must not trigger the
-    # no-mux observation branch at all.
-    empty_cache = mux_link.ManagedMuxCache()
-    observed_empty: list[set[str]] = []
-    m._monitor_sweep(
-        None, "T", "P", set(), catalog_observer=observed_empty.append, managed_mux_cache=empty_cache
-    )
-    assert observed_empty == []  # never called -- nothing was ever recorded
-
-    # A cache that once had a live mapping, now tombstoned.
-    cache = mux_link.ManagedMuxCache()
-    cache.apply_observation(
-        {
-            "project": "proj",
-            "worktree_id": "wt-manager-owned",
-            "mux_session": "wt-manager-owned",
-            "mapping_revision": 1,
-            "live": True,
-        }
-    )
-    cache.apply_observation(
-        {
-            "project": "proj",
-            "worktree_id": "wt-manager-owned",
-            "mux_session": "wt-manager-owned",
-            "mapping_revision": 2,
-            "live": False,
-        }
-    )
-    observed: list[set[str]] = []
-    m._monitor_sweep(
-        None, "T", "P", set(), catalog_observer=observed.append, managed_mux_cache=cache
-    )
-    assert observed == [set()]  # the removal is propagated immediately, not withheld
+    assert observed == []  # never called -- a partial view must never reach it
 
 
 def test_sweep_ctx_rendered_once(tmp_path, monkeypatch):
