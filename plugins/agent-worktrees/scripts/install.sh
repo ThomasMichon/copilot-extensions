@@ -599,8 +599,20 @@ _versioned_activate() {
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py="$VENV_PYTHON"
     [[ -x "$py" ]] || return 0
-    if ! PYTHONPATH= "$VENV_PYTHON" -c 'import agent_worktrees' 2>/dev/null; then
+    # A bare `import agent_worktrees` is NOT a sufficient health check: the
+    # `agent_worktrees` directory merely EXISTING makes it importable as a PEP
+    # 420 namespace package even when it holds zero `.py` files (e.g. an
+    # interrupted/partial `uv pip install` that never actually placed the
+    # package). That false pass let a broken slot get marked complete and
+    # activated with no working CLI. Importing the `__main__` submodule
+    # instead forces Python to resolve a real `__main__.py` and walk its full
+    # transitive import chain (config, project_state, the internal `libs/*`
+    # packages, etc.), so a partial install that dropped any of those pieces
+    # fails the gate here instead of silently activating.
+    local health_out
+    if ! health_out="$(PYTHONPATH= "$VENV_PYTHON" -c 'import agent_worktrees.__main__' 2>&1)"; then
         err "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
+        [[ -n "$health_out" ]] && err "  $health_out"
         return 1
     fi
     _versioned_mark_complete
