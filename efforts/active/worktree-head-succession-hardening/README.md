@@ -86,10 +86,14 @@ objective can be a worktree other than the one nearest at hand.
 ## Plan
 
 ### Phase 1 — Acknowledgement-gated head succession (#3584, closes groundwork for #84)
-- [ ] Restrict head-claiming-from-vacant to the `sessionStart` hook alone,
-      gated on the head genuinely never having been set (a fresh worktree, or
-      one whose predecessor is confirmed fully abandoned through the existing
-      recovery procedure); no other hook/extension point may write it.
+- [ ] Restrict head-claiming-from-**vacant** to the `sessionStart` hook alone.
+      Define "vacant" precisely as two distinct, separately-enumerated cases —
+      never conflated into one "never set" test: **(a) fresh** — the worktree
+      has genuinely never had a head; **(b) confirmed-recovered** — a prior
+      head existed but its predecessor is proven fully abandoned through the
+      existing recovery procedure, and that procedure is what marks the slot
+      vacant again, not an implicit inference. No other hook/extension point
+      may write the slot in either case.
 - [ ] Model displacing an *existing* head as a single atomic,
       acknowledgement-gated transfer — reconciled with
       `docs/patterns/context-handoff-lifecycle.md`'s existing invariant that
@@ -103,6 +107,17 @@ objective can be a worktree other than the one nearest at hand.
 - [ ] Confirm this composes with, not replaces, full session lineage
       journaling (every session ever associated with the worktree stays
       recorded independently of the current head).
+- [ ] Add the **creation-side guard** #84 already specifies: creating a new
+      session in a worktree whose head is still active is *refused*, not
+      silently permitted, with a structured reason enumerating the three
+      resolutions (reuse, hand off, sunset) plus an explicit, attributable
+      break-glass override — matching agent-bridge's existing `409
+      live_cli_holds_worktree` shape. Without this, restricting who can
+      *write* the head slot does not by itself stop a second session from
+      being *created* while an existing head is still live, so the effort's
+      "never a second session racing an existing live one" guarantee would be
+      unmet. This item is load-bearing for that guarantee, not optional
+      polish.
 - [ ] Reconcile with #912 and #3000's overlapping scope so the three don't
       land contradictory mechanisms.
 
@@ -126,6 +141,10 @@ objective can be a worktree other than the one nearest at hand.
 - [ ] Confirm no hook other than `sessionStart` can seat a head from vacant,
       and no path can displace an existing head without a verified successor
       acknowledgement (two targeted negative tests).
+- [ ] Attempt to create a second session in a worktree whose head is still
+      active: the attempt is refused with the structured reuse/hand-off/
+      sunset reason, never silently allowed to proceed; a break-glass
+      override is available, explicit, and attributable.
 - [ ] A fleet with an existing worktree bound to effort X surfaces that
       worktree (and, where a chain is involved, the root claimant) when a
       second agent checks before starting work on X.
@@ -161,3 +180,16 @@ repo's `pr-self-merge` profile before Phase 1 implementation begins._
   from the original operator request is preserved as historical record in the
   Request quote above, but the design itself now models succession as one
   acknowledgement-gated transfer, not two independent slot writes.
+
+### 2026-09-25 — Closed the creation-side race, precised "vacant"
+- A further review round caught two more real gaps: (1) restricting who can
+  *write* the head slot said nothing about who can *create a new session* in
+  a worktree whose head is still live -- #84 already specifies a
+  creation-side refusal guard for exactly this, and the effort's own stated
+  guarantee ("never a second session racing an existing live one") was
+  unmet without it. Added it as an explicit, load-bearing Phase 1 item plus
+  a matching Validation Plan bullet. (2) "Genuinely never having been set"
+  conflated two distinct vacancy cases (fresh vs. confirmed-recovered);
+  re-worded to enumerate them separately so an implementation can't
+  accidentally reject the recovery case or permit an unverified reclaim.
+

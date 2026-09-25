@@ -170,7 +170,7 @@ launch can never strand the worktree with no authoritative head, because
 nothing is ever cleared without a proven successor on the other end of the
 same step. (This is the existing `context-handoff-lifecycle` pattern's
 ownership invariant, generalized as the durable head-succession guarantee
-rather than a orchestration-layer-only rule.) A resuming session therefore
+rather than an orchestration-layer-only rule.) A resuming session therefore
 always lands as the *rightful* current leg — either the sole claimant of a
 truly fresh head, or the acknowledged successor of a specific, still-identified
 predecessor — never a second, uncoordinated voice re-entering a conversation
