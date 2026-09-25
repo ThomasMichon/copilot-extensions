@@ -200,8 +200,17 @@ def _read_bounded(path: str, limit: int = 200_000) -> str:
         return ""
 
 
-def _extract_body_text(tokens: list[str]) -> str:
-    """Best-effort: the literal body text this invocation would publish."""
+_UNSCANNABLE = object()  # sentinel: the body is sourced from stdin, which a
+# preToolUse hook cannot inspect (it runs before the command executes, with
+# no visibility into whatever gets piped into its future stdin) -- treat as
+# unscannable and FAIL CLOSED (deny) rather than silently pass an
+# unverifiable publish through.
+
+
+def _extract_body_text(tokens: list[str]) -> str | object:
+    """Best-effort: the literal body text this invocation would publish, or
+    the ``_UNSCANNABLE`` sentinel if the body is sourced from stdin
+    (``--body-file -`` / ``-F body=@-``, gh's stdin convention)."""
     parts: list[str] = []
     index = 1
     while index < len(tokens):
@@ -221,21 +230,28 @@ def _extract_body_text(tokens: list[str]) -> str:
             continue
         for flag in FILE_BODY_FLAGS:
             if token == flag and index + 1 < len(tokens):
+                if tokens[index + 1] == "-":
+                    return _UNSCANNABLE
                 parts.append(_read_bounded(tokens[index + 1]))
                 matched = True
                 break
             if token.startswith(flag + "="):
-                parts.append(_read_bounded(token[len(flag) + 1 :]))
+                value = token[len(flag) + 1 :]
+                if value == "-":
+                    return _UNSCANNABLE
+                parts.append(_read_bounded(value))
                 matched = True
                 break
         if matched:
             index += 2 if token in FILE_BODY_FLAGS else 1
             continue
-        # ``gh api ... -f body=VALUE`` / ``-F body=@path``.
+        # ``gh api ... -f body=VALUE`` / ``-F body=@path`` / ``-F body=@-``.
         if token in {"-f", "-F"} and index + 1 < len(tokens):
             field = tokens[index + 1]
             if field.startswith("body="):
                 value = field[len("body=") :]
+                if value == "@-":
+                    return _UNSCANNABLE
                 if token == "-F" and value.startswith("@"):
                     parts.append(_read_bounded(value[1:]))
                 else:
@@ -254,16 +270,24 @@ def _extract_body_text(tokens: list[str]) -> str:
     return "\n".join(parts)
 
 
-def command_publishes_copilot_mention(command: str) -> bool:
+def command_publishes_copilot_mention(command: str) -> str | None:
+    """Returns a deny-reason string if *command* should be blocked, else
+    ``None``. Two distinct reasons: an actual ``@copilot`` mention, or a
+    stdin-sourced body this hook cannot inspect before the command runs."""
     for tokens in _split_statements(command):
         if not _is_gh(tokens):
             continue
         if not (_has_write_subcommand(tokens) or _is_api_comment_or_review_write(tokens)):
             continue
         body_text = _extract_body_text(tokens)
+        if body_text is _UNSCANNABLE:
+            # A stdin-sourced body (`--body-file -` / `-F body=@-`) cannot be
+            # inspected before the command runs -- fail closed rather than
+            # silently pass an unverifiable publish through.
+            return "unscannable"
         if MENTION.search(body_text):
-            return True
-    return False
+            return "mention"
+    return None
 
 
 def main() -> int:
@@ -293,7 +317,8 @@ def main() -> int:
         # projections), or one where the target repo couldn't be resolved
         # at all, is never touched by this guard (fail open, not closed).
         return 0
-    if command_publishes_copilot_mention(command):
+    reason = command_publishes_copilot_mention(command)
+    if reason == "mention":
         print(
             json.dumps(
                 {
@@ -309,6 +334,26 @@ def main() -> int:
                     ),
                     "decision": "deny",
                     "message": "DENIED: do not @-mention copilot in a PR/issue comment or review.",
+                },
+                separators=(",", ":"),
+            )
+        )
+    elif reason == "unscannable":
+        print(
+            json.dumps(
+                {
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": (
+                        "DENIED: this publishes a PR/issue comment or review "
+                        "body sourced from stdin (--body-file - / -F "
+                        "body=@-), which this guard cannot inspect before "
+                        "the command runs. Write the body to a file first "
+                        "(--body-file <path>) or pass it inline (--body "
+                        "\"...\") so it can be scanned for an @copilot "
+                        "mention."
+                    ),
+                    "decision": "deny",
+                    "message": "DENIED: stdin-sourced PR/issue body text cannot be scanned.",
                 },
                 separators=(",", ":"),
             )

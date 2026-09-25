@@ -26,7 +26,7 @@ def _load_guard():
 def test_pr_comment_with_mention_is_denied() -> None:
     guard = _load_guard()
     cmd = 'gh pr comment 3554 -R ThomasMichon/copilot-extensions --body "@copilot review"'
-    assert guard.command_publishes_copilot_mention(cmd) is True
+    assert guard.command_publishes_copilot_mention(cmd) is not None
 
 
 def test_pr_comment_without_mention_is_allowed() -> None:
@@ -35,7 +35,7 @@ def test_pr_comment_without_mention_is_allowed() -> None:
         'gh pr comment 3554 -R ThomasMichon/copilot-extensions '
         '--body "Fixed the typo, please take another look."'
     )
-    assert guard.command_publishes_copilot_mention(cmd) is False
+    assert guard.command_publishes_copilot_mention(cmd) is None
 
 
 def test_api_comment_reply_with_mention_is_denied() -> None:
@@ -44,13 +44,13 @@ def test_api_comment_reply_with_mention_is_denied() -> None:
         "gh api repos/ThomasMichon/copilot-extensions/pulls/3554/comments/123/replies "
         '-f body="@copilot please re-review"'
     )
-    assert guard.command_publishes_copilot_mention(cmd) is True
+    assert guard.command_publishes_copilot_mention(cmd) is not None
 
 
 def test_api_read_only_comment_listing_is_allowed() -> None:
     guard = _load_guard()
     cmd = "gh api repos/ThomasMichon/copilot-extensions/pulls/3554/comments"
-    assert guard.command_publishes_copilot_mention(cmd) is False
+    assert guard.command_publishes_copilot_mention(cmd) is None
 
 
 def test_legitimate_copilot_extensions_handle_is_allowed() -> None:
@@ -59,7 +59,7 @@ def test_legitimate_copilot_extensions_handle_is_allowed() -> None:
         'gh pr comment 42 -R ThomasMichon/copilot-extensions '
         '--body "Reviewed against agent-worktrees@copilot-extensions v1.5.5."'
     )
-    assert guard.command_publishes_copilot_mention(cmd) is False
+    assert guard.command_publishes_copilot_mention(cmd) is None
 
 
 def test_body_file_with_mention_is_denied(tmp_path: Path) -> None:
@@ -67,7 +67,7 @@ def test_body_file_with_mention_is_denied(tmp_path: Path) -> None:
     body_file = tmp_path / "body.md"
     body_file.write_text("Please have @copilot take a look.\n", encoding="utf-8")
     cmd = f'gh pr comment 3554 -R owner/repo --body-file "{body_file}"'
-    assert guard.command_publishes_copilot_mention(cmd) is True
+    assert guard.command_publishes_copilot_mention(cmd) is not None
 
 
 def test_body_file_equals_form_with_mention_is_denied(tmp_path: Path) -> None:
@@ -78,25 +78,54 @@ def test_body_file_equals_form_with_mention_is_denied(tmp_path: Path) -> None:
     body_file = tmp_path / "body.md"
     body_file.write_text("Please have @copilot take a look.\n", encoding="utf-8")
     cmd = f'gh pr comment 3554 -R owner/repo --body-file="{body_file}"'
-    assert guard.command_publishes_copilot_mention(cmd) is True
+    assert guard.command_publishes_copilot_mention(cmd) is not None
 
 
 def test_semicolon_inside_quoted_body_does_not_truncate_the_scan() -> None:
     guard = _load_guard()
     cmd = 'gh pr comment 1 -R owner/repo --body "Fixed the bug; @copilot review"'
-    assert guard.command_publishes_copilot_mention(cmd) is True
+    assert guard.command_publishes_copilot_mention(cmd) is not None
 
 
 def test_pipe_inside_quoted_body_does_not_truncate_the_scan() -> None:
     guard = _load_guard()
     cmd = 'gh pr comment 1 -R owner/repo --body "note: use pipe | then @copilot"'
-    assert guard.command_publishes_copilot_mention(cmd) is True
+    assert guard.command_publishes_copilot_mention(cmd) is not None
 
 
 def test_non_gh_command_mentioning_copilot_is_allowed() -> None:
     guard = _load_guard()
     cmd = 'echo "never use @copilot in a PR comment" >> docs/notes.md'
-    assert guard.command_publishes_copilot_mention(cmd) is False
+    assert guard.command_publishes_copilot_mention(cmd) is None
+
+
+def test_stdin_body_file_is_denied_fail_closed() -> None:
+    """PR #3663 review (round 3): `gh` accepts `--body-file -` to read the
+    body from stdin, which a preToolUse hook cannot inspect (it runs before
+    the command executes, with no visibility into what will be piped in) --
+    must fail CLOSED (deny) rather than silently allow an unscannable
+    publish through."""
+    guard = _load_guard()
+    cmd = "printf '@copilot review' | gh pr comment 1 -R owner/repo --body-file -"
+    assert guard.command_publishes_copilot_mention(cmd) == "unscannable"
+
+
+def test_stdin_body_file_equals_form_is_denied_fail_closed() -> None:
+    guard = _load_guard()
+    cmd = "printf '@copilot review' | gh pr comment 1 -R owner/repo --body-file=-"
+    assert guard.command_publishes_copilot_mention(cmd) == "unscannable"
+
+
+def test_api_stdin_field_is_denied_fail_closed() -> None:
+    guard = _load_guard()
+    cmd = "printf '@copilot review' | gh api repos/o/r/pulls/1/comments -F body=@-"
+    assert guard.command_publishes_copilot_mention(cmd) == "unscannable"
+
+
+def test_mention_and_unscannable_are_distinct_reasons() -> None:
+    guard = _load_guard()
+    mention_cmd = 'gh pr comment 1 -R owner/repo --body "@copilot review"'
+    assert guard.command_publishes_copilot_mention(mention_cmd) == "mention"
 
 
 # ---------------------------------------------------------------------------
