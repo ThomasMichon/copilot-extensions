@@ -449,14 +449,14 @@ def test_cli_annotate_rejects_symlinked_session_directory(
 
 # --------------------------------------------------------------------------- #
 # CLI: `agent-logger catalog query` -- the cross-repo process-boundary read  #
-# side fallback tier (Intelligence Dampener's reviewer-link chain, Phase 3) #
+# side fallback tier (a downstream review-link fallback chain)          #
 # --------------------------------------------------------------------------- #
 
 
 def _run_query_cli(monkeypatch, tmp_path: Path, argv: list[str]) -> tuple[int, str]:
     """Invoke the real CLI entry point with an isolated HOME/AGENT_LOGGER_HOME
     and capture stdout, mirroring ``_run_annotate_cli`` -- a caller in another
-    repository (Intelligence Dampener) has no Python import path into
+    repository (a downstream review-link fallback chain) has no Python import path into
     agent-logger, only this process boundary."""
     import contextlib
     import io
@@ -563,6 +563,30 @@ def test_cli_query_skips_session_unresolvable_on_this_host(
         monkeypatch,
         tmp_path,
         ["catalog", "query", "--repo", "example/repo", "--pr-number", "6100"],
+    )
+
+    assert rc == 0
+    assert _json.loads(out)["sessions"] == []
+
+
+def test_cli_query_survives_catalog_storage_failure(monkeypatch, tmp_path: Path) -> None:
+    """A corrupt/unavailable SQLite catalog or an out-of-range ``pr_number``
+    must degrade to an empty result, never an uncaught traceback -- this is
+    a best-effort fallback tier a caller reaches only after exhausting its
+    own faster resolution paths."""
+    import json as _json
+
+    from agent_logger import cold_store
+
+    def _raise(*args, **kwargs):
+        raise OverflowError("Python int too large to convert to SQLite INTEGER")
+
+    monkeypatch.setattr(cold_store, "query_reviewer_sessions", _raise)
+
+    rc, out = _run_query_cli(
+        monkeypatch,
+        tmp_path,
+        ["catalog", "query", "--repo", "example/repo", "--pr-number", "99999999999999999999"],
     )
 
     assert rc == 0

@@ -308,7 +308,7 @@ rebuildable-from-sidecars, never a second source of truth.
 - `agent-logger catalog query --repo R --pr-number N [--since ISO]
   [--until ISO]` — the cross-repo process-boundary **read** path, the same
   integration shape `annotate` establishes for writes (a caller such as
-  Intelligence Dampener's reviewer-link fallback chain shells out rather
+  a downstream review-link fallback chain shells out rather
   than importing agent-logger as a library). Thin wrapper over
   `cold_store.query_reviewer_sessions()`; always exits `0` and prints
   `{"repo": ..., "pr_number": ..., "sessions": [{"session_id": ..., "kind":
