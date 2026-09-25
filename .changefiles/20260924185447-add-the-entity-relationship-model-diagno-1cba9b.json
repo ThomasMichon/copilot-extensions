@@ -1,0 +1,13 @@
+{
+  "comment": "Add the entity-relationship-model diagnostic playbook (mirrored docs + skill pointers) so a marketplace consumer can resolve cross-entity questions (session->worktree, task->worktree/session/bridge-state, etc.) without a copilot-extensions checkout",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
