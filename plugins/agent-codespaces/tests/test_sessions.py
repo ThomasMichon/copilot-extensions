@@ -36,6 +36,59 @@ def test_extract_b64_empty_when_no_sentinels():
     assert sessions._extract_b64("nothing here") == ""
 
 
+def test_pull_cmd_produces_archive_with_only_session_state_present():
+    """Real regression for a fixed bug: `files=$(ls -d a b c d 2>/dev/null)`
+    used the assignment's own exit code (`ls`'s, nonzero whenever ANY of
+    the four paths is missing -- routinely true, since the WAL/SHM
+    companions only exist while the db is in active WAL mode) to gate the
+    whole archive step via `&&`, so a normal CodeSpace missing just one
+    optional file silently produced NO output at all (misreported as "no
+    sessions" even though `session-state` existed)."""
+    import shutil
+    import subprocess
+    import tempfile
+
+    if shutil.which("bash") is None:
+        return  # environment without bash; nothing to verify here
+    with tempfile.TemporaryDirectory() as home:
+        copilot = Path(home) / ".copilot"
+        (copilot / "session-state").mkdir(parents=True)
+        (copilot / "session-state" / "dummy.txt").write_text("x")
+        # Deliberately no session-store.db / -wal / -shm -- exactly the
+        # normal, common case the fixed bug silently lost.
+        result = subprocess.run(
+            ["bash", "-c", sessions._PULL_CMD],  # noqa: S607 - test-only, fixed args
+            capture_output=True, text=True, timeout=10,
+            env={"HOME": home, "PATH": "/usr/bin:/bin"},
+        )
+    assert sessions._B64_START in result.stdout
+    assert sessions._B64_END in result.stdout
+
+
+def test_pull_cmd_never_archives_outside_copilot_dir_when_cd_fails():
+    """Directory-scoping safety regression: if `cd ~/.copilot` fails (the
+    directory doesn't exist), the command must produce NO output at all --
+    never fall through to `tar` against the SSH default directory using an
+    inherited/exported `files` environment variable, which would violate
+    the command's stated session-state-only allowlist."""
+    import shutil
+    import subprocess
+    import tempfile
+
+    if shutil.which("bash") is None:
+        return
+    with tempfile.TemporaryDirectory() as home:
+        # No ~/.copilot at all -- `cd` fails.
+        result = subprocess.run(
+            ["bash", "-c", sessions._PULL_CMD],  # noqa: S607 - test-only, fixed args
+            capture_output=True, text=True, timeout=10,
+            # A nonempty inherited `files` env var is exactly the attack
+            # this regression guards against: it must never reach `tar`.
+            env={"HOME": home, "PATH": "/usr/bin:/bin", "files": "/etc/passwd"},
+        )
+    assert result.stdout.strip() == ""
+
+
 def _make_session_tar(session_ids: list[str], *, include_db: bool = True) -> bytes:
     """Build an in-memory gzip tar mirroring a CodeSpace ~/.copilot subset."""
     buf = io.BytesIO()

@@ -104,6 +104,30 @@ def test_capture_hold_reason_fails_closed_on_malformed_record_for_target(monkeyp
     assert "malformed" in reason
 
 
+def test_capture_hold_reason_fails_closed_on_non_string_worktree_type(monkeypatch):
+    """``Lease(**rec)`` validates the record's KEYS, not field TYPES -- a
+    syntactically-valid record with a non-string ``worktree`` (e.g. an
+    int) passes construction but crashes ``_holder_worktree_gone()``'s
+    ``os.path.isabs()`` call. Evaluating the orphan check itself must be
+    treated as an unknown lease state, not let the exception escape."""
+    import agent_codespaces.lease as lease_mod
+    bad_lease = Lease(
+        codespace="cs", effort="e", pid=1, host="h",
+        acquired_at=0.0, heartbeat_at=0.0, worktree=12345,  # type: ignore[arg-type]
+    )
+    monkeypatch.setattr(lease_mod, "get_lease", lambda name: bad_lease)
+
+    # Confirm the orphan check itself would raise (the exact blind spot the
+    # try/except closes).
+    with pytest.raises(TypeError):
+        from agent_codespaces.pool import _holder_worktree_gone
+        _holder_worktree_gone(bad_lease.worktree)
+
+    reason = sessions._capture_hold_reason("cs", account=None)
+    assert reason is not None
+    assert "fail-closed" in reason
+
+
 def test_capture_hold_reason_fails_closed_when_account_unmintable_before_listing(monkeypatch):
     """`_list_codespaces_under` re-derives its own env via `env_for_account`,
     which silently falls back to ambient auth on a minting failure -- must
@@ -571,6 +595,70 @@ def test_capture_succeeds_on_idle_session(monkeypatch):
     assert res["ok"] is True
     assert res["deferred"] is False
     assert res["session_count"] == 3
+
+
+def test_capture_accepts_acquire_then_release_within_pull_as_documented_residual(monkeypatch):
+    """The one race this effort explicitly does NOT close (Phase 1's
+    recorded decision, restated in this function's own docstring): a
+    session that both acquires AND releases its ``inuse.*.lock`` entirely
+    within the pull's own duration is invisible to both the pre- and
+    post-pull liveness probes alike -- each reads ``idle`` even though the
+    session was live mid-write. This regression proves the capture
+    proceeds in that exact scenario (documenting the accepted blind spot),
+    not that it is somehow caught."""
+    import ssh_manager
+
+    class _FakeLock:
+        def __init__(self, *a, **k):
+            pass
+
+        def acquire(self, *a, **k):
+            return self
+
+        def release(self):
+            pass
+
+    class _Manager:
+        async def disconnect(self, name):
+            return None
+
+    monkeypatch.setattr(ssh_manager, "TargetLock", _FakeLock)
+    monkeypatch.setattr(ssh_manager, "ConnectionManager", lambda *a, **k: _Manager())
+    monkeypatch.setattr(
+        "agent_codespaces.account_binding.bound_account", lambda name: "acct",
+    )
+    monkeypatch.setattr(
+        "agent_codespaces.lifecycle.get_codespace_status_with_account",
+        lambda name, account: (True, "Available", "acct"),
+    )
+    monkeypatch.setattr(sessions, "_capture_hold_reason", lambda name, *, account: None)
+    monkeypatch.setattr("agent_codespaces.gh_account.token_for_account", lambda account: "tok")
+
+    async def _connect_ok(*a, **k):
+        return None
+
+    # BOTH probes read idle -- the session acquired and released its lock
+    # entirely within the pull's duration, invisible to either checkpoint.
+    async def _probe_idle(manager, name, *, timeout):
+        return sessions.SessionLiveness("idle", [], [])
+
+    async def _pull_ok(*a, **k):
+        return b"not-empty"
+
+    monkeypatch.setattr(sessions, "_connect_with_retry", _connect_ok)
+    monkeypatch.setattr(sessions, "_probe_codespace_liveness", _probe_idle)
+    monkeypatch.setattr(sessions, "_pull_tar_bytes", _pull_ok)
+    monkeypatch.setattr(
+        sessions, "_stage_and_push",
+        lambda tar_bytes, name, *, verbose: {"ok": True, "session_count": 1, "detail": "pushed"},
+    )
+
+    res = sessions.capture_codespace_sessions("cs", account=None)
+
+    # Documents the accepted residual risk: the capture DOES proceed here,
+    # exactly as the docstring says it will.
+    assert res["ok"] is True
+    assert res["deferred"] is False
 
 
 def test_capture_post_pull_hold_recheck_discards_late_appearing_hold(monkeypatch):

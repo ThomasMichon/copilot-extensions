@@ -137,6 +137,18 @@ the detailed rationale each item originally carried.
       guarantee it is not. The regression test must include an
       acquire-then-release-during-the-pull case, not only a lock that
       remains held through the final probe.
+
+      **Done, including the previously-missing case:** the pre/post
+      liveness gate and the post-pull hold re-check are both implemented
+      and tested (`test_capture_liveness_gate_defers_active_session`,
+      `test_capture_re_probes_after_pull_and_discards_on_became_active`,
+      `test_capture_post_pull_hold_recheck_discards_late_appearing_hold`).
+      The acquire-then-release-during-the-pull case itself is covered by
+      `test_capture_accepts_acquire_then_release_within_pull_as_documented_residual`
+      -- both probes read `idle` and the capture proceeds, proving (not
+      merely asserting in prose) the accepted blind spot this item
+      describes: this test's job is to document the gap stays open, not to
+      close it.
 - [x] Tests: CLI-dispatch coverage (text + `--json`, mirroring
       `test_rescue_capture_cli.py`'s shape), a liveness-gate regression test
       (mid-write session is deferred, not captured), a

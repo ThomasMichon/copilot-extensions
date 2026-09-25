@@ -57,11 +57,11 @@ _B64_CHARS = frozenset(string.ascii_letters + string.digits + "+/=")
 # ~/.copilot -- OAuth/credential state, keys, settings), gzip + base64, wrapped
 # in sentinels. Emits nothing between the sentinels when there are no sessions.
 _PULL_CMD = (
-    "cd ~/.copilot 2>/dev/null && "
+    "cd ~/.copilot 2>/dev/null && { "
     "files=$(ls -d session-state session-store.db session-store.db-wal "
     'session-store.db-shm 2>/dev/null); [ -n "$files" ] && '
     "{ echo " + _B64_START + "; tar czf - $files 2>/dev/null | base64 -w0; "
-    "echo; echo " + _B64_END + "; } || true"
+    "echo; echo " + _B64_END + "; }; } || true"
 )
 
 
@@ -456,8 +456,21 @@ def _capture_hold_reason(name: str, *, account: str | None) -> str | None:
         lease = get_lease(name)
     except Exception as exc:
         return f"could not confirm lease state (fail-closed): {exc}"
-    if lease is not None and not _holder_worktree_gone(lease.worktree):
-        return f"CodeSpace has an active lease (effort {lease.effort!r})"
+    if lease is not None:
+        try:
+            orphaned = _holder_worktree_gone(lease.worktree)
+        except Exception as exc:
+            # A syntactically-valid-but-schema-malformed record (e.g. a
+            # non-string ``worktree``) can pass `Lease(**rec)` (a dataclass
+            # constructor validates keys, not field types) yet still raise
+            # here (`os.path.isabs()` on a non-str). Treat evaluating the
+            # orphan check itself as an unknown lease state, not a crash.
+            return (
+                f"could not confirm lease state (fail-closed): error "
+                f"evaluating orphan status: {exc}"
+            )
+        if not orphaned:
+            return f"CodeSpace has an active lease (effort {lease.effort!r})"
 
     try:
         from . import gh_account
