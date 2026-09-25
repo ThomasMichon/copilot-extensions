@@ -101,7 +101,17 @@ jobs:
         # re-derived, checked out, and tested). Download the artifact
         # Validation Gate's `gate` job uploaded with the commit it actually
         # confirmed, instead of trusting that event field one hop removed.
+        #
+        # `continue-on-error: true`: Validation Gate's own `gate` job only
+        # uploads this artifact when ITS `is_dev` check was true -- a
+        # Validation Gate run legitimately completes with overall
+        # `conclusion: success` (the `gate` job itself succeeded) even when
+        # `is_dev` was false (e.g. the triggering CI run was for main's own
+        # generated promotion commit, not a real dev push), in which case no
+        # artifact was ever uploaded and this download is expected to fail.
+        # Treat that as "nothing to check" below rather than a hard failure.
         if: github.event_name == 'workflow_run'
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: validated-sha
@@ -123,6 +133,11 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "is_dev=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ ! -f validated_sha.txt ]; then
+            echo "is_dev=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No validated-sha artifact from the triggering Validation Gate run -- it wasn't for a dev commit (is_dev was false there too), skipping."
             exit 0
           fi
           git fetch origin dev
