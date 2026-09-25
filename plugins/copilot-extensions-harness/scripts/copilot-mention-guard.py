@@ -112,6 +112,22 @@ def target_repo_from_manifest(plugin_root: Path) -> str | None:
     return None
 
 
+_GIT_ENV_VARS_TO_STRIP = (
+    "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+)
+
+
+def _clean_git_env() -> dict[str, str]:
+    """A copy of this process's environment with the ``GIT_*`` variables
+    that redirect git's repository discovery stripped, so a caller-supplied
+    ambient value (``GIT_DIR``, ``GIT_WORK_TREE``, ...) can't point our own
+    ``git remote`` probes at a different repo than *cwd* actually is --
+    matching the sanitized-environment precedent in this same codebase's
+    ``agent_worktrees.git_ops``."""
+    return {k: v for k, v in os.environ.items() if k not in _GIT_ENV_VARS_TO_STRIP}
+
+
 def current_repo_candidates(cwd: str | None = None) -> list[str]:
     """Every ``owner/repo`` resolvable from the git remotes configured at
     *cwd* -- not just ``origin``. This codebase's own convention allows a
@@ -120,10 +136,12 @@ def current_repo_candidates(cwd: str | None = None) -> list[str]:
     carries an ``upstream`` remote pointing at the real target repo, so
     checking only ``origin`` would silently no-op the guard for either
     shape."""
+    env = _clean_git_env()
     try:
         result = subprocess.run(
             ["git", "remote"],
             cwd=cwd, capture_output=True, text=True, timeout=5, check=False,
+            env=env,
         )
     except (OSError, subprocess.SubprocessError):
         return []
@@ -137,6 +155,7 @@ def current_repo_candidates(cwd: str | None = None) -> list[str]:
             url_result = subprocess.run(
                 ["git", "remote", "get-url", name],
                 cwd=cwd, capture_output=True, text=True, timeout=5, check=False,
+                env=env,
             )
         except (OSError, subprocess.SubprocessError):
             continue
@@ -224,7 +243,36 @@ def _split_statements(command: str) -> list[list[str]]:
             current.append(token)
         if current:
             statements.append(current)
-    return statements
+    return [_strip_leading_prefixes(statement) for statement in statements]
+
+
+ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def _strip_leading_prefixes(tokens: list[str]) -> list[str]:
+    """Strip leading ``VAR=value`` assignments and ``env``/``command``
+    wrapper tokens so ``gh`` is recognized even when it isn't literally the
+    first token -- e.g. ``GH_TOKEN="$TOKEN" gh pr comment ...`` or
+    ``env gh pr comment ...``, both valid, ordinary shell forms."""
+    tokens = list(tokens)
+    while tokens:
+        while tokens and ASSIGNMENT.match(tokens[0]):
+            tokens.pop(0)
+        if not tokens:
+            break
+        executable = _basename(tokens[0])
+        if executable in {"env", "env.exe"}:
+            tokens.pop(0)
+            while tokens and (tokens[0].startswith("-") or ASSIGNMENT.match(tokens[0])):
+                tokens.pop(0)
+            continue
+        if executable in {"command", "command.exe"}:
+            tokens.pop(0)
+            while tokens and tokens[0].startswith("-"):
+                tokens.pop(0)
+            continue
+        break
+    return tokens
 
 
 def _is_gh(tokens: list[str]) -> bool:
@@ -300,6 +348,19 @@ def _extract_input_json_body(path: str) -> str | object:
     return body if isinstance(body, str) else _UNSCANNABLE
 
 
+def _is_create_subcommand(tokens: list[str]) -> bool:
+    """``pr create``/``issue create`` can derive their body from an
+    interactive prompt or ``--fill`` (commit messages) when no explict
+    ``--body``/``--body-file``/``--input`` is given -- content that never
+    appears in argv at all, so it can't be scanned (see
+    ``_extract_body_text``'s fail-closed handling for this case)."""
+    pair_stream = [t.lower() for t in tokens[1:]]
+    for index in range(len(pair_stream) - 1):
+        if pair_stream[index] in ("pr", "issue") and pair_stream[index + 1] == "create":
+            return True
+    return False
+
+
 def _extract_body_text(tokens: list[str]) -> str | object:
     """Best-effort: the literal body text this invocation would publish, or
     the ``_UNSCANNABLE`` sentinel if the body is sourced from stdin
@@ -369,10 +430,15 @@ def _extract_body_text(tokens: list[str]) -> str | object:
             parts.append(token[len("body=") :])
         index += 1
     if not parts:
-        # Fall back to scanning every token this guard couldn't attribute to
-        # a recognized body flag (covers shapes this best-effort flag scan
-        # didn't anticipate) rather than silently passing an unrecognized
-        # invocation.
+        # No recognized body flag found. For a `pr create`/`issue create`
+        # invocation, that means the body is interactive or `--fill`-derived
+        # -- content that never appears in argv at all -- so fail CLOSED
+        # rather than assume it's safe. Every other write subcommand this
+        # guard covers (comment/review/edit) requires an explicit body
+        # argument from gh itself, so falling back to a raw token scan there
+        # still covers shapes this best-effort flag scan didn't anticipate.
+        if _is_create_subcommand(tokens):
+            return _UNSCANNABLE
         return " ".join(tokens)
     return "\n".join(parts)
 

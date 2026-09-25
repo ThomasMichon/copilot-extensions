@@ -192,6 +192,41 @@ def test_mention_and_unscannable_are_distinct_reasons() -> None:
     assert guard.command_publishes_copilot_mention(mention_cmd) == "mention"
 
 
+def test_env_assignment_prefix_is_recognized() -> None:
+    """PR #3663 review (round 7): `gh` need not be the literal first token
+    of a shell statement -- an ordinary env-var-assignment prefix like
+    `GH_TOKEN="$TOKEN" gh pr comment ...` is valid shell and must not skip
+    detection just because `gh` isn't tokens[0]."""
+    guard = _load_guard()
+    cmd = 'GH_TOKEN="x" gh pr comment 1 -R owner/repo --body "@copilot review"'
+    assert guard.command_publishes_copilot_mention(cmd) == "mention"
+
+
+def test_env_wrapper_prefix_is_recognized() -> None:
+    guard = _load_guard()
+    cmd = 'env GH_TOKEN=x gh pr comment 1 -R owner/repo --body "@copilot review"'
+    assert guard.command_publishes_copilot_mention(cmd) == "mention"
+
+
+def test_pr_create_without_explicit_body_is_denied_fail_closed() -> None:
+    """PR #3663 review (round 7): `gh pr create`/`gh issue create` can
+    derive their body from an interactive prompt or `--fill` (commit
+    messages) when no explicit --body/--body-file/--input is given --
+    content that never appears in argv at all and so can never be scanned;
+    must fail CLOSED rather than silently allow it."""
+    guard = _load_guard()
+    cmd = "gh pr create --title x -R owner/repo --fill"
+    assert guard.command_publishes_copilot_mention(cmd) == "unscannable"
+
+
+def test_pr_create_with_explicit_body_is_still_scanned() -> None:
+    guard = _load_guard()
+    denied = 'gh pr create --title x -R owner/repo --body "@copilot review"'
+    assert guard.command_publishes_copilot_mention(denied) == "mention"
+    allowed = 'gh pr create --title x -R owner/repo --body "Looks good"'
+    assert guard.command_publishes_copilot_mention(allowed) is None
+
+
 # ---------------------------------------------------------------------------
 # Repo scoping -- this guard applies ONLY to this plugin's own repo.
 # ---------------------------------------------------------------------------
