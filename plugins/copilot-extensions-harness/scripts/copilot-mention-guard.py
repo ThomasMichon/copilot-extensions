@@ -68,13 +68,24 @@ WRITE_SUBCOMMANDS = {
 INLINE_BODY_FLAGS = {"--body", "-b"}
 FILE_BODY_FLAGS = {"--body-file"}
 
-_REPO_URL_RE = re.compile(
-    r"(?:github\.com[:/])([^/]+)/([^/.\s]+?)(?:\.git)?/?$", re.I
-)
+# GitHub permits dots in a repo name (``owner/repo.name``), so the repo
+# component must not exclude ``.`` -- only a trailing ``.git`` suffix is
+# stripped afterward, not during the match itself (#3663 review).
+_REPO_URL_RE = re.compile(r"github\.com[:/]([^/\s]+)/([^/\s]+?)/?$", re.I)
 
 
 def _basename(token: str) -> str:
     return os.path.basename(token.replace("\\", "/")).lower()
+
+
+def _parse_github_repo(url: str) -> str | None:
+    match = _REPO_URL_RE.search(url)
+    if not match:
+        return None
+    owner, repo = match.group(1), match.group(2)
+    if repo.lower().endswith(".git"):
+        repo = repo[: -len(".git")]
+    return f"{owner}/{repo}".lower()
 
 
 def target_repo_from_manifest(plugin_root: Path) -> str | None:
@@ -95,9 +106,9 @@ def target_repo_from_manifest(plugin_root: Path) -> str | None:
     for key in ("repository", "homepage"):
         url = manifest.get(key)
         if isinstance(url, str):
-            match = _REPO_URL_RE.search(url)
-            if match:
-                return f"{match.group(1)}/{match.group(2)}".lower()
+            repo = _parse_github_repo(url)
+            if repo:
+                return repo
     return None
 
 
@@ -115,8 +126,7 @@ def current_repo(cwd: str | None = None) -> str | None:
         return None
     if result.returncode != 0:
         return None
-    match = _REPO_URL_RE.search(result.stdout.strip())
-    return f"{match.group(1)}/{match.group(2)}".lower() if match else None
+    return _parse_github_repo(result.stdout.strip())
 
 
 def _split_statements(command: str) -> list[list[str]]:
@@ -214,8 +224,12 @@ def _extract_body_text(tokens: list[str]) -> str:
                 parts.append(_read_bounded(tokens[index + 1]))
                 matched = True
                 break
+            if token.startswith(flag + "="):
+                parts.append(_read_bounded(token[len(flag) + 1 :]))
+                matched = True
+                break
         if matched:
-            index += 2
+            index += 2 if token in FILE_BODY_FLAGS else 1
             continue
         # ``gh api ... -f body=VALUE`` / ``-F body=@path``.
         if token in {"-f", "-F"} and index + 1 < len(tokens):

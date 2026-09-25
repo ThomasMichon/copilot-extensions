@@ -70,6 +70,17 @@ def test_body_file_with_mention_is_denied(tmp_path: Path) -> None:
     assert guard.command_publishes_copilot_mention(cmd) is True
 
 
+def test_body_file_equals_form_with_mention_is_denied(tmp_path: Path) -> None:
+    """PR #3663 review: ``--body-file=PATH`` (the equals form gh also
+    accepts) was only ever scanned as a literal path string, not read as a
+    file -- a mention-bearing body file silently bypassed the guard."""
+    guard = _load_guard()
+    body_file = tmp_path / "body.md"
+    body_file.write_text("Please have @copilot take a look.\n", encoding="utf-8")
+    cmd = f'gh pr comment 3554 -R owner/repo --body-file="{body_file}"'
+    assert guard.command_publishes_copilot_mention(cmd) is True
+
+
 def test_semicolon_inside_quoted_body_does_not_truncate_the_scan() -> None:
     guard = _load_guard()
     cmd = 'gh pr comment 1 -R owner/repo --body "Fixed the bug; @copilot review"'
@@ -104,6 +115,18 @@ def test_target_repo_survives_a_git_suffix(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     assert guard.target_repo_from_manifest(tmp_path) == "someorg/some-repo"
+
+
+def test_target_repo_allows_a_dot_in_the_repo_name(tmp_path: Path) -> None:
+    """PR #3663 review: the repo-name capture excluded ``.``, so a real repo
+    with a dot in its name (GitHub permits this) silently disabled the
+    guard entirely (both sides returned None -> scope check always no-op)."""
+    guard = _load_guard()
+    (tmp_path / "plugin.json").write_text(
+        json.dumps({"repository": "https://github.com/someorg/repo.name"}),
+        encoding="utf-8",
+    )
+    assert guard.target_repo_from_manifest(tmp_path) == "someorg/repo.name"
 
 
 def test_current_repo_reads_the_git_remote(tmp_path: Path) -> None:
