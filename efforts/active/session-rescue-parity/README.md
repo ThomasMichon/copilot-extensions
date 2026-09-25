@@ -171,9 +171,16 @@ current map, 2026-09-25). Six libs are already vendored into **both**
 `--list`.) Adding a new shared lib is: create
 `plugins/agent-containers/libs/<new-lib>/` and
 `plugins/agent-codespaces/libs/<new-lib>/` with identical `src/` trees and
-matching `pyproject.toml` versions, add each consuming plugin's own
-`[tool.uv.sources] <new-lib> = { path = "libs/<new-lib>" }`; the guard picks
-it up automatically. `docs/patterns/README.md`'s `versioned-runtime`
+matching `pyproject.toml` versions, then in **each** consuming plugin's own
+`pyproject.toml` add **both** the distribution name to
+`[project].dependencies` (e.g. `"agent-<new-lib>"`) **and** a matching
+`[tool.uv.sources] agent-<new-lib> = { path = "libs/<new-lib>" }` entry --
+`[tool.uv.sources]` only controls how an *already-declared* dependency
+resolves; without the `[project].dependencies` entry too, the vendored
+package is never installed into a standalone marketplace environment and
+the new imports fail there even though a same-checkout dev run might not
+catch it. The guard picks
+it up automatically once both entries are present. `docs/patterns/README.md`'s `versioned-runtime`
 paragraph documents the same fan-out pattern for a single canonical source
 (`libs/versioned-runtime/versioned_runtime.py`) synced by a dedicated tool
 (`tools/sync-versioned-runtime.py`) rather than the plain byte-identical
@@ -273,7 +280,10 @@ itself did not specify phasing)_
       itself switches to consuming the vendored copy (no behavior change;
       existing tests must still pass unchanged).
 - [ ] Vendor the identical copy into `plugins/agent-codespaces/libs/`, wire
-      its `pyproject.toml`/`[tool.uv.sources]` entry, and confirm
+      its `pyproject.toml`'s **both** `[project].dependencies` entry and
+      matching `[tool.uv.sources]` entry (per Context's clarification --
+      `[tool.uv.sources]` alone does not install the package into a
+      standalone marketplace environment), and confirm
       `tools/check-vendored-libs-sync.py` passes.
 
 ### Phase 3 — CodeSpaces: non-destructive capture verb + liveness gate
