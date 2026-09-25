@@ -667,12 +667,58 @@ function Invoke-VersionedActivate {
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
     if (-not (Test-Path $py)) { return $true }
+    # A bare `import agent_worktrees` is NOT a sufficient health check: the
+    # `agent_worktrees` directory merely EXISTING makes it importable as a
+    # PEP 420 namespace package even when it holds zero `.py` files (e.g. an
+    # interrupted/partial `uv pip install` that never actually placed the
+    # package). That false pass let a broken slot get marked complete and
+    # activated with no working CLI. Importing the `__main__` submodule
+    # instead forces Python to resolve a real `__main__.py` and walk its full
+    # transitive import chain (config, project_state, the internal `libs/*`
+    # packages, etc.), so a partial install that dropped any of those pieces
+    # fails the gate here instead of silently activating.
+    #
+    # `import agent_worktrees.__main__` alone only exercises __main__'s EAGER
+    # imports -- the CLI defers ~35 submodules behind `_LAZY_DISPATCH_TABLE`/
+    # `_load_full_command_surface()`, so a slot missing one of those would
+    # still pass and only fail on its first real invocation. Call
+    # `_load_full_command_surface()` too so the completion marker means the
+    # complete CLI is importable, not just its entry point.
+    #
+    # Run with `-I` (isolated mode: ignores PYTHONPATH/other PYTHON* env vars
+    # AND excludes the working directory / script dir from sys.path) so a
+    # stale checkout's `src` dir or another on-disk `agent_worktrees` copy
+    # can't satisfy the import while $VenvPython points at the partial slot
+    # under test -- the explicit PYTHONPATH clear below is kept as
+    # defense-in-depth (matches the isolation already used by
+    # Register-ProjectEntry and the package-stamping probe below).
     $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-    & $VenvPython -c 'import agent_worktrees' 2>$null
+    $prevHealthPP = $env:PYTHONPATH
+    $env:PYTHONPATH = $null
+    $healthOut = & $VenvPython -I -c 'import agent_worktrees.__main__ as m; m._load_full_command_surface()' 2>&1
     $slotOk = ($LASTEXITCODE -eq 0)
+    $env:PYTHONPATH = $prevHealthPP
     $ErrorActionPreference = $prevEAP
     if (-not $slotOk) {
         Write-ServiceErr "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
+        if ($healthOut) { Write-ServiceErr "  $healthOut" }
+        # This slot may already carry a completion marker from an OLDER,
+        # less-strict installer run (dotfiles #7561): Test-SlotAlreadyComplete
+        # trusts a valid marker + matching payload hash and skips reinstalling,
+        # so without this the same stale-but-broken slot would keep failing
+        # this gate forever on every future run. Remove just the marker file
+        # (never the slot's other files -- safe even if this happens to be the
+        # CURRENTLY ACTIVE slot, since a JSON marker is never held open by a
+        # running interpreter the way its own module files can be) so a future
+        # run stops trusting it and either rebuilds it fresh or falls back to
+        # last-known-good (resolve_python's tiered fallback in
+        # versioned_runtime.py already treats a markerless slot as unhealthy).
+        # Filename matches versioned_runtime.py's own COMPLETE_MARKER constant.
+        $staleMarker = Join-Path $VenvDir '.install-complete.json'
+        if (Test-Path $staleMarker) {
+            Remove-Item $staleMarker -Force -ErrorAction SilentlyContinue
+            Write-ServiceChanged "Invalidated stale completion marker (versions/$SrcVersion)"
+        }
         return $false
     }
     Invoke-VersionedMarkComplete
