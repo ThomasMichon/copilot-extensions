@@ -479,7 +479,7 @@ _Pending._
   `tools/run-plugin-tests.py agent-codespaces --reinstall`. `ruff check`
   clean on every touched/new file (confirmed a pre-existing, unrelated
   ~17-finding baseline on `__main__.py` is unchanged by this diff).
-  Changefile added (minor -- new CLI verb).
+  Changefile added (patch, per CONTRIBUTING.md's default-to-patch guidance).
 - Next: open Phase 3's own PR, drive it through review/merge, then Phase 4
   (documentation-only, per Phase 1's consumer-owned scheduling decision)
   and Phase 5 (close-out).

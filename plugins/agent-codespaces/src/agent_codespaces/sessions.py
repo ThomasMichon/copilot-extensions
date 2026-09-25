@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import logging
 import os
 import string
@@ -425,8 +426,20 @@ def _capture_hold_reason(name: str, *, account: str | None) -> str | None:
     silently treated as *unheld*, which would defeat the whole point of this
     gate (review finding on the original cut of this function).
     """
-    from .lease import get_lease
+    from .lease import LEASE_FILE, get_lease
     from .pool import _holder_worktree_gone
+
+    if LEASE_FILE.exists():
+        # `lease.get_lease()`/`_read_leases()` intentionally degrade a
+        # corrupt/unreadable ``leases.json`` to ``{}`` for pool.py's
+        # display-only purposes -- exactly the "no lease" outcome this
+        # gate must never silently accept. Read it directly first so an
+        # unreadable store is caught HERE as an unknown-state defer,
+        # before ever calling into the degrade-safe helper.
+        try:
+            json.loads(LEASE_FILE.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            return f"could not confirm lease state (fail-closed): leases.json unreadable: {exc}"
 
     try:
         lease = get_lease(name)
@@ -544,6 +557,12 @@ def capture_codespace_sessions(
       periodic/advisory capture (session-rescue-parity Phase 1's recorded
       decision), identical in kind to what ``rescue-capture`` already
       accepts.
+    - **re-checks the hold status too, both immediately after acquiring the
+      SSH target lock and again after the pull completes.** A lease/claim
+      is acquired through the separate lease/coordination store, never this
+      ``TargetLock``, so a new holder can appear at any point up to and
+      including while the pull itself is in flight; a failed re-check is
+      treated the same as a found hold.
 
     Returns ``{ok, session_count, detail, deferred}``. Never raises.
     """
@@ -657,6 +676,23 @@ def capture_codespace_sessions(
                         f"session became {post_liveness.state!r} during the "
                         f"pull; discarding this capture rather than staging "
                         f"a possibly mid-write snapshot"
+                    ),
+                }
+            # Re-check the hold status too, not just liveness: a lease/claim
+            # is acquired through the lease/coordination store, not this SSH
+            # target lock, so a new holder can appear while the pull itself
+            # is in progress. Treat a failed re-check the same as a found
+            # hold -- defer rather than stage/push.
+            try:
+                post_hold_reason = _capture_hold_reason(name, account=account)
+            except Exception as exc:
+                post_hold_reason = f"could not confirm hold state after pull: {exc}"
+            if post_hold_reason is not None:
+                return {
+                    "ok": False, "deferred": True, "session_count": 0,
+                    "detail": (
+                        f"{post_hold_reason} (appeared during the pull); "
+                        f"discarding this capture rather than staging it"
                     ),
                 }
         finally:

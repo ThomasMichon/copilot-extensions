@@ -49,6 +49,28 @@ def test_capture_hold_reason_defers_on_local_lease(monkeypatch):
     assert "lease" in reason
 
 
+def test_capture_hold_reason_fails_closed_on_corrupt_lease_file(monkeypatch, tmp_path):
+    """`lease.get_lease()`/`_read_leases()` intentionally degrade a corrupt
+    ``leases.json`` to ``{}`` for pool.py's display-only purposes -- exactly
+    the "no lease" outcome this gate must never silently accept. A direct,
+    strict read of the raw file must catch this BEFORE ever calling the
+    degrade-safe helper, even though `get_lease()` itself (left real/
+    unmocked here) would otherwise happily return `None`."""
+    import agent_codespaces.lease as lease_mod
+    corrupt = tmp_path / "leases.json"
+    corrupt.write_text("{not valid json", encoding="utf-8")
+    monkeypatch.setattr(lease_mod, "LEASE_FILE", corrupt)
+
+    # Confirm get_lease() itself would silently swallow this (the exact
+    # blind spot the direct read closes).
+    assert lease_mod.get_lease("cs") is None
+
+    reason = sessions._capture_hold_reason("cs", account=None)
+    assert reason is not None
+    assert "fail-closed" in reason
+    assert "unreadable" in reason
+
+
 def test_capture_hold_reason_proceeds_on_orphaned_claim(monkeypatch, tmp_path):
     """An orphaned #897 claim (owning worktree positively gone) is not a
     live hold -- session-rescue-parity Phase 1's recorded exception."""
@@ -496,6 +518,69 @@ def test_capture_succeeds_on_idle_session(monkeypatch):
     assert res["ok"] is True
     assert res["deferred"] is False
     assert res["session_count"] == 3
+
+
+def test_capture_post_pull_hold_recheck_discards_late_appearing_hold(monkeypatch):
+    """A lease/claim is acquired through the lease/coordination store, not
+    the SSH target lock, so a new holder can appear while the pull itself
+    is in flight. The post-pull re-check must catch it and discard the
+    capture rather than staging/pushing it."""
+    import ssh_manager
+
+    class _FakeLock:
+        def __init__(self, *a, **k):
+            pass
+
+        def acquire(self, *a, **k):
+            return self
+
+        def release(self):
+            pass
+
+    class _Manager:
+        async def disconnect(self, name):
+            return None
+
+    monkeypatch.setattr(ssh_manager, "TargetLock", _FakeLock)
+    monkeypatch.setattr(ssh_manager, "ConnectionManager", lambda *a, **k: _Manager())
+    monkeypatch.setattr(
+        "agent_codespaces.account_binding.bound_account", lambda name: "acct",
+    )
+    monkeypatch.setattr(
+        "agent_codespaces.lifecycle.get_codespace_status_with_account",
+        lambda name, account: (True, "Available", "acct"),
+    )
+    monkeypatch.setattr("agent_codespaces.gh_account.token_for_account", lambda account: "tok")
+
+    # None (outer check), None (fenced pre-connect check), then a hold
+    # (post-pull check).
+    calls = iter([None, None, "a lease appeared mid-pull"])
+    monkeypatch.setattr(
+        sessions, "_capture_hold_reason", lambda name, *, account: next(calls),
+    )
+
+    async def _connect_ok(*a, **k):
+        return None
+
+    async def _probe_idle(manager, name, *, timeout):
+        return sessions.SessionLiveness("idle", [], [])
+
+    async def _pull_ok(*a, **k):
+        return b"not-empty"
+
+    def _stage_should_not_run(*a, **k):
+        raise AssertionError("must never stage/push once the post-pull hold recheck finds a hold")
+
+    monkeypatch.setattr(sessions, "_connect_with_retry", _connect_ok)
+    monkeypatch.setattr(sessions, "_probe_codespace_liveness", _probe_idle)
+    monkeypatch.setattr(sessions, "_pull_tar_bytes", _pull_ok)
+    monkeypatch.setattr(sessions, "_stage_and_push", _stage_should_not_run)
+
+    res = sessions.capture_codespace_sessions("cs", account=None)
+
+    assert res["ok"] is False
+    assert res["deferred"] is True
+    assert "appeared during the pull" in res["detail"]
 
 
 def test_capture_target_busy_defers(monkeypatch):
