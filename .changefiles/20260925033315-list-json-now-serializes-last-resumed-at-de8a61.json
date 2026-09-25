@@ -1,0 +1,9 @@
+{
+  "comment": "list --json now serializes last_resumed_at so the Worktree Picker's Recent section can sort by real recency-of-use",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

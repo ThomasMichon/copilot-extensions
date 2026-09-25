@@ -336,3 +336,19 @@ def test_worktree_to_dict_omits_session_bound_live_when_stale(tmp_path):
     rec = _rec("aaaa", path=str(tmp_path), bound_live=True, bound_live_at=_stale())
     d = cli._worktree_to_dict(rec)
     assert "session_bound_live" not in d
+
+
+# ── #3307 Phase 3: last_resumed_at feeds the Picker's Recent-section sort ──
+
+def test_worktree_to_dict_emits_last_resumed_at_when_set(tmp_path):
+    rec = _rec("aaaa", path=str(tmp_path))
+    rec.last_resumed_at = "2026-06-27T16:30:00"
+    d = cli._worktree_to_dict(rec)
+    assert d.get("last_resumed_at") == "2026-06-27T16:30:00"
+
+
+def test_worktree_to_dict_omits_last_resumed_at_when_never_resumed(tmp_path):
+    rec = _rec("aaaa", path=str(tmp_path))
+    rec.last_resumed_at = ""
+    d = cli._worktree_to_dict(rec)
+    assert "last_resumed_at" not in d

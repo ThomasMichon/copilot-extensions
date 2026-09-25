@@ -3110,6 +3110,41 @@ def test_bucket_sections_key_off_state():
     assert sorted(w["state"] for w in recent) == ["UNUSED", "WIP"]
 
 
+def test_bucket_recent_sorts_by_last_resumed_not_creation_age():
+    """#3307 Phase 3: Recent orders by most-recently-used
+    (``last_resumed_at``), not by ``started_at``/creation age. A worktree
+    created weeks ago but resumed an hour ago must sort ABOVE one created
+    yesterday and never resumed since."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    old_created_recently_used = derive.norm(
+        {"id": "x-old-created", "status": "active", "state": "wip",
+         "started_at": "2026-05-01T09:00:00",
+         "last_resumed_at": "2026-06-27T17:00:00"},
+        "m", "Win")
+    new_created_never_resumed = derive.norm(
+        {"id": "x-new-created", "status": "active", "state": "unused",
+         "started_at": "2026-06-26T17:00:00"},
+        "m", "Win")
+    _active, recent, _completed = derive.bucket(
+        [new_created_never_resumed, old_created_recently_used])
+    assert [w["id"] for w in recent] == ["x-old-created", "x-new-created"]
+
+
+def test_bucket_recent_falls_back_to_started_at_when_never_resumed():
+    """No ``last_resumed_at`` at all (never resumed since creation) falls
+    back to ``started_at``, same as the pre-Phase-3 behavior -- so two
+    never-resumed rows still sort newest-created-first."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    older = derive.norm(
+        {"id": "x-older", "status": "active", "state": "wip",
+         "started_at": "2026-06-25T09:00:00"}, "m", "Win")
+    newer = derive.norm(
+        {"id": "x-newer", "status": "active", "state": "wip",
+         "started_at": "2026-06-26T09:00:00"}, "m", "Win")
+    _active, recent, _completed = derive.bucket([older, newer])
+    assert [w["id"] for w in recent] == ["x-newer", "x-older"]
+
+
 def test_sessionless_flag_only_when_count_known_zero():
     """#1026: sessionless is flagged only when session_count is present and 0,
     with no turns / mux ownership and not a managed kind."""
