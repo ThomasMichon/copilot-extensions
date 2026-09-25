@@ -7,7 +7,7 @@
 - **Scope:** branch (a per-plugin vision under the
   [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-09-02
+- **Last revised:** 2026-09-25
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's `plugins/agent-dispatch/` (skill `agent-dispatch`, `pick-and-claim`)
 
@@ -150,16 +150,26 @@ claim candidates remain observably audited rather than silently skipped.
 
 ### The lifecycle
 A task moves through a small set of states: **proposed → queued → claimed**
-(held for evaluation) → **started** (under active work) → **completed**, with an
-**abandoned** terminal path for duplicates and dropped priorities. The two entry
-states are two deliberate operations: to **propose** is to draft a task — its
-concise **goal**, its detailed **goal payload**, the capabilities it **requires**,
-the work it **rejects**, and its other filter attributes — and get back a **task
-id**, *without* making it claimable; to **queue** it moves **proposed → queued**,
-at which point the layer **binds it to an agent whose pool filter accepts it**.
-The **claim→start** gap is then a deliberate **evaluation window**: a worker holds
+(held for evaluation) → **started** (under active work) → **completed** →
+**confirmed**, with an **abandoned** terminal path reachable from any
+non-terminal state for duplicates, dropped priorities, or a completion claim
+that doesn't hold up. The two entry states are two deliberate operations: to
+**propose** is to draft a task — its concise **goal**, its detailed **goal
+payload**, the capabilities it **requires**, the work it **rejects**, and its
+other filter attributes — and get back a **task id**, *without* making it
+claimable; to **queue** it moves **proposed → queued**, at which point the
+layer **binds it to an agent whose pool filter accepts it**. The
+**claim→start** gap is then a deliberate **evaluation window**: a worker holds
 a queued task exclusively while it decides whether to accept, decline (returning it
 with a "not me" so it isn't re-offered the same task), or retire it as a duplicate.
+**completed** is likewise a deliberate gap rather than a true terminal: it is
+the worker's *claim* that the goal is met, and the task only reaches the real
+terminal, **confirmed**, once that claim is corroborated — automatically, by
+an evaluator, for emitter-driven work, or explicitly, by whoever is tracking
+it, for self-tracked work with none (see *verify-the-completion-claim*). A
+completed-but-unconfirmed task may instead be **re-queued** — returning to
+**queued** with its progress and any newly added steering carried forward —
+or **abandoned**, exactly like any other non-terminal task.
 
 ### The recipe — an emitter/evaluator template
 The common **shapes** of long-running agentic work ship with the layer as named,
@@ -206,7 +216,30 @@ lifecycle, a standing domain automates a whole cycle without the layer needing a
 bespoke module per domain. The boundary is ownership — a task produced **through an
 emitter** gets that emitter's evaluator run over it automatically; a task
 **proposed and queued by hand, with no emitter behind it**, has no evaluator and is
-**tracked by its caller** (see *emitter-tasks-are-evaluated-mine-are-tracked*).
+**tracked by its caller** (see *emitter-tasks-are-evaluated-mine-are-tracked*). A
+human operator authoring a task **by hand** through the layer's own surfaces —
+not scripting an emitter — is simply the caller in this same sentence: the
+manual path is not a special mode, it is *this* path, walked by a person instead
+of a domain's automation. Closing that loop is what the **monitor** and
+**confirmed** primitives below exist for.
+
+### The monitor — a suspend's resolution handler
+Just as an **evaluator** is the emitter's companion handler for a task's
+*lifecycle*, a **monitor** is a **suspend's** companion handler for a *wait*: it
+names the specific, externally-observable condition that resolves the wait — a
+pull request merged or closed, a check/build run finishing, a scheduled time
+reached, a webhook posted — and it is the thing that actually watches for that
+condition and wakes the worker, rather than the layer trusting an unattended
+idle to eventually get noticed. A monitor is drawn from a **small, known
+vocabulary** of resolvable conditions, the same way a recipe is drawn from a
+small, known vocabulary of loop shapes — a wait is only ever "suspend on
+*this specific, checkable thing*," never "suspend and something will surely
+follow up." This is what makes *hibernate-the-wait*'s promise (no running
+process while parked, resumed the moment its condition resolves) actually
+**collectable** rather than aspirational: the monitor is the concrete
+component making the resolution observable, exactly as the evaluator is the
+concrete component making a lifecycle event actionable. A wait with no
+matching monitor is not suspendable — see *suspension-requires-a-monitor*.
 
 ## Features
 
@@ -644,7 +677,27 @@ rather than silently accepted, so a worker that declares done without doing the
 work cannot quietly close a goal. This is *complete-means-done* made defensive:
 the worker still self-judges completion, but a goal's closure is corroborated, not
 assumed. (A plain one-shot task with no goal keeps the simple deferred-completion
-contract.)
+contract.) Corroboration is what turns **completed** into **confirmed**
+(*The lifecycle*): for emitter-driven work the evaluator runs this check
+automatically the moment completion is asserted; for **self-tracked** work with
+no evaluator, there is nothing else to run it — the caller tracking the task
+*is* the verifier, and a completed-but-unconfirmed self-tracked task sits
+waiting for exactly that person's review. Reviewing is one of three honest
+acts, never a fourth silent one: **confirm** it (the claim holds, close as
+confirmed), **re-queue** it (the claim doesn't hold, or more is wanted — back
+to queued, progress and any newly given steering carried forward), or
+**abandon** it (the claim doesn't matter anymore). Leaving it unreviewed
+indefinitely is a legitimate resting state — see *self-tracked-review-is-not-a-lane*
+— not a silent default that quietly counts as done.
+
+### self-tracked-review-is-not-a-lane
+A **completed-but-unconfirmed** task holds no lane and blocks no pool slot —
+the worker that completed it has already finished and released its claim; only
+the *review* remains outstanding, and review is a caller act, not agent work.
+An arbitrary backlog of unconfirmed completions may sit for as long as the
+caller needs before being confirmed, re-queued, or abandoned, exactly the way
+a *queued*, not-yet-embodied task may sit before a worker binds to it — waiting
+for review is cheap, unlike waiting for a worker.
 
 ### resume-the-goal-not-restart-it
 When a worker owning a goal-bearing task is confirmed gone (*liveness-not-lease*),
@@ -705,6 +758,24 @@ The next Resume or steer reattaches that exact ACP session in the same worktree;
 ordinary payload, revision, or target movement never creates a replacement
 session or workspace. Only confirmed context exhaustion permits an explicit
 handoff to a successor session within the same task/worktree lineage.
+
+### suspension-requires-a-monitor
+Settling a turn without completing is not, by itself, a **wait** — it is only
+ever legitimately parked cost-free (*hibernate-the-wait*) when a registered
+**monitor** (*The monitor*) recognizes the specific condition the worker is
+waiting on. A worker that settles a turn with unfinished work and states **no**
+monitored wait has not suspended in the sense this layer means: supervision
+still cold-parks the *session* (*suspend-idle-resume-same-session* is a
+process-lifecycle mechanism, not a verdict on the task), but the *task* is
+treated as a **stall**, not a legitimate hold — it falls straight into
+*nudge-before-recover*'s ladder like any other quiet-but-live worker, promptly
+nudged rather than left to sit indefinitely as if something were watching it.
+This is the line between "waiting on an externality" (a monitor-backed wait,
+free of charge, genuinely watched) and an implicit "end of turn" masquerading
+as one (an unmonitored idle nobody is actually watching) — a worker always has
+a named next act: keep working, **complete** (splitting remaining scope into a
+follow-up task if needed), **suspend** against a stated, monitored wait, or
+**abandon**. Falling silent with none of those is never a fourth option.
 
 ### repo-lane-isolation
 Every task belongs to the **repo lane** of the agent that produced it, and the
@@ -871,6 +942,10 @@ does **not** quietly undo it.
   names, transport, storage engine, on-disk format, endpoints, or command
   grammar. Binding detail of that kind belongs to the reality docs or a future
   `specifications` layer.
+- **Not a fixed monitor taxonomy.** This vision does not enumerate the closed
+  set of monitor kinds a deployment ships (which webhook shapes, which CI
+  providers, which schedule grammar) — that catalog is reality-doc detail; the
+  vision fixes only that a monitor must name a specific, checkable condition.
 
 ## See Also
 
@@ -881,6 +956,9 @@ does **not** quietly undo it.
 - Child leaf: [repository-issue-loops](repository-issue-loop/README.md) — the
   backlog-batch archetype's declarative adoption, provider-neutral capability,
   and declarative worker-identity contract.
+- Child leaf: [Tasks-pane UX](tasks-pane-ux/README.md) — the operator surface
+  that realizes manual, no-emitter task authoring and the completed→confirmed
+  review loop (*New Task* composer, *Completion Review* card).
 - Sibling leaf: [agent-ssh](../agent-ssh/README.md) — the connectivity layer this
   layer's cross-machine reach rides on.
 - Consumer: [agent-logger](../agent-logger/README.md) — the **chronicler**, a
@@ -894,6 +972,20 @@ does **not** quietly undo it.
 
 ## Provenance
 
+- **2026-09-25** — Added **the monitor** (a suspend's companion resolution
+  handler, paired with the evaluator) and **confirmed** as the true lifecycle
+  terminal beyond a provisional **completed** (*verify-the-completion-claim*
+  extended, *self-tracked-review-is-not-a-lane*, *suspension-requires-a-monitor*).
+  Mined from an operator observation that an external, simpler force-fed
+  task-queue wrapper was somehow proving *more* reliable than this layer's own
+  richer machinery: its workers never suspend at all (they run to completion
+  or die), so it never accumulates the failure modes this revision closes —
+  a stalled "end of turn" masquerading as a legitimate wait, and a queue that
+  can't tell "the worker finished" from "the worker's claim was ever checked."
+  The fix generalizes rather than removing the richer machinery: suspension
+  stays available, but only for a *named, watched* wait; and self-tracked
+  completion (the default for hand-authored, no-emitter work) gets an actual
+  closing act instead of silently counting a claim as done.
 - **2026-09-21** — Added *cross-machine-federation* and
   *satellite-status-is-pushed-not-polled-and-gated-closed*: retroactive
   reconciliation for the opt-in federation runtime (rendezvous discovery,
