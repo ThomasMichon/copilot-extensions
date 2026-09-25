@@ -98,19 +98,39 @@ def _validate_summary(summary: dict) -> dict:
     return summary
 
 
-def _resolve_command() -> str:
-    command = shutil.which("agent-worktrees")
+def _resolve_command(preferred: str | None = None) -> list[str]:
+    if preferred:
+        if (
+            os.name == "nt"
+            and os.path.splitext(preferred)[1].casefold() == ".ps1"
+        ):
+            host = shutil.which("pwsh.exe") or shutil.which("powershell.exe")
+            if not host:
+                raise KnowledgePluginError(
+                    f"resolved command {preferred!r} is a PowerShell script "
+                    "but neither pwsh.exe nor powershell.exe was found on "
+                    "PATH to host it"
+                )
+            return [
+                host, "-NoProfile", "-NoLogo",
+                "-ExecutionPolicy", "Bypass", "-File", preferred,
+            ]
+        return [preferred]
+    # Legacy compatibility fallback: only reached when no caller (bind_knowledge.py's
+    # --agent-worktrees-path, or this script's own --agent-worktrees-path) supplied
+    # the session-catalog-resolved command.
+    command = shutil.which("agent-worktrees")  # marketplace-isolation: allow legacy-compatibility-delegate
     if command is None:
         raise KnowledgePluginError(
             "agent-worktrees executable was not found on PATH; install or "
             "enable the agent-worktrees plugin"
         )
-    return command
+    return [command]
 
 
-def _delegate(arguments: list[str]) -> dict:
+def _delegate(arguments: list[str], agent_worktrees_command: str | None = None) -> dict:
     command = [
-        _resolve_command(),
+        *_resolve_command(agent_worktrees_command),
         "knowledge",
         "compose-plugins",
         *arguments,
@@ -164,6 +184,8 @@ def _delegate(arguments: list[str]) -> dict:
 def assemble(
     harness_path: os.PathLike[str] | str,
     knowledge_path: os.PathLike[str] | str,
+    *,
+    agent_worktrees_command: str | None = None,
 ) -> dict:
     """Compose plugins for an explicit harness/knowledge checkout pair."""
     return _delegate(
@@ -172,13 +194,14 @@ def assemble(
             os.fspath(harness_path),
             "--knowledge-path",
             os.fspath(knowledge_path),
-        ]
+        ],
+        agent_worktrees_command,
     )
 
 
-def assemble_from_pair() -> dict:
+def assemble_from_pair(*, agent_worktrees_command: str | None = None) -> dict:
     """Compose plugins using the pair containing the current directory."""
-    return _delegate([])
+    return _delegate([], agent_worktrees_command)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -193,18 +216,32 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--knowledge-path")
     parser.add_argument("--from-pair", action="store_true")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument(
+        "--agent-worktrees-path",
+        help=(
+            "Resolved agent-worktrees command (e.g. the session command "
+            "catalog's argv[0]). Falls back to an ambient PATH lookup "
+            "when omitted."
+        ),
+    )
     args = parser.parse_args(argv)
 
     try:
         if args.from_pair:
-            summary = assemble_from_pair()
+            summary = assemble_from_pair(
+                agent_worktrees_command=args.agent_worktrees_path
+            )
         else:
             if not args.harness_path or not args.knowledge_path:
                 parser.error(
                     "--harness-path and --knowledge-path are required unless "
                     "--from-pair is given"
                 )
-            summary = assemble(args.harness_path, args.knowledge_path)
+            summary = assemble(
+                args.harness_path,
+                args.knowledge_path,
+                agent_worktrees_command=args.agent_worktrees_path,
+            )
         summary = _validate_summary(summary)
     except KnowledgePluginError as exc:
         if args.json:

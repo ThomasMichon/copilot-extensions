@@ -851,6 +851,54 @@ def test_bind_assembles_plugins_when_paths_known(tmp_path: Path, monkeypatch):
     assert summary["plugins"]["count"] == 1
 
 
+def test_bind_threads_agent_worktrees_path_into_assemble(
+    tmp_path: Path, monkeypatch
+):
+    """bind()'s resolved --agent-worktrees-path must reach assemble()'s
+    subprocess call too, not just win over PATH for the direct calls above
+    it -- otherwise assembly could silently select a different cell's
+    ambient agent-worktrees install."""
+    home = tmp_path / "home"
+    harness = tmp_path / "harness"
+    harness.mkdir()
+    knowledge = tmp_path / "knowledge"
+    (knowledge / ".ai").mkdir(parents=True)
+    (knowledge / ".github" / "copilot").mkdir(parents=True)
+    (knowledge / ".github" / "copilot" / "settings.json").write_text(json.dumps({
+        "extraKnownMarketplaces": {"kn": {"source": {"source": "directory", "path": "./.ai"}}},
+        "enabledPlugins": {"skill@kn": True},
+    }), encoding="utf-8")
+
+    overlay = harness / ".github" / "copilot" / "settings.local.json"
+    summary = {
+        "action": "no-op", "paired": False, "changed": False, "count": 0,
+        "settings_local": str(overlay), "harness_path": str(harness),
+        "knowledge_path": str(knowledge), "marketplaces": [],
+        "enabled_plugins": [], "conflicts": {"marketplaces": [], "enabled_plugins": []},
+        "pair_error": "not paired",
+    }
+    resolved = str(tmp_path / "right-cell" / "agent-worktrees")
+    commands = []
+
+    def fake_run(command, **_kwargs):
+        if command[0] == "git":
+            return subprocess.CompletedProcess(command, 2, "", "")
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, json.dumps(summary), "")
+
+    # An ambient PATH match that must NOT be selected once an explicit
+    # agent_worktrees_path is supplied.
+    monkeypatch.setattr(shutil, "which", lambda _name: str(tmp_path / "wrong-cell" / "agent-worktrees"))
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    bk.bind("citadel-harness", "kn-repo", str(knowledge), home=home,
+             harness_path=str(harness), agent_worktrees_path=resolved)
+
+    compose_commands = [c for c in commands if "compose-plugins" in c]
+    assert compose_commands, commands
+    assert all(c[0] == resolved for c in compose_commands), compose_commands
+
+
 def test_bind_skips_assembly_without_harness_path(tmp_path: Path):
     home = tmp_path / "home"
     summary = bk.bind("h", "k", "C:/k", home=home)  # no harness_path
