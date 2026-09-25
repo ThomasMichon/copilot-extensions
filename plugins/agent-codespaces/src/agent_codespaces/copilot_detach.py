@@ -34,6 +34,20 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from venue_copilot import (
+    MAX_SEED_CHARS,  # noqa: F401 -- re-exported: callers/tests read detach.MAX_SEED_CHARS
+    _TRUST_FOLDER,  # noqa: F401 -- re-exported for the trust-folder snippet test
+    await_claim as _await_claim,
+    bridge_probe_script,
+    last_json,
+    observe_commands,
+    read_seed,
+    reserve_with_retry,
+    seed_delivery,
+    trust_folder_command,
+    with_new_session,
+)
+
 _BUSY_EXIT = 75
 _COORDINATION_EXIT = 78
 _RESERVATION_TTL = 900.0  # generous: venue prep + first-run provisioning + seed wait
@@ -42,31 +56,6 @@ _RESERVE_RETRY_WINDOW = 90.0
 
 def _progress(stage: str, detail: str = "") -> None:
     print(f"[DETACH] {stage}{': ' + detail if detail else ''}", file=sys.stderr, flush=True)
-
-
-# The seed travels inside the remote command line; a Windows host caps a
-# process command line at ~32K characters, so refuse clearly well below that.
-MAX_SEED_CHARS = 24_000
-
-
-def read_seed(args: argparse.Namespace) -> str | None:
-    """The seed from ``--seed`` or ``--seed-file`` (``-`` = stdin)."""
-    path = getattr(args, "seed_file", None)
-    if path and getattr(args, "seed", None):
-        raise ValueError("--seed and --seed-file are mutually exclusive")
-    if not path:
-        seed = getattr(args, "seed", None)
-    elif path == "-":
-        seed = sys.stdin.read()
-    else:
-        with open(path, encoding="utf-8") as fh:
-            seed = fh.read()
-    if seed and len(seed) > MAX_SEED_CHARS:
-        raise ValueError(
-            f"seed is {len(seed)} characters (max {MAX_SEED_CHARS}); put the "
-            "details in a file the session can read and seed a short pointer"
-        )
-    return seed or None
 
 
 def _codespace(name: str) -> Any:
@@ -145,6 +134,7 @@ def _remote(
 
 _CONNECT_ATTEMPTS = 2
 _LAUNCH_ATTEMPTS = 2
+_last_json = last_json
 
 
 def _transient(text: str) -> bool:
@@ -157,31 +147,6 @@ def _is_transient_result(result: Any) -> bool:
     from ssh_manager import is_transient_ssh_failure
 
     return is_transient_ssh_failure(result)
-
-
-# `embody` types its seed into the TUI with `tmux send-keys`, which is only safe
-# for one line (a newline would submit a partial prompt). A multi-line or long
-# task is therefore written to a file on the venue and seeded as a one-line
-# pointer; the file also stays re-readable by the session after a resume.
-_SEED_INLINE_MAX = 400
-_SEED_DIR = "$HOME/.agent-bridge/seeds"
-
-
-_SESSION_SELECTORS = ("--resume", "-r", "--continue", "--session-id")
-
-
-def with_new_session(copilot_args: list[str]) -> list[str]:
-    """Start a *new* Copilot session unless the caller chose one to resume.
-
-    A plain launch on a previously used venue opens Copilot's "choose sessions
-    to restore" picker, which nobody is there to dismiss; an explicit new
-    ``--session-id`` starts fresh deterministically.
-    """
-    if any(a.split("=", 1)[0] in _SESSION_SELECTORS for a in copilot_args):
-        return list(copilot_args)
-    import uuid
-
-    return [*copilot_args, f"--session-id={uuid.uuid4()}"]
 
 
 def parse_reverse_forwards(specs: list[str]) -> dict[int, int]:
@@ -231,50 +196,13 @@ def parse_local_forwards(specs: list[str]) -> dict[int, int]:
 
 def _send_refs(name: str, upload: tuple[str, bytes, list[tuple[str, int]]]) -> str | None:
     """Copy one reference batch into the venue; the worker-facing note, or ``None``."""
-    from .venue_refs import refs_note
+    from venue_copilot.refs import send_refs
 
-    command, payload, files = upload
-    _progress("refs", f"copying {len(files)} reference file(s) to the venue")
-    result = _remote(name, command, timeout=600.0, input_bytes=payload)
-    if result is None or result[0] != 0 or not result[1].strip():
-        _progress("refs-failed", (result[2] if result else "transport failure").strip()[-500:])
-        return None
-    return refs_note(result[1].strip().splitlines()[-1], files)
-
-
-def seed_delivery(seed: str | None, scope: str) -> tuple[str | None, str]:
-    """``(seed_to_type, shell_prefix)`` -- the prefix stages a file when needed."""
-    if not seed or ("\n" not in seed.strip() and len(seed) <= _SEED_INLINE_MAX):
-        return (seed.strip() if seed else None), ""
-    safe = "".join(c if c.isalnum() or c in "-._" else "-" for c in scope)
-    path = f"{_SEED_DIR}/{safe}-{int(time.time())}.md"
-    prefix = f'mkdir -p "{_SEED_DIR}" && printf %s {shlex.quote(seed)} > "{path}" && '
-    pointer = (
-        f"Read the task file {path.replace('$HOME', '~')} now and carry it out "
-        "exactly as written; re-read it whenever you need the instructions again."
+    return send_refs(
+        lambda command, stdin: _remote(name, command, timeout=600.0, input_bytes=stdin),
+        upload,
+        _progress,
     )
-    return pointer, prefix
-
-
-# Nobody is at a detached session's terminal to answer Copilot's first-run
-# "Confirm folder trust" dialog (and its menu caret reads as the input prompt to
-# `embody`'s readiness check). Dispatching work into the checkout implies
-# trusting it, so record exactly that folder in Copilot's own `trustedFolders`
-# first -- keeping its `//` header, never rewriting a file that does not parse.
-_TRUST_FOLDER = (
-    "python3 -c 'import json,os,sys\n"
-    "p=os.path.expanduser(\"~/.copilot/config.json\")\n"
-    "head,body=[],[]\n"
-    "if os.path.exists(p):\n"
-    "    for line in open(p).read().splitlines():\n"
-    "        (head if not body and line.lstrip().startswith(\"//\") else body).append(line)\n"
-    "try: d=json.loads(chr(10).join(body)) if body else {}\n"
-    "except Exception: sys.exit(0)\n"
-    "t=d.setdefault(\"trustedFolders\",[])\n"
-    "t.append(sys.argv[1]) if sys.argv[1] not in t else None\n"
-    "os.makedirs(os.path.dirname(p),exist_ok=True)\n"
-    "open(p,\"w\").write(chr(10).join(head+[json.dumps(d,indent=2)])+chr(10))' "
-)
 
 
 # A fresh CodeSpace can carry the agent-worktrees plugin payload (staged by
@@ -292,11 +220,6 @@ _VENUE_TOOLING = (
 )
 
 
-def trust_folder_command(folder: str) -> str:
-    """Shell snippet adding ``folder`` to the venue's Copilot ``trustedFolders``."""
-    return _TRUST_FOLDER + shlex.quote(folder)
-
-
 def _pane_tail(name: str, mux: str, lines: int = 40) -> str:
     got = _remote(
         name, f"tmux capture-pane -p -t {shlex.quote('=' + mux + ':')} 2>/dev/null | tail -n {lines}",
@@ -311,11 +234,7 @@ def _bridge_path_ok(name: str, port: int) -> bool:
     alone does not prove its remote bind succeeded) and that the provisioned
     token is accepted -- i.e. the session will be able to register.
     """
-    probe = (
-        "t=$(sed -n 's/^[[:space:]]*token:[[:space:]]*//p' ~/.agent-bridge/auth.yaml | tr -d \"'\\\"\"); "
-        f"curl -fsS -m 5 -o /dev/null -H \"Authorization: Bearer $t\" "
-        f"http://127.0.0.1:{int(port)}/api/v1/live-sessions"
-    )
+    probe = bridge_probe_script(port)
     got = None
     for attempt in range(_PROBE_ATTEMPTS):
         got = _remote(name, probe, timeout=30.0)
@@ -391,58 +310,22 @@ def _commands(plan: dict[str, Any], session_id: str, effort: str | None = None) 
     # the CodeSpace's claim refuses them as busy.
     claim = f" --effort {shlex.quote(effort)}" if effort else ""
     return {
-        "status": f"agent-bridge --json live-sessions resolve --handle {session_id}",
-        "observe": f"agent-bridge result {session_id} --json --max-items 5 --max-text-chars 2000",
-        "nudge": f"agent-bridge send {session_id} \"<message>\" --no-wait",
+        **observe_commands(session_id),
         "attach": f"agent-codespaces copilot {cs}{claim}",
         "stop": f"agent-codespaces copilot {cs} --stop{claim}",
     }
 
 
 def _reserve(plan: dict[str, Any]) -> dict[str, Any]:
-    from venue_copilot import VenueCopilotError, reserve_cli_mode
-
-    deadline = time.monotonic() + _RESERVE_RETRY_WINDOW
-    while True:
-        try:
-            return reserve_cli_mode(
-                plan["scope_id"], ttl_seconds=_RESERVATION_TTL, venue=plan["venue"],
-            )
-        except VenueCopilotError as exc:
-            if "reservation_active" not in str(exc) or time.monotonic() >= deadline:
-                raise
-            _progress("waiting", "another launch on this CodeSpace holds the reservation")
-            time.sleep(5.0)
-
-
-def _await_claim(scope: str, reservation_id: str, timeout: float) -> str | None:
-    from venue_copilot import VenueCopilotError, get_cli_mode_reservation
-
-    deadline = time.monotonic() + timeout
-    while True:
-        try:
-            row = get_cli_mode_reservation(scope)
-        except VenueCopilotError:
-            row = {}
-        if row.get("reservation_id") == reservation_id and row.get("claimed_by_session_id"):
-            return str(row["claimed_by_session_id"])
-        if time.monotonic() >= deadline:
-            return None
-        time.sleep(3.0)
-
-
-def _last_json(text: str) -> dict[str, Any]:
-    """The last complete JSON object in ``text`` (embody may pretty-print)."""
-    start = text.rfind("{")
-    while start != -1:
-        try:
-            value = json.loads(text[start:])
-            if isinstance(value, dict):
-                return value
-        except ValueError:
-            pass
-        start = text.rfind("{", 0, start)
-    return {}
+    return reserve_with_retry(
+        plan["scope_id"],
+        plan["venue"],
+        ttl_seconds=_RESERVATION_TTL,
+        retry_window=_RESERVE_RETRY_WINDOW,
+        on_wait=lambda: _progress(
+            "waiting", "another launch on this CodeSpace holds the reservation",
+        ),
+    )
 
 
 def _fail(message: str, plan: dict[str, Any], **extra: Any) -> int:
@@ -484,7 +367,7 @@ def cmd_detach(
         return _fail(str(exc), plan)
     ref_files = list(getattr(args, "ref_files", None) or [])
     if ref_files:
-        from .venue_refs import RefFileError, build_refs_upload, batch_id
+        from venue_copilot.refs import RefFileError, build_refs_upload, batch_id
 
         try:
             refs_upload = build_refs_upload(ref_files, batch_id(plan["scope_id"]))
@@ -666,7 +549,7 @@ def cmd_detach(
         refs_delivered = None
         if refs_note_text:
             # A new session got the note in its seed; a running one is told now.
-            from .venue_refs import deliver_note
+            from venue_copilot.refs import deliver_note
 
             refs_delivered = "seed" if created else (
                 "message" if deliver_note(session_id, refs_note_text) else "failed"

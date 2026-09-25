@@ -584,7 +584,7 @@ def test_ref_files_are_copied_before_launch_and_named_in_the_seed(seams, tmp_pat
 
 
 def test_ref_files_for_a_running_session_are_sent_as_a_message(seams, tmp_path, monkeypatch, capsys):
-    from agent_codespaces import venue_refs
+    from venue_copilot import refs as venue_refs
 
     sent = []
     monkeypatch.setattr(venue_refs, "deliver_note", lambda sid, note: sent.append((sid, note)) or True)

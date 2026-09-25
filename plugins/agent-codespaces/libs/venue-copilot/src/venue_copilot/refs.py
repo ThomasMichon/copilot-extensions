@@ -7,7 +7,7 @@ checkout (so it is never committed) and the worker is told where it is, in its
 seed (new session) or in a message (running session).
 
 The transfer is the same egress-free lane plugin staging uses
-(:func:`plugin_staging.build_stage_command`): tar+gzip in memory, base64 over
+(agent-codespaces' plugin staging): tar+gzip in memory, base64 over
 the SSH exec channel's **stdin**, so the command line stays tiny.
 """
 from __future__ import annotations
@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import tarfile
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 REFS_ROOT = "$HOME/.agent-bridge/refs"
@@ -103,14 +104,37 @@ def batch_id(scope: str) -> str:
     return f"{safe}-{time.strftime('%Y%m%d-%H%M%S')}"
 
 
+def upload_for(raw_paths: list[str], scope: str) -> tuple[str, bytes, list[tuple[str, int]]] | None:
+    """The batch upload for a session's ``--ref-file`` paths, or ``None`` when none."""
+    return build_refs_upload(list(raw_paths), batch_id(scope)) if raw_paths else None
+
+
+def send_refs(
+    run_input: Callable[[str, bytes], tuple[int, str, str] | None],
+    upload: tuple[str, bytes, list[tuple[str, int]]],
+    progress: Callable[[str, str], None],
+) -> str | None:
+    """Copy one batch into the venue with ``run_input(command, stdin)``.
+
+    Returns the worker-facing note, or ``None`` when the copy failed.
+    """
+    command, payload, files = upload
+    progress("refs", f"copying {len(files)} reference file(s) to the venue")
+    result = run_input(command, payload)
+    if result is None or result[0] != 0 or not result[1].strip():
+        progress("refs-failed", ((result[2] or f"exit {result[0]}") if result else "transport failure").strip()[-500:])
+        return None
+    return refs_note(result[1].strip().splitlines()[-1], files)
+
+
 def deliver_note(session_id: str, note: str, *, run=subprocess.run) -> bool:
     """Tell a running session about new reference files (over stdin; never raises)."""
     bridge = shutil.which("agent-bridge") or "agent-bridge"
     try:
         result = run(
-            [bridge, "send", session_id, "--prompt-file", "-", "--no-wait"],
-            input=note, capture_output=True, text=True,
+            [bridge, "send", session_id, "--prompt-file", "-", "--no-wait", "--steer"],
+            input=note, capture_output=True, text=True, timeout=60,
         )
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         return False
     return getattr(result, "returncode", 1) == 0
