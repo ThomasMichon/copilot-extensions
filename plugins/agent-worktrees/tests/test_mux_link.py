@@ -701,6 +701,7 @@ def test_push_key_requires_project_worktree_id_and_integer_mapping_revision():
         {"project": "proj", "worktree_id": "wt-1"},
         {"project": "proj", "worktree_id": "wt-1", "mapping_revision": "1"},
         {"project": "proj", "worktree_id": "wt-1", "mapping_revision": True},
+        {"project": "proj", "worktree_id": "wt-1", "mapping_revision": -1},
     ):
         try:
             mux_link._push_key(bad)
@@ -708,6 +709,22 @@ def test_push_key_requires_project_worktree_id_and_integer_mapping_revision():
         except ValueError:
             raised = True
         assert raised, bad
+
+
+def test_push_key_rejects_a_negative_mapping_revision():
+    """Copilot review finding: without this, an invalid negative-revision
+    push would still reach the daemon, whose own _normalize_entry rejects
+    it -- but that exception is swallowed by the wire handler's broad
+    `except Exception: return`, so the caller only ever sees the generic
+    DaemonUnavailable/fallback path instead of an immediate, specific
+    error. _push_key must reject it before the push ever reaches the wire,
+    keeping the client and daemon contracts aligned."""
+    try:
+        mux_link._push_key(_obs(revision=-1))
+        raised = False
+    except ValueError:
+        raised = True
+    assert raised
 
 
 def test_mux_live_via_daemon_concurrent_different_revisions_never_coalesce():

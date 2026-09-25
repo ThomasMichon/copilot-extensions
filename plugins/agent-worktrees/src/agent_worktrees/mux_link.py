@@ -633,8 +633,16 @@ def _push_key(payload: dict) -> str:
     coalescing contract intends.
 
     Raises ``ValueError`` for a payload missing any of the three fields,
-    mirroring :func:`_normalize_entry`'s own required-field validation so a
-    caller finds out before ever reaching the wire.
+    or carrying a negative ``mapping_revision`` -- mirroring
+    :func:`_normalize_entry`'s own required-field/non-negative-revision
+    validation so a caller finds out immediately, before ever reaching the
+    wire (Copilot review finding: without this, an invalid negative-
+    revision push would still reach the daemon, whose own
+    ``_normalize_entry`` rejects it -- but the resulting exception inside
+    ``compute()`` is swallowed by the wire handler's broad ``except
+    Exception: return``, so the caller only ever sees the generic
+    ``DaemonUnavailable``/fallback path instead of an immediate, specific
+    error).
     """
     project = payload.get("project")
     worktree_id = payload.get("worktree_id")
@@ -645,6 +653,8 @@ def _push_key(payload: dict) -> str:
         raise ValueError("mux-live-v1 push payload missing 'worktree_id'")
     if isinstance(revision, bool) or not isinstance(revision, int):
         raise ValueError("mux-live-v1 push payload requires an integer mapping_revision")
+    if revision < 0:
+        raise ValueError("mux-live-v1 push payload mapping_revision must be non-negative")
     # Length-prefix both string components so the split points are
     # unambiguous regardless of their own content (mirrors
     # `worktree_status_daemon.coalescing_key`'s own injective-key
