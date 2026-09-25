@@ -1,0 +1,9 @@
+{
+  "comment": "Test that every shipped instruction projection fits the template and rendered byte budgets",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}
