@@ -234,6 +234,31 @@ itself did not specify phasing)_
       rescue-store + `rescue-push` vs. codespaces' direct `session-sync
       push`) or deliberately keep them separate -- record the decision and
       why; do not assume unification.
+- [ ] **Define CodeSpace lease ownership for capture, explicitly.**
+      Containers' `rescue-capture` reuses `_restricted_member_action`'s
+      full admission gating unconditionally, including deferring on any
+      active effort lease (`get_lease(info.name) is not None`) -- even
+      though a pure read-only capture destroys nothing. Decide, for
+      CodeSpaces, whether the same "defer on any active lease regardless of
+      holder" rule applies, or whether a read-only capture is safe to run
+      against a leased CodeSpace regardless of who holds it (or only when
+      the caller IS the lease holder) -- and who/what is authorized to
+      *call* the capture verb in the first place (the lease holder only?
+      any host process? a periodic sweep with no effort identity at all?).
+      Record the decision and why; Phase 3's tests must cover both the
+      owner and non-owner/no-lease cases per that decision, not just the
+      happy path.
+- [ ] **Evaluate this effort's design against `docs/patterns/README.md`'s
+      architecture-pattern invariants before implementation begins** --
+      this introduces a new shared runtime boundary across two
+      independently installable plugins (à-la-carte independence: each
+      plugin must remain fully functional if the other is absent/disabled,
+      so the vendored lib itself must carry no cross-plugin runtime
+      dependency, only a compile-time/vendored source dependency) and the
+      vendored/versioned-install contract (`docs/install-contract.md`,
+      the same-page `versioned-runtime` paragraph). Record which
+      invariants apply, how the vendored-lib design satisfies each, and
+      any invariant that constrains Phase 2's shape choice.
 - [ ] **Decide, explicitly and once, whether periodic CodeSpaces scheduling
       is repository-owned or consumer-owned** -- this decision governs
       Phase 4 and must be made before it starts, not assumed by it.
@@ -278,7 +303,11 @@ itself did not specify phasing)_
       behind a small injected transport callable per Phase 1's
       sync/async-split decision. `agent-containers`
       itself switches to consuming the vendored copy (no behavior change;
-      existing tests must still pass unchanged).
+      existing tests must still pass unchanged) -- this requires wiring
+      **its own** `pyproject.toml`'s `[project].dependencies` **and**
+      `[tool.uv.sources]` entries for the new lib too (both entries, per
+      `CONTRIBUTING.md`'s vendoring guidance and this effort's own Context
+      note -- this is not codespaces-only wiring).
 - [ ] Vendor the identical copy into `plugins/agent-codespaces/libs/`, wire
       its `pyproject.toml`'s **both** `[project].dependencies` entry and
       matching `[tool.uv.sources]` entry (per Context's clarification --
@@ -319,9 +348,11 @@ itself did not specify phasing)_
       booting it.
 - [ ] Tests: CLI-dispatch coverage (text + `--json`, mirroring
       `test_rescue_capture_cli.py`'s shape), a liveness-gate regression test
-      (mid-write session is deferred, not captured), and a
+      (mid-write session is deferred, not captured), a
       non-`Available`-state regression test (a `Shutdown`/`Starting`/
-      unknown-state CodeSpace is deferred without a connection attempt).
+      unknown-state CodeSpace is deferred without a connection attempt),
+      and lease-ownership tests covering both the owner and non-owner/
+      no-lease cases per Phase 1's lease-ownership decision.
 
 ### Phase 4 — Periodic trigger for CodeSpaces
 (scope set by Phase 1's scheduling-ownership decision)
@@ -360,7 +391,8 @@ itself did not specify phasing)_
       (`python tools/run-plugin-tests.py agent-codespaces`) passes,
       including the new liveness-gate regression test, the
       non-`Available`-state regression test (no boot/connect attempt for a
-      Shutdown/Starting/unknown-state CodeSpace), and CLI-dispatch tests.
+      Shutdown/Starting/unknown-state CodeSpace), the lease-ownership
+      owner/non-owner tests, and CLI-dispatch tests.
 - [ ] Phase 4: a real leased CodeSpace is captured and published
       end-to-end (mirroring the container-side end-to-end validation
       already proven for `rescue-capture`) — published session readable
