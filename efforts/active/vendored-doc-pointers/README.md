@@ -5,7 +5,7 @@
 - **Branch(es):** per-slice worktree branch (not recorded here to keep this
   public artifact generic)
 - **Created:** 2026-09-24
-- **Status:** Active
+- **Status:** Done; pending archive
 - **Vision:** `visions/plugin-services` §Concepts & Components/`Entity-relationship
   diagnosability` (extends: the mirrored-doc duplication this effort removes was
   introduced to satisfy that same concept). Now resolvable on `dev` --
@@ -194,21 +194,45 @@ _Status: designed, implemented, and merged via PR
 
 
 ### Phase 3 — Fix the push() hook bypass
-- [ ] Read `plugins/agent-worktrees/src/agent_worktrees/git_ops.py`'s `push()`
+- [x] Read `plugins/agent-worktrees/src/agent_worktrees/git_ops.py`'s `push()`
       and every call site to distinguish internal-plumbing pushes (rebase
       retries, mid-flow branch updates) from the terminal publish push.
-- [ ] Land a fix scoped to the terminal publish push only — re-enable the
+      Found: all 8 real call sites (`git_collab.py` feature-branch/
+      merge-to-feature, `finalize.py` push-changes-to-default-branch and
+      PR-branch push, `pr_ops.py`'s 3 PR-branch pushes) are genuine terminal
+      publishes to `remote` -- none are pure local plumbing. The `no_hooks`
+      rationale from #3707 (client-side branch-guard hooks would corrupt an
+      in-flight mechanical squash) applies to the LOCAL squash re-commit and
+      `rebase()` calls elsewhere in the same file, not to `push()`'s own
+      network operation.
+- [x] Land a fix scoped to the terminal publish push only — re-enable the
       release-guard hooks (or explicitly invoke the relevant checks, at
       minimum `check-changefile-presence.py`) for that call, while keeping
       `no_hooks=True`'s existing, still-valid rationale for internal
-      rebase/squash plumbing.
-- [ ] Add a regression test: a push through `push-changes`/`create-pr` with a
+      rebase/squash plumbing. Done: removed `no_hooks=True` from both `git()`
+      calls inside `push()` (the primary push and the auth-fallback retry).
+      Wrapped `git_collab.py`'s two un-wrapped push call sites with
+      `hooks.allow_pr_push()` (matching the existing pattern in
+      `finalize.py`/`pr_ops.py`) so agent-worktrees' own dogfooded PR-workflow
+      guard hook still recognizes these as legitimate publishes and doesn't
+      newly self-block them now that hooks actually run on push.
+- [x] Add a regression test: a push through `push-changes`/`create-pr` with a
       missing required changefile must fail locally, matching the raw
-      `git push` behavior already proven in issue #3561's reproduction.
-- [ ] Confirm no existing `push-changes`/`create-pr`/`finalize` test suite
+      `git push` behavior already proven in issue #3561's reproduction. Done:
+      `test_push_changes_is_blocked_by_a_real_client_side_pre_push_hook`
+      installs a real, unconditionally-failing pre-push hook (standing in for
+      any repo release guard) in the anchor's common git dir and confirms
+      `push_changes` is genuinely blocked (verified this test fails without
+      the fix, by temporarily reintroducing `no_hooks=True` and confirming
+      the assertion breaks, then restoring the fix).
+- [x] Confirm no existing `push-changes`/`create-pr`/`finalize` test suite
       relies on the current bypass behavior (e.g. tests that push
       intentionally-non-compliant content as part of a scratch/synthetic
-      fixture) before landing.
+      fixture) before landing. Confirmed: the full agent-worktrees suite
+      (1010 + 247 + 527 tests across 9 sub-suites) passes unchanged after the
+      fix; only `test_push_bypasses_hooks` needed updating (renamed to
+      `test_push_does_not_bypass_hooks`, its assertion inverted) since it was
+      testing the exact bypass this phase removes.
 
 ## Validation Plan
 
@@ -220,9 +244,12 @@ _Status: designed, implemented, and merged via PR
       content. Confirmed for agent-worktrees, agent-bridge, agent-dispatch --
       each preview's materialized `docs/entity-relationship-model.md` is
       byte-identical to `docs/patterns/entity-relationship-model.md`.
-- [ ] A reproduction of issue #3561's exact scenario (push a commit touching
+- [x] A reproduction of issue #3561's exact scenario (push a commit touching
       a plugin's payload with no changefile, through `push-changes`/
       `create-pr`, not raw `git push`) is now blocked locally, matching CI.
+      Confirmed via `test_push_changes_is_blocked_by_a_real_client_side_pre_push_hook`
+      (Phase 3) -- a real client-side pre-push hook now genuinely blocks
+      `push_changes`, verified to fail without the fix and pass with it.
 - [x] `python tools/check-changefile-presence.py` and
       `python tools/check-docs-consistency.py` both pass after each phase's
       changes. Confirmed after Phase 2 (a changefile was required and added
@@ -332,3 +359,31 @@ comparison and `tools/test_materialize_main.py` /
   payload, so a relative link would still resolve to nothing installed. Left
   `docs/patterns/entity-relationship-model.md`'s "See Also" section
   unchanged.
+
+### 2026-09-25 — Phase 3 opened; all three phases complete
+
+- Fixed the `push()` hook bypass (#3561): removed `no_hooks=True` from both
+  `git()` calls inside `push()` -- the primary push and the auth-fallback
+  retry. Read all 8 real call sites first to confirm every one is a genuine
+  terminal publish (none are pure local plumbing), so the fix is unconditional
+  rather than needing a caller-supplied flag.
+- Wrapped `git_collab.py`'s two previously-un-wrapped push call sites
+  (`feature-branch --push`, `merge-to-feature --push`) with
+  `hooks.allow_pr_push()`, matching the existing pattern already used in
+  `finalize.py`/`pr_ops.py` -- needed because those two calls now run with
+  real hooks active, and agent-worktrees' own dogfooded PR-workflow guard
+  hook must still recognize them as legitimate publishes.
+- Added a real end-to-end regression test
+  (`test_push_changes_is_blocked_by_a_real_client_side_pre_push_hook`):
+  installs an unconditionally-failing pre-push hook in a real bare-repo
+  fixture's common git dir and confirms `push_changes` is genuinely blocked.
+  Verified the test actually catches the regression -- temporarily
+  reintroduced `no_hooks=True` in `push()`, watched the new test fail, then
+  restored the fix and watched it pass again.
+- Updated `test_push_bypasses_hooks` -> `test_push_does_not_bypass_hooks`
+  (inverted assertion) since it was testing the exact bypass this phase
+  removes; added `test_push_retry_also_does_not_bypass_hooks` for the
+  auth-fallback path. Confirmed no other test in the full agent-worktrees
+  suite (1010 + 247 + 527 tests, 9 sub-suites) relied on the old bypass.
+- All three phases' Plan and Validation Plan items are now checked off. This
+  effort is Done, pending the normal archive-to-`efforts/<YYYY>/MM/DD/` step.

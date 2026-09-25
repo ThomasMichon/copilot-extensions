@@ -873,13 +873,27 @@ def push(
     caller's retry loop can surface the real error (a pre-push hook decline, an
     auth 403, a protected-branch block) and fail fast instead of masking every
     failure as a generic "rejected" and retrying a doomed push (#993).
+
+    Unlike ``squash_branch``/``rebase``/the internal squash re-commit, this
+    call is NEVER given ``no_hooks=True``: every real caller uses ``push()``
+    as the terminal action that actually publishes to ``remote`` (a direct
+    default-branch push, or a feature-branch push for ``create-pr``/
+    ``push-changes``) -- not internal plumbing that only re-arranges
+    already-committed, already-hook-verified content. A repo's real pre-push
+    release guard (e.g. this repo's own ``check-changefile-presence.py``)
+    must be allowed to block a genuinely non-compliant push here, the same
+    way a raw ``git push`` already does (#3561). Every worktree-originated
+    call site wraps this with ``hooks.allow_pr_push()`` so agent-worktrees'
+    own dogfooded PR-workflow guard (a different, narrower hook -- see
+    ``hooks.py``) still recognizes its own legitimate publish and does not
+    self-block.
     """
     extra = ["--force-with-lease"] if force_with_lease else []
     auth_args = _auth_config_args(remote, cwd=cwd)
     result = git(
         *auth_args,
         "push", remote, branch, *extra, "--quiet",
-        cwd=cwd, check=False, no_hooks=True,
+        cwd=cwd, check=False,
     )
     if result.returncode == 0:
         return PushResult(ok=True)
@@ -892,7 +906,7 @@ def push(
     if auth_args:
         retry = git(
             "push", remote, branch, *extra, "--quiet",
-            cwd=cwd, check=False, no_hooks=True,
+            cwd=cwd, check=False,
         )
         if retry.returncode == 0:
             return PushResult(ok=True)

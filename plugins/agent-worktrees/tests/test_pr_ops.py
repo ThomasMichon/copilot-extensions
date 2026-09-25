@@ -1842,6 +1842,47 @@ class TestPRFinalizeAndPush:
         assert rec.pr.head_sha == local_head
         assert rec.pr.state == "open"
 
+    def test_push_changes_is_blocked_by_a_real_client_side_pre_push_hook(self, pr_repo):
+        """#3561: push() must not silently disable a repo's own release-guard
+        pre-push hook (e.g. this repo's check-changefile-presence.py). Install
+        a real, unconditionally-failing pre-push hook -- standing in for any
+        such guard -- and confirm push_changes is genuinely blocked by it, the
+        same way a raw ``git push`` already was before this fix."""
+        import stat
+
+        config, wid, wt_path, _remote_dir = pr_repo
+        pr_ops.create_pr(wid, config, title="Add feature")
+
+        # Install a real client-side pre-push hook in the anchor's common git
+        # dir (shared by every worktree, including wt_path) that always
+        # refuses -- standing in for a real release guard.
+        common_dir = Path(_git("rev-parse", "--git-common-dir", cwd=wt_path))
+        if not common_dir.is_absolute():
+            common_dir = wt_path / common_dir
+        hooks_dir = common_dir / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        hook_path = hooks_dir / "pre-push"
+        hook_path.write_text(
+            "#!/bin/sh\n"
+            "echo 'BLOCKED: missing changefile (simulated release guard)' >&2\n"
+            "exit 1\n"
+        )
+        hook_path.chmod(hook_path.stat().st_mode | stat.S_IEXEC)
+
+        before = _git("rev-parse", "origin/feature/add-feature-aaaa", cwd=wt_path)
+
+        _git("checkout", "feature/add-feature-aaaa", cwd=wt_path)
+        (wt_path / "c.txt").write_text("feedback\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "address feedback", cwd=wt_path)
+
+        from agent_worktrees import finalize as fin
+        ok = fin.push_changes(wid, config)
+        assert ok is False  # the hook must actually block the push
+
+        after = _git("rev-parse", "origin/feature/add-feature-aaaa", cwd=wt_path)
+        assert after == before  # remote feature branch did NOT advance
+
     def test_push_changes_blocks_a_leaking_recorded_branch(self, pr_repo):
         # pr-attribution-codenames Phase 5 (round 2): create-pr's guard only
         # covers the branch IT chooses -- a leaking name recorded some other

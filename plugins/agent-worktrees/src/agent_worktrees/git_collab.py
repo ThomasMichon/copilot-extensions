@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import git_ops, output, tracking
+from . import git_ops, hooks, output, tracking
 from .config import Config
 
 
@@ -235,7 +235,9 @@ def manage_feature_branch(
 
     if push:
         print(f"Pushing {feature} to {remote}...")
-        if not git_ops.push(remote, feature, cwd=worktree_path):
+        with hooks.allow_pr_push():
+            pushed = git_ops.push(remote, feature, cwd=worktree_path)
+        if not pushed:
             output.err(
                 f"Push of {feature} to {remote} failed (likely non-ff). Run "
                 f"'git feature-branch {name} --sync' to pull the shared branch "
@@ -331,7 +333,9 @@ def merge_to_feature(
 
     if push:
         print(f"Pushing {feature} to {remote}...")
-        if not git_ops.push(remote, feature, cwd=worktree_path):
+        with hooks.allow_pr_push():
+            pushed = git_ops.push(remote, feature, cwd=worktree_path)
+        if not pushed:
             output.err(
                 f"Push of {feature} to {remote} failed (likely a concurrent update). "
                 f"Run 'git merge-to-feature {name}' again to rebase onto the latest "
