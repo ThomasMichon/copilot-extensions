@@ -4,13 +4,17 @@ Split out of ``__main__.py`` to stay under its grandfathered module-size
 ceiling (same pattern as ``claim_provider_cli.py``). Captures a restricted
 fleet member's Copilot session-state evidence into ``$STATE_DIR/rescues/``
 without stopping or removing the container -- for an always-on fleet (e.g.
-the Intelligence Dampener reviewer) whose only prior rescue trigger
+a headless review service) whose only prior rescue trigger
 (removal/stop) essentially never fires.
 """
 from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import asdict
+
+from . import fleet as fleet_mod
+from .config import load_config
 
 _BUSY_EXIT = 75
 
@@ -27,11 +31,6 @@ def add_rescue_capture_parser(sub) -> None:
 
 
 def cmd_rescue_capture(args: argparse.Namespace) -> int:
-    from dataclasses import asdict
-
-    from . import fleet as fleet_mod
-    from .config import load_config
-
     config = load_config()
     result = fleet_mod.rescue_capture_fleet(config, args.fleet)
     if args.json:
