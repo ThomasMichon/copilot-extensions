@@ -75,6 +75,15 @@ def add_parsers(sub) -> None:
         help="Skip fast-forwarding the managed repo anchor(s) after update",
     )
     p.add_argument(
+        "--no-prune-pivots",
+        action="store_true",
+        help="Skip auto-removing legitimately stale Picker pivot manifest "
+        "entries after update (duplicate/identity-mismatch/missing-target/"
+        "invalid-entry findings whose plugin has a live, correct manifest "
+        "elsewhere in the registry -- never a legacy-unattributed or "
+        "not-enabled finding; those still need a human).",
+    )
+    p.add_argument(
         "--force",
         action="store_true",
         help="Re-deploy every runtime installer even when the "
@@ -201,6 +210,8 @@ def _update_flags(args: argparse.Namespace) -> list[str]:
         flags.append("--force")
     if getattr(args, "no_anchor_sync", False):
         flags.append("--no-anchor-sync")
+    if getattr(args, "no_prune_pivots", False):
+        flags.append("--no-prune-pivots")
     if getattr(args, "recreate_venv", False):
         flags.append("--recreate-venv")
     skip = getattr(args, "skip_modules", None)
@@ -385,7 +396,43 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
     if not getattr(args, "no_anchor_sync", False):
         _core_helper("_fast_forward_project_anchors", _fast_forward_project_anchors)()
 
+    if not getattr(args, "no_prune_pivots", False):
+        _core_helper("_prune_stale_pivots_after_update", _prune_stale_pivots_after_update)()
+
     return 0 if payloads_ok and runtimes_ok else 1
+
+
+def _prune_stale_pivots_after_update() -> None:
+    """Auto-remove Picker pivot manifests that just went stale from *this*
+    update (a plugin's manifest changed shape/columns and left an old
+    materialized copy shadowing it -- see #3509's investigation).
+
+    Deliberately reuses :func:`prunable_findings`'s existing safe subset
+    (``duplicate``/``identity-mismatch``/``missing-target``/``invalid-entry``,
+    each only once a live correct manifest for the same plugin is already
+    resolvable elsewhere in the registry). A ``legacy-unattributed`` or
+    ``not-enabled`` finding is never touched here either -- both still need a
+    human to reinstall/re-enable the owning plugin. Best-effort: any failure
+    here is a warning, never a reason to fail the update itself."""
+    try:
+        from .picker_support import pivots as pivot_registry
+    except Exception as exc:
+        output.warn(f"Pivot prune skipped (import failed): {exc}")
+        return
+    try:
+        report = pivot_registry.scan_pivot_registry(materialize=False)
+        pruned = pivot_registry.prune_stale_entries(report, apply=True)
+    except Exception as exc:
+        output.warn(f"Pivot prune skipped: {exc}")
+        return
+    removed = [item for item in pruned if item.get("removed")]
+    if removed:
+        output.ok(
+            f"Pruned {len(removed)} stale Picker pivot manifest(s) "
+            "(reopen the Picker to re-materialize from the current "
+            "plugin manifest): "
+            + ", ".join(str(item.get("entry")) for item in removed)
+        )
 
 
 def _project_update_context() -> Path | None:
