@@ -19,7 +19,9 @@ liveness = parse_probe_output(result.returncode, result.stdout, result.stderr)
 
 # Async transport (e.g. ssh-manager's exec_with_retry, which returns a
 # CommandResult with an `exit_code` field, not `returncode`):
-result = await exec_with_retry(host, f"bash -c {shlex.quote(build_probe_script())}")
+result = await exec_with_retry(
+    manager, host, f"bash -c {shlex.quote(build_probe_script())}"
+)
 liveness = parse_probe_output(result.exit_code, result.stdout, result.stderr)
 ```
 
