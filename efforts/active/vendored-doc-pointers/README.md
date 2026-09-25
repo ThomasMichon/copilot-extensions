@@ -8,11 +8,8 @@
 - **Status:** Active
 - **Vision:** `visions/plugin-services` §Concepts & Components/`Entity-relationship
   diagnosability` (extends: the mirrored-doc duplication this effort removes was
-  introduced to satisfy that same concept). **Pending:** this vision section is
-  proposed by PR [#3554](https://github.com/ThomasMichon/copilot-extensions/pull/3554)
-  and not yet present on `dev` — until that PR merges, resolve the reference
-  against `docs/patterns/entity-relationship-model.md` in PR #3554's branch,
-  not against `visions/plugin-services/README.md` on this checkout.
+  introduced to satisfy that same concept). Now resolvable on `dev` --
+  PR #3554 merged.
 - **Umbrella issue:** [ThomasMichon/copilot-extensions#3565](https://github.com/ThomasMichon/copilot-extensions/issues/3565)
 - **Sub-issues:** [#3561](https://github.com/ThomasMichon/copilot-extensions/issues/3561)
   (push-hook bypass, Phase 3 below — a distinct bug surfaced by the same PR,
@@ -81,8 +78,7 @@ findings together.
 - The concrete pain that motivated this effort:
   `docs/patterns/entity-relationship-model.md` and its three mirrors
   (`plugins/agent-worktrees/docs/`, `plugins/agent-bridge/docs/`,
-  `plugins/agent-dispatch/docs/`), introduced by PR #3554 (still open as of
-  this writing).
+  `plugins/agent-dispatch/docs/`), introduced by PR #3554 (merged).
 - The hook-bypass bug: `plugins/agent-worktrees/src/agent_worktrees/git_ops.py`
   `push()` — `no_hooks=True` unconditionally, on every push including the
   terminal publish push. See issue #3561 for the full reproduction (a raw
@@ -113,11 +109,10 @@ Per operator direction (session that authored PR #3554):
 
 ### Phase 1 — Design the generalized pointer mechanism
 
-_Status: designed and implemented in PR [#3575](https://github.com/ThomasMichon/copilot-extensions/pull/3575)
-(not yet merged as of this writing). Checked off here only once that PR lands
-on `dev` -- this branch's own checkout does not yet contain the code below._
+_Status: designed, implemented, and merged via PR
+[#3575](https://github.com/ThomasMichon/copilot-extensions/pull/3575)._
 
-- [ ] Read `tools/materialize_main.py`, `tools/sync-vendored-libs.py`, and the
+- [x] Read `tools/materialize_main.py`, `tools/sync-vendored-libs.py`, and the
       `VENDOR_POINTER.json` schema in full; confirm exactly what would need to
       generalize (currently hardcoded to `libs/<lib>/src` + a version-line
       rewrite in `pyproject.toml` — neither applies to a plain doc file).
@@ -125,7 +120,7 @@ on `dev` -- this branch's own checkout does not yet contain the code below._
       (copytree + version-line rewrite) applies to a single file; the new
       file-pointer kind needed its own find/expand functions rather than
       reusing the lib case's internals.
-- [ ] Decide the pointer shape for a non-lib file: reuse
+- [x] Decide the pointer shape for a non-lib file: reuse
       `VENDOR_POINTER.json` with a generalized `source`/`kind` field, or a
       distinct format. Justify the choice against issue #3565's stated
       preference for an in-language marker. Decided in PR #3575: a distinct
@@ -139,7 +134,7 @@ on `dev` -- this branch's own checkout does not yet contain the code below._
       language, without first discovering `VENDOR_POINTER.json`'s schema.
       See `tools/materialize_main.py`'s module docstring (PR #3575) for the
       full rationale and both pointer kinds side by side.
-- [ ] Prototype the in-language marker for Markdown specifically (e.g. an
+- [x] Prototype the in-language marker for Markdown specifically (e.g. an
       HTML comment header) and confirm it round-trips: a human/agent reading
       the `dev`-branch file understands it's a mirror without external docs,
       and the promotion tooling can still parse it mechanically. Built in PR
@@ -149,14 +144,16 @@ on `dev` -- this branch's own checkout does not yet contain the code below._
       visible in source, and materializing overwrites the stub's own content
       with the canonical file's bytes in place (no separate pointer file to
       delete, unlike the lib case).
-- [ ] Extend `tools/materialize_main.py` (and its test suite) to expand the
+- [x] Extend `tools/materialize_main.py` (and its test suite) to expand the
       new pointer kind, with the same non-regression guarantees the lib case
       has (never silently wipes canonical, refuses to materialize from a
       stale/missing source). Built in PR #3575: `find_file_pointers()` +
       `materialize_file_pointers()`, wired into `materialize()`/`build()`;
-      6 new tests (byte-identical round-trip, missing-canonical SKIP leaves
-      the stub untouched, multiple mirrors of the same doc, non-pointer files
-      ignored, full `build()` end-to-end). Also extended
+      8 new tests in `test_materialize_main.py` (byte-identical round-trip,
+      missing-canonical SKIP leaves the stub untouched, multiple mirrors of
+      the same doc, non-pointer files ignored, full `build()` end-to-end,
+      plus 3 covering path-traversal refusal, added after a Copilot review
+      caught an unvalidated `source` path -- see Journal). Also extended
       `tools/preview_release.py`'s per-plugin materializer
       (`_materialize_file_pointers_into_preview`) to expand file pointers
       into a single-plugin preview copy, matching a gap the Copilot reviewer
@@ -167,14 +164,15 @@ on `dev` -- this branch's own checkout does not yet contain the code below._
 ### Phase 2 — Convert the entity-relationship-model.md mirrors
 - [ ] Convert `plugins/agent-worktrees/docs/entity-relationship-model.md`,
       `plugins/agent-bridge/docs/entity-relationship-model.md`, and
-      `plugins/agent-dispatch/docs/entity-relationship-model.md` (proposed by
-      PR #3554, still open) from full hand-copies to real pointers
-      referencing `docs/patterns/entity-relationship-model.md`.
+      `plugins/agent-dispatch/docs/entity-relationship-model.md` (merged via
+      PR #3554) from full hand-copies to real pointers referencing
+      `docs/patterns/entity-relationship-model.md`.
 - [ ] Confirm `tools/preview_release.py`/`tools/materialize_main.py` produce
       byte-identical output to the current hand-copies for all three (Phase 1
-      already extends `preview_release.py`'s per-plugin materializer to
-      expand the generalized file-pointer kind, not just the lib kind, so
-      this validation can run per-plugin as documented).
+      -- merged via PR #3575 -- already extends `preview_release.py`'s
+      per-plugin materializer to expand the generalized file-pointer kind,
+      not just the lib kind, so this validation can run per-plugin as
+      documented).
 - [ ] Update `docs/patterns/entity-relationship-model.md`'s own "See Also"
       section (currently plain-text repo references because the mirrors
       couldn't resolve a relative link) once the mirrors are pointers instead
@@ -200,7 +198,7 @@ on `dev` -- this branch's own checkout does not yet contain the code below._
 
 ## Validation Plan
 
-- [ ] `tools/materialize_main.py`'s test suite covers the new pointer kind
+- [x] `tools/materialize_main.py`'s test suite covers the new pointer kind
       with the same rigor as the existing lib case (byte-identical
       round-trip, refuses on missing/stale source).
 - [ ] A real `python tools/preview_release.py <plugin>` run for each of the
@@ -215,9 +213,9 @@ on `dev` -- this branch's own checkout does not yet contain the code below._
 
 ## Proposal
 
-**File-pointer format (decided in Phase 1, implemented in PR
-[#3575](https://github.com/ThomasMichon/copilot-extensions/pull/3575), not
-yet merged):** a vendored file's first line is an HTML comment marker:
+**File-pointer format (decided and implemented in Phase 1, PR
+[#3575](https://github.com/ThomasMichon/copilot-extensions/pull/3575),
+merged):** a vendored file's first line is an HTML comment marker:
 
 ```
 <!-- VENDOR_POINTER: source=<repo-relative-path> kind=file -->
@@ -254,16 +252,17 @@ comparison and `tools/test_materialize_main.py` /
   Handed off immediately after kickoff per operator direction — no phase work
   started yet.
 
-### 2026-09-24/25 — Phase 1 opened as PR #3575 (not yet merged)
+### 2026-09-24/25 — Phase 1 merged (PR #3575)
 - Designed and built the generalized file-pointer mechanism: an in-language
   HTML-comment marker (see Proposal above), `materialize_main.py`'s
   `find_file_pointers()`/`materialize_file_pointers()`, and
-  `preview_release.py`'s per-plugin equivalent. 6 new tests in each of
-  `test_materialize_main.py` and `test_preview_release.py`, all passing;
+  `preview_release.py`'s per-plugin equivalent. 8 new tests in
+  `test_materialize_main.py` and 1 in `test_preview_release.py` (23 total
+  across both files, all passing);
   `ruff check` clean; `check-docs-consistency.py` and
   `check-changefile-presence.py` both pass (no changefile needed -- these are
   repo-root `tools/` changes, not a plugin payload). Opened as its own PR
-  (#3575, not yet merged) per this effort's own per-phase-PR coordination
+  (#3575) per this effort's own per-phase-PR coordination
   rule, in a fresh worktree (not PR #3554's or #3566's) since neither of
   those branches was the right home for Phase 1 code.
 - Two review rounds on PR #3554 and #3566 (the two prior open PRs, watched
@@ -281,3 +280,12 @@ comparison and `tools/test_materialize_main.py` /
   pointers) became the extra `preview_release.py` extension folded into this
   same Phase 1 PR rather than deferred to Phase 2, since Phase 2's validation
   step cannot pass without it.
+- PR #3575 also had a real Copilot-review catch: `materialize_file_pointers()`
+  joined `canonical_root` with an unvalidated marker `source`, letting an
+  absolute path or `../` traversal escape the trusted root. Fixed with
+  `_resolve_within()` (resolves + confirms containment, symlinks included)
+  before this PR was merged; 3 regression tests added.
+- All three PRs (#3554, #3566, #3575) merged. `dev`'s own CI ran green after
+  each merge, and the `dev` → `main` promotion pipeline fired successfully
+  (release/promote-36100513912, merged). Phase 1 is complete; Phase 2 (convert
+  the three real mirrors to file pointers) is next.
