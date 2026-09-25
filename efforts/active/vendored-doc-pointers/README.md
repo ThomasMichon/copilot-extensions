@@ -149,9 +149,11 @@ _Status: designed, implemented, and merged via PR
       has (never silently wipes canonical, refuses to materialize from a
       stale/missing source). Built in PR #3575: `find_file_pointers()` +
       `materialize_file_pointers()`, wired into `materialize()`/`build()`;
-      6 new tests (byte-identical round-trip, missing-canonical SKIP leaves
-      the stub untouched, multiple mirrors of the same doc, non-pointer files
-      ignored, full `build()` end-to-end). Also extended
+      8 new tests in `test_materialize_main.py` (byte-identical round-trip,
+      missing-canonical SKIP leaves the stub untouched, multiple mirrors of
+      the same doc, non-pointer files ignored, full `build()` end-to-end,
+      plus 3 covering path-traversal refusal, added after a Copilot review
+      caught an unvalidated `source` path -- see Journal). Also extended
       `tools/preview_release.py`'s per-plugin materializer
       (`_materialize_file_pointers_into_preview`) to expand file pointers
       into a single-plugin preview copy, matching a gap the Copilot reviewer
@@ -211,9 +213,9 @@ _Status: designed, implemented, and merged via PR
 
 ## Proposal
 
-**File-pointer format (decided in Phase 1, implemented in PR
-[#3575](https://github.com/ThomasMichon/copilot-extensions/pull/3575), not
-yet merged):** a vendored file's first line is an HTML comment marker:
+**File-pointer format (decided and implemented in Phase 1, PR
+[#3575](https://github.com/ThomasMichon/copilot-extensions/pull/3575),
+merged):** a vendored file's first line is an HTML comment marker:
 
 ```
 <!-- VENDOR_POINTER: source=<repo-relative-path> kind=file -->
@@ -254,8 +256,9 @@ comparison and `tools/test_materialize_main.py` /
 - Designed and built the generalized file-pointer mechanism: an in-language
   HTML-comment marker (see Proposal above), `materialize_main.py`'s
   `find_file_pointers()`/`materialize_file_pointers()`, and
-  `preview_release.py`'s per-plugin equivalent. 6 new tests in each of
-  `test_materialize_main.py` and `test_preview_release.py`, all passing;
+  `preview_release.py`'s per-plugin equivalent. 8 new tests in
+  `test_materialize_main.py` and 1 in `test_preview_release.py` (23 total
+  across both files, all passing);
   `ruff check` clean; `check-docs-consistency.py` and
   `check-changefile-presence.py` both pass (no changefile needed -- these are
   repo-root `tools/` changes, not a plugin payload). Opened as its own PR
