@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve marketplace-isolation guard findings: annotate legacy-delegate fallback and project-owned config read",
+  "changes": [
+    {
+      "plugin": "harness-knowledge",
+      "type": "patch"
+    }
+  ]
+}
