@@ -272,6 +272,15 @@ def test_stop_verifies_before_releasing(seams, capsys):
     assert json.loads(capsys.readouterr().out)["deregistered"] == "sid-42"
 
 
+def test_stop_keep_claim_never_settles_the_claim_on_disconnect(seams, capsys):
+    rc = detach.cmd_stop(_args(stop=True, detach=False, keep_claim=True),
+                         ssh_session=_ssh(seams, stdout="STOPPED\n"))
+    assert rc == 0
+    assert "kill-session" in seams.ssh[0]["remote"]
+    assert seams.ssh[0]["settle"] is False  # the task keeps the box for finalize
+    assert seams.deregistered == ["sid-42"]  # the session itself is still fully stopped
+
+
 def test_stop_without_a_live_session_deregisters_nothing(seams, capsys):
     seams.live_rows.clear()
     rc = detach.cmd_stop(_args(stop=True, detach=False), ssh_session=_ssh(seams, stdout="STOPPED\n"))
@@ -584,7 +593,7 @@ def test_ref_files_are_copied_before_launch_and_named_in_the_seed(seams, tmp_pat
 
 
 def test_ref_files_for_a_running_session_are_sent_as_a_message(seams, tmp_path, monkeypatch, capsys):
-    from agent_codespaces import venue_refs
+    from venue_copilot import refs as venue_refs
 
     sent = []
     monkeypatch.setattr(venue_refs, "deliver_note", lambda sid, note: sent.append((sid, note)) or True)

@@ -17,9 +17,9 @@ class LiveSessionVenue(BaseModel):
     inferred or guessed by the bridge itself.
     """
 
-    #: Venue provider boundary, matching ``session_host``'s existing
-    #: ``boundary`` vocabulary: "codespace" | "container". Local sessions
-    #: carry no venue at all rather than a "local" kind here.
+    #: Venue provider boundary ("codespace", "container", "ssh", or another
+    #: provider-owned kind). Local sessions carry no venue at all rather than
+    #: a "local" kind here.
     kind: str
     #: The venue's own name/identifier (CodeSpace name, container name).
     target: str
