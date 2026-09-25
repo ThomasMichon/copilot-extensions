@@ -8,7 +8,11 @@
 - **Status:** Active
 - **Vision:** `visions/plugin-services` §Concepts & Components/`Entity-relationship
   diagnosability` (extends: the mirrored-doc duplication this effort removes was
-  introduced to satisfy that same concept)
+  introduced to satisfy that same concept). **Pending:** this vision section is
+  proposed by PR [#3554](https://github.com/ThomasMichon/copilot-extensions/pull/3554)
+  and not yet present on `dev` — until that PR merges, resolve the reference
+  against `docs/patterns/entity-relationship-model.md` in PR #3554's branch,
+  not against `visions/plugin-services/README.md` on this checkout.
 - **Umbrella issue:** [ThomasMichon/copilot-extensions#3565](https://github.com/ThomasMichon/copilot-extensions/issues/3565)
 - **Sub-issues:** [#3561](https://github.com/ThomasMichon/copilot-extensions/issues/3561)
   (push-hook bypass, Phase 3 below — a distinct bug surfaced by the same PR,
