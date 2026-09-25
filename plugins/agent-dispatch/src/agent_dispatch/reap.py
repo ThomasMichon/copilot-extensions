@@ -222,8 +222,10 @@ def terminate_pid(
     *,
     grace_seconds: float = _TERMINATE_GRACE_S,
     poll_seconds: float = _TERMINATE_POLL_S,
+    kill_grace_seconds: float | None = None,
     sleep: Callable[[float], None] = time.sleep,
     pid_alive: Callable[[int], bool] = _pid_alive,
+    confirm_identity: Callable[[int], bool] | None = is_live_coordinator_pid,
     is_windows: bool = os.name == "nt",
 ) -> bool:
     """Terminate ``pid`` and confirm it is actually gone before reporting so.
@@ -232,10 +234,15 @@ def terminate_pid(
     unconditional, immediate kill, so there is nothing to escalate. On POSIX,
     ``SIGTERM`` is cooperative: a stuck process (wedged, or blocked in
     uninterruptible IO) can simply never act on it. This waits up to
-    ``grace_seconds`` confirming real death via ``pid_alive``, then escalates
-    to ``SIGKILL`` so a caller is never told "reaped" for a process that is
-    still, in fact, alive. ``True`` on confirmed death (or an already-gone
-    process); ``False`` only when a signal could not be delivered at all.
+    ``grace_seconds`` confirming real death via ``pid_alive``, then -- only
+    after re-validating (via ``confirm_identity``) that ``pid`` is *still the
+    same coordinator process* and not an unrelated one that has since reused
+    the number -- escalates to ``SIGKILL``, then confirms *that* death too
+    within ``kill_grace_seconds`` (defaults to ``grace_seconds``). A process
+    that survives even SIGKILL (stuck in uninterruptible IO) is reported as a
+    failure rather than a false "reaped". ``True`` only on confirmed death (or
+    an already-gone process); ``False`` when a signal could not be delivered,
+    or the process is still alive after every step above.
     """
     if is_windows:
         try:
@@ -263,6 +270,18 @@ def terminate_pid(
     if not pid_alive(pid):
         return True
 
+    if confirm_identity is not None and not confirm_identity(pid):
+        # The original pid is gone -- pid_alive found *something* alive at
+        # that number, but it is no longer our coordinator, meaning the OS
+        # already recycled it to an unrelated process in the tiny window
+        # since our last check. Escalating here would SIGKILL a stranger;
+        # the process we actually meant to terminate is already gone.
+        log.debug(
+            "pid=%s no longer identifies as our coordinator -- treating as "
+            "already gone rather than escalating against a reused pid", pid,
+        )
+        return True
+
     log.warning(
         "pid=%s did not exit within %.1fs of SIGTERM -- escalating to SIGKILL "
         "to avoid reporting a reap that never actually completed (see #3068)",
@@ -275,7 +294,23 @@ def terminate_pid(
     except (PermissionError, OSError):
         log.debug("could not SIGKILL coordinator pid=%s", pid, exc_info=True)
         return False
-    return True
+
+    kill_deadline = time.monotonic() + (
+        grace_seconds if kill_grace_seconds is None else kill_grace_seconds
+    )
+    while time.monotonic() < kill_deadline:
+        if not pid_alive(pid):
+            return True
+        sleep(poll_seconds)
+    if not pid_alive(pid):
+        return True
+
+    log.error(
+        "pid=%s is still alive after SIGKILL (likely stuck in uninterruptible "
+        "IO) -- reporting the reap as failed rather than a false success",
+        pid,
+    )
+    return False
 
 
 def reap_superseded_coordinators(

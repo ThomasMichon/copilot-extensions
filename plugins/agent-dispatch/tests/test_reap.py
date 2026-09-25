@@ -188,19 +188,71 @@ def test_terminate_pid_confirms_death_no_escalation(monkeypatch):
 
 
 def test_terminate_pid_escalates_to_sigkill_when_stuck(monkeypatch):
-    """A process that ignores SIGTERM for the whole grace window gets SIGKILLed."""
+    """A process that ignores SIGTERM, then dies once SIGKILLed."""
+    if not hasattr(signal, "SIGKILL"):
+        pytest.skip("SIGKILL is POSIX-only; no distinct escalation signal here")
+    sent: list[int] = []
+    sigkill_sent = {"v": False}
+
+    def _kill(pid, sig):
+        sent.append(sig)
+        if sig == _SIGKILL:
+            sigkill_sent["v"] = True
+
+    monkeypatch.setattr("os.kill", _kill)
+
+    def _pid_alive(pid):
+        # Alive through the SIGTERM grace window; dies once SIGKILLed.
+        return not sigkill_sent["v"]
+
+    ok = terminate_pid(
+        123,
+        grace_seconds=1.0,
+        poll_seconds=1.0,  # one poll tick exhausts the grace window
+        kill_grace_seconds=1.0,
+        sleep=lambda _s: None,
+        pid_alive=_pid_alive,
+        confirm_identity=lambda pid: True,  # still our coordinator, just stuck
+        is_windows=False,
+    )
+    assert ok is True
+    assert sent == [signal.SIGTERM, _SIGKILL]
+
+
+def test_terminate_pid_never_escalates_against_a_reused_pid(monkeypatch):
+    """If the pid was recycled to an unrelated process, don't SIGKILL it."""
     sent: list[int] = []
     monkeypatch.setattr("os.kill", lambda pid, sig: sent.append(sig))
 
     ok = terminate_pid(
         123,
         grace_seconds=1.0,
-        poll_seconds=1.0,  # one poll tick exhausts the grace window
+        poll_seconds=1.0,
         sleep=lambda _s: None,
-        pid_alive=lambda pid: True,  # never reports dead
+        pid_alive=lambda pid: True,  # *something* alive at that number
+        confirm_identity=lambda pid: False,  # ...but it's not our coordinator
         is_windows=False,
     )
     assert ok is True
+    assert sent == [signal.SIGTERM]  # SIGKILL never sent to the stranger
+
+
+def test_terminate_pid_survives_sigkill_reports_failure(monkeypatch):
+    """A process stuck in uninterruptible IO can outlive even SIGKILL."""
+    sent: list[int] = []
+    monkeypatch.setattr("os.kill", lambda pid, sig: sent.append(sig))
+
+    ok = terminate_pid(
+        123,
+        grace_seconds=1.0,
+        poll_seconds=1.0,
+        kill_grace_seconds=1.0,
+        sleep=lambda _s: None,
+        pid_alive=lambda pid: True,  # never reports dead, even post-SIGKILL
+        confirm_identity=lambda pid: True,
+        is_windows=False,
+    )
+    assert ok is False
     assert sent == [signal.SIGTERM, _SIGKILL]
 
 
@@ -237,6 +289,7 @@ def test_terminate_pid_sigkill_failure_reports_false(monkeypatch):
         poll_seconds=0.1,
         sleep=lambda _s: None,
         pid_alive=lambda pid: True,
+        confirm_identity=lambda pid: True,
         is_windows=False,
     )
     assert ok is False
