@@ -42,6 +42,19 @@ Repository operations require a public GitHub account; enterprise-managed
 GitHub accounts are appropriate for internal organizations, while Entra
 credentials apply to Azure DevOps rather than this GitHub repository.
 
+The plugin also registers one **preToolUse** guard (`hooks.json` +
+`scripts/copilot-mention-guard.py`): it denies a `gh` invocation that would
+publish an `@copilot` mention in a PR/issue comment or review, scoped to this
+plugin's own repo (`ThomasMichon/copilot-extensions`, read live from
+`plugin.json` -- never hardcoded, so a fork retargets automatically). On
+GitHub, that mention doesn't nudge the review bot; it delegates to the
+separate Copilot **cloud coding agent**, which starts pushing its own commits
+directly to the PR branch. See `CONTRIBUTING.md`'s own "Do not comment
+`@copilot review`" rule for the written policy this hook mechanically
+enforces. A control repo enabling this plugin purely for its instruction
+projections is never touched by the guard -- it only fires for a `gh`
+invocation whose current directory resolves to this plugin's own target repo.
+
 | Sub-agent | Covers |
 |-----------|--------|
 | [clean-room-judge](agents/clean-room-judge.agent.md) | Read-only Tier-E evaluator: scores a clean-room eval run against a scenario's stated outcome under **literal-mode** rules (credits only the literal task; a self-heal "pass" is a false pass), emitting PASS/FAIL + classified jams |
@@ -73,10 +86,14 @@ enable the plugin in `.github/copilot/settings.json`:
 Then use the skills directly by asking to contribute to copilot-extensions,
 diagnose an installed plugin/runtime, or validate a plugin in the clean room.
 
-The retained cross-platform boundary emitter is not registered as a hook. It is
-the policy producer seam for a future direct plugin-owned `additionalContext`
-path, which may be activated only after native host composition is proven at the
-supported Copilot CLI version floor.
+The retained cross-platform boundary emitter is not registered as a
+**sessionStart** hook. It is the policy producer seam for a future direct
+plugin-owned `additionalContext` path, which may be activated only after
+native host composition is proven at the supported Copilot CLI version floor
+-- multiple plugins' own `additionalContext` currently has no composition
+story. The `preToolUse` guard above has no such composition hazard (each
+plugin's `preToolUse` hooks run independently, with nothing to compose), so
+it is registered normally.
 
 ## The `<repo>-harness` standard
 

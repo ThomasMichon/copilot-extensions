@@ -1,0 +1,296 @@
+#!/usr/bin/env python3
+"""Decide whether a Copilot shell command posts an ``@copilot`` mention to a
+GitHub PR/issue comment or review, **scoped to this plugin's own repo**
+(``ThomasMichon/copilot-extensions``, read from ``plugin.json`` -- a fork or
+rename picks up the new target automatically).
+
+On GitHub, an ``@copilot`` mention in a PR/issue comment or review does NOT
+nudge the ``copilot-pull-request-reviewer`` bot to re-review -- it delegates
+a task to the separate Copilot **cloud coding agent**, which starts pushing
+its own commits directly to the PR branch (consuming its own credit budget,
+independent of and unreviewed by the submitting session, and potentially
+touching unrelated files if the branch has drifted). The review bot already
+re-runs on every push; a fresh verdict needs only a new commit, never a
+mention. See ``CONTRIBUTING.md``'s own "Do not comment `@copilot review`"
+rule -- this is that policy's mechanical enforcement seam, scoped to this
+plugin's own repo so an unrelated repo's `gh` workflow is never touched.
+
+This guard denies the specific action that actually causes the harm -- a
+``gh`` invocation that PUBLISHES comment/review/PR-body text containing an
+``@copilot`` mention -- not any file write that merely happens to discuss
+the topic (this very module and its docs are exempt for that reason).
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+from pathlib import Path
+
+# ``@copilot-extensions`` (the marketplace/org handle) and similar
+# `@copilot-<word>` identifiers are legitimate and pervasive in this facility
+# -- only a bare ``@copilot`` mention (not immediately continued by a word
+# character or hyphen) is the GitHub cloud-agent trigger.
+MENTION = re.compile(r"@copilot(?![\w-])", re.I)
+
+# Shell statement/pipeline separators, recognized as their own tokens by
+# ``shlex.shlex(..., punctuation_chars=...)`` -- NOT a text-level split.
+# A naive ``str.split``/regex split on these characters would cut a quoted
+# ``--body`` value in half the moment it contains ordinary punctuation like
+# ``;`` or ``|`` (e.g. ``--body "Fixed the bug; @copilot review"``), silently
+# truncating the very text this guard exists to scan. Splitting the
+# quote-aware token STREAM instead keeps a quoted argument's separator
+# characters part of that one token, never a statement boundary.
+STATEMENT_SEPARATORS = {";", "&", "&&", "||", "|", "\n"}
+
+# gh subcommand chains that publish comment/review/PR-or-issue-body text.
+WRITE_SUBCOMMANDS = {
+    ("pr", "comment"),
+    ("issue", "comment"),
+    ("pr", "review"),
+    ("pr", "create"),
+    ("pr", "edit"),
+    ("issue", "create"),
+    ("issue", "edit"),
+}
+
+# --body / --body-file style flags whose value (or referenced file) is the
+# published text to scan. ``-f``/``-F`` cover ``gh api ... -f body=...`` /
+# ``-F body=@path`` (used for review-comment replies, which have no first-
+# class ``gh pr comment`` equivalent).
+INLINE_BODY_FLAGS = {"--body", "-b"}
+FILE_BODY_FLAGS = {"--body-file"}
+
+_REPO_URL_RE = re.compile(
+    r"(?:github\.com[:/])([^/]+)/([^/.\s]+?)(?:\.git)?/?$", re.I
+)
+
+
+def _basename(token: str) -> str:
+    return os.path.basename(token.replace("\\", "/")).lower()
+
+
+def target_repo_from_manifest(plugin_root: Path) -> str | None:
+    """``owner/repo`` this guard applies to, read from this plugin's own
+    ``plugin.json`` ``repository``/``homepage`` field -- never hardcoded, so
+    a fork or rename retargets the guard automatically."""
+    try:
+        manifest = json.loads((plugin_root / "plugin.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    for key in ("repository", "homepage"):
+        url = manifest.get(key)
+        if isinstance(url, str):
+            match = _REPO_URL_RE.search(url)
+            if match:
+                return f"{match.group(1)}/{match.group(2)}".lower()
+    return None
+
+
+def current_repo(cwd: str | None = None) -> str | None:
+    """``owner/repo`` for the git repo at *cwd* (default: this process's own
+    working directory, which the Copilot CLI sets to the directory the
+    about-to-run tool call targets), or ``None`` outside any git repo / with
+    no GitHub remote."""
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=cwd, capture_output=True, text=True, timeout=5, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    match = _REPO_URL_RE.search(result.stdout.strip())
+    return f"{match.group(1)}/{match.group(2)}".lower() if match else None
+
+
+def _split_statements(command: str) -> list[list[str]]:
+    """Tokenize the whole command ONCE, respecting quotes, then split the
+    resulting token stream on real (unquoted) statement/pipeline separators.
+
+    Using ``shlex.shlex`` with ``punctuation_chars`` set makes it recognize
+    ``;``/``&``/``&&``/``||``/``|`` as their own tokens when they appear
+    unquoted -- a separator character that occurs INSIDE a quoted argument
+    stays part of that single token, so it is never mistaken for a statement
+    boundary (see ``STATEMENT_SEPARATORS``' docstring above)."""
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars="();<>|&")
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError:
+        return []
+    statements: list[list[str]] = []
+    current: list[str] = []
+    for token in tokens:
+        if token in STATEMENT_SEPARATORS or token in {"(", ")", "<", ">"}:
+            if current:
+                statements.append(current)
+                current = []
+            continue
+        current.append(token)
+    if current:
+        statements.append(current)
+    return statements
+
+
+def _is_gh(tokens: list[str]) -> bool:
+    return bool(tokens) and _basename(tokens[0]) in {"gh", "gh.exe"}
+
+
+def _has_write_subcommand(tokens: list[str]) -> bool:
+    pair_stream = [t.lower() for t in tokens[1:]]
+    for first, second in WRITE_SUBCOMMANDS:
+        for index in range(len(pair_stream) - 1):
+            if pair_stream[index] == first and pair_stream[index + 1] == second:
+                return True
+    return False
+
+
+def _is_api_comment_or_review_write(tokens: list[str]) -> bool:
+    """``gh api ...`` writing a body via ``-f``/``-F`` to a comments/reviews
+    endpoint (PR review-comment replies, issue comments via the raw API)."""
+    lowered = [t.lower() for t in tokens[1:]]
+    if "api" not in lowered:
+        return False
+    has_body_field = any(
+        (token in {"-f", "-F", "--field", "--raw-field"} and index + 1 < len(tokens)
+         and tokens[index + 1].startswith("body="))
+        or token.startswith(("-f", "-F", "--field=", "--raw-field=")) and "body=" in token
+        for index, token in enumerate(tokens[1:], start=1)
+    )
+    if not has_body_field:
+        return False
+    return any(
+        "/comments" in t or "/reviews" in t
+        for t in tokens[1:]
+        if not t.startswith("-")
+    )
+
+
+def _read_bounded(path: str, limit: int = 200_000) -> str:
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            return fh.read(limit)
+    except OSError:
+        return ""
+
+
+def _extract_body_text(tokens: list[str]) -> str:
+    """Best-effort: the literal body text this invocation would publish."""
+    parts: list[str] = []
+    index = 1
+    while index < len(tokens):
+        token = tokens[index]
+        matched = False
+        for flag in INLINE_BODY_FLAGS:
+            if token == flag and index + 1 < len(tokens):
+                parts.append(tokens[index + 1])
+                matched = True
+                break
+            if token.startswith(flag + "="):
+                parts.append(token[len(flag) + 1 :])
+                matched = True
+                break
+        if matched:
+            index += 2 if token in INLINE_BODY_FLAGS else 1
+            continue
+        for flag in FILE_BODY_FLAGS:
+            if token == flag and index + 1 < len(tokens):
+                parts.append(_read_bounded(tokens[index + 1]))
+                matched = True
+                break
+        if matched:
+            index += 2
+            continue
+        # ``gh api ... -f body=VALUE`` / ``-F body=@path``.
+        if token in {"-f", "-F"} and index + 1 < len(tokens):
+            field = tokens[index + 1]
+            if field.startswith("body="):
+                value = field[len("body=") :]
+                if token == "-F" and value.startswith("@"):
+                    parts.append(_read_bounded(value[1:]))
+                else:
+                    parts.append(value)
+            index += 2
+            continue
+        if token.startswith("body=") and "-f" not in tokens[:index]:
+            parts.append(token[len("body=") :])
+        index += 1
+    if not parts:
+        # Fall back to scanning every token this guard couldn't attribute to
+        # a recognized body flag (covers shapes this best-effort flag scan
+        # didn't anticipate) rather than silently passing an unrecognized
+        # invocation.
+        return " ".join(tokens)
+    return "\n".join(parts)
+
+
+def command_publishes_copilot_mention(command: str) -> bool:
+    for tokens in _split_statements(command):
+        if not _is_gh(tokens):
+            continue
+        if not (_has_write_subcommand(tokens) or _is_api_comment_or_review_write(tokens)):
+            continue
+        body_text = _extract_body_text(tokens)
+        if MENTION.search(body_text):
+            return True
+    return False
+
+
+def main() -> int:
+    plugin_root = Path(
+        os.environ.get("COPILOT_PLUGIN_ROOT")
+        or Path(__file__).resolve().parent.parent
+    )
+    try:
+        data = json.load(sys.stdin)
+        tool_name = data.get("toolName")
+        if tool_name not in {"bash", "powershell"}:
+            return 0
+        args = data.get("toolArgs") or {}
+        if isinstance(args, str):
+            args = json.loads(args)
+        command = args.get("command", "") if isinstance(args, dict) else ""
+        # Prefer an explicit cwd on the tool-call payload if the host
+        # provides one; fall back to this hook process's own cwd (which the
+        # CLI sets to match the session's current directory).
+        hook_cwd = data.get("cwd") or (args.get("cwd") if isinstance(args, dict) else None)
+    except Exception:
+        return 0
+    target = target_repo_from_manifest(plugin_root)
+    if target is None or current_repo(hook_cwd) != target:
+        # Scoped to this plugin's own repo -- a session working elsewhere
+        # (even with this plugin enabled purely for its instruction
+        # projections), or one where the target repo couldn't be resolved
+        # at all, is never touched by this guard (fail open, not closed).
+        return 0
+    if command_publishes_copilot_mention(command):
+        print(
+            json.dumps(
+                {
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": (
+                        "DENIED: an @copilot mention in a GitHub PR/issue "
+                        "comment or review does not nudge the review bot -- "
+                        "it delegates to the separate Copilot cloud coding "
+                        "agent, which will push its own unreviewed commits "
+                        "to the PR branch. The review bot already re-runs "
+                        "on every push; just push a commit for a fresh "
+                        "verdict, or post the comment without the mention."
+                    ),
+                    "decision": "deny",
+                    "message": "DENIED: do not @-mention copilot in a PR/issue comment or review.",
+                },
+                separators=(",", ":"),
+            )
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
