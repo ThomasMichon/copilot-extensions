@@ -277,8 +277,9 @@ def _cmd_catalog_annotate(args: argparse.Namespace) -> int:
     :mod:`agent_logger.sessions`/:mod:`agent_logger.cold_store` already apply
     to a read, since a process-boundary caller here is just as untrusted as
     one there. Exits non-zero with a clear message when the session id isn't
-    found locally or isn't safe, or the write itself fails (a lock timeout or
-    a catalog database error -- the sidecar write may already have succeeded
+    found locally or isn't safe, or the write itself fails (a lock timeout, a
+    catalog database error, or a ``--pr-number`` too large for SQLite's
+    64-bit ``INTEGER`` column -- the sidecar write may already have succeeded
     even if the catalog side then fails, so the caller should know about it
     rather than have it silently discarded). A malformed *existing* sidecar
     is not a failure here: :func:`write_review_annotation` treats it the same
@@ -325,7 +326,7 @@ def _cmd_catalog_annotate(args: argparse.Namespace) -> int:
             recorded_at=args.recorded_at,
             index=default_index(cfg),
         )
-    except (OSError, TimeoutError, sqlite3.Error) as exc:
+    except (OSError, TimeoutError, sqlite3.Error, OverflowError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     print(

@@ -372,6 +372,32 @@ def test_cli_annotate_rejects_directory_without_events_marker(
     assert not (not_a_session / "review-annotations.json").exists()
 
 
+def test_cli_annotate_reports_out_of_range_pr_number_as_clear_error(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """A --pr-number beyond SQLite's 64-bit INTEGER range raises
+    OverflowError binding the catalog insert -- must surface as the promised
+    error: message, never an uncaught traceback."""
+    session_dir = tmp_path / ".copilot" / "session-state" / "s1"
+    session_dir.mkdir(parents=True)
+    (session_dir / "events.jsonl").write_text("", encoding="utf-8")
+
+    rc = _run_annotate_cli(
+        monkeypatch,
+        tmp_path,
+        [
+            "annotate",
+            "s1",
+            "--repo",
+            "example/repo",
+            "--pr-number",
+            str(2**63),
+        ],
+    )
+
+    assert rc != 0
+
+
 def test_cli_annotate_rejects_unsafe_session_id(monkeypatch, tmp_path: Path) -> None:
     (tmp_path / ".copilot" / "session-state").mkdir(parents=True)
 
