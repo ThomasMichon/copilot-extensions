@@ -222,10 +222,12 @@ the async-compatible liveness-probe transport seam, the vendored lib's shape
 and dependency wiring (both `[project].dependencies` and
 `[tool.uv.sources]`, for both consumers), the publish-path unification
 question, CodeSpace lease/claim-ownership semantics for capture, the
-snapshot-race mitigation decision, the `docs/patterns/README.md`
-architecture-invariant check, the periodic-scheduling ownership decision,
-and vision reconciliation. Ends with submitting this effort's plan as a PR
-(this repo's automated-review gate) before Phase 2 starts.
+snapshot-race mitigation default (accept as documented residual risk,
+confirm or revise), the concurrency-lock widening for destructive callers,
+the `docs/patterns/README.md` architecture-invariant check, the
+periodic-scheduling ownership decision, and vision reconciliation. Ends
+with submitting this effort's plan as a PR (this repo's automated-review
+gate) before Phase 2 starts.
 
 ### Phase 2 — Extract the shared liveness-probe as a vendored lib
 - [ ] Extract the portable liveness-probe logic from
@@ -267,10 +269,13 @@ destructive-recovery call sites keeps working unchanged), account binding
 that requires an explicit caller-supplied account or a confirmed exact
 per-name binding -- never `get_codespace_status_with_account()`'s
 no-binding fallback scan, which is itself an ambiguous first-match, not an
-authoritative answer -- with fail-closed behavior, the post-capture
+authoritative answer -- with fail-closed behavior, coordinating capture with
+concurrent lifecycle operations (widening `TargetLock`'s held scope past
+just the sync sub-step, with an explicit accepted exception for a truly
+external actor bypassing this repo's lock entirely), the post-capture
 re-validation and explicitly-acknowledged residual snapshot-race risk, and
 the full test list (liveness, state, lease/claim, account-binding, race,
-and CLI-dispatch coverage).
+lifecycle-contention, and CLI-dispatch coverage).
 
 ### Phase 4 — Periodic trigger for CodeSpaces
 (scope set by Phase 1's scheduling-ownership decision)
@@ -326,10 +331,13 @@ and CLI-dispatch coverage).
       probe-to-pull race tests (a lock held through the final probe MUST
       always be rejected/retried; a lock acquired-then-released entirely
       during the pull is rejected/retried **only if** Phase 1 scoped in a
-      mitigation for it -- if Phase 1 instead accepted it as documented
-      residual risk, this case is not required to pass and the test suite
-      must not assert a guarantee the plan explicitly declined to make),
-      the account-binding tests (same-name-across-accounts with no binding
+      mitigation for it -- given the recorded default (accept as residual
+      risk), this case is not required to pass and the test suite must not
+      assert a guarantee the plan explicitly declined to make), the
+      lifecycle-contention regression test (a capture attempted while a
+      destructive caller holds the widened `TargetLock` across its full
+      sync-then-act sequence must defer, never interleave), the
+      account-binding tests (same-name-across-accounts with no binding
       is deferred; same-name-across-accounts with an exact binding
       succeeds pinned to that account; a binding-lookup failure defers;
       none of these fall through to ambient auth or an ambiguous

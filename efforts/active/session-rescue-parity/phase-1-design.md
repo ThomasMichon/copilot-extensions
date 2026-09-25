@@ -52,13 +52,25 @@ itself did not specify phasing)_
       non-owner/no-lease, an orphaned/claim-holder-gone case, and a
       cross-machine L2-only hold (no local lease) per that decision, not
       just the plain `get_lease()` owner/non-owner happy path.
-- [ ] **Decide the acceptable mitigation for the acquire-then-release-
-      during-the-pull snapshot race** (see Phase 3's explicit
-      acknowledgment): either accept it as a documented residual risk for
-      a periodic/advisory capture (matching what the existing containers
-      `rescue-capture` already implicitly accepts), or scope in an
-      atomic/lock-aware remote snapshot or detect-and-reject protocol as
-      part of Phase 3. Do not leave this undecided going into Phase 3.
+- [ ] **Snapshot-race mitigation: default decided, may be revised.**
+      Phase 3 now carries an agent-recommended default -- accept the
+      acquire-then-release-during-the-pull race as a documented residual
+      risk for a periodic/advisory capture (matching what the existing
+      containers `rescue-capture` already implicitly accepts), rather than
+      inventing a new atomic remote snapshot primitive Copilot CLI itself
+      does not support. Confirm this default still holds once real code is
+      in front of you, or revise it explicitly with the reasoning recorded
+      here -- do not silently drop the acknowledgment either way.
+- [ ] **Widen the concurrency lock's held scope for destructive callers.**
+      `sync_codespace_sessions()`'s `TargetLock` currently only covers its
+      own sync sub-step; `_cmd_stop` (and the other destructive callers)
+      release it before performing their actual stop/finalize/delete
+      action, leaving a window where a concurrent capture can pass its
+      probe and pull while a destructive action is imminent or in
+      progress. Decide how to widen the lock's held scope to cover each
+      destructive caller's full sync-then-act sequence (see Phase 3's
+      explicit item and its accepted external-actor exception) before
+      Phase 3 implementation.
 - [ ] **Evaluate this effort's design against `docs/patterns/README.md`'s
       architecture-pattern invariants before implementation begins** --
       this introduces a new shared runtime boundary across two

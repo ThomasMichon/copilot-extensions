@@ -2,6 +2,45 @@
 
 Back to [README.md](README.md).
 
+- [ ] **Coordinate capture with concurrent lifecycle operations, not just
+      with itself.** `sync_codespace_sessions()` already takes a
+      `TargetLock(name, op="session-sync")` for its own sync sub-step, but
+      `_cmd_stop` (`__main__.py:3615-3632`) calls that sync, **releases the
+      lock when it returns**, and only then calls `stop_codespace()` as a
+      separate step -- so a periodic capture's own lock acquisition can
+      land in the window between "stop's sync finished" and "stop's actual
+      `stop_codespace()` call", pass its liveness probe, and pull while the
+      CodeSpace is about to be (or is being) stopped underneath it. Widen
+      the lock's held scope so a destructive caller (`stop`/`finalize`/
+      `delete`/prune/reclaim) holds `TargetLock` across its **entire**
+      sync-then-act sequence, not only the sync sub-step, so a concurrent
+      capture attempt sees `TargetBusyError` and defers for the whole
+      transaction, not just the sync portion. Add a contention regression
+      test: a capture attempted while a destructive caller holds the
+      (widened) lock across its sync+act sequence must defer, never
+      interleave. **This does not extend to a truly external actor**
+      (a human running `gh codespace stop` directly, or GitHub's own
+      idle-timeout) bypassing this repo's lock entirely -- that remains an
+      accepted residual risk, identical in kind to a container being
+      `docker stop`'d by a process outside `agent-containers`' own lifecycle
+      code; call this out explicitly rather than silently, so a reader does
+      not read this widened lock as closing every actor's race, only this
+      repo's own in-process ones.
+- [ ] **Default resolution for the acquire-then-release-during-the-pull
+      snapshot race** _(agent-recommended default; the Phase 1 implementer
+      may revise with new information, but the plan should not ship this
+      question fully open)_: accept it as a documented residual risk for a
+      periodic/advisory capture, matching what the existing containers
+      `rescue-capture` already implicitly accepts (see the parallel
+      Phase 1 item and Validation Plan wording, which are already
+      conditioned on this exact choice) -- inventing a new atomic remote
+      snapshot primitive that Copilot CLI itself does not support is
+      disproportionate scope for a periodic evidence-preservation capture,
+      not a merge/replace/destructive operation. Document this choice
+      plainly in the shipped code's own docstring (mirroring how
+      `agent_containers.replacement.probe_session_liveness` already
+      documents its own best-effort nature) so a future reader does not
+      mistake the two-probe approach for a stronger guarantee than it is.
 - [ ] Add a CodeSpace-side liveness check (using the Phase 2 vendored lib,
       transport = the existing SSH `ConnectionManager`/`exec_with_retry`)
       that a new capture-only path calls before pulling, mirroring
