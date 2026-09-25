@@ -702,9 +702,10 @@ claiming discipline alone.
   are fully green (120/120). `ruff check --select F,E9`,
   `check-module-size.py`, `check-install-contract.py`, and
   `check-version-consistency.py` all clean. Added a pending
-  `.changefiles/*.json` entry naming `agent-worktrees` (patch) per
-  CONTRIBUTING.md's changefile flow -- the real version bump is applied by
-  the promotion pipeline, not hand-edited in this tree.
+  `.changefiles/*.json` entry naming `agent-worktrees` (`dev`, since this
+  session's own PR builds on the already-in-flight `1.5.5` patch series)
+  per CONTRIBUTING.md's changefile flow -- the real version bump is
+  applied by the promotion pipeline, not hand-edited in this tree.
 
 - **2026-09-23** — Landed Phase 3e Step 5b/5c (install.ps1 repoint + live
   trial), PR [#3457](https://github.com/ThomasMichon/copilot-extensions/pull/3457).

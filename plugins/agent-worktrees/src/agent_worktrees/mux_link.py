@@ -243,7 +243,17 @@ class ManagedMuxCache:
                 normalized = _normalize_entry(entry, trust_received_at=True)
             except ValueError:
                 continue
-            entries[(normalized["project"], normalized["worktree_id"])] = normalized
+            key = (normalized["project"], normalized["worktree_id"])
+            # A syntactically valid but duplicated (project, worktree_id)
+            # record in the snapshot must not let a later, lower-revision
+            # entry silently win over an earlier, higher-revision one just
+            # because it appears later in the array (Copilot review
+            # finding) -- keep whichever duplicate carries the highest
+            # mapping_revision, consistent with _persist_locked()'s own
+            # merge contract.
+            current = entries.get(key)
+            if current is None or normalized["mapping_revision"] >= current["mapping_revision"]:
+                entries[key] = normalized
         return entries
 
     @contextlib.contextmanager

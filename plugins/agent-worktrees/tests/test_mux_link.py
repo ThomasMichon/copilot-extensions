@@ -717,6 +717,53 @@ def test_warm_load_keys_entries_by_their_own_project_and_worktree_id(tmp_path):
     assert second.get("proj-b", "wt-1")["project"] == "proj-b"
 
 
+def test_warm_load_keeps_the_highest_revision_among_duplicate_snapshot_entries(tmp_path):
+    """Copilot review finding: a syntactically valid snapshot containing
+    duplicate ``(project, worktree_id)`` records must not let a later,
+    lower-revision entry silently win over an earlier, higher-revision one
+    just because it appears later in the JSON array -- that would let a
+    stale update pass the monotonicity guard on the next warm-load."""
+    persist_path = tmp_path / "managed-mux-cache.json"
+    persist_path.write_text(
+        json.dumps(
+            [
+                {
+                    "project": "proj",
+                    "worktree_id": "wt-1",
+                    "mux_session": "wt-1",
+                    "mapping_revision": 9,
+                    "live": True,
+                    "panes": [],
+                    "session_incarnation": "",
+                    "attached_clients": 0,
+                    "observed_at": "2026-09-17T08:00:00Z",
+                    "received_at": time.time(),
+                },
+                {
+                    # A duplicate key with a LOWER revision, appearing
+                    # later in the array.
+                    "project": "proj",
+                    "worktree_id": "wt-1",
+                    "mux_session": "wt-1",
+                    "mapping_revision": 3,
+                    "live": False,
+                    "panes": [],
+                    "session_incarnation": "",
+                    "attached_clients": 0,
+                    "observed_at": "2026-09-17T08:00:00Z",
+                    "received_at": time.time(),
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    cache = mux_link.ManagedMuxCache(persist_path=persist_path)
+    entry = cache.get("proj", "wt-1")
+    assert entry is not None
+    assert entry["mapping_revision"] == 9  # the higher revision wins, not array order
+    assert entry["live"] is True
+
+
 def test_apply_observation_still_rejects_stale_revision_after_restart(tmp_path):
     persist_path = tmp_path / "managed-mux-cache.json"
     first = mux_link.ManagedMuxCache(persist_path=persist_path)
