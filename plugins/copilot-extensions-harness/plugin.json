@@ -17,5 +17,6 @@
     "copilot-extension"
   ],
   "skills": "skills/",
-  "agents": "agents/"
+  "agents": "agents/",
+  "hooks": "hooks.json"
 }
