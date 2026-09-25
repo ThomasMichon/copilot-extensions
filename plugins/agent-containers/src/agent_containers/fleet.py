@@ -813,6 +813,8 @@ def rescue_capture_fleet(
     """
     result = FleetOperationResult()
     fleet = config.fleets.get(fleet_name)
+    if fleet is None:
+        raise RuntimeError(f"Fleet '{fleet_name}' is not defined in containers.yaml")
     for c in _fleet_members(config, fleet_name):
         if c.fleet and c.fleet != fleet_name:
             result.deferred[c.name] = (

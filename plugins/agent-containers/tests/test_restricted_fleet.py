@@ -749,6 +749,13 @@ def test_rescue_capture_fleet_defers_nonrunning_members(monkeypatch):
     }
 
 
+def test_rescue_capture_fleet_requires_defined_fleet(monkeypatch):
+    monkeypatch.setattr(fleet_mod, "_fleet_members", lambda *_args: [])
+
+    with pytest.raises(RuntimeError, match="Fleet 'missing' is not defined"):
+        fleet_mod.rescue_capture_fleet(ContainersConfig(), "missing")
+
+
 def test_restricted_down_uses_safe_per_member_stop(monkeypatch):
     from agent_containers import replacement
 

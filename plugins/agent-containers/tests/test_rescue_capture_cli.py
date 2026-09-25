@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 
+from agent_containers import __main__ as cli
 from agent_containers import fleet as fleet_mod
 from agent_containers import rescue_capture_cli as rcc
 from agent_containers.config import ContainersConfig
@@ -76,6 +77,15 @@ def test_rescue_capture_text_none_captured(monkeypatch, capsys):
 
     assert rc == 0
     assert "Captured: (none)" in capsys.readouterr().out
+
+
+def test_rescue_capture_unknown_fleet_is_error(monkeypatch, capsys):
+    monkeypatch.setattr(rcc, "load_config", ContainersConfig)
+
+    rc = cli.main(["rescue-capture", "missing"])
+
+    assert rc == 1
+    assert "Fleet 'missing' is not defined" in capsys.readouterr().err
 
 
 def test_rescue_capture_parser_wires_fleet_and_json_and_func():
