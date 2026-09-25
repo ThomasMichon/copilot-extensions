@@ -18,10 +18,10 @@ name: CI
 #
 # `dev` is included in the push trigger for the dev-branch-release-pipeline
 # effort's Phase 3 (ThomasMichon/copilot-extensions#3336): a green run of
-# THIS workflow on `dev` is what `.github/workflows/promote.yml` waits on
-# (`workflow_run`) before generating the wholesale-replace commit onto
-# `main`. Nobody is asked to target `dev` yet -- see that effort's Plan for
-# the sequencing note on when contributor-facing docs actually flip.
+# THIS workflow on `dev` is what `.github/workflows/validate-and-promote.yml`
+# waits on (`workflow_run`) before generating the wholesale-replace commit
+# onto `main`. Nobody is asked to target `dev` yet -- see that effort's Plan
+# for the sequencing note on when contributor-facing docs actually flip.
 #
 # See also: .github/workflows/context-handoff-exhaustive.yml -- a SEPARATE
 # workflow (not a job here) for the real-git/child-process/lock-race matrix
@@ -39,7 +39,17 @@ on:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # `false` (not the prior `true`): a rolling build, not cancel-and-restart.
+  # GitHub's default queue:single semantics for a shared group already give
+  # exactly this -- at most one run in progress, at most one pending, and a
+  # newer push only ever supersedes the *pending* run, never kills the one
+  # already in progress. `cancel-in-progress: true` risked starving this
+  # workflow entirely under rapid pushes to the same ref (an in-flight run
+  # gets killed and restarted from zero every time, so if pushes arrive
+  # faster than this suite completes, NO run ever finishes) -- which in turn
+  # means Validation Gate/Promote downstream never fire at all
+  # (ThomasMichon/copilot-extensions#3592).
+  cancel-in-progress: false
 
 permissions:
   contents: read

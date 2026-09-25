@@ -9,8 +9,8 @@ implements):
 1. **Pause first.** ``python tools/rollback_release.py pause --reason "..."
    --push`` -- lands a small commit on ``main`` marking the pipeline paused
    *before* the rollback commit itself lands, so a promotion cannot race the
-   rollback. ``.github/workflows/promote.yml`` refuses to run (via
-   ``tools/promote_release.py``'s own pause check) while this is set.
+   rollback. ``.github/workflows/validate-and-promote.yml`` refuses to run
+   (via ``tools/promote_release.py``'s own pause check) while this is set.
 2. **Revert.** ``python tools/rollback_release.py revert --reason "..."
    --push`` -- restores main's pre-promotion tree wholesale (refusing to
    touch anything else -- see the guard below), tags it, and records the
@@ -26,8 +26,8 @@ implements):
 GitHub Actions app, or any other actor, a bypass the way an organization
 can), so a raw push to `main` is always rejected. Requires an authenticated
 `gh` CLI (this is meant to be run by a human operator with their own
-credentials, not from within `promote.yml`'s CI identity). Pass `--no-pr`
-only against an unprotected/trusted repo (tests use this).
+credentials, not from within ``validate-and-promote.yml``'s CI identity).
+Pass `--no-pr` only against an unprotected/trusted repo (tests use this).
 
 Guards:
 

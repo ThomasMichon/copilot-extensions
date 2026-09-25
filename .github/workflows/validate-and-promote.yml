@@ -1,0 +1,382 @@
+name: Validate and promote dev to main
+
+# Phase 3 of the dev-branch-release-pipeline effort
+# (ThomasMichon/copilot-extensions#3336): once CI goes green on `dev`, run
+# the broader (target 10-30 min) steady test-suite validation, then --
+# only if that validation genuinely passed for a genuine dev commit --
+# generate a single wholesale-replace commit and land it on `main` -- never
+# a merge of `dev` into `main` -- via tools/promote_release.py. See that
+# effort's README (Plan > Phase 3/5) for the full design.
+#
+# Merged from two separate files (`validation-gate.yml` + `promote.yml`,
+# ThomasMichon/copilot-extensions#3592) after #3567 and a same-day follow-up
+# regression: the only reason `promote.yml` needed a fragile artifact
+# upload/download hand-off for the validated commit SHA was that the two
+# stages were separate workflows connected by `workflow_run`, which has no
+# native way to pass job outputs across that boundary. As one workflow, the
+# `promote` job below reads `needs.gate.outputs.sha` directly -- an ordinary
+# same-run job output, always present, never subject to the `head_sha`/
+# `head_branch` unreliability `workflow_run` events are documented to have.
+# That whole failure class is now structurally impossible for this hop, not
+# merely worked around.
+#
+# Concurrency: a single top-level group (see below) makes the ENTIRE run --
+# validation AND promotion together -- one atomic unit in GitHub's queue.
+# With `cancel-in-progress: false`, this is GitHub's documented
+# `queue: single` default: at most one (validate+promote) tuple running, at
+# most one pending, and a newer trigger only ever cancels the *pending*
+# tuple -- never the one currently running. A currently-running tuple always
+# runs to completion (success or failure) before the next queued one starts;
+# nothing is ever restarted mid-flight. This is a genuine rolling build, not
+# the previous split design's "cancel and restart from zero" (`ci.yml`) or
+# "full parallelism, no debounce" (the old per-commit validation-gate
+# group) -- see the effort Journal entry that proposed this for the full
+# reasoning.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      push:
+        description: "Push the generated commit + tag to main (default: true)"
+        required: false
+        default: "true"
+
+concurrency:
+  group: validate-and-promote-dev-to-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+jobs:
+  gate:
+    name: gate (confirm this is a dev commit)
+    # `branches: [dev]` on the workflow_run trigger above looks like the
+    # obvious filter, but it is unreliable in practice: GitHub's
+    # workflow_run event consistently reports `head_branch` as the
+    # repository's *default* branch (main), not the branch that actually
+    # produced the triggering CI run -- confirmed empirically across many
+    # real runs here, including successful push-triggered CI runs on dev
+    # whose own head_branch correctly says "dev". Trusting that field left
+    # this whole pipeline dead: 0 real triggers ever
+    # (dev-branch-release-pipeline effort, promote-trigger finding).
+    # Verify real dev-ancestry with git instead of the event metadata.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      is_dev: ${{ steps.check.outputs.is_dev }}
+      sha: ${{ steps.check.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: check
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "is_dev=true" >> "$GITHUB_OUTPUT"
+            echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          sha="${{ github.event.workflow_run.head_sha }}"
+          git fetch origin dev
+          if git merge-base --is-ancestor "$sha" origin/dev; then
+            echo "is_dev=true" >> "$GITHUB_OUTPUT"
+            echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_dev=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::$sha is not on origin/dev's history -- skipping (this CI completion was for a different branch/PR)."
+          fi
+
+  full:
+    name: full - ${{ matrix.plugin }}
+    needs: gate
+    if: needs.gate.outputs.is_dev == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        plugin:
+          - agent-bridge
+          - agent-codespaces
+          - agent-containers
+          - agent-dispatch
+          - agent-logger
+          - agent-mcp
+          - agent-ssh
+          - agent-vault
+          - agent-worktrees
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.gate.outputs.sha }}
+      - name: Ensure full history is actually present
+        # actions/checkout's fetch-depth: 0 is unreliable when combined with
+        # an explicit detached-commit-sha ref (as this job needs, to pin to
+        # the exact commit `gate` already validated rather than whatever
+        # dev's tip has moved to since) -- confirmed live: agent-bridge's
+        # test_session_host_fixture_matches_generation_one (a `git show
+        # <historical-sha>:path` test) still failed with the same shallow-
+        # clone error even with fetch-depth: 0 set (actions/checkout#1515:
+        # an explicit SHA ref can silently produce a single-commit shallow
+        # clone regardless of fetch-depth). The prior fix here
+        # (`git fetch --prune --unshallow || true`) was itself broken: run
+        # against an already-complete clone, `--unshallow` errors out
+        # ("does not make sense on a complete repository") and the bare
+        # `|| true` silently swallowed that, so the step never actually did
+        # anything. Only unshallow when the clone genuinely is shallow, and
+        # always also register every remote branch explicitly -- an SHA-ref
+        # checkout may leave `origin/*` remote-tracking refs entirely
+        # unpopulated, which an unshallow alone would not fix either.
+        run: |
+          if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+            git fetch --prune --unshallow
+          fi
+          git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Full suite - ${{ matrix.plugin }}
+        run: python tools/run-plugin-tests.py ${{ matrix.plugin }}
+
+  worktree-manager:
+    name: worktree-manager (out-of-plugin, full)
+    needs: gate
+    if: needs.gate.outputs.is_dev == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.gate.outputs.sha }}
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Test worktree-manager
+        working-directory: worktree-manager
+        run: uv run --extra dev pytest -q
+
+  guards-full-sweep:
+    name: guards (full-tree, non-PR-scoped)
+    needs: gate
+    if: needs.gate.outputs.is_dev == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.gate.outputs.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip pytest pyyaml ruff
+      - name: Module size (full sweep, unconditional)
+        run: python tools/check-module-size.py
+      - name: Version consistency
+        run: python tools/check-version-consistency.py
+      - name: Vendored library synchronization
+        run: python tools/check-vendored-libs-sync.py
+      - name: Docs consistency
+        run: python tools/check-docs-consistency.py
+
+  promote:
+    name: Promote dev -> main
+    needs: [gate, full, worktree-manager, guards-full-sweep]
+    # `always()`: `full`/`worktree-manager`/`guards-full-sweep` are legitimately
+    # `skipped` (not `success`) whenever `gate` found `is_dev == 'false'` --
+    # the default implicit `if` (require every `needs` job to have succeeded)
+    # would skip THIS job too in that case, when what we actually want is to
+    # run the `decide` step below and log why promotion isn't happening.
+    if: always()
+    runs-on: ubuntu-latest
+    environment: main-promotion
+    # Admin-escalation gate: this job runs under the `main-promotion` GitHub
+    # Environment. That environment itself is NOT something this workflow
+    # file can configure -- a repo admin must add required reviewers to it
+    # (Settings > Environments > main-promotion) before this gate actually
+    # blocks anything unattended. Until that's done, the job runs without a
+    # human approval step (but every other guard below still applies).
+    #
+    # `main` carries a zero-bypass "pull request required" ruleset (a
+    # personal GitHub account cannot grant the GitHub Actions app -- or any
+    # other actor -- a bypass the way an organization can), so this job can
+    # never push to `main` directly. It pushes the generated commit to a
+    # throwaway `release/promote-<run id>` branch instead, opens a PR
+    # against `main`, and squash-merges it via the `gh` CLI (the same
+    # sanctioned path every other change to this repo already lands
+    # through) -- then tags the REAL, post-merge commit on `main` (a
+    # squash-merge produces a new sha; the pre-merge candidate commit this
+    # job built locally is never the thing that actually lands).
+    #
+    # Token: uses the `APERTURE_RELEASE_TOKEN` repository secret (a
+    # fine-grained PAT scoped to this repo, Contents: Read and write +
+    # Pull requests: Read and write), NOT the default `github.token`. GitHub
+    # never fires other workflow events (including `pull_request`) for
+    # content pushed/authored with the default `GITHUB_TOKEN` -- a
+    # documented anti-recursion safeguard -- so a `GITHUB_TOKEN`-authored
+    # candidate PR never triggers `ci.yml`'s required `main source gate`
+    # check and `gh pr merge --auto` sits permanently blocked (confirmed
+    # live on the very first real --push run, #3533 -- had to be merged
+    # with a manual admin bypass). A PAT-authored push/PR does trigger
+    # downstream workflows normally, making the merge genuinely turn-key.
+    #
+    # Emergency rollback: `python tools/rollback_release.py pause --reason
+    # "..." --push` BEFORE `revert --reason "..." --push` -- run by a human
+    # operator with their own `gh` credentials (see
+    # tools/rollback_release.py's own docstring), not from this workflow.
+    # `tools/promote_release.py` itself refuses to run while paused, and
+    # refuses to re-promote the exact `dev` state a rollback just reverted
+    # (the non-incremental-update guard) unless `--force` is passed after
+    # `dev` has moved forward with a real fix.
+    env:
+      GH_TOKEN: ${{ secrets.APERTURE_RELEASE_TOKEN }}
+      CANDIDATE_BRANCH: release/promote-${{ github.run_id }}
+    steps:
+      - name: Decide whether this run should actually promote
+        id: decide
+        # Replaces both the artifact hand-off (#3567/#3578) and the old
+        # cross-workflow "did Validation Gate's whole run succeed" check --
+        # `needs.<job>.result`/`.outputs` are ordinary same-run facts, not
+        # event metadata, so there is nothing left here to be unreliable.
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "${{ needs.gate.result }}" != "success" ]; then
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::gate job did not succeed (${{ needs.gate.result }}) -- skipping promotion."
+            exit 0
+          fi
+          if [ "${{ needs.gate.outputs.is_dev }}" != "true" ]; then
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Not a validated dev commit -- skipping promotion."
+            exit 0
+          fi
+          # is_dev was true, so full/worktree-manager/guards-full-sweep were
+          # NOT skipped by their own `if:` above -- they must have genuinely
+          # run and succeeded, or we refuse to promote unvalidated content.
+          for r in "${{ needs.full.result }}" "${{ needs.worktree-manager.result }}" "${{ needs.guards-full-sweep.result }}"; do
+            if [ "$r" != "success" ]; then
+              echo "proceed=false" >> "$GITHUB_OUTPUT"
+              echo "::error::Validation did not pass ($r) -- refusing to promote."
+              exit 0
+            fi
+          done
+          echo "proceed=true" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+          token: ${{ secrets.APERTURE_RELEASE_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Configure git identity for the generated commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+      - name: Promote (push a candidate branch; report-only if push=false)
+        id: promote
+        if: steps.decide.outputs.proceed == 'true'
+        env:
+          PUSH_INPUT: ${{ github.event.inputs.push }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$PUSH_INPUT" = "false" ]; then
+            python tools/promote_release.py --dev-ref origin/dev --main-ref origin/main
+            echo "land=false" >> "$GITHUB_OUTPUT"
+          else
+            output=$(python tools/promote_release.py --dev-ref origin/dev --main-ref origin/main \
+              --push --candidate-branch "$CANDIDATE_BRANCH")
+            echo "$output"
+            echo "land=true" >> "$GITHUB_OUTPUT"
+            # Machine-readable list of the .changefiles/*.json this run
+            # consumed (tools/promote_release.py's own "changefile-consumed:"
+            # marker lines) -- the "Clear consumed changefiles" step below
+            # deletes exactly these from dev, so a later promotion never
+            # re-reads and re-bumps the same already-landed changefiles
+            # against dev's still-unbumped plugin.json (see that tool's own
+            # comment for the confirmed-live collision this prevents).
+            {
+              echo "consumed_changefiles<<CHANGEFILES_EOF"
+              echo "$output" | sed -n 's/^  changefile-consumed: //p'
+              echo "CHANGEFILES_EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+      - name: Land the candidate branch on main via PR + squash-merge
+        id: land
+        if: steps.promote.outputs.land == 'true'
+        run: |
+          if ! git ls-remote --exit-code --heads origin "$CANDIDATE_BRANCH" > /dev/null; then
+            echo "No candidate branch pushed (nothing to promote) -- skipping."
+            echo "candidate_pushed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "candidate_pushed=true" >> "$GITHUB_OUTPUT"
+          # `gh pr create` has no --json/--jq flags (those belong to `gh pr
+          # view`/`gh pr list`); it prints the PR URL on success. Extract the
+          # number from that URL instead of piping create straight into --jq
+          # (confirmed live: this workflow's first real --push run failed
+          # here with "unknown flag: --json").
+          pr_url=$(gh pr create --base main --head "$CANDIDATE_BRANCH" \
+            --title "release: promote dev to main ($CANDIDATE_BRANCH)" \
+            --body "Generated by tools/promote_release.py. Do not edit by hand.")
+          pr_number=$(basename "$pr_url")
+          gh pr merge "$pr_number" --squash --auto
+      - name: Tag the real post-merge commit
+        if: steps.promote.outputs.land == 'true' && steps.land.outputs.candidate_pushed == 'true'
+        run: |
+          git fetch origin main
+          new_sha=$(git rev-parse origin/main)
+          tag_name="promote-$(date -u +%Y%m%d%H%M%S)-${new_sha:0:8}"
+          git tag -a "$tag_name" -m "release: promote dev to main ($CANDIDATE_BRANCH -> $new_sha)" "$new_sha"
+          git push origin "$tag_name"
+      - name: Clear consumed changefiles on dev
+        # promote_release.py deliberately NEVER touches dev's own tree
+        # (only the isolated scratch worktree that becomes main's
+        # snapshot) -- so without this step, every already-landed
+        # changefile stays on dev forever, and each future promotion
+        # re-reads and re-consumes it, recomputing the SAME target version
+        # from dev's still-unbumped plugin.json every time (confirmed
+        # live: two consecutive real promotions both computed identical
+        # "agent-bridge 0.4.0-dev551 -> 0.4.1-dev1"). Lands as an ordinary
+        # PR through dev's own normal ruleset (PR + CI required, no
+        # bypass) -- ci.yml's changefile-presence guard only requires a
+        # NEW changefile for touched plugin content, and this PR touches
+        # only .changefiles/ deletions, so it passes trivially.
+        if: >-
+          steps.promote.outputs.land == 'true' &&
+          steps.land.outputs.candidate_pushed == 'true' &&
+          steps.promote.outputs.consumed_changefiles != ''
+        run: |
+          git fetch origin dev
+          cleanup_branch="chore/consume-changefiles-${{ github.run_id }}"
+          git switch -c "$cleanup_branch" origin/dev
+          removed=0
+          while IFS= read -r name; do
+            [ -n "$name" ] || continue
+            if [ -f ".changefiles/$name" ]; then
+              git rm -q -- ".changefiles/$name"
+              removed=$((removed + 1))
+            fi
+          done <<< "${{ steps.promote.outputs.consumed_changefiles }}"
+          if [ "$removed" -eq 0 ] || git diff --cached --quiet; then
+            echo "Nothing to remove (already cleared by an earlier run) -- skipping."
+            exit 0
+          fi
+          git commit -m "chore: clear changefiles consumed by promotion ${{ github.run_id }}"
+          git push origin "HEAD:$cleanup_branch"
+          pr_url=$(gh pr create --base dev --head "$cleanup_branch" \
+            --title "chore: clear changefiles consumed by promotion ${{ github.run_id }}" \
+            --body "Generated by tools/promote_release.py via validate-and-promote.yml. Removes changefiles already consumed by the just-completed promotion, so a future promotion never re-bumps the same plugin(s) to the same already-shipped target version. Do not edit by hand.")
+          pr_number=$(basename "$pr_url")
+          gh pr merge "$pr_number" --squash --auto
