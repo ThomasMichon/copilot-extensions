@@ -270,24 +270,31 @@ def _cmd_catalog_annotate(args: argparse.Namespace) -> int:
     Only ever resolves the local live session-state tier (never an archive):
     :func:`agent_logger.sessions.write_review_annotation` requires a live
     session directory to mutate, matching its own contract. Rejects an unsafe
-    ``session_id`` (path separator, ``..``, absolute anchor) and a session
-    directory that resolves through a symlink/reparse point -- the same two
-    checks :mod:`agent_logger.cold_store` already applies to a read, since a
-    process-boundary caller here is just as untrusted as one there. Exits
-    non-zero with a clear message when the session id isn't found locally or
-    isn't safe, or the write itself fails (a lock timeout or a catalog
-    database error -- the sidecar write may already have succeeded even if
-    the catalog side then fails, so the caller should know about it rather
-    than have it silently discarded). A malformed *existing* sidecar is not
-    a failure here: :func:`write_review_annotation` treats it the same as a
-    missing one and simply overwrites it with a fresh, well-formed entry.
+    ``session_id`` (path separator, ``..``, absolute anchor), a session
+    directory that resolves through a symlink/reparse point, and any real
+    directory lacking the live-session marker
+    (:data:`agent_logger.sessions.EVENTS_MEMBER`) -- the same checks
+    :mod:`agent_logger.sessions`/:mod:`agent_logger.cold_store` already apply
+    to a read, since a process-boundary caller here is just as untrusted as
+    one there. Exits non-zero with a clear message when the session id isn't
+    found locally or isn't safe, or the write itself fails (a lock timeout or
+    a catalog database error -- the sidecar write may already have succeeded
+    even if the catalog side then fails, so the caller should know about it
+    rather than have it silently discarded). A malformed *existing* sidecar
+    is not a failure here: :func:`write_review_annotation` treats it the same
+    as a missing one and simply overwrites it with a fresh, well-formed
+    entry.
     """
     import sqlite3
 
     from agent_logger.catalog import default_index
     from agent_logger.cold_store import _is_safe_session_id
     from agent_logger.segmenter.collate import find_copilot_dir
-    from agent_logger.sessions import SESSION_STATE_SUBDIR, write_review_annotation
+    from agent_logger.sessions import (
+        EVENTS_MEMBER,
+        SESSION_STATE_SUBDIR,
+        write_review_annotation,
+    )
     from agent_logger.sync.provenance import existing_real_directory
 
     if not _is_safe_session_id(args.session_id):
@@ -299,7 +306,8 @@ def _cmd_catalog_annotate(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     session_dir = state_root / args.session_id
-    if existing_real_directory(session_dir) is None:
+    real_session_dir = existing_real_directory(session_dir)
+    if real_session_dir is None or not (real_session_dir / EVENTS_MEMBER).is_file():
         print(
             f"error: no local live session directory for {args.session_id!r} "
             f"(looked under {state_root})",

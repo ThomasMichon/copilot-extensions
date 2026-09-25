@@ -345,6 +345,33 @@ def test_cli_annotate_missing_session_exits_nonzero(monkeypatch, tmp_path: Path)
     assert rc != 0
 
 
+def test_cli_annotate_rejects_directory_without_events_marker(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """A real directory under session-state that never held a session (no
+    events.jsonl) must not be treated as a live session -- matching
+    sessions.resolve_ref()'s own contract, and never getting a
+    review-annotations.json sidecar written into an unrelated directory."""
+    not_a_session = tmp_path / ".copilot" / "session-state" / "not-a-session"
+    not_a_session.mkdir(parents=True)
+
+    rc = _run_annotate_cli(
+        monkeypatch,
+        tmp_path,
+        [
+            "annotate",
+            "not-a-session",
+            "--repo",
+            "example/repo",
+            "--pr-number",
+            "6100",
+        ],
+    )
+
+    assert rc != 0
+    assert not (not_a_session / "review-annotations.json").exists()
+
+
 def test_cli_annotate_rejects_unsafe_session_id(monkeypatch, tmp_path: Path) -> None:
     (tmp_path / ".copilot" / "session-state").mkdir(parents=True)
 
