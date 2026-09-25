@@ -1,9 +1,0 @@
-{
-  "comment": "copilot --detach --forward PORT[:VENUE_PORT]: the Connection Owner keeps a host-to-CodeSpace local forward (e.g. a worker's dev server for a host browser) for the session's life",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

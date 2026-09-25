@@ -1,9 +1,0 @@
-{
-  "comment": "Add a CLI verb (catalog annotate) to write a review annotation across a process boundary",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

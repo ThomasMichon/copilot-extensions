@@ -1,9 +1,0 @@
-{
-  "comment": "agent-logger: add a CLI verb (catalog query) to read the review-annotation catalog cross-repo",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

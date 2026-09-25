@@ -1,9 +1,0 @@
-{
-  "comment": "Add a staged 'diagnose' command that walks config -> auth -> transport -> handshake -> catalog for one bridge, reporting exactly which connectivity layer failed",
-  "changes": [
-    {
-      "plugin": "agent-mcp",
-      "type": "patch"
-    }
-  ]
-}
