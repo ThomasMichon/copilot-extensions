@@ -10,7 +10,7 @@ from pathlib import Path
 
 from . import git_ops, installer as inst, output, picker_profiles_cli
 from . import config as cfg
-from . import picker_profiles_cli, repos_cli, status_bar_cli
+from . import repos_cli, status_bar_cli
 
 
 def _core():
