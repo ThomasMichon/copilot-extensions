@@ -317,6 +317,39 @@ def test_ingest_translates_and_counts(client: TestClient) -> None:
     assert body["last_id"] == 3
 
 
+def test_open_tool_keeps_live_session_running_after_turn_end(
+    client: TestClient,
+) -> None:
+    _register(client)
+    r = client.post(
+        "/api/v1/live-sessions/cli-1/events",
+        json={
+            "events": [
+                {
+                    "type": "tool.execution_start",
+                    "data": {
+                        "toolCallId": "tc-1",
+                        "toolName": "shell",
+                        "arguments": {"command": "run checks"},
+                    },
+                },
+                {"type": "assistant.turn_end", "data": {"turnId": "subturn"}},
+            ]
+        },
+    )
+    assert r.status_code == 200, r.text
+
+    info = client.get("/api/v1/live-sessions/cli-1").json()
+    assert info["turn_state"] == "running"
+    assert info["liveness"] == "active"
+
+    snapshot = client.get("/api/v1/live-sessions/cli-1/result").json()
+    assert snapshot["state"]["session_status"] == "live"
+    assert snapshot["state"]["liveness"] == "active"
+    assert snapshot["state"]["active_work"]["availability"] == "available"
+    assert snapshot["state"]["active_work"]["value"]["tool"]["command"] == "run checks"
+
+
 def test_deregister_drops_represented_log(client: TestClient) -> None:
     _register(client)
     client.post(
