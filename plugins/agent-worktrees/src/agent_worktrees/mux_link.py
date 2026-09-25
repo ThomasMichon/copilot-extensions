@@ -114,12 +114,28 @@ class ManagedMuxCache:
     otherwise stateless across restarts, matching
     ``worktree_status_daemon.WorktreeStatusCache``'s own durable-across-
     restart precedent.
+
+    :meth:`close` marks this cache permanently closed: every subsequent
+    :meth:`apply_observation` call becomes a safe no-op instead of writing.
+    ``CoalescingServer.close()`` stops *accepting* new work but does not
+    wait for an already-dispatched request-handler thread to finish (see
+    its own docstring) -- without this guard, such a late handler could
+    still call into a cache whose owning ``InProcessRuntime`` has already
+    been shut down and atomically persist an *older* snapshot after a
+    replacement runtime has already persisted a newer revision to the same
+    ``persist_path``, regressing the on-disk monotonicity guard across a
+    restart (Copilot review finding). ``InProcessRuntime.shutdown()`` calls
+    this after closing the server, serialized through the same lock every
+    ``apply_observation`` call takes, so a handler already past this check
+    when ``close()`` runs still completes normally, but any handler that
+    reaches the lock afterward safely aborts instead of writing.
     """
 
     def __init__(self, persist_path: Path | str | None = None) -> None:
         self._lock = threading.Lock()
         self._entries: dict[str, dict] = {}
         self._persist_path = Path(persist_path) if persist_path is not None else None
+        self._closed = False
         self._warm_load()
 
     def _warm_load(self) -> None:
@@ -168,6 +184,13 @@ class ManagedMuxCache:
         except OSError:
             pass
 
+    def close(self) -> None:
+        """Permanently close this cache: every subsequent
+        :meth:`apply_observation` becomes a no-op (see this class's own
+        docstring for why this exists)."""
+        with self._lock:
+            self._closed = True
+
     def apply_observation(self, payload: dict) -> dict:
         """Validate and apply one ``mux-live-v1`` observation.
 
@@ -176,15 +199,18 @@ class ManagedMuxCache:
         ``mapping_revision``) -- the same "never silently accept garbage"
         contract ``worktree_status_daemon.build_cached_compute`` uses for
         its own request validation. Returns ``{"applied": True, "revision":
-        <int>}`` on success, or ``{"applied": False, "reason":
+        <int>}`` on success, ``{"applied": False, "reason":
         "stale_revision", "current_revision": <int>}`` when a newer revision
-        is already on file.
+        is already on file, or ``{"applied": False, "reason": "closed"}``
+        when this cache has already been closed (see :meth:`close`).
         """
         entry = _normalize_entry(payload)
         worktree_id = entry["worktree_id"]
         revision = entry["mapping_revision"]
 
         with self._lock:
+            if self._closed:
+                return {"applied": False, "reason": "closed"}
             current = self._entries.get(worktree_id)
             if current is not None and revision < current["mapping_revision"]:
                 return {
@@ -429,27 +455,33 @@ def _push_key(payload: dict) -> str:
     .apply_observation` at all, and that caller would receive the first
     push's response as if its own had succeeded, silently dropping the
     update with no way for the monotonic-revision guard to ever recover it
-    (Copilot review finding). Keying on ``(worktree_id, mapping_revision)``
-    instead makes every distinct observation its own coalescing slot --
-    only a genuine retry of the exact same revision is ever safe to
-    coalesce -- while still deduplicating truly-concurrent identical
-    retries the way the coalescing contract intends.
+    (Copilot review finding). Keying on ``(project, worktree_id,
+    mapping_revision)`` instead makes every distinct observation its own
+    coalescing slot -- ``project`` matters too, since ``worktree_id`` alone
+    is not guaranteed unique across two different projects' concurrent
+    pushes at the same revision number (Copilot review finding) -- while
+    still deduplicating truly-concurrent identical retries the way the
+    coalescing contract intends.
 
-    Raises ``ValueError`` for a payload missing either field, mirroring
-    :func:`_normalize_entry`'s own required-field validation so a caller
-    finds out before ever reaching the wire.
+    Raises ``ValueError`` for a payload missing any of the three fields,
+    mirroring :func:`_normalize_entry`'s own required-field validation so a
+    caller finds out before ever reaching the wire.
     """
+    project = payload.get("project")
     worktree_id = payload.get("worktree_id")
     revision = payload.get("mapping_revision")
+    if not isinstance(project, str) or not project:
+        raise ValueError("mux-live-v1 push payload missing 'project'")
     if not isinstance(worktree_id, str) or not worktree_id:
         raise ValueError("mux-live-v1 push payload missing 'worktree_id'")
     if isinstance(revision, bool) or not isinstance(revision, int):
         raise ValueError("mux-live-v1 push payload requires an integer mapping_revision")
-    # Length-prefix worktree_id so the split point is unambiguous regardless
-    # of its own content (mirrors `worktree_status_daemon.coalescing_key`'s
-    # own injective-key rationale) -- `worktree_id` is caller-controlled and
-    # not restricted against a literal `:`.
-    return f"{len(worktree_id)}:{worktree_id}:{revision}"
+    # Length-prefix both string components so the split points are
+    # unambiguous regardless of their own content (mirrors
+    # `worktree_status_daemon.coalescing_key`'s own injective-key
+    # rationale) -- neither `project` nor `worktree_id` is restricted
+    # against a literal `:`.
+    return f"{len(project)}:{project}:{len(worktree_id)}:{worktree_id}:{revision}"
 
 
 def mux_live_via_daemon(
@@ -601,6 +633,15 @@ class InProcessRuntime:
 
     def shutdown(self) -> None:
         if self.server is not None:
+            # Stop accepting new work first. `CoalescingServer.close()`
+            # does not wait for an already-dispatched handler thread to
+            # finish, so `cache.close()` below is what actually makes a
+            # late handler's write safe (see `ManagedMuxCache`'s own
+            # docstring) -- ordering `server.close()` first here is belt-
+            # and-suspenders (no new handler can be dispatched after this),
+            # not itself the safety guarantee.
             self.server.close()
+        if self.cache is not None:
+            self.cache.close()
         self.server = None
         self.cache = None

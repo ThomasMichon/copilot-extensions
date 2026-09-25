@@ -221,6 +221,43 @@ def test_has_any_live_reflects_current_state():
     assert cache.has_any_live() is False
 
 
+def test_close_makes_apply_observation_a_safe_no_op():
+    """Copilot review finding: ``CoalescingServer.close()`` does not wait
+    for an already-dispatched handler thread to finish, so a late handler
+    could still call into a cache whose owning runtime has already shut
+    down and atomically persist an older snapshot after a replacement
+    runtime already persisted a newer revision -- regressing the on-disk
+    monotonicity guard across a restart. Once closed, every subsequent
+    apply must be a safe no-op, never a write."""
+    cache = mux_link.ManagedMuxCache()
+    cache.apply_observation(_obs(revision=1))
+    cache.close()
+    result = cache.apply_observation(_obs(revision=2))
+    assert result == {"applied": False, "reason": "closed"}
+    assert cache.get("wt-1")["mapping_revision"] == 1  # unchanged -- never wrote
+
+
+def test_close_prevents_a_late_apply_from_persisting_over_a_newer_snapshot(tmp_path):
+    """End-to-end proof: after close(), a 'late handler' calling
+    apply_observation for a higher revision must not overwrite a snapshot a
+    'replacement runtime' already persisted."""
+    persist_path = tmp_path / "managed-mux-cache.json"
+    old_cache = mux_link.ManagedMuxCache(persist_path=persist_path)
+    old_cache.apply_observation(_obs(revision=1))
+    old_cache.close()  # simulates InProcessRuntime.shutdown()
+
+    # A replacement runtime starts, warm-loads, and persists a newer revision.
+    new_cache = mux_link.ManagedMuxCache(persist_path=persist_path)
+    new_cache.apply_observation(_obs(revision=5))
+
+    # The old, closed cache's late handler must not clobber the newer file.
+    late_result = old_cache.apply_observation(_obs(revision=2))
+    assert late_result == {"applied": False, "reason": "closed"}
+
+    reloaded = mux_link.ManagedMuxCache(persist_path=persist_path)
+    assert reloaded.get("wt-1")["mapping_revision"] == 5  # the newer snapshot survived
+
+
 def test_stale_live_mapping_is_excluded_from_live_views_but_kept_in_get(monkeypatch):
     """Copilot review finding: a crashed/partitioned Manager mux-companion
     daemon that never reports ``live: false`` must not pin the resident
@@ -430,22 +467,36 @@ def test_push_key_is_identical_for_a_genuine_retry_of_the_same_revision():
     assert key1 == key2
 
 
-def test_push_key_is_injective_despite_a_colon_in_worktree_id():
-    # Mirrors worktree_status_daemon.coalescing_key's own injective-key test:
-    # neither `worktree_id` nor the literal separator is restricted against
-    # `:`, so a naive `f"{worktree_id}:{revision}"` could collide.
-    key_a = mux_link._push_key({"worktree_id": "a", "mapping_revision": 23})
-    key_b = mux_link._push_key({"worktree_id": "a:2", "mapping_revision": 3})
+def test_push_key_differs_across_projects_for_the_same_worktree_id_and_revision():
+    """Copilot review finding: ``worktree_id`` alone is not guaranteed
+    unique across two different projects' concurrent pushes at the same
+    revision number -- omitting ``project`` from the key could let those
+    two unrelated pushes coalesce, returning one project's payload for the
+    other."""
+    key_a = mux_link._push_key(_obs(project="proj-a", worktree_id="wt-1", revision=1))
+    key_b = mux_link._push_key(_obs(project="proj-b", worktree_id="wt-1", revision=1))
     assert key_a != key_b
 
 
-def test_push_key_requires_worktree_id_and_integer_mapping_revision():
+def test_push_key_is_injective_despite_a_colon_in_project_or_worktree_id():
+    # Mirrors worktree_status_daemon.coalescing_key's own injective-key test:
+    # neither `project`/`worktree_id` nor the literal separator is
+    # restricted against `:`, so a naive join could collide.
+    key_a = mux_link._push_key({"project": "p", "worktree_id": "a", "mapping_revision": 23})
+    key_b = mux_link._push_key({"project": "p", "worktree_id": "a:2", "mapping_revision": 3})
+    key_c = mux_link._push_key({"project": "p:2", "worktree_id": "a", "mapping_revision": 3})
+    assert len({key_a, key_b, key_c}) == 3
+
+
+def test_push_key_requires_project_worktree_id_and_integer_mapping_revision():
     for bad in (
-        {"mapping_revision": 1},
-        {"worktree_id": "", "mapping_revision": 1},
-        {"worktree_id": "wt-1"},
-        {"worktree_id": "wt-1", "mapping_revision": "1"},
-        {"worktree_id": "wt-1", "mapping_revision": True},
+        {"worktree_id": "wt-1", "mapping_revision": 1},
+        {"project": "", "worktree_id": "wt-1", "mapping_revision": 1},
+        {"project": "proj", "mapping_revision": 1},
+        {"project": "proj", "worktree_id": "", "mapping_revision": 1},
+        {"project": "proj", "worktree_id": "wt-1"},
+        {"project": "proj", "worktree_id": "wt-1", "mapping_revision": "1"},
+        {"project": "proj", "worktree_id": "wt-1", "mapping_revision": True},
     ):
         try:
             mux_link._push_key(bad)
@@ -703,6 +754,18 @@ def test_in_process_runtime_starts_and_shuts_down_cleanly():
     assert runtime.server is None
     assert runtime.cache is None
     assert runtime.lock_extra() == {}
+
+
+def test_in_process_runtime_shutdown_closes_the_cache_not_just_the_server():
+    """Copilot review finding: shutdown() must close the cache itself (not
+    just the server) so a late, already-dispatched handler thread cannot
+    still write through it after this runtime has shut down."""
+    runtime = mux_link.InProcessRuntime()
+    runtime.start()
+    cache = runtime.cache
+    runtime.shutdown()
+    result = cache.apply_observation(_obs())
+    assert result == {"applied": False, "reason": "closed"}
 
 
 def test_in_process_runtime_live_session_names_empty_until_something_pushes():
