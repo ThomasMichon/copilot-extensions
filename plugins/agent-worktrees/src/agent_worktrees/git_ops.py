@@ -139,7 +139,9 @@ class GitError(Exception):
 
 #: A hooks directory guaranteed to hold no hooks, used to disable a repo's
 #: *client-side* guard hooks for the plugin's own trusted mechanical git ops
-#: (squash re-commit / rebase / push -- see :func:`git` ``no_hooks``). ``/dev/null``
+#: (squash re-commit / rebase -- see :func:`git` ``no_hooks``; NOT ``push()``,
+#: which is the terminal action that actually publishes to remote and must
+#: let a repo's real pre-push release guard run -- #3561). ``/dev/null``
 #: is the portable idiom: git looks for hook files under this path, finds none,
 #: and runs no hook -- on POSIX and on Git-for-Windows alike. Server-side branch
 #: protection is unaffected (it is not a client hook). #3707.
@@ -170,14 +172,19 @@ def git(
         no_hooks: If True, run with ``-c core.hooksPath=<empty>`` so a repo's
             **client-side** guard hooks (a branch-protection ``pre-commit`` /
             ``pre-push`` / ``pre-rebase``) cannot block or corrupt the tool's own
-            trusted, mechanical plumbing (the squash re-commit, rebase, push).
-            Only *client-side* hooks are disabled -- server-side branch
-            protection (Gitea/GitHub rulesets) is untouched -- and only for
-            operations that re-arrange or re-commit ALREADY-committed content, so
+            trusted, mechanical plumbing that only re-arranges or re-commits
+            ALREADY-committed content (the squash re-commit, rebase) -- so
             content-quality checks that ran at original-commit time still hold.
-            This is **not** ``--no-verify`` (disallowed for agent-authored
-            commits): it scopes the disable to the plugin's internal git ops via
-            a config override. See #3707.
+            Only *client-side* hooks are disabled -- server-side branch
+            protection (Gitea/GitHub rulesets) is untouched. **``push()`` never
+            passes this flag** (#3561): it is the terminal action that actually
+            publishes to remote, so a repo's real pre-push release guard (e.g.
+            this repo's ``check-changefile-presence.py``) must be allowed to
+            run and block a genuinely non-compliant push, the same way a raw
+            ``git push`` already does. This is **not** ``--no-verify``
+            (disallowed for agent-authored commits): it scopes the disable to
+            the plugin's internal, non-publishing git ops via a config
+            override. See #3707.
 
     Returns:
         CompletedProcess with stdout/stderr as strings.
