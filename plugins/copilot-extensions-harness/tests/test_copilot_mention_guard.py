@@ -187,12 +187,29 @@ def test_current_repo_reads_the_git_remote(tmp_path: Path) -> None:
         ["git", "remote", "add", "origin", "git@github.com:someorg/some-repo.git"],
         cwd=tmp_path, check=True,
     )
-    assert guard.current_repo(str(tmp_path)) == "someorg/some-repo"
+    assert guard.current_repo_candidates(str(tmp_path)) == ["someorg/some-repo"]
+    assert guard.current_repo_matches("someorg/some-repo", str(tmp_path)) is True
+    assert guard.current_repo_matches("someorg/other-repo", str(tmp_path)) is False
 
 
-def test_current_repo_none_outside_any_git_repo(tmp_path: Path) -> None:
+def test_current_repo_empty_outside_any_git_repo(tmp_path: Path) -> None:
     guard = _load_guard()
-    assert guard.current_repo(str(tmp_path)) is None
+    assert guard.current_repo_candidates(str(tmp_path)) == []
+    assert guard.current_repo_matches("someorg/some-repo", str(tmp_path)) is False
+
+
+def test_current_repo_matches_a_non_origin_remote(tmp_path: Path) -> None:
+    """PR #3663 review (round 5): this codebase's own convention allows a
+    configurable remote name (RepoConfig.remote), and a fork checkout
+    commonly also carries an 'upstream' remote -- checking only 'origin'
+    silently no-ops the guard for either shape."""
+    guard = _load_guard()
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "remote", "add", "upstream", "git@github.com:someorg/some-repo.git"],
+        cwd=tmp_path, check=True,
+    )
+    assert guard.current_repo_matches("someorg/some-repo", str(tmp_path)) is True
 
 
 def test_hook_is_a_noop_outside_the_target_repo(tmp_path: Path) -> None:

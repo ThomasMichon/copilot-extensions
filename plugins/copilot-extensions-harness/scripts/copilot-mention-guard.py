@@ -112,21 +112,46 @@ def target_repo_from_manifest(plugin_root: Path) -> str | None:
     return None
 
 
-def current_repo(cwd: str | None = None) -> str | None:
-    """``owner/repo`` for the git repo at *cwd* (default: this process's own
-    working directory, which the Copilot CLI sets to the directory the
-    about-to-run tool call targets), or ``None`` outside any git repo / with
-    no GitHub remote."""
+def current_repo_candidates(cwd: str | None = None) -> list[str]:
+    """Every ``owner/repo`` resolvable from the git remotes configured at
+    *cwd* -- not just ``origin``. This codebase's own convention allows a
+    configurable remote name (``plugins/agent-worktrees/src/agent_worktrees/
+    config.py``'s ``RepoConfig.remote``), and a fork checkout commonly also
+    carries an ``upstream`` remote pointing at the real target repo, so
+    checking only ``origin`` would silently no-op the guard for either
+    shape."""
     try:
         result = subprocess.run(
-            ["git", "remote", "get-url", "origin"],
+            ["git", "remote"],
             cwd=cwd, capture_output=True, text=True, timeout=5, check=False,
         )
     except (OSError, subprocess.SubprocessError):
-        return None
+        return []
     if result.returncode != 0:
-        return None
-    return _parse_github_repo(result.stdout.strip())
+        return []
+    repos: list[str] = []
+    for name in (line.strip() for line in result.stdout.splitlines()):
+        if not name:
+            continue
+        try:
+            url_result = subprocess.run(
+                ["git", "remote", "get-url", name],
+                cwd=cwd, capture_output=True, text=True, timeout=5, check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if url_result.returncode != 0:
+            continue
+        repo = _parse_github_repo(url_result.stdout.strip())
+        if repo:
+            repos.append(repo)
+    return repos
+
+
+def current_repo_matches(target: str, cwd: str | None = None) -> bool:
+    """True if *target* (``owner/repo``) is among the GitHub repos resolved
+    from any configured remote at *cwd* (see ``current_repo_candidates``)."""
+    return target in current_repo_candidates(cwd)
 
 
 def _split_unquoted_newlines(command: str) -> list[str]:
@@ -355,7 +380,7 @@ def main() -> int:
     except Exception:
         return 0
     target = target_repo_from_manifest(plugin_root)
-    if target is None or current_repo(hook_cwd) != target:
+    if target is None or not current_repo_matches(target, hook_cwd):
         # Scoped to this plugin's own repo -- a session working elsewhere
         # (even with this plugin enabled purely for its instruction
         # projections), or one where the target repo couldn't be resolved
