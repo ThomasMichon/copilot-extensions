@@ -26,15 +26,23 @@ mux-companion daemon (a later sub-slice) to call.
 
 from __future__ import annotations
 
+import contextlib
+import json
+import os
+import tempfile
 import threading
 import time
 from collections.abc import Callable
+from pathlib import Path
 
 from work_coalescing_singleton import CoalescingServer
 from work_coalescing_singleton import client as wcs_client
 
-#: The one request kind this daemon-link surface accepts.
-KIND = "mux_live"
+#: The one request kind this daemon-link surface accepts. Matches the
+#: ``mux-live-v1`` event name used throughout
+#: ``phase-3b-substatus-monitor-relocation.md`` -- a Step 2+ Manager caller
+#: following that documented contract must be able to reach this seam.
+KIND = "mux-live-v1"
 
 #: A push is a single in-memory dict update -- cheap and synchronous, unlike
 #: the classify/worktree-status daemons' real git/filesystem work. Kept
@@ -50,12 +58,24 @@ BOOT_WAIT_S = 6.0
 LINGER_SECONDS = 5.0
 SUBSCRIBER_TTL_SECONDS = 30.0
 
+#: A live mapping with no fresh observation in this long is treated as
+#: stale/unconfirmed (excluded from :meth:`ManagedMuxCache.live_session_names`
+#: / :meth:`has_any_live`) rather than permanently live -- a crashed or
+#: partitioned Manager mux-companion daemon before it ever reports
+#: ``live: false`` must not pin the resident monitor's observation
+#: indefinitely. The future Manager daemon is expected to re-push a live
+#: mapping on a cadence well under this window (a heartbeat, or any real
+#: mapping-changed event) to keep it fresh; a one-shot push alone will go
+#: stale after this long with no follow-up.
+MAPPING_STALE_AFTER_SECONDS = 45.0
+
 _REQUIRED_STR_FIELDS = ("worktree_id", "session")
 
 
 class ManagedMuxCache:
-    """Thread-safe, in-memory store of Manager-reported ``worktree_id`` ⇄
-    mux session/pane mapping observations.
+    """Thread-safe store of Manager-reported ``worktree_id`` ⇄ mux
+    session/pane mapping observations, with a best-effort on-disk snapshot
+    so a mapping survives one resident-monitor restart.
 
     Keyed by ``worktree_id``. Each observation carries a ``mapping_revision``
     (a non-negative integer the *reporting* Manager mux-companion daemon
@@ -67,18 +87,66 @@ class ManagedMuxCache:
     the stored one are accepted (idempotent replay -- e.g. a caller retrying
     after a response it never saw).
 
-    Deliberately in-memory only, matching the resident status-monitor's own
-    existing registries (``status-monitor.d``, the ``published``/
-    ``incarnations`` sweep state) -- a monitor restart naturally starts this
-    cache empty again; the Manager mux-companion daemon (a later sub-slice)
-    re-publishes its live mappings on the next observation it sends, exactly
-    the same "recovers on next report" shape ``session_catalog`` already
-    relies on for ordinary mux liveness.
+    A live entry with no fresh observation for
+    :data:`MAPPING_STALE_AFTER_SECONDS` is treated as stale/unconfirmed by
+    :meth:`live_session_names`/:meth:`has_any_live` (excluded from both)
+    without being deleted -- :meth:`get`/:meth:`snapshot` still return it
+    (with its true ``live`` bit) for callers that want the raw record.
+
+    When ``persist_path`` is given, every successful :meth:`apply_observation`
+    writes the full snapshot to that path (atomic replace, best-effort: a
+    write failure is swallowed rather than raised, matching the resident
+    monitor's own tolerance for a non-fatal persistence hiccup), and the
+    constructor warm-loads any existing snapshot from it. This lets the
+    Step 1 seam's own contract-level requirement -- a mapping survives one
+    daemon restart -- hold even though ``InProcessRuntime`` itself is
+    otherwise stateless across restarts, matching
+    ``worktree_status_daemon.WorktreeStatusCache``'s own durable-across-
+    restart precedent.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, persist_path: Path | str | None = None) -> None:
         self._lock = threading.Lock()
         self._entries: dict[str, dict] = {}
+        self._persist_path = Path(persist_path) if persist_path is not None else None
+        self._warm_load()
+
+    def _warm_load(self) -> None:
+        if self._persist_path is None:
+            return
+        try:
+            raw = self._persist_path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+        except (OSError, ValueError):
+            return
+        if not isinstance(data, dict):
+            return
+        for worktree_id, entry in data.items():
+            if not isinstance(worktree_id, str) or not isinstance(entry, dict):
+                continue
+            try:
+                self._entries[worktree_id] = _normalize_entry(entry)
+            except ValueError:
+                continue
+
+    def _persist_locked(self) -> None:
+        """Best-effort atomic snapshot write. Caller already holds ``_lock``."""
+        if self._persist_path is None:
+            return
+        try:
+            self._persist_path.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp_name = tempfile.mkstemp(
+                dir=str(self._persist_path.parent), prefix=".mux-link-cache-"
+            )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    json.dump(self._entries, fh, separators=(",", ":"))
+                os.replace(tmp_name, self._persist_path)
+            finally:
+                with contextlib.suppress(OSError):
+                    os.remove(tmp_name)
+        except OSError:
+            pass
 
     def apply_observation(self, payload: dict) -> dict:
         """Validate and apply one observation.
@@ -92,29 +160,9 @@ class ManagedMuxCache:
         "current_revision": <int>}`` when a newer revision is already on
         file.
         """
-        for field in _REQUIRED_STR_FIELDS:
-            value = payload.get(field)
-            if not isinstance(value, str) or not value:
-                raise ValueError(f"mux_live observation missing '{field}'")
-        worktree_id = payload["worktree_id"]
-        session = payload["session"]
-        revision_raw = payload.get("mapping_revision")
-        if isinstance(revision_raw, bool) or not isinstance(revision_raw, int):
-            raise ValueError("mux_live observation requires an integer mapping_revision")
-        revision = revision_raw
-        if revision < 0:
-            raise ValueError("mux_live observation mapping_revision must be non-negative")
-        live = bool(payload.get("live", True))
-        path = payload.get("path")
-        panes = payload.get("panes")
-        if not isinstance(panes, list) or not all(isinstance(p, str) for p in panes):
-            panes = []
-        incarnation = payload.get("incarnation")
-        if not isinstance(incarnation, str):
-            incarnation = ""
-        attached_clients = payload.get("attached_clients")
-        if isinstance(attached_clients, bool) or not isinstance(attached_clients, int):
-            attached_clients = 0
+        entry = _normalize_entry(payload)
+        worktree_id = entry["worktree_id"]
+        revision = entry["mapping_revision"]
 
         with self._lock:
             current = self._entries.get(worktree_id)
@@ -124,39 +172,101 @@ class ManagedMuxCache:
                     "reason": "stale_revision",
                     "current_revision": current["mapping_revision"],
                 }
-            self._entries[worktree_id] = {
-                "worktree_id": worktree_id,
-                "session": session,
-                "path": path if isinstance(path, str) else None,
-                "panes": panes,
-                "incarnation": incarnation,
-                "attached_clients": attached_clients,
-                "mapping_revision": revision,
-                "live": live,
-                "updated_at": time.time(),
-            }
+            self._entries[worktree_id] = entry
+            self._persist_locked()
         return {"applied": True, "revision": revision}
 
     def get(self, worktree_id: str) -> dict | None:
         with self._lock:
             entry = self._entries.get(worktree_id)
-            return dict(entry) if entry is not None else None
+            return _deep_copy_entry(entry) if entry is not None else None
 
     def live_session_names(self) -> set[str]:
-        """Session names for every currently-live managed mapping -- the
-        seam ``_monitor_sweep`` merges into its own direct mux-scan
-        observation, per this step's scope (observation only, no writes)."""
+        """Session names for every currently-live, **fresh** (not yet stale
+        per :data:`MAPPING_STALE_AFTER_SECONDS`) managed mapping -- the seam
+        ``_monitor_sweep`` merges into its own direct mux-scan observation,
+        per this step's scope (observation only, no writes)."""
+        now = time.time()
         with self._lock:
-            return {e["session"] for e in self._entries.values() if e["live"]}
+            return {
+                e["session"]
+                for e in self._entries.values()
+                if e["live"] and now - e["updated_at"] <= MAPPING_STALE_AFTER_SECONDS
+            }
 
     def snapshot(self) -> dict[str, dict]:
-        """A defensive copy of every entry, keyed by ``worktree_id``."""
+        """A defensive (deep) copy of every entry, keyed by ``worktree_id``."""
         with self._lock:
-            return {wid: dict(entry) for wid, entry in self._entries.items()}
+            return {wid: _deep_copy_entry(entry) for wid, entry in self._entries.items()}
 
     def has_any_live(self) -> bool:
+        now = time.time()
         with self._lock:
-            return any(e["live"] for e in self._entries.values())
+            return any(
+                e["live"] and now - e["updated_at"] <= MAPPING_STALE_AFTER_SECONDS
+                for e in self._entries.values()
+            )
+
+
+def _normalize_entry(payload: dict) -> dict:
+    """Validate + normalize one observation payload into a stored entry
+    shape. Raises ``ValueError`` for anything structurally malformed.
+    Shared by :meth:`ManagedMuxCache.apply_observation` (an untrusted wire
+    payload) and :meth:`ManagedMuxCache._warm_load` (a previously-persisted,
+    already-normalized record -- re-validated anyway since a corrupt/
+    tampered on-disk snapshot must not be trusted blindly, mirroring
+    ``worktree_status_daemon.validated_refresh``'s own precedent)."""
+    for field in _REQUIRED_STR_FIELDS:
+        value = payload.get(field)
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"mux_live observation missing '{field}'")
+    worktree_id = payload["worktree_id"]
+    session = payload["session"]
+    revision_raw = payload.get("mapping_revision")
+    if isinstance(revision_raw, bool) or not isinstance(revision_raw, int):
+        raise ValueError("mux_live observation requires an integer mapping_revision")
+    revision = revision_raw
+    if revision < 0:
+        raise ValueError("mux_live observation mapping_revision must be non-negative")
+    live_raw = payload.get("live", True)
+    if not isinstance(live_raw, bool):
+        raise ValueError("mux_live observation 'live' must be a boolean")
+    live = live_raw
+    path = payload.get("path")
+    panes = payload.get("panes")
+    if not isinstance(panes, list) or not all(isinstance(p, str) for p in panes):
+        panes = []
+    incarnation = payload.get("incarnation")
+    if not isinstance(incarnation, str):
+        incarnation = ""
+    attached_clients = payload.get("attached_clients")
+    if isinstance(attached_clients, bool) or not isinstance(attached_clients, int):
+        attached_clients = 0
+    updated_at = payload.get("updated_at")
+    if not isinstance(updated_at, (int, float)) or isinstance(updated_at, bool):
+        updated_at = time.time()
+
+    return {
+        "worktree_id": worktree_id,
+        "session": session,
+        "path": path if isinstance(path, str) else None,
+        "panes": list(panes),
+        "incarnation": incarnation,
+        "attached_clients": attached_clients,
+        "mapping_revision": revision,
+        "live": live,
+        "updated_at": updated_at,
+    }
+
+
+def _deep_copy_entry(entry: dict) -> dict:
+    """Copy of ``entry`` whose ``panes`` list is independent of the stored
+    one -- ``dict(entry)`` alone leaves ``panes`` shared, so a caller
+    mutating the returned list would silently corrupt the live cache
+    without holding its lock."""
+    copied = dict(entry)
+    copied["panes"] = list(entry["panes"])
+    return copied
 
 
 def build_compute(cache: ManagedMuxCache) -> Callable[[str, dict], dict]:
@@ -325,17 +435,20 @@ class InProcessRuntime:
         self.server: CoalescingServer | None = None
         self.cache: ManagedMuxCache | None = None
 
-    def start(self) -> None:
+    def start(self, persist_path: Path | str | None = None) -> None:
         try:
-            cache = ManagedMuxCache()
+            cache = ManagedMuxCache(persist_path=persist_path)
             server = start_server(build_compute(cache))
+            # Assign before `server.start()`: `CoalescingServer.__init__`
+            # already binds+listens its loopback socket, so a failure in
+            # `.start()` (thread spawn) after construction must still be
+            # reachable from the `except` branch below to close that
+            # already-bound server -- never leave it running unadvertised.
+            self.cache = cache
+            self.server = server
             server.start()
         except Exception:
-            self.server = None
-            self.cache = None
-            return
-        self.cache = cache
-        self.server = server
+            self.shutdown()
 
     def lock_extra(self) -> dict:
         """Rendezvous fields to merge into the monitor's lock file, or an

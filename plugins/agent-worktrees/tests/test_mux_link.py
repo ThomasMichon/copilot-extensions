@@ -4,6 +4,8 @@ effort). Mirrors ``test_worktree_status_daemon.py``'s style."""
 
 from __future__ import annotations
 
+import time
+
 from agent_worktrees import mux_link
 
 
@@ -89,6 +91,17 @@ def test_apply_observation_requires_an_integer_mapping_revision():
         assert raised, bad_revision
 
 
+def test_apply_observation_requires_a_boolean_live_field():
+    cache = mux_link.ManagedMuxCache()
+    for bad_live in ("true", 1, 0, None):
+        try:
+            cache.apply_observation(_obs(live=bad_live))
+            raised = False
+        except ValueError:
+            raised = True
+        assert raised, bad_live
+
+
 def test_apply_observation_rejects_negative_revision():
     cache = mux_link.ManagedMuxCache()
     try:
@@ -133,6 +146,22 @@ def test_snapshot_is_a_defensive_copy():
     assert cache.get("wt-1")["live"] is True  # mutation of the copy didn't leak back
 
 
+def test_get_and_snapshot_deep_copy_the_panes_list():
+    """Copilot review finding: ``dict(entry)`` alone leaves the stored
+    ``panes`` list shared -- a caller mutating a returned list would
+    silently corrupt the live cache without holding its lock."""
+    cache = mux_link.ManagedMuxCache()
+    cache.apply_observation(_obs(panes=["%1", "%2"]))
+
+    got = cache.get("wt-1")
+    got["panes"].append("INJECTED")
+    assert cache.get("wt-1")["panes"] == ["%1", "%2"]  # mutation never leaked back
+
+    snap = cache.snapshot()
+    snap["wt-1"]["panes"].append("INJECTED")
+    assert cache.get("wt-1")["panes"] == ["%1", "%2"]
+
+
 def test_has_any_live_reflects_current_state():
     cache = mux_link.ManagedMuxCache()
     assert cache.has_any_live() is False
@@ -140,6 +169,70 @@ def test_has_any_live_reflects_current_state():
     assert cache.has_any_live() is True
     cache.apply_observation(_obs(revision=2, live=False))
     assert cache.has_any_live() is False
+
+
+def test_stale_live_mapping_is_excluded_from_live_views_but_kept_in_get(monkeypatch):
+    """Copilot review finding: a crashed/partitioned Manager mux-companion
+    daemon that never reports ``live: false`` must not pin the resident
+    monitor's observation as live forever -- an unconfirmed mapping goes
+    stale after ``MAPPING_STALE_AFTER_SECONDS`` with no follow-up push."""
+    cache = mux_link.ManagedMuxCache()
+    cache.apply_observation(_obs(live=True))
+    assert cache.live_session_names() == {"wt-1"}
+    assert cache.has_any_live() is True
+
+    monkeypatch.setattr(mux_link, "MAPPING_STALE_AFTER_SECONDS", 0.0)
+    time.sleep(0.01)  # ensure real elapsed time exceeds the now-zero threshold
+    assert cache.live_session_names() == set()  # stale now, no fresh push arrived
+    assert cache.has_any_live() is False
+    assert cache.get("wt-1")["live"] is True  # raw record still reports its true bit
+
+
+def test_cache_survives_a_simulated_daemon_restart_via_persist_path(tmp_path):
+    """Contract-level requirement (Step 1 validation): a mapping must
+    survive one daemon restart via its runtime snapshot."""
+    persist_path = tmp_path / "managed-mux-cache.json"
+    first = mux_link.ManagedMuxCache(persist_path=persist_path)
+    first.apply_observation(_obs(panes=["%1"], attached_clients=2))
+
+    # Simulate a restart: a brand new cache instance loads the same file.
+    second = mux_link.ManagedMuxCache(persist_path=persist_path)
+    entry = second.get("wt-1")
+    assert entry is not None
+    assert entry["session"] == "wt-1"
+    assert entry["panes"] == ["%1"]
+    assert entry["attached_clients"] == 2
+    assert second.live_session_names() == {"wt-1"}
+
+
+def test_cache_without_persist_path_does_not_survive_a_restart(tmp_path):
+    first = mux_link.ManagedMuxCache()
+    first.apply_observation(_obs())
+    second = mux_link.ManagedMuxCache()
+    assert second.get("wt-1") is None
+
+
+def test_warm_load_ignores_a_corrupt_or_malformed_snapshot_file(tmp_path):
+    persist_path = tmp_path / "managed-mux-cache.json"
+    persist_path.write_text("not json at all {{{", encoding="utf-8")
+    cache = mux_link.ManagedMuxCache(persist_path=persist_path)  # must not raise
+    assert cache.snapshot() == {}
+
+    persist_path.write_text(
+        '{"wt-1": {"worktree_id": "wt-1"}}', encoding="utf-8"
+    )  # missing required fields
+    cache2 = mux_link.ManagedMuxCache(persist_path=persist_path)
+    assert cache2.snapshot() == {}
+
+
+def test_apply_observation_still_rejects_stale_revision_after_restart(tmp_path):
+    persist_path = tmp_path / "managed-mux-cache.json"
+    first = mux_link.ManagedMuxCache(persist_path=persist_path)
+    first.apply_observation(_obs(revision=5))
+
+    second = mux_link.ManagedMuxCache(persist_path=persist_path)
+    result = second.apply_observation(_obs(revision=3, live=False))
+    assert result == {"applied": False, "reason": "stale_revision", "current_revision": 5}
 
 
 # -- compute / wire wrappers ---------------------------------------------
@@ -367,3 +460,53 @@ def test_in_process_runtime_before_start_reports_empty_and_inactive():
     assert runtime.live_session_names() == set()
     assert runtime.has_active_demand() is False
     runtime.shutdown()  # never started; must not raise
+
+
+def test_in_process_runtime_persists_and_reloads_across_a_restart(tmp_path):
+    persist_path = tmp_path / "managed-mux-cache.json"
+    first = mux_link.InProcessRuntime()
+    first.start(persist_path)
+    try:
+        first.cache.apply_observation(_obs())
+    finally:
+        first.shutdown()
+
+    second = mux_link.InProcessRuntime()
+    second.start(persist_path)
+    try:
+        assert second.live_session_names() == {"wt-1"}
+    finally:
+        second.shutdown()
+
+
+def test_in_process_runtime_start_closes_the_partially_started_server_on_failure(monkeypatch):
+    """Copilot review finding: ``CoalescingServer.__init__`` already
+    binds+listens its loopback socket, so a failure in ``server.start()``
+    (thread spawn) after construction previously only cleared the
+    reference -- leaving an unadvertised, still-bound TCP server running.
+    ``start()`` must close it through the same path a normal shutdown uses."""
+    real_start = mux_link.CoalescingServer.start
+    started_servers = []
+
+    def _boom(self):
+        started_servers.append(self)
+        raise RuntimeError("thread spawn failed")
+
+    monkeypatch.setattr(mux_link.CoalescingServer, "start", _boom)
+
+    runtime = mux_link.InProcessRuntime()
+    runtime.start()
+
+    assert runtime.server is None
+    assert runtime.cache is None
+    assert len(started_servers) == 1
+    # The server that failed to start must have been closed, not leaked --
+    # closing an un-started CoalescingServer must itself not raise/hang (see
+    # `CoalescingServer.close`'s own `self._started` guard).
+    monkeypatch.setattr(mux_link.CoalescingServer, "start", real_start)
+    # A second, real start() must still work cleanly afterward.
+    runtime.start()
+    try:
+        assert runtime.server is not None
+    finally:
+        runtime.shutdown()
