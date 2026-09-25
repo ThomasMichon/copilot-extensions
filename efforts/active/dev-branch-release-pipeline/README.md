@@ -445,7 +445,10 @@ Round 2 (operator's response to that evaluation):
       one. Also flip `ci.yml`'s `cancel-in-progress: true` -> `false` (group
       key is already shared per-ref) for the same non-starving behavior at
       the CI stage.
-  - **Not started.**
+  - **Done, 2026-09-24/25.** Merged into `.github/workflows/validate-and-promote.yml`
+    (PR #3593 dev / #3596 main bootstrap, same admin-merge pattern as prior
+    bootstraps). Confirmed live within minutes of landing — see the
+    Validation Plan entries below.
 
 ### Phase 4 — Rollback & hotfix procedures
 - [x] Implement the CI guard against producing a non-incremental (out-of-order)
@@ -594,12 +597,24 @@ Round 2 (operator's response to that evaluation):
       pushes and observe run 1 completes undisturbed while run 2 (queued)
       gets superseded/cancelled by a third rapid push, matching the
       documented model exactly (not just passing in isolation).
-- [ ] Confirm the merged workflow's `promote` job correctly no-ops (does not
+  - **Not yet deliberately exercised** — no rapid-fire burst has landed on
+    `dev` since the merge to observe the queue/supersede behavior directly.
+    Revisit next time multiple PRs merge to `dev` in quick succession.
+- [x] Confirm the merged workflow's `promote` job correctly no-ops (does not
       block) when `gate`'s `is_dev` is false and its sibling jobs are
       `skipped` rather than `success` — this was the exact shape of the
       #3567 follow-up regression, now expressed as an `if:` condition
       instead of a missing-artifact fallback; re-verify it explicitly rather
       than assuming the redesign is immune by construction.
+  - **Done, 2026-09-24/25.** Confirmed across the first 5 real runs of
+    `validate-and-promote.yml` post-merge (runs 36104046646, 36104064891,
+    36104155846, 36104262646, 36104356317): every combination observed
+    live — `gate` itself skipped (triggering CI run wasn't `success`),
+    `gate` succeeded with `is_dev=false` (triggering CI run was for a
+    non-dev commit, e.g. `main`'s own promotion commit), and `gate`
+    succeeded with `is_dev=true` and no new content to promote — all
+    correctly resulted in `promote` completing `success` with a graceful
+    internal no-op, never a hard failure and never a false promotion.
 
 ## Proposal
 
@@ -1520,4 +1535,51 @@ pipeline; this became a two-round fix plus a proposed structural redesign.
   the exact shape the round-2 regression took) rather than assumed correct
   by construction. **Not yet implemented** — this entry is the kickoff;
   see the Plan item for status.
+
+### 2026-09-24/25 — #3592 implemented, landed, and confirmed live
+
+Drove the redesign kicked off in the entry above to completion in the same
+session.
+
+- **Merged** `.github/workflows/validation-gate.yml` + `promote.yml` into
+  `validate-and-promote.yml`: `gate` -> `full`/`worktree-manager`/
+  `guards-full-sweep` -> `promote`, all `needs`-chained. The validated SHA
+  now passes via ordinary `needs.gate.outputs.sha`; the artifact upload/
+  download mechanism #3567/#3578 needed is gone entirely, along with the
+  whole `head_sha`-unreliability failure class it existed to route around
+  (there's no `workflow_run` boundary left for this hop to be unreliable
+  across).
+- **Concurrency**: single top-level `group: validate-and-promote-dev-to-main`,
+  `cancel-in-progress: false` — GitHub's documented `queue: single` default,
+  giving exactly the rolling-build model discussed (one tuple running, one
+  pending, newer supersedes only the pending one). Also flipped `ci.yml`'s
+  `cancel-in-progress: true` -> `false` (same shared per-ref group already
+  existed) for the same non-starving behavior at the CI stage.
+- **Safety-equivalence carried forward deliberately**: the new `promote`
+  job's `decide` step explicitly checks `needs.full.result`/
+  `needs.worktree-manager.result`/`needs.guards-full-sweep.result` are all
+  `success` (not merely not-`failure`) whenever `is_dev=true`, since those
+  jobs being `skipped` only happens legitimately when `is_dev=false` — this
+  preserves the original design's "never promote unvalidated content" gate,
+  now expressed as one `if:` condition instead of two workflows' worth of
+  independent gating.
+- **Landed** via this effort's now-standard two-PR bootstrap pattern: #3593
+  (dev, all green including Copilot's own review) + #3596 (main bootstrap,
+  admin-merged past `main`'s `main source gate` the same way #3547/#3573/
+  #3580 were). Updated every doc/comment reference to the retired filenames
+  (`AGENTS.md`, `CONTRIBUTING.md`, `REVIEW.md`,
+  `tools/promote_release.py`, `tools/rollback_release.py`).
+  `tools/test_promote_release.py`: 13 passed (comment-only changes to that
+  file; no logic touched).
+  Also filed #3592 as this redesign's own tracking issue.
+- **Confirmed live immediately**: the first 5 real runs of the merged
+  workflow (36104046646, 36104064891, 36104155846, 36104262646,
+  36104356317) exercised every branch of the new `is_dev`/sibling-result
+  logic organically — `gate` itself skipped, `gate` succeeded with
+  `is_dev=false`, and `gate` succeeded with `is_dev=true` and nothing new to
+  promote — all correctly resolved to `promote` completing `success` with a
+  graceful internal no-op. The rolling-queue guarantee itself (two rapid
+  pushes: one runs to completion, the other queues and gets superseded by a
+  third) has not yet been deliberately exercised — left open on the
+  Validation Plan for the next burst of concurrent `dev` merges.
 
