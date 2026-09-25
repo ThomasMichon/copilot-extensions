@@ -1133,6 +1133,15 @@ def _worktree_to_dict(
         "title": rec.title,
         "resume_count": rec.resume_count,
     }
+    # #3307 Phase 3: the timestamp of the worktree's most recent actual
+    # resume (``tracking.py``'s ``last_resumed_at``, updated whenever a
+    # session is genuinely resumed) -- distinct from ``started_at`` (when the
+    # worktree was FIRST created). The Picker's Recent-section sort needs this
+    # to rank by real recency-of-use rather than original creation age; a
+    # never-resumed worktree simply omits the field (callers fall back to
+    # ``started_at``).
+    if rec.last_resumed_at:
+        d["last_resumed_at"] = rec.last_resumed_at
     if rec.codename:
         d["codename"] = rec.codename
     # Session ownership is durable record state, not live-scan enrichment.
