@@ -11,10 +11,14 @@ import pytest
 
 from venue_copilot import (
     VenueCopilotError,
+    bridge_probe_script,
     build_copilot_remote_command,
     daemon_port_reverse_forward,
+    last_json,
+    observe_commands,
     release_cli_mode,
     reserve_cli_mode,
+    reserve_with_retry,
     resolve_daemon_port,
     run_venue_copilot,
 )
@@ -91,6 +95,19 @@ class TestReserveCliMode:
 
         with pytest.raises(VenueCopilotError, match="boom"):
             reserve_cli_mode("wt-A", run=fake_run)
+
+    def test_a_wedged_bridge_call_is_bounded(self) -> None:
+        import subprocess
+
+        seen: dict[str, Any] = {}
+
+        def fake_run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
+            seen["timeout"] = kwargs.get("timeout")
+            raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
+
+        with pytest.raises(VenueCopilotError, match="did not answer"):
+            reserve_cli_mode("wt-A", run=fake_run)
+        assert seen["timeout"] and seen["timeout"] > 0
 
 
 class TestReleaseCliMode:
@@ -366,3 +383,296 @@ class TestDetachedLaunchAdditions:
         inner = shlex.split(cmd)[2]
         assert shlex.split(inner)[:3] == ["agent-worktrees", "copilot", "--anchor"]
         assert "--json" not in inner
+
+
+class TestDetachedSharedHelpers:
+    def test_last_json_returns_the_last_object(self) -> None:
+        assert last_json('noise {"a": 1}\n{"b": 2}') == {"b": 2}
+        assert last_json("no json") == {}
+
+    def test_reserve_with_retry_waits_on_active_reservation(self, monkeypatch) -> None:
+        calls = []
+        sleeps = []
+
+        def fake_reserve(scope, *, ttl_seconds, venue, bridge_bin="agent-bridge", run=None):
+            calls.append((scope, ttl_seconds, venue))
+            if len(calls) == 1:
+                raise VenueCopilotError("reservation_active")
+            return {"reservation_id": "r2"}
+
+        monkeypatch.setattr("venue_copilot.reserve_cli_mode", fake_reserve)
+        monkeypatch.setattr("venue_copilot.time.sleep", lambda delay: sleeps.append(delay))
+        waits = []
+        got = reserve_with_retry(
+            "scope",
+            {"kind": "ssh", "target": "host", "mux_session_name": "wt-x"},
+            ttl=42,
+            retry_window=60,
+            on_wait=lambda: waits.append("wait"),
+        )
+        assert got == {"reservation_id": "r2"}
+        assert len(calls) == 2 and calls[0][1] == 42
+        assert waits == ["wait"] and sleeps == [5.0]
+
+    def test_bridge_probe_script_and_observe_commands(self) -> None:
+        script = bridge_probe_script(41234)
+        assert "auth.yaml" in script
+        assert "http://127.0.0.1:41234/api/v1/live-sessions" in script
+        assert observe_commands("sid-1") == {
+            "status": "agent-bridge --json live-sessions resolve --handle sid-1",
+            "observe": "agent-bridge result sid-1 --json --max-items 5 --max-text-chars 2000",
+            "nudge": 'agent-bridge send sid-1 "<message>" --no-wait',
+        }
+
+
+class _Adapter:
+    def __init__(self, launch_payload: dict[str, Any] | None = None) -> None:
+        self.launch_payload = launch_payload or {
+            "ok": True,
+            "created": True,
+            "seed_submitted": True,
+            "session": "wt-anchor-repo",
+        }
+        self.calls: list[tuple[str, str]] = []
+        self.keeper_stopped = False
+
+    def run(self, command: str, *, timeout: float) -> tuple[int, str, str]:
+        self.calls.append(("run", command))
+        if "curl" in command:
+            return 0, "", ""
+        if "tmux kill-session" in command:
+            return 0, "STOPPED\n", ""
+        return 0, "", ""
+
+    def launch(self, command: str, *, timeout: float) -> tuple[int, str, str]:
+        self.calls.append(("launch", command))
+        return 0, json.dumps(self.launch_payload), ""
+
+    def run_input(self, command: str, stdin: bytes, *, timeout: float) -> tuple[int, str, str]:
+        self.calls.append(("run_input", command))
+        self.stdin = stdin
+        return (0, "/home/u/.agent-bridge/refs/b1\n", "") if getattr(self, "refs_ok", True) else (1, "", "denied")
+
+    def ensure_keeper(self, *, venue_port: int, mux: str) -> dict[str, Any]:
+        self.calls.append(("keeper", f"{venue_port}:{mux}"))
+        return {"started": True, "state": {"pid": 123}}
+
+    def stop_keeper(self) -> bool:
+        self.keeper_stopped = True
+        return True
+
+    def attach_command(self, plan: dict[str, Any]) -> str:
+        return f"attach {plan['mux_session']}"
+
+    def stop_command(self, plan: dict[str, Any]) -> str:
+        return f"stop {plan['mux_session']}"
+
+
+class TestDetachedRunner:
+    def _plan(self) -> dict[str, Any]:
+        return {
+            "identity": "anchor-repo",
+            "scope_id": "anchor-repo@venue",
+            "mux_session": "wt-anchor-repo",
+            "workspace": "/workspaces/repo",
+            "anchor": True,
+            "venue": {"kind": "ssh", "target": "venue", "mux_session_name": "wt-anchor-repo"},
+        }
+
+    def test_launch_detached_happy_path(self, monkeypatch) -> None:
+        from venue_copilot import detached
+
+        adapter = _Adapter()
+        monkeypatch.setattr("venue_copilot.detached.resolve_daemon_port", lambda: 41234)
+        monkeypatch.setattr("venue_copilot.detached.resolve_local_auth_token", lambda: "tok")
+        monkeypatch.setattr(
+            "venue_copilot.detached.reserve_with_retry",
+            lambda scope, venue, **kw: {"reservation_id": "r1"},
+        )
+        monkeypatch.setattr("venue_copilot.detached.await_claim", lambda scope, rid, timeout: "sid-42")
+        released = []
+        monkeypatch.setattr(
+            "venue_copilot.detached.release_cli_mode",
+            lambda scope, reservation_id=None: released.append((scope, reservation_id)) or 1,
+        )
+
+        rc, payload = detached.launch_detached(
+            adapter,
+            self._plan(),
+            seed="do it",
+            driver="orchestrator",
+            copilot_args=["--no-ask-user"],
+            ensure_mux=True,
+            register_timeout=0.0,
+            progress=lambda *a: None,
+        )
+
+        assert rc == 0
+        assert payload["session_id"] == "sid-42"
+        assert payload["commands"] == {
+            "status": "agent-bridge --json live-sessions resolve --handle sid-42",
+            "observe": "agent-bridge result sid-42 --json --max-items 5 --max-text-chars 2000",
+            "nudge": 'agent-bridge send sid-42 "<message>" --no-wait',
+            "attach": "attach wt-anchor-repo",
+            "stop": "stop wt-anchor-repo",
+        }
+        assert any("auth.yaml" in command for kind, command in adapter.calls if kind == "run")
+        launch = next(command for kind, command in adapter.calls if kind == "launch")
+        assert "cd /workspaces/repo" in launch
+        assert "--bridge-scope-id anchor-repo@venue" in launch
+        assert "--copilot-arg=--no-ask-user" in launch
+        assert released == [("anchor-repo@venue", "r1")]
+
+    def test_handle_never_echoes_runner_configuration(self, monkeypatch) -> None:
+        from venue_copilot import detached
+
+        monkeypatch.setattr("venue_copilot.detached.resolve_daemon_port", lambda: 41234)
+        monkeypatch.setattr("venue_copilot.detached.resolve_local_auth_token", lambda: "tok")
+        monkeypatch.setattr(
+            "venue_copilot.detached.reserve_with_retry",
+            lambda scope, venue, **kw: {"reservation_id": "r1"},
+        )
+        monkeypatch.setattr("venue_copilot.detached.await_claim", lambda scope, rid, timeout: "sid-42")
+        monkeypatch.setattr("venue_copilot.detached.release_cli_mode", lambda *a, **k: 1)
+        plan = {**self._plan(), "registration_error": "x", "reservation_ttl": 5.0, "launch_detail": "y"}
+        rc, payload = detached.launch_detached(
+            _Adapter(), plan, seed="do it", driver=None, copilot_args=[], ensure_mux=True,
+            register_timeout=0.0, progress=lambda *a: None,
+        )
+        assert rc == 0
+        assert not {"registration_error", "reservation_ttl", "launch_detail"} & payload.keys()
+        assert payload["scope_id"] == "anchor-repo@venue"
+        assert detached.public_plan(plan) == self._plan()
+
+    def _patch_bridge(self, monkeypatch) -> None:
+        monkeypatch.setattr("venue_copilot.detached.resolve_daemon_port", lambda: 41234)
+        monkeypatch.setattr("venue_copilot.detached.resolve_local_auth_token", lambda: "tok")
+        monkeypatch.setattr(
+            "venue_copilot.detached.reserve_with_retry",
+            lambda scope, venue, **kw: {"reservation_id": "r1"},
+        )
+        monkeypatch.setattr("venue_copilot.detached.await_claim", lambda scope, rid, timeout: "sid-42")
+        monkeypatch.setattr("venue_copilot.detached.release_cli_mode", lambda *a, **k: 1)
+
+    def _refs(self) -> tuple[str, bytes, list[tuple[str, int]]]:
+        return "mkdir -p x && base64 -d | tar -xzf - -C x && cd x && pwd", b"UEFZTE9BRA==", [("trace.har", 2048)]
+
+    def test_ref_files_are_copied_before_launch_and_named_in_a_new_sessions_seed(self, monkeypatch) -> None:
+        from venue_copilot import detached
+
+        self._patch_bridge(monkeypatch)
+        adapter = _Adapter()
+        rc, payload = detached.launch_detached(
+            adapter, self._plan(), seed="look at the trace", driver=None, copilot_args=[],
+            ensure_mux=True, register_timeout=0.0, progress=lambda *a: None, refs=self._refs(),
+        )
+        assert rc == 0
+        kinds = [kind for kind, _ in adapter.calls]
+        assert kinds.index("run_input") < kinds.index("launch")
+        assert adapter.stdin == b"UEFZTE9BRA=="
+        launch = next(command for kind, command in adapter.calls if kind == "launch")
+        assert "/home/u/.agent-bridge/refs/b1/trace.har" in launch
+        assert payload["refs_delivered"] == "seed"
+        assert payload["ref_files"] == ["- /home/u/.agent-bridge/refs/b1/trace.har (2.0 KB)"]
+
+    def test_ref_files_for_a_running_session_are_sent_as_a_message(self, monkeypatch) -> None:
+        from venue_copilot import detached, refs
+
+        self._patch_bridge(monkeypatch)
+        sent = []
+        monkeypatch.setattr(refs, "deliver_note", lambda sid, note: sent.append((sid, note)) or True)
+        adapter = _Adapter({"ok": True, "created": False, "session": "wt-anchor-repo"})
+        rc, payload = detached.launch_detached(
+            adapter, self._plan(), seed=None, driver=None, copilot_args=[],
+            ensure_mux=True, register_timeout=0.0, progress=lambda *a: None, refs=self._refs(),
+        )
+        assert rc == 0
+        assert payload["refs_delivered"] == "message"
+        assert sent and sent[0][0] == "sid-42" and "trace.har" in sent[0][1]
+
+    def test_a_failed_ref_copy_fails_before_launch(self, monkeypatch) -> None:
+        from venue_copilot import detached
+
+        self._patch_bridge(monkeypatch)
+        adapter = _Adapter()
+        adapter.refs_ok = False
+        rc, payload = detached.launch_detached(
+            adapter, self._plan(), seed="x", driver=None, copilot_args=[],
+            ensure_mux=True, register_timeout=0.0, progress=lambda *a: None, refs=self._refs(),
+        )
+        assert rc == 1
+        assert "reference files" in payload["error"]
+        assert "launch" not in [kind for kind, _ in adapter.calls]
+
+    def test_launch_failure_stops_created_unrepresented_session(self, monkeypatch) -> None:
+        from venue_copilot import detached
+
+        adapter = _Adapter({"ok": True, "created": True, "seed_submitted": False})
+        monkeypatch.setattr("venue_copilot.detached.resolve_daemon_port", lambda: 41234)
+        monkeypatch.setattr("venue_copilot.detached.resolve_local_auth_token", lambda: "tok")
+        monkeypatch.setattr(
+            "venue_copilot.detached.reserve_with_retry",
+            lambda scope, venue, **kw: {"reservation_id": "r1"},
+        )
+        monkeypatch.setattr("venue_copilot.detached.release_cli_mode", lambda *a, **k: 1)
+
+        rc, payload = detached.launch_detached(
+            adapter,
+            self._plan(),
+            seed="do it",
+            driver="d",
+            copilot_args=[],
+            ensure_mux=True,
+            register_timeout=0.0,
+            progress=lambda *a: None,
+        )
+
+        assert rc == 1
+        assert "seed was not submitted" in payload["error"]
+        assert adapter.keeper_stopped is True
+        assert any("tmux kill-session" in command for kind, command in adapter.calls if kind == "run")
+
+    def test_stop_detached_verifies_releases_and_deregisters(self, monkeypatch) -> None:
+        from venue_copilot import detached
+
+        adapter = _Adapter()
+        released = []
+        deregistered = []
+        monkeypatch.setattr(
+            "venue_copilot.detached.release_cli_mode",
+            lambda scope, reservation_id=None: released.append((scope, reservation_id)) or 1,
+        )
+        monkeypatch.setattr(
+            "venue_copilot.detached.deregister_live_session",
+            lambda sid: deregistered.append(sid) or True,
+        )
+
+        rc, payload = detached.stop_detached(
+            adapter,
+            self._plan(),
+            session_row={"session_id": "sid-42", "venue": {"target": "venue"}},
+        )
+
+        assert rc == 0
+        assert payload["stopped"] is True
+        assert payload["deregistered"] == "sid-42"
+        assert adapter.keeper_stopped is True
+        assert released == [("anchor-repo@venue", None)]
+        assert deregistered == ["sid-42"]
+
+    def test_stop_detached_failure_releases_nothing(self, monkeypatch) -> None:
+        from venue_copilot import detached
+
+        adapter = _Adapter()
+        adapter.run = lambda command, *, timeout: (3, "STILL_RUNNING\n", "")
+        released = []
+        monkeypatch.setattr(
+            "venue_copilot.detached.release_cli_mode",
+            lambda *a, **k: released.append(a) or 1,
+        )
+
+        rc, payload = detached.stop_detached(adapter, self._plan(), session_row={})
+
+        assert rc == 1
+        assert "could not verify" in payload["error"]
+        assert released == []

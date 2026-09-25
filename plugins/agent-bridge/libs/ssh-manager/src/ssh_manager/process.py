@@ -93,7 +93,29 @@ async def terminate_ssh_process_tree(
     try:
         await _terminate_ssh_process_tree(proc, grace=grace)
     finally:
+        _close_unreaped_transport(proc)
         await run_process_cleanup(proc)
+
+
+def _close_unreaped_transport(proc: asyncio.subprocess.Process) -> None:
+    """Close the pipes of a process whose exit was never observed.
+
+    A kill whose wait ran out, or that was cancelled mid-``taskkill`` when the
+    owning ``asyncio.run`` ended, leaves the subprocess transport open. The
+    garbage collector then finalizes it after the loop has closed, and its
+    ``__del__`` prints "Exception ignored ... Event loop is closed" at exit.
+    Closing it here, while the loop still runs, releases it cleanly (the
+    process is already being killed).
+    """
+    if getattr(proc, "returncode", 0) is not None:
+        return
+    close = getattr(getattr(proc, "_transport", None), "close", None)
+    if close is None:
+        return
+    try:
+        close()
+    except Exception:  # noqa: BLE001 - best-effort release during teardown
+        pass
 
 
 async def _terminate_ssh_process_tree(

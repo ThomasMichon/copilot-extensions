@@ -1,0 +1,9 @@
+{
+  "comment": "Allow detached CLI-mode passthrough for container targets.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

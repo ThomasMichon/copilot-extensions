@@ -1,0 +1,9 @@
+{
+  "comment": "copilot --detach --ref-file: a note for a running worker is steered into its turn (not queued behind it) and the send is bounded to 60s",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}
