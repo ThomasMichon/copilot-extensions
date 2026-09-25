@@ -707,6 +707,11 @@ closed; umbrella dotfiles#1081.)*
 
 ## Where to go next
 
+- **Troubleshooting across entities (worktree, session, task, bridge,
+  machine, ...)?** Start with
+  [patterns/entity-relationship-model.md](patterns/entity-relationship-model.md)
+  — the diagnostic playbook mapping each cross-entity question to its current
+  CLI command, before writing an ad-hoc script.
 - [Rollout readiness plan](plans/rollout-readiness.md) · [Fresh dev box validation](plans/fresh-devbox-validation.md)
 - agent-worktrees [architecture](../plugins/agent-worktrees/docs/architecture.md) · [CLI reference](../plugins/agent-worktrees/docs/cli-reference.md)
 - agent-bridge [architecture](../plugins/agent-bridge/docs/architecture.md) · [machine-config](../plugins/agent-bridge/docs/machine-config.md)
