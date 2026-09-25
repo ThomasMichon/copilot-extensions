@@ -41,7 +41,7 @@ def test_cold_store_provider_manifest_is_attributed_and_writers_stamp_root_atomi
     assert "AGENT_BRIDGE_COLD_STORE_PROVIDERS_DIR" in shell
 
 
-def _resolve_bash() -> str:
+def _resolve_bash() -> str | None:
     """Resolve a REAL bash, not Windows' WSL-launcher `bash.exe` shim.
 
     A bare "bash" can resolve to a genuine WSL distro's `/bin/bash` (via the
@@ -49,9 +49,11 @@ def _resolve_bash() -> str:
     from a Windows-style argv path (POSIX shells don't treat `\\` as a path
     separator), mangling `D:\\Src\\...\\script.sh` into a nonexistent
     filename. Prefer the real Git Bash location, which accepts Windows
-    paths natively. The bare fallback also excludes the known WSL launcher
-    locations (System32 and the WindowsApps Store alias) so it never
-    silently selects one when Git Bash is absent.
+    paths natively. Returns ``None`` (never a bare, unfiltered "bash"
+    string) when no non-WSL candidate is found -- a bare fallback string
+    would let the OS's own PATH search resolve a WSL launcher again at
+    `subprocess.run()` time, silently bypassing this function's own
+    filtering.
     """
     git_bash = Path(r"C:\Program Files\Git\bin\bash.exe")
     if git_bash.is_file():
@@ -66,9 +68,13 @@ def _resolve_bash() -> str:
         found = shutil.which("bash", path=filtered)
         if found:
             return found
-    return "bash"
+    return None
 
 
+_BASH = _resolve_bash()
+
+
+@pytest.mark.skipif(_BASH is None, reason="a real (non-WSL) bash is required")
 def test_posix_writer_creates_and_replaces_manifest(tmp_path):
     registry = tmp_path / "cold-store-providers.d"
     env = {**os.environ, "AGENT_BRIDGE_COLD_STORE_PROVIDERS_DIR": str(registry)}
@@ -80,7 +86,7 @@ def test_posix_writer_creates_and_replaces_manifest(tmp_path):
     if "PATH" in env:
         parts = env["PATH"].split(os.pathsep)
         env["PATH"] = os.pathsep.join(p for p in parts if "WindowsApps" not in p)
-    command = [_resolve_bash(), str(PLUGIN / "scripts" / "register-cold-store-provider.sh")]
+    command = [_BASH, str(PLUGIN / "scripts" / "register-cold-store-provider.sh")]
     subprocess.run(command, env=env, check=True, cwd=str(PLUGIN))
     subprocess.run(command, env=env, check=True, cwd=str(PLUGIN))
 
