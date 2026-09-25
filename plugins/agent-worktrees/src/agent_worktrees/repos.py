@@ -330,6 +330,29 @@ def find_repo(name: str) -> RepoEntry | None:
     return registry.repos.get(name)
 
 
+def inrepo_declared_default_branch(path: str) -> str:
+    """Return the branch a checked-out repo declares as its own via its
+    in-repo ``.agent-worktrees/config.yaml`` (or legacy equivalents), or
+    ``""`` when it declares none / the path is unusable.
+
+    A repo's own ``default_branch`` (e.g. copilot-extensions' ``dev`` --
+    a contribution/integration branch distinct from a GitHub-side release
+    branch) is authoritative over anything a machine's ``repos.yaml`` or an
+    external manifest separately records for it (see ``config.py``'s
+    ``_resolve_adoption_defaults_from_registry``, which already treats the
+    registry value as a mere fallback for repos that declare none). Callers
+    use this to keep clone/add/sync self-deriving that value instead of
+    requiring an operator to duplicate it by hand. Never raises.
+    """
+    try:
+        from .config import _load_inrepo_config
+
+        value = _load_inrepo_config(path).get("default_branch")
+        return str(value) if value else ""
+    except Exception:
+        return ""
+
+
 # ---------------------------------------------------------------------------
 # Account resolution (repo -> preferred GitHub identity)
 # ---------------------------------------------------------------------------
@@ -926,7 +949,35 @@ def clone_repo(
         return None
 
     output.ok(f"Cloned {remote} to {target}")
-    return add_repo(name, target, remote=remote)
+
+    # A repo that declares its own default_branch (e.g. copilot-extensions'
+    # `dev` -- a contribution branch distinct from GitHub's advertised HEAD,
+    # which is what a plain `git clone` always checks out) is authoritative:
+    # switch the fresh checkout onto it now, and register that value instead
+    # of requiring an operator to separately know and pass --default-branch.
+    declared_branch = inrepo_declared_default_branch(str(target_path))
+    if declared_branch:
+        try:
+            current = subprocess.run(
+                ["git", "-C", str(target_path), "branch", "--show-current"],
+                capture_output=True, text=True, timeout=30,
+            ).stdout.strip()
+            if current != declared_branch:
+                checkout = subprocess.run(
+                    ["git", "-C", str(target_path), "checkout", declared_branch],
+                    capture_output=True, text=True, timeout=30,
+                )
+                if checkout.returncode == 0:
+                    output.ok(f"Checked out declared default branch '{declared_branch}'")
+                else:
+                    output.warn(
+                        f"Could not check out declared default branch "
+                        f"'{declared_branch}': {_redact(checkout.stderr.strip())}"
+                    )
+        except Exception:
+            pass
+
+    return add_repo(name, target, remote=remote, default_branch=declared_branch)
 
 
 def _name_from_remote(remote: str) -> str | None:
@@ -1295,14 +1346,20 @@ def sync_repo(entry: RepoEntry, plat: str | None = None) -> tuple[str, str]:
     """Fetch and fast-forward one repo's default branch.
 
     Returns ``(state, detail)`` where state is one of: ``synced``,
-    ``skipped``, ``missing``, ``error``.  Dirty trees and detached/
-    non-default branches are skipped (never force-updated).
+    ``skipped``, ``missing``, ``error``.  Dirty trees and detached HEADs are
+    skipped (never force-updated). A repo's own in-repo-declared
+    ``default_branch`` (via ``inrepo_declared_default_branch``) is
+    authoritative over the registry's ``entry.default_branch`` -- when the
+    checkout is clean but sitting on a *different* branch than the declared
+    one (e.g. a stale clone left on GitHub's advertised HEAD instead of the
+    repo's actual contribution branch), this switches it back rather than
+    permanently skipping every future sync.
     """
     plat = plat or _current_platform()
     path = entry.local_path(plat)
     if not path or not (Path(path) / ".git").exists():
         return ("missing", "not checked out")
-    branch = entry.default_branch
+    branch = inrepo_declared_default_branch(path) or entry.default_branch
     try:
         if _git(path, "status", "--porcelain").stdout.strip():
             return ("skipped", "working tree dirty")
@@ -1312,7 +1369,14 @@ def sync_repo(entry: RepoEntry, plat: str | None = None) -> tuple[str, str]:
             # never fast-forward it.
             return ("skipped", "detached HEAD")
         if branch and current != branch:
-            return ("skipped", f"on '{current}', not '{branch}'")
+            checkout = _git(path, "checkout", branch)
+            if checkout.returncode != 0:
+                return (
+                    "skipped",
+                    f"on '{current}', not declared default '{branch}' "
+                    f"(checkout failed: {checkout.stderr.strip() or 'unknown error'})",
+                )
+            current = branch
         target = branch or current
         # Use git_ops.fetch (not the plain local _git helper) so a cross-account
         # remote authenticates the same way every other agent-worktrees git flow

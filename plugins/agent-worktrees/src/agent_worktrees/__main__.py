@@ -7475,7 +7475,7 @@ def _load_full_command_surface() -> None:
     global _monitor_session_state_handoff_path, _new_picker_blocked_by_ssh, _parse_follow_up_refs, _pending_handoff_predecessor_safe, _perform_remux, _picker_profile_choice, _platform_short, _plugin_managed_notice
     global _post_exit_gate, _pr_flow_profile, _pr_merge_now, _pr_merge_print_human, _pr_merge_usage, _pr_parse_repo, _pr_reminder_for, _pr_usage
     global _pr_watch_review_blocking, _pr_watch_usage, _prepare_namespaced_project_state, _print_gc_managed, _print_gc_orphans, _print_gc_shells, _proc_boot_time, _profiles_host
-    global _project_for_tracking_file, _project_update_context, _read_monitor_registry, _reconcile_one_runtime, _reconcile_registered_runtimes, _reflect_assignment, _refresh_list_record, _refresh_marketplace
+    global _project_for_tracking_file, _project_update_context, _prune_stale_pivots_after_update, _read_monitor_registry, _reconcile_one_runtime, _reconcile_registered_runtimes, _reflect_assignment, _refresh_list_record, _refresh_marketplace
     global _refresh_terminal_profiles, _register_session_for_monitor, _registered_plugin_targets, _related_anchor, _related_conduct, _related_config_source_anchors, _related_current_machine, _related_doctor
     global _related_lookup_anchors, _related_opt, _related_usage, _relocate_active_project_for_worktree, _remove_managed_file, _remove_managed_instruction, _remove_managed_worktree, _remove_monitor_entry
     global _render_doctor_report, _render_dropin_registry_report, _render_related_findings, _render_status_context, _render_status_segment, _repo_for_record, _require_coordination_readiness, _resolve_anchor_owner_ref
@@ -7867,6 +7867,7 @@ def _load_full_command_surface() -> None:
     _reconcile_registered_runtimes = update_cli._reconcile_registered_runtimes
     _reconcile_one_runtime = update_cli._reconcile_one_runtime
     _fast_forward_project_anchors = update_cli._fast_forward_project_anchors
+    _prune_stale_pivots_after_update = update_cli._prune_stale_pivots_after_update
     _self_entry_present = update_cli._self_entry_present
     _heal_stale_anchor_if_self_missing = update_cli._heal_stale_anchor_if_self_missing
     _update_modules = update_cli._update_modules

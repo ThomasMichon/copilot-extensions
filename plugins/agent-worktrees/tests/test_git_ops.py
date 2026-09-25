@@ -453,6 +453,19 @@ class TestPinGitCredential:
     ``pin_git_credential`` persists a repo-local override so any plain git
     client resolves the correct login."""
 
+    @pytest.fixture(autouse=True)
+    def _no_active_gh_account_by_default(self, monkeypatch):
+        """Determinism guard: without this, ``pin_git_credential`` calls
+        ``_active_gh_account()``, which shells out to the REAL ``gh auth
+        status`` on whatever machine runs this suite. A test using a
+        plausible-looking real login (e.g. the EMU-mapped
+        ``tmichon_microsoft`` example) would then pass or fail depending on
+        which account happens to be authenticated locally -- exactly the
+        kind of environment-dependent flake a unit test must not have. Tests
+        exercising the active-account branch explicitly override this with
+        their own ``monkeypatch.setattr(go, "_active_gh_account", ...)``."""
+        monkeypatch.setattr(go, "_active_gh_account", lambda: None)
+
     def test_noop_when_login_or_host_empty(self, tmp_path: Path, monkeypatch):
         monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
         assert go.pin_git_credential(tmp_path, "") is False

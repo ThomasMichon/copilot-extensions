@@ -5288,6 +5288,67 @@ def test_command_bar_never_hides_a_live_worktree(monkeypatch):
     asyncio.run(run())
 
 
+def test_command_bar_filter_matches_state_and_status_markers(monkeypatch):
+    """worktree-finality-and-obligations Phase 5: the "/" filter must match
+    the closure-descriptor-aware derived ``state`` label (e.g. "merged") and
+    the raw ``status_markers`` compact tokens (e.g. "c1" for a held claim),
+    not just title/id text -- parity with what the row actually displays."""
+    from worktree_manager.production_picker import prune
+
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+    local = ("anomalous-potato", "Win")
+    raws = [
+        {"id": "anomalous-potato-win-20260627-aaaa", "title": "Fix the thing",
+         "status": "active", "started_at": "2026-06-27T17:00:00",
+         "turn_count": 4, "state": "wip"},
+        {"id": "anomalous-potato-win-20260626-cccc", "title": "Blocked wt",
+         "status": "finalized", "completed_at": "2026-06-26T10:00:00",
+         "started_at": "2026-06-25T10:00:00", "turn_count": 9,
+         "state": "completed",
+         "closure": {
+             "version": prune.DESCRIPTOR_VERSION, "label": "MERGED",
+             "style": "merged-blocked", "compact": "MERGED C1",
+             "claims": {"held": 1}, "follow_ups": {"open": 0},
+             "closure": {"final": False}, "action": {"disposition": "blocked"},
+         }},
+    ]
+    src = types.SimpleNamespace()
+    src.LOCAL = local
+    src.LOCAL_LABEL = "anomalous-potato · win"
+    src.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+    src.bucket = derive.bucket
+    src.for_machine = derive.for_machine
+    src.load = lambda: [derive.norm(w, *local) for w in raws]
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            await _focus_wt_list(app, pilot, scr)
+            # Match by derived state label, not title/id text.
+            await pilot.press("/")
+            for ch in "merged":
+                await pilot.press(ch)
+            await pilot.press("enter")
+            await pilot.pause()
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Blocked wt"]
+            await pilot.press("escape")
+            await pilot.pause()
+            # Match by the raw status_markers compact token.
+            await pilot.press("/")
+            for ch in "c1":
+                await pilot.press(ch)
+            await pilot.press("enter")
+            await pilot.pause()
+            assert [w["title"] for w in scr._wt_visible_records()] == ["Blocked wt"]
+
+    asyncio.run(run())
+
+
 def test_command_bar_filter_never_narrows_list_records_or_selection(monkeypatch):
     """PR #2911 review: the filter/sort narrowing must apply ONLY to the
     render/navigation view (`current_list_visible`/`_wt_visible_records`) --

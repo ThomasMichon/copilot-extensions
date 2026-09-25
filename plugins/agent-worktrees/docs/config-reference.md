@@ -83,6 +83,16 @@ repos:
 > repos doctor` flags redundant/conflicting overlay keys and `--fix` strips the
 > redundant ones (comments preserved). A base-repo enlistment overlay typically
 > shrinks to just `repo_name` + the `env_script` it alone provides.
+>
+> **`default_branch` itself is likewise redundant in `repos.yaml` for a repo
+> that declares its own** (its in-repo `.agent-worktrees/config.yaml`, e.g.
+> a repo whose real contribution branch differs from its GitHub-advertised
+> HEAD). `repos add`/`repos clone` auto-derive the registry value from that
+> declaration when `--default-branch` isn't given, and `repos sync` treats
+> the in-repo declaration as authoritative over a stale registry value,
+> self-healing an anchor left checked out on the wrong branch (clean trees
+> only) rather than skipping it forever.
+
 
 It may *also* carry the machine-wide fields below (they then override the global
 config), but the slim form above is preferred:

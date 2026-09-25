@@ -37,6 +37,7 @@ def _args(force: bool = False) -> argparse.Namespace:
         recreate_venv=False,
         skip_modules=None,
         no_anchor_sync=True,
+        no_prune_pivots=True,
         force=force,
         no_manager=True,
     )
@@ -70,6 +71,7 @@ def wired(monkeypatch, plugin_dir):
     monkeypatch.setattr(m, "_update_registered_plugins", lambda targets: None)
     monkeypatch.setattr(m, "_update_modules", lambda *a, **k: None)
     monkeypatch.setattr(m, "_fast_forward_project_anchors", lambda: None)
+    monkeypatch.setattr(m, "_prune_stale_pivots_after_update", lambda: None)
     monkeypatch.setattr(m, "_find_installed_plugin_dir", lambda: plugin_dir)
     monkeypatch.setattr(m, "_project_update_context", lambda: plugin_dir)
     monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")

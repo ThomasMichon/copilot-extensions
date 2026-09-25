@@ -519,13 +519,21 @@ below for the carved implementation plan.
   triage). This checkbox was left stale after Phase 9 closed the gap under
   its own name; corrected here rather than re-building it.
 - [ ] Keep legends, filters, maintenance previews, and cleanup selections in
-  parity with the same descriptor. **Still not done** (re-verified
-  2026-09-23): the Picker's `/`-filter and sort keys
-  (`wt_row_always_visible`, `WT_SORT_KEYS` in `derive.py`) still key off the
-  plain normalized `state` string, not `closure`/`compact`; no legend
-  surface reads the descriptor either. Genuinely open -- not superseded by
-  Phase 9's per-row marker rendering above, which only changed *display*,
-  not filtering/legend/maintenance-preview logic.
+  parity with the same descriptor. **Partially done (2026-09-25):** the
+  `/`-filter (`current_list_visible` in `engine_model.py`) now also matches
+  against `state` (already closure-descriptor-aware -- `derive._state`
+  resolves FINAL/MERGED through `interpret_descriptor_payload`, this was a
+  filter-field gap, not a state-derivation one) and `status_markers` (the raw
+  `C<N>`/`F<N>`/`U*`/`OC*` compact tokens), so typing "merged" or "c1"
+  narrows the list -- previously only `title`/`id`/`id4` matched. `WT_SORT_KEYS`
+  was re-checked and needs no change: its `"state"` key already reads the
+  normalized record's derived label, not the raw tracking field. **Still
+  open:** no legend surface exists yet that explains the compact marker
+  vocabulary (`describe_status_marker` expands a token to text for the
+  row's own detail line, but nothing surfaces the full vocabulary as a
+  standalone legend); maintenance-preview and cleanup-selection parity
+  (`BUCKET_DISPO`/`cleanup_disposition`) is a separate, larger design
+  question -- deferred rather than guessed at here.
 - [x] Preserve mixed-version fleet safety: absent, unsupported, or newer
   descriptor versions render provisional/review and never `FINAL` or
   prune-eligible. Landed as `prune.interpret_descriptor_payload`: an exact
@@ -2726,4 +2734,62 @@ The approved design is the faceted model in [design.md](design.md):
   `test_context_resolution.py` failures seen in the full-suite run are
   pre-existing on `origin/main` (confirmed via the same A/B) and unrelated
   to this slice.
+
+### 2026-09-25 - Session-liveness audit (2 unaccounted sessions resolved) + Phase 5: Picker filter parity
+
+- Resumed via a manual handoff after a mid-session `agent-worktrees` runtime
+  corruption (`1.5.8-dev1`, rolled back to `1.5.6-dev1` by the predecessor)
+  and an operator request to first resolve two sessions
+  (`4dbf1ec1-e5bb-4433-bb0c-a55b3dab50dc`, `65a8554b-42f9-4c14-8527-59b53d4b66cf`)
+  the prior handoff had flagged as having real activity but no live process
+  or head claim -- the open question of whether either held unrecovered
+  work.
+- **Both resolved as non-issues**: `session-tail` on each showed only a
+  blocked duplicate-handoff-delivery exchange (a handoff already being
+  consumed by a different session) with zero substantive content; one ended
+  in a clean `session.shutdown`, the other on an unanswered offer with
+  nothing at stake. Neither has a live process (checked `inuse.*.lock` +
+  `Get-Process`); a stray lock file under `4dbf1ec1`'s session-state folder
+  traced back to this session's own PID, not a second live process. No
+  recovery action needed.
+- Re-triaged the effort doc and found the prior handoff's two suggested
+  "next slice" items were **already done** by the predecessor after
+  generating that handoff: Phase 7's `#3114` transfer and the Phase 5
+  Picker-parity checkbox correction.
+- **Picked Phase 5's filter/legend bullet next** (the largest remaining
+  Phase 5 item): the `/` command-bar filter
+  (`current_list_visible` -> `ListView.narrow` in `engine_model.py`) only
+  matched `title`/`id`/`id4` -- an operator could not type "merged" or "c1"
+  to narrow to closure-blocked worktrees, despite those exact tokens being
+  what the row itself displays (`state`, `status_markers`). Re-checked
+  `WT_SORT_KEYS` first and found no matching gap: its `"state"` key already
+  reads the *normalized* record's derived label (already closure-aware via
+  `derive._state`), not the raw tracking field -- the doc's earlier
+  "genuinely open" note conflated the sort key (fine) with the filter
+  fields (the real gap).
+- Fixed: added `"state"` and `"status_markers"` to the filter's field tuple.
+  Added `test_command_bar_filter_matches_state_and_status_markers`
+  (a closure-descriptor fixture with a held claim, `compact="MERGED C1"`)
+  proving both a state-label query ("merged") and a marker-token query
+  ("c1") narrow the list to the matching row.
+- **Left open, explicitly**: no legend surface yet renders the marker
+  vocabulary as a whole (only per-row expansion exists via
+  `describe_status_marker`); maintenance-preview/cleanup-selection parity
+  with the descriptor is a separate, larger design question not resolved
+  by this filter fix -- corrected the Plan bullet's status to reflect
+  partial completion rather than checking it off.
+- Validation: targeted `pytest tests/production_picker/test_picker_tui.py -k
+  filter` (12 passed) plus the full `tests/production_picker/` suite (701
+  passed, 3 pre-existing/unrelated failures in `test_data_ssh_sources.py` --
+  same Windows path-format assertions the 2026-09-23 entry already flagged
+  as pre-existing on `origin/main`). `ruff check` on the touched files shows
+  only pre-existing, file-wide conventions (e.g. `DTZ001` on every fixture's
+  `datetime.datetime(...)` call, 33 instances repo-wide already) -- no new
+  lint category introduced.
+- Next open Phase 5 items: the legend surface itself, and the shared
+  compact-text assemble/truncate function (still blocked on knowing a real
+  width budget from the as-yet-unbuilt agent-bridge cockpit consumer).
+  Phase 4's `cleanup`/`gc` descriptor-consumption bullet, Phase 6 (ship-it,
+  last), and Phase 7's remaining process bullets (`migration-intake` gate,
+  scope revalidation, synthetic-fixtures) are all still open.
 

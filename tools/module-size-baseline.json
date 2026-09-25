@@ -74,7 +74,7 @@
   "plugins/agent-worktrees/src/agent_worktrees/pr_ops.py": 2439,
   "plugins/agent-worktrees/src/agent_worktrees/reconcile.py": 2195,
   "plugins/agent-worktrees/src/agent_worktrees/related.py": 1717,
-  "plugins/agent-worktrees/src/agent_worktrees/repos.py": 1355,
+  "plugins/agent-worktrees/src/agent_worktrees/repos.py": 1419,
   "plugins/agent-worktrees/src/agent_worktrees/session_projection.py": 2124,
   "plugins/agent-worktrees/src/agent_worktrees/sessions.py": 2704,
   "plugins/agent-worktrees/src/agent_worktrees/state_root.py": 1056,

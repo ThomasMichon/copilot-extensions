@@ -1503,6 +1503,179 @@ class TestLayeredConfig:
         assert repo.pr.required is True
 
 
+class TestInRepoConfigCommittedRefResolution:
+    """The in-repo config must be read from what's actually COMMITTED on the
+    resolved default branch, not from whatever the anchor's working tree
+    happens to have checked out (a stale/wrong local branch on the anchor
+    must never shadow it -- the anchor is a read-only mirror by design)."""
+
+    @staticmethod
+    def _resolve(anchor: Path) -> dict:
+        from agent_worktrees import inrepo_config_source
+        return inrepo_config_source.load_inrepo_config_from_committed_ref(
+            anchor,
+            (
+                cfg.inrepo_config_path(Path()),
+                cfg.legacy_inrepo_config_path(Path()),
+                Path(cfg.INREPO_CONFIG_FILENAME),
+            ),
+        )
+
+    @staticmethod
+    def _git(*args: str, cwd: Path):
+        import subprocess
+        return subprocess.run(
+            ["git", "-c", "user.email=t@example.com", "-c", "user.name=Test",
+             "-c", "init.defaultBranch=main", *args],
+            cwd=str(cwd), capture_output=True, text=True, check=True,
+        )
+
+    def _make_remote_with_branch_configs(
+        self, tmp_path: Path, *, configs: dict[str, str]
+    ) -> Path:
+        """A bare 'remote' with one branch per ``configs`` key, each carrying
+        its own committed ``.agent-worktrees/config.yaml`` content."""
+        remote = tmp_path / "remote.git"
+        self._git("init", "--bare", "-b", "main", str(remote), cwd=tmp_path)
+        work = tmp_path / "work"
+        self._git("init", "-b", "main", str(work), cwd=tmp_path)
+        self._git("remote", "add", "origin", str(remote), cwd=work)
+        first = True
+        for branch, text in configs.items():
+            if first:
+                self._git("checkout", "-b", branch, cwd=work) if branch != "main" else None
+                first = False
+            else:
+                self._git("checkout", "-B", branch, cwd=work)
+            cfgdir = work / ".agent-worktrees"
+            cfgdir.mkdir(exist_ok=True)
+            (cfgdir / "config.yaml").write_text(text, encoding="utf-8")
+            self._git("add", "-A", cwd=work)
+            self._git("commit", "-m", f"config for {branch}", cwd=work)
+            self._git("push", "origin", branch, cwd=work)
+        return remote
+
+    def _clone_with_fetched_refs(
+        self, tmp_path: Path, remote: Path, *, checkout: str, fetch: tuple[str, ...]
+    ) -> Path:
+        """A clone (the 'anchor') checked out on ``checkout``. A normal clone
+        sets up ``origin/HEAD`` (needed for the offline head-branch probe)
+        and a remote-tracking ref for every branch on the remote; branches
+        NOT named in ``fetch`` have their remote-tracking ref pruned
+        afterward, to simulate one this anchor genuinely never fetched."""
+        clone = tmp_path / "anchor"
+        self._git(
+            "clone", "--branch", checkout, str(remote), str(clone), cwd=tmp_path,
+        )
+        proc = self._git(
+            "for-each-ref", "--format=%(refname:short)", "refs/remotes/origin",
+            cwd=clone,
+        )
+        all_remote_branches = {
+            ref.split("/", 1)[1]
+            for ref in proc.stdout.splitlines()
+            if ref and "/" in ref and ref.split("/", 1)[1] != "HEAD"
+        }
+        for branch in all_remote_branches - set(fetch):
+            self._git(
+                "update-ref", "-d", f"refs/remotes/origin/{branch}", cwd=clone
+            )
+        return clone
+
+    def test_stale_anchor_checkout_does_not_shadow_committed_default_branch(
+        self, tmp_path: Path
+    ):
+        """THE regression: the anchor's checked-out `main` is stale (still
+        says `default_branch: main` on disk), but `origin/main`'s actually
+        committed config already says `default_branch: dev`. Resolution must
+        honor the committed value, never the stale working-tree copy."""
+        remote = self._make_remote_with_branch_configs(
+            tmp_path,
+            configs={"main": "default_branch: dev\nremote: origin\n"},
+        )
+        anchor = self._clone_with_fetched_refs(
+            tmp_path, remote, checkout="main", fetch=("main",)
+        )
+        # Simulate a stale on-disk copy that still says the OLD value --
+        # the exact shape of an anchor that hasn't pulled recent commits.
+        (anchor / ".agent-worktrees" / "config.yaml").write_text(
+            "default_branch: main\nremote: origin\n", encoding="utf-8"
+        )
+        data = self._resolve(anchor)
+        assert data.get("default_branch") == "dev"
+
+    def test_hops_to_declared_branch_when_it_carries_newer_settings(
+        self, tmp_path: Path
+    ):
+        """`origin/main` declares `default_branch: dev`; `origin/dev` (fetched)
+        carries its OWN, different settings. Resolution must read from `dev`,
+        not stop at what `main` alone declares."""
+        remote = self._make_remote_with_branch_configs(
+            tmp_path,
+            configs={
+                "main": "default_branch: dev\nremote: origin\n",
+                "dev": "default_branch: dev\nremote: origin\nstrategy: detach\n",
+            },
+        )
+        anchor = self._clone_with_fetched_refs(
+            tmp_path, remote, checkout="main", fetch=("main", "dev")
+        )
+        data = self._resolve(anchor)
+        assert data.get("strategy") == "detach"
+
+    def test_does_not_hop_when_declared_branch_not_fetched(self, tmp_path: Path):
+        """`origin/main` declares `default_branch: dev`, but `dev` was never
+        fetched as a remote-tracking ref -- resolution stays on `main`'s own
+        committed config rather than guessing at an unresolvable hop."""
+        remote = self._make_remote_with_branch_configs(
+            tmp_path,
+            configs={
+                "main": "default_branch: dev\nremote: origin\n",
+                "dev": "default_branch: dev\nremote: origin\nstrategy: detach\n",
+            },
+        )
+        anchor = self._clone_with_fetched_refs(
+            tmp_path, remote, checkout="main", fetch=("main",)  # dev NOT fetched
+        )
+        data = self._resolve(anchor)
+        assert data.get("default_branch") == "dev"
+        assert "strategy" not in data
+
+    def test_falls_back_to_worktree_when_no_remote_at_all(self, tmp_path: Path):
+        """A plain non-git anchor (or one with no remote) resolves nothing via
+        the committed-ref path; `_load_inrepo_config` falls back to disk."""
+        anchor = tmp_path / "ext"
+        cfg.inrepo_config_path(anchor).parent.mkdir(parents=True)
+        cfg.inrepo_config_path(anchor).write_text(
+            "default_branch: main\n", encoding="utf-8"
+        )
+        assert self._resolve(anchor) == {}
+        assert cfg._load_inrepo_config(str(anchor)).get("default_branch") == "main"
+
+    def test_end_to_end_through_load_config(self, tmp_path: Path):
+        """The fix reaches all the way through `load_config`: a repo whose
+        anchor is stuck on a stale checkout still resolves the CURRENT
+        committed `default_branch` for the loaded `RepoConfig`."""
+        remote = self._make_remote_with_branch_configs(
+            tmp_path,
+            configs={"main": "default_branch: dev\nremote: origin\n"},
+        )
+        anchor = self._clone_with_fetched_refs(
+            tmp_path, remote, checkout="main", fetch=("main",)
+        )
+        (anchor / ".agent-worktrees" / "config.yaml").write_text(
+            "default_branch: main\nremote: origin\n", encoding="utf-8"
+        )
+        cfgfile = tmp_path / "machine-config.yaml"
+        cfgfile.write_text(
+            "repo_name: ext\nmachine: m\nplatform: linux\n"
+            "repos:\n  ext:\n"
+            f"    anchor: {anchor}\n    worktree_root: {tmp_path / 'wt'}\n"
+        )
+        repo = cfg.load_config(cfgfile).repos["ext"]
+        assert repo.default_branch == "dev"
+
+
 class TestGlobalConfigUserOwned:
     """The global config is user-owned: scaffold-if-missing, never overwritten."""
 

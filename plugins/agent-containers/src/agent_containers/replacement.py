@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-import re
 import time
-import uuid
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
+
+from session_liveness_probe import (
+    SessionLiveness,
+    build_probe_script,
+    parse_probe_output,
+)
 
 from .config import ContainersConfig, FleetConfig
 from .lease import (
@@ -44,9 +48,6 @@ from .restricted_exec import (
     sanitized_exec_prefix,
 )
 
-_LOCK_LINE_RE = re.compile(
-    r"^LOCK\t([0-9a-fA-F-]{36})\t([1-9][0-9]*)\t(live|stale)$"
-)
 _CONFIRMATION_AND_CLEANUP_GRACE = 45.0
 _TERMINAL_STOPPED_STATES = {"exited", "created"}
 _ALLOWED_REPLACEMENT_DRIFT = {
@@ -55,17 +56,6 @@ _ALLOWED_REPLACEMENT_DRIFT = {
     "container image ID differs from provisioned image ID",
     "configured image reference differs from running image ID",
 }
-
-
-@dataclass
-class SessionLiveness:
-    """Non-cooperative in-container session-state probe result."""
-
-    state: str
-    active_sessions: list[str]
-    stale_sessions: list[str]
-    reason: str | None = None
-    session_state: str = "unknown"
 
 
 @dataclass
@@ -90,6 +80,10 @@ def probe_session_liveness(
 
     Docker executes the probe from the host. The session does not need to
     cooperate or publish provider/bridge state.
+
+    The probe script and output parser are shared with agent-codespaces via
+    the vendored ``session_liveness_probe`` lib (session-rescue-parity Phase
+    2); only the ``docker exec`` transport below is container-specific.
     """
     state = getattr(info, "state", "")
     if state == "paused":
@@ -101,48 +95,7 @@ def probe_session_liveness(
             [],
             "container is not running and tmpfs evidence is unavailable",
         )
-    script = r"""
-set -o pipefail
-root="$HOME/.copilot/session-state"
-test -d /proc
-if [ ! -e "$root" ]; then
-  printf 'ROOT\tabsent\n'
-else
-  test -d "$root"
-  printf 'ROOT\tpresent\n'
-  find "$root" -mindepth 2 -maxdepth 2 -type f -name 'inuse.*.lock' -print |
-  while IFS= read -r path; do
-    session="${path%/*}"
-    session="${session##*/}"
-    marker="${path##*/}"
-    pid="${marker#inuse.}"
-    pid="${pid%.lock}"
-    case "$pid" in
-      ''|*[!0-9]*) printf 'INVALID\t%s\t%s\n' "$session" "$marker"; continue ;;
-    esac
-    if [ -d "/proc/$pid" ]; then state=live; else state=stale; fi
-    printf 'LOCK\t%s\t%s\t%s\n' "$session" "$pid" "$state"
-  done
-fi
-scan=ok
-for proc in /proc/[0-9]*; do
-  pid="${proc##*/}"
-  [ "$pid" = "$$" ] && continue
-  [ "$pid" = "$PPID" ] && continue
-  if [ ! -r "$proc/cmdline" ]; then
-    [ -d "$proc" ] && scan=partial
-    continue
-  fi
-  command=$(tr '\000' ' ' < "$proc/cmdline") || {
-    [ -d "$proc" ] && scan=partial
-    continue
-  }
-  case "$command" in
-    *copilot*|*Copilot*|*--acp*) printf 'PROCESS\t%s\n' "$pid" ;;
-  esac
-done
-printf 'PROCESS_SCAN\t%s\n' "$scan"
-""".strip()
+    script = build_probe_script()
     try:
         result = _docker(
             [
@@ -157,104 +110,7 @@ printf 'PROCESS_SCAN\t%s\n' "$scan"
         )
     except RuntimeError as exc:
         return SessionLiveness("unknown", [], [], str(exc))
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout).strip()
-        return SessionLiveness(
-            "unknown",
-            [],
-            [],
-            detail or "session-state probe failed",
-        )
-    lines = result.stdout.splitlines()
-    if not lines or lines[0] not in {"ROOT\tabsent", "ROOT\tpresent"}:
-        return SessionLiveness(
-            "unknown",
-            [],
-            [],
-            "session-state probe returned an invalid header",
-        )
-    active = []
-    stale = []
-    processes = []
-    scan_state = None
-    for line in lines[1:]:
-        if line.startswith("PROCESS\t"):
-            pid = line.split("\t", 1)[1]
-            if not pid.isdigit():
-                return SessionLiveness(
-                    "unknown",
-                    active,
-                    stale,
-                    "process backstop returned an invalid pid",
-                    lines[0].split("\t", 1)[1],
-                )
-            processes.append(pid)
-            continue
-        if line.startswith("PROCESS_SCAN\t"):
-            scan_state = line.split("\t", 1)[1]
-            if scan_state not in {"ok", "partial"}:
-                return SessionLiveness(
-                    "unknown",
-                    active,
-                    stale,
-                    "process backstop returned invalid status",
-                    lines[0].split("\t", 1)[1],
-                )
-            continue
-        match = _LOCK_LINE_RE.fullmatch(line)
-        if not match:
-            return SessionLiveness(
-                "unknown",
-                active,
-                stale,
-                "session-state probe returned an invalid marker",
-                lines[0].split("\t", 1)[1],
-            )
-        session_id, _pid, marker_state = match.groups()
-        try:
-            session_id = str(uuid.UUID(session_id))
-        except ValueError:
-            return SessionLiveness(
-                "unknown",
-                active,
-                stale,
-                "session-state probe found a non-UUID session marker",
-                lines[0].split("\t", 1)[1],
-            )
-        if marker_state == "live":
-            active.append(session_id)
-        else:
-            stale.append(session_id)
-    session_state = lines[0].split("\t", 1)[1]
-    if active:
-        return SessionLiveness(
-            "active",
-            sorted(set(active)),
-            sorted(set(stale)),
-            session_state=session_state,
-        )
-    if processes:
-        return SessionLiveness(
-            "unknown",
-            [],
-            sorted(set(stale)),
-            "Copilot-like process has no matching live session marker",
-            session_state,
-        )
-    if scan_state != "ok":
-        return SessionLiveness(
-            "unknown",
-            [],
-            sorted(set(stale)),
-            "process backstop was incomplete",
-            session_state,
-        )
-    return SessionLiveness(
-        "idle",
-        [],
-        sorted(set(stale)),
-        session_state=session_state,
-    )
+    return parse_probe_output(result.returncode, result.stdout, result.stderr)
 
 
 def destroy_restricted_member(
