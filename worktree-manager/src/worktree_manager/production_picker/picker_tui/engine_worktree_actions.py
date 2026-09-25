@@ -308,6 +308,10 @@ class PickerScreenWorktreeActionsMixin:
         # session/relation detail) now lives behind this always-available,
         # last-listed verb instead, so the core Actions menu itself never
         # grows past a few fixed header lines.
+        # Supervised remote workers (venue-pivots-ux): one "Worker: <venue>"
+        # verb each, jumping to that venue row's own action menu.
+        worker_verbs, self._wt_submenu_workers = self._worker_menu_verbs(rec)
+        acts.extend(worker_verbs)
         acts.append("View details")
         return acts, ext
     def _reciprocal_target_row(self, rec):
@@ -370,6 +374,10 @@ class PickerScreenWorktreeActionsMixin:
         if cur in ext:
             # A cross-plugin contributed action (#B): run it and rescan.
             self._run_wt_action(ext[cur], rec)
+            return
+        workers = getattr(self, "_wt_submenu_workers", {}) or {}
+        if cur in workers:
+            self._open_worker_row(workers[cur])
             return
         if cur == "Open":
             self._decide(self._resume_decision(rec, no_mux=no_mux, ahp=ahp))
@@ -738,6 +746,10 @@ class PickerScreenWorktreeActionsMixin:
             )
         if verb == "open-venue":
             return self._open_venue(ctx)
+        if verb == "open-venue-window":
+            return self._open_venue_window(ctx)
+        if verb == "open-bridge-ui":
+            return self._open_bridge_ui(ctx)
         if verb == "embody-cli":
             return self._embody_task_cli(ctx)
         return False, f"unknown internal action: {verb}"

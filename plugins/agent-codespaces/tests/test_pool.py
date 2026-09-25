@@ -782,6 +782,7 @@ def test_picker_payload_live_session_join_wires_sess_and_activity(monkeypatch):
     assert e["sess"] == "LIVE"
     assert e["subtitle"].endswith("impl: wiring")
     assert e["activity"] == "impl: wiring"  # the worktree-row worker line's source
+    assert e["effort"] == "3bac"            # claim owner, for an attach's --effort
     assert "claimed by 3bac on dev6" in e["subtitle"]  # durable half preserved
 
 

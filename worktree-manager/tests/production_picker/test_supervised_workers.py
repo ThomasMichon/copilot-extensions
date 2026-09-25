@@ -100,7 +100,7 @@ def test_find_supervised_workers_matches_the_full_driving_worktree_id():
     found = pivots.find_supervised_workers(
         [{"pivot": reg}], {reg.name: _Runtime({"": rows})}, "host", _WID.upper())
     assert found == [
-        {"pivot": "agent-codespaces", "label": "cs-one", "live": "LIVE", "activity": "pr: opened"},
+        {"pivot": "agent-codespaces", "id": "", "label": "cs-one", "live": "LIVE", "activity": "pr: opened"},
     ]
 
 

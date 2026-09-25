@@ -27,6 +27,19 @@
       "verb": "open-venue"
     },
     {
+      "key": "inspect-window",
+      "label": "Inspect in a new window",
+      "kind": "internal",
+      "verb": "open-venue-window"
+    },
+    {
+      "key": "watch",
+      "label": "Watch (live-session view)",
+      "kind": "internal",
+      "verb": "open-bridge-ui",
+      "when": {"sess": ["LIVE", "IDLE"]}
+    },
+    {
       "key": "jump-driving-worktree",
       "label": "View driving worktree",
       "kind": "internal",

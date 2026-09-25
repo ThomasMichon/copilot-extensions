@@ -1275,8 +1275,7 @@ def picker_payload(
             m.beacon or driving_worktree_id or m.holder_effort
             or _worktree_dir_id(m.holder_worktree)
         )
-        # A concise uppercase status for the compact table: RUNNING when live,
-        # STALE for an aged recycle candidate, else STOPPED.
+        # Compact status: RUNNING when live, STALE if an aged recycle candidate, else STOPPED.
         if m.running:
             status = "RUNNING"
         elif m.disposition == STALE:
@@ -1353,6 +1352,7 @@ def picker_payload(
             "cores": str(m.cores) if m.cores_known else "?",
             "running": m.running,
             "holder": holder,
+            "effort": m.holder_effort or "",  # claim owner label (attach --effort)
             # health vs. use: two distinct axes (venue-pool Phase 3 / #709).
             "health": "running" if m.running else "stopped",
             "use": "in-use" if m.disposition == IN_USE else "free",

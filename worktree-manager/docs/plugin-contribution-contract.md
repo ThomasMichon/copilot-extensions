@@ -63,7 +63,13 @@ Version-1 compatibility also covers the existing declarative fields:
   by the full driving-worktree id in `worktree`, renders a
   `→ <label> <live> <activity>` line under the supervising worktree, keeps the
   pivot loaded in the background, and never treats such a pivot as a claiming
-  task (no phase badge). `label` defaults to `entry.id`.
+  task (no phase badge). `label` defaults to `entry.id`. Each supervised
+  worker also appears as a `Worker: <label>` entry in that worktree's Actions
+  menu, which opens the venue row's own actions. Venue rows can use the
+  internal verbs `open-venue-window` (attach with the provider's
+  `copilot <id>` in a new tmux window or Windows Terminal tab, passing the
+  row's `effort` as `--effort` when present) and `open-bridge-ui` (the
+  agent-bridge live-session web view).
 
 The command arrays are process-boundary contracts. The Manager invokes the
 contributing plugin's canonical CLI; it never imports the plugin runtime or
