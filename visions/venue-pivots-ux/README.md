@@ -3,12 +3,14 @@
 - **Subject:** The Worktree Manager's already-registered **CodeSpaces**
   (`agent-codespaces`) and **Containers** (`agent-containers`) pivots —
   overhauled for presentation consistency with each other and with the
-  Worktrees/Tasks panes, and for fidelity of the information each surfaces.
+  Worktrees/Tasks panes, and for fidelity of the information each surfaces —
+  plus the inverse direction: a Worktrees-pane row surfaces the remote
+  workers that worktree supervises on those venues.
 - **Scope:** leaf (concrete component; child of
   [agent-fabric](../agent-fabric/README.md), sibling of
   [picker](../picker/README.md))
 - **Status:** Draft
-- **Last revised:** 2026-09-21
+- **Last revised:** 2026-09-25
 - **Reality docs:**
   `worktree-manager/src/worktree_manager/production_picker/picker_tui/engine.py`
   (`WorktreesView._row`/`_column_subtitle`, `TasksView`,
@@ -29,6 +31,8 @@
   implemented shared claims-pecking-order module) ·
   `plugins/agent-worktrees/src/agent_worktrees/claim_kinds_registry.py`
   (the implemented `.d/` drop-in registry) ·
+  `worktree-manager/src/worktree_manager/production_picker/picker_tui/pivot_actions.py`
+  (`worktree_actions` contributions) ·
   `efforts/active/picker-venue-pivots/README.md`
 
 ## Purpose & Intent
@@ -62,6 +66,13 @@ and add the one genuinely new integration both pivots are missing — the
 agent-bridge live-session join — so either pivot's row shows what its remote
 Copilot session is actually reporting back, not just its container/venue
 lifecycle state.
+
+The same relationship must also read **from the worktree side**. A worktree
+that dispatched a task to a venue supervises that venue's remote Copilot
+worker, and an operator browsing the Worktrees pane should see that worker on
+the worktree's own row and act on it (inspect, message, watch, jump to the
+venue) without first knowing which venue to look in. Both directions are two
+views of one fact, never two separately maintained links.
 
 ## Concepts & Components
 
@@ -387,6 +398,40 @@ an operator reaches by doing **New agent** against a dormant/idle venue: both
 paths converge on "provision or select a venue, then embody a Copilot
 session into it."
 
+### Supervised workers, seen from the worktree row
+
+The inverse of the driving-worktree cross-link. A worktree that dispatched a
+task to a CodeSpace, fleet container, or SSH host supervises that venue's
+remote Copilot worker, and the **Worktrees-pane row** for that worktree
+surfaces it using the same row grammar and vocabulary the venue pivots use:
+a relation mark naming a supervised remote worker, the venue's identity, the
+same `LIVE`/`IDLE` session signal, and the worker's latest snagged activity
+as the transient half of line two. A worktree supervising more than one
+worker shows them compactly on its row and fully on drill-in, following the
+"1-2 prominent inline" convention the claims-list already uses.
+
+The link is **derived, not recorded**: it comes from the worktree's own
+outbound venue claims (the claim ledger already journals the venue a
+worktree connected to) joined with agent-bridge's live sessions by venue
+identity. It is the same pair of facts the venue pivot reads in the other
+direction, so the two views always agree, including when a venue was
+borrowed under an explicit effort or owner name rather than the worktree's
+own identity.
+
+The row's action menu offers, for each supervised worker:
+
+- **Inspect** — attach to the worker's interactive session in a **new**
+  terminal window or tab, leaving the Picker where it was;
+- **Send message** — steer the worker's running turn with operator-typed
+  text, with an explicit choice to interrupt instead;
+- **Watch** — open agent-bridge's live-session web view for that worker;
+- **Show venue** — jump to the venue's own row in its pivot.
+
+Each venue provider contributes these actions for its own venue kind, the
+same way it contributes its pivot, so the Picker itself stays
+provider-neutral and a new venue kind gains the worktree-side view by
+contributing, not by the Picker learning about it.
+
 ## Features
 
 ### row-grammar-consistency
@@ -454,6 +499,18 @@ provides, then carry the operator directly into a newly embodied Copilot
 session in that venue — one continuous flow, not a provisioning step
 followed by a separate manual attach.
 
+### worktree-row-supervised-workers
+A Worktrees-pane row shows the remote worker(s) its worktree supervises —
+venue, `LIVE`/`IDLE`, and latest activity — derived from the worktree's
+outbound venue claims joined with agent-bridge live sessions, in the same
+row grammar the venue pivots use.
+
+### supervised-worker-actions
+Each supervised worker on a worktree row offers Inspect (attach in a new
+terminal window/tab), Send message (steer, or interrupt), Watch (live-session
+web view), and Show venue (jump to the venue's pivot row), contributed by the
+venue's own provider.
+
 ## Behaviors
 
 ### derive-never-duplicate
@@ -498,6 +555,22 @@ validated as a **real, driven screenshot** of the actual Textual engine
 (reusing the `picker-snapshot`/`tasks-preview` pattern) against a hermetic
 demo data source, before any implementation PR — never a hand-drawn mockup.
 
+### both-directions-agree
+A venue row's driving-worktree link and a worktree row's supervised-worker
+link are two readings of the same claim-plus-live-session facts. They never
+disagree, and neither depends on the venue having been borrowed under the
+worktree's own identity rather than an explicit effort or owner name.
+
+### render-without-reaching-the-venue
+Showing supervised workers on worktree rows reads only host-local state
+(the claim ledger and agent-bridge's live-session registry); rendering the
+Worktrees pane never opens a connection to a venue. When agent-bridge is
+unreachable, the worker line is simply absent (graceful-absence).
+
+### inspect-never-displaces-the-picker
+Inspect opens the worker's session alongside the Picker, in a new terminal
+window or tab, rather than replacing the Picker's own terminal.
+
 ## Non-Goals / Boundaries
 
 - **Not a general Docker browser.** The Containers pivot already correctly
@@ -530,6 +603,12 @@ demo data source, before any implementation PR — never a hand-drawn mockup.
   aligning those panes onto this ranking is a cross-vision coordination
   item, not something this vision can unilaterally mandate onto another
   plugin's owned surface.
+- **Not a transcript viewer.** A worktree row shows a supervised worker's
+  latest activity only; reading the worker's conversation is what Inspect
+  and Watch are for.
+- **Not handoff continuity.** Carrying a supervised worker across a context
+  handoff to a successor session belongs to the session-continuity surfaces,
+  not to this pivot vision.
 
 ## See Also
 
@@ -546,6 +625,14 @@ demo data source, before any implementation PR — never a hand-drawn mockup.
 - Reality docs: see above
 
 ## Provenance
+
+- **2026-09-25** — Operator asked for the inverse of the venue → worktree
+  direction: a worktree row should show the remote worker it supervises
+  (detached, interactive venue sessions dispatched from a host worktree) and
+  offer Inspect / Send message / Watch / Show venue. Added as the
+  "Supervised workers, seen from the worktree row" concept, two features, and
+  three behaviors; grounded against the existing outbound claim journaling on
+  connect and agent-bridge's venue-keyed live sessions (tracked in #3657).
 
 - **2026-09-21 (latest+4)** — Operator proposed a `.d/` drop-in system for
   claim-kind metadata, mirroring the Picker's own pivot-contribution
