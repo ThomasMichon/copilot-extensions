@@ -91,12 +91,25 @@ fresh):
 ## Plan
 
 ### Phase 1 — Effort-anchored worktree titling (#3581)
-- [ ] When `effort-focus bind` is active, derive the worktree title from the
-      bound effort's slug + current phase/slice by default.
+- [ ] Define explicit title precedence/migration rules, not a bare
+      "by default": (a) **binding a worktree that already carries a
+      freeform asserted title** — the effort-anchored title takes over and
+      *replaces* it going forward (the freeform title is superseded, not
+      merged or preserved as a prefix); (b) **writing `status --title` while
+      a binding is active** — the explicit write is rejected or immediately
+      re-derived back to the anchored form, so an agent cannot silently
+      unanchor a bound worktree's title through the ordinary title-write
+      path; (c) **re-binding to a different effort, or a phase/slice
+      transition** — the title re-derives to match the new binding/phase;
+      (d) **unbinding** — the worktree reverts to today's freeform
+      `status --title` behavior, keeping whatever title it last had until
+      explicitly changed.
+- [ ] Implement derivation from the bound effort's slug + current
+      phase/slice per the rules above.
 - [ ] Only phase/slice transitions change the title; a session merely
       rephrasing the same phase does not.
 - [ ] Unbound worktrees keep today's freeform `status --title` behavior
-      unchanged.
+      unchanged (rule (d) above).
 
 ### Phase 2 — Auto-derived current slice + mid-session railroad nudge (#3583)
 - [ ] Extend `effort_focus.py` to derive "current slice" from the first
@@ -132,6 +145,11 @@ fresh):
 - [ ] A worktree bound to an effort, re-titled across a simulated
       phase-boundary handoff, keeps its title anchored to the effort slug
       rather than reflecting only the latest session's framing.
+- [ ] A worktree carrying a pre-existing freeform title is bound to an
+      effort: the title is replaced by the anchored form, not merged or
+      left as-is. An attempted freeform `status --title` write while bound
+      does not silently unanchor it. Unbinding restores ordinary freeform
+      behavior.
 - [ ] A test effort with a partially-checked Plan is bound; `orientation()`
       (or its Phase 2 successor) reports the first unchecked item as the
       current slice without requiring a manual `--slice` re-bind.
@@ -169,4 +187,14 @@ repo's `pr-self-merge` profile before Phase 1 implementation begins._
   if the staleness-signal stretch item isn't implemented. Also clarified
   the vision's "railroad" metaphor ("not only at the platform" -> "not only
   at its outset") which read as unclear rather than evocative.
+
+### 2026-09-25 — Title precedence/migration rules
+- Review caught that Phase 1's "derive the title by default" was weaker
+  than the vision's actual anchoring intent: existing tracking treats an
+  agent-asserted `status --title` as authoritative, so a worktree bound
+  after already carrying a freeform title (or re-titled by hand while
+  bound) could end up unanchored despite the binding. Added explicit
+  precedence/migration rules for bind, write-while-bound, re-bind/phase
+  transition, and unbind, plus a matching Validation Plan bullet.
+
 
