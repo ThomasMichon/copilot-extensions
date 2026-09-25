@@ -138,13 +138,10 @@ class GitError(Exception):
 
 
 #: A hooks directory guaranteed to hold no hooks, used to disable a repo's
-#: *client-side* guard hooks for the plugin's own trusted mechanical git ops
-#: (squash re-commit / rebase -- see :func:`git` ``no_hooks``; NOT ``push()``,
-#: which is the terminal action that actually publishes to remote and must
-#: let a repo's real pre-push release guard run -- #3561). ``/dev/null``
-#: is the portable idiom: git looks for hook files under this path, finds none,
-#: and runs no hook -- on POSIX and on Git-for-Windows alike. Server-side branch
-#: protection is unaffected (it is not a client hook). #3707.
+#: client-side guard hooks for trusted mechanical git ops (squash re-commit /
+#: rebase -- NOT ``push()``, which must let a repo's real pre-push release
+#: guard run -- #3561; see :func:`git` ``no_hooks``). Server-side branch
+#: protection is unaffected. #3707.
 _NO_HOOKS_PATH = "/dev/null"
 
 
@@ -170,21 +167,12 @@ def git(
             (worktree classification) pass a bound so a single stalled ``git``
             spawn cannot hang them indefinitely.
         no_hooks: If True, run with ``-c core.hooksPath=<empty>`` so a repo's
-            **client-side** guard hooks (a branch-protection ``pre-commit`` /
-            ``pre-push`` / ``pre-rebase``) cannot block or corrupt the tool's own
-            trusted, mechanical plumbing that only re-arranges or re-commits
-            ALREADY-committed content (the squash re-commit, rebase) -- so
-            content-quality checks that ran at original-commit time still hold.
-            Only *client-side* hooks are disabled -- server-side branch
-            protection (Gitea/GitHub rulesets) is untouched. **``push()`` never
-            passes this flag** (#3561): it is the terminal action that actually
-            publishes to remote, so a repo's real pre-push release guard (e.g.
-            this repo's ``check-changefile-presence.py``) must be allowed to
-            run and block a genuinely non-compliant push, the same way a raw
-            ``git push`` already does. This is **not** ``--no-verify``
-            (disallowed for agent-authored commits): it scopes the disable to
-            the plugin's internal, non-publishing git ops via a config
-            override. See #3707.
+            client-side guard hooks cannot block/corrupt trusted plumbing
+            that only re-arranges ALREADY-committed content (squash
+            re-commit, rebase). **``push()`` never passes this** (#3561): a
+            real pre-push release guard (e.g. ``check-changefile-presence.py``)
+            must be allowed to block a non-compliant push. Not
+            ``--no-verify``: scopes the disable to internal git ops. #3707.
 
     Returns:
         CompletedProcess with stdout/stderr as strings.
@@ -881,19 +869,9 @@ def push(
     auth 403, a protected-branch block) and fail fast instead of masking every
     failure as a generic "rejected" and retrying a doomed push (#993).
 
-    Unlike ``squash_branch``/``rebase``/the internal squash re-commit, this
-    call is NEVER given ``no_hooks=True``: every real caller uses ``push()``
-    as the terminal action that actually publishes to ``remote`` (a direct
-    default-branch push, or a feature-branch push for ``create-pr``/
-    ``push-changes``) -- not internal plumbing that only re-arranges
-    already-committed, already-hook-verified content. A repo's real pre-push
-    release guard (e.g. this repo's own ``check-changefile-presence.py``)
-    must be allowed to block a genuinely non-compliant push here, the same
-    way a raw ``git push`` already does (#3561). Every worktree-originated
-    call site wraps this with ``hooks.allow_pr_push()`` so agent-worktrees'
-    own dogfooded PR-workflow guard (a different, narrower hook -- see
-    ``hooks.py``) still recognizes its own legitimate publish and does not
-    self-block.
+    Unlike ``rebase``, this is NEVER given ``no_hooks=True`` (#3561): a real
+    pre-push release guard must be allowed to block a non-compliant push.
+    Worktree-originated callers wrap this with ``hooks.allow_pr_push()``.
     """
     extra = ["--force-with-lease"] if force_with_lease else []
     auth_args = _auth_config_args(remote, cwd=cwd)
