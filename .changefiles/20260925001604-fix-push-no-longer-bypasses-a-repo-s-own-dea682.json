@@ -1,0 +1,9 @@
+{
+  "comment": "fix: push() no longer bypasses a repo's own pre-push release-guard hooks",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

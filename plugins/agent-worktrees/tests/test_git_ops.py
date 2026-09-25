@@ -52,10 +52,13 @@ class TestGitWrapper:
 
 
 class TestNoHooks:
-    """#3707: the plugin's mechanical git ops (squash re-commit / rebase / push)
+    """#3707: the plugin's mechanical git ops (squash re-commit / rebase)
     disable a repo's client-side guard hooks via ``-c core.hooksPath=`` so a
-    branch-protection pre-commit/pre-push/pre-rebase can't block or corrupt the
-    flow. Server-side protection is unaffected (not a client hook)."""
+    branch-protection pre-commit/pre-rebase can't block or corrupt the flow.
+    Server-side protection is unaffected (not a client hook). ``push()`` is
+    NOT one of these ops (#3561): it must let a repo's real pre-push release
+    guard run, so it never disables hooks -- see the ``TestPush`` class
+    below."""
 
     def _capture(self, monkeypatch):
         import subprocess as _sp
@@ -115,7 +118,14 @@ class TestNoHooks:
         assert seen["args"][:1] == ("rebase",)
         assert seen["no_hooks"] is True
 
-    def test_push_bypasses_hooks(self, monkeypatch):
+
+class TestPush:
+    """#3561: unlike ``TestNoHooks``'s squash/rebase plumbing, ``push()`` is
+    the terminal action that actually publishes to remote -- a real pre-push
+    release guard (e.g. ``check-changefile-presence.py``) must be allowed to
+    run and block a non-compliant push."""
+
+    def test_push_does_not_bypass_hooks(self, monkeypatch):
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
         seen = {}
         monkeypatch.setattr(go, "git", lambda *a, cwd=None, check=True,
@@ -124,7 +134,28 @@ class TestNoHooks:
             types.SimpleNamespace(returncode=0, stdout="", stderr=""))[1])
         assert bool(go.push("origin", "main", cwd=".")) is True
         assert seen["args"][:1] == ("push",)
-        assert seen["no_hooks"] is True
+        assert seen["no_hooks"] is False
+
+    def test_push_retry_also_does_not_bypass_hooks(self, monkeypatch):
+        """The auth-fallback retry push (#900) must not bypass hooks either --
+        it's still the same terminal publish action, just retried without the
+        injected cross-account token."""
+        monkeypatch.setattr(
+            go, "_auth_config_args",
+            lambda remote, *, cwd: ["-c", "http.extraheader=AUTHORIZATION: basic x"],
+        )
+        no_hooks_seen: list[bool] = []
+
+        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None, no_hooks=False):
+            no_hooks_seen.append(no_hooks)
+            injected = "http.extraheader=AUTHORIZATION: basic x" in args
+            rc = 1 if injected else 0
+            return types.SimpleNamespace(returncode=rc, stdout="", stderr="")
+
+        monkeypatch.setattr(go, "git", fake_git)
+        assert bool(go.push("origin", "main", cwd=".")) is True
+        assert no_hooks_seen == [False, False]  # neither the injected nor the fallback call
+
 
 
 # ---------------------------------------------------------------------------
