@@ -561,7 +561,7 @@ def _restart_status_monitor() -> dict:
         if _locks.lock_is_live(data) and isinstance(data, dict):
             pid = data.get("pid")
             prefix = data.get("prefix")
-            superseded = bool(prefix) and _core()._runtime_superseded(prefix=prefix)
+            superseded = bool(prefix) and _core_helper("_runtime_superseded", status_updater_cli._runtime_superseded)(prefix=prefix)
             if pid == os.getpid():
                 pass  # our own lock (shouldn't happen from the installer) -- ignore
             elif superseded and isinstance(pid, int):
