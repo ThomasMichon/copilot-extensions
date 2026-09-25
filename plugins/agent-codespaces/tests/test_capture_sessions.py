@@ -92,6 +92,55 @@ def test_capture_hold_reason_defers_on_l2_hold(monkeypatch):
     assert "L2" in reason
 
 
+def test_capture_hold_reason_fails_closed_on_lease_read_error(monkeypatch):
+    """An unknown hold state (a lease-store read failure) must defer, never
+    be silently treated as unheld."""
+    import agent_codespaces.lease as lease_mod
+
+    def _explode(name):
+        raise OSError("lease store locked")
+
+    monkeypatch.setattr(lease_mod, "get_lease", _explode)
+
+    reason = sessions._capture_hold_reason("cs", account=None)
+    assert reason is not None
+    assert "fail-closed" in reason
+
+
+def test_capture_hold_reason_fails_closed_on_beacon_listing_error(monkeypatch):
+    """A failed `gh codespace list` for the beacon check must defer too --
+    it must never make a live display-name hold look unheld."""
+    import agent_codespaces.lease as lease_mod
+    monkeypatch.setattr(lease_mod, "get_lease", lambda name: None)
+
+    def _explode(account):
+        raise RuntimeError("gh codespace list failed")
+
+    monkeypatch.setattr("agent_codespaces.lifecycle._list_codespaces_under", _explode)
+
+    reason = sessions._capture_hold_reason("cs", account=None)
+    assert reason is not None
+    assert "fail-closed" in reason
+
+
+def test_capture_hold_reason_fails_closed_on_l2_read_error(monkeypatch):
+    import agent_codespaces.lease as lease_mod
+    monkeypatch.setattr(lease_mod, "get_lease", lambda name: None)
+    monkeypatch.setattr(
+        "agent_codespaces.lifecycle._list_codespaces_under", lambda account: [_info("cs")],
+    )
+    import agent_codespaces.coordination as coordination
+
+    def _explode():
+        raise RuntimeError("l2 store unreachable")
+
+    monkeypatch.setattr(coordination, "list_leases", _explode)
+
+    reason = sessions._capture_hold_reason("cs", account=None)
+    assert reason is not None
+    assert "fail-closed" in reason
+
+
 # --- capture_codespace_sessions: preflight, account binding, gating ---
 
 def test_capture_defers_on_non_available_state(monkeypatch):
@@ -179,6 +228,74 @@ def test_capture_defers_on_active_hold_before_connecting(monkeypatch):
     assert res["detail"] == "held by someone"
 
 
+def test_capture_fails_closed_when_token_minting_fails(monkeypatch):
+    """Never fall through to token=None (which lets the connection re-derive,
+    and possibly ambient-fallback, credentials) when minting fails."""
+    monkeypatch.setattr(
+        "agent_codespaces.account_binding.bound_account", lambda name: "acct",
+    )
+    monkeypatch.setattr(
+        "agent_codespaces.lifecycle.get_codespace_status_with_account",
+        lambda name, account: (True, "Available", "acct"),
+    )
+    monkeypatch.setattr(sessions, "_capture_hold_reason", lambda name, *, account: None)
+    monkeypatch.setattr("agent_codespaces.gh_account.token_for_account", lambda account: None)
+
+    def _explode(*a, **k):
+        raise AssertionError("must never connect without a minted token")
+
+    monkeypatch.setattr(sessions, "_connect_with_retry", _explode)
+
+    res = sessions.capture_codespace_sessions("cs", account=None)
+
+    assert res["ok"] is False
+    assert res["deferred"] is True
+    assert "could not mint" in res["detail"]
+
+
+def test_capture_fenced_hold_recheck_catches_a_late_appearing_hold(monkeypatch):
+    """A hold that appears between the up-front check and the SSH target
+    lock actually taking effect must still be caught -- the fenced re-check
+    inside the lock, not just the up-front one."""
+    import ssh_manager
+
+    class _FakeLock:
+        def __init__(self, *a, **k):
+            pass
+
+        def acquire(self, *a, **k):
+            return self
+
+        def release(self):
+            pass
+
+    monkeypatch.setattr(ssh_manager, "TargetLock", _FakeLock)
+    monkeypatch.setattr(
+        "agent_codespaces.account_binding.bound_account", lambda name: "acct",
+    )
+    monkeypatch.setattr(
+        "agent_codespaces.lifecycle.get_codespace_status_with_account",
+        lambda name, account: (True, "Available", "acct"),
+    )
+    monkeypatch.setattr("agent_codespaces.gh_account.token_for_account", lambda account: "tok")
+
+    calls = iter([None, "a lease just appeared"])
+    monkeypatch.setattr(
+        sessions, "_capture_hold_reason", lambda name, *, account: next(calls),
+    )
+
+    def _explode(*a, **k):
+        raise AssertionError("must never connect once the fenced re-check finds a hold")
+
+    monkeypatch.setattr(sessions, "_connect_with_retry", _explode)
+
+    res = sessions.capture_codespace_sessions("cs", account=None)
+
+    assert res["ok"] is False
+    assert res["deferred"] is True
+    assert res["detail"] == "a lease just appeared"
+
+
 def test_capture_liveness_gate_defers_active_session(monkeypatch):
     """A mid-write session (active liveness) is deferred, never captured --
     the CodeSpace-side peer of agent-containers' liveness-gate regression."""
@@ -204,6 +321,7 @@ def test_capture_liveness_gate_defers_active_session(monkeypatch):
         lambda name, account: (True, "Available", "acct"),
     )
     monkeypatch.setattr(sessions, "_capture_hold_reason", lambda name, *, account: None)
+    monkeypatch.setattr("agent_codespaces.gh_account.token_for_account", lambda account: "tok")
 
     async def _connect_ok(*a, **k):
         return None
@@ -263,6 +381,7 @@ def test_capture_re_probes_after_pull_and_discards_on_became_active(monkeypatch)
         lambda name, account: (True, "Available", "acct"),
     )
     monkeypatch.setattr(sessions, "_capture_hold_reason", lambda name, *, account: None)
+    monkeypatch.setattr("agent_codespaces.gh_account.token_for_account", lambda account: "tok")
 
     async def _connect_ok(*a, **k):
         return None
@@ -320,6 +439,7 @@ def test_capture_succeeds_on_idle_session(monkeypatch):
         lambda name, account: (True, "Available", "acct"),
     )
     monkeypatch.setattr(sessions, "_capture_hold_reason", lambda name, *, account: None)
+    monkeypatch.setattr("agent_codespaces.gh_account.token_for_account", lambda account: "tok")
 
     async def _connect_ok(*a, **k):
         return None
@@ -356,6 +476,7 @@ def test_capture_target_busy_defers(monkeypatch):
         lambda name, account: (True, "Available", "acct"),
     )
     monkeypatch.setattr(sessions, "_capture_hold_reason", lambda name, *, account: None)
+    monkeypatch.setattr("agent_codespaces.gh_account.token_for_account", lambda account: "tok")
 
     class _BusyLock:
         def __init__(self, *a, **k):
@@ -433,6 +554,7 @@ def test_capture_defers_while_a_destructive_caller_holds_the_widened_lock(monkey
         lambda name, account: (True, "Available", "acct"),
     )
     monkeypatch.setattr(sessions, "_capture_hold_reason", lambda name, *, account: None)
+    monkeypatch.setattr("agent_codespaces.gh_account.token_for_account", lambda account: "tok")
 
     other_lock = ssh_manager.TargetLock("contended-cs", op="codespace-lifecycle")
     other_lock.path.parent.mkdir(parents=True, exist_ok=True)

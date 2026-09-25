@@ -92,6 +92,18 @@ class TestCLI:
             rc = main(["list", "--json"])
         assert rc == 0
 
+    def test_sync_sessions_balks_when_gh_missing(self, capsys):
+        """sync-sessions is a gh-dependent verb (status lookup + SSH connect) --
+        it must balk the same as every other CodeSpace-operating verb rather
+        than fall through to an opaque runtime failure."""
+        with patch("agent_codespaces.__main__._gh_binary_available",
+                   return_value=False):
+            rc = main(["sync-sessions", "cs-a"])
+        assert rc == 1
+        err = capsys.readouterr().err
+        assert "gh" in err.lower()
+        assert "sync-sessions" in err
+
     def test_local_verb_does_not_balk_without_gh(self, capsys):
         """A local/report-only verb (version) must keep working with no gh."""
         with patch("agent_codespaces.__main__._gh_binary_available",

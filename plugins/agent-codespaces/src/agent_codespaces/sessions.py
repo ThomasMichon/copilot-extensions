@@ -418,25 +418,32 @@ def _capture_hold_reason(name: str, *, account: str | None) -> str | None:
     per ``pool._holder_worktree_gone``): nothing is heartbeating it anymore,
     so it is not treated as a live hold here, mirroring how ``pool.py``
     itself surfaces (but does not gate on) ``orphaned``.
+
+    **Fails closed on every signal, not just a confirmed hold**: a lease-store
+    read failure, a listing failure for the beacon check, or an L2-overlay
+    read failure each defer too -- an *unknown* hold state must never be
+    silently treated as *unheld*, which would defeat the whole point of this
+    gate (review finding on the original cut of this function).
     """
     from .lease import get_lease
     from .pool import _holder_worktree_gone
 
-    lease = get_lease(name)
+    try:
+        lease = get_lease(name)
+    except Exception as exc:
+        return f"could not confirm lease state (fail-closed): {exc}"
     if lease is not None and not _holder_worktree_gone(lease.worktree):
         return f"CodeSpace has an active lease (effort {lease.effort!r})"
 
-    beacon = None
     try:
         from .lifecycle import _list_codespaces_under
         from .pool import _beacon_id
 
         entries = _list_codespaces_under(account)
         info = next((cs for cs in entries if cs.name == name), None)
-        if info is not None:
-            beacon = _beacon_id(info.display_name)
-    except Exception:
-        beacon = None  # best-effort; a listing failure never falsely clears a hold
+        beacon = _beacon_id(info.display_name) if info is not None else None
+    except Exception as exc:
+        return f"could not confirm cross-machine beacon state (fail-closed): {exc}"
     if beacon is not None:
         return "CodeSpace has a live cross-machine display-name beacon"
 
@@ -444,8 +451,8 @@ def _capture_hold_reason(name: str, *, account: str | None) -> str | None:
         from . import coordination
 
         l2 = (coordination.list_leases() or {}).get(name)
-    except Exception:
-        l2 = None
+    except Exception as exc:
+        return f"could not confirm cross-machine L2 lease state (fail-closed): {exc}"
     if l2 is not None and getattr(l2, "live", False):
         return "CodeSpace has a live cross-machine L2 lease overlay"
     return None
@@ -489,14 +496,25 @@ def capture_codespace_sessions(
       special-case, which still boots every OTHER non-Shutdown,
       non-Available state.
     - **defers on any active hold** (local lease, ``#897`` claim,
-      cross-machine L2, beacon) regardless of holder identity -- see
-      :func:`_capture_hold_reason`.
+      cross-machine L2, beacon) regardless of holder identity, checked BOTH
+      up front and again immediately after the SSH target lock is acquired
+      -- the up-front check runs before any lock exists, so it alone cannot
+      close the window where a hold appears between that check and the lock
+      actually taking effect; the fence-time re-check does. See
+      :func:`_capture_hold_reason`, which also fails closed (defers) on any
+      read failure -- an *unknown* hold state is never treated as *unheld*.
     - **requires an unambiguous account**: an explicit ``account`` or a
       confirmed exact per-name binding (``account_binding.bound_account``)
       -- never ``get_codespace_status_with_account``'s generic
       multi-candidate scan, whose first-match semantics are exactly the
       same-name-across-accounts ambiguity this item exists to close. Fails
-      closed (defers) when neither is available.
+      closed (defers) when neither is available, and mints the connection
+      token for that EXACT resolved account once, up front -- never letting
+      ``CodespaceSource``/``env_for_account`` re-derive (and possibly
+      silently ambient-fallback for) credentials moments later, which would
+      let a same-named CodeSpace under the ambient account be read under
+      this identity if minting failed between the preflight and the
+      connect (mirroring ``claim_provider_cli.py``'s reclaim path).
     - **gates the pull on the vendored liveness probe both before AND
       after** the pull, never capturing a session whose state is anything
       but ``idle`` at either checkpoint. This narrows, but does not close,
@@ -549,6 +567,21 @@ def capture_codespace_sessions(
         return {"ok": False, "deferred": True, "session_count": 0,
                 "detail": hold_reason}
 
+    # Mint the token ONCE for the exact resolved account, right here --
+    # never letting the connection re-derive (and possibly silently
+    # ambient-fallback for) credentials moments later.
+    from . import gh_account
+
+    token = gh_account.token_for_account(account)
+    if not token:
+        return {
+            "ok": False, "deferred": True, "session_count": 0,
+            "detail": (
+                f"could not mint an authenticated gh token for account "
+                f"{account!r}; refusing to connect under ambient fallback"
+            ),
+        }
+
     from ssh_manager import ConnectionManager, TargetBusyError, TargetLock
 
     lock = TargetLock(name, op="codespace-capture")
@@ -561,9 +594,17 @@ def capture_codespace_sessions(
     manager = ConnectionManager()
 
     async def _run() -> dict:
+        # Re-check the hold status INSIDE the fence too -- the checks above
+        # all ran before this lock was acquired, leaving a window in which
+        # a lease/claim/beacon/L2 hold could still appear between that
+        # check and the lock actually taking effect.
+        fenced_hold_reason = _capture_hold_reason(name, account=account)
+        if fenced_hold_reason is not None:
+            return {"ok": False, "deferred": True, "session_count": 0,
+                    "detail": fenced_hold_reason}
         try:
             await _connect_with_retry(
-                manager, name, timeout=timeout, account=account, token=None,
+                manager, name, timeout=timeout, account=account, token=token,
             )
         except (ConnectionError, TimeoutError, RuntimeError) as exc:
             return {"ok": False, "deferred": True, "session_count": 0,

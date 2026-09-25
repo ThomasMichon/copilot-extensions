@@ -121,6 +121,7 @@ _ADO_AUTH_EXIT = 77
 _GH_REQUIRED_COMMANDS = frozenset({
     "ssh", "list", "delete", "finalize", "stop", "verify",
     "create", "prune", "wait", "pool", "allocate", "copilot",
+    "sync-sessions",
 })
 
 

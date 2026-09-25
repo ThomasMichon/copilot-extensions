@@ -3,7 +3,7 @@
   "changes": [
     {
       "plugin": "agent-codespaces",
-      "type": "minor"
+      "type": "patch"
     }
   ]
 }
