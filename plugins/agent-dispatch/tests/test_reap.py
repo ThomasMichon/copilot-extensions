@@ -254,7 +254,17 @@ def test_terminate_pid_escalates_despite_indeterminate_enumeration(monkeypatch):
     if not hasattr(signal, "SIGKILL"):
         pytest.skip("SIGKILL is POSIX-only; no distinct escalation signal here")
     sent: list[int] = []
-    monkeypatch.setattr("os.kill", lambda pid, sig: sent.append(sig))
+    sigkill_sent = {"v": False}
+
+    def _kill(pid, sig):
+        sent.append(sig)
+        if sig == _SIGKILL:
+            sigkill_sent["v"] = True
+
+    monkeypatch.setattr("os.kill", _kill)
+
+    def _pid_alive(pid):
+        return not sigkill_sent["v"]  # alive until actually SIGKILLed
 
     def _boom(pid):
         raise RuntimeError("ps exploded")
@@ -265,7 +275,7 @@ def test_terminate_pid_escalates_despite_indeterminate_enumeration(monkeypatch):
         poll_seconds=1.0,
         kill_grace_seconds=1.0,
         sleep=lambda _s: None,
-        pid_alive=lambda pid: True,
+        pid_alive=_pid_alive,
         confirmed_gone_or_reused=lambda pid: _confirmed_gone_or_reused(pid, list_procs=_boom),
         is_windows=False,
     )
