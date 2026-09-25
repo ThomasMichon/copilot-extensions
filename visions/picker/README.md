@@ -5,7 +5,7 @@
   worktree-backed agents of a project.
 - **Scope:** leaf (concrete component; child of the agent-fabric vision)
 - **Status:** Active
-- **Last revised:** 2026-09-24
+- **Last revised:** 2026-09-25
 - **Home:** delivered by the **Installer & Configurator** (the optional worktree-
   and agent-control-plane) — see [installer](../installer/README.md). It is an
   **optional** surface: the plugins provide the in-session tools agents use and
@@ -374,9 +374,10 @@ regression is something a test can catch before an operator does.
   already-registered Codespaces and Containers pivots for presentation
   consistency and information fidelity (Containers brought to Codespaces'
   columnar/action fidelity, a dropped Codespaces subtitle wired back in, a
-  new agent-bridge live-session join, Open/New-venue flows), the same kind
-  of pivot-specific overhaul `plugins/agent-dispatch/tasks-pane-ux` did for
-  Tasks.
+  new agent-bridge live-session join, Open/New-venue flows, and the inverse
+  worktree-row view of the remote workers a worktree supervises), the same
+  kind of pivot-specific overhaul `plugins/agent-dispatch/tasks-pane-ux` did
+  for Tasks.
 - CodeSpaces-pivot data owner: [agent-codespaces](../plugins/agent-codespaces/README.md)
   — the Picker's **CodeSpaces** pivot renders that venue's pool membership,
   per-venue state (in-use / idle / clean / stale), allocation, and budget
