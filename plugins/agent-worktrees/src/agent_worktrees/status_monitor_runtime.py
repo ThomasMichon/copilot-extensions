@@ -241,10 +241,18 @@ def _monitor_reclaim_stale_handoff_cutover_claim(
     check), the second reclaimer's ``os.replace`` silently steals the
     first's brand-new, genuinely-live claim instead of the stale one either
     of them actually meant to evict -- both then report ``claimed=True``.
-    When ``expected_stale_claim`` is given, verify the displaced content
-    still matches it before publishing; on a mismatch (someone else's live
-    claim was displaced instead), put it back and report "not reclaimed"
-    rather than silently overwriting live work.
+
+    The displaced content is always verified against ``expected_stale_claim``
+    (the claim the caller's staleness check actually inspected) before
+    publishing -- including when it is ``None``, meaning the staleness check
+    found an unreadable/torn file rather than a parseable claim: a
+    now-readable, now-valid claim at that same path means someone else
+    published a genuinely live claim in the interim, not the torn file
+    originally assessed, and must not be treated as a match either. On any
+    mismatch, the displaced content is put back (non-destructively -- never
+    overwriting a claim a third contender may have published there in the
+    meantime) and "not reclaimed" is reported rather than silently
+    overwriting live work.
     """
     displaced = path.with_name(
         f".{path.name}.{os.getpid()}.{secrets.token_hex(8)}.stale"
@@ -255,13 +263,13 @@ def _monitor_reclaim_stale_handoff_cutover_claim(
         return True, False, None
     except OSError as exc:
         return False, False, str(exc)
-    if expected_stale_claim is not None:
-        dc = locks.read_lock(displaced)
-        match = dc == expected_stale_claim
-        if not match:
-            with contextlib.suppress(OSError):
-                os.replace(displaced, path)
-            return True, False, None
+    displaced_claim = locks.read_lock(displaced)
+    if displaced_claim != expected_stale_claim:
+        with contextlib.suppress(OSError):
+            os.link(displaced, path)
+        with contextlib.suppress(OSError):
+            displaced.unlink()
+        return True, False, None
     try:
         claimed, error = _monitor_publish_handoff_cutover_claim(path, payload)
         return error is None, claimed, error
@@ -289,7 +297,16 @@ def _monitor_claim_handoff_cutover(
         "session_id": str(request.get("predecessor_session_id") or "").strip() or None,
         "pid": owner_pid,
         "start_time": locks.process_start_time(owner_pid),
-        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        # Full microsecond precision, not the previous second-truncated
+        # `timespec="seconds"` -- truncation could round a claim published
+        # near the end of a wall-clock second up to appear a full second
+        # older than it really is the instant a later staleness check
+        # crosses into the next second, spuriously satisfying a short
+        # `AGENT_WORKTREES_STATUS_MONITOR_HANDOFF_CLAIM_STALE_SECONDS`
+        # threshold for a claim that is only milliseconds old. Reading
+        # (`_monitor_handoff_claim_created_at`, via `datetime.fromisoformat`)
+        # already accepts either form, so this is backward compatible.
+        "created_at": datetime.now(timezone.utc).isoformat(),
         # Disambiguates two claims that would otherwise be byte-for-byte
         # identical (same pid, same start_time, same second-granularity
         # timestamp -- routine for two threads/processes racing within the
