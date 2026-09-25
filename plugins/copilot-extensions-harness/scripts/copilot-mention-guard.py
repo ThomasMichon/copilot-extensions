@@ -129,6 +129,47 @@ def current_repo(cwd: str | None = None) -> str | None:
     return _parse_github_repo(result.stdout.strip())
 
 
+def _split_unquoted_newlines(command: str) -> list[str]:
+    """Split *command* on newline characters that are NOT inside a single-
+    or double-quoted span (bash-style quoting; a backslash escapes the next
+    character outside single quotes). ``shlex.shlex`` treats ``\\n`` as
+    ordinary whitespace, never a statement separator, regardless of
+    ``punctuation_chars`` -- newline is not a valid member of that set (it is
+    pre-classified as whitespace) -- so a genuine multi-line tool command
+    (e.g. ``echo ok\\ngh pr comment ... --body "@copilot review"``) needs
+    this dedicated pre-pass or it is silently read as a single token stream
+    starting with ``echo``, never reaching the ``gh`` invocation at all."""
+    lines: list[str] = []
+    current: list[str] = []
+    quote: str | None = None
+    escaped = False
+    for ch in command:
+        if escaped:
+            current.append(ch)
+            escaped = False
+            continue
+        if ch == "\\" and quote != "'":
+            current.append(ch)
+            escaped = True
+            continue
+        if quote:
+            current.append(ch)
+            if ch == quote:
+                quote = None
+            continue
+        if ch in ("'", '"'):
+            quote = ch
+            current.append(ch)
+            continue
+        if ch == "\n":
+            lines.append("".join(current))
+            current = []
+            continue
+        current.append(ch)
+    lines.append("".join(current))
+    return lines
+
+
 def _split_statements(command: str) -> list[list[str]]:
     """Tokenize the whole command ONCE, respecting quotes, then split the
     resulting token stream on real (unquoted) statement/pipeline separators.
@@ -137,24 +178,27 @@ def _split_statements(command: str) -> list[list[str]]:
     ``;``/``&``/``&&``/``||``/``|`` as their own tokens when they appear
     unquoted -- a separator character that occurs INSIDE a quoted argument
     stays part of that single token, so it is never mistaken for a statement
-    boundary (see ``STATEMENT_SEPARATORS``' docstring above)."""
-    try:
-        lexer = shlex.shlex(command, posix=True, punctuation_chars="();<>|&")
-        lexer.whitespace_split = True
-        tokens = list(lexer)
-    except ValueError:
-        return []
+    boundary (see ``STATEMENT_SEPARATORS``' docstring above). Real (unquoted)
+    newlines are split out first via ``_split_unquoted_newlines`` -- shlex
+    itself never treats one as a separator (see that function's docstring)."""
     statements: list[list[str]] = []
-    current: list[str] = []
-    for token in tokens:
-        if token in STATEMENT_SEPARATORS or token in {"(", ")", "<", ">"}:
-            if current:
-                statements.append(current)
-                current = []
+    for line in _split_unquoted_newlines(command):
+        try:
+            lexer = shlex.shlex(line, posix=True, punctuation_chars="();<>|&")
+            lexer.whitespace_split = True
+            tokens = list(lexer)
+        except ValueError:
             continue
-        current.append(token)
-    if current:
-        statements.append(current)
+        current: list[str] = []
+        for token in tokens:
+            if token in STATEMENT_SEPARATORS or token in {"(", ")", "<", ">"}:
+                if current:
+                    statements.append(current)
+                    current = []
+                continue
+            current.append(token)
+        if current:
+            statements.append(current)
     return statements
 
 

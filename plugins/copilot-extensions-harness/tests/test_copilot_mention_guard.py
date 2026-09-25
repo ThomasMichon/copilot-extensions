@@ -93,6 +93,28 @@ def test_pipe_inside_quoted_body_does_not_truncate_the_scan() -> None:
     assert guard.command_publishes_copilot_mention(cmd) is not None
 
 
+def test_multiline_command_is_still_inspected() -> None:
+    """PR #3663 review (round 4): shlex.shlex treats '\\n' as ordinary
+    whitespace, never a statement separator, regardless of
+    punctuation_chars -- a genuine multi-line tool command (a very common
+    shape: 'echo ok\\ngh pr comment ...') was read as a single token stream
+    starting with 'echo', so _is_gh() skipped it and the gh invocation on
+    the second line was never reached at all."""
+    guard = _load_guard()
+    cmd = 'echo ok\ngh pr comment 1 -R owner/repo --body "@copilot review"'
+    assert guard.command_publishes_copilot_mention(cmd) is not None
+
+
+def test_multiline_command_with_a_real_newline_inside_a_quoted_body() -> None:
+    """The companion case: a literal newline INSIDE a quoted --body value is
+    real body content, not a statement boundary -- it must stay part of the
+    same token, not fool the new newline-splitter into treating what
+    follows as a separate (and therefore skipped) statement."""
+    guard = _load_guard()
+    cmd = 'gh pr comment 1 -R owner/repo --body "line one\nline two @copilot review"'
+    assert guard.command_publishes_copilot_mention(cmd) is not None
+
+
 def test_non_gh_command_mentioning_copilot_is_allowed() -> None:
     guard = _load_guard()
     cmd = 'echo "never use @copilot in a PR comment" >> docs/notes.md'
