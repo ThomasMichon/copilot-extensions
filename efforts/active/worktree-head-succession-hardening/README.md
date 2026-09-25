@@ -86,16 +86,20 @@ objective can be a worktree other than the one nearest at hand.
 ## Plan
 
 ### Phase 1 — Acknowledgement-gated head succession (#3584, closes groundwork for #84)
-- [ ] Restrict head-claiming-from-**vacant** to the `sessionStart` hook alone.
-      Define "vacant" precisely as two distinct, separately-enumerated cases —
+- [ ] Restrict head-claiming-from-**vacant** to the `sessionStart` hook alone
+      (the operator's own "session-start hook must always claim head unless
+      empty" request). _(agent-recommended precision, from PR review
+      analysis)_ Define "vacant" precisely as two distinct,
+      separately-enumerated cases —
       never conflated into one "never set" test: **(a) fresh** — the worktree
       has genuinely never had a head; **(b) confirmed-recovered** — a prior
       head existed but its predecessor is proven fully abandoned through the
       existing recovery procedure, and that procedure is what marks the slot
       vacant again, not an implicit inference. No other hook/extension point
       may write the slot in either case.
-- [ ] Model displacing an *existing* head as a single atomic,
-      acknowledgement-gated transfer — reconciled with
+- [ ] _(agent-recommended, corrected via PR review analysis after an
+      initial design flaw)_ Model displacing an *existing* head as a single
+      atomic, acknowledgement-gated transfer — reconciled with
       `docs/patterns/context-handoff-lifecycle.md`'s existing invariant that
       **the predecessor remains head until the successor proves it can
       recover the baton**. Explicitly reject the earlier
@@ -107,32 +111,35 @@ objective can be a worktree other than the one nearest at hand.
 - [ ] Confirm this composes with, not replaces, full session lineage
       journaling (every session ever associated with the worktree stays
       recorded independently of the current head).
-- [ ] Add the **creation-side guard** #84 already specifies: creating a new
-      session in a worktree whose head is still active is *refused* by
-      default, not silently permitted, with a structured reason enumerating
-      the three resolutions (reuse, hand off, sunset) plus an explicit,
-      attributable break-glass override — matching agent-bridge's existing
-      `409 live_cli_holds_worktree` shape. Without this, restricting who can
-      *write* the head slot does not by itself stop a second session from
-      being *created* while an existing head is still live, so the effort's
-      "never a second session racing an existing live one" guarantee would be
-      unmet. This item is load-bearing for that guarantee, not optional
-      polish.
-- [ ] **Carve out the legitimate handoff launch.** The default-refuse rule
-      above must not also block `context-handoff-lifecycle`'s own normal
-      step 4 ("launch the successor without changing the worktree head" —
-      i.e. the successor session is deliberately created *while the
-      predecessor is still head*, by design). A review round correctly
-      caught that an undifferentiated guard would make ordinary handoff
-      indistinguishable from break-glass. The guard must recognize an
-      **authenticated, persisted handoff token/successor identity** — the
-      same baton `context-handoff-lifecycle` already persists before launch
-      — and permit exactly that launch through, while still refusing any
-      *other* new-session attempt against a live head. Break-glass remains
-      for the case with no such token.
-- [ ] **Fence the token to single consumption.** A further review round
-      correctly caught that recognizing a valid token is not by itself
-      enough: `context-handoff-lifecycle` already anticipates that two
+- [ ] _(agent-recommended, added from PR review analysis, not the original
+      operator request)_ Add the **creation-side guard** #84 already
+      specifies: creating a new session in a worktree whose head is still
+      active is *refused* by default, not silently permitted, with a
+      structured reason enumerating the three resolutions (reuse, hand off,
+      sunset) plus an explicit, attributable break-glass override —
+      matching agent-bridge's existing `409 live_cli_holds_worktree` shape.
+      Without this, restricting who can *write* the head slot does not by
+      itself stop a second session from being *created* while an existing
+      head is still live, so the effort's "never a second session racing an
+      existing live one" guarantee would be unmet. This item is load-bearing
+      for that guarantee, not optional polish.
+- [ ] _(agent-recommended, added from PR review analysis)_ **Carve out the
+      legitimate handoff launch.** The default-refuse rule above must not
+      also block `context-handoff-lifecycle`'s own normal step 4 ("launch
+      the successor without changing the worktree head" — i.e. the
+      successor session is deliberately created *while the predecessor is
+      still head*, by design). A review round correctly caught that an
+      undifferentiated guard would make ordinary handoff indistinguishable
+      from break-glass. The guard must recognize an **authenticated,
+      persisted handoff token/successor identity** — the same baton
+      `context-handoff-lifecycle` already persists before launch — and
+      permit exactly that launch through, while still refusing any *other*
+      new-session attempt against a live head. Break-glass remains for the
+      case with no such token.
+- [ ] _(agent-recommended, added from PR review analysis)_ **Fence the
+      token to single consumption.** A further review round correctly
+      caught that recognizing a valid token is not by itself enough:
+      `context-handoff-lifecycle` already anticipates that two
       independent launch attempts can observe the *same* persisted baton
       (e.g. a genuine retry racing a still-in-flight original launch), and
       leans on task-backed consumption writing a durable checkpoint before
@@ -265,6 +272,17 @@ repo's `pr-self-merge` profile before Phase 1 implementation begins._
   exactly one launch per token and resolving a genuine retry to the same
   successor, not a competing second one -- plus a matching Validation Plan
   bullet simulating two near-simultaneous legitimate launch attempts.
+
+### 2026-09-25 — Demarcated review-derived Plan items as agent-recommended
+- Review caught that several Plan items added across prior rounds
+  (atomic-acknowledgement redesign, creation-side guard, handoff carve-out,
+  token single-consumption fence, and the precise vacant-case enumeration)
+  originated from PR review analysis, not the operator's quoted request,
+  but weren't visibly marked as such per the `planning-efforts` skill's
+  demarcation rule. Added explicit `(agent-recommended)` tags to those
+  bullets so a later reader can distinguish the operator's own
+  head/backup-slot request from the agent's corrected realization of it.
+
 
 
 

@@ -91,19 +91,20 @@ fresh):
 ## Plan
 
 ### Phase 1 — Effort-anchored worktree titling (#3581)
-- [ ] Define explicit title precedence/migration rules, not a bare
-      "by default": (a) **binding a worktree that already carries a
-      freeform asserted title** — the effort-anchored title takes over and
-      *replaces* it going forward (the freeform title is superseded, not
-      merged or preserved as a prefix); (b) **writing `status --title` while
-      a binding is active** — the explicit write is rejected or immediately
-      re-derived back to the anchored form, so an agent cannot silently
-      unanchor a bound worktree's title through the ordinary title-write
-      path; (c) **re-binding to a different effort, or a phase/slice
-      transition** — the title re-derives to match the new binding/phase;
-      (d) **unbinding** — the worktree reverts to today's freeform
-      `status --title` behavior, keeping whatever title it last had until
-      explicitly changed.
+- [ ] _(agent-recommended, added from PR review analysis, not the original
+      operator request)_ Define explicit title precedence/migration rules,
+      not a bare "by default": (a) **binding a worktree that already
+      carries a freeform asserted title** — the effort-anchored title takes
+      over and *replaces* it going forward (the freeform title is
+      superseded, not merged or preserved as a prefix); (b) **writing
+      `status --title` while a binding is active** — the explicit write is
+      rejected or immediately re-derived back to the anchored form, so an
+      agent cannot silently unanchor a bound worktree's title through the
+      ordinary title-write path; (c) **re-binding to a different effort, or
+      a phase/slice transition** — the title re-derives to match the new
+      binding/phase; (d) **unbinding** — the worktree reverts to today's
+      freeform `status --title` behavior, keeping whatever title it last
+      had until explicitly changed.
 - [ ] Implement derivation from the bound effort's slug + current
       phase/slice per the rules above.
 - [ ] Only phase/slice transitions change the title; a session merely
@@ -112,10 +113,11 @@ fresh):
       unchanged (rule (d) above).
 
 ### Phase 2 — Auto-derived current slice + mid-session railroad nudge (#3583)
-- [ ] **Establish one canonical source of truth for the binding's slice.**
-      `ActiveEffort.slice` is persisted and already consumed by
-      `inspect_effort()`, `orientation()`, binding validation, and
-      `duplicate_binding()`; deriving a *different* value only for the
+- [ ] _(agent-recommended, added from PR review analysis, not the original
+      operator request)_ **Establish one canonical source of truth for the
+      binding's slice.** `ActiveEffort.slice` is persisted and already
+      consumed by `inspect_effort()`, `orientation()`, binding validation,
+      and `duplicate_binding()`; deriving a *different* value only for the
       orientation/nudge path (without updating the persisted field) would
       leave those other consumers stale and create two disagreeing notions
       of "current slice." Specify the atomic update/revalidation semantics
@@ -124,18 +126,19 @@ fresh):
       to match at a defined point (e.g. on each orientation/nudge
       computation, or on the operation that changed the checklist) — never
       left to silently diverge.
-- [ ] **Derive a stable phase/item representation, not raw bullet text.**
-      `validate_binding()` currently requires `ActiveEffort.slice` to match
-      a declaration in Plan/Coordination, and parses checklist bullets
-      separately for completion — writing the first unchecked bullet's raw
-      text back as the slice would both bypass that declared-match
-      requirement and risk exceeding the existing 180-character label
-      limit. Define a stable identifier instead (e.g. the enclosing Plan
-      phase heading, optionally with an item index within it — "Phase 2,
-      item 3" — never the free-text bullet body), and update
-      `validate_binding()` and every other slice consumer to recognize and
-      accept that derived form consistently, before implementing
-      derivation.
+- [ ] _(agent-recommended, added from PR review analysis, not the original
+      operator request)_ **Derive a stable phase/item representation, not
+      raw bullet text.** `validate_binding()` currently requires
+      `ActiveEffort.slice` to match a declaration in Plan/Coordination, and
+      parses checklist bullets separately for completion — writing the
+      first unchecked bullet's raw text back as the slice would both
+      bypass that declared-match requirement and risk exceeding the
+      existing 180-character label limit. Define a stable identifier
+      instead (e.g. the enclosing Plan phase heading, optionally with an
+      item index within it — "Phase 2, item 3" — never the free-text
+      bullet body), and update `validate_binding()` and every other slice
+      consumer to recognize and accept that derived form consistently,
+      before implementing derivation.
 - [ ] Extend `effort_focus.py` to derive "current slice" from the first
       unchecked Plan/Validation Plan item, falling back to the declared
       `--slice` string only when the effort has no checklist structure yet,
@@ -254,6 +257,16 @@ repo's `pr-self-merge` profile before Phase 1 implementation begins._
   that form before implementing derivation. Updated the matching Validation
   Plan bullets to check the identifier form and `validate_binding()`
   acceptance explicitly.
+
+### 2026-09-25 — Demarcated review-derived Plan items as agent-recommended
+- Review caught that several Plan items added across prior rounds (title
+  precedence/migration, slice canonicalization, stable identifier
+  derivation) originated from PR review analysis, not the operator's
+  quoted request, but weren't visibly marked as such per the
+  `planning-efforts` skill's demarcation rule. Added explicit
+  `(agent-recommended)` tags to those bullets so a later reader can
+  distinguish settled operator scope from agent recommendation.
+
 
 
 

@@ -88,9 +88,11 @@ duplicate:
       list; Tab or arrowing past the list's bottom returns focus to the box.
 
 ### Phase 3 — Terminal tab title projection (#3588)
-- [ ] Research where Windows Terminal (and psmux/tmux, for parity) exposes a
-      settable tab/pane title, and whether/how it can read the wrapped
-      process's own OSC title hint.
+- [ ] Research where Windows Terminal exposes a settable tab title, and
+      whether/how it can read the wrapped process's own OSC title hint (the
+      operator's own request). _(agent-recommended scope addition, not the
+      original operator request)_ Extend the same research to psmux/tmux
+      for cross-host parity.
 - [ ] Compose the worktree's durable title as a prefix with the process's own
       title hint as a suffix, rather than replacing it outright.
 
@@ -128,4 +130,11 @@ repo's `pr-self-merge` profile before Phase 1 implementation begins._
   Widened the bullet to require validation on every host Phase 3 names,
   with an explicit narrowing instruction if research finds a host that
   can't support it.
+
+### 2026-09-25 — Demarcated the mux-parity scope addition as agent-recommended
+- The psmux/tmux parity scope in Phase 3 was an agent addition beyond the
+  operator's own request (which named Windows Terminal specifically);
+  tagged it explicitly so a later reader can tell it apart from the
+  operator's literal ask.
+
 
