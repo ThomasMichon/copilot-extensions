@@ -233,7 +233,16 @@ fixes."
         any token involved, never hardcode it.
   - [ ] Give the agent job read-only repo access by default (its baseline
         posture) — only the `safe-outputs` PR-creation stage should hold
-        any write credential at all.
+        any write credential at all. **This must be an explicit job-level
+        `permissions:` block on the agent job itself, not implicit.**
+        `validate-and-promote.yml` (the caller invoking this reusable
+        workflow) already grants `contents: write`/`pull-requests: write`
+        at *workflow* scope for its own `promote` job — a reusable-workflow
+        `workflow_call` job inherits the caller's broad token unless the
+        callee explicitly declares its own narrower `permissions:`. Set
+        the agent job's permissions to read-only explicitly in the
+        callee, and verify at review time that no broader permission
+        leaks through from the caller side.
 - [ ] Fallback, only if `gh-aw` proves unworkable in practice (e.g. auth
       friction, engine limitations): extend the filed/updated issue to
       **also assign it to `copilot`** via the `gh` CLI (`gh issue edit <#>
@@ -413,3 +422,15 @@ _Pending._
   severity is converging toward zero real findings; this is expected
   scrutiny depth for a not-yet-implemented design doc going through the
   same non-blocking review every code PR gets in this repo.
+- **Sixth Copilot review pass caught one more, addressed — a reusable-
+  workflow permission-inheritance gap:** a `workflow_call` job inherits
+  its caller's broad workflow-scope permissions (`validate-and-promote.yml`
+  itself grants `contents: write`/`pull-requests: write`) unless the
+  callee explicitly declares its own narrower `permissions:` block; made
+  the agent job's read-only posture an explicit job-level `permissions:`
+  requirement rather than an implicit assumption. Stopping the review
+  loop here: checks have stayed green throughout, findings have converged
+  from high-severity/architecture-level to a single narrow permissions
+  detail, and this repo's Copilot review is explicitly non-blocking —
+  merging now; any further hardening surfaces during actual Phase 1/2
+  implementation instead.
