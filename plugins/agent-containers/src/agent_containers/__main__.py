@@ -32,8 +32,7 @@ from pathlib import Path, PurePosixPath
 
 from agent_procutil import no_window_flags
 
-from . import __version__
-from . import claim_provider_cli
+from . import __version__, claim_provider_cli, rescue_capture_cli
 from .config import (
     RESTRICTED_PROFILE,
     SECURITY_PROFILE_LABEL,
@@ -117,6 +116,7 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--force", action="store_true", help="Force removal")
 
     claim_provider_cli.add_claim_provider_parsers(sub)
+    rescue_capture_cli.add_rescue_capture_parser(sub)
     borrow_p = sub.add_parser("borrow", help="Lease a free container to an effort")
     borrow_p.add_argument("effort", help="Effort name (lease holder)")
     borrow_p.add_argument("--container", help="Borrow a specific container")

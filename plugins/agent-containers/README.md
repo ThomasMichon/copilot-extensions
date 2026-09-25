@@ -130,6 +130,9 @@ agent-containers down <fleet> [--force-abandon] [--json]
 agent-containers start <fleet>       # start stopped containers
 agent-containers rm <fleet> [--force] [--force-abandon] [--json]
                                       # remove; restricted members rescue first
+agent-containers rescue-capture <fleet> [--json]
+                                      # capture running restricted members' session
+                                      # evidence non-destructively (no stop/remove)
 agent-containers borrow <effort> [--fleet <fleet>] [--container <name>]
                                       # lease a free/specific container -> prints name
 agent-containers release <target>    # release by container or effort name
@@ -311,6 +314,22 @@ member carrying an explicit foreign fleet label is reported as drift and
 deferred; its foreign/trusted configuration can never downgrade a requested
 restricted remove into the trusted direct-removal path.
 
+`rescue-capture` runs the same admission/lease/liveness gating as `down`/`rm`
+against every running restricted member of the named fleet, but performs no
+stop or remove afterward -- the container keeps running untouched. This is
+for a fleet that is deliberately never recycled (an always-on service), where
+`down`/`rm`'s rescue-on-destruction would otherwise never fire: it lets an
+operator (or a periodic timer) shuttle a live member's session evidence out on
+a schedule instead. A member with an active/unknown session, an active lease,
+or a paused state is deferred, same as `down`/`rm` -- capture-only never
+unpauses a container just to probe it. Unlike `down` (which reports an
+already-stopped member as unchanged) or `rm` (which follows the
+stopped-instance evidence/removal path), a non-`running` member is deferred
+immediately with "nothing to capture": capturing is only ever a live,
+in-place operation, never a fallback onto stale stopped-instance evidence.
+`--json` reports per-member `captured`/`deferred` results the same shape as
+`down`'s.
+
 The rescue is one-way evidence capture, not persistence or restore. The
 provider streams only these members from UUID-named Copilot session-state
 directories into host-owned state:
@@ -372,10 +391,10 @@ Docker container ID and its authoritative `State.StartedAt` execution
 generation; restarting the same container ID creates a new generation that
 cannot reuse evidence from the prior run.
 
-`up`, `down`, and `rm` accept `--json`; their result includes created/stopped/
-removed, unchanged, rescued, abandoned, and deferred members. Any deferred
-member returns the established busy exit code `75`. Restricted `exec` blocked by
-a lifecycle hold uses the same exit code.
+`up`, `down`, `rm`, and `rescue-capture` accept `--json`; their result includes
+created/stopped/removed/captured, unchanged, rescued, abandoned, and deferred
+members. Any deferred member returns the established busy exit code `75`.
+Restricted `exec` blocked by a lifecycle hold uses the same exit code.
 Docker command timeouts are normalized into per-member deferred results:
 liveness timeouts become unknown, while stop/remove/confirmation timeouts leave
 the hold fail-closed and do not abort reconciliation of sibling members.
