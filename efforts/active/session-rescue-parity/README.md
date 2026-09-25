@@ -233,8 +233,18 @@ and vision reconciliation. Ends with submitting this effort's plan as a PR
       Phase 1, with the container-specific `docker exec` call factored out
       behind a small injected transport callable per Phase 1's
       sync/async-split decision. `agent-containers`
-      itself switches to consuming the vendored copy (no behavior change;
-      existing tests must still pass unchanged) -- this requires wiring
+      itself switches to consuming the vendored copy -- no *behavior*
+      change, but its existing tests directly monkeypatch the pre-extraction
+      internals (`test_replacement.py` patches `replacement._docker` and
+      `replacement.probe_session_liveness` directly, e.g. around lines
+      130-137 and 488-501 in the current tree) and will **not** pass
+      unchanged once that logic moves behind a transport-injected vendored
+      API. Either preserve a thin compatibility wrapper in `replacement.py`
+      that keeps the same monkeypatchable seam (`_docker`,
+      `probe_session_liveness` remain real, patchable module attributes
+      that delegate to the vendored lib), or update every affected test to
+      mock the new seam instead -- decide which explicitly, and confirm no
+      test coverage is silently lost either way -- this requires wiring
       **its own** `pyproject.toml`'s `[project].dependencies` **and**
       `[tool.uv.sources]` entries for the new lib too (both entries, per
       `CONTRIBUTING.md`'s vendoring guidance and this effort's own Context
@@ -292,10 +302,16 @@ and CLI-dispatch coverage).
 ## Validation Plan
 
 - [ ] Phase 2: `tools/check-vendored-libs-sync.py` passes with the new lib
-      listed in both consumers; agent-containers' existing full test suite
-      (`python tools/run-plugin-tests.py agent-containers`) still passes
-      unchanged after the extraction. **Additionally**, since the sync guard
-      does not validate `[project].dependencies`/`[tool.uv.sources]` wiring
+      listed in both consumers; agent-containers' full test suite
+      (`python tools/run-plugin-tests.py agent-containers`) passes after
+      the extraction -- with `test_replacement.py`'s direct
+      `replacement._docker`/`replacement.probe_session_liveness` monkeypatches
+      either still working against a preserved compatibility seam, or
+      explicitly updated to mock the new vendored-lib seam instead (per
+      Phase 2's decision) -- confirm no coverage was silently dropped
+      either way, not just that the suite is green. **Additionally**, since
+      the sync guard does not validate
+      `[project].dependencies`/`[tool.uv.sources]` wiring
       (see Context), force a genuinely fresh install for both consumers
       (e.g. a from-scratch venv rebuild rather than trusting a cached one --
       `run-plugin-tests.py`'s own `--reinstall`, or an equivalent explicit
