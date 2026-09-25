@@ -6,7 +6,7 @@
 - **Scope:** leaf (a child of the
   [agent-dispatch](../README.md) plugin vision)
 - **Status:** Draft
-- **Last revised:** 2026-09-17
+- **Last revised:** 2026-09-25
 - **Reality docs:** `worktree-manager/src/worktree_manager/production_picker/picker_tui/engine.py`
   (`TasksView`, `WorktreesView`, `_TASK_PHASE_PALETTE`) ·
   `worktree-manager/src/worktree_manager/production_picker/picker_tui/pivots.py`
@@ -39,6 +39,17 @@ without dropping to a CLI. It also extends "configuration is visible and
 user-overridable" (already true for the enable/disable override store) into a
 real **Registrars** viewer under the Configuration menu, so the master pause
 is discoverable, not tribal knowledge.
+
+The pane is also where the parent vision's manual, no-emitter task path
+becomes something an operator can actually *drive end to end* rather than
+script: a **New Task composer** to author and queue work by hand, at whatever
+pace and volume the operator wants, and a **Completion Review card** to close
+the loop the parent vision's *verify-the-completion-claim* leaves to a
+self-tracked task's caller — confirm it, re-queue it with fresh steering, or
+abandon it. Together they make the fully hand-driven propose → queue →
+complete → review cycle require **no plugin, no registrar, and no opt-in**
+beyond this pane and the coordinator/supervisor agent-dispatch already ships
+with — the manual path is native, not an add-on.
 
 ## Concepts & Components
 
@@ -135,6 +146,50 @@ move the task's state). The agent is expected to set to work toward the
 task's next phase, but — being genuinely non-railroaded — may pause and ask
 the operator directly for instructions at any point; past that seed, the
 operator has direct, open-ended control.
+
+### The New Task composer — hand-authoring, made a first-class action
+
+Every task on this pane today arrived through some producer other than the
+operator directly typing one in — an emitter, a delegation, a schedule. But
+the parent vision's *propose-then-queue* has always allowed a plain caller to
+hand-author a task with no emitter behind it (*emitter-tasks-are-evaluated-
+mine-are-tracked*); this pane never gave that path a surface. A **New task…**
+action on the Tasks pivot — the direct peer of the Worktrees pane's **New
+worktree…** — opens the same declarative composer machinery already proven
+for steering (`kind:"form"` / `PivotFormScreen`): a title, a free-form
+prompt/goal payload with the same steering-quality input box, and a
+**tags & criteria picker** built from the exact vocabulary a pool's filter
+already matches against — repo lane (defaults to the current one), required
+and rejected capabilities, role, and task-type — so what the operator picks
+*is* what routes the task to the right pool, with no derivation step standing
+in for what an emitter would normally have supplied. Composing and submitting
+is propose+queue in one motion, returns immediately, and is repeatable back
+to back — an operator can queue an arbitrary run of hand-authored tasks
+without waiting for any one of them to be claimed, embodied, or finished, and
+the pools drain them exactly as they drain any other queued work.
+
+### The Completion Review card — closing the self-tracked loop
+
+A task authored through the New Task composer carries no evaluator, so per
+the parent vision's *verify-the-completion-claim* nothing else corroborates
+its worker's completion claim — the operator who queued it is the tracker,
+and needs an actual surface to do that tracking on. The **Completion Review**
+card is the direct counterpart of the steering card, at the other end of the
+lifecycle: reached from a **completed** task that has not yet reached
+**confirmed**, it shows what the worker actually reports done — its result
+reference, the accumulated progress log, and any prominent artifacts it
+claimed (reusing the same shared artifacts surface as the Worktree Status
+card) — and offers exactly four honest next acts, never a silent fifth:
+**Confirm** (the claim holds; close as confirmed), **Re-queue with steering**
+(reuses the steering-card input verbatim; the task returns to queued with its
+progress preserved and the operator's new instructions as the first thing the
+next worker reads), **Abandon** (close as abandoned), or **Save for later**
+(leave it exactly where it is). Per the parent vision's
+*self-tracked-review-is-not-a-lane*, a saved-for-later card costs nothing —
+no pool slot, no worker, no lane — so a whole backlog of unconfirmed
+completions can sit safely until reviewed. For emitter-driven tasks whose
+evaluator already auto-confirms, this card simply never has anything to show:
+nothing sits completed-and-unconfirmed long enough to need it.
 
 ### Registrars configuration — the master pause, made visible
 

@@ -7608,7 +7608,6 @@ def test_registered_pivot_account_scope_and_subtitle(tmp_path, monkeypatch):
 
     asyncio.run(run())
 
-
 def test_registered_pivot_action_menu_runs_and_invalidates(tmp_path, monkeypatch):
     from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
 

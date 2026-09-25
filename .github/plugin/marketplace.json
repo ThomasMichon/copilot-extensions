@@ -31,7 +31,7 @@
     {
       "name": "agent-codespaces",
       "description": "GitHub Codespaces lifecycle management, SSH transport, credential relay, and agent-bridge provider integration",
-      "version": "0.4.2-dev1",
+      "version": "0.4.3-dev1",
       "source": "plugins/agent-codespaces"
     },
     {
@@ -79,7 +79,7 @@
     {
       "name": "customizing-copilot",
       "description": "Customize, diagnose, and extend the Copilot CLI - authoring skills, defining sub-agents, registering MCP servers, installing plugins, building an agent control-harness, reviewing customizations, diagnosing startup hangs, hoisting plugin agents around a delegation limitation, componentizing oversized modules, orchestrating multi-file componentization campaigns, authoring <repo>-harness plugins, and setting up an instruction-projection sync worker - with the per-skill folder conventions and Agent Skills best practices; ships twelve focused skills",
-      "version": "0.1.1-dev1",
+      "version": "0.1.2-dev1",
       "source": "plugins/customizing-copilot"
     },
     {
@@ -103,7 +103,7 @@
     {
       "name": "wsl-setup",
       "description": "Set up and troubleshoot WSL2 as a first-class development and service-hosting environment - install a distro, choose the networking mode (NAT + localhostForwarding vs mirrored + dnsTunneling), split storage across a small NTFS-hosted rootfs VHD and a native ext4 data disk, keep the distro alive for hosted services, and diagnose corp-network egress and host<->WSL loopback failures. Composes with agent-worktrees' agent-worktrees-wsl-provision; ships the setting-up-wsl, splitting-wsl-storage and troubleshooting-wsl-networking skills",
-      "version": "0.1.0-dev7",
+      "version": "0.1.1-dev1",
       "source": "plugins/wsl-setup"
     },
     {

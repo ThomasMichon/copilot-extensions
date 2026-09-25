@@ -143,7 +143,7 @@ unnecessary — front it with a tunnel instead).
 
 > **For sshd, pick a dedicated port (e.g. 2200), not `:22`.** A Windows OpenSSH
 > `sshd` commonly binds `:22`; when it does, `localhostForwarding` does **not**
-> forward `Windows localhost:22` to WSL (the Windows binding wins), so the WSL
+> forward `Windows localhost:22` to WSL (the Windows binding wins), so the WSL <!-- marketplace-isolation: allow doc-example -->
 > sshd is silently shadowed. Run the WSL sshd on an unused port
 > (`/etc/ssh/sshd_config.d/*.conf` → `Port 2200`) and use that everywhere.
 

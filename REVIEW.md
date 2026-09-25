@@ -28,21 +28,25 @@ specifically when reviewing a pull request, not a replacement for them.
   `main`, head branch matching `release/promote-<run id>`, authored via the
   `APERTURE_RELEASE_TOKEN` fine-grained PAT (a personal token minted under
   the maintainer's own account -- this repo has no separate bot identity --
-  so the PR's author is `ThomasMichon`, not a bot login).
-  Contributors always target `dev` — a PR whose base is `main` and that
-  does NOT match BOTH that branch-naming convention AND that author is not
-  a legitimate use of this repo's PR flow (the repo's own CI has a hard
-  guard checking the same two conditions, but that only fails the build;
-  this comment is the visible signal on the PR itself, since Copilot
-  review is disabled on `main`'s ruleset -- the hard block is the sole
-  gate). Post this comment, verbatim, exactly once per PR (do not repeat it
-  on subsequent review passes of the same PR):
+  so the PR's author is `ThomasMichon`, not a bot login). The **only other**
+  legitimate shape is a workflow-file-ONLY bootstrap PR by the repo owner
+  (workflow_run-triggered workflows resolve their own YAML from `main`, so a
+  fix to `.github/workflows/*.yml` occasionally must land there directly) --
+  `main-gate` (ci.yml) enforces this by diff content, not by admin bypass;
+  see ThomasMichon/copilot-extensions#3622-erratum for the incident that
+  prompted the hardening. Contributors always target `dev` — a PR whose
+  base is `main` and that matches NEITHER shape is not a legitimate use of
+  this repo's PR flow (the repo's own CI has a hard guard checking exactly
+  this, but that only fails the build; this comment is the visible signal
+  on the PR itself, since Copilot review is disabled on `main`'s ruleset --
+  the hard block is the sole gate). Post this comment, verbatim, exactly
+  once per PR (do not repeat it on subsequent review passes of the same PR):
 
-  > This PR targets `main` directly. `main` is only ever updated by this
+  > This PR targets `main` directly. `main` only ever moves via this
   > repo's own CI promotion pipeline (dev-branch-release-pipeline effort,
-  > `.github/workflows/validate-and-promote.yml`) via an automated snapshot PR from a
-  > `release/promote-*` branch. Please retarget this PR's base branch to
-  > `dev` — see `CONTRIBUTING.md` § Release & Versioning.
+  > `.github/workflows/validate-and-promote.yml`) from a `release/promote-*`
+  > branch, or a workflow-file-ONLY bootstrap PR. Please retarget this PR's
+  > base branch to `dev` — see `CONTRIBUTING.md` § Release & Versioning.
 - **Scope to the diff.** Review the code the PR actually changes. The repo
   carries pre-existing style debt — do **not** demand repo-wide cleanup or
   flag untouched code.
