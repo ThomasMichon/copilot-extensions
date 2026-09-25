@@ -35,7 +35,12 @@ _INSTALL_SH = (
     Path(__file__).resolve().parents[1] / "scripts" / "install.sh"
 )
 
-_BASH = shutil.which("bash")
+# A bare shutil.which("bash") can resolve to a Windows App Execution Alias
+# stub or the classic `C:\Windows\System32\bash.exe` WSL launcher (both
+# invoke an actual WSL distro rather than running this script in the
+# environment under test). Prefer the real Git Bash location when present.
+_GIT_BASH = Path(r"C:\Program Files\Git\bin\bash.exe")
+_BASH = str(_GIT_BASH) if _GIT_BASH.is_file() else shutil.which("bash")
 
 
 def _bash_honors_pipefail() -> bool:

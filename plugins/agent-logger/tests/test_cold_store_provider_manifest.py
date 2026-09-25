@@ -41,10 +41,34 @@ def test_cold_store_provider_manifest_is_attributed_and_writers_stamp_root_atomi
     assert "AGENT_BRIDGE_COLD_STORE_PROVIDERS_DIR" in shell
 
 
+def _resolve_bash() -> str:
+    """Resolve a REAL bash, not Windows' WSL-launcher `bash.exe` shim.
+
+    A bare "bash" can resolve to a genuine WSL distro's `/bin/bash` (via the
+    `C:\\Windows\\System32\\bash.exe` launcher), which strips backslashes
+    from a Windows-style argv path (POSIX shells don't treat `\\` as a path
+    separator), mangling `D:\\Src\\...\\script.sh` into a nonexistent
+    filename. Prefer the real Git Bash location, which accepts Windows
+    paths natively.
+    """
+    git_bash = Path(r"C:\Program Files\Git\bin\bash.exe")
+    if git_bash.is_file():
+        return str(git_bash)
+    return "bash"
+
+
 def test_posix_writer_creates_and_replaces_manifest(tmp_path):
     registry = tmp_path / "cold-store-providers.d"
     env = {**os.environ, "AGENT_BRIDGE_COLD_STORE_PROVIDERS_DIR": str(registry)}
-    command = ["bash", str(PLUGIN / "scripts" / "register-cold-store-provider.sh")]
+    # Strip the Windows Store's python3/python alias stubs from PATH -- a
+    # no-op unless Python is installed via the Store, but it can shadow the
+    # real interpreter ahead of it, making the script's own
+    # `command -v python3 || command -v python` resolve to a dud and
+    # silently no-op before ever writing the manifest.
+    if "PATH" in env:
+        parts = env["PATH"].split(os.pathsep)
+        env["PATH"] = os.pathsep.join(p for p in parts if "WindowsApps" not in p)
+    command = [_resolve_bash(), str(PLUGIN / "scripts" / "register-cold-store-provider.sh")]
     subprocess.run(command, env=env, check=True, cwd=str(PLUGIN))
     subprocess.run(command, env=env, check=True, cwd=str(PLUGIN))
 
@@ -54,7 +78,12 @@ def test_posix_writer_creates_and_replaces_manifest(tmp_path):
     assert manifest["schema_version"] == 1
     assert manifest["capability"] == "session-fetch"
     assert Path(manifest["plugin_root"]).resolve() == PLUGIN.resolve()
-    assert manifest["command"] == [str(PLUGIN / "bin" / "agent-logger")]
+    # The shell writer always emits forward-slash paths (a deliberate,
+    # platform-consistent manifest convention -- see the sibling test's
+    # `'binstub="$PluginDir/bin/$name"'` assertion on the script text
+    # itself), so compare with `.as_posix()` rather than `str()`, which
+    # would use backslashes on Windows and never match.
+    assert manifest["command"] == [(PLUGIN / "bin" / "agent-logger").as_posix()]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell compatibility")

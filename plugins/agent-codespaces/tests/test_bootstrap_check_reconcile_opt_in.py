@@ -46,7 +46,14 @@ _OPT_IN_KEY = f"background_reconcile_{_PLUGIN_NAME}"
 # process-creation call (routing it to WSL) even when shutil.which() finds
 # Git Bash first on PATH -- the alias interception happens below PATH search,
 # at CreateProcess time, unless the explicit resolved path is used.
-_BASH = shutil.which("bash")
+#
+# A bare shutil.which("bash") can ALSO resolve to the classic
+# `C:\Windows\System32\bash.exe` WSL launcher stub when it precedes Git Bash
+# on PATH -- that stub invokes an actual WSL distro rather than running this
+# script in the environment under test. Prefer the real Git Bash location
+# when present.
+_GIT_BASH = Path(r"C:\Program Files\Git\bin\bash.exe")
+_BASH = str(_GIT_BASH) if _GIT_BASH.is_file() else shutil.which("bash")
 
 
 def test_hook_scripts_exist():
