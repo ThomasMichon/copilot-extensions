@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from work_coalescing_singleton.server import CoalescingServer, Unavailable
+from work_coalescing_singleton.server import _CLOSE_SERVE_WAIT_S, CoalescingServer, Unavailable
 
 
 def _make_server(**kwargs) -> CoalescingServer:
@@ -292,4 +292,62 @@ def test_start_itself_closes_a_partially_started_server_before_reraising():
     # No explicit close() call here at all -- start() must have already
     # torn everything down on its own.
     assert server._closed is True
+    assert not server._serve_thread.is_alive()
+
+
+def test_close_does_not_call_shutdown_before_serve_forever_is_confirmed_running(monkeypatch):
+    """Copilot review finding: ``Thread.start()`` returning successfully
+    only proves the OS thread object was created, not that
+    ``serve_forever()`` has actually begun executing yet. ``close()`` must
+    gate ``self._server.shutdown()`` on ``_serve_running`` (set only once
+    the thread's target callable truly starts), never on ``_serve_started``
+    (thread-creation) alone -- otherwise a ``close()`` racing an in-flight
+    ``start()`` could call ``shutdown()`` before the loop is running."""
+    server = _make_server()
+    gate = threading.Event()
+    real_run = server._run_serve_forever
+
+    def _delayed_run():
+        gate.wait(timeout=5)  # simulates a real scheduling delay
+        if server._closed:
+            return  # close() already tore the socket down; nothing left to serve
+        real_run()
+
+    monkeypatch.setattr(server, "_run_serve_forever", _delayed_run)
+    # Replace the pre-built serve thread with one bound to the delayed
+    # target (the original was already bound to the un-patched callable at
+    # __init__ time), then start it for real -- the OS thread genuinely
+    # exists and is alive, it just hasn't reached `serve_forever()` yet.
+    server._serve_thread = threading.Thread(
+        target=server._run_serve_forever, name="work-coalescing-singleton", daemon=True
+    )
+    server._serve_thread.start()
+    server._serve_started = True
+    assert not server._serve_running.is_set()
+
+    try:
+        close_thread = threading.Thread(target=server.close)
+        close_thread.start()
+        close_thread.join(timeout=_CLOSE_SERVE_WAIT_S + 3)
+        assert not close_thread.is_alive(), (
+            "close() blocked on shutdown() despite serve_forever() never confirmed running"
+        )
+    finally:
+        gate.set()  # release the delayed thread so it can finish cleanly
+
+
+def test_close_shuts_down_promptly_once_serve_forever_is_confirmed_running():
+    """The other side of the same guard: once ``_serve_running`` IS set (a
+    real ``start()``), ``close()`` must still promptly call ``shutdown()``
+    and actually stop the loop -- the bounded wait must never itself
+    introduce a needless delay on the ordinary, fully-started path."""
+    server = _make_server()
+    server.start()
+    try:
+        assert server._serve_running.is_set()
+    finally:
+        started = time.time()
+        server.close()
+        elapsed = time.time() - started
+    assert elapsed < 1.0, "close() took unexpectedly long on the ordinary running path"
     assert not server._serve_thread.is_alive()

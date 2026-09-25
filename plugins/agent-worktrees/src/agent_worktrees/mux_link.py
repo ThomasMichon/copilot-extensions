@@ -111,20 +111,26 @@ class ManagedMuxCache:
     (with its true ``live`` bit) for callers that want the raw record.
 
     When ``persist_path`` is given, every successful :meth:`apply_observation`
-    writes the full snapshot -- a JSON **array** of already-self-describing
-    entries (never a JSON object keyed by a separately-trusted string,
-    which is exactly the shape that let an earlier revision of this cache
-    accept an entry under a JSON key that disagreed with its own
-    ``worktree_id`` field) -- to that path (atomic replace, best-effort: a
-    write failure is swallowed rather than raised, matching the resident
-    monitor's own tolerance for a non-fatal persistence hiccup), and the
-    constructor warm-loads any existing snapshot from it, re-deriving each
-    entry's storage key from its own validated ``project``/``worktree_id``
-    fields. This lets the Step 1 seam's own contract-level requirement -- a
-    mapping survives one daemon restart -- hold even though
-    ``InProcessRuntime`` itself is otherwise stateless across restarts,
-    matching ``worktree_status_daemon.WorktreeStatusCache``'s own
-    durable-across-restart precedent.
+    merges this process's in-memory entries with whatever is currently on
+    disk (keeping the higher ``mapping_revision`` per key) and writes the
+    merged result -- a JSON **array** of already-self-describing entries
+    (never a JSON object keyed by a separately-trusted string, which is
+    exactly the shape that let an earlier revision of this cache accept an
+    entry under a JSON key that disagreed with its own ``worktree_id``
+    field) -- to that path (atomic replace, best-effort: a write failure is
+    swallowed rather than raised, matching the resident monitor's own
+    tolerance for a non-fatal persistence hiccup). The merge (rather than a
+    blind overwrite) narrows the window where two monitor processes briefly
+    overlap during a handoff, each with their own in-memory cache sharing
+    this path (Copilot review finding) -- see :meth:`_persist_locked`'s own
+    docstring for the full rationale. The constructor warm-loads any
+    existing snapshot the same way, re-deriving each entry's storage key
+    from its own validated ``project``/``worktree_id`` fields. This lets the
+    Step 1 seam's own contract-level requirement -- a mapping survives one
+    daemon restart -- hold even though ``InProcessRuntime`` itself is
+    otherwise stateless across restarts, matching
+    ``worktree_status_daemon.WorktreeStatusCache``'s own durable-across-
+    restart precedent.
 
     :meth:`close` marks this cache permanently closed: every subsequent
     :meth:`apply_observation` call becomes a safe no-op instead of writing.
@@ -152,13 +158,22 @@ class ManagedMuxCache:
     def _warm_load(self) -> None:
         if self._persist_path is None:
             return
+        self._entries.update(self._read_persisted_entries())
+
+    def _read_persisted_entries(self) -> dict[tuple[str, str], dict]:
+        """Read + validate whatever is currently at ``_persist_path``, keyed
+        by each entry's own ``(project, worktree_id)``. Returns ``{}`` for
+        anything missing/malformed -- never raises."""
+        if self._persist_path is None:
+            return {}
         try:
             raw = self._persist_path.read_text(encoding="utf-8")
             data = json.loads(raw)
         except (OSError, ValueError):
-            return
+            return {}
         if not isinstance(data, list):
-            return
+            return {}
+        entries: dict[tuple[str, str], dict] = {}
         for entry in data:
             if not isinstance(entry, dict):
                 continue
@@ -166,21 +181,44 @@ class ManagedMuxCache:
                 normalized = _normalize_entry(entry, trust_received_at=True)
             except ValueError:
                 continue
-            key = (normalized["project"], normalized["worktree_id"])
-            self._entries[key] = normalized
+            entries[(normalized["project"], normalized["worktree_id"])] = normalized
+        return entries
 
     def _persist_locked(self) -> None:
-        """Best-effort atomic snapshot write. Caller already holds ``_lock``."""
+        """Best-effort atomic snapshot write. Caller already holds ``_lock``.
+
+        Merges this process's in-memory entries with whatever is currently
+        on disk (keeping the higher ``mapping_revision`` per key) rather
+        than blindly overwriting the file with only this process's own
+        view (Copilot review finding): the resident-monitor handoff can
+        briefly run an old (retiring) and a new monitor process
+        concurrently, each with its own in-memory ``ManagedMuxCache``
+        sharing this same ``persist_path``. A blind overwrite from an old
+        process's in-flight handler could otherwise clobber a newer
+        monitor's already-persisted mapping for a key the old process never
+        learned about, or hadn't yet seen the latest revision for. This
+        narrows (does not fully eliminate -- there is still a read-then-
+        atomic-replace window with no interprocess lock) that race: the
+        merge only ever *loses* data in the vanishingly narrow case of two
+        processes replacing the file at the exact same instant, never in
+        the ordinary "one process is simply behind" case this exists to
+        fix.
+        """
         if self._persist_path is None:
             return
         try:
             self._persist_path.parent.mkdir(parents=True, exist_ok=True)
+            merged = dict(self._read_persisted_entries())
+            for key, entry in self._entries.items():
+                current = merged.get(key)
+                if current is None or entry["mapping_revision"] >= current["mapping_revision"]:
+                    merged[key] = entry
             fd, tmp_name = tempfile.mkstemp(
                 dir=str(self._persist_path.parent), prefix=".mux-link-cache-"
             )
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                    json.dump(list(self._entries.values()), fh, separators=(",", ":"))
+                    json.dump(list(merged.values()), fh, separators=(",", ":"))
                 os.replace(tmp_name, self._persist_path)
             finally:
                 with contextlib.suppress(OSError):

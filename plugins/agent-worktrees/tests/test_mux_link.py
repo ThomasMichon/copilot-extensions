@@ -329,6 +329,67 @@ def test_cache_survives_a_simulated_daemon_restart_via_persist_path(tmp_path):
     assert second.live_session_names() == {"wt-1"}
 
 
+def test_persist_merges_with_disk_instead_of_blindly_overwriting(tmp_path):
+    """Copilot review finding: the resident-monitor handoff can briefly run
+    an old (retiring) and a new monitor process concurrently, each with its
+    own in-memory ``ManagedMuxCache`` sharing the same ``persist_path``. A
+    blind overwrite from one process's own view could clobber a newer
+    mapping the other process already persisted for a key this process
+    never learned about. ``_persist_locked`` must merge with whatever is
+    currently on disk (keeping the higher ``mapping_revision`` per key)
+    rather than overwrite wholesale."""
+    persist_path = tmp_path / "managed-mux-cache.json"
+
+    # "Old" process: learns about wt-a only.
+    old_process_cache = mux_link.ManagedMuxCache(persist_path=persist_path)
+    old_process_cache.apply_observation(
+        _obs(project="proj", worktree_id="wt-a", mux_session="wt-a", revision=1)
+    )
+
+    # "New" process: a second, independent in-memory cache instance (as if
+    # a replacement monitor process started up) that warm-loaded the file
+    # right after the old process's write above, then learns about a
+    # DIFFERENT worktree (wt-b) the old process never knew about, and
+    # persists that.
+    new_process_cache = mux_link.ManagedMuxCache(persist_path=persist_path)
+    new_process_cache.apply_observation(
+        _obs(project="proj", worktree_id="wt-b", mux_session="wt-b", revision=1)
+    )
+
+    # The old process's in-memory cache is still alive (a late in-flight
+    # handler) and pushes one more observation for wt-a -- its own
+    # _persist_locked call must not clobber wt-b, which it never learned
+    # about, from the file.
+    old_process_cache.apply_observation(
+        _obs(project="proj", worktree_id="wt-a", mux_session="wt-a", revision=2)
+    )
+
+    reloaded = mux_link.ManagedMuxCache(persist_path=persist_path)
+    assert reloaded.get("proj", "wt-a")["mapping_revision"] == 2  # old process's later write
+    assert reloaded.get("proj", "wt-b") is not None  # new process's mapping survived
+
+
+def test_persist_merge_keeps_the_higher_revision_when_disk_is_ahead(tmp_path):
+    """The other direction of the same merge: if the on-disk file already
+    has a *higher* revision for a key than this process's own in-memory
+    view (a genuinely stale in-process cache persisting after a newer
+    write from elsewhere), the merge must not regress it."""
+    persist_path = tmp_path / "managed-mux-cache.json"
+    behind_cache = mux_link.ManagedMuxCache(persist_path=persist_path)
+    behind_cache.apply_observation(_obs(revision=3))  # writes revision 3 to disk
+
+    ahead_cache = mux_link.ManagedMuxCache(persist_path=persist_path)  # warm-loads revision 3
+    ahead_cache.apply_observation(_obs(revision=9))  # writes revision 9 to disk
+
+    # behind_cache's own in-memory view never saw revision 9 -- replay its
+    # own (now-stale) observation again, simulating a late in-flight
+    # handler flushing state that predates the newer write elsewhere.
+    behind_cache.apply_observation(_obs(revision=3))
+
+    reloaded = mux_link.ManagedMuxCache(persist_path=persist_path)
+    assert reloaded.get("proj", "wt-1")["mapping_revision"] == 9  # disk's higher revision kept
+
+
 def test_cache_without_persist_path_does_not_survive_a_restart():
     first = mux_link.ManagedMuxCache()
     first.apply_observation(_obs())

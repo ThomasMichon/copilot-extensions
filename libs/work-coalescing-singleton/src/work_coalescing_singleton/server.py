@@ -22,6 +22,12 @@ Compute = Callable[[str, dict], dict]
 
 PROTOCOL_VERSION = 1
 _READ_TIMEOUT_S = 5.0
+#: How long `close()` waits for confirmed entry into `serve_forever()`
+#: before giving up on calling `shutdown()` at all (see `close()`'s own
+#: docstring). Generous relative to ordinary OS thread-scheduling latency,
+#: bounded so `close()` itself can never hang indefinitely on a thread that
+#: never gets scheduled.
+_CLOSE_SERVE_WAIT_S = 2.0
 
 
 class Unavailable(Exception):
@@ -148,11 +154,21 @@ class CoalescingServer:
         # wait/join is safe rather than assuming both-or-neither.
         self._serve_started = False
         self._reap_started = False
+        # `Thread.start()` returning successfully only proves the OS thread
+        # object was created -- it does not prove the target callable has
+        # actually begun executing yet (a real scheduling gap, however
+        # short) (Copilot review finding). `close()` must not call
+        # `self._server.shutdown()` -- which blocks waiting for
+        # `serve_forever()`'s own exit -- until `serve_forever()` is
+        # *confirmed* running, never merely inferred from `.start()`
+        # succeeding. `_run_serve_forever` sets this the instant the
+        # thread's target callable actually begins.
+        self._serve_running = threading.Event()
         self._reap_stop = threading.Event()
 
         self._server = _Server(("127.0.0.1", 0), _Handler, owner=self)
         self._serve_thread = threading.Thread(
-            target=self._server.serve_forever,
+            target=self._run_serve_forever,
             name="work-coalescing-singleton",
             daemon=True,
         )
@@ -161,6 +177,10 @@ class CoalescingServer:
             name="work-coalescing-singleton-reaper",
             daemon=True,
         )
+
+    def _run_serve_forever(self) -> None:
+        self._serve_running.set()
+        self._server.serve_forever()
 
     # -- lifecycle -------------------------------------------------------
 
@@ -207,8 +227,18 @@ class CoalescingServer:
         # exercises ``handle_request``/refcounting directly, never calling
         # ``start()``, or a real ``start()`` whose serve-thread launch
         # itself failed -- see `_serve_started`'s own docstring above).
-        # Only wait on/join a thread that actually began running.
-        if self._serve_started:
+        # `_serve_started` alone only proves `Thread.start()` succeeded
+        # (the OS thread object exists), not that `serve_forever()` has
+        # actually begun executing (Copilot review finding) -- wait
+        # (bounded) for `_serve_running` before ever calling `shutdown()`,
+        # so a `close()` racing an in-flight `start()` never blocks on a
+        # loop that has not truly started yet. If the loop still hasn't
+        # confirmed running within that bound (a thread genuinely never
+        # got scheduled -- pathological, but not this method's job to wait
+        # out indefinitely), skip `shutdown()`: `server_close()` alone
+        # still releases the bound socket, and the thread stays daemon-only
+        # (never blocks process exit) if it does eventually run.
+        if self._serve_started and self._serve_running.wait(timeout=_CLOSE_SERVE_WAIT_S):
             self._server.shutdown()
         self._server.server_close()
         if self._serve_started:
