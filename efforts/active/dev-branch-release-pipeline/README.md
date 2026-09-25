@@ -506,7 +506,32 @@ Round 2 (operator's response to that evaluation):
     post-announcement observation period): PR #3541 (first fully unattended
     auto-merge), PR #3544 (surfaced the version-regression bug below), PR
     #3545 (changefile-sweep verification), and the corrective PR #3548.
-    A formal announcement to other contributors has not happened yet.
+  - **Done, 2026-09-24.** Swept every open PR authored under this identity
+    (14 total) for the residual "jam" a mid-flight default-branch flip
+    predictably leaves behind: 5 were still targeting `main` and CONFLICTING
+    (#3226, #3248, #3305, #3440, #3456 — GitHub auto-retargets an open PR's
+    base when a repo's default branch changes, but does not rebase it), and
+    2 more already targeted `dev` but were CONFLICTING against its current
+    tip (#3348, #3310). All 7 were retargeted (where needed) and rebased
+    clean via parallel background agents following the safe
+    backup-branch-then-rebase/cherry-pick recipe, keeping `dev`'s newer
+    plugin-version/baseline files while preserving each PR's real functional
+    content; backup branches (`backup/pr-<N>-before-rebase`) were kept
+    locally for anyone who wants to audit a resolution. Traced local
+    ownership via the claimant graph first: only 2 of the 14 PRs (#3505,
+    #3498) had a worktree registered on this machine, one of them (#3505)
+    genuinely live/being driven — left untouched (it was already clean); the
+    other 12 traced to a different machine (`tmichon-cloud1`) or an
+    already-finalized/pruned worktree here, confirming it was safe to fix
+    them directly. This produced the written-up **migration guide** below (this
+    same entry) as the natural next artifact, since the flip's residual
+    friction is exactly the "contributors get bitten by the old flow"
+    problem a migration note exists to prevent.
+  - **Formal announcement to other contributors still not done** — this
+    phase item stays checked for "watch the first few cycles" (now
+    genuinely exercised across ~10 promotions) but the written-up migration
+    guide (CONTRIBUTING.md, see Journal) is the announcement vehicle; no
+    separate broadcast has gone out yet.
 
 ### Phase 6 — Maturity walk-back
 - [ ] Define success criteria for relaxing the admin-escalation gate on
@@ -1296,4 +1321,107 @@ live, and moving "watch the first few cycles closely" from an implicit,
 in-the-moment activity to a deliberate observation window before formally
 announcing cutover to other contributors. #3534 is closed. No other open
 PRs, held claims, or background flows remain from this session.
+
+### 2026-09-24 — PR-jam sweep across all open contributor PRs + a written
+### migration guide
+
+Follow-up to the entry immediately above, prompted by the operator's
+concern that the mid-flight `main`→`dev` default-branch flip would leave
+other in-flight PRs (this identity's own backlog, standing in for any
+contributor's) silently jammed.
+
+- **Surveyed every open PR authored under this identity** (14 total via `gh
+  pr list --search "author:ThomasMichon"`) for base-branch correctness and
+  merge cleanliness:
+  - **5 still targeted `main` and were CONFLICTING**: #3226, #3248, #3305,
+    #3440, #3456. Root cause confirmed via GitHub's own behavior: when a
+    repo's default branch changes, GitHub auto-retargets any *open* PR that
+    was pointed at the old default — but it does **not** rebase the branch,
+    so each surfaced as a real merge conflict against `dev`'s tip once
+    retargeted (or, for these 5, hadn't even been auto-retargeted yet since
+    they predated GitHub's retarget sweep).
+  - **2 already targeted `dev` but were CONFLICTING**: #3348, #3310 (both
+    from a different machine, `tmichon-cloud1`).
+  - The other 7 were already clean against `dev` — no action needed.
+  - A stray `main source gate` check failure seen on a couple of PRs (e.g.
+    #3495, #3310) turned out to be a **stale check, not a live bug**: that
+    job's own `if: base.ref == 'main'` guard is correct on current `dev`;
+    the failing runs were simply the last CI execution from *before*
+    GitHub's auto-retarget flipped that PR's base to `dev`, and no new push
+    had happened since to re-evaluate it under the corrected base. Confirmed
+    by reading the actual failing run's logs and comparing its recorded
+    `head_branch`/base against the PR's current state — not a pipeline
+    defect, and (since `main source gate` is only a required check on
+    `main`'s own ruleset, never `dev`'s) not a merge blocker either way.
+- **Fixed all 7 broken PRs** using 7 parallel background agents, one per PR,
+  each following the safe backup-branch-then-rebase (falling back to
+  reset-and-cherry-pick when a rebase got tangled) recipe: retarget to `dev`
+  where needed (`gh pr edit --base dev`), rebase onto current `dev`,
+  resolve conflicts by actually reading both sides (mostly version-file/
+  changefile-baseline drift — resolved by keeping `dev`'s newer values while
+  preserving each PR's real functional diff), force-push back to the PR's
+  own existing head ref (never a new branch/PR), and verify
+  `mergeStateStatus`/`mergeable` came back clean. All 7 confirmed
+  `MERGEABLE` afterward; two (#3310, #3348) show a residual `UNSTABLE`
+  `mergeStateStatus` from the same stale-check pattern above (harmless,
+  non-required on `dev`) rather than an actual conflict. Backup branches
+  (`backup/pr-<N>-before-rebase`) retained locally on this machine for
+  anyone who wants to audit a resolution before it's rebased away.
+- **Traced ownership before touching anything cross-machine.** Used the
+  `tracing-claimant-graphs` skill's two-hop recipe (`claims <id>` →
+  `claimant-liveness`) to confirm no *live* session anywhere would be
+  clobbered: only 2 of the 14 PRs had a worktree registered on this
+  machine at all (#3505, #3498) — one (#3505) genuinely live and mid-turn
+  (left untouched; it was already clean, so no action was needed on it
+  regardless), the other (#3498) `active` in the registry but with an
+  `ambiguous`/`incomplete-projection` reciprocal relation and zero recorded
+  turns (idle-looking, also already clean, also left alone). The remaining
+  12 — including all 7 that needed fixing — had no local worktree record at
+  all (`agent-worktrees claims <id>` returned "worktree not found" for
+  every raw `worktree/tmichon-cloud1-*`/`worktree/tmichon-book2-*` head
+  branch checked), meaning either a different machine or an
+  already-finalized/pruned worktree here — confirming it was safe to work
+  on them directly. Also traced one hop further for #3505: its owning
+  `copilot-extensions` worktree is itself owned by a long-lived,
+  currently-very-active `aperture-labs` worktree (a *root* claim, no further
+  owner recorded) — not an `odsp-web-harness` worktree; #3498's worktree has
+  no recorded owner at all (a root itself, or created out-of-band).
+- **Wrote the migration guide the sweep itself proved necessary.** Added a
+  `> ### Migrating from the old main-targeting flow` callout directly under
+  CONTRIBUTING.md's "Contribution flow (PR-required)" intro (there was no
+  dedicated migration-note surface before this — the `dev`-is-default
+  information existed, but scattered, with nothing addressed to a
+  contributor still muscle-memoried onto `main`), covering exactly the three
+  things this sweep ran into in practice:
+  1. Retarget-and-rebase-don't-refile guidance for a PR still open against
+     `main`.
+  2. **A red `dev` CI run blocks every pending release, not just the PR that
+     broke it** — confirmed mechanically, not just asserted: `Validation
+     Gate` only runs `if: ... == 'success'` on `CI`, and `Promote` only runs
+     `if: ... == 'success'` on `Validation Gate`, so a red `dev` commit
+     produces zero downstream triggers until a later green commit — with
+     everything accumulated on `dev` in the meantime shipping together on
+     that later trigger. Contributors are now expected to fix-forward or
+     revert immediately, not investigate at leisure, since every other
+     contributor's already-merged work is stuck behind them too.
+  3. **Set the ~10-20 minute release-lag expectation** (CI → Validation Gate
+     → Promote's generated `release/promote-<run id>` candidate PR → that
+     PR's own fast check → auto-merge), with the exact `gh pr list --search
+     "is:merged head:release/promote-"` command to confirm a real release
+     landed, and a note that a small "clear consumed changefiles on dev"
+     housekeeping PR normally follows a few minutes after every successful
+     promotion (expected, not actionable). The timing figure was
+     cross-checked against real recent promotion runs (Validation Gate
+     completing in ~12s once triggered, Promote itself completing in
+     ~15-20s, the slower/variable part being `dev`'s own CI queue+runtime)
+     rather than asserted from feel.
+  - Also expanded the pre-existing "The wait, and how to preview past it"
+    section in CONTRIBUTING.md with the same hard-chain-gating explanation
+    and the release-confirmation command, so the technical depth lives
+    there and the migration callout stays a short pointer to it.
+- **Not done in this entry**: the PR itself carrying these CONTRIBUTING.md
+  changes has not yet been opened/merged — see whoever picks this up next,
+  or the same session if it continues. No other PRs were merged or closed
+  in this entry; the 7 fixed PRs remain open, un-merged, exactly as before
+  (only retargeted/rebased), per the operator's actual ask.
 
