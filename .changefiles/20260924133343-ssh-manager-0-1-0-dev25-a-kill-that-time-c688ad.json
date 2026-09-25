@@ -1,9 +1,0 @@
-{
-  "comment": "ssh-manager 0.1.0-dev25: a kill that times out or is cancelled at shutdown closes the process's subprocess transport, so no 'Event loop is closed' traceback prints at exit",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

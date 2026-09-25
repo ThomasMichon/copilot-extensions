@@ -1,9 +1,0 @@
-{
-  "comment": "Reference-file staging moves to the shared venue-copilot lib (venue_copilot.refs); CodeSpace behavior unchanged",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

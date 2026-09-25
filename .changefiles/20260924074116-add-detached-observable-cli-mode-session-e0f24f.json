@@ -1,9 +1,0 @@
-{
-  "comment": "Add detached observable CLI-mode sessions for POSIX SSH targets.",
-  "changes": [
-    {
-      "plugin": "agent-ssh",
-      "type": "patch"
-    }
-  ]
-}
