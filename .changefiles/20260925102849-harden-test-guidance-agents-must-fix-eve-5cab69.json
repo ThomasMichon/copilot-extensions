@@ -1,0 +1,9 @@
+{
+  "comment": "Harden Test guidance: agents must fix every failing test they encounter, never label pre-existing",
+  "changes": [
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "dev"
+    }
+  ]
+}
