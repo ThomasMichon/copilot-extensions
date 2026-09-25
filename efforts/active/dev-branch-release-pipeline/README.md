@@ -11,7 +11,9 @@
   entry once the design settles; revisit at Phase 2/3 boundary.
 - **Umbrella issue:** ThomasMichon/copilot-extensions#3336
 - **Sub-issues:** ThomasMichon/copilot-extensions#182 (immediate pain this
-  also resolves)
+  also resolves); #3567 (promote.yml read the wrong SHA from
+  `workflow_run` metadata, fixed + a regression fixed); #3592 (merge
+  Validation Gate + Promote into one workflow, rolling-queue concurrency)
 
 ## Guiding Intent
 
@@ -429,6 +431,22 @@ Round 2 (operator's response to that evaluation):
     the job runs unattended (but still report-only, per the note above).
     Walk-back criteria are Phase 6's job, not this one.
 
+- [ ] **(#3592)** Merge `validation-gate.yml` + `promote.yml` into one
+      workflow (`validate-and-promote.yml`) with sequential jobs (`gate` ->
+      `full`/`worktree-manager`/`guards-full-sweep` -> `promote`), passing the
+      validated SHA via ordinary `needs.<job>.outputs` instead of the
+      artifact-upload/download workaround #3567/#3578 needed — eliminating
+      that whole failure class structurally (no more cross-workflow-run
+      boundary for this hop). Give the workflow one top-level `concurrency`
+      block (shared static group key, `cancel-in-progress: false`) so
+      GitHub's default `queue: single` semantics give a true rolling build:
+      at most one (validate+promote) tuple running, at most one pending, a
+      newer trigger only ever cancels the pending tuple, never the running
+      one. Also flip `ci.yml`'s `cancel-in-progress: true` -> `false` (group
+      key is already shared per-ref) for the same non-starving behavior at
+      the CI stage.
+  - **Not started.**
+
 ### Phase 4 — Rollback & hotfix procedures
 - [x] Implement the CI guard against producing a non-incremental (out-of-order)
       `main` update after a manual rollback.
@@ -571,6 +589,17 @@ Round 2 (operator's response to that evaluation):
 - [ ] Confirm the auto-updater coverage fix: every harness worktree that
       depends on `copilot-extensions-harness` picks up its updates on the
       same cadence as `agent-*` plugins.
+- [ ] Confirm the merged `validate-and-promote.yml` (#3592) actually
+      exhibits the rolling-queue guarantee live: trigger two rapid dev
+      pushes and observe run 1 completes undisturbed while run 2 (queued)
+      gets superseded/cancelled by a third rapid push, matching the
+      documented model exactly (not just passing in isolation).
+- [ ] Confirm the merged workflow's `promote` job correctly no-ops (does not
+      block) when `gate`'s `is_dev` is false and its sibling jobs are
+      `skipped` rather than `success` — this was the exact shape of the
+      #3567 follow-up regression, now expressed as an `if:` condition
+      instead of a missing-artifact fallback; re-verify it explicitly rather
+      than assuming the redesign is immune by construction.
 
 ## Proposal
 
@@ -1424,4 +1453,71 @@ contributor's) silently jammed.
   or the same session if it continues. No other PRs were merged or closed
   in this entry; the 7 fixed PRs remain open, un-merged, exactly as before
   (only retargeted/rebased), per the operator's actual ask.
+
+### 2026-09-24, later still — #3567 diagnosed + fixed, a follow-up
+### regression caught live, and the validate/promote merge kicked off
+
+Operator asked for help diagnosing #3567 and unblocking the promotion
+pipeline; this became a two-round fix plus a proposed structural redesign.
+
+- **#3567 root cause**: `promote.yml`'s own gate step trusted
+  `github.event.workflow_run.head_sha` — Validation Gate's OWN run
+  metadata, itself `workflow_run`-triggered and subject to the identical
+  `head_sha` unreliability the file's adjacent comment already documented
+  for the CI -> Validation Gate hop. Validation Gate's `gate` job correctly
+  re-derives and confirms the real SHA via `git merge-base --is-ancestor`,
+  but only exposed it as an `is_dev` job output — never the SHA itself —
+  so `promote.yml` had nothing reliable to consume.
+- **Fix, round 1** (PR #3571 dev / #3573 main bootstrap): `validation-gate.yml`'s
+  `gate` job now uploads the confirmed SHA as an artifact (`validated-sha`);
+  `promote.yml` downloads it by the triggering run's id
+  (`github.event.workflow_run.id`) instead of trusting the event field.
+  Landed via the effort's established bootstrap pattern (workflow_run always
+  resolves `.github/workflows/*.yml` from `main`, so both files need a
+  direct-to-main companion PR, admin-merged past `main`'s `main source gate`
+  the same way #3547 was).
+- **Caught live within the hour**: the operator flagged a still-`skipped`
+  promote run right after #3571/#3573 landed. Investigation found a genuine
+  regression the first fix introduced — a Validation Gate run legitimately
+  concluding `is_dev=false` (e.g. CI ran on `main`'s own generated promotion
+  commit, not a real `dev` push) still reports overall `conclusion: success`
+  (the `gate` job itself succeeded), so the new download step had no
+  `is_dev==false` escape hatch and hard-failed with "Artifact not found for
+  name: validated-sha" instead of gracefully skipping — confirmed across 3
+  real failing runs (36100802265, 36100802143, 36101194235).
+- **Fix, round 2** (PR #3578 dev / #3580 main bootstrap): `continue-on-error`
+  on the download step; a missing `validated_sha.txt` is now treated as
+  `is_dev=false` (matching the graceful skip the old head_sha-ancestry check
+  already had), not an error. Verified green end-to-end afterward (runs
+  36101453241, 36101708233, 36101733825): correctly downloads-and-checks
+  when Validation Gate ran on real dev content, gracefully no-ops when it
+  didn't.
+- **Follow-up design conversation**: the operator asked whether Validation
+  Gate and Promote risk re-entrancy races, prompting a concurrency-group
+  audit of all three chained workflows (`ci.yml` cancel-in-progress:true on
+  a shared per-ref group — kills an in-flight run outright, not a rolling
+  build, real starvation risk under rapid pushes; `validation-gate.yml`
+  grouped per-commit — full parallelism across commits, no debounce at all;
+  `promote.yml` grouped globally with cancel-in-progress:false — already
+  the correct rolling-build/debounce pattern). The operator then asked for
+  exactly a GitHub-native rolling-queue model (run/queue/supersede-queued-
+  never-cancel-running) across the whole chain, and specifically whether
+  Validation Gate + Promote could become stages of one run so only one
+  (validate, promote) tuple is ever in flight.
+- **Confirmed feasible and superior, not just possible**: merging the two
+  workflow files also eliminates the artifact-passing mechanism entirely —
+  same-run jobs share `needs.<job>.outputs` natively, so there's no
+  `workflow_run` boundary left for this hop and no SHA-unreliability failure
+  class to work around at all (the entire #3567 + follow-up bug family
+  becomes structurally impossible for this hop, not merely handled). A
+  single top-level `concurrency` block (shared static key,
+  `cancel-in-progress: false`) is GitHub's documented `queue: single`
+  default — exactly the rolling-build semantics requested, with zero custom
+  logic needed.
+- **Filed #3592** tracking this redesign; added it to this effort's Phase 3
+  Plan + a Validation Plan item demanding it's verified live (rolling-queue
+  behavior, and the `is_dev`-false/skip branching specifically, since that's
+  the exact shape the round-2 regression took) rather than assumed correct
+  by construction. **Not yet implemented** — this entry is the kickoff;
+  see the Plan item for status.
 

@@ -371,8 +371,9 @@ def promote(
     branch (which a real, protected ``main`` will reject -- a personal
     GitHub account's branch rulesets have no way to grant a bypass to the
     GitHub Actions app the way an organization's can), the commit is pushed
-    to ``refs/heads/<candidate_branch>`` and the caller (``promote.yml``,
-    via ``gh pr create``/``gh pr merge``) is responsible for landing it on
+    to ``refs/heads/<candidate_branch>`` and the caller
+    (``validate-and-promote.yml``, via ``gh pr create``/``gh pr merge``) is
+    responsible for landing it on
     ``main`` through a real pull request -- the same sanctioned path every
     other change to this repo already uses. The tag is intentionally left
     unpushed in that mode: its target should be the real post-merge commit
@@ -482,7 +483,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--candidate-branch", default=None,
         help="push the candidate commit here instead of main directly, for a "
-             "caller (promote.yml) to land via a real PR + merge",
+             "caller (validate-and-promote.yml) to land via a real PR + merge",
     )
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true", help="default: do not push")
@@ -514,8 +515,9 @@ def main(argv: list[str] | None = None) -> int:
     for plugin, (old, new) in sorted(report["bumps"].items()):
         print(f"  bump: {plugin} {old} -> {new}")
     for name in report.get("changefiles_consumed", []):
-        # Machine-readable marker: promote.yml greps these to know exactly
-        # which .changefiles/*.json to delete from dev in a follow-up PR.
+        # Machine-readable marker: validate-and-promote.yml greps these to
+        # know exactly which .changefiles/*.json to delete from dev in a
+        # follow-up PR.
         # This tool NEVER touches dev's own tree itself -- `consume_pending_
         # changes()` only deletes changefiles inside the isolated scratch
         # worktree that becomes main's snapshot, so dev's real files are
