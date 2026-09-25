@@ -434,7 +434,13 @@ class OneShotSession:
                     f"tools/list: malformed response (expected 'result.tools' "
                     f"to be a list, got {page!r})"
                 )
-            tools.extend(t for t in page if isinstance(t, dict))
+            for entry in page:
+                if not isinstance(entry, dict):
+                    raise UpstreamError(
+                        f"tools/list: malformed response (expected every "
+                        f"'result.tools' entry to be an object, got {entry!r})"
+                    )
+                tools.append(entry)
             cursor = result.get("nextCursor")
             if not cursor:
                 break

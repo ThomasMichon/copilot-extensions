@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from .client import OneShotSession, UpstreamError
-from .config import ConfigError, load_config
+from .config import load_config
 
 # One-line remediation pointer per stage, shown under a failed stage.
 _HINTS: dict[str, str] = {
@@ -106,23 +106,18 @@ async def diagnose(
     printer(f"{step(1, 'config')}: loading {name_or_path} ...")
     try:
         cfg = load_config(name_or_path)
-    except ConfigError as exc:
-        printer(f"{step(1, 'config')}: FAILED -- {exc}")
-        report.stages.append(StageResult("config", False, str(exc)))
-        return report
-    except (OSError, UnicodeDecodeError) as exc:
-        # A config path that exists but can't be read (permissions, a broken
-        # symlink) or isn't valid UTF-8 -- a config-stage failure just like a
-        # schema/parse error, not an unhandled traceback (``_read_file``'s
-        # ``path.read_text()`` raises these unwrapped, outside ``ConfigError``).
-        printer(f"{step(1, 'config')}: FAILED -- {exc}")
-        report.stages.append(StageResult("config", False, str(exc)))
-        return report
-    except (ValueError, TypeError) as exc:
-        # A parseable-but-malformed scalar (e.g. ``timeout: not-a-number``) --
-        # ``parse_config`` converts several fields (``timeout``, ``retries``,
-        # cache ``ttl``/``skew``, decorator options) via bare ``float()``/
-        # ``int()`` calls that raise unwrapped, outside ``ConfigError`` too.
+    except Exception as exc:
+        # `load_config` raises `ConfigError` for a genuine schema/parse
+        # problem, but several of its lower steps raise unwrapped, outside
+        # `ConfigError`: `_read_file`'s `path.read_text()` can raise `OSError`
+        # (permissions, a broken symlink) or `UnicodeDecodeError` (invalid
+        # UTF-8), and `parse_config` performs unguarded scalar conversions
+        # (`float()`/`int()` on `timeout`/`retries`/cache `ttl`/`skew`) and
+        # mapping operations (`server.env`, `headers`, `tools`) that can raise
+        # `ValueError`/`TypeError`/`AttributeError` on a malformed value. Every
+        # one of those is a config-stage failure to `diagnose`, not a reason
+        # to crash -- catch broadly here rather than chase each conversion's
+        # specific exception type one at a time.
         printer(f"{step(1, 'config')}: FAILED -- {exc}")
         report.stages.append(StageResult("config", False, str(exc)))
         return report

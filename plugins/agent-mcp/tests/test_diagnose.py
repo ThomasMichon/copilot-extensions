@@ -41,6 +41,30 @@ for line in sys.stdin:
         sys.stdout.write(json.dumps(r)+"\n"); sys.stdout.flush()
 """
 
+# A stdio MCP child whose tools/list page includes a non-object entry
+# alongside valid ones -- regression for `list_tools_checked` silently
+# dropping a corrupted entry instead of failing.
+MCP_CHILD_CORRUPT_TOOL_ENTRY = r"""
+import sys, json
+def handle(m):
+    mid = m.get("id"); method = m.get("method")
+    if method == "initialize":
+        return {"jsonrpc":"2.0","id":mid,"result":{
+            "protocolVersion":"2025-06-18",
+            "serverInfo":{"name":"corrupt-entry","version":"1"},"capabilities":{}}}
+    if method == "tools/list":
+        return {"jsonrpc":"2.0","id":mid,"result":{"tools":[{"name":"ok"}, "bad"]}}
+    if mid is not None:
+        return {"jsonrpc":"2.0","id":mid,"result":{}}
+    return None
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    r = handle(json.loads(line))
+    if r is not None:
+        sys.stdout.write(json.dumps(r)+"\n"); sys.stdout.flush()
+"""
 # A stdio MCP child whose tools/list answer is well-formed JSON-RPC but has a
 # malformed *result* shape (no "tools" list at all) -- neither an explicit
 # error nor a valid catalog page. Regression for `list_tools_checked`.
@@ -203,3 +227,36 @@ async def test_diagnose_reports_malformed_config_value_as_failure(tmp_path):
 
     assert not report.ok
     assert [s.name for s in report.stages] == ["config"]
+
+
+async def test_diagnose_reports_malformed_config_mapping_as_failure(tmp_path):
+    # Regression: `parse_config` calls `.items()` on `headers` unguarded --
+    # a non-mapping value (e.g. a bare string) raises `AttributeError`, not
+    # `ValueError`/`TypeError`/`ConfigError` -- must still be a config-stage
+    # failure, not an unhandled traceback.
+    path = _write_cfg(tmp_path, {
+        "server": {"type": "stdio", "command": [sys.executable, "-c", MCP_CHILD]},
+        "auth": {"kind": "none"},
+        "headers": "not-a-mapping",
+    })
+    report = await diagnose(str(path), printer=lambda _line: None)
+
+    assert not report.ok
+    assert [s.name for s in report.stages] == ["config"]
+
+
+async def test_diagnose_reports_corrupt_tool_entry_as_failure(tmp_path):
+    # Regression: `list_tools_checked` must reject a non-object entry inside
+    # an otherwise well-formed `tools/list` page, not silently drop it and
+    # report success with a partial count.
+    path = _write_cfg(tmp_path, {
+        "server": {"type": "stdio", "command": [sys.executable, "-c", MCP_CHILD_CORRUPT_TOOL_ENTRY]},
+        "auth": {"kind": "none"},
+    })
+    report = await diagnose(str(path), printer=lambda _line: None)
+
+    assert not report.ok
+    failed = report.failed_stage
+    assert failed is not None
+    assert failed.name == "catalog"
+    assert report.tool_count is None
