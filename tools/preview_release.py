@@ -3,13 +3,17 @@
 would look like if promoted right now, without touching any real repo state
 or the operator's installed Copilot plugins.
 
-This composes the two generators built earlier in this effort:
+This composes three generators built earlier in this effort:
 
 * the same canonical-`libs/<lib>` -> copy materialization
   ``sync-vendored-libs.py --materialize`` performs, but scoped to write only
   into the **preview copy** (never the real
   ``plugins/<plugin>/libs/<lib>`` in this checkout -- a preview must never
   mutate the source tree it is previewing).
+* the same generalized file-pointer expansion ``materialize_main.py``
+  performs (e.g. a mirrored Markdown doc under ``plugins/<plugin>/docs/``),
+  same scoped-to-the-preview-copy guarantee (`vendored-doc-pointers` effort,
+  Phase 1).
 * ``accumulate_bumps.py``'s pure ``compute()`` (never ``apply()``) reports the
   version the plugin *would* get if its pending changefiles were consumed now.
 
@@ -67,6 +71,18 @@ def _load_sync_vendored_libs():
     return module
 
 
+def _load_materialize_main():
+    """Load ``tools/materialize_main.py`` relative to this module's own
+    location, same rationale as ``_load_sync_vendored_libs`` (an isolated
+    test tree gets the isolated copy, never the real repo's)."""
+    path = Path(__file__).resolve().parent / "materialize_main.py"
+    spec = importlib.util.spec_from_file_location("materialize_main_preview", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
 def _materialize_into_preview(dest: Path) -> list[str]:
     """Materialize every vendored lib under ``dest/libs/<lib>`` from the real
     canonical ``libs/<lib>``, writing only into ``dest`` -- never back into
@@ -92,6 +108,14 @@ def _materialize_into_preview(dest: Path) -> list[str]:
     return log
 
 
+def _materialize_file_pointers_into_preview(dest: Path) -> list[str]:
+    """Expand every vendored-doc (or other file) pointer under ``dest`` from
+    the real repo canonical source, writing only into ``dest`` -- same
+    never-mutate-the-source guarantee as ``_materialize_into_preview``."""
+    mm = _load_materialize_main()
+    return mm.materialize_file_pointers(dest, canonical_root=REPO)
+
+
 def build(plugin: str, workdir: Path) -> Path:
     src = PLUGINS_DIR / plugin
     if not src.is_dir():
@@ -103,6 +127,7 @@ def build(plugin: str, workdir: Path) -> Path:
     shutil.copytree(src, dest, ignore=_ignore)
 
     materialize_log = _materialize_into_preview(dest)
+    file_pointer_log = _materialize_file_pointers_into_preview(dest)
 
     grouped = {p: t for p, t in acc.pending_bumps().items() if p == plugin}
     computed = acc.compute(grouped) if grouped else {}
@@ -120,6 +145,7 @@ def build(plugin: str, workdir: Path) -> Path:
         "has_pending_changefiles": pending,
         "source_commit": _git_head(),
         "vendored_libs_materialize_log": materialize_log,
+        "vendored_file_pointers_materialize_log": file_pointer_log,
     }
     (dest / "PREVIEW.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return dest

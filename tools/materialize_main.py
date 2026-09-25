@@ -1,22 +1,36 @@
 #!/usr/bin/env python3
 """Build the "main release form" from a `dev`-shaped checkout: snapshot the
-whole tree, then expand every DRY vendor pointer
-(`plugins/<plugin>/libs/<lib>/VENDOR_POINTER.json`) back into a full copy
-from its canonical `libs/<lib>` source. This is the whole-repo counterpart of
+whole tree, then expand every DRY vendor pointer back into a full copy from
+its canonical source. This is the whole-repo counterpart of
 `preview_release.py`'s single-plugin materialization, and a validated
 prototype of the promotion pipeline's core step (Phase 3 of the
 dev-branch-release-pipeline effort) -- confirmed byte-for-byte lossless
 across all 56 vendored copies of this repo's 10 shared libs in a standalone
 trial clone (see the effort's Journal).
 
-No real plugin in this repo carries a vendor pointer yet -- that conversion
-is Phase 2 (the actual `dev` cutover), not this tool. Until then this tool
-is a no-op against the real checkout (there is nothing to expand) and exists
-so the promotion mechanism is ready and tested before it's needed.
+Two pointer kinds are expanded, generalized under the
+`vendored-doc-pointers` effort (see its README, Phase 1):
 
-Only `src/` is ever touched by a pointer, matching
-`check-vendored-libs-sync.py`'s own existing invariant (it only ever
-compares `src/` across copies; `tests/` and everything else stay untouched).
+* **Directory (lib) pointers** -- `plugins/<plugin>/libs/<lib>/VENDOR_POINTER.json`,
+  a JSON sidecar next to a lib copy that has no `src/` of its own. Expanded
+  from the canonical `libs/<lib>` directory; only `src/` and the declared
+  `pyproject.toml` version are ever touched, matching
+  `check-vendored-libs-sync.py`'s own existing invariant.
+* **File pointers** -- any single vendored file (e.g. a mirrored Markdown
+  doc under `plugins/<plugin>/docs/`) whose first line is an in-language
+  HTML-comment marker:
+  `<!-- VENDOR_POINTER: source=<repo-relative-path> kind=file -->`. Unlike a
+  directory pointer, the pointer *is* the mirrored file itself (its content
+  on `dev` is a short human/agent-readable stub, not empty) -- there is no
+  separate real copy to remove, so materializing overwrites the stub's
+  content in place with the canonical file's bytes.
+
+No real plugin in this repo carries a lib pointer yet -- that conversion is
+Phase 2 of dev-branch-release-pipeline. `docs/patterns/entity-relationship-model.md`'s
+three mirrors are the first real file-pointer conversion (Phase 2 of
+vendored-doc-pointers). Until each conversion lands this tool is a no-op
+against the real checkout for that kind (there is nothing to expand) and
+exists so the promotion mechanism is ready and tested before it's needed.
 
 Usage::
 
@@ -33,10 +47,40 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 POINTER_NAME = "VENDOR_POINTER.json"
 _VERSION_RE = re.compile(r'^(\s*version\s*=\s*")([^"]+)(")', re.MULTILINE)
+_FILE_POINTER_RE = re.compile(
+    r'^<!--\s*VENDOR_POINTER:\s*source=(\S+)\s+kind=file\s*-->\s*$'
+)
 
 
 def find_pointers(root: Path) -> list[Path]:
     return sorted(root.glob("plugins/*/libs/*/" + POINTER_NAME))
+
+
+def _file_pointer_source(path: Path) -> str | None:
+    """The `source=` value if ``path``'s first line is a file-pointer marker."""
+    try:
+        with path.open(encoding="utf-8") as f:
+            first_line = f.readline()
+    except (UnicodeDecodeError, OSError):
+        return None
+    m = _FILE_POINTER_RE.match(first_line.rstrip("\n"))
+    return m.group(1) if m else None
+
+
+def find_file_pointers(root: Path) -> list[Path]:
+    """Every vendored *file* pointer under ``root`` (not directory/lib
+    pointers, which are found by ``find_pointers``). ``root`` may be a whole
+    repo checkout or a single plugin's directory -- unlike a lib pointer's
+    fixed ``plugins/<plugin>/libs/<lib>`` location, a file pointer can live
+    anywhere its marker line is found, so callers such as
+    ``preview_release.py`` (which materializes one plugin directory, not the
+    whole repo) can reuse this unchanged."""
+    if not root.is_dir():
+        return []
+    return sorted(
+        p for p in root.rglob("*")
+        if p.is_file() and p.name != POINTER_NAME and _file_pointer_source(p)
+    )
 
 
 def materialize(dest: Path, *, canonical_root: Path) -> list[str]:
@@ -73,6 +117,44 @@ def materialize(dest: Path, *, canonical_root: Path) -> list[str]:
 
         pointer_path.unlink()
         log.append(f"OK   {lib_copy_dir} <- {source_rel}")
+    log.extend(materialize_file_pointers(dest, canonical_root=canonical_root))
+    return log
+
+
+def _resolve_within(canonical_root: Path, source_rel: str) -> Path | None:
+    """Resolve ``source_rel`` against ``canonical_root``, refusing an absolute
+    path or any ``../`` traversal that would escape ``canonical_root``
+    (including via a symlink). Returns ``None`` when the candidate escapes."""
+    if Path(source_rel).is_absolute():
+        return None
+    candidate = (canonical_root / source_rel).resolve()
+    root = canonical_root.resolve()
+    if candidate != root and root not in candidate.parents:
+        return None
+    return candidate
+
+
+def materialize_file_pointers(dest: Path, *, canonical_root: Path) -> list[str]:
+    """Expand every file pointer found under ``dest`` from ``canonical_root``.
+
+    Unlike a directory/lib pointer, a file pointer *is* the mirrored file:
+    there is no separate pointer sidecar to delete, so materializing
+    overwrites the stub's content with the canonical file's bytes in place."""
+    log: list[str] = []
+    for pointer_path in find_file_pointers(dest):
+        source_rel = _file_pointer_source(pointer_path)
+        canonical = _resolve_within(canonical_root, source_rel)
+
+        if canonical is None:
+            log.append(f"SKIP {pointer_path} (file pointer): source {source_rel!r} "
+                        "escapes the canonical root -- refusing")
+            continue
+        if not canonical.is_file():
+            log.append(f"SKIP {pointer_path} (file pointer): canonical {source_rel} not found")
+            continue
+
+        pointer_path.write_bytes(canonical.read_bytes())
+        log.append(f"OK   {pointer_path} (file pointer) <- {source_rel}")
     return log
 
 
