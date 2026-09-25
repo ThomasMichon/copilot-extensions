@@ -384,6 +384,59 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-24 — Guard re-audit against current `origin/main`; 4 documentation false positives annotated
+
+- Resumed after a prior worktree's unrelated stale diff (Agent Machines
+  exemplar hardening) was discarded as fully superseded by upstream's own
+  clean-room implementation. Re-ran
+  `python tools/check-marketplace-isolation.py --json` against fresh
+  `origin/main`: **702** findings (`unqualified-runtime-root`: 421,
+  `fixed-service-identity`: 146, `global-plugin-binstub`: 84,
+  `path-sibling-launch`: 50, `bare-agent-command`: 1 — a new category not
+  present in the 2026-09-10 note), up from 681 on 2026-09-10. This confirms
+  item 6 still does not hold; the guard stays report-only.
+- Sampled the 13 findings in the smallest untouched plugins
+  (`wsl-setup`, `harness-knowledge`, `budget-guidance`, `customizing-copilot`).
+  Found and annotated 4 genuine documentation false positives with
+  `marketplace-isolation: allow doc-example` (prose mentioning
+  `~/.agent-codespaces/config.d/`, `~/.agent-mcp/materialized/<server>/`,
+  generic `~/.local/bin` binstub concept, and `localhost:22` SSH port-forwarding
+  advice matching the endpoint regex by coincidence) —
+  `customizing-copilot/skills/authoring-harness-plugins/SKILL.md`,
+  `customizing-copilot/skills/defining-subagents/SKILL.md`,
+  `customizing-copilot/skills/installing-plugins/SKILL.md`, and
+  `wsl-setup/skills/setting-up-wsl/SKILL.md`. Verified
+  `check-marketplace-isolation.py --json` dropped from 702 to 698 findings
+  exactly matching the 4 annotations, and `check-docs-consistency.py` still
+  passes.
+- The remaining findings in that same sample —
+  `harness-knowledge/skills/binding-knowledge/scripts/assemble_plugins.py`
+  and `bind_knowledge.py`, and
+  `customizing-copilot/skills/reviewing-customizations/scripts/scan_plugin_sources.py`
+  — are genuine `path-sibling-launch` backlog: bare
+  `shutil.which("agent-worktrees")` resolution from a payload-only skill
+  script (no runtime cell of its own; neither plugin has a
+  `payload-invocation.json`). This does not fit the existing `_peer_launch.py`
+  primitive, which is scoped to the 7 already-registered `OWNERS` runtime/
+  service cells (`agent-bridge`, `agent-dispatch`, `agent-codespaces`,
+  `agent-containers`, `agent-logger`, `agent-index`, `agent-machines`) calling
+  each other cell-to-cell — extending that scaffolding to payload-only skill
+  scripts, or wiring them through the Phase 2 session-start command catalog
+  instead, needs its own design pass before touching these files. Left
+  unconverted rather than risk a rushed, unverified change to a live skill
+  entrypoint.
+- **698 findings remain** (702 minus the 4 annotated above): 689 in the 13
+  plugins outside this note's small cluster, plus the 9 genuine findings left
+  unconverted inside it (5 in `budget-guidance`, 2 in `customizing-copilot`,
+  2 in `harness-knowledge` — see above). The 13 outer plugins are dominated by
+  `agent-worktrees` (168), `agent-dispatch` (76), `agent-codespaces` (69),
+  `agent-index` (62), `agent-bridge` (55), `agent-vault` (52), and
+  `agent-machines` (49); each needs the same file-by-file genuine-backlog-vs-
+  intentional-legacy triage this note applied to the small plugins. Phase 2's
+  own tracked subset (`phase-2-launcher-contracts.md`, baselined at 80
+  `global-plugin-binstub` findings across 14 plugins) needs re-syncing against
+  the current count before its own numbers can be trusted.
+
 ### 2026-09-21 — `agent-bridge` registered as a new OWNERS member; `handoff-check` converted
 
 - Full-architecture audit (all 11 `agent-*` plugins) found `agent-bridge` and
