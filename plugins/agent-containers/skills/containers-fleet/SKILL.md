@@ -51,7 +51,8 @@ Define the fleet in `containers.yaml`, then:
 ```
 
 Containers are kept warm (stopped, not destroyed). `down` stops them, `start`
-restarts them, `rm` removes them.
+restarts them, `rm` removes them, and `rescue-capture` non-destructively copies
+idle restricted-fleet session evidence for publication without stopping members.
 
 ## Configuration (`containers.yaml`)
 

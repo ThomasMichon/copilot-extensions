@@ -1,0 +1,9 @@
+{
+  "comment": "Add non-destructive 'agent-containers rescue-capture <fleet>' verb: captures a restricted fleet's session evidence without stopping or removing the container, reusing the existing admission/idleness gating.",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}
