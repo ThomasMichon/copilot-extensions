@@ -6,6 +6,10 @@
       "type": "patch"
     },
     {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
       "plugin": "agent-dispatch",
       "type": "patch"
     }

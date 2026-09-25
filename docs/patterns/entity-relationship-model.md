@@ -11,8 +11,16 @@ machine), agent-codespaces (codespace), agent-containers (container).
 
 ## Problem
 
-The suite tracks ten **entity types**, each owned by exactly one plugin tier —
-nine durable, one transient:
+The suite tracks ten **entity types**. Nine are durable and each has exactly
+one authoritative owner; the tenth (**agent**) is transient and has none.
+**session** is the one entity whose authoritative store splits by *kind*, not
+joint ownership: a bridge-hosted session (one agent-bridge drives) is owned by
+agent-bridge; a raw interactive-CLI session the Copilot CLI itself started
+(with no bridge involved) is tracked only in its own
+`~/.copilot/session-state/<id>/` directory, which agent-bridge's
+`live-sessions` registry additionally *represents* when that session is
+opened for observation — see rows 3-4 below for exactly which command answers
+which kind:
 
 | Entity | Owning plugin | What it is |
 |---|---|---|
@@ -20,7 +28,7 @@ nine durable, one transient:
 | **repo** | agent-worktrees | A versionable source corpus (a git remote + its local checkouts). |
 | **project** | agent-worktrees | A repo declared to agent-worktrees as an agent harness — the unit `agent-worktrees` commands operate against. |
 | **worktree** | agent-worktrees | A space carved for one agent in a project's repo — an isolated checkout + branch. |
-| **session** | agent-bridge (bridge-hosted) / Copilot CLI (`~/.copilot/session-state/`) | Accumulated conversation context awaiting the next agent action, built from a worktree. |
+| **session** | agent-bridge (bridge-hosted) **or** the Copilot CLI's own session-state store (raw interactive-CLI, no bridge) — see the split above | Accumulated conversation context awaiting the next agent action, built from a worktree. |
 | **agent** | (transient, not separately persisted) | The active loop currently driving a session — an identity + running process, not a durable row of its own. |
 | **task** | agent-dispatch | A unit of durable, assignable work with its own lifecycle (queued → claimed → active → completed). |
 | **bridge** | agent-bridge | The live connection to Copilot actually driving an agent right now. |
@@ -60,21 +68,24 @@ commands are added, renamed, or filled in.
 |---|---|---|
 | 1 | Given a session id, what worktree is it assigned to? | `agent-worktrees session-lineage --session-id <id> --json` |
 | 2 | Given a worktree, enumerate all sessions ever assigned to it | `agent-worktrees list-sessions --worktree <id> --json` (machine-wide: `--all-projects`) |
-| 3 | Given a session id, what is its active bridge state (live? driving agent? observed/steered?) | For an **interactive-CLI (represented) session**: `agent-bridge live-sessions resolve --handle <session-id>` (`live-sessions` registers only represented CLI sessions, not general bridge-hosted ACP sessions). For any bridge-hosted session: `agent-bridge session-usage <session-id>` reports status/liveness generally. |
+| 3 | Given a session id, what is its active bridge state (live? driving agent? observed/steered?) | For an **interactive-CLI (represented) session**: `agent-bridge live-sessions resolve --handle <session-id>` returns status, liveness, `turn_state`, and `latest_progress` (`live-sessions` registers only represented CLI sessions, not general bridge-hosted ACP sessions). For **any** bridge-hosted session (represented or not), `agent-bridge session-usage <session-id>` reports `status` (a liveness proxy: e.g. running/idle/completed) plus turn/context usage — but not `driven_by`/observed-or-steered detail, which is a `live-sessions`-only (represented-session) concept. |
 | 4 | Given a worktree, what is its active bridge state | For an interactive-CLI (represented) session on that worktree: `agent-bridge live-sessions resolve --handle <worktree-id>` (or `live-sessions list --worktree-id <id>`) — same represented-session-only scope as row 3. |
-| 5 | Given a task id, resolve its assigned worktree, session, and bridge state | **Better than composable for the live case.** `agent-dispatch show <task_id>`/`list` already **overlay** live-session status for a CLI-embodied task: it joins the task's owner worktree against agent-bridge's live-session registry and adds an `embodiment` block (`driven_by`, `status`, `turn_state`/`liveness`, heartbeat) — cross-machine too (resolves over the SSH mesh when the owner is a remote machine). See `agent-dispatch`'s own skill, § Inspect. For a task whose worktree is **already gone** (no longer live), that overlay is absent by design (best-effort/read-only); durable resolution then depends on issue #3555 (below) landing a CLI-native step for `GET /api/v1/dispatch-tasks/{id}/session`. Tracked as [issue #3556](https://github.com/ThomasMichon/copilot-extensions/issues/3556) to decide whether a single command spanning both the live-overlay and durable-fallback cases is worth adding. |
+| 5 | Given a task id, resolve its assigned worktree, session, and bridge state | **Composable for the live case, a genuine gap for the durable case.** `agent-dispatch show <task_id>`/`list` already **overlay** live-session status for a CLI-embodied task: it joins the task's owner worktree against agent-bridge's live-session registry and adds an `embodiment` block (`driven_by`, `status`, `turn_state`/`liveness`, heartbeat) — cross-machine too (resolves over the SSH mesh when the owner is a remote machine). See `agent-dispatch`'s own skill, § Inspect. That overlay is **absent by design** the moment the task's worktree is no longer live (best-effort/read-only) — resolving the session for *that* case is the same durable gap as the `—` row below (issue #3555), not a separate one. Tracked as [issue #3556](https://github.com/ThomasMichon/copilot-extensions/issues/3556) to decide whether a single command spanning both the live-overlay and durable-fallback cases is worth adding once #3555 lands. |
 | 6 | Given a session id, enumerate its conversation history and compute stats (turn count, token usage, `context_pct`, duration) | Composable, not a gap (rule 4): `agent-bridge session-usage <session-id>` for stats; `agent-bridge read <session-id> --no-follow` (or `GET /api/v1/sessions/{id}/transcript`) for the rendered conversation. Tracked as [issue #3557](https://github.com/ThomasMichon/copilot-extensions/issues/3557) to decide whether a single combined command is worth adding, or whether keeping stats cheap and transcript rendering separate is the intended design. |
 | 7 | Given a worktree, identify its handoff chain | `agent-worktrees worktree-lineage --worktree <id> --json` (or `handoff-trace <worktree-id>`) |
-| 8 | Given a session id, identify its predecessor/successor/head in the handoff chain | Read the relevant entry out of `worktree-lineage`'s `HeadTransition`/`SessionHandoff` records for that session's worktree — there is no session-scoped filter of that output yet. |
-| — | Given a task id (only), resolve the session it worked | **Genuine gap**, tracked as [issue #3555](https://github.com/ThomasMichon/copilot-extensions/issues/3555). `GET /api/v1/dispatch-tasks/{id}/session` on agent-bridge exists over HTTP; no CLI equivalent, forcing every CLI-context consumer to hand-roll an HTTP client. |
+| 8 | Given a session id, identify its predecessor/successor/head in the handoff chain | Composable, not a gap: `agent-worktrees session-lineage --session-id <id> --json` already returns this session-scoped -- `relations[].projection.lineage.predecessor`/`.successor` and `relations[].projection.is_head` -- directly, no need to parse the broader worktree-lineage graph. |
+| 9 | Given a session id, find the task(s) it worked (reverse of row 5) | `agent-dispatch find-by-session <session-id>` -- lists every task on this host's coordinator that session ever attached to, with `worktree_id`/`machine` and attach/detach timestamps (local-only; no cross-machine peer-browse for this direction yet). |
+| — | Given a task id (only), resolve the session it worked once its worktree is no longer live | **Genuine gap**, tracked as [issue #3555](https://github.com/ThomasMichon/copilot-extensions/issues/3555). `GET /api/v1/dispatch-tasks/{id}/session` on agent-bridge exists over HTTP; no CLI equivalent, forcing every CLI-context consumer to hand-roll an HTTP client. |
 | — | Given a claim ref (`dispatch-task:`/`codespace:`/`container:`), resolve the owning worktree | **Genuine gap**, tracked as [issue #3558](https://github.com/ThomasMichon/copilot-extensions/issues/3558). The claim-provider's `claim-status <ref>` callback reports the external resource's liveness, not its owning worktree; only the claims-ledger *entry* (already keyed by worktree) carries that link, and there's no composed reverse resolver yet. |
 
 The two `—` rows above are the genuine gaps at the time this pattern was
 written (no command exists at any layer) — each now has a tracking issue
-linked in its row. Rows 5 and 6 are composable, not gaps, per rule 4 below;
-their linked issues (#3555, #3557) track ergonomics improvements, not missing
-capability. Add a tracking issue link the moment a new gap is found, so this
-table stays the single source of truth instead of drifting from reality.
+linked in its row. Rows 5, 6, and 8 are composable, not gaps, per rule 4
+below -- their linked issues (#3556, #3557) track ergonomics improvements,
+not missing capability, except row 5's durable-fallback case, which shares
+issue #3555 with the equivalent `—` row above. Add a tracking issue link the
+moment a new gap is found, so this table stays the single source of truth
+instead of drifting from reality.
 
 ### Rules for keeping the map honest
 
@@ -106,14 +117,19 @@ reinventing a wrapper script that the next session won't know to reuse.
 
 ## See Also
 
-- [`a-la-carte-independence.md`](a-la-carte-independence.md) — the plugin-stack
-  tier ordering and provider-manifest registry pattern claim refs build on.
-- [`state-root-coordination.md`](state-root-coordination.md) — how claim/lease
-  producers resolve a qualified owner's coordination identity.
-- [`session-state-access.md`](session-state-access.md) — the
-  registry-not-sweep discipline behind worktree↔session discovery
-  (questions 1-2 above).
-- [`drop-in-registry-hygiene.md`](drop-in-registry-hygiene.md) — how claim
-  providers stay legible when a contributing plugin is absent or stale.
+These deeper patterns live only in the `copilot-extensions` repo itself (they
+are not part of any plugin's marketplace payload, so a mirrored copy of this
+file cannot link to them relatively) — read them from a checkout, or resolve
+one via `agent-worktrees related resolve copilot-extensions` if this doc's
+own repo is not already registered:
+
+- `docs/patterns/a-la-carte-independence.md` — the plugin-stack tier ordering
+  and provider-manifest registry pattern claim refs build on.
+- `docs/patterns/state-root-coordination.md` — how claim/lease producers
+  resolve a qualified owner's coordination identity.
+- `docs/patterns/session-state-access.md` — the registry-not-sweep discipline
+  behind worktree↔session discovery (questions 1-2 above).
+- `docs/patterns/drop-in-registry-hygiene.md` — how claim providers stay
+  legible when a contributing plugin is absent or stale.
 - `efforts/active/claim-provider-pattern/README.md` — the claim-ref namespace
   schema (`dispatch-task:`, `codespace:`, `container:`).
