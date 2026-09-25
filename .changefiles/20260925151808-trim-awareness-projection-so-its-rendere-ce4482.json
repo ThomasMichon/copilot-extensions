@@ -1,0 +1,9 @@
+{
+  "comment": "Trim awareness projection so its rendered output fits the 4 KiB projection budget",
+  "changes": [
+    {
+      "plugin": "context-handoff",
+      "type": "patch"
+    }
+  ]
+}
