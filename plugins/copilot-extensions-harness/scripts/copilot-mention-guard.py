@@ -290,8 +290,9 @@ def _has_write_subcommand(tokens: list[str]) -> bool:
 
 def _is_api_comment_or_review_write(tokens: list[str]) -> bool:
     """``gh api ...`` writing a body via ``-f``/``-F``/``--input`` to a
-    comments/reviews endpoint (PR review-comment replies, issue comments via
-    the raw API)."""
+    comments/reviews/issue/pull-request endpoint (PR review-comment
+    replies, issue comments via the raw API, and a PR/issue's own body
+    update, e.g. ``PATCH /repos/o/r/issues/1``)."""
     lowered = [t.lower() for t in tokens[1:]]
     if "api" not in lowered:
         return False
@@ -308,23 +309,29 @@ def _is_api_comment_or_review_write(tokens: list[str]) -> bool:
     if not (has_body_field or has_input):
         return False
     return any(
-        "/comments" in t or "/reviews" in t
+        "/comments" in t or "/reviews" in t or "/issues" in t or "/pulls" in t
         for t in tokens[1:]
         if not t.startswith("-")
     )
 
 
 def _read_bounded(path: str, limit: int = 200_000) -> str | None:
-    """Contents of *path* (bounded), or ``None`` if it can't be read --
-    NEVER an empty string on failure, which would make an uninspectable
-    body file (e.g. a variable-expanded path this best-effort tokenizer
-    couldn't resolve, or a genuinely missing file) look identical to an
-    empty, harmless one and silently pass it through."""
+    """Contents of *path*, or ``None`` if it can't be read/is too large to
+    fully inspect -- NEVER an empty or truncated string on failure, either
+    of which would make an uninspectable body file (unreadable, a
+    variable-expanded path this best-effort tokenizer couldn't resolve, or
+    one whose real content exceeds *limit*) look identical to an empty or
+    fully-scanned one and silently pass it through. Reads one byte past
+    *limit* specifically to detect truncation rather than ever treating a
+    cut-off prefix as the complete body."""
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
-            return fh.read(limit)
+            content = fh.read(limit + 1)
     except OSError:
         return None
+    if len(content) > limit:
+        return None
+    return content
 
 
 _UNSCANNABLE = object()  # sentinel: the body is sourced from stdin, which a
@@ -366,10 +373,25 @@ def _is_create_subcommand(tokens: list[str]) -> bool:
     return False
 
 
+# A literal shell-expansion reference (``$VAR``, ``${VAR}``, ``$(...)``,
+# or a backtick command substitution) that shlex's quote-removal leaves
+# intact as plain text, since shlex only strips quoting -- it is not a real
+# shell and never performs the expansion itself. A body argument containing
+# one of these is NOT the actual published text; the real content is only
+# known at gh's own execution time, after this hook has already decided.
+_UNEXPANDED_REFERENCE_RE = re.compile(r"\$\{|\$\(|\$[A-Za-z_]|`")
+
+
+def _contains_unexpanded_reference(value: str) -> bool:
+    return bool(_UNEXPANDED_REFERENCE_RE.search(value))
+
+
 def _extract_body_text(tokens: list[str]) -> str | object:
     """Best-effort: the literal body text this invocation would publish, or
     the ``_UNSCANNABLE`` sentinel if the body is sourced from stdin
-    (``--body-file -`` / ``-F body=@-``, gh's stdin convention)."""
+    (``--body-file -`` / ``-F body=@-``, gh's stdin convention) or is an
+    unexpanded shell variable/command-substitution reference this hook
+    cannot resolve before the command actually runs."""
     parts: list[str] = []
     index = 1
     while index < len(tokens):
@@ -377,11 +399,17 @@ def _extract_body_text(tokens: list[str]) -> str | object:
         matched = False
         for flag in INLINE_BODY_FLAGS:
             if token == flag and index + 1 < len(tokens):
-                parts.append(tokens[index + 1])
+                value = tokens[index + 1]
+                if _contains_unexpanded_reference(value):
+                    return _UNSCANNABLE
+                parts.append(value)
                 matched = True
                 break
             if token.startswith(flag + "="):
-                parts.append(token[len(flag) + 1 :])
+                value = token[len(flag) + 1 :]
+                if _contains_unexpanded_reference(value):
+                    return _UNSCANNABLE
+                parts.append(value)
                 matched = True
                 break
         if matched:
@@ -424,24 +452,43 @@ def _extract_body_text(tokens: list[str]) -> str | object:
             parts.append(result)
             index += 1
             continue
-        # ``gh api ... -f body=VALUE`` / ``-F body=@path`` / ``-F body=@-``.
-        if token in {"-f", "-F"} and index + 1 < len(tokens):
+        # ``gh api ... -f body=VALUE`` / ``-F body=@path`` / ``-F body=@-``
+        # (and their ``--field``/``--raw-field`` long-flag aliases, space or
+        # ``=``-joined form). Both flag families support an ``@file``
+        # reference -- neither is raw-only for that purpose.
+        body_field_flags = {"-f", "-F", "--field", "--raw-field"}
+        field = None
+        consumed = 0
+        if token in body_field_flags and index + 1 < len(tokens):
             field = tokens[index + 1]
+            consumed = 2
+        else:
+            for flag in body_field_flags:
+                if token.startswith(flag + "="):
+                    field = token[len(flag) + 1 :]
+                    consumed = 1
+                    break
+        if field is not None:
             if field.startswith("body="):
                 value = field[len("body=") :]
                 if value == "@-":
                     return _UNSCANNABLE
-                if token == "-F" and value.startswith("@"):
+                if value.startswith("@"):
                     content = _read_bounded(value[1:])
                     if content is None:
                         return _UNSCANNABLE
                     parts.append(content)
+                elif _contains_unexpanded_reference(value):
+                    return _UNSCANNABLE
                 else:
                     parts.append(value)
-            index += 2
+            index += consumed
             continue
         if token.startswith("body=") and "-f" not in tokens[:index]:
-            parts.append(token[len("body=") :])
+            value = token[len("body=") :]
+            if _contains_unexpanded_reference(value):
+                return _UNSCANNABLE
+            parts.append(value)
         index += 1
     if not parts:
         # No recognized body flag found. For a `pr create`/`issue create`

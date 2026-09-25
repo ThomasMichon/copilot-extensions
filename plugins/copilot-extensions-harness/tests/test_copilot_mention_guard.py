@@ -262,6 +262,72 @@ def test_readable_body_file_is_still_scanned_normally(tmp_path: Path) -> None:
     assert guard.command_publishes_copilot_mention(cmd) is None
 
 
+def test_oversized_body_file_is_denied_fail_closed(tmp_path: Path) -> None:
+    """PR #3663 review (round 9): _read_bounded() silently dropped
+    everything past its 200,000-character limit, so a mention appearing
+    only after that boundary published undetected. Must fail closed on
+    truncation instead of treating a cut-off prefix as complete. Exercises
+    the truncation branch directly via a small *limit* override (writing an
+    actual 200KB+ fixture file would be wasteful for a unit test)."""
+    guard = _load_guard()
+    big_file = tmp_path / "big.md"
+    big_file.write_text("y" * 10, encoding="utf-8")
+    assert guard._read_bounded(str(big_file), limit=5) is None
+    assert guard._read_bounded(str(big_file), limit=20) == "y" * 10
+
+
+def test_api_issue_body_write_with_mention_is_denied() -> None:
+    """PR #3663 review (round 9): the endpoint filter only recognized
+    /comments and /reviews, so a PR/issue's own body update (PATCH
+    /issues/1 or /pulls/1) -- also part of this guard's documented scope
+    -- was treated as a non-write and allowed."""
+    guard = _load_guard()
+    cmd = "gh api repos/o/r/issues/1 --method PATCH -f 'body=cc @copilot review'"
+    assert guard.command_publishes_copilot_mention(cmd) == "mention"
+
+
+def test_api_long_field_form_file_ref_is_scanned(tmp_path: Path) -> None:
+    """PR #3663 review (round 9): the classifier recognized --field as an
+    alias of -F, but extraction only handled -f/-F literally -- a
+    --field body=@path file reference fell through to scanning the literal
+    filename instead of reading it."""
+    guard = _load_guard()
+    body_file = tmp_path / "body.md"
+    body_file.write_text("@copilot review", encoding="utf-8")
+    cmd = f"gh api repos/o/r/issues/1/comments --field body=@{body_file}"
+    assert guard.command_publishes_copilot_mention(cmd) == "mention"
+
+
+def test_unexpanded_shell_variable_body_is_denied_fail_closed() -> None:
+    """PR #3663 review (round 9, previously-missed finding): shlex's quote
+    removal leaves an unexpanded $VAR/${VAR}/$(...)/backtick reference as
+    plain text -- shell expansion happens only when gh actually runs, after
+    this hook has already decided. The real published text is never the
+    literal '$BODY' string this hook can see."""
+    guard = _load_guard()
+    assert guard.command_publishes_copilot_mention(
+        'gh pr comment 1 -R owner/repo --body "$BODY"'
+    ) == "unscannable"
+    assert guard.command_publishes_copilot_mention(
+        'gh pr comment 1 -R owner/repo --body "${BODY}"'
+    ) == "unscannable"
+    assert guard.command_publishes_copilot_mention(
+        "gh pr comment 1 -R owner/repo --body \"$(cat notes.txt)\""
+    ) == "unscannable"
+    assert guard.command_publishes_copilot_mention(
+        'gh api repos/o/r/issues/1 --method PATCH -f body="$BODY"'
+    ) == "unscannable"
+
+
+def test_literal_dollar_sign_without_variable_syntax_is_still_scanned() -> None:
+    """Companion true-negative: a literal '$' that isn't actually a
+    variable/command-substitution reference (no following identifier char,
+    '{', '(', or backtick) must not be treated as unscannable."""
+    guard = _load_guard()
+    cmd = 'gh pr comment 1 -R owner/repo --body "Cost is $5, all good"'
+    assert guard.command_publishes_copilot_mention(cmd) is None
+
+
 # ---------------------------------------------------------------------------
 # Repo scoping -- this guard applies ONLY to this plugin's own repo.
 # ---------------------------------------------------------------------------
