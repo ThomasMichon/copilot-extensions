@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from agent_logger.catalog import ReviewCatalogIndex, rebuild_from_sidecars
 from agent_logger.sessions import write_review_annotation
 
@@ -371,7 +373,10 @@ def test_cli_annotate_rejects_symlinked_session_directory(
     state_root.mkdir(parents=True)
     outside = tmp_path / "outside"
     outside.mkdir()
-    (state_root / "s1").symlink_to(outside, target_is_directory=True)
+    try:
+        (state_root / "s1").symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation not permitted in this environment")
 
     rc = _run_annotate_cli(
         monkeypatch,

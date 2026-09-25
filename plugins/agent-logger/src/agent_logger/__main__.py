@@ -275,10 +275,12 @@ def _cmd_catalog_annotate(args: argparse.Namespace) -> int:
     checks :mod:`agent_logger.cold_store` already applies to a read, since a
     process-boundary caller here is just as untrusted as one there. Exits
     non-zero with a clear message when the session id isn't found locally or
-    isn't safe, or the write itself fails (a lock timeout, a malformed
-    existing sidecar, or a catalog database error -- the sidecar write may
-    already have succeeded even if the catalog side then fails, so the
-    caller should know about it rather than have it silently discarded).
+    isn't safe, or the write itself fails (a lock timeout or a catalog
+    database error -- the sidecar write may already have succeeded even if
+    the catalog side then fails, so the caller should know about it rather
+    than have it silently discarded). A malformed *existing* sidecar is not
+    a failure here: :func:`write_review_annotation` treats it the same as a
+    missing one and simply overwrites it with a fresh, well-formed entry.
     """
     import sqlite3
 
