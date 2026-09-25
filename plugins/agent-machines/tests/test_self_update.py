@@ -1180,6 +1180,19 @@ def test_render_linux_timer_unit_hourly_vs_daily():
 
 
 def test_render_linux_service_unit_includes_machine_and_workdir(tmp_path):
+    # `task_binstub_path()` (which this renderer calls) intentionally keys
+    # its `.cmd`-suffix/Windows-path-style behavior off `sys.platform`, not
+    # an explicit rendering target -- it's shared with the real Windows
+    # Scheduled Task path, which needs exactly that host-reflecting
+    # behavior. On a native Windows test run this produces a real,
+    # Windows-flavored path, which this Linux-unit-text assertion was never
+    # written to expect (it assumes a POSIX host, matching how this whole
+    # systemd family is gated by `linux_systemd_user_available()` and thus
+    # only ever meaningfully exercised on Linux/WSL in practice). Skip on
+    # native Windows rather than asserting a POSIX-only rendering contract
+    # the host cannot satisfy.
+    if sys.platform == "win32":
+        pytest.skip("Linux systemd unit rendering assumes a POSIX host")
     unit = self_update_tasks.render_linux_service_unit(
         "sweep", machine="box-1", home=tmp_path
     )
@@ -1267,6 +1280,13 @@ def test_query_systemd_timer_absent_when_units_missing(tmp_path):
 
 
 def test_query_systemd_timer_matches_after_register(tmp_path):
+    # Same POSIX-host assumption as test_render_linux_service_unit_...
+    # above -- `task_binstub_path()`'s Windows-flavored rendering makes the
+    # embedded exec path and this test's expected string diverge on a
+    # native Windows run.
+    if sys.platform == "win32":
+        pytest.skip("Linux systemd unit rendering assumes a POSIX host")
+
     def runner(argv, **kwargs):
         if "is-enabled" in argv:
             return _fake_command_result(argv, 0, "enabled\n")
@@ -1389,6 +1409,13 @@ def test_reconcile_scheduled_task_skips_when_no_systemd_user_manager(monkeypatch
 
 
 def test_scheduled_task_status_reports_linux_timer(monkeypatch, tmp_path):
+    # `scheduled_task_status()`'s public wrapper hardcodes
+    # `resolve_binary=shutil_which` (not test-injectable), so this test can
+    # only pass where a REAL `systemctl` binary is resolvable on PATH --
+    # genuine Linux/WSL with systemd, never native Windows. Mocking
+    # `sys.platform` alone cannot substitute for that real dependency.
+    if sys.platform == "win32":
+        pytest.skip("requires a real systemctl binary on PATH (Linux/WSL only)")
     monkeypatch.setattr(self_update_tasks.sys, "platform", "linux")
 
     def runner(argv, **kwargs):

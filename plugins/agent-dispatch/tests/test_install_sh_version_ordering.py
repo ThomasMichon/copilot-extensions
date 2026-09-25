@@ -31,15 +31,31 @@ _INSTALL_SH = _PLUGIN_ROOT / "scripts" / "install.sh"
 
 
 def _resolve_bash() -> str | None:
-    """Return a usable Bash path, excluding the WindowsApps WSL alias stub."""
+    """Resolve a REAL bash, not Windows' WSL-launcher `bash.exe` shim.
+
+    On Windows, ``shutil.which("bash")`` can resolve to a WSL launcher stub
+    under ``WindowsApps`` or the classic ``C:\\Windows\\System32\\bash.exe``
+    -- neither is a real POSIX bash for this test's purposes (the System32
+    launcher invokes an actual WSL distro, which runs this script in a
+    different environment than the one under test). Prefer the real Git
+    Bash location when present, then fall back to a PATH-resolved bash with
+    both known WSL-launcher locations excluded.
+    """
+    git_bash = Path(r"C:\Program Files\Git\bin\bash.exe")
+    if git_bash.is_file():
+        return str(git_bash)
     path = os.environ.get("PATH")
     if path:
-        filtered = os.pathsep.join(part for part in path.split(os.pathsep) if "WindowsApps" not in part)
+        filtered = os.pathsep.join(
+            part for part in path.split(os.pathsep)
+            if "WindowsApps" not in part
+            and part.rstrip("\\").lower() != r"c:\windows\system32"
+        )
         bash = shutil.which("bash", path=filtered)
         if bash:
             return bash
     bash = shutil.which("bash")
-    if bash and "WindowsApps" not in bash:
+    if bash and "WindowsApps" not in bash and "\\system32\\" not in bash.lower():
         return bash
     return None
 
