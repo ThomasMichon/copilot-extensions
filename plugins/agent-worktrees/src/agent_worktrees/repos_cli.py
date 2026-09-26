@@ -44,7 +44,9 @@ def _repos_usage() -> None:
     print("     [--platform windows|wsl|linux]")
     print("  migrate [--default-class C]         Import legacy ~/.git-repos")
     print("  status [--tag T] [--class C]        Show branch/dirty/ahead-behind")
-    print("  sync [--tag T] [--class C]          Fetch + fast-forward (skips dirty)")
+    print("  sync [<repo> ...] [--tag T] [--class C]  Fetch + fast-forward (skips dirty);")
+    print("                                      named repos only, else every registered one")
+    print("                                      (names, if any, must come first)")
     print("  doctor [--fix] [--json]             Reconcile projects.yaml <-> repos.yaml")
     print("  account [list|set <owner> <login>|unset <owner>]")
     print("                                      Decoupled owner->gh-login map (account_map)")
@@ -81,6 +83,7 @@ def _repos_usage() -> None:
     print(f"  {project} repos find dotfiles")
     print(f"  {project} repos add my-lib D:\\Src\\my-lib --class reference")
     print(f"  {project} repos sync --tag multi-machine system")
+    print(f"  {project} repos sync copilot-extensions   # fast-forward just its anchor")
 
 
 def _clarify_registration_account(
@@ -415,16 +418,36 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
     if sub == "sync":
         tag = None
         class_filter = None
-        if "--tag" in rest:
-            idx = rest.index("--tag")
-            if idx + 1 < len(rest):
-                tag = rest[idx + 1]
-        for flag in ("--class", "--type"):
-            if flag in rest:
-                idx = rest.index(flag)
-                if idx + 1 < len(rest):
-                    class_filter = rest[idx + 1]
-        results = repos.sync_all(tag=tag, class_filter=class_filter)
+        # Repo names must come first (`repos sync <name> [<name> ...]
+        # [--tag T] [--class C]`) -- an unambiguous positionals-then-flags
+        # split. This is what lets an unquoted, multi-word `--tag
+        # multi-machine system` value (a real, pre-existing tag containing a
+        # literal space -- see references/repos.yaml) keep working: once the
+        # first `--`-flag is seen, every remaining bare token belongs to that
+        # flag, never to a trailing name.
+        i = 0
+        name_list: list[str] = []
+        while i < len(rest) and not rest[i].startswith("--"):
+            name_list.append(rest[i])
+            i += 1
+        while i < len(rest):
+            tok = rest[i]
+            if tok == "--tag":
+                j = i + 1
+                while j < len(rest) and not rest[j].startswith("--"):
+                    j += 1
+                tag = " ".join(rest[i + 1:j]) or None
+                i = j
+                continue
+            if tok in ("--class", "--type"):
+                if i + 1 < len(rest):
+                    class_filter = rest[i + 1]
+                i += 2
+                continue
+            i += 1
+        results = repos.sync_all(
+            tag=tag, class_filter=class_filter, names=tuple(name_list) or None,
+        )
         if not results:
             print("No repos registered.")
             return 0
