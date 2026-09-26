@@ -244,16 +244,28 @@ shape before committing to a design)_
       script content in the `main` snapshot, so what ships never resolves
       anything outside its own plugin's payload (per `docs/install-
       contract.md`).
+- [ ] **`tools/preview_release.py` has no materialization path for an
+      executable pointer** (confirmed in review — its scratch-preview build
+      only calls `_materialize_into_preview()` for library copies and
+      `materialize_file_pointers()` for file markers; a script pointer
+      would remain an unexpanded dev stub in the preview, even though the
+      Validation Plan requires previews to resolve it). Add the explicit
+      preview-materialization change and regression tests for the new kind
+      here, not just in `materialize_main.py`.
 - [ ] Coordinate with `vendored-installer-engine`'s own driver/Journal
       before changing its chosen byte-vendor mechanism — this may land as
       a phase *within* that effort instead of duplicated here, once its
       canonical engine exists to point at. Do not fork its design
       unilaterally.
-- [ ] Extend `sync-vendored-libs.py` and the new/extended guard from Phase 1
-      (whichever tool ends up owning pointer-schema validation) to
-      recognize the executable pointer kind for drift/consistency checking,
-      matching whatever real directory/file pointer guard Phase 1 actually
-      builds — not assuming one already exists.
+- [ ] Build drift/consistency checking for the executable pointer kind
+      **without conflating vendoring surfaces** (corrected in review —
+      `sync-vendored-libs.py` is scoped to `plugins/*/libs/*` and library
+      `src/`/version materialization; the installer-engine surface already
+      has its own `tools/sync-installer-engine.py` for
+      `scripts/installer-engine.*` copies, with its own adopter map).
+      Assign this to either a new, generic pointer validator/materializer
+      shared across all pointer kinds, or to `sync-installer-engine.py`
+      itself — not to the lib-scoped tool.
 
 ### Phase 3 — Document the pattern; sweep for further "and more" candidates
 - [ ] Write `docs/patterns/vendor-pointer.md`: the three (by then) pointer
@@ -339,3 +351,12 @@ _Pending._
   pointerized lib cannot yet produce a scratch preview. Added a Phase 1
   item to fix this directly (moved out of the Validation Plan, where it
   was only an assumption).
+- **Round 3 review (2026-09-26):** two more findings on Phase 2's design
+  completeness, both fixed: (1) `preview_release.py`'s scratch build has no
+  materialization path for the (not-yet-designed) executable pointer kind
+  — added an explicit Phase 2 item alongside the `materialize_main.py` one.
+  (2) The drift/consistency-checking item wrongly assigned executable-
+  pointer checking to the lib-scoped `sync-vendored-libs.py`, conflating it
+  with the installer-engine surface's own `sync-installer-engine.py` —
+  corrected to assign it to a new generic pointer validator or
+  `sync-installer-engine.py` itself, never the lib tool.
