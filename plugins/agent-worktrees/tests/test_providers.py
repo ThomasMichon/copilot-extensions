@@ -1139,6 +1139,41 @@ class TestGitHubProvider:
         ) == ""
         assert captured["args"][-2:] == ["--body", "updated"]
 
+    def test_publish_source_marker_rejects_copilot_mention(self, monkeypatch):
+        # Asking the @copilot cloud coding agent to act as the PR's own
+        # submitter is bad etiquette and invokes the wrong bot -- the
+        # provider must refuse before it ever reaches `gh`, regardless of
+        # any shell-level hook.
+        from agent_worktrees.providers import github
+
+        def fake_run(args, **kwargs):
+            raise AssertionError("gh must not be invoked for a rejected mention")
+
+        monkeypatch.setattr(github, "run_cli", fake_run)
+
+        with pytest.raises(ProviderError, match="@copilot"):
+            github.GitHubProvider().publish_source_marker(
+                "o/r", 42, "please see @copilot for details"
+            )
+
+    def test_publish_source_marker_allows_real_handle_mention(self, monkeypatch):
+        # "@copilot-extensions" is a real handle, not a mention of the
+        # cloud coding agent -- must not be rejected.
+        from agent_worktrees.providers import github
+
+        captured = {}
+
+        def fake_run(args, **kwargs):
+            captured.update(args=args)
+            return _proc()
+
+        monkeypatch.setattr(github, "run_cli", fake_run)
+
+        assert github.GitHubProvider().publish_source_marker(
+            "o/r", 42, "filed against @copilot-extensions"
+        ) == ""
+        assert captured["args"][-1] == "filed against @copilot-extensions"
+
     def test_create_pull_parses_number_from_url(self, monkeypatch):
         from agent_worktrees.providers import github
         monkeypatch.setattr(
@@ -1149,6 +1184,31 @@ class TestGitHubProvider:
         res = github.GitHubProvider().create_pull(scope, token=None)
         assert res.url == "https://github.com/o/r/pull/7"
         assert res.number == 7
+
+    def test_create_pull_rejects_copilot_mention_in_title(self, monkeypatch):
+        from agent_worktrees.providers import github
+
+        def fake_run(args, **kwargs):
+            raise AssertionError("gh must not be invoked for a rejected mention")
+
+        monkeypatch.setattr(github, "run_cli", fake_run)
+        scope = PRScope(repo="o/r", head="h", base="master", title="@copilot fix this")
+        with pytest.raises(ProviderError, match="@copilot"):
+            github.GitHubProvider().create_pull(scope, token=None)
+
+    def test_create_pull_rejects_copilot_mention_in_body(self, monkeypatch):
+        from agent_worktrees.providers import github
+
+        def fake_run(args, **kwargs):
+            raise AssertionError("gh must not be invoked for a rejected mention")
+
+        monkeypatch.setattr(github, "run_cli", fake_run)
+        scope = PRScope(
+            repo="o/r", head="h", base="master", title="T",
+            body="@copilot please also review",
+        )
+        with pytest.raises(ProviderError, match="@copilot"):
+            github.GitHubProvider().create_pull(scope, token=None)
 
     def test_get_pull_merged_state_sets_flag(self, monkeypatch):
         # gh reports a merged PR as state MERGED.
