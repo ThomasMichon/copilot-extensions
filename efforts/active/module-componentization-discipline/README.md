@@ -2223,3 +2223,90 @@ the Phase 0 runbook, picked up as capacity allows.
   The worktree was then reconciled onto `origin/main` and finalized. The
   `agent-dispatch` work itself never required a behavioral follow-up beyond
   compatibility-seam fixes inside the extracted helpers.
+
+### 2026-09-25 — Phase 2 continued: `agent-worktrees/__main__.py` handoff-cutover launch-core slice
+- Picked up the handoff-cutover thread this effort's own README flagged as
+  needing a **dedicated design pass**, not another blind mechanical slice: the
+  launch core itself (`cmd_copilot`/`cmd_resolve` and their surrounding
+  session-orchestration machinery). Two things had changed since that flag was
+  written and needed confirming first: (1) `cmd_resolve` was already reduced
+  to a one-line delegate to `resolve_cli.cmd_resolve` by an earlier slice, and
+  `cmd_copilot` itself is only ~65 lines -- neither is actually the remaining
+  bulk; and (2) PR #3691 ("Stage D -- decouple final 9 lazy-dispatch modules")
+  had landed in the interim and confirmed `agent-worktrees` had already fully
+  adopted the lazy-loading pattern this campaign's earlier pattern-shift
+  caveat asked to check for (`_LAZY_DISPATCH_TABLE`/`_dispatch_lazy`/
+  `_ensure_cluster_loaded`/`_load_full_command_surface`) -- the design
+  question that motivated the pass is resolved; no separate lazy-pattern
+  design doc is needed.
+- Reading the file's actual structure (function boundaries + section banners)
+  found the real remaining bulk is not the two `cmd_*` entry points but the
+  session-orchestration bodies between them: `cmd_launch` (~790 lines),
+  `cmd_execution_leg` and its worktree-creation/launch-cmd helpers
+  (~2,560 lines), and -- the coherent, cleanly-bounded seam this slice
+  targeted -- a **~935-line handoff-cutover band**
+  (`_wait_for_handoff_candidate` through `_handoff_cutover_retire_result`,
+  immediately before `cmd_copilot`) that already has its own dedicated test
+  module (`test_handoff_cutover.py`, 113+ tests) and is the exact
+  choreography this session's own `context-handoff` mechanism drives.
+- Extracted the whole band into a new `handoff_cutover.py`: target resolution
+  (`_resolve_handoff_cutover_target`), the spawn/retry/retire result builders
+  (`_handoff_cutover_spawn_result`, `_handoff_cutover_retry_result`,
+  `_handoff_cutover_retire_result`), and the Stage 13 (`handoff_complete`)
+  completion-race helpers (`_maybe_emit_stage_13`,
+  `_settle_predecessor_session_claim`, `_conclude_retired_predecessor`,
+  `_resolve_retire_pane_mux_session`). This band is unusually tangled for a
+  "mechanical" slice: it calls back into launch-core helpers that stay
+  resident in `__main__.py` (`_build_launch_cmd`, `_build_env`,
+  `_preflight_launch`, `_repo_session_env`, `_unsupported_hosted_launch`,
+  `_resolve_worktree_id`, `_infer_worktree_id_from_cwd`,
+  `_cwd_is_inside_project`), and several of ITS OWN functions are
+  cross-monkeypatched by name in `test_handoff_cutover.py`
+  (`monkeypatch.setattr(m, "_conclude_retired_predecessor", ...)` etc., then
+  exercised via a sibling function in the same band). Followed the
+  already-established `_core()`/`_self_override()` reverse-import idiom
+  (the same pattern every `*_cli.py` sibling already uses via
+  `from . import __main__ as core`) for every such cross-call, rather than a
+  bare local-name reference, so a monkeypatch on `m.<name>` is observed
+  regardless of which function in the band makes the call -- exactly the
+  property `_self_override` exists to guarantee for `__main__.py`'s own
+  outward delegations, applied here to calls flowing back inward.
+- Two real compatibility regressions surfaced by validation, both from
+  assuming "unused in `__main__.py` itself" meant "safe to drop" without
+  checking the test suite's own direct attribute access: `sessions_pane_retire`
+  (tests patch `m.sessions_pane_retire` directly, e.g.
+  `monkeypatch.setattr(m.sessions_pane_retire, "_list_matching_pane_targets",
+  ...)`) and `hashlib` (`test_register_session.py` calls
+  `m.hashlib.sha256(...)` directly) both needed to stay as re-exported
+  top-level imports on `__main__.py` even though the band that used to
+  reference them moved out. Also removed a now-redundant local `import
+  hashlib` inside `_session_lifecycle_launch_key` (unrelated function,
+  unrelated to this slice, but its local shadow-import triggered a fresh
+  ruff F811 once the top-level import's only prior *use* moved away with the
+  band -- a one-line pre-existing-style cleanup, not a behavior change).
+- Net result: `plugins/agent-worktrees/src/agent_worktrees/__main__.py`
+  shrank from **8,756** lines at slice start; this slice's own extraction
+  removed ~934 lines, though the file's exact final line count kept moving
+  slightly across this PR's several rebases onto the fast-moving `dev`
+  branch (each unrelated upstream commit nudges it by a handful of lines) --
+  `python tools/check-module-size.py` against the checked-in files is the
+  live source of truth for the current count, not a number pinned here; the
+  new `handoff_cutover.py` lands well under the 1,000-line cap (~990 lines).
+  `python tools/run-plugin-tests.py agent-worktrees` passed all nine
+  sub-suites green (**5,502 passed** total, 0 unexpected failures -- one
+  transient per-sub-suite wall-clock timeout on a retry was the runner's own
+  300s default budget on an unrelated, pre-existing-slow sub-suite, not a
+  real failure; a longer `--timeout`/`--plugin-timeout` budget confirmed full
+  green). `ruff check --select F,E9` clean on both touched files.
+  `tools/check-module-size.py` passed, and `--refresh-baseline` lowered the
+  `__main__.py` entry accordingly. Changefile added:
+  `agent-worktrees` patch, "Componentize handoff-cutover choreography
+  (spawn/retry/retire) out of `__main__.py` into `handoff_cutover.py`".
+- Remaining launch-core bulk (`cmd_launch`, `cmd_execution_leg`,
+  `_create_worktree_core`, `_build_launch_cmd`/`_preflight_launch` and the
+  worktree-creation/paired-knowledge helpers) is still there and still the
+  largest coherent remaining band in the file -- genuinely next if this
+  campaign returns to `agent-worktrees`, but it is far more deeply
+  intertwined with the still-resident launch helpers than the handoff-cutover
+  band was, and deserves its own dedicated design pass rather than being
+  folded into this slice's scope.
