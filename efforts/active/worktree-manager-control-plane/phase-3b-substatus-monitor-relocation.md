@@ -17,7 +17,9 @@
   as the sole owner/accumulator of worktree status data.
 - **Status:** In progress — Step 1 (of 6) landed 2026-09-25, merged as
   [#3650](https://github.com/ThomasMichon/copilot-extensions/pull/3650);
-  Step 2 landed 2026-09-25; Steps 3-6 not yet implemented.
+  Step 2 landed 2026-09-26, merged as
+  [#3724](https://github.com/ThomasMichon/copilot-extensions/pull/3724);
+  Steps 3-6 not yet implemented.
 
 ## Why this needs its own ordered plan
 
