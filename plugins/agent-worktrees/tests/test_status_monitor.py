@@ -16,6 +16,7 @@ import json
 import os
 import re
 import threading
+import time
 import types
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
@@ -437,25 +438,8 @@ def test_sweep_routes_manager_owned_status_through_mux_status_v1(tmp_path, monke
 
 def test_sweep_prunes_manager_owned_registry_entries_from_the_unmanaged_lane(tmp_path, monkeypatch):
     reg = tmp_path / "reg"
-    manager_root = tmp_path / "manager-root"
-    manager_root.mkdir()
-    (manager_root / "mux-mapping.json").write_text(
-        json.dumps(
-            [
-                {
-                    "project": "proj",
-                    "worktree_id": "wt-managed",
-                    "worktree_path": "/w/managed",
-                    "mux_session": "wt-managed",
-                    "mux_bin": "tmux",
-                    "mapping_revision": 1,
-                    "live": True,
-                }
-            ]
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(manager_root))
+    from agent_worktrees import mux_link
+
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
     m._register_session_for_monitor("wt-managed", "/w/managed")
     monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-managed": 1})
@@ -464,11 +448,23 @@ def test_sweep_prunes_manager_owned_registry_entries_from_the_unmanaged_lane(tmp
         "_monitor_mux_set",
         lambda *args, **kwargs: pytest.fail("manager-owned sessions must not fall back to direct mux writes"),
     )
+    pushed = []
     monkeypatch.setattr(
         m,
         "_publish_managed_session_status",
-        lambda **kwargs: pytest.fail("status writes must wait for Worktree Manager to republish the mapping"),
+        lambda **kwargs: pushed.append(kwargs) or {"handled": True, "applied": True, "context_published": True},
         raising=False,
+    )
+    cache = mux_link.ManagedMuxCache()
+    cache.apply_observation(
+        {
+            "project": "proj",
+            "worktree_id": "wt-managed",
+            "worktree_path": "/w/managed",
+            "mux_session": "wt-managed",
+            "mapping_revision": 1,
+            "live": True,
+        }
     )
     observed: list[set[str]] = []
 
@@ -478,11 +474,64 @@ def test_sweep_prunes_manager_owned_registry_entries_from_the_unmanaged_lane(tmp
         "PFX",
         set(),
         catalog_observer=observed.append,
+        managed_mux_cache=cache,
     )
 
-    assert served == 0
-    assert observed == [set()]
+    assert served == 1
+    assert observed == [{"wt-managed"}]
     assert not (reg / "wt-managed").exists()
+    assert len(pushed) == 1
+    assert pushed[0]["session_name"] == "wt-managed"
+
+
+def test_sweep_treats_stale_managed_cache_entries_as_unmanaged_again(tmp_path, monkeypatch):
+    """A cache entry older than the freshness window no longer proves
+    Manager ownership, so the direct lane resumes instead of freezing."""
+    from agent_worktrees import mux_link
+
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    monkeypatch.setattr(
+        m,
+        "cfg",
+        types.SimpleNamespace(
+            set_active_project=lambda *_a, **_k: None,
+            project_name=lambda: "proj",
+            active_project=lambda: "proj",
+            tracking_dir=lambda: tmp_path,
+        ),
+    )
+    m._register_session_for_monitor("wt-a", "/w/a")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    monkeypatch.setattr(m, "_publish_managed_session_status", lambda **kwargs: None, raising=False)
+    direct_calls = _capture_set(monkeypatch)
+    cache = mux_link.ManagedMuxCache()
+    cache.apply_observation(
+        {
+            "project": "proj",
+            "worktree_id": "wt-a",
+            "worktree_path": "/w/a",
+            "mux_session": "wt-a",
+            "mapping_revision": 1,
+            "live": True,
+        }
+    )
+    for entry in cache._entries.values():
+        entry["received_at"] = time.time() - mux_link.MAPPING_STALE_AFTER_SECONDS - 1
+
+    served = m._monitor_sweep(
+        "tmux",
+        "TOK",
+        "PFX",
+        set(),
+        managed_mux_cache=cache,
+    )
+
+    assert served == 1
+    assert ("wt-a", "@aw_updater", "TOK") in direct_calls
 
 
 def test_sweep_keeps_unmanaged_sessions_on_the_direct_writer_path(tmp_path, monkeypatch):

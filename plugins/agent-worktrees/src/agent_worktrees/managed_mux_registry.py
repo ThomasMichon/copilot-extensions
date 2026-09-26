@@ -15,7 +15,7 @@ def _read_registry() -> list[dict]:
         data = json.loads(raw)
     except (OSError, TypeError, ValueError):
         return []
-    return data if isinstance(data, list) else []
+    return [item for item in data if isinstance(item, dict)] if isinstance(data, list) else []
 
 
 def _latest_live_entry(matches) -> dict | None:

@@ -510,11 +510,19 @@ def _manager_owned_mapping_for_session(session_name: str, *, managed_mux_cache=N
         return None
     current = None
     if managed_mux_cache is not None:
+        from . import mux_link
+
+        live_sessions = managed_mux_cache.live_session_names()
+        if session_name not in live_sessions:
+            return None
+        now = time.time()
         for entry in managed_mux_cache.snapshot().values():
             if (
                 isinstance(entry, dict)
                 and entry.get("live")
                 and entry.get("mux_session") == session_name
+                and isinstance(entry.get("received_at"), (int, float))
+                and now - entry["received_at"] <= mux_link.MAPPING_STALE_AFTER_SECONDS
             ):
                 if current is None:
                     current = entry
@@ -526,7 +534,6 @@ def _manager_owned_mapping_for_session(session_name: str, *, managed_mux_cache=N
                     and entry.get("received_at", 0) >= current.get("received_at", 0)
                 ):
                     current = entry
-    if current is not None:
         return current
     from . import managed_mux_registry
 

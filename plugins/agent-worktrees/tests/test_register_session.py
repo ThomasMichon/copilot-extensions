@@ -1245,8 +1245,6 @@ class TestRegisterSessionReseedsStatusUpdater:
         payload = '{"sessionId":"sess-managed","cwd":"/tmp/src/wt-managed/sub"}'
         monkeypatch.setattr(m.sys, "stdin", io.StringIO(payload))
         rc = m.cmd_register_session(_args(stdin=True))
-        rc = m.cmd_register_session(_args(stdin=True))
-        assert rc == 0
         assert rc == 0
         assert ensured
 
