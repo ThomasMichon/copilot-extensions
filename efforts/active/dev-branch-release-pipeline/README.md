@@ -1733,17 +1733,21 @@ efforts' own PRs).
     permissions docs) — recommended tightening it to "Require approval for
     all outside collaborators" (GitHub's default, first-time-contributors-
     only, stops re-checking after a contributor's first approved PR).
-  - **Real gap found and fixed**: `APERTURE_RELEASE_TOKEN` was a plain
-    repository secret — not scoped to either existing GitHub Environment
-    (`copilot`, `main-promotion`), both of which had zero protection rules.
-    Any of the three Write-access collaborators (`JakeSchieber`,
-    `anarmawala`, `namankanakiya` — confirmed intentional by the operator)
-    could push a brand-new, entirely unprotected scratch branch with a new
-    workflow referencing that secret and it would run with full access —
-    branch rulesets only cover `dev`/`main`. Configured `main-promotion`'s
-    `deployment_branch_policy` to `protected_branches only` (closes the
-    scratch-branch path structurally, at the environment level, regardless
-    of who authored the workflow or which branch ruleset applies).
+  - **Real gap found, partially mitigated (see below for what's still
+    open)**: `APERTURE_RELEASE_TOKEN` was a plain repository secret — not
+    scoped to either existing GitHub Environment (`copilot`,
+    `main-promotion`), both of which had zero protection rules. Three
+    confirmed Write-access collaborators (identities verified with the
+    operator, not named here per this repo's public-artifact
+    identifier-neutrality convention) could push a brand-new, entirely
+    unprotected scratch branch with a new workflow referencing that secret
+    and it would run with full access — branch rulesets only cover
+    `dev`/`main`. Configured `main-promotion`'s `deployment_branch_policy`
+    to `protected_branches only` — this closes the **scratch-branch** path
+    specifically, but (per PR #3701's own review, see below) does **not**
+    close the path through `dev` itself, since `dev` is one of the two
+    "protected" branches the policy allows and `dev`'s own ruleset requires
+    zero approving reviews to merge.
   - **Explicitly decided against** a required-reviewer rule on
     `main-promotion`: it would pause every real, fully-unattended promotion
     run waiting on a manual click (GitHub never lets a workflow's own
@@ -1793,4 +1797,26 @@ efforts' own PRs).
     branch exfiltration path is **not yet actually closed** until that
     migration happens. Rewrote the comment to say so plainly rather than
     imply the fix was already complete.
+  - **A second #3701 review pass surfaced the deeper residual risk,
+    genuinely not yet resolved:** even after the token migration above
+    completes, `main-promotion`'s branch policy still allows `dev` as a
+    valid branch (it has to — that's the promote job's own real ref) —
+    and `dev`'s own ruleset requires **zero** approving reviews to merge.
+    So a Write collaborator could still merge an ordinary, review-free PR
+    into `dev` that adds a new job declaring `environment:
+    main-promotion` and it would get the secret, once migrated — the
+    branch-policy fix only ever closed the *scratch-branch* variant of
+    this risk, never the *through-dev* variant. Closing that fully
+    requires either a required reviewer on the environment (which this
+    effort already ruled out — it would pause every real promotion on a
+    manual click) or `require_code_owner_review` on `dev` itself (already
+    ruled out — self-locks every future workflow PR in this
+    single-operator repo). No code change closes this without accepting
+    one of those two costs; **flagged to the operator as an explicit,
+    named residual risk** rather than silently claiming the gap is shut.
+    Current stance: Write access already implies broad trust in this
+    repo's model, and this narrows to "collaborators could reach one
+    specific token via a workflow edit that would itself be visible in
+    the PR diff" — not a new category of exposure, just this effort being
+    honest that the environment fix alone doesn't fully close it.
 

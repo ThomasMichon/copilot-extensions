@@ -218,6 +218,20 @@ jobs:
     # happened yet. Until it does, treat this environment's protection as
     # configured-but-not-yet-effective for this specific secret.
     #
+    # **Even after that migration, this only closes the scratch-branch
+    # variant of the risk, not the through-`dev` variant:** `dev` is
+    # itself one of the two branches this policy allows (it has to be --
+    # that's this job's own real ref), and `dev`'s ruleset requires zero
+    # approving reviews to merge. A Write collaborator could still merge
+    # an ordinary PR into `dev` adding a job that declares this same
+    # `environment:` and reach the secret that way. Closing that fully
+    # needs either a required reviewer here (ruled out -- breaks
+    # unattended promotion) or `require_code_owner_review` on `dev`
+    # itself (ruled out -- self-locks every workflow PR in this
+    # single-operator repo). See the dev-branch-release-pipeline journal
+    # for the full trade-off; this is a named, accepted residual risk,
+    # not an oversight.
+    #
     # `main` carries a zero-bypass "pull request required" ruleset (a
     # personal GitHub account cannot grant the GitHub Actions app -- or any
     # other actor -- a bypass the way an organization can), so this job can
