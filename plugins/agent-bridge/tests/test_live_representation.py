@@ -120,6 +120,29 @@ class TestTranslateSdkEvent:
             ("turn_complete", {"stop_reason": None})
         ]
 
+    def test_compaction_events(self) -> None:
+        # Aperture Labs #7587: compaction was dropped before this whitelist
+        # entry existed, so a downstream ctx% reset showed with no
+        # confirmation a compaction actually happened.
+        assert translate_sdk_event(
+            "session.compaction_start",
+            {"conversationTokens": 1000, "systemTokens": 200},
+        ) == [(
+            "compaction_start",
+            {"conversation_tokens": 1000, "system_tokens": 200},
+        )]
+        assert translate_sdk_event(
+            "session.compaction_complete",
+            {"success": True, "tokensRemoved": 800, "postCompactionTokens": 400},
+        ) == [(
+            "compaction_complete",
+            {
+                "success": True,
+                "tokens_removed": 800,
+                "post_compaction_tokens": 400,
+            },
+        )]
+
     def test_permission_is_read_only_without_request_id(self) -> None:
         out = translate_sdk_event(
             "permission.requested",

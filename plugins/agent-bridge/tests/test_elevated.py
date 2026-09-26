@@ -28,9 +28,18 @@ def test_read_token_none_when_absent(tmp_path, monkeypatch):
     assert elevated.read_token() is None
 
 
-def test_constants():
-    assert elevated.ELEVATED_PORT == 9281
-    assert elevated.TASK_NAME == "agent-bridge-elevated"
+def test_constants(monkeypatch):
+    # TASK_NAME is a module-level constant baked in at import time from
+    # AGENT_BRIDGE_INSTALL_DIR; a contained test run may set that var ambiently
+    # for state isolation (a real non-legacy install root), so don't assume it
+    # was unset before this module was first imported -- force the legacy case
+    # explicitly instead, mirroring test_scoped_task_name's own reload pattern.
+    monkeypatch.delenv("AGENT_BRIDGE_INSTALL_DIR", raising=False)
+    from importlib import reload
+
+    module = reload(elevated)
+    assert module.ELEVATED_PORT == 9281
+    assert module.TASK_NAME == "agent-bridge-elevated"
 
 
 def test_scoped_task_name(monkeypatch, tmp_path):
