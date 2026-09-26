@@ -1,9 +1,0 @@
-{
-  "comment": "Close the tracking_write accept-to-handler drain race (copilot-extensions#3798) before the first production write verb ships.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
