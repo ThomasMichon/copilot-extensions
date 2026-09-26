@@ -1,0 +1,9 @@
+{
+  "comment": "anchor_write_guard: stop blocking a plain 'git pull'/'git fetch' against a worktree-class anchor. The guard's invariant is 'no agent-authored content lands in the anchor' -- a pull can only ever bring in commits that already exist upstream, so it structurally cannot violate that. Other git mutation verbs (commit, checkout, reset, merge, rebase, etc.) remain blocked. cross_repo_guard keeps its own independent copy of the write-verb list and is unaffected.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

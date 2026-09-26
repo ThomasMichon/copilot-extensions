@@ -45,16 +45,15 @@ Escape hatches / modes:
     write-routing guard family.
   * ``ANCHOR_WRITE_GUARD_MODE=deny|ask|warn|off`` (default ``deny``) picks the
     action on a hit.
-  * ``agent-worktrees repos sync <repo>`` is the sanctioned no-new-commit
-    action on an anchor: fetch + ``merge --ff-only``, skipping (never
-    forcing) a dirty/diverged/detached checkout. It never reaches this guard
-    at all -- the guard's shell heuristic looks for a literal ``git`` mutation
-    verb in the command text, and this CLI verb shells out to git internally
-    rather than the agent invoking ``git`` directly. Prefer it over a raw
-    ``git pull`` (a bare ``git fetch`` alone never trips this guard --
-    it never mutates the working tree -- but still needs a follow-up
-    ``merge``/``rebase`` to actually catch the anchor up, which does) whenever
-    the goal is only catching the anchor up with its remote, not editing it.
+  * A plain ``git pull`` (and a bare ``git fetch`` alone, which never
+    mutates the working tree) is never blocked on an anchor: this guard's
+    invariant is "no agent-authored content" -- a stray edit/commit that
+    never lands through the PR flow -- and a pull only ever brings in
+    commits that already exist upstream, so it structurally cannot violate
+    that invariant. ``agent-worktrees repos sync <repo>`` is a convenience
+    wrapper worth preferring anyway: fetch + ``merge --ff-only``, skipping
+    (never forcing) a dirty/diverged/detached checkout, instead of a plain
+    pull's own merge-commit-on-divergence default.
   * ``agent-worktrees repos allow-edits <repo> --reason "..."`` opens a
     time-boxed break-glass (``~/.agent-worktrees/allow-edits.json``) the guard
     honors.
@@ -91,7 +90,9 @@ CMD_ARG_KEYS = ("command", "cmd", "script", "commandLine", "commandline", "input
 
 # Write-ish verbs (PowerShell cmdlets + POSIX + git mutations); presence
 # alongside an anchor-path literal in a shell command flips a read into a
-# suspected write. Mirrors cross_repo_guard.
+# suspected write. Mirrors cross_repo_guard, EXCEPT this guard's own
+# rationale (never introduce agent-authored content into the anchor) does
+# not cover ``pull`` -- see the ``_GIT_WRITE_SUB`` comment below.
 _WRITE_VERBS = re.compile(
     "|".join([
         "Set-Content", "Add-Content", "Out-File", "New-Item", "Remove-Item",
@@ -101,7 +102,7 @@ _WRITE_VERBS = re.compile(
         r"\btee\b", r"\bsed\b\s+-i", r"\bcp\b", r"\bmv\b", r"\brm\b",
         r"\btouch\b", r"\bmkdir\b", r"\bdd\b", r"\btruncate\b", r"\bpatch\b",
         r"git\s+(?:-C\s+\S+\s+)?(?:apply|commit|checkout|switch|reset|"
-        r"restore|clean|rm|mv|stash|merge|rebase|pull|cherry-pick|revert|"
+        r"restore|clean|rm|mv|stash|merge|rebase|cherry-pick|revert|"
         r"add|init)",
     ]),
     re.IGNORECASE,
@@ -138,9 +139,17 @@ _WRITE_CMD_START = re.compile(
 )
 # A git command at segment start, and the write subcommands that mutate a repo.
 _GIT_START = re.compile(r"^\s*[\"']?git\b", re.IGNORECASE)
+# ``pull`` is deliberately absent: this guard's invariant is "no agent-
+# authored content lands in the anchor" (a stray commit, an edit that never
+# goes through the worktree/PR flow) -- a plain ``git pull`` only ever
+# fast-forwards (or merges) in commits that already exist upstream, so it
+# can never introduce content this guard exists to block. Blocking it just
+# forced a clunkier `repos sync <repo>` detour for a routine, harmless
+# "catch the anchor up" operation. Other guards (``cross_repo_guard``) keep
+# their own independent copy of this list and are unaffected.
 _GIT_WRITE_SUB = re.compile(
     r"\b(?:add|commit|apply|checkout|switch|reset|restore|clean|rm|mv|stash|"
-    r"merge|rebase|pull|cherry-pick|revert|init)\b",
+    r"merge|rebase|cherry-pick|revert|init)\b",
     re.IGNORECASE,
 )
 # A ``-C`` (git change-directory) flag anywhere in a git segment.
