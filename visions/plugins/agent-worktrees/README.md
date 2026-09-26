@@ -247,6 +247,46 @@ confirmed is marked as such in the rendered result — never silently reported
 as certain, and never given a separate, whole state of its own standing in
 for "unverified."
 
+**This describes the accelerator's first-landed shape**
+(`agent-worktrees-external-status-accelerator`, 2026-09-20): read-only warmth
+over facts the durable YAML record (and direct git/session/claims
+computation) already own, never a second writer, never authoritative over a
+fresher direct read. *The resident daemon as the authoritative live-state
+database* below asserts the deliberate long-term inversion of that stance —
+read this section as Phase 1 of that trajectory, not as the ceiling.
+
+### The resident daemon as the authoritative live-state database
+
+The accelerator's long-term direction is a reversal of *Derived status*'s
+"never a second writer": the resident daemon becomes worktree-lifetime
+state's **one live authority** — an in-memory database every read **and**
+every mutation is funneled through — rather than a read-only cache layered
+over YAML files that remain the actual read/write surface. The per-worktree
+YAML record does not disappear; it becomes the daemon's own **durable
+persistence**, written only by the daemon itself as a best-effort sidecar
+sync of its in-memory state, never independently opened, parsed, or
+hand-written by a CLI command, a script, or a sibling plugin as a side door
+around it.
+
+This is a deliberate reversal, not an extension: today, a CLI invocation that
+finds no daemon reachable degrades to direct file computation as a
+**correct, coequal** path (*Derived status* above). Under this direction, a
+degrade to direct file access remains available for resilience — the daemon
+being unreachable must never wedge worktree state shut — but it stops being
+coequal: it is a **degraded, advisory-only** path (read-only, never a write),
+clearly marked as such to whatever surfaced it, while the daemon is the only
+path a mutation may ever take. A CLI command's job becomes composing a
+request to the daemon and rendering its answer, not independently computing
+or writing the record itself.
+
+The daemon's in-memory state is what "current" means; its durable YAML
+persistence is a recovery mechanism (warm-restore after a restart), never a
+second copy another reader/writer could race the daemon over. Every fact this
+vision already names — identity, claims, lineage, disposition, the derived
+status reduction — moves under this same single authority; none of them
+retain a separate, daemon-bypassing read or write path once this direction is
+realized.
+
 ### Declarative presentation contribution
 
 agent-worktrees contributes machine-readable worktree semantics and actions to
@@ -343,6 +383,10 @@ engine or persisting a second copy of its state.
 
 ### external-status-consumer-contract
 
+*(Phase 1 shape — see* daemon-mediated-write-authority *and* single-write-
+path-across-plugins *below for the asserted long-term inversion this is
+expected to grow into.)*
+
 Any other capability that needs a worktree's current status — a Tasks-board
 status card, a dashboard, a notification — is the same kind of reader
 *Derived status* above already describes: it boots the resident accelerator
@@ -374,6 +418,28 @@ shape. Its boot-on-demand subscribe attempt either succeeds within its own
 bounded wait, or it reports the requested facts as stale/unknown and moves
 on, never blocking its own render or click path and never silently
 recomputing or guessing at the answer.
+
+### daemon-mediated-write-authority
+
+Every mutation of worktree-lifetime state — a claim opened or settled, a
+disposition asserted, a title set, a head transition acknowledged, a
+follow-up dismissed, a session registered — is a request to the resident
+daemon, which holds the current in-memory truth and is solely responsible
+for persisting it to the durable YAML record. No command, script, or
+sibling plugin opens, parses, or hand-writes a tracking YAML file directly;
+doing so is a bypass of the one authority, not a second legitimate writer,
+regardless of how carefully it locks the file.
+
+### single-write-path-across-plugins
+
+A sibling plugin that needs to read or change worktree state — agent-bridge,
+agent-dispatch, agent-codespaces, agent-containers, agent-logger, or any
+other — does so exclusively through agent-worktrees' own published surface
+(its CLI, or the daemon's documented wire contract), never by importing
+agent-worktrees' internals to read or write its tracking records directly.
+This closes the specific atomicity/lock hazard of two independent writers
+(agent-worktrees' own CLI and a sibling plugin) racing the same YAML file
+through two different lock disciplines.
 
 ### registered-by-default-listing
 
@@ -509,6 +575,29 @@ A repo's upstream-containment evidence, once refreshed by any means, is
 immediately available to every worktree of that repo — never re-fetched
 independently per worktree for the same evidence.
 
+### no-writer-bypasses-the-daemon
+
+A mutation to worktree-lifetime state that did not go through the resident
+daemon is not a valid write, no matter how correctly it locks or serializes
+the YAML file it touched. A direct file write is a bug to fix, never an
+accepted second path, once *daemon-mediated-write-authority* is realized.
+
+### durable-files-are-persistence-not-a-side-door
+
+The tracking YAML record exists so the daemon's in-memory state survives a
+restart, and so a human or a break-glass script can read it when nothing
+else is reachable — it is not a second, independently-writable copy of the
+state a caller could reach around the daemon for convenience or perceived
+speed.
+
+### direct-read-is-a-degrade-not-a-peer
+
+Direct file/computation access remains available for resilience — the
+daemon being unreachable must never wedge worktree state shut — but it is
+strictly a **degraded, read-only** path, not a coequal one: it never writes,
+and whatever surfaced it marks the answer as degraded rather than presenting
+it with the same confidence as a daemon-mediated read.
+
 ### contribution-posture-degrades-honestly
 
 When a related repo's contribution posture cannot be discovered from its own
@@ -619,6 +708,30 @@ manager, or session-host implementation.
 
 ## Provenance
 
+- **2026-09-26** — Added *The resident daemon as the authoritative
+  live-state database* (Concepts & Components), *daemon-mediated-write-
+  authority* and *single-write-path-across-plugins* (Features), and
+  *no-writer-bypasses-the-daemon*, *durable-files-are-persistence-not-a-
+  side-door*, and *direct-read-is-a-degrade-not-a-peer* (Behaviors) —
+  asserting the deliberate long-term reversal of *Derived status*'s "never
+  a second writer" and *external-status-consumer-contract*'s "warmth, not
+  truth": both are marked as this vision's already-landed Phase 1, not its
+  ceiling. Mined from an operator directive after diagnosing
+  copilot-extensions#3751 (the resident status-monitor pinning ~80-85% CPU
+  from an uncached, fleet-wide YAML reparse) and a session survey of every
+  sibling plugin's `agent_worktrees.tracking` usage that found only
+  read-only accessors today (`load_record_by_id`, `find_worktree_id_by_cwd`,
+  `find_worktree_id_by_session`) — no unauthorized direct writer yet exists,
+  but nothing durable prevented one from appearing. The operator's own
+  framing: "the first vision pass was just getting the daemon to exist and
+  get callers using it" (the accelerator effort, read-only); the long-term
+  goal is an authoritative in-memory database for live state, carefully
+  wrapped by CLI commands and the daemon, with the durable YAML record
+  demoted to the daemon's own persistence rather than a second write
+  surface any command or sibling plugin could still reach around it. A
+  dedicated follow-on effort (design-first, mirroring how the accelerator
+  itself was run) is expected to carry this from asserted vision to landed
+  code.
 - **2026-09-25** — Renamed the *terminal-app profile owner* Non-Goal to
   *Terminal Fragment owner* and added an explicit carve-out: per-project
   binstub deployment/repair (the PATH launcher scripts a registered project
