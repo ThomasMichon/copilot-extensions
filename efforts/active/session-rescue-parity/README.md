@@ -6,9 +6,9 @@
 - **Created:** 2026-09-25
 - **Status:** Done <!-- Draft | Active | Blocked | Done -->
   (one Validation Plan item -- a real leased-CodeSpace end-to-end run --
-  is explicitly transferred, not closed; see Phase 4/5 and its matching
-  Validation Plan line for the tracked follow-up. Every other Plan and
-  Validation Plan item is resolved.)
+  is explicitly transferred to a tracked follow-up
+  ([`#3698`](https://github.com/ThomasMichon/copilot-extensions/issues/3698)),
+  not closed. Every other Plan and Validation Plan item is resolved.)
 - **Vision:** extends `visions/plugins/agent-containers/README.md`
   §`rescue-before-destructive-replacement` (generalizing it to an
   on-demand, non-destructive trigger independent of replacement — see
@@ -382,7 +382,8 @@ clean on every touched/new file.
       full unit/CLI-dispatch test suite (1429 tests, Phase 3) validates
       every code path this item would exercise except the literal live
       round-trip against GitHub's own CodeSpace API/SSH transport. **Named
-      tracked follow-up:** an operator (or a session with the `codespace`
+      tracked follow-up: [`#3698`](https://github.com/ThomasMichon/copilot-extensions/issues/3698).**
+      An operator (or a session with the `codespace`
       gh scope already granted) should run
       `agent-codespaces sync-sessions <a-real-leased-name> --json` against
       a genuinely leased CodeSpace once, confirm the published session
@@ -391,7 +392,7 @@ clean on every touched/new file.
       list`/`pool` shows the CodeSpace's lease/connection state unchanged
       before and after. This is the one Validation Plan item this effort
       does not itself close (see Phase 5's Validation Plan line for the
-      same item, transferred identically).
+      same item, transferred identically to the same tracked issue).
 
 ### Phase 5 — Close-out
 - [x] Confirm both providers' capture/publish result-shape fields are
@@ -484,8 +485,7 @@ clean on every touched/new file.
       **Transferred, not closed** -- see Phase 4's matching item above for
       the full reasoning (no `codespace`-scoped `gh` auth or real leased
       CodeSpace available in this session's sandbox). Named tracked
-      follow-up: an operator (or a session with that scope already
-      granted) runs this validation once against a real CodeSpace.
+      follow-up: [`#3698`](https://github.com/ThomasMichon/copilot-extensions/issues/3698).
 - [x] Both providers' module-size guards (`tools/check-module-size.py`) and
       `ruff check` stay clean on every touched file.
 
@@ -594,9 +594,9 @@ _Pending._
   validation against a real leased CodeSpace but this session's `gh` auth
   lacks the `codespace` API scope (confirmed via `agent-codespaces list`
   failing with `HTTP 403`) and no real leased CodeSpace was available --
-  **explicitly transferred** as a named tracked follow-up (see Phase 4's
-  own checklist item and the matching Validation Plan line) rather than
-  silently skipped or falsely claimed done.
+  **explicitly transferred** to
+  [`#3698`](https://github.com/ThomasMichon/copilot-extensions/issues/3698)
+  rather than silently skipped or falsely claimed done.
 - Phase 5: cross-referenced both providers' capture result shapes --
   `agent-codespaces`' new section documents `sync-sessions --json`'s
   `{ok, deferred, session_count, detail}` shape and states it is the same
