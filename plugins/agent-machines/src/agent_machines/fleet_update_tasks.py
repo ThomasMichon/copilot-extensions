@@ -426,6 +426,8 @@ def _linux_exec_start(tier: str, *, home: Path | None = None) -> str:
 
 
 def render_linux_service_unit(tier: str, *, home: Path | None = None) -> str:
+    base = home if home is not None else Path.home()
+    local_bin = base / ".local" / "bin"
     return (
         "[Unit]\n"
         f"Description={task_description(tier)}\n"
@@ -433,6 +435,13 @@ def render_linux_service_unit(tier: str, *, home: Path | None = None) -> str:
         "[Service]\n"
         "Type=oneshot\n"
         f"WorkingDirectory={task_working_directory(home)}\n"
+        # See self_update_tasks.py's identical comment: systemd --user's
+        # manager environment lacks `~/.local/bin`, where the
+        # `worktree-manager` binstub this sweep invokes -- and anything
+        # `worktree-manager update` itself shells out to by bare name --
+        # actually lives (confirmed live via the sibling self-update sweep's
+        # own multi-day FileNotFoundError failure, same root cause).
+        f"Environment=PATH={local_bin}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n"
         f"ExecStart={_linux_exec_start(tier, home=home)}\n"
     )
 

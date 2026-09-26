@@ -1,0 +1,9 @@
+{
+  "comment": "Linux/WSL self-update and fleet-update systemd --user oneshot services now set an explicit PATH (prepending ~/.local/bin) -- systemd --user's own manager environment carries a minimal PATH that lacks it, so every bare-name subprocess call to a facility binstub (agent-worktrees, worktree-manager, agent-ssh, ...) failed with FileNotFoundError.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

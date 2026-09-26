@@ -560,6 +560,15 @@ def test_render_linux_service_unit_includes_workdir(tmp_path):
     assert "worktree-manager" in unit
 
 
+def test_render_linux_service_unit_sets_path_environment_for_local_bin(tmp_path):
+    """Regression: see the identical test/comment in test_self_update.py --
+    the same systemd --user minimal-PATH gap affects this sibling sweep too
+    (its `worktree-manager` binstub, and anything it shells out to, also
+    lives only in `~/.local/bin`)."""
+    unit = fleet_update_tasks.render_linux_service_unit("sweep", home=tmp_path)
+    assert f"Environment=PATH={tmp_path}/.local/bin:" in unit
+
+
 def test_linux_systemd_user_available_false_without_binary():
     assert (
         fleet_update_tasks.linux_systemd_user_available(
