@@ -57,10 +57,14 @@ entry for why the Design Decision immediately below — the effort's
   "self-replacing module" technique at runtime, so the importable `src/`
   payload has zero content to keep in sync. The pointer copy still
   physically carries a `pyproject.toml`, `README.md`, and (when the copy
-  opted in) a local `tests/` tree — the materialization tooling refreshes
-  those from canonical rather than forwarding them live, so they are
-  DRY-by-tooling, not DRY-by-construction the way `src/` is. **Not** the
-  npm-workspace-style `uv [tool.uv.sources]`
+  opted in) a local `tests/` tree — `--pointerize` copies all three from
+  canonical **once, at conversion time**; only `src/`, an
+  already-present `tests/`, and `pyproject.toml`'s declared version are
+  refreshed again at promotion/materialization time (`materialize_main
+  .py`) — `README.md` is copied once and never re-synced afterward, so a
+  canonical README change after pointerizing does not automatically
+  propagate. None of this is DRY-by-construction the way `src/` is.
+  **Not** the npm-workspace-style `uv [tool.uv.sources]`
   `path`+`editable` live reference originally decided below — see the
   Course-correction Journal entry.
 - **The shared installer engine** (if `vendored-installer-engine` adopts
@@ -545,10 +549,12 @@ shape before committing to a design)_
       that escapes `canonical_root` (the same containment guarantee the
       file-pointer path already has via `_resolve_within()`). **Done, PR
       #3752** — also extended to reject a symlink inside/as the canonical
-      `src/` tree and a destination pointer path escaping `dest`. Reused
-      directly by the reference-rewrite containment check (`_escapes_root`)
-      once Phase 1's conversion tool lands; the directory-pointer *loop*
-      itself is retired per Phase 1's own retirement item.
+      `src/` tree and a destination pointer path escaping `dest`. Under
+      the adopted `src-passthrough` design this directory-pointer path
+      IS the active, permanent materialization mechanism for libs (not a
+      stepping stone to a future TOML reference-rewrite check, and not
+      slated for retirement) — `_escapes_root()` continues protecting it
+      directly, alongside the file-pointer kind, indefinitely.
 - [x] A promotion run against a deliberately malformed/unresolvable pointer
       aborts the promotion rather than producing a `main` snapshot
       containing an unexpanded stub. **Done, PR #3752** — covered for a
