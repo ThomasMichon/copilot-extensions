@@ -256,7 +256,7 @@ def home_dir() -> Path:
     env = os.environ.get("AGENT_LOGGER_HOME")
     if env:
         return Path(env).expanduser()
-    return Path.home() / ".agent-logger"
+    return Path.home() / ".agent-logger"  # marketplace-isolation: allow legacy compatibility root
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:

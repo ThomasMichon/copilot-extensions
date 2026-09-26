@@ -13,4 +13,4 @@ from importlib.metadata import version as _pkg_version
 try:
     __version__ = _pkg_version("agent-machines")
 except PackageNotFoundError:  # running from source without an install
-    __version__ = "0.1.2-dev2"
+    __version__ = "0.1.3-dev1"
