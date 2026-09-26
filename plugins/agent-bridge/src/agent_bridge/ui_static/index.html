@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="dark light" />
+<title>Agent Bridge</title>
+<link rel="icon" href="data:," />
+<link rel="stylesheet" href="/ui/assets/app.css" />
+<script type="module" src="/ui/assets/app.js"></script>
+</head>
+<body>
+<div id="signin" class="signin" hidden>
+  <div class="signin-card">
+    <h1>Agent Bridge</h1>
+    <p>Open this page signed in by running <code>agent-bridge ui</code> in a terminal.</p>
+    <p id="signin-msg" class="bad" hidden></p>
+    <details>
+      <summary>Sign in with a token instead</summary>
+      <form id="signin-form" class="signin-form">
+        <input id="signin-token" type="password" autocomplete="off" placeholder="Paste the output of agent-bridge token" aria-label="Bridge token" />
+        <button class="primary" type="submit">Sign in</button>
+      </form>
+    </details>
+  </div>
+</div>
+
+<div id="app" hidden>
+  <header class="top">
+    <a class="brand" href="#/">Agent Bridge</a>
+    <nav class="tabs" aria-label="Views">
+      <a href="#/" data-view="tasks">Tasks</a>
+      <a href="#/sessions" data-view="sessions">Sessions</a>
+      <a href="#/acp" data-view="acp">ACP</a>
+    </nav>
+    <div id="summary" class="summary"></div>
+    <span class="grow"></span>
+    <button id="new" class="primary small" title="Start a new task (n)">New task</button>
+    <span id="net" class="net muted" role="status"></span>
+    <button id="theme" class="ghost small" title="Theme: auto, dark, or light">Auto</button>
+    <button id="signout" class="ghost small">Sign out</button>
+  </header>
+
+  <div class="toolbar">
+    <input id="q" type="search" placeholder="Filter by title, id, branch, or PR   ( / )" aria-label="Filter" />
+    <div id="venues" class="fchips" role="group" aria-label="Venue"></div>
+    <div id="repos" class="fchips" role="group" aria-label="Repo"></div>
+  </div>
+
+  <main>
+    <div id="tasks-view">
+      <div id="layout" class="layout">
+        <div id="board" class="board" aria-label="Tasks"></div>
+        <aside id="detail" class="detail" hidden></aside>
+      </div>
+    </div>
+    <section id="sessions-view" class="page" hidden></section>
+    <section id="acp-view" class="page" hidden></section>
+  </main>
+</div>
+
+<dialog id="newtask" class="modal" aria-labelledby="nt-heading">
+  <h2 id="nt-heading">New task</h2>
+  <p class="muted small">Starts a Copilot session in a fresh worktree with your prompt as its first message.
+    It keeps running in the background; it shows up in the Picker too.</p>
+  <label>Repo <select id="nt-project"></select></label>
+  <label>Title <span class="muted small">(optional)</span>
+    <input id="nt-title" type="text" maxlength="60" placeholder="A short headline for the board" /></label>
+  <label>What should it do?
+    <textarea id="nt-prompt" rows="7" placeholder="Describe the task in plain language, as you would in a Copilot session."></textarea></label>
+  <div class="row">
+    <span id="nt-status" class="muted small" role="status"></span>
+    <span class="grow"></span>
+    <button id="nt-cancel" type="button" class="ghost">Cancel</button>
+    <button id="nt-start" type="button" class="primary" title="Ctrl+Enter">Start task</button>
+  </div>
+</dialog>
+</body>
+</html>

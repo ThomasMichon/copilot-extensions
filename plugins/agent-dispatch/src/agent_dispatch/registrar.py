@@ -64,6 +64,7 @@ _KNOWN_BODY_KEYS = frozenset(
         "headless_labels",
         "cli_labels",
         "disposable_cli_labels",
+        "idle_nudge_exempt_labels",
         "no_pair",
     }
 )
@@ -121,6 +122,14 @@ class Body:
     headless_labels: tuple[str, ...] = ()
     cli_labels: tuple[str, ...] = ()
     disposable_cli_labels: tuple[str, ...] = ()
+    idle_nudge_exempt_labels: tuple[str, ...] = ()
+    """Labels exempt from the generic idle-confirm nudge (see
+    ``Supervisor.idle_nudge_exempt_labels``): a task type that owns its own
+    resume path (an in-process evaluator, or an external one driven entirely
+    through this CLI) has going idle with no new activity as its correct
+    resting state, not an unfinished turn. Confirmed live that nudging it
+    anyway can encourage the worker to reach for a resolution its own
+    charter never sanctioned."""
     no_pair: bool = False
     """Skip the paired-knowledge carve for every worktree this lane
     creates -- for a pool with no bound knowledge repo to give its workers
@@ -300,6 +309,8 @@ class ProfileDeclaration:
                 args += ["--cli-label", label]
         for label in self.body.disposable_cli_labels:
             args += ["--disposable-cli-label", label]
+        for label in self.body.idle_nudge_exempt_labels:
+            args += ["--idle-nudge-exempt-label", label]
         if self.body.no_pair:
             args.append("--no-pair")
         if self.body.type == "headless" or self.body.headless_labels or self.fleet.headless:
@@ -452,6 +463,10 @@ def _load_body(data: object) -> Body:
         disposable_cli_labels=_as_str_tuple(
             data.get("disposable_cli_labels"),
             key="body.disposable_cli_labels",
+        ),
+        idle_nudge_exempt_labels=_as_str_tuple(
+            data.get("idle_nudge_exempt_labels"),
+            key="body.idle_nudge_exempt_labels",
         ),
         no_pair=_as_bool(data.get("no_pair", False), key="body.no_pair"),
     )
@@ -738,6 +753,13 @@ def load_declaration(
             raise RegistrarError(
                 "body.disposable_cli_labels are supported only for local "
                 "worker bodies"
+            )
+    if decl.body.idle_nudge_exempt_labels:
+        stray = set(decl.body.idle_nudge_exempt_labels) - set(decl.labels)
+        if stray:
+            raise RegistrarError(
+                f"body.idle_nudge_exempt_labels {sorted(stray)} are not in labels "
+                f"{sorted(decl.labels)} -- an exempt label must also be watched"
             )
     if decl.body.no_pair and decl.fleet.enabled:
         raise RegistrarError(

@@ -74,8 +74,10 @@ class TestStatusUi:
             assert resp.status_code == 200
             assert "text/html" in resp.headers["content-type"]
             assert "Agent Bridge" in resp.text
-            # No Authorization header was sent, yet the page loads.
-            assert "/acp/" in resp.text
+            # No Authorization header was sent, yet the page and its script load.
+            script = c.get("/ui/assets/app.js")
+            assert script.status_code == 200
+            assert "/acp/" in script.text
 
 
 # ---------------------------------------------------------------------------

@@ -27,6 +27,12 @@ def register_supervise_commands(sub) -> None:
     p.add_argument("--cli-label", action="append", metavar="LABEL")
     p.add_argument("--script-label", action="append", metavar="LABEL")
     p.add_argument("--disposable-cli-label", action="append", metavar="LABEL")
+    p.add_argument(
+        "--idle-nudge-exempt-label",
+        action="append",
+        metavar="LABEL",
+        help="never send the generic idle-confirm nudge to a task carrying this label (repeatable) -- for a task type that owns its own resume path (an in-process evaluator, or an external one driven entirely through this CLI), an idle STARTED task with no new activity is its correct resting state, not an unfinished turn",
+    )
     p.add_argument("--no-pair", action="store_true")
     p.add_argument("--headless-agent", default="task-worker", metavar="AGENT")
     p.add_argument("--charter", metavar="AGENT", help="optional .github/agents/<charter>.agent.md behavior overlay -- passed as Copilot's own --agent flag on the launched session, independent of the venue targeted by --headless-agent")
@@ -60,6 +66,7 @@ def register_supervise_commands(sub) -> None:
     rp.add_argument("--cli-label", action="append", metavar="LABEL")
     rp.add_argument("--script-label", action="append", metavar="LABEL")
     rp.add_argument("--disposable-cli-label", action="append", metavar="LABEL")
+    rp.add_argument("--idle-nudge-exempt-label", action="append", metavar="LABEL")
     rp.add_argument("--headless-agent", metavar="AGENT")
     rp.add_argument("--charter", metavar="AGENT")
     rp.add_argument("--evaluator", metavar="SPEC")
