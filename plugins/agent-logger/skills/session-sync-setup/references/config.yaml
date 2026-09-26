@@ -61,7 +61,7 @@ sync:
     # Ingest -- push to a processing service's rsync-daemon sink.
     ingest:
       url: rsync://hub.example.com/sessions       # or host::module/path
-      password_file: ~/.agent-logger/rsync.pass   # optional
+      password_file: ~/.agent-logger/rsync.pass   # optional # marketplace-isolation: allow doc-example
       notify_url: https://hub.example.com/api/notify?machine={machine}  # optional
 
 # Optional global fallback for repos with no repo-local .agent-logger.yaml.
