@@ -1,0 +1,9 @@
+{
+  "comment": "New read-only 'claims fleet-audit' command: fleet-wide inventory of legacy boolean follow-ups, active effort bindings, at-rest claims, and finalized records whose disposition has drifted (worktree-finality-and-obligations Phase 6).",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "minor"
+    }
+  ]
+}
