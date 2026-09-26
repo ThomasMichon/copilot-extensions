@@ -21,7 +21,7 @@ from typing import Literal
 import yaml
 
 from . import config as cfg
-from . import disposition_history
+from . import disposition_history, record_cache
 from .effort_focus import ActiveEffort, active_effort_from_mapping
 
 #: Max length of an AGENT-ASSERTED worktree title. Agent titles must fit the mux
@@ -3042,7 +3042,7 @@ def list_records(
 
     for yaml_file in sorted(tracking_path.glob("*.yaml")):
         try:
-            rec = load_record(yaml_file)
+            rec = record_cache.cached_load(yaml_file, load_record)
         except Exception:
             continue
         if status_filter and rec.status != status_filter:
