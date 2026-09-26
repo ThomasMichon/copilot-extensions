@@ -355,11 +355,13 @@ survey above.
       `test_status_monitor.py`'s existing daemon-lifecycle regression test
       updated (3 → 4 `CoalescingServer.close()` calls: classify +
       worktree_status + managed_mux + tracking_write) plus new
-      `tracking_write_*` rendezvous-field assertions. Full suite: 5573
-      passed, 26 skipped, 5 failures confirmed pre-existing/environment-
-      dependent via `git stash` (unrelated to this change — `test_doctor.py`/
-      `test_update_stage.py`/`test_registration_home.py`, all failing
-      identically without these changes).
+      `tracking_write_*` rendezvous-field assertions and the
+      `TestWaitForTrackingWriteIdle` class added in review round 4. Full
+      suite (current, as of round 6): 5576 passed, 26 skipped, 5 failures
+      confirmed pre-existing/environment-dependent via `git stash`
+      (unrelated to this change — `test_doctor.py`/`test_update_stage.py`/
+      `test_registration_home.py`, all failing identically without these
+      changes).
 
 ### Phase 3 — Migrate the first real write call site, then the rest _(not started)_
 - [ ] Pick the first real call site to migrate given the corrected verb
@@ -411,6 +413,32 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-09-26 — PR #3779 review round 6: shutdown must stop accepting work before draining
+- **A new write could still race the shutdown wait.** Rounds 4/5 waited for
+  `_tracking_write_busy()` to clear *before* calling
+  `tracking_write_server.close()` -- but the server keeps accepting new
+  connections the entire time it isn't yet closed, so a fresh write could
+  arrive right after the final busy check passed and start executing just
+  as `close()` ran, which -- since `close()` never drains an already-
+  dispatched handler thread -- could still terminate the process
+  mid-transaction. Fixed by reordering: `close()` first (stops accepting
+  any *new* request immediately), *then* wait for `_tracking_write_busy()`
+  to clear. Every request the predicate can still observe from that point
+  on was necessarily accepted before `close()`, so the drain now genuinely
+  only waits on already-accepted work -- no request can arrive during the
+  wait itself.
+- Fixed the Plan's own stale validation count (still said "5573 passed"
+  after round 4 had already added 3 tests reaching 5576) -- the historical
+  journal entries correctly kept their own point-in-time counts; only the
+  live Plan checklist line needed the update.
+- No new tests needed: the existing `TestWaitForTrackingWriteIdle` unit
+  tests exercise the wait/deadline logic itself, which is unchanged; the
+  fix is purely a call-order swap in `cmd_status_monitor`'s `finally`
+  block, verified by rerunning the full daemon-lifecycle suite. Full
+  suite: 130 tests across `test_tracking_write.py`/`test_status_monitor.py`
+  passed; `check-module-size`/`check-install-contract`/
+  `check-changefile-presence`/`check-effort-vision-structure`: all clean.
 
 ### 2026-09-26 — PR #3779 review round 5: shutdown wait used the wrong predicate; a documentation-accuracy fix
 - **The shutdown wait checked the wrong signal.** Round 4's

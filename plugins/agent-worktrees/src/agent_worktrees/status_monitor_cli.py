@@ -399,21 +399,23 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         if classify_server is not None:
             classify_server.close()
         if tracking_write_server is not None:
-            # 2026-09-26 PR review: CoalescingServer.close() does not drain
-            # an already-dispatched handler thread -- closing while a write
-            # is still executing (runtime_superseded/_other_current_monitor
-            # can reach this `finally` regardless of the empty-strike path
-            # above) could terminate the process mid-transaction, leaving a
-            # non-idempotent write incomplete. Waits on the same combined
-            # `_tracking_write_busy()` predicate the empty-strike branch
-            # uses -- `has_inflight_write()` alone misses the window between
-            # a request being accepted (subscriber registered) and its
-            # `compute()` call actually starting (where that counter
-            # increments), so subscriber_count() must stay part of the
-            # check here too. Bounded: a shutdown must still terminate
-            # eventually, never wait forever on a wedged compute.
-            _wait_for_tracking_write_idle(_tracking_write_busy)
+            # 2026-09-26 PR review: close *first*, then drain -- closing
+            # stops the server accepting any *new* request immediately;
+            # waiting first (the original ordering) left the server still
+            # accepting connections throughout the whole grace window, so a
+            # fresh write could arrive right after the final busy check and
+            # start executing just as close() ran, which -- since close()
+            # never drains an already-dispatched handler thread -- could
+            # still terminate the process mid-transaction. Closing first
+            # removes that race outright: every request counted by
+            # `_tracking_write_busy()` from this point on was necessarily
+            # accepted *before* close(), so waiting for that predicate to
+            # clear now genuinely drains only already-accepted work, never a
+            # request that could still arrive during the wait. Bounded --
+            # a shutdown must still terminate eventually, never wait forever
+            # on a wedged compute.
             tracking_write_server.close()
+            _wait_for_tracking_write_idle(_tracking_write_busy)
         worktree_status_runtime.shutdown()
         managed_mux_runtime.shutdown()
         d = _locks.read_lock(lock)
