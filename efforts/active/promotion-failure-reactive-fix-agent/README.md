@@ -160,10 +160,15 @@ fixes."
       likely within hours, not days). When one occurs:
       - [ ] Confirm `report-failure` actually ran (not skipped) and its
             conclusion.
-      - [ ] Confirm exactly one issue was filed (or an existing one
-            commented, if a repeat), labeled `ci-failure-signature`, with
-            an accurate signature, correct run link/SHA, and a genuinely
-            useful log excerpt — not truncated/garbled.
+      - [ ] Confirm one issue was filed per distinct failure signature
+            (or an existing matching one commented, if a repeat) — not
+            necessarily exactly one overall: a run with multiple distinct
+            failing tests legitimately produces multiple
+            `ci-failure-signature`-labeled issues, one per signature, per
+            the watchdog's own design (`tools/ci_failure_watchdog.py`
+            builds one `FailureSignature` per distinct failing test id).
+            Each should have an accurate signature, correct run link/SHA,
+            and a genuinely useful log excerpt — not truncated/garbled.
       - [ ] Confirm no duplicate issue was filed for the same signature on
             a second occurrence within the 6h window (only a real test of
             this, if the same failure recurs naturally or via the probe
@@ -173,19 +178,27 @@ fixes."
       revert promptly:**
       - [ ] **Target `agent-worktrees` specifically, not just any
             "low-traffic plugin"** (a real review finding on this Plan
-            itself): `ci.yml`'s smoke tier only *collects* (imports,
+            itself): `ci.yml`'s Linux smoke tier only *collects* (imports,
             never executes) `agent-worktrees`' tests on push/PR --
             `HEAVY_PLUGIN: agent-worktrees` / `--collect-only` -- while
-            every other plugin's tests actually *run* there. A deliberately
-            failing test added to any OTHER plugin would fail `ci.yml`
-            itself first; since `validate-and-promote.yml`'s own
-            `workflow_run` trigger only fires when the upstream `CI` run's
-            `conclusion == 'success'`, that would make `gate` never run at
-            all, and `report-failure` would never fire -- defeating the
-            entire probe. `agent-worktrees` is the one plugin whose smoke
-            pass can't catch this, so `ci.yml` stays green and
-            `validate-and-promote.yml` triggers normally, landing on the
-            real target: the `full - agent-worktrees` job.
+            every other plugin's tests actually *run* there. (`ci.yml`
+            also has a separate `worktrees-windows-launch` job that DOES
+            execute one specific, narrowly-filtered `agent-worktrees` test
+            -- `-k status_daemon_console_root_contains_psmux_descendants`
+            -- so the claim isn't that this plugin's suite is never
+            executed on push/PR at all, only that neither existing path
+            would catch a *new*, differently-named probe test.) A
+            deliberately failing test added to any OTHER plugin's real
+            (non-filtered) suite would fail `ci.yml` itself first; since
+            `validate-and-promote.yml`'s own `workflow_run` trigger only
+            fires when the upstream `CI` run's `conclusion == 'success'`,
+            that would make `gate` never run at all, and `report-failure`
+            would never fire -- defeating the entire probe. `agent-
+            worktrees` is the one plugin where a new, distinctly-named
+            test evades both of `ci.yml`'s existing execution paths, so
+            `ci.yml` stays green and `validate-and-promote.yml` triggers
+            normally, landing on the real target: the `full -
+            agent-worktrees` job.
       - [ ] Add ONE new, obviously-synthetic, clearly-commented failing
             test to `agent-worktrees`' suite (e.g.
             `assert False, "Deliberate Phase 1 validation probe for
@@ -193,6 +206,11 @@ fixes."
             efforts/active/promotion-failure-reactive-fix-agent"`) — never
             touch existing test logic, never something with side effects,
             never `.github/workflows/**`.
+      - [ ] **Add a changefile for `agent-worktrees`** (`python
+            tools/changefile.py add --plugin agent-worktrees --type dev
+            --comment "..."`) — this PR touches `plugins/agent-worktrees/`
+            content, so the repo's changefile-presence guard requires one;
+            the same is true for the follow-up revert PR below.
       - [ ] Land it via the normal PR flow to `dev` like any other change
             (small, honest PR description naming this as a deliberate,
             temporary probe for this effort — never disguised as a real
@@ -717,3 +735,18 @@ _Pending._
   fire. Corrected the plan to name `agent-worktrees` specifically as the
   only plugin where the probe actually reaches the intended `full -
   agent-worktrees` job.
+- **Second review pass caught three more real refinements, all fixed:**
+  (1) the "confirm exactly one issue was filed" checklist item was too
+  strict — the watchdog legitimately files one issue per distinct
+  failure signature, so a multi-failure run can correctly produce
+  several; corrected to "one issue per distinct signature"; (2) the
+  Linux-collect-only rationale was factually incomplete — `ci.yml` also
+  has a `worktrees-windows-launch` job that executes one specific,
+  narrowly `-k`-filtered `agent-worktrees` test, so the accurate claim is
+  that a *new, differently-named* probe test evades both existing
+  execution paths, not that the suite is never executed at all;
+  corrected the wording; (3) the probe PR (and its follow-up revert)
+  touch `plugins/agent-worktrees/` content, so both need a pending
+  `agent-worktrees` changefile per this repo's changefile-presence guard
+  — added as an explicit checklist item so "the normal PR flow" doesn't
+  quietly omit it.
