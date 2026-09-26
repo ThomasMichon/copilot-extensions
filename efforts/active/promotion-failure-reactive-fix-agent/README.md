@@ -324,10 +324,17 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
         "flaky" here specifically when it over-specifies its environment
         or timing rather than the behavior it's meant to protect —
         hardcoded OS assumptions (Windows-vs-Linux path/permission/
-        process differences), calling out to real `git`/subprocesses
-        instead of a fake/mock, depending on ambient env vars or real
-        wall-clock time, or an async/concurrency race with no
-        synchronization. For this class, **the correct fix is almost
+        process differences), an *incidental* real `git`/subprocess call
+        where process startup isn't what's under test, depending on
+        ambient env vars or real wall-clock time, or an async/concurrency
+        race with no synchronization. **Not every real subprocess/git
+        boundary is overreach** — `TESTING.md` explicitly requires
+        concurrency and process-lifecycle tests to bypass pooling and
+        keep exercising *real* process boundaries, since that boundary is
+        the actual behavior under test there; the agent must check
+        whether the failing test is one of these before "fixing" it, or
+        it will rewrite valid, intentional integration coverage. For the
+        genuinely-incidental-overreach class, **the correct fix is almost
         always to correct the *test* itself** (isolate the dependency,
         inject a fake, add proper synchronization/deterministic timing,
         remove the OS-specific assumption) — **never** to weaken or
