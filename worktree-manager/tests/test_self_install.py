@@ -194,6 +194,162 @@ def test_status_reports_marker_and_binstub(tmp_path, monkeypatch):
     assert st.binstub is not None
 
 
+def _fake_monorepo_with_pointer(tmp: Path, version: str) -> Path:
+    """A synthetic monorepo shape: <tmp>/monorepo/{worktree-manager,libs}/
+    -- the payload's ``libs/<lib>`` carries an UN-materialized vendor pointer,
+    and ``libs/`` (top-level) carries the real canonical content.
+    ``_materialize_payload_pointers`` never needs a fetched ``tools/`` at
+    all -- it uses the LOCAL, already-trusted
+    ``_trusted_pointer_materializer`` module shipped with worktree_manager
+    itself, never dynamically executing anything from the fetched source.
+    Returns the payload dir (``<tmp>/monorepo/worktree-manager``)."""
+    mono = tmp / "monorepo"
+    pd = _fake_payload(mono, version)
+    pd.rename(mono / "worktree-manager")
+    pd = mono / "worktree-manager"
+
+    canon = mono / "libs" / "shared-lib"
+    (canon / "src" / "shared_lib").mkdir(parents=True)
+    (canon / "src" / "shared_lib" / "__init__.py").write_text("value = 1\n", encoding="utf-8")
+    (canon / "pyproject.toml").write_text(
+        '[project]\nname = "shared-lib"\nversion = "0.1.0-dev1"\n', encoding="utf-8"
+    )
+
+    copy_dir = pd / "libs" / "shared-lib"
+    (copy_dir / "src" / "shared_lib").mkdir(parents=True)
+    (copy_dir / "src" / "shared_lib" / "__init__.py").write_text("# stub\n", encoding="utf-8")
+    (copy_dir / "VENDOR_POINTER.json").write_text(
+        '{"schema": "copilot-extensions.vendor-pointer", "version": 1, '
+        '"source": "libs/shared-lib", "kind": "src-passthrough"}\n',
+        encoding="utf-8",
+    )
+    return pd
+
+
+def test_self_install_materializes_a_vendor_pointer_from_a_live_monorepo(tmp_path, monkeypatch):
+    """A self-installed slot has no libs/+plugins/ monorepo ancestor of its
+    own, so a src-passthrough pointer's runtime import would be permanently
+    broken there -- self_install must expand any pointer copy into real,
+    self-contained content BEFORE publishing the slot, using the still-live
+    monorepo ancestor available at copy time (see
+    ``_materialize_payload_pointers``)."""
+    pd = _fake_monorepo_with_pointer(tmp_path, "5.5.5")
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+
+    res = self_install(pd, root=root, dry_run=False)
+    assert res.action == "installed"
+    slot = version_slot("5.5.5", root)
+    copy_dir = slot / "libs" / "shared-lib"
+    assert not (copy_dir / "VENDOR_POINTER.json").exists()
+    assert (copy_dir / "src" / "shared_lib" / "__init__.py").read_text() == "value = 1\n"
+
+
+def test_self_install_never_requires_a_monorepo_ancestor_when_there_are_no_pointers(
+    tmp_path, monkeypatch,
+):
+    """Round-18 review finding: when slot/libs exists but contains no
+    VENDOR_POINTER.json at all, a normal payload with real libs must not
+    even inspect (let alone require) a monorepo ancestor -- there is
+    nothing to materialize, so a fetch/checkout that never provides a
+    libs/ sibling (or one with an unrelated malformed file inside it)
+    must not fail installation."""
+    pd = _fake_payload(tmp_path, "6.6.7")
+    real_copy = pd / "libs" / "real-lib"
+    (real_copy / "src" / "real_lib").mkdir(parents=True)
+    (real_copy / "src" / "real_lib" / "__init__.py").write_text(
+        "value = 1\n", encoding="utf-8"
+    )
+    # No libs/ sibling next to pd at all -- if this were even inspected,
+    # a monorepo-ancestor-required error would fire; it must not be.
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+
+    res = self_install(pd, root=root, dry_run=False)
+    assert res.action == "installed"
+    slot = version_slot("6.6.7", root)
+    assert (slot / "libs" / "real-lib" / "src" / "real_lib" / "__init__.py").read_text() == (
+        "value = 1\n"
+    )
+
+
+def test_self_install_raises_when_pointer_present_without_monorepo_ancestor(tmp_path, monkeypatch):
+    """The dependency-free, no-ancestor case: a pointer copy with no
+    reachable canonical source would install successfully but be permanently
+    unimportable at runtime -- self_install must report an error (rather
+    than crash or silently ship a broken payload), and self_update's own
+    "error"-action handling then forwards this cleanly (see
+    test_self_update_reports_error_and_cleans_up_when_pointer_unresolvable
+    in test_e2e_delivery.py / test_update.py)."""
+    pd = _fake_payload(tmp_path, "6.6.6")
+    copy_dir = pd / "libs" / "shared-lib"
+    (copy_dir / "src" / "shared_lib").mkdir(parents=True)
+    (copy_dir / "src" / "shared_lib" / "__init__.py").write_text("# stub\n", encoding="utf-8")
+    (copy_dir / "VENDOR_POINTER.json").write_text(
+        '{"schema": "copilot-extensions.vendor-pointer", "version": 1, '
+        '"source": "libs/shared-lib", "kind": "src-passthrough"}\n',
+        encoding="utf-8",
+    )
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+
+    res = self_install(pd, root=root, dry_run=False)
+    assert res.action == "error"
+    assert "unmaterialized vendor pointers" in (res.reason or "")
+    # Nothing was published -- a rejected install must not leave a broken
+    # slot on disk (it would otherwise be mistaken for a valid install by
+    # a later needs_install() existence check) or a marker naming it as
+    # current.
+    assert current_version(root) is None
+    assert not version_slot("6.6.6", root).exists()
+
+
+def test_self_install_refuses_a_symlink_anywhere_in_the_payload(tmp_path, monkeypatch):
+    """Round-9 review finding: symlinks=True on the copytree PRESERVES a
+    symlink instead of dereferencing it, but preservation alone doesn't
+    make it safe to publish -- a symlink anywhere in the payload (not
+    just within a vendor-pointer's canonical src/tests) would survive into
+    the slot and could resolve outside it at runtime. self_install must
+    reject the whole payload rather than let it through, and must not
+    leave the partially-copied slot behind."""
+    pd = _fake_payload(tmp_path, "7.7.7")
+    outside = tmp_path / "outside-secret.txt"
+    outside.write_text("should never be reachable from the slot\n")
+    (pd / "sneaky-link").symlink_to(outside)
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+
+    res = self_install(pd, root=root, dry_run=False)
+    assert res.action == "error"
+    assert "symlink" in (res.reason or "")
+    assert current_version(root) is None
+    assert not version_slot("7.7.7", root).exists()
+
+
+def test_self_install_refuses_a_symlinked_payload_root(tmp_path, monkeypatch):
+    """Round-16 review finding: symlinks=True on the copytree only
+    protects symlinks encountered DURING the walk of payload_dir's own
+    tree -- it cannot protect payload_dir being a symlink ITSELF
+    (shutil.copytree always creates dst as a real directory, so there's
+    nowhere for a preserved-root-symlink object to go). In the git-backed
+    self_update path, a checked-out worktree-manager/ dir could itself be
+    a symlink; the earlier (payload/"pyproject.toml").is_file() check
+    would still pass (it follows the link), copytree would dereference
+    it, and _find_any_symlink(slot) afterward would see no link at all
+    (the slot's own root is never included in its own scan)."""
+    real_payload = _fake_payload(tmp_path, "10.10.10")
+    linked_payload = tmp_path / "linked-payload"
+    linked_payload.symlink_to(real_payload, target_is_directory=True)
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+
+    res = self_install(linked_payload, root=root, dry_run=False)
+    assert res.action == "error"
+    assert "symlink" in (res.reason or "")
+    assert current_version(root) is None
+    assert not version_slot("10.10.10", root).exists()
+
+
 def test_bin_directory_is_deployed_into_the_slot(tmp_path, monkeypatch):
     """Phase 3b Slice 2 (Mux relocation): the versioned self-install copies the
     WHOLE payload directory (``_copy_payload`` -> ``shutil.copytree``), so a
@@ -299,3 +455,25 @@ def test_self_install_command_dry_run(capsys):
 def test_doctor_shows_self_section(capsys):
     main(["doctor"])
     assert "worktree-manager (self)" in capsys.readouterr().out
+
+
+def test_self_install_normalizes_a_malformed_pointer_failure_to_runtimeerror(tmp_path, monkeypatch):
+    """Round-9 review finding: a malformed pointer file (bad JSON) can make
+    materialize_libs_dir() raise JSONDecodeError instead of returning a
+    SKIP line -- self_install() only translates RuntimeError, so this must
+    be normalized at the _materialize_payload_pointers boundary rather
+    than letting an unexpected exception type escape self_update's own
+    best-effort/non-fatal contract."""
+    pd = _fake_monorepo_with_pointer(tmp_path, "8.8.8")
+    # Corrupt the pointer file with invalid JSON.
+    (pd / "libs" / "shared-lib" / "VENDOR_POINTER.json").write_text(
+        "{not valid json", encoding="utf-8"
+    )
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+
+    res = self_install(pd, root=root, dry_run=False)
+    assert res.action == "error"
+    assert "pointer materialization" in (res.reason or "")
+    assert current_version(root) is None
+    assert not version_slot("8.8.8", root).exists()
