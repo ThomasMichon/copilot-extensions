@@ -1,9 +1,0 @@
-{
-  "comment": "Represent session compaction events (start/complete) on the live-session SSE stream so consumers see a compaction happened instead of a silent context-usage reset (#3717)",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}
