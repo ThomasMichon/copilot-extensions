@@ -13,23 +13,23 @@ IS_WINDOWS = platform.system() == "Windows"
 DEFAULT_TCP_PORT = 19999
 HOME_ENV = "AGENT_VAULT_HOME"
 INSTALLATION_ID_ENV = "AGENT_VAULT_INSTALLATION_ID"
-SYSTEMD_UNIT_ENV = "AGENT_VAULT_SYSTEMD_UNIT"
-TASK_NAME_ENV = "AGENT_VAULT_TASK_NAME"
+SYSTEMD_UNIT_ENV = "AGENT_VAULT_SYSTEMD_UNIT"  # marketplace-isolation: allow legacy-compatibility
+TASK_NAME_ENV = "AGENT_VAULT_TASK_NAME"  # marketplace-isolation: allow legacy-compatibility
 
 # Runtime endpoint paths. Each honors an environment override so a deployment can
 # run the daemon at custom paths (e.g. a branded service, or several named vaults
 # side by side without colliding). Unset -> the platform default below.
-SOCKET_ENV = "AGENT_VAULT_SOCKET"
+SOCKET_ENV = "AGENT_VAULT_SOCKET"  # marketplace-isolation: allow legacy-compatibility
 PID_ENV = "AGENT_VAULT_PID"
 LOG_ENV = "AGENT_VAULT_LOG"
 
-DEFAULT_SOCKET_PATH = "/tmp/agent-vault-service.sock"
+DEFAULT_SOCKET_PATH = "/tmp/agent-vault-service.sock"  # marketplace-isolation: allow legacy-compatibility
 SOCKET_PATH = os.environ.get(SOCKET_ENV) or DEFAULT_SOCKET_PATH
 
 # Windows named-pipe endpoint (rung 2 on Windows). Honors an override so a
 # branded/side-by-side deployment keeps its own pipe namespace.
-PIPE_ENV = "AGENT_VAULT_PIPE"
-DEFAULT_PIPE_PATH = r"\\.\pipe\agent-vault"
+PIPE_ENV = "AGENT_VAULT_PIPE"  # marketplace-isolation: allow legacy-compatibility
+DEFAULT_PIPE_PATH = r"\\.\pipe\agent-vault"  # marketplace-isolation: allow legacy-compatibility
 PIPE_PATH = os.environ.get(PIPE_ENV) or DEFAULT_PIPE_PATH
 PID_FILE_LINUX = "/tmp/agent-vault-service.pid"
 PID_FILE_WIN = Path(os.environ.get("TEMP", "C:/Temp")) / "agent-vault-service.pid"
@@ -48,12 +48,12 @@ RUN_DIR_ENV = "AGENT_VAULT_RUN_DIR"
 # ``"<transport>:<address>"`` spec (e.g. ``tcp:127.0.0.1:52731`` or
 # ``unix:/tmp/agent-vault.sock``) that a client dials before consulting the
 # rendezvous file or the legacy fixed port.
-ENDPOINT_ENV = "AGENT_VAULT_ENDPOINT"
+ENDPOINT_ENV = "AGENT_VAULT_ENDPOINT"  # marketplace-isolation: allow legacy-compatibility
 
 
 def home_dir() -> Path:
     """Return the runtime root for the active vault installation."""
-    return Path(os.environ.get(HOME_ENV) or (Path.home() / ".agent-vault"))
+    return Path(os.environ.get(HOME_ENV) or (Path.home() / ".agent-vault"))  # marketplace-isolation: allow legacy compatibility root
 
 
 def installation_id() -> str | None:

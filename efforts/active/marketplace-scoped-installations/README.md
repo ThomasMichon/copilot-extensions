@@ -386,6 +386,77 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-26 — `agent-vault`'s `config.py` 8 findings annotated (partial plugin slice)
+
+- Fresh guard count for `dev` head (post `context-handoff` merge): 684→688
+  after unrelated `dev` activity, then confirmed drift is expected (counts
+  are a live snapshot, not a fixed baseline to re-derive each leg).
+- Re-verified `agent-pull-requests` (10 findings) and `budget-guidance`
+  (5 findings) are still confirmed genuine Phase 2 launcher-contract backlog
+  — explicitly gated by the still-unchecked README Phase 2 item ("Stop
+  installing generic `agent-*` commands into `~/.local/bin`; retained
+  service, provider, remote, scheduled, startup, and deployment boundaries
+  still require attributable external-launch contracts before their
+  compatibility wrappers can be retired"). Converting either now would be
+  premature against unfinished prerequisite infrastructure — left untouched,
+  not a quick annotation slice.
+- Moved to the next size tier (36-52 findings) and picked the most
+  file-concentrated candidate: `agent-vault` (52 findings across only 11
+  files, with `config.py` alone carrying 8 in a single file — the same
+  one-file-one-classification shape as the `context-handoff` slice).
+- Read `config.py`: every flagged constant (`SYSTEMD_UNIT_ENV`,
+  `TASK_NAME_ENV`, `SOCKET_ENV`, `DEFAULT_SOCKET_PATH`, `PIPE_ENV`,
+  `DEFAULT_PIPE_PATH`, `ENDPOINT_ENV`, `home_dir()`'s runtime-root fallback)
+  is part of the file's own documented "environment override... unset ->
+  platform default" design (its own comments state this explicitly) — the
+  identical env-override-with-legacy-default shape already annotated in this
+  same plugin's `runtime-gate.sh`/`.ps1` (`LEGACY_ROOT="${AGENT_VAULT_HOME:-
+  $HOME/.agent-vault}" # marketplace-isolation: allow legacy compatibility
+  root`). Annotated the runtime-root fallback with the identical `allow
+  legacy compatibility root` reason and the remaining 7 fixed-identity/env-
+  name constants with the established `allow legacy-compatibility` reason
+  (matching `agent-containers/src/agent_containers/config.py`'s existing use
+  of the same phrase for an analogous shape).
+- **Left the rest of `agent-vault` deliberately untouched this leg** —
+  scoped to `config.py` only, matching the bounded single-file slice
+  discipline:
+  - `install.sh`/`install.ps1` (25 findings) — same blocked generic-wrapper
+    backlog as `budget-guidance`/`agent-pull-requests`, not annotatable yet.
+  - `scripts/runtime-gate.sh`/`.ps1` (9 remaining findings beyond the 2
+    already-marked lines) — these set `AGENT_VAULT_SOCKET`/`PIPE`/
+    `SYSTEMD_UNIT`/`TASK_NAME` using a `SERVICE_SUFFIX` derived from
+    `scoped_identity_suffix "$RUNTIME_ROOT"` (a hash of the cell-specific
+    runtime root) — i.e. these ARE already cell-qualified, just under a
+    variable name (`SERVICE_SUFFIX`/`RUNTIME_ROOT`) the guard's
+    `_CELL_QUALIFIER` regex (`marketplace(_id)?|installation(_id)?|cell
+    (_id)?`) doesn't recognize. This looks like a genuine guard blind spot
+    (false positive), not a code or annotation fix — flagging for a future
+    leg to decide whether to broaden the guard's regex or annotate with a
+    new reason category (no existing precedent token fits this shape; do
+    not invent one without checking the guard-authoring history first).
+  - `cli.py` (2), `core_ext.py` (1), `service.py` (1), `winpipe.py` (1),
+    `payload-invocation.json` (1), `skills/agent-vault-setup/SKILL.md` (3) —
+    each has a distinct shape (sibling env-override duplicate, a plain
+    logger name, a `legacyRuntimeRoot` migration-metadata field matching the
+    `agent-index`/`agent-machines` precedent noted in the 2026-09-25
+    `phase-2-launcher-contracts.md` re-audit, and doc rows) needing their
+    own individual read before classifying — not read this leg.
+- Verified: `git diff origin/dev -- config.py | grep -c "marketplace-
+  isolation: allow"` = exactly 8 (not eyeballed). `check-marketplace-
+  isolation.py --json` dropped by exactly 8 (688→680 relative to the fresh
+  `dev` head at rebase time). `python -c "import ast; ast.parse(...)"`
+  syntax check. `python tools/run-plugin-tests.py agent-vault` — the
+  canonical turn-key runner (not a bare `uv run pytest`, which uses no
+  per-plugin venv and produces a misleading stale-package
+  `ModuleNotFoundError` unrelated to any real regression — confirmed via
+  `git stash`/`git stash pop` that the same bare-`uv run` failure pre-exists
+  untouched, then re-ran correctly via `tools/run-plugin-tests.py`): 249
+  passed, 12 skipped. `check-docs-consistency.py` OK. `check-changefile-
+  presence.py --base origin/dev` OK after adding a dev changefile. Manually
+  confirmed the fix catches its own regression via `git stash`/`git stash
+  pop` (688→680→688→680, the count drift between checks tracked unrelated
+  `dev` commits landing concurrently, not a validation error).
+
 ### 2026-09-25 — `context-handoff`'s 11 findings in `handoff-core.mjs` annotated
 
 - Fresh guard count for `dev` head `97c641fa0`: 696 findings, matching the
