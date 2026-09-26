@@ -1,9 +1,0 @@
-{
-  "comment": "Componentize handoff-cutover choreography (spawn/retry/retire) out of __main__.py into handoff_cutover.py",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
