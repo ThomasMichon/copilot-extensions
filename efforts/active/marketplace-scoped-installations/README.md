@@ -386,6 +386,45 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-25 — `copilot-extensions-harness`'s 5 findings annotated
+
+- Fresh guard count for `dev` head `4c51d882c`: 701 findings
+  (`unqualified-runtime-root`: 423, `fixed-service-identity`: 144,
+  `global-plugin-binstub`: 83, `path-sibling-launch`: 51), matching the prior
+  entry's post-merge baseline. `copilot-extensions-harness` carried exactly 5
+  findings, all in `SKILL.md` docs: 3 in
+  `skills/diagnosing-copilot-extensions/SKILL.md` (a "Where things live"
+  table row each for `Runtime roots` and `Binstubs`, plus a `Symptom → cause
+  → action` row for the "command not found" case — the last one dual-flagged
+  `global-plugin-binstub` + `path-sibling-launch`) and 1 in
+  `skills/contributing-to-copilot-extensions/SKILL.md` (the "Payload vs
+  runtime" concept paragraph's mention of a `~/.local/bin` binstub).
+- The diagnosing-skill's file already carries 8 existing
+  `marketplace-isolation: allow deployed-runtime-diagnostics` markers on
+  materially identical rows/commands in the same table and command block
+  (documenting today's deployed, still-legacy-by-design runtime layout for
+  troubleshooting) — category 2, matching an established in-file precedent,
+  not a new judgment call. Annotated the 3 remaining rows with the same
+  marker.
+- The contributing-skill's finding is a generic architectural description
+  ("a runtime plugin also ships a venv + `~/.local/bin` binstub"), not a
+  diagnostic reference to the live deployed state — matches the 2026-09-24
+  entry's `allow doc-example` category (that entry annotated an identical
+  generic `~/.local/bin` binstub concept mention elsewhere) rather than
+  `deployed-runtime-diagnostics`. Annotated with `allow doc-example`.
+- **Gotcha re-hit**: the guard's `_ALLOW_REASON` match requires the marker on
+  the exact same physical source line as the flagged text, not merely the
+  same paragraph/table row — a marker placed on the following wrapped
+  markdown line does not suppress the finding. First attempt at the
+  contributing-skill annotation placed it one line down and left the finding
+  un-suppressed (701 → 697, not 696); moved the marker onto the actual
+  flagged line to fix it.
+- Verified: `check-marketplace-isolation.py --json` dropped from 701 to 696
+  (exactly the 5 annotated findings); `check-docs-consistency.py` still
+  passes; manually confirmed the fix catches its own regression (`git
+  stash` reverted the two files, count went back to 701; `git stash pop`
+  restored 696).
+
 ### 2026-09-25 — Vendored `plugin-activation` registry-root finding annotated (6 findings)
 
 - Fresh guard count for the `dev` head at this point: 707 findings (not the
