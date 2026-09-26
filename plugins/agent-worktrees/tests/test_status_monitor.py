@@ -2441,7 +2441,10 @@ def test_classify_daemon_started_published_in_lock_and_closed_on_exit(
     assert "managed_mux_endpoint" in servers_stamp
     assert "managed_mux_token" in servers_stamp
     assert "managed_mux_generation" in servers_stamp
-    assert closed["n"] == 3  # classify_server + worktree_status_server + managed_mux_server
+    assert "tracking_write_endpoint" in servers_stamp
+    assert "tracking_write_token" in servers_stamp
+    assert "tracking_write_generation" in servers_stamp
+    assert closed["n"] == 4  # classify_server + worktree_status_server + managed_mux_server + tracking_write_server
 
 
 def test_sweep_rechecks_before_publish_and_retains_registered_session_on_generation_change(

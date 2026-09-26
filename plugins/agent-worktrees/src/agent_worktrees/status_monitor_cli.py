@@ -45,6 +45,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     from . import classify_daemon, loop_governance, monitor_roots, mux_link, pane_reaper, registry_paths, session_catalog
     from . import locks as _locks
     from . import status_monitor_runtime, status_updater_cli
+    from . import tracking_write
     from . import worktree_status_daemon
     from .hook_ipc import HookIpcServer, HookUnavailable
 
@@ -194,6 +195,13 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     except Exception:
         classify_server = None
 
+    tracking_write_server = None
+    try:
+        tracking_write_server = tracking_write.start_server(tracking_write.compute)
+        tracking_write_server.start()
+    except Exception:
+        tracking_write_server = None
+
     worktree_status_runtime = worktree_status_daemon.InProcessRuntime()
     worktree_status_runtime.start(
         _core_helper("_aw_runtime_home", status_monitor_runtime._aw_runtime_home)() / "worktree-status-cache.sqlite3",
@@ -219,6 +227,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             extra.update(hook_server.rendezvous())
         if classify_server is not None:
             extra.update(classify_daemon.rendezvous_fields(classify_server))
+        if tracking_write_server is not None:
+            extra.update(tracking_write.rendezvous_fields(tracking_write_server))
         extra.update(worktree_status_runtime.lock_extra())
         extra.update(managed_mux_runtime.lock_extra())
         return extra
@@ -319,6 +329,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             hook_server.close()
         if classify_server is not None:
             classify_server.close()
+        if tracking_write_server is not None:
+            tracking_write_server.close()
         worktree_status_runtime.shutdown()
         managed_mux_runtime.shutdown()
         d = _locks.read_lock(lock)

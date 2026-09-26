@@ -5,7 +5,7 @@
 - **Branch(es):** independent per-phase worktrees (land each phase's PR before
   starting the next)
 - **Created:** 2026-09-26
-- **Status:** Draft <!-- Draft | Active | Blocked | Done -->
+- **Status:** Active <!-- Draft | Active | Blocked | Done -->
 - **Vision:** extends
   [`visions/plugins/agent-worktrees`](../../../visions/plugins/agent-worktrees/README.md)
   (new concept *The resident daemon as the authoritative live-state
@@ -285,31 +285,81 @@ survey above.
       - No other active effort was found touching `tracking.py`'s write
         functions or the resident daemon's core sweep/publish loop.
 
-### Phase 2 — Daemon mutation-verb plumbing _(not started; unblocked by Phase 1's resolved open questions)_
-- [ ] Confirm `module-componentization-discipline`'s `tracking.py` split is
-      at a stable resting point (or coordinate landing alongside it) before
-      enumerating Phase 2's mutation verbs against `tracking_claims.py` /
-      `tracking_lifecycle.py` / `tracking_session_registry.py` / the
-      remaining `tracking.py` persistence core.
-  - [ ] Add the `tracking_write` wire kind, mirroring `worktree_status_daemon.py`'s
-      structure (rendezvous fields, `start_server`, a `_with_boot` client
-      helper), landed additively alongside the existing `classify`/
-      `worktree_status`/`mux_link` kinds — never replacing or restructuring
-      those in the same change.
-- [ ] In-memory record store, warm-restored from YAML on daemon boot.
-- [ ] The daemon-unreachable fallback: a small shared helper each migrated
-      write function calls into on daemon-unreachable — `run_direct(fn,
-      *args, **kwargs)`-shaped, so the logging obligation lives in one place
-      rather than being hand-repeated at every call site — invoking the
-      exact function the daemon's own handler would have called, then
-      logging the bypass (worktree id, function name, reason the daemon was
-      unreachable, timestamp).
-- [ ] First migrated verb (smallest, most contained write — likely
-      `register_session` or a single disposition setter) as the end-to-end
-      proof, mirroring how the accelerator's own Phase 4 proved its design
-      with one in-process reference consumer before wider rollout.
+### Phase 2 — Daemon mutation-verb plumbing ✅ INFRA DONE 2026-09-26 (no call site migrated yet)
+- [x] Confirmed `module-componentization-discipline`'s `tracking.py` split is
+      at a stable resting point before starting: `tracking.py` sits exactly
+      at its 4009-line grandfathered ceiling with no journal activity since
+      2026-09-22 (4 days idle at the time this phase started) — a safe
+      resting point, not a moving target.
+  - [x] Added the `tracking_write` wire kind (`tracking_write.py`), mirroring
+      `classify_daemon.py`/`worktree_status_daemon.py`'s structure
+      (rendezvous fields, `start_server`, a `write_with_boot` client
+      helper), landed additively in `cmd_status_monitor` alongside the
+      existing `classify`/`worktree_status`/`mux_link` kinds — none of
+      those were touched or restructured.
+- [x] **Revised, not yet built:** a full persistent in-memory record store
+      (warm-restored from YAML on daemon boot, `worktree_status_cache.py`-
+      style) remains explicitly **deferred**, not part of this phase's
+      landed slice — see the granularity finding below for why forcing it
+      in now would have been premature. Today, a registered verb still does
+      its own fresh lock/load/mutate/save per call, whether invoked from the
+      daemon or directly; the correctness win landed is "every write
+      funnels through one process when reachable," not yet "every read is
+      served from a warm in-memory copy."
+- [x] The daemon-unreachable fallback: `tracking_write.run_direct(verb,
+      args, reason=...)` — calls the *same* function `tracking_write.
+      compute` would have called (via the shared `_VERBS` registry, see
+      `register_verb`), always logging the bypass first. `tracking_write.
+      dispatch()` is the single public entry point a migrated call site
+      uses in place of calling its function directly, minting a fresh,
+      unique coalescing key per call so two concurrent writes are never
+      merged into one execution (a write-specific difference from
+      `classify`/`worktree_status`'s read-safe coalescing).
+- [x] **Real finding, not yet acted on for the first verb:** inspecting
+      actual call sites (`register_session` in
+      `tracking_session_registry.py`, `mark_resumed` in `resolve_cli.py`/
+      `resolve_launch_cli.py`) found every one composes **several**
+      `tracking.*` mutation calls under one `_RecordLock` before **one**
+      `save_record` — never a single bare field-setter call in isolation.
+      **Corrects this phase's own earlier plan wording** ("named
+      operations... as request verbs," implying one verb per
+      `tracking.py` function): a verb must map to a call site's whole
+      guarded transaction, not to an individual setter, or a migration
+      would either multiply round trips per real operation or break the
+      atomicity that one lock + one save currently guarantees. See
+      `tracking_write.py`'s own module docstring ("Verb granularity note")
+      for the durable, code-level record of this correction.
+      _(agent-recommended — found via code inspection this session, not
+      operator-specified; flagged here per this skill's own demarcation
+      requirement.)_
+- [ ] **First migrated verb, still open:** given the granularity finding
+      above, `register_session`/`mark_resumed` (this phase's originally
+      named candidates) are each a multi-step guarded transaction, not a
+      quick, low-risk first proof to retrofit blind in one pass against a
+      hot, widely-used facility path (`register_session` specifically backs
+      the sessionStart hook). Deferred to Phase 3 rather than rushed here;
+      Phase 2's own infra is proven end-to-end instead via 14 new unit
+      tests (`test_tracking_write.py`) exercising the registry, dispatch,
+      logged fallback, and the unique-key-never-coalesces guarantee
+      directly, without touching a live production call site.
+- [x] Tests: `test_tracking_write.py` (14 tests: rendezvous parsing, verb
+      registration/dispatch, unregistered-verb/malformed-payload rejection,
+      `run_direct`'s logged bypass, daemon-reachable vs. fallback dispatch,
+      deadline-exceeded fallback, and two-concurrent-writes-never-coalesce).
+      `test_status_monitor.py`'s existing daemon-lifecycle regression test
+      updated (3 → 4 `CoalescingServer.close()` calls: classify +
+      worktree_status + managed_mux + tracking_write) plus new
+      `tracking_write_*` rendezvous-field assertions. Full suite: 5549
+      passed, 26 skipped, 5 failures confirmed pre-existing/environment-
+      dependent via `git stash` (unrelated to this change — `test_doctor.py`/
+      `test_update_stage.py`/`test_registration_home.py`, all failing
+      identically without these changes).
 
-### Phase 3 — Migrate remaining write call sites _(not started)_
+### Phase 3 — Migrate the first real write call site, then the rest _(not started)_
+- [ ] Pick the first real call site to migrate given the corrected verb
+      granularity (a whole transaction, not a bare setter) — candidates to
+      evaluate: a narrower, lower-traffic disposition-assertion path before
+      `register_session`'s own sessionStart-hook-critical one.
 - [ ] One call site (or a closely related cluster) at a time, each its own
       reviewable PR, per this repo's serial-single-writer convention —
       across whichever of `tracking.py` / `tracking_claims.py` /
@@ -355,6 +405,50 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-09-26 — Phase 2 infra landed (wire plumbing + fallback + tests); first call-site migration deferred to Phase 3
+- Verified `module-componentization-discipline`'s `tracking.py` split was a
+  safe resting point (exactly at its 4009-line ceiling, no journal activity
+  in 4 days) before starting, per Phase 1's resolved sequencing question.
+- Built `tracking_write.py`: the `tracking_write` wire kind, a verb
+  registry (`register_verb`/`compute`), `run_direct` (the logged,
+  same-code daemon-unreachable fallback), and `dispatch`/`write_with_boot`
+  (the public entry point, always minting a fresh coalescing key per call
+  so concurrent writes never merge). Wired additively into
+  `cmd_status_monitor` (`status_monitor_cli.py`): a fourth
+  `CoalescingServer` alongside `classify`/`worktree_status`/`mux_link`,
+  publishing `tracking_write_*` rendezvous fields, closed in the existing
+  shutdown path.
+- **Real finding while scoping the first migrated verb:** every actual
+  `tracking.py` write call site (`register_session`, `mark_resumed`, ...)
+  batches several mutation calls under one `_RecordLock` before one
+  `save_record` — never a bare single-setter call. This corrects Phase 2's
+  own earlier plan wording (documented in the Plan above and in
+  `tracking_write.py`'s own docstring): a verb must map to a call site's
+  whole guarded transaction, not an individual `tracking.py` function.
+  Demarcated as agent-recommended (found via inspection, not
+  operator-specified).
+- Given that correction, and that both originally-named first-verb
+  candidates turned out to be non-trivial, hot-path transactions
+  (`register_session` specifically backs the sessionStart hook), chose
+  **not** to rush a production call-site migration in the same pass as
+  new infra against a live, widely-used facility tool. Instead proved the
+  infra end-to-end via 14 new unit tests (`test_tracking_write.py`)
+  exercising the registry, dispatch, logged fallback, and the
+  never-coalesces-two-writes guarantee directly.
+- Fixed a real, expected regression in `test_status_monitor.py`'s existing
+  daemon-lifecycle test (mirrors the accelerator effort's own precedent,
+  2026-09-20: adding a fourth `CoalescingServer` moved its
+  `closed["n"] == 3` assertion to `4`) and added `tracking_write_*`
+  rendezvous-field assertions alongside the existing ones.
+- Full suite: 5549 passed, 26 skipped, 5 failures -- confirmed via
+  `git stash` to be pre-existing/environment-dependent (`test_doctor.py`,
+  `test_update_stage.py`, `test_registration_home.py`), unrelated to this
+  change and failing identically without it.
+- **Not yet done:** no production write call site actually goes through
+  the daemon yet -- `tracking_write.dispatch()` exists and is proven
+  correct in isolation, but nothing calls it outside its own tests. Phase
+  3 picks the first real transaction to migrate.
 
 ### 2026-09-26 — Open questions resolved; concurrent-effort survey done
 Operator answers, verbatim:
