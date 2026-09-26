@@ -296,6 +296,83 @@ def test_set_card_requires_held(q):
         q.set_card(t.id, "w1", card={"status": "x"})
 
 
+def _held_with_label(q, *, label, worker="w1", target_machine=None):
+    t = q.create(
+        "review PR 42",
+        labels=[label],
+        target_machine=target_machine,
+    )
+    q.claim_one(worker, machine=target_machine)
+    q.start(t.id, worker)
+    return t
+
+
+def test_set_card_request_input_default_permissive(q):
+    """No registration has declared a denylist -- a label carries no
+    inherent restriction (the facility's own default posture, see
+    docs/spawn-supervisor.md's Steering-card permission gate)."""
+    t = _held_with_label(q, label="intelligence-dampener-review")
+    card = steering.build_card(request_input=steering.parse_request_input("note"))
+    task = q.set_card(t.id, "w1", card=card)
+    assert task.awaiting_steer is True
+
+
+def test_set_card_request_input_blocked_by_registration(q):
+    q.register_registration(
+        "supervised-lane",
+        {"all_repos": True, "labels": ["intelligence-dampener-review"],
+         "steering_disallowed_labels": ["intelligence-dampener-review"]},
+    )
+    t = _held_with_label(q, label="intelligence-dampener-review")
+    card = steering.build_card(request_input=steering.parse_request_input("note"))
+    with pytest.raises(TaskError, match="steering_disallowed_labels"):
+        q.set_card(t.id, "w1", card=card)
+
+
+def test_set_card_without_request_input_is_never_blocked(q):
+    """A plain status-note card carries no ``request_input`` and never blocks
+    the task's own resume path, so it is never gated -- only the
+    ``awaiting_steer``-inducing form is."""
+    q.register_registration(
+        "supervised-lane",
+        {"all_repos": True, "labels": ["intelligence-dampener-review"],
+         "steering_disallowed_labels": ["intelligence-dampener-review"]},
+    )
+    t = _held_with_label(q, label="intelligence-dampener-review")
+    task = q.set_card(t.id, "w1", card=steering.build_card(status="just an FYI"))
+    assert task.awaiting_steer is False
+
+
+def test_set_card_request_input_blocked_registration_scoped_by_machine(q):
+    """A registration pinned to a different machine does not block a task
+    targeting another machine."""
+    q.register_registration(
+        "supervised-lane",
+        {"all_repos": True, "labels": ["intelligence-dampener-review"],
+         "steering_disallowed_labels": ["intelligence-dampener-review"]},
+        machine="wheatley",
+    )
+    t = _held_with_label(
+        q, label="intelligence-dampener-review", target_machine="lambda-core"
+    )
+    card = steering.build_card(request_input=steering.parse_request_input("note"))
+    task = q.set_card(t.id, "w1", card=card)
+    assert task.awaiting_steer is True
+
+
+def test_set_card_request_input_unrelated_label_is_not_blocked(q):
+    q.register_registration(
+        "supervised-lane",
+        {"all_repos": True, "labels": ["intelligence-dampener-review"],
+         "steering_disallowed_labels": ["intelligence-dampener-review"]},
+    )
+    t = _held_with_label(q, label="general")
+    card = steering.build_card(request_input=steering.parse_request_input("note"))
+    task = q.set_card(t.id, "w1", card=card)
+    assert task.awaiting_steer is True
+
+
+
 # -- queue: submit_steer + take_steer ---------------------------------------
 
 

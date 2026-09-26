@@ -1,0 +1,9 @@
+{
+  "comment": "Coordinator-side steering-card permission gate: body.steering_disallowed_labels refuses a request-input card for a task carrying a named label (default permissive), enforced in TaskQueue.set_card. Closes #3731.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "minor"
+    }
+  ]
+}

@@ -890,6 +890,40 @@ def test_cli_build_spec_from_lane_flags_includes_idle_nudge_exempt_labels():
     assert spec["idle_nudge_exempt_labels"] == ["code-review"]
 
 
+def test_cli_build_spec_from_lane_flags_includes_steering_disallowed_labels():
+    from agent_dispatch.__main__ import _build_registration_spec
+
+    args = _parse(
+        ["supervise", "register", "--all-repos", "--label", "code-review",
+         "--steering-disallowed-label", "code-review"]
+    )
+    spec = _build_registration_spec(args)
+    assert spec["steering_disallowed_labels"] == ["code-review"]
+
+
+def test_validate_registration_accepts_steering_disallowed_labels_subset_of_labels():
+    validate_registration(
+        RegistrationKind.SUPERVISED_LANE,
+        {
+            "all_repos": True,
+            "labels": ["intelligence-dampener-review"],
+            "steering_disallowed_labels": ["intelligence-dampener-review"],
+        },
+    )
+
+
+def test_validate_registration_rejects_steering_disallowed_label_not_watched():
+    with pytest.raises(RegistrationError, match="not watched"):
+        validate_registration(
+            RegistrationKind.SUPERVISED_LANE,
+            {
+                "all_repos": True,
+                "labels": ["general"],
+                "steering_disallowed_labels": ["intelligence-dampener-review"],
+            },
+        )
+
+
 def test_cli_build_spec_inline_json():
     from agent_dispatch.__main__ import _build_registration_spec
 
