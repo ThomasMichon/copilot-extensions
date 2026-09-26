@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -108,6 +109,193 @@ def test_find_pointers_returns_sorted_paths(tmp_path: Path):
 
     found = mm.find_pointers(root)
     assert [p.parent.parent.parent.name for p in found] == ["alpha-plugin", "zeta-plugin"]
+
+
+def _worktree_manager_pointer(root: Path, lib: str) -> Path:
+    """Create a directory pointer under the extra top-level
+    ``worktree-manager/libs/<lib>`` tree (mirrors ``sync-vendored-libs.py``'s
+    own extra-tree handling, not the ``plugins/*/libs/*`` shape)."""
+    d = root / "worktree-manager" / "libs" / lib
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "VENDOR_POINTER.json").write_text(
+        json.dumps({"schema": "copilot-extensions.vendor-pointer", "version": 1,
+                    "source": f"libs/{lib}"}) + "\n",
+        encoding="utf-8",
+    )
+    (d / "pyproject.toml").write_text('[project]\nname = "x"\nversion = "0.0.0"\n',
+                                       encoding="utf-8")
+    return d
+
+
+def test_find_pointers_includes_worktree_manager(tmp_path: Path):
+    root = tmp_path / "repo"
+    _pointer(root, "agent-bridge", "libA")
+    _worktree_manager_pointer(root, "libB")
+
+    found = mm.find_pointers(root)
+    assert len(found) == 2
+    assert any(p.parent.parent.parent.name == "worktree-manager" for p in found)
+
+
+def test_materialize_expands_worktree_manager_pointer(tmp_path: Path):
+    root = tmp_path / "repo"
+    _canonical_lib(root, "zdd", version="0.2.0-dev1", content="shared\n")
+    _worktree_manager_pointer(root, "zdd")
+
+    log = mm.materialize(root, canonical_root=root)
+
+    assert any(line.startswith("OK") for line in log)
+    copy_src = root / "worktree-manager/libs/zdd/src/zdd/__init__.py"
+    assert copy_src.read_text() == "shared\n"
+
+
+def _pointer_with_source(root: Path, plugin: str, lib: str, *, source: str) -> Path:
+    """Like ``_pointer``, but with an arbitrary (possibly malicious) ``source``
+    value instead of the well-formed ``libs/<lib>`` default."""
+    d = root / "plugins" / plugin / "libs" / lib
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "VENDOR_POINTER.json").write_text(
+        json.dumps({"schema": "copilot-extensions.vendor-pointer", "version": 1,
+                    "source": source}) + "\n",
+        encoding="utf-8",
+    )
+    (d / "pyproject.toml").write_text('[project]\nname = "x"\nversion = "0.0.0"\n',
+                                       encoding="utf-8")
+    return d
+
+
+def test_materialize_refuses_absolute_source_path_for_directory_pointer(tmp_path: Path):
+    root = tmp_path / "repo"
+    secret = tmp_path / "outside-repo-secret"
+    (secret / "src" / "evil").mkdir(parents=True)
+    (secret / "src" / "evil" / "__init__.py").write_text("leak = True\n", encoding="utf-8")
+    pointer_dir = _pointer_with_source(root, "agent-bridge", "evil", source=str(secret))
+
+    log = mm.materialize(root, canonical_root=root)
+
+    assert any("SKIP" in line and "escapes the canonical root" in line for line in log)
+    assert (pointer_dir / "VENDOR_POINTER.json").exists()
+    assert not (pointer_dir / "src").exists()
+
+
+def test_materialize_refuses_traversal_source_path_for_directory_pointer(tmp_path: Path):
+    root = tmp_path / "repo"
+    secret = tmp_path / "outside-repo-secret"
+    (secret / "src" / "evil").mkdir(parents=True)
+    (secret / "src" / "evil" / "__init__.py").write_text("leak = True\n", encoding="utf-8")
+    pointer_dir = _pointer_with_source(
+        root, "agent-bridge", "evil", source="../outside-repo-secret"
+    )
+
+    log = mm.materialize(root, canonical_root=root)
+
+    assert any("SKIP" in line and "escapes the canonical root" in line for line in log)
+    assert (pointer_dir / "VENDOR_POINTER.json").exists()
+    assert not (pointer_dir / "src").exists()
+
+
+def test_materialize_refuses_an_escaping_symlink_within_canonical_src(tmp_path: Path):
+    # The pointer's own `source` (libs/zdd) is legitimately inside
+    # canonical_root, but the canonical directory's own src/ contains a
+    # symlink pointing outside it -- shutil.copytree would otherwise follow
+    # it and copy external content into the release snapshot.
+    root = tmp_path / "repo"
+    secret = tmp_path / "outside-repo-secret"
+    secret.mkdir()
+    (secret / "leaked.txt").write_text("do not leak\n", encoding="utf-8")
+    canonical = _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
+    (canonical / "src" / "evil-link").symlink_to(secret, target_is_directory=True)
+    pointer_dir = _pointer(root, "agent-bridge", "zdd")
+
+    log = mm.materialize(root, canonical_root=root)
+
+    assert any("SKIP" in line and "is a symlink" in line for line in log)
+    assert (pointer_dir / "VENDOR_POINTER.json").exists()
+    assert not (pointer_dir / "src").exists()
+
+
+def test_materialize_refuses_an_in_root_symlink_within_canonical_src(tmp_path: Path):
+    # Even a symlink that resolves *inside* canonical_root is refused --
+    # a legitimate vendored lib has no reason to contain any symlink.
+    root = tmp_path / "repo"
+    canonical = _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
+    other_lib = _canonical_lib(root, "other", version="0.1.0-dev1", content="other\n")
+    (canonical / "src" / "sneaky-link").symlink_to(other_lib, target_is_directory=True)
+    pointer_dir = _pointer(root, "agent-bridge", "zdd")
+
+    log = mm.materialize(root, canonical_root=root)
+
+    assert any("SKIP" in line and "is a symlink" in line for line in log)
+    assert (pointer_dir / "VENDOR_POINTER.json").exists()
+    assert not (pointer_dir / "src").exists()
+
+
+def test_materialize_refuses_a_symlinked_src_root(tmp_path: Path):
+    # `tree.is_dir()` follows a symlink, so a canonical lib whose `src`
+    # itself is a symlink (not merely containing one) would otherwise slip
+    # past a check that only scans descendants via rglob().
+    root = tmp_path / "repo"
+    secret = tmp_path / "outside-repo-secret"
+    secret.mkdir()
+    (secret / "leaked.txt").write_text("do not leak\n", encoding="utf-8")
+    lib_dir = root / "libs" / "zdd"
+    lib_dir.mkdir(parents=True)
+    (lib_dir / "pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "0.1.0-dev1"\n', encoding="utf-8"
+    )
+    (lib_dir / "src").symlink_to(secret, target_is_directory=True)
+    pointer_dir = _pointer(root, "agent-bridge", "zdd")
+
+    log = mm.materialize(root, canonical_root=root)
+
+    assert any("SKIP" in line and "is a symlink" in line for line in log)
+    assert (pointer_dir / "VENDOR_POINTER.json").exists()
+    assert not (pointer_dir / "src").exists()
+
+
+def test_materialize_refuses_a_pointer_dir_that_escapes_dest(tmp_path: Path):
+    # find_pointers() globs under dest, but a symlinked plugin (or libs)
+    # directory could still resolve outside dest -- rmtree()/copytree()
+    # must never write there even though the pointer glob "found" it.
+    root = tmp_path / "repo"
+    _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
+    outside = tmp_path / "outside-plugin"
+    real_pointer_dir = _pointer(outside, "escaped-plugin", "zdd")
+    (root / "plugins").mkdir(parents=True, exist_ok=True)
+    (root / "plugins" / "escaped-plugin").symlink_to(
+        outside / "plugins" / "escaped-plugin", target_is_directory=True
+    )
+
+    log = mm.materialize(root, canonical_root=root)
+
+    assert any("SKIP" in line and "escapes the checkout root" in line for line in log)
+    assert (real_pointer_dir / "VENDOR_POINTER.json").exists()
+    assert not (real_pointer_dir / "src").exists()
+
+
+def test_build_preserves_a_symlink_instead_of_dereferencing_its_content(tmp_path: Path):
+    # The default shutil.copytree(symlinks=False) would dereference ANY
+    # symlink under source_root during the initial whole-tree snapshot
+    # copy, embedding external content into dest before materialize()'s
+    # own per-pointer symlink check even runs. build() must preserve
+    # symlinks instead.
+    source_root = tmp_path / "repo"
+    secret = tmp_path / "outside-repo-secret"
+    secret.mkdir()
+    (secret / "leaked.txt").write_text("do not leak\n", encoding="utf-8")
+    (source_root / "some-dir").mkdir(parents=True)
+    (source_root / "some-dir" / "a-link").symlink_to(secret, target_is_directory=True)
+    (source_root / "README.md").write_text("hello\n", encoding="utf-8")
+    dest = tmp_path / "dest"
+
+    mm.build(dest, source_root=source_root)
+
+    copied_link = dest / "some-dir" / "a-link"
+    assert copied_link.is_symlink(), "a-link must be preserved as a symlink, not dereferenced"
+    # Confirm the symlink is a real symlink object -- not a directory that
+    # copytree(symlinks=False) would have created containing an embedded
+    # copy of the secret's own files.
+    assert os.readlink(copied_link) == str(secret)
 
 
 def _file_pointer(root: Path, plugin: str, rel: str, *, source: str) -> Path:
