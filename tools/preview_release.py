@@ -174,6 +174,12 @@ def _materialize_into_preview(dest: Path) -> list[str]:
                 log.append(f"SKIP {lib_copy}: {where} is a symlink -- refusing")
                 continue
         svl._copy_src(canonical, lib_copy)
+        # svl._sync_version() guards against a symlinked canonical or
+        # destination pyproject.toml INTERNALLY (checking both
+        # src_pp.is_symlink() and pp.is_symlink() before any read/write) --
+        # this is the same shared function cmd_materialize() and
+        # cmd_restore_canonical() call too, so the protection applies
+        # uniformly here without a separate check in this file.
         svl._sync_version(canonical, lib_copy)
         if refresh_tests:
             # A pointer copy MAY vendor tests/ from canonical too
