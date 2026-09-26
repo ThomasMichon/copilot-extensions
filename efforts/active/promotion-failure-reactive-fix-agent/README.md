@@ -222,18 +222,26 @@ fixes."
             natural-occurrence
             checklist above.
       - [ ] **Before reverting, deliberately re-trigger the same
-            validation run once more** (`workflow_dispatch` on
-            `validate-and-promote.yml`, or push a trivial no-op commit) so
-            the identical signature occurs a second time within the 6h
-            window, and confirm the dedup/rate-limit path actually fires
-            -- a comment on the existing issue, never a second issue.
-            The probe as originally planned only ever produced one
-            occurrence, which would let this checklist be marked complete
-            without ever exercising the dedup path at all; a single
-            synthetic run doesn't prove Phase 1 handles the exact repeat-
-            failure case it exists for. If skipped for time, explicitly
-            record dedup as **unvalidated** here and do not treat Phase 1
-            as fully proven / Phase 2's gate as unblocked on that basis.
+            validation run once more via a real `workflow_run` event** —
+            push a trivial no-op commit to `dev` while the probe test is
+            still present (NOT `workflow_dispatch`: `report-failure` is
+            restricted to `github.event_name == 'workflow_run'`, so a
+            manual dispatch would re-run the failing `full` job but skip
+            the watchdog entirely and validate nothing). Confirm the
+            identical signature occurs a second time **within** the 6h
+            window and that rate-limiting actually holds: **no** second
+            issue and **no** new comment either (`process_signature`
+            deliberately returns without commenting while
+            `is_rate_limited(...)` is true) — a comment only appears once
+            the window has genuinely expired, which isn't practical to
+            wait out here. The probe as originally planned only ever
+            produced one occurrence, which would let this checklist be
+            marked complete without ever exercising the dedup path at
+            all; a single synthetic run doesn't prove Phase 1 handles the
+            exact repeat-failure case it exists for. If skipped for time,
+            explicitly record dedup as **unvalidated** here and do not
+            treat Phase 1 as fully proven / Phase 2's gate as unblocked on
+            that basis.
       - [ ] **Revert immediately once confirmed** (a follow-up PR deleting
             the probe test) — this deliberately jams every pending
             promotion for the observation window, the exact cost this
@@ -783,3 +791,15 @@ _Pending._
   (confirming a comment lands on the existing issue, not a second one),
   with an honest fallback: if skipped for time, record dedup as
   unvalidated rather than silently treating Phase 1 as fully proven.
+- **Fifth review pass caught two real self-contradictions in that same
+  new step:** (1) a second occurrence *within* the stated 6h window
+  should verify **no** new issue and **no** new comment either —
+  `process_signature` deliberately holds off commenting while
+  `is_rate_limited(...)` is true, so "confirm a comment lands" was
+  simply wrong for a re-trigger that happens minutes later, not hours;
+  (2) `workflow_dispatch` was suggested as one re-trigger option, but
+  `report-failure` is now `workflow_run`-only (this session's own earlier
+  security fix) — a manual dispatch would re-run the failing job but
+  skip the watchdog entirely, validating nothing. Corrected to: push a
+  trivial no-op commit to `dev` (a real `workflow_run` event) and expect
+  silence (rate-limited), not a comment.
