@@ -61,3 +61,6 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "no_autotrust: opt out of the autouse repo-config trust-gate bypass (see conftest.py)",
+]

@@ -1,0 +1,9 @@
+{
+  "comment": "Add a registered-project + default-branch trust gate for repo-local config, so an unregistered or non-default-branch checkout can no longer supply repo-local directives (sync path, log layout, etc.).",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "minor"
+    }
+  ]
+}

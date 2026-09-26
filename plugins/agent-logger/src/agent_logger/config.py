@@ -27,6 +27,8 @@ try:
 except ImportError:  # pragma: no cover - pyyaml is a hard dependency
     yaml = None  # type: ignore[assignment]
 
+from .repo_trust import repo_config_is_trusted
+
 #: Neutral, personality- and multi-machine system-free defaults.
 DEFAULTS: dict[str, Any] = {
     # Where collated digest chunks are written/read.
@@ -179,7 +181,7 @@ REPO_CONFIG_FILENAMES: tuple[str, ...] = (
     ".config/agent-logger.yaml",
     ".config/agent-logger.yml",
 )
-REPO_CONFIG_SCHEMA_VERSION = 2  # v2 adds the ``tenant`` block (see tenancy)
+REPO_CONFIG_SCHEMA_VERSION = 3  # v3 adds the ``sync.local_path`` field
 REPO_LOG_FIELDS = {
     "root",
     "path_template",
@@ -190,6 +192,17 @@ REPO_LOG_FIELDS = {
     "exemplars",
     "closing_remark",
 }
+# Deliberately narrow: only the canonical local sync destination, which is the
+# SAME absolute path for every machine in the fleet (a shared NAS mount), not
+# a per-machine secret or a choice of *which* target type is active. Declaring
+# it once in the repo eliminates the exact drift this field exists to prevent
+# -- a machine whose local ``~/.agent-logger/config.yaml`` was never written
+# (or was written with a stale/wrong path) silently syncing nowhere useful,
+# confirmed live across two real machines before this field existed. See
+# ``_load_repo_config``'s own docstring for why this is a deliberate,
+# consciously-decided relaxation of the "repo can't touch machine sync state"
+# boundary, not an oversight.
+REPO_SYNC_FIELDS = {"local_path"}
 # The background chronicle's first-class narration style. When
 # ``narration_style`` is exactly this keyword the writer produces a neutral,
 # factual chronicle; :func:`resolve_narration_style` expands it to the canonical
@@ -297,6 +310,31 @@ def _validate_relative_path(value: Any, location: str) -> str:
     return text
 
 
+def _validate_absolute_path(value: Any, location: str) -> str:
+    """Validate a facility-wide absolute path (e.g. a shared NAS mount) --
+    the counterpart to :func:`_validate_relative_path` for a sync
+    destination, which is inherently machine-independent and absolute rather
+    than repo-relative. Rejects ``~`` (a per-user expansion defeats the
+    "same value for every machine" property this field exists for), a bare
+    root (``/`` or a drive root), and any ``..`` segment.
+    """
+    if not isinstance(value, str) or not value.strip():
+        raise RepositoryConfigError(f"{location} must be a non-empty absolute path")
+    text = value.strip()
+    if text.startswith("~"):
+        raise RepositoryConfigError(f"{location} must not use '~' (not machine-portable)")
+    posix = PurePosixPath(text)
+    windows = PureWindowsPath(text)
+    if not (posix.is_absolute() or windows.is_absolute()):
+        raise RepositoryConfigError(f"{location} must be an absolute path")
+    parts = posix.parts if posix.is_absolute() else windows.parts
+    if len(parts) <= 1:
+        raise RepositoryConfigError(f"{location} must not be a bare filesystem root")
+    if ".." in PurePosixPath(text.replace("\\", "/")).parts:
+        raise RepositoryConfigError(f"{location} must not contain '..'")
+    return text
+
+
 def _validate_template(
     value: Any,
     *,
@@ -374,7 +412,9 @@ def find_repo_config(start: Path | None = None) -> Path | None:
 
     ``$AGENT_LOGGER_REPO_CONFIG`` may point at an explicit file. Set it to
     ``0``/``false``/``off``/``none`` to disable repo-local config discovery.
-    Otherwise the nearest git root is searched for :data:`REPO_CONFIG_FILENAMES`.
+    Otherwise the nearest git root is searched for :data:`REPO_CONFIG_FILENAMES`,
+    but only when that repo is a registered project checked out on its
+    default branch -- see :func:`agent_logger.repo_trust.repo_config_is_trusted`.
     """
     env = os.environ.get("AGENT_LOGGER_REPO_CONFIG")
     if env:
@@ -390,6 +430,8 @@ def find_repo_config(start: Path | None = None) -> Path | None:
     root = _find_repo_root(start)
     if root is None:
         return None
+    if not repo_config_is_trusted(root):
+        return None
     for name in REPO_CONFIG_FILENAMES:
         candidate = root / name
         if candidate.is_file():
@@ -400,18 +442,32 @@ def find_repo_config(start: Path | None = None) -> Path | None:
 def _load_repo_config(path: Path) -> dict[str, Any]:
     """Load the repo-local organization config.
 
-    Repo-local config is intentionally scoped to ``log`` settings (plus the
-    ``tenant`` block, consumed only by tenancy discovery). It lets a repository
-    define its checked-in log organization without letting arbitrary checkouts
-    change machine-local sync targets or runtime state locations.
+    Repo-local config is scoped to ``log`` settings, the ``tenant`` block
+    (consumed only by tenancy discovery), and -- as of schema v3, a
+    deliberate, narrow relaxation -- ``sync.local_path``: the ONE sync
+    setting that is genuinely the same absolute value for every machine in
+    the fleet (a shared NAS mount), not a per-machine secret or a choice of
+    *which* sync target is active. Every other sync/runtime-state setting
+    stays machine-local; a repo still cannot redirect a machine to a
+    different sync target type, change machine identity, or touch anything
+    credential-bearing.
+
+    This relaxation exists because the alternative -- requiring every
+    machine to hand-author its own copy of a value that must be identical
+    everywhere -- is exactly the drift this field closes: confirmed live
+    across two real machines before this field existed, one had the wrong
+    path (contradicting its own adjacent comment) and the other had no
+    sync config file at all, silently syncing to a useless local-only
+    default for its entire lifetime.
 
     **Forward compatibility (rolling updates).** A config written for a *newer*
-    schema than this build supports is read **tolerantly** -- top-level and
-    ``log`` fields this version does not recognize are ignored rather than fatal
-    -- so a fleet mid-upgrade never has an older reader hard-fail on a config a
-    newer machine committed. A config at or below this build's schema is
-    validated **strictly** (unknown fields are a typo and raise). This is why
-    growing the schema is a version bump, not a breaking change.
+    schema than this build supports is read **tolerantly** -- top-level,
+    ``log``, and ``sync`` fields this version does not recognize are ignored
+    rather than fatal -- so a fleet mid-upgrade never has an older reader
+    hard-fail on a config a newer machine committed. A config at or below
+    this build's schema is validated **strictly** (unknown fields are a typo
+    and raise). This is why growing the schema is a version bump, not a
+    breaking change.
     """
     data = _load_repo_yaml(path)
     schema_version = data.get("schema_version", REPO_CONFIG_SCHEMA_VERSION)
@@ -425,15 +481,17 @@ def _load_repo_config(path: Path) -> dict[str, Any]:
         )
     future = schema_version > REPO_CONFIG_SCHEMA_VERSION
     if not future:
-        _reject_unknown_fields(data, {"schema_version", "log", "tenant"}, str(path))
+        _reject_unknown_fields(data, {"schema_version", "log", "tenant", "sync"}, str(path))
 
     # The ``tenant`` block is consumed only by tenancy discovery (see
     # agent_logger.tenancy), never by the ambient repo-local layer -- an
-    # arbitrary checkout must not be able to change machine-local sync state.
-    # A repo may carry a tenant block with no ``log`` block; that is a no-op here.
+    # arbitrary checkout must not be able to change machine-local sync state
+    # BEYOND the one narrow ``sync.local_path`` exception documented above.
+    # A repo may carry a tenant block with no ``log``/``sync`` block; that is
+    # a no-op here.
     log = data.get("log")
     if log is None:
-        return {}
+        log = {}
     if not isinstance(log, dict):
         raise RepositoryConfigError(f"{path}: log must be a mapping")
     if future:
@@ -503,7 +561,21 @@ def _load_repo_config(path: Path) -> dict[str, Any]:
                 "or a list of non-empty strings"
             )
 
-    return {"log": scoped}
+    result: dict[str, Any] = {"log": scoped}
+
+    sync = data.get("sync")
+    if sync is not None:
+        if not isinstance(sync, dict):
+            raise RepositoryConfigError(f"{path}: sync must be a mapping")
+        if future:
+            sync = {k: v for k, v in sync.items() if k in REPO_SYNC_FIELDS}
+        else:
+            _reject_unknown_fields(sync, REPO_SYNC_FIELDS, f"{path}: sync")
+        if "local_path" in sync:
+            local_path = _validate_absolute_path(sync["local_path"], "sync.local_path")
+            result["sync"] = {"targets": {"local": {"path": local_path}}}
+
+    return result
 
 
 class Config:

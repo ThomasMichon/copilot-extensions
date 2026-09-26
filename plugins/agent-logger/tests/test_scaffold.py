@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 from agent_logger import __version__
 from agent_logger.__main__ import main as cli_main
@@ -17,8 +19,37 @@ from agent_logger.config import (
     find_repo_config,
     load_config,
 )
+from agent_logger.repo_trust import _normalize_git_remote
 from agent_logger.segmenter import prepare_log
 from agent_logger.segmenter.platform import detect_machine, sanitize_path_component
+
+
+def _init_git_repo(
+    path: Path,
+    *,
+    remote: str | None = "https://example.test/tmichon/demo.git",
+    branch: str = "main",
+) -> None:
+    """Create a real (throwaway) git repo for trust-gate tests.
+
+    Unlike the bare ``(repo / ".git").mkdir()`` fixture pattern used
+    elsewhere in this file (fine for tests that bypass the trust gate via
+    the autouse fixture), the trust gate itself shells out to real ``git``
+    commands, so exercising it honestly needs a real checkout.
+    """
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q", "-b", branch, str(path)], check=True)
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.email", "test@example.test"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.name", "Test"], check=True
+    )
+    if remote is not None:
+        subprocess.run(
+            ["git", "-C", str(path), "remote", "add", "origin", remote], check=True
+        )
 
 
 def test_version_matches_build_info() -> None:
@@ -177,6 +208,60 @@ def test_repo_config_overrides_log_layout_only(tmp_path: Path, monkeypatch) -> N
     assert cfg.closing_remark == "End with one concise takeaway."
 
 
+def test_repo_config_sync_local_path_overrides_machine_local(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """schema v3's one deliberate relaxation: ``sync.local_path`` is honored
+    from repo-local config -- the canonical facility-wide sync destination,
+    the same absolute value for every machine, closing the exact drift that
+    motivated it (a machine with no local sync config at all, or one with a
+    stale/wrong path)."""
+    home = tmp_path / "home"
+    home.mkdir()
+    # No config.yaml at all here -- exactly the "never configured" case this
+    # field exists to fix.
+
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / ".agent-logger.yaml").write_text(
+        "schema_version: 3\nsync:\n  local_path: /mnt/nas/Lake/Copilot/sessions\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(repo)
+
+    cfg = load_config(home=home)
+
+    assert cfg.sync_path == Path("/mnt/nas/Lake/Copilot/sessions")
+    # Everything else stays machine-local/default -- only the path moved.
+    assert cfg.sync_target == "local"
+
+
+def test_repo_config_sync_local_path_does_not_affect_other_sync_fields(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The relaxation is scoped to exactly one field -- machine identity,
+    the active target choice, and everything else stay machine-local."""
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "config.yaml").write_text(
+        "sync:\n  target: onedrive\nmachine:\n  name: my-machine\n",
+        encoding="utf-8",
+    )
+
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / ".agent-logger.yaml").write_text(
+        "schema_version: 3\nsync:\n  local_path: /mnt/nas/Lake/Copilot/sessions\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(repo)
+
+    cfg = load_config(home=home)
+
+    assert cfg.sync_target == "onedrive"  # untouched by the repo config
+    assert cfg.sync_path == Path("/mnt/nas/Lake/Copilot/sessions")
+
+
 @pytest.mark.parametrize(
     ("body", "message"),
     [
@@ -205,7 +290,19 @@ def test_repo_config_overrides_log_layout_only(tmp_path: Path, monkeypatch) -> N
         ),
         (
             "schema_version: 1\nsync:\n  target: ssh\nlog: {}\n",
-            r"unsupported field\(s\): sync",
+            r"sync contains unsupported field\(s\): target",
+        ),
+        (
+            "schema_version: 1\nsync:\n  local_path: relative/path\nlog: {}\n",
+            "sync.local_path must be an absolute path",
+        ),
+        (
+            "schema_version: 1\nsync:\n  local_path: /\nlog: {}\n",
+            "must not be a bare filesystem root",
+        ),
+        (
+            "schema_version: 1\nsync:\n  local_path: '~/nas'\nlog: {}\n",
+            "must not use '~'",
         ),
     ],
 )
@@ -306,6 +403,161 @@ def test_repo_config_can_be_disabled(tmp_path: Path, monkeypatch) -> None:
 
     assert cfg.repo_config_path is None
     assert cfg.log_path_template == DEFAULTS["log"]["path_template"]
+
+
+@pytest.mark.no_autotrust
+def test_repo_config_honored_when_registered_and_on_default_branch(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The real trust gate: a genuine git checkout whose remote matches a
+    registered project, on that project's registered default branch, gets
+    its repo-local config honored end to end."""
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, remote="https://example.test/tmichon/demo.git", branch="main")
+    (repo / ".agent-logger.yaml").write_text(
+        "log:\n  path_template: logs/{title}.md\n",
+        encoding="utf-8",
+    )
+
+    registry = tmp_path / "repos.yaml"
+    registry.write_text(
+        yaml.safe_dump(
+            {
+                "repos": {
+                    "demo": {
+                        "remote": "git@example.test:tmichon/demo.git",
+                        "default_branch": "main",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_WORKTREES_REPOS_YAML", str(registry))
+    monkeypatch.chdir(repo)
+
+    assert find_repo_config() == repo / ".agent-logger.yaml"
+    cfg = load_config(home=tmp_path / "home")
+    assert cfg.log_path_template == "logs/{title}.md"
+
+
+@pytest.mark.no_autotrust
+def test_repo_config_ignored_when_repo_not_registered(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A real, matching-remote checkout that simply isn't in the registry
+    (or the registry doesn't exist) gets its repo-local config ignored --
+    never an error, just treated as absent."""
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, remote="https://example.test/tmichon/demo.git", branch="main")
+    (repo / ".agent-logger.yaml").write_text(
+        "log:\n  path_template: logs/{title}.md\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_WORKTREES_REPOS_YAML", str(tmp_path / "no-such-registry.yaml"))
+    monkeypatch.chdir(repo)
+
+    assert find_repo_config() is None
+    cfg = load_config(home=tmp_path / "home")
+    assert cfg.repo_config_path is None
+    assert cfg.log_path_template == DEFAULTS["log"]["path_template"]
+
+
+@pytest.mark.no_autotrust
+def test_repo_config_ignored_when_not_on_default_branch(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A registered repo checked out on a feature/PR branch (not the
+    registered default branch) does not get its repo-local config honored --
+    an unreviewed branch must not be able to redirect facility behavior."""
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, remote="https://example.test/tmichon/demo.git", branch="feature-x")
+    (repo / ".agent-logger.yaml").write_text(
+        "log:\n  path_template: logs/{title}.md\n",
+        encoding="utf-8",
+    )
+
+    registry = tmp_path / "repos.yaml"
+    registry.write_text(
+        yaml.safe_dump(
+            {
+                "repos": {
+                    "demo": {
+                        "remote": "https://example.test/tmichon/demo.git",
+                        "default_branch": "main",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_WORKTREES_REPOS_YAML", str(registry))
+    monkeypatch.chdir(repo)
+
+    assert find_repo_config() is None
+
+
+@pytest.mark.no_autotrust
+def test_repo_config_ignored_when_no_git_remote(tmp_path: Path, monkeypatch) -> None:
+    """A real git checkout with no ``origin`` remote at all (e.g. a bare
+    local scratch clone) can never be a registered project, so its
+    repo-local config is ignored."""
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, remote=None, branch="main")
+    (repo / ".agent-logger.yaml").write_text(
+        "log:\n  path_template: logs/{title}.md\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(repo)
+
+    assert find_repo_config() is None
+
+
+@pytest.mark.no_autotrust
+def test_repo_config_trust_override_env_bypasses_gate(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """``AGENT_LOGGER_TRUST_REPO_CONFIG=1`` is a machine-local escape hatch
+    for an operator who has independently confirmed a checkout is safe --
+    it must never be settable by the repo itself, only by the local
+    environment, but when set it does bypass the registry/branch checks."""
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, remote=None, branch="main")
+    (repo / ".agent-logger.yaml").write_text(
+        "log:\n  path_template: logs/{title}.md\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("AGENT_LOGGER_TRUST_REPO_CONFIG", "1")
+
+    assert find_repo_config() == repo / ".agent-logger.yaml"
+
+
+@pytest.mark.parametrize(
+    ("a", "b"),
+    [
+        (
+            "https://example.test/tmichon/demo.git",
+            "git@example.test:tmichon/demo.git",
+        ),
+        (
+            "https://example.test/tmichon/demo",
+            "ssh://git@example.test/tmichon/demo.git",
+        ),
+        (
+            "https://EXAMPLE.test/Tmichon/Demo.git",
+            "https://example.test/tmichon/demo",
+        ),
+    ],
+)
+def test_normalize_git_remote_matches_equivalent_forms(a: str, b: str) -> None:
+    assert _normalize_git_remote(a) == _normalize_git_remote(b)
+
+
+def test_normalize_git_remote_distinguishes_different_repos() -> None:
+    assert _normalize_git_remote(
+        "https://example.test/tmichon/demo.git"
+    ) != _normalize_git_remote("https://example.test/tmichon/other.git")
 
 
 def test_organization_cli_reports_manifest_ready_config(
