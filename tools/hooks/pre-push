@@ -67,6 +67,11 @@ COPILOT_EXTENSIONS_GUARD_BASE=origin/dev "${PY[@]}" "$ROOT/tools/check-no-intern
 # real version fields; contributors no longer hand-edit versions in ordinary
 # dev PRs.
 "${PY[@]}" "$ROOT/tools/check-changefile-presence.py" --base origin/dev
+# agent-machines packages declare a CONSUMING repo's own desired machine
+# state; that content belongs exclusively in the repo that adopts the
+# pattern, never in copilot-extensions itself (this repo is public and has
+# no machine of its own to converge).
+"${PY[@]}" "$ROOT/tools/check-no-agent-machines-packages.py"
 # Every tracked, non-test source module must stay within its line-count cap
 # (or its shrink-only grandfathered ceiling, for pre-existing offenders) --
 # a componentization failure (queue.py's ~7,200 lines) had no automated guard
