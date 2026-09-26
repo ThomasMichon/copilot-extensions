@@ -386,6 +386,91 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-25 — `customizing-copilot`'s remaining `path-sibling-launch` finding resolved
+
+- The prior entry left `scan_plugin_sources.py`'s `_agent_worktrees_repo_root()`
+  genuinely open, believing it was called from ~8 separate scan entrypoints
+  with no natural place to inject an explicit catalog-argv. Tracing the real
+  call graph found this was wrong: only `assemble_enabled_plugins()` can
+  reach it (via `_directory_marketplace_plugin`'s `agent-worktrees-repo`
+  source kind), and only 2 real call sites exist -- `scan-customizations.py`'s
+  `main()` (the actual agent-invoked CLI entrypoint) and
+  `instruction_projections.py`/`manage-instruction-projections.py`'s
+  `discover_enabled_sources()` wrapper (a second CLI entrypoint).
+  `projection_sync_worker.py` also calls `discover_enabled_sources()`, but as
+  a headless background sync daemon with no agent turn to supply a
+  catalog-resolved path -- left it on the ambient-`PATH` default, which is
+  the correct permanent behavior there, not a gap.
+- Threaded an optional `agent_worktrees_command` parameter through
+  `_agent_worktrees_repo_root` -> `_directory_marketplace_plugin` ->
+  `assemble_enabled_plugins` -> `discover_enabled_sources`, preferring it
+  over `shutil.which` exactly like the `harness-knowledge` fix (including
+  the same Windows `.ps1`-host handling). Added `--agent-worktrees-path` to
+  both `scan-customizations.py`'s and `manage-instruction-projections.py`'s
+  CLIs, and a usage note to `reviewing-customizations/SKILL.md`.
+- Review caught a real gap in the first pass: unlike `harness-knowledge`'s
+  `assemble_plugins.py` (which raises on an unhostable `.ps1`), this file's
+  resolver originally returned `None` for that case, and `None` is also
+  the existing "genuinely unresolvable, fall through to `installed_root`"
+  signal for every *ambient* resolution failure. That conflation meant an
+  **explicitly** supplied but unhostable command would silently degrade to
+  inspecting an unrelated `installed_root` payload instead of failing --
+  the opposite of what an explicit catalog-resolved command is for. Fixed
+  by having `_resolve_agent_worktrees_command` raise `ValueError` only for
+  the explicit-and-unhostable case (ambient `shutil.which` misses still
+  return `None` and fall through unchanged, matching every other
+  unresolvable-marketplace case). Wrapped both `scan-customizations.py`
+  call sites in their own `except ValueError` that exits 2 with a clear
+  message, keeping the pre-existing `validate_committed_settings` soft-error
+  path untouched and correctly ordered.
+- **Second review round widened the same fix**: the first pass only made
+  the unhostable-`.ps1` case fatal, but review caught that any *other*
+  failure of an explicitly supplied command (a stale path, a failing CLI,
+  empty output, a launch `OSError`) still returned `None` and fell through
+  to `installed_root` the same way -- the identical provenance-mismatch
+  risk, just for every non-`.ps1` failure mode. Restructured
+  `_agent_worktrees_repo_root` so *any* failure raises `ValueError` when an
+  explicit command was supplied, while ambient (`shutil.which`) failures
+  keep the pre-existing soft `None`. Added a parametrized regression test
+  covering 4 explicit-failure modes.
+- Review also caught that the CLI-forwarding paths in both
+  `scan-customizations.py`'s `main()` and
+  `manage-instruction-projections.py`'s `main()` were untested -- a
+  regression could drop the parsed flag before the real call and the suite
+  would stay green. Added a `main()`-level regression test for each,
+  supplying a conflicting ambient command and asserting the CLI-resolved
+  one is used. Also widened `reviewing-customizations/SKILL.md`'s usage
+  note (review caught it only mentioned `scan-customizations.py`, though
+  `manage-instruction-projections.py` shares the same flag and resolver).
+- Added 8 regression tests total across two review rounds
+  (explicit-wins-over-ambient, the Windows unhostable-`.ps1` raise, 4
+  parametrized explicit-failure modes, and the two `main()` CLI-forwarding
+  tests); manually confirmed each fails when its corresponding fix is
+  reverted (the Windows case via an isolated throwaway interpreter, since
+  it's platform-gated and this box is Linux).
+- **Third review round found two more edge cases**: (1) `bool("")` is
+  `False`, so `--agent-worktrees-path ""` was indistinguishable from "not
+  supplied" and silently used the ambient fallback -- switched the
+  explicit/ambient distinction from truthiness to `is not None`, with an
+  explicit-but-blank string raising immediately; my first regression test
+  for this used whitespace (`"   "`), which is truthy and didn't actually
+  exercise the bug -- caught in self-review before landing and corrected
+  to a true empty string. (2) `Path.resolve(strict=True)` can raise
+  `RuntimeError` (symlink loop) or `ValueError`, not just `OSError` --
+  widened the caught exception tuple so every explicit-resolution failure
+  stays fail-closed. Also corrected the SKILL.md note: `--from-settings`
+  is `scan`-only, so "`sync`/`scan --from-settings`" was a fabricated
+  invocation that would error; reworded to `sync` (no flag needed) versus
+  `scan --from-settings`.
+- Added 1 more regression test (blank explicit command); 9 total.
+- Validation: `python tools/check-marketplace-isolation.py --json`
+  (`path-sibling-launch` 52->51, `scan_plugin_sources.py`'s finding gone),
+  `python tools/check-docs-consistency.py`, `python
+  tools/check-module-size.py` (trimmed `instruction_projections.py` back
+  under its grandfathered ceiling), and `customizing-copilot`'s full
+  `scan-customizations`/`instruction-projections` test suite (177 passed,
+  including 9 new regression tests) via `test-supervisor`.
+
 ### 2026-09-25 — `harness-knowledge`'s 2 `path-sibling-launch`/`unqualified-runtime-root` findings resolved
 
 - The 2026-09-24 note left `harness-knowledge`'s `assemble_plugins.py` (bare
