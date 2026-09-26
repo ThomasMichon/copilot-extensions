@@ -215,6 +215,31 @@ def test_materialize_expands_pointer_copy_and_removes_pointer_file(repo: Path):
     assert not (repo / "plugins/alpha/libs/shared-lib/VENDOR_POINTER.json").exists()
 
 
+def test_materialize_never_syncs_version_through_a_symlinked_pyproject_toml(repo: Path):
+    # _sync_version()'s src_pp.is_symlink()/pp.is_symlink() guard: a
+    # pointer copy with pyproject.toml linked to another file (or
+    # canonical's own linked elsewhere) must never have read_text()/
+    # write_text() follow that link -- promotion must not silently read
+    # from or overwrite an arbitrary external target while updating the
+    # version.
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "canonical content\n")
+    _lib_pyproject(repo, "libs/shared-lib/pyproject.toml", "0.1.0-dev5")
+    _pointer(repo, "alpha", "shared-lib")
+    victim = repo.parent / "outside-victim-copy-pyproject.toml"
+    victim.write_text('[project]\nname = "victim"\nversion = "1.2.3"\n', encoding="utf-8")
+    (repo / "plugins/alpha/libs/shared-lib/pyproject.toml").symlink_to(victim)
+
+    result = _run(repo, "--materialize")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    # src/ still expands normally (the symlinked pyproject.toml only
+    # blocks the version-sync step, not the rest of expansion), but the
+    # victim file must be completely untouched.
+    copy_src = repo / "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py"
+    assert copy_src.read_text() == "canonical content\n"
+    assert victim.read_text() == '[project]\nname = "victim"\nversion = "1.2.3"\n'
+
+
 def test_materialize_refuses_a_symlinked_canonical_lib_root(repo: Path):
     # A `libs/<lib>` link to an external tree must be caught even though
     # canonical/src itself is a real directory within that external tree.
@@ -527,6 +552,37 @@ def test_pointerize_refuses_a_symlinked_canonical_lib_root(repo: Path):
     )
     (repo / "libs").mkdir(parents=True)
     (repo / "libs/shared-lib").symlink_to(external, target_is_directory=True)
+    (repo / "plugins/alpha").mkdir(parents=True)
+
+    result = _run(repo, "--pointerize", "alpha", "shared-lib")
+    assert result.returncode != 0
+    assert "is a symlink" in (result.stdout + result.stderr)
+    assert not (repo / "plugins/alpha/libs/shared-lib").exists()
+
+
+def test_pointerize_refuses_a_symlinked_canonical_pyproject_toml(repo: Path):
+    # canon_pp.is_file() (checked earlier) follows a symlink, and
+    # shutil.copy2 would copy an arbitrary external pyproject.toml into
+    # the new consumer tree.
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
+    victim = repo.parent / "outside-victim-pyproject.toml"
+    victim.write_text('[project]\nname = "victim"\nversion = "9.9.9"\n', encoding="utf-8")
+    (repo / "libs/shared-lib/pyproject.toml").unlink()
+    (repo / "libs/shared-lib/pyproject.toml").symlink_to(victim)
+    (repo / "plugins/alpha").mkdir(parents=True)
+
+    result = _run(repo, "--pointerize", "alpha", "shared-lib")
+    assert result.returncode != 0
+    assert "is a symlink" in (result.stdout + result.stderr)
+    assert not (repo / "plugins/alpha/libs/shared-lib").exists()
+
+
+def test_pointerize_refuses_a_symlinked_canonical_readme(repo: Path):
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
+    victim = repo.parent / "outside-victim-readme.md"
+    victim.write_text("# victim\n", encoding="utf-8")
+    (repo / "libs/shared-lib/README.md").unlink()
+    (repo / "libs/shared-lib/README.md").symlink_to(victim)
     (repo / "plugins/alpha").mkdir(parents=True)
 
     result = _run(repo, "--pointerize", "alpha", "shared-lib")

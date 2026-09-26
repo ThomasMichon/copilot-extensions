@@ -467,10 +467,21 @@ def _copy_tests(src_lib: Path, dst_lib: Path) -> None:
 
 
 def _sync_version(src_lib: Path, dst_lib: Path) -> None:
+    src_pp = src_lib / "pyproject.toml"
+    pp = dst_lib / "pyproject.toml"
+    # Both is_file()/exists() checks below follow a symlink -- a linked
+    # src_lib/pyproject.toml or dst_lib/pyproject.toml would make
+    # read_text()/write_text() silently follow it, letting this update an
+    # arbitrary external target's version field. Silently no-op (matching
+    # this function's existing "missing pyproject.toml is a silent no-op"
+    # contract) rather than raise, since callers already preflight the
+    # trees that matter for their own destructive operations; this is a
+    # last-line defense for the version-sync step specifically.
+    if src_pp.is_symlink() or pp.is_symlink():
+        return
     version = _declared_version(src_lib)
     if version is None:
         return
-    pp = dst_lib / "pyproject.toml"
     if not pp.exists():
         return
     text = pp.read_text(encoding="utf-8")
@@ -775,6 +786,22 @@ def _write_passthrough_pointer(consumer: str, lib: str) -> Path:
         raise SystemExit(
             f"{where} is a symlink -- refusing (a canonical lib source "
             "must contain only real files)"
+        )
+    # The symlink hardening above covers src/ and tests/ but not the
+    # metadata copied immediately below -- canon_pp.is_file() (checked
+    # earlier) follows a symlink, and shutil.copy2 would copy an
+    # arbitrary external pyproject.toml into the new consumer tree.
+    # Apply the same check to the optional README.
+    if canon_pp.is_symlink():
+        raise SystemExit(
+            f"libs/{lib}/pyproject.toml is a symlink -- refusing (a "
+            "canonical lib's metadata must be a real file)"
+        )
+    canon_readme = canonical / "README.md"
+    if canon_readme.is_symlink():
+        raise SystemExit(
+            f"libs/{lib}/README.md is a symlink -- refusing (a canonical "
+            "lib's metadata must be a real file)"
         )
 
     pkg = lib.replace("-", "_")

@@ -238,6 +238,23 @@ def _materialize_one_pointer(pointer_path: Path, *, checkout_root: Path, canonic
                 "(a canonical lib source must contain only real files)"
             )
 
+    canon_pp = canonical / "pyproject.toml"
+    copy_pp = lib_copy_dir / "pyproject.toml"
+    # canon_pp.is_file()/copy_pp.is_file() (checked further below) both
+    # follow symlinks -- a pointer copy with pyproject.toml linked to
+    # another file (or canonical's own linked elsewhere) would make
+    # read_text()/write_text() follow the link, letting promotion
+    # silently read from or overwrite an arbitrary external target while
+    # updating the version. Preflighted here, alongside src/tests, before
+    # ANY mutation runs below.
+    if canon_pp.is_symlink():
+        return f"SKIP {lib_copy_dir}: {source_rel}/pyproject.toml is a symlink -- refusing"
+    if copy_pp.is_symlink():
+        return (
+            f"SKIP {lib_copy_dir}: pyproject.toml (destination) is a symlink "
+            "-- refusing to write through it blindly"
+        )
+
     _remove_path(dst_sub)
     if src_sub.is_dir():
         shutil.copytree(src_sub, dst_sub)
@@ -247,8 +264,6 @@ def _materialize_one_pointer(pointer_path: Path, *, checkout_root: Path, canonic
         if tests_sub.is_dir():
             shutil.copytree(tests_sub, dst_tests_sub)
 
-    canon_pp = canonical / "pyproject.toml"
-    copy_pp = lib_copy_dir / "pyproject.toml"
     if canon_pp.exists() and copy_pp.exists():
         m = _VERSION_RE.search(canon_pp.read_text(encoding="utf-8"))
         if m:

@@ -211,6 +211,35 @@ def test_materialize_refuses_a_symlinked_canonical_source_before_resolving(tmp_p
     assert (victim / "src" / "victim_lib" / "__init__.py").read_text() == "do not touch\n"
 
 
+def test_materialize_refuses_a_symlinked_pyproject_toml_before_version_sync(tmp_path: Path):
+    # canon_pp.is_file()/copy_pp.exists() both follow symlinks -- a
+    # pointer copy with pyproject.toml linked to another file (or
+    # canonical's own linked elsewhere) would make read_text()/
+    # write_text() follow the link, letting promotion silently read from
+    # or overwrite an arbitrary external target while updating the
+    # version. Must be preflighted BEFORE src/tests are mutated, not
+    # checked only right before the read/write (which would leave a
+    # mixed partial state: fresh src/, stale pyproject.toml, pointer
+    # marker still present).
+    root = tmp_path / "repo"
+    _canonical_lib(root, "zdd", version="0.1.0-dev5", content="fresh\n")
+    victim = root.parent / "outside-victim-pyproject.toml"
+    victim.write_text('[project]\nname = "victim"\nversion = "9.9.9"\n', encoding="utf-8")
+    (root / "libs" / "zdd" / "pyproject.toml").unlink()
+    (root / "libs" / "zdd" / "pyproject.toml").symlink_to(victim)
+
+    pointer_dir = _pointer(root, "agent-bridge", "zdd")
+    (pointer_dir / "src" / "zdd").mkdir(parents=True)
+    (pointer_dir / "src" / "zdd" / "__init__.py").write_text("stale stub\n", encoding="utf-8")
+
+    log = mm.materialize(root, canonical_root=root)
+    assert any("SKIP" in line and "is a symlink" in line for line in log)
+    # Nothing was mutated -- neither the copy's src/ nor the victim file.
+    assert (pointer_dir / "src" / "zdd" / "__init__.py").read_text() == "stale stub\n"
+    assert victim.read_text() == '[project]\nname = "victim"\nversion = "9.9.9"\n'
+    assert (pointer_dir / mm.POINTER_NAME).exists()
+
+
 def test_materialize_skips_a_canonical_lib_with_no_src_directory_at_all(tmp_path: Path):
     # _find_symlink() returns None for a MISSING src/ too, not just "no
     # symlink found inside it" -- an incomplete/malformed canonical lib
