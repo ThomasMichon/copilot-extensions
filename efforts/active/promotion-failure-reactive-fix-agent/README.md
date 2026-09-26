@@ -158,8 +158,14 @@ fixes."
       occurring red `full`/`worktree-manager`/`guards-full-sweep` failure**
       (this repo has enough concurrent PR/promotion activity that one is
       likely within hours, not days). When one occurs:
-      - [ ] Confirm `report-failure` actually ran (not skipped) and its
-            conclusion.
+      - [x] Confirm `report-failure` actually ran (not skipped) and its
+            conclusion. **Occurred 2026-09-26 08:34 UTC (run 36230190121):
+            ran, but its own conclusion was `failure` — see the 2026-09-26
+            Journal entry below. Real bug found and fixed (PR #3815). Not
+            yet re-observed succeeding live end-to-end (only replay-
+            verified against the same run's real data, see Journal) --
+            keeping this parent item open until a subsequent natural (or
+            probe) occurrence confirms a filed issue for real.**
       - [ ] Confirm one issue was filed per distinct failure signature
             (or, for a repeat outside the 6h rate-limit window
             specifically, an existing matching issue commented instead —
@@ -841,3 +847,96 @@ _Pending._
   observation (an incomplete observation is acceptable; an unbounded red
   `dev` is not), and a note to prepare the revert PR in parallel so it's
   never itself the source of delay.
+
+### 2026-09-26 — Phase 1.5's first natural occurrence: a real bug, found and fixed live
+- A scheduled monitoring tick found a genuine naturally-occurring red
+  `validate-and-promote.yml` run: **36230190121** (2026-09-26 08:34 UTC),
+  two distinct real failing tests in the SAME run —
+  `agent-worktrees::TestRetireRecord::test_concurrent_both_reaped_
+  hard_delete_does_not_deadlock` (`full - agent-worktrees`) and
+  `production_picker::test_streaming_paints_rows_and_summary`
+  (`worktree-manager (out-of-plugin, full)`), both apparent
+  concurrency/timing flakes. `dev` self-recovered on its own within the
+  same hour (later commits pushed forward and passed cleanly) — no
+  intervention was needed on the underlying flakes themselves, and this
+  observation never left `dev` red longer than it already was.
+- **`report-failure` ran (not skipped), but its own conclusion was
+  `failure` — and it filed NOTHING for either signature.** Root cause,
+  confirmed against the real job logs: `gh api repos/{repo}/actions/
+  jobs/{id}/logs` (hosted runner ships GitHub CLI 2.101.0) refuses to
+  print a raw non-JSON response body containing ANSI escape sequences
+  unless `--allow-escape-sequences` is passed — a CLI terminal-safety
+  guard (`pkg/cmd/api/api.go`, `iostreams.CopyGuardedContent`/
+  `ErrEscapeSequence` upstream in `cli/cli`), not an API restriction.
+  Real job logs are timestamp-prefixed *and* frequently carry ANSI
+  color codes (confirmed real ESC bytes present in the raw captured
+  log), so this tripped on both failing jobs' log fetches, `_fetch_job_
+  log` raised `LookupFailed` for each, and `main()`'s own contract
+  (`continue` past an unfetchable job, no signature built) meant zero
+  issues were filed for a real double-test-failure run — exactly the
+  jam-goes-unnoticed failure mode this whole effort exists to shorten.
+  This is precisely why Phase 1.5 (a real observation window before
+  trusting Phase 1, let alone building Phase 2 on top of it) mattered:
+  a purely offline review of the code would not have caught a `gh`-CLI-
+  version-dependent runtime behavior difference between the hosted
+  runner (2.101.0) and every dev machine's own older `gh`.
+- **Fixed via PR #3815** (two review rounds, both catching real,
+  additional gaps beyond the direct fix):
+  - `_fetch_job_log` now passes `--allow-escape-sequences`.
+  - **First review round found two more real bugs the direct fix
+    introduced/left standing:** (1) **high severity** — the flag
+    itself doesn't exist before `gh` ~2.94; this repo's own clean-room
+    helper (`tools/clean-room/lib/clean-room-lib.sh`) still provisions
+    `gh` 2.62.0 by default, which would reject the flag as "unknown
+    flag" and break the call in a completely different way on that
+    environment. Fixed with a graceful fallback: retry once without the
+    flag on an "unknown flag" stderr match (an old `gh` has no escape-
+    sequence guard to begin with, so the plain call still succeeds; a
+    genuinely broken `gh` still fails the same way on the retry, so
+    this can never mask a real error). (2) **medium severity** —
+    allowing escape sequences through without stripping them means a
+    colored `FAILED tests/x.py::test_y` line no longer matches
+    `_FAILED_TEST_RE` at all (the ANSI codes break the `^FAILED `
+    anchor/shape), silently falling back to a whole-job signature and
+    losing the exact per-test dedup behavor this fix was meant to
+    restore. Fixed by stripping ANSI CSI sequences (`_strip_ansi`)
+    unconditionally in `_fetch_job_log`, before any caller ever sees
+    the text — verified this is a real risk (not hypothetical) by
+    checking the actual captured bytes from run 36230190121: genuine
+    ESC bytes were present in the raw log (in a `Run <command>` echo
+    line in this specific instance, not the `FAILED` line itself this
+    time — but PR ci steps do sometimes force-color pytest output onto
+    the FAILED line too, so unconditional stripping is the only safe
+    fix, not "only strip if observed on that line"). **Second review
+    round: Findings: None** — both fixed correctly, merged.
+  - Also added the CONTRIBUTING.md-required "Documentation impact"
+    statement to the PR body (a real process gap in the first
+    submission draft) — this being an internal report-only script's
+    own `gh`-CLI interaction, no user-facing doc changes were needed,
+    but the statement itself is mandatory regardless.
+  - 4 new regression tests (35 total): the flag is passed on the happy
+    path; the version-fallback retry fires and succeeds on "unknown
+    flag"; a colored `FAILED` line still parses correctly into a proper
+    per-test id after stripping; a genuine non-flag-related `gh`
+    failure still raises `LookupFailed` (never silently swallowed).
+  - **End-to-end confidence, without waiting for another live
+    occurrence:** re-ran the *fixed* script locally (dry-run) directly
+    against the real failed run's data — `python tools/ci_failure_
+    watchdog.py --run-id 36230190121 --sha cc88f...` — and it correctly
+    produced both real per-test signatures
+    (`test_streaming_paints_rows_and_summary`,
+    `test_concurrent_both_reaped_hard_delete_does_not_deadlock`). (This
+    exercised the version-fallback path locally, since the local `gh`
+    predates the flag too — not the exact hosted-runner
+    `--allow-escape-sequences`-succeeds path — so it is strong
+    supporting evidence, not full live proof of that specific path.)
+- **Left intentionally open in the Plan above:** the "one issue filed
+  per distinct signature," "accurate signature/log excerpt," and "no
+  duplicate within the 6h window" sub-items are still unconfirmed live
+  — this incident proved and fixed a real detection-side bug, but
+  didn't get far enough to observe a real filed issue or a real dedup
+  cycle. Continuing to monitor (schedule still armed) for either
+  another natural occurrence or, failing that, the deliberate probe
+  already specified in the Plan, to close out the remaining sub-items
+  with genuine live evidence rather than declaring Phase 1.5 done on
+  partial signal.
