@@ -1396,3 +1396,29 @@ def test_repos_cli_sync_preserves_unquoted_multi_word_tag_value(
     assert captured["names"] is None
 
 
+def test_repos_cli_sync_combines_leading_names_with_a_multi_word_tag(
+    home: Path, tmp_path: Path, monkeypatch,
+):
+    """Explicit repo names and an unquoted multi-word `--tag` value can
+    combine unambiguously as long as the names come first (the CLI's
+    documented positionals-then-flags convention) -- the ordering
+    `repos sync` must resolve, not just tolerate."""
+    from agent_worktrees import repos_cli
+
+    captured: dict[str, object] = {}
+
+    def fake_sync_all(*, tag=None, class_filter=None, names=None, plat=None):
+        captured["tag"] = tag
+        captured["names"] = names
+        return []
+
+    monkeypatch.setattr(repos, "sync_all", fake_sync_all)
+
+    repos_cli.cmd_repos_dispatch(
+        ["sync", "repo-a", "repo-b", "--tag", "multi-machine", "system"]
+    )
+
+    assert captured["names"] == ("repo-a", "repo-b")
+    assert captured["tag"] == "multi-machine system"
+
+

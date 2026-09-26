@@ -226,10 +226,14 @@ If the repo has no local path but has a remote, suggest cloning it.
 working tree is dirty or whose checkout is on a non-default branch — it
 never force-updates or creates merge commits. Naming one or more repos
 (`repos sync <repo> [<repo> ...]`) narrows the sync to exactly those,
-combinable with `--tag`/`--class`; a named repo that isn't registered at all
-is reported as its own `not registered` result. This is the sanctioned way to
-catch a worktree-class repo's **anchor** checkout up with its remote without
-tripping `anchor_write_guard` (which blocks a literal `git pull` -- and any
+combinable with `--tag`/`--class` -- **names must come first** (positionals
+before flags): `--tag`'s value runs to the next `--`-flag (to keep an
+unquoted, multi-word tag like the `multi-machine system` example above
+working), so a name placed after `--tag` would be swallowed into its value
+instead. A named repo that isn't registered at all is reported as its own
+`not registered` result. This is the sanctioned way to catch a worktree-class
+repo's **anchor** checkout up with its remote without tripping
+`anchor_write_guard` (which blocks a literal `git pull` -- and any
 other git mutation verb -- run directly against the anchor; a bare `git
 fetch` was never blocked, but still needs a follow-up `merge`/`rebase` that
 would be).

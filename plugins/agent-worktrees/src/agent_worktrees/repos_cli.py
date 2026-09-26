@@ -46,6 +46,7 @@ def _repos_usage() -> None:
     print("  status [--tag T] [--class C]        Show branch/dirty/ahead-behind")
     print("  sync [<repo> ...] [--tag T] [--class C]  Fetch + fast-forward (skips dirty);")
     print("                                      named repos only, else every registered one")
+    print("                                      (names, if any, must come first)")
     print("  doctor [--fix] [--json]             Reconcile projects.yaml <-> repos.yaml")
     print("  account [list|set <owner> <login>|unset <owner>]")
     print("                                      Decoupled owner->gh-login map (account_map)")
@@ -417,16 +418,21 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
     if sub == "sync":
         tag = None
         class_filter = None
-        name_list: list[str] = []
+        # Repo names must come first (`repos sync <name> [<name> ...]
+        # [--tag T] [--class C]`) -- an unambiguous positionals-then-flags
+        # split. This is what lets an unquoted, multi-word `--tag
+        # multi-machine system` value (a real, pre-existing tag containing a
+        # literal space -- see references/repos.yaml) keep working: once the
+        # first `--`-flag is seen, every remaining bare token belongs to that
+        # flag, never to a trailing name.
         i = 0
+        name_list: list[str] = []
+        while i < len(rest) and not rest[i].startswith("--"):
+            name_list.append(rest[i])
+            i += 1
         while i < len(rest):
             tok = rest[i]
             if tok == "--tag":
-                # Consume every following bare token (until the next `--`
-                # flag) as one space-joined tag value -- preserves the
-                # pre-existing (unquoted, multi-word) `--tag multi-machine
-                # system` usage instead of misreading its trailing word as
-                # an explicit repo name.
                 j = i + 1
                 while j < len(rest) and not rest[j].startswith("--"):
                     j += 1
@@ -438,13 +444,6 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
                     class_filter = rest[i + 1]
                 i += 2
                 continue
-            if not tok.startswith("--"):
-                # A bare, unconsumed token is an explicit repo name -- lets
-                # a caller fast-forward exactly one anchor (`repos sync
-                # <name>`) instead of every registered repo, the same safe
-                # fetch + `merge --ff-only` (skips dirty/diverged/detached)
-                # `sync_repo` always used, just scoped down.
-                name_list.append(tok)
             i += 1
         results = repos.sync_all(
             tag=tag, class_filter=class_filter, names=tuple(name_list) or None,
