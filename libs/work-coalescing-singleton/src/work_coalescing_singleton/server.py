@@ -283,7 +283,22 @@ class CoalescingServer:
             # out indefinitely), skip `shutdown()`: `server_close()` alone
             # still releases the bound socket, and the thread stays daemon-only
             # (never blocks process exit) if it does eventually run.
-            if self._serve_started and self._serve_running.wait(timeout=_CLOSE_SERVE_WAIT_S):
+            # `_serve_running` is a one-way readiness event (Copilot review
+            # finding): once `service_actions()` sets it, it stays set even
+            # if the serve thread has since died on its own (a scenario a
+            # test can force by directly clearing/replacing the target
+            # callable, even though real `socketserver.serve_forever()`'s own
+            # `try/finally` cannot exit without itself signalling shutdown
+            # completion). Treat readiness as necessary but not sufficient --
+            # also require the thread to still be alive right now, so a
+            # `close()` that only ever observes a post-mortem serve thread
+            # never calls `shutdown()` at all instead of trusting a stale
+            # readiness signal.
+            if (
+                self._serve_started
+                and self._serve_running.wait(timeout=_CLOSE_SERVE_WAIT_S)
+                and self._serve_thread.is_alive()
+            ):
                 self._server.shutdown()
                 # `shutdown()` only guarantees `serve_forever()`'s own while
                 # loop noticed the request and its `finally` block ran --

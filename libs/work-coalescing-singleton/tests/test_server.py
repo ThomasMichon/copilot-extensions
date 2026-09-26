@@ -252,7 +252,12 @@ def test_close_after_serve_thread_dies_before_confirming_running_never_blocks():
     def _dies_immediately(poll_interval):
         raise RuntimeError("simulated early serve_forever failure")
 
-    server._server.serve_forever = _dies_immediately
+    # `self._serve_thread` was constructed in `__init__` with
+    # `target=self._server.serve_forever` already bound -- reassigning
+    # `server._server.serve_forever` afterwards would not affect that
+    # already-captured target, so the substitute must replace the thread's
+    # own `_target` instead for the injected failure to actually run.
+    server._serve_thread._target = _dies_immediately
     server.start()
     assert server._serve_started is True
     assert server._reap_started is True
@@ -264,6 +269,36 @@ def test_close_after_serve_thread_dies_before_confirming_running_never_blocks():
     elapsed = time.time() - start_time
     assert not close_thread.is_alive(), "close() hung waiting on a serve loop that never confirmed running"
     assert elapsed < _CLOSE_SERVE_WAIT_S + 2, "close() should not wait meaningfully longer than its own bound"
+
+
+def test_close_never_calls_shutdown_on_a_thread_that_died_after_confirming_running():
+    """Copilot review finding: ``_serve_running`` is a one-way readiness
+    event -- once ``service_actions()`` sets it, it stays set even if the
+    serve thread has since died on its own. If ``close()`` trusted that
+    stale readiness signal alone, it would call ``self._server.shutdown()``
+    against a loop that no longer exists. Gate ``shutdown()`` on the thread
+    still being alive too, not merely on having once confirmed running."""
+    server = _make_server()
+    shutdown_calls: list[None] = []
+    real_shutdown = server._server.shutdown
+    server._server.shutdown = lambda: shutdown_calls.append(None) or real_shutdown()
+
+    def _confirms_running_then_dies(poll_interval):
+        server._serve_running.set()
+
+    # See the sibling test above for why the thread's own `_target` (not
+    # `server._server.serve_forever`) must be replaced.
+    server._serve_thread._target = _confirms_running_then_dies
+    server.start()
+    assert server._serve_started is True
+    server._serve_thread.join(timeout=2)
+    assert not server._serve_thread.is_alive()  # died on its own, post-readiness
+
+    close_thread = threading.Thread(target=server.close)
+    close_thread.start()
+    close_thread.join(timeout=3)
+    assert not close_thread.is_alive(), "close() hung on a thread that had already died"
+    assert shutdown_calls == [], "close() must not call shutdown() against an already-dead serve loop"
 
 
 def test_close_after_a_failed_reap_thread_launch_still_stops_the_serve_loop():
