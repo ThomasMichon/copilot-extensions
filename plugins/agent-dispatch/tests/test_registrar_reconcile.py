@@ -57,6 +57,26 @@ def test_spec_and_command_carry_disposable_cli_labels():
     assert command[command.index("--disposable-cli-label") + 1] == "review"
 
 
+def test_spec_and_command_carry_idle_nudge_exempt_labels():
+    decl = load_declaration(
+        {
+            "name": "reviewers",
+            "labels": ["review"],
+            "body": {
+                "type": "embody",
+                "idle_nudge_exempt_labels": ["review"],
+            },
+        }
+    )
+    spec = declaration_to_spec(decl)
+    assert spec["idle_nudge_exempt_labels"] == ["review"]
+    command = build_command(
+        declaration_to_registration(decl, machine="host-a"),
+        python="PY",
+    )
+    assert command[command.index("--idle-nudge-exempt-label") + 1] == "review"
+
+
 def test_spec_fleet_pool_origin_headless():
     # A fleet declaration (pool/origin/headless) must be carried into the lane spec;
     # otherwise the serve daemon drops it and the supervisor runs LOCAL (regression:

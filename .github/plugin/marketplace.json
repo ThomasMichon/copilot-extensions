@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, budget posture, coordinator-first delegation, publication safety, WSL environment setup, and CLI customization",
-    "version": "1.5.13-dev1"
+    "version": "1.5.14-dev1"
   },
   "plugins": [
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.5.13-dev1",
+      "version": "1.5.14-dev1",
       "source": "plugins/agent-worktrees"
     },
     {
@@ -25,7 +25,7 @@
     {
       "name": "agent-bridge",
       "description": "Live cross-boundary inter-agent communication service - conversation transport, session management, SSE event streaming, agent subprocess spawning, and ACP-over-WebSocket support for external clients",
-      "version": "0.4.7-dev1",
+      "version": "0.5.0-dev1",
       "source": "plugins/agent-bridge"
     },
     {
@@ -61,7 +61,7 @@
     {
       "name": "context-handoff",
       "description": "Context window monitoring and session handoff - a session-start continuity kernel plus a Copilot CLI extension that tracks token utilization, stores handoffs as worktree-pinned agent-dispatch tasks when available or one-time worktree-state files otherwise, and always makes a manual continuation available; soft/hard usage warnings fire under the default manual-only mode too, but the force tier's automatic trigger and live pending-handoff pickup signaling are opt-in (mode: auto) and never perform process management",
-      "version": "0.1.4-dev1",
+      "version": "0.1.4-dev2",
       "source": "plugins/context-handoff"
     },
     {
@@ -85,7 +85,7 @@
     {
       "name": "agent-dispatch",
       "description": "Portable durable agent task-loop + per-host coordinator: a single-writer SQLite work queue (eight-state model with owner-preserving suspension, capability-gated atomic claim, affinity routing, liveness-reconciled recovery) so agents coordinate without push latency or an account per agent.",
-      "version": "0.2.0-dev1",
+      "version": "0.2.1-dev1",
       "source": "plugins/agent-dispatch"
     },
     {

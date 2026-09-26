@@ -510,6 +510,31 @@ def _validate_disposable_cli_labels(spec: dict) -> None:
             raise RegistrationError(f"'{key}' must be a list of labels")
 
 
+def _validate_idle_nudge_exempt_labels(spec: dict) -> None:
+    values = spec.get("idle_nudge_exempt_labels")
+    if values is None:
+        return
+    if not isinstance(values, list) or not values or not all(
+        isinstance(value, str) and value for value in values
+    ):
+        raise RegistrationError(
+            "'idle_nudge_exempt_labels' must be a non-empty list of labels"
+        )
+    labels = spec.get("labels") or []
+    if not isinstance(labels, list) or not all(
+        isinstance(value, str) and value for value in labels
+    ):
+        raise RegistrationError(
+            "an idle-nudge-exempt policy requires a valid 'labels' list"
+        )
+    watched = set(labels)
+    exempt = set(values)
+    if stray := exempt - watched:
+        raise RegistrationError(
+            f"idle-nudge-exempt labels {sorted(stray)} are not watched by this lane"
+        )
+
+
 def _schedule_entry(spec: dict, *, strict: bool) -> dict:
     """The single schedule entry a schedule registration carries.
 
@@ -576,6 +601,7 @@ def validate_registration(kind: str, spec: dict) -> None:
                 "'all_repos': true"
             )
         _validate_disposable_cli_labels(spec)
+        _validate_idle_nudge_exempt_labels(spec)
     elif kind == RegistrationKind.SCHEDULE:
         # A schedule is a self-run emitter: it needs an id (its dedup namespace,
         # 'sched:<id>:<epoch>') and a lane to emit into.
@@ -622,6 +648,7 @@ def validate_registration(kind: str, spec: dict) -> None:
                 "evaluator 'evaluator_ref' must be a non-empty string"
             )
         _validate_disposable_cli_labels(spec)
+        _validate_idle_nudge_exempt_labels(spec)
     elif kind == RegistrationKind.PLUGIN_COMPANION:
         _validate_plugin_companion(spec)
 

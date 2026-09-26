@@ -192,6 +192,7 @@ class Supervisor:
         fleet_end_fn: FleetEndFn | None = None,
         nudge_fn: NudgeFn | None = None,
         idle_nudge_fn: Any | None = None,
+        idle_nudge_exempt_labels: Sequence[str] | None = None,
         redrive_fn: RedriveFn | None = None,
         disposable_cli_labels: Sequence[str] | None = None,
         conclusion_fn: ConclusionFn | None = None,
@@ -316,6 +317,16 @@ class Supervisor:
         from .idle_confirm import default_idle_confirm_nudge
 
         self.idle_nudge_fn = idle_nudge_fn or default_idle_confirm_nudge
+        #: Labels exempt from the generic idle-confirm nudge (see
+        #: :func:`agent_dispatch.idle_confirm.nudge_idle_headless_tasks`): a
+        #: recipe/emitter-driven task type already owns its own resume path
+        #: (an in-process evaluator, or an external one driven entirely
+        #: through this CLI), so an idle STARTED task with no new activity is
+        #: its correct resting state, not an unfinished turn -- nudging it
+        #: anyway can push the worker toward an unsanctioned resolution
+        #: (confirmed live). Default (empty) preserves today's behavior for
+        #: genuinely self-tracked work (#3487).
+        self.idle_nudge_exempt_labels = set(idle_nudge_exempt_labels or ())
         #: Re-drive sender used when a spawned CLI body is alive but still has
         #: not claimed its queued task after a supervisor/bridge restart.
         self.redrive_fn = redrive_fn or _default_redrive

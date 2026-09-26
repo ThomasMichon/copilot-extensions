@@ -1511,11 +1511,23 @@ def test_idle_confirm_nudge_asks_whether_the_task_is_done(monkeypatch):
     assert sent[0][0] == "sid-1"
     assert sent[0][1] is None
     msg = sent[0][2]
-    assert "I see you are idle, but you have not completed task abc (do the thing)" in msg
-    assert "Idle after loading a skill or ending a turn is not completion" in msg
+    assert "task abc (do the thing) is not marked complete" in msg
+    assert "Idle does not mean done" in msg
     assert "agent-dispatch complete abc" in msg
     assert "Done-criteria: comment posted" in msg
     assert "do not complete just to clear this prompt" in msg
+    assert "steering card" not in msg
+
+
+def test_idle_confirm_nudge_without_goal_or_criteria_falls_back_to_title():
+    from agent_dispatch.idle_confirm import idle_confirm_message
+
+    msg = idle_confirm_message({"id": "abc", "title": "do the thing"})
+    assert "Your assignment: do the thing" in msg
+    assert "resume working toward the assignment above now" in msg
+    assert "Done-criteria" not in msg
+    assert "if the assignment is genuinely, fully complete" in msg
+    assert "if the done-criteria are genuinely met" not in msg
 
 
 def test_idle_headless_fleet_nudge_includes_remote_host(q, client):
@@ -1558,7 +1570,7 @@ def test_idle_confirm_nudge_routes_fleet_via_resume_session(monkeypatch):
     )
     assert sent[0][0] == "sess-9"
     assert sent[0][1] == "host-a"
-    assert "have not completed task abc" in sent[0][2]
+    assert "task abc is not marked complete" in sent[0][2]
 
 
 def test_idle_headless_turn_nudges_confirm_done_instead_of_suspend(q, client):
@@ -1591,6 +1603,39 @@ def test_idle_headless_turn_nudges_confirm_done_instead_of_suspend(q, client):
     assert nudged == [("review-session", task.id)]
     assert sup.poll_once() == []
     assert nudged == [("review-session", task.id)]
+
+
+def test_idle_nudge_exempt_label_never_nudges(q, client):
+    """A task carrying an idle-nudge-exempt label owns its own resume path (an
+    in-process evaluator, or an external one driven entirely through this
+    CLI) -- going idle with no new activity is that task's correct resting
+    state, not an unfinished turn. Nudging it anyway can encourage the worker
+    to reach for a resolution its own charter never sanctioned (confirmed
+    live)."""
+    task = q.create("review turn", labels=["review"])
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        reservation.key, session_handle="local-body:review-session"
+    )
+    q.claim_one("headless-owner", task_id=task.id)
+    q.start(task.id, "headless-owner")
+    nudged = []
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        labels=["review"],
+        idle_nudge_exempt_labels=["review"],
+        local_body_activity_fn=lambda _session_id: "IDLE",
+        local_body_verdict_fn=lambda _session_id: "live",
+        idle_nudge_fn=lambda target, t: nudged.append((target, t["id"])) or True,
+    )
+
+    assert sup.poll_once() == []
+    assert nudged == []
+    current = q.get(task.id)
+    assert current.status == Status.STARTED
+    assert q.get_reservation(reservation.key).state == SpawnState.SPAWNED
 
 
 def test_supervisor_binds_headless_owner_to_acp_session(q, client):
@@ -4215,6 +4260,26 @@ def test_cli_supervise_rejects_script_backend_in_pool_mode(monkeypatch, capsys):
     )
     assert m._cmd_supervise(args) == 2
     assert "script embodiment is supported only for local" in capsys.readouterr().err
+
+
+def test_cli_supervise_rejects_idle_nudge_exempt_label_not_watched(monkeypatch, capsys):
+    import types
+
+    from agent_dispatch import __main__ as m
+
+    monkeypatch.setattr(m, "_scope_repo", lambda _args: TEST_REPO)
+
+    args = types.SimpleNamespace(
+        all_repos=False, repo=None, url=None, token=None, label=["maintenance"],
+        max_concurrent=5, verify_timeout=0, once=True, interval=30.0,
+        no_heartbeat=False, max_attempts=3,
+        pool=None, origin=None, headless=False,
+        embody_backend="headless", headless_label=None, cli_label=None, script_label=None,
+        disposable_cli_label=None, idle_nudge_exempt_label=["other-label"],
+        headless_agent="task-worker", charter=None, no_pair=False,
+    )
+    assert m._cmd_supervise(args) == 2
+    assert "every --idle-nudge-exempt-label must also be watched" in capsys.readouterr().err
 
 
 def test_cli_supervise_pool_headless_builds_headless_fleet(monkeypatch, q, client):

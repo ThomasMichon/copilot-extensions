@@ -62,7 +62,7 @@ import re
 import stat
 import subprocess
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from agent_procutil import no_window_kwargs
 from dropin_registry import EntryDecision, EntryStatus, Finding, scan_directory
@@ -210,6 +210,21 @@ def parse_manifest(data: object, *, source_path: str = "") -> ClaimProviderManif
     )
 
 
+def _pure_path_name(value: str) -> str:
+    """``PurePath(value).name`` under the CURRENT platform's path syntax.
+
+    Never a bare ``Path()``: its ``WindowsPath``/``PosixPath`` selection is
+    based on live ``os.name``, but ``WindowsPath``'s own flavour support is
+    frozen ``False`` at interpreter-start time on a real POSIX process --
+    constructing one raises even when a test fakes ``os.name == "nt"`` to
+    exercise Windows-only routing on any platform. ``PureWindowsPath``/
+    ``PurePosixPath`` are lexical-only and always instantiable, keeping that
+    simulation correct while matching real production behavior (which
+    always calls this with the true ``os.name``)."""
+    flavour = PureWindowsPath if os.name == "nt" else PurePosixPath
+    return flavour(value).name
+
+
 def _payload_command(root: Path, command: str) -> Path | None:
     """Resolve a bare command name to the plugin's own payload-local binstub.
 
@@ -218,7 +233,7 @@ def _payload_command(root: Path, command: str) -> Path | None:
     -- so a claim-provider callback can only ever run the exact binstub the
     identity-verified plugin itself shipped.
     """
-    if Path(command).name != command:
+    if _pure_path_name(command) != command:
         return None
     candidates = [root / "bin" / command]
     if os.name == "nt":
@@ -575,7 +590,12 @@ def _windows_batch_argv(command: tuple[str, ...]) -> list[str]:
     Mirrors `agent_bridge.transport._wrap_batch_for_windows`, an existing,
     separately-tested precedent for this exact problem.
     """
-    if os.name != "nt" or Path(command[0]).suffix.casefold() not in (".cmd", ".bat"):
+    # PureWindowsPath, not Path: this only parses a Windows-style path
+    # string's suffix -- no filesystem access is needed, and Path() would
+    # resolve to WindowsPath (whose flavour is frozen unsupported at
+    # interpreter startup on a real POSIX process), raising even though
+    # os.name reports "nt" here.
+    if os.name != "nt" or PureWindowsPath(command[0]).suffix.casefold() not in (".cmd", ".bat"):
         return list(command)
     comspec = os.environ.get("ComSpec", "cmd.exe")
     return [comspec, "/d", "/s", "/c", *command]
@@ -633,7 +653,7 @@ def _provider_plugin_id(provider: ClaimProviderManifest) -> str:
     plugin, sep, _marketplace = provider.plugin.partition("@")
     if sep and plugin:
         return plugin
-    root_name = Path(provider.plugin_root).name
+    root_name = _pure_path_name(provider.plugin_root)
     return root_name or provider.plugin
 
 

@@ -267,6 +267,7 @@ agent-dispatch supervise [--repo R | --all-repos] [--label L ...] \
     [--no-reactive] [--reactive-interval S] \
     [--embody-backend headless|cli] [--cli-label L ...] \
     [--headless-label L ...] [--disposable-cli-label L ...] \
+    [--idle-nudge-exempt-label L ...] \
     [--headless-agent AGENT] [--interval S] [--once]
 agent-dispatch reservations list [--task ID] [--state S]
 agent-dispatch reservations fail|settle <key> [--detail ...]
@@ -335,6 +336,7 @@ agent-dispatch supervise register [--kind KIND] [--id ID] [--spec JSON|@FILE] \
     [--repo R | --all-repos] [--label L ...] [--max-concurrent N] \
     [--max-attempts N] [--label-max-attempts LABEL=N ...] \
     [--headless-label L ...] [--disposable-cli-label L ...] \
+    [--idle-nudge-exempt-label L ...] \
     [--headless-agent AGENT] [--evaluator SPEC] \
     [--interval S]
 agent-dispatch supervise status <id>
@@ -690,6 +692,21 @@ dispatch-owned.
 The older `--disposable-cli-label LABEL` path remains for explicitly declared
 CLI worker classes whose worktrees predate allocation provenance. A registrar
 may supply the equivalent `body.disposable_cli_labels`.
+
+### Idle-confirm nudge exemption
+
+A `STARTED` headless body that goes idle with no new activity is only
+ambiguous when nothing else is watching it. A recipe/emitter-driven task type
+already has its own resume mechanism -- an in-process evaluator, or an
+external one driven entirely through this CLI -- and going idle there is that
+task's correct resting state, not an unfinished turn; nudging it anyway can
+push the worker toward a resolution its own charter never sanctioned.
+
+`--idle-nudge-exempt-label LABEL` (repeatable; a registrar may supply the
+equivalent `body.idle_nudge_exempt_labels`) exempts a task carrying that label
+from the generic idle-confirm nudge entirely. The default (no exemptions)
+preserves today's behavior for genuinely self-tracked work with no evaluator
+watching it -- the case the nudge exists for.
 
 On terminal task settlement the supervisor uses only the spawn reservation's
 recorded `session_handle` and `worktree`. It never infers an allocation by

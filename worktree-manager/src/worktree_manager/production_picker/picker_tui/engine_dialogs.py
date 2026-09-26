@@ -659,6 +659,7 @@ class WtDetailsScreen(ModalScreen[None]):
     def action_close(self) -> None:
         self.dismiss(None)
 
+
 class ScopeDlgScreen(ModalScreen[bool]):
     """Native modal scope dialog for Clean/Sync and New-worktree options (#88 F4;
     native-focus internals #88 NF1).

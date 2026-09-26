@@ -879,6 +879,17 @@ def test_cli_build_spec_from_lane_flags():
     assert spec["max_attempts"] == 5
 
 
+def test_cli_build_spec_from_lane_flags_includes_idle_nudge_exempt_labels():
+    from agent_dispatch.__main__ import _build_registration_spec
+
+    args = _parse(
+        ["supervise", "register", "--all-repos", "--label", "code-review",
+         "--idle-nudge-exempt-label", "code-review"]
+    )
+    spec = _build_registration_spec(args)
+    assert spec["idle_nudge_exempt_labels"] == ["code-review"]
+
+
 def test_cli_build_spec_inline_json():
     from agent_dispatch.__main__ import _build_registration_spec
 

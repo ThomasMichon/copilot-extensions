@@ -60,7 +60,7 @@ function resolveSystemCliDescriptor(bin) {
           ? join("bin", "payload", "agent-worktrees.ps1")
           : join("bin", "payload", "agent-worktrees"),
       module: "agent_worktrees",
-      runtimeRoot: ".agent-worktrees",
+      runtimeRoot: ".agent-worktrees", // marketplace-isolation: allow agent-worktrees-management
       payloadRootEnv: "AGENT_WORKTREES_PAYLOAD_ROOT",
     },
     "agent-dispatch": {
@@ -69,7 +69,7 @@ function resolveSystemCliDescriptor(bin) {
           ? join("bin", "agent-dispatch.ps1")
           : join("bin", "agent-dispatch"),
       module: "agent_dispatch",
-      runtimeRoot: ".agent-dispatch",
+      runtimeRoot: ".agent-dispatch", // marketplace-isolation: allow agent-dispatch-management
       payloadRootEnv: null,
     },
     "agent-bridge": {
@@ -78,7 +78,7 @@ function resolveSystemCliDescriptor(bin) {
           ? join("bin", "agent-bridge.ps1")
           : join("bin", "agent-bridge"),
       module: "agent_bridge",
-      runtimeRoot: ".agent-bridge",
+      runtimeRoot: ".agent-bridge", // marketplace-isolation: allow agent-bridge-management
       payloadRootEnv: null,
     },
   };
@@ -1348,7 +1348,7 @@ async function attemptWorktreeSyncLocked(cwd) {
 // True if an agent-dispatch coordinator answers a health probe.
 export function agentDispatchAvailable() {
   try {
-    runCli("agent-dispatch", ["health"], {
+    runCli("agent-dispatch", ["health"], { // marketplace-isolation: allow agent-dispatch-management
       timeout: 5000,
       stdio: "ignore",
     });
@@ -1664,7 +1664,7 @@ function normalizeComparePath(value) {
 }
 
 export function readStatusMonitorRegistry(home = homedir()) {
-  const dir = join(home, ".agent-worktrees", "status-monitor.d");
+  const dir = join(home, ".agent-worktrees", "status-monitor.d"); // marketplace-isolation: allow agent-worktrees-management
   const entries = {};
   if (!existsSync(dir)) return entries;
   for (const name of readdirSync(dir)) {
@@ -2000,7 +2000,7 @@ export function consumeFileHandoffOnce(
 // --- agent-dispatch task store --------------------------------------------
 export function agentDispatchJson(argv, cwd) {
   try {
-    return JSON.parse(runCli("agent-dispatch", argv, { cwd, timeout: 15000 }));
+    return JSON.parse(runCli("agent-dispatch", argv, { cwd, timeout: 15000 })); // marketplace-isolation: allow agent-dispatch-management
   } catch {
     return null;
   }
@@ -2012,7 +2012,7 @@ export function abandonSupersededHandoffs(cwd, worktree, keepId) {
   );
   for (const id of supersededHandoffIds(tasks, worktree, keepId)) {
     try {
-      runCli("agent-dispatch",
+      runCli("agent-dispatch", // marketplace-isolation: allow agent-dispatch-management
         ["abandon", id, "--permit", "--reason", "superseded by a newer handoff for this worktree"],
         { cwd, timeout: 15000 });
     } catch { /* best-effort -- GC orphan pass is the backstop */ }
@@ -2031,7 +2031,7 @@ export function findHandoffTask(cwd, worktree) {
 
 export function readTaskPayloadRaw(cwd, taskId) {
   try {
-    return runCli(
+    return runCli( // marketplace-isolation: allow agent-dispatch-management
       "agent-dispatch", ["payload", taskId, "--raw"],
       { cwd, timeout: 15000 },
     );
@@ -2043,7 +2043,7 @@ export function readTaskPayloadRaw(cwd, taskId) {
 export function runAgentDispatchConsume(cwd, taskId, deferComplete) {
   const argv = ["consume", taskId];
   if (deferComplete) argv.push("--defer-complete");
-  return runCli("agent-dispatch", argv, { cwd, timeout: 20000 });
+  return runCli("agent-dispatch", argv, { cwd, timeout: 20000 }); // marketplace-isolation: allow agent-dispatch-management
 }
 
 // A handoff task means "resume THIS worktree's work" -- until it is consumed
@@ -2146,7 +2146,7 @@ export function dispatchHandoff(promptText, sid, cwd, title) {
       "--target-worktree", worktree, "--affinity", `worktree=${worktree}`,
     ];
     if (machine) argv.push("--target-machine", machine);
-    const task = JSON.parse(runCli("agent-dispatch", argv, { cwd, timeout: 15000 }));
+    const task = JSON.parse(runCli("agent-dispatch", argv, { cwd, timeout: 15000 })); // marketplace-isolation: allow agent-dispatch-management
     if (task?.id) {
       addHandoffClaim(cwd, task.id, worktree);
       // #3248 review comment 9: the task was already publicly claimable
@@ -2663,7 +2663,7 @@ export function noteHandoffInRecord(cwd, sid, ref, title) {
     if (ref) argv.push("--task", ref);
     if (title) argv.push("--title", title);
     if (sid) argv.push("--session-id", sid);
-    runCli("agent-worktrees", argv, { cwd, timeout: 5000 });
+    runCli("agent-worktrees", argv, { cwd, timeout: 5000 }); // marketplace-isolation: allow agent-worktrees-management
   } catch { /* history is advisory */ }
 }
 

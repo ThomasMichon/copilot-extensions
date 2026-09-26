@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-bridge"
-version = "0.4.7-dev1"
+version = "0.5.0-dev1"
 description = "Persistent inter-agent communication service for Copilot CLI"
 readme = "README.md"
 license = "MIT"
@@ -73,6 +73,10 @@ agent-bridge = "agent_bridge.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+# The /ui control surface's page, scripts, and stylesheet (routes/ui.py).
+agent_bridge = ["ui_static/*.html", "ui_static/*.js", "ui_static/*.css"]
 
 [tool.ruff]
 target-version = "py310"

@@ -5,6 +5,7 @@ from __future__ import annotations
 from . import derive
 from .engine_dialogs import QuitConfirmScreen
 from .engine_helpers import C_DIM
+from .engine_legend import LegendScreen
 from .listview import capture_row_refs, remap_row_refs, render_command_bar
 from .styles import canonical_key
 
@@ -50,6 +51,12 @@ class PickerScreenInputMixin:
             return self._switch_pivot(-1)
         if key == "]":
             return self._switch_pivot(1)
+        # "?" opens the read-only state/marker/disposition Legend (worktree-
+        # finality-and-obligations Phase 5) -- global, works from any zone,
+        # matching "[" / "]" above.
+        if key == "?":
+            self.app.push_screen(LegendScreen())
+            return
         # "/" command bar + "s" sort-cycle (#2228 Phase 4) -- Worktrees only
         # for now; a registered pivot's own wiring is a later slice.
         if key == "/" and self._kind() == "worktrees":

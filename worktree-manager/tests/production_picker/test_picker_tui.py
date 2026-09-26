@@ -5349,6 +5349,47 @@ def test_command_bar_filter_matches_state_and_status_markers(monkeypatch):
     asyncio.run(run())
 
 
+def test_legend_screen_opens_on_question_mark_and_closes_on_escape(monkeypatch):
+    """worktree-finality-and-obligations Phase 5: "?" opens the read-only
+    Legend card (state labels, compact markers, maintenance disposition) from
+    any zone; Escape closes it, same as WtDetailsScreen/QuitConfirmScreen."""
+    from worktree_manager.production_picker.picker_tui.engine_legend import (
+        LegendScreen,
+    )
+
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 24)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            await pilot.press("?")
+            await pilot.pause()
+            legend = next(
+                s for s in scr.app.screen_stack if isinstance(s, LegendScreen))
+            body = legend._body().plain
+            # State-label legend, not row-specific: every canonical state the
+            # Worktrees list can render is explained, using the SAME labels
+            # C_STATE/derive._STATE_LABEL already key colors/text off.
+            for label in ("ACTIVE", "DIRTY", "WIP", "FINAL", "MERGED",
+                          "UNUSED", "CONVO", "ORPHAN", "GONE"):
+                assert label in body
+            # Compact marker vocabulary + maintenance disposition chips.
+            assert "C<N>" in body and "F<N>" in body
+            assert "U*" in body and "OC*" in body
+            assert "SAFE" in body and "REVIEW" in body and "UNSAFE" in body
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not any(
+                isinstance(s, LegendScreen) for s in scr.app.screen_stack)
+
+    asyncio.run(run())
+
+
 def test_command_bar_filter_never_narrows_list_records_or_selection(monkeypatch):
     """PR #2911 review: the filter/sort narrowing must apply ONLY to the
     render/navigation view (`current_list_visible`/`_wt_visible_records`) --

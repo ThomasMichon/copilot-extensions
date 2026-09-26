@@ -97,6 +97,8 @@ KEY_ALIASES = {
     "left_square_bracket": "[",
     "right_square_bracket": "]",
     "slash": "/",  # Textual names the "/" key "slash" (#2228 Phase 4 command bar).
+    "question_mark": "?",  # Textual names the "?" key "question_mark" (Phase 5
+    # Legend screen).
     # Ctrl+Space is NUL, which Textual surfaces as "ctrl+at"; the picker treats
     # it as a Ctrl-held Space toggle, identical to "ctrl+space".
     "ctrl+at": "ctrl+space",

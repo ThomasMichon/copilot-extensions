@@ -225,6 +225,7 @@ def _runtime_equivalence_fingerprint(reg: dict) -> str:
             "cli_labels": [],
             "script_labels": [],
             "disposable_cli_labels": [],
+            "idle_nudge_exempt_labels": [],
             "headless_agent": "task-worker",
             "no_pair": False,
         }
@@ -237,6 +238,7 @@ def _runtime_equivalence_fingerprint(reg: dict) -> str:
             "cli_labels",
             "script_labels",
             "disposable_cli_labels",
+            "idle_nudge_exempt_labels",
         ):
             spec[key] = sorted(set(spec.get(key) or []))
         for key in ("interval",):
@@ -379,6 +381,8 @@ def _lane_flags(spec: dict) -> list[str]:
         argv += ["--script-label", str(label)]
     for label in spec.get("disposable_cli_labels", []) or []:
         argv += ["--disposable-cli-label", str(label)]
+    for label in spec.get("idle_nudge_exempt_labels", []) or []:
+        argv += ["--idle-nudge-exempt-label", str(label)]
     if spec.get("no_pair"):
         argv.append("--no-pair")
     # Fleet dispatch: fan bodies across a pool of remote hosts, each driving the
