@@ -459,6 +459,61 @@ def test_claims_release_missing_ref(monkeypatch, tmp_path):
     assert rc == 2
 
 
+def _annotate_args(ref, *, note="", json_=True):
+    return argparse.Namespace(
+        target=["annotate", ref], note=note, release_worktree=None, json=json_)
+
+
+def test_claims_annotate_updates_existing_note(monkeypatch, tmp_path, capfd):
+    """Update an existing claim's note without release + re-add
+    (copilot-extensions#2631)."""
+    ref = "anomalous-potato/copilot-extensions/wt-B"
+    _seed(tmp_path, monkeypatch,
+          resources=[tracking.ResourceClaim(kind="worktree", ref=ref, note="")])
+    rc = m.cmd_claims(_annotate_args(ref, note="linked to PR #3705"))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out["ref"] == ref and out["note"] == "linked to PR #3705"
+    assert out["previous_note"] == ""
+    rec = tracking.load_record(tmp_path / "worktrees" / "wt-A.yaml")
+    assert rec.resources[0].note == "linked to PR #3705"
+
+
+def test_claims_annotate_overwrites_prior_note_and_logs_event(monkeypatch, tmp_path, capfd):
+    ref = "anomalous-potato/copilot-extensions/wt-B"
+    _seed(tmp_path, monkeypatch,
+          resources=[tracking.ResourceClaim(kind="worktree", ref=ref, note="auto-claimed")])
+    rc = m.cmd_claims(_annotate_args(ref, note="now linked to PR #3705"))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out["previous_note"] == "auto-claimed"
+    rec = tracking.load_record(tmp_path / "worktrees" / "wt-A.yaml")
+    assert rec.resources[0].note == "now linked to PR #3705"
+
+
+def test_claims_annotate_requires_note(monkeypatch, tmp_path):
+    ref = "anomalous-potato/copilot-extensions/wt-B"
+    _seed(tmp_path, monkeypatch,
+          resources=[tracking.ResourceClaim(kind="worktree", ref=ref)])
+    rc = m.cmd_claims(_annotate_args(ref, note=""))
+    assert rc == 2
+
+
+def test_claims_annotate_unknown_ref(monkeypatch, tmp_path):
+    _seed(tmp_path, monkeypatch,
+          resources=[tracking.ResourceClaim(
+              kind="worktree", ref="anomalous-potato/copilot-extensions/wt-B")])
+    rc = m.cmd_claims(_annotate_args("anomalous-potato/copilot-extensions/wt-Z", note="x"))
+    assert rc == 1
+
+
+def test_claims_annotate_missing_ref(monkeypatch, tmp_path):
+    _seed(tmp_path, monkeypatch)
+    rc = m.cmd_claims(argparse.Namespace(
+        target=["annotate"], note="x", release_worktree=None, json=True))
+    assert rc == 2
+
+
 # --- claims add -------------------------------------------------------------
 
 def _add_args(kind, ref, *, note="", json_=True):

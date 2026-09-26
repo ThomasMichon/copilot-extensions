@@ -22,6 +22,14 @@ _ALLOWED_STATUSES = frozenset({"draft", "active", "blocked", "done"})
 _HEADER_RE = re.compile(
     r"(?mi)^-\s+\*\*(?P<name>Slug|Status):\*\*\s*(?P<value>[^\r\n]+?)\s*$"
 )
+# Permissive counterpart of _HEADER_RE (no required leading "- " bullet
+# marker), used only by lint_effort() to name the SPECIFIC fix for the most
+# common near-miss: a bare "**Slug:** ..." bold line, which renders
+# identically to the required bulleted form in Markdown but does not parse
+# (copilot-extensions#2631).
+_LOOSE_HEADER_RE = re.compile(
+    r"(?mi)^(?:-\s+)?\*\*(?P<name>Slug|Status):\*\*\s*(?P<value>[^\r\n]+?)\s*$"
+)
 _HEADING_RE = re.compile(r"(?m)^##\s+(.+?)\s*$")
 _TASK_RE = re.compile(
     r"(?m)^\s*(?:[-*+]|\d+[.)])\s+\[([^\]])\]\s+(?P<text>[^\r\n]+?)\s*$"
@@ -413,6 +421,117 @@ def inspect_effort(repo_root: Path, ref: ActiveEffort) -> EffortInspection:
         )
     except EffortFocusError as exc:
         return EffortInspection(ref=ref, state="stale", reason=str(exc))
+
+
+def lint_effort(
+    repo_root: Path,
+    relative_path: str,
+    *,
+    participant: str | None = None,
+    slice_name: str | None = None,
+) -> list[dict[str, str]]:
+    """Validate one effort README's schema and return EVERY finding at once.
+
+    Reuses the exact checks :func:`inspect_effort`/:func:`validate_binding`
+    perform for ``effort-focus bind``, but reports every problem in a single
+    pass with actionable, field-specific guidance -- rather than surfacing
+    one vague error at a time, discovered only via repeated failed ``bind``
+    attempts (copilot-extensions#2631). Intended to run standalone, at
+    effort-authoring time (no worktree binding/tracking record required):
+    a caller passes ``participant``/``slice_name`` only when it wants those
+    two binding-specific checks included too.
+
+    Returns an empty list when the README is clean. Never raises
+    :class:`EffortFocusError` itself -- a caught error (bad path, unreadable
+    file, etc.) is reported as a single ``"path"`` finding instead, since no
+    further schema checks are meaningful once the file can't be read at all.
+    """
+    findings: list[dict[str, str]] = []
+    try:
+        text = _read_effort(repo_root, relative_path)
+    except EffortFocusError as exc:
+        return [{"field": "path", "message": str(exc)}]
+
+    strict_headers = _headers_permissive(text, _HEADER_RE)
+    loose_headers = _headers_permissive(text, _LOOSE_HEADER_RE)
+    for field, label in (("slug", "Slug"), ("status", "Status")):
+        if field in strict_headers:
+            continue
+        if field in loose_headers:
+            findings.append({
+                "field": field,
+                "message": (
+                    f"effort {field} is required: found a `**{label}:** ...` line "
+                    "that is not a bulleted list item (renders identically in "
+                    "Markdown, but only the bulleted form parses) -- use "
+                    f"`- **{label}:** ...` per assets/TEMPLATE.md"
+                ),
+            })
+        else:
+            findings.append({
+                "field": field,
+                "message": (
+                    f"effort {field} is required: no `- **{label}:** ...` header "
+                    "line found -- see assets/TEMPLATE.md for the expected header block"
+                ),
+            })
+
+    status_value = strict_headers.get("status")
+    if status_value:
+        normalized_status = _normalized_status(status_value)
+        if normalized_status not in _ALLOWED_STATUSES:
+            findings.append({
+                "field": "status",
+                "message": (
+                    f"effort status is not recognized: {status_value!r} -- "
+                    f"expected one of {sorted(_ALLOWED_STATUSES)}"
+                ),
+            })
+
+    if not _section(text, "Plan"):
+        findings.append({
+            "field": "plan",
+            "message": "effort README is missing a literal `## Plan` heading",
+        })
+    if not _section(text, "Validation Plan"):
+        findings.append({
+            "field": "validation_plan",
+            "message": "effort README is missing a literal `## Validation Plan` heading",
+        })
+
+    if participant and not _declares_participant(text, participant):
+        findings.append({
+            "field": "participant",
+            "message": (
+                f"participant {participant!r} is not declared: expected a "
+                "`## Participants` (or `## Coordination`) table row whose "
+                "first column matches this string verbatim"
+            ),
+        })
+    if slice_name:
+        plan = _section(text, "Plan")
+        coordination = _section(text, "Coordination")
+        if not _declares(f"{plan}\n{coordination}", slice_name):
+            findings.append({
+                "field": "slice",
+                "message": (
+                    f"slice {slice_name!r} is not declared: expected a matching "
+                    "Plan heading or Coordination table row, verbatim"
+                ),
+            })
+
+    return findings
+
+
+def _headers_permissive(text: str, pattern: re.Pattern[str]) -> dict[str, str]:
+    """Like :func:`_headers`, but never raises on a duplicate -- lint_effort
+    reports every field independently and a duplicate-name defect is a
+    separate, secondary lint concern this helper does not need to gate on."""
+    headers: dict[str, str] = {}
+    for match in pattern.finditer(text):
+        name = match.group("name").lower()
+        headers.setdefault(name, match.group("value").strip().strip("`"))
+    return headers
 
 
 def validate_binding(repo_root: Path, ref: ActiveEffort) -> EffortInspection:
