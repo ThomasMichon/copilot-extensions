@@ -1,9 +1,0 @@
-{
-  "comment": "Add a missing marketplace-isolation marker to runtime-gate.ps1's legacy-compatibility-root fallback (found during a systemic audit of the same runtime-gate.ps1 marker bug across all 8 plugins that have one)",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}
