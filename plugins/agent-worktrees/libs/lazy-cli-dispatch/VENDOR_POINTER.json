@@ -1,0 +1,6 @@
+{
+  "schema": "copilot-extensions.vendor-pointer",
+  "version": 1,
+  "source": "libs/lazy-cli-dispatch",
+  "kind": "src-passthrough"
+}
