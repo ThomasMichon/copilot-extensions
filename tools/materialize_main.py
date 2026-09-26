@@ -119,10 +119,10 @@ def materialize(dest: Path, *, canonical_root: Path) -> list[str]:
         dst_sub = lib_copy_dir / "src"
         symlink_found = _find_symlink(src_sub)
         if symlink_found is not None:
+            where = f"{source_rel}/src" if symlink_found == "." else f"{source_rel}/src/{symlink_found}"
             log.append(
-                f"SKIP {lib_copy_dir}: {source_rel}/src/{symlink_found} is a "
-                "symlink -- refusing (a canonical lib source must contain "
-                "only real files)"
+                f"SKIP {lib_copy_dir}: {where} is a symlink -- refusing "
+                "(a canonical lib source must contain only real files)"
             )
             continue
         if dst_sub.exists():
@@ -159,21 +159,25 @@ def _resolve_within(canonical_root: Path, source_rel: str) -> Path | None:
 
 
 def _find_symlink(tree: Path) -> str | None:
-    """The first path (relative to ``tree``) under ``tree`` that is a
-    symlink, or ``None`` if none is found. ``_resolve_within`` only
-    validates the pointer's own ``source`` value; a legitimate-looking
-    canonical directory can still contain a symlink *within* it (e.g.
-    ``src/evil -> /etc``) that ``shutil.copytree`` would otherwise silently
-    follow, copying external content into the release snapshot. A
-    legitimate vendored lib has no reason to contain a symlink at all, so
-    any symlink here is refused outright -- simpler than distinguishing
-    escaping from non-escaping, and fails closed."""
+    """A path (relative to ``tree``, or ``"."`` when ``tree`` itself is the
+    symlink) under ``tree`` that is a symlink, or ``None`` if none is found.
+    ``_resolve_within`` only validates the pointer's own ``source`` value; a
+    legitimate-looking canonical directory can still contain (or itself
+    *be*) a symlink (e.g. ``src -> /etc`` or ``src/evil -> /etc``) that
+    ``shutil.copytree`` would otherwise silently follow, copying external
+    content into the release snapshot. Checking ``tree.is_dir()`` alone is
+    not enough: it follows a symlink, so a symlinked ``tree`` itself would
+    otherwise pass through unnoticed and only its *descendants* would be
+    scanned. A legitimate vendored lib has no reason to contain a symlink
+    at all, so any symlink here is refused outright -- simpler than
+    distinguishing escaping from non-escaping, and fails closed."""
+    if tree.is_symlink():
+        return "."
     if not tree.is_dir():
         return None
     for entry in sorted(tree.rglob("*")):
         if entry.is_symlink():
             return str(entry.relative_to(tree))
-    return None
     return None
 
 

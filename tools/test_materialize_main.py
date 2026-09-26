@@ -229,6 +229,29 @@ def test_materialize_refuses_an_in_root_symlink_within_canonical_src(tmp_path: P
     assert not (pointer_dir / "src").exists()
 
 
+def test_materialize_refuses_a_symlinked_src_root(tmp_path: Path):
+    # `tree.is_dir()` follows a symlink, so a canonical lib whose `src`
+    # itself is a symlink (not merely containing one) would otherwise slip
+    # past a check that only scans descendants via rglob().
+    root = tmp_path / "repo"
+    secret = tmp_path / "outside-repo-secret"
+    secret.mkdir()
+    (secret / "leaked.txt").write_text("do not leak\n", encoding="utf-8")
+    lib_dir = root / "libs" / "zdd"
+    lib_dir.mkdir(parents=True)
+    (lib_dir / "pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "0.1.0-dev1"\n', encoding="utf-8"
+    )
+    (lib_dir / "src").symlink_to(secret, target_is_directory=True)
+    pointer_dir = _pointer(root, "agent-bridge", "zdd")
+
+    log = mm.materialize(root, canonical_root=root)
+
+    assert any("SKIP" in line and "is a symlink" in line for line in log)
+    assert (pointer_dir / "VENDOR_POINTER.json").exists()
+    assert not (pointer_dir / "src").exists()
+
+
 def _file_pointer(root: Path, plugin: str, rel: str, *, source: str) -> Path:
     """Create a vendored *file* pointer stub at ``plugins/<plugin>/<rel>``."""
     d = root / "plugins" / plugin
