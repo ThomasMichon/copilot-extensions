@@ -67,6 +67,12 @@ def register_supervise_commands(sub) -> None:
     rp.add_argument("--script-label", action="append", metavar="LABEL")
     rp.add_argument("--disposable-cli-label", action="append", metavar="LABEL")
     rp.add_argument("--idle-nudge-exempt-label", action="append", metavar="LABEL")
+    rp.add_argument(
+        "--steering-disallowed-label",
+        action="append",
+        metavar="LABEL",
+        help="forbid a task carrying this label from posting a request_input steering card at all (repeatable) -- enforced coordinator-side; default is permissive, so name a label here only for a task type with no human to hand a card to (an evaluator-owned auto-reviewer, a batch log writer, an Adjudication Board worker)",
+    )
     rp.add_argument("--headless-agent", metavar="AGENT")
     rp.add_argument("--charter", metavar="AGENT")
     rp.add_argument("--evaluator", metavar="SPEC")

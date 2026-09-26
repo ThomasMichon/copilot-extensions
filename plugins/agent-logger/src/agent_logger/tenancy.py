@@ -47,6 +47,7 @@ from agent_logger.config import (
     _deep_merge,
     home_dir,
 )
+from agent_logger.repo_trust import has_symlink_ancestor, repo_config_is_trusted
 from agent_logger.segmenter.platform import detect_machine
 
 #: Roles a tenant may play.
@@ -156,11 +157,28 @@ def find_tenant_config(repo_path: Path) -> Path | None:
     A dedicated ``.agent-logger.tenant.yaml`` is searched before the shared
     ``.agent-logger.yaml``. Only a file that actually carries a ``tenant``
     mapping is returned, so a log-only ``.agent-logger.yaml`` never shadows a
-    real tenant declaration in a lower-priority file.
+    real tenant declaration in a lower-priority file. A candidate that is a
+    symlink -- or reached through a symlinked ancestor directory such as a
+    symlinked ``.config`` -- is rejected outright -- a committed link must
+    not let a tenant declaration read arbitrary machine-local YAML from
+    outside the checkout.
+
+    Applies the same registered-project + default-branch trust gate as
+    ``config.find_repo_config`` (see :func:`agent_logger.repo_trust.repo_config_is_trusted`):
+    a tenant block committed to a feature/PR branch of an otherwise-registered
+    repo must not redirect the daemon before that branch is reviewed and
+    merged.
     """
+    if not repo_config_is_trusted(repo_path):
+        return None
     for name in (*TENANT_CONFIG_FILENAMES, *REPO_CONFIG_FILENAMES):
         candidate = repo_path / name
-        if candidate.is_file() and isinstance(_read_yaml(candidate).get("tenant"), dict):
+        if (
+            candidate.is_file()
+            and not candidate.is_symlink()
+            and not has_symlink_ancestor(repo_path, candidate)
+            and isinstance(_read_yaml(candidate).get("tenant"), dict)
+        ):
             return candidate
     return None
 

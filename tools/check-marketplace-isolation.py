@@ -84,7 +84,19 @@ _FIXED_ENDPOINT = re.compile(
     re.IGNORECASE,
 )
 _CELL_QUALIFIER = re.compile(
-    r"""marketplace(?:_id)?|installation(?:_id)?|cell(?:_id)?""",
+    r"""marketplace(?:_id)?|installation(?:_id)?|cell(?:_id)?"""
+    # Unlike the bare keywords above, runtime_root is only trustworthy as an
+    # actual variable *dereference* ($RUNTIME_ROOT / ${RUNTIME_ROOT} /
+    # $runtimeRoot) -- a bare mention (e.g. an assignment target on the same
+    # line as an unrelated hardcoded identity) proves nothing. Shell never
+    # sigils an assignment's LHS, but PowerShell always sigils both reads
+    # and writes ($runtimeRoot = '...', or braced ${runtimeRoot} = '...'),
+    # so a trailing "not immediately followed by (a single) =" exclusion is
+    # needed. The optional closing brace lives INSIDE the lookahead (not as
+    # a separately backtrackable ``\}?`` before it) -- otherwise the regex
+    # engine can backtrack past an unconsumed ``}`` to dodge the lookahead
+    # entirely, letting a braced assignment slip through.
+    r"""|\$\{?runtime[_]?root\b(?!\}?\s*=(?!=))""",
     re.IGNORECASE,
 )
 _JS_FUNCTION = re.compile(

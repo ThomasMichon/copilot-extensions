@@ -689,6 +689,41 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-09-25** — Landed Phase 3b Slice 2 Sub-slice 3 Step 2 (Worktree
+  Manager mux-companion daemon + mapping registry, still off the main
+  launch path), PR TBD. Added `worktree_manager/mux_daemon.py`: a host-wide
+  resident daemon publishing `mux-daemon.lock` (namespaced `manager_mux_*`
+  rendezvous fields, same lockfile-rendezvous + loopback-JSON pattern as
+  `agent_worktrees`' `hook_ipc`/`classify_daemon`/`mux_link`) and serving
+  `mux-status-v1` requests (`build_compute`/`apply_status_options`,
+  mirroring `_monitor_mux_set`'s bounded subprocess `set-option` shape).
+  `MuxMappingRegistry` is the Manager-owned `worktree_id ⇄ mux session`
+  mapping -- deliberately always disk-backed rather than one long-lived
+  in-memory cache, since register/remove calls come from short-lived CLI
+  invocations, not a process that outlives the mapping -- with the same
+  monotonic-`mapping_revision` guard and cross-process advisory file lock
+  `ManagedMuxCache` uses; restart recovery is automatic (no separate
+  in-memory state to warm). `ensure_daemon_running` proves liveness with a
+  real subscribe/release wire round-trip rather than a PID/start-time
+  check. `register_mapping`/`remove_mapping`/`get_mapping` are reachable
+  via a new `worktree-manager mux-daemon run|ensure|register|remove|show`
+  CLI surface -- none of it yet called by any real launch/join/restore/
+  remux action or the production Picker (Step 3's job). Vendored
+  `work_coalescing_singleton` into `worktree-manager/libs/` (byte-identical
+  to the other two copies per `check-vendored-libs-sync.py`). Added
+  `tests/test_mux_daemon.py` and `tests/test_mux_daemon_cli.py` (41 tests:
+  registry persistence/monotonicity, rendezvous parsing, compute-handler
+  validation, an end-to-end real-socket round trip, the resident daemon's
+  idle-exit lifecycle, and the CLI surface against a scratch runtime
+  root). Full `worktree-manager` suite (`uv run --extra dev pytest`): 1401
+  passed, 7 skipped, 3 pre-existing unrelated failures (all in
+  `test_data_ssh_sources.py`, a Picker-provider-source path-validation area
+  this change never touches; confirmed via `git diff --stat` showing no
+  overlap). Bumped `worktree-manager` to `0.1.0-dev78` (pyproject.toml +
+  `__init__.py`, kept in sync per `check-version-consistency.py` -- this
+  package versions directly rather than through the plugin changefile
+  flow, since it is delivered out-of-plugin).
+
 - **2026-09-25** — Landed Phase 3e Step 6's remaining review-round fixes and
   closed out the phase. PR
   [#3626](https://github.com/ThomasMichon/copilot-extensions/pull/3626)

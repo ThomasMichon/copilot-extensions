@@ -77,6 +77,27 @@ def test_spec_and_command_carry_idle_nudge_exempt_labels():
     assert command[command.index("--idle-nudge-exempt-label") + 1] == "review"
 
 
+def test_spec_carries_steering_disallowed_labels():
+    """Coordinator-only field (see ``TaskQueue.set_card``): unlike
+    ``idle_nudge_exempt_labels``, the running supervisor subprocess never
+    consumes this itself -- the coordinator reads the live registrations
+    table directly at ``card set`` request time -- so it round-trips
+    through the spec but deliberately does not appear in the relaunched
+    subprocess's own argv (``build_command``)."""
+    decl = load_declaration(
+        {
+            "name": "reviewers",
+            "labels": ["review"],
+            "body": {
+                "type": "embody",
+                "steering_disallowed_labels": ["review"],
+            },
+        }
+    )
+    spec = declaration_to_spec(decl)
+    assert spec["steering_disallowed_labels"] == ["review"]
+
+
 def test_spec_fleet_pool_origin_headless():
     # A fleet declaration (pool/origin/headless) must be carried into the lane spec;
     # otherwise the serve daemon drops it and the supervisor runs LOCAL (regression:

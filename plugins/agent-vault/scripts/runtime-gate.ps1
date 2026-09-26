@@ -18,8 +18,8 @@ $installer = Join-Path $scriptDir 'install.ps1'
 $legacyRoot = if ($env:AGENT_VAULT_HOME) {
     $env:AGENT_VAULT_HOME
 } else {
-    Join-Path $env:USERPROFILE '.agent-vault'
-} # marketplace-isolation: allow legacy compatibility root
+    Join-Path $env:USERPROFILE '.agent-vault' # marketplace-isolation: allow legacy compatibility root
+}
 if (
     -not (Test-Path -LiteralPath $modeRunner -PathType Leaf) -or
     -not (Test-Path -LiteralPath $runtimeResolver -PathType Leaf) -or

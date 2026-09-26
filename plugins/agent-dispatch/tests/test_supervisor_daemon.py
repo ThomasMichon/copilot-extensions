@@ -139,6 +139,7 @@ class FakeClient:
         self._regs = regs
         self.lease_holder: str | None = None
         self.released: list[str] = []
+        self.published: list[dict] = []
 
     def set_regs(self, regs: list[dict]) -> None:
         self._regs = regs
@@ -154,6 +155,29 @@ class FakeClient:
                 continue
             out.append(r)
         return out
+
+    def register_registration(self, kind, spec, *, reg_id=None, machine=None, env="default"):
+        """Minimal upsert-by-id double for
+        ``SupervisorDaemon._publish_declared_registrations`` -- records every
+        call in ``self.published`` (for call-count assertions) and keeps
+        ``list_registrations`` in sync so a test can confirm the published
+        registration is actually visible afterward, the same way the real
+        coordinator's store would be."""
+        self.published.append({"kind": kind, "spec": spec, "reg_id": reg_id,
+                                "machine": machine, "env": env})
+        record = {"id": reg_id, "kind": kind, "spec": spec, "machine": machine,
+                  "env": env, "status": "active"}
+        for idx, existing in enumerate(self._regs):
+            if existing.get("id") == reg_id:
+                self._regs[idx] = record
+                return record
+        self._regs.append(record)
+        return record
+
+    def remove_registration(self, rid: str) -> bool:
+        before = len(self._regs)
+        self._regs = [r for r in self._regs if r.get("id") != rid]
+        return len(self._regs) != before
 
     def acquire_schedule_lease(self, scope, holder, **kw):
         if self.lease_holder is None:
@@ -723,6 +747,103 @@ def test_reconcile_starts_and_withdraws_declared_registration():
     stopped = daemon.reconcile_once()
     assert stopped.stopped == [registration_id]
     assert launcher.proc_for(registration_id).terminated is True
+
+
+def test_reconcile_publishes_declared_registration_to_coordinator():
+    """Regression: the registrar/YAML-declared path previously only fed this
+    daemon's own local subprocess-desired-state merge, never the
+    coordinator's own registrations store -- so a coordinator-side policy
+    consumer (e.g. ``TaskQueue.set_card``'s ``steering_disallowed_labels``
+    gate) never saw a field a registrar declaration set (caught in PR
+    review, copilot-extensions#3731). A declared unit must now be upserted
+    into the coordinator's store, indistinguishable there from one created
+    directly via ``supervise register``."""
+    from agent_dispatch.registrar import load_declaration
+
+    declaration = load_declaration(
+        {
+            "name": "reviewers",
+            "labels": ["intelligence-dampener-review"],
+            "body": {
+                "type": "embody",
+                "steering_disallowed_labels": ["intelligence-dampener-review"],
+            },
+        }
+    )
+    client = FakeClient([])
+    launcher = FakeLauncher()
+    daemon = _daemon(
+        client,
+        launcher,
+        declared_source=lambda: [declaration],
+    )
+
+    daemon.reconcile_once()
+
+    published = client.list_registrations()
+    assert len(published) == 1
+    assert published[0]["spec"]["steering_disallowed_labels"] == [
+        "intelligence-dampener-review"
+    ]
+    # Re-reconciling upserts (idempotent by id) rather than duplicating.
+    daemon.reconcile_once()
+    assert len(client.list_registrations()) == 1
+
+
+def test_reconcile_withdraws_a_dropped_declared_registration_from_coordinator():
+    """The regression this publish step itself introduced and PR review
+    caught: a declaration removed from the registrar/YAML source must be
+    withdrawn from the coordinator's store too, not left behind as a
+    zombie row the store-backed half of ``_desired()`` would keep treating
+    as desired forever."""
+    from agent_dispatch.registrar import load_declaration
+
+    declaration = load_declaration(
+        {"name": "reviewers", "labels": ["review"], "body": {"type": "embody"}}
+    )
+    current = [[declaration]]
+    client = FakeClient([])
+    launcher = FakeLauncher()
+    daemon = _daemon(
+        client,
+        launcher,
+        declared_source=lambda: current[0],
+    )
+
+    daemon.reconcile_once()
+    assert len(client.list_registrations()) == 1
+
+    current[0] = []
+    daemon.reconcile_once()
+    assert client.list_registrations() == []
+
+
+def test_reconcile_skips_publishing_a_plugin_companion_declaration():
+    """``register_registration`` only accepts ``RegistrationKind.DIRECT``
+    kinds -- a ``plugin-companion`` declaration has no coordinator-side
+    registration counterpart and must be skipped, not spam a failed publish
+    attempt every reconcile tick."""
+    from agent_dispatch.registrar import load_declaration
+
+    declaration = load_declaration(
+        {
+            "name": "index-service",
+            "kind": "plugin-companion",
+            "spec": {"command": ["bin/serve"]},
+        },
+        allow_plugin_companion=True,
+    ).with_owner("plugin@example")
+    client = FakeClient([])
+    launcher = FakeLauncher()
+    daemon = _daemon(
+        client,
+        launcher,
+        declared_source=lambda: [declaration],
+    )
+
+    daemon.reconcile_once()
+
+    assert client.published == []
 
 
 # -- operator overrides (kill-switch) ----------------------------------------

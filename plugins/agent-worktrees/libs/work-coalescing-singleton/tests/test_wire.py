@@ -157,3 +157,46 @@ def test_call_with_fallback_falls_back_on_request_deadline_exceeded():
     finally:
         gate.set()
         server.close()
+
+
+def test_call_with_fallback_falls_back_when_dial_itself_raises():
+    """Copilot review finding: ``call_with_fallback``'s own docstring
+    promises it never raises past this call, but a caller-supplied
+    ``dial``/``boot`` that itself raises (rather than returning ``None``)
+    used to escape uncaught."""
+
+    def _boom_dial():
+        raise RuntimeError("transient rendezvous read failure")
+
+    result = client.call_with_fallback(
+        dial=_boom_dial,
+        boot=None,
+        boot_wait_s=0.2,
+        kind="k", key="k1", payload={},
+        request_deadline_s=0.2,
+        fallback=lambda: {"inline": True},
+    )
+    assert result == {"inline": True}
+
+
+def test_call_with_fallback_falls_back_when_boot_itself_raises():
+    calls = {"dial": 0}
+
+    def _dial():
+        calls["dial"] += 1
+        return None  # never discoverable, even after "boot"
+
+    def _boom_boot():
+        raise RuntimeError("daemon spawn failed")
+
+    result = client.call_with_fallback(
+        dial=_dial,
+        boot=_boom_boot,
+        boot_wait_s=0.1,
+        kind="k", key="k1", payload={},
+        request_deadline_s=0.2,
+        fallback=lambda: {"inline": True},
+        poll_interval_s=0.02,
+    )
+    assert result == {"inline": True}
+    assert calls["dial"] >= 1

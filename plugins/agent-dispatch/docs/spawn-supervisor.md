@@ -336,7 +336,7 @@ agent-dispatch supervise register [--kind KIND] [--id ID] [--spec JSON|@FILE] \
     [--repo R | --all-repos] [--label L ...] [--max-concurrent N] \
     [--max-attempts N] [--label-max-attempts LABEL=N ...] \
     [--headless-label L ...] [--disposable-cli-label L ...] \
-    [--idle-nudge-exempt-label L ...] \
+    [--idle-nudge-exempt-label L ...] [--steering-disallowed-label L ...] \
     [--headless-agent AGENT] [--evaluator SPEC] \
     [--interval S]
 agent-dispatch supervise status <id>
@@ -707,6 +707,29 @@ equivalent `body.idle_nudge_exempt_labels`) exempts a task carrying that label
 from the generic idle-confirm nudge entirely. The default (no exemptions)
 preserves today's behavior for genuinely self-tracked work with no evaluator
 watching it -- the case the nudge exists for.
+
+### Steering-card permission gate
+
+`agent-dispatch card set --request-input` suspends a task in
+`awaiting_steer` until a human answers it -- a capability every task type
+gets by default, whether or not a human is actually watching. Confirmed
+live (aperture-labs#7589/#7585): Intelligence Dampener's reviewer reached
+for this on its own initiative, blocking its normal automatic resume path
+for over 2 hours because nothing was going to answer a card it should
+never have posted in the first place.
+
+`--steering-disallowed-label LABEL` (repeatable, `supervise register` only;
+a registrar may supply the equivalent `body.steering_disallowed_labels`)
+forbids a task carrying that label from posting a `request_input` card at
+all -- enforced **coordinator-side** in `TaskQueue.set_card`, since the
+call goes straight from the embodied worker to the coordinator and the
+supervisor process never intermediates it (unlike the idle-confirm nudge
+above). The **default is permissive**: an undeclared label may still post
+a card, matching this facility's own policy of allowing steering by
+default and naming only the task types with no human on the other end of
+an answer (an evaluator-owned auto-reviewer, a batch log writer, an
+Adjudication Board sweep/verdict worker). A card with no `request_input`
+(a plain status note) is never gated.
 
 On terminal task settlement the supervisor uses only the spawn reservation's
 recorded `session_handle` and `worktree`. It never infers an allocation by

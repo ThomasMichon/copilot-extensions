@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-logger"
-version = "0.1.4-dev1"
+version = "0.1.5-dev1"
 description = "Reusable Copilot CLI session logging -- segmenter, log writer, local/rescue session-sync, and orchestrator"
 readme = "README.md"
 license = "MIT"
@@ -16,6 +16,9 @@ dependencies = [
     "pyyaml>=6.0",
     "agent-config-migrate",
     "agent-procutil",
+    "agent-plugin-activation",
+    "agent-dropin-registry",
+    "agent-plugin-resolve",
 ]
 
 [tool.uv.sources]
@@ -25,6 +28,14 @@ agent-config-migrate = { path = "libs/config-migrate" }
 # Windows-headless process-spawn helpers (module ``agent_procutil``). Vendored
 # per plugin; byte-identical src across copies.
 agent-procutil = { path = "libs/agent-procutil" }
+# Canonical git-remote identity normalization (module ``plugin_activation``);
+# vendored per plugin; byte-identical src across copies.
+agent-plugin-activation = { path = "libs/plugin-activation" }
+# plugin_activation's own transitive dependencies -- required for its path
+# dependency to resolve; vendored per plugin; byte-identical src across
+# copies. Not imported directly by agent-logger.
+agent-dropin-registry = { path = "libs/dropin-registry" }
+agent-plugin-resolve = { path = "libs/plugin-resolve" }
 
 [project.scripts]
 agent-logger = "agent_logger.__main__:main"
@@ -61,3 +72,6 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "no_autotrust: opt out of the autouse repo-config trust-gate bypass (see conftest.py)",
+]

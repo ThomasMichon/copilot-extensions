@@ -135,12 +135,14 @@ This is an *additional* requirement layered on top of
 Session-sync is machine-local, but log organization can be repo-local. A
 repository may commit `.agent-logger.yaml` (or `.agent-logger.yml`,
 `.config/agent-logger.yaml`, `.config/agent-logger.yml`) at its git root with
-only a `log:` block. The catalog's `prepare-session-log` command with `--json`
-layers that block over the
-machine-local config and passes it through the manifest:
+a `log:` block, plus (as of schema v3) a single `sync.local_path`. The
+catalog's `prepare-session-log` command with `--json` layers that block over
+the machine-local config and passes it through the manifest:
 
 ```yaml
-schema_version: 1
+schema_version: 3
+sync:
+  local_path: /mnt/nas/Lake/Copilot/sessions
 log:
   root: .
   path_template: "logs/{year}/{month}.{day} {title}.md"
@@ -171,12 +173,22 @@ log:
   closing_remark: "End with one concise takeaway."
 ```
 
-Repo-local config cannot change `sync:` targets; those remain in
-`~/.agent-logger/config.yaml`. Only `root`, `path_template`, `timezone`,
-`note_marker`, `template`, `narration_style`, `exemplars`, and
-`closing_remark` are accepted under `log:`. Invalid YAML, unknown
+Repo-local config cannot change which `sync:` target is active, credentials,
+or machine identity -- those remain in `~/.agent-logger/config.yaml`. The
+one exception, `sync.local_path` (schema v3+), exists because that value is
+genuinely the same absolute path for every machine in the fleet (a shared NAS
+mount) rather than a per-machine choice. Under `log:`, only `root`,
+`path_template`, `timezone`, `note_marker`, `template`, `narration_style`,
+`exemplars`, and `closing_remark` are accepted. Invalid YAML, unknown
 fields/placeholders, unsupported schema versions, unsafe paths, and invalid
-timezones fail explicitly. Run
+timezones fail explicitly.
+
+Repo-local config of any kind is honored only for a checkout that is both a
+project registered with `agent-worktrees` and currently on that project's
+registered default branch -- an unregistered clone or a feature/PR branch
+gets no repo-local config at all, silently. See
+`plugins/agent-logger/docs/manifest-contract.md`'s trust-gate section for the
+full mechanics. Run
 `<agent-logger catalog "agent-logger" argv[0]> organization` to inspect the
 manifest-ready result.
 

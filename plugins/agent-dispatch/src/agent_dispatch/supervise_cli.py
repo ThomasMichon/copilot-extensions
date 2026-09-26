@@ -222,6 +222,11 @@ def _build_registration_spec(args: argparse.Namespace) -> dict:
     ]
     if idle_nudge_exempt:
         spec["idle_nudge_exempt_labels"] = idle_nudge_exempt
+    steering_disallowed = [
+        label for label in (getattr(args, "steering_disallowed_label", None) or []) if label
+    ]
+    if steering_disallowed:
+        spec["steering_disallowed_labels"] = steering_disallowed
     if getattr(args, "headless_agent", None):
         spec["headless_agent"] = args.headless_agent
     if getattr(args, "charter", None):

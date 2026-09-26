@@ -128,14 +128,32 @@ def call_with_fallback(
     4. Any failure at any phase (no daemon, boot-wait timeout, request
        timeout/fallback/error) falls through to ``fallback()`` -- the
        always-optional, always-correct inline path.
+
+    ``dial``/``boot`` are caller-supplied and may themselves raise (e.g. a
+    daemon-spawn helper hitting a transient OS error) -- this function's own
+    docstring promises it never raises past this call, so those callbacks
+    (and every dial during the boot-wait poll) are wrapped the same
+    best-effort way the request phase already is (Copilot review finding):
+    a caller must never see the whole call break just because starting the
+    daemon happened to fail.
     """
     started = time.time()
-    endpoint = dial()
+
+    def _safe_dial() -> tuple[str, int, str] | None:
+        try:
+            return dial()
+        except Exception:
+            return None
+
+    endpoint = _safe_dial()
     if endpoint is None and boot is not None:
-        boot()
+        try:
+            boot()
+        except Exception:
+            pass
         while endpoint is None and time.time() - started < boot_wait_s:
             time.sleep(poll_interval_s)
-            endpoint = dial()
+            endpoint = _safe_dial()
     if endpoint is None:
         return fallback()
 
