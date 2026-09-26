@@ -65,6 +65,7 @@ that pattern to this repository.
 | [Codename Attribution By Default](active/codename-attribution-by-default/README.md) | Done; pending archive | #2977 |
 | [AGENTS.md vs .github/instructions Split](active/agents-md-vs-instructions-split/README.md) | Done; pending archive | #2825 |
 | [Claim Provider Pattern](active/claim-provider-pattern/README.md) | Active | #3295, #3461 |
+| [Authoritative Write-Through Daemon](active/agent-worktrees-authoritative-daemon/README.md) | Draft | #3761 |
 
 ## Local conventions
 
