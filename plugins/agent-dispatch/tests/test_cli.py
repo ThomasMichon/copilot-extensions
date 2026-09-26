@@ -3595,6 +3595,36 @@ def test_bind_host_resilient_reads_env_defaults(monkeypatch):
     assert attempts["n"] == 2       # honored AGENT_DISPATCH_BIND_RETRIES=2
 
 
+# -- confirm / reopen CLI verbs (the Completion Review card's backend) ------
+
+
+class TestConfirmReopenCLI:
+    def test_confirm_parses(self):
+        from agent_dispatch import __main__ as m
+        a = _args(["confirm", "t-1", "--actor", "operator"])
+        assert a.func is m._cmd_confirm
+        assert a.task_id == "t-1"
+        assert a.actor == "operator"
+
+    def test_reopen_parses_with_repeated_fields(self):
+        from agent_dispatch import __main__ as m
+        a = _args([
+            "reopen", "t-1", "--reason", "not done",
+            "--field", "k1=v1", "--field", "k2=v2", "--sender", "operator",
+        ])
+        assert a.func is m._cmd_reopen
+        assert a.task_id == "t-1"
+        assert a.reason == "not done"
+        assert a.field == ["k1=v1", "k2=v2"]
+        assert a.sender == "operator"
+
+    def test_reopen_parses_with_no_fields(self):
+        from agent_dispatch import __main__ as m
+        a = _args(["reopen", "t-1"])
+        assert a.func is m._cmd_reopen
+        assert not a.field
+
+
 # -- inbox --board: status-grouped picker board ------------------------------
 
 
@@ -3610,6 +3640,7 @@ class TestInboxBoard:
         assert self._grp(status="started") == "Started"
         assert self._grp(status="suspended") == "Suspended"
         assert self._grp(status="completed") == "Completed"
+        assert self._grp(status="confirmed") == "Confirmed"
         assert self._grp(status="abandoned") == "Abandoned"
         assert self._grp(status="dead_letter") == "Abandoned"
 
@@ -3625,6 +3656,7 @@ class TestInboxBoard:
         # must group as terminal, never Blocked.
         assert self._grp(status="abandoned", awaiting_steer=True) == "Abandoned"
         assert self._grp(status="completed", awaiting_steer=True) == "Completed"
+        assert self._grp(status="confirmed", awaiting_steer=True) == "Confirmed"
 
     def test_activity_is_independent_from_lifecycle_phase(self):
         from agent_dispatch import __main__ as m

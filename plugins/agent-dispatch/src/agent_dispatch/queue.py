@@ -73,6 +73,7 @@ from .queue_common import (  # noqa: F401 -- re-exported for existing call sites
     _PROGRESS_PR_MAX,
     _TASK_DB_COLUMNS,
 )
+from .queue_completion_review import QueueCompletionReviewMixin
 from .queue_handoff_fallback import HandoffFallbackMixin
 from .queue_lifecycle import QueueLifecycleMixin
 from .queue_liveness import LivenessMixin
@@ -130,6 +131,7 @@ class TaskQueue(
     QueueStorageMixin,
     QueueClaimQueriesMixin,
     QueueLifecycleMixin,
+    QueueCompletionReviewMixin,
     LivenessMixin,
     HandoffFallbackMixin,
     QueueSteeringMixin,
@@ -146,7 +148,10 @@ class TaskQueue(
     #: The states a dedup *sweep* spans -- every state except the terminal
     #: ``abandoned`` (an abandoned task is not a live duplicate of new work).
     #: This is the corpus the agent-driven "sweep + explore + verify" dedup
-    #: flow reads before creating a task; see :meth:`sweep`.
+    #: flow reads before creating a task; see :meth:`sweep`. Includes
+    #: ``confirmed`` alongside ``completed`` (2026-09-25): a confirmed task
+    #: is exactly as real a prior instance of the work as a merely-completed
+    #: one -- the confirm step doesn't make it any less relevant to dedup.
     SWEEP_STATES = (
         Status.PROPOSED,
         Status.QUEUED,
@@ -154,6 +159,7 @@ class TaskQueue(
         Status.STARTED,
         Status.SUSPENDED,
         Status.COMPLETED,
+        Status.CONFIRMED,
     )
 
     def __init__(

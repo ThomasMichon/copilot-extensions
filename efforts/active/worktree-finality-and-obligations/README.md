@@ -471,12 +471,28 @@ below for the carved implementation plan.
   distinctly from `clean` -> `safe`; GONE/record-reap are explicitly **not**
   handled by this descriptor yet, matching `cleanup_disposition`'s own
   docstring that GONE is the caller's concern).
-- [ ] Make cleanup and GC consume the descriptor's graded action disposition and
-  exact blockers instead of maintaining a parallel verdict. **Not done** --
-  `cleanup`/`gc` still consume `CleanupDisposition` directly; only `list --json
-  --classify` publishes the descriptor so far (additive, alongside the legacy
-  fields). Switching cleanup/GC's own decision logic over is Phase 5 work
-  (avoids two behavior changes landing in one PR).
+- [x] Make cleanup and GC consume the descriptor's graded action disposition and
+  exact blockers instead of maintaining a parallel verdict. **Landed
+  2026-09-25, deliberately narrowed from the literal bullet** -- investigation
+  found the literal ask (make `action_disposition` the actual go/no-go gate)
+  was a real regression risk, not a mechanical refactor: `action_disposition`
+  downgrades `safe` to `blocked` whenever evidence isn't a fresh network
+  fetch (or the repo-scoped fetch-freshness ledger is stale), but cleanup/GC's
+  one canonical safety recheck (`_revalidate_cleanup_safety`) never fetches by
+  design (`fetch=False`) -- switching the actual gate to `action_disposition`
+  would newly refuse to prune worktrees it safely prunes today whenever that
+  ledger lags. Presented this to the operator; landed the decision-preserving
+  half instead: `cleanup`'s scan report and `_revalidate_cleanup_safety`
+  (shared by `cleanup`, `reap_one`, and the GC sweep) now both assemble the
+  closure descriptor and surface its full `blockers` list (every
+  concurrently-true blocker, e.g. a worktree that is both held-claims AND has
+  open follow-ups) alongside the existing single-reason text, which
+  `cleanup_disposition` itself only ever names the FIRST of (it
+  short-circuits). The cleanable/not decision itself is untouched --
+  `disp.cleanable`, exactly as before. A full switch to `action_disposition`
+  as the actual gate remains open, tracked for Phase 6 (ship-it) if ever
+  pursued, contingent on first hardening the fetch-freshness ledger for this
+  no-fetch code path.
 - [x] Recompute refreshed, complete evidence under the record/finalization lock
   immediately before any prune/delete action; cached or fetch-free descriptors
   are never destructive authorization. Enforced structurally: any
@@ -2861,4 +2877,50 @@ The approved design is the faceted model in [design.md](design.md):
   bullet, Phase 5's legend surface + agent-bridge cockpit consumer, and
   Phase 6 (ship-it, last, and now the closest thing to "everything else is
   done" this effort has been).
+
+### 2026-09-25 (continued) - Phase 4 complete: cleanup/GC blocker enrichment (decision-preserving, narrowed from the literal bullet)
+
+- Investigated Phase 4's last open bullet ("make cleanup and GC consume the
+  descriptor's graded action disposition ... instead of maintaining a
+  parallel verdict") and found the literal ask was NOT a mechanical
+  refactor -- `assemble_closure_descriptor` already takes `CleanupDisposition`
+  as an INPUT (so there was never truly a *parallel* verdict, only a
+  *downstream* one), but its `action_disposition` field degrades `safe` to
+  `blocked` whenever evidence isn't `evidence_mode == "refreshed"` (an actual
+  successful network fetch) or the repo-scoped fetch-freshness ledger is
+  current. Cleanup/GC's one shared safety recheck (`_revalidate_cleanup_
+  safety`) classifies with `fetch=False` by design (an outer command-level
+  fetch happens once earlier, not re-done under the lock) -- making
+  `action_disposition` the actual gate would silently make cleanup MORE
+  conservative than today, refusing to prune worktrees it currently prunes
+  safely, any time that ledger lags. A real regression risk on a destructive
+  operation, not a redundant safety win.
+- Presented this finding to the operator with three options (decision-
+  preserving enrichment only / full switch accepting the new gating risk /
+  defer entirely). Chose **decision-preserving enrichment**: `cleanup`'s
+  scan-report loop and `_revalidate_cleanup_safety` (shared by `cleanup`,
+  `reap_one`, and the GC sweep -- the actual chokepoint for every real reap)
+  now both assemble the closure descriptor purely for its `blockers` list and
+  append every blocker beyond the single one `cleanup_disposition` already
+  named (it short-circuits on the FIRST blocking condition it checks, so a
+  worktree that is both held-claims AND has open follow-ups previously only
+  ever reported "held-claims"). The cleanable/not decision is untouched --
+  still exactly `disp.cleanable`.
+- Added `_closure_blockers`/`_enrich_reason_with_blockers` in
+  `cleanup_gc_cli.py`; new `test_cleanup_closure_blockers.py` (4 tests: the
+  enrichment no-ops with 0-1 blockers, appends correctly with 2+, the
+  descriptor genuinely surfaces both blockers a short-circuited disposition
+  would hide, and an end-to-end `cmd_cleanup` batch run reports both). Ran
+  the full cleanup/reap/gc/prune/sweep-tagged slice (512 tests) plus the
+  targeted new/adjacent files (80 tests) -- all pass, no existing assertion
+  needed updating (every existing reason-text check uses substring `in`,
+  not equality). `ruff check` on the touched file: 25 pre-existing errors,
+  none within or near the new code.
+- **Phase 4 is now fully complete** -- every Plan bullet checked. The full
+  switch to `action_disposition` as the actual gate remains a real, explicitly
+  open possibility -- noted in the bullet itself, tracked for Phase 6 if ever
+  pursued, contingent on first hardening the fetch-freshness ledger for this
+  no-fetch code path -- not silently dropped.
+- Remaining open work: Phase 5's legend surface + agent-bridge cockpit
+  consumer, and Phase 6 (ship-it, last).
 

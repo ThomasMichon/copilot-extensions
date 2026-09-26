@@ -35,7 +35,7 @@ from .registrar import (
 )
 from .worker_identities import load_worker_identity
 
-_TERMINAL = frozenset({"completed", "abandoned", "dead_letter"})
+_TERMINAL = frozenset({"completed", "confirmed", "abandoned", "dead_letter"})
 _KNOWN_KEYS = frozenset(
     {
         "name",

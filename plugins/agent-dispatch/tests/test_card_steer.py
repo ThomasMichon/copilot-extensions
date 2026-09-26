@@ -372,7 +372,7 @@ def test_suspend_rejects_steer_that_arrived_after_card(q):
 def test_submit_steer_rejects_terminal_task(q):
     t = _held(q)
     q.complete(t.id, "w1")
-    with pytest.raises(TaskError):
+    with pytest.raises(TaskError, match="reopen_completed"):
         q.submit_steer(t.id, fields={"x": "y"})
 
 
@@ -576,6 +576,56 @@ def test_card_on_unheld_task_is_409(api):
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
     r = api.post(f"/tasks/{tid}/card", json={"worker_id": "w1", "card": {"status": "x"}})
     assert r.status_code == 409
+
+
+def test_confirm_and_reopen_roundtrip_over_http(api):
+    tid = _held_over_http(api)
+    r = api.post(f"/tasks/{tid}/complete", json={"worker_id": "w1", "result_ref": "pr/1"})
+    assert r.status_code == 200
+    assert r.json()["status"] == "completed"
+
+    r = api.post(f"/tasks/{tid}/confirm", json={"actor": "evaluator"})
+    assert r.status_code == 200
+    assert r.json()["status"] == "confirmed"
+
+    # A confirmed task's confirm is idempotent (replay), not an error --
+    # matching the same idempotent-replay contract every other terminal
+    # transition already carries (e.g. abandon).
+    replay = api.post(f"/tasks/{tid}/confirm", json={})
+    assert replay.status_code == 200
+    assert replay.json()["status"] == "confirmed"
+    # But a genuinely different action against an already-confirmed task
+    # (re-completing, reopening) is rejected -- confirmed really is final.
+    assert api.post(f"/tasks/{tid}/reopen", json={}).status_code == 409
+
+    log = api.get(f"/tasks/{tid}/events").json()
+    assert any(e["to_status"] == "confirmed" for e in log)
+
+
+def test_reopen_returns_to_queued_with_a_steer(api):
+    tid = _held_over_http(api)
+    api.post(f"/tasks/{tid}/complete", json={"worker_id": "w1"})
+
+    r = api.post(
+        f"/tasks/{tid}/reopen",
+        json={"reason": "not done", "steer_fields": {"note": "fix X too"}, "sender": "op"},
+    )
+    assert r.status_code == 200
+    assert r.json()["status"] == "queued"
+
+    log = api.get(f"/tasks/{tid}/steer-log").json()
+    assert len(log) == 1
+    assert log[0]["fields"] == {"note": "fix X too"}
+    assert log[0]["sender"] == "op"
+
+    # Reopened work is claimable again like any other queued task.
+    claimed = api.post("/claim", json={"worker_id": "w2", "repo": TEST_REPO}).json()
+    assert claimed["id"] == tid
+
+
+def test_reopen_on_non_completed_task_is_409(api):
+    tid = api.post("/tasks", json={"title": "x"}).json()["id"]
+    assert api.post(f"/tasks/{tid}/reopen", json={}).status_code == 409
 
 
 def test_steer_take_wrong_owner_is_409(api):

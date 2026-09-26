@@ -60,6 +60,7 @@ def test_build_orders_started_ahead_of_queued(monkeypatch):
     rows = board_cli._build(
         [
             {"id": "completed", "status": "completed", "updated_at": 100},
+            {"id": "confirmed", "status": "confirmed", "updated_at": 100},
             {"id": "blocked", "status": "started", "awaiting_steer": True,
              "updated_at": 100},
             {"id": "queued", "status": "queued", "updated_at": 100},
@@ -73,7 +74,7 @@ def test_build_orders_started_ahead_of_queued(monkeypatch):
     )
     assert [row["group"] for row in rows] == [
         "Blocked", "Proposed", "Started", "Queued", "Suspended",
-        "Completed", "Abandoned",
+        "Completed", "Confirmed", "Abandoned",
     ]
 
 

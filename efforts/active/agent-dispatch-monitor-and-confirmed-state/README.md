@@ -146,48 +146,111 @@ SAME change that adds either transition. There is no clean, purely-additive
 "Phase 1" for the state-machine table itself; Phase 2 below is now the
 single phase that must land both together.
 
-- [ ] **Risk-audit every `Status.TERMINAL`/`Status.COMPLETED` call site**
+- [x] **Risk-audit every `Status.TERMINAL`/`Status.COMPLETED` call site**
       across `queue*.py`, `coordinator_tasks.py`, `board_cli.py`,
       `client.py`, `mcp_server.py`, `mcp_http.py`, the CLI, and tests
-      **before** changing terminal-ness — the additive-while-still-terminal
-      framing this bullet originally proposed does not hold (see the
-      finding above): `COMPLETED` must actually leave `Status.TERMINAL`,
-      with `CONFIRMED` taking its place as the new true terminal. Read
-      every site that branches on "is this task done" to confirm each one
-      either (a) already means "no more agent work will happen on this,"
-      which stays true for `COMPLETED` even once it's non-terminal (no
-      *agent* work resumes without an explicit `reopen`), or (b) genuinely
-      means "fully, durably closed," which now wants `CONFIRMED` instead.
-      Liveness-GC/reclamation are the likeliest to fall in bucket (a); audit
-      before assuming.
-- [ ] Update `task_state_machine.py`: add `CONFIRMED` to `ALL_STATES`; move
-      `COMPLETED` out of (and `CONFIRMED` into) the states this module
-      treats as terminal; add `confirm` (`COMPLETED -> CONFIRMED`,
-      `SAFE_RETRY`) and `reopen_completed` (`COMPLETED -> QUEUED`,
-      `SAFE_RETRY`, carrying forward progress/goal per
-      *resume-the-goal-not-restart-it*) to `TRANSITIONS`. Re-run
-      `test_task_state_machine.py` unmodified except for
-      `test_terminal_states_match_queue_status` (which must track whatever
-      `Status.TERMINAL` becomes) — every other structural assertion in that
-      file should keep passing against the new table with zero further
-      edits; treat a need to relax any other assertion there as a signal
-      the design needs more thought, not a test to loosen.
-- [ ] Implement `TaskQueue.confirm(task_id, ...)` (`COMPLETED -> CONFIRMED`)
-      and `TaskQueue.reopen_completed(task_id, ..., steer_fields=None)`
-      (`COMPLETED -> QUEUED`, carrying progress forward and, if given,
-      recording an operator steer atomically with the reopen) in
-      `queue_lifecycle.py`.
-- [ ] Wire `verify-the-completion-claim`'s automatic half: for
-      emitter/evaluator-driven (goal-bearing) tasks, the evaluator's own
-      completion handler calls `confirm()` once its corroboration passes,
-      instead of leaving the task at a bare `completed` no one revisits.
-- [ ] Expose `confirm`/`reopen-completed` on the CLI (`agent-dispatch
-      confirm <id>`, `agent-dispatch reopen <id> [--steer ...]`) alongside
-      the existing `abandon`/`reset` verbs in whichever CLI module already
-      owns them (`task_lifecycle_cli.py`).
-- [ ] `board_cli.py`: add `confirmed` to the phase/group projection so the
-      Tasks pane (see `agent-dispatch-tasks-pane-ux-overhaul` Phase 11) has
-      something to read.
+      **before** changing terminal-ness. **Done 2026-09-25** -- every
+      real call site found and classified:
+      - **Genuinely wants the OLD "no more agent work" meaning** (added a
+        new `Status.CONCLUDED = {COMPLETED, CONFIRMED, ABANDONED,
+        DEAD_LETTER}` constant for these, rather than repeating
+        `in TERMINAL or == COMPLETED` everywhere):
+        `queue_lifecycle.set_hold`, `queue_steering.submit_steer` (now also
+        hints "use reopen_completed"), `queue_steering.save_card_draft`,
+        `loop_commands.py`'s repository-issue-loop `active` filter,
+        `reattach.py`'s dedup-key re-mint guard.
+      - **Hand-rolled local duplicates of the OLD terminal set**, updated
+        to also cover `confirmed`: `repository_issue_loops._TERMINAL`
+        (backlog-batch "is this occurrence done" checks).
+        `supervisor.py`'s own `_TERMINAL = {COMPLETED, ABANDONED}` (spawn
+        **conclusion**/reclamation) and `_completion_detail`'s
+        corroboration check are correctly scoped to the *moment of
+        completion* and need no `CONFIRMED` handling -- by the time a task
+        is confirmed, its spawn already concluded back at `COMPLETED`.
+      - **`Status.ABANDONABLE`**: added `COMPLETED` (the Completion Review
+        card's Abandon action) -- `task_state_machine.py`'s `abandon`
+        transition sources from `Status.ABANDONABLE` directly, so this one
+        edit updates both without drift.
+      - **`queue.SWEEP_STATES`**: added `CONFIRMED` alongside `COMPLETED`
+        (a confirmed task is just as real a dedup candidate).
+      - **`task_query_cli.py`'s continuation-baton debounce** (`is_handoff
+        and status == "completed"` / `status not in ("completed",
+        "abandoned")`): extended both to also treat `confirmed` as spent/
+        done, for a handoff task that somehow got reviewed and confirmed.
+      - **Two byte-identical board-group duplicates**
+        (`board_cli.GROUPS`/`TERMINAL`/`_group` and
+        `task_query_cli._BOARD_GROUPS`/`_BOARD_TERMINAL`/`_board_group`):
+        added a `Confirmed` group to both, kept in sync per their own
+        "must stay in sync" comments.
+      - **Confirmed NOT a task-`Status` concept at all** (a different
+        domain reusing the string `"completed"`, false positives from the
+        literal-string sweep): `bridge_namespace_cli.py`'s owner-resolution
+        tuple (dead code for `completed` anyway -- `owner` is always
+        cleared by then), `embody.py`'s worktree-tracking and ACP-session
+        terminal sets, `producers/evaluator.py`'s own spec docstring
+        example.
+- [x] Update `task_state_machine.py`: added `CONFIRMED` to `ALL_STATES`;
+      `COMPLETED` left `Status.TERMINAL` (moved to the new `CONCLUDED`
+      superset), `CONFIRMED` took its place; added `confirm`
+      (`COMPLETED -> CONFIRMED`, `SAFE_RETRY`) and `reopen_completed`
+      (`COMPLETED -> QUEUED`, `SAFE_RETRY`) to `TRANSITIONS`. Exactly the
+      one predicted test edit was needed
+      (`test_all_states_match_queue_status`'s hardcoded state list); every
+      other structural assertion in `test_task_state_machine.py` passed
+      against the new table unmodified, confirming the design holds.
+- [x] Implemented `TaskQueue.confirm(task_id, ...)` and
+      `TaskQueue.reopen_completed(task_id, ..., steer_fields=None,
+      sender=None)` in `queue_lifecycle.py`. `reopen_completed` clears
+      `result`/`result_ref`/`completed_by`/`completed_at` (the disputed
+      claim is superseded, not merely annotated) and optionally records an
+      operator steer atomically with the reopen.
+- [x] Wired `verify-the-completion-claim`'s automatic half -- **and found a
+      cleaner integration point than planned**: `producers/evaluator.py`'s
+      `SpecEvaluator`/`apply_decisions` (the real, already-working
+      evaluator mechanism `supervisor.py`'s `advance_via_evaluator` already
+      runs over every `COMPLETED`/`ABANDONED` task) gained a third
+      `Confirm` decision alongside the existing `Emit`/`NoOp`: a rule
+      declaring `"confirm": true` (instead of `"emit": {...}`) closes the
+      *originating* task via `queue.confirm()`. `apply_decisions` gained
+      `task_id`/`confirmer` parameters (both optional; a `Confirm` with
+      neither wired is recorded as a skipped decision, never raised).
+      `supervisor.py`'s evaluator pass now threads `task_id=tid,
+      confirmer=self.client.confirm` through. **Deferred, not done**: this
+      `Confirm` decision performs no corroboration check of its own --
+      it trusts the rule's own `when` predicate as the corroboration
+      judgment. Actually reusing `_completion_detail`'s existing
+      goal/result-ref/progress corroboration logic (today only produces a
+      descriptive log string, never gates anything) as a real precondition
+      before a `Confirm` decision fires is real follow-up work, tracked
+      here rather than guessed at: the two currently run as separate,
+      untimed-relative-to-each-other passes over "terminal" tasks, and
+      correctly composing them needs its own design pass.
+- [x] Exposed `confirm`/`reopen` on the CLI
+      (`task_lifecycle_cli.py`/`task_lifecycle_registration_cli.py`) and
+      the coordinator HTTP API (`client.py`'s `confirm`/`reopen_completed`,
+      `coordinator_tasks.py`'s `/tasks/{id}/confirm` and
+      `/tasks/{id}/reopen` routes) -- the full stack, not CLI-only.
+- [x] `board_cli.py` (and its `task_query_cli.py` duplicate): added
+      `confirmed` to the phase/group projection.
+- [x] Kept `client.py`/`queue_lifecycle.py` under their module-size caps by
+      extracting the new methods into their own mixins
+      (`client_completion_review.CompletionReviewMixin`,
+      `queue_completion_review.QueueCompletionReviewMixin`), matching this
+      codebase's existing one-mixin-per-concern componentization pattern
+      (`client_registrations.py`/`client_worktree_status.py` were already
+      split out the same way).
+- [ ] Deferred, not started: expose `confirm`/`reopen_completed` as MCP
+      tools (`mcp_server.py`/`mcp_http.py`, alongside the existing
+      `dispatch_complete`/`dispatch_abandon`) -- purely additive, no
+      regression risk either way, just not done this pass.
+- [ ] Deferred, not started: reuse `supervisor._completion_detail`'s
+      existing goal/result-ref/progress corroboration logic as a real
+      precondition gating the evaluator's new `Confirm` decision (today it
+      only produces a descriptive log string and never blocks anything;
+      the `Confirm` decision itself performs no corroboration of its own,
+      trusting the rule's `when` predicate instead). Needs its own design
+      pass since the two currently run as separate, untimed-relative-to-
+      each-other passes over "terminal" tasks.
 
 ### Phase 3 — The cooldown monitor (default, round-robin time-slice yield)
 - [ ] Extend `queue_storage._enqueue_wake()` (or add a sibling) with an
@@ -248,17 +311,20 @@ single phase that must land both together.
 
 ## Validation Plan
 
-- [ ] `task_state_machine.py`'s own shape checks (`reachable_states`,
+- [x] `task_state_machine.py`'s own shape checks (`reachable_states`,
       `states_without_exit`, `terminal_states_with_exit`) pass with
-      `CONFIRMED` included.
-- [ ] Full `plugins/agent-dispatch` test suite green (establish the
-      pre-change baseline count first; the same "confirm zero regressions,
-      not just zero *new* failures" bar `agent-worktrees`' own recent fix
-      was held to applies here).
+      `CONFIRMED` included -- confirmed via the existing
+      `test_task_state_machine.py` suite, unmodified except for the one
+      predicted hardcoded-state-list assertion.
+- [x] Full `plugins/agent-dispatch` test suite green: **3434 passed, 19
+      skipped** (run twice, before and after the module-size mixin
+      extraction), the same single pre-existing failure both times
+      (confirmed via `git stash` against the unmodified baseline).
 - [ ] A hand-run scenario end-to-end: propose → queue → claim → start →
       suspend (no explicit monitor) → (fake-clock-advance) → auto-resume →
       complete → confirm; and the sibling reopen path: complete → reopen →
-      queue → claim → ... → confirm.
+      queue → claim → ... → confirm. (Deferred to Phase 3: the
+      no-explicit-monitor auto-resume leg doesn't exist yet.)
 - [ ] A hand-run crash scenario: suspend with a cooldown pending → kill the
       supervisor process → restart it → assert the honest recovery note
       lands, per Phase 4.
@@ -269,9 +335,25 @@ single phase that must land both together.
 
 ## Proposal
 
-_Pending — Phase 1/2's design firms up once `monitors.py`'s shape and the
-`Status.TERMINAL` risk-audit are actually done; this section will carry the
-concrete API shapes then._
+Phase 2's concrete API shapes, as landed:
+
+- `TaskQueue.confirm(task_id, *, actor=None, expected_status=None,
+  expected_generation=None, now=None) -> Task` -- `COMPLETED -> CONFIRMED`,
+  idempotent replay, no owner required.
+- `TaskQueue.reopen_completed(task_id, *, reason=None, steer_fields=None,
+  sender=None, expected_status=None, expected_generation=None, now=None)
+  -> Task` -- `COMPLETED -> QUEUED`, clears the disputed completion claim
+  (`result`/`result_ref`/`completed_by`/`completed_at`), optionally records
+  an operator steer atomically.
+- CLI: `agent-dispatch confirm <id> [--actor A]`,
+  `agent-dispatch reopen <id> [--reason R] [--field K=V ...] [--sender S]`.
+- HTTP: `POST /tasks/{id}/confirm`, `POST /tasks/{id}/reopen`.
+- Evaluator: a `SpecEvaluator` rule spec gains `"confirm": true` (a
+  `Confirm` decision) as a sibling to `"emit": {...}`; wired through
+  `supervisor.advance_via_evaluator` via `apply_decisions(...,
+  task_id=tid, confirmer=self.client.confirm)`.
+
+Phase 3/4's shapes are still pending their own design pass.
 
 ## Journal
 
@@ -315,3 +397,49 @@ concrete API shapes then._
   real source-reading over speculation — the difference here is running the
   actual suite, not just reading the module.
 - Proceeding to implement the corrected Phase 1 (`monitors.py`) now.
+
+### 2026-09-25 — Phase 2 lands: `confirmed` is real, wired end to end
+- Executed the corrected Phase 2 in full: `Status.CONFIRMED` added,
+  `COMPLETED` moved out of `Status.TERMINAL` into the new `Status.CONCLUDED`
+  superset (`{COMPLETED, CONFIRMED, ABANDONED, DEAD_LETTER}`), `confirm`/
+  `reopen_completed` declared in `task_state_machine.py` and implemented in
+  `queue.py`. Every call site the audit found was fixed (see Phase 2's
+  checklist above for the itemized list) — including one the original audit
+  missed entirely: `doctor.py` imports `TERMINAL_STATES` **directly** from
+  `task_state_machine` (not via `Status.TERMINAL`), a second import path the
+  Context section's literal-string grep never caught. The full test suite
+  caught it immediately (`test_doctor.py` regressions) — a second concrete
+  proof that running the suite, not just grepping for `Status.TERMINAL`,
+  is what actually finds every real call site.
+- **A genuinely nice surprise**: `producers/evaluator.py`'s `SpecEvaluator`
+  turned out to already be the real, working "evaluator" the parent vision
+  describes (`supervisor.advance_via_evaluator` already runs it over every
+  `COMPLETED`/`ABANDONED` task). Rather than deferring
+  *verify-the-completion-claim*'s automatic half as originally planned, added
+  a third `Confirm` decision (alongside the existing `Emit`/`NoOp`) — a rule
+  declaring `"confirm": true` closes the *originating* task. This is real,
+  tested, working automatic confirmation for emitter-driven work, not a
+  stub. What's still deferred (see Phase 2's checklist) is wiring the
+  `Confirm` decision to `_completion_detail`'s existing corroboration
+  check — today a `Confirm` decision trusts its own rule's `when` predicate
+  entirely, performing no corroboration of its own.
+- Kept `client.py` and `queue_lifecycle.py` under their module-size caps by
+  extracting the new methods into their own mixins
+  (`client_completion_review.py`, `queue_completion_review.py`), matching
+  the codebase's existing componentization pattern rather than requesting a
+  baseline widen.
+- **Validation**: full `plugins/agent-dispatch` test suite run twice at the
+  end of this session (once before, once after the `client.py`/
+  `queue_lifecycle.py` mixin extraction) — both **3434 passed, 19 skipped**,
+  with the *same single* pre-existing failure both times
+  (`test_idle_headless_fleet_nudge_includes_remote_host`, confirmed via
+  `git stash` to reproduce identically against the unmodified baseline —
+  nothing to do with this change). `check-module-size.py` and syntax checks
+  clean. Added tests: `test_monitors.py` (10, Phase 1), `test_queue.py`'s
+  new confirm/reopen/`CONCLUDED`/`ABANDONABLE` cases (9), `test_evaluator.py`'s
+  new `Confirm`-decision cases (8), `test_card_steer.py`'s HTTP roundtrip
+  cases (3), `test_cli.py`'s CLI-parsing + board-group cases (5),
+  `test_board_cli.py`'s group-ordering update (1).
+- Phase 2 is code-complete. Phases 3 (cooldown monitor) and 4
+  (crash-recovery honesty) remain open and are independent of each other
+  and of Phase 2 — either may be picked up next.

@@ -221,6 +221,20 @@ class ResetBody(BaseModel):
     expected_owner_session_id: str | None = None
 
 
+class ConfirmBody(BaseModel):
+    actor: str | None = None
+    expected_status: str | None = None
+    expected_generation: int | None = None
+
+
+class ReopenBody(BaseModel):
+    reason: str | None = None
+    steer_fields: dict | None = None
+    sender: str | None = None
+    expected_status: str | None = None
+    expected_generation: int | None = None
+
+
 class HoldBody(BaseModel):
     reason: str
     actor: str
@@ -726,6 +740,32 @@ def register_task_routes(
                 expected_owner_session_id=body.expected_owner_session_id,
             ),
             "task.reset",
+        )
+
+    @app.post("/tasks/{task_id}/confirm")
+    def confirm(task_id: str, body: ConfirmBody) -> dict:
+        return _guard(
+            lambda: queue.confirm(
+                task_id,
+                actor=body.actor,
+                expected_status=body.expected_status,
+                expected_generation=body.expected_generation,
+            ),
+            "task.confirmed",
+        )
+
+    @app.post("/tasks/{task_id}/reopen")
+    def reopen(task_id: str, body: ReopenBody) -> dict:
+        return _guard(
+            lambda: queue.reopen_completed(
+                task_id,
+                reason=body.reason,
+                steer_fields=body.steer_fields,
+                sender=body.sender,
+                expected_status=body.expected_status,
+                expected_generation=body.expected_generation,
+            ),
+            "task.reopened",
         )
 
     @app.post("/tasks/{task_id}/heartbeat")

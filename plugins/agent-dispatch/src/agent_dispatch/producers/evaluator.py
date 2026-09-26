@@ -5,10 +5,12 @@ A **producer** puts work on the queue; an **evaluator** is its companion handler
 that decides what happens *next* as that work progresses. Like a hook, an
 evaluator receives a task's **lifecycle event** -- the shape the coordinator
 publishes, ``{"type": "task.completed", "task": {...}}`` -- and returns
-**decisions**: emit a follow-up task, or do nothing. Producers wire a domain's
-*world* into the queue; evaluators wire its *judgment* into the loop, so a
-standing domain can automate a whole cycle (reviewer done -> open a
-conflict-resolution follow-up; a goal completed -> emit the next goal) without a
+**decisions**: emit a follow-up task, confirm the originating task's completion
+claim, or do nothing. Producers wire a domain's *world* into the queue;
+evaluators wire its *judgment* into the loop, so a standing domain can automate
+a whole cycle (reviewer done -> open a conflict-resolution follow-up; a goal
+completed -> emit the next goal; a completion claim corroborated -> confirm it,
+per the agent-dispatch vision's *verify-the-completion-claim*) without a
 bespoke module.
 
 This module is the pure contract plus a declarative :class:`SpecEvaluator`, in
@@ -60,7 +62,22 @@ class NoOp:
         return {"decision": "noop", "reason": self.reason}
 
 
-Decision = Emit | NoOp
+@dataclass(frozen=True)
+class Confirm:
+    """A decision to confirm the *originating* task's completion claim --
+    the automatic half of *verify-the-completion-claim* for emitter-driven
+    work: the rule's own ``when`` predicate is the corroboration judgment
+    (e.g. requiring a specific label/status combination believed reliable
+    for this domain); this decision itself performs no additional
+    corroboration check of its own."""
+
+    reason: str | None = None
+
+    def to_dict(self) -> dict:
+        return {"decision": "confirm", "reason": self.reason}
+
+
+Decision = Emit | NoOp | Confirm
 
 
 def _safe_fmt(template: str, values: dict[str, Any]) -> str:
@@ -128,7 +145,7 @@ def _emit_from_rule(rule: dict, event: dict) -> Emit:
 
 class SpecEvaluator:
     """A declarative evaluator: a list of rules, each matching an event and
-    minting a follow-up task.
+    minting a follow-up task or confirming the originating one.
 
     Spec shape (JSON)::
 
@@ -137,12 +154,19 @@ class SpecEvaluator:
            "when": {"labels_any": ["recipe:reviewer"], "status": "completed"},
            "emit": {"title_template": "unstick {origin_ref}",
                     "labels": ["recipe:conflict-resolution"],
-                    "dedup_template": "evaluator:followup:{task_id}"}}
+                    "dedup_template": "evaluator:followup:{task_id}"}},
+          {"on": "task.completed",
+           "when": {"labels_any": ["recipe:goal-driven"], "status": "completed"},
+           "confirm": true}
         ]}
 
     ``on`` is an event type or a list of them; ``when`` is an optional predicate
-    (see :func:`_matches`); ``emit`` templates the follow-up task. The first
-    matching rule with an ``emit`` wins per event (rules are ordered).
+    (see :func:`_matches`); ``emit`` templates a follow-up task; ``confirm``
+    (a bare ``true``) closes the *originating* task's completion claim instead
+    (see :class:`Confirm` -- the rule's own ``when`` clause is the
+    corroboration judgment). The first matching rule with an ``emit`` or
+    ``confirm`` wins per event (rules are ordered); a rule with neither is
+    simply never matched to a decision.
     """
 
     def __init__(self, spec: dict):
@@ -164,6 +188,8 @@ class SpecEvaluator:
                 continue
             if "emit" in rule:
                 return [_emit_from_rule(rule, event)]
+            if rule.get("confirm"):
+                return [Confirm(reason=rule.get("confirm_reason"))]
         return [NoOp(reason="no matching rule")]
 
 
@@ -172,10 +198,20 @@ def apply_decisions(
     *,
     creator: Callable[..., dict],
     repo: str | None = None,
+    task_id: str | None = None,
+    confirmer: Callable[..., dict] | None = None,
 ) -> list[dict]:
     """Execute decisions. ``creator`` is ``client.create``-shaped
     ``(title, **fields) -> task``; an :class:`Emit` calls it (stamping ``repo``
-    when given), a :class:`NoOp` records the skip. Returns a per-decision report.
+    when given). ``confirmer`` is ``client.confirm``-shaped
+    ``(task_id, *, actor=...) -> task``; a :class:`Confirm` calls it against
+    ``task_id`` (the originating task -- required for any :class:`Confirm`
+    decision, since unlike :class:`Emit` there is no new task to derive an id
+    from). A :class:`Confirm` with no ``confirmer`` or no ``task_id`` wired is
+    recorded as a skipped decision rather than raising -- a caller that never
+    wires confirmation simply never gets it, exactly like the degenerate
+    no-evaluator case. A :class:`NoOp` records the skip. Returns a per-decision
+    report.
     """
     results: list[dict] = []
     for d in decisions:
@@ -185,6 +221,18 @@ def apply_decisions(
                 fields["repo"] = repo
             task = creator(d.title, **fields)
             results.append({"decision": "emit", "created": task})
+        elif isinstance(d, Confirm):
+            if confirmer is None or task_id is None:
+                results.append(
+                    {
+                        "decision": "confirm",
+                        "skipped": True,
+                        "reason": "no confirmer/task_id wired",
+                    }
+                )
+            else:
+                confirmed = confirmer(task_id, actor="evaluator")
+                results.append({"decision": "confirm", "confirmed": confirmed})
         else:
             results.append(d.to_dict())
     return results
@@ -196,6 +244,7 @@ def evaluate_and_apply(
     *,
     creator: Callable[..., dict],
     repo: str | None = None,
+    confirmer: Callable[..., dict] | None = None,
     apply: bool = True,
 ) -> dict:
     """Evaluate ``event`` and (optionally) apply the decisions. Returns a report
@@ -206,5 +255,8 @@ def evaluate_and_apply(
         "decisions": [d.to_dict() for d in decisions],
     }
     if apply:
-        report["applied"] = apply_decisions(decisions, creator=creator, repo=repo)
+        task_id = (event.get("task") or {}).get("id")
+        report["applied"] = apply_decisions(
+            decisions, creator=creator, repo=repo, task_id=task_id, confirmer=confirmer
+        )
     return report

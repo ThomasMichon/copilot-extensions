@@ -5,10 +5,10 @@ tracked reservation is dead while an earlier attempt's embody session is
 still alive and fully resumable.
 
 Background: a task's ``dedup_key`` only releases from the create-dedup index
-once the task reaches a **terminal** status (see
-:data:`agent_dispatch.queue_records.Status.TERMINAL` and
+once the task reaches a **concluded** status (see
+:data:`agent_dispatch.queue_records.Status.CONCLUDED` and
 ``TaskQueue.create``'s docstring) -- so this primitive is viable only against
-an *already*-terminal task, typically one just abandoned for exactly this
+an *already*-concluded task, typically one just abandoned for exactly this
 reason (see :func:`guard_abandon_liveness` and ``agent-dispatch abandon
 --override-live``). :func:`reattach` re-mints the same logical work under the
 same ``dedup_key`` (create -> reserve_spawn -> record_spawn -> claim -> start,
@@ -267,7 +267,7 @@ def reattach(
     # server-side atomic fence for this) the window between "confirmed live"
     # and "actually bound".
     old_task = client.get(task_id)
-    if old_task.get("status") not in Status.TERMINAL:
+    if old_task.get("status") not in Status.CONCLUDED:
         raise ReattachError(
             f"task {task_id!r} is {old_task.get('status')!r}, not terminal -- "
             "reattach only re-mints a terminal task's dedup_key (abandon it "
