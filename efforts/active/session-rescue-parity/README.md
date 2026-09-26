@@ -584,7 +584,7 @@ _Pending._
   shape family as `agent-containers`' `rescue-capture` result, scaled to
   one target; `agent-containers/README.md` got a reciprocal pointer back.
   Changefile added (patch/patch, both plugins).
-- Landed as its own docs-only PR. Every Plan and Validation Plan item in
+- Landed as PR #3697 (docs-only). Every Plan and Validation Plan item in
   this effort is now resolved except the one transferred live-CodeSpace
   validation item. **Status: Done.**
 
