@@ -355,9 +355,14 @@ shape before committing to a design)_
       #3752** — also extended to reject a symlink inside/as the canonical
       `src/` tree and a destination pointer path escaping `dest`.
 - [x] A promotion run against a deliberately malformed/unresolvable pointer
-      (missing `source`, escaping `source`) aborts the promotion rather
-      than producing a `main` snapshot containing an unexpanded stub.
-      **Done, PR #3752** (`test_promote_refuses_when_a_pointer_does_not_resolve`).
+      aborts the promotion rather than producing a `main` snapshot
+      containing an unexpanded stub. **Done, PR #3752** — covered for a
+      missing `source` at the promotion level
+      (`test_promote_refuses_when_a_pointer_does_not_resolve`); the
+      escaping-`source`/symlink-containment cases are covered directly at
+      the `materialize_main.py` level (which `consume_pending_changes()`
+      calls and fails closed on), not via a dedicated promotion-level test
+      for each variant.
 - [ ] A pointer-ized `scripts/installer-engine.{sh,ps1}` runs correctly
       **in dev**, unmaterialized, called from a plugin's own (never
       pointerized) `install.sh`/`install.ps1` wrapper across folders into
@@ -508,7 +513,11 @@ _Pending._
     in the source tree *before* `materialize()`'s own checks ever ran —
     fixed by passing `symlinks=True` (confirmed safe: no tracked symlink
     exists in this repo today, via `git ls-files -s`).
-  - 21 new tests total across the PR's four commits. Merged after CI green
+  - 10 new test functions in the final diff (9 in
+    `test_materialize_main.py`, 1 in `test_promote_release.py` — corrected
+    in review from an earlier miscounted 21, which summed tests added
+    across incremental review-round commits rather than the final diff).
+    Merged after CI green
     and merge state clean (a possible 4th review round was not observed
     within a reasonable wait after the 3rd fix; CI and merge-state were
     both clean, and this repo's review is advisory/non-blocking).
