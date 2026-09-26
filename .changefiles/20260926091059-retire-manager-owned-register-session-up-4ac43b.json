@@ -1,0 +1,9 @@
+{
+  "comment": "Retire manager-owned register-session updater shim",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

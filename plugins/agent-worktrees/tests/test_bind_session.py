@@ -11,7 +11,10 @@ folds into the same idempotent tracking.register_session the hook uses.
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
+
+import pytest
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import activity, tracking
@@ -51,6 +54,33 @@ def _args(**kw) -> argparse.Namespace:
     return argparse.Namespace(**base)
 
 
+def _write_managed_mux_mapping(
+    root: Path,
+    *,
+    project: str,
+    worktree_id: str,
+    worktree_path: str,
+    mux_session: str,
+) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "mux-mapping.json").write_text(
+        json.dumps(
+            [
+                {
+                    "project": project,
+                    "worktree_id": worktree_id,
+                    "worktree_path": worktree_path,
+                    "mux_session": mux_session,
+                    "mux_bin": "psmux",
+                    "mapping_revision": 1,
+                    "live": True,
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
 def _neutralize(monkeypatch, captured: dict) -> None:
     monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
     monkeypatch.setattr(m, "_spawn_status_updater", lambda wt, path: True)
@@ -58,6 +88,47 @@ def _neutralize(monkeypatch, captured: dict) -> None:
 
 
 class TestBindSession:
+    def test_manager_owned_session_registers_with_monitor_instead_of_spawning_updater(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch, tmp_path: Path
+    ):
+        _save_record(tmp_tracking_dir, "wt-managed", "/tmp/src/wt-managed")
+        manager_root = tmp_path / "manager-root"
+        _write_managed_mux_mapping(
+            manager_root,
+            project="test-project",
+            worktree_id="wt-managed",
+            worktree_path="/tmp/src/wt-managed",
+            mux_session="wt-managed",
+        )
+        monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(manager_root))
+        monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "1")
+        captured: dict = {}
+        _neutralize(monkeypatch, captured)
+        seen: list[tuple[str, str | None]] = []
+        ensured: list[bool] = []
+        monkeypatch.setattr(
+            m, "_spawn_status_updater",
+            lambda *_args, **_kwargs: pytest.fail("manager-owned sessions must not spawn status-updater"),
+        )
+        monkeypatch.setattr(
+            m,
+            "_register_session_for_monitor",
+            lambda sess, path: seen.append((sess, path)) or True,
+        )
+        monkeypatch.setattr(
+            m, "_ensure_status_monitor", lambda: ensured.append(True) or True
+        )
+
+        rc = m.cmd_bind_session(_args(
+            worktree_dir="/tmp/src/wt-managed",
+            session_id="sess-managed",
+        ))
+
+        assert rc == 0
+        assert captured["bound"] is True
+        assert seen == [("wt-managed", "/tmp/src/wt-managed")]
+        assert ensured
+
     def test_acknowledges_session_start_candidate_atomically(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
     ):
