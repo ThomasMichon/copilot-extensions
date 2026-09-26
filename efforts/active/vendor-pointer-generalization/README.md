@@ -181,17 +181,19 @@ shape before committing to a design)_
 ### Phase 1 — Convert real shared-lib copies to pointers
 - [ ] **Define the dev-time resolver before converting anything** (blocking
       design gap found in review): `tools/run-plugin-tests.py` installs each
-      plugin's dependencies via `uv sync`, which resolves
+      plugin's dependencies via an editable `uv pip install -e` (not
+      `uv sync` — corrected in review), which resolves
       `plugins/<plugin>/libs/<lib>` as a real local path package
       (`[tool.uv.sources]`) — a directory containing only
       `VENDOR_POINTER.json` (no `src/`, no `pyproject.toml`) is not
-      installable and `uv sync` fails outright. Decide and document one of:
-      (a) the pointer directory keeps a real `pyproject.toml` so it's still
-      a valid package, and only `src/` becomes a stub the resolver expands
-      before install; or (b) `run-plugin-tests.py` gains a materialize-first
-      step (mirroring `preview_release.py`'s "materialize into a scratch
-      copy, never touch the real tree" pattern) that expands every pointer
-      into its own temporary test tree before `uv sync` runs there. Do not
+      installable and the editable install fails outright. Decide and
+      document one of: (a) the pointer directory keeps a real
+      `pyproject.toml` so it's still a valid package, and only `src/`
+      becomes a stub the resolver expands before install; or (b)
+      `run-plugin-tests.py` gains a materialize-first step (mirroring
+      `preview_release.py`'s "materialize into a scratch copy, never touch
+      the real tree" pattern) that expands every pointer into its own
+      temporary test tree before the editable install runs there. Do not
       convert a single real lib copy until this is resolved and proven
       against one real plugin.
 - [ ] Apply the already-validated, already-built mechanism
@@ -265,7 +267,15 @@ shape before committing to a design)_
       unconverted lib directly from `libs/<lib>` with no local copy at all
       — confirm whether that's actually how Python resolves it today, or
       whether a `sys.path`/workspace config makes it work, before assuming
-      the script-pointer case is analogous).
+      the script-pointer case is analogous). **Must preserve the existing
+      dot-source contract** (confirmed in review — the POSIX and
+      PowerShell installer wrappers dot-source `scripts/installer-engine.*`
+      because the engine defines functions the caller consumes directly; a
+      stub that merely invokes the canonical file as a child process cannot
+      make those functions available in the wrapper's own scope). Test both
+      the POSIX (`source`) and PowerShell (`.`) dot-source paths explicitly
+      before adopting this pointer kind — a child-process-launching stub is
+      not an acceptable substitute.
 - [ ] Extend `materialize_main.py` to expand the new kind: replace the
       dev-time cross-folder-calling stub with the fully inlined canonical
       script content in the `main` snapshot, so what ships never resolves
@@ -328,6 +338,10 @@ shape before committing to a design)_
       the canonical engine — demonstrating the "in-place test scripts in
       `dev`" requirement is met without requiring
       `preview_release.py`/materialization first.
+- [ ] The pointer-ized engine is correctly **dot-sourced** (`source` on
+      POSIX, `.` on PowerShell) by the calling wrapper, not merely executed
+      as a child process — functions the engine defines must be callable
+      from the wrapper's own scope, on both platforms.
 - [ ] A materialized `main` build of the same plugin is fully self-contained
       — no cross-folder reference remains in the shipped payload — per
       `docs/install-contract.md`.
@@ -407,3 +421,13 @@ _Pending._
   Phase 2 heading, design item, Context's description of that effort, and
   the Validation Plan's install-script item to scope the new pointer kind
   to the shared engine file only.
+- **Round 5 review (2026-09-26):** one new finding, one previously-missed
+  finding, both fixed: (1) the executable-pointer design didn't account for
+  the existing installer wrappers **dot-sourcing** `scripts/installer-
+  engine.*` (POSIX `source`, PowerShell `.`) so its functions land in the
+  caller's own scope — a stub that just executes the engine as a child
+  process can't provide that. Added an explicit dot-source-preservation
+  requirement to the Phase 2 design item and a matching Validation Plan
+  item testing both platforms. (2) Round-1's fix wrongly described the
+  test runner's install command as `uv sync`; corrected throughout to the
+  actual editable `uv pip install -e`.
