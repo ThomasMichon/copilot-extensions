@@ -237,14 +237,19 @@ jobs:
         # (the same class of mistake `trusted-ci.yml` was hardened
         # against earlier this session): a compromised dev commit's own
         # copy of this very script could exfiltrate the token or file
-        # arbitrary issues/comments. No `ref:` means actions/checkout
-        # resolves the workflow_run's own natural ref, which -- exactly
-        # like this workflow file itself -- is the repo's DEFAULT branch
-        # (trusted, reviewed code). The diagnosed SHA still reaches the
-        # script, but only as a `--sha` **data** argument, never as code
-        # that gets checked out and executed.
+        # arbitrary issues/comments.
+        #
+        # An EXPLICIT `ref:` naming the default branch is required, not
+        # merely omitting `ref:` -- a bare checkout resolves differently
+        # per trigger type: for `workflow_run` it happens to land on the
+        # default branch, but for `workflow_dispatch` (which this job's
+        # own `if:` permits from `refs/heads/dev`) it resolves to
+        # whichever ref was manually dispatched, reopening the exact
+        # hole for that path. Naming the default branch explicitly is
+        # correct for every trigger type, not just the common one.
         with:
           fetch-depth: 1
+          ref: ${{ github.event.repository.default_branch }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -262,13 +267,28 @@ jobs:
           --description "Red dev validation failure signature; report-only watchdog (no fix attempted)"
           --force
       - name: Detect + dedup + report
+        # Bootstrap gap: this is a NEW script, so it does not exist on the
+        # default branch yet at the moment this PR first merges -- and
+        # (unlike a workflow-file change) it cannot ride main-gate's
+        # workflow-only bootstrap lane, since it isn't a workflow file.
+        # It only reaches the default branch the normal way: the next
+        # ordinary green dev->main promotion (any promotion, not
+        # necessarily one about this script) carries the whole tree
+        # across, same as every other file. Until then, degrade
+        # gracefully instead of hard-failing the job on a missing file --
+        # this is also a permanent safety net against any future
+        # main/dev script-presence mismatch, not just this one-time gap.
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >-
-          python tools/ci_failure_watchdog.py
-          --run-id ${{ github.run_id }}
-          --sha ${{ needs.gate.outputs.sha }}
-          --file-issue
+        run: |
+          if [ ! -f tools/ci_failure_watchdog.py ]; then
+            echo "::notice::tools/ci_failure_watchdog.py not yet present on the default branch -- it reaches main via the next ordinary green promotion, same as any other file. Skipping this run's report rather than failing the job."
+            exit 0
+          fi
+          python tools/ci_failure_watchdog.py \
+            --run-id "${{ github.run_id }}" \
+            --sha "${{ needs.gate.outputs.sha }}" \
+            --file-issue
 
   promote:
     name: Promote dev -> main

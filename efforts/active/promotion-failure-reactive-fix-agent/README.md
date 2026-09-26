@@ -586,3 +586,30 @@ _Pending._
   report success while detecting and filing nothing — now returns 1 in
   that mode specifically (dry-run stays 0 regardless, matching the
   documented contract). 31 tests now, all passing.
+- **Eighth review pass caught the deepest structural gap yet, plus two
+  smaller real ones, all fixed:** (1) **the trusted-checkout fix from the
+  previous round created a genuine bootstrap chicken-and-egg problem**:
+  `tools/ci_failure_watchdog.py` is a brand-new file that only exists on
+  `dev` right now, and — unlike a workflow-file change — it can't ride
+  `main-gate`'s workflow-only bootstrap lane (it isn't a workflow file);
+  it only reaches the default branch the normal way, via the next
+  ordinary green `dev`->`main` promotion. Until that happens, the trusted
+  (main) checkout genuinely won't have the file, and the step would
+  hard-fail on every red run in that window. Fixed by degrading
+  gracefully: the step now checks the file exists before invoking it,
+  logging a notice and exiting 0 instead of failing the job — a
+  permanent safety net against any future main/dev script-presence
+  mismatch, not just this one-time gap, not merely a wait-and-hope; (2)
+  the trusted-checkout fix itself had a trigger-type gap: omitting `ref:`
+  resolves to the default branch for `workflow_run` events, but for
+  `workflow_dispatch` (which this job's own `if:` explicitly permits from
+  `refs/heads/dev`) it resolves to whichever ref was manually dispatched
+  — reopening the exact hole for that one path. Now pins an EXPLICIT
+  `ref: ${{ github.event.repository.default_branch }}`, correct
+  regardless of trigger type; (3) `process_signature`'s own
+  `LookupFailed` handler (a per-signature dedup-lookup failure, distinct
+  from the two `main()`-level `gh` failure paths fixed last round) still
+  returned 0 unconditionally, even though by the time that branch is
+  reached `file_issue` is always `True` (the dry-run case already
+  returned earlier) — fixed to return 1, matching the same "never mask a
+  broken watchdog behind a green step" contract. 31 tests, all passing.

@@ -240,7 +240,10 @@ def test_process_signature_aborts_without_filing_when_lookup_fails(watchdog, mon
 
     rc = watchdog.process_signature("owner/repo", sig, "1", "sha", 6, file_issue=True)
 
-    assert rc == 0
+    # Nonzero, not zero: nothing was actually filed/commented in
+    # --file-issue mode, so reporting success would mask a broken dedup
+    # lookup behind a green step.
+    assert rc == 1
     assert called_file_issue is False
     assert "aborting without filing" in capsys.readouterr().err
 

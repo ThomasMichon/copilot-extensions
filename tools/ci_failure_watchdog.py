@@ -314,12 +314,17 @@ def process_signature(
         existing = _existing_issue(repo, sig.key)
     except LookupFailed as error:
         # Never treat "couldn't confirm" as "confirmed absent" -- abort this
-        # signature without filing; the next red run tries again.
+        # signature without filing; the next red run tries again. Still
+        # nonzero, though: we're in --file-issue mode here (the dry-run
+        # early-return above already handled the other case), and nothing
+        # was actually filed/commented -- reporting success would mask a
+        # broken dedup API behind a green step, exactly the contract this
+        # script's own module docstring promises never to do.
         print(
             f"[WARN] existing-issue lookup failed for {sig.key}, aborting without filing: {error}",
             file=sys.stderr,
         )
-        return 0
+        return 1
     if existing is None:
         return 0 if _file_issue(repo, sig, run_id, sha) else 1
     if is_rate_limited(existing, datetime.now(timezone.utc), rate_limit_hours):
