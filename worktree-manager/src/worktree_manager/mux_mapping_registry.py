@@ -245,61 +245,67 @@ class MuxMappingRegistry:
                 pass
             raise
 
+    def _register_locked(self, payload: dict, entries: dict[tuple[str, str], dict]) -> dict:
+        entry = _normalize_mapping_entry(payload)
+        key = (entry["project"], entry["worktree_id"])
+        current = entries.get(key)
+        if current is not None:
+            if entry["mapping_revision"] < current["mapping_revision"]:
+                return {
+                    "applied": False,
+                    "reason": "stale_revision",
+                    "current_revision": current["mapping_revision"],
+                }
+            if (
+                entry["mapping_revision"] == current["mapping_revision"]
+                and not current["live"]
+                and entry["live"]
+            ):
+                return {
+                    "applied": False,
+                    "reason": "stale_revision",
+                    "current_revision": current["mapping_revision"],
+                }
+        if (
+            current is not None
+            and entry["mapping_revision"] == current["mapping_revision"]
+            and entry["last_status_rendered_at"] is None
+        ):
+            entry["last_status_rendered_at"] = current["last_status_rendered_at"]
+        entries[key] = entry
+        self._write_all(entries)
+        return {"applied": True, "revision": entry["mapping_revision"]}
+
     def register(self, payload: dict) -> dict:
         """Validate, apply the monotonic-revision guard, and persist one
         mapping entry. Returns ``{"applied": bool, ...}``."""
-        entry = _normalize_mapping_entry(payload)
-        key = (entry["project"], entry["worktree_id"])
         with self._interprocess_lock():
             entries = self._read_all()
-            current = entries.get(key)
-            if current is not None:
-                if entry["mapping_revision"] < current["mapping_revision"]:
-                    return {
-                        "applied": False,
-                        "reason": "stale_revision",
-                        "current_revision": current["mapping_revision"],
-                    }
-                # An equal-revision LIVE registration must not resurrect an
-                # explicitly-tombstoned entry at that exact revision
-                # (Copilot review finding): the monotonic ``<``-only guard
-                # above lets it through, since equal revisions are
-                # otherwise meant to be accepted (e.g. a benign metadata
-                # refresh at the same revision). An explicit
-                # ``remove(..., mapping_revision=N)`` deliberately leaves a
-                # ``live: false`` tombstone at exactly revision N to fence
-                # against exactly this.
-                if (
-                    entry["mapping_revision"] == current["mapping_revision"]
-                    and not current["live"]
-                    and entry["live"]
-                ):
-                    return {
-                        "applied": False,
-                        "reason": "stale_revision",
-                        "current_revision": current["mapping_revision"],
-                    }
-            # A register()/remove() payload is about MAPPING identity, not
-            # status-render ordering -- it never carries
-            # last_status_rendered_at itself, so preserve whatever fence
-            # was already recorded rather than silently resetting it to
-            # None on every re-register. Only for the SAME mapping
-            # incarnation, though (Copilot review finding): a strictly
-            # HIGHER mapping_revision is a genuinely new incarnation (e.g.
-            # a new mux session after a cutover), and build_compute()
-            # relies on a new incarnation starting with a fresh ordering
-            # fence -- inheriting the old session's fence could reject that
-            # new incarnation's very first render as a stale-render purely
-            # because it predates the previous session's own timestamp.
+            return self._register_locked(payload, entries)
+
+    def register_next(self, payload: dict) -> dict:
+        """Like :meth:`register`, but allocate ``mapping_revision`` under the
+        registry's own interprocess lock when the caller omitted it."""
+        with self._interprocess_lock():
+            entries = self._read_all()
+            raw_project = payload.get("project")
+            raw_worktree_id = payload.get("worktree_id")
             if (
-                current is not None
-                and entry["mapping_revision"] == current["mapping_revision"]
-                and entry["last_status_rendered_at"] is None
+                "mapping_revision" not in payload
+                and isinstance(raw_project, str)
+                and raw_project
+                and isinstance(raw_worktree_id, str)
+                and raw_worktree_id
             ):
-                entry["last_status_rendered_at"] = current["last_status_rendered_at"]
-            entries[key] = entry
-            self._write_all(entries)
-        return {"applied": True, "revision": entry["mapping_revision"]}
+                current = entries.get((raw_project, raw_worktree_id))
+                next_revision = (
+                    current["mapping_revision"] + 1
+                    if current is not None
+                    else 1
+                )
+                payload = dict(payload)
+                payload["mapping_revision"] = next_revision
+            return self._register_locked(payload, entries)
 
     def remove(
         self, project: str, worktree_id: str, *, mapping_revision: int | None = None
@@ -419,6 +425,11 @@ def register_mapping(payload: dict, root: Path | None = None) -> dict:
     running; the daemon reads the same file on its next lookup."""
     registry = MuxMappingRegistry(registry_path(root))
     return registry.register(payload)
+
+
+def register_next_mapping(payload: dict, root: Path | None = None) -> dict:
+    registry = MuxMappingRegistry(registry_path(root))
+    return registry.register_next(payload)
 
 
 def remove_mapping(

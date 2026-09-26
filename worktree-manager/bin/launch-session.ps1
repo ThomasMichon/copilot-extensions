@@ -1419,50 +1419,37 @@ function Invoke-AwPsmuxAttach {
         }
     }
 }
-# Start the detached status-bar updater for a session. It renders the
-# identity (@aw_ctx) once and refreshes the git-disposition (@aw_seg) off
-# psmux's paint path, so the status bar never spawns a process per render.
-# Best-effort: a failure here just leaves a static/blank bar, never blocks
-# the launch.  Safe to call on every create/join: the updater's @aw_updater
-# token elects a single live instance, so older ones self-retire.
-function Start-StatusUpdater {
+# Register this Manager-owned mux session and immediately publish its live
+# mapping into agent-worktrees. The resident status-monitor then routes
+# rendered @aw_* values back through Worktree Manager's daemon instead of
+# leaving a per-session status-updater loop behind.
+function Invoke-ManagedMuxRegister {
     param([string]$Session, [string]$WorkDir)
-    if (-not $Session) { return }
+    if (
+        -not $Session -or
+        [string]::IsNullOrWhiteSpace([string]$script:LaunchProject) -or
+        [string]::IsNullOrWhiteSpace([string]$plan.worktree_id)
+    ) { return }
     try {
-        $updArgs = @('-m', 'agent_worktrees', 'status-updater',
-                     '--session', $Session, '--mux', 'psmux')
-        if ($WorkDir) { $updArgs += @('--path', $WorkDir) }
-        # conhost --headless: -WindowStyle Hidden alone is ignored by the DefTerm
-        # handoff and can flash a console (windows-launch-hardening #786).
-        $savedAuth = @{}
-        foreach ($name in @(
-            'GH_TOKEN',
-            'GITHUB_TOKEN',
-            'AGENT_WORKTREES_AHP_AUTH_TOKEN'
-        )) {
-            $savedAuth[$name] = [Environment]::GetEnvironmentVariable(
-                $name,
-                'Process'
-            )
-            [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+        $managerRoot = Split-Path -Parent $PSScriptRoot
+        $registerArgs = @(
+            'run',
+            '--quiet',
+            '--project', $managerRoot,
+            '-m', 'worktree_manager',
+            'mux-daemon', 'register',
+            "--project=$($script:LaunchProject)",
+            "--worktree-id=$([string]$plan.worktree_id)",
+            "--worktree-path=$WorkDir",
+            "--mux-session=$Session",
+            '--mux-bin=psmux'
+        )
+        & uv @registerArgs *> $null
+        if ($LASTEXITCODE -ne 0) {
+            Write-SetupLog "psmux: managed mux registration failed for $Session" 'WARN'
         }
-        try {
-            Start-Process -FilePath 'conhost.exe' `
-                -ArgumentList (@('--headless', "`"$VenvPython`"") + $updArgs) `
-                -WorkingDirectory $HOME -WindowStyle Hidden `
-                -ErrorAction Stop | Out-Null
-        } finally {
-            foreach ($name in $savedAuth.Keys) {
-                [Environment]::SetEnvironmentVariable(
-                    $name,
-                    $savedAuth[$name],
-                    'Process'
-                )
-            }
-        }
-        Write-SetupLog "psmux: started status-updater for $Session"
     } catch {
-        Write-SetupLog "psmux: status-updater spawn failed: $($_.Exception.Message)" 'WARN'
+        Write-SetupLog "psmux: managed mux registration failed: $($_.Exception.Message)" 'WARN'
     }
 }
 # Per-session psmux options (status bar + behaviors). agent-worktrees does NOT
@@ -1502,11 +1489,11 @@ if (-not $noMux) {
     $sessName = "wt-$wtId"
     Write-SetupLog "psmux: looking for session $sessName"
 
-    # Path the status-bar updater renders from. Normally the pane cwd, but for
-    # deprecated Bare resume the pane launches in HOME while the bar must still
-    # show the worktree's identity + git disposition -- so prefer the plan's
-    # status_path (the real worktree) and
-    # fall back to work_dir for every other launch.
+    # Path the Manager-owned live-mapping registration publishes as the
+    # worktree path. Normally the pane cwd, but for deprecated Bare resume the
+    # pane launches in HOME while the resident monitor must still classify the
+    # real worktree -- so prefer the plan's status_path and fall back to
+    # work_dir for every other launch.
     $muxStatusPath = if ($plan.PSObject.Properties['status_path'] -and $plan.status_path) {
         [string]$plan.status_path
     } else {
@@ -1531,17 +1518,10 @@ if (-not $noMux) {
         # source-file) so a rejoined long-lived session picks up PageUp/wheel/
         # arrow passthrough.
         Invoke-AwPsmuxPassthroughSafe $sessName
-        # (Re)assert the updater on join: if the prior one died, this revives
-        # the bar; if it's alive, the token guard makes the new one retire.
-        Start-StatusUpdater $sessName $muxStatusPath
-        # Write last_session AFTER spawning the updater, immediately before
-        # attach -- mirroring the create branch below. The updater connects to
-        # psmux as a background client, which can rewrite ~/.psmux/last_session;
-        # since the 3.3.6 attach regression reads that file instead of honoring
-        # -t, setting it any earlier lets the updater clobber our target and the
-        # join lands in whatever session was last current (collapsing two
-        # worktrees onto one session). Set-PsmuxLastSession must be the final
-        # psmux-affecting action before attach.
+        Invoke-ManagedMuxRegister $sessName $muxStatusPath
+        # Write last_session immediately before attach: the 3.3.6 attach
+        # regression reads that file instead of honoring -t, so this must
+        # remain the final psmux-affecting action before attach.
         Set-PsmuxLastSession $sessName
         $attachExit = 1
         $attachError = ''
@@ -1651,6 +1631,9 @@ if (-not $noMux) {
         $wrapperArgs = @()
         if (-not [string]::IsNullOrWhiteSpace($plan.worktree_id)) {
             $wrapperArgs += @('-AwWt', [string]$plan.worktree_id)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($script:LaunchProject)) {
+            $wrapperArgs += @('-AwProject', [string]$script:LaunchProject)
         }
         if ($ahpTokenFile) {
             $wrapperArgs += @('-AwAhpTokenFile', $ahpTokenFile)
@@ -1817,14 +1800,15 @@ if (-not $noMux) {
             'mux=create',
             "attempts=$totalCreateAttempts"
         )
-        # Session created: stamp per-session options + start its status-bar
-        # updater (one per session, before any nested-create early-exit so the
-        # bar populates either way).
+        # Session created: stamp per-session options, then publish the live
+        # Manager-owned mapping before any nested-create early-exit so the
+        # resident status-monitor can route rendered status through Worktree
+        # Manager immediately.
         Set-AwSessionOptionsSafe $sessName
         # Apply the keystroke passthrough to the new session's server
         # (per-session source-file) so PageUp/wheel/arrows reach Copilot.
         Invoke-AwPsmuxPassthroughSafe $sessName
-        Start-StatusUpdater $sessName $muxStatusPath
+        Invoke-ManagedMuxRegister $sessName $muxStatusPath
         if ($nested) {
             Write-Host "Session created: $sessName (open a new terminal to join)"
             exit 0

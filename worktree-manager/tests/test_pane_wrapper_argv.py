@@ -10,7 +10,7 @@ PowerShell's ``$x = if (cond) { @(...) } else { @() }`` (if-as-expression
 assignment) silently unwraps a single-element array result to a bare scalar,
 even though the branch itself forces array typing with ``@()``. The
 wrapper's flag-stripping loop narrows ``$rest`` down to exactly the trailing
-payload command once every known ``-AwWt``/``--aw-prompt-b64``/
+payload command once every known ``-AwWt``/``-AwProject``/``--aw-prompt-b64``/
 ``--aw-prompt-receipt-b64``/``-AwAhpTokenFile`` pair is stripped -- for the
 common single-token payload case (e.g. bare ``copilot``) that narrowing
 lands on exactly one remaining element, which used to collapse ``$rest`` to
@@ -81,6 +81,7 @@ def test_single_token_payload_survives_as_array(tmp_path: Path):
         tmp_path,
         [
             "-AwWt", "some-worktree-id",
+            "-AwProject", "proj",
             "--aw-prompt-b64", "cHJvbXB0",
             "--aw-prompt-receipt-b64", "cmVjZWlwdA==",
             "copilot",
@@ -100,6 +101,7 @@ def test_multi_token_payload_still_correct(tmp_path: Path):
         tmp_path,
         [
             "-AwWt", "some-worktree-id",
+            "-AwProject", "proj",
             "--aw-prompt-b64", "cHJvbXB0",
             "--aw-prompt-receipt-b64", "cmVjZWlwdA==",
             "copilot", "--allow-all-tools", "-p", "hi",

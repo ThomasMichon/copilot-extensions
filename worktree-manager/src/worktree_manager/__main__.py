@@ -802,16 +802,8 @@ def _cmd_contracts(rest: list[str]) -> int:
     print()
     return 0
 
-
 def _cmd_mux_daemon(rest: list[str]) -> int:
-    """Manager mux-companion daemon internals (Phase 3b Sub-slice 3 Step 2).
-
-    Still off the main launch path -- no real launch/join/restore/remux
-    action calls any of this yet (see ``mux_daemon.py``'s own module
-    docstring). Exposed here only so the daemon's lifecycle, and the
-    mapping-registry register/remove operations Step 3 will eventually wire
-    in, are independently reachable/testable today.
-    """
+    """Manager mux-companion daemon internals (Phase 3b Sub-slice 3)."""
     from . import mux_daemon
 
     args = list(rest)
@@ -848,7 +840,7 @@ def _cmd_mux_daemon(rest: list[str]) -> int:
         if "live" in payload:
             payload["live"] = payload["live"].strip().lower() not in ("0", "false", "no")
         try:
-            result = mux_daemon.register_mapping(payload)
+            result = mux_daemon.register_managed_mapping(payload)
         except ValueError as exc:
             print(f"error: {exc}")
             return 2
@@ -874,7 +866,11 @@ def _cmd_mux_daemon(rest: list[str]) -> int:
             print("error: remove needs --project=NAME --worktree-id=ID")
             return 2
         try:
-            result = mux_daemon.remove_mapping(project, worktree_id, mapping_revision=revision)
+            result = mux_daemon.remove_managed_mapping(
+                project,
+                worktree_id,
+                mapping_revision=revision,
+            )
         except ValueError as exc:
             print(f"error: {exc}")
             return 2

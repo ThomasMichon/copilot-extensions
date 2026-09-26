@@ -100,13 +100,11 @@ def test_status_bar_reads_at_vars_not_cli():
     assert "#(cat " not in text, "the cache-file reader is retired"
 
 
-def test_launcher_spawns_common_status_updater():
+def test_launcher_registers_managed_mux_sessions_instead_of_spawning_status_updater():
     text = _LAUNCHER.read_text(encoding="utf-8")
-    assert "_aw_spawn_status_updater" in text, "launcher must spawn the updater"
-    assert "status-updater --session" in text
-    assert "--mux tmux" in text, "the tmux launcher must target the tmux watcher"
-    # The per-session apply is still threaded with the worktree id (call-site
-    # compatibility) even though the watcher classifies by path.
+    assert "_aw_publish_managed_mux_live" in text
+    assert "mux-daemon register" in text
+    assert "status-updater --session" not in text
     assert 'aw_apply_tmux_session_options "$1" "${WORKTREE_ID:-}"' in text
 
 

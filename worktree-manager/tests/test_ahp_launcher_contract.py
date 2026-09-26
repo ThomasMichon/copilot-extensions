@@ -21,7 +21,7 @@ def test_windows_launcher_hard_binds_and_disables_post_exit():
     assert "ConvertFrom-SecureString $secureToken" in source
     assert "@('-AwAhpTokenFile', $ahpTokenFile)" in source
     assert "$prop.Name -in @(" in source
-    assert "Start-StatusUpdater" in source
+    assert "Invoke-ManagedMuxRegister" in source
     assert "$cmd += $CopilotPassthrough" in source
     assert "$cmd += $ahpArgs" in source
     assert "$arg -like '--ahp=*' -or $arg -like '--resume=*'" in source
@@ -32,6 +32,7 @@ def test_windows_launcher_hard_binds_and_disables_post_exit():
     assert "launching via the Worktree Manager Picker" in source
 
     wrapper = (ROOT / "bin" / "pane-wrapper.ps1").read_text()
+    assert "$key -eq '-AwProject'" in wrapper
     assert "$key -eq '-AwAhpTokenFile'" in wrapper
     assert "ConvertTo-SecureString" in wrapper
     assert "$startInfo.Environment['GH_TOKEN'] = $ahpChildToken" in wrapper
@@ -54,6 +55,7 @@ def test_posix_launcher_hard_binds_and_disables_post_exit():
     assert "-u COPILOT_CLI_ENABLED_FEATURE_FLAGS tmux" in source
     assert '-e "GH_TOKEN=' not in source
     wrapper = (ROOT / "bin" / "pane-wrapper.sh").read_text()
+    assert "--aw-project" in wrapper
     assert "env -u GITHUB_TOKEN -u AGENT_WORKTREES_AHP_AUTH_TOKEN" in wrapper
     assert 'CMD_ARRAY+=("${COPILOT_PASSTHROUGH[@]}")' in source
     assert "--ahp=*|--resume=*" in source

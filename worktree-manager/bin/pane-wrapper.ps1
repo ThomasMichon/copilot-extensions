@@ -93,6 +93,7 @@ Set-AwPaneKillOnCloseJob
 
 $rest = @($args)
 $awWt = ''
+$awProject = ''
 $initialPromptB64 = ''
 $initialPromptReceiptB64 = ''
 $ahpTokenFile = ''
@@ -100,6 +101,8 @@ while ($rest.Count -ge 2) {
     $key = [string]$rest[0]
     if ($key -eq '-AwWt') {
         $awWt = [string]$rest[1]
+    } elseif ($key -eq '-AwProject') {
+        $awProject = [string]$rest[1]
     } elseif ($key -eq '--aw-prompt-b64') {
         $initialPromptB64 = [string]$rest[1]
     } elseif ($key -eq '--aw-prompt-receipt-b64') {
@@ -283,6 +286,18 @@ try {
 # pane.
 if ($script:AwActivityProc) {
     try { $null = $script:AwActivityProc.WaitForExit(5000) } catch {}
+}
+if (
+    -not [string]::IsNullOrWhiteSpace($awProject) -and
+    -not [string]::IsNullOrWhiteSpace($awWt)
+) {
+    try {
+        $managerRoot = Split-Path -Parent $PSScriptRoot
+        & uv run --quiet --project $managerRoot -m worktree_manager `
+            mux-daemon remove `
+            "--project=$awProject" `
+            "--worktree-id=$awWt" *> $null
+    } catch {}
 }
 
 # Intentional interrupt -- exit silently so post-exit finalization runs.

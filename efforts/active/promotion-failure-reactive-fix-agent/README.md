@@ -4,7 +4,9 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice worktrees
 - **Created:** 2026-09-25
-- **Status:** Active — Phase 1 implemented and landed; Phase 2 gated (see below)
+- **Status:** Active — Phase 1 implemented and landed; Phase 1.5 (live
+  validation) partially complete: detection+filing proven live, dedup/
+  rate-limit path still open (see Journal); Phase 2 gated (see below)
 - **Vision:** none yet — this effort establishes the standing policy itself
   (safety envelope + trigger contract for a reactive fix agent); revisit
   once Phase 1 proves out whether it deserves its own harness-guidance
@@ -159,14 +161,13 @@ fixes."
       (this repo has enough concurrent PR/promotion activity that one is
       likely within hours, not days). When one occurs:
       - [x] Confirm `report-failure` actually ran (not skipped) and its
-            conclusion. **Occurred 2026-09-26 08:34 UTC (run 36230190121):
-            ran, but its own conclusion was `failure` — see the 2026-09-26
-            Journal entry below. Real bug found and fixed (PR #3815). Not
-            yet re-observed succeeding live end-to-end (only replay-
-            verified against the same run's real data, see Journal) --
-            keeping this parent item open until a subsequent natural (or
-            probe) occurrence confirms a filed issue for real.**
-      - [ ] Confirm one issue was filed per distinct failure signature
+            conclusion. **First occurrence 2026-09-26 08:34 UTC (run
+            36230190121): ran, but its own conclusion was `failure` — see
+            the 2026-09-26 Journal entries below (real bug found and fixed
+            in PR #3815). Second occurrence 2026-09-26 12:04 UTC (run
+            36240803760, after the fix merged): ran and concluded
+            `success` — real, live, positive confirmation the fix works.**
+      - [x] Confirm one issue was filed per distinct failure signature
             (or, for a repeat outside the 6h rate-limit window
             specifically, an existing matching issue commented instead —
             **never** both a new issue for an already-tracked signature,
@@ -179,102 +180,131 @@ fixes."
             builds one `FailureSignature` per distinct failing test id).
             Each should have an accurate signature, correct run link/SHA,
             and a genuinely useful log excerpt — not truncated/garbled.
+            **Confirmed: `agent-worktrees#3830` filed automatically from
+            run 36240803760, correct signature (`240176164548`, matching
+            the earlier dry-run replay's own signature for the identical
+            test — confirms stability), correct run link/commit, a clean
+            genuinely useful log excerpt (no ANSI garbage), correct
+            `ci-failure-signature` label, and the standard "no fix
+            attempted" status line.**
       - [ ] Confirm no duplicate issue was filed for the same signature on
             a second occurrence within the 6h window (only a real test of
             this, if the same failure recurs naturally or via the probe
-            below).
-- [ ] **If no natural red run occurs within a reasonable observation
-      window (a few hours), inject one deliberately, carefully, and
-      revert promptly:**
-      - [ ] **Hard stop, non-negotiable:** the probe merge starts a clock.
-            **Maximum 2 hours from the probe PR's merge to the revert
-            PR's merge**, full stop — not "a reasonable observation
-            window," an actual deadline. Set a real reminder/timer for it
-            when the probe merges. If verification is still incomplete
-            when the deadline arrives (checks stalled, the revert PR
-            itself isn't merging, anything not going as planned), **open
-            and merge the revert PR immediately anyway** — an incomplete
-            observation is a fully acceptable outcome (record it as such
-            in the Journal); leaving `dev` red indefinitely while chasing
-            a clean observation is not. The revert PR is small and simple
-            enough to prepare in parallel with the probe PR (same diff,
-            inverted) so "the revert PR isn't merging" is never itself the
-            blocker.
-      - [ ] **Target `agent-worktrees` specifically, not just any
-            "low-traffic plugin"** (a real review finding on this Plan
-            itself): `ci.yml`'s Linux smoke tier only *collects* (imports,
-            never executes) `agent-worktrees`' tests on push/PR --
-            `HEAVY_PLUGIN: agent-worktrees` / `--collect-only` -- while
-            every other plugin's tests actually *run* there. (`ci.yml`
-            also has a separate `worktrees-windows-launch` job that DOES
-            execute one specific, narrowly-filtered `agent-worktrees` test
-            -- `-k status_daemon_console_root_contains_psmux_descendants`
-            -- so the claim isn't that this plugin's suite is never
-            executed on push/PR at all, only that neither existing path
-            would catch a *new*, differently-named probe test.) A
-            deliberately failing test added to any OTHER plugin's real
-            (non-filtered) suite would fail `ci.yml` itself first; the
-            `workflow_run` trigger itself still fires on that failed `CI`
-            run (`types: [completed]` fires for any conclusion), but
-            `gate`'s own `if:` requires `github.event.workflow_run.
-            conclusion == 'success'` before doing anything -- so `gate`
-            would produce `is_dev=false`/no-op and `report-failure` would
-            never fire -- defeating the entire probe. `agent-
-            worktrees` is the one plugin where a new, distinctly-named
-            test evades both of `ci.yml`'s existing execution paths, so
-            `ci.yml` stays green and `gate` proceeds normally, landing on
-            the real target: the `full -
-            agent-worktrees` job.
-      - [ ] Add ONE new, obviously-synthetic, clearly-commented failing
-            test to `agent-worktrees`' suite (e.g.
-            `assert False, "Deliberate Phase 1 validation probe for
-            promotion-failure-reactive-fix-agent -- safe to delete, see
-            efforts/active/promotion-failure-reactive-fix-agent"`) — never
-            touch existing test logic, never something with side effects,
-            never `.github/workflows/**`.
-      - [ ] **Add a changefile for `agent-worktrees`** (`python
-            tools/changefile.py add --plugin agent-worktrees --type dev
-            --comment "..."`) — this PR touches `plugins/agent-worktrees/`
-            content, so the repo's changefile-presence guard requires one;
-            the same is true for the follow-up revert PR below.
-      - [ ] Land it via the normal PR flow to `dev` like any other change
-            (small, honest PR description naming this as a deliberate,
-            temporary probe for this effort — never disguised as a real
-            bug).
-      - [ ] Watch the resulting `full - agent-worktrees` failure and
-            confirm `report-failure` behaves exactly as in the
-            natural-occurrence
-            checklist above.
-      - [ ] **Before reverting, deliberately re-trigger the same
-            validation run once more via a real `workflow_run` event** —
-            merge a small, trivial no-op PR into `dev` (this repo blocks
-            direct pushes to `dev`; every change lands through the normal
-            PR flow, no exception here) while the probe test is still
-            present (NOT `workflow_dispatch`: `report-failure` is
-            restricted to `github.event_name == 'workflow_run'`, so a
-            manual dispatch would re-run the failing `full` job but skip
-            the watchdog entirely and validate nothing). Confirm the
-            identical signature occurs a second time **within** the 6h
-            window and that rate-limiting actually holds: **no** second
-            issue and **no** new comment either (`process_signature`
-            deliberately returns without commenting while
-            `is_rate_limited(...)` is true) — a comment only appears once
-            the window has genuinely expired, which isn't practical to
-            wait out here. The probe as originally planned only ever
-            produced one occurrence, which would let this checklist be
-            marked complete without ever exercising the dedup path at
-            all; a single synthetic run doesn't prove Phase 1 handles the
-            exact repeat-failure case it exists for. If skipped for time,
-            explicitly record dedup as **unvalidated** here and do not
-            treat Phase 1 as fully proven / Phase 2's gate as unblocked on
-            that basis.
-      - [ ] **Revert immediately once confirmed** (a follow-up PR deleting
-            the probe test) — this deliberately jams every pending
-            promotion for the observation window, the exact cost this
-            whole effort exists to shorten, so keep that window as short
-            as the observation genuinely requires and never longer.
-      - [ ] Note in the Journal whether the resulting issue/comment was
-            left in place (as evidence) or closed once confirmed working.
+            below). **Not yet observed — genuinely unvalidated, per a
+            real review finding on this very journal entry (PR #3832):**
+            "exactly one issue currently exists for this signature" is
+            NOT evidence dedup/rate-limiting works, because the *first*
+            occurrence never produced an issue to begin with (that was
+            the bug PR #3815 fixed) — there has never yet been a second
+            occurrence for `process_signature`'s dedup path to have had a
+            chance to run against. This sub-item requires an actual
+            in-window repeat and its resulting silence (or, outside the
+            window, a comment) to be genuinely confirmed. This flaky test
+            has recurred naturally twice ~3.5h apart already, so a further
+            recurrence inside `#3830`'s 6h window (2026-09-26 12:10–18:10
+            UTC) is plausible — continuing to monitor for it rather than
+            declaring this closed.
+**Superseded — the sub-plan below is archived reference, not an active
+checklist.** A natural occurrence (run 36240803760, 2026-09-26 12:04 UTC)
+already confirmed `report-failure` correctly detects and files a new
+issue end-to-end after the PR #3815 fix (see Journal). Executing the
+probe purely to re-observe *that* part would only add risk (a real red
+`dev` window) for no additional signal. The steps below remain real,
+reviewed, and correct, and are kept (not deleted) in case a future need
+— most likely, still validating the dedup/rate-limit path specifically,
+see the open item just above — wants this exact design again; they are
+written as plain bullets, not `- [ ]` checkboxes, precisely so they never
+again render as active/actionable:
+
+* Hard stop, non-negotiable: the probe merge starts a clock.
+  Maximum 2 hours from the probe PR's merge to the revert
+  PR's merge, full stop — not "a reasonable observation
+  window," an actual deadline. Set a real reminder/timer for it
+  when the probe merges. If verification is still incomplete
+  when the deadline arrives (checks stalled, the revert PR
+  itself isn't merging, anything not going as planned), open
+  and merge the revert PR immediately anyway — an incomplete
+  observation is a fully acceptable outcome (record it as such
+  in the Journal); leaving `dev` red indefinitely while chasing
+  a clean observation is not. The revert PR is small and simple
+  enough to prepare in parallel with the probe PR (same diff,
+  inverted) so "the revert PR isn't merging" is never itself the
+  blocker.
+* Target `agent-worktrees` specifically, not just any
+  "low-traffic plugin" (a real review finding on this Plan
+  itself): `ci.yml`'s Linux smoke tier only *collects* (imports,
+  never executes) `agent-worktrees`' tests on push/PR --
+  `HEAVY_PLUGIN: agent-worktrees` / `--collect-only` -- while
+  every other plugin's tests actually *run* there. (`ci.yml`
+  also has a separate `worktrees-windows-launch` job that DOES
+  execute one specific, narrowly-filtered `agent-worktrees` test
+  -- `-k status_daemon_console_root_contains_psmux_descendants`
+  -- so the claim isn't that this plugin's suite is never
+  executed on push/PR at all, only that neither existing path
+  would catch a *new*, differently-named probe test.) A
+  deliberately failing test added to any OTHER plugin's real
+  (non-filtered) suite would fail `ci.yml` itself first; the
+  `workflow_run` trigger itself still fires on that failed `CI`
+  run (`types: [completed]` fires for any conclusion), but
+  `gate`'s own `if:` requires `github.event.workflow_run.
+  conclusion == 'success'` before doing anything -- so `gate`
+  would produce `is_dev=false`/no-op and `report-failure` would
+  never fire -- defeating the entire probe. `agent-
+  worktrees` is the one plugin where a new, distinctly-named
+  test evades both of `ci.yml`'s existing execution paths, so
+  `ci.yml` stays green and `gate` proceeds normally, landing on
+  the real target: the `full -
+  agent-worktrees` job.
+* Add ONE new, obviously-synthetic, clearly-commented failing
+  test to `agent-worktrees`' suite (e.g.
+  `assert False, "Deliberate Phase 1 validation probe for
+  promotion-failure-reactive-fix-agent -- safe to delete, see
+  efforts/active/promotion-failure-reactive-fix-agent"`) — never
+  touch existing test logic, never something with side effects,
+  never `.github/workflows/**`.
+* Add a changefile for `agent-worktrees` (`python
+  tools/changefile.py add --plugin agent-worktrees --type dev
+  --comment "..."`) — this PR touches `plugins/agent-worktrees/`
+  content, so the repo's changefile-presence guard requires one;
+  the same is true for the follow-up revert PR below.
+* Land it via the normal PR flow to `dev` like any other change
+  (small, honest PR description naming this as a deliberate,
+  temporary probe for this effort — never disguised as a real
+  bug).
+* Watch the resulting `full - agent-worktrees` failure and
+  confirm `report-failure` behaves exactly as in the
+  natural-occurrence
+  checklist above.
+* Before reverting, deliberately re-trigger the same
+  validation run once more via a real `workflow_run` event —
+  merge a small, trivial no-op PR into `dev` (this repo blocks
+  direct pushes to `dev`; every change lands through the normal
+  PR flow, no exception here) while the probe test is still
+  present (NOT `workflow_dispatch`: `report-failure` is
+  restricted to `github.event_name == 'workflow_run'`, so a
+  manual dispatch would re-run the failing `full` job but skip
+  the watchdog entirely and validate nothing). Confirm the
+  identical signature occurs a second time within the 6h
+  window and that rate-limiting actually holds: no second
+  issue and no new comment either (`process_signature`
+  deliberately returns without commenting while
+  `is_rate_limited(...)` is true) — a comment only appears once
+  the window has genuinely expired, which isn't practical to
+  wait out here. The probe as originally planned only ever
+  produced one occurrence, which would let this checklist be
+  marked complete without ever exercising the dedup path at
+  all; a single synthetic run doesn't prove Phase 1 handles the
+  exact repeat-failure case it exists for. If skipped for time,
+  explicitly record dedup as unvalidated here and do not
+  treat Phase 1 as fully proven / Phase 2's gate as unblocked on
+  that basis.
+* Revert immediately once confirmed (a follow-up PR deleting
+  the probe test) — this deliberately jams every pending
+  promotion for the observation window, the exact cost this
+  whole effort exists to shorten, so keep that window as short
+  as the observation genuinely requires and never longer.
+* Note in the Journal whether the resulting issue/comment was
+  left in place (as evidence) or closed once confirmed working.
 - [ ] Record findings (false positives, dedup accuracy, issue quality)
       here before treating Phase 1 as proven and touching Phase 2's gate.
 
@@ -940,3 +970,65 @@ _Pending._
   already specified in the Plan, to close out the remaining sub-items
   with genuine live evidence rather than declaring Phase 1.5 done on
   partial signal.
+
+### 2026-09-26 — Phase 1.5's second natural occurrence: detection+filing confirmed working live; dedup remains open
+- A second scheduled monitoring tick found two more red
+  `validate-and-promote.yml` runs since the last check:
+  **36236310228** (10:36 UTC — before PR #3815 merged; `report-failure`
+  still failed, same already-diagnosed root cause, no new information)
+  and **36240803760** (12:04 UTC — after the fix merged).
+- **36240803760 is the real positive confirmation this effort's whole
+  Phase 1.5 existed to get.** Same underlying flaky test as the first
+  occurrence — `agent-worktrees::TestRetireRecord::
+  test_concurrent_both_reaped_hard_delete_does_not_deadlock` — but this
+  time `report-failure` concluded `success`, and its own log showed
+  `[OK] filed https://github.com/ThomasMichon/copilot-extensions/
+  issues/3830`.
+- Inspected the filed issue directly: correct signature
+  (`Signature: 240176164548`, hidden anchor line — and identical to the
+  signature the local dry-run replay produced against the *first*
+  occurrence's data in the prior Journal entry, confirming the hash is
+  stable across separate real runs of the same failing test), correct
+  run link and commit SHA, a clean and genuinely useful log excerpt (the
+  real assertion failure and traceback, no ANSI garbage, no truncation),
+  the correct `ci-failure-signature` label, and the standard "no fix
+  attempted, whoever encounters it owns fixing it" status text.
+  Confirmed via `gh issue list --search '"Signature: 240176164548"'`
+  that exactly one such issue exists — no duplicate.
+- **This is the first real, live, end-to-end proof the *detection and
+  filing* path works correctly against genuine production data** — not a
+  unit test, not a local replay, but an actual hosted-runner
+  `report-failure` run filing a real issue with real data. The first
+  occurrence's bug-and-fix cycle (previous Journal entry) was necessary
+  groundwork; this occurrence is the actual validation of that specific
+  path.
+- **A real review finding on this exact journal entry (PR #3832) caught
+  an overclaim here, corrected below and in the Plan checklist above:**
+  the dedup/rate-limit path is NOT validated by this occurrence. "Exactly
+  one issue currently exists for this signature" only holds because the
+  *first* occurrence never produced an issue at all (the bug PR #3815
+  fixed) — there has never yet been a genuine second occurrence for
+  `process_signature`'s dedup logic to actually run against live. Proving
+  that path needs an actual in-window repeat and observed silence (or an
+  out-of-window repeat and an observed comment), which has not happened
+  yet. This specific flaky test has recurred naturally twice roughly 3.5
+  hours apart already, so a further recurrence inside `#3830`'s own 6h
+  window (2026-09-26 12:10–18:10 UTC) is plausible — continuing to
+  monitor for it (schedule stays armed) rather than declaring it closed
+  on inference.
+- **Phase 1.5 is therefore partially, not fully, complete:** the
+  detection+filing path is now proven live and correct; the dedup/rate-
+  limit path remains open. The deliberate-probe branch of the Plan is
+  marked superseded as archived reference (plain bullets, not active
+  checkboxes — see the Plan section above) rather than executed for the
+  *detection* validation specifically, since that risk would have bought
+  no additional signal there — but it may still be the right tool later
+  if no natural in-window repeat shows up, specifically to validate
+  dedup. Leaving the recurring monitoring schedule armed until the
+  dedup sub-item is genuinely confirmed one way or another.
+- **Next:** Phase 2 (an actual fix-attempt mechanism via `gh-aw`) remains
+  gated on the vision-reconciliation question noted at the top of this
+  file regardless of how the dedup sub-item resolves — Phase 1.5 proving
+  Phase 1's detection path live and correct does not itself resolve that
+  gate; it only removes the "we don't even know Phase 1 works yet"
+  reason to defer looking at it.
