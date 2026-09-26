@@ -430,6 +430,19 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
     compatibility root` / `allow legacy-compatibility` only on the 3 lines
     that genuinely fit that shape (the `DEFAULT_*` values and
     `home_dir()`).
+  - **Second first-pass mistake, also caught by PR review**: the changefile
+    used `--type dev`, matching this leg's own earlier `context-handoff` and
+    `copilot-extensions-harness` PRs — but `CONTRIBUTING.md`'s version-scheme
+    section is explicit: default to `patch` (bug fixes/small improvements/
+    docs that don't change runtime behavior — exactly this shape); `dev` is
+    only for "an iterative fixup within an already-in-flight patch" (i.e. a
+    second commit added to a PR that already has a pending `patch`
+    changefile from an earlier commit in the same PR, not a fresh PR's only
+    changefile). Fixed by switching this PR's changefile to `patch`. The
+    earlier two merged PRs' `dev`-typed changefiles were not retroactively
+    corrected (already consumed/merged); future guard-triage PRs should
+    default to `--type patch` unless genuinely adding to an already-pending
+    patch changefile in the same PR.
 - **Left the rest of `agent-vault` deliberately untouched this leg** —
   scoped to `config.py` only, matching the bounded single-file slice
   discipline:

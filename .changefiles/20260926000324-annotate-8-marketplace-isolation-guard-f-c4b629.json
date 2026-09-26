@@ -3,7 +3,7 @@
   "changes": [
     {
       "plugin": "agent-vault",
-      "type": "dev"
+      "type": "patch"
     }
   ]
 }
