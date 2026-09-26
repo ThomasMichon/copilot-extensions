@@ -446,18 +446,19 @@ shape before committing to a design)_
       a per-service wrapper/config (launch command, capability flags,
       sibling installs) that must keep varying by plugin, per that effort's
       own design.
-- [x] **No new pointer kind needed — superseded by the same Design
+- [x] ~~**No new pointer kind needed — superseded by the same Design
       Decision above.** A plugin's own `install.sh`/`install.ps1` directly
       `source`s/dot-sources the canonical `scripts/installer-engine.sh`/
-      `.ps1` via a relative path in `dev` — this needs no `uv`/Python
-      mechanism, no marker file format, and no new "pointer kind" at all:
-      a shell `source`/PowerShell `.` with a relative path argument
-      already works natively and preserves the dot-source contract (the
-      engine's functions land in the calling wrapper's own scope) by
-      construction, since it *is* a real dot-source, not a stub simulating
-      one. This resolves the original Plan's dot-source-preservation
-      concern by making it structurally unavoidable rather than a
-      requirement to test for.
+      `.ps1` via a relative path in `dev` ...~~ — **historical, not
+      currently resolved**: this checklist item marked the live-reference
+      idea "resolved" by the (now-superseded) Design Decision above. Per
+      the note just above, Phase 2's mechanism has NOT been re-evaluated
+      since libs pivoted to `src-passthrough` — this design is a
+      candidate, not a settled decision, until that re-evaluation happens.
+      Left `[x]` (not reopened as `[ ]`) only because the underlying
+      dot-source-preservation ANALYSIS still holds regardless of which
+      pointer mechanism Phase 2 ultimately adopts; the "no new pointer
+      kind needed" CONCLUSION is what's now open again.
 - [ ] At promotion, `materialize_main.py` (extended the same way as the
       libs case) rewrites that `source`/`.` line to reference (or fully
       inline) a freshly-copied-in local `scripts/installer-engine.{sh,ps1}`
