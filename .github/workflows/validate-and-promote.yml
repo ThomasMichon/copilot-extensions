@@ -193,13 +193,20 @@ jobs:
     # Phase 1 of the promotion-failure-reactive-fix-agent effort
     # (efforts/active/promotion-failure-reactive-fix-agent/README.md):
     # detect + dedup a red dev validation run and file/comment a tracking
-    # issue -- never attempts a fix. Intentionally scoped narrower than
-    # `promote`'s own `always()`: only run when something genuinely failed,
-    # on a genuinely validated dev commit -- never on a `is_dev == 'false'`
-    # run (a stray CI completion for an unrelated branch/PR) and never when
-    # everything actually passed.
+    # issue -- never attempts a fix.
+    #
+    # `always()` is REQUIRED here, not optional: GitHub Actions silently ANDs
+    # an implicit `success()` onto any job's `if:` unless the expression
+    # itself calls a status-check function (`always()`/`failure()`/
+    # `success()`/`cancelled()`) -- confirmed via review, this job would
+    # otherwise never fire on the exact red run it exists to report, since
+    # `full`/`worktree-manager`/`guards-full-sweep` genuinely failing is
+    # precisely the case the implicit success() check would skip. This
+    # mirrors why `promote` below needs its own `always()` for the same
+    # reason.
     needs: [gate, full, worktree-manager, guards-full-sweep]
     if: >-
+      always() &&
       needs.gate.outputs.is_dev == 'true' &&
       (needs.full.result == 'failure' ||
        needs.worktree-manager.result == 'failure' ||

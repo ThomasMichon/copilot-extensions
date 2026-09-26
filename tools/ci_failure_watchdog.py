@@ -94,7 +94,12 @@ def _excerpt_around(log_text: str, needle: str, before: int = 15, after: int = 3
 
 
 def signature_key(job_name: str, test_id: str | None, fallback_text: str = "") -> str:
-    basis = test_id if test_id else f"{job_name}:{fallback_text[:500]}"
+    # Always incorporate job_name, even for a parseable test id: this repo
+    # vendors shared libs into multiple plugins (`full` runs each plugin as
+    # its own job), so the identical test node id can legitimately fail in
+    # several different jobs at once -- those are different failures (a
+    # different plugin's copy) and must never collapse into one issue.
+    basis = f"{job_name}:{test_id}" if test_id else f"{job_name}:{fallback_text[:500]}"
     return hashlib.sha256(basis.encode("utf-8")).hexdigest()[:12]
 
 
@@ -161,7 +166,7 @@ def _existing_issue(repo: str, key: str) -> dict | None:
             "--label", ISSUE_LABEL,
             "--state", "open",
             "--search", f'"Signature: {key}"',
-            "--json", "number,updatedAt,comments",
+            "--json", "number,updatedAt",
         ]
     )
     if out.returncode != 0:
@@ -174,12 +179,16 @@ def _existing_issue(repo: str, key: str) -> dict | None:
 
 
 def _last_occurrence_at(issue: dict) -> datetime:
-    """The most recent occurrence marker: the latest comment if any exist,
-    else the issue's own last-updated timestamp (its filing)."""
-    comments = issue.get("comments") or []
-    if comments:
-        latest = max(comments, key=lambda c: c["createdAt"])
-        return datetime.fromisoformat(latest["createdAt"].replace("Z", "+00:00"))
+    """The most recent occurrence marker for rate-limiting.
+
+    Deliberately just ``updatedAt`` (bumped by GitHub on any new comment,
+    not only on filing) rather than fetching real comment objects: `gh
+    issue list --json comments` returns only a **comment count**, not
+    comment objects with timestamps (that shape only exists on `gh issue
+    view <#> --json comments` for a single issue) -- using `updatedAt`
+    avoids a schema mismatch entirely rather than adding a second `gh`
+    round-trip just to recover a timestamp GitHub already tracks for us.
+    """
     return datetime.fromisoformat(issue["updatedAt"].replace("Z", "+00:00"))
 
 

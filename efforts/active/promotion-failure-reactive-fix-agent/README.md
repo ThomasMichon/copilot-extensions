@@ -468,3 +468,38 @@ _Pending._
   vision-reconciliation decision; that decision is deferred until Phase 1
   has run for real against a genuine red build and its behavior (false
   positives, dedup accuracy, issue quality) can be judged on evidence.
+- **Copilot PR review (#3746) caught four real bugs before this ever ran
+  for real, all fixed:** (1) the new `report-failure` job's `if:` had no
+  status-check function, so GitHub's implicit `success()` requirement
+  would have silently skipped it on the exact red run it exists to
+  report — added the same `always()` this workflow's own `promote` job
+  already needed for the identical reason; (2) `signature_key()` hashed
+  only the test id for a parseable failure, so the identical test node id
+  failing in two different vendored-lib plugin jobs (`full -
+  agent-bridge` vs `full - agent-mcp`, a real shape in this repo) would
+  wrongly collapse into one issue — job name is now always part of the
+  hash basis; (3) `gh issue list --json comments` returns a comment
+  *count*, not comment objects with timestamps (that shape only exists on
+  `gh issue view` for a single issue) — the rate-limit anchor was
+  simplified to just `updatedAt`, which GitHub already bumps on any new
+  comment, rather than adding a second API round-trip to recover what it
+  already tracks; (4) the new test file wasn't wired into `ci.yml`'s
+  per-file test enumeration (no wildcard discovery in this repo) —
+  added alongside `module-health-watchdog.py`'s own entry. Also deleted a
+  flaky smoke test that shelled out to the real `gh` CLI (network/auth-
+  dependent) in favor of the equivalent, already-present monkeypatched
+  coverage, and added an explicit cross-job dedup regression test.
+- **One reviewer finding was checked against live evidence and found
+  incorrect, not applied:** the claim that `gh api .../jobs/{id}/logs`
+  returns a ZIP archive. Fetched a real job's log with that exact command
+  live against this repo — it returns plain text directly (the ZIP format
+  is real, but only for the *run*-level logs endpoint,
+  `.../runs/{run_id}/logs`, which downloads every job's logs bundled
+  together; the *job*-level endpoint this script uses is documented and
+  observed to return plain text on its own). Replied on the review thread
+  with the evidence rather than silently "fixing" correct behavior.
+- **Still deliberately not landed on `main`:** `validate-and-promote.yml`
+  is `workflow_run`-triggered, so per this repo's now-familiar bootstrap
+  gotcha, `report-failure` will not actually execute until this same diff
+  also reaches `main` via a workflows-only companion PR — queued as the
+  next action once this PR merges to `dev`.
