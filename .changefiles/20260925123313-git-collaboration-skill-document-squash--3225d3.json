@@ -1,9 +1,0 @@
-{
-  "comment": "git-collaboration skill: document squash-then-rebase technique for a PR whose target files were split upstream (coordinator-zombie-hygiene effort Phase 2)",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

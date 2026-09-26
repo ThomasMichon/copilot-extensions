@@ -1,9 +1,0 @@
-{
-  "comment": "Detached venue sessions start on the caller's own model, reasoning effort, and context tier (same resolution as ACP dispatch; explicit --copilot-arg wins)",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

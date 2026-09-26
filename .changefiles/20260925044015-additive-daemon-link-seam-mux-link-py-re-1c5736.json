@@ -1,9 +1,0 @@
-{
-  "comment": "Additive daemon-link seam (mux_link.py): resident status-monitor gains a rendezvous-published managed-mux observation IPC surface + ManagedMuxCache for a future Worktree Manager mux-companion daemon (Phase 3b Sub-slice 3 Step 1). No behavior change to ordinary sessions.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "dev"
-    }
-  ]
-}

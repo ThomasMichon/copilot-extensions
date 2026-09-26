@@ -1,9 +1,0 @@
-{
-  "comment": "list --json now serializes claims_summary (shared claims_rank ranking) for the Worktree Picker's CLAIMS column",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "dev"
-    }
-  ]
-}

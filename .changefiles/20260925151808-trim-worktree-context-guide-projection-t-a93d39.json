@@ -1,9 +1,0 @@
-{
-  "comment": "Trim worktree-context-guide projection template back under the 4 KiB projection budget",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

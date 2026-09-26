@@ -1,9 +1,0 @@
-{
-  "comment": "Containers pivot rows offer Inspect in a new window and Watch",
-  "changes": [
-    {
-      "plugin": "agent-containers",
-      "type": "patch"
-    }
-  ]
-}

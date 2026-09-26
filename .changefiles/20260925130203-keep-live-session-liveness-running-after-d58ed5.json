@@ -1,9 +1,0 @@
-{
-  "comment": "Keep live-session liveness running after steered delivery or active tool evidence.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

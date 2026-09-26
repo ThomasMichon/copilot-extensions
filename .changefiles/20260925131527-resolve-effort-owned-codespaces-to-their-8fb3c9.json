@@ -1,9 +1,0 @@
-{
-  "comment": "Resolve effort-owned CodeSpaces to their driving worktree from journaled claims.",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

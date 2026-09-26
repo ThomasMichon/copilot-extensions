@@ -1,9 +1,0 @@
-{
-  "comment": "Retire agent-worktrees terminal profile CLI",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

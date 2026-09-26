@@ -1,9 +1,0 @@
-{
-  "comment": "Thread an explicit resolved agent-worktrees command through the reviewing-customizations scanner, preferring it over ambient PATH",
-  "changes": [
-    {
-      "plugin": "customizing-copilot",
-      "type": "patch"
-    }
-  ]
-}
