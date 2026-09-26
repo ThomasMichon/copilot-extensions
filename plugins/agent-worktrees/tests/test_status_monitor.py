@@ -552,6 +552,67 @@ def test_sweep_serves_manager_owned_sessions_without_direct_mux_scan(tmp_path, m
     assert pane_observed == [("wt-manager-owned", "/w/managed")]
 
 
+def test_sweep_invalidates_managed_cache_only_incarnation(tmp_path, monkeypatch):
+    from agent_worktrees import mux_link
+
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: tmp_path / "reg")
+    monkeypatch.setattr(
+        m,
+        "cfg",
+        types.SimpleNamespace(
+            set_active_project=lambda *_a, **_k: None,
+            project_name=lambda: "proj",
+            active_project=lambda: "proj",
+            tracking_dir=lambda: tmp_path,
+        ),
+    )
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda *a, **k: "wt-manager-owned")
+    published_snapshots = []
+    monkeypatch.setattr(
+        m,
+        "_publish_managed_session_status",
+        lambda **kwargs: published_snapshots.append(dict(kwargs["published"]))
+        or {"handled": True, "applied": True, "context_published": True},
+        raising=False,
+    )
+
+    cache = mux_link.ManagedMuxCache()
+    cache.apply_observation(
+        {
+            "project": "proj",
+            "worktree_id": "wt-manager-owned",
+            "worktree_path": "/w/managed",
+            "mux_session": "wt-manager-owned",
+            "session_incarnation": "sess:2",
+            "mapping_revision": 2,
+            "live": True,
+        }
+    )
+    ctx_done = {"wt-manager-owned"}
+    published = {
+        ("wt-manager-owned", "@aw_ctx"): "stale-ctx",
+        ("wt-manager-owned", "@aw_seg"): "stale-seg",
+    }
+    incarnations = {"wt-manager-owned": "sess:1"}
+
+    served = m._monitor_sweep(
+        None,
+        "T",
+        "P",
+        ctx_done,
+        published=published,
+        incarnations=incarnations,
+        managed_mux_cache=cache,
+    )
+
+    assert served == 1
+    assert published_snapshots == [{}]
+    assert "wt-manager-owned" in ctx_done
+    assert incarnations["wt-manager-owned"] == "sess:2"
+
+
 def test_sweep_ctx_rendered_once(tmp_path, monkeypatch):
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)

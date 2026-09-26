@@ -4069,6 +4069,8 @@ def _monitor_sweep(
     managed_entries, observed_sessions, managed_served = _monitor_managed_session_union(
         managed_mux_cache, registry
     )
+    unmanaged_live_wt: set[str] = set()
+    live: dict[str, tuple[int, str]] = {}
     live_wt: set[str] = set()
     if mux_bin:
         live = _monitor_list_sessions(mux_bin)
@@ -4089,11 +4091,11 @@ def _monitor_sweep(
             if published is not None:
                 for key in [key for key in published if key[0] == sess]:
                     published.pop(key, None)
-        if incarnations is not None:
-            _monitor_update_session_incarnations(
-                incarnations, live, unmanaged_live_wt, managed_entries, ctx_done, published
-            )
         served = [(s, p) for s, p in registry.items() if s in unmanaged_live_wt and p]
+    if incarnations is not None:
+        _monitor_update_session_incarnations(
+            incarnations, live, unmanaged_live_wt, managed_entries, ctx_done, published
+        )
     served.extend(managed_served)
     if catalog_observer is not None:
         catalog_observer(observed_sessions)
