@@ -9,14 +9,20 @@ import json
 import pytest
 
 from worktree_manager import mux_daemon
+from worktree_manager import mux_mapping_registry
 from worktree_manager.__main__ import main
 
 
 @pytest.fixture(autouse=True)
 def _isolated_root(tmp_path, monkeypatch):
     """Force every helper's ``root=None`` default to resolve into a scratch
-    directory instead of the real ``~/.worktree-manager``."""
+    directory instead of the real ``~/.worktree-manager``. Patched in BOTH
+    modules -- ``mux_daemon.default_root`` (its own lock-path resolution)
+    and ``mux_mapping_registry.default_root`` (the registry lives in its
+    own module since the Copilot-review-driven split, with its own
+    imported reference to the same function)."""
     monkeypatch.setattr(mux_daemon, "default_root", lambda: tmp_path)
+    monkeypatch.setattr(mux_mapping_registry, "default_root", lambda: tmp_path)
     return tmp_path
 
 

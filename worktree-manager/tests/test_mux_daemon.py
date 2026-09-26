@@ -15,6 +15,7 @@ import pytest
 from work_coalescing_singleton import client as wcs_client
 
 from worktree_manager import mux_daemon
+from worktree_manager import mux_mapping_registry
 
 
 def _entry(**overrides) -> dict:
@@ -45,16 +46,16 @@ def test_normalize_mapping_entry_requires_core_fields():
         payload = _entry()
         del payload[field]
         with pytest.raises(ValueError, match=field):
-            mux_daemon._normalize_mapping_entry(payload)
+            mux_mapping_registry._normalize_mapping_entry(payload)
 
 
 def test_normalize_mapping_entry_rejects_bad_revision():
     with pytest.raises(ValueError):
-        mux_daemon._normalize_mapping_entry(_entry(mapping_revision=-1))
+        mux_mapping_registry._normalize_mapping_entry(_entry(mapping_revision=-1))
     with pytest.raises(ValueError):
-        mux_daemon._normalize_mapping_entry(_entry(mapping_revision="1"))
+        mux_mapping_registry._normalize_mapping_entry(_entry(mapping_revision="1"))
     with pytest.raises(ValueError):
-        mux_daemon._normalize_mapping_entry(_entry(mapping_revision=True))
+        mux_mapping_registry._normalize_mapping_entry(_entry(mapping_revision=True))
 
 
 def test_normalize_mapping_entry_defaults_and_pane_sanitization():
@@ -62,7 +63,7 @@ def test_normalize_mapping_entry_defaults_and_pane_sanitization():
     del payload["attached_clients"]
     del payload["session_incarnation"]
     del payload["observed_at"]
-    entry = mux_daemon._normalize_mapping_entry(payload)
+    entry = mux_mapping_registry._normalize_mapping_entry(payload)
     assert entry["attached_clients"] == 0
     assert entry["session_incarnation"] == ""
     assert entry["observed_at"]
@@ -487,6 +488,189 @@ def test_compute_discards_a_stale_render_arriving_after_a_newer_one(tmp_path, mo
         },
     )
     assert older == {"applied": False, "reason": "stale-render"}
+
+
+def test_ordering_fence_survives_a_simulated_daemon_restart(tmp_path, monkeypatch):
+    """Copilot review finding: the last-applied-render high-water mark must
+    be durable, not merely in-memory -- a fresh build_compute() closure
+    (simulating a daemon restart) sharing the SAME on-disk registry must
+    still discard a delayed render older than what was applied before the
+    (simulated) restart."""
+    path = tmp_path / "mux-mapping.json"
+    registry_before = mux_daemon.MuxMappingRegistry(path)
+    registry_before.register(_entry())
+    monkeypatch.setattr(subprocess, "run", _fake_run_factory())
+    compute_before = mux_daemon.build_compute(registry_before)
+    result = compute_before(
+        mux_daemon.KIND,
+        {
+            "project": "proj",
+            "worktree_id": "wt-1",
+            "values": {"@aw_ctx": "before-restart"},
+            "rendered_at": "2026-09-25T00:00:05Z",
+        },
+    )
+    assert result == {"applied": True}
+
+    # Simulate a daemon restart: a brand-new registry + build_compute
+    # instance over the SAME persisted file, with no in-memory state
+    # carried over.
+    registry_after = mux_daemon.MuxMappingRegistry(path)
+    compute_after = mux_daemon.build_compute(registry_after)
+    stale = compute_after(
+        mux_daemon.KIND,
+        {
+            "project": "proj",
+            "worktree_id": "wt-1",
+            "values": {"@aw_ctx": "delayed-stale"},
+            "rendered_at": "2026-09-25T00:00:01Z",
+        },
+    )
+    assert stale == {"applied": False, "reason": "stale-render"}
+
+
+def test_registry_record_applied_render_persists_and_is_noop_when_superseded(tmp_path):
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry(mapping_revision=1))
+    registry.record_applied_render("proj", "wt-1", "2026-09-25T00:00:05Z", mapping_revision=1)
+    assert registry.get("proj", "wt-1")["last_status_rendered_at"] == "2026-09-25T00:00:05Z"
+
+    # A late record_applied_render targeting a SUPERSEDED (now-stale)
+    # mapping_revision must be a no-op -- it must not overwrite the fence
+    # with a value computed against the OLD incarnation.
+    registry.register(_entry(mapping_revision=2))
+    registry.record_applied_render("proj", "wt-1", "2026-09-25T00:00:01Z", mapping_revision=1)
+    assert registry.get("proj", "wt-1")["last_status_rendered_at"] == "2026-09-25T00:00:05Z"
+
+
+def test_register_preserves_last_status_rendered_at_across_re_registration(tmp_path):
+    """Copilot review finding safeguard: a register() payload never carries
+    last_status_rendered_at itself (it is about mapping identity, not
+    status ordering) -- a re-register at a HIGHER mapping_revision for the
+    SAME underlying session must not silently reset the fence to None."""
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry(mapping_revision=1))
+    registry.record_applied_render("proj", "wt-1", "2026-09-25T00:00:05Z", mapping_revision=1)
+    # A re-register that keeps the SAME revision semantics conceptually
+    # (e.g. refreshing attached_clients) should not lose the fence.
+    registry.register(_entry(mapping_revision=1, attached_clients=2))
+    assert registry.get("proj", "wt-1")["last_status_rendered_at"] == "2026-09-25T00:00:05Z"
+
+
+def test_compute_rechecks_revision_immediately_before_applying(tmp_path, monkeypatch):
+    """Copilot review finding: the interprocess lock is only held for each
+    individual registry operation -- a concurrent CLI register/remove can
+    still supersede the mapping between an earlier fetch and the actual
+    write. Simulated deterministically: registry.get() returns the ORIGINAL
+    entry once (for compute's own initial fetch), then a superseded
+    (removed) view for the immediate-before-apply recheck."""
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry())
+    monkeypatch.setattr(subprocess, "run", _fake_run_factory())
+
+    real_get = registry.get
+    call_count = {"n": 0}
+
+    def _get_then_supersede(project, worktree_id):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return real_get(project, worktree_id)
+        # Simulate a concurrent remove landing between the initial fetch
+        # and the immediate-before-apply recheck.
+        return None
+
+    monkeypatch.setattr(registry, "get", _get_then_supersede)
+    compute = mux_daemon.build_compute(registry)
+    result = compute(
+        mux_daemon.KIND,
+        {
+            "project": "proj",
+            "worktree_id": "wt-1",
+            "values": {"@aw_ctx": "x"},
+            "rendered_at": "2026-09-25T00:00:00Z",
+        },
+    )
+    assert result == {"applied": False, "reason": "not-live"}
+    assert call_count["n"] == 2
+
+
+def test_shutdown_waits_for_an_in_flight_handler_before_closing(tmp_path, monkeypatch):
+    """Copilot review finding: CoalescingServer.close() does not join
+    already-running handler threads -- a handler mid-apply must be fenced
+    (waited for) before shutdown proceeds, so run_daemon_foreground never
+    releases its single-instance lease while a stale handler could still
+    be writing."""
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry())
+    release = threading.Event()
+    entered = threading.Event()
+
+    def _slow_run(argv, **kw):
+        if "set-option" in argv:
+            entered.set()
+            release.wait(timeout=3)
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(subprocess, "run", _slow_run)
+
+    runtime = mux_daemon.MuxDaemonRuntime(mux_daemon.registry_path(tmp_path))
+    runtime.start()
+    assert runtime.server is not None
+    try:
+        rv = mux_daemon.rendezvous_fields(runtime.server)
+        host, port, token = mux_daemon.endpoint_from_rendezvous(
+            {
+                "manager_mux_endpoint": rv["manager_mux_endpoint"],
+                "manager_mux_token": rv["manager_mux_token"],
+            }
+        )
+        payload = {
+            "project": "proj",
+            "worktree_id": "wt-1",
+            "values": {"@aw_ctx": "x"},
+            "rendered_at": "2026-09-25T00:00:00Z",
+        }
+
+        push_result: dict = {}
+
+        def _push():
+            push_result["r"] = wcs_client.request(
+                host,
+                port,
+                token,
+                kind=mux_daemon.KIND,
+                key=mux_daemon.status_push_key(payload),
+                payload=payload,
+                request_deadline_s=5.0,
+                client_id=wcs_client.new_client_id(),
+            )
+
+        push_thread = threading.Thread(target=_push)
+        push_thread.start()
+        assert entered.wait(timeout=3), "handler never reached the in-flight apply"
+
+        shutdown_result: dict = {}
+
+        def _shutdown():
+            start = time.time()
+            runtime.shutdown()
+            shutdown_result["elapsed"] = time.time() - start
+
+        shutdown_thread = threading.Thread(target=_shutdown)
+        shutdown_thread.start()
+        # shutdown() must actually be BLOCKED waiting on the in-flight
+        # handler right now, not racing past it.
+        time.sleep(0.2)
+        assert shutdown_thread.is_alive()
+
+        release.set()
+        push_thread.join(timeout=5)
+        shutdown_thread.join(timeout=5)
+        assert not shutdown_thread.is_alive()
+        assert push_result["r"] == {"applied": True}
+    finally:
+        if runtime.server is not None:
+            runtime.shutdown()
 
 
 def test_compute_revalidates_the_mapping_fresh_immediately_before_applying(tmp_path, monkeypatch):
