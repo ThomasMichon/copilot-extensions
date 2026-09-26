@@ -1,9 +1,0 @@
-{
-  "comment": "Migrate the status/disposition write call site onto the tracking_write daemon-mediated verb (agent-worktrees-authoritative-daemon Phase 3).",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
