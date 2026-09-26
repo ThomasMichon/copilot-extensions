@@ -2074,24 +2074,20 @@ def _carve_paired_knowledge(
     knowledge_ref = tracking.format_claim_ref(config.machine, knowledge_name, knowledge_id)
     knowledge_tracking_path = cfg.project_dir(knowledge_name) / "worktrees"
 
-    # pr-attribution-codenames Phase 2 (#2838): assign the paired knowledge
-    # worktree's own codename (scoped to its own project's tracking
-    # directory and wordlist, not a share of the harness's) BEFORE the git
-    # worktree/branch is created -- an allocation failure (an exhausted
-    # finite configured wordlist) must never leave an orphaned checkout with
-    # no tracking record. Assignment + the eventual record-write share one
-    # allocation lock (see codename_tracking.py) so a concurrent carve can
-    # never pick the same candidate.
+    # pr-attribution-codenames Phase 2 (#2838): assign the paired knowledge worktree's own
+    # codename (scoped to its own project's tracking directory and wordlist, not a share of
+    # the harness's) BEFORE the git worktree/branch is created -- an allocation failure (an
+    # exhausted finite configured wordlist) must never leave an orphaned checkout with no
+    # tracking record. Assignment + the eventual record-write share one allocation lock
+    # (see codename_tracking.py) so a concurrent carve can never pick the same candidate.
     #
-    # codename-attribution-by-default (round-10/11 findings): the
-    # allocation-policy check below is deliberately OUTSIDE this
-    # config-load try/except -- an earlier design had it inside, where a
-    # bare `except Exception` swallowed the policy violation into a silent
-    # `knowledge_wordlist = None` fallback, letting this path allocate a
-    # codename (with codename_source="built-in") for exactly the
-    # custom-wordlist/unconfigured-source_attribution repo the policy
-    # exists to block. A config-load failure degrades ONLY the wordlist
-    # resolution (matching this function's existing fail-safe posture);
+    # codename-attribution-by-default (round-10/11 findings): the allocation-policy check
+    # below is deliberately OUTSIDE this config-load try/except -- an earlier design had it
+    # inside, where a bare `except Exception` swallowed the policy violation into a silent
+    # `knowledge_wordlist = None` fallback, letting this path allocate a codename (with
+    # codename_source="built-in") for exactly the custom-wordlist/unconfigured-
+    # source_attribution repo the policy exists to block. A config-load failure degrades
+    # ONLY the wordlist resolution (matching this function's existing fail-safe posture);
     # it never silently authorizes an otherwise-blocked allocation.
     try:
         knowledge_config = cfg.load_config(project=knowledge_name)
@@ -2478,27 +2474,23 @@ def _create_worktree_core(
         if launch_preflight.error:
             raise LaunchPreflightError(launch_preflight.error)
 
-    # Round-6 review finding: preflight the PAIRED-KNOWLEDGE allocation
-    # policy here, BEFORE any side effect below (owner claim, harness git
-    # worktree/branch, tracking record) -- the ONLY preflight this policy
-    # previously had lived inside `_carve_paired_knowledge`, which
-    # `_create_worktree_core` calls AFTER the harness worktree/branch/
-    # record already exist, so a violation there still left those harness
-    # side effects behind (and without the orphan-path context the later
-    # revalidation adds). This mirrors the harness's own preflight-then-
-    # revalidate-under-lock shape immediately below; `_carve_paired_
-    # knowledge`'s own preflight/revalidation stay in place as defense in
+    # Round-6 review finding: preflight the PAIRED-KNOWLEDGE allocation policy here, BEFORE
+    # any side effect below (owner claim, harness git worktree/branch, tracking record) --
+    # the ONLY preflight this policy previously had lived inside `_carve_paired_knowledge`,
+    # which `_create_worktree_core` calls AFTER the harness worktree/branch/record already
+    # exist, so a violation there still left those harness side effects behind (and without
+    # the orphan-path context the later revalidation adds). This mirrors the harness's own
+    # preflight-then-revalidate-under-lock shape immediately below;
+    # `_carve_paired_knowledge`'s own preflight/revalidation stay in place as defense in
     # depth for the narrower TOCTOU window between here and its own carve.
     #
-    # Pairing applies to every `kind == "session"` worktree regardless of
-    # `origin` (#catch-22 follow-up to #3207): a delegate/system-origin
-    # dispatch worker needs its own paired knowledge sibling exactly as much
-    # as an interactive operator does -- reciprocal disposal (see
-    # `terminal_conclusion.conclude_disposable_worktree`) is what lets a
-    # dispatch attempt's conclusion release both halves together, so origin
-    # is no longer a reason to skip the carve. `no_pair` is the intentional,
-    # explicit per-call opt-out for a registrar/pool with no bound knowledge
-    # repo to hand its workers.
+    # Pairing applies to every `kind == "session"` worktree regardless of `origin`
+    # (#catch-22 follow-up to #3207): a delegate/system-origin dispatch worker needs its
+    # own paired knowledge sibling exactly as much as an interactive operator does --
+    # reciprocal disposal (see `terminal_conclusion.conclude_disposable_worktree`) is what
+    # lets a dispatch attempt's conclusion release both halves together, so origin is no
+    # longer a reason to skip the carve. `no_pair` is the intentional, explicit per-call
+    # opt-out for a registrar/pool with no bound knowledge repo to hand its workers.
     if kind == "session" and not no_pair:
         _paired_knowledge_allocation_preflight(config)
 
@@ -3200,7 +3192,6 @@ from .handoff_cutover import (  # noqa: E402 -- re-export position matches origi
 )
 
 
-
 def cmd_copilot(args: argparse.Namespace) -> int:
     """Deliver a TTY Copilot session to the user in THIS terminal.
 
@@ -3523,53 +3514,63 @@ def _cmd_status_write(
             # preserve, but a plain traceback is still a defect).
             output.err(str(e))
             return 1
-    # Foreground verb (#4547): the whole load -> set_disposition -> save is a
-    # critical RMW held under the blocking record lock, so a concurrent Picker
-    # best-effort sweep skips rather than clobbering the disposition overlay.
-    with tracking._RecordLock(yaml_path):
-        record = tracking.load_record(yaml_path)
-        if record.kind in tracking.MANAGED_KINDS and record.status in {
-            "complete", "completed", "finalized",
-        }:
-            output.err(
-                f"Worktree {worktree_id} is terminal and managed; refusing disposition changes."
-            )
-            return 1
-        if follow_up is False and record.active_effort is not None:
-            output.err(
-                "Cannot resolve this worktree while an effort remains bound. "
-                "Complete, transfer, or replace it with 'effort-focus'."
-            )
-            return 1
-        if follow_up is True and record.status == "finalized":
-            tracking.update_status(record, "active", save=False)
-        session_id = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
-        tracking.set_disposition(
-            record,
-            summary=summary,
-            title=title,
-            follow_up=follow_up,
-            session_id=session_id,
-            save=False,
+    # agent-worktrees-authoritative-daemon Phase 3: the whole load ->
+    # set_disposition -> save transaction (formerly a foreground
+    # `tracking._RecordLock` block here, #4547) now runs as the registered
+    # `status_disposition_write` verb (`tracking_disposition_write.py`),
+    # funneled through the resident daemon when reachable, or the identical
+    # code in-process (logged) via `tracking_write.dispatch` when it is not.
+    session_id = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
+    # Resolved here (mirrors session_id): the status_reported durable trace
+    # must use THIS project, never a resident daemon's own ambient one.
+    try:
+        project = cfg.project_name()
+    except Exception:
+        project = None
+    from . import locks as _locks
+    from . import status_monitor_runtime as _smr
+    from . import tracking_write
+
+    _monitor_lock_path = _self_override("_monitor_lock_path", _smr._monitor_lock_path)
+    _ensure_status_monitor = _self_override("_ensure_status_monitor", _smr._ensure_status_monitor)
+    _status_monitor_enabled = _self_override(
+        "_status_monitor_enabled", _smr._status_monitor_enabled
+    )
+    try:
+        result = tracking_write.dispatch(
+            "status_disposition_write",
+            {
+                "worktree_id": worktree_id,
+                "yaml_path": str(yaml_path),
+                "summary": summary,
+                "title": title,
+                "follow_up": follow_up,
+                "session_id": session_id,
+                "project": project,
+            },
+            read_lock_data=lambda: _locks.read_lock(_monitor_lock_path()),
+            ensure_monitor=_ensure_status_monitor if _status_monitor_enabled() else None,
         )
-        tracking.save_record(record)
-        # Stage 5 (status_reported): once per session_id (held under the
-        # same RecordLock as the write above so two concurrent writers can't
-        # both observe "no prior event" and double-emit). No `limit` here --
-        # the log is already retention-pruned, and a `limit` would silently
-        # drop an older matching event once a worktree accumulates enough
-        # newer ones, defeating the once-per-session guarantee.
-        if session_id and not any(
-            e.get("session_id") == session_id
-            for e in activity.read_events(worktree_id=worktree_id, event="status_reported")
-        ):
-            activity.log_event("status_reported", worktree_id=worktree_id, session_id=session_id)
-    flag = "follow-ups pending" if record.follow_up else "resolved"
+    except tracking_write.AmbiguousWriteOutcome as e:
+        output.err(f"Disposition write to worktree {worktree_id} is in an unknown state: {e}")
+        return 1
+    if result.get("error") == "terminal_managed":
+        output.err(
+            f"Worktree {worktree_id} is terminal and managed; refusing disposition changes."
+        )
+        return 1
+    if result.get("error") == "effort_bound":
+        output.err(
+            "Cannot resolve this worktree while an effort remains bound. "
+            "Complete, transfer, or replace it with 'effort-focus'."
+        )
+        return 1
+    flag = "follow-ups pending" if result["follow_up"] else "resolved"
     msg = f"[OK] Worktree {worktree_id[-4:]} disposition: {flag}"
-    if title is not None and record.title:
-        msg += f" -- title: {record.title}"
-    if record.summary:
-        msg += f" -- {record.summary}"
+    if title is not None and result["title"]:
+        msg += f" -- title: {result['title']}"
+    if result["summary"]:
+        msg += f" -- {result['summary']}"
     print(msg)
     return 0
 
@@ -3667,15 +3668,13 @@ def _pending_handoff_retire_requests(
     worktree_id = getattr(record, "worktree_id", None)
     if not worktree_id:
         return []
-    # The rolling activity.jsonl log is bounded (age + a 64-event read cap);
-    # a worktree with more than 64 later cutovers -- or one revisited well
-    # past the log's retention window -- can silently drop an older
-    # handoff's spawn/retire evidence right out of view. Both
-    # "handoff_cutover_spawn" and "handoff_predecessor_retire" are
-    # stage-mapped (HANDOFF_STAGE_MAP stages 8 and 11), so they also land in
-    # the durable, unrotated per-project trace store (handoff_trace.py,
-    # Phase 3) -- merge it in as the completeness backstop the bounded log
-    # can't be.
+    # The rolling activity.jsonl log is bounded (age + a 64-event read cap); a worktree
+    # with more than 64 later cutovers -- or one revisited well past the log's retention
+    # window -- can silently drop an older handoff's spawn/retire evidence right out of
+    # view. Both "handoff_cutover_spawn" and "handoff_predecessor_retire" are stage-mapped
+    # (HANDOFF_STAGE_MAP stages 8 and 11), so they also land in the durable, unrotated per-
+    # project trace store (handoff_trace.py, Phase 3) -- merge it in as the completeness
+    # backstop the bounded log can't be.
     trace_events: list[dict[str, object]] = []
     project = cfg.active_project()
     if project:
