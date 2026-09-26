@@ -252,38 +252,35 @@ single phase that must land both together.
       pass since the two currently run as separate, untimed-relative-to-
       each-other passes over "terminal" tasks.
 
-### Phase 3 — The cooldown monitor (default, round-robin time-slice yield)
-- [ ] Extend `queue_storage._enqueue_wake()` (or add a sibling) with an
-      optional `not_before` override (default preserves today's
-      immediate-delivery behavior exactly — no existing caller is
-      affected).
-- [ ] Add `TaskQueue.suspend(..., cooldown_seconds: float | None =
-      DEFAULT_SUSPEND_COOLDOWN_SECONDS)` — a suspend with **no** more
-      specific monitor gets the default cooldown automatically, so a bare
-      "yield the lane" is always a real, bounded, monitored wait, never an
-      unwatched idle (per *suspension-requires-a-monitor*). Route delivery
-      through the **existing interactive/cold-headless split** found in
-      Context above — for a cold-headless reservation this likely means
-      scheduling a delayed flip of `resume_requested = 1` (a new small
-      "cooldown reconciliation" pass alongside the existing liveness GC
-      loop, since `resume_requested` today only gets set synchronously),
-      not literally reusing `_enqueue_wake`'s interactive-only delivery
-      path unchanged.
-- [ ] A worker that names a **specific** wait (not the bare default) should
-      be able to suspend against a longer, unbounded cooldown or state that
-      no cooldown applies (an explicit "I have named my own monitor"
-      escape hatch) — but starting with cooldown-only for every monitor
-      kind (Phase 1's closed vocabulary of exactly one) is fine; a second
-      monitor kind is out of scope here.
-- [ ] CLI/API surface: `agent-dispatch suspend <id> --reason "..."
-      [--cooldown-seconds N]`.
-- [ ] Tests: a suspended task with no explicit cooldown resumes on its own
-      after the default interval (fake clock, not a real sleep); an
-      explicit `--cooldown-seconds` overrides the default; a task resumed
-      by an operator steer before its cooldown fires never double-resumes
-      when the stale cooldown wake later becomes due (reuse/extend the
-      existing `_wake_is_current` fencing logic for whichever delivery path
-      Phase 3 actually lands on).
+### Phase 3 — The cooldown monitor (default, round-robin time-slice yield) ✅ landed
+- [x] ~~Extend `queue_storage._enqueue_wake()`~~ **not needed** -- see the
+      Journal entry below for why the actual design never touches the wake
+      outbox at all. Instead, the monitor deadline is tracked directly on
+      the task row (new `monitor_kind`/`monitor_not_before` columns).
+- [x] Added `TaskQueue.suspend(..., cooldown_seconds: float | None =
+      DEFAULT_SUSPEND_COOLDOWN_SECONDS)` — a suspend with no more specific
+      monitor gets the default cooldown automatically (per
+      *suspension-requires-a-monitor*). Extracted `suspend`/`resume` out of
+      the near-ceiling `queue_lifecycle.py` into a new `queue_suspend.py`
+      mixin (module-size discipline) alongside the new
+      `reconcile_cooldowns()` reconciler.
+- [x] The escape hatch exists: `cooldown_seconds=None` suppresses the
+      monitor entirely (CLI: `--no-cooldown`). A second monitor kind
+      remains out of scope.
+- [x] CLI/API surface: `agent-dispatch suspend <id> --reason "..."
+      [--cooldown-seconds N | --no-cooldown]`. Threaded through
+      `DispatchClient.suspend` (new `client_suspend.py` mixin, same reason)
+      and the coordinator's `SuspendBody`/`/tasks/{id}/suspend` route
+      (`model_fields_set` distinguishes "not passed" from an explicit
+      `null` over the wire).
+- [x] Tests: `tests/test_queue_suspend.py` (fake-clock, no real sleep) --
+      default cooldown attaches a monitor; an explicit override changes the
+      deadline; `None` suppresses it; `resume()` always clears the monitor
+      so a manually-resumed task never gets double-resumed by a later
+      `reconcile_cooldowns()` pass; a raced/abandoned task is skipped, not
+      errored. Plus coordinator-level HTTP round-trip tests and a real
+      (short-real-sleep) end-to-end auto-resume test against the live
+      `_gc_loop`.
 
 ### Phase 4 — Crash-recovery honesty (the "died due to infrastructure failure" note)
 - [ ] Locate the current `agent-dispatch run`/supervisor startup
@@ -443,3 +440,56 @@ Phase 3/4's shapes are still pending their own design pass.
 - Phase 2 is code-complete. Phases 3 (cooldown monitor) and 4
   (crash-recovery honesty) remain open and are independent of each other
   and of Phase 2 — either may be picked up next.
+
+### 2026-09-25/26 — Phase 3 lands: the cooldown monitor, wired end to end
+- Resumed via a standalone context-handoff continuation in a fresh
+  worktree. Started from the Phase 3 checklist above rather than
+  re-deriving the design, but reading `resume()`'s `_transition` call more
+  closely revealed the checklist's own premise was slightly off: the
+  interactive/cold-headless split it flags does **not** need a new
+  `not_before`-aware wake path, because `resume()` already internally
+  branches correctly between the two (an interactive owner transitions
+  straight to `started`; a cold-headless owner instead flips
+  `resume_requested` and stays `suspended`, for the supervisor's own
+  `release_resumed_cold_tasks` poll to pick up) -- see
+  `queue_suspend.py`'s module docstring for the exact mechanism. This let
+  the whole reconciler collapse to "track a deadline on the task row, then
+  call the unmodified `resume()` once it's due" -- no wake-outbox changes,
+  no new resume_requested-flip code path, and no risk of the two
+  mechanisms (a delayed wake vs. a delayed resume_requested flip) racing
+  each other.
+- Landed: `monitors.py` gained `suspend_monitor_columns()` (pure) and
+  `DEFAULT_SUSPEND_COOLDOWN_SECONDS`; new `monitor_kind`/`monitor_not_before`
+  task columns (`queue_common.py`, auto-migrated via the existing
+  `_COLUMNS`/`_migrate` mechanism -- no bespoke migration code needed);
+  `suspend`/`resume` extracted out of the near-ceiling `queue_lifecycle.py`
+  (998/1000 lines, effectively zero headroom) into a new `queue_suspend.py`
+  mixin, which also gained `reconcile_cooldowns()`; `client.py` similarly
+  had zero headroom against its own baselined ceiling (1175 lines), so
+  `suspend` moved to a new `client_suspend.py` mixin (same pattern as
+  Phase 2's `client_completion_review.py`). CLI: `--cooldown-seconds` /
+  `--no-cooldown` on `suspend`. HTTP: `SuspendBody.cooldown_seconds`,
+  using pydantic's `model_fields_set` to distinguish "not passed" (server
+  default applies) from an explicit `null` (suppressed) over the wire --
+  the client mirrors this with a private `_UNSET` sentinel.
+- The reconciler itself doesn't run as its own new opt-in coordinator loop:
+  it's piggybacked directly onto the existing always-on liveness-GC loop
+  (`_gc_loop` in `coordinator_loops.py`), since a bare suspend's cooldown
+  needs the exact same unconditional "never just sit there" guarantee
+  liveness GC already gives held tasks -- no new `LoopHealth`/health-endpoint
+  wiring needed, unlike the opt-in `handoff_fallback` loop.
+- Tests: new `tests/test_queue_suspend.py` (9, fake-clock unit coverage of
+  suspend/resume/reconcile_cooldowns incl. the race/abandon/already-resumed
+  cases), 3 new coordinator HTTP round-trip cases, 1 new real
+  (short-sleep) end-to-end coordinator test proving the live `_gc_loop`
+  actually auto-resumes a suspended task, 2 new CLI cases (kwarg
+  forwarding + the `--no-cooldown`/`--cooldown-seconds` conflict guard),
+  plus `test_queue_lifecycle.py`'s guard test updated for the
+  suspend/resume extraction. `check-module-size.py` clean (`client.py`
+  1153/1175, `queue_lifecycle.py` 899/1000, both now with headroom instead
+  of none). Full `plugins/agent-dispatch` suite run before merging (see
+  Validation Plan) -- same single pre-existing flake as Phase 2, nothing
+  new.
+- Phase 4 (crash-recovery honesty) remains open and is next; genuinely
+  unexplored per the Phase 4 checklist.
+

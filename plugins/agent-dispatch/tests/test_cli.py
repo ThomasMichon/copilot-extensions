@@ -1901,6 +1901,19 @@ def test_parser_suspended_lifecycle_verbs():
     )
     assert suspend.command == "suspend"
     assert suspend.reason == "waiting"
+    assert suspend.cooldown_seconds is None
+    assert suspend.no_cooldown is False
+    suspend_cooldown = build_parser().parse_args(
+        [
+            "suspend", "task-1", "worker-1", "--reason", "waiting",
+            "--cooldown-seconds", "30",
+        ]
+    )
+    assert suspend_cooldown.cooldown_seconds == 30.0
+    suspend_no_cooldown = build_parser().parse_args(
+        ["suspend", "task-1", "worker-1", "--reason", "waiting", "--no-cooldown"]
+    )
+    assert suspend_no_cooldown.no_cooldown is True
     resume = build_parser().parse_args(
         ["resume", "task-1", "worker-1", "--no-wake"]
     )
@@ -1911,6 +1924,59 @@ def test_parser_suspended_lifecycle_verbs():
     )
     assert release.command == "release"
     assert release.reason == "replace it"
+
+
+def test_cmd_suspend_forwards_cooldown_kwargs_when_given(monkeypatch, capsys):
+    from agent_dispatch import __main__ as m
+
+    class FakeClient:
+        def __init__(self):
+            self.suspend_kwargs: dict = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def suspend(self, task_id, worker_id, *, reason, **kwargs):
+            self.suspend_kwargs = kwargs
+            return {"id": task_id, "owner": worker_id, "status": "suspended", "reason": reason}
+
+    fake = FakeClient()
+    monkeypatch.setattr(m, "_resolve_owner", lambda args, *, verb: "m/wt-1")
+    monkeypatch.setattr(m, "_client", lambda _args: fake)
+
+    args = build_parser().parse_args(["suspend", "task-1", "--reason", "waiting"])
+    assert args.func(args) == 0
+    assert fake.suspend_kwargs == {}
+    capsys.readouterr()
+
+    args = build_parser().parse_args(
+        ["suspend", "task-1", "--reason", "waiting", "--cooldown-seconds", "45"]
+    )
+    assert args.func(args) == 0
+    assert fake.suspend_kwargs == {"cooldown_seconds": 45.0}
+    capsys.readouterr()
+
+    args = build_parser().parse_args(
+        ["suspend", "task-1", "--reason", "waiting", "--no-cooldown"]
+    )
+    assert args.func(args) == 0
+    assert fake.suspend_kwargs == {"cooldown_seconds": None}
+
+
+def test_cmd_suspend_rejects_conflicting_cooldown_flags(monkeypatch):
+    from agent_dispatch import __main__ as m
+
+    monkeypatch.setattr(m, "_resolve_owner", lambda args, *, verb: "m/wt-1")
+    args = build_parser().parse_args(
+        [
+            "suspend", "task-1", "--reason", "waiting",
+            "--cooldown-seconds", "10", "--no-cooldown",
+        ]
+    )
+    assert args.func(args) == 2
     wakes = build_parser().parse_args(["wakes", "task-1"])
     assert wakes.command == "wakes"
     assert wakes.task_id == "task-1"
