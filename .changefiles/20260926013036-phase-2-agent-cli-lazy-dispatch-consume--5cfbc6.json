@@ -1,9 +1,0 @@
-{
-  "comment": "Phase 2 (agent-cli-lazy-dispatch): consume the new shared libs/lazy-cli-dispatch mechanism via a real, working src-passthrough vendor pointer (tools/sync-vendored-libs.py --pointerize)",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
