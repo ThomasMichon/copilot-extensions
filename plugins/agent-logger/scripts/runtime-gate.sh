@@ -105,7 +105,7 @@ apply_runtime_env() {
     if [[ -n "$INSTALLATION_ID" ]]; then
         export AGENT_LOGGER_INSTALLATION_ID="$INSTALLATION_ID"
         export AGENT_LOGGER_TIMER_NAME="agent-logger-sync-$SERVICE_SUFFIX"
-        export AGENT_LOGGER_TASK_NAME="Agent Logger Session Sync - $SERVICE_SUFFIX"
+        export AGENT_LOGGER_TASK_NAME="Agent Logger Session Sync - $SERVICE_SUFFIX" # marketplace-isolation: allow cell-derived-suffix
     else
         unset AGENT_LOGGER_INSTALLATION_ID AGENT_LOGGER_TIMER_NAME AGENT_LOGGER_TASK_NAME
     fi

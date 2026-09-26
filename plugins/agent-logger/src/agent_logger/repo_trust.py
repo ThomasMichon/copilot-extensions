@@ -124,12 +124,12 @@ def _default_repos_yaml_root() -> Path:
     """
     override = os.environ.get("AGENT_HOME", "").strip()
     if override:
-        return Path(override) / ".agent-worktrees"
+        return Path(override) / ".agent-worktrees"  # marketplace-isolation: allow registry
     if platform.system() == "Windows":
         home = Path(os.environ.get("USERPROFILE") or Path.home())
     else:
         home = Path.home()
-    return home / ".agent-worktrees"
+    return home / ".agent-worktrees"  # marketplace-isolation: allow registry
 
 
 def _registered_default_branch(remote_url: str) -> str | None:

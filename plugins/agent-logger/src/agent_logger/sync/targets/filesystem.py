@@ -1944,7 +1944,7 @@ class LocalTarget(FilesystemTarget):
         path = self.options.get("path")
         if path:
             return Path(path).expanduser()
-        return Path.home() / ".agent-logger" / "sessions"
+        return Path.home() / ".agent-logger" / "sessions"  # marketplace-isolation: allow legacy-compatibility
 
 
 def resolve_onedrive_root() -> Path | None:

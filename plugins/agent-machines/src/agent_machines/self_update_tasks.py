@@ -468,6 +468,9 @@ def _linux_exec_start(
 def render_linux_service_unit(
     tier: str, *, machine: str | None = None, home: Path | None = None
 ) -> str:
+    base = home if home is not None else Path.home()
+    local_bin = base / ".local" / "bin"
+    path_value = f"PATH={local_bin}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
     return (
         "[Unit]\n"
         f"Description={task_description(tier)}\n"
@@ -475,8 +478,20 @@ def render_linux_service_unit(
         "[Service]\n"
         "Type=oneshot\n"
         f"WorkingDirectory={task_working_directory(home)}\n"
+        # systemd --user's own manager environment carries a minimal PATH
+        # (confirmed live: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+        # :/sbin:/bin, no `~/.local/bin`) -- every facility binstub this
+        # sweep shells out to by bare name (agent-worktrees, agent-ssh, ...)
+        # lives only in `~/.local/bin`, so an unattended run failed with
+        # FileNotFoundError for days before a human noticed the timer never
+        # actually converging anything. Prepending it here fixes every
+        # subprocess call this service makes, not one call site at a time.
+        # Quoted as one token (like ExecStart='s parts) so a home directory
+        # containing whitespace doesn't split PATH= into invalid tokens.
+        f"Environment={_systemd_quote(path_value)}\n"
         f"ExecStart={_linux_exec_start(tier, machine=machine, home=home)}\n"
     )
+
 
 
 def render_linux_timer_unit(tier: str) -> str:

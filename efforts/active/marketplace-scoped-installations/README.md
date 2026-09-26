@@ -386,6 +386,130 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-26 — `agent-logger`'s 18 findings resolved (first-time triage of this plugin)
+
+- Fresh guard count for `dev` head (post guard-fix merge): 666, then 669
+  after further unrelated `dev` activity (confirmed via `git stash`/`git
+  stash pop` at commit time — the drift between checks tracks unrelated
+  concurrent `dev` commits, not a validation error; this leg's own change
+  always removes exactly 18 findings regardless of the baseline).
+- `agent-logger` had never been individually triaged before this leg (it
+  had only benefited incidentally from the `_CELL_QUALIFIER` `RUNTIME_ROOT`
+  guard fix in the prior entry, which silently resolved 1 of its findings
+  without anyone reading the rest). Checked file concentration first (per
+  the effort's own established discipline): 40 findings across 15 files,
+  with `install.sh`/`.ps1` (18) and `service.yaml` (3) matching the same
+  blocked generic-wrapper/service-manifest backlog already confirmed for
+  `budget-guidance`/`agent-pull-requests`/other plugins' `install.*` —
+  left untouched. The remaining ~19 findings across 12 files were read
+  individually, not assumed from file name:
+  - `src/agent_logger/config.py:259` (`return Path.home() / ".agent-
+    logger"`) — genuine env-override-with-legacy-default (`AGENT_LOGGER_
+    HOME` checked first), identical shape to `agent-vault`'s `home_dir()`.
+    Annotated `allow legacy compatibility root`.
+  - `src/agent_logger/repo_trust.py:127,132` and `tenancy.py:82` — both
+    read `agent-worktrees`' own legacy registry root (`~/.agent-worktrees`)
+    by name for cross-plugin repo-adoption lookups; the `repo_trust.py`
+    docstring explicitly documents this as intentionally mirroring
+    `agent_worktrees.registry_paths._legacy_root` (citing the identical,
+    pre-existing scope in `agent_bridge.agent_registry_common._REPOS_
+    YAML_DEFAULT`). Matches the already-established, multi-plugin `allow
+    registry` marker (verified via `grep` across `agent-worktrees`/
+    `agent-dispatch`/`agent-bridge`/`agent-machines`/`agent-codespaces`'
+    own vendored `plugin_activation/resolver.py:1121`). Annotated all 3
+    lines with `allow registry`.
+  - `src/agent_logger/sync/origin.py:45`
+    (`_LEGACY_OPT_IN_CONFIG_RELATIVE = (".agent-logger", "config.yaml")`)
+    and `sync/targets/filesystem.py:1947` (`Path.home() / ".agent-logger"
+    / "sessions"`, with an explicit `self.options.get("path")` override
+    checked first) — both genuine legacy-default fallback values, paired
+    with a documented newer alternative (`_OPT_IN_CONFIG_RELATIVE` using
+    `.copilot-extensions/agent-logger/config.yaml`) or an explicit
+    override. Annotated `allow legacy-compatibility`.
+  - `scripts/register-cold-store-provider.ps1:44`
+    (`Join-Path $env:USERPROFILE '.agent-bridge\cold-store-providers.d'`)
+    — a **sibling-plugin's** (`agent-bridge`) legacy directory, read only
+    after two explicit env overrides (`AGENT_BRIDGE_COLD_STORE_PROVIDERS_
+    DIR`, `AGENT_BRIDGE_CONFIG_DIR`) are checked first — the same env-
+    override-with-legacy-default shape, just targeting a sibling instead
+    of the plugin's own root (confirmed `agent-codespaces/scripts/
+    register-bridge-provider.sh` uses the identical
+    `${AGENT_BRIDGE_CONFIG_DIR:-$HOME/.agent-bridge}` pattern, though that
+    file isn't currently guard-flagged). Annotated `allow legacy
+    compatibility root`.
+  - `scripts/runtime-gate.ps1:45` — **found the exact same pre-existing
+    marker-placement bug fixed in `agent-vault`'s `runtime-gate.ps1` last
+    leg**: the `allow legacy compatibility root` marker was on the closing
+    `}` line of the `if`/`else` expression, not the flagged `Join-Path
+    $env:USERPROFILE '.agent-logger'` line two lines above, so it never
+    actually suppressed the finding. Moved the marker onto the flagged
+    line. (Both `agent-vault` and `agent-logger`'s `runtime-gate.ps1`
+    likely came from the same template/generator originally, given the
+    identical bug — a future leg triaging any other plugin's `runtime-
+    gate.ps1` should check for this same misplacement pattern rather than
+    assuming a fresh one is unique to that plugin.)
+  - `scripts/runtime-gate.sh:108` and `runtime-gate.ps1:262`
+    (`AGENT_LOGGER_TASK_NAME = "Agent Logger Session Sync - $SERVICE_
+    SUFFIX"` / `$serviceSuffix`) — the exact `SERVICE_SUFFIX`-only shape
+    the prior entry's guard fix deliberately did NOT touch (correctly
+    still-flagged, since the fix only recognizes a direct `$RUNTIME_ROOT`
+    reference on the same line, not a locally-derived suffix variable by
+    name alone). **Individually verified** (not blanket-trusted) that
+    `SERVICE_SUFFIX` in both files is genuinely assigned from
+    `scoped_identity_suffix "$RUNTIME_ROOT"` (`.sh` line 260) / an inlined
+    equivalent SHA256 block over `$runtimeRoot` (`.ps1` line 232) earlier
+    in the same file — the identical pattern already confirmed safe in
+    `agent-vault`. This is option (b) from the prior entry's own guidance
+    ("per-line annotation once each is individually confirmed to derive
+    from a real `scoped_identity_suffix` call") rather than re-adding a
+    bare keyword to the guard regex (option (c), the explicitly-warned-
+    against mistake). Annotated both with a new, precise `allow cell-
+    derived-suffix` reason (distinct from `allow legacy-compatibility`,
+    since this is the *live*, correct cell-qualified value, not a legacy
+    fallback — no existing token fit this shape).
+  - `skills/log-session/SKILL.md:94` (a blockquote paragraph, not a table)
+    and `skills/session-sync-setup/SKILL.md`'s 6 findings (a mix of plain
+    paragraphs, a table cell, and a diagnostic command inside a bullet) —
+    all describe the current deployed config-file location/systemd unit
+    names for setup/troubleshooting guidance, the same shape as the
+    `copilot-extensions-harness` and `agent-vault` `SKILL.md` precedents.
+    Confirmed the HTML-comment marker works identically inside blockquote/
+    bullet prose, not just table cells (no existing precedent for that
+    exact placement, but the guard's `_ALLOW_REASON` regex is a plain
+    same-line text match with no markdown-structure awareness, so this
+    was a safe, low-risk extension of the established pattern, verified by
+    checking the count dropped as expected). Annotated all 7 (1 + 6) with
+    `allow deployed-runtime-diagnostics`.
+  - `skills/session-sync-setup/references/config.yaml:64`
+    (`password_file: ~/.agent-logger/rsync.pass   # optional`) — inside a
+    "canonical, copy-pasteable example" reference file (its own header
+    comment says so explicitly), not live deployed state. Matches the
+    established `allow doc-example` category. Annotated.
+- Verified: `git diff origin/dev -- plugins/agent-logger | grep "^\+.*
+  marketplace-isolation: allow" | wc -l` = exactly 18 (matching all 18
+  resolved findings — not eyeballed). `check-marketplace-isolation.py
+  --json` dropped by exactly 18 (669→651 at verification time).
+  `python -c "import ast; ast.parse(...)"` syntax check on all 5 touched
+  `.py` files. `pwsh -Command "[System.Management.Automation.Language.
+  Parser]::ParseFile(...)"` confirmed both touched `.ps1` files still
+  parse. `python tools/run-plugin-tests.py agent-logger` (the canonical
+  turn-key runner): 611 passed, 18 skipped (pre-existing skips, unrelated
+  to this change). `check-docs-consistency.py` OK. `check-changefile-
+  presence.py --base origin/dev` OK after adding a `patch`-typed
+  changefile (the correct default, per the prior entry's own correction —
+  not repeating the earlier `dev`-type mistake). Manually confirmed the
+  fix catches its own regression via `git stash`/`git stash pop`
+  (669→651→669→651).
+- **Left deliberately untouched, documented rather than guessed at**:
+  `payload-invocation.json:5`'s `legacyRuntimeRoot` field — the same
+  cross-plugin open question already deferred for `agent-vault` (the
+  identical field/shape exists verbatim in `agent-index`/`agent-machines`/
+  `agent-vault`'s own `payload-invocation.json`); `install.sh`/`.ps1` (18
+  findings) and `service.yaml` (3 findings) — genuine blocked Phase 2
+  launcher-contract / service-manifest backlog, gated on the same
+  unfinished prerequisite infrastructure documented for `budget-guidance`/
+  `agent-pull-requests`.
+
 ### 2026-09-26 — Guard-code fix: `_CELL_QUALIFIER` now recognizes `RUNTIME_ROOT` (narrowed after review)
 
 - Fresh guard count for `dev` head (post `agent-vault` small-findings

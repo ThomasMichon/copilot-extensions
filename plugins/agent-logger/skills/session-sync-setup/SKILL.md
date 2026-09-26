@@ -27,7 +27,7 @@ description: >
 
 `session-sync` pushes raw Copilot session data from `~/.copilot` to a
 configurable **target**, under a `{machine}/` subpath, so any consumer sees
-the same layout. Configuration lives at `~/.agent-logger/config.yaml`
+the same layout. Configuration lives at `~/.agent-logger/config.yaml` <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 (override the home dir with `$AGENT_LOGGER_HOME`).
 
 > **Keep the home dir out of any cloud-synced folder.** `~/.agent-logger`
@@ -38,7 +38,7 @@ the same layout. Configuration lives at `~/.agent-logger/config.yaml`
 
 | Target | Use case | Required options |
 |--------|----------|------------------|
-| `local` (default) | Self-serve one machine; zero dependencies | `path` (optional; default `~/.agent-logger/sessions`) |
+| `local` (default) | Self-serve one machine; zero dependencies | `path` (optional; default `~/.agent-logger/sessions`) <!-- marketplace-isolation: allow deployed-runtime-diagnostics --> |
 | `onedrive` | Fleet hub without a NAS -- many machines sync to one OneDrive folder, one machine crunches | `subfolder` (default `Apps/agent-logger/sessions`) |
 | `ssh` | Push to an arbitrary host you control | `host`, `remote_path`; optional `proxy_jump` |
 | `ssh-tunnel` | Same as `ssh`, routed through a jump host | `host`, `remote_path`, `tunnel_host` |
@@ -48,7 +48,7 @@ the same layout. Configuration lives at `~/.agent-logger/config.yaml`
 
 ## Configure
 
-Edit `~/.agent-logger/config.yaml`. Copy the full annotated example showing
+Edit `~/.agent-logger/config.yaml`. Copy the full annotated example showing <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 every target, [`references/config.yaml`](references/config.yaml), and keep the
 one block you need. The local default at a glance:
 
@@ -86,7 +86,7 @@ Optional sync controls:
 
 ### Repo-owned sync opt-in (`sync.require_repo_opt_in`)
 
-With `sync.require_repo_opt_in: true` set in `~/.agent-logger/config.yaml`, a
+With `sync.require_repo_opt_in: true` set in `~/.agent-logger/config.yaml`, a <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 repo commits its own activation declaration at
 `.copilot-extensions/agent-logger/config.yaml` (legacy:
 `.agent-logger/config.yaml`):
@@ -174,7 +174,7 @@ log:
 ```
 
 Repo-local config cannot change which `sync:` target is active, credentials,
-or machine identity -- those remain in `~/.agent-logger/config.yaml`. The
+or machine identity -- those remain in `~/.agent-logger/config.yaml`. The <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 one exception, `sync.local_path` (schema v3+), exists because that value is
 genuinely the same absolute path for every machine in the fleet (a shared NAS
 mount) rather than a per-machine choice. Under `log:`, only `root`,
@@ -320,7 +320,7 @@ never race the scheduled push. Add `--dry-run` to preview.
   `pwsh -File plugins\agent-logger\scripts\install.ps1 status` or
   `bash plugins/agent-logger/scripts/install.sh status`. On Windows the task is
   `Agent Logger Session Sync`; on Linux/WSL inspect
-  `systemctl --user status agent-logger-sync.timer agent-logger-sync.service`.
+  `systemctl --user status agent-logger-sync.timer agent-logger-sync.service`. <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 - **Expected fail-loud behavior:** a missing source or failed push returns exit
   code 1 and writes the reason to stderr. A held sync lock exits successfully
   with "another sync holds the lock; skipping". HTTP notify failures are

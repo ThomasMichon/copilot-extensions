@@ -91,7 +91,7 @@ explicit error. Do not silently fall back when validation fails.
 > harness** (a shareable control plane that holds no personal state), logs must
 > **not** land in the harness checkout. agent-logger already supports a
 > configurable root: set the **user-level** `log.root` (in
-> `~/.agent-logger/config.yaml`, which may be absolute) to the bound
+> `~/.agent-logger/config.yaml`, which may be absolute) to the bound <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 > **knowledge** repo's logs directory — resolvable on this machine with
 > `<agent-worktrees catalog argv[0]> state-root` (append `/logs`). The harness setup flow writes
 > this per machine; the repo-local `.agent-logger.yaml` `root` stays relative

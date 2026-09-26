@@ -6,6 +6,49 @@ import argparse
 import os
 import sys
 
+#: Bounded grace period a shutdown/handoff (runtime superseded, a newer
+#: monitor taking ownership, or the empty-strike idle-exit path) waits for
+#: an in-flight tracking-write compute to finish before closing the
+#: tracking_write server anyway. Generous relative to a single verb
+#: transaction's own cost (a lock/load/mutate/save, comparable to one
+#: worktree_status fact), bounded so a genuinely wedged compute can never
+#: block a shutdown indefinitely (2026-09-26 PR review finding).
+_TRACKING_WRITE_SHUTDOWN_GRACE_S = 10.0
+
+
+def _wait_for_tracking_write_idle(
+    is_busy,
+    *,
+    grace_s: float = _TRACKING_WRITE_SHUTDOWN_GRACE_S,
+    poll_interval_s: float = 0.1,
+    now=None,
+    sleep=None,
+) -> None:
+    """Block until ``is_busy()`` is false or ``grace_s`` elapses.
+
+    ``is_busy`` should be a caller's combined busy predicate (e.g. this
+    module's own ``_tracking_write_busy``, not ``tracking_write.
+    has_inflight_write`` alone) -- a request already accepted (registered as
+    a ``CoalescingServer`` subscriber) but not yet inside its ``compute()``
+    call (where the in-flight counter increments) would otherwise slip past
+    a check that only looked at the in-flight counter (2026-09-26 PR review
+    finding).
+
+    Extracted as its own function (rather than inlined in the shutdown
+    ``finally`` block) so the wait/deadline logic itself is directly unit-
+    testable without needing to drive the full ``cmd_status_monitor``
+    lifecycle. ``now``/``sleep`` default to the real ``time`` module;
+    overridden by tests to make the deadline/poll behavior deterministic
+    without a real wall-clock wait.
+    """
+    import time as _time
+
+    now = now or _time.time
+    sleep = sleep or _time.sleep
+    deadline = now() + grace_s
+    while is_busy() and now() < deadline:
+        sleep(poll_interval_s)
+
 
 def _core():
     from . import __main__ as core
@@ -45,6 +88,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     from . import classify_daemon, loop_governance, monitor_roots, mux_link, pane_reaper, registry_paths, session_catalog
     from . import locks as _locks
     from . import status_monitor_runtime, status_updater_cli
+    from . import tracking_write
     from . import worktree_status_daemon
     from .hook_ipc import HookIpcServer, HookUnavailable
 
@@ -194,6 +238,22 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     except Exception:
         classify_server = None
 
+    tracking_write_server = None
+    try:
+        # Load every verb-owning module (currently none -- see
+        # tracking_write._VERB_MODULES) eagerly at monitor startup, not
+        # lazily on the first request: a Phase 3 verb module's own
+        # `register_verb` call is then guaranteed to have run before this
+        # daemon ever answers a `tracking_write` request, closing the
+        # 2026-09-26 PR review's "load production verbs at the monitor's
+        # own startup/import path" finding at this call site specifically
+        # (compute/run_direct already call this too, idempotently).
+        tracking_write._ensure_verb_modules_loaded()
+        tracking_write_server = tracking_write.start_server(tracking_write.compute)
+        tracking_write_server.start()
+    except Exception:
+        tracking_write_server = None
+
     worktree_status_runtime = worktree_status_daemon.InProcessRuntime()
     worktree_status_runtime.start(
         _core_helper("_aw_runtime_home", status_monitor_runtime._aw_runtime_home)() / "worktree-status-cache.sqlite3",
@@ -219,6 +279,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             extra.update(hook_server.rendezvous())
         if classify_server is not None:
             extra.update(classify_daemon.rendezvous_fields(classify_server))
+        if tracking_write_server is not None:
+            extra.update(tracking_write.rendezvous_fields(tracking_write_server))
         extra.update(worktree_status_runtime.lock_extra())
         extra.update(managed_mux_runtime.lock_extra())
         return extra
@@ -226,6 +288,20 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     _locks.write_lock(lock, extra=_lock_extra())
     empty_strikes = 0
     max_empty_strikes = 3
+
+    def _tracking_write_busy() -> bool:
+        # subscriber_count() alone is not enough: a client releases its own
+        # lease as soon as its own request call returns or times out, which
+        # can happen well before the daemon-side compute this triggered
+        # actually finishes (CoalescingServer never cancels an accepted
+        # owner). tracking_write.has_inflight_write() tracks the compute
+        # itself, in this same process, independent of any client's own
+        # lease lifecycle (2026-09-26 PR review finding).
+        return (
+            tracking_write_server is not None
+            and tracking_write_server.subscriber_count() > 0
+        ) or tracking_write.has_inflight_write()
+
     try:
         while True:
             if runtime_superseded():
@@ -286,12 +362,14 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             if served < 0:
                 time.sleep(interval)
                 continue
+
             if (
                 served == 0
                 and not external_projects
                 and not reconciler.has_live_worktree_mux
                 and not worktree_status_runtime.has_active_demand()
                 and not managed_mux_runtime.has_active_demand()
+                and not _tracking_write_busy()
             ):
                 empty_strikes += 1
                 if empty_strikes >= max_empty_strikes:
@@ -307,6 +385,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         or core.list_cache.recent_demand_projects()
                         or worktree_status_runtime.has_active_demand()
                         or managed_mux_runtime.has_active_demand()
+                        or _tracking_write_busy()
                     ):
                         empty_strikes = 0
                     else:
@@ -319,6 +398,24 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             hook_server.close()
         if classify_server is not None:
             classify_server.close()
+        if tracking_write_server is not None:
+            # 2026-09-26 PR review: close *first*, then drain -- closing
+            # stops the server accepting any *new* request immediately;
+            # waiting first (the original ordering) left the server still
+            # accepting connections throughout the whole grace window, so a
+            # fresh write could arrive right after the final busy check and
+            # start executing just as close() ran, which -- since close()
+            # never drains an already-dispatched handler thread -- could
+            # still terminate the process mid-transaction. Closing first
+            # removes that race outright: every request counted by
+            # `_tracking_write_busy()` from this point on was necessarily
+            # accepted *before* close(), so waiting for that predicate to
+            # clear now genuinely drains only already-accepted work, never a
+            # request that could still arrive during the wait. Bounded --
+            # a shutdown must still terminate eventually, never wait forever
+            # on a wedged compute.
+            tracking_write_server.close()
+            _wait_for_tracking_write_idle(_tracking_write_busy)
         worktree_status_runtime.shutdown()
         managed_mux_runtime.shutdown()
         d = _locks.read_lock(lock)

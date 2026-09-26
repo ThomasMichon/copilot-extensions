@@ -95,9 +95,14 @@ class _FakeSyncVendoredLibs:
 
     def __init__(self, canonical_root: Path):
         self.LIBS_DIR = canonical_root
+        self.POINTER_NAME = "VENDOR_POINTER.json"
+        self.blocked_reason: str | None = None
 
     def _materialize_blocked(self, lib, canonical, first_copy):
-        return None
+        return self.blocked_reason
+
+    def _is_pointer_copy(self, path: Path) -> bool:
+        return (path / self.POINTER_NAME).is_file()
 
     def _copy_src(self, src_lib: Path, dst_lib: Path) -> None:
         dst = dst_lib / "src"
@@ -133,6 +138,72 @@ def test_materialize_into_preview_writes_only_into_dest_never_real_repo(
     assert (dest / "libs" / "shared-lib" / "src" / "__init__.py").read_text() == "fresh = True\n"
     # ...but the real plugin directory in this checkout was never touched.
     assert (real_copy / "__init__.py").read_text() == "stale = True\n"
+
+
+def test_materialize_into_preview_bypasses_drift_check_for_a_pointer_copy(
+    isolated: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    # A DRY vendor-pointer copy (bare or src-passthrough) is never the
+    # verified-agreeing "truth" _materialize_blocked() compares against --
+    # previously this unconditionally ran that check and refused a real,
+    # already-adopted src-passthrough copy (agent-worktrees/libs/
+    # lazy-cli-dispatch) whenever canonical's declared version wasn't
+    # already strictly ahead of the stub's own declared version (confirmed
+    # against the real repo before this fix: "same version but content
+    # differs -- bump one side").
+    plugin_dir = _plugin(isolated, "agent-worktrees", "1.0.0")
+    pointer_copy = plugin_dir / "libs" / "shared-lib"
+    (pointer_copy / "src").mkdir(parents=True)
+    (pointer_copy / "src" / "__init__.py").write_text("stub = True\n", encoding="utf-8")
+    (pointer_copy / "VENDOR_POINTER.json").write_text(
+        json.dumps({"schema": "copilot-extensions.vendor-pointer", "version": 1,
+                    "source": "libs/shared-lib", "kind": "src-passthrough"}) + "\n",
+        encoding="utf-8",
+    )
+
+    canonical_root = isolated / "canonical-libs"
+    canonical_lib = canonical_root / "shared-lib"
+    (canonical_lib / "src").mkdir(parents=True)
+    (canonical_lib / "src" / "__init__.py").write_text("fresh = True\n", encoding="utf-8")
+
+    fake = _FakeSyncVendoredLibs(canonical_root)
+    fake.blocked_reason = "shared-lib: same version but content differs -- bump one side"
+    monkeypatch.setattr(preview_release, "_load_sync_vendored_libs", lambda: fake)
+
+    dest = preview_release.build("agent-worktrees", isolated / "work")
+
+    lib_dest = dest / "libs" / "shared-lib"
+    assert (lib_dest / "src" / "__init__.py").read_text() == "fresh = True\n"
+    # The now-superseded pointer marker must not survive materialization --
+    # the preview must be a fully real, no-pointer-remaining copy.
+    assert not (lib_dest / "VENDOR_POINTER.json").exists()
+
+
+def test_materialize_into_preview_still_respects_drift_check_for_a_real_copy(
+    isolated: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    # A real (non-pointer) copy must still be protected by the drift check
+    # -- only a pointer copy bypasses it.
+    plugin_dir = _plugin(isolated, "agent-bridge", "1.0.0")
+    real_copy = plugin_dir / "libs" / "shared-lib" / "src"
+    real_copy.mkdir(parents=True)
+    (real_copy / "__init__.py").write_text("newer-real-content = True\n", encoding="utf-8")
+
+    canonical_root = isolated / "canonical-libs"
+    canonical_lib = canonical_root / "shared-lib"
+    (canonical_lib / "src").mkdir(parents=True)
+    (canonical_lib / "src" / "__init__.py").write_text("stale = True\n", encoding="utf-8")
+
+    fake = _FakeSyncVendoredLibs(canonical_root)
+    fake.blocked_reason = "shared-lib: copies are newer than canonical -- run --restore-canonical first"
+    monkeypatch.setattr(preview_release, "_load_sync_vendored_libs", lambda: fake)
+
+    dest = preview_release.build("agent-bridge", isolated / "work")
+
+    # Blocked -- the real copy's own (newer) content must be left untouched.
+    assert (dest / "libs" / "shared-lib" / "src" / "__init__.py").read_text() == (
+        "newer-real-content = True\n"
+    )
 
 
 class _FakeMaterializeMain:

@@ -1206,6 +1206,36 @@ def test_render_linux_service_unit_includes_machine_and_workdir(tmp_path):
     assert f"WorkingDirectory={self_update_tasks.task_working_directory(tmp_path)}" in unit
 
 
+def test_render_linux_service_unit_sets_path_environment_for_local_bin(tmp_path):
+    """Regression: systemd --user's own manager environment carries a
+    minimal PATH with no `~/.local/bin`, so a bare-name subprocess call to
+    a facility binstub (agent-worktrees, agent-ssh, ...) inside the sweep
+    failed with FileNotFoundError for days before being noticed -- the
+    scheduled service ran, but every subprocess it launched failed
+    immediately. The rendered unit must set an explicit PATH that puts
+    `~/.local/bin` first."""
+    if sys.platform == "win32":
+        pytest.skip("Linux systemd unit rendering assumes a POSIX host")
+    unit = self_update_tasks.render_linux_service_unit(
+        "sweep", machine="box-1", home=tmp_path
+    )
+    assert f"Environment=PATH={tmp_path}/.local/bin:" in unit
+
+
+def test_render_linux_service_unit_quotes_path_for_home_with_whitespace(tmp_path):
+    """A home directory containing whitespace (e.g. '/home/Build User') must
+    not split the Environment=PATH= assignment into invalid tokens -- caught
+    in PR review; systemd's Environment= parser is shell-like, same as
+    ExecStart='s, which _systemd_quote already handles."""
+    if sys.platform == "win32":
+        pytest.skip("Linux systemd unit rendering assumes a POSIX host")
+    spacey_home = tmp_path / "Build User"
+    unit = self_update_tasks.render_linux_service_unit(
+        "sweep", machine="box-1", home=spacey_home
+    )
+    assert f'Environment="PATH={spacey_home}/.local/bin:' in unit
+
+
 def test_linux_systemd_user_available_false_without_binary():
     available = self_update_tasks.linux_systemd_user_available(
         resolve_binary=lambda _name: None,

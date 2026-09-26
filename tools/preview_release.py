@@ -98,12 +98,28 @@ def _materialize_into_preview(dest: Path) -> list[str]:
         if not canonical.is_dir():
             log.append(f"{lib}: no canonical libs/{lib}/ -- preview keeps the current copy")
             continue
-        reason = svl._materialize_blocked(lib, canonical, lib_copy)
-        if reason:
-            log.append(reason)
-            continue
+        # A DRY vendor-pointer copy (bare or src-passthrough) is never the
+        # verified-agreeing "truth" sync-vendored-libs.py's own
+        # cmd_materialize() compares against either -- its src/ is either
+        # absent or a stub whose declared version/content have no bearing
+        # on whether materializing canonical down is safe. Skip
+        # _materialize_blocked()'s drift check entirely for a pointer copy,
+        # matching cmd_materialize()'s own real/pointer distinction
+        # (real = svl._real_copies([lib_copy])); previously this always ran
+        # the check unconditionally and refused a real, already-adopted
+        # src-passthrough copy (agent-worktrees/libs/lazy-cli-dispatch)
+        # whenever canonical's declared version wasn't already strictly
+        # ahead of the stub's own declared version.
+        if not svl._is_pointer_copy(lib_copy):
+            reason = svl._materialize_blocked(lib, canonical, lib_copy)
+            if reason:
+                log.append(reason)
+                continue
         svl._copy_src(canonical, lib_copy)
         svl._sync_version(canonical, lib_copy)
+        pointer = lib_copy / svl.POINTER_NAME
+        if pointer.exists():
+            pointer.unlink()
         log.append(f"{lib}: materialized into preview from canonical")
     return log
 
