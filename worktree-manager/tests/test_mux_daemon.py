@@ -135,6 +135,20 @@ def test_registry_remove_prevents_stale_resurrection(tmp_path):
     assert registry.get("proj", "wt-1")["live"] is False
 
 
+def test_registry_remove_prevents_equal_revision_resurrection(tmp_path):
+    """Copilot review finding: an explicit revisioned remove leaves a
+    tombstone at EXACTLY that revision -- the monotonic ``<``-only guard
+    alone would still accept a delayed LIVE register at that same
+    (equal) revision, resurrecting the mapping."""
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry(mapping_revision=5))
+    registry.remove("proj", "wt-1", mapping_revision=6)
+    result = registry.register(_entry(mapping_revision=6))
+    assert result["applied"] is False
+    assert result["reason"] == "stale_revision"
+    assert registry.get("proj", "wt-1")["live"] is False
+
+
 def test_registry_remove_is_idempotent_when_absent(tmp_path):
     registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
     result = registry.remove("proj", "never-registered")
@@ -323,7 +337,12 @@ def test_compute_reports_not_live_when_no_mapping(tmp_path):
     compute = mux_daemon.build_compute(registry)
     result = compute(
         mux_daemon.KIND,
-        {"project": "proj", "worktree_id": "missing", "values": {"@aw_ctx": "x"}},
+        {
+            "project": "proj",
+            "worktree_id": "missing",
+            "values": {"@aw_ctx": "x"},
+            "rendered_at": "2026-09-25T00:00:00Z",
+        },
     )
     assert result == {"applied": False, "reason": "not-live"}
 
@@ -334,9 +353,28 @@ def test_compute_reports_not_live_when_mapping_is_tombstoned(tmp_path):
     compute = mux_daemon.build_compute(registry)
     result = compute(
         mux_daemon.KIND,
-        {"project": "proj", "worktree_id": "wt-1", "values": {"@aw_ctx": "x"}},
+        {
+            "project": "proj",
+            "worktree_id": "wt-1",
+            "values": {"@aw_ctx": "x"},
+            "rendered_at": "2026-09-25T00:00:00Z",
+        },
     )
     assert result == {"applied": False, "reason": "not-live"}
+
+
+def test_compute_rejects_missing_rendered_at(tmp_path):
+    """Copilot review finding: a wire caller that bypasses status_push_key
+    and submits a payload with no rendered_at sits outside the
+    mux-status-v1 contract entirely (it cannot participate in the ordering
+    fence) -- reject it before ever looking up the mapping."""
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    compute = mux_daemon.build_compute(registry)
+    with pytest.raises(ValueError, match="rendered_at"):
+        compute(
+            mux_daemon.KIND,
+            {"project": "proj", "worktree_id": "wt-1", "values": {"@aw_ctx": "x"}},
+        )
 
 
 def test_compute_applies_when_mapping_is_live(tmp_path, monkeypatch):
@@ -346,7 +384,12 @@ def test_compute_applies_when_mapping_is_live(tmp_path, monkeypatch):
     compute = mux_daemon.build_compute(registry)
     result = compute(
         mux_daemon.KIND,
-        {"project": "proj", "worktree_id": "wt-1", "values": {"@aw_ctx": "x"}},
+        {
+            "project": "proj",
+            "worktree_id": "wt-1",
+            "values": {"@aw_ctx": "x"},
+            "rendered_at": "2026-09-25T00:00:00Z",
+        },
     )
     assert result == {"applied": True}
 
@@ -358,7 +401,12 @@ def test_compute_reports_apply_failed(tmp_path, monkeypatch):
     compute = mux_daemon.build_compute(registry)
     result = compute(
         mux_daemon.KIND,
-        {"project": "proj", "worktree_id": "wt-1", "values": {"@aw_ctx": "x"}},
+        {
+            "project": "proj",
+            "worktree_id": "wt-1",
+            "values": {"@aw_ctx": "x"},
+            "rendered_at": "2026-09-25T00:00:00Z",
+        },
     )
     assert result == {"applied": False, "reason": "apply-failed"}
 
@@ -374,7 +422,12 @@ def test_compute_invalidates_a_mapping_whose_mux_session_has_died(tmp_path, monk
     compute = mux_daemon.build_compute(registry)
     result = compute(
         mux_daemon.KIND,
-        {"project": "proj", "worktree_id": "wt-1", "values": {"@aw_ctx": "x"}},
+        {
+            "project": "proj",
+            "worktree_id": "wt-1",
+            "values": {"@aw_ctx": "x"},
+            "rendered_at": "2026-09-25T00:00:00Z",
+        },
     )
     assert result == {"applied": False, "reason": "not-live"}
     # the dead mapping must be invalidated (tombstoned), not left "live"
@@ -535,12 +588,15 @@ def test_registry_record_applied_render_persists_and_is_noop_when_superseded(tmp
     registry.record_applied_render("proj", "wt-1", "2026-09-25T00:00:05Z", mapping_revision=1)
     assert registry.get("proj", "wt-1")["last_status_rendered_at"] == "2026-09-25T00:00:05Z"
 
-    # A late record_applied_render targeting a SUPERSEDED (now-stale)
-    # mapping_revision must be a no-op -- it must not overwrite the fence
-    # with a value computed against the OLD incarnation.
+    # A register() at a genuinely HIGHER revision is a new incarnation --
+    # it must start with a fresh (reset) ordering fence, per the sibling
+    # "higher-revision registration" fix below. A late record_applied_render
+    # still targeting the OLD (now-superseded) revision must remain a
+    # no-op against this new incarnation.
     registry.register(_entry(mapping_revision=2))
+    assert registry.get("proj", "wt-1")["last_status_rendered_at"] is None
     registry.record_applied_render("proj", "wt-1", "2026-09-25T00:00:01Z", mapping_revision=1)
-    assert registry.get("proj", "wt-1")["last_status_rendered_at"] == "2026-09-25T00:00:05Z"
+    assert registry.get("proj", "wt-1")["last_status_rendered_at"] is None
 
 
 def test_register_preserves_last_status_rendered_at_across_re_registration(tmp_path):

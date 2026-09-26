@@ -253,18 +253,49 @@ class MuxMappingRegistry:
         with self._interprocess_lock():
             entries = self._read_all()
             current = entries.get(key)
-            if current is not None and entry["mapping_revision"] < current["mapping_revision"]:
-                return {
-                    "applied": False,
-                    "reason": "stale_revision",
-                    "current_revision": current["mapping_revision"],
-                }
+            if current is not None:
+                if entry["mapping_revision"] < current["mapping_revision"]:
+                    return {
+                        "applied": False,
+                        "reason": "stale_revision",
+                        "current_revision": current["mapping_revision"],
+                    }
+                # An equal-revision LIVE registration must not resurrect an
+                # explicitly-tombstoned entry at that exact revision
+                # (Copilot review finding): the monotonic ``<``-only guard
+                # above lets it through, since equal revisions are
+                # otherwise meant to be accepted (e.g. a benign metadata
+                # refresh at the same revision). An explicit
+                # ``remove(..., mapping_revision=N)`` deliberately leaves a
+                # ``live: false`` tombstone at exactly revision N to fence
+                # against exactly this.
+                if (
+                    entry["mapping_revision"] == current["mapping_revision"]
+                    and not current["live"]
+                    and entry["live"]
+                ):
+                    return {
+                        "applied": False,
+                        "reason": "stale_revision",
+                        "current_revision": current["mapping_revision"],
+                    }
             # A register()/remove() payload is about MAPPING identity, not
             # status-render ordering -- it never carries
             # last_status_rendered_at itself, so preserve whatever fence
             # was already recorded rather than silently resetting it to
-            # None on every re-register.
-            if current is not None and entry["last_status_rendered_at"] is None:
+            # None on every re-register. Only for the SAME mapping
+            # incarnation, though (Copilot review finding): a strictly
+            # HIGHER mapping_revision is a genuinely new incarnation (e.g.
+            # a new mux session after a cutover), and build_compute()
+            # relies on a new incarnation starting with a fresh ordering
+            # fence -- inheriting the old session's fence could reject that
+            # new incarnation's very first render as a stale-render purely
+            # because it predates the previous session's own timestamp.
+            if (
+                current is not None
+                and entry["mapping_revision"] == current["mapping_revision"]
+                and entry["last_status_rendered_at"] is None
+            ):
                 entry["last_status_rendered_at"] = current["last_status_rendered_at"]
             entries[key] = entry
             self._write_all(entries)

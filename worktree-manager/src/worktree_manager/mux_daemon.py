@@ -351,8 +351,18 @@ def build_compute(
             raise ValueError("mux-status-v1 payload missing 'worktree_id'")
         if not isinstance(values, dict):
             raise ValueError("mux-status-v1 payload missing 'values'")
+        if not isinstance(rendered_at, str) or not rendered_at:
+            # A wire caller MUST derive its coalescing key (and this
+            # payload) via status_push_key, which itself requires
+            # rendered_at (Copilot review finding): a caller that bypassed
+            # that helper and submitted an arbitrary key/payload sits
+            # outside the mux-status-v1 contract and cannot participate in
+            # the ordering fence at all -- reject it here, before ever
+            # looking up the mapping, rather than silently treating it as
+            # unorderable (rendered_ts=None) and applying it anyway.
+            raise ValueError("mux-status-v1 payload missing 'rendered_at'")
         key = (project, worktree_id)
-        rendered_ts = _parse_rendered_at(rendered_at) if isinstance(rendered_at, str) else None
+        rendered_ts = _parse_rendered_at(rendered_at)
 
         with _lock_for(key):
             # Revalidate the mapping fresh, immediately before applying,
