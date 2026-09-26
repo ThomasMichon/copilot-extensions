@@ -168,3 +168,27 @@ def test_long_running_worktree_matches_golden(monkeypatch, tmp_path):
     ]
     grid = _capture_grid(monkeypatch, tmp_path, raws)
     assert grid == _golden("scenario_long_running.txt", grid)
+
+
+def test_handoff_and_acp_worktrees_match_golden(monkeypatch, tmp_path):
+    """#3307 Phase 5: the retired "R" column's values redistributed --
+    row 1 is handed-off with no live successor yet (state reads HANDOFF,
+    lands in Recent); row 2 is a live ACP/bridge-interface worktree owned by
+    an orchestrating session (LIVE reads ACP, not the generic PROC a plain
+    CLI-bound worktree would show)."""
+    raws = [
+        {"id": "anomalous-potato-win-20260620-h001", "title": "Ready for a successor",
+         "status": "active", "started_at": "2026-06-20T09:00:00",
+         "turn_count": 5, "state": "unused",
+         "reciprocal_relation": {
+             "version": 1, "state": "handed-off",
+             "binding": {"state": "handed-off"}, "control": {"state": "none"},
+             "actions": [],
+         }},
+        {"id": "anomalous-potato-win-20260627-h002", "title": "Bridge-driven worktree",
+         "status": "active", "started_at": "2026-06-27T10:00:00",
+         "turn_count": 3, "state": "wip",
+         "interface": "acp", "session_bound_live": True},
+    ]
+    grid = _capture_grid(monkeypatch, tmp_path, raws)
+    assert grid == _golden("scenario_handoff_acp.txt", grid)

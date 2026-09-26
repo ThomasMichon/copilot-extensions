@@ -1,20 +1,20 @@
 <<TOPBAR>>
   WORKTREES                                                                                           ⚙ Configuration
 ───────────────────────────────────────────────────────── ▲ ──────────────────────────────────────────────────────────
- Machine  Ctrl ◀▶                                                                      ● 0 active · 1 recent · 0 done
+ Machine  Ctrl ◀▶                                                                      ● 1 active · 1 recent · 0 done
     All     anomalous-potato Win ✓
 
    + New worktree…     ✕ Clean     ⟳ Sync     creates on anomalous-potato Win  (this host)
 
   ID     STATE      AGE    LIVE   T     CLAIMS
   ── Active ──────────────────────────────────────────────────────────────────────────────────────────────────────────
-    (none)
+☐ h002   ACTIVE     8h     ACP      3
+      [acp] Bridge-driven worktree: active
   ── Recent ──────────────────────────────────────────────────────────────────────────────────────────────────────────
-☐ c001   WIP        3h     ·        8   PR #4821
-      Add the retry budget: wip
+☐ h001   HANDOFF    7d     ·        5
+      Ready for a successor: handoff
   ── Completed ───────────────────────────────────────────────────────────────────────────────────────────────────────
     (none)
-
 
 
 
