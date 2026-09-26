@@ -134,6 +134,14 @@ class TestVerbRegistryAndCompute:
                 tracking_write.KIND, {"verb": "test-bad-args", "args": "nope"}
             )
 
+    def test_compute_rejects_a_request_labeled_with_a_different_kind(self):
+        """2026-09-26 PR review finding: without this guard, a request
+        mislabeled with a sibling daemon's own kind (e.g. "classify") would
+        still be dispatched as a mutation here."""
+        tracking_write.register_verb("test-wrong-kind", lambda args: {"ok": True})
+        with pytest.raises(ValueError, match="does not serve kind"):
+            tracking_write.compute("classify", {"verb": "test-wrong-kind"})
+
 
 class TestRunDirectFallback:
     def test_run_direct_calls_the_same_registered_function(self):

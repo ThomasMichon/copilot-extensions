@@ -241,12 +241,18 @@ def registered_verbs() -> frozenset[str]:
 def compute(kind: str, payload: dict) -> dict:
     """``CoalescingServer``-shaped ``compute(kind, payload)`` callback.
 
+    Rejects any request whose ``kind`` is not :data:`KIND` (2026-09-26 PR
+    review finding, mirroring ``mux_link.py``'s own
+    ``build_cached_compute``/``_compute`` guard) -- without this check, a
+    request mislabeled with a different daemon's ``kind`` (e.g.
+    ``"classify"``) would still be dispatched as a mutation here.
+
     ``payload`` must carry ``verb`` (a name registered via
     :func:`register_verb`, directly or via :data:`_VERB_MODULES`) and may
     carry ``args`` (a dict passed to that verb's function). Raises
-    ``ValueError`` for an unregistered verb or a malformed payload --
-    surfaced to the caller exactly like ``_classify_daemon_compute``'s own
-    validation errors.
+    ``ValueError`` for a wrong ``kind``, an unregistered verb, or a
+    malformed payload -- surfaced to the caller exactly like
+    ``_classify_daemon_compute``'s own validation errors.
 
     Counts itself in :data:`_inflight_writes` for the whole verb call (see
     :func:`has_inflight_write` -- 2026-09-26 PR review finding: a client
@@ -257,6 +263,8 @@ def compute(kind: str, payload: dict) -> dict:
     progress).
     """
     global _inflight_writes
+    if kind != KIND:
+        raise ValueError(f"tracking_write daemon does not serve kind={kind!r}")
     _ensure_verb_modules_loaded()
     verb = payload.get("verb")
     if not isinstance(verb, str) or not verb:

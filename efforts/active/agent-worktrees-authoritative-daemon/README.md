@@ -424,6 +424,16 @@ reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
 
+### 2026-09-26 — PR #3779 review round 8: missing wire-kind validation
+`compute` dispatched a verb without checking the request's own `kind`
+field, so a request mislabeled with a sibling daemon's kind (e.g.
+`"classify"`, sent to this daemon's own port) would still be dispatched as
+a mutation. Fixed by rejecting any request whose `kind != KIND`, mirroring
+`mux_link.py`'s own existing `_compute` guard exactly. One new test
+(`test_compute_rejects_a_request_labeled_with_a_different_kind`) — 132
+tests total across both files. Full suite: 5577 passed, same 5
+pre-existing failures. All gates clean.
+
 ### 2026-09-26 — PR #3779 review round 7: a residual microsecond race, tracked as a follow-up rather than fixed inline
 Round 7 caught one further, genuinely real but much narrower race than
 round 6's: a connection can be `accept()`ed by the server's socket layer
