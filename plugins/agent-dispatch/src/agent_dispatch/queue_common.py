@@ -232,6 +232,8 @@ class Task:
     wake_seq: int = 0
     wake_status: str | None = None
     wake_operation_id: str | None = None
+    monitor_kind: str | None = None
+    monitor_not_before: float | None = None
 
     @classmethod
     def _from_row(cls, row: sqlite3.Row) -> Task:
@@ -292,6 +294,10 @@ class Task:
             wake_seq=row["wake_seq"],
             wake_status=row["wake_status"],
             wake_operation_id=row["wake_operation_id"],
+            monitor_kind=(row["monitor_kind"] if "monitor_kind" in columns else None),
+            monitor_not_before=(
+                row["monitor_not_before"] if "monitor_not_before" in columns else None
+            ),
         )
 
 
@@ -430,4 +436,6 @@ _COLUMNS: dict[str, str] = {
     "wake_seq": "INTEGER NOT NULL DEFAULT 0",
     "wake_status": "TEXT",
     "wake_operation_id": "TEXT",
+    "monitor_kind": "TEXT",
+    "monitor_not_before": "REAL",
 }

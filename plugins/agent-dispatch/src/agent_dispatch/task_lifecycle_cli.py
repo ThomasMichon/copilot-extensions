@@ -177,8 +177,16 @@ def _cmd_suspend(args: argparse.Namespace) -> int:
     worker_id = _core()._resolve_owner(args, verb="suspend")
     if worker_id is None:
         return 2
+    if args.no_cooldown and args.cooldown_seconds is not None:
+        print("--no-cooldown and --cooldown-seconds are mutually exclusive", file=sys.stderr)
+        return 2
+    kwargs: dict = {}
+    if args.no_cooldown:
+        kwargs["cooldown_seconds"] = None
+    elif args.cooldown_seconds is not None:
+        kwargs["cooldown_seconds"] = args.cooldown_seconds
     with _core()._client(args) as c:
-        return _core()._emit(c.suspend(args.task_id, worker_id, reason=args.reason))
+        return _core()._emit(c.suspend(args.task_id, worker_id, reason=args.reason, **kwargs))
 
 def _cmd_resume(args: argparse.Namespace) -> int:
     worker_id = _core()._resolve_owner(args, verb="resume")

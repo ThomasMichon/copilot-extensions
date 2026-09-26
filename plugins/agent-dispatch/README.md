@@ -304,6 +304,17 @@ started -> suspended -> started                              (resume; same owner
   explicitly clears ownership and moves **suspended → queued**. Suspended tasks
   do not participate in liveness GC, supervisor capacity/claiming, or retry
   accounting.
+- A bare `suspend` always attaches a **cooldown monitor** (default
+  `DEFAULT_SUSPEND_COOLDOWN_SECONDS`, override with `--cooldown-seconds`, or
+  suppress with `--no-cooldown` for a caller that has arranged its own, more
+  specific wait) -- see `agent_dispatch.monitors`. The coordinator's
+  liveness-GC loop piggybacks a cooldown reconciler on the same always-on
+  cadence: once a monitor elapses, the task is auto-resumed under its
+  existing owner (a cold-headless owner's `resume` flips `resume_requested`
+  for the supervisor's own pool reservation poll rather than transitioning
+  straight to `started`) -- turning a bare suspend into a genuine
+  round-robin time-slice instead of an unwatched idle a task can get stuck
+  in forever.
 - `complete <id> <owner>` is also legal directly from **suspended**. An external
   resolver may therefore record a satisfied dormant goal atomically under the
   preserved owner without waking a process or fabricating an active turn.

@@ -1036,7 +1036,10 @@ configuration to token flags where process arguments may be observable.
   line of defense. Write self-contained titles/prompts so the sweep can work.
 - **Explain suspension and yield.** `suspend` requires a meaningful `--reason`;
   `started -> queued` is only useful to the next agent
-  if you say *why* you yielded.
+  if you say *why* you yielded. A bare suspend always attaches a default
+  **cooldown monitor** and auto-resumes once it elapses (round-robin
+  time-slicing, not an unwatched idle) -- override with `--cooldown-seconds`,
+  or `--no-cooldown` only when you've arranged your own, more specific wait.
 - **Don't fake identity.** Let `claim` / `worktree-status` resolve it from CWD;
   only pass `--machine` / `--worktree` to override or where agent-worktrees is
   absent.

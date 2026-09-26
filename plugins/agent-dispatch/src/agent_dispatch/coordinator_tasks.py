@@ -148,6 +148,7 @@ class SuspendBody(BaseModel):
     expected_generation: int | None = None
     expected_owner_session_id: str | None = None
     reject_pending_steer: bool = True
+    cooldown_seconds: float | None = None
 
 
 class ResumeBody(BaseModel):
@@ -613,6 +614,9 @@ def register_task_routes(
 
     @app.post("/tasks/{task_id}/suspend")
     def suspend(task_id: str, body: SuspendBody) -> dict:
+        kwargs: dict = {}
+        if "cooldown_seconds" in body.model_fields_set:
+            kwargs["cooldown_seconds"] = body.cooldown_seconds
         return _guard(
             lambda: queue.suspend(
                 task_id,
@@ -622,6 +626,7 @@ def register_task_routes(
                 expected_generation=body.expected_generation,
                 expected_owner_session_id=body.expected_owner_session_id,
                 reject_pending_steer=body.reject_pending_steer,
+                **kwargs,
             ),
             "task.suspended",
         )

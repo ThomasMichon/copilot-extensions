@@ -103,6 +103,23 @@ def register_task_lifecycle_commands(sub) -> None:
         required=True,
         help="required meaningful reason recorded in the task audit trail",
     )
+    p.add_argument(
+        "--cooldown-seconds",
+        type=float,
+        default=None,
+        help=(
+            "override the default cooldown monitor's duration (seconds); a "
+            "bare suspend always gets one unless --no-cooldown is given"
+        ),
+    )
+    p.add_argument(
+        "--no-cooldown",
+        action="store_true",
+        help=(
+            "suppress the default cooldown monitor -- only for a caller that "
+            "has arranged its own, more specific wait"
+        ),
+    )
     p.add_argument("--machine", help="override the resolved machine identity")
     p.add_argument("--worktree", help="override the resolved worktree identity")
     p.set_defaults(func=_core()._cmd_suspend)

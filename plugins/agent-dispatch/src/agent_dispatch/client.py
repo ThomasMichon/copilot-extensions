@@ -13,6 +13,7 @@ from typing import Any
 import httpx
 from .client_completion_review import CompletionReviewMixin
 from .client_registrations import RegistrationClientMixin
+from .client_suspend import SuspendClientMixin
 from .client_worktree_status import WorktreeStatusClientMixin
 
 class DispatchError(RuntimeError):
@@ -41,7 +42,9 @@ class DispatchUpgradeRequired(DispatchError):
         super().__init__(426, detail)
 
 
-class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin):
+class DispatchClient(
+    RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin
+):
     """A synchronous client for one coordinator base URL."""
 
     def __init__(
@@ -256,31 +259,6 @@ class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin, Complet
                     "note": note,
                     "exclude": exclude,
                     "release_spawn": release_spawn,
-                },
-            )
-        )
-
-    def suspend(
-        self,
-        task_id: str,
-        worker_id: str,
-        *,
-        reason: str,
-        expected_status: str | None = None,
-        expected_generation: int | None = None,
-        expected_owner_session_id: str | None = None,
-        reject_pending_steer: bool = True,
-    ) -> dict:
-        return self._unwrap(
-            self._http.post(
-                f"/tasks/{task_id}/suspend",
-                json={
-                    "worker_id": worker_id,
-                    "reason": reason,
-                    "expected_status": expected_status,
-                    "expected_generation": expected_generation,
-                    "expected_owner_session_id": expected_owner_session_id,
-                    "reject_pending_steer": reject_pending_steer,
                 },
             )
         )

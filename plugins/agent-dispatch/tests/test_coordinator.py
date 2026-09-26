@@ -173,6 +173,42 @@ def test_client_suspend_resume_release_routes(client, monkeypatch):
     assert released["owner"] is None
 
 
+def test_client_suspend_cooldown_seconds_round_trips_over_http(client):
+    task = client.create("wait")
+    owner = client.claim(worker_id="worker-1", repo=TEST_REPO)["owner"]
+    client.start(task["id"], owner)
+
+    parked = client.suspend(
+        task["id"], owner, reason="waiting", cooldown_seconds=30.0
+    )
+
+    assert parked["monitor_kind"] == "cooldown"
+    assert parked["monitor_not_before"] > parked["updated_at"]
+
+
+def test_client_suspend_cooldown_seconds_omitted_still_applies_default(client):
+    task = client.create("wait")
+    owner = client.claim(worker_id="worker-1", repo=TEST_REPO)["owner"]
+    client.start(task["id"], owner)
+
+    parked = client.suspend(task["id"], owner, reason="waiting")
+
+    assert parked["monitor_kind"] == "cooldown"
+
+
+def test_client_suspend_cooldown_seconds_none_suppresses_the_monitor(client):
+    task = client.create("wait")
+    owner = client.claim(worker_id="worker-1", repo=TEST_REPO)["owner"]
+    client.start(task["id"], owner)
+
+    parked = client.suspend(
+        task["id"], owner, reason="waiting", cooldown_seconds=None
+    )
+
+    assert parked["monitor_kind"] is None
+    assert parked["monitor_not_before"] is None
+
+
 def test_client_resume_can_atomically_adopt_successor_session(
     client, monkeypatch
 ):
@@ -1555,6 +1591,37 @@ def test_health_loops_report_liveness_gc_and_orphan_reap(tmp_path, monkeypatch):
         # AGENT_DISPATCH_HANDOFF_FALLBACK) -- its health entry is still
         # present (never a KeyError) but never records a run.
         assert loops["handoff_fallback"]["total_runs"] == 0
+        c.close()
+    finally:
+        stop()
+
+
+def test_liveness_gc_loop_auto_resumes_a_due_cooldown(tmp_path, monkeypatch):
+    """The liveness GC loop's piggybacked cooldown reconciler (Phase 3 of
+    agent-dispatch-monitor-and-confirmed-state) auto-resumes a suspended
+    task once its default cooldown monitor elapses -- no operator/worker
+    call to ``resume`` required."""
+    from agent_dispatch.coordinator import create_app
+
+    monkeypatch.setattr("agent_dispatch.tracking.liveness_verdict", lambda *a, **k: "unknown")
+    monkeypatch.setattr("agent_dispatch.identity.resolve_machine", lambda: None)
+    q = TaskQueue(tmp_path / "tasks.db")
+    url, stop = _boot(create_app(q, sweep_interval=0.2, enable_mcp=False))
+    try:
+        c = DispatchClient(url)
+        task = c.create("cooldown")
+        owner = c.claim(worker_id="worker-1", repo=TEST_REPO)["owner"]
+        c.start(task["id"], owner)
+        c.suspend(task["id"], owner, reason="waiting", cooldown_seconds=0.3)
+
+        deadline = time.time() + 5
+        status = None
+        while time.time() < deadline:
+            status = c.get(task["id"])["status"]
+            if status == Status.STARTED:
+                break
+            time.sleep(0.1)
+        assert status == Status.STARTED
         c.close()
     finally:
         stop()
