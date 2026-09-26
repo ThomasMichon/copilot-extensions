@@ -383,11 +383,15 @@ def test_compute_invalidates_a_mapping_whose_mux_session_has_died(tmp_path, monk
 
 def test_status_push_key_requires_project_worktree_id_and_rendered_at():
     with pytest.raises(ValueError, match="project"):
-        mux_daemon.status_push_key({"worktree_id": "wt-1", "rendered_at": "t"})
+        mux_daemon.status_push_key({"worktree_id": "wt-1", "rendered_at": "t", "values": {}})
     with pytest.raises(ValueError, match="worktree_id"):
-        mux_daemon.status_push_key({"project": "proj", "rendered_at": "t"})
+        mux_daemon.status_push_key({"project": "proj", "rendered_at": "t", "values": {}})
     with pytest.raises(ValueError, match="rendered_at"):
-        mux_daemon.status_push_key({"project": "proj", "worktree_id": "wt-1"})
+        mux_daemon.status_push_key({"project": "proj", "worktree_id": "wt-1", "values": {}})
+    with pytest.raises(ValueError, match="values"):
+        mux_daemon.status_push_key(
+            {"project": "proj", "worktree_id": "wt-1", "rendered_at": "t"}
+        )
 
 
 def test_status_push_key_differs_across_distinct_renders():
@@ -396,12 +400,119 @@ def test_status_push_key_differs_across_distinct_renders():
     joins same-key requests onto one result, discarding a joiner's own
     payload) -- the key must differ whenever rendered_at differs."""
     key_a = mux_daemon.status_push_key(
-        {"project": "proj", "worktree_id": "wt-1", "rendered_at": "2026-09-25T00:00:00Z"}
+        {
+            "project": "proj",
+            "worktree_id": "wt-1",
+            "rendered_at": "2026-09-25T00:00:00Z",
+            "values": {"@aw_ctx": "x"},
+        }
     )
     key_b = mux_daemon.status_push_key(
-        {"project": "proj", "worktree_id": "wt-1", "rendered_at": "2026-09-25T00:00:01Z"}
+        {
+            "project": "proj",
+            "worktree_id": "wt-1",
+            "rendered_at": "2026-09-25T00:00:01Z",
+            "values": {"@aw_ctx": "x"},
+        }
     )
     assert key_a != key_b
+
+
+def test_status_push_key_differs_when_only_values_differ():
+    """Copilot review finding: rendered_at alone is not a guaranteed-unique
+    render identity -- two genuinely different payloads sharing one
+    (coarse clock resolution, or a caller bug) must still get distinct
+    keys, since the values themselves differ."""
+    key_a = mux_daemon.status_push_key(
+        {
+            "project": "proj",
+            "worktree_id": "wt-1",
+            "rendered_at": "2026-09-25T00:00:00Z",
+            "values": {"@aw_ctx": "first"},
+        }
+    )
+    key_b = mux_daemon.status_push_key(
+        {
+            "project": "proj",
+            "worktree_id": "wt-1",
+            "rendered_at": "2026-09-25T00:00:00Z",
+            "values": {"@aw_ctx": "second"},
+        }
+    )
+    assert key_a != key_b
+
+
+def test_status_push_key_identical_for_a_genuine_retry():
+    """The one case that SHOULD coalesce: an identical retry (same
+    rendered_at, same values) gets the same key, so a concurrent duplicate
+    request safely joins the original instead of doing redundant work."""
+    payload = {
+        "project": "proj",
+        "worktree_id": "wt-1",
+        "rendered_at": "2026-09-25T00:00:00Z",
+        "values": {"@aw_ctx": "x"},
+    }
+    assert mux_daemon.status_push_key(payload) == mux_daemon.status_push_key(dict(payload))
+
+
+def test_compute_discards_a_stale_render_arriving_after_a_newer_one(tmp_path, monkeypatch):
+    """Copilot review finding: giving distinct renders distinct coalescing
+    keys means CoalescingServer can run them concurrently, with no
+    guarantee of completion order. An OLDER render finishing AFTER a newer
+    one has already applied must be discarded, not allowed to overwrite the
+    newer state."""
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry())
+    monkeypatch.setattr(subprocess, "run", _fake_run_factory())
+    compute = mux_daemon.build_compute(registry)
+
+    newer = compute(
+        mux_daemon.KIND,
+        {
+            "project": "proj",
+            "worktree_id": "wt-1",
+            "values": {"@aw_ctx": "newer"},
+            "rendered_at": "2026-09-25T00:00:05Z",
+        },
+    )
+    assert newer == {"applied": True}
+
+    older = compute(
+        mux_daemon.KIND,
+        {
+            "project": "proj",
+            "worktree_id": "wt-1",
+            "values": {"@aw_ctx": "older"},
+            "rendered_at": "2026-09-25T00:00:01Z",
+        },
+    )
+    assert older == {"applied": False, "reason": "stale-render"}
+
+
+def test_compute_revalidates_the_mapping_fresh_immediately_before_applying(tmp_path, monkeypatch):
+    """Copilot review finding: a status push must not write to a mapping
+    that has been removed/superseded since an EARLIER lookup -- the
+    revalidation must happen immediately before the write, not from a
+    snapshot taken earlier in the caller's own flow."""
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry())
+    monkeypatch.setattr(subprocess, "run", _fake_run_factory())
+    compute = mux_daemon.build_compute(registry)
+
+    # Remove the mapping BETWEEN an earlier snapshot and this compute call
+    # -- simulates a concurrent CLI remove racing with an in-flight push.
+    registry.remove("proj", "wt-1")
+
+    result = compute(
+        mux_daemon.KIND,
+        {
+            "project": "proj",
+            "worktree_id": "wt-1",
+            "values": {"@aw_ctx": "x"},
+            "rendered_at": "2026-09-25T00:00:00Z",
+        },
+    )
+    assert result == {"applied": False, "reason": "not-live"}
 
 
 def test_two_distinct_renders_never_coalesce_over_the_wire(tmp_path, monkeypatch):
@@ -681,38 +792,70 @@ def test_run_daemon_foreground_publishes_a_live_rendezvous_while_running(tmp_pat
     assert result.get("rc") == 0
 
 
-def test_run_daemon_foreground_only_unlinks_its_own_generations_lock(tmp_path, monkeypatch):
-    """Copilot review finding: a retiring daemon must not unconditionally
-    unlink the lock file -- if a REPLACEMENT daemon publishes its own
-    (different) generation in the narrow window between this daemon's own
-    shutdown and its lock cleanup, that live replacement's lock must
-    survive. Simulated deterministically by injecting the replacement's
-    write exactly at that window, rather than racing real timing."""
-    lock = mux_daemon.lock_path(tmp_path)
-    real_shutdown = mux_daemon.MuxDaemonRuntime.shutdown
+def test_run_daemon_foreground_stands_down_when_lease_already_held(tmp_path):
+    """Copilot review finding: any invocation path -- not just callers
+    going through ensure_daemon_running -- must be unable to start a
+    second daemon. Holding the single-instance lease directly (simulating
+    a genuinely running daemon) proves a second run_daemon_foreground call
+    stands down immediately: no server started, no lock file touched."""
+    lease = mux_daemon._acquire_daemon_lease(tmp_path)
+    assert lease is not None
+    try:
+        rc = mux_daemon.run_daemon_foreground(
+            tmp_path, idle_after_s=0.02, poll_interval_s=0.01, max_iterations=5
+        )
+        assert rc == 0
+        # never even published a rendezvous of its own
+        assert mux_daemon.read_lock_data(mux_daemon.lock_path(tmp_path)) is None
+    finally:
+        mux_daemon._release_daemon_lease(lease)
 
-    def _shutdown_then_simulate_replacement(self):
-        real_shutdown(self)
-        mux_daemon.write_lock_data(lock, {"generation_id": "someone-elses-generation"})
 
-    monkeypatch.setattr(
-        mux_daemon.MuxDaemonRuntime, "shutdown", _shutdown_then_simulate_replacement
-    )
-    rc = mux_daemon.run_daemon_foreground(
-        tmp_path, idle_after_s=0.02, poll_interval_s=0.01, max_iterations=10
-    )
-    assert rc == 0
-    # the replacement's lock must still be there, untouched
-    data = mux_daemon.read_lock_data(lock)
-    assert data is not None
-    assert data["generation_id"] == "someone-elses-generation"
+def test_run_daemon_foreground_racing_instances_only_one_actually_runs(tmp_path):
+    """Copilot review finding (the direct-run bypass): two genuinely
+    concurrent run_daemon_foreground calls for the SAME root must not both
+    become live -- exactly one wins the single-instance lease and starts a
+    server; the loser returns immediately without ever publishing (or
+    disturbing) a rendezvous."""
+    results: list[int] = [None, None]
+
+    def _run(idx):
+        results[idx] = mux_daemon.run_daemon_foreground(
+            tmp_path, idle_after_s=0.3, poll_interval_s=0.02, max_iterations=200
+        )
+
+    t1 = threading.Thread(target=_run, args=(0,))
+    t2 = threading.Thread(target=_run, args=(1,))
+    t1.start()
+    t2.start()
+
+    # Confirm exactly one of them actually became a live, reachable daemon.
+    deadline = time.time() + 5
+    live = False
+    while time.time() < deadline:
+        data = mux_daemon.read_lock_data(mux_daemon.lock_path(tmp_path))
+        if data is not None and mux_daemon._daemon_is_live(data):
+            live = True
+            break
+        time.sleep(0.02)
+    assert live, "neither racing instance ever became live"
+
+    t1.join(timeout=10)
+    t2.join(timeout=10)
+    assert not t1.is_alive() and not t2.is_alive()
+    assert results == [0, 0]
+    # the winner's own idle-exit cleanup must have removed its rendezvous
+    assert mux_daemon.read_lock_data(mux_daemon.lock_path(tmp_path)) is None
 
 
 def test_ensure_daemon_running_serializes_concurrent_first_callers(tmp_path, monkeypatch):
-    """Copilot review finding: two concurrent first callers must not both
-    spawn their own daemon -- the whole check-then-spawn sequence is
-    serialized, and a caller that loses the race must simply observe the
-    winner's daemon as already live rather than spawning a second one."""
+    """Copilot review finding: two concurrent first callers may each spawn
+    a child (this function no longer needs to prevent that itself -- see
+    its own docstring), but only ONE daemon may ever actually become live:
+    both children race for the same single-instance lease, so both
+    ensure_daemon_running calls must still observe success (whichever
+    daemon wins), and at most one spawn call's child may ever have
+    published a rendezvous at once."""
     spawn_calls: list[list[str]] = []
     spawn_lock = threading.Lock()
 
@@ -743,5 +886,5 @@ def test_ensure_daemon_running_serializes_concurrent_first_callers(tmp_path, mon
     t2.join(timeout=10)
 
     assert results == [True, True]
-    assert len(spawn_calls) == 1, "exactly one daemon should have been spawned"
+    assert 1 <= len(spawn_calls) <= 2
 

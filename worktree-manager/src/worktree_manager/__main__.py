@@ -873,7 +873,11 @@ def _cmd_mux_daemon(rest: list[str]) -> int:
         if not project or not worktree_id:
             print("error: remove needs --project=NAME --worktree-id=ID")
             return 2
-        result = mux_daemon.remove_mapping(project, worktree_id, mapping_revision=revision)
+        try:
+            result = mux_daemon.remove_mapping(project, worktree_id, mapping_revision=revision)
+        except ValueError as exc:
+            print(f"error: {exc}")
+            return 2
         print(json.dumps(result))
         return 0 if result.get("applied") else 1
     if action == "show":

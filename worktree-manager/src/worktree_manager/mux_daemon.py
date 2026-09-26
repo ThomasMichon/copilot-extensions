@@ -44,11 +44,13 @@ warm-load step because there is no separate in-memory state to warm.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -112,6 +114,21 @@ if sys.platform == "win32":
     def _unlock_file(fh) -> None:
         fh.seek(0)
         msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+
+    def _try_lock_file_once(fh) -> bool:
+        """A single non-blocking lock attempt -- unlike :func:`_lock_file`,
+        never retries, so a caller can tell "someone else already holds
+        this" from "acquired it" immediately."""
+        fh.seek(0, os.SEEK_END)
+        if fh.tell() == 0:
+            fh.write(b"\0")
+            fh.flush()
+        fh.seek(0)
+        try:
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+            return True
+        except OSError:
+            return False
 else:
     import fcntl
 
@@ -120,6 +137,13 @@ else:
 
     def _unlock_file(fh) -> None:
         fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+    def _try_lock_file_once(fh) -> bool:
+        try:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except OSError:
+            return False
 
 
 # ---------------------------------------------------------------------------
@@ -521,26 +545,53 @@ def status_push_key(payload: dict) -> str:
     being applied would coalesce onto that older execution and never
     actually reach ``apply_status_options`` with its own (newer) values,
     silently violating the documented last-write-wins contract (Copilot
-    review finding). Including ``rendered_at`` in the key gives every
-    distinct render its own coalescing slot -- ``set-option`` itself is
-    idempotent, so re-applying an identical render that a retry coalesces
-    onto is harmless; it is only two *different* renders coalescing that
-    would drop one.
+    review finding).
 
-    Raises ``ValueError`` for a payload missing any of the three fields
-    this key depends on, so a caller finds out immediately rather than
-    silently deriving a key that can still collide.
+    ``rendered_at`` alone is not enough (a further Copilot review finding):
+    it is a timestamp, not a guaranteed-unique render identity -- two
+    genuinely different payloads for the same worktree could share one
+    (coarse clock resolution, or a caller bug), and would then still
+    coalesce. The key therefore also folds in a canonical hash of
+    ``values`` itself: two payloads only ever share a key when both
+    ``rendered_at`` AND every value are identical, in which case joining
+    them onto one execution is exactly the safe, intended coalescing of a
+    genuine retry -- not a silent drop.
+
+    Raises ``ValueError`` for a payload missing any of the fields this key
+    depends on, so a caller finds out immediately rather than silently
+    deriving a key that can still collide.
     """
     project = payload.get("project")
     worktree_id = payload.get("worktree_id")
     rendered_at = payload.get("rendered_at")
+    values = payload.get("values")
     if not isinstance(project, str) or not project:
         raise ValueError("mux-status-v1 push payload missing 'project'")
     if not isinstance(worktree_id, str) or not worktree_id:
         raise ValueError("mux-status-v1 push payload missing 'worktree_id'")
     if not isinstance(rendered_at, str) or not rendered_at:
         raise ValueError("mux-status-v1 push payload missing 'rendered_at'")
-    return f"{len(project)}:{project}:{len(worktree_id)}:{worktree_id}:{rendered_at}"
+    if not isinstance(values, dict):
+        raise ValueError("mux-status-v1 push payload missing 'values'")
+    values_digest = hashlib.sha256(
+        json.dumps(values, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return (
+        f"{len(project)}:{project}:{len(worktree_id)}:{worktree_id}:"
+        f"{rendered_at}:{values_digest}"
+    )
+
+
+def _parse_rendered_at(value: str) -> float | None:
+    """Best-effort ISO-8601 -> epoch-seconds parse for ordering renders.
+    Returns ``None`` (never raises) for anything unparseable -- an
+    unorderable render is simply always treated as "not older" (applied),
+    matching this ordering check's fail-open contract: it exists to catch
+    an out-of-order write, not to add a NEW way to drop a render."""
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except (ValueError, TypeError):
+        return None
 
 
 def build_compute(registry: MuxMappingRegistry) -> Callable[[str, dict], dict]:
@@ -550,7 +601,33 @@ def build_compute(registry: MuxMappingRegistry) -> Callable[[str, dict], dict]:
 
     Callers MUST derive their coalescing ``key`` via :func:`status_push_key`
     -- see that function's own docstring for why (Copilot review finding).
+
+    Giving distinct renders distinct coalescing keys (per
+    :func:`status_push_key`) closes one race but opens another (Copilot
+    review finding): ``CoalescingServer`` can now run two different
+    renders for the SAME worktree fully concurrently (they no longer share
+    a key), with no guarantee the older one's ``set-option`` calls finish
+    first -- an older render completing AFTER a newer one would overwrite
+    the mux options with stale values. This closure therefore keeps two
+    pieces of **per-``build_compute``-instance** (i.e. per resident daemon
+    process) in-memory state: a lock per ``(project, worktree_id)`` so
+    concurrent renders for the SAME worktree serialize (renders for
+    DIFFERENT worktrees still proceed in parallel), and the ``rendered_at``
+    of the last render actually applied for that worktree, so a render
+    that loses the serialization race and turns out to be older than what
+    already applied is discarded rather than overwriting the newer state.
     """
+    worktree_locks: dict[tuple[str, str], threading.Lock] = {}
+    worktree_locks_guard = threading.Lock()
+    last_applied: dict[tuple[str, str], float] = {}
+
+    def _lock_for(key: tuple[str, str]) -> threading.Lock:
+        with worktree_locks_guard:
+            lock = worktree_locks.get(key)
+            if lock is None:
+                lock = threading.Lock()
+                worktree_locks[key] = lock
+            return lock
 
     def _compute(kind: str, payload: dict) -> dict:
         if kind != KIND:
@@ -558,27 +635,51 @@ def build_compute(registry: MuxMappingRegistry) -> Callable[[str, dict], dict]:
         project = payload.get("project")
         worktree_id = payload.get("worktree_id")
         values = payload.get("values")
+        rendered_at = payload.get("rendered_at")
         if not isinstance(project, str) or not project:
             raise ValueError("mux-status-v1 payload missing 'project'")
         if not isinstance(worktree_id, str) or not worktree_id:
             raise ValueError("mux-status-v1 payload missing 'worktree_id'")
         if not isinstance(values, dict):
             raise ValueError("mux-status-v1 payload missing 'values'")
-        entry = registry.get(project, worktree_id)
-        if entry is None or not entry["live"]:
-            return {"applied": False, "reason": "not-live"}
-        # Revalidate a recovered/persisted mapping against the REAL mux
-        # server rather than trusting its stored `live` bit alone (Copilot
-        # review finding, Step 2's own validation requirement): a mux
-        # session that was torn down while the daemon was down (or since
-        # this entry was last observed) must not still be treated as a
-        # valid write target. A dead session invalidates the mapping so a
-        # later lookup does not repeat the same probe forever.
-        if not _mux_session_alive(entry["mux_bin"], entry["mux_session"]):
-            registry.remove(project, worktree_id, mapping_revision=entry["mapping_revision"])
-            return {"applied": False, "reason": "not-live"}
-        ok = apply_status_options(entry, values)
-        return {"applied": ok} if ok else {"applied": False, "reason": "apply-failed"}
+        key = (project, worktree_id)
+        rendered_ts = _parse_rendered_at(rendered_at) if isinstance(rendered_at, str) else None
+
+        with _lock_for(key):
+            # Discard a render older than the last one this daemon actually
+            # applied for this worktree (Copilot review finding): two
+            # concurrent, differently-keyed renders can otherwise finish in
+            # either order, and an older one finishing last would overwrite
+            # the mux options with stale values.
+            if rendered_ts is not None:
+                previous_ts = last_applied.get(key)
+                if previous_ts is not None and rendered_ts < previous_ts:
+                    return {"applied": False, "reason": "stale-render"}
+
+            # Revalidate the mapping fresh, immediately before applying,
+            # rather than trusting a snapshot taken earlier (Copilot review
+            # finding): a concurrent remove/re-register (a separate CLI
+            # process) could otherwise change or remove the mapping in the
+            # window between an earlier lookup and this write, letting a
+            # status push paint a removed or superseded session.
+            entry = registry.get(project, worktree_id)
+            if entry is None or not entry["live"]:
+                return {"applied": False, "reason": "not-live"}
+            # Revalidate a recovered/persisted mapping against the REAL mux
+            # server rather than trusting its stored `live` bit alone
+            # (Copilot review finding, Step 2's own validation
+            # requirement): a mux session that was torn down while the
+            # daemon was down (or since this entry was last observed) must
+            # not still be treated as a valid write target. A dead session
+            # invalidates the mapping so a later lookup does not repeat the
+            # same probe forever.
+            if not _mux_session_alive(entry["mux_bin"], entry["mux_session"]):
+                registry.remove(project, worktree_id, mapping_revision=entry["mapping_revision"])
+                return {"applied": False, "reason": "not-live"}
+            ok = apply_status_options(entry, values)
+            if ok and rendered_ts is not None:
+                last_applied[key] = rendered_ts
+            return {"applied": ok} if ok else {"applied": False, "reason": "apply-failed"}
 
     return _compute
 
@@ -636,50 +737,65 @@ def run_daemon_foreground(
     poll_interval_s: float = 1.0,
     max_iterations: int | None = None,
 ) -> int:
-    """The resident daemon's own loop: start the server, publish the lock
-    file, then idle-exit after ``idle_after_s`` seconds with no live mapping
-    and no active subscriber. ``max_iterations`` is test-only (bounds the
-    loop instead of relying on the idle timer alone)."""
+    """The resident daemon's own loop: acquire this daemon's single-
+    instance lease, start the server, publish the lock file, then
+    idle-exit after ``idle_after_s`` seconds with no live mapping and no
+    active subscriber. ``max_iterations`` is test-only (bounds the loop
+    instead of relying on the idle timer alone).
+
+    Acquiring :data:`_spawn_lock_path` as a lease held for this daemon's
+    ENTIRE lifetime (not merely at startup) is a deliberate design choice
+    (Copilot review finding): a briefly-held "check, then spawn" lock (as
+    an earlier revision of this function used) only protects callers that
+    go through it -- a direct ``mux-daemon run`` invocation (manual, or a
+    second supervisor) bypasses that check-then-spawn dance entirely, and
+    even between two lock-protected operations (an old daemon's cleanup
+    and a new one's startup publish) there is still a gap where both could
+    believe the lock file is theirs to write. Holding the SAME lease
+    continuously instead makes mutual exclusion structural rather than
+    timing-dependent: only one process can ever hold it, so a second
+    ``run_daemon_foreground`` call (via any path) sees it already held and
+    stands down immediately without ever starting a server or touching the
+    rendezvous file -- and this process's own exit-time cleanup can remove
+    the rendezvous unconditionally, since holding the lease the whole time
+    already proves no other daemon could have published one.
+    """
     resolved_root = root if root is not None else default_root()
-    runtime = MuxDaemonRuntime(registry_path(resolved_root))
-    runtime.start()
-    if runtime.server is None:
-        return 1
-    lock = lock_path(resolved_root)
-    generation = wcs_client.new_client_id()
-    idle_since: float | None = None
-    iterations = 0
+    lease = _acquire_daemon_lease(resolved_root)
+    if lease is None:
+        # Another instance already holds the single-instance lease --
+        # stand down rather than starting a second daemon.
+        return 0
     try:
-        while True:
-            extra = runtime.lock_extra()
-            extra["generation_id"] = generation
-            write_lock_data(lock, extra)
-            if runtime.has_active_demand():
-                idle_since = None
-            elif idle_since is None:
-                idle_since = time.time()
-            elif time.time() - idle_since >= idle_after_s:
-                break
-            iterations += 1
-            if max_iterations is not None and iterations >= max_iterations:
-                break
-            time.sleep(poll_interval_s)
-    finally:
-        runtime.shutdown()
-        # Ownership-aware cleanup (Copilot review finding): unconditionally
-        # unlinking the lock file here is unsafe if a REPLACEMENT daemon
-        # has already started and published its own (newer) rendezvous
-        # under the same path while this one was shutting down -- that
-        # would delete the live replacement's lock, leaving it
-        # undiscoverable. Only remove the file if it still records THIS
-        # daemon's own generation.
-        current = read_lock_data(lock)
-        if current is not None and current.get("generation_id") == generation:
+        lock = lock_path(resolved_root)
+        runtime = MuxDaemonRuntime(registry_path(resolved_root))
+        runtime.start()
+        if runtime.server is None:
+            return 1
+        idle_since: float | None = None
+        iterations = 0
+        try:
+            while True:
+                write_lock_data(lock, runtime.lock_extra())
+                if runtime.has_active_demand():
+                    idle_since = None
+                elif idle_since is None:
+                    idle_since = time.time()
+                elif time.time() - idle_since >= idle_after_s:
+                    break
+                iterations += 1
+                if max_iterations is not None and iterations >= max_iterations:
+                    break
+                time.sleep(poll_interval_s)
+        finally:
+            runtime.shutdown()
             try:
                 lock.unlink()
             except OSError:
                 pass
-    return 0
+        return 0
+    finally:
+        _release_daemon_lease(lease)
 
 
 def _daemon_is_live(data: dict | None) -> bool:
@@ -707,28 +823,27 @@ def _spawn_lock_path(root: Path) -> Path:
     return root / "mux-daemon.spawn.lock"
 
 
-def _spawn_serialized(root: Path):
-    """Cross-process advisory lock serializing the whole check-then-spawn
-    boot sequence (Copilot review finding): without this, two concurrent
-    first callers can both observe no live endpoint and each spawn their
-    own dynamic-port daemon, with each then racing to publish/overwrite the
-    shared lock file -- and the loser's daemon becomes an orphaned,
-    undiscoverable process. Only one caller performs the check-and-spawn at
-    a time; every other concurrent caller waits for the lock, then finds
-    the first caller's daemon already live and skips spawning entirely."""
-    import contextlib
+def _acquire_daemon_lease(root: Path):
+    """Attempt this daemon's single-instance lease: a single non-blocking
+    cross-process file-lock attempt, held for the daemon's entire lifetime
+    (see :func:`run_daemon_foreground`'s own docstring for why). Returns an
+    open file handle the caller must eventually pass to
+    :func:`_release_daemon_lease`, or ``None`` if another instance already
+    holds it."""
+    root.mkdir(parents=True, exist_ok=True)
+    fh = open(_spawn_lock_path(root), "a+b")
+    if _try_lock_file_once(fh):
+        return fh
+    fh.close()
+    return None
 
-    @contextlib.contextmanager
-    def _cm():
-        root.mkdir(parents=True, exist_ok=True)
-        with open(_spawn_lock_path(root), "a+b") as fh:
-            _lock_file(fh)
-            try:
-                yield
-            finally:
-                _unlock_file(fh)
 
-    return _cm()
+def _release_daemon_lease(fh) -> None:
+    try:
+        _unlock_file(fh)
+    except OSError:
+        pass
+    fh.close()
 
 
 def ensure_daemon_running(
@@ -737,36 +852,36 @@ def ensure_daemon_running(
     """Start the resident Manager mux daemon unless one is already live.
     Returns whether a current daemon is believed running (already live, or
     freshly spawned within ``boot_wait_s``). Idempotent + cheap: a live
-    daemon is a no-op."""
+    daemon is a no-op.
+
+    Does not itself hold any lock around the check-then-spawn sequence --
+    correctness no longer depends on that (see
+    :func:`run_daemon_foreground`'s own docstring): if two callers race
+    here and both spawn a child, both children race for the SAME
+    single-instance lease and only one actually starts a server, so this
+    function stays simple and never risks deadlocking against the very
+    child it just spawned."""
     resolved_root = root if root is not None else default_root()
     lock = lock_path(resolved_root)
     if _daemon_is_live(read_lock_data(lock)):
         return True
-    with _spawn_serialized(resolved_root):
-        # Re-check now that this call holds the spawn lock (Copilot review
-        # finding): a concurrent caller may have already spawned (and this
-        # call's own daemon may now be live) while this call was waiting to
-        # acquire it -- never spawn a second daemon on top of one that just
-        # became live.
+    # Propagate the resolved root to the child (Copilot review finding):
+    # without this, a caller-supplied non-default `root` (e.g. a test's
+    # scratch directory) would wait on a lock under that root while the
+    # spawned `mux-daemon run` resolved its own default installation root
+    # instead, so this helper would report failure despite successfully
+    # spawning a daemon.
+    argv = [sys.executable, "-m", "worktree_manager", "mux-daemon", "run"]
+    if root is not None:
+        argv.append(f"--root={root}")
+    if not _spawn_detached(argv):
+        return False
+    started = time.time()
+    while time.time() - started < boot_wait_s:
+        time.sleep(0.1)
         if _daemon_is_live(read_lock_data(lock)):
             return True
-        # Propagate the resolved root to the child (Copilot review
-        # finding): without this, a caller-supplied non-default `root`
-        # (e.g. a test's scratch directory) would wait on a lock under
-        # that root while the spawned `mux-daemon run` resolved its own
-        # default installation root instead, so this helper would report
-        # failure despite successfully spawning a daemon.
-        argv = [sys.executable, "-m", "worktree_manager", "mux-daemon", "run"]
-        if root is not None:
-            argv.append(f"--root={root}")
-        if not _spawn_detached(argv):
-            return False
-        started = time.time()
-        while time.time() - started < boot_wait_s:
-            time.sleep(0.1)
-            if _daemon_is_live(read_lock_data(lock)):
-                return True
-        return False
+    return False
 
 
 def _spawn_detached(argv: list[str]) -> bool:
