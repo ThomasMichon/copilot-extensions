@@ -859,6 +859,31 @@ install_package() {
   if [ -f "${procutil_dir}/pyproject.toml" ]; then
     _uv_pip_install_resilient --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-procutil "${procutil_dir}" --quiet
   fi
+  # plugin_activation's own transitive deps first, then plugin_activation
+  # itself (schema v3's registered-project trust gate; module
+  # ``plugin_activation``, used by ``repo_trust.py`` for canonical git-remote
+  # identity normalization).
+  local dropin_registry_dir="${PLUGIN_DIR}/libs/dropin-registry"
+  if [ ! -f "${dropin_registry_dir}/pyproject.toml" ]; then
+    dropin_registry_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/dropin-registry"
+  fi
+  if [ -f "${dropin_registry_dir}/pyproject.toml" ]; then
+    _uv_pip_install_resilient --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-dropin-registry "${dropin_registry_dir}" --quiet
+  fi
+  local plugin_resolve_dir="${PLUGIN_DIR}/libs/plugin-resolve"
+  if [ ! -f "${plugin_resolve_dir}/pyproject.toml" ]; then
+    plugin_resolve_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/plugin-resolve"
+  fi
+  if [ -f "${plugin_resolve_dir}/pyproject.toml" ]; then
+    _uv_pip_install_resilient --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-plugin-resolve "${plugin_resolve_dir}" --quiet
+  fi
+  local plugin_activation_dir="${PLUGIN_DIR}/libs/plugin-activation"
+  if [ ! -f "${plugin_activation_dir}/pyproject.toml" ]; then
+    plugin_activation_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/plugin-activation"
+  fi
+  if [ -f "${plugin_activation_dir}/pyproject.toml" ]; then
+    _uv_pip_install_resilient --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-plugin-activation "${plugin_activation_dir}" --quiet
+  fi
   _uv_pip_install_resilient --python "${VENV}/bin/python" --no-build-isolation --no-deps "${PLUGIN_DIR}" --quiet
   ok "installed agent-logger package"
 
