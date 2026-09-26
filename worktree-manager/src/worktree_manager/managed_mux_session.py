@@ -101,31 +101,6 @@ def _session_metadata(mux_bin: str, mux_session: str) -> dict:
     }
 
 
-def _activation_revision(current: dict | None, payload: dict) -> int:
-    if current is None:
-        return 1
-    if not current.get("live"):
-        return int(current["mapping_revision"]) + 1
-    same_identity = (
-        current.get("mux_session") == payload.get("mux_session")
-        and current.get("mux_bin") == payload.get("mux_bin")
-        and current.get("worktree_path") == payload.get("worktree_path")
-        and current.get("session_incarnation") == payload.get("session_incarnation")
-    )
-    if same_identity:
-        return int(current["mapping_revision"])
-    return int(current["mapping_revision"]) + 1
-
-
-def _deactivation_revision(current: dict | None, mux_session: str) -> int | None:
-    if current is None:
-        return None
-    current_revision = int(current["mapping_revision"])
-    if not current.get("live") and current.get("mux_session") == mux_session:
-        return current_revision
-    return current_revision + 1
-
-
 def activate_managed_session(
     project: str,
     worktree_id: str,
@@ -135,8 +110,16 @@ def activate_managed_session(
     *,
     root: Path | None = None,
 ) -> dict:
-    """Register + observe one live Manager-owned mux embodiment."""
-    current = mux_daemon.get_mapping(project, worktree_id, root=root)
+    """Register + observe one live Manager-owned mux embodiment.
+
+    Revision allocation happens atomically inside
+    :func:`mux_daemon.activate_mapping` (a single locked
+    read-current/allocate-next/write critical section), not via a separate
+    unlocked ``get_mapping`` call followed by a second-lock ``register``
+    (Copilot review finding on PR #3829: that two-step shape was a
+    read-then-write race where two concurrent activations could both
+    observe the same current entry and register at the same, indistinguishable
+    revision)."""
     metadata = _session_metadata(mux_bin, mux_session)
     payload = {
         "project": project,
@@ -150,12 +133,13 @@ def activate_managed_session(
         "live": True,
         "observed_at": _now_iso(),
     }
-    payload["mapping_revision"] = _activation_revision(current, payload)
-    mapping_result = mux_daemon.register_mapping(payload, root=root)
+    mapping_result = mux_daemon.activate_mapping(payload, root=root)
+    mapping_revision = mapping_result["revision"]
     daemon_running = mux_daemon.ensure_daemon_running(root)
     observation_payload = {
         key: value for key, value in payload.items() if key != "mux_bin"
     }
+    observation_payload["mapping_revision"] = mapping_revision
     observe_result = managed_mux_link.mux_live_with_boot(
         payload=observation_payload,
         fallback=lambda: {"delivered": False, "reason": "unreachable"},
@@ -164,7 +148,7 @@ def activate_managed_session(
         "mapping": mapping_result,
         "daemon_running": daemon_running,
         "observation": observe_result,
-        "mapping_revision": payload["mapping_revision"],
+        "mapping_revision": mapping_revision,
     }
 
 
@@ -175,15 +159,14 @@ def deactivate_managed_session(
     *,
     root: Path | None = None,
 ) -> dict:
-    """Tombstone + observe the loss of one Manager-owned mux embodiment."""
+    """Tombstone + observe the loss of one Manager-owned mux embodiment.
+
+    Revision allocation happens atomically inside
+    :func:`mux_daemon.deactivate_mapping` (see :func:`activate_managed_session`
+    for why the previous separate-get-then-remove shape was a race)."""
     current = mux_daemon.get_mapping(project, worktree_id, root=root)
-    revision = _deactivation_revision(current, mux_session)
-    remove_result = mux_daemon.remove_mapping(
-        project,
-        worktree_id,
-        mapping_revision=revision,
-        root=root,
-    )
+    remove_result = mux_daemon.deactivate_mapping(project, worktree_id, mux_session, root=root)
+    revision = remove_result.get("revision")
     if current is None or revision is None:
         return {
             "mapping": remove_result,

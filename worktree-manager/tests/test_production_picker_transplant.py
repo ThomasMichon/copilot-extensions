@@ -162,17 +162,52 @@ def test_production_runner_activates_project_and_uses_transplanted_ui(monkeypatc
         lambda *, live: calls.append(("picker", live)) or {"action": "new"},
     )
     monkeypatch.setattr(runner.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(
+        runner,
+        "_ensure_mux_daemon_running",
+        lambda: calls.append(("mux-daemon-ensure",)) or True,
+    )
 
     assert runner.run("demo") == {"action": "new"}
     assert calls == [
         ("active", "demo"),
         ("heal", "config"),
+        ("mux-daemon-ensure",),
         ("reap",),
         ("managed",),
         ("shells",),
         ("finished",),
         ("picker", True),
     ]
+
+
+def test_start_mux_daemon_ensure_runs_off_thread_and_swallows_failure(monkeypatch):
+    """``_start_mux_daemon_ensure`` must (a) actually dispatch through
+    ``threading.Thread`` rather than calling inline, and (b) never let a
+    daemon-ensure failure propagate -- it is a best-effort background
+    ensure, not a blocking precondition for the Picker to run (Copilot
+    review finding on PR #3829: the previous inline call had no dedicated
+    coverage for either property)."""
+    calls = []
+
+    class ImmediateThread:
+        def __init__(self, *, target, name=None, daemon=None):
+            calls.append(("thread", name, daemon))
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(runner.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(
+        runner,
+        "_ensure_mux_daemon_running",
+        lambda: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    runner._start_mux_daemon_ensure()  # must not raise
+
+    assert calls == [("thread", "production-picker-mux-daemon-ensure", True)]
 
 
 def test_prepare_does_not_block_first_paint_on_slow_config_load(monkeypatch):

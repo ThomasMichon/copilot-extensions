@@ -53,6 +53,8 @@ from .mux_mapping_registry import (
     MuxMappingRegistry,
     _try_lock_file_once,
     _unlock_file,
+    activate_mapping,
+    deactivate_mapping,
     get_mapping,
     registry_path,
     register_mapping,
@@ -61,6 +63,8 @@ from .mux_mapping_registry import (
 from .self_install import default_root
 
 __all__ = [
+    "activate_mapping",
+    "deactivate_mapping",
     "get_mapping",
     "register_mapping",
     "remove_mapping",

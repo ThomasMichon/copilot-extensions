@@ -89,6 +89,44 @@ def _start_housekeeping(cli: Any) -> None:
     ).start()
 
 
+def _ensure_mux_daemon_running() -> bool:
+    """Indirection seam so tests can stub out the real daemon-ensure call
+    (Copilot review finding on PR #3829: the prior inline
+    ``from .. import mux_daemon; mux_daemon.ensure_daemon_running()`` call
+    had no patchable name, so the existing runner test exercised a real
+    daemon spawn/probe against the default runtime root instead of a
+    controlled double). Import stays deferred to avoid a module-load-time
+    dependency from this package onto ``mux_daemon``."""
+    from .. import mux_daemon
+
+    return mux_daemon.ensure_daemon_running()
+
+
+def _start_mux_daemon_ensure() -> None:
+    """Ensure the Worktree Manager mux companion daemon is running, off the
+    Picker's first-paint path (Copilot review finding on PR #3829):
+    ``mux_daemon.ensure_daemon_running()`` can block up to its own
+    ``BOOT_WAIT_S`` while spawning/probing the daemon process, and calling it
+    synchronously here reintroduces the same blank-first-paint class of delay
+    ``_start_anchor_heal_check``/``_start_housekeeping`` already exist to
+    avoid. Fire-and-forget on a background thread instead; nothing on the
+    render path depends on its result -- a later managed-mux action
+    (activate/deactivate) re-ensures the daemon itself if this attempt is
+    still in flight or failed."""
+
+    def _worker() -> None:
+        try:
+            _ensure_mux_daemon_running()
+        except Exception:
+            pass
+
+    threading.Thread(
+        target=_worker,
+        name="production-picker-mux-daemon-ensure",
+        daemon=True,
+    ).start()
+
+
 def run(
     project: str,
     *,
@@ -105,12 +143,7 @@ def run(
     resolved_mock = _resolve_mock_mode(mock_mode)
     cli, default_live = _prepare(project, heal=not resolved_mock)
     if not resolved_mock:
-        try:
-            from .. import mux_daemon
-
-            mux_daemon.ensure_daemon_running()
-        except Exception:
-            pass
+        _start_mux_daemon_ensure()
         _start_housekeeping(cli)
     picker_root = None if resolved_mock else cli._start_picker_monitor_root()
     live = False if local else default_live

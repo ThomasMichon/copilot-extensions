@@ -180,6 +180,26 @@ def _normalize_panes(raw) -> list[dict]:
     return normalized
 
 
+def _next_activation_revision(current: dict | None, candidate: dict) -> int:
+    """Shared allocation rule for :meth:`MuxMappingRegistry.activate`: reuse
+    the current entry's revision only for a benign same-session metadata
+    refresh; allocate the next revision for a new incarnation, a revival
+    from a tombstone, or a first-ever registration."""
+    if current is None:
+        return 1
+    if not current["live"]:
+        return current["mapping_revision"] + 1
+    same_identity = (
+        current.get("mux_session") == candidate.get("mux_session")
+        and current.get("mux_bin") == candidate.get("mux_bin")
+        and current.get("worktree_path") == candidate.get("worktree_path")
+        and current.get("session_incarnation") == candidate.get("session_incarnation")
+    )
+    if same_identity:
+        return current["mapping_revision"]
+    return current["mapping_revision"] + 1
+
+
 class MuxMappingRegistry:
     """The Manager-owned ``worktree_id ⇄ mux session/pane(s)`` mapping,
     always disk-backed (see this module's own docstring for why -- no
@@ -244,6 +264,69 @@ class MuxMappingRegistry:
             except OSError:
                 pass
             raise
+
+    def activate(self, payload: dict) -> dict:
+        """Allocate the next mapping revision for one activation and persist
+        it atomically, in the same locked critical section that reads the
+        current entry (Copilot review finding on PR #3829): computing the
+        revision from a separate, unlocked ``get()`` call and then calling
+        :meth:`register` in a second lock acquisition is a read-then-write
+        race -- two concurrent activations can both observe the same
+        ``current`` snapshot, both compute the same next revision, and both
+        register at that equal revision. Because ``register`` accepts an
+        equal-revision update as a benign refresh, a delayed activation for
+        a stale session identity could otherwise silently overwrite a newer
+        session's mapping while remaining indistinguishable by revision
+        alone.
+
+        ``payload`` must carry every field :func:`_normalize_mapping_entry`
+        requires except ``mapping_revision``, which this method allocates:
+        the current entry's own revision when ``payload``'s session identity
+        (``mux_session``, ``mux_bin``, ``worktree_path``,
+        ``session_incarnation``) matches a still-live current entry (a
+        benign metadata refresh of the SAME session), otherwise the next
+        revision (a genuinely new session incarnation, reviving from a
+        tombstone, or a first-ever registration).
+        """
+        key = (payload["project"], payload["worktree_id"])
+        with self._interprocess_lock():
+            entries = self._read_all()
+            current = entries.get(key)
+            working = dict(payload)
+            working["mapping_revision"] = _next_activation_revision(current, payload)
+            entry = _normalize_mapping_entry(working)
+            if (
+                current is not None
+                and entry["mapping_revision"] == current["mapping_revision"]
+                and entry["last_status_rendered_at"] is None
+            ):
+                entry["last_status_rendered_at"] = current["last_status_rendered_at"]
+            entries[key] = entry
+            self._write_all(entries)
+        return {"applied": True, "revision": entry["mapping_revision"]}
+
+    def deactivate(self, project: str, worktree_id: str, mux_session: str) -> dict:
+        """Allocate the tombstone revision and persist it atomically, in the
+        same locked critical section that reads the current entry (same
+        read-then-write race the review flagged for :meth:`activate`,
+        applied to the teardown edge). Returns
+        ``{"applied": True, "revision": int | None}``; ``revision`` is
+        ``None`` when no mapping currently exists for this key."""
+        key = (project, worktree_id)
+        with self._interprocess_lock():
+            entries = self._read_all()
+            current = entries.get(key)
+            if current is None:
+                return {"applied": True, "reason": "absent", "revision": None}
+            revision = current["mapping_revision"]
+            if not (not current["live"] and current["mux_session"] == mux_session):
+                revision += 1
+            tombstone = dict(current)
+            tombstone["live"] = False
+            tombstone["mapping_revision"] = revision
+            entries[key] = tombstone
+            self._write_all(entries)
+        return {"applied": True, "revision": revision}
 
     def register(self, payload: dict) -> dict:
         """Validate, apply the monotonic-revision guard, and persist one
@@ -410,6 +493,25 @@ class MuxMappingRegistry:
 # Register/remove mapping helpers (the "internal commands/helpers" Step 2
 # calls for -- not yet wired to any real launch/join/restore/remux caller)
 # ---------------------------------------------------------------------------
+
+
+def activate_mapping(payload: dict, root: Path | None = None) -> dict:
+    """Atomically allocate + persist one activation's mapping revision (see
+    :meth:`MuxMappingRegistry.activate`). This is the entry point Step 3's
+    launch/join/restore/remux callers use instead of a separate
+    ``get_mapping`` + ``register_mapping`` pair, closing the read-then-write
+    revision-allocation race a Copilot review flagged on PR #3829."""
+    registry = MuxMappingRegistry(registry_path(root))
+    return registry.activate(payload)
+
+
+def deactivate_mapping(
+    project: str, worktree_id: str, mux_session: str, root: Path | None = None
+) -> dict:
+    """Atomically allocate + persist one teardown's tombstone revision (see
+    :meth:`MuxMappingRegistry.deactivate`)."""
+    registry = MuxMappingRegistry(registry_path(root))
+    return registry.deactivate(project, worktree_id, mux_session)
 
 
 def register_mapping(payload: dict, root: Path | None = None) -> dict:
