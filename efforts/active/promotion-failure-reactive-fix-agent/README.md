@@ -342,15 +342,22 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
         exercises, to find whichever changed most recently and whether
         that change was itself a deliberate, intentional behavior change
         or an accidental regression.
-  - [ ] **Decision rule, once triaged:** if the implementation's recent
-        change was a deliberate, intentional behavior change, the test's
-        *expectation* should be updated to match that new intent
-        (correcting what it asserts, not loosening it generically or
-        disabling it). If the implementation regressed a genuine
-        pre-existing invariant the test correctly protects, fix the
-        *implementation*, not the test. Either way the fix must be
-        traceable to a specific, stated judgment about *whose intent was
-        right* — never a silent "whichever change makes the run green."
+  - [ ] **Decision rule, once triaged:** "deliberate" alone is not
+        sufficient to update the test — a deliberate implementation
+        change can still be *wrong*: it can violate a genuine pre-
+        existing invariant or contradict established vision/intent even
+        though it was made on purpose. Update the test's *expectation*
+        to match the implementation's new behavior **only when** that
+        change was both deliberate *and* itself validated against
+        established intent/vision (correcting what the test asserts, not
+        loosening it generically or disabling it). In every other case —
+        an accidental regression, **or** a deliberate change that itself
+        conflicts with a genuine pre-existing invariant or the
+        established vision — fix the *implementation*, not the test.
+        Either way the fix must be traceable to a specific, stated
+        judgment about *whose intent was right* — never a silent
+        "whichever change makes the run green," and never "it was
+        deliberate" alone as the justification.
   - [ ] **Explicitly forbidden, regardless of triage outcome:** deleting,
         skipping, `xfail`-ing, or broadly loosening a test's assertion as
         a way to avoid making that judgment. If the agent cannot
