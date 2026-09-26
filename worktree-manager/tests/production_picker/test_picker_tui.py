@@ -3164,6 +3164,25 @@ def test_sessionless_flag_only_when_count_known_zero():
     assert n(session_count=0, kind="bridge")["sessionless"] is False  # managed
 
 
+def test_sess_turns_combines_session_count_and_turn_count():
+    """#3307 Phase 6: the combined SESS/TURNS column renders
+    "<session_count>/<turn_count>", falling back to "-" for the session half
+    when ``session_count`` is absent (a fixture or a too-old remote) rather
+    than fabricating a count -- the turn half always renders."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+
+    def n(**extra):
+        base = {"id": "anomalous-potato-win-zzzz", "status": "active",
+                "state": "wip", "started_at": "2026-06-27T17:00:00"}
+        base.update(extra)
+        return derive.norm(base, "m", "Win")
+
+    assert n(session_count=3, turn_count=47)["sess_turns"] == "3/47"
+    assert n(session_count=0, turn_count=0)["sess_turns"] == "0/0"
+    assert n(turn_count=5)["sess_turns"] == "-/5"          # count unknown
+    assert n()["sess_turns"] == "-/0"                      # neither known
+
+
 def _sessionless_source():
     """One normal (owned) worktree + one sessionless orphan (session_count 0)."""
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
