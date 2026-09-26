@@ -201,7 +201,9 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     )
 
     managed_mux_runtime = mux_link.InProcessRuntime()
-    managed_mux_runtime.start(core._aw_runtime_home() / "managed-mux-cache.json")
+    managed_mux_runtime.start(
+        _core_helper("_aw_runtime_home", status_monitor_runtime._aw_runtime_home)() / "managed-mux-cache.json"
+    )
 
     def _lock_extra() -> dict:
         extra = {"prefix": my_prefix, "mux": bool(mux_bin)}

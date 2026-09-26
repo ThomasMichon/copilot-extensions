@@ -590,6 +590,20 @@ def test_warm_load_ignores_a_corrupt_or_malformed_snapshot_file(tmp_path):
     assert cache3.snapshot() == {}
 
 
+def test_warm_load_ignores_a_snapshot_with_invalid_utf8_bytes(tmp_path):
+    """Copilot review finding: a corrupt/truncated snapshot containing bytes
+    that are not valid UTF-8 makes ``Path.read_text(encoding="utf-8")`` raise
+    ``UnicodeDecodeError`` rather than ``json.JSONDecodeError``.
+    ``UnicodeDecodeError`` is itself a ``ValueError`` subclass, so
+    ``_read_persisted_entries``'s existing ``except (OSError, ValueError)``
+    already covers it -- this test pins that down explicitly so it can never
+    silently regress (e.g. via a narrower future ``except`` clause)."""
+    persist_path = tmp_path / "managed-mux-cache.json"
+    persist_path.write_bytes(b"\xff\xfe not valid utf-8 \x80\x81")
+    cache = mux_link.ManagedMuxCache(persist_path=persist_path)  # must not raise
+    assert cache.snapshot() == {}
+
+
 def test_warm_load_rejects_a_non_finite_received_at_and_falls_back_to_now(tmp_path):
     """Copilot review finding: ``json.loads`` permits non-finite numbers
     (``Infinity``/``-Infinity``/``NaN``), and a plain ``isinstance(x, (int,
