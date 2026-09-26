@@ -407,9 +407,11 @@ shape before committing to a design)_
       the file-pointer/docs kind) and is now this effort's actual, active
       mechanism. Nothing to remove.
 - [x] Update `tools/preview_release.py` ("preview-promo") to perform the
-      same copy-then-rewrite operation into its scratch preview copy
-      (never the real tree) for a plugin using the reference form —
-      **`src-passthrough` form, actually**: `_materialize_into_preview()`
+      same pointer-expansion/materialization into its scratch preview copy
+      (never the real tree) for a plugin using the `src-passthrough` form
+      (**not** a TOML "copy-then-rewrite" — that described the superseded
+      uv-editable form; `src-passthrough` never rewrites a consumer's
+      `pyproject.toml` reference at all): `_materialize_into_preview()`
       already handles it (PR #3803, hardened further by #3810).
 - [ ] Confirm the live promotion pipeline (`promote_release.py` ->
       `materialize_main.py`) handles the converted real plugins correctly.
@@ -534,9 +536,11 @@ shape before committing to a design)_
       (a real subprocess re-import after mutating canonical, no reinstall)
       — still worth a direct real-plugin demonstration per future
       conversion.
-- [ ] `tools/preview_release.py` ("preview-promo") correctly performs the
-      copy-then-rewrite for a plugin using the canonical-reference form
-      when building a scratch local-install preview.
+- [x] `tools/preview_release.py` ("preview-promo") correctly performs
+      pointer expansion/materialization (not a TOML rewrite — see the
+      note above) for a plugin using the `src-passthrough` form
+      when building a scratch local-install preview. **Done, PR #3803/
+      #3810** (`_materialize_into_preview()`).
 - [x] `materialize_main.py`'s directory-pointer path refuses a `source`
       that escapes `canonical_root` (the same containment guarantee the
       file-pointer path already has via `_resolve_within()`). **Done, PR
