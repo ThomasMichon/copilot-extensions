@@ -1,9 +1,0 @@
-{
-  "comment": "agent-bridge ui: a task control surface -- a board that joins each orchestrator with its supervised venue workers, a session viewer that collapses tool calls, new/resume/rename task verbs, live PR state, and a CSP with no inline code",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "minor"
-    }
-  ]
-}
