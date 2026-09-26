@@ -1,0 +1,9 @@
+{
+  "comment": "Fix two real bugs in the #3825 managed-mux status cutover: scrub session credentials before restarting the resident status-monitor, and stop blocking launcher attach/pane-exit on the register/remove CLI edge.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

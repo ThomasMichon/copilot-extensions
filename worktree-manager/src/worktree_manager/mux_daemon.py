@@ -186,12 +186,21 @@ def _ensure_status_monitor_running() -> bool:
     base = engine_client.engine_base_command()
     if not base:
         return False
+    env = engine_client._engine_environment()
+    # Scrub session credentials before spawning/restarting the resident
+    # status-monitor: this call can run from a launcher/pane-teardown
+    # process that carries `GH_TOKEN`/`GITHUB_TOKEN`/an AHP token, and the
+    # resident monitor is long-lived -- `_engine_environment()` only strips
+    # Python-parent env vars, not auth tokens, so it must not inherit them.
+    # Mirrors `_spawn_detached`'s own scrubbing for the mux companion daemon.
+    for key in ("GH_TOKEN", "GITHUB_TOKEN", "AGENT_WORKTREES_AHP_AUTH_TOKEN"):
+        env.pop(key, None)
     kwargs: dict = {
         "capture_output": True,
         "text": True,
         "timeout": 30,
         "check": False,
-        "env": engine_client._engine_environment(),
+        "env": env,
         "stdin": subprocess.DEVNULL,
     }
     if os.name == "nt":

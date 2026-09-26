@@ -1058,6 +1058,40 @@ def test_ensure_daemon_running_propagates_root_to_spawned_child(tmp_path, monkey
     assert any(arg == f"--root={tmp_path}" for arg in captured["argv"])
 
 
+def test_ensure_status_monitor_running_scrubs_session_credentials(monkeypatch):
+    """This call can run from a launcher/pane-teardown process carrying
+    ``GH_TOKEN``/``GITHUB_TOKEN``/an AHP token, and the resident status-
+    monitor it (re)starts is long-lived -- it must not inherit them just
+    because ``engine_client._engine_environment()`` only strips
+    Python-parent variables, not auth tokens."""
+    from worktree_manager import engine_client
+
+    monkeypatch.setenv("GH_TOKEN", "secret-gh")
+    monkeypatch.setenv("GITHUB_TOKEN", "secret-github")
+    monkeypatch.setenv("AGENT_WORKTREES_AHP_AUTH_TOKEN", "secret-ahp")
+    monkeypatch.setenv("SOME_OTHER_VAR", "kept")
+    monkeypatch.setattr(engine_client, "engine_base_command", lambda: ["agent-worktrees"])
+
+    captured: dict = {}
+
+    class _FakeCompletedProcess:
+        returncode = 0
+
+    def _fake_run(argv, **kwargs):
+        captured["env"] = kwargs.get("env")
+        return _FakeCompletedProcess()
+
+    monkeypatch.setattr(mux_daemon.subprocess, "run", _fake_run)
+
+    assert mux_daemon._ensure_status_monitor_running() is True
+    env = captured["env"]
+    assert env is not None
+    assert "GH_TOKEN" not in env
+    assert "GITHUB_TOKEN" not in env
+    assert "AGENT_WORKTREES_AHP_AUTH_TOKEN" not in env
+    assert env.get("SOME_OTHER_VAR") == "kept"
+
+
 def test_ensure_daemon_running_end_to_end_with_a_real_subprocess(tmp_path):
     """A genuine integration test: spawn the real ``mux-daemon run`` CLI as
     a subprocess (not mocked) and confirm ``ensure_daemon_running`` finds it
