@@ -698,13 +698,14 @@ claiming discipline alone.
   `status-monitor` now routes rendered `@aw_*` payloads back through
   `mux-status-v1` for sessions present in the managed-mux cache while
   leaving unmanaged sessions on the old direct writer path. Review surfaced
-  four real follow-up fixes before merge: bumping the standalone Manager
-  payload to `0.1.0-dev79` so the launcher/daemon cutover actually ships,
+  five real follow-up fixes before merge: bumping the standalone Manager
+  payload to `0.1.0-dev80` so the launcher/daemon cutover actually ships,
   moving revisionless mapping allocation under the registry lock so two
   concurrent register calls cannot reuse the same `mapping_revision`,
   adding direct wire-client coverage for `agent_worktrees.mux_status_link`,
-  and updating `mux_daemon.py`'s lifecycle docstring now that the launch
-  path is live. Validation: targeted suites green after the final review
+  scrubbing long-lived daemon spawns of relayed auth tokens, and updating
+  `mux_daemon.py`'s lifecycle docstring now that the launch path is live.
+  Validation: targeted suites green after the final review
   fixes (`agent-worktrees`: 108 passed; `worktree-manager`: 111 passed).
   Full `worktree-manager` suite after those fixes: 1436 passed, 7 skipped,
   same 3 pre-existing unrelated failures (`tests/production_picker/

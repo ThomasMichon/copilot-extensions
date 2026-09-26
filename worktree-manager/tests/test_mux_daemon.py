@@ -1099,6 +1099,27 @@ def test_ensure_daemon_running_end_to_end_with_a_real_subprocess(tmp_path):
             proc.kill()
 
 
+def test_spawn_detached_scrubs_auth_env(monkeypatch):
+    captured = {}
+
+    def _fake_popen(argv, **kwargs):
+        captured["argv"] = argv
+        captured["env"] = dict(kwargs["env"])
+        class _Proc:
+            pass
+        return _Proc()
+
+    monkeypatch.setattr(subprocess, "Popen", _fake_popen)
+    monkeypatch.setenv("GH_TOKEN", "gh-token")
+    monkeypatch.setenv("GITHUB_TOKEN", "github-token")
+    monkeypatch.setenv("AGENT_WORKTREES_AHP_AUTH_TOKEN", "ahp-token")
+
+    assert mux_daemon._spawn_detached(["python", "-m", "worktree_manager"]) is True
+    assert "GH_TOKEN" not in captured["env"]
+    assert "GITHUB_TOKEN" not in captured["env"]
+    assert "AGENT_WORKTREES_AHP_AUTH_TOKEN" not in captured["env"]
+
+
 # ---------------------------------------------------------------------------
 # run_daemon_foreground idle-exit lifecycle
 # ---------------------------------------------------------------------------

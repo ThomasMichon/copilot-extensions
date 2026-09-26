@@ -897,10 +897,16 @@ def _spawn_detached(argv: list[str]) -> bool:
     hook/classify servers' callers can) and is not yet on any production
     launch path (Step 2's own explicit scope). Revisit if/when Step 3 wires
     this into a UX-visible launch flow."""
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in {"GH_TOKEN", "GITHUB_TOKEN", "AGENT_WORKTREES_AHP_AUTH_TOKEN"}
+    }
     kwargs: dict = {
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,
         "stderr": subprocess.DEVNULL,
+        "env": env,
     }
     if sys.platform == "win32":
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
