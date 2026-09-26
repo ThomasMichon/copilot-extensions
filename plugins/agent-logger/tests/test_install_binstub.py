@@ -540,3 +540,110 @@ def test_scoped_stamp_avoids_global_compatibility_wrappers(tmp_path: Path) -> No
         assert not (local_bin / command_name).exists()
         assert not (local_bin / f"{command_name}.ps1").exists()
         assert not (local_bin / f"{command_name}.cmd").exists()
+
+
+# --------------------------------------------------------------------------- #
+# vendored-lib install-step regression                                        #
+# --------------------------------------------------------------------------- #
+#
+# A dependency declared only in pyproject.toml is NOT enough for either
+# installer: both install the main package with --no-deps (a bare path
+# dependency name like "agent-plugin-activation" has no index entry to
+# resolve against), so each vendored lib needs its own explicit install step
+# BEFORE that final --no-deps install. This was missed for three new libs
+# when schema v3's registered-project trust gate was added (confirmed live:
+# a fresh install produced a package that raised `ModuleNotFoundError: No
+# module named 'plugin_activation'` on every CLI invocation). These tests
+# derive the expected lib set straight from pyproject.toml's own
+# ``[tool.uv.sources]`` (the source of truth for "which packages are vendored
+# path dependencies") rather than a hand-maintained list, so a future
+# dependency add/rename that isn't matched by an install step fails here
+# automatically -- no one has to remember to update a second, parallel list.
+
+_PYPROJECT_TEXT = (_PLUGIN_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+
+def _vendored_path_dependencies() -> dict[str, str]:
+    """Map each ``[tool.uv.sources]`` path-pinned package name to its vendored
+    ``libs/<dir>`` directory name (e.g. ``"agent-plugin-activation" ->
+    "plugin-activation"``)."""
+    sources_match = re.search(
+        r"\[tool\.uv\.sources\](.*?)(?:\n\[|\Z)", _PYPROJECT_TEXT, re.DOTALL
+    )
+    assert sources_match, "pyproject.toml has no [tool.uv.sources] table"
+    mapping = {}
+    for name, lib_dir in re.findall(
+        r'^([\w-]+)\s*=\s*\{\s*path\s*=\s*"libs/([\w-]+)"',
+        sources_match.group(1),
+        re.MULTILINE,
+    ):
+        mapping[name] = lib_dir
+    assert mapping, "no path-pinned dependencies found in [tool.uv.sources]"
+    return mapping
+
+
+_VENDORED_LIB_DIRS = sorted(_vendored_path_dependencies().values())
+
+
+def _install_sh_lib_positions() -> dict[str, int]:
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    no_deps_marker = text.index('--no-deps "${PLUGIN_DIR}"')
+    body = text[:no_deps_marker]
+    positions = {}
+    for lib in _VENDORED_LIB_DIRS:
+        index = body.find(f"libs/{lib}")
+        assert index != -1, f"install.sh has no install step for libs/{lib}"
+        positions[lib] = index
+    return positions
+
+
+def _install_ps1_lib_positions() -> dict[str, int]:
+    text = _INSTALL_PS1.read_text(encoding="utf-8")
+    no_deps_marker = text.index("'--no-deps', \"$PluginDir\"")
+    body = text[:no_deps_marker]
+    positions = {}
+    for lib in _VENDORED_LIB_DIRS:
+        index = body.find(f"Dir = '{lib}'")
+        assert index != -1, f"install.ps1 has no install step for lib dir '{lib}'"
+        positions[lib] = index
+    return positions
+
+
+@pytest.mark.parametrize(
+    "positions_fn", [_install_sh_lib_positions, _install_ps1_lib_positions]
+)
+def test_installers_install_every_pyproject_vendored_lib_before_no_deps(
+    positions_fn,
+) -> None:
+    """Every ``[tool.uv.sources]`` path dependency in pyproject.toml gets an
+    explicit install step, in both installers, before the final --no-deps
+    main-package install (asserted by ``_install_*_positions`` itself
+    raising if a lib's install step is missing entirely)."""
+    positions_fn()
+
+
+@pytest.mark.parametrize(
+    "positions_fn", [_install_sh_lib_positions, _install_ps1_lib_positions]
+)
+def test_installers_install_plugin_activation_after_its_own_transitive_deps(
+    positions_fn,
+) -> None:
+    """plugin_activation imports dropin_registry and plugin_resolve at module
+    load time, so its own install step must come after both of theirs --
+    installing it first would leave its own dependencies briefly
+    unresolvable mid-install (uv resolves each --no-build-isolation install
+    independently, so this is about avoiding an inconsistent partial state,
+    not a hard uv failure)."""
+    positions = positions_fn()
+    assert positions["plugin-activation"] > positions["dropin-registry"]
+    assert positions["plugin-activation"] > positions["plugin-resolve"]
+
+
+def test_install_ps1_falls_back_to_monorepo_libs_dir() -> None:
+    """Unlike a plugin-local vendored copy (always present in a deployed
+    payload), a local monorepo dev checkout may stage the plugin without its
+    own libs\\ copy -- install.ps1 must resolve each lib against the
+    top-level libs\\ directory in that case, mirroring install.sh's own
+    ${PLUGIN_DIR}/../../libs/<lib> fallback."""
+    text = _INSTALL_PS1.read_text(encoding="utf-8")
+    assert r"..\..\libs\$($lib.Dir)" in text
