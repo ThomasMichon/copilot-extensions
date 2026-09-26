@@ -535,6 +535,31 @@ def _validate_idle_nudge_exempt_labels(spec: dict) -> None:
         )
 
 
+def _validate_steering_disallowed_labels(spec: dict) -> None:
+    values = spec.get("steering_disallowed_labels")
+    if values is None:
+        return
+    if not isinstance(values, list) or not values or not all(
+        isinstance(value, str) and value for value in values
+    ):
+        raise RegistrationError(
+            "'steering_disallowed_labels' must be a non-empty list of labels"
+        )
+    labels = spec.get("labels") or []
+    if not isinstance(labels, list) or not all(
+        isinstance(value, str) and value for value in labels
+    ):
+        raise RegistrationError(
+            "a steering-disallowed policy requires a valid 'labels' list"
+        )
+    watched = set(labels)
+    disallowed = set(values)
+    if stray := disallowed - watched:
+        raise RegistrationError(
+            f"steering-disallowed labels {sorted(stray)} are not watched by this lane"
+        )
+
+
 def _schedule_entry(spec: dict, *, strict: bool) -> dict:
     """The single schedule entry a schedule registration carries.
 
@@ -602,6 +627,7 @@ def validate_registration(kind: str, spec: dict) -> None:
             )
         _validate_disposable_cli_labels(spec)
         _validate_idle_nudge_exempt_labels(spec)
+        _validate_steering_disallowed_labels(spec)
     elif kind == RegistrationKind.SCHEDULE:
         # A schedule is a self-run emitter: it needs an id (its dedup namespace,
         # 'sched:<id>:<epoch>') and a lane to emit into.
@@ -649,6 +675,7 @@ def validate_registration(kind: str, spec: dict) -> None:
             )
         _validate_disposable_cli_labels(spec)
         _validate_idle_nudge_exempt_labels(spec)
+        _validate_steering_disallowed_labels(spec)
     elif kind == RegistrationKind.PLUGIN_COMPANION:
         _validate_plugin_companion(spec)
 
