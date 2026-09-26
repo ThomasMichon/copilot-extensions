@@ -1318,12 +1318,15 @@ def _filter_repos(
     *,
     tag: str | None,
     class_filter: str | None,
+    names: tuple[str, ...] | None = None,
 ) -> list[RepoEntry]:
     if class_filter:
         wanted = normalize_class(class_filter)
         entries = [e for e in entries if e.repo_class == wanted]
     if tag:
         entries = [e for e in entries if tag in e.tags]
+    if names:
+        entries = [e for e in entries if e.name in set(names)]
     return entries
 
 
@@ -1401,19 +1404,16 @@ def sync_all(
     *,
     tag: str | None = None,
     class_filter: str | None = None,
+    names: tuple[str, ...] | None = None,
     plat: str | None = None,
 ) -> list[tuple[str, str, str]]:
-    """Fetch + ff-merge all registered repos (optionally filtered).
-
-    Returns a list of ``(name, state, detail)`` tuples.
-    """
-    entries = _filter_repos(
-        list(read_registry().repos.values()),
-        tag=tag, class_filter=class_filter,
-    )
+    """Fetch + ff-merge registered repos, optionally filtered by ``names``
+    (an unregistered name reports its own not-registered result)."""
+    all_entries = list(read_registry().repos.values())
+    entries = _filter_repos(all_entries, tag=tag, class_filter=class_filter, names=names)
     entries.sort(key=lambda e: e.name)
-    results = []
-    for e in entries:
-        state, detail = sync_repo(e, plat)
-        results.append((e.name, state, detail))
+    results = [(e.name, *sync_repo(e, plat)) for e in entries]
+    if names:
+        known = {e.name for e in all_entries}
+        results += [(n, "error", "not registered") for n in sorted(set(names) - known)]
     return results

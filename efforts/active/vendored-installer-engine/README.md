@@ -812,3 +812,15 @@ appropriately larger/riskier for one sitting):
   POSIX live-install proof lane, and the cross-repo documentation sweep are
   all still open follow-through.
 
+### 2026-09-26 — Cross-reference: a pointer-based mechanism may supersede byte-vendoring here
+- A new sibling effort, `efforts/active/vendor-pointer-generalization`,
+  proposes generalizing the DRY vendor-pointer pattern (built by
+  `vendored-doc-pointers` + `dev-branch-release-pipeline`, currently applied
+  to docs and designed-but-unapplied for shared libs) to this effort's own
+  installer-engine surface, as a Phase 2 evaluation. That effort's own Plan
+  explicitly commits to coordinating with this effort's driver before
+  changing this effort's chosen mechanism (`sync-installer-engine.py
+  --check`, a drift detector) — not forking the design unilaterally. No
+  mechanism change is proposed or made here; this is a forward pointer only,
+  so this effort's own driver sees it on next resume.
+
