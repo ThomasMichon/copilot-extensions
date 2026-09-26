@@ -4092,13 +4092,13 @@ def _monitor_sweep(
                 for key in [key for key in published if key[0] == sess]:
                     published.pop(key, None)
         served = [(s, p) for s, p in registry.items() if s in unmanaged_live_wt and p]
+        if catalog_observer is not None:
+            catalog_observer(observed_sessions)
     if incarnations is not None:
         _monitor_update_session_incarnations(
             incarnations, live, unmanaged_live_wt, managed_entries, ctx_done, published
         )
     served.extend(managed_served)
-    if catalog_observer is not None:
-        catalog_observer(observed_sessions)
     if session_projects is not None:
         registered_paths: set[str] = set()
         for path in registry.values():

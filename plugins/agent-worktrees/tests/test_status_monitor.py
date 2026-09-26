@@ -548,7 +548,7 @@ def test_sweep_serves_manager_owned_sessions_without_direct_mux_scan(tmp_path, m
     )
 
     assert served == 1
-    assert observed == [{"wt-manager-owned"}]
+    assert observed == []
     assert pane_observed == [("wt-manager-owned", "/w/managed")]
 
 
@@ -611,6 +611,129 @@ def test_sweep_invalidates_managed_cache_only_incarnation(tmp_path, monkeypatch)
     assert published_snapshots == [{}]
     assert "wt-manager-owned" in ctx_done
     assert incarnations["wt-manager-owned"] == "sess:2"
+
+
+def test_sweep_uses_direct_incarnation_when_managed_entry_omits_it(tmp_path, monkeypatch):
+    from agent_worktrees import mux_link
+
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: tmp_path / "reg")
+    monkeypatch.setattr(
+        m,
+        "cfg",
+        types.SimpleNamespace(
+            set_active_project=lambda *_a, **_k: None,
+            project_name=lambda: "proj",
+            active_project=lambda: "proj",
+            tracking_dir=lambda: tmp_path,
+        ),
+    )
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-manager-owned": (1, "sess:2")})
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda *a, **k: "wt-manager-owned")
+    published_snapshots = []
+    monkeypatch.setattr(
+        m,
+        "_publish_managed_session_status",
+        lambda **kwargs: published_snapshots.append(dict(kwargs["published"]))
+        or {"handled": True, "applied": True, "context_published": True},
+        raising=False,
+    )
+
+    cache = mux_link.ManagedMuxCache()
+    cache.apply_observation(
+        {
+            "project": "proj",
+            "worktree_id": "wt-manager-owned",
+            "worktree_path": "/w/managed",
+            "mux_session": "wt-manager-owned",
+            "mapping_revision": 2,
+            "live": True,
+        }
+    )
+    ctx_done = {"wt-manager-owned"}
+    published = {
+        ("wt-manager-owned", "@aw_ctx"): "stale-ctx",
+        ("wt-manager-owned", "@aw_seg"): "stale-seg",
+    }
+    incarnations = {"wt-manager-owned": "sess:1"}
+
+    served = m._monitor_sweep(
+        "tmux",
+        "T",
+        "P",
+        ctx_done,
+        published=published,
+        incarnations=incarnations,
+        managed_mux_cache=cache,
+    )
+
+    assert served == 1
+    assert published_snapshots == [{}]
+    assert incarnations["wt-manager-owned"] == "sess:2"
+
+
+def test_sweep_prefers_live_managed_entry_when_session_names_collide(tmp_path, monkeypatch):
+    from agent_worktrees import mux_link
+
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: tmp_path / "reg")
+    monkeypatch.setattr(
+        m,
+        "cfg",
+        types.SimpleNamespace(
+            set_active_project=lambda *_a, **_k: None,
+            project_name=lambda: "proj-live",
+            active_project=lambda: "proj-live",
+            tracking_dir=lambda: tmp_path,
+        ),
+    )
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda path, **_k: "wt-live" if path == "/w/live" else "wt-dead")
+    pushed = []
+    monkeypatch.setattr(
+        m,
+        "_publish_managed_session_status",
+        lambda **kwargs: pushed.append((kwargs["project"], kwargs["path"], kwargs["session_name"]))
+        or {"handled": True, "applied": True, "context_published": True},
+        raising=False,
+    )
+
+    cache = mux_link.ManagedMuxCache()
+    cache.apply_observation(
+        {
+            "project": "proj-live",
+            "worktree_id": "wt-live",
+            "worktree_path": "/w/live",
+            "mux_session": "wt-shared",
+            "mapping_revision": 1,
+            "live": True,
+        }
+    )
+    cache.apply_observation(
+        {
+            "project": "proj-dead",
+            "worktree_id": "wt-dead",
+            "worktree_path": "/w/dead",
+            "mux_session": "wt-shared",
+            "mapping_revision": 5,
+            "live": False,
+        }
+    )
+    pane_observed = []
+
+    served = m._monitor_sweep(
+        None,
+        "T",
+        "P",
+        set(),
+        pane_observer=lambda session, path: pane_observed.append((session, path)),
+        managed_mux_cache=cache,
+    )
+
+    assert served == 1
+    assert pane_observed == [("wt-shared", "/w/live")]
+    assert pushed == [("proj-live", "/w/live", "wt-shared")]
 
 
 def test_sweep_ctx_rendered_once(tmp_path, monkeypatch):

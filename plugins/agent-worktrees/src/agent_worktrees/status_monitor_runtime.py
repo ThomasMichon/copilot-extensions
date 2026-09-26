@@ -11,12 +11,13 @@ import secrets
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 from agent_procutil import windowless_python
 
-from . import activity, locks, sessions_pane_retire, tracking
+from . import activity, locks, mux_link, sessions_pane_retire, tracking
 from . import config as cfg
 from . import status_updater_cli
 
@@ -762,10 +763,25 @@ def _monitor_managed_session_union(
         return {}, set(), []
     entries: dict[str, dict] = {}
     served: list[tuple[str, str]] = []
+    now = time.time()
     for entry in managed_mux_cache.snapshot().values():
         session_name = entry.get("mux_session")
-        if session_name not in live_sessions:
+        received_at = entry.get("received_at")
+        if (
+            session_name not in live_sessions
+            or not entry.get("live")
+            or not isinstance(received_at, (int, float))
+            or now - received_at > mux_link.MAPPING_STALE_AFTER_SECONDS
+        ):
             continue
+        current = entries.get(session_name)
+        if current is not None:
+            current_revision = current.get("mapping_revision", -1)
+            entry_revision = entry.get("mapping_revision", -1)
+            if entry_revision < current_revision:
+                continue
+            if entry_revision == current_revision and received_at < current.get("received_at", 0):
+                continue
         entries[session_name] = entry
         path = entry.get("worktree_path")
         if not isinstance(path, str) or not path:
@@ -787,10 +803,11 @@ def _monitor_update_session_incarnations(
         sess: str(live[sess][1]) if isinstance(live.get(sess), tuple) and len(live[sess]) > 1 else ""
         for sess in unmanaged_live_wt
     }
-    current.update({
-        sess: str(entry.get("session_incarnation") or "")
-        for sess, entry in managed_entries.items()
-    })
+    for sess, entry in managed_entries.items():
+        incarnation = str(entry.get("session_incarnation") or "")
+        if not incarnation and isinstance(live.get(sess), tuple) and len(live[sess]) > 1:
+            incarnation = str(live[sess][1])
+        current[sess] = incarnation
     for sess, incarnation in current.items():
         prior = incarnations.get(sess)
         if prior is not None and prior != incarnation:
