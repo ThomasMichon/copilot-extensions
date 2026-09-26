@@ -1,9 +1,0 @@
-{
-  "comment": "Cache list_records() per-file (mtime, size) to stop the resident status-monitor from re-parsing every tracked worktree's YAML on every worktree-status-bundle compute (perf: pinned CPU on fleets with many live worktrees)",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
