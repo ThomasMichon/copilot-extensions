@@ -461,7 +461,8 @@ _Pending._
   mirroring `module-health-watchdog.py`'s own pattern, rate-limited
   occurrence comments) plus a new `report-failure` job in
   `validate-and-promote.yml`, gated on a genuine `dev`-commit failure and
-  carrying `needs.gate.outputs.sha` (never re-derived). 21 new tests, all
+  carrying `needs.gate.outputs.sha` (never re-derived). 26 new tests (grew
+  from an initial 21 as review passes surfaced more edge cases), all
   passing. Resolved the effort's own open question: rate-limit window =
   6 hours.
 - Status moved Draft -> Active. Phase 2 remains explicitly gated on the
@@ -535,3 +536,15 @@ _Pending._
   regex; rewrote the fixture to timestamp every line realistically and
   added a direct regression test. Worth remembering: a green test suite
   only proves what the fixtures actually exercise.
+- **Fifth review pass caught three real, smaller issues, all fixed:**
+  (1) `gate`'s `is_dev` output is `true` for every `workflow_dispatch` run
+  regardless of ref (pre-existing `promote` behavior, not something this
+  effort should alter) — a manual dispatch from `main` or any other ref
+  could have filed an issue wrongly claiming a `dev` validation failure;
+  added a `report-failure`-local `github.ref == 'refs/heads/dev'` check
+  (skipped for `workflow_run` events, which `gate` already verifies) that
+  closes this without touching `gate`'s own shared logic; (2) this
+  effort's own status change to Active hadn't propagated to
+  `efforts/README.md`'s canonical Active index (still said Draft) —
+  fixed; (3) the test count cited here (21) was already stale by the time
+  it was written (26 by then) — corrected.

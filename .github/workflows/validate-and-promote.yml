@@ -204,10 +204,20 @@ jobs:
     # precisely the case the implicit success() check would skip. This
     # mirrors why `promote` below needs its own `always()` for the same
     # reason.
+    #
+    # `gate`'s own `is_dev` output is `true` for EVERY `workflow_dispatch`
+    # run regardless of which ref it was dispatched against (a pre-existing
+    # behavior `promote` already relies on and this job must not alter) --
+    # so a manual dispatch from `main` or any other ref could otherwise file
+    # an issue whose body wrongly claims a `dev` validation failure. The
+    # extra `github.ref == 'refs/heads/dev'` check (workflow_run events
+    # don't need it -- `gate` already verified real dev ancestry for those)
+    # closes that specifically for this job, without touching `gate`.
     needs: [gate, full, worktree-manager, guards-full-sweep]
     if: >-
       always() &&
       needs.gate.outputs.is_dev == 'true' &&
+      (github.event_name == 'workflow_run' || github.ref == 'refs/heads/dev') &&
       (needs.full.result == 'failure' ||
        needs.worktree-manager.result == 'failure' ||
        needs.guards-full-sweep.result == 'failure')
