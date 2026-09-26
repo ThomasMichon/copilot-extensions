@@ -19,25 +19,33 @@ same code, no fork), with log." :func:`run_direct` always logs the bypass
 alternative to going through the daemon (see the vision's
 ``no-writer-bypasses-the-daemon``).
 
-**The fallback only ever runs for a pre-dial miss.** :func:`run_direct` is
-reached automatically only when no daemon endpoint could be discovered at
-all (even after a boot-wait) -- nothing was ever sent anywhere, so nothing
-could have already run. A request that *was* sent to a successfully-dialed
-daemon and then failed (timeout, malformed response) is a genuinely
-different, ambiguous case -- the daemon may already be executing or have
-already committed the mutation -- and :func:`write_with_boot`/
-:func:`dispatch` raise :class:`AmbiguousWriteOutcome` there instead of
-silently retrying, per a 2026-09-26 PR review finding (this distinction did
-not exist in this module's first-landed version).
+**The fallback only ever runs when nothing could have been sent.**
+:func:`run_direct` is reached automatically in exactly two cases: no daemon
+endpoint could be discovered at all (even after a boot-wait), or an
+endpoint was found but the TCP connect itself failed (a stale rendezvous
+entry left by a since-exited daemon). In both, no request bytes were ever
+sent, so nothing could have already run. A request that *was* actually sent
+over an established connection and then failed (timeout, malformed
+response) is a genuinely different, ambiguous case -- the daemon may
+already be executing or have already committed the mutation -- and
+:func:`write_with_boot`/:func:`dispatch` raise
+:class:`AmbiguousWriteOutcome` there instead of silently retrying, per
+2026-09-26 PR review findings (this distinction did not exist in this
+module's first-landed version, and its first fix still conflated "endpoint
+found" with "request sent" -- see :func:`_send_tracking_write_request`'s
+own docstring for why a custom send/receive split was needed to separate
+them correctly).
 
 **Coalescing key is always unique per write.** Unlike ``classify``/
 ``worktree_status`` (idempotent reads, safe to coalesce concurrent identical
 requests onto one answer), two writes must never join the same in-flight
 execution merely because they arrived close together -- each is a distinct
-mutation intent. :func:`dispatch` always mints a fresh key
-(``f"{verb}:{uuid4().hex}"``), so ``CoalescingServer``'s own ``(kind, key)``
-dedup can never merge two different write calls (see
-``work_coalescing_singleton.server.CoalescingServer.handle_request``).
+mutation intent. :func:`write_with_boot` always mints a fresh key
+(``uuid4().hex``) itself -- never accepts one from a caller -- so
+``CoalescingServer``'s own ``(kind, key)`` dedup can never merge two
+different write calls (see
+``work_coalescing_singleton.server.CoalescingServer.handle_request``) no
+matter what any current or future entry point passes.
 
 **Verb granularity note (agent-recommended, from real code inspection):** a
 verb should map to a call site's whole guarded read-lock-modify-save
@@ -67,7 +75,9 @@ depth -- it is a correctness step, not the final performance shape.
 from __future__ import annotations
 
 import importlib
+import json
 import logging
+import socket
 import threading
 import time
 import uuid
@@ -80,17 +90,33 @@ logger = logging.getLogger(__name__)
 
 
 class AmbiguousWriteOutcome(Exception):
-    """A write's daemon request failed *after* successfully dialing an
-    endpoint -- the mutation may already be committed, or still executing,
-    server-side (``CoalescingServer`` does not cancel an already-accepted
-    owner compute when a caller's own socket read times out). Unlike the
-    "no daemon reachable at all" case (safe: nothing was ever sent), this
-    state is never safe to silently retry via the same-code direct
-    fallback -- doing so could double-apply a non-idempotent write (a
-    counter increment, an appended session entry). The caller must decide:
-    report the error, or design the specific verb to be safely
-    idempotent/dedupable before ever allowing an automatic retry here.
+    """A write's daemon request failed *after* the request was actually sent
+    over an established connection -- the mutation may already be
+    committed, or still executing, server-side (``CoalescingServer`` does
+    not cancel an already-accepted owner compute when a caller's own socket
+    read times out). Unlike the "no daemon reachable at all" case (safe:
+    nothing was ever sent), this state is never safe to silently retry via
+    the same-code direct fallback -- doing so could double-apply a
+    non-idempotent write (a counter increment, an appended session entry).
+    The caller must decide: report the error, or design the specific verb
+    to be safely idempotent/dedupable before ever allowing an automatic
+    retry here.
+
+    Deliberately **not** raised for a failure before the request bytes were
+    ever sent (a refused/timed-out connect -- e.g. a stale rendezvous entry
+    left by a since-exited daemon): that case is indistinguishable in
+    effect from never having dialed a daemon at all, so it degrades to the
+    same-code fallback exactly like a pre-dial miss (see
+    :class:`_PreSendFailure` and :func:`write_with_boot`, 2026-09-26 PR
+    review finding).
     """
+
+
+class _PreSendFailure(Exception):
+    """The TCP connect itself failed or timed out, before any request bytes
+    were sent -- nothing could have run server-side. Caught internally by
+    :func:`write_with_boot` and treated exactly like a pre-dial miss (safe
+    to run the same-code fallback), never surfaced past this module."""
 
 
 KIND = "tracking_write"
@@ -112,6 +138,31 @@ LINGER_SECONDS = 8.0
 SUBSCRIBER_TTL_SECONDS = 30.0
 
 _VERBS: dict[str, Callable[[dict], dict]] = {}
+
+#: How many :func:`compute` calls (verb executions) are currently running in
+#: this process -- the daemon process, when this module's server is live.
+#: Deliberately independent of ``CoalescingServer.subscriber_count()``: a
+#: client releases its own subscriber lease as soon as *its own* request
+#: call returns or times out, which can happen well before the server-side
+#: compute this counter tracks actually finishes (2026-09-26 PR review
+#: finding). See :func:`has_inflight_write`.
+_inflight_writes = 0
+_inflight_lock = threading.Lock()
+
+
+def has_inflight_write() -> bool:
+    """Whether a :func:`compute` call is currently executing in this process.
+
+    The resident monitor's idle-shutdown predicate should check this
+    alongside (not instead of) its ``CoalescingServer.subscriber_count()``
+    check -- a lingering subscriber with no compute running is still a
+    legitimate "someone is about to ask" signal, and a running compute with
+    no subscriber left (the case this function exists for) must still block
+    shutdown.
+    """
+    with _inflight_lock:
+        return _inflight_writes > 0
+
 
 #: The cross-process registration contract (2026-09-26 PR review finding --
 #: `_VERBS` alone is a process-local dict; the resident daemon and any CLI
@@ -194,7 +245,16 @@ def compute(kind: str, payload: dict) -> dict:
     ``ValueError`` for an unregistered verb or a malformed payload --
     surfaced to the caller exactly like ``_classify_daemon_compute``'s own
     validation errors.
+
+    Counts itself in :data:`_inflight_writes` for the whole verb call (see
+    :func:`has_inflight_write` -- 2026-09-26 PR review finding: a client
+    that times out releases its subscriber lease immediately, even though
+    this compute -- running here, in the daemon process, on its own handler
+    thread -- keeps executing; the monitor's idle-shutdown predicate must
+    not rely on subscriber count alone to decide a write is no longer in
+    progress).
     """
+    global _inflight_writes
     _ensure_verb_modules_loaded()
     verb = payload.get("verb")
     if not isinstance(verb, str) or not verb:
@@ -207,7 +267,13 @@ def compute(kind: str, payload: dict) -> dict:
         args = {}
     if not isinstance(args, dict):
         raise ValueError("tracking_write request 'args' must be a dict")
-    return fn(args)
+    with _inflight_lock:
+        _inflight_writes += 1
+    try:
+        return fn(args)
+    finally:
+        with _inflight_lock:
+            _inflight_writes -= 1
 
 
 def start_server(
@@ -241,7 +307,13 @@ def endpoint_from_rendezvous(data: dict | None) -> tuple[str, int, str] | None:
     """Parse this module's rendezvous fields out of an already-read lock dict.
 
     Returns ``None`` for anything malformed or absent -- the caller's own
-    correct fallback path, never an exception."""
+    correct fallback path, never an exception. Rejects a port outside
+    ``0 < port < 65536`` (2026-09-26 PR review finding: an unvalidated port
+    -- 0, negative, or above the valid range -- would otherwise be treated
+    as a real endpoint and fail deep inside the socket client instead of
+    safely degrading to the no-endpoint fallback here; mirrors
+    ``mux_link.endpoint_from_rendezvous``'s own check).
+    """
     if not isinstance(data, dict):
         return None
     endpoint = data.get("tracking_write_endpoint")
@@ -254,6 +326,8 @@ def endpoint_from_rendezvous(data: dict | None) -> tuple[str, int, str] | None:
     try:
         port = int(port_s)
     except ValueError:
+        return None
+    if not (0 < port < 65536):
         return None
     return host, port, token
 
@@ -278,11 +352,94 @@ def run_direct(verb: str, args: dict, *, reason: str) -> dict:
     return fn(args)
 
 
+def _send_tracking_write_request(
+    host: str,
+    port: int,
+    token: str,
+    *,
+    key: str,
+    payload: dict,
+    request_deadline_s: float,
+    client_id: str,
+) -> dict:
+    """Send one ``tracking_write`` request, distinguishing a **pre-send**
+    failure (the TCP connect itself failed or timed out -- nothing could
+    have run server-side, raises :class:`_PreSendFailure`) from a
+    **post-send** failure (the connection was established and the request
+    may have reached the daemon -- raises :class:`AmbiguousWriteOutcome`).
+
+    Deliberately does not use ``wcs_client.request`` -- that function wraps
+    the whole connect+send+receive sequence in a single
+    ``except OSError: raise DaemonUnavailable``, which cannot make this
+    distinction (2026-09-26 PR review finding). Speaks the identical wire
+    protocol (``work_coalescing_singleton``'s versioned JSON-over-socket
+    envelope) by construction, not by importing private helpers from it.
+    """
+    timeout = request_deadline_s + 1.0
+    deadline = time.time() + request_deadline_s
+    message: dict = {
+        "action": "request",
+        "kind": KIND,
+        "key": key,
+        "payload": payload,
+        "deadline": deadline,
+        "client_id": client_id,
+    }
+    envelope = dict(message, version=wcs_client.PROTOCOL_VERSION, token=token)
+    body = json.dumps(envelope, separators=(",", ":")).encode("utf-8") + b"\n"
+
+    try:
+        sock = socket.create_connection((host, port), timeout=timeout)
+    except OSError as exc:
+        raise _PreSendFailure(str(exc)) from exc
+
+    buf = b""
+    try:
+        with sock:
+            sock.settimeout(timeout)
+            sock.sendall(body)
+            sock.shutdown(socket.SHUT_WR)
+            while not buf.endswith(b"\n"):
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                buf += chunk
+    except OSError as exc:
+        raise AmbiguousWriteOutcome(
+            "tracking_write request's connection was established but the "
+            f"send/receive phase then failed -- outcome unknown: {exc}"
+        ) from exc
+
+    if not buf:
+        raise AmbiguousWriteOutcome(
+            "tracking_write request: empty response after a successful send"
+        )
+    try:
+        response = json.loads(buf.decode("utf-8"))
+    except ValueError as exc:
+        raise AmbiguousWriteOutcome(
+            f"tracking_write request: malformed response: {exc}"
+        ) from exc
+    if not isinstance(response, dict) or response.get("version") != wcs_client.PROTOCOL_VERSION:
+        raise AmbiguousWriteOutcome("tracking_write request: malformed response")
+    if response.get("fallback"):
+        raise AmbiguousWriteOutcome(
+            "tracking_write request: daemon reported fallback (its own "
+            "deadline was exceeded server-side) -- the owner compute's "
+            "outcome is still unknown"
+        )
+    result = response.get("result")
+    if not isinstance(result, dict):
+        raise AmbiguousWriteOutcome(
+            "tracking_write request: malformed response (missing result)"
+        )
+    return result
+
+
 def write_with_boot(
     *,
     read_lock_data: Callable[[], dict | None],
     ensure_monitor: Callable[[], bool] | None,
-    key: str,
     payload: dict,
     fallback: Callable[[], dict],
     request_deadline_s: float = REQUEST_DEADLINE_S,
@@ -296,17 +453,23 @@ def write_with_boot(
     ``worktree_status_daemon.status_with_boot``, but a write **cannot**
     share their "any miss runs fallback()" contract: ``CoalescingServer``
     does not cancel an already-accepted owner compute when a caller's own
-    socket read times out, so a request failure *after* a daemon endpoint
-    was successfully dialed is ambiguous -- the daemon may already be
-    executing, or have already committed, the mutation. Blindly running
-    the same-code fallback in that state risks double-applying a
-    non-idempotent write (a counter increment, an appended session entry).
+    socket read times out, so a request that was actually *sent* and then
+    failed is ambiguous -- the daemon may already be executing, or have
+    already committed, the mutation. Blindly running the same-code
+    fallback in that state risks double-applying a non-idempotent write.
 
-    Only a **pre-dial** miss (no endpoint discoverable at all, even after
-    the boot-wait) is unambiguous -- nothing was ever sent anywhere, so
-    ``fallback()`` is safe there and only there. A post-dial failure raises
-    :class:`AmbiguousWriteOutcome` instead of silently retrying (2026-09-26
-    PR review finding).
+    Two, and only two, cases are safe to run ``fallback()``: no endpoint
+    was discoverable at all (even after the boot-wait), or the endpoint was
+    found but the connection itself could never be established (a stale
+    rendezvous entry left by a since-exited daemon) -- in both, nothing was
+    ever sent anywhere. Anything that fails *after* a connection was
+    established raises :class:`AmbiguousWriteOutcome` instead of silently
+    retrying (2026-09-26 PR review finding).
+
+    Always mints its own fresh, unique coalescing key (``uuid4().hex``) --
+    never accepts one from a caller -- so every entry point through this
+    function structurally guarantees two writes can never coalesce onto one
+    execution, regardless of what a caller passes.
     """
     started = time.time()
 
@@ -323,25 +486,20 @@ def write_with_boot(
         return fallback()
 
     host, port, token = endpoint
+    key = uuid.uuid4().hex
     client_id = wcs_client.new_client_id()
     try:
-        return wcs_client.request(
+        return _send_tracking_write_request(
             host,
             port,
             token,
-            kind=KIND,
             key=key,
             payload=payload,
             request_deadline_s=request_deadline_s,
             client_id=client_id,
         )
-    except wcs_client.DaemonUnavailable as exc:
-        raise AmbiguousWriteOutcome(
-            "tracking_write request failed after successfully dialing the "
-            "daemon -- the mutation's outcome is unknown (it may already be "
-            "committed server-side); refusing to retry via the same-code "
-            f"direct fallback: {exc}"
-        ) from exc
+    except _PreSendFailure:
+        return fallback()
     finally:
         wcs_client.release(host, port, token, client_id, timeout=request_deadline_s)
 
@@ -358,21 +516,15 @@ def dispatch(
     """The public entry point a migrated call site uses in place of calling
     its verb's function directly: try the resident daemon first (booting one
     on demand if none is reachable), falling back to :func:`run_direct`
-    (same code, logged) only when no daemon could be reached **at all**.
+    (same code, logged) only when nothing could ever have been sent to a
+    daemon (see :func:`write_with_boot`'s own docstring for the exact two
+    safe cases).
 
-    A fresh, unique coalescing key is minted for every call (see this
-    module's docstring, "Coalescing key is always unique per write") so two
-    concurrent writes -- even for the same verb and worktree -- are never
-    merged into one execution.
-
-    Raises :class:`AmbiguousWriteOutcome` when a daemon *was* reached but
-    the request itself then failed (a deadline/malformed-response/transport
-    error) -- that state is never safe to auto-retry (see
-    :func:`write_with_boot`'s own docstring). This is a genuine exception a
-    caller must handle deliberately, not a bug: it is the one case this
-    module refuses to paper over with a same-code fallback.
+    Raises :class:`AmbiguousWriteOutcome` when a request *was* sent and then
+    failed -- that state is never safe to auto-retry. This is a genuine
+    exception a caller must handle deliberately, not a bug: it is the one
+    case this module refuses to paper over with a same-code fallback.
     """
-    key = f"{verb}:{uuid.uuid4().hex}"
     payload = {"verb": verb, "args": args}
 
     def _fallback() -> dict:
@@ -381,7 +533,6 @@ def dispatch(
     return write_with_boot(
         read_lock_data=read_lock_data,
         ensure_monitor=ensure_monitor,
-        key=key,
         payload=payload,
         fallback=_fallback,
         request_deadline_s=request_deadline_s,

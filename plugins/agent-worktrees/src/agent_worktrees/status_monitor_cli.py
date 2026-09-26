@@ -247,10 +247,17 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     max_empty_strikes = 3
 
     def _tracking_write_busy() -> bool:
+        # subscriber_count() alone is not enough: a client releases its own
+        # lease as soon as its own request call returns or times out, which
+        # can happen well before the daemon-side compute this triggered
+        # actually finishes (CoalescingServer never cancels an accepted
+        # owner). tracking_write.has_inflight_write() tracks the compute
+        # itself, in this same process, independent of any client's own
+        # lease lifecycle (2026-09-26 PR review finding).
         return (
             tracking_write_server is not None
             and tracking_write_server.subscriber_count() > 0
-        )
+        ) or tracking_write.has_inflight_write()
 
     try:
         while True:

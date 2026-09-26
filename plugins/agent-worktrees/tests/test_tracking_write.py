@@ -76,6 +76,23 @@ def test_endpoint_from_rendezvous_rejects_malformed_or_absent_data():
     )
 
 
+@pytest.mark.parametrize("port", ["0", "-1", "65536", "999999"])
+def test_endpoint_from_rendezvous_rejects_out_of_range_ports(port):
+    assert tracking_write.endpoint_from_rendezvous(
+        {
+            "tracking_write_endpoint": f"127.0.0.1:{port}",
+            "tracking_write_token": "tok",
+        }
+    ) is None
+
+
+def test_endpoint_from_rendezvous_accepts_a_valid_port():
+    endpoint = tracking_write.endpoint_from_rendezvous(
+        {"tracking_write_endpoint": "127.0.0.1:65535", "tracking_write_token": "tok"}
+    )
+    assert endpoint == ("127.0.0.1", 65535, "tok")
+
+
 class TestVerbRegistryAndCompute:
     def test_register_verb_then_compute_dispatches_to_it(self):
         calls = []
@@ -240,6 +257,34 @@ class TestDispatch:
         assert result == {"via": "fallback"}
         assert calls == [{}]
 
+    def test_dispatch_falls_back_when_endpoint_found_but_connect_refused(self):
+        """The second safe case: a stale rendezvous entry (e.g. a since-
+        exited daemon's lock file) resolves to a real-looking endpoint, but
+        the TCP connect itself fails -- nothing was ever sent, so this must
+        degrade exactly like a pre-dial miss, never raise
+        AmbiguousWriteOutcome. A short request_deadline_s bounds this test:
+        some sandboxed network stacks silently drop rather than actively
+        refuse a connection to an unbound port, which would otherwise wait
+        out the full connect timeout."""
+        calls = []
+        tracking_write.register_verb(
+            "test-stale-endpoint", lambda args: calls.append(args) or {"via": "fallback"}
+        )
+        # Port 1 on loopback: reserved, nothing listens there.
+        stale_lock_data = {
+            "tracking_write_endpoint": "127.0.0.1:1",
+            "tracking_write_token": "stale-token",
+        }
+        result = tracking_write.dispatch(
+            "test-stale-endpoint",
+            {},
+            read_lock_data=lambda: stale_lock_data,
+            ensure_monitor=None,
+            request_deadline_s=0.3,
+        )
+        assert result == {"via": "fallback"}
+        assert calls == [{}]
+
     def test_two_concurrent_writes_never_coalesce_even_for_the_same_verb_and_args(self):
         """The write-specific guarantee this module adds over classify/
         worktree_status: a unique key per call means two concurrent writes
@@ -393,3 +438,47 @@ class TestVerbModuleLoading:
             )
             assert proc.returncode == 0, proc.stdout + proc.stderr
             assert "OK" in proc.stdout
+
+
+class TestInflightWriteTracking:
+    """2026-09-26 PR review round 3: `subscriber_count()` alone is not a
+    reliable in-flight signal for a write -- a client releases its own
+    lease as soon as its own request call returns or times out, even while
+    the daemon-side compute (this same process, a different thread) keeps
+    running. `has_inflight_write()` tracks the compute itself.
+    """
+
+    def test_has_inflight_write_is_false_when_idle(self):
+        assert tracking_write.has_inflight_write() is False
+
+    def test_has_inflight_write_is_true_while_compute_runs(self):
+        entered = threading.Event()
+        release_gate = threading.Event()
+
+        def _slow_verb(args):
+            entered.set()
+            release_gate.wait(timeout=5)
+            return {"ok": True}
+
+        tracking_write.register_verb("test-inflight", _slow_verb)
+        t = threading.Thread(
+            target=tracking_write.compute,
+            args=(tracking_write.KIND, {"verb": "test-inflight"}),
+        )
+        t.start()
+        try:
+            assert entered.wait(timeout=2)
+            assert tracking_write.has_inflight_write() is True
+        finally:
+            release_gate.set()
+            t.join(timeout=3)
+        assert tracking_write.has_inflight_write() is False
+
+    def test_has_inflight_write_clears_even_if_the_verb_raises(self):
+        def _boom(args):
+            raise RuntimeError("verb failure")
+
+        tracking_write.register_verb("test-inflight-error", _boom)
+        with pytest.raises(RuntimeError):
+            tracking_write.compute(tracking_write.KIND, {"verb": "test-inflight-error"})
+        assert tracking_write.has_inflight_write() is False

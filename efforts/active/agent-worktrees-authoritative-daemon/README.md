@@ -342,17 +342,19 @@ survey above.
       tests (`test_tracking_write.py`) exercising the registry, dispatch,
       logged fallback, and the unique-key-never-coalesces guarantee
       directly, without touching a live production call site.
-- [x] Tests: `test_tracking_write.py` (18 tests, after the PR review round 2
-      additions below: rendezvous parsing, verb registration/dispatch,
-      unregistered-verb/malformed-payload rejection, `run_direct`'s logged
-      bypass, daemon-reachable dispatch, pre-dial-miss fallback, the
-      ambiguous-outcome-after-dial exception, two-concurrent-writes-never-
-      coalesce, the verb-module loader, and a genuine two-subprocess
-      process-boundary proof).
+- [x] Tests: `test_tracking_write.py` (27 tests, after PR review rounds 2-3:
+      rendezvous parsing + port-bounds validation, verb registration/
+      dispatch, unregistered-verb/malformed-payload rejection, `run_direct`'s
+      logged bypass, daemon-reachable dispatch, both safe-fallback cases
+      (no endpoint found; endpoint found but connect fails), the
+      ambiguous-outcome-after-send exception, two-concurrent-writes-never-
+      coalesce, the verb-module loader, a genuine two-subprocess
+      process-boundary proof, and in-flight-write tracking independent of
+      subscriber lease lifecycle).
       `test_status_monitor.py`'s existing daemon-lifecycle regression test
       updated (3 → 4 `CoalescingServer.close()` calls: classify +
       worktree_status + managed_mux + tracking_write) plus new
-      `tracking_write_*` rendezvous-field assertions. Full suite: 5549
+      `tracking_write_*` rendezvous-field assertions. Full suite: 5573
       passed, 26 skipped, 5 failures confirmed pre-existing/environment-
       dependent via `git stash` (unrelated to this change — `test_doctor.py`/
       `test_update_stage.py`/`test_registration_home.py`, all failing
@@ -408,6 +410,57 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-09-26 — PR #3779 review round 3: 5 more real findings, all fixed
+Round 3 caught five further genuine issues, all in the same "does the
+ambiguity/liveness reasoning actually hold under real conditions" vein as
+round 2:
+
+- **`subscriber_count()` still wasn't the right in-flight signal.** A
+  client releases its own lease the moment its own request call returns or
+  times out -- which can happen well before the daemon-side compute (same
+  process, a different thread) actually finishes, since `CoalescingServer`
+  never cancels an accepted owner. Added `has_inflight_write()`: a simple
+  module-level counter incremented/decremented around the verb call inside
+  `compute()` itself, independent of any client's lease lifecycle. The
+  monitor's `_tracking_write_busy()` now checks both signals.
+- **The ambiguous/safe split was still wrong at the edges.** My round-2 fix
+  treated "endpoint found" as the boundary for ambiguity, but `DaemonUnavailable`
+  is also raised for a *pre-send* connect failure (a stale rendezvous entry
+  left by a since-exited daemon) -- genuinely safe, indistinguishable in
+  effect from never having dialed at all. The real boundary is "were request
+  bytes ever sent," not "was an endpoint found." Fixed by writing
+  `_send_tracking_write_request` -- a from-scratch client for this one wire
+  action, splitting the TCP connect (failure -> safe, new `_PreSendFailure`,
+  caught by `write_with_boot` and treated exactly like a pre-dial miss) from
+  the send/receive phase (failure -> `AmbiguousWriteOutcome`, unchanged).
+  `wcs_client.request()`'s single `except OSError` across the whole sequence
+  cannot make this distinction, so this module no longer calls it for the
+  write path (still uses `wcs_client.new_client_id`/`release` for the
+  existing subscriber-lease bookkeeping, unchanged).
+- **The coalescing key could theoretically be reused.** `write_with_boot`
+  accepted a caller-supplied `key`; only `dispatch` happened to always mint
+  a fresh one. Removed `key` from `write_with_boot`'s signature entirely --
+  it now mints its own `uuid4().hex` internally, so the
+  never-coalesce-two-writes guarantee is structural (every entry point),
+  not a convention every future caller has to remember.
+- **Port validation gap.** `endpoint_from_rendezvous` parsed a port as a
+  bare `int()` with no range check, so `0`, a negative value, or anything
+  above 65535 would be treated as a real endpoint and fail deep inside the
+  socket client instead of safely returning `None` (the no-endpoint
+  fallback path). Fixed with the same `0 < port < 65536` check
+  `mux_link.endpoint_from_rendezvous` already applies.
+- **Eager monitor-startup loading, done in round 2, was correctly credited**
+  but the stale-count Low finding recurred (my round-2 edit fixed the
+  Journal narrative but missed a live checklist line) -- fixed for real
+  this time; both occurrences of the stale count now read the current
+  count.
+- 9 new/changed tests (27 total, was 18): out-of-range and valid port
+  parsing for `endpoint_from_rendezvous`, the pre-send-connect-failure safe
+  fallback, and three `has_inflight_write` tests (idle, running, clears on
+  verb exception). Re-ran the full suite (5573 passed, same 5 pre-existing
+  failures), `ruff check`, `check-module-size`, `check-install-contract`,
+  `check-changefile-presence`: all clean.
 
 ### 2026-09-26 — PR #3779 review round 2: 2 more real High findings, plus test-quality fixes
 Round 2 (3 High/Medium/Low remaining + 4 new, 1 resolved from round 1) caught
