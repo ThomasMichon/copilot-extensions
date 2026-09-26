@@ -17,7 +17,7 @@
   as the sole owner/accumulator of worktree status data.
 - **Status:** In progress — Step 1 (of 6) landed 2026-09-25, merged as
   [#3650](https://github.com/ThomasMichon/copilot-extensions/pull/3650);
-  Steps 2-6 not yet implemented.
+  Step 2 landed 2026-09-25; Steps 3-6 not yet implemented.
 
 ## Why this needs its own ordered plan
 
@@ -349,16 +349,41 @@ state where two long-lived writers are both intended to own it.
      or writer ownership yet.
    - No behavior change to ordinary sessions; this step only creates the seam.
 
-2. [ ] **Add the Worktree Manager mux companion daemon and its own runtime
-       registry, still off the main launch path.**
-   - Add a host-wide Manager daemon with its own lock file and status-sink
-     endpoint.
-   - Add a Manager-owned per-worktree mapping registry and recovery-on-restart
-     read path.
-   - Add internal commands/helpers for "ensure daemon", "register/update
-     mapping", and "remove mapping", but do not yet cut normal launches over.
-   - This step proves lifecycle/install/update behavior without changing who
-     writes the bar in production.
+2. [x] **Add the Worktree Manager mux companion daemon and its own runtime
+       registry, still off the main launch path.** Landed: ``mux_daemon.py``
+       adds a host-wide Manager daemon with its own ``mux-daemon.lock``
+       rendezvous file (namespaced ``manager_mux_*`` fields, same
+       lockfile-rendezvous + loopback-JSON pattern as ``agent-worktrees``'
+       ``hook_ipc``/``classify_daemon``/``mux_link``, including the
+       out-of-range-port rejection learned during Step 1's own review) and a
+       ``CoalescingServer``-backed ``mux-status-v1`` status-sink endpoint
+       (``build_compute``/``apply_status_options``, mirroring
+       ``status_monitor_runtime._monitor_mux_set``'s bounded subprocess
+       shape). Added ``MuxMappingRegistry``: a Manager-owned, always
+       disk-backed (deliberately not one long-lived in-memory owner --
+       register/remove calls come from short-lived CLI invocations, not a
+       process that outlives the mapping) ``worktree_id ⇄ mux session``
+       mapping with the same monotonic-``mapping_revision`` guard and
+       cross-process advisory file lock ``ManagedMuxCache`` uses; recovery-
+       on-restart is automatic since there is no separate in-memory state to
+       warm. Added ``ensure_daemon_running`` (liveness proven by a real
+       subscribe/release wire round-trip, not a PID check) and
+       ``register_mapping``/``remove_mapping``/``get_mapping`` helpers,
+       reachable via ``worktree-manager mux-daemon run|ensure|register|
+       remove|show`` -- none of this is yet called by any real launch/join/
+       restore/remux action or the production Picker (Step 3's job). Vendored
+       ``work_coalescing_singleton`` into ``worktree-manager/libs/`` (kept
+       byte-identical to the other two copies by
+       ``check-vendored-libs-sync.py``). Added
+       ``tests/test_mux_daemon.py`` (registry persistence/monotonicity,
+       rendezvous parsing, compute-handler validation, an end-to-end real-
+       socket round trip, and the resident daemon's own idle-exit lifecycle)
+       and ``tests/test_mux_daemon_cli.py`` (the CLI surface against a
+       scratch runtime root) -- 41 new tests, all green. Full
+       ``worktree-manager`` suite (``uv run --extra dev pytest``): 1401
+       passed, 7 skipped, 3 pre-existing unrelated failures (all in
+       ``test_data_ssh_sources.py``, a Picker-provider-source absolute-path
+       validation area this change never touches).
 
 3. [ ] **Perform the managed-session cutover atomically: launch path,
        observe path, and push path together.**
