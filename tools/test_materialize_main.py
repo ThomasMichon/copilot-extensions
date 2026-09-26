@@ -150,6 +150,40 @@ def test_materialize_refuses_a_symlinked_ancestor_directory(tmp_path: Path):
     assert (root / "plugins" / "attacker-plugin").is_symlink()
 
 
+def test_materialize_refuses_an_ancestor_symlink_resolving_exactly_to_root(tmp_path: Path):
+    # Round-14 review finding: _find_symlinked_ancestor's is_symlink()
+    # check must run BEFORE the resolved-path termination test, not
+    # after -- a symlink whose target happens to resolve to `root` itself
+    # (e.g. plugins/evil -> ..) would otherwise short-circuit the walk as
+    # "reached root, nothing to check" without ever inspecting that
+    # symlink, letting the later replacement + pointer_path.unlink() write
+    # through to the checkout root itself.
+    root = tmp_path / "repo"
+    _canonical_lib(root, "zdd", version="0.1.0-dev1", content="shared\n")
+    (root / "src").mkdir()  # something already at root/src, must survive
+    (root / "src" / "sentinel.txt").write_text("do not touch\n", encoding="utf-8")
+
+    # plugins/evil-plugin -> root itself (resolves exactly to root_r).
+    (root / "plugins").mkdir(parents=True, exist_ok=True)
+    (root / "plugins" / "evil-plugin").symlink_to(root, target_is_directory=True)
+    # "ghost" (not "zdd") -- through the symlink this literally aliases
+    # root/libs/ghost, which must not already exist (avoid colliding with
+    # the canonical zdd lib _canonical_lib() already created above).
+    libs_dir = root / "plugins" / "evil-plugin" / "libs" / "ghost"
+    libs_dir.mkdir(parents=True)
+    (libs_dir / mm.POINTER_NAME).write_text(
+        json.dumps({"schema": "copilot-extensions.vendor-pointer", "version": 1,
+                    "source": "libs/zdd"}) + "\n",
+        encoding="utf-8",
+    )
+
+    log = mm.materialize(root, canonical_root=root)
+    assert any("SKIP" in line and "is a symlink" in line for line in log)
+    # Nothing was written through to the checkout root itself.
+    assert (root / "src" / "sentinel.txt").read_text() == "do not touch\n"
+    assert not (root / "VENDOR_POINTER.json").exists()
+
+
 def test_materialize_skips_a_canonical_lib_with_no_src_directory_at_all(tmp_path: Path):
     # _find_symlink() returns None for a MISSING src/ too, not just "no
     # symlink found inside it" -- an incomplete/malformed canonical lib

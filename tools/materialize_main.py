@@ -282,21 +282,28 @@ def _escapes_root(candidate: Path, root: Path) -> bool:
 
 def _find_symlinked_ancestor(path: Path, root: Path) -> Path | None:
     """The first symlink among ``path`` itself and every ancestor directory
-    strictly between it and ``root`` (``root`` itself is never checked --
-    it's the trusted boundary, not part of the untrusted path being
-    validated). Checking only ``path`` misses a symlinked ANCESTOR (e.g.
-    ``plugins/<plugin>`` or ``plugins/<plugin>/libs`` itself): a glob-based
-    discovery like ``find_pointers()`` already follows such an
-    intermediate symlink to find a pointer file in the first place, and if
-    it resolves to another directory still inside ``root``, a resolved-
-    path escape check alone would accept it too."""
+    up to and including ``root``. Checking only ``path`` misses a
+    symlinked ANCESTOR (e.g. ``plugins/<plugin>`` or
+    ``plugins/<plugin>/libs`` itself): a glob-based discovery like
+    ``find_pointers()`` already follows such an intermediate symlink to
+    find a pointer file in the first place, and if it resolves to another
+    directory still inside ``root``, a resolved-path escape check alone
+    would accept it too.
+
+    ``is_symlink()`` is checked BEFORE the resolved-path termination test,
+    not after: a symlink whose target happens to RESOLVE to ``root``
+    itself (e.g. ``plugins/evil -> ..``) would otherwise short-circuit the
+    loop as "reached root, nothing to check" without ever inspecting that
+    symlink itself -- exactly the gap an earlier version of this function
+    had (checked live: creates ``root/src`` and removes
+    ``root/VENDOR_POINTER.json`` through the link)."""
     root_r = root.resolve()
     current = path
     while True:
-        if current.resolve() == root_r or current.parent == current:
-            return None
         if current.is_symlink():
             return current
+        if current.resolve() == root_r or current.parent == current:
+            return None
         current = current.parent
 
 

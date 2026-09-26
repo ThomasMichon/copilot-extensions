@@ -377,6 +377,30 @@ def _find_symlink(tree: Path) -> str | None:
     return None
 
 
+def _find_symlinked_ancestor(path: Path, root: Path) -> Path | None:
+    """Mirrors ``materialize_main.py``'s own ``_find_symlinked_ancestor``
+    (kept as a separate small copy for the same hyphenated-filename reason
+    as ``_find_symlink`` above). The first symlink among ``path`` itself
+    and every ancestor directory up to and including ``root``. Checking
+    only the final directory misses a symlinked ANCESTOR (e.g.
+    ``plugins/<plugin>`` or ``libs`` itself): ``_lib_copies()``'s own
+    directory discovery already follows such an intermediate symlink, and
+    if it resolves to another directory still inside ``root``, a
+    resolved-path escape check alone would accept it too. ``is_symlink()``
+    is checked BEFORE the resolved-path termination test, not after: a
+    symlink whose target happens to RESOLVE to ``root`` itself would
+    otherwise short-circuit as "reached root, nothing to check" without
+    ever inspecting that symlink itself."""
+    root_r = root.resolve()
+    current = path
+    while True:
+        if current.is_symlink():
+            return current
+        if current.resolve() == root_r or current.parent == current:
+            return None
+        current = current.parent
+
+
 def _remove_path(p: Path) -> None:
     """Remove ``p`` whatever it is -- a real directory, a real file, or a
     symlink (including a dangling one, where ``exists()``/``is_dir()`` are
@@ -572,18 +596,20 @@ def cmd_materialize(*, force: bool) -> int:
             continue
         for copy in paths:
             try:
-                if copy.is_symlink():
-                    # _lib_copies() admits any copy.is_dir(), which follows
-                    # a symlink, but nothing here rejects the copy ROOT
-                    # itself being a symlink (e.g. plugins/a/libs/x ->
-                    # ../other) -- without this, _copy_src()/pointer.unlink()
-                    # below would reach real child paths through the link,
-                    # overwriting the TARGET's own src/version and
-                    # unlinking the TARGET's pointer marker (an external
-                    # target could be modified this way too).
+                bad_ancestor = _find_symlinked_ancestor(copy, REPO)
+                if bad_ancestor is not None:
+                    # _lib_copies() follows symlinks in plugins/<plugin>
+                    # and libs while discovering `copy` -- checking only
+                    # the final copy path missed a symlinked ANCESTOR,
+                    # which could make --materialize write through to
+                    # another consumer (or outside the checkout) via
+                    # _copy_src()/pointer.unlink() below, overwriting the
+                    # TARGET's own src/version and unlinking the TARGET's
+                    # pointer marker.
                     raise SystemExit(
-                        f"{copy} is a symlink -- refusing (a vendored copy "
-                        "root must be a real directory, not a link)"
+                        f"{bad_ancestor} is a symlink -- refusing (a vendored "
+                        "copy root, and every ancestor between it and the "
+                        "checkout root, must be a real directory)"
                     )
                 pointer = copy / POINTER_NAME
                 copy_tests = copy / "tests"

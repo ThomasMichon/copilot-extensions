@@ -105,6 +105,20 @@ def _materialize_into_preview(dest: Path) -> list[str]:
                 "to an external tree)"
             )
             continue
+        # libs_dir.iterdir()'s own is_dir() filter already follows a
+        # symlink, so a symlinked libs/ or libs/<lib> DESTINATION could
+        # reach this point too -- checking canonical (the SOURCE) being a
+        # symlink above doesn't cover this; the copy/destination side
+        # needs its own ancestor check before any write, matching
+        # materialize_main.py's equivalent protection.
+        bad_ancestor = svl._find_symlinked_ancestor(lib_copy, dest)
+        if bad_ancestor is not None:
+            log.append(
+                f"SKIP {lib_copy}: {bad_ancestor} is a symlink -- refusing "
+                "(a preview copy root, and every ancestor between it and "
+                "the preview destination, must be a real directory)"
+            )
+            continue
         # A DRY vendor-pointer copy (bare or src-passthrough) is never the
         # verified-agreeing "truth" sync-vendored-libs.py's own
         # cmd_materialize() compares against either -- its src/ is either

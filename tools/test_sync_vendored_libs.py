@@ -283,6 +283,27 @@ def test_materialize_refuses_a_symlinked_copy_root(repo: Path):
     assert (repo / "plugins/alpha/libs/shared-lib").is_symlink()
 
 
+def test_materialize_refuses_a_symlinked_ancestor_of_the_copy_root(repo: Path):
+    # _lib_copies() follows symlinks in plugins/<plugin> and libs while
+    # discovering `copy` -- checking only the final copy path (round 13's
+    # fix) misses a symlinked ANCESTOR (e.g. plugins/<plugin> itself),
+    # which could make --materialize write through to another consumer
+    # via the same class of attack, just one level higher.
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "canonical content\n")
+    _lib_pyproject(repo, "libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+    _pointer(repo, "beta", "shared-lib")
+    target = repo / "plugins/beta"
+    (target / "innocent.txt").write_text("do not touch\n", encoding="utf-8")
+
+    (repo / "plugins/alpha").symlink_to(target, target_is_directory=True)
+
+    result = _run(repo, "--materialize")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "symlink" in result.stderr
+    assert (target / "innocent.txt").read_text() == "do not touch\n"
+    assert (repo / "plugins/alpha").is_symlink()
+
+
 def test_materialize_pointer_copy_is_never_blocked_by_drift_gate(repo: Path):
     """A pointer copy has no version of its own to compare against canonical,
     so there is nothing for the "copies moved ahead" safety gate to block --

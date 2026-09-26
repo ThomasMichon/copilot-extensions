@@ -130,6 +130,16 @@ class _FakeSyncVendoredLibs:
                 return str(p.relative_to(tree))
         return None
 
+    def _find_symlinked_ancestor(self, path: Path, root: Path) -> Path | None:
+        root_r = root.resolve()
+        current = path
+        while True:
+            if current.is_symlink():
+                return current
+            if current.resolve() == root_r or current.parent == current:
+                return None
+            current = current.parent
+
 
 def test_materialize_into_preview_writes_only_into_dest_never_real_repo(
     isolated: Path, monkeypatch: pytest.MonkeyPatch,
@@ -297,6 +307,47 @@ def test_materialize_into_preview_refuses_a_symlinked_canonical_lib_root(
         "original stub\n"
     )
     assert (dest / "libs" / "shared-lib" / "VENDOR_POINTER.json").exists()
+
+
+def test_materialize_into_preview_refuses_a_symlinked_destination_ancestor(
+    isolated: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    # Round-14 review finding: iterdir()/is_dir() follow a symlinked
+    # libs/ or libs/<lib> DESTINATION just as readily as canonical.is_dir()
+    # follows a symlinked SOURCE (fixed earlier this round) -- _copy_src(),
+    # _copy_tests(), version syncing, and pointer removal could all mutate
+    # whatever a symlinked destination points at. Exercises
+    # _materialize_into_preview() directly (its only real caller, build(),
+    # always populates dest fresh via its own dereferencing copytree, so
+    # this destination-side attack shape isn't reachable through build()
+    # alone -- but the function itself must still refuse it defensively).
+    dest = isolated / "direct-dest"
+    victim = isolated / "victim-dir"
+    (victim / "src").mkdir(parents=True)
+    (victim / "src" / "__init__.py").write_text("do not touch\n", encoding="utf-8")
+    (victim / "VENDOR_POINTER.json").write_text(
+        json.dumps({"schema": "copilot-extensions.vendor-pointer", "version": 1,
+                    "source": "libs/shared-lib", "kind": "src-passthrough"}) + "\n",
+        encoding="utf-8",
+    )
+
+    (dest / "libs").mkdir(parents=True)
+    (dest / "libs" / "shared-lib").symlink_to(victim, target_is_directory=True)
+
+    canonical_root = isolated / "canonical-libs"
+    canonical_lib = canonical_root / "shared-lib"
+    (canonical_lib / "src").mkdir(parents=True)
+    (canonical_lib / "src" / "__init__.py").write_text("smuggled = True\n", encoding="utf-8")
+
+    fake = _FakeSyncVendoredLibs(canonical_root)
+    monkeypatch.setattr(preview_release, "_load_sync_vendored_libs", lambda: fake)
+
+    log = preview_release._materialize_into_preview(dest)
+
+    assert any("SKIP" in line and "is a symlink" in line for line in log)
+    assert (victim / "src" / "__init__.py").read_text() == "do not touch\n"
+    assert (victim / "VENDOR_POINTER.json").exists()
+    assert (dest / "libs" / "shared-lib").is_symlink()
 
 
 def test_materialize_into_preview_refuses_a_canonical_lib_with_no_src_directory(
