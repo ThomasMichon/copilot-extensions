@@ -282,6 +282,14 @@ def consume_pending_changes(
             acc._consume_changefiles()
 
         materialize_log = mm.materialize(scratch, canonical_root=scratch)
+        unresolved = [line for line in materialize_log if line.startswith("SKIP")]
+        if unresolved:
+            raise PromotionError(
+                "promotion refused: one or more vendor pointers did not "
+                "resolve during materialization -- a malformed, missing, or "
+                "escaping pointer would otherwise ship as an unexpanded stub "
+                "in the main snapshot:\n  " + "\n  ".join(unresolved)
+            )
         projections_synced = _sync_instruction_projections(scratch)
     finally:
         if previous_changefile_mod is not None:

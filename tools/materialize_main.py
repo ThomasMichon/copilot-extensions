@@ -11,9 +11,13 @@ trial clone (see the effort's Journal).
 Two pointer kinds are expanded, generalized under the
 `vendored-doc-pointers` effort (see its README, Phase 1):
 
-* **Directory (lib) pointers** -- `plugins/<plugin>/libs/<lib>/VENDOR_POINTER.json`,
-  a JSON sidecar next to a lib copy that has no `src/` of its own. Expanded
-  from the canonical `libs/<lib>` directory; only `src/` and the declared
+* **Directory (lib) pointers** -- `plugins/<plugin>/libs/<lib>/VENDOR_POINTER.json`
+  (also `worktree-manager/libs/<lib>/VENDOR_POINTER.json`, the one extra
+  top-level tree `sync-vendored-libs.py`/`check-vendored-libs-sync.py` also
+  scan), a JSON sidecar next to a lib copy that has no `src/` of its own.
+  Expanded from the canonical `libs/<lib>` directory (refusing any `source`
+  that escapes the canonical root, the same containment guarantee the file
+  pointer kind below already has); only `src/` and the declared
   `pyproject.toml` version are ever touched, matching
   `check-vendored-libs-sync.py`'s own existing invariant.
 * **File pointers** -- any single vendored file (e.g. a mirrored Markdown
@@ -55,7 +59,13 @@ _FILE_POINTER_RE = re.compile(
 
 
 def find_pointers(root: Path) -> list[Path]:
-    return sorted(root.glob("plugins/*/libs/*/" + POINTER_NAME))
+    """Every directory/lib pointer under ``root``: ``plugins/*/libs/*`` and
+    the extra top-level ``worktree-manager/libs/*`` tree that
+    ``sync-vendored-libs.py``/``check-vendored-libs-sync.py`` also scan (see
+    those tools' own ``_lib_copies()``/extra-tree handling)."""
+    return sorted(
+        root.glob("plugins/*/libs/*/" + POINTER_NAME)
+    ) + sorted(root.glob("worktree-manager/libs/*/" + POINTER_NAME))
 
 
 def _file_pointer_source(path: Path) -> str | None:
@@ -94,15 +104,35 @@ def materialize(dest: Path, *, canonical_root: Path) -> list[str]:
     for pointer_path in find_pointers(dest):
         pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
         source_rel = pointer["source"]  # e.g. "libs/zdd"
-        canonical = canonical_root / source_rel
         lib_copy_dir = pointer_path.parent
 
+        if _escapes_root(lib_copy_dir, dest):
+            log.append(
+                f"SKIP {lib_copy_dir}: pointer directory escapes the "
+                "checkout root (a symlinked plugin/libs path) -- refusing"
+            )
+            continue
+
+        canonical = _resolve_within(canonical_root, source_rel)
+
+        if canonical is None:
+            log.append(f"SKIP {lib_copy_dir}: source {source_rel!r} escapes "
+                        "the canonical root -- refusing")
+            continue
         if not canonical.is_dir():
             log.append(f"SKIP {lib_copy_dir}: canonical {source_rel} not found")
             continue
 
         src_sub = canonical / "src"
         dst_sub = lib_copy_dir / "src"
+        symlink_found = _find_symlink(src_sub)
+        if symlink_found is not None:
+            where = f"{source_rel}/src" if symlink_found == "." else f"{source_rel}/src/{symlink_found}"
+            log.append(
+                f"SKIP {lib_copy_dir}: {where} is a symlink -- refusing "
+                "(a canonical lib source must contain only real files)"
+            )
+            continue
         if dst_sub.exists():
             shutil.rmtree(dst_sub)
         if src_sub.is_dir():
@@ -123,17 +153,47 @@ def materialize(dest: Path, *, canonical_root: Path) -> list[str]:
     return log
 
 
+def _escapes_root(candidate: Path, root: Path) -> bool:
+    """True when ``candidate``'s resolved (symlink-followed) location is not
+    ``root`` itself or a descendant of it."""
+    candidate_r = candidate.resolve()
+    root_r = root.resolve()
+    return candidate_r != root_r and root_r not in candidate_r.parents
+
+
 def _resolve_within(canonical_root: Path, source_rel: str) -> Path | None:
     """Resolve ``source_rel`` against ``canonical_root``, refusing an absolute
     path or any ``../`` traversal that would escape ``canonical_root``
     (including via a symlink). Returns ``None`` when the candidate escapes."""
     if Path(source_rel).is_absolute():
         return None
-    candidate = (canonical_root / source_rel).resolve()
-    root = canonical_root.resolve()
-    if candidate != root and root not in candidate.parents:
+    candidate = canonical_root / source_rel
+    if _escapes_root(candidate, canonical_root):
         return None
-    return candidate
+    return candidate.resolve()
+
+
+def _find_symlink(tree: Path) -> str | None:
+    """A path (relative to ``tree``, or ``"."`` when ``tree`` itself is the
+    symlink) under ``tree`` that is a symlink, or ``None`` if none is found.
+    ``_resolve_within`` only validates the pointer's own ``source`` value; a
+    legitimate-looking canonical directory can still contain (or itself
+    *be*) a symlink (e.g. ``src -> /etc`` or ``src/evil -> /etc``) that
+    ``shutil.copytree`` would otherwise silently follow, copying external
+    content into the release snapshot. Checking ``tree.is_dir()`` alone is
+    not enough: it follows a symlink, so a symlinked ``tree`` itself would
+    otherwise pass through unnoticed and only its *descendants* would be
+    scanned. A legitimate vendored lib has no reason to contain a symlink
+    at all, so any symlink here is refused outright -- simpler than
+    distinguishing escaping from non-escaping, and fails closed."""
+    if tree.is_symlink():
+        return "."
+    if not tree.is_dir():
+        return None
+    for entry in sorted(tree.rglob("*")):
+        if entry.is_symlink():
+            return str(entry.relative_to(tree))
+    return None
 
 
 def materialize_file_pointers(dest: Path, *, canonical_root: Path) -> list[str]:
@@ -169,7 +229,16 @@ def _ignore(_dir: str, names: list[str]) -> set[str]:
 def build(dest: Path, *, source_root: Path = REPO) -> list[str]:
     if dest.exists():
         shutil.rmtree(dest)
-    shutil.copytree(source_root, dest, ignore=_ignore)
+    # symlinks=True: preserve any tracked symlink AS a symlink in the
+    # snapshot rather than following it -- the default (False) would
+    # silently dereference and embed whatever external content a symlink
+    # anywhere in source_root (e.g. a canonical lib's src/) points at,
+    # before materialize()'s own per-pointer _find_symlink() check below
+    # even runs. A preserved symlink pointing outside dest is inert (a
+    # dangling/foreign reference in the snapshot, not embedded bytes); the
+    # per-pointer check then still catches and refuses a symlinked
+    # canonical lib source specifically.
+    shutil.copytree(source_root, dest, ignore=_ignore, symlinks=True)
     return materialize(dest, canonical_root=source_root)
 
 
