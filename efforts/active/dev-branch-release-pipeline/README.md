@@ -1712,3 +1712,72 @@ efforts' own PRs).
     other machines' anchors (e.g. `tmichon-cloud1`) carry the same staleness
     — worth a sweep next time that machine is active.
 
+### 2026-09-25 — Repo-settings security sweep
+- Operator asked for a live verification pass against three concrete
+  security asks: (1) non-collaborators can't trigger Copilot/CI/Agentic
+  Workflows via PR or issue, (2) collaborators can't create new CI/workflow
+  tasks that exfiltrate the promotion secrets, (3) only the operator can
+  introduce new workflows/actions. Checked live settings via API rather
+  than assuming, found and fixed one real gap:
+  - **Confirmed already-good**: no workflow listens on `issues`/
+    `issue_comment` (filing an issue triggers nothing); assigning an issue
+    to `copilot` requires Triage+ permission (a non-collaborator can't
+    self-assign); `default_workflow_permissions: read` (least-privilege
+    token default); `trusted-ci.yml`'s `pull_request_target` job
+    independently re-checks author+sender Write access and same-repo
+    origin before running anything, and is currently fully inert (its
+    `TRUSTED_SELF_HOSTED_CI` repo variable doesn't exist).
+  - **Can't verify via API, flagged for the operator to check manually**:
+    the fork-PR-workflow-approval dropdown (Settings → Actions → General)
+    has no REST endpoint at all (confirmed against GitHub's own Actions
+    permissions docs) — recommended tightening it to "Require approval for
+    all outside collaborators" (GitHub's default, first-time-contributors-
+    only, stops re-checking after a contributor's first approved PR).
+  - **Real gap found and fixed**: `APERTURE_RELEASE_TOKEN` was a plain
+    repository secret — not scoped to either existing GitHub Environment
+    (`copilot`, `main-promotion`), both of which had zero protection rules.
+    Any of the three Write-access collaborators (`JakeSchieber`,
+    `anarmawala`, `namankanakiya` — confirmed intentional by the operator)
+    could push a brand-new, entirely unprotected scratch branch with a new
+    workflow referencing that secret and it would run with full access —
+    branch rulesets only cover `dev`/`main`. Configured `main-promotion`'s
+    `deployment_branch_policy` to `protected_branches only` (closes the
+    scratch-branch path structurally, at the environment level, regardless
+    of who authored the workflow or which branch ruleset applies).
+  - **Explicitly decided against** a required-reviewer rule on
+    `main-promotion`: it would pause every real, fully-unattended promotion
+    run waiting on a manual click (GitHub never lets a workflow's own
+    acting identity auto-satisfy its own reviewer requirement, even when
+    that identity is the operator's own PAT) — directly contradicting this
+    effort's whole "turnkey, unattended promotion" design. Branch
+    restriction alone was judged sufficient for the actual threat (secret
+    theft via an unauthorized branch), so the reviewer requirement was
+    added then deliberately removed after surfacing the trade-off.
+    `validate-and-promote.yml`'s promote job already declared
+    `environment: main-promotion` from earlier work — its comment claiming
+    the environment "isn't configured yet" was stale and rewritten to
+    describe the actual chosen posture.
+  - **Still open, deliberately not done yet**: `APERTURE_RELEASE_TOKEN`
+    itself has not yet been re-created as an environment-scoped secret
+    under `main-promotion` (still a plain repo secret today) — this
+    requires the operator to run `gh secret set --env main-promotion
+    APERTURE_RELEASE_TOKEN` themselves with the real PAT value, since
+    GitHub secrets are write-only and no vault entry holds this
+    operator-minted token's plaintext. Delete the repo-level secret only
+    after confirming a real promotion succeeds with the environment secret
+    in place.
+  - **CODEOWNERS**: extended the existing single-file entry
+    (`trusted-ci.yml` only) to cover the whole `.github/workflows/` tree,
+    naming only `@ThomasMichon`. Enabled `require_code_owner_review: true`
+    on `main`'s ruleset (safe: it already carries an Admin-role bypass, so
+    the operator can still self-merge their own workflow PRs) but
+    deliberately left it **off** on `dev`'s ruleset: `dev`'s ruleset
+    carries zero bypass by design, and since this is a single-operator repo
+    (every PR, including every workflow-touching one, is authored by
+    `ThomasMichon`), enabling it there would self-lock every future
+    workflow PR into `dev` — GitHub never lets a PR author approve their
+    own PR, codeowner or not. CODEOWNERS still auto-requests the operator
+    as a reviewer on `dev` PRs touching workflows (informational, not
+    blocking) — the operator explicitly chose this split when the
+    self-lockout risk was surfaced rather than have it applied silently.
+

@@ -199,12 +199,18 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     environment: main-promotion
-    # Admin-escalation gate: this job runs under the `main-promotion` GitHub
-    # Environment. That environment itself is NOT something this workflow
-    # file can configure -- a repo admin must add required reviewers to it
-    # (Settings > Environments > main-promotion) before this gate actually
-    # blocks anything unattended. Until that's done, the job runs without a
-    # human approval step (but every other guard below still applies).
+    # Environment gating (configured 2026-09-25, repo Settings, not this
+    # file): `main-promotion` restricts its deployment_branch_policy to
+    # protected branches only (`dev`/`main`) and deliberately carries NO
+    # required reviewer -- a required reviewer would pause every real,
+    # fully-unattended promotion run waiting on a manual click, which
+    # would defeat the whole point of this pipeline. The security value
+    # here is entirely the branch restriction: `APERTURE_RELEASE_TOKEN`
+    # is an environment secret scoped to `main-promotion`, so a workflow
+    # smuggled onto an unprotected scratch branch (the live risk a
+    # security review surfaced) cannot reach it -- only a job that both
+    # declares this environment AND runs on `dev`/`main` can. It's still
+    # NOT a human-approval gate; every other guard below still applies.
     #
     # `main` carries a zero-bypass "pull request required" ruleset (a
     # personal GitHub account cannot grant the GitHub Actions app -- or any
