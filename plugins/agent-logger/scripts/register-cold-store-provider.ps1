@@ -41,7 +41,7 @@ if ($env:AGENT_BRIDGE_COLD_STORE_PROVIDERS_DIR) {
 } elseif ($env:AGENT_BRIDGE_CONFIG_DIR) {
     $dir = Join-Path $env:AGENT_BRIDGE_CONFIG_DIR 'cold-store-providers.d'
 } else {
-    $dir = Join-Path $env:USERPROFILE '.agent-bridge\cold-store-providers.d'
+    $dir = Join-Path $env:USERPROFILE '.agent-bridge\cold-store-providers.d' # marketplace-isolation: allow legacy compatibility root
 }
 try { New-Item -ItemType Directory -Force -Path $dir | Out-Null } catch { Exit-SessionStart }
 
