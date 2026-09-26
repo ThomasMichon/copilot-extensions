@@ -677,8 +677,15 @@ def _write_passthrough_pointer(consumer: str, lib: str) -> Path:
     # --pointerize would destroy the old consumer copy and leave the new
     # directory partially populated (pyproject.toml/README but no
     # src/tests/pointer). Fail before any destructive action, not partway
-    # through building the replacement.
-    src_symlink_found = _find_symlink(canon_pkg_dir)
+    # through building the replacement. Scans canonical / "src" itself, not
+    # canon_pkg_dir (canonical/src/<pkg>) -- starting at canon_pkg_dir would
+    # miss a symlink at the src/ ROOT: canon_pkg_dir is constructed by
+    # joining paths, so if canonical/src itself were a symlink, is_dir()
+    # would transparently follow it and _find_symlink() would only ever see
+    # the (external) target's own contents, letting --pointerize accept an
+    # external source tree even though the materializers explicitly reject
+    # a symlinked src/ root.
+    src_symlink_found = _find_symlink(canonical / "src")
     if src_symlink_found is not None:
         where = f"{lib}/src" if src_symlink_found == "." else f"{lib}/src/{src_symlink_found}"
         raise SystemExit(

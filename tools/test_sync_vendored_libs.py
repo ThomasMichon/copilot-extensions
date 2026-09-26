@@ -404,6 +404,28 @@ def test_pointerize_refuses_when_canonical_lib_missing(repo: Path):
     assert "no canonical libs/ghost-lib" in (result.stdout + result.stderr)
 
 
+def test_pointerize_refuses_a_symlinked_src_root(repo: Path):
+    # The canonical src/ ROOT being a symlink (not just a symlink somewhere
+    # inside it) must be caught too -- scanning from canon_pkg_dir
+    # (canonical/src/<pkg>) instead of canonical/src itself would miss
+    # this: canon_pkg_dir is constructed by joining paths, so is_dir()
+    # transparently follows the src/ symlink and _find_symlink() only ever
+    # sees the (external) target's own contents, letting --pointerize
+    # accept an external source tree even though the materializers
+    # explicitly reject a symlinked src/ root.
+    _lib_pyproject(repo, "libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+    external = repo.parent / "outside-repo-src"
+    (external / "shared_lib").mkdir(parents=True)
+    (external / "shared_lib" / "__init__.py").write_text("value = 1\n", encoding="utf-8")
+    (repo / "libs/shared-lib/src").symlink_to(external, target_is_directory=True)
+    (repo / "plugins/alpha").mkdir(parents=True)
+
+    result = _run(repo, "--pointerize", "alpha", "shared-lib")
+    assert result.returncode != 0
+    assert "is a symlink" in (result.stdout + result.stderr)
+    assert not (repo / "plugins/alpha/libs/shared-lib").exists()
+
+
 def test_pointerize_supports_the_worktree_manager_extra_consumer_tree(repo: Path):
     # worktree-manager sits at the repo root, not under plugins/ -- confirm
     # --pointerize resolves it via _consumer_dir() the same way _lib_copies()

@@ -193,8 +193,9 @@ def test_fetch_via_tarball_also_fetches_the_libs_sibling(tmp_path, monkeypatch):
     """A tarball-only fetch previously grabbed ONLY the worktree-manager/
     subtree, silently dropping the sibling libs/ that any src-passthrough
     vendor pointer inside the payload needs to resolve canonical content
-    from -- the resulting staging tree must carry both, the same
-    monorepo-shaped layout a git clone already produces for free."""
+    from, and tools/materialize_main.py that expands it -- the resulting
+    staging tree must carry all three, the same monorepo-shaped layout a
+    git clone already produces for free."""
     import tarfile
 
     archive_root = tmp_path / "archive-src"
@@ -208,6 +209,10 @@ def test_fetch_via_tarball_also_fetches_the_libs_sibling(tmp_path, monkeypatch):
      "shared_lib").mkdir(parents=True)
     (archive_root / "copilot-extensions-main" / "libs" / "shared-lib" / "src" /
      "shared_lib" / "__init__.py").write_text("value = 1\n")
+    (archive_root / "copilot-extensions-main" / "tools").mkdir(parents=True)
+    (archive_root / "copilot-extensions-main" / "tools" / "materialize_main.py").write_text(
+        "# real materializer\n"
+    )
 
     archive_path = tmp_path / "payload.tar.gz"
     with tarfile.open(archive_path, "w:gz") as tf:
@@ -236,6 +241,7 @@ def test_fetch_via_tarball_also_fetches_the_libs_sibling(tmp_path, monkeypatch):
 
     assert (staging / "worktree-manager" / "pyproject.toml").is_file()
     assert (staging / "libs" / "shared-lib" / "src" / "shared_lib" / "__init__.py").read_text() == "value = 1\n"
+    assert (staging / "tools" / "materialize_main.py").read_text() == "# real materializer\n"
 
 
 @pytest.mark.parametrize("repo,ref,expected", [

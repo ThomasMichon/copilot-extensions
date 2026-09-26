@@ -621,12 +621,15 @@ def _fetch_via_tarball(staging: Path, url: str, *, timeout: int = 180) -> None:
     """Fetch + extract the worktree-manager payload from a GitHub tarball (no git).
 
     Replaces ``staging`` contents with the extracted ``worktree-manager/`` payload
-    PLUS its sibling ``libs/`` directory, so ``staging/worktree-manager/pyproject.toml``
-    and ``staging/libs/`` both exist -- the same monorepo-shaped layout the git clone
-    produces. The ``libs/`` sibling is required for ``_materialize_payload_pointers``
-    to resolve canonical content for any vendor-pointer copy inside the payload (a
-    tarball-only fetch that skipped it would leave those pointers permanently
-    unresolvable in the installed slot -- see that function's own docstring).
+    PLUS its sibling ``libs/`` directory and ``tools/materialize_main.py``, so
+    ``staging/worktree-manager/pyproject.toml``, ``staging/libs/``, and
+    ``staging/tools/materialize_main.py`` all exist -- the same monorepo-shaped
+    layout the git clone produces. Both siblings are required for
+    ``_materialize_payload_pointers`` to expand any vendor-pointer copy inside the
+    payload (``libs/`` supplies canonical content, ``tools/materialize_main.py`` is
+    dynamically loaded to do the expansion -- see that function's own docstring);
+    a tarball-only fetch that skipped either would leave those pointers permanently
+    unresolvable in the installed slot.
     Raises ``OSError`` on any failure so the caller can degrade to an ``error`` result.
     """
     import tarfile
@@ -657,6 +660,17 @@ def _fetch_via_tarball(staging: Path, url: str, *, timeout: int = 180) -> None:
         libs_source = payload.parent / "libs"
         if libs_source.is_dir():
             shutil.copytree(libs_source, staging / "libs")
+        # _materialize_payload_pointers() also needs tools/materialize_main.py
+        # (a monorepo ancestor sibling, dynamically loaded -- see
+        # _load_materialize_main()) to expand any pointer copy inside
+        # libs/ before the standalone slot is published; a tarball fetch
+        # that copied libs/ but not this file would still hit the
+        # unresolved-pointer refusal.
+        tool_source = payload.parent / "tools" / "materialize_main.py"
+        if tool_source.is_file():
+            tool_dest = staging / "tools"
+            tool_dest.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(tool_source, tool_dest / "materialize_main.py")
 
 
 def self_update(
