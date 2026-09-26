@@ -435,8 +435,9 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   discipline:
   - `install.sh`/`install.ps1` (25 findings) — same blocked generic-wrapper
     backlog as `budget-guidance`/`agent-pull-requests`, not annotatable yet.
-  - `scripts/runtime-gate.sh`/`.ps1` (9 remaining findings beyond the 2
-    already-marked lines) — these set `AGENT_VAULT_SOCKET`/`PIPE`/
+  - `scripts/runtime-gate.sh`/`.ps1` (10 remaining findings beyond the 2
+    already-marked lines, verified via `python -c "import json; ..."` count
+    over the guard's own JSON output, not eyeballed) — these set `AGENT_VAULT_SOCKET`/`PIPE`/
     `SYSTEMD_UNIT`/`TASK_NAME` using a `SERVICE_SUFFIX` derived from
     `scoped_identity_suffix "$RUNTIME_ROOT"` (a hash of the cell-specific
     runtime root) — i.e. these ARE already cell-qualified, just under a
