@@ -455,33 +455,89 @@ def _marketplace_manifest(root: Path) -> tuple[dict, Path] | None:
     return None
 
 
-def _agent_worktrees_repo_root(repo_name: str) -> Path | None:
-    """Resolve a registered repo's local checkout path via the trusted CLI."""
+def _agent_worktrees_repo_root(
+    repo_name: str, agent_worktrees_command: str | None = None
+) -> Path | None:
+    """Resolve a registered repo's local checkout path via the trusted CLI.
+
+    When ``agent_worktrees_command`` is supplied (even as an empty/blank
+    string), any failure to launch or use it raises ``ValueError`` -- it
+    must never silently degrade to the ambient-resolution fallback (which
+    can inspect an unrelated cell's payload). Ambient
+    (``agent_worktrees_command`` is ``None``) resolution failures remain a
+    soft ``None``, matching every other genuinely unresolvable marketplace
+    case.
+    """
     if not AGENT_WORKTREES_REPO_NAME.fullmatch(repo_name):
         return None
-    agent_worktrees = shutil.which("agent-worktrees")
-    if not agent_worktrees:
+    explicit = agent_worktrees_command is not None
+
+    def _fail(reason: str) -> None:
+        if explicit:
+            raise ValueError(
+                f"explicit agent-worktrees command {agent_worktrees_command!r} "
+                f"could not resolve repo {repo_name!r}: {reason}"
+            )
         return None
+
+    if explicit and not agent_worktrees_command.strip():
+        return _fail("the supplied command is blank")
+    command = _resolve_agent_worktrees_command(agent_worktrees_command)
+    if command is None:
+        return _fail("no agent-worktrees command was found")
     try:
         completed = subprocess.run(
-            [agent_worktrees, "repos", "find", repo_name],
+            [*command, "repos", "find", repo_name],
             capture_output=True,
             text=True,
             timeout=15,
             check=False,
         )
-    except (OSError, subprocess.SubprocessError):
-        return None
+    except (OSError, subprocess.SubprocessError) as exc:
+        return _fail(f"launch failed: {exc}")
     if completed.returncode != 0:
-        return None
+        return _fail(f"exited with status {completed.returncode}")
     lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
     if not lines:
-        return None
+        return _fail("produced no output")
     try:
         path = Path(lines[-1]).resolve(strict=True)
-    except OSError:
-        return None
-    return path if path.is_dir() else None
+    except (OSError, RuntimeError, ValueError) as exc:
+        return _fail(f"resolved path is invalid: {exc}")
+    if not path.is_dir():
+        return _fail(f"resolved path is not a directory: {path}")
+    return path
+
+
+def _resolve_agent_worktrees_command(preferred: str | None) -> list[str] | None:
+    """Prefer a caller-supplied catalog-resolved command over ambient PATH.
+
+    Raises ``ValueError`` when an explicitly supplied command cannot be
+    launched at all (an unhostable ``.ps1``) -- that must surface as a
+    resolution failure, never silently degrade to the caller's ambient/
+    installed-root fallback and inspect unrelated content.
+    """
+    if preferred:
+        if (
+            os.name == "nt"
+            and os.path.splitext(preferred)[1].casefold() == ".ps1"
+        ):
+            host = shutil.which("pwsh.exe") or shutil.which("powershell.exe")
+            if not host:
+                raise ValueError(
+                    f"resolved agent-worktrees command {preferred!r} is a "
+                    "PowerShell script but neither pwsh.exe nor "
+                    "powershell.exe was found on PATH to host it"
+                )
+            return [
+                host, "-NoProfile", "-NoLogo",
+                "-ExecutionPolicy", "Bypass", "-File", preferred,
+            ]
+        return [preferred]
+    # Ambient fallback: only reached when no caller supplied the
+    # session-catalog-resolved command.
+    command = shutil.which("agent-worktrees")  # marketplace-isolation: allow legacy-compatibility-delegate
+    return [command] if command else None
 
 
 def _directory_marketplace_plugin(
@@ -489,6 +545,8 @@ def _directory_marketplace_plugin(
     name: str,
     declaration: dict,
     base: Path,
+    *,
+    agent_worktrees_command: str | None = None,
 ) -> Path | None:
     """Resolve one directory-marketplace entry with runtime-equivalent checks."""
     source = declaration.get("source")
@@ -509,7 +567,9 @@ def _directory_marketplace_plugin(
         repo_name = source.get("repo")
         if not isinstance(repo_name, str) or not repo_name.strip():
             return None
-        repo_root = _agent_worktrees_repo_root(repo_name.strip())
+        repo_root = _agent_worktrees_repo_root(
+            repo_name.strip(), agent_worktrees_command
+        )
         if repo_root is None:
             return None
         raw_path = source.get("path", ".ai")
@@ -578,6 +638,7 @@ def assemble_enabled_plugins(
     require_trust: bool = False,
     include_user: bool = True,
     include_local: bool = True,
+    agent_worktrees_command: str | None = None,
 ) -> list[PluginSource]:
     """Assemble the plugin set *actually loaded for this repo* into review scope."""
     selected_home = home or Path.home()
@@ -608,7 +669,10 @@ def assemble_enabled_plugins(
             else ""
         )
 
-        footprint = _directory_marketplace_plugin(mkt, name, declaration, base)
+        footprint = _directory_marketplace_plugin(
+            mkt, name, declaration, base,
+            agent_worktrees_command=agent_worktrees_command,
+        )
         # A directory-marketplace footprint is only trusted checkout
         # provenance when it is EITHER this reviewing repo's own tree
         # (`controlled`) OR resolved via the `agent-worktrees-repo` source

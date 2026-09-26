@@ -516,6 +516,18 @@ async def ingest_live_events(
     # tracker sees running/idle/stalled -- objective and token-free.
     prior = (db.get_live_session(session_id) or {}).get("turn_state")
     new_state, saw_activity = derive_turn_state(raw, prior_state=prior)
+    # A represented turn-end can arrive even while the current process-lifetime
+    # tail still has an open root tool call. In that case the open tool is the
+    # strongest local evidence: status surfaces must not read idle while
+    # active_work can name a running command.
+    log = store.get(session_id)
+    if (
+        new_state == "idle"
+        and log is not None
+        and log.active_tool_call(include_nested=False) is not None
+    ):
+        new_state = "running"
+        saw_activity = True
     if new_state != prior or saw_activity:
         db.update_live_turn_state(
             session_id, turn_state=new_state, last_activity_at=time.time()
@@ -528,7 +540,6 @@ async def ingest_live_events(
             session_id, latest_progress=json.dumps(beat, separators=(",", ":")),
             now=time.time(),
         )
-    log = store.get(session_id)
     last_id = log.latest_id if log is not None else 0
     return IngestLiveEventsResult(
         session_id=session_id, ingested=ingested, last_id=last_id
@@ -721,5 +732,14 @@ async def ack_live_messages(
     db = _db(request)
     if db.get_live_session(session_id) is None:
         raise HTTPException(status_code=404, detail="live session not found")
-    acked = db.ack_live_messages(session_id, body.ids, now=time.time())
+    now = time.time()
+    acked = db.ack_live_messages(session_id, body.ids, now=now)
+    if acked:
+        # The extension acks only after ``session.send`` resolves. That is the
+        # bridge's first reliable evidence that a queued/steered prompt reached
+        # the live CLI after an idle turn, so mark the represented session busy
+        # until later mirrored events (or a turn boundary) refine it.
+        db.update_live_turn_state(
+            session_id, turn_state="running", last_activity_at=now
+        )
     return AckMessagesResult(acked=acked)

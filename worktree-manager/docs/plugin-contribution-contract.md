@@ -56,7 +56,23 @@ Version-1 compatibility also covers the existing declarative fields:
 - optional action `shortcut`, used by the generic interaction shell to expose
   the action's keyboard affordance without hard-coding a provider's keys;
 - top-level `worktree_actions`;
-- top-level `config_sections`.
+- top-level `config_sections`;
+- optional top-level `worker` — `{"worktree": <field>, "label"?: <field>,
+  "live"?: <field>, "activity"?: <field>}` — marking the pivot's rows as remote
+  workers a worktree supervises. The Manager joins cached rows to Worktrees rows
+  by the full driving-worktree id in `worktree`, renders a
+  `→ <label> <live> <activity>` line under the supervising worktree, keeps the
+  pivot loaded in the background, and never treats such a pivot as a claiming
+  task (no phase badge). `label` defaults to `entry.id`. Each supervised
+  worker also appears as a `Worker: <label>` entry in that worktree's Actions
+  menu, which opens the venue row's own actions. Venue rows can use the
+  internal verbs `open-venue-window` (attach with the provider's
+  `copilot <id>` in a new tmux window or Windows Terminal tab, passing the
+  row's `effort` as `--effort` when present), `open-bridge-ui` (the
+  agent-bridge live-session web view), and `send-worker-message` (a small
+  modal that sends typed text to the row's live `session_id` — Ctrl+S steers
+  the running turn, Ctrl+X interrupts it — via `agent-bridge send <sid> -`
+  with the text on stdin).
 
 The command arrays are process-boundary contracts. The Manager invokes the
 contributing plugin's canonical CLI; it never imports the plugin runtime or

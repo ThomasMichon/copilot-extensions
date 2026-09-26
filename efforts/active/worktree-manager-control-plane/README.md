@@ -265,7 +265,8 @@ realized in `main`; unchecked items are the remaining delta.
             wired, and bumped `__version__` (`0.1.0-dev36` →
             `0.1.0-dev37`) so already-installed machines actually redeploy
             the corrected payload.
-      - [ ] **Sub-slice 3 (direction set 2026-09-14; planned 2026-09-17, not yet implemented):**
+      - [ ] **Sub-slice 3 (direction set 2026-09-14; planned 2026-09-17; Step 1
+            landed 2026-09-25; Steps 2-6 not yet implemented):**
             split the resident status-monitor's push/observe legs into
             Worktree Manager — agent-worktrees keeps sole ownership of
             accumulating/tracking session status; Worktree Manager takes a
@@ -274,6 +275,10 @@ realized in `main`; unchecked items are the remaining delta.
             panes, and applies the resident monitor's rendered status back
             into mux status bars. Reviewed, ordered plan:
             [`phase-3b-substatus-monitor-relocation.md`](phase-3b-substatus-monitor-relocation.md).
+            **Step 1 landed:** `mux_link.py`'s additive daemon-link contract
+            + resident `ManagedMuxCache` seam, wired into `cmd_status_monitor`
+            and merged (observation-only) into `_monitor_sweep`'s existing
+            `catalog_observer` call — see the phase doc's own Step 1 entry.
       - [x] **Sub-slice 4 (landed 2026-09-14): same-config marketplace-cell
             resolution + generic installed-binstub invocation.** Cross-cuts
             the `marketplace-scoped-installations` effort's installation-mode
@@ -511,7 +516,7 @@ call site.
         version-gated (`>= 0.1.0-dev75`) present-or-fallback to the
         unchanged local implementation.
   - [x] **Step 5c — live-machine validation trial**, operator-supervised on
-        tmichon-book2: confirmed the installed `install.ps1` actually ran
+        a live machine: confirmed the installed `install.ps1` actually ran
         the new Worktree Manager path (`--live: writes applied`) and left
         the real fragment/`state.json`/`settings.json` byte-identical to
         before (idempotent, non-destructive). `--live` is proven safe on
@@ -634,10 +639,21 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
 ## Coordination
 
 `copilot-extensions` is public and may be driven from more than one private
-control repo. **[#352](https://github.com/ThomasMichon/copilot-extensions/issues/352)
-is the shared coordination token** for the remaining Worktree Manager work; claim
-a slice there (comment/assign) before starting, and land changes serially through
-the PR-required `main`. Downstream private plans may **link to** this effort and
+control repo. **Stale pointer, corrected 2026-09-25:** this section long named
+[#352](https://github.com/ThomasMichon/copilot-extensions/issues/352) as the
+shared coordination token, but #352 (the Installer & Configurator umbrella)
+was itself closed as completed on 2026-09-17 — after that point every
+"claim a slice on #352" comment landed on an already-closed issue with no
+one watching it, silently defeating the claiming discipline this section
+describes. **There is currently no dedicated open coordination-token issue
+for this effort.** Until one exists, claim a slice by adding a dated entry to
+this file's own Journal (below) naming the exact sub-item before starting it,
+and check the Journal's most recent entries for an unreleased claim before
+picking up new work — the same discipline the closed issue used to host,
+just recorded here instead. Land changes serially through the PR-required
+`dev` branch (`main` only ever moves via the CI promotion pipeline, never a
+direct PR target — see CONTRIBUTING.md). Downstream private plans may
+**link to** this effort and
 its issues; the public artifacts stay self-contained and general-purpose.
 
 This effort has already paid the cost of two sessions landing independently
@@ -651,6 +667,71 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-09-25** — Merged Phase 3b Slice 2 Sub-slice 3 Step 1, PR
+  [#3650](https://github.com/ThomasMichon/copilot-extensions/pull/3650)
+  (squash-merged into `dev` as `059c25a35`). Went through 21 review rounds
+  before landing (see the PR's own comment history for the full per-round
+  breakdown); the last three rounds each fixed a genuine finding surfaced
+  after a mid-session rebase onto the latest `dev` (which had itself landed
+  the Stage D lazy-dispatch decoupling since this branch's prior rebase):
+  rejecting an out-of-range rendezvous port before returning an endpoint,
+  resolving `status-monitor`'s managed-mux runtime home through the
+  cluster-free `_core_helper` path instead of a direct (and, under lazy
+  dispatch, unbound) `core._aw_runtime_home()` access, and gating
+  `CoalescingServer.close()`'s `shutdown()` call on the serve thread still
+  being alive rather than trusting its one-way readiness event alone (with
+  a regression test in both vendored `work_coalescing_singleton` copies,
+  which also caught and fixed a latent bug in the prior round's own test
+  that patched a bound method after the thread's target had already been
+  captured). Full suite re-run after the rebase: 8 pre-existing unrelated
+  failures (same four families as before -- git credential pinning,
+  lazy-dispatch cluster-scan parity, repos-clone auth-arg injection,
+  update-stage indicator state; one fewer than previously observed,
+  consistent with an unrelated upstream fix landing during the rebase),
+  5469 passed, 52 skipped. Step 1 of this sub-slice's 6-step ordered plan
+  is complete; Steps 2-6 (the Worktree Manager mux-companion daemon itself,
+  Mux-launch integration, and the writer-ownership cutover) remain
+  unclaimed.
+
+- **2026-09-25** — Landed Phase 3b Slice 2 Sub-slice 3 Step 1 (additive
+  daemon-link contract + resident managed-mux cache seam), PR TBD. Added
+  `mux_link.py`: rendezvous-parseable `managed_mux_*` fields published in
+  the same `status-monitor.lock` alongside `HookIpcServer`/`classify_daemon`/
+  `worktree_status_daemon`'s own namespaced fields; a thread-safe
+  `ManagedMuxCache` keyed by `(project, worktree_id)` whose `apply_observation`
+  rejects an incoming `mapping_revision` lower than the one already on file
+  (scoped per key, so a stale/out-of-order `live: false` event can never
+  clobber a newer live mapping); an `InProcessRuntime` wired into
+  `cmd_status_monitor` the same way `worktree_status_daemon.InProcessRuntime`
+  is (lock-extra publication, `has_active_demand()` feeding the monitor's own
+  idle-strike/empty-exit logic, shutdown in the same `finally`). `_monitor_sweep`
+  gained an optional
+  `managed_mux_cache` parameter: when present, its currently-live session
+  names are merged into the existing `catalog_observer` call alongside the
+  direct mux scan's own set -- but never added to `served`, and never
+  triggers a `set-option` write of its own, per this step's explicit
+  no-writer-ownership-change scope. Client-side `mux_live_via_daemon`/
+  `mux_live_with_boot` push helpers are pinned (mirroring
+  `worktree_status_daemon.status_via_daemon`/`status_with_boot` exactly) but
+  not yet called by anything -- Step 2's Worktree Manager mux-companion
+  daemon is the first real caller. No behavior change to ordinary sessions:
+  the cache starts (and, until a Manager daemon exists to push into it,
+  stays) empty. Added `tests/test_mux_link.py` (cache monotonicity/
+  validation/rendezvous/wire-helper/runtime-lifecycle coverage) plus two new
+  `_monitor_sweep` tests proving the merge is observation-only. Full
+  `agent-worktrees` suite run: 9 pre-existing failures confirmed unrelated
+  (git credential pinning, paired-carve harness attribution, update-stage
+  indicator state -- none touch status-monitor/mux_link, and `git diff`
+  confirms this change touches none of those files), 5459 passed, 51
+  skipped; the targeted `test_mux_link.py`/`test_status_monitor.py` suites
+  are fully green (120/120). `ruff check --select F,E9`,
+  `check-module-size.py`, `check-install-contract.py`, and
+  `check-version-consistency.py` all clean. Added a pending
+  `.changefiles/*.json` entry naming `agent-worktrees` (`dev`, since this
+  session's own PR builds on the already-in-flight `1.5.5` patch series)
+  per CONTRIBUTING.md's changefile flow -- the real version bump is
+  applied by the promotion pipeline, not hand-edited in this tree.
 
 - **2026-09-23** — Landed Phase 3e Step 5b/5c (install.ps1 repoint + live
   trial), PR [#3457](https://github.com/ThomasMichon/copilot-extensions/pull/3457).
@@ -672,7 +753,7 @@ claiming discipline alone.
   proved worktree-manager's fragment output was byte-identical to the
   already-installed fragment and converged to zero plan changes. After
   landing, ran `worktree-manager update` (`0.1.0-dev65` -> `dev75`) and
-  `agent-worktrees update` (`1.5.5-dev260` -> `dev261`) on tmichon-book2,
+  `agent-worktrees update` (`1.5.5-dev260` -> `dev261`) on that machine,
   then invoked the installed `install.ps1`'s `refresh-profiles` action
   directly: its own output confirmed the NEW path ran ("Windows Terminal
   profiles deployed via Worktree Manager" + the deploy plan's `-> LIVE:

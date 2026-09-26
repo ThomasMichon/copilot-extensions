@@ -368,12 +368,24 @@ def test_namespaced_sibling_resolution_stays_in_active_marketplace_cell(
         assert child_env[sibling_id.upper().replace("-", "_") + "_PAYLOAD_ROOT"] == str(
             cell / "payloads" / sibling_id
         )
+        if sibling_id == "agent-codespaces":
+            assert child_env["AGENT_CODESPACES_HOME"] == str(cell / "plugins" / sibling_id)
+        if sibling_id == "agent-containers":
+            assert child_env["AGENT_CONTAINERS_HOME"] == str(cell / "plugins" / sibling_id)
+            assert child_env["AGENT_CONTAINERS_STATE_DIR"] == str(cell / "plugins" / sibling_id)
+        if sibling_id == "agent-dispatch":
+            assert child_env["AGENT_DISPATCH_INSTALL_DIR"] == str(cell / "plugins" / sibling_id)
+            assert child_env["AGENT_DISPATCH_ROUTING_DIR"] == str(cell / "plugins" / sibling_id)
+            assert child_env["AGENT_DISPATCH_RUN_DIR"] == str(
+                cell / "plugins" / sibling_id / "run"
+            )
+            assert child_env["AGENT_DISPATCH_TOKEN"] == str(tmp_path / "foreign")
+            assert child_env["AGENT_DISPATCH_CONTROL_TOKEN"] == str(tmp_path / "foreign")
+            assert child_env["AGENT_DISPATCH_URL"] == str(tmp_path / "foreign")
         assert not set(child_env) & {
             "PYTHONPATH", "PYTHONHOME", "AGENT_HOME", "AGENT_RT_PY",
-            "AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT", "AGENT_DISPATCH_INSTALL_DIR",
-            "AGENT_BRIDGE_BASE_URL", "AGENT_DISPATCH_TOKEN",
-            "AGENT_DISPATCH_CONTROL_TOKEN", "AGENT_DISPATCH_URL",
-            "AGENT_CODESPACES_HOME", "AGENT_CODESPACES_TOKEN", "GH_TOKEN", "GITHUB_TOKEN",
+            "AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT", "AGENT_BRIDGE_BASE_URL",
+            "AGENT_CODESPACES_TOKEN", "GH_TOKEN", "GITHUB_TOKEN",
             "AGENT_CONTAINERS_TOKEN", "AGENT_CONTAINERS_CONFIG",
             "AGENT_CONTAINERS_RELAY_ENABLED",
             "AGENT_LOGGER_HOME", "AGENT_LOGGER_SYNC_TARGET",

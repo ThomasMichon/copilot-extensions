@@ -358,6 +358,8 @@ case "${1:-}" in
 #!/bin/sh
 set -eu
 slot_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+_arg1="${1:-}"
+[ "$_arg1" = "-I" ] && shift
 if [ "${1:-}" = "-c" ]; then
   case "${2:-}" in
     *"import agent_worktrees, os"*)
@@ -422,3 +424,102 @@ esac
         )
         assert launched.returncode == 0, launched.stderr
         assert launched.stdout.strip() == "fake-agent-worktrees --version"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX installer integration")
+def test_posix_health_gate_rejects_namespace_package_slot(tmp_path: Path) -> None:
+    """A partial ``uv pip install`` can leave ``agent_worktrees`` on disk as an
+    empty directory -- no ``__init__.py``, no ``__main__.py``, no dist-info.
+    Python still imports that as a PEP 420 *namespace* package with no error,
+    so a health gate that only runs ``import agent_worktrees`` falsely passes
+    and the broken slot gets marked complete and activated (the exact bug
+    this regression guards). The fixed gate imports ``agent_worktrees.__main__``
+    instead, which requires a real ``__main__.py`` and its full transitive
+    import chain to resolve, so it must fail loudly here and the slot must
+    never be activated.
+    """
+    home = tmp_path / "home"
+    payload = (
+        home
+        / ".copilot"
+        / "installed-plugins"
+        / "copilot-extensions"
+        / "agent-worktrees"
+    )
+    shutil.copytree(
+        PLUGIN,
+        payload,
+        ignore=shutil.ignore_patterns(
+            "__pycache__",
+            "*.pyc",
+            ".pytest_cache",
+            ".test-venvs",
+        ),
+    )
+
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    fake_uv = fake_bin / "uv"
+    fake_uv.write_text(
+        """#!/usr/bin/env bash
+set -eu
+case "${1:-}" in
+  venv)
+    target="$2"
+    # Simulate the partial install: the package directory exists (so it is
+    # importable as a namespace package) but is otherwise empty -- no
+    # __init__.py, no __main__.py, no dist-info -- exactly what an
+    # interrupted `uv pip install` of the multi-package project left behind.
+    mkdir -p "$target/bin" "$target/fake-site/agent_worktrees"
+    cat > "$target/bin/python" <<'PY'
+#!/bin/sh
+set -eu
+_arg1="${1:-}"
+[ "$_arg1" = "-I" ] && shift
+if [ "${1:-}" = "-c" ]; then
+  case "${2:-}" in
+    *"import agent_worktrees.__main__"*) exit 1 ;;
+    *"import agent_worktrees"*) exit 0 ;;
+  esac
+fi
+if [ "${1:-}" = "-m" ] && [ "${2:-}" = "agent_worktrees" ]; then
+  echo "should never run: broken slot was activated" >&2
+  exit 1
+fi
+exec "$REAL_PYTHON" "$@"
+PY
+    chmod +x "$target/bin/python"
+    ;;
+  pip) ;;
+  *) exit 2 ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    fake_uv.chmod(0o755)
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home),
+            "PATH": f"{fake_bin}{os.pathsep}{env['PATH']}",
+            "REAL_PYTHON": sys.executable,
+            "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "0",
+        }
+    )
+    provision = subprocess.run(
+        ["bash", str(payload / "scripts" / "install.sh"), "provision"],
+        cwd=home,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert provision.returncode != 0
+    assert "failed its health gate" in provision.stderr
+
+    # The broken slot must never be marked complete or activated: no
+    # current-version marker, and no last-known-good pointing at it.
+    install_dir = home / ".agent-worktrees"
+    assert not (install_dir / "current-version").exists()
+    assert not (install_dir / "last-known-good").exists()

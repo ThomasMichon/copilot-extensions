@@ -76,11 +76,11 @@ commands are added, renamed, or filled in.
 | 8 | Given a session id, identify its predecessor/successor/head in the handoff chain | Composable, not a gap: `agent-worktrees session-lineage --session-id <id> --json` already returns this session-scoped -- `relations[].projection.lineage.predecessor`/`.successor` and `relations[].projection.is_head` -- directly, no need to parse the broader worktree-lineage graph. |
 | 9 | Given a session id, find the task(s) it worked (reverse of row 5) | `agent-dispatch find-by-session <session-id>` -- lists every task on this host's coordinator that session ever attached to, with `worktree_id`/`machine` and attach/detach timestamps (local-only; no cross-machine peer-browse for this direction yet). |
 | — | Given a task id (only), resolve the session it worked once its worktree is no longer live | **Genuine gap**, tracked as [issue #3555](https://github.com/ThomasMichon/copilot-extensions/issues/3555). `GET /api/v1/dispatch-tasks/{id}/session` on agent-bridge exists over HTTP; no CLI equivalent, forcing every CLI-context consumer to hand-roll an HTTP client. |
-| — | Given a claim ref (`dispatch-task:`/`codespace:`/`container:`), resolve the owning worktree | **Genuine gap**, tracked as [issue #3558](https://github.com/ThomasMichon/copilot-extensions/issues/3558). The claim-provider's `claim-status <ref>` callback reports the external resource's liveness, not its owning worktree; only the claims-ledger *entry* (already keyed by worktree) carries that link, and there's no composed reverse resolver yet. |
+| 10 | Given a claim ref (`dispatch-task:`/`codespace:`/`container:`), resolve the owning worktree | `agent-worktrees claims owner <kind> <ref> --json` searches every registered project on this machine and returns the holding worktree record(s), their status/path, qualified owner ref, and claim state/note. Add `--all-states` to include released claims. |
 
-The two `—` rows above are the genuine gaps at the time this pattern was
-written (no command exists at any layer) — each now has a tracking issue
-linked in its row. Rows 5, 6, and 8 are composable, not gaps, per rule 4
+The remaining `—` row above is the genuine gap at the time this pattern was
+written (no command exists at any layer), with a tracking issue linked in
+its row. Rows 5, 6, 8, and 10 are composable/covered, not gaps, per rule 4
 below -- their linked issues (#3556, #3557) track ergonomics improvements,
 not missing capability, except row 5's durable-fallback case, which shares
 issue #3555 with the equivalent `—` row above. Add a tracking issue link the

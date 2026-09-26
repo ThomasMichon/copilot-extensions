@@ -187,6 +187,12 @@ checkout adopts it as an anchor-only `agent-worktrees` project if needed,
 records that folder in Copilot's `trustedFolders` (nobody is there to answer the
 first-run trust dialog), and launches the session with the venue's agent-worktrees
 `embody` verb.
+A new detached session starts on **the caller's own model**: the launch adds
+`--model`, `--reasoning-effort`, and `--context` from the host
+`~/.copilot/settings.json` (`model`, `effortLevel`, `contextTier`), the same
+resolution the ACP dispatch path uses. `AGENT_CODESPACES_ACP_MODEL` /
+`_EFFORT` / `_CONTEXT` override it, `AGENT_CODESPACES_MODEL_PROPAGATE=0` turns
+it off, and a flag passed explicitly with `--copilot-arg` always wins.
 `--ref-file` (repeatable; a file or a folder, up to 256 MiB per call) copies
 reference material into `~/.agent-bridge/refs/<batch>/` on the venue -- outside
 the product checkout, so it is never committed -- over the same egress-free

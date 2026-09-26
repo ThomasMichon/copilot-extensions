@@ -140,6 +140,37 @@ class PickerScreenRuntimeMixin:
             self._pivot_runtime(reg).repoll(scope)
         except Exception:
             pass
+    def _maybe_refresh_worker_pivots(self):
+        """Keep venue pivots that declare a ``worker`` block loaded, so a
+        Worktrees row can show the remote worker it supervises without the
+        operator first visiting that pivot. First sight kicks one background
+        ``list``; after that a swap-in-place repoll runs every
+        ``2 * POLL_SECS`` (venue listings are costlier than a status ping).
+        Account-scoped pivots use the shared scope; a machine-scoped one uses
+        the current machine. Never blocks, never raises."""
+        from . import engine as engine_mod
+
+        poll_secs = engine_mod.POLL_SECS
+        if self.progress is not None:
+            return
+        now = time.monotonic()
+        due = poll_secs > 0 and now - getattr(self, "_last_worker_poll", 0.0) >= 2 * poll_secs
+        if due:
+            self._last_worker_poll = now
+        for d in getattr(self, "pivots", None) or []:
+            reg = d.get("pivot")
+            if reg is None or getattr(reg, "worker", None) is None:
+                continue
+            try:
+                scope = "" if reg.account_scoped else self._pivot_machine_id()
+                if scope is None:
+                    continue
+                rt = self._pivot_runtime(reg)
+                rt.ensure(scope)
+                if due:
+                    rt.repoll(scope)
+            except Exception:
+                continue
     def _tick(self):
         self.frame += 1
         if self._frame_health is not None:
@@ -166,6 +197,7 @@ class PickerScreenRuntimeMixin:
         # worktree loader / live mode, so a card posted by another session shows
         # up without a manual reload (#staleness).
         self._maybe_repoll_pivot()
+        self._maybe_refresh_worker_pivots()
         # Poll the launcher's update stage ~twice a second (#1430), keeping
         # the tick busy (spinner animating) while a stage is in flight.
         if self.frame % 5 == 0:

@@ -924,11 +924,12 @@ def test_clone_repo_injects_auth_args_into_initial_clone(home: Path, tmp_path: P
     gh's active one needs a one-shot override on the clone itself."""
     home_srcroot = tmp_path / "src"
     repos.set_srcroot(str(home_srcroot), plat="windows")
-    captured: dict[str, list] = {}
+    calls: list[list] = []
 
     def fake_run(argv, **kwargs):
-        captured["argv"] = argv
-        (Path(argv[-1])).mkdir(parents=True, exist_ok=True)
+        calls.append(argv)
+        if "clone" in argv:
+            (Path(argv[-1])).mkdir(parents=True, exist_ok=True)
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     with patch("agent_worktrees.repos._current_platform", return_value="windows"), \
@@ -940,7 +941,11 @@ def test_clone_repo_injects_auth_args_into_initial_clone(home: Path, tmp_path: P
         entry = repos.clone_repo("https://github.com/example-operator/cloned.git")
 
     assert entry is not None
-    argv = captured["argv"]
+    # `clone_repo` may run further, unrelated git calls after the clone
+    # itself (declared-default-branch checkout, remote-HEAD resolution for
+    # registration) -- find the actual `clone` invocation rather than
+    # assuming it is the last (or only) captured call.
+    argv = next(a for a in calls if "clone" in a)
     assert argv[0] == "git"
     assert "-c" in argv and "http.extraheader=AUTHORIZATION: basic FAKE" in argv
     assert argv[argv.index("clone")] == "clone"
@@ -949,11 +954,12 @@ def test_clone_repo_injects_auth_args_into_initial_clone(home: Path, tmp_path: P
 def test_clone_repo_no_extra_args_for_same_account(home: Path, tmp_path: Path):
     home_srcroot = tmp_path / "src"
     repos.set_srcroot(str(home_srcroot), plat="windows")
-    captured: dict[str, list] = {}
+    calls: list[list] = []
 
     def fake_run(argv, **kwargs):
-        captured["argv"] = argv
-        (Path(argv[-1])).mkdir(parents=True, exist_ok=True)
+        calls.append(argv)
+        if "clone" in argv:
+            (Path(argv[-1])).mkdir(parents=True, exist_ok=True)
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     with patch("agent_worktrees.repos._current_platform", return_value="windows"), \
@@ -961,7 +967,8 @@ def test_clone_repo_no_extra_args_for_same_account(home: Path, tmp_path: Path):
          patch("agent_worktrees.git_ops._auth_config_args_for_url", return_value=[]):
         repos.clone_repo("https://github.com/example-operator/cloned2.git")
 
-    assert captured["argv"] == [
+    argv = next(a for a in calls if "clone" in a)
+    assert argv == [
         "git", "clone", "https://github.com/example-operator/cloned2.git",
         str(home_srcroot / "cloned2"),
     ]

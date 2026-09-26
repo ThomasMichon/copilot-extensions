@@ -24,6 +24,7 @@ from venue_copilot import (
     resolve_daemon_port,
 )
 from venue_copilot.detached import launch_detached, public_plan, stop_detached
+from venue_copilot.models import model_copilot_args
 from venue_copilot.refs import upload_for
 
 _RESERVATION_TTL = 900.0
@@ -31,6 +32,13 @@ _RESERVE_RETRY_WINDOW = 90.0
 _PROBE_ATTEMPTS = 2
 _STATE_DIR = Path.home() / ".agent-ssh" / "forward-keepers"
 _STORE = KeeperStore(_STATE_DIR)
+
+
+def _with_caller_model(requested: list[str]) -> list[str]:
+    """The caller's `--copilot-arg` list plus its own model / reasoning effort /
+    context tier (`venue_copilot.models`), so the worker doesn't silently run on
+    the venue's CLI defaults; an explicitly passed flag wins."""
+    return requested + model_copilot_args(requested)
 
 
 def _progress(stage: str, detail: str = "") -> None:
@@ -250,7 +258,7 @@ def cmd_detach(args: argparse.Namespace) -> int:
             plan,
             seed=seed,
             driver=args.driver,
-            copilot_args=list(getattr(args, "copilot_args", None) or []),
+            copilot_args=_with_caller_model(list(getattr(args, "copilot_args", None) or [])),
             ensure_mux=True,
             register_timeout=float(args.register_timeout),
             progress=_progress,

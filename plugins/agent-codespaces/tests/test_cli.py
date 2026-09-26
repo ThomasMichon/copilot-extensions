@@ -92,6 +92,18 @@ class TestCLI:
             rc = main(["list", "--json"])
         assert rc == 0
 
+    def test_sync_sessions_balks_when_gh_missing(self, capsys):
+        """sync-sessions is a gh-dependent verb (status lookup + SSH connect) --
+        it must balk the same as every other CodeSpace-operating verb rather
+        than fall through to an opaque runtime failure."""
+        with patch("agent_codespaces.__main__._gh_binary_available",
+                   return_value=False):
+            rc = main(["sync-sessions", "cs-a"])
+        assert rc == 1
+        err = capsys.readouterr().err
+        assert "gh" in err.lower()
+        assert "sync-sessions" in err
+
     def test_local_verb_does_not_balk_without_gh(self, capsys):
         """A local/report-only verb (version) must keep working with no gh."""
         with patch("agent_codespaces.__main__._gh_binary_available",
@@ -211,6 +223,66 @@ class TestDeleteSyncHook:
         assert rc == 0
         delete.assert_called_once_with("cs-1", force=True)
         assert "Pre-delete session recovery failed" in capsys.readouterr().err
+
+
+class TestLockWidening:
+    """session-rescue-parity Phase 1's recorded lock-widening decision: a
+    destructive caller must hold the SSH target lock across its FULL
+    sync-then-act sequence, not only the sync sub-step -- these tests
+    exercise the real ``ssh_manager.TargetLock`` file (not a synthetic
+    stand-in) through the actual `_cmd_delete` dispatch path, proving the
+    lock file is still present (held) when the destructive action itself
+    runs, and gone (released) only once the whole command completes."""
+
+    def test_delete_holds_lock_across_sync_and_delete(self, capsys):
+        seen = {}
+
+        def fake_sync(name, verbose=False, lock=None):
+            assert lock is not None, "sync_codespace_sessions must receive the widened lock"
+            seen["path"] = lock.path
+            assert lock.path.exists(), "the lock must already be held during sync"
+            return {"ok": True, "session_count": 1, "detail": "ok"}
+
+        def fake_delete(name, force=False):
+            assert seen["path"].exists(), (
+                "the lock must still be held during delete_codespace -- "
+                "it must not be released between sync and the destructive action"
+            )
+
+        with patch("agent_codespaces.__main__.sync_codespace_sessions", side_effect=fake_sync), \
+             patch("agent_codespaces.__main__.delete_codespace", side_effect=fake_delete):
+            rc = main(["delete", "cs-lockcheck"])
+
+        assert rc == 0
+        assert not seen["path"].exists(), "the lock must be released once the command completes"
+
+    def test_delete_balks_when_lock_is_busy(self, capsys):
+        import os
+
+        import ssh_manager
+
+        # TargetLock is re-entrant for the SAME pid, so a same-process
+        # acquire() would not exercise the busy path at all -- write the
+        # lock file directly with a genuinely different, live pid (this
+        # process's own parent), exactly as a real second process would.
+        holder_lock = ssh_manager.TargetLock("cs-busycheck", op="codespace-lifecycle")
+        holder_lock.path.parent.mkdir(parents=True, exist_ok=True)
+        holder_lock.path.write_text(
+            f'{{"pid": {os.getppid()}, "op": "codespace-lifecycle", '
+            f'"target": "cs-busycheck", "started_at": 0.0, "host": ""}}',
+            encoding="utf-8",
+        )
+        try:
+            with patch("agent_codespaces.__main__.sync_codespace_sessions") as sync, \
+                 patch("agent_codespaces.__main__.delete_codespace") as delete:
+                rc = main(["delete", "cs-busycheck"])
+        finally:
+            holder_lock.path.unlink(missing_ok=True)
+
+        assert rc == 1
+        sync.assert_not_called()
+        delete.assert_not_called()
+        assert "BUSY" in capsys.readouterr().err
 
 
 class TestFinalize:

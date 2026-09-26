@@ -29,6 +29,8 @@ def _args(**kw):
 
 @pytest.fixture
 def seams(monkeypatch):
+    # Hermetic: never read the developer's own ~/.copilot/settings.json model.
+    monkeypatch.setattr(detach, "model_copilot_args", lambda existing: [])
     calls = types.SimpleNamespace(
         remote=[],
         reserve=[],
@@ -193,3 +195,10 @@ def test_dry_run_names_ref_files_and_a_missing_one_fails(tmp_path, capsys):
     assert json.loads(capsys.readouterr().out)["ref_files"] == ["trace.har"]
     assert detach.cmd_detach(_args(dry_run=True, ref_files=[str(tmp_path / "nope.har")])) == 1
     assert "reference file not found" in capsys.readouterr().err
+
+
+def test_detached_session_mirrors_the_callers_model(monkeypatch):
+    seen = []
+    monkeypatch.setattr(detach, "model_copilot_args", lambda existing: seen.append(list(existing)) or ["--model=example-model"])
+    assert detach._with_caller_model(["--no-ask-user"]) == ["--no-ask-user", "--model=example-model"]
+    assert seen == [["--no-ask-user"]]

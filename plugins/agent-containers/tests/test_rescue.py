@@ -86,6 +86,14 @@ def _node() -> str:
     node = shutil.which("node")
     if not node:
         pytest.skip("node is required for embedded rescue-script tests")
+    if os.name == "nt":
+        # The embedded rescue scripts assume a POSIX `HOME` (they validate
+        # `path.startsWith("/")`) because they run inside a Linux container
+        # via `docker exec` in production -- a native Windows Node.js
+        # install invoked directly here can never supply a POSIX-shaped
+        # HOME, so this is a platform mismatch in the test harness, not a
+        # real product gap.
+        pytest.skip("embedded rescue scripts assume a POSIX container HOME")
     return node
 
 
@@ -526,6 +534,13 @@ def test_member_destination_is_0600_at_initial_open_under_open_umask(
     monkeypatch,
     tmp_path,
 ):
+    # `os.open`'s `mode` argument is a POSIX permission-bits request; NTFS
+    # does not honor it the way a POSIX filesystem does (Windows uses ACLs,
+    # not the same mode-bit model), so a created file's mode there is never
+    # meaningfully `0o600` regardless of what's requested. Skip on Windows
+    # rather than asserting a guarantee the platform cannot provide.
+    if os.name == "nt":
+        pytest.skip("POSIX file-mode bits are not honored by os.open on nt")
     payload = b"event\n"
     monkeypatch.setattr(
         rescue_protocol.subprocess,

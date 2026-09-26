@@ -93,6 +93,8 @@ from agent_procutil import (
 
 from . import (
     activity,
+    claim_kinds_registry,
+    claims_rank,
     codename_tracking,
     disposition_history,
     effort_focus,
@@ -702,6 +704,12 @@ def _classify_records(
         if project:
             from . import classify_daemon
             from . import locks as _locks
+            # Stage D: resolve via _self_override (cluster-free; test override safe).
+            from . import status_monitor_runtime as _smr
+
+            _monitor_lock_path = _self_override("_monitor_lock_path", _smr._monitor_lock_path)
+            _ensure_status_monitor = _self_override("_ensure_status_monitor", _smr._ensure_status_monitor)
+            _status_monitor_enabled = _self_override("_status_monitor_enabled", _smr._status_monitor_enabled)
 
             key = "|".join(
                 (
@@ -1383,6 +1391,31 @@ def _worktree_to_dict(
         d["pr"] = pr_ops._pr_to_dict(active) if active is not None else None
         d["prs"] = [pr_ops._pr_to_dict(p) for p in rec.prs]
         d["pr_count"] = len(rec.prs)
+    else:
+        active = None
+    # #3307 Phase 4: the Worktrees pivot's own ranked ``claims_summary``,
+    # computed HERE (not by the Picker) since this is the one process that
+    # can import ``claims_rank`` directly rather than crossing the
+    # Manager/engine subprocess boundary. See
+    # ``claims_rank.claims_summary_for_worktree``'s own docstring for the
+    # ranking + PR-backfill details.
+    try:
+        pecking_order = claim_kinds_registry.effective_pecking_order()
+        label_overrides = claim_kinds_registry.effective_label_overrides()
+    except Exception:
+        pecking_order = None
+        label_overrides = None
+    active_pr = ({"repo": active.repo, "number": active.number, "state": active.state}
+                 if active is not None else None)
+    try:
+        summary = claims_rank.claims_summary_for_worktree(
+            rec.resources, active_pr,
+            pecking_order=pecking_order, label_overrides=label_overrides,
+        )
+    except Exception:
+        summary = ""
+    if summary:
+        d["claims_summary"] = summary
     # #93: mark a worktree hosting a bare (un-muxed) bound Copilot so the picker
     # can annotate its row with an orphan marker (a Copilot the mux fleet view
     # cannot see). Set only when true, to keep the dict lean.
@@ -2232,6 +2265,11 @@ def _journal_owner_reciprocal_claim(
     """
     if not owner_ref:
         return False
+    # Stage D: real implementation lives in claims_cli (cluster-free).
+    from . import claims_cli as _claims_cli
+
+    _resolve_owner_ref_record_path = _self_override("_resolve_owner_ref_record_path", _claims_cli._resolve_owner_ref_record_path)
+
     try:
         owner_path, _owner_wt, _err = _resolve_owner_ref_record_path(owner_ref, config,)
         if owner_path is None or not owner_path.exists():
@@ -2367,6 +2405,20 @@ def _create_worktree_core(
 
     Raises ``RuntimeError`` on failure.
     """
+    # Stage D: local-shadow deferred names via _self_override (keeps create/worktree_ops_cli cluster-free).
+    from . import claims_cli as _claims_cli
+    from . import resolve_launch_cli as _resolve_launch_cli
+    from . import worktree_ops_cli as _worktree_ops_cli
+
+    _coordination_readiness_for_owner_ref = _self_override("_coordination_readiness_for_owner_ref", _claims_cli._coordination_readiness_for_owner_ref)
+    CoordinationReadinessFailure = _self_override("CoordinationReadinessFailure", _claims_cli.CoordinationReadinessFailure)
+    _resolve_owner_ref_record_path = _self_override("_resolve_owner_ref_record_path", _claims_cli._resolve_owner_ref_record_path)
+    _validate_profile_assignment_config = _self_override("_validate_profile_assignment_config", _resolve_launch_cli._validate_profile_assignment_config)
+    _apply_assignment_env = _self_override("_apply_assignment_env", _resolve_launch_cli._apply_assignment_env)
+    _launch_profile_selection = _self_override("_launch_profile_selection", _resolve_launch_cli._launch_profile_selection)
+    _reflect_assignment = _self_override("_reflect_assignment", _resolve_launch_cli._reflect_assignment)
+    _slugify = _self_override("_slugify", _worktree_ops_cli._slugify)
+
     repo = config.default_repo
     if kind != "system" and getattr(repo, "knowledge_only", False):
         raise RuntimeError(
@@ -3149,6 +3201,11 @@ def _resolve_handoff_cutover_target(
     session_id: str | None,
 ) -> tuple[int, dict[str, object]]:
     """Resolve the target worktree (or adopted anchor) for handoff cutover."""
+    # Stage D: session_binding_cli is cluster-free.
+    from . import session_binding_cli as _session_binding_cli
+
+    _activate_session_binding = _self_override("_activate_session_binding", _session_binding_cli._activate_session_binding)
+
     config = None
     if raw_id:
         wt_id = _resolve_worktree_id(raw_id)
@@ -3206,6 +3263,13 @@ def _handoff_cutover_spawn_result(
     args: argparse.Namespace,
 ) -> tuple[int, dict[str, object]]:
     """Return the spawn-mode ``handoff-cutover`` result without printing JSON."""
+    # Stage D: resolve_launch_cli is cluster-free.
+    from . import resolve_launch_cli as _resolve_launch_cli
+
+    _apply_assignment_env = _self_override("_apply_assignment_env", _resolve_launch_cli._apply_assignment_env)
+    _reflect_assignment = _self_override("_reflect_assignment", _resolve_launch_cli._reflect_assignment)
+    _launch_profile_selection = _self_override("_launch_profile_selection", _resolve_launch_cli._launch_profile_selection)
+
     seed = getattr(args, "seed", None)
     if not seed:
         return 1, {
@@ -3561,6 +3625,12 @@ def _handoff_cutover_retry_result(
     args: argparse.Namespace,
 ) -> tuple[int, dict[str, object]]:
     """Retry a stuck cutover without duplicating a live successor."""
+    # Stage D: status_monitor_runtime is cluster-free.
+    from . import status_monitor_runtime as _smr
+
+    _monitor_session_state_handoff_path = _self_override("_monitor_session_state_handoff_path", _smr._monitor_session_state_handoff_path)
+    _monitor_read_session_state_handoff = _self_override("_monitor_read_session_state_handoff", _smr._monitor_read_session_state_handoff)
+
     session_id = getattr(args, "session_id", None)
     rc, resolved = _resolve_handoff_cutover_target(
         getattr(args, "worktree_id", None),
@@ -3733,6 +3803,11 @@ def _maybe_emit_stage_13(
     if handoff is None or handoff.state != "linked":
         return
     digest = hashlib.sha256(f"{wt_id}\x00{handoff_token}".encode()).hexdigest()
+    # Stage D: status_monitor_runtime is cluster-free.
+    from . import status_monitor_runtime as _smr
+
+    _monitor_handoff_claim_root = _self_override("_monitor_handoff_claim_root", _smr._monitor_handoff_claim_root)
+
     claim_path = _monitor_handoff_claim_root() / "stage13" / f"{digest}.json"
     try:
         claim_path.parent.mkdir(parents=True, exist_ok=True)
@@ -4200,6 +4275,12 @@ def _sweep_finished_sessions_on_cadence() -> None:
     conservative safety exactly. Gated by the :func:`auto_clean_enabled`
     kill-switch and wrapped best-effort; never raises.
     """
+    # Stage D: reap_cli is cluster-free; resolve via _self_override.
+    from . import reap_cli as _reap_cli
+
+    auto_clean_enabled = _self_override("auto_clean_enabled", _reap_cli.auto_clean_enabled)
+    sweep_finished_session_worktrees = _self_override("sweep_finished_session_worktrees", _reap_cli.sweep_finished_session_worktrees)
+
     if not auto_clean_enabled():
         return
     try:
@@ -4215,11 +4296,14 @@ def _sweep_finished_sessions_on_cadence() -> None:
 
 
 def _write_session_lifecycle_receipt(payload: dict, state: str) -> None:
+    # Stage D: status_monitor_runtime is cluster-free.
+    from . import status_monitor_runtime as _smr
+
     version, _environment = _session_lifecycle_metadata(payload)
     launch_key = _session_lifecycle_launch_key(payload, version)
     if not launch_key:
         return
-    root = _aw_runtime_home() / ".session-context"
+    root = _self_override("_aw_runtime_home", _smr._aw_runtime_home)() / ".session-context"
     target = root / f"lifecycle-{launch_key}.json"
     temporary = target.with_name(f"{target.name}.{os.getpid()}.tmp")
     try:
@@ -4257,8 +4341,11 @@ def _sweep_managed_on_exit() -> None:
     session ending is exactly when its bridge worktree becomes reapable, so this
     boundary is where the accumulation is caught. Never raises.
     """
+    # Stage D: sweep_managed_worktrees is owned by reap_cli.
+    from . import reap_cli as _reap_cli
+
     try:
-        report = sweep_managed_worktrees()
+        report = _self_override("sweep_managed_worktrees", _reap_cli.sweep_managed_worktrees)()
         removed = report.get("removed") or []
         if removed:
             output.ok(
@@ -4281,8 +4368,11 @@ def _sweep_launcher_shells_on_exit() -> None:
     (self-preservation), and a live session's launcher is spared while its
     terminal (its parent) is alive. Never raises.
     """
+    # Stage D: reap_orphan_launcher_shells is owned by reap_cli.
+    from . import reap_cli as _reap_cli
+
     try:
-        payload = reap_orphan_launcher_shells(dry_run=False)
+        payload = _self_override("reap_orphan_launcher_shells", _reap_cli.reap_orphan_launcher_shells)(dry_run=False)
         reaped = payload.get("reaped") or []
         if reaped:
             output.ok(
@@ -4665,7 +4755,10 @@ def _monitor_pending_handoff_predecessor_retire(
     only opts a machine out of *automatic* sweeps, not out of an agent's
     ability to explicitly ask "is this worktree's cutover actually finished?".
     """
-    if require_monitor_enabled and not _status_monitor_enabled():
+    # Stage D: status_monitor_runtime is cluster-free.
+    from . import status_monitor_runtime as _smr
+
+    if require_monitor_enabled and not _self_override("_status_monitor_enabled", _smr._status_monitor_enabled)():
         return None
     requests = _pending_handoff_retire_requests(record)
     return requests[0] if requests else None
@@ -4819,7 +4912,10 @@ def _monitor_trigger_handoff_cutover(
 
 def _monitor_maybe_trigger_handoff_cutover(path: str, *, governance=None) -> None:
     """Pick up one actionable pending handoff for ``path`` if the monitor owns it."""
-    record = _find_record_for_path(path)
+    # Stage D: status_bar_cli is cluster-free.
+    from . import status_bar_cli as _status_bar_cli
+
+    record = _self_override("_find_record_for_path", _status_bar_cli._find_record_for_path)(path)
     if record is None:
         return
     _monitor_maybe_process_handoff_record(record, governance=governance)
@@ -4831,11 +4927,14 @@ def _monitor_maybe_process_handoff_record(
     governance=None,
 ) -> None:
     """Run the monitor's handoff retire/spawn checks for one tracking record."""
+    # Stage D: status_monitor_runtime is cluster-free.
+    from . import status_monitor_runtime as _smr
+
     retire_request = _monitor_pending_handoff_predecessor_retire(record)
     if retire_request is not None:
         _status_monitor_recheck(governance, "pre-mutation:handoff-predecessor-retire")
         _monitor_retire_handoff_predecessor(retire_request)
-    request = _monitor_pending_handoff_request(record)
+    request = _self_override("_monitor_pending_handoff_request", _smr._monitor_pending_handoff_request)(record)
     if request is None:
         return
     _status_monitor_recheck(governance, "pre-mutation:handoff-cutover")
@@ -4858,6 +4957,7 @@ def _monitor_sweep(
     project_lock=None,
     lifecycle_priority=None,
     governance=None,
+    managed_mux_cache=None,
 ) -> int:
     """One coalescing pass over all live, registered ``wt-*`` sessions.
 
@@ -4868,16 +4968,50 @@ def _monitor_sweep(
     ``@aw_seg`` every pass -- the same renders the per-session updater did,
     coalesced into one process.  Registry entries whose session is definitively
     gone are pruned.
+
+    ``managed_mux_cache`` (a ``mux_link.ManagedMuxCache``, Phase 3b Slice 2
+    Sub-slice 3 Step 1) is optional and, for this step, purely additive: its
+    currently-live session names are merged into ``catalog_observer``
+    alongside the direct mux scan's own **complete** set -- but it never
+    adds an entry to ``served`` and never changes which sessions this
+    sweep writes ``set-option`` for. That writer-ownership cutover is a
+    later, separate step. This merge only happens inside the direct
+    ``mux_bin`` scan (Copilot review finding, reverting an earlier attempt
+    to also observe it standalone): ``catalog_observer``
+    (``ResidentSessionReconciler.observe_mux``) is a *complete-snapshot*
+    API -- any session name missing from the passed set is treated as
+    genuinely gone and reaped. Calling it with only the Manager-known
+    subset when no mux binary is locally discoverable would incorrectly
+    mark every *other*, ordinary session as dead too. A managed-only
+    partial view must never reach this API; a real completeness/managed-
+    scope path is a separate, later concern.
     """
+    # Stage D: resolve deferred names via _self_override (cluster-free owners).
+    from . import list_cli as _list_cli
+    from . import status_bar_cli as _status_bar_cli
+    from . import status_monitor_runtime as _smr
+    from . import status_updater_cli as _status_updater_cli
+
+    _monitor_list_sessions = _self_override("_monitor_list_sessions", _smr._monitor_list_sessions)
+    _monitor_registry_dir = _self_override("_monitor_registry_dir", _smr._monitor_registry_dir)
+    _activate_project_for_path = _self_override("_activate_project_for_path", _status_updater_cli._activate_project_for_path)
+    _monitor_mux_set = _self_override("_monitor_mux_set", _smr._monitor_mux_set)
+    _read_monitor_registry = _self_override("_read_monitor_registry", _smr._read_monitor_registry)
+    _remove_monitor_entry = _self_override("_remove_monitor_entry", _smr._remove_monitor_entry)
+    _warm_list_cache_for_active_project = _self_override("_warm_list_cache_for_active_project", _list_cli._warm_list_cache_for_active_project)
+    _render_status_segment = _self_override("_render_status_segment", _status_bar_cli._render_status_segment)
+    _render_status_context = _self_override("_render_status_context", _status_bar_cli._render_status_context)
+
     reg_dir = _monitor_registry_dir()
     registry = _read_monitor_registry(reg_dir)
     served: list[tuple[str, str]] = []
+    managed_live = managed_mux_cache.live_session_names() if managed_mux_cache is not None else set()
     if mux_bin:
         live = _monitor_list_sessions(mux_bin)
         if live is None:
             return -1
         if catalog_observer is not None:
-            catalog_observer(set(live))
+            catalog_observer(set(live) | managed_live)
         live_wt = {n for n in live if n.startswith("wt-")}
         stale_sessions = [s for s in registry if s not in live_wt]
         if stale_sessions:
@@ -5229,6 +5363,11 @@ def _write_session_lifecycle_snapshot(
     payload: dict,
     output_text: str,
 ) -> None:
+    # Stage D: status_monitor_runtime is cluster-free.
+    from . import status_monitor_runtime as _smr
+
+    _aw_runtime_home = _self_override("_aw_runtime_home", _smr._aw_runtime_home)
+
     version, _environment = _session_lifecycle_metadata(payload)
     if not version:
         try:
@@ -5278,7 +5417,10 @@ def _registration_nudge_context(cwd: str) -> str:
             return ""
         import hashlib
 
-        marker_dir = _aw_runtime_home() / ".register-nudged"
+        # Stage D: status_monitor_runtime is cluster-free.
+        from . import status_monitor_runtime as _smr
+
+        marker_dir = _self_override("_aw_runtime_home", _smr._aw_runtime_home)() / ".register-nudged"
         marker = marker_dir / hashlib.sha1(str(top).encode("utf-8")).hexdigest()
         if marker.exists():
             return ""
@@ -5300,8 +5442,11 @@ def _start_project_session_hook(
     cwd: str,
     environment: dict[str, str],
 ) -> subprocess.Popen | None:
+    # Stage D: status_updater_cli is cluster-free.
+    from . import status_updater_cli as _status_updater_cli
+
     try:
-        _activate_project_for_path(cwd, force=True)
+        _self_override("_activate_project_for_path", _status_updater_cli._activate_project_for_path)(cwd, force=True)
         project = cfg.project_name()
     except Exception:
         return None
@@ -5473,8 +5618,10 @@ def _reconcile_knowledge_plugin_overlay(payload: dict, cwd: str) -> None:
     output_text = "{}"
     try:
         from . import knowledge_plugins
+        # Stage D: status_updater_cli is cluster-free.
+        from . import status_updater_cli as _status_updater_cli
 
-        _activate_project_for_path(cwd)
+        _self_override("_activate_project_for_path", _status_updater_cli._activate_project_for_path)(cwd)
         summary = knowledge_plugins.compose_from_pair(cwd=cwd)
         if summary.get("changed"):
             path = summary.get("settings_local", "settings.local.json")
@@ -5493,6 +5640,11 @@ def _reconcile_knowledge_plugin_overlay(payload: dict, cwd: str) -> None:
 
 
 def _provisioning_status_diagnostic(cwd: str) -> str:
+    # Stage D: status_monitor_runtime is cluster-free.
+    from . import status_monitor_runtime as _smr
+
+    _aw_runtime_home = _self_override("_aw_runtime_home", _smr._aw_runtime_home)
+
     status = _aw_runtime_home() / "logs" / "provision-status.json"
     try:
         previous = json.loads(status.read_text(encoding="utf-8"))
@@ -5524,13 +5676,16 @@ def _start_provisioning_if_needed(
     include_status_diagnostic: bool = True,
     process_holder: list[subprocess.Popen] | None = None,
 ) -> str:
+    # Stage D: status_monitor_runtime is cluster-free.
+    from . import status_monitor_runtime as _smr
+
     session_environment = session_environment or {}
     if (
         session_environment.get("WORKTREE_NO_RECONCILE") == "1"
         or session_environment.get("WORKTREE_NO_PROVISION") == "1"
     ):
         return ""
-    status = _aw_runtime_home() / "logs" / "provision-status.json"
+    status = _self_override("_aw_runtime_home", _smr._aw_runtime_home)() / "logs" / "provision-status.json"
     diagnostic = _provisioning_status_diagnostic(cwd) if include_status_diagnostic else ""
     try:
         from . import reconcile
@@ -5561,7 +5716,7 @@ def _start_provisioning_if_needed(
         str(status),
         "--apply",
     ]
-    argv[0] = _windowless_python()
+    argv[0] = _self_override("_windowless_python", _smr._windowless_python)()
     env = dict(os.environ)
     env.update(windowless_python_env(sys.executable))
     kwargs: dict = {
@@ -5625,7 +5780,10 @@ def _schedule_provisioning_if_needed(
                 process_holder=process_holder,
             )
             if worker_diagnostic:
-                log = _aw_runtime_home() / "logs" / "provision-preview.log"
+                # Stage D: status_monitor_runtime is cluster-free.
+                from . import status_monitor_runtime as _smr
+
+                log = _self_override("_aw_runtime_home", _smr._aw_runtime_home)() / "logs" / "provision-preview.log"
                 try:
                     log.parent.mkdir(parents=True, exist_ok=True)
                     with log.open("a", encoding="utf-8") as stream:
@@ -5953,6 +6111,13 @@ def _resident_hook_decision(
     deadline: float | None = None,
     provisioning_start_event: threading.Event | None = None,
 ) -> dict:
+    # Stage D: status_updater_cli/session_binding_cli are cluster-free.
+    from . import session_binding_cli as _session_binding_cli
+    from . import status_updater_cli as _status_updater_cli
+
+    _activate_project_for_path = _self_override("_activate_project_for_path", _status_updater_cli._activate_project_for_path)
+    _bind_nudge_decision = _self_override("_bind_nudge_decision", _session_binding_cli._bind_nudge_decision)
+
     cwd = _hook_payload_cwd(payload)
     previous_project = cfg.active_project()
     _activate_project_for_path(cwd, force=True)
@@ -6189,6 +6354,15 @@ def reap_one(
     result-returning core shared by the ``cleanup --worktree-id`` CLI and the
     picker's in-process local Cleanup executor.
     """
+    # Stage D: _revalidate_cleanup_safety's real implementation lives in
+    # cleanup_gc_cli (which itself calls back into this function via
+    # `_core_helper`); importing it directly here -- instead of the bare
+    # global name only bound during `_load_full_command_surface()` -- is
+    # what lets `cleanup`/`gc` (cleanup_gc_cli) stay cluster-free.
+    from . import cleanup_gc_cli as _cleanup_gc_cli
+
+    _revalidate_cleanup_safety = _self_override("_revalidate_cleanup_safety", _cleanup_gc_cli._revalidate_cleanup_safety)
+
     config = cfg.load_config()
     repo = config.default_repo
     tracking_path = cfg.tracking_dir()
@@ -6725,7 +6899,10 @@ def _enumerate_launcher_shells() -> list[dict] | None:
     """
     if platform.system() == "Windows":
         return _enumerate_launcher_shells_windows()
-    return _enumerate_launcher_shells_posix()
+    # Stage D: the real POSIX implementation lives in reap_cli.
+    from . import reap_cli as _reap_cli
+
+    return _self_override("_enumerate_launcher_shells_posix", _reap_cli._enumerate_launcher_shells_posix)()
 
 
 def _enumerate_launcher_shells_windows() -> list[dict] | None:
@@ -7281,7 +7458,6 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'pr-ready': ('pr_state_cli', 'cmd_pr_ready'),
     'pr-status': ('pr_state_cli', 'cmd_pr_status'),
     'pre-launch': ('update_cli', 'cmd_pre_launch'),
-    'profiles': ('picker_profiles_cli', 'cmd_profiles'),
     'push-changes': ('finalize_cli', 'cmd_push_changes'),
     'reap-sessions': ('reap_cli', 'cmd_reap_sessions'),
     'reap-shells': ('reap_cli', 'cmd_reap_shells'),
@@ -7314,7 +7490,6 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'status-segment': ('status_bar_cli', 'cmd_status_segment'),
     'status-updater': ('status_updater_cli', 'cmd_status_updater'),
     'sync': ('worktree_ops_cli', 'cmd_sync'),
-    'terminal-fragment': ('picker_profiles_cli', 'cmd_terminal_fragment'),
     'uninstall': ('installation_cli', 'cmd_uninstall'),
     'uninstall-plugins': ('update_cli', 'cmd_uninstall_plugins'),
     'update': ('update_cli', 'cmd_update'),
@@ -7361,21 +7536,30 @@ _ALL_KNOWN_VERBS: frozenset[str] = frozenset(_LAZY_DISPATCH_TABLE.keys()) | froz
 # real commands end-to-end, not just `--help`.
 _CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "claims_cli",
+    "cleanup_gc_cli",
     "context_cli",
+    "finalize_cli",
     "follow_ups_cli",
+    "handoff_cli",
     "installation_cli",
+    "list_cli",
     "maintenance_cli",
     "pane_lifecycle",
     "picker_profiles_cli",
     "pr_state_cli",
+    "reap_cli",
     "reclaim_cli",
+    "session_binding_cli",
+    "session_inspection_cli",
     "session_metadata_cli",
     "session_tracking_cli",
     "status_bar_cli",
     "status_cli",
+    "status_monitor_cli",
     "status_monitor_runtime",
     "status_updater_cli",
     "update_cli",
+    "worktree_ops_cli",
     "worktree_status_audit",
 })
 
@@ -7436,6 +7620,17 @@ def _dispatch_lazy(command: str, args_list: list[str]) -> int:
 _CLUSTER_LOADED = False
 
 
+def _self_override(name: str, local):
+    """`__main__`-side mirror of every sibling module's `_core_helper`:
+    prefers a monkeypatched/pre-bound global on this module (e.g. a test's
+    ``monkeypatch.setattr(m, name, fake)``) over `local` (a direct sibling
+    import), so a Stage D local-shadow fix never bypasses such a test."""
+    candidate = globals().get(name)
+    if callable(candidate) and candidate is not local:
+        return candidate
+    return local
+
+
 def _ensure_cluster_loaded() -> None:
     global _CLUSTER_LOADED
     if _CLUSTER_LOADED:
@@ -7470,21 +7665,22 @@ def _load_full_command_surface() -> None:
     global _find_tracking_file_by_session, _find_tracking_file_exact, _follow_up_to_json, _follow_ups_add, _follow_ups_dismiss, _follow_ups_record_path, _follow_ups_resolve, _follow_ups_show
     global _gh_env_for_repo, _git_positional, _git_resolve_target, _git_usage, _heal_stale_anchor_if_self_missing, _in_ssh_session, _dispatch_assigned_tasks, _infer_active_github_slug
     global _infer_active_repo_slug, _invocation_update_context, _is_copilot_plugin_name, _journal_run_claim, _launch_profile_selection, _list_error, _list_records_for_args, _load_all_machine_keys
-    global _load_remote_machines, _machine_key_for_display, _mirror_terminal_profiles, _module_names, _monitor_claim_handoff_cutover, _monitor_handoff_claim_created_at, _monitor_handoff_claim_path, _monitor_handoff_claim_root
+    global _load_remote_machines, _machine_key_for_display, _module_names, _monitor_claim_handoff_cutover, _monitor_handoff_claim_created_at, _monitor_handoff_claim_path, _monitor_handoff_claim_root
     global _monitor_handoff_claim_segment, _monitor_handoff_claim_staleness, _monitor_list_sessions, _monitor_lock_path, _monitor_mux_set, _monitor_pending_handoff_request, _monitor_read_session_state_handoff, _monitor_registry_dir
+    global _monitor_reclaim_stale_handoff_cutover_claim
     global _monitor_session_state_handoff_path, _new_picker_blocked_by_ssh, _parse_follow_up_refs, _pending_handoff_predecessor_safe, _perform_remux, _picker_profile_choice, _platform_short, _plugin_managed_notice
     global _post_exit_gate, _pr_flow_profile, _pr_merge_now, _pr_merge_print_human, _pr_merge_usage, _pr_parse_repo, _pr_reminder_for, _pr_usage
-    global _pr_watch_review_blocking, _pr_watch_usage, _prepare_namespaced_project_state, _print_gc_managed, _print_gc_orphans, _print_gc_shells, _proc_boot_time, _profiles_host
+    global _pr_watch_review_blocking, _pr_watch_usage, _prepare_namespaced_project_state, _print_gc_managed, _print_gc_orphans, _print_gc_shells, _proc_boot_time
     global _project_for_tracking_file, _project_update_context, _prune_stale_pivots_after_update, _read_monitor_registry, _reconcile_one_runtime, _reconcile_registered_runtimes, _reflect_assignment, _refresh_list_record, _refresh_marketplace
-    global _refresh_terminal_profiles, _register_session_for_monitor, _registered_plugin_targets, _related_anchor, _related_conduct, _related_config_source_anchors, _related_current_machine, _related_doctor
+    global _register_session_for_monitor, _registered_plugin_targets, _related_anchor, _related_conduct, _related_config_source_anchors, _related_current_machine, _related_doctor
     global _related_lookup_anchors, _related_opt, _related_usage, _relocate_active_project_for_worktree, _remove_managed_file, _remove_managed_instruction, _remove_managed_worktree, _remove_monitor_entry
     global _render_doctor_report, _render_dropin_registry_report, _render_related_findings, _render_status_context, _render_status_segment, _repo_for_record, _require_coordination_readiness, _resolve_anchor_owner_ref
     global _resolve_base_repo, _resolve_codename_anywhere, _resolve_environment, _resolve_lease_origin, _resolve_machine_alias, _resolve_mux_worktree_id, _resolve_new, _resolve_owner_ref
-    global _resolve_owner_ref_record_path, _resolve_profile, _resolve_remote_default_branch, _resolve_repo_remote, _resolve_resume, _resolve_ssh_alias, _resolve_terminal_install_script, _resolve_worktree_for_read
+    global _resolve_owner_ref_record_path, _resolve_profile, _resolve_remote_default_branch, _resolve_repo_remote, _resolve_resume, _resolve_ssh_alias, _resolve_worktree_for_read
     global _restart_status_monitor, _restore_before_resume, _revalidate_cleanup_safety, _run_backfill, _run_machine_menu, _run_new_picker, _run_picker_housekeeping, _run_reciprocal_backfill
     global _run_system_menu, _runtime_superseded, _self_entry_present, _session_role, _slot_superseded, _slugify, _spawn_detached, _spawn_status_updater
     global _start_picker_monitor_root, _status_monitor_enabled, _status_segment_json, _succession_header, _sweep_orphans_on_exit, _sync_one_record, _system_cleanup, _system_pause
-    global _system_status, _system_update, _system_worktrees_browse, _terminal_fragment_doctor, _tracked_pr_head_evidence, _try_machine_handoff, _uninstall_one_plugin_payload, _update_flags
+    global _system_status, _system_update, _system_worktrees_browse, _tracked_pr_head_evidence, _try_machine_handoff, _uninstall_one_plugin_payload, _update_flags
     global _update_modules, _update_one_plugin_payload, _update_registered_plugins, _valid_monitor_session, _validate_machine_registry, _validate_profile_assignment_config, _warm_list_cache_for_active_project, _windowless_python
     global auto_clean_enabled, claims_cli, cleanup_gc_cli, cmd_accounts_dispatch, cmd_anchor_check, cmd_attribution_audit, cmd_backfill_sessions, cmd_bind_nudge
     global cmd_bind_session, cmd_claimant_liveness, cmd_claims, cmd_cleanup, cmd_codename_lookup, cmd_conclude_disposable, cmd_conclude_session, cmd_config_migrate
@@ -7493,13 +7689,13 @@ def _load_full_command_surface() -> None:
     global cmd_git_merge_to_feature, cmd_git_sync, cmd_handoff_cutover, cmd_handoff_trace, cmd_handoffs_check, cmd_head_session, cmd_history_digest, cmd_hygiene
     global cmd_install, cmd_install_status, cmd_installer_readiness, cmd_knowledge_dispatch, cmd_link_succession, cmd_list, cmd_list_sessions, cmd_machine_context
     global cmd_mark_complete, cmd_note_handoff, cmd_picker, cmd_post_exit, cmd_pr_complete, cmd_pr_dispatch, cmd_pr_merge_dispatch, cmd_pr_ready
-    global cmd_pr_research_dispatch, cmd_pr_status, cmd_pr_watch_dispatch, cmd_pre_launch, cmd_profiles, cmd_push_changes, cmd_reap_sessions, cmd_reap_shells
+    global cmd_pr_research_dispatch, cmd_pr_status, cmd_pr_watch_dispatch, cmd_pre_launch, cmd_push_changes, cmd_reap_sessions, cmd_reap_shells
     global cmd_recent_messages, cmd_reclaim, cmd_reconcile_binstubs, cmd_reconcile_marketplaces, cmd_reconcile_plugins, cmd_reconcile_sessions, cmd_register, cmd_register_project_entry
     global cmd_register_session, cmd_related_dispatch, cmd_remove_system, cmd_remux, cmd_repair, cmd_repos_dispatch, cmd_restart, cmd_run
     global cmd_services_dispatch, cmd_session_binding, cmd_session_lifecycle, cmd_session_lineage, cmd_session_lock, cmd_session_recovery, cmd_session_role
     global cmd_session_tail
     global cmd_session_transcript, cmd_set_pr, cmd_state_root_dispatch, cmd_status, cmd_status_context, cmd_status_monitor, cmd_status_monitor_restart, cmd_status_segment
-    global cmd_status_updater, cmd_sync, cmd_terminal_fragment, cmd_uninstall, cmd_uninstall_plugins, cmd_update, cmd_validate, cmd_worktree_dispatch
+    global cmd_status_updater, cmd_sync, cmd_uninstall, cmd_uninstall_plugins, cmd_update, cmd_validate, cmd_worktree_dispatch
     global cmd_worktree_lineage, cmd_worktree_status_bundle, context_cli, copilot_identity_cli, finalize_cli, finalize_one, follow_ups_cli, front_door_cli, git_cli
     global handoff_cli, handoff_diagnostics, installation_cli, list_cli, maintenance_cli, picker_profiles_cli, plan_pre_launch, pr_cli
     global pr_state_cli, reap_cli, reap_orphan_launcher_shells, reclaim_cli, reclaim_one, related_cli, repos_cli, resolve_cli
@@ -7816,15 +8012,8 @@ def _load_full_command_surface() -> None:
     _print_gc_managed = cleanup_gc_cli._print_gc_managed
     _print_gc_shells = cleanup_gc_cli._print_gc_shells
     cmd_gc = cleanup_gc_cli.cmd_gc
-    _profiles_host = picker_profiles_cli._profiles_host
-    cmd_profiles = picker_profiles_cli.cmd_profiles
-    _mirror_terminal_profiles = picker_profiles_cli._mirror_terminal_profiles
-    cmd_terminal_fragment = picker_profiles_cli.cmd_terminal_fragment
-    _terminal_fragment_doctor = picker_profiles_cli._terminal_fragment_doctor
     cmd_picker = picker_profiles_cli.cmd_picker
     cmd_validate = picker_profiles_cli.cmd_validate
-    _resolve_terminal_install_script = picker_profiles_cli._resolve_terminal_install_script
-    _refresh_terminal_profiles = picker_profiles_cli._refresh_terminal_profiles
     cmd_repair = picker_profiles_cli.cmd_repair
     cmd_hygiene = maintenance_cli.cmd_hygiene
     cmd_dev = maintenance_cli.cmd_dev
@@ -7938,8 +8127,6 @@ def _load_full_command_surface() -> None:
         "remux": cmd_remux,
         "restart": cmd_restart,
         "sync": cmd_sync,
-        "profiles": cmd_profiles,
-        "terminal-fragment": cmd_terminal_fragment,
         "repair": cmd_repair,
         "picker": cmd_picker,
         "validate": cmd_validate,
