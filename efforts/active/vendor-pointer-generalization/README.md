@@ -337,11 +337,12 @@ shape before committing to a design)_
 
 ## Validation Plan
 
-- [ ] Every real `plugins/<plugin>/libs/<lib>` copy converted in Phase 1
-      round-trips losslessly: `materialize_main.py`'s output for that
-      plugin is byte-identical to the pre-conversion copy (the same
-      `git diff --no-index` check the isolated trial used, run against the
-      real repo this time).
+- [ ] Every real lib copy converted in Phase 1 — every
+      `plugins/<plugin>/libs/<lib>` copy **and every `worktree-manager/
+      libs/*` copy** — round-trips losslessly: `materialize_main.py`'s
+      output is byte-identical to the pre-conversion copy for each (the
+      same `git diff --no-index` check the isolated trial used, run
+      against the real repo this time).
 - [ ] `tools/preview_release.py` ("preview-promo") correctly resolves every
       pointer kind — directory, file, and the new executable kind — when
       building a scratch local-install preview, using the
@@ -465,3 +466,14 @@ _Pending._
   every adopter — a pointerized engine copy would fail that check even
   after a new pointer validator exists. Added a Phase 2 item to update or
   replace that call path.
+- **Round 7 review (2026-09-26):** one small follow-on finding — the
+  round-trip Validation Plan item only named `plugins/<plugin>/libs/<lib>`
+  even though round 6 had already extended Phase 1's conversion scope to
+  `worktree-manager/libs/*`. Fixed to cover both. **Concluding active
+  review engagement here**: seven rounds have progressively narrowed from
+  blocking design gaps (installability, containment, fail-closed
+  promotion) to this kind of small cross-reference-consistency nit,
+  consistent with CONTRIBUTING.md's own guidance against chasing a
+  zero-finding pass that may never come. Merging once CI is green;
+  further findings on execution (not on this plan document) belong in the
+  phase PRs that actually implement it.
