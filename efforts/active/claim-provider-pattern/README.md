@@ -193,7 +193,7 @@ design note for the rebinding work:
   context before invoking a sibling claim-provider callback, instead of
   stripping `COPILOT_EXTENSIONS_CONTEXT`/`COPILOT_PLUGIN_ROOT`/`GH_TOKEN`/
   `GITHUB_TOKEN` and letting the sibling fall back to legacy/ambient mode.
-- [ ] Once rebinding lands, fix
+- [x] Once rebinding lands, fix
   `agent-codespaces/gh_account.py::mapped_accounts()`/`_lookup()`/
   `_agent_worktrees_bin()` to prefer the same-cell `worktrees.run()` path
   over the `shutil.which("agent-worktrees")` PATH fallback for this
@@ -240,6 +240,33 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
 _Pending._
 
 ## Journal
+
+### 2026-09-25 — Phase 4 item 3: confirmed already implemented, no code change needed
+- Re-read `plugins/agent-codespaces/src/agent_codespaces/gh_account.py::_lookup()`
+  against the design note's own caveat ("verify at implementation time; do not
+  assume") and confirmed it already prefers `worktrees.run()` (the same-cell
+  path) whenever `worktrees.explicit_context()` is true, falling back to
+  `shutil.which("agent-worktrees")` only for the genuinely-no-context/ambient
+  case -- exactly the intended shape. This routing predates this effort
+  (`7a2875c56` "Use shared same-cell invocation for CodeSpaces worktrees
+  calls (#2431)", 2026-09-11) and was left correct by the Phase 4 rebinding
+  work rather than needing a follow-up change.
+- `plugins/agent-codespaces/tests/test_worktrees_peer.py` already carries the
+  regression coverage this item calls for:
+  `test_every_adapter_uses_same_cell_worktrees` proves `gh_account.
+  account_for_repo`/`mapped_accounts` route through the same-cell path with
+  PATH lookups made to fail the test if hit; `test_context_refusal_cannot_
+  become_fallback_or_claim` proves an explicit-context validation refusal
+  propagates as `ContextRefused` rather than silently downgrading to the
+  legacy PATH path (both call sites included); `test_namespaced_account_
+  cache_never_reuses_other_cell` proves the memoized lookups stay
+  cell-scoped. No new tests were needed.
+- Validation: full `agent-codespaces` suite (620+475+281+10, all passing/
+  skipped-only) and full `agent-worktrees` suite (all 9 sub-suites, ~2000+
+  passing) both green after rebasing this worktree onto current `origin/dev`
+  (no unrelated regressions). No code changes landed for this item --
+  checklist item 3 marked done on confirmation + existing test evidence
+  alone, per the design note's own anticipation of this outcome.
 
 ### 2026-09-23 — Phase 4 slice: agent-codespaces atomic deploy hold
 - Added an agent-codespaces provider `deploy_hold` fence mirroring
