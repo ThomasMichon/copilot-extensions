@@ -1,9 +1,0 @@
-{
-  "comment": "Add the confirmed lifecycle state: COMPLETED is now a provisional completion claim, corroborated (automatically by an evaluator's new Confirm decision, or explicitly via the Completion Review card's confirm/reopen actions) into the true CONFIRMED terminal. New TaskQueue.confirm/reopen_completed, CLI confirm/reopen verbs, HTTP routes, and board Confirmed group.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "minor"
-    }
-  ]
-}
