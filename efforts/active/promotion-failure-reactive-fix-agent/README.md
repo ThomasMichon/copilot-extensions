@@ -312,6 +312,58 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
       reconciliation noted in the header above — decide whether this
       mechanism choice belongs under an existing vision or needs its own,
       and record that decision before any `gh-aw` workflow file is merged.
+- [ ] **Charter — diagnosis and intent-preservation discipline (this
+      governs the prompt itself, independent of which mechanism below
+      carries it out):** the agent's job is never "make the failing test
+      green." Its job is to **preserve the *intent* of whatever change is
+      judged responsible** for the failure — the test's intent, the
+      implementation's intent, or both — never to erase the disagreement
+      between them by force.
+  - [ ] **Default expectation, stated explicitly in the prompt: most
+        failures are flaky tests, not real regressions.** A test is
+        "flaky" here specifically when it over-specifies its environment
+        or timing rather than the behavior it's meant to protect —
+        hardcoded OS assumptions (Windows-vs-Linux path/permission/
+        process differences), calling out to real `git`/subprocesses
+        instead of a fake/mock, depending on ambient env vars or real
+        wall-clock time, or an async/concurrency race with no
+        synchronization. For this class, **the correct fix is almost
+        always to correct the *test* itself** (isolate the dependency,
+        inject a fake, add proper synchronization/deterministic timing,
+        remove the OS-specific assumption) — **never** to weaken or
+        delete the assertion just to reach green, and never to touch
+        unrelated implementation code to paper over a test's own
+        over-reach.
+  - [ ] **But triage first — do not assume "test's fault" by default.**
+        Before touching anything, read: (a) what invariant the failing
+        assertion actually protects (not just its literal condition), and
+        (b) recent history on both sides — `git log`/`git blame` on the
+        failing assertion's own test *and* on the implementation path it
+        exercises, to find whichever changed most recently and whether
+        that change was itself a deliberate, intentional behavior change
+        or an accidental regression.
+  - [ ] **Decision rule, once triaged:** if the implementation's recent
+        change was a deliberate, intentional behavior change, the test's
+        *expectation* should be updated to match that new intent
+        (correcting what it asserts, not loosening it generically or
+        disabling it). If the implementation regressed a genuine
+        pre-existing invariant the test correctly protects, fix the
+        *implementation*, not the test. Either way the fix must be
+        traceable to a specific, stated judgment about *whose intent was
+        right* — never a silent "whichever change makes the run green."
+  - [ ] **Explicitly forbidden, regardless of triage outcome:** deleting,
+        skipping, `xfail`-ing, or broadly loosening a test's assertion as
+        a way to avoid making that judgment. If the agent cannot
+        confidently determine which side's intent should win, it must
+        escalate (a plain human-facing issue/comment, per the cap-
+        attempts guardrail in Phase 3) rather than guess.
+  - [ ] **Stay within vision, not just within this effort's own scope
+        limits:** a fix-attempt PR must never introduce new capability,
+        behavior, or design the codebase didn't already have — it restores
+        or aligns with an already-established intent, it never invents one.
+        If the "obvious" fix would require a genuinely new design decision
+        (not just correcting a test or restoring prior behavior), that is
+        itself a signal to escalate rather than decide unilaterally.
 - [ ] Once Phase 1's detection+dedup is proven reliable (no false positives,
       no duplicate-issue spam) over a real observation window, author a
       `gh-aw` agentic workflow (Markdown + YAML frontmatter, compiled via
@@ -329,8 +381,9 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
       boundary instead of a same-workflow job boundary. This preserves the
       same-run data flow without a second, independently-triggered
       workflow to keep in sync. Prompt it with exactly the compact
-      signature Phase 1 already extracts: which job(s) failed, the failing
-      test node id(s), and the log excerpt — not a vague "go fix CI."
+      signature Phase 1 already extracts (which job(s) failed, the failing
+      test node id(s), and the log excerpt) **plus the diagnosis/intent-
+      preservation charter above, in full** — not a vague "go fix CI."
   - [ ] **If a separate `workflow_run`-triggered workflow is used instead
         (not the preferred shape above): never filter it on
         `branches: [dev]`.** This repo already documents that
@@ -476,6 +529,16 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
       trial where the "obvious" fix would touch a version field or a
       workflow file, and confirm the agent's resulting PR does neither
       (escalates instead).
+- [ ] **Confirm the diagnosis/intent-preservation charter actually governs
+      triage, with two contrasting trials, not just the easy case:**
+      (a) seed a genuine environment-overreaching flaky test (e.g. a real
+      subprocess/git call, an OS-specific assumption, or an unsynchronized
+      race) and confirm the agent's fix corrects the *test*, never the
+      unrelated implementation; (b) seed a deliberate, real implementation
+      regression against an existing, still-correct test invariant (not a
+      flake) and confirm the agent fixes the *implementation* and leaves
+      the test's assertion alone — proving it doesn't reflexively "fix"
+      every red test by weakening the test.
 
 ## Proposal
 
@@ -1111,3 +1174,32 @@ _Pending._
   was ever conditioned on ("we don't even know Phase 1 works yet") —
   it does not itself resolve the gate, which still needs a deliberate
   decision, not inferred permission, before Phase 2 begins.
+
+### 2026-09-26 — Added the diagnosis/intent-preservation charter to Phase 2's design
+- Operator: the repair agent must stay within vision and its goal is to
+  preserve the *intent* of whatever recent change may have caused the
+  failure, not simply chase green. Most failures are flaky tests
+  overreaching on environment/timing dependencies (Windows-vs-Linux,
+  real subprocess/git calls, ambient env vars, async races/wall-clock
+  timing) — for that class the test itself should usually be corrected.
+  But a genuine cross-area regression is possible, requiring real triage
+  to decide whether the test or the implementation diverged from the
+  true intent.
+- Added this as an explicit, mandatory sub-item of Phase 2 (not just
+  prose in this journal): a triage/decision-rule bullet list stating the
+  default expectation (flaky tests are usually a test-side fix), the
+  required triage step before acting (read the invariant, check recent
+  history on both the test and the implementation path), the decision
+  rule once triaged (fix whichever side diverged from the *correct*
+  intent, update the test's expectation only when the implementation's
+  change was itself deliberate), an explicit prohibition on resolving by
+  deleting/skipping/loosening an assertion without that judgment, and a
+  "stay within vision" restatement specific to this agent (restore/align
+  with established intent, never invent new design — an "obvious fix"
+  that would require a new design decision is itself an escalation
+  signal). This charter is meant to be carried into the agent's actual
+  prompt verbatim, not just kept as effort-internal guidance.
+- Added a matching Validation Plan item: two contrasting trials (a
+  genuine flaky/overreaching test, and a genuine implementation
+  regression against a still-correct test) to prove the agent actually
+  triages rather than reflexively weakening every red test.
