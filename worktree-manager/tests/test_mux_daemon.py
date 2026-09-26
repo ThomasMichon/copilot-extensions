@@ -38,6 +38,39 @@ def _entry(**overrides) -> dict:
     return base
 
 
+def _start_observation_server(seen: list[dict]) -> CoalescingServer:
+    def _compute(kind, payload):
+        seen.append({"kind": kind, "payload": dict(payload)})
+        return {"applied": True}
+
+    server = CoalescingServer(_compute, linger_seconds=5.0, subscriber_ttl=30.0)
+    server.start()
+    return server
+
+
+def _write_status_monitor_lock(path: Path, server: CoalescingServer) -> None:
+    rendezvous = server.rendezvous()
+    path.write_text(
+        json.dumps(
+            {
+                "managed_mux_endpoint": rendezvous["endpoint"],
+                "managed_mux_token": rendezvous["token"],
+                "managed_mux_generation": rendezvous["generation"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _wait_for(predicate, *, timeout: float = 2.0, delay: float = 0.02) -> None:
+    started = time.time()
+    while time.time() - started < timeout:
+        if predicate():
+            return
+        time.sleep(delay)
+    pytest.fail("timed out waiting for expected condition")
+
+
 # ---------------------------------------------------------------------------
 # _normalize_mapping_entry
 # ---------------------------------------------------------------------------
@@ -312,6 +345,30 @@ def test_remove_managed_mapping_publishes_a_tombstone(tmp_path, monkeypatch):
 
     assert result == {"applied": True}
     assert observed[-1]["live"] is False
+
+
+def test_manager_owned_launch_and_teardown_publish_live_and_tombstone_over_wire(tmp_path, monkeypatch):
+    """Final Step 6 scenario: a Manager-owned launch publishes a live
+    observation to the resident monitor over the real wire, and teardown
+    clears it with a tombstone without reviving the legacy updater lane."""
+    lock = tmp_path / "status-monitor.lock"
+    observed: list[dict] = []
+    server = _start_observation_server(observed)
+    monkeypatch.setattr(mux_daemon, "_status_monitor_lock_path", lambda: lock)
+    monkeypatch.setattr(mux_daemon, "ensure_daemon_running", lambda *a, **k: True)
+    _write_status_monitor_lock(lock, server)
+    try:
+        payload = _entry()
+        del payload["mapping_revision"]
+        result = mux_daemon.register_managed_mapping(payload, root=tmp_path)
+        assert result == {"applied": True, "revision": 1}
+        _wait_for(lambda: any(item["payload"].get("live") is True for item in observed))
+
+        remove_result = mux_daemon.remove_managed_mapping("proj", "wt-1", root=tmp_path)
+        assert remove_result == {"applied": True}
+        _wait_for(lambda: any(item["payload"].get("live") is False for item in observed))
+    finally:
+        server.close()
 
 
 # ---------------------------------------------------------------------------
@@ -1056,6 +1113,67 @@ def test_ensure_daemon_running_propagates_root_to_spawned_child(tmp_path, monkey
     monkeypatch.setattr(mux_daemon, "_spawn_detached", _fake_spawn)
     mux_daemon.ensure_daemon_running(tmp_path, boot_wait_s=0.05)
     assert any(arg == f"--root={tmp_path}" for arg in captured["argv"])
+
+
+def test_manager_daemon_restart_republishes_live_mapping_without_relaunch(tmp_path, monkeypatch):
+    """Final Step 6 scenario: restarting the companion daemon with a live
+    mapping already on disk republishes that mapping to the resident monitor
+    again, rather than requiring a session relaunch or a per-session updater."""
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry())
+    lock = tmp_path / "status-monitor.lock"
+    observed: list[dict] = []
+    server = _start_observation_server(observed)
+    monkeypatch.setattr(mux_daemon, "_status_monitor_lock_path", lambda: lock)
+    _write_status_monitor_lock(lock, server)
+    try:
+        assert mux_daemon.run_daemon_foreground(
+            tmp_path, poll_interval_s=0.01, max_iterations=3
+        ) == 0
+        _wait_for(lambda: len(observed) >= 1)
+
+        assert mux_daemon.run_daemon_foreground(
+            tmp_path, poll_interval_s=0.01, max_iterations=3
+        ) == 0
+        _wait_for(lambda: len(observed) >= 2)
+    finally:
+        server.close()
+
+
+def test_resident_monitor_restart_republishes_live_mapping_to_new_generation(tmp_path, monkeypatch):
+    """Final Step 6 scenario: when the resident monitor restarts and publishes a
+    fresh managed-mux generation, the companion daemon republishes every live
+    mapping so status can resume without relaunching the mux session."""
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry())
+    lock = tmp_path / "status-monitor.lock"
+    first_seen: list[dict] = []
+    second_seen: list[dict] = []
+    first = _start_observation_server(first_seen)
+    second = None
+    monkeypatch.setattr(mux_daemon, "_status_monitor_lock_path", lambda: lock)
+    _write_status_monitor_lock(lock, first)
+    daemon_result: dict = {}
+
+    def _run():
+        daemon_result["rc"] = mux_daemon.run_daemon_foreground(
+            tmp_path, poll_interval_s=0.01, max_iterations=60
+        )
+
+    thread = threading.Thread(target=_run)
+    thread.start()
+    try:
+        _wait_for(lambda: len(first_seen) >= 1)
+        second = _start_observation_server(second_seen)
+        _write_status_monitor_lock(lock, second)
+        _wait_for(lambda: len(second_seen) >= 1)
+    finally:
+        first.close()
+        if second is not None:
+            second.close()
+        thread.join(timeout=5)
+
+    assert daemon_result["rc"] == 0
 
 
 def test_ensure_status_monitor_running_scrubs_session_credentials(monkeypatch):

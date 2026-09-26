@@ -161,6 +161,13 @@ def _status_monitor_lock_path() -> Path | None:
     return None if root is None else root / "status-monitor.lock"
 
 
+def _status_monitor_generation(data: dict | None) -> str | None:
+    if not isinstance(data, dict):
+        return None
+    generation = data.get("managed_mux_generation")
+    return generation if isinstance(generation, str) and generation else None
+
+
 def _status_monitor_endpoint_from_rendezvous(data: dict | None) -> tuple[str, int, str] | None:
     if not isinstance(data, dict):
         return None
@@ -360,6 +367,23 @@ def remove_managed_mapping(
         if entry is not None:
             publish_live_observation(entry, ensure_monitor=True)
     return result
+
+
+def _republish_live_mappings(
+    registry: MuxMappingRegistry,
+    *,
+    ensure_monitor: bool,
+) -> bool:
+    published_any = False
+    for entry in registry.snapshot().values():
+        if not entry.get("live"):
+            continue
+        result = publish_live_observation(entry, ensure_monitor=ensure_monitor)
+        if result.get("applied"):
+            published_any = True
+        else:
+            return False
+    return published_any or not registry.has_any_live()
 
 
 def rendezvous_fields(server: CoalescingServer) -> dict:
@@ -783,9 +807,27 @@ def run_daemon_foreground(
             return 1
         idle_since: float | None = None
         iterations = 0
+        published_monitor_generation: str | None = None
         try:
             while True:
                 write_lock_data(lock, runtime.lock_extra())
+                status_monitor_lock = _status_monitor_lock_path()
+                status_monitor_data = (
+                    read_lock_data(status_monitor_lock)
+                    if status_monitor_lock is not None
+                    else None
+                )
+                status_monitor_generation = _status_monitor_generation(status_monitor_data)
+                if (
+                    status_monitor_generation is not None
+                    and status_monitor_generation != published_monitor_generation
+                    and runtime.registry.has_any_live()
+                    and _republish_live_mappings(
+                        runtime.registry,
+                        ensure_monitor=False,
+                    )
+                ):
+                    published_monitor_generation = status_monitor_generation
                 if runtime.has_active_demand():
                     idle_since = None
                 elif idle_since is None:

@@ -112,9 +112,8 @@ def _register_manager_owned_monitor_session(
     )
     if not managed_session:
         return False
-    return _register_session_for_monitor(
-        managed_session, path
-    ) and _ensure_status_monitor()
+    _ensure_status_monitor()
+    return True
 
 
 def _session_handoff_token() -> str:
