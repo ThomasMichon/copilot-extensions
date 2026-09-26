@@ -71,7 +71,7 @@ copilot-extensions/
 
 **Payload vs runtime.** A *payload-only* plugin ships skills/hooks/extensions
 (no venv) — enabling it is the whole install. A *runtime* plugin also ships a
-venv + `~/.local/bin` binstub (and sometimes a service), deployed by its own
+venv + `~/.local/bin` binstub (and sometimes a service), deployed by its own <!-- marketplace-isolation: allow doc-example -->
 installer. Know which kind you are changing.
 
 ## The flow
