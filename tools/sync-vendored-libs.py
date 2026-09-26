@@ -184,10 +184,34 @@ if not _canonical_init.is_file():
 # immediately" guarantee. Clearing canonical's own __pycache__ here forces
 # a fresh compile on every process that imports this stub -- this stub
 # only ever runs in a full dev-branch checkout (never shipped), so the
-# small recompute cost is a non-issue.
+# small recompute cost is a non-issue. Deliberately NOT ignore_errors=True:
+# a nested submodule's import goes through the ordinary import system's own
+# PathFinder/SourceFileLoader (via this module's __path__), which has no
+# per-call override to skip its own bytecode-cache lookup -- clearing the
+# WHOLE __pycache__ dir up front is the only practical way to guarantee
+# every submodule recompiles too, so if that clear can't fully complete
+# (e.g. a locked file), failing loudly here beats silently risking stale
+# canonical content being served (copilot-extensions#3802's own failure
+# mode) with no visible sign anything is wrong. FileNotFoundError is NOT a
+# failure here, just a benign TOCTOU race: a concurrent process/thread
+# importing this same stub (common under a parallel test run) may have
+# already cleared __pycache__ between this file's is_dir() check and this
+# rmtree call -- the end state (no stale cache) is exactly what was wanted
+# either way, so only a genuine removal failure (e.g. PermissionError, a
+# locked file) fails closed.
 _pycache = _canonical_pkg_dir / "__pycache__"
 if _pycache.is_dir():
-    shutil.rmtree(_pycache, ignore_errors=True)
+    try:
+        shutil.rmtree(_pycache)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        raise ImportError(
+            __name__ + ": could not clear stale __pycache__ at " +
+            str(_pycache) + " (" + str(exc) + ") -- refusing to risk "
+            "serving stale bytecode (copilot-extensions#3802); remove it "
+            "by hand and retry"
+        ) from exc
 
 # Standard "self-replacing module" technique: CPython's import machinery
 # re-fetches ``sys.modules[name]`` AFTER this file's own exec finishes (see

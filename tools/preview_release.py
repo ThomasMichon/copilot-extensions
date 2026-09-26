@@ -116,10 +116,34 @@ def _materialize_into_preview(dest: Path) -> list[str]:
                 log.append(reason)
                 continue
         is_pointer = svl._is_pointer_copy(lib_copy)
+        pointer_tests = lib_copy / "tests"
+        refresh_tests = is_pointer and (pointer_tests.is_dir() or pointer_tests.is_symlink())
+        # Preflight BOTH replacement trees before mutating either one --
+        # _copy_src() previously ran before this tests/ validation, so a
+        # rejected tests/ refresh (canonical has a symlink) would leave the
+        # preview in a mixed state: fresh src/, stale tests/, pointer marker
+        # still present. Mirrors sync-vendored-libs.py's cmd_materialize()
+        # and materialize_main.py's own preflight-before-mutate ordering.
+        src_bad = svl._find_symlink(canonical / "src")
+        if src_bad is not None:
+            where = f"{lib}/src" if src_bad == "." else f"{lib}/src/{src_bad}"
+            log.append(f"SKIP {lib_copy}: {where} is a symlink -- refusing")
+            continue
+        if refresh_tests:
+            if pointer_tests.is_symlink():
+                log.append(
+                    f"SKIP {lib_copy}: {lib}/tests (destination) is a symlink "
+                    "-- refusing to replace it blindly"
+                )
+                continue
+            tests_bad = svl._find_symlink(canonical / "tests")
+            if tests_bad is not None:
+                where = f"{lib}/tests" if tests_bad == "." else f"{lib}/tests/{tests_bad}"
+                log.append(f"SKIP {lib_copy}: {where} is a symlink -- refusing")
+                continue
         svl._copy_src(canonical, lib_copy)
         svl._sync_version(canonical, lib_copy)
-        pointer_tests = lib_copy / "tests"
-        if is_pointer and (pointer_tests.is_dir() or pointer_tests.is_symlink()):
+        if refresh_tests:
             # A pointer copy MAY vendor tests/ from canonical too
             # (--pointerize); refresh it here as well if it already
             # carries one, otherwise a preview built after a canonical

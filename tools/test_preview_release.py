@@ -120,6 +120,16 @@ class _FakeSyncVendoredLibs:
     def _sync_version(self, src_lib: Path, dst_lib: Path) -> None:
         pass
 
+    def _find_symlink(self, tree: Path) -> str | None:
+        if tree.is_symlink():
+            return "."
+        if not tree.is_dir():
+            return None
+        for p in sorted(tree.rglob("*")):
+            if p.is_symlink():
+                return str(p.relative_to(tree))
+        return None
+
 
 def test_materialize_into_preview_writes_only_into_dest_never_real_repo(
     isolated: Path, monkeypatch: pytest.MonkeyPatch,
@@ -249,6 +259,48 @@ def test_materialize_into_preview_still_respects_drift_check_for_a_real_copy(
     assert (dest / "libs" / "shared-lib" / "src" / "__init__.py").read_text() == (
         "newer-real-content = True\n"
     )
+
+
+def test_materialize_into_preview_preflights_tests_before_mutating_src(
+    isolated: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    # _copy_src() must not run before a canonical tests/ symlink is
+    # rejected -- otherwise a rejected tests/ refresh (found only after
+    # src/ was already replaced) would leave the preview in a mixed state:
+    # fresh src/, stale tests/, pointer marker still present.
+    plugin_dir = _plugin(isolated, "agent-worktrees", "1.0.0")
+    pointer_copy = plugin_dir / "libs" / "shared-lib"
+    (pointer_copy / "src").mkdir(parents=True)
+    (pointer_copy / "src" / "__init__.py").write_text("stale stub\n", encoding="utf-8")
+    (pointer_copy / "tests").mkdir(parents=True)
+    (pointer_copy / "tests" / "test_thing.py").write_text(
+        "def test_it():\n    pass\n", encoding="utf-8"
+    )
+    (pointer_copy / "VENDOR_POINTER.json").write_text(
+        json.dumps({"schema": "copilot-extensions.vendor-pointer", "version": 1,
+                    "source": "libs/shared-lib", "kind": "src-passthrough"}) + "\n",
+        encoding="utf-8",
+    )
+
+    canonical_root = isolated / "canonical-libs"
+    canonical_lib = canonical_root / "shared-lib"
+    (canonical_lib / "src").mkdir(parents=True)
+    (canonical_lib / "src" / "__init__.py").write_text("fresh = True\n", encoding="utf-8")
+    secret = isolated / "outside-secret"
+    secret.mkdir()
+    (canonical_lib / "tests").symlink_to(secret, target_is_directory=True)
+
+    fake = _FakeSyncVendoredLibs(canonical_root)
+    monkeypatch.setattr(preview_release, "_load_sync_vendored_libs", lambda: fake)
+
+    dest = preview_release.build("agent-worktrees", isolated / "work")
+
+    # src/ must be untouched -- the rejection happened before any mutation.
+    assert (dest / "libs" / "shared-lib" / "src" / "__init__.py").read_text() == "stale stub\n"
+    assert (dest / "libs" / "shared-lib" / "tests" / "test_thing.py").read_text() == (
+        "def test_it():\n    pass\n"
+    )
+    assert (dest / "libs" / "shared-lib" / "VENDOR_POINTER.json").exists()
 
 
 class _FakeMaterializeMain:

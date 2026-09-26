@@ -189,6 +189,55 @@ def test_manager_tarball_url_non_github_is_none(tmp_path):
     assert self_install.manager_tarball_url(tmp_path) is None
 
 
+def test_fetch_via_tarball_also_fetches_the_libs_sibling(tmp_path, monkeypatch):
+    """A tarball-only fetch previously grabbed ONLY the worktree-manager/
+    subtree, silently dropping the sibling libs/ that any src-passthrough
+    vendor pointer inside the payload needs to resolve canonical content
+    from -- the resulting staging tree must carry both, the same
+    monorepo-shaped layout a git clone already produces for free."""
+    import tarfile
+
+    archive_root = tmp_path / "archive-src"
+    (archive_root / "copilot-extensions-main" / "worktree-manager" / "src" /
+     "worktree_manager").mkdir(parents=True)
+    (archive_root / "copilot-extensions-main" / "worktree-manager" / "src" /
+     "worktree_manager" / "__init__.py").write_text('__version__ = "9.9.9"\n')
+    (archive_root / "copilot-extensions-main" / "worktree-manager" /
+     "pyproject.toml").write_text("[project]\nname='x'\nversion='9.9.9'\n")
+    (archive_root / "copilot-extensions-main" / "libs" / "shared-lib" / "src" /
+     "shared_lib").mkdir(parents=True)
+    (archive_root / "copilot-extensions-main" / "libs" / "shared-lib" / "src" /
+     "shared_lib" / "__init__.py").write_text("value = 1\n")
+
+    archive_path = tmp_path / "payload.tar.gz"
+    with tarfile.open(archive_path, "w:gz") as tf:
+        tf.add(archive_root / "copilot-extensions-main", arcname="copilot-extensions-main")
+
+    class _FakeResponse:
+        def __init__(self, data: bytes) -> None:
+            self._data = data
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self) -> bytes:
+            return self._data
+
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda url, timeout=None: _FakeResponse(archive_path.read_bytes()),
+    )
+
+    staging = tmp_path / "staging"
+    self_install._fetch_via_tarball(staging, "https://codeload.example/fake.tar.gz")
+
+    assert (staging / "worktree-manager" / "pyproject.toml").is_file()
+    assert (staging / "libs" / "shared-lib" / "src" / "shared_lib" / "__init__.py").read_text() == "value = 1\n"
+
+
 @pytest.mark.parametrize("repo,ref,expected", [
     ("https://github.com/ThomasMichon/copilot-extensions.git", "main",
      "https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main"

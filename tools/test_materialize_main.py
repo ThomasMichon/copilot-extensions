@@ -189,6 +189,51 @@ def test_materialize_expands_worktree_manager_pointer(tmp_path: Path):
     assert copy_src.read_text() == "shared\n"
 
 
+def test_find_pointers_in_libs_dir_finds_a_pointer_directly_under_libs(tmp_path: Path):
+    """The shape a copied-out payload has (e.g. a self-installed
+    worktree-manager slot's own <slot>/libs/*), unlike find_pointers()'s
+    fixed plugins/*/libs/* / worktree-manager/libs/* repo-root-relative
+    glob."""
+    libs_dir = tmp_path / "slot" / "libs"
+    d = libs_dir / "zdd"
+    d.mkdir(parents=True)
+    (d / mm.POINTER_NAME).write_text(
+        json.dumps({"schema": "copilot-extensions.vendor-pointer", "version": 1,
+                    "source": "libs/zdd"}) + "\n",
+        encoding="utf-8",
+    )
+    found = mm.find_pointers_in_libs_dir(libs_dir)
+    assert [p.parent.name for p in found] == ["zdd"]
+
+
+def test_find_pointers_in_libs_dir_empty_when_no_libs_dir(tmp_path: Path):
+    assert mm.find_pointers_in_libs_dir(tmp_path / "nope") == []
+
+
+def test_materialize_libs_dir_expands_a_pointer_from_canonical(tmp_path: Path):
+    """The case worktree_manager.self_install's _materialize_payload_pointers
+    needs: expanding a copied-out slot's own libs/<lib> directly (not a
+    whole repo-checkout-shaped tree)."""
+    root = tmp_path / "repo"
+    _canonical_lib(root, "zdd", version="0.3.0-dev1", content="from-canonical\n")
+
+    libs_dir = tmp_path / "slot" / "libs"
+    copy_dir = libs_dir / "zdd"
+    (copy_dir / "src" / "zdd").mkdir(parents=True)
+    (copy_dir / "src" / "zdd" / "__init__.py").write_text("stub\n", encoding="utf-8")
+    (copy_dir / mm.POINTER_NAME).write_text(
+        json.dumps({"schema": "copilot-extensions.vendor-pointer", "version": 1,
+                    "source": "libs/zdd"}) + "\n",
+        encoding="utf-8",
+    )
+
+    log = mm.materialize_libs_dir(libs_dir, canonical_root=root)
+
+    assert any(line.startswith("OK") for line in log)
+    assert not (copy_dir / mm.POINTER_NAME).exists()
+    assert (copy_dir / "src" / "zdd" / "__init__.py").read_text() == "from-canonical\n"
+
+
 def _pointer_with_source(root: Path, plugin: str, lib: str, *, source: str) -> Path:
     """Like ``_pointer``, but with an arbitrary (possibly malicious) ``source``
     value instead of the well-formed ``libs/<lib>`` default."""

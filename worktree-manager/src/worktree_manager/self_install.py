@@ -310,11 +310,79 @@ def _write_marker(root: Path, version: str) -> None:
     tmp.replace(root / MARKER)  # atomic publish
 
 
+def _load_materialize_main(monorepo_root: Path):
+    """Dynamically load ``tools/materialize_main.py`` from a live monorepo
+    checkout, without ever making it a real import-time dependency of this
+    dependency-free out-of-plugin payload (see this module's own docstring)
+    -- only reachable, and only ever called, when a monorepo ancestor is
+    actually present (see ``_materialize_payload_pointers``)."""
+    import importlib.util
+
+    path = monorepo_root / "tools" / "materialize_main.py"
+    spec = importlib.util.spec_from_file_location("materialize_main", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _materialize_payload_pointers(payload_dir: Path, slot: Path) -> None:
+    """Expand any vendor-pointer lib copies under a freshly-copied
+    ``slot/libs/*`` into real, self-contained content -- a standalone
+    self-installed slot (or a self-updated one fetched via git/tarball) has
+    no ``libs/``+``plugins/`` monorepo ancestor of its own, so the
+    src-passthrough pointer stub's runtime ``_find_repo_root`` walk can
+    never find canonical there; every pointer copy MUST be materialized
+    into a real copy before (or as part of) publishing this slot, exactly
+    the way a `main`-branch release already does.
+
+    ``payload_dir`` is the SOURCE being copied (still-live at the moment
+    this runs, whether a dev checkout or a freshly fetched self_update
+    staging tree -- see ``self_update``'s git-clone/tarball paths, both of
+    which now guarantee a ``libs/`` sibling next to the payload). Resolves
+    canonical from ``payload_dir.parent`` -- if that ancestor lacks a real
+    ``libs/`` (and thus can't provide canonical content), any pointer found
+    in the copied slot is an unresolvable, permanently-broken import for
+    whoever runs it next, so this raises rather than silently shipping it.
+    """
+    libs_dir = slot / "libs"
+    if not libs_dir.is_dir():
+        return
+    monorepo_root = payload_dir.parent
+    has_canonical = (monorepo_root / "libs").is_dir()
+    has_tool = (monorepo_root / "tools" / "materialize_main.py").is_file()
+    if not (has_canonical and has_tool):
+        materialize_main = None
+    else:
+        materialize_main = _load_materialize_main(monorepo_root)
+    unresolved = materialize_main.find_pointers_in_libs_dir(libs_dir) if materialize_main else \
+        [p for p in libs_dir.glob("*/VENDOR_POINTER.json")]
+    if not unresolved:
+        return
+    if materialize_main is None:
+        names = ", ".join(sorted(p.parent.name for p in unresolved))
+        raise RuntimeError(
+            f"cannot install this payload: libs/{{{names}}} are unmaterialized "
+            "vendor pointers, but no monorepo ancestor (libs/ + "
+            "tools/materialize_main.py) is reachable from the fetched "
+            "payload to resolve canonical content from -- self_update's "
+            "fetch must provide the full monorepo shape, not just the "
+            "worktree-manager/ subtree"
+        )
+    log = materialize_main.materialize_libs_dir(libs_dir, canonical_root=monorepo_root)
+    failures = [line for line in log if line.startswith("SKIP ")]
+    if failures:
+        raise RuntimeError(
+            "refusing to install this payload: pointer materialization "
+            "was rejected for " + "; ".join(failures)
+        )
+
+
 def _copy_payload(payload_dir: Path, slot: Path) -> None:
     if slot.exists():
         shutil.rmtree(slot)
     ignore = shutil.ignore_patterns(".git", ".venv", "__pycache__", "*.pyc")
     shutil.copytree(payload_dir, slot, ignore=ignore)
+    _materialize_payload_pointers(payload_dir, slot)
 
 
 # ── legacy artifact recognition + cleanup ────────────────────────────────
@@ -553,9 +621,13 @@ def _fetch_via_tarball(staging: Path, url: str, *, timeout: int = 180) -> None:
     """Fetch + extract the worktree-manager payload from a GitHub tarball (no git).
 
     Replaces ``staging`` contents with the extracted ``worktree-manager/`` payload
-    so ``staging/worktree-manager/pyproject.toml`` exists — the same layout the git
-    clone produces, so the caller's payload resolution is uniform. Raises ``OSError``
-    on any failure so the caller can degrade to an ``error`` result.
+    PLUS its sibling ``libs/`` directory, so ``staging/worktree-manager/pyproject.toml``
+    and ``staging/libs/`` both exist -- the same monorepo-shaped layout the git clone
+    produces. The ``libs/`` sibling is required for ``_materialize_payload_pointers``
+    to resolve canonical content for any vendor-pointer copy inside the payload (a
+    tarball-only fetch that skipped it would leave those pointers permanently
+    unresolvable in the installed slot -- see that function's own docstring).
+    Raises ``OSError`` on any failure so the caller can degrade to an ``error`` result.
     """
     import tarfile
     import tempfile
@@ -582,6 +654,9 @@ def _fetch_via_tarball(staging: Path, url: str, *, timeout: int = 180) -> None:
             raise OSError(f"worktree-manager payload not found in tarball from {url}")
         _clear_dir(staging)
         shutil.copytree(payload, staging / "worktree-manager")
+        libs_source = payload.parent / "libs"
+        if libs_source.is_dir():
+            shutil.copytree(libs_source, staging / "libs")
 
 
 def self_update(

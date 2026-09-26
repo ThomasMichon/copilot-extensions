@@ -17,9 +17,12 @@ Two pointer kinds are expanded, generalized under the
   scan), a JSON sidecar next to a lib copy that has no `src/` of its own.
   Expanded from the canonical `libs/<lib>` directory (refusing any `source`
   that escapes the canonical root, the same containment guarantee the file
-  pointer kind below already has); only `src/` and the declared
-  `pyproject.toml` version are ever touched, matching
-  `check-vendored-libs-sync.py`'s own existing invariant.
+  pointer kind below already has); `src/` and the declared `pyproject.toml`
+  version are always touched, matching `check-vendored-libs-sync.py`'s own
+  existing invariant -- `tests/` is refreshed too, but ONLY when the copy
+  already carries one of its own (a deliberate per-copy opt-in choice made
+  once at `--pointerize` time, never introduced unilaterally on a later
+  refresh just because canonical happens to have a `tests/` today).
 * **File pointers** -- any single vendored file (e.g. a mirrored Markdown
   doc under `plugins/<plugin>/docs/`) whose first line is an in-language
   HTML-comment marker:
@@ -95,113 +98,145 @@ def find_file_pointers(root: Path) -> list[Path]:
     )
 
 
+def find_pointers_in_libs_dir(libs_dir: Path) -> list[Path]:
+    """Every directory/lib pointer directly under a single ``libs/`` dir --
+    the shape a copied-out payload has (e.g. a self-installed
+    ``worktree-manager`` slot's own ``<slot>/libs/*``), unlike
+    ``find_pointers()``'s fixed ``plugins/*/libs/*`` /
+    ``worktree-manager/libs/*`` repo-root-relative glob."""
+    if not libs_dir.is_dir():
+        return []
+    return sorted(libs_dir.glob("*/" + POINTER_NAME))
+
+
+def _materialize_one_pointer(pointer_path: Path, *, checkout_root: Path, canonical_root: Path) -> str:
+    """Expand a single directory/lib pointer at ``pointer_path`` from
+    ``canonical_root``, returning one log line. ``checkout_root`` bounds the
+    escape check for the copy's own directory (the tree ``pointer_path``
+    itself must stay inside); shared by ``materialize()`` (checkout_root ==
+    the whole dest tree) and ``materialize_libs_dir()`` (checkout_root ==
+    the single libs/ dir being expanded)."""
+    pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
+    source_rel = pointer["source"]  # e.g. "libs/zdd"
+    lib_copy_dir = pointer_path.parent
+
+    if _escapes_root(lib_copy_dir, checkout_root):
+        return (
+            f"SKIP {lib_copy_dir}: pointer directory escapes the "
+            "checkout root (a symlinked plugin/libs path) -- refusing"
+        )
+
+    canonical = _resolve_within(canonical_root, source_rel)
+
+    if canonical is None:
+        return f"SKIP {lib_copy_dir}: source {source_rel!r} escapes the canonical root -- refusing"
+    if not canonical.is_dir():
+        return f"SKIP {lib_copy_dir}: canonical {source_rel} not found"
+
+    src_sub = canonical / "src"
+    dst_sub = lib_copy_dir / "src"
+    symlink_found = _find_symlink(src_sub)
+    if symlink_found is not None:
+        where = f"{source_rel}/src" if symlink_found == "." else f"{source_rel}/src/{symlink_found}"
+        return (
+            f"SKIP {lib_copy_dir}: {where} is a symlink -- refusing "
+            "(a canonical lib source must contain only real files)"
+        )
+    if dst_sub.is_symlink():
+        return (
+            f"SKIP {lib_copy_dir}: {source_rel}/src (destination) is a "
+            "symlink -- refusing to replace it blindly (a vendored "
+            "copy must contain only real files)"
+        )
+
+    # A DRY-pointer copy MAY vendor tests/ from canonical the same way
+    # (--pointerize) -- refresh it here too if the copy already carries
+    # one, otherwise a canonical test change after pointerizing leaves
+    # this copy's tests/ stale and promotion would silently snapshot
+    # that stale tree into main. Gated on the copy ALREADY having a
+    # tests/ dir (not merely on canonical having one): --pointerize
+    # records a deliberate choice per copy, and promotion must respect
+    # "this copy chose not to vendor tests/" rather than unilaterally
+    # introducing one a copy never had. Only ever done for a pointer
+    # copy (this whole branch is the pointer-expansion path) -- a real
+    # copy's own tests/ is never touched by this function at all.
+    # Checks is_symlink() too, not just is_dir() -- a dangling or
+    # non-directory symlink there is_dir()==False (it follows the link
+    # to a target that isn't there), so an is_dir()-only check would
+    # silently ignore it and let it survive untouched into a
+    # materialized release.
+    dst_tests_sub = lib_copy_dir / "tests"
+    tests_sub = canonical / "tests"
+    refresh_tests = dst_tests_sub.is_dir() or dst_tests_sub.is_symlink()
+    if refresh_tests:
+        if dst_tests_sub.is_symlink():
+            return (
+                f"SKIP {lib_copy_dir}: {source_rel}/tests (destination) "
+                "is a symlink -- refusing to replace it blindly (a "
+                "vendored copy must contain only real files)"
+            )
+        tests_symlink_found = _find_symlink(tests_sub)
+        if tests_symlink_found is not None:
+            where = (
+                f"{source_rel}/tests" if tests_symlink_found == "."
+                else f"{source_rel}/tests/{tests_symlink_found}"
+            )
+            return (
+                f"SKIP {lib_copy_dir}: {where} is a symlink -- refusing "
+                "(a canonical lib source must contain only real files)"
+            )
+
+    _remove_path(dst_sub)
+    if src_sub.is_dir():
+        shutil.copytree(src_sub, dst_sub)
+
+    if refresh_tests:
+        _remove_path(dst_tests_sub)
+        if tests_sub.is_dir():
+            shutil.copytree(tests_sub, dst_tests_sub)
+
+    canon_pp = canonical / "pyproject.toml"
+    copy_pp = lib_copy_dir / "pyproject.toml"
+    if canon_pp.exists() and copy_pp.exists():
+        m = _VERSION_RE.search(canon_pp.read_text(encoding="utf-8"))
+        if m:
+            text = copy_pp.read_text(encoding="utf-8")
+            copy_pp.write_text(_VERSION_RE.sub(rf"\g<1>{m.group(2)}\g<3>", text, count=1),
+                               encoding="utf-8")
+
+    pointer_path.unlink()
+    return f"OK   {lib_copy_dir} <- {source_rel}"
+
+
 def materialize(dest: Path, *, canonical_root: Path) -> list[str]:
     """Expand every pointer found under ``dest`` from ``canonical_root``.
 
     ``canonical_root`` is a parameter (not hardcoded to ``REPO``) so a test
     can point it at an isolated tree instead of the real checkout."""
-    log: list[str] = []
-    for pointer_path in find_pointers(dest):
-        pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
-        source_rel = pointer["source"]  # e.g. "libs/zdd"
-        lib_copy_dir = pointer_path.parent
-
-        if _escapes_root(lib_copy_dir, dest):
-            log.append(
-                f"SKIP {lib_copy_dir}: pointer directory escapes the "
-                "checkout root (a symlinked plugin/libs path) -- refusing"
-            )
-            continue
-
-        canonical = _resolve_within(canonical_root, source_rel)
-
-        if canonical is None:
-            log.append(f"SKIP {lib_copy_dir}: source {source_rel!r} escapes "
-                        "the canonical root -- refusing")
-            continue
-        if not canonical.is_dir():
-            log.append(f"SKIP {lib_copy_dir}: canonical {source_rel} not found")
-            continue
-
-        src_sub = canonical / "src"
-        dst_sub = lib_copy_dir / "src"
-        symlink_found = _find_symlink(src_sub)
-        if symlink_found is not None:
-            where = f"{source_rel}/src" if symlink_found == "." else f"{source_rel}/src/{symlink_found}"
-            log.append(
-                f"SKIP {lib_copy_dir}: {where} is a symlink -- refusing "
-                "(a canonical lib source must contain only real files)"
-            )
-            continue
-        if dst_sub.is_symlink():
-            log.append(
-                f"SKIP {lib_copy_dir}: {source_rel}/src (destination) is a "
-                "symlink -- refusing to replace it blindly (a vendored "
-                "copy must contain only real files)"
-            )
-            continue
-
-        # A DRY-pointer copy MAY vendor tests/ from canonical the same way
-        # (--pointerize) -- refresh it here too if the copy already carries
-        # one, otherwise a canonical test change after pointerizing leaves
-        # this copy's tests/ stale and promotion would silently snapshot
-        # that stale tree into main. Gated on the copy ALREADY having a
-        # tests/ dir (not merely on canonical having one): --pointerize
-        # records a deliberate choice per copy, and promotion must respect
-        # "this copy chose not to vendor tests/" rather than unilaterally
-        # introducing one a copy never had. Only ever done for a pointer
-        # copy (this whole branch is the pointer-expansion path) -- a real
-        # copy's own tests/ is never touched by this function at all.
-        # Checks is_symlink() too, not just is_dir() -- a dangling or
-        # non-directory symlink there is_dir()==False (it follows the link
-        # to a target that isn't there), so an is_dir()-only check would
-        # silently ignore it and let it survive untouched into a
-        # materialized release.
-        dst_tests_sub = lib_copy_dir / "tests"
-        tests_sub = canonical / "tests"
-        refresh_tests = dst_tests_sub.is_dir() or dst_tests_sub.is_symlink()
-        if refresh_tests:
-            if dst_tests_sub.is_symlink():
-                log.append(
-                    f"SKIP {lib_copy_dir}: {source_rel}/tests (destination) "
-                    "is a symlink -- refusing to replace it blindly (a "
-                    "vendored copy must contain only real files)"
-                )
-                continue
-            tests_symlink_found = _find_symlink(tests_sub)
-            if tests_symlink_found is not None:
-                where = (
-                    f"{source_rel}/tests" if tests_symlink_found == "."
-                    else f"{source_rel}/tests/{tests_symlink_found}"
-                )
-                log.append(
-                    f"SKIP {lib_copy_dir}: {where} is a symlink -- refusing "
-                    "(a canonical lib source must contain only real files)"
-                )
-                continue
-
-        _remove_path(dst_sub)
-        if src_sub.is_dir():
-            shutil.copytree(src_sub, dst_sub)
-
-        if refresh_tests:
-            _remove_path(dst_tests_sub)
-            if tests_sub.is_dir():
-                shutil.copytree(tests_sub, dst_tests_sub)
-
-        canon_pp = canonical / "pyproject.toml"
-        copy_pp = lib_copy_dir / "pyproject.toml"
-        if canon_pp.exists() and copy_pp.exists():
-            m = _VERSION_RE.search(canon_pp.read_text(encoding="utf-8"))
-            if m:
-                text = copy_pp.read_text(encoding="utf-8")
-                copy_pp.write_text(_VERSION_RE.sub(rf"\g<1>{m.group(2)}\g<3>", text, count=1),
-                                   encoding="utf-8")
-
-        pointer_path.unlink()
-        log.append(f"OK   {lib_copy_dir} <- {source_rel}")
+    log = [
+        _materialize_one_pointer(pointer_path, checkout_root=dest, canonical_root=canonical_root)
+        for pointer_path in find_pointers(dest)
+    ]
     log.extend(materialize_file_pointers(dest, canonical_root=canonical_root))
     return log
+
+
+def materialize_libs_dir(libs_dir: Path, *, canonical_root: Path) -> list[str]:
+    """Expand every directory/lib pointer directly under a single copied-out
+    ``libs/`` dir (not a whole repo checkout shaped tree) -- the case a
+    standalone-deployed payload's own vendored libs need (see
+    ``worktree_manager.self_install``'s ``_copy_payload``, which calls this
+    against a freshly self-installed slot's ``libs/`` using its still-live
+    monorepo sibling as ``canonical_root``, since a slot copied out on its
+    own has no ``libs/``+``plugins/`` ancestor for the passthrough stub's own
+    ``_find_repo_root`` to walk up to at runtime)."""
+    return [
+        _materialize_one_pointer(pointer_path, checkout_root=libs_dir, canonical_root=canonical_root)
+        for pointer_path in find_pointers_in_libs_dir(libs_dir)
+    ]
+
+
+
 
 
 def _escapes_root(candidate: Path, root: Path) -> bool:
