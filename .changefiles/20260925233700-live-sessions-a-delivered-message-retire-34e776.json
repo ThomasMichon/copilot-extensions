@@ -1,0 +1,9 @@
+{
+  "comment": "live sessions: a delivered message retires a BLOCKED milestone, so a session that went back to work stops reading as blocked",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
