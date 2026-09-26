@@ -27,7 +27,7 @@ try:
 except ImportError:  # pragma: no cover - pyyaml is a hard dependency
     yaml = None  # type: ignore[assignment]
 
-from .repo_trust import repo_config_is_trusted
+from .repo_trust import has_symlink_ancestor, repo_config_is_trusted
 
 #: Neutral, personality- and multi-machine system-free defaults.
 DEFAULTS: dict[str, Any] = {
@@ -454,7 +454,11 @@ def find_repo_config(start: Path | None = None) -> Path | None:
         return None
     for name in REPO_CONFIG_FILENAMES:
         candidate = root / name
-        if candidate.is_file() and not candidate.is_symlink():
+        if (
+            candidate.is_file()
+            and not candidate.is_symlink()
+            and not has_symlink_ancestor(root, candidate)
+        ):
             return candidate
     return None
 

@@ -174,8 +174,24 @@ def _registered_default_branch(remote_url: str) -> str | None:
         entry_remote = entry.get("remote")
         if not isinstance(entry_remote, str):
             continue
-        if _normalize_git_remote(entry_remote) == normalized:
-            return str(entry.get("default_branch") or "master")
+        if _normalize_git_remote(entry_remote) != normalized:
+            continue
+        default_branch = entry.get("default_branch")
+        if default_branch is None:
+            return "master"
+        if not isinstance(default_branch, str) or not default_branch.strip():
+            # A malformed registry entry (e.g. `default_branch: 123`) must
+            # not be silently coerced into a plausible-looking branch name
+            # via str(...) -- that could spuriously trust a checkout whose
+            # branch happens to match the coerced text. Fail closed for
+            # THIS entry (keep scanning; a later entry may still match).
+            log.warning(
+                "agent-worktrees repos registry has a non-string "
+                "default_branch for a project matching this remote -- "
+                "treating it as unregistered"
+            )
+            continue
+        return default_branch
     return None
 
 
@@ -280,3 +296,25 @@ def repo_config_is_trusted(root: Path) -> bool:
         )
         return False
     return True
+
+
+def has_symlink_ancestor(root: Path, candidate: Path) -> bool:
+    """Does any path component between ``root`` and ``candidate`` (inclusive
+    of the leaf) resolve through a symlink?
+
+    Checking only the leaf file (``candidate.is_symlink()``) misses a repo
+    committing an INTERMEDIATE directory as a symlink -- e.g. ``.config`` as
+    a symlink to somewhere outside the checkout -- which would let
+    ``candidate.is_file()`` / a YAML load still follow it to read arbitrary
+    machine-local content despite the leaf itself being an ordinary file.
+    """
+    try:
+        relative = candidate.relative_to(root)
+    except ValueError:
+        return True  # not even under root -- treat as unsafe
+    current = root
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            return True
+    return False

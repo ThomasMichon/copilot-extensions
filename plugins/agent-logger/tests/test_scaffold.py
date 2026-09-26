@@ -402,6 +402,79 @@ def test_repo_config_rejects_symlinked_candidate(tmp_path: Path, monkeypatch) ->
 
 
 @pytest.mark.no_autotrust
+def test_repo_config_rejects_symlinked_ancestor_directory(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Checking only the leaf file misses a repo committing an INTERMEDIATE
+    directory (e.g. .config) as a symlink -- candidate.is_file() would still
+    follow it to read arbitrary content outside the checkout even though the
+    leaf itself is an ordinary file."""
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, remote="https://example.test/example-owner/demo.git", branch="main")
+    outside_dir = tmp_path / "outside-config"
+    outside_dir.mkdir()
+    (outside_dir / "agent-logger.yaml").write_text(
+        "log:\n  path_template: logs/{title}.md\n", encoding="utf-8"
+    )
+    (repo / ".config").symlink_to(outside_dir)
+
+    registry = tmp_path / "repos.yaml"
+    registry.write_text(
+        yaml.safe_dump(
+            {
+                "repos": {
+                    "demo": {
+                        "remote": "https://example.test/example-owner/demo.git",
+                        "default_branch": "main",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_WORKTREES_REPOS_YAML", str(registry))
+    monkeypatch.chdir(repo)
+
+    assert find_repo_config() is None
+
+
+@pytest.mark.no_autotrust
+def test_repo_config_ignores_registry_entry_with_non_string_default_branch(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A malformed registry entry (default_branch: 123) must not be coerced
+    into a plausible-looking branch name via str(...) -- that could
+    spuriously trust a checkout whose actual branch happens to match the
+    coerced text."""
+    repo = tmp_path / "repo"
+    _init_git_repo(
+        repo, remote="https://example.test/example-owner/demo.git", branch="123"
+    )
+    (repo / ".agent-logger.yaml").write_text(
+        "log:\n  path_template: logs/{title}.md\n", encoding="utf-8"
+    )
+
+    registry = tmp_path / "repos.yaml"
+    registry.write_text(
+        yaml.safe_dump(
+            {
+                "repos": {
+                    "demo": {
+                        "remote": "https://example.test/example-owner/demo.git",
+                        "default_branch": 123,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_WORKTREES_REPOS_YAML", str(registry))
+    monkeypatch.chdir(repo)
+
+    assert find_repo_config() is None
+
+
+@pytest.mark.no_autotrust
 def test_repo_config_ignored_on_conflicting_registered_default_branches(
     tmp_path: Path, monkeypatch
 ) -> None:
