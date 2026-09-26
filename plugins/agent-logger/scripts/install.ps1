@@ -1011,31 +1011,42 @@ function Install-Package {
         @{
             Name = 'config-migrate'
             Package = 'agent-config-migrate'
-            Path = Join-Path $PluginDir 'libs\config-migrate'
+            Dir = 'config-migrate'
         },
         @{
             Name = 'agent-procutil'
             Package = 'agent-procutil'
-            Path = Join-Path $PluginDir 'libs\agent-procutil'
+            Dir = 'agent-procutil'
         },
         @{
             Name = 'dropin-registry'
             Package = 'agent-dropin-registry'
-            Path = Join-Path $PluginDir 'libs\dropin-registry'
+            Dir = 'dropin-registry'
         },
         @{
             Name = 'plugin-resolve'
             Package = 'agent-plugin-resolve'
-            Path = Join-Path $PluginDir 'libs\plugin-resolve'
+            Dir = 'plugin-resolve'
         },
         @{
             Name = 'plugin-activation'
             Package = 'agent-plugin-activation'
-            Path = Join-Path $PluginDir 'libs\plugin-activation'
+            Dir = 'plugin-activation'
         }
     )) {
-        if (-not (Test-Path (Join-Path $lib.Path 'pyproject.toml'))) { continue }
-        $libResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--no-build-isolation', '--reinstall-package', $lib.Package, $lib.Path, '--quiet')
+        # Prefer the plugin-local vendored copy; fall back to the monorepo's
+        # top-level libs\ directory for a local dev checkout where the payload
+        # was staged without its own libs\ copy (mirrors install.sh's own
+        # ${PLUGIN_DIR}/../../libs/<lib> fallback).
+        $libPath = Join-Path $PluginDir "libs\$($lib.Dir)"
+        if (-not (Test-Path (Join-Path $libPath 'pyproject.toml'))) {
+            $monorepoLibPath = Join-Path $PluginDir "..\..\libs\$($lib.Dir)"
+            if (Test-Path (Join-Path $monorepoLibPath 'pyproject.toml')) {
+                $libPath = $monorepoLibPath
+            }
+        }
+        if (-not (Test-Path (Join-Path $libPath 'pyproject.toml'))) { continue }
+        $libResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--no-build-isolation', '--reinstall-package', $lib.Package, $libPath, '--quiet')
         $libOut = $libResult.Output
         if ($libResult.ExitCode -ne 0) {
             $ErrorActionPreference = $prevEAP

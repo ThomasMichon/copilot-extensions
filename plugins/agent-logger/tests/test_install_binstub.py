@@ -540,3 +540,71 @@ def test_scoped_stamp_avoids_global_compatibility_wrappers(tmp_path: Path) -> No
         assert not (local_bin / command_name).exists()
         assert not (local_bin / f"{command_name}.ps1").exists()
         assert not (local_bin / f"{command_name}.cmd").exists()
+
+
+# --------------------------------------------------------------------------- #
+# vendored-lib install-step regression                                        #
+# --------------------------------------------------------------------------- #
+#
+# A dependency declared only in pyproject.toml is NOT enough for either
+# installer: both install the main package with --no-deps (a bare path
+# dependency name like "agent-plugin-activation" has no index entry to
+# resolve against), so each vendored lib needs its own explicit install step
+# BEFORE that final --no-deps install. This was missed for three new libs
+# when schema v3's registered-project trust gate was added (confirmed live:
+# a fresh install produced a package that raised `ModuleNotFoundError: No
+# module named 'plugin_activation'` on every CLI invocation). These tests
+# assert the fix structurally so a future edit can't silently drop or
+# reorder one of these steps while the rest of the suite stays green.
+
+_VENDORED_LIBS = (
+    "config-migrate",
+    "agent-procutil",
+    "dropin-registry",
+    "plugin-resolve",
+    "plugin-activation",
+)
+
+
+def _install_sh_lib_order() -> list[str]:
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    no_deps_marker = text.index('--no-deps "${PLUGIN_DIR}"')
+    body = text[:no_deps_marker]
+    order = []
+    for lib in _VENDORED_LIBS:
+        index = body.find(f"libs/{lib}")
+        assert index != -1, f"install.sh has no install step for libs/{lib}"
+        order.append((index, lib))
+    order.sort()
+    return [lib for _, lib in order]
+
+
+def _install_ps1_lib_order() -> list[str]:
+    text = _INSTALL_PS1.read_text(encoding="utf-8")
+    no_deps_marker = text.index("'--no-deps', \"$PluginDir\"")
+    body = text[:no_deps_marker]
+    order = []
+    for lib in _VENDORED_LIBS:
+        index = body.find(f"Dir = '{lib}'")
+        assert index != -1, f"install.ps1 has no install step for lib dir '{lib}'"
+        order.append((index, lib))
+    order.sort()
+    return [lib for _, lib in order]
+
+
+def test_install_sh_installs_every_vendored_lib_before_no_deps_install() -> None:
+    assert _install_sh_lib_order() == list(_VENDORED_LIBS)
+
+
+def test_install_ps1_installs_every_vendored_lib_before_no_deps_install() -> None:
+    assert _install_ps1_lib_order() == list(_VENDORED_LIBS)
+
+
+def test_install_ps1_falls_back_to_monorepo_libs_dir() -> None:
+    """Unlike a plugin-local vendored copy (always present in a deployed
+    payload), a local monorepo dev checkout may stage the plugin without its
+    own libs\\ copy -- install.ps1 must resolve each lib against the
+    top-level libs\\ directory in that case, mirroring install.sh's own
+    ${PLUGIN_DIR}/../../libs/<lib> fallback."""
+    text = _INSTALL_PS1.read_text(encoding="utf-8")
+    assert r"..\..\libs\$($lib.Dir)" in text
