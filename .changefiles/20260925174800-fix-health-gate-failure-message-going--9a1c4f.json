@@ -1,0 +1,9 @@
+{
+  "comment": "Fix install.sh's err() helper writing to stdout instead of stderr, which made the versioned-runtime health-gate rejection message ('failed its health gate') invisible on stderr and broke test_posix_health_gate_rejects_namespace_package_slot's stderr assertion (blocking dev->main promotion).",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -685,7 +685,7 @@ ok()      { echo "  ✓ $*"; }
 changed() { echo "  → $*"; }
 skipped() { echo "  ○ $*"; }
 warn()    { echo "  ! $*"; }
-err()     { echo "  ✗ $*"; }
+err()     { echo "  ✗ $*" >&2; }
 header()  { echo ""; echo "═══ $* $(printf '═%.0s' $(seq 1 $((56 - ${#1}))))"; }
 
 _bootstrap_python() {
@@ -1772,7 +1772,7 @@ deploy_copilot_plugin() {
     local copilot_path
     if ! copilot_path="$(resolve_executable_command_path copilot)"; then
         if command -v copilot >/dev/null 2>&1; then
-            err "Copilot CLI resolves only to a non-executable shell command; an executable PATH command is required" >&2
+            err "Copilot CLI resolves only to a non-executable shell command; an executable PATH command is required"
             return 1
         fi
         warn "Copilot CLI not found - skipping plugin install"
