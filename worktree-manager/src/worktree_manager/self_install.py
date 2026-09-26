@@ -442,6 +442,23 @@ def _find_any_symlink(tree: Path) -> Path | None:
 def _copy_payload(payload_dir: Path, slot: Path) -> None:
     if slot.exists():
         shutil.rmtree(slot)
+    if payload_dir.is_symlink():
+        # symlinks=True on the copytree below only protects symlinks
+        # encountered DURING the walk of payload_dir's own tree -- it
+        # cannot protect payload_dir being a symlink ITSELF (shutil.
+        # copytree always creates dst as a real directory, so there's
+        # nowhere for a preserved-root-symlink object to go). In the
+        # git-backed self_update path, a checked-out worktree-manager/
+        # dir could itself be a symlink; the earlier
+        # (payload/"pyproject.toml").is_file() check would still pass
+        # (it follows the link), copytree would dereference it, and
+        # _find_any_symlink(slot) afterward would see no link at all
+        # (the slot's own root is never included in its own scan).
+        raise RuntimeError(
+            f"refusing to install this payload: {payload_dir} is a "
+            "symlink -- a payload root must be a real directory, not a "
+            "link to an external tree"
+        )
     ignore = shutil.ignore_patterns(".git", ".venv", "__pycache__", "*.pyc")
     # symlinks=True: a payload staged by self_update's tarball fetch may
     # carry a preserved (not dereferenced -- see _fetch_via_tarball's own

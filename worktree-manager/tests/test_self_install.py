@@ -338,6 +338,30 @@ def test_self_install_refuses_a_symlink_anywhere_in_the_payload(tmp_path, monkey
     assert not version_slot("7.7.7", root).exists()
 
 
+def test_self_install_refuses_a_symlinked_payload_root(tmp_path, monkeypatch):
+    """Round-16 review finding: symlinks=True on the copytree only
+    protects symlinks encountered DURING the walk of payload_dir's own
+    tree -- it cannot protect payload_dir being a symlink ITSELF
+    (shutil.copytree always creates dst as a real directory, so there's
+    nowhere for a preserved-root-symlink object to go). In the git-backed
+    self_update path, a checked-out worktree-manager/ dir could itself be
+    a symlink; the earlier (payload/"pyproject.toml").is_file() check
+    would still pass (it follows the link), copytree would dereference
+    it, and _find_any_symlink(slot) afterward would see no link at all
+    (the slot's own root is never included in its own scan)."""
+    real_payload = _fake_payload(tmp_path, "10.10.10")
+    linked_payload = tmp_path / "linked-payload"
+    linked_payload.symlink_to(real_payload, target_is_directory=True)
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+
+    res = self_install(linked_payload, root=root, dry_run=False)
+    assert res.action == "error"
+    assert "symlink" in (res.reason or "")
+    assert current_version(root) is None
+    assert not version_slot("10.10.10", root).exists()
+
+
 def test_bin_directory_is_deployed_into_the_slot(tmp_path, monkeypatch):
     """Phase 3b Slice 2 (Mux relocation): the versioned self-install copies the
     WHOLE payload directory (``_copy_payload`` -> ``shutil.copytree``), so a
