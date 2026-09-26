@@ -1,0 +1,9 @@
+{
+  "comment": "Revert the deliberate Phase 1.5 validation probe now that report-failure's behavior has been observed",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

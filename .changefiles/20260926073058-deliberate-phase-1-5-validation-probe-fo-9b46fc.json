@@ -1,9 +1,0 @@
-{
-  "comment": "Deliberate Phase 1.5 validation probe for promotion-failure-reactive-fix-agent (temporary, reverted immediately after observation)",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "dev"
-    }
-  ]
-}
