@@ -6386,7 +6386,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Append one lifecycle event to the activity log (internal)",
     )
     sp.add_argument("event", help="Event name")
-    sp.add_argument("--worktree-id", default=None)
+    sp.add_argument("--worktree-id", default=None, help="Worktree ID (default: resolved from cwd)")
     sp.add_argument("--session-id", default=None)
     sp.add_argument(
         "--launch-id", dest="launch_id", default=None, help="Launch-flow correlation id"
