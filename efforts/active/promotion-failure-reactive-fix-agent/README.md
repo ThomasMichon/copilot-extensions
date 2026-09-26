@@ -898,7 +898,7 @@ _Pending._
     colored `FAILED tests/x.py::test_y` line no longer matches
     `_FAILED_TEST_RE` at all (the ANSI codes break the `^FAILED `
     anchor/shape), silently falling back to a whole-job signature and
-    losing the exact per-test dedup behavor this fix was meant to
+    losing the exact per-test dedup behavior this fix was meant to
     restore. Fixed by stripping ANSI CSI sequences (`_strip_ansi`)
     unconditionally in `_fetch_job_log`, before any caller ever sees
     the text — verified this is a real risk (not hypothetical) by
