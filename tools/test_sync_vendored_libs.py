@@ -257,6 +257,32 @@ def test_materialize_refuses_a_canonical_lib_with_no_src_directory(repo: Path):
     assert (repo / "plugins/alpha/libs/shared-lib/VENDOR_POINTER.json").exists()
 
 
+def test_materialize_refuses_a_symlinked_copy_root(repo: Path):
+    # _lib_copies() admits any lib.is_dir(), which follows a symlink, but
+    # the per-copy loop never rejected `copy` itself being a symlink (e.g.
+    # plugins/alpha/libs/shared-lib -> ../beta/libs/shared-lib) -- without
+    # this, _copy_src() would reach real child paths through the link,
+    # overwriting the TARGET's own src/version and unlinking the TARGET's
+    # pointer marker.
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "canonical content\n")
+    _lib_pyproject(repo, "libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+    _pointer(repo, "beta", "shared-lib")
+    target = repo / "plugins/beta/libs/shared-lib"
+    (target / "innocent.txt").write_text("do not touch\n", encoding="utf-8")
+
+    (repo / "plugins/alpha/libs").mkdir(parents=True)
+    (repo / "plugins/alpha/libs/shared-lib").symlink_to(target, target_is_directory=True)
+
+    result = _run(repo, "--materialize")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "symlink" in result.stderr
+    # The target's own content must be untouched by the attacker's
+    # symlinked copy attempt (its own genuine pointer may still
+    # legitimately expand independently -- that's expected and fine).
+    assert (target / "innocent.txt").read_text() == "do not touch\n"
+    assert (repo / "plugins/alpha/libs/shared-lib").is_symlink()
+
+
 def test_materialize_pointer_copy_is_never_blocked_by_drift_gate(repo: Path):
     """A pointer copy has no version of its own to compare against canonical,
     so there is nothing for the "copies moved ahead" safety gate to block --

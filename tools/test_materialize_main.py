@@ -125,6 +125,31 @@ def test_materialize_refuses_a_symlinked_pointer_directory_pointing_inside_root(
     assert (attacker_dir / "zdd").is_symlink()
 
 
+def test_materialize_refuses_a_symlinked_ancestor_directory(tmp_path: Path):
+    # Checking only lib_copy_dir itself misses a symlinked ANCESTOR (e.g.
+    # plugins/<plugin> or plugins/<plugin>/libs itself): find_pointers()'s
+    # own glob already follows such an intermediate symlink to discover
+    # the pointer file, and if it resolves to another directory still
+    # inside checkout_root, a resolved-path escape check alone would
+    # accept it too -- letting the src_sub removal/copy overwrite that
+    # OTHER directory's own content and unlink ITS marker.
+    root = tmp_path / "repo"
+    _canonical_lib(root, "zdd", version="0.1.0-dev1", content="shared\n")
+    victim = _pointer(root, "victim-plugin", "zdd")
+    (victim / "innocent.txt").write_text("do not touch\n", encoding="utf-8")
+
+    # The attacker's OWN plugin dir (not just its libs/<lib> copy) is a
+    # symlink pointing at the victim's plugin dir.
+    (root / "plugins" / "attacker-plugin").symlink_to(
+        root / "plugins" / "victim-plugin", target_is_directory=True
+    )
+
+    log = mm.materialize(root, canonical_root=root)
+    assert any("SKIP" in line and "is a symlink" in line for line in log)
+    assert (victim / "innocent.txt").read_text() == "do not touch\n"
+    assert (root / "plugins" / "attacker-plugin").is_symlink()
+
+
 def test_materialize_skips_a_canonical_lib_with_no_src_directory_at_all(tmp_path: Path):
     # _find_symlink() returns None for a MISSING src/ too, not just "no
     # symlink found inside it" -- an incomplete/malformed canonical lib
@@ -467,7 +492,7 @@ def test_materialize_refuses_a_pointer_dir_that_escapes_dest(tmp_path: Path):
 
     log = mm.materialize(root, canonical_root=root)
 
-    assert any("SKIP" in line and "escapes the checkout root" in line for line in log)
+    assert any("SKIP" in line and "is a symlink" in line for line in log)
     assert (real_pointer_dir / "VENDOR_POINTER.json").exists()
     assert not (real_pointer_dir / "src").exists()
 

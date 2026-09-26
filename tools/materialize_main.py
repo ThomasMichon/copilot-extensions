@@ -128,9 +128,21 @@ def _materialize_one_pointer(pointer_path: Path, *, checkout_root: Path, canonic
     # is legitimately within root) -- but the src_sub removal/copy below
     # would then silently overwrite that OTHER directory's own content and
     # unlink its own pointer marker. Reject the pointer directory itself
-    # being a symlink outright, before the escape check even runs.
-    if lib_copy_dir.is_symlink():
-        return f"SKIP {lib_copy_dir}: pointer directory itself is a symlink -- refusing"
+    # being a symlink outright, before the escape check even runs. This
+    # alone still misses a symlinked ANCESTOR though (e.g. plugins/<plugin>
+    # or plugins/<plugin>/libs itself) -- find_pointers()'s own glob
+    # already follows such an intermediate symlink to discover the
+    # pointer file in the first place, and if it resolves to another
+    # directory still inside checkout_root, _escapes_root() (checked
+    # next) would accept it too. Check every path component between
+    # checkout_root and lib_copy_dir, not just the final directory.
+    bad_ancestor = _find_symlinked_ancestor(lib_copy_dir, checkout_root)
+    if bad_ancestor is not None:
+        return (
+            f"SKIP {lib_copy_dir}: {bad_ancestor} is a symlink -- refusing "
+            "(a pointer copy's own path, and every ancestor between it and "
+            "the checkout root, must be a real directory)"
+        )
 
     if _escapes_root(lib_copy_dir, checkout_root):
         return (
@@ -266,6 +278,26 @@ def _escapes_root(candidate: Path, root: Path) -> bool:
     candidate_r = candidate.resolve()
     root_r = root.resolve()
     return candidate_r != root_r and root_r not in candidate_r.parents
+
+
+def _find_symlinked_ancestor(path: Path, root: Path) -> Path | None:
+    """The first symlink among ``path`` itself and every ancestor directory
+    strictly between it and ``root`` (``root`` itself is never checked --
+    it's the trusted boundary, not part of the untrusted path being
+    validated). Checking only ``path`` misses a symlinked ANCESTOR (e.g.
+    ``plugins/<plugin>`` or ``plugins/<plugin>/libs`` itself): a glob-based
+    discovery like ``find_pointers()`` already follows such an
+    intermediate symlink to find a pointer file in the first place, and if
+    it resolves to another directory still inside ``root``, a resolved-
+    path escape check alone would accept it too."""
+    root_r = root.resolve()
+    current = path
+    while True:
+        if current.resolve() == root_r or current.parent == current:
+            return None
+        if current.is_symlink():
+            return current
+        current = current.parent
 
 
 def _resolve_within(canonical_root: Path, source_rel: str) -> Path | None:

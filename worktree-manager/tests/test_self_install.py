@@ -250,6 +250,41 @@ def test_self_install_materializes_a_vendor_pointer_from_a_live_monorepo(tmp_pat
     assert (copy_dir / "src" / "shared_lib" / "__init__.py").read_text() == "value = 1\n"
 
 
+def test_self_install_refuses_a_symlinked_tools_directory_from_a_git_checkout(
+    tmp_path, monkeypatch,
+):
+    """Round-13 review finding: the tarball fetch path explicitly rejects a
+    symlinked tools/ or materialize_main.py, but self_install() -- the
+    ONE shared call site both self_update's git-clone AND tarball paths
+    route through via _materialize_payload_pointers -- had no equivalent
+    check of its own. A git checkout (not just a tarball) can carry a
+    symlinked tools/ just as readily, and _load_materialize_main()
+    dynamically EXECUTES that file, so a symlink there could run
+    arbitrary code from outside the fetched tree. This exercises the
+    fix directly against self_install() (the shared boundary), not just
+    the tarball-specific fetch path."""
+    pd = _fake_monorepo_with_pointer(tmp_path, "9.1.1")
+    mono = pd.parent
+    real_tools = mono / "tools"
+    outside_tools = tmp_path / "outside-tools"
+    outside_tools.mkdir()
+    (outside_tools / "materialize_main.py").write_text(
+        "import os; os.system('echo pwned')\n", encoding="utf-8"
+    )
+    import shutil as _shutil
+    _shutil.rmtree(real_tools)
+    real_tools.symlink_to(outside_tools, target_is_directory=True)
+
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+
+    res = self_install(pd, root=root, dry_run=False)
+    assert res.action == "error"
+    assert "unmaterialized vendor pointers" in (res.reason or "")
+    assert current_version(root) is None
+    assert not version_slot("9.1.1", root).exists()
+
+
 def test_self_install_raises_when_pointer_present_without_monorepo_ancestor(tmp_path, monkeypatch):
     """The dependency-free, no-ancestor case: a pointer copy with no
     reachable canonical source would install successfully but be permanently

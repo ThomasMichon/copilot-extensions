@@ -572,6 +572,19 @@ def cmd_materialize(*, force: bool) -> int:
             continue
         for copy in paths:
             try:
+                if copy.is_symlink():
+                    # _lib_copies() admits any copy.is_dir(), which follows
+                    # a symlink, but nothing here rejects the copy ROOT
+                    # itself being a symlink (e.g. plugins/a/libs/x ->
+                    # ../other) -- without this, _copy_src()/pointer.unlink()
+                    # below would reach real child paths through the link,
+                    # overwriting the TARGET's own src/version and
+                    # unlinking the TARGET's pointer marker (an external
+                    # target could be modified this way too).
+                    raise SystemExit(
+                        f"{copy} is a symlink -- refusing (a vendored copy "
+                        "root must be a real directory, not a link)"
+                    )
                 pointer = copy / POINTER_NAME
                 copy_tests = copy / "tests"
                 refresh_tests = pointer.exists() and (

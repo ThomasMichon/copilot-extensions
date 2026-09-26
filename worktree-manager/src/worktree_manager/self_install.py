@@ -349,7 +349,22 @@ def _materialize_payload_pointers(payload_dir: Path, slot: Path) -> None:
         return
     monorepo_root = payload_dir.parent
     has_canonical = (monorepo_root / "libs").is_dir()
-    has_tool = (monorepo_root / "tools" / "materialize_main.py").is_file()
+    tools_dir = monorepo_root / "tools"
+    tool_source = tools_dir / "materialize_main.py"
+    # The git-clone self_update path never went through the tarball
+    # fetch's own symlink checks (those only guard _fetch_via_tarball) --
+    # a checked-out tree can carry a symlinked tools/ or
+    # materialize_main.py just as readily as a tarball can, and
+    # _load_materialize_main() below dynamically EXECUTES this file, so a
+    # symlink here could run arbitrary code from outside the fetched
+    # tree. Checked at this ONE shared call site (both self_update's
+    # git-clone and tarball paths route through _materialize_payload_pointers)
+    # rather than duplicating it in each fetch mechanism.
+    has_tool = (
+        tool_source.is_file()
+        and not tools_dir.is_symlink()
+        and not tool_source.is_symlink()
+    )
     if not (has_canonical and has_tool):
         materialize_main = None
     else:
