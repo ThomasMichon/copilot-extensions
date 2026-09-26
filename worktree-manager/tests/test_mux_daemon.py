@@ -1092,6 +1092,24 @@ def test_ensure_status_monitor_running_scrubs_session_credentials(monkeypatch):
     assert env.get("SOME_OTHER_VAR") == "kept"
 
 
+def test_scrub_session_credentials_is_case_insensitive():
+    """Copilot review finding on PR #3839: Windows environment-variable
+    names are case-insensitive, so a parent carrying `gh_token`,
+    `github_token`, or a differently-cased AHP token must still be
+    scrubbed -- an exact-case set-membership check silently misses those."""
+    env = {
+        "gh_token": "secret-gh-lower",
+        "Github_Token": "secret-github-mixed",
+        "agent_worktrees_ahp_auth_token": "secret-ahp-lower",
+        "GH_TOKEN": "secret-gh-upper",
+        "SOME_OTHER_VAR": "kept",
+    }
+
+    scrubbed = mux_daemon._scrub_session_credentials(env)
+
+    assert scrubbed == {"SOME_OTHER_VAR": "kept"}
+
+
 def test_ensure_daemon_running_end_to_end_with_a_real_subprocess(tmp_path):
     """A genuine integration test: spawn the real ``mux-daemon run`` CLI as
     a subprocess (not mocked) and confirm ``ensure_daemon_running`` finds it
