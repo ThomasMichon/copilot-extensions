@@ -971,7 +971,7 @@ _Pending._
   with genuine live evidence rather than declaring Phase 1.5 done on
   partial signal.
 
-### 2026-09-26 — Phase 1.5's second natural occurrence: the fix confirmed working live, Phase 1.5 complete
+### 2026-09-26 — Phase 1.5's second natural occurrence: detection+filing confirmed working live; dedup remains open
 - A second scheduled monitoring tick found two more red
   `validate-and-promote.yml` runs since the last check:
   **36236310228** (10:36 UTC — before PR #3815 merged; `report-failure`
