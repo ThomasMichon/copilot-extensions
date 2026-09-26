@@ -37,7 +37,8 @@ def _runtime_home() -> Path:
     override = os.environ.get("AGENT_CONTAINERS_HOME", "").strip()
     if override:
         return Path(override).expanduser()
-    return Path.home() / ".agent-containers"
+    _legacy = ".agent-containers"  # marketplace-isolation: allow legacy compatibility root
+    return Path.home() / _legacy
 
 
 # Canonical runtime paths.

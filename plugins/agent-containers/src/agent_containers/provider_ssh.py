@@ -74,7 +74,8 @@ class SessionRequest:
 
 def provider_module_path() -> Path:
     """Return the provider-owned agent-ssh transport module path."""
-    runtime_root = Path(os.environ.get("AGENT_RT_ROOT", "~/.agent-containers")).expanduser()
+    _default = "~/.agent-containers"  # marketplace-isolation: allow legacy compatibility root
+    runtime_root = Path(os.environ.get("AGENT_RT_ROOT", _default)).expanduser()
     marker = runtime_root / "payload-dir"
     try:
         payload_root = Path(marker.read_text(encoding="utf-8").strip())
@@ -315,9 +316,8 @@ def _profile_registry_path() -> Path:
 
 
 def _source_registry_path() -> Path:
-    root = Path(
-        os.environ.get("AGENT_WORKTREES_SOURCES_DIR", "~/.agent-worktrees/sources")
-    ).expanduser()
+    _default = "~/.agent-worktrees/sources"  # marketplace-isolation: allow registry
+    root = Path(os.environ.get("AGENT_WORKTREES_SOURCES_DIR", _default)).expanduser()
     return root / "agent-containers.json"
 
 

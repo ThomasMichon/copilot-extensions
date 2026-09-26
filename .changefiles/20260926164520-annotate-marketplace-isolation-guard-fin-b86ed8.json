@@ -1,0 +1,17 @@
+{
+  "comment": "Annotate marketplace-isolation guard findings (agent-containers triage; shared venue-copilot lib fix fans out to agent-codespaces/agent-ssh)",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

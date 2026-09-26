@@ -41,7 +41,7 @@ if ($env:AGENT_BRIDGE_PROVIDERS_DIR) {
 } elseif ($env:AGENT_BRIDGE_CONFIG_DIR) {
     $dir = Join-Path $env:AGENT_BRIDGE_CONFIG_DIR 'providers.d'
 } else {
-    $dir = Join-Path $env:USERPROFILE '.agent-bridge\providers.d'
+    $dir = Join-Path $env:USERPROFILE '.agent-bridge\providers.d' # marketplace-isolation: allow legacy compatibility root
 }
 try { New-Item -ItemType Directory -Force -Path $dir | Out-Null } catch { Exit-SessionStart }
 

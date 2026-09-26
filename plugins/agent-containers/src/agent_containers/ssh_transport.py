@@ -419,7 +419,8 @@ def write_remote_env(container: str, user: str, values: dict[str, str]) -> str |
     invalid = sorted(name for name in values if not _SAFE_ENV.fullmatch(name))
     if invalid:
         raise RuntimeError(f"Unsafe environment names for SSH launch: {invalid}")
-    launch_dir = f"{_remote_home(container, user)}/.agent-containers/launch"
+    _launch_rel = ".agent-containers/launch"  # marketplace-isolation: allow remote-container-path
+    launch_dir = f"{_remote_home(container, user)}/{_launch_rel}"
     remote_path = f"{launch_dir}/{uuid.uuid4().hex}.env"
     payload = "".join(
         f"export {name}={shlex.quote(value)}\n"
@@ -465,7 +466,8 @@ def cleanup_remote_env(container: str, user: str, remote_path: str | None) -> No
 def cleanup_remote_envs(container: str, user: str) -> None:
     """Remove abandoned launch-only env files before preparing a new launch."""
     _validate_target(container, user)
-    launch_dir = f"{_remote_home(container, user)}/.agent-containers/launch"
+    _launch_rel = ".agent-containers/launch"  # marketplace-isolation: allow remote-container-path
+    launch_dir = f"{_remote_home(container, user)}/{_launch_rel}"
     result = _run([
         "docker", "exec", "-u", user, container,
         "sh", "-c",

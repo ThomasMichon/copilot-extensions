@@ -39,13 +39,15 @@ MAX_SEED_CHARS = 24_000
 # task is therefore written to a file on the venue and seeded as a one-line
 # pointer; the file also stays re-readable by the session after a resume.
 SEED_INLINE_MAX = 400
-SEED_DIR = "$HOME/.agent-bridge/seeds"
+SEED_DIR = "$HOME/.agent-bridge/seeds"  # marketplace-isolation: allow agent-bridge-management
 
 SESSION_SELECTORS = ("--resume", "-r", "--continue", "--session-id")
 
 # The daemon's own config dir, matching agent-bridge's ``effective_config_dir()``
 # default -- overridable the same way, via ``AGENT_BRIDGE_CONFIG_DIR``.
-_DEFAULT_BRIDGE_CONFIG_DIR = "~/.agent-bridge"
+_DEFAULT_BRIDGE_CONFIG_DIR = (
+    "~/.agent-bridge"  # marketplace-isolation: allow agent-bridge-management
+)
 
 #: Env vars scrubbed before spawning the ``agent-bridge`` CLI as a plain
 #: sibling binstub -- mirrors ``agent_dispatch.procutil``'s
@@ -146,9 +148,9 @@ def registration_credentials_script(token: str, port: int) -> str:
     return (
         "mkdir -p ~/.agent-bridge && "
         f"printf 'token: %s\\n' {shlex.quote(token)} "
-        "> ~/.agent-bridge/auth.yaml && "
+        "> ~/.agent-bridge/auth.yaml && "  # marketplace-isolation: allow agent-bridge-management
         f"printf '{{\"active\": {{\"port\": {int(port)}}}}}' "
-        "> ~/.agent-bridge/active.json"
+        "> ~/.agent-bridge/active.json"  # marketplace-isolation: allow agent-bridge-management
     )
 
 
@@ -156,7 +158,8 @@ def bridge_probe_script(port: int) -> str:
     """Authenticated curl probe for a venue-side agent-bridge reverse forward."""
     return (
         "t=$(sed -n 's/^[[:space:]]*token:[[:space:]]*//p' "
-        "~/.agent-bridge/auth.yaml | tr -d \"'\\\"\"); "
+        "~/.agent-bridge/auth.yaml "  # marketplace-isolation: allow agent-bridge-management
+        "| tr -d \"'\\\"\"); "
         f"curl -fsS -m 5 -o /dev/null -H \"Authorization: Bearer $t\" "
         f"http://127.0.0.1:{int(port)}/api/v1/live-sessions"
     )
