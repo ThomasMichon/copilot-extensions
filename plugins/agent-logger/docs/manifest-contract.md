@@ -163,9 +163,11 @@ one of these files at its git root:
 - `.config/agent-logger.yaml`
 - `.config/agent-logger.yml`
 
-Only the `log:` block is honored from repo-local config. This lets a repository
-choose its own output tree and Markdown skeleton without letting a checkout
-change machine-local sync targets.
+Only the `log:` block, plus schema v3's single `sync.local_path` field (see
+below), is honored from repo-local config. This lets a repository choose its
+own output tree and Markdown skeleton, and declare the one facility-wide
+sync destination, without letting a checkout change any other machine-local
+sync behavior (target type, credentials, machine identity).
 
 Example:
 
@@ -215,8 +217,29 @@ version 1. The loader rejects unsupported versions, malformed YAML, unknown
 fields/placeholders, invalid timezones, and output paths that are absolute or
 escape the repository. Repo-local config accepts only `root`, `path_template`,
 `timezone`, `note_marker`, `template`, `narration_style`, `exemplars`, and
-`closing_remark` under `log:`; it cannot change sync or other machine-local
-behavior.
+`closing_remark` under `log:`; as of schema v3 it additionally accepts a
+single `sync.local_path` (an absolute path, e.g. a shared NAS mount) -- the
+one sync setting that is genuinely the same value for every machine in the
+fleet. Everything else about sync (which target is active, credentials,
+machine identity) stays machine-local and cannot be set from a repo.
+
+```yaml
+schema_version: 3
+sync:
+  local_path: /mnt/nas/Lake/Copilot/sessions
+```
+
+### Trust gate: only a registered project's default branch is honored
+
+Repo-local config is only read from a checkout that is BOTH a project the
+operator has explicitly registered with `agent-worktrees` (matched by git
+remote URL against `~/.agent-worktrees/repos.yaml`) AND currently checked out
+on that project's registered `default_branch`. An arbitrary local clone, or a
+registered repo's feature/PR branch, gets no repo-local config at all --
+silently, never an error -- so a checkout can't redirect a facility machine's
+sync destination or log layout just by existing locally or by an unreviewed
+branch. See `agent_logger/repo_trust.py` for the exact resolution logic and
+the `$AGENT_LOGGER_TRUST_REPO_CONFIG` machine-local override.
 
 **Interleaved vs. end-only.** `narration_style` exists precisely so voice
 need not be *"jammed at the end"* -- a host that wants personality *woven

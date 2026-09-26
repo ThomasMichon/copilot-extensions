@@ -57,6 +57,24 @@ def _normalize_git_remote(url: str) -> str | None:
     return f"{match.group('host').lower()}/{match.group('path').lower()}"
 
 
+# Ambient Git environment variables that redirect git's notion of "which
+# repository" regardless of an explicit `-C <root>` -- a stale/leaked
+# GIT_DIR (etc.) in the calling process's environment could otherwise make
+# this probe inspect a different repository than `root`, decoupling the
+# trust decision from the config actually being loaded. Cleared on every
+# invocation below; mirrors the same clearing in aggregate.py's own
+# `_run_git`.
+_AMBIENT_GIT_ENV_VARS = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_COMMON_DIR",
+    "GIT_PREFIX",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+)
+
+
 def _run_git(root: Path, *args: str) -> str | None:
     """Run a git command in ``root``; return stdout on success, else None.
 
@@ -65,6 +83,9 @@ def _run_git(root: Path, *args: str) -> str | None:
     this is an input to a fail-safe trust decision, never something that
     should raise into a config-loading path.
     """
+    env = os.environ.copy()
+    for key in _AMBIENT_GIT_ENV_VARS:
+        env.pop(key, None)
     try:
         result = subprocess.run(
             ["git", "-C", str(root), *args],
@@ -72,6 +93,7 @@ def _run_git(root: Path, *args: str) -> str | None:
             text=True,
             timeout=5,
             check=False,
+            env=env,
         )
     except (OSError, subprocess.SubprocessError):
         return None

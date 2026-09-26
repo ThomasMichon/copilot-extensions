@@ -10,6 +10,8 @@ import yaml
 from agent_logger import tenancy
 from agent_logger.config import load_config
 
+from .conftest import init_git_repo
+
 # --------------------------------------------------------------------------- #
 # fixtures / helpers                                                            #
 # --------------------------------------------------------------------------- #
@@ -366,6 +368,54 @@ def test_discover_prefers_dedicated_tenant_file(tmp_path):
     )
     assert [t.tenant_id for t in tenants] == ["aperture-labs"]
     assert tenants[0].config_path.name == ".agent-logger.tenant.yaml"
+
+
+@pytest.mark.no_autotrust
+def test_discover_tenant_ignored_when_not_on_default_branch(tmp_path, monkeypatch):
+    """A registered adopted repo checked out on a feature/PR branch must not
+    have its committed tenant block honored -- the same registered-project +
+    default-branch trust gate config.py's find_repo_config applies (see
+    agent_logger.repo_trust.repo_config_is_trusted), now also applied to
+    tenant discovery."""
+    src = tmp_path / "src"
+    repo = src / "aperture-labs"
+    init_git_repo(
+        repo,
+        remote="https://example.test/tmichon/aperture-labs.git",
+        branch="feature-x",
+    )
+    (repo / ".agent-logger.yaml").write_text(
+        yaml.safe_dump(
+            {"schema_version": 1, "tenant": {"id": "aperture-labs", "roles": ["source"]}}
+        ),
+        encoding="utf-8",
+    )
+    aw_home = tmp_path / ".aw"
+    aw_home.mkdir(parents=True)
+    (aw_home / "projects.yaml").write_text(
+        yaml.safe_dump({"projects": {"aperture-labs": {}}}), encoding="utf-8"
+    )
+    registry = aw_home / "repos.yaml"
+    registry.write_text(
+        yaml.safe_dump(
+            {
+                "srcroot": {tenancy.current_platform(): str(src)},
+                "repos": {
+                    "aperture-labs": {
+                        "remote": "https://example.test/tmichon/aperture-labs.git",
+                        "default_branch": "main",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_WORKTREES_REPOS_YAML", str(registry))
+
+    tenants = tenancy.discover_tenants(
+        machine="book2", home=tmp_path / "home", aw_home=aw_home
+    )
+    assert tenants == []
 
 
 def test_discover_malformed_tenant_is_skipped(tmp_path):
