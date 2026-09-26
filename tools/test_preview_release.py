@@ -299,6 +299,38 @@ def test_materialize_into_preview_refuses_a_symlinked_canonical_lib_root(
     assert (dest / "libs" / "shared-lib" / "VENDOR_POINTER.json").exists()
 
 
+def test_materialize_into_preview_refuses_a_canonical_lib_with_no_src_directory(
+    isolated: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    # _find_symlink() returns None for a MISSING src/ too, not just "no
+    # symlink found inside it" -- an incomplete canonical lib must be
+    # refused here, before _copy_src() removes the preview copy's
+    # existing source and copies nothing, leaving a source-less preview
+    # with the pointer marker still removed as if expansion had succeeded.
+    plugin_dir = _plugin(isolated, "agent-worktrees", "1.0.0")
+    pointer_copy = plugin_dir / "libs" / "shared-lib"
+    (pointer_copy / "src").mkdir(parents=True)
+    (pointer_copy / "src" / "__init__.py").write_text("original stub\n", encoding="utf-8")
+    (pointer_copy / "VENDOR_POINTER.json").write_text(
+        json.dumps({"schema": "copilot-extensions.vendor-pointer", "version": 1,
+                    "source": "libs/shared-lib", "kind": "src-passthrough"}) + "\n",
+        encoding="utf-8",
+    )
+
+    canonical_root = isolated / "canonical-libs"
+    (canonical_root / "shared-lib").mkdir(parents=True)  # no src/ subdirectory
+
+    fake = _FakeSyncVendoredLibs(canonical_root)
+    monkeypatch.setattr(preview_release, "_load_sync_vendored_libs", lambda: fake)
+
+    dest = preview_release.build("agent-worktrees", isolated / "work")
+
+    assert (dest / "libs" / "shared-lib" / "src" / "__init__.py").read_text() == (
+        "original stub\n"
+    )
+    assert (dest / "libs" / "shared-lib" / "VENDOR_POINTER.json").exists()
+
+
 def test_materialize_into_preview_preflights_tests_before_mutating_src(
     isolated: Path, monkeypatch: pytest.MonkeyPatch,
 ):

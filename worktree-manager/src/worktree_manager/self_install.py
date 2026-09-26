@@ -672,34 +672,64 @@ def _clear_dir(d: Path) -> None:
 def _safe_extract(tf, dest: Path) -> None:
     """Extract a tar into ``dest``, refusing anything that would escape it.
 
-    Uses the stdlib's own ``filter="data"`` (available since Python 3.12,
-    backported as a security fix to older supported versions too) rather
-    than a hand-rolled path-only pre-check: a pre-check computed against
-    ``getmembers()`` BEFORE any extraction happens cannot catch a classic
-    tar symlink attack -- a symlink member (``evil -> /tmp/outside``)
-    followed by a second member using it as a path prefix
-    (``evil/payload.py``) -- because at pre-check time neither path exists
-    on disk yet, so a lexical ``.resolve()`` sees no symlink to follow and
-    both members pass; only DURING extractall's own sequential member-by-
-    member write does the second member actually traverse through the
-    just-created symlink and land outside ``dest`` entirely.
-    ``filter="data"`` is stdlib's purpose-built, security-reviewed defense
-    against exactly this: it validates each member (including a symlink's
-    resolved destination) against ``dest`` live, as extraction proceeds,
-    rather than trusting a snapshot taken before anything was written."""
-    import tarfile
+    A hand-rolled path-only pre-check computed against ``getmembers()``
+    BEFORE any extraction happens cannot catch a classic tar symlink
+    attack -- a symlink member (``evil -> /tmp/outside``) followed by a
+    second member using it as a path prefix (``evil/payload.py``) --
+    because at pre-check time neither path exists on disk yet, so a
+    lexical ``.resolve()`` sees no symlink to follow and both members
+    pass; only DURING a batch extractall's own sequential write does the
+    second member actually traverse through the just-created symlink and
+    land outside ``dest`` entirely.
+
+    Fixed by extracting ONE member at a time, validating each immediately
+    before extracting it (not the whole batch up front): by the time a
+    later member (``evil/payload.py``) is checked, an earlier symlink
+    member (``evil``) has ALREADY been written to disk in a prior
+    iteration of this same loop, so ``.resolve()`` follows the REAL
+    symlink now sitting there and correctly detects the escape --
+    reproducing the safety property of stdlib's ``filter="data"``
+    (available only since Python 3.12, backported to some but not all
+    supported-version patch releases) without depending on it, since this
+    project declares ``requires-python = \">=3.10\"`` and a raw
+    ``filter=\"data\"`` call would raise ``TypeError`` on an
+    unpatched 3.10/3.11 host, breaking the documented git-optional
+    tarball fallback instead of updating."""
+    import warnings
 
     dest = dest.resolve()
-    try:
-        tf.extractall(dest, filter="data")  # noqa: S202 - filter="data" validates live
-    except tarfile.TarError as e:
-        # filter="data" raises tarfile.FilterError (a TarError, not an
-        # OSError) on a rejected member -- but this function's caller
-        # contract (and _fetch_via_tarball's own documented "raises
-        # OSError on any failure") is OSError-only, so normalize here
-        # rather than letting a different exception type escape past
-        # self_update's own OSError/SubprocessError catch.
-        raise OSError(f"refused while extracting tarball: {e}") from e
+    for member in tf.getmembers():
+        target = (dest / member.name).resolve()
+        if target != dest and dest not in target.parents:
+            raise OSError(f"unsafe path in tarball: {member.name}")
+        # Hardlinks, device files, fifos, etc. are refused outright by the
+        # member-type check below -- only a symlink's own target needs
+        # validating here.
+        if member.issym():
+            if os.path.isabs(member.linkname):
+                raise OSError(f"{member.name} is a link to an absolute path")
+            # Resolve the link's OWN target relative to where it will
+            # live (target.parent), the same way the filesystem would --
+            # this is what actually catches the sequential-traversal
+            # attack: a later member's own target path (checked above)
+            # only escapes visibly once THIS check has forced the
+            # symlink's resolved destination to be validated too.
+            link_dest = (target.parent / member.linkname).resolve()
+            if link_dest != dest and dest not in link_dest.parents:
+                raise OSError(f"{member.name} is a link escaping the destination")
+        if not (member.isreg() or member.isdir() or member.issym()):
+            raise OSError(
+                f"refusing to extract {member.name}: unsupported member type "
+                "(only regular files, directories, and symlinks are allowed)"
+            )
+        with warnings.catch_warnings():
+            # Every member here is already validated by hand above,
+            # independent of Python's own filter= mechanism (unavailable
+            # on this project's older supported Python versions) --
+            # silence the resulting "no filter given" DeprecationWarning
+            # rather than leaving noise in every real self-update run.
+            warnings.simplefilter("ignore", DeprecationWarning)
+            tf.extract(member, dest)  # noqa: S202 - each member validated immediately above
 
 
 def _fetch_via_tarball(staging: Path, url: str, *, timeout: int = 180) -> None:

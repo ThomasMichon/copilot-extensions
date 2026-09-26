@@ -661,3 +661,40 @@ def test_safe_extract_refuses_the_classic_tar_symlink_traversal_attack(tmp_path)
     # Nothing must have been written outside dest -- the attack's whole
     # point was landing payload.py at outside/payload.py.
     assert not (outside / "payload.py").exists()
+
+
+def test_safe_extract_never_uses_the_filter_kwarg(tmp_path):
+    """Round-12 review finding: the project declares
+    requires-python >= 3.10 (worktree-manager/pyproject.toml), but
+    TarFile.extractall(filter=...)/.extract(filter=...) is only available
+    in newer stdlib patch versions -- calling it unconditionally would
+    raise TypeError on an unpatched 3.10/3.11 host, breaking the
+    documented git-optional tarball fallback instead of updating. Proves
+    _safe_extract() never passes filter= at all (relying instead on its
+    own hand-rolled, version-independent sequential validate-then-extract
+    loop), by monkeypatching TarFile.extract itself to fail loudly if
+    ever called with a filter kwarg."""
+    import tarfile
+
+    original_extract = tarfile.TarFile.extract
+
+    def _spy_extract(self, member, path="", set_attrs=True, *, numeric_owner=False, filter=None):
+        assert filter is None, "filter= was passed -- must stay version-independent"
+        return original_extract(self, member, path, set_attrs=set_attrs,
+                                numeric_owner=numeric_owner)
+
+    import unittest.mock
+    with unittest.mock.patch.object(tarfile.TarFile, "extract", _spy_extract):
+        archive_root = tmp_path / "archive-src"
+        archive_root.mkdir()
+        (archive_root / "a.txt").write_text("hello\n")
+        archive_path = tmp_path / "plain.tar.gz"
+        with tarfile.open(archive_path, "w:gz") as tf:
+            tf.add(archive_root, arcname="stuff")
+
+        dest = tmp_path / "dest"
+        dest.mkdir()
+        with tarfile.open(archive_path, "r:gz") as tf:
+            self_install._safe_extract(tf, dest)
+
+    assert (dest / "stuff" / "a.txt").read_text() == "hello\n"

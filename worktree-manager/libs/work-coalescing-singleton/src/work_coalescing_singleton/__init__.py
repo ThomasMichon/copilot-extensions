@@ -77,17 +77,27 @@ if not _canonical_init.is_file():
 # locked file) fails closed.
 _pycache = _canonical_pkg_dir / "__pycache__"
 if _pycache.is_dir():
-    try:
-        shutil.rmtree(_pycache)
-    except FileNotFoundError:
-        pass
-    except OSError as exc:
-        raise ImportError(
-            __name__ + ": could not clear stale __pycache__ at " +
-            str(_pycache) + " (" + str(exc) + ") -- refusing to risk "
-            "serving stale bytecode (copilot-extensions#3802); remove it "
-            "by hand and retry"
-        ) from exc
+    for _attempt in range(3):
+        try:
+            shutil.rmtree(_pycache)
+            break
+        except FileNotFoundError:
+            break
+        except OSError as _exc:
+            # A concurrent process/thread importing this same stub (common
+            # under a parallel test run) may be writing fresh .pyc files
+            # into __pycache__ at the exact moment shutil.rmtree() is mid-
+            # walk, raising ENOTEMPTY (or a similar transient OSError) even
+            # though nothing here is genuinely broken -- this operation is
+            # idempotent (clearing an already-partially-cleared cache is
+            # safe), so retry a few times before failing closed.
+            if _attempt == 2:
+                raise ImportError(
+                    __name__ + ": could not clear stale __pycache__ at " +
+                    str(_pycache) + " (" + str(_exc) + ") -- refusing to "
+                    "risk serving stale bytecode (copilot-extensions#3802); "
+                    "remove it by hand and retry"
+                ) from _exc
 
 # Standard "self-replacing module" technique: CPython's import machinery
 # re-fetches ``sys.modules[name]`` AFTER this file's own exec finishes (see

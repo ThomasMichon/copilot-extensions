@@ -131,7 +131,18 @@ def _materialize_into_preview(dest: Path) -> list[str]:
         # preview in a mixed state: fresh src/, stale tests/, pointer marker
         # still present. Mirrors sync-vendored-libs.py's cmd_materialize()
         # and materialize_main.py's own preflight-before-mutate ordering.
-        src_bad = svl._find_symlink(canonical / "src")
+        canon_src = canonical / "src"
+        if not canon_src.is_dir():
+            # _find_symlink() returns None for a MISSING src/ too, not just
+            # "no symlink found inside it" -- an incomplete canonical lib
+            # must be refused here, before _copy_src() removes the
+            # preview copy's existing source and copies nothing, leaving a
+            # source-less preview with the pointer marker still removed as
+            # if expansion had succeeded. Mirrors the same fix already
+            # applied to cmd_materialize() and materialize_main.py.
+            log.append(f"SKIP {lib_copy}: {lib}/src not found -- refusing")
+            continue
+        src_bad = svl._find_symlink(canon_src)
         if src_bad is not None:
             where = f"{lib}/src" if src_bad == "." else f"{lib}/src/{src_bad}"
             log.append(f"SKIP {lib_copy}: {where} is a symlink -- refusing")
