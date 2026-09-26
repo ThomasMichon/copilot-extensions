@@ -424,6 +424,46 @@ def test_materialize_into_preview_refuses_and_preserves_the_pointer_for_a_symlin
     assert (copy_dir / "VENDOR_POINTER.json").exists()
 
 
+def test_materialize_into_preview_refuses_a_stray_symlink_anywhere_in_the_copy(
+    isolated: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    # The src/tests/pyproject.toml checks validate the pieces this
+    # function itself knows about, but a pointer copy directory can carry
+    # other, unrelated entries too (e.g. a stray docs/link) -- without a
+    # final blanket scan, _copy_src() runs and the marker is unlinked,
+    # leaving that symlink untouched in the preview output. Mirrors
+    # materialize_main.py's and cmd_materialize()'s own final blanket scan.
+    dest = isolated / "direct-dest"
+    copy_dir = dest / "libs" / "shared-lib"
+    (copy_dir / "src").mkdir(parents=True)
+    (copy_dir / "src" / "__init__.py").write_text("original stub\n", encoding="utf-8")
+    (copy_dir / "VENDOR_POINTER.json").write_text(
+        json.dumps({"schema": "copilot-extensions.vendor-pointer", "version": 1,
+                    "source": "libs/shared-lib", "kind": "src-passthrough"}) + "\n",
+        encoding="utf-8",
+    )
+    outside = isolated / "outside-stray-target-preview"
+    outside.mkdir()
+    copy_docs = copy_dir / "docs"
+    copy_docs.mkdir()
+    (copy_docs / "link").symlink_to(outside, target_is_directory=True)
+
+    canonical_root = isolated / "canonical-libs"
+    canonical_lib = canonical_root / "shared-lib"
+    (canonical_lib / "src").mkdir(parents=True)
+    (canonical_lib / "src" / "__init__.py").write_text("fresh = True\n", encoding="utf-8")
+
+    fake = _FakeSyncVendoredLibs(canonical_root)
+    monkeypatch.setattr(preview_release, "_load_sync_vendored_libs", lambda: fake)
+
+    log = preview_release._materialize_into_preview(dest)
+
+    assert any("SKIP" in line and "is a symlink" in line for line in log)
+    assert (copy_dir / "src" / "__init__.py").read_text() == "original stub\n"
+    assert (copy_dir / "VENDOR_POINTER.json").exists()
+    assert (copy_docs / "link").is_symlink()
+
+
 def test_materialize_into_preview_refuses_a_canonical_lib_with_no_src_directory(
     isolated: Path, monkeypatch: pytest.MonkeyPatch,
 ):

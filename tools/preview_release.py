@@ -194,6 +194,18 @@ def _materialize_into_preview(dest: Path) -> list[str]:
                 "-- refusing to write through it blindly"
             )
             continue
+        # The checks above only scan src/, tests/, and pyproject.toml --
+        # an unrelated symlink anywhere else in the pointer copy (e.g.
+        # docs/link) is never individually enumerated, so it would
+        # survive untouched as _copy_src()/pointer removal proceed,
+        # letting a non-self-contained tree reach the preview build.
+        # Mirrors materialize_main.py's and cmd_materialize()'s own
+        # final blanket scan.
+        stray = svl._find_symlink(lib_copy)
+        if stray is not None:
+            where = lib_copy if stray == "." else lib_copy / stray
+            log.append(f"SKIP {lib_copy}: {where} is a symlink -- refusing")
+            continue
         svl._copy_src(canonical, lib_copy)
         # svl._sync_version() guards against a symlinked canonical or
         # destination pyproject.toml INTERNALLY too (checking both

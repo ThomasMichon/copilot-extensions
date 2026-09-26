@@ -694,6 +694,21 @@ def cmd_materialize(*, force: bool) -> int:
                         "-- refusing to write through it blindly"
                     )
 
+                # The checks above only scan src/, tests/, and
+                # pyproject.toml -- an unrelated symlink anywhere else in
+                # the pointer copy (e.g. docs/link) is never individually
+                # enumerated, so it would survive untouched as
+                # _copy_src()/pointer.unlink() proceed, leaving a
+                # non-self-contained copy. Mirrors materialize_main.py's
+                # and preview_release.py's own final blanket scan.
+                stray = _find_symlink(copy)
+                if stray is not None:
+                    where = str(copy) if stray == "." else f"{copy}/{stray}"
+                    raise SystemExit(
+                        f"{where} is a symlink -- refusing (a vendored "
+                        "copy must contain only real files)"
+                    )
+
                 _copy_src(canonical, copy)
                 _sync_version(canonical, copy)
                 if pointer.exists():
@@ -768,6 +783,20 @@ def _write_passthrough_pointer(consumer: str, lib: str) -> Path:
         raise SystemExit(
             f"libs/{lib} is a symlink -- refusing (a canonical lib root "
             "must be a real directory, not a link to an external tree)"
+        )
+    # canonical.is_symlink() above only checks the FINAL path component --
+    # if an ANCESTOR is a symlink (e.g. the checkout's top-level libs/
+    # itself), canonical/lib still resolves through it and every later
+    # check (is_dir(), _find_symlink(canonical / "src"), etc.) only ever
+    # sees the (external) redirect target's own contents, letting
+    # --pointerize vendor an external tree into a consumer. Mirrors the
+    # materializers' own _find_symlinked_ancestor() ancestor walk.
+    bad_ancestor = _find_symlinked_ancestor(canonical, REPO)
+    if bad_ancestor is not None:
+        raise SystemExit(
+            f"{bad_ancestor} is a symlink -- refusing (a canonical lib "
+            "root, and every ancestor between it and the repo root, must "
+            "be a real directory)"
         )
     canon_pp = canonical / "pyproject.toml"
     if not canon_pp.is_file():

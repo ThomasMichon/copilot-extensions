@@ -215,6 +215,33 @@ def test_materialize_expands_pointer_copy_and_removes_pointer_file(repo: Path):
     assert not (repo / "plugins/alpha/libs/shared-lib/VENDOR_POINTER.json").exists()
 
 
+def test_materialize_refuses_a_stray_symlink_anywhere_in_the_pointer_copy(repo: Path):
+    # The src/tests/pyproject.toml checks validate the pieces this
+    # function itself knows about, but a pointer copy directory can carry
+    # other, unrelated entries too (e.g. a stray docs/link) -- without a
+    # final blanket scan, _copy_src()/pointer.unlink() would proceed and
+    # leave such a symlink sitting untouched in the materialized copy,
+    # making it not self-contained. Mirrors materialize_main.py's own
+    # final blanket scan.
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "canonical content\n")
+    _lib_pyproject(repo, "libs/shared-lib/pyproject.toml", "0.1.0-dev5")
+    _pointer(repo, "alpha", "shared-lib")
+    _lib_pyproject(repo, "plugins/alpha/libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+    outside = repo.parent / "outside-stray-target-cmd-materialize"
+    outside.mkdir()
+    copy_docs = repo / "plugins/alpha/libs/shared-lib/docs"
+    copy_docs.mkdir()
+    (copy_docs / "link").symlink_to(outside, target_is_directory=True)
+
+    result = _run(repo, "--materialize")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "is a symlink" in result.stderr
+    # Nothing was mutated -- pointer marker still present, stray symlink
+    # untouched.
+    assert (repo / "plugins/alpha/libs/shared-lib/VENDOR_POINTER.json").exists()
+    assert (copy_docs / "link").is_symlink()
+
+
 def test_materialize_refuses_and_preserves_the_pointer_for_a_symlinked_copy_pyproject_toml(
     repo: Path,
 ):
@@ -559,6 +586,31 @@ def test_pointerize_refuses_a_symlinked_canonical_lib_root(repo: Path):
     )
     (repo / "libs").mkdir(parents=True)
     (repo / "libs/shared-lib").symlink_to(external, target_is_directory=True)
+    (repo / "plugins/alpha").mkdir(parents=True)
+
+    result = _run(repo, "--pointerize", "alpha", "shared-lib")
+    assert result.returncode != 0
+    assert "is a symlink" in (result.stdout + result.stderr)
+    assert not (repo / "plugins/alpha/libs/shared-lib").exists()
+
+
+def test_pointerize_refuses_a_symlinked_canonical_libs_ancestor(repo: Path):
+    # canonical.is_symlink() (checked separately) only catches
+    # `libs/<lib>` itself being a symlink -- if an ANCESTOR is a symlink
+    # (the top-level `libs/` directory itself), canonical/lib still
+    # resolves through it, and every later check (is_dir(),
+    # _find_symlink(canonical / "src"), etc.) only ever sees the
+    # (external) redirect target's own contents, letting --pointerize
+    # vendor an external tree into a consumer.
+    external = repo.parent / "outside-repo-libs-dir"
+    (external / "shared-lib" / "src" / "shared_lib").mkdir(parents=True)
+    (external / "shared-lib" / "src" / "shared_lib" / "__init__.py").write_text(
+        "value = 1\n", encoding="utf-8"
+    )
+    (external / "shared-lib" / "pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "0.1.0-dev1"\n', encoding="utf-8"
+    )
+    (repo / "libs").symlink_to(external, target_is_directory=True)
     (repo / "plugins/alpha").mkdir(parents=True)
 
     result = _run(repo, "--pointerize", "alpha", "shared-lib")
