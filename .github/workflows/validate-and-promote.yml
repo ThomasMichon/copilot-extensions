@@ -188,6 +188,109 @@ jobs:
       - name: Docs consistency
         run: python tools/check-docs-consistency.py
 
+  report-failure:
+    name: report failure (Phase 1 watchdog; detection + dedup only, no fix attempt)
+    # Phase 1 of the promotion-failure-reactive-fix-agent effort
+    # (efforts/active/promotion-failure-reactive-fix-agent/README.md):
+    # detect + dedup a red dev validation run and file/comment a tracking
+    # issue -- never attempts a fix.
+    #
+    # `always()` is REQUIRED here, not optional: GitHub Actions silently ANDs
+    # an implicit `success()` onto any job's `if:` unless the expression
+    # itself calls a status-check function (`always()`/`failure()`/
+    # `success()`/`cancelled()`) -- confirmed via review, this job would
+    # otherwise never fire on the exact red run it exists to report, since
+    # `full`/`worktree-manager`/`guards-full-sweep` genuinely failing is
+    # precisely the case the implicit success() check would skip. This
+    # mirrors why `promote` below needs its own `always()` for the same
+    # reason.
+    #
+    # `workflow_run`-only, deliberately: `workflow_dispatch` loads the
+    # ENTIRE workflow YAML from the dispatched ref (unlike `workflow_run`,
+    # which always resolves the workflow file from the default branch) --
+    # so allowing a dispatch against `dev` would make the whole job
+    # definition itself untrusted, not merely the checked-out script. This
+    # job doesn't need manual triggering (it exists to react automatically
+    # to real validation runs), so the fix is to just never offer that
+    # path, rather than trying to harden a job whose own YAML could be
+    # attacker-controlled.
+    needs: [gate, full, worktree-manager, guards-full-sweep]
+    if: >-
+      always() &&
+      github.event_name == 'workflow_run' &&
+      needs.gate.outputs.is_dev == 'true' &&
+      (needs.full.result == 'failure' ||
+       needs.worktree-manager.result == 'failure' ||
+       needs.guards-full-sweep.result == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        # Deliberately NOT `ref: needs.gate.outputs.sha`: that's the
+        # dev commit being diagnosed -- the very thing that just failed
+        # validation -- and this job holds `issues: write` + `GH_TOKEN`.
+        # Executing `tools/ci_failure_watchdog.py` FROM that untrusted
+        # checkout would defeat the whole workflow_run trust boundary
+        # (the same class of mistake `trusted-ci.yml` was hardened
+        # against earlier this session): a compromised dev commit's own
+        # copy of this very script could exfiltrate the token or file
+        # arbitrary issues/comments.
+        #
+        # An EXPLICIT `ref:` naming the default branch is required, not
+        # merely omitting `ref:` -- a bare checkout resolves differently
+        # per trigger type: for `workflow_run` it lands on the default
+        # branch, but a bare checkout under `workflow_dispatch` would
+        # resolve to whichever ref was manually dispatched -- moot for
+        # this job specifically now that its own `if:` is `workflow_run`-
+        # only (see above), but naming the default branch explicitly is
+        # correct and harmless defense-in-depth regardless of trigger.
+        with:
+          fetch-depth: 1
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Ensure the tracking label exists
+        # `gh issue create --label` fails outright if the label is missing;
+        # `label create --force` is idempotent, matching
+        # module-health-watchdog.yml's own pattern. GitHub label
+        # descriptions are capped at 100 characters -- keep this one
+        # under that or the step (and everything after it) fails outright.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh label create ci-failure-signature
+          --color 5319E7
+          --description "Red dev validation failure signature; report-only watchdog (no fix attempted)"
+          --force
+      - name: Detect + dedup + report
+        # Bootstrap gap: this is a NEW script, so it does not exist on the
+        # default branch yet at the moment this PR first merges -- and
+        # (unlike a workflow-file change) it cannot ride main-gate's
+        # workflow-only bootstrap lane, since it isn't a workflow file.
+        # It only reaches the default branch the normal way: the next
+        # ordinary green dev->main promotion (any promotion, not
+        # necessarily one about this script) carries the whole tree
+        # across, same as every other file. Until then, degrade
+        # gracefully instead of hard-failing the job on a missing file --
+        # this is also a permanent safety net against any future
+        # main/dev script-presence mismatch, not just this one-time gap.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -f tools/ci_failure_watchdog.py ]; then
+            echo "::notice::tools/ci_failure_watchdog.py not yet present on the default branch -- it reaches main via the next ordinary green promotion, same as any other file. Skipping this run's report rather than failing the job."
+            exit 0
+          fi
+          python tools/ci_failure_watchdog.py \
+            --run-id "${{ github.run_id }}" \
+            --sha "${{ needs.gate.outputs.sha }}" \
+            --file-issue
+
   promote:
     name: Promote dev -> main
     needs: [gate, full, worktree-manager, guards-full-sweep]
