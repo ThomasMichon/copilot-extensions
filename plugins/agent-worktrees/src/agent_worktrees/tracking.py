@@ -3205,34 +3205,60 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
       all-or-nothing -- never unconditionally, which would let two
       concurrent calls on the two halves of the SAME pair deadlock each
       other.
+    * The sibling's expected path is locked whenever this record is paired
+      with a resolvable ref -- **not only** once this call has already
+      decided the sibling looks reaped. The hard-delete-vs-tombstone
+      decision itself is made only AFTER both locks are held (a pre-lock
+      read is racy against a concurrent call on the other half of the SAME
+      pair reaching its own hard-delete first). Once locked, this call also
+      re-checks its OWN file first: if a concurrent call already hard-deleted
+      it (the both-reaped branch removes both files), there is nothing left
+      to do -- falling through to the tombstone branch would wrongly
+      RECREATE a file a legitimate concurrent hard-delete had already
+      removed (copilot-extensions#3749).
 
     Returns ``True`` once the record is durably retired (tombstoned or
-    deleted); ``False`` if deferred by a contended lock -- callers treat
-    that as "retry on a later reap pass," not a failure.
+    deleted, or found already retired by a concurrent call); ``False`` if
+    deferred by a contended lock -- callers treat that as "retry on a later
+    reap pass," not a failure.
     """
     path = tracking_path / f"{record.worktree_id}.yaml"
     sibling_path: Path | None = None
-    hard_delete_sibling = False
     if record.is_paired:
-        sibling: WorktreeRecord | None = None
-        try:
-            sibling = find_paired_record(record)
-        except Exception:
-            sibling = None
-        if sibling is not None and sibling.reaped_at:
-            hard_delete_sibling = True
-            ref = record.pair_claim_ref
-            if ref is not None and ref.is_qualified and ref.project:
-                sibling_path = (
-                    cfg.project_dir(ref.project) / "worktrees"
-                    / f"{ref.worktree_id}.yaml"
-                )
+        ref = record.pair_claim_ref
+        if ref is not None and ref.is_qualified and ref.project:
+            sibling_path = (
+                cfg.project_dir(ref.project) / "worktrees"
+                / f"{ref.worktree_id}.yaml"
+            )
 
     lock_paths = sorted({path, sibling_path} - {None}, key=str)
     try:
         with ExitStack() as stack:
             for lock_path in lock_paths:
                 stack.enter_context(_RecordLock(lock_path, require_sidecar=True))
+
+            # A concurrent retire_record on the SAME pair's other half may
+            # already have hard-deleted this exact record (its own
+            # both-reaped branch unlinks both files) between our pre-lock
+            # sibling read above (used only to pick which paths to lock)
+            # and this point -- re-checking now, under the lock(s), avoids
+            # racing that decision. Nothing to do once our own file is
+            # already gone; falling through to the tombstone branch below
+            # would wrongly RECREATE a file a concurrent hard-delete had
+            # already, correctly, removed (copilot-extensions#3749).
+            if not path.exists():
+                return True
+
+            hard_delete_sibling = False
+            if record.is_paired:
+                sibling: WorktreeRecord | None = None
+                try:
+                    sibling = find_paired_record(record)
+                except Exception:
+                    sibling = None
+                if sibling is not None and sibling.reaped_at:
+                    hard_delete_sibling = True
 
             if hard_delete_sibling:
                 if sibling_path is not None:
