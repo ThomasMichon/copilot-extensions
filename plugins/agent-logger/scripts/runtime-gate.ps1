@@ -42,8 +42,8 @@ $installer = Join-Path $scriptDir 'install.ps1'
 $legacyRoot = if ($env:AGENT_LOGGER_HOME) {
     $env:AGENT_LOGGER_HOME
 } else {
-    Join-Path $env:USERPROFILE '.agent-logger'
-} # marketplace-isolation: allow legacy compatibility root
+    Join-Path $env:USERPROFILE '.agent-logger' # marketplace-isolation: allow legacy compatibility root
+}
 if (
     -not (Test-Path -LiteralPath $modeRunner -PathType Leaf) -or
     -not (Test-Path -LiteralPath $runtimeResolver -PathType Leaf) -or
@@ -259,7 +259,7 @@ function Set-RuntimeEnvironment {
     if ($installationId) {
         $env:AGENT_LOGGER_INSTALLATION_ID = $installationId
         $env:AGENT_LOGGER_TIMER_NAME = "agent-logger-sync-$serviceSuffix"
-        $env:AGENT_LOGGER_TASK_NAME = "Agent Logger Session Sync - $serviceSuffix"
+        $env:AGENT_LOGGER_TASK_NAME = "Agent Logger Session Sync - $serviceSuffix" # marketplace-isolation: allow cell-derived-suffix
     } else {
         Remove-Item Env:AGENT_LOGGER_INSTALLATION_ID -ErrorAction SilentlyContinue
         Remove-Item Env:AGENT_LOGGER_TIMER_NAME -ErrorAction SilentlyContinue

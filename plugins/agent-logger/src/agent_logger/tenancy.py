@@ -79,7 +79,7 @@ class TenantConfigError(ValueError):
 
 
 def _aw_home(aw_home: Path | None = None) -> Path:
-    return aw_home or (Path.home() / ".agent-worktrees")
+    return aw_home or (Path.home() / ".agent-worktrees")  # marketplace-isolation: allow registry
 
 
 def current_platform() -> str:

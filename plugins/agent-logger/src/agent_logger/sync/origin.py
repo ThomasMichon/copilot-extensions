@@ -42,7 +42,7 @@ _ORIGIN_KEYS = ("git_root", "repository", "cwd")
 # Repo-owned sync opt-in config: same relative shape as agent-index's
 # `.copilot-extensions/<plugin>/config.yaml` activation convention.
 _OPT_IN_CONFIG_RELATIVE = (".copilot-extensions", "agent-logger", "config.yaml")
-_LEGACY_OPT_IN_CONFIG_RELATIVE = (".agent-logger", "config.yaml")
+_LEGACY_OPT_IN_CONFIG_RELATIVE = (".agent-logger", "config.yaml")  # marketplace-isolation: allow legacy-compatibility
 _OPT_IN_SUBPROCESS_TIMEOUT = 10
 _MAX_OPT_IN_CONFIG_BYTES = 256 * 1024
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
