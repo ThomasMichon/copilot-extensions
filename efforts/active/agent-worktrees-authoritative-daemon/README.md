@@ -400,6 +400,19 @@ survey above.
       [#3812](https://github.com/ThomasMichon/copilot-extensions/issues/3812)
       rather than expanding this PR's scope, same rationale as #3798's own
       original deferral.
+- [x] Migrated the second call-site cluster: the itemized follow-up
+      ledger's three write transactions (`follow-ups add`/`resolve`/
+      `dismiss` — `follow_up_add`/`follow_up_resolve`/`follow_up_dismiss`
+      verbs, a new `tracking_followup_write.py` module), landed together
+      as one PR since they are a closely related cluster (same
+      `tracking._RecordLock` -> mutate -> `save_record` ->
+      `activity.log_event` shape). Landed in PR
+      [#3868](https://github.com/ThomasMichon/copilot-extensions/pull/3868)
+      — only a single low-severity finding this round (a missing
+      Documentation-impact PR-description statement); none of this
+      cluster's three events are stage-mapped in
+      `activity.HANDOFF_STAGE_MAP`, so unlike `status_disposition_write`
+      there was no cross-project durable-trace scoping fix needed here.
 - [ ] One call site (or a closely related cluster) at a time, each its own
       reviewable PR, per this repo's serial-single-writer convention —
       across whichever of `tracking.py` / `tracking_claims.py` /
@@ -451,6 +464,43 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-09-26 — PR #3868: Phase 3's second migrated call-site cluster, the follow-up ledger
+Picked the itemized follow-up ledger's three write transactions
+(`follow-ups add`/`resolve`/`dismiss`) as the next cluster, following
+`status_disposition_write`'s (#3807) own template exactly: a new
+`tracking_followup_write.py` registers `follow_up_add`/
+`follow_up_resolve`/`follow_up_dismiss` verbs, each wrapping the whole
+guarded transaction (load -> mutate -> `save_record` ->
+`activity.log_event`) previously inline in `follow_ups_cli.py`; the CLI's
+three functions now dispatch through a shared `_dispatch_follow_up` helper
+instead.
+
+Notably simpler than #3807: none of `follow_up_added`/`follow_up_resolved`/
+`follow_up_dismissed` are stage-mapped in `activity.HANDOFF_STAGE_MAP`, so
+`activity.log_event` never reaches `handoff_trace.append_event` (the
+ambient-project sink #3807 had to explicitly re-scope) for any of them —
+confirming that lesson generalizes (only STAGE-MAPPED events carry the
+cross-project durable-trace hazard) rather than needing to be re-derived
+per call site. Only one low-severity review finding this round (a missing
+`Documentation impact:` PR-description statement, same as #3823's own
+finding) — a good sign the migration pattern itself is now well-understood
+and mechanically repeatable.
+
+Tests: new `test_tracking_followup_write.py` (verb registration, the
+frozen-owner rejection, the reopen-on-add path, both not-found rejections,
+one live-daemon end-to-end proof), plus a `test_follow_ups_cmd.py` case
+proving `AmbiguousWriteOutcome` is reported not swallowed. All 12 existing
+`test_follow_ups_cmd.py` tests continue passing unchanged. Full suite: 5639
+passed, same pre-existing failures (a subset varied this run — environment-
+dependent, per this Journal's own prior entries). All gates clean.
+
+**Next Phase 3 slice:** survey `tracking_claims.py` (resource-claim
+settle/release), `tracking_lifecycle.py` (`open_handoff`/`link_handoff`/
+`conclude_session`/`link_succession`), or `tracking_session_registry.py`
+for the next candidate, still avoiding `register_session` (sessionStart-
+hook-critical) and `mark_resumed` (embedded in a bigger resume flow) per
+the effort's own original guidance.
 
 ### 2026-09-26 — PR #3807: Phase 3's first migrated call site, `status_disposition_write`
 Picked the "narrower, lower-traffic disposition-assertion path" this Plan
