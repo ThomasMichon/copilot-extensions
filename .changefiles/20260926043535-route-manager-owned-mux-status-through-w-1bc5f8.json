@@ -1,9 +1,0 @@
-{
-  "comment": "Route Manager-owned mux status through Worktree Manager and publish live mapping cutover",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "dev"
-    }
-  ]
-}
