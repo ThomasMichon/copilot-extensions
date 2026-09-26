@@ -404,19 +404,32 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   file-concentrated candidate: `agent-vault` (52 findings across only 11
   files, with `config.py` alone carrying 8 in a single file — the same
   one-file-one-classification shape as the `context-handoff` slice).
-- Read `config.py`: every flagged constant (`SYSTEMD_UNIT_ENV`,
-  `TASK_NAME_ENV`, `SOCKET_ENV`, `DEFAULT_SOCKET_PATH`, `PIPE_ENV`,
-  `DEFAULT_PIPE_PATH`, `ENDPOINT_ENV`, `home_dir()`'s runtime-root fallback)
-  is part of the file's own documented "environment override... unset ->
-  platform default" design (its own comments state this explicitly) — the
-  identical env-override-with-legacy-default shape already annotated in this
-  same plugin's `runtime-gate.sh`/`.ps1` (`LEGACY_ROOT="${AGENT_VAULT_HOME:-
-  $HOME/.agent-vault}" # marketplace-isolation: allow legacy compatibility
-  root`). Annotated the runtime-root fallback with the identical `allow
-  legacy compatibility root` reason and the remaining 7 fixed-identity/env-
-  name constants with the established `allow legacy-compatibility` reason
-  (matching `agent-containers/src/agent_containers/config.py`'s existing use
-  of the same phrase for an analogous shape).
+- Read `config.py`: 3 of the 8 flagged lines (`DEFAULT_SOCKET_PATH`,
+  `DEFAULT_PIPE_PATH`, `home_dir()`'s runtime-root fallback) are genuine
+  env-override-with-legacy-default values, the identical shape already
+  annotated in this same plugin's `runtime-gate.sh`/`.ps1`
+  (`LEGACY_ROOT="${AGENT_VAULT_HOME:-$HOME/.agent-vault}" # marketplace-
+  isolation: allow legacy compatibility root`). The other 5
+  (`SYSTEMD_UNIT_ENV`, `TASK_NAME_ENV`, `SOCKET_ENV`, `PIPE_ENV`,
+  `ENDPOINT_ENV`) are a **different shape entirely**: each is just a string
+  constant holding the env var's *name* (e.g.
+  `SYSTEMD_UNIT_ENV = "AGENT_VAULT_SYSTEMD_UNIT"`), not a fixed identity or
+  legacy-default value — the guard's `_FIXED_UNIT` regex false-positives on
+  the variable name containing a keyword (`unit`/`task`/`socket`/`pipe`/
+  `endpoint`) followed by `= "..."`.
+  - **First-pass mistake, caught by PR review**: initially annotated all 8
+    with `allow legacy-compatibility`, including the 5 env-var-name
+    declarations, and cited `agent-containers/src/agent_containers/
+    config.py`'s existing `allow legacy-compatibility` marker as an
+    "analogous shape" precedent — but that precedent (`shutil.which
+    ("agent-worktrees")`, a sibling-plugin lookup fallback) is a different
+    shape too, and conflating both distinct categories under one reason
+    hid that 5 of the 8 aren't legacy-compatibility fallbacks at all. Fixed
+    by re-annotating the 5 env-var-name lines with a new, precise
+    `allow env-var-name-declaration` reason and keeping `allow legacy
+    compatibility root` / `allow legacy-compatibility` only on the 3 lines
+    that genuinely fit that shape (the `DEFAULT_*` values and
+    `home_dir()`).
 - **Left the rest of `agent-vault` deliberately untouched this leg** —
   scoped to `config.py` only, matching the bounded single-file slice
   discipline:
