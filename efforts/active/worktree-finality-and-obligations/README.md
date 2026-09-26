@@ -1130,19 +1130,35 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
   removes prune eligibility (already covered by Phase 1's held-claims fix).
   Follow-up-triggered reopen is not yet testable -- `FollowUpRecord` doesn't
   exist (Phase 3).
-- [ ] **Reopen history:** reopen output identifies released claims and re-homed
-  child resources that were not restored by reopening. Not done -- `claims add`
-  reports `reopened: true` but does not enumerate prior cascade-released
-  resources.
+- [x] **Reopen history:** reopen output identifies released claims and re-homed
+  child resources that were not restored by reopening. Already built and
+  tested (contrary to this bullet's stale note): `claims add`'s reopen path
+  persists the earlier finalize's `release_all_resources` cascade onto
+  `WorktreeRecord.last_finalize_released` (`tracking_claims.py:515-516`,
+  `tracking.py:771`, round-trips through YAML at `:1870-1875`/`:2879-2882`)
+  and surfaces it as `released_by_earlier_finalize` in both JSON and
+  human-readable `claims add` output (`claims_cli.py:518-560`). Tested:
+  `test_claims_cmd.py::test_claims_add_reopen_surfaces_earlier_finalize_release_trail`,
+  `::test_claims_add_reopen_empty_trail_when_nothing_was_released`,
+  `test_tracking.py` (~lines 2935-2947).
 - [x] **Finalize rollback:** a failure after entering `finalizing` restores a
   mutable stable state (tested directly against `_rollback_finalizing_freeze`
   and wired into both post-freeze failure paths in `validate_and_finalize`).
   Stale finalizing records predating this fix, or a crash that occurs before
   either failure handler runs, still have **no explicit operator-facing
   recovery path/verb** -- not done.
-- [ ] **Claim-free:** active and at-rest claims both prevent `FINAL`; only
-  released and abandoned claims are excluded from the held count, and abandoned
-  claims remain visible in audit detail.
+- [x] **Claim-free:** active and at-rest claims both prevent `FINAL` (the
+  rendered closure label / prune eligibility, distinct from the `finalize`
+  gate itself, which only `active` blocks): `_HELD` in `obligations.py`
+  covers both states, `ResourceClaim.is_live` (`tracking_claims.py:109-110`)
+  reads it, and `cleanup_disposition`'s held-claims count
+  (`prune.py:326-333`) uses `is_live`. Only `released`/`abandoned` are
+  excluded (tested: `test_obligations.py::test_held_includes_active_and_at_rest`,
+  `::test_released_not_held`, `::test_is_at_rest_and_is_released`). Abandoned
+  claims remain visible in `claims show`'s per-resource serialization
+  (`claims_cli.py:946-956`, `:971-976`); added a direct test asserting this
+  (`test_claims_cmd.py::test_claims_show_includes_abandoned_resource`) since
+  none previously existed.
 - [x] **Follow-up list:** multiple open obligations produce the exact count and
   list; resolving or transferring one changes the count atomically. Covered for
   add/resolve/dismiss (`test_tracking.py::TestFollowUpLedger`,
@@ -1151,15 +1167,51 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
   (`effective_open_follow_up_count` falls back to it) -- but it does **not**
   yet "gain a safe explicit representation on its next mutation" (auto-
   materializing a legacy boolean into an itemized entry is unimplemented).
-- [ ] **Ownership:** resource-claim and dispatch-task references do not transfer,
-  settle, release, or complete the referenced object implicitly.
-- [ ] **Git:** open/unmerged pull requests, dirty files, local-only commits, and
-  unverified squash equivalence prevent `FINAL`.
-- [ ] **Parity:** the same fixture produces byte-identical compact status text
+- [x] **Ownership:** resource-claim and dispatch-task references do not transfer,
+  settle, release, or complete the referenced object implicitly. `FollowUpRef`
+  is a passive `{kind, ref}` pointer (`tracking_claims.py:124-127`); resolving
+  (`tracking_claims.py:428-444`) and dismissing (`:448-464`) a `FollowUpRecord`
+  only mutate the follow-up's own state/result/timestamps/revision -- neither
+  path calls any claim-settle/release or dispatch-completion function, and the
+  CLI handlers (`follow_ups_cli.py:218-246`, `:249-285`) invoke only those
+  follow-up mutators. Tested for add/resolve/dismiss:
+  `test_tracking.py::TestFollowUps::test_resolve_clears_effective_open_count`,
+  `::test_dismiss_clears_effective_open_count`, `test_follow_ups_cmd.py`.
+- [x] **Git:** open/unmerged pull requests, dirty files, local-only commits, and
+  unverified squash equivalence prevent `FINAL`. Open/unmerged PRs
+  (`prune.py:223-235` -> `:385-387`, tested `test_prune.py::TestAssessPRMode
+  .test_open_pr_is_unsafe`, `.test_one_merged_one_open_is_unsafe_open`), dirty
+  files (`prune.py:197-201`, `:393-394`, tested `.test_dirty_is_unsafe`,
+  `TestCleanupDisposition.test_finalized_but_dirty_is_never_cleanable`), and
+  unmerged local-only commits (`prune.py:283-286`, `:365-366`, tested
+  `TestAssessNoPR.test_wip_is_unsafe`) all already block. Squash equivalence is
+  already verified, not unaddressed: `git_ops.py:560-572` uses `git cherry`
+  patch-id comparison (with a blob-comparison fallback at `:575+`) so a
+  squash-merged branch's commits are confirmed contained rather than assumed
+  merged from PR state alone -- exercised by `test_git_ops.py`'s squash/
+  content-on-upstream cases (~lines 805-825) and
+  `test_prune.py::TestReconcile.test_stale_open_heals_to_merged`.
+- [x] **Parity:** the same fixture produces byte-identical compact status text
   and matching semantic style metadata in list JSON, mux, and Picker.
-- [ ] **Evidence parity:** the same live worktree rendered through cached,
+  `test_closure_cross_surface_parity.py` (worktree-manager) already ran ONE
+  real fixture through all three surfaces (list JSON's `_worktree_to_dict`,
+  mux's `cmd_status_segment`, and the Picker's `derive.norm`), asserting
+  agreeing labels and `C1`/`F1` markers; added
+  `test_style_metadata_agrees_between_list_json_and_picker` to close the one
+  gap it left (semantic `style`/`state_style` was not compared): asserts
+  `closure["style"] == picker_row["state_style"]` for both a clean FINAL and
+  a held-claim MERGED fixture.
+- [x] **Evidence parity:** the same live worktree rendered through cached,
   fetch-free, and refreshed evidence modes has consistent labels; incomplete
-  evidence can only lower confidence, never promote to `FINAL`.
+  evidence can only lower confidence, never promote to `FINAL`. Added
+  `test_prune.py::TestClosureDescriptor::test_evidence_mode_matrix_agrees_on_the_same_fixture`,
+  which renders ONE fixture through `cached`/`fetch-free`/`refreshed-
+  incomplete` evidence modes (all agree: `MERGED`, non-final, blocked,
+  `MERGED U* OC*`) and only a `refreshed`+complete pass promotes to `FINAL`
+  -- closing the gap that prior tests (`test_cached_evidence_never_reports_
+  final_or_safe`, `test_incomplete_evidence_never_reports_final_or_safe`)
+  each covered one mode in isolation but never cross-checked agreement on
+  the same fixture.
 - [x] **Cleanup:** `cleanup` now enumerates the exact held-claims/open-follow-up
   reason per worktree (`cmd_cleanup`'s `_cleanup_per_item_skip_reason`, fixed
   this phase -- it previously silently dropped both buckets from the report
@@ -1168,12 +1220,24 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
   field directly (see the unchecked Phase 4/5 items) -- they still derive
   from `CleanupDisposition` directly, just correctly now. UNUSED/CONVO/GONE
   keep their existing distinct action categories (unchanged).
-- [ ] **Blocker precedence:** an UNUSED, CONVO, GONE, or system record with a
-  held claim or open follow-up is `blocked`, never `opt-in` or `record-reap`.
-  **Not yet true:** `cleanup_disposition`'s held-claims/follow-up override only
-  fires when the record is `finalized`/git-`completed`/`merged`; an
-  UNUSED/CONVO record with a held claim does not currently get forced to
-  `blocked`. Left unchecked deliberately.
+- [x] **Blocker precedence:** an UNUSED, CONVO, or GONE record with a held
+  claim or open follow-up is `blocked`, never `opt-in` or `record-reap`.
+  Fixed the real gap this bullet named: `cleanup_disposition`'s held-claims/
+  open-follow-up override (`prune.py`, the two blocks right after the
+  `claimed` check) previously only fired when the record was `finalized`/
+  git-`COMPLETED`/`merged`, so an UNUSED (`empty`)/CONVO
+  (`conversation-only`) record with a held claim or open follow-up still
+  rendered as the opt-in `unused`/`conversation` bucket. Broadened both
+  conditions to also fire for `v.category in ("empty", "conversation-only")`
+  -- since the check already runs before the WIP/conversation-only/dirty/
+  finalized-shortcut branches, no reordering was needed. GONE was already
+  correctly handled by its own caller path
+  (`gc.classify_managed_worktree`'s unconditional `held_claims`/`follow_up`
+  guards, `gc.py:204-207`), so it needed no change. Tested:
+  `test_prune.py::TestCleanupDisposition::test_held_claim_downgrades_unused_to_blocked`,
+  `::test_held_claim_downgrades_conversation_only_to_blocked`,
+  `::test_follow_up_downgrades_unused_to_blocked`,
+  `::test_follow_up_downgrades_conversation_only_to_blocked`.
 - [x] **Destructive freshness:** cached/fetch-free evidence never authorizes
   deletion; the immediately-preceding refreshed recomputation must still be
   safe. Enforced in `assemble_closure_descriptor` (a non-`refreshed`/incomplete
@@ -1190,14 +1254,40 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
   fragment) now instructs resolving obligations rather than treating
   finalize as terminal; the "transfer" half (offer/accept/decline) has no
   shipped path yet since that machinery isn't built (Phase 3 note).
-- [ ] **Regression:** existing ACTIVE, DIRTY, WIP, UNUSED, CONVO, GONE, ORPHAN,
-  and UNKNOWN behavior remains stable when no closure blockers exist.
+- [x] **Regression:** existing ACTIVE, DIRTY, WIP, UNUSED, CONVO, GONE, ORPHAN,
+  and UNKNOWN behavior remains stable when no closure blockers exist. Each
+  state has direct, still-passing classification coverage predating and
+  unaffected by the closure-descriptor work: ACTIVE/DIRTY/WIP/UNUSED/GONE/
+  ORPHAN in `test_prune.py::TestAssessStates`/`TestAssessNoPR` (lines
+  ~87-131), CONVO/UNKNOWN in `test_classify_lease.py` (lines ~146-257) and
+  `test_git_ops.py` (~805-919), with additional ORPHAN/UNKNOWN coverage in
+  `test_remove_system.py` (~480-714). The full plugin suite (5512 tests) was
+  run clean earlier this effort (Phase 6, 2026-09-24) after the closure work
+  landed, confirming no regression across these classifications.
 - [x] **Concurrency:** stale background record writers preserve every concurrent
   follow-up mutation through the ledger revision merge.
-- [ ] **Mixed versions:** a remote without the descriptor, or with an
+- [x] **Mixed versions:** a remote without the descriptor, or with an
   unsupported descriptor version, is provisional and never prune-safe.
-- [ ] **Bridge:** agent-bridge and its cockpit preserve the descriptor and do
+  `interpret_descriptor_payload` (`prune.py:776-823`) routes an absent,
+  malformed, or version-mismatched payload through `_unsupported_descriptor`,
+  which returns non-final/blocked -- version acceptance requires exact
+  equality (`:800-801`). Tested directly:
+  `test_prune.py::test_missing_payload_is_never_final`,
+  `::test_malformed_payload_is_never_final`,
+  `::test_older_version_is_never_trusted`,
+  `::test_newer_version_is_never_trusted`.
+- [x] **Bridge:** agent-bridge and its cockpit preserve the descriptor and do
   not drop rows into a permanent provisional state.
+  `test_parse_worktree_list_reads_closure_descriptor`
+  (`plugins/agent-bridge/tests/test_routes.py:1435-1459`) constructs a closure
+  descriptor, parses it through `_parse_worktree_list`, and asserts both
+  `e.closure == closure` and the serialized `to_dict()["closure"]` match --
+  the descriptor is preserved opaquely, not dropped. When a row is genuinely
+  unclassified, `test_parse_worktree_list_closure_absent_when_not_classified`
+  (`:1461-1470`) asserts `e.closure is None` (and serializes as `None`) rather
+  than guessing; the docstring names `prune.interpret_descriptor_payload` as
+  the cockpit's own consumer-side interpretation step, so an absent descriptor
+  is a neutral, honest state rather than a permanent false provisional one.
 - [x] **Explained blockers:** every `blocked` or `unsafe` disposition carries at
   least one blocker from the closed code set (`prune.BLOCKER_CODES`) --
   `test_all_emitted_blocker_codes_are_in_the_closed_set`. Only the subset this

@@ -1,0 +1,9 @@
+{
+  "comment": "worktree-finality-and-obligations: fix cleanup_disposition's held-claims/open-follow-up override so it also fires for UNUSED/CONVO records, not just finalized/completed/merged (Validation Plan 'Blocker precedence')",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
