@@ -203,6 +203,26 @@ shape before committing to a design)_
       guard) to validate a pointer's schema and confirm its `source` target
       actually exists and matches canonical, before treating any real
       conversion as complete.
+- [ ] **`materialize_main.py`'s directory-pointer path has no root-
+      containment check** (confirmed in review — `materialize()` resolves
+      `canonical = canonical_root / source_rel` directly for a directory
+      pointer, unlike the file-pointer path, which validates through
+      `_resolve_within()` to refuse an absolute path or `../` escape).
+      A committed `source` value that traverses outside `canonical_root`
+      could make promotion copy an arbitrary runner-local path into the
+      release snapshot. Fix `materialize()` to route the directory-pointer
+      case through `_resolve_within()` (or an equivalent containment check)
+      before Phase 1 converts any real lib, and add the same validation to
+      whichever guard the item above builds.
+- [ ] **`preview_release.py` cannot currently build a scratch install for a
+      pointerized lib** (confirmed in review — `_materialize_into_preview()`
+      calls `sync_vendored_libs._materialize_blocked()`, which treats a
+      pointer directory with no `src/` as content drift and blocks it).
+      Update `_materialize_into_preview()` (and its tests) to recognize and
+      correctly expand a `VENDOR_POINTER.json` lib copy, matching how
+      `materialize_main.py` already does — this is required before Phase 1
+      can call itself complete, not just an assumption the Validation Plan
+      hopes holds.
 - [ ] Confirm the live promotion pipeline (`promote_release.py` ->
       `materialize_main.py`) handles the converted real plugins correctly —
       not just the isolated trial clone.
@@ -254,7 +274,12 @@ shape before committing to a design)_
       real repo this time).
 - [ ] `tools/preview_release.py` ("preview-promo") correctly resolves every
       pointer kind — directory, file, and the new executable kind — when
-      building a scratch local-install preview.
+      building a scratch local-install preview, using the
+      `_materialize_into_preview()` fix from Phase 1 (not merely hoped to
+      already work).
+- [ ] `materialize_main.py`'s directory-pointer path refuses a `source`
+      that escapes `canonical_root` (the same containment guarantee the
+      file-pointer path already has via `_resolve_within()`).
 - [ ] A pointer-ized `install.sh`/`install.ps1` runs correctly **in dev**,
       unmaterialized, calling across folders into the canonical engine —
       demonstrating the "in-place test scripts in `dev`" requirement is met
@@ -302,3 +327,15 @@ _Pending._
   carries a pointer yet" wrongly read as covering all pointer kinds —
   qualified to the directory/lib kind specifically (three real files
   already carry `kind=file` pointers).
+- **Round 2 review (2026-09-26):** two more findings, both confirmed
+  against the real code and fixed: (1) `materialize_main.py`'s directory-
+  pointer path resolves `canonical_root / source_rel` with no containment
+  check, unlike the file-pointer path's `_resolve_within()` — a committed
+  `../`-escaping `source` could make promotion copy an arbitrary path into
+  the release snapshot. Added a Phase 1 item to fix `materialize()` before
+  any real conversion. (2) `preview_release.py`'s
+  `_materialize_into_preview()` calls `_materialize_blocked()`, which
+  treats a pointer-only lib copy as content drift and blocks it today — a
+  pointerized lib cannot yet produce a scratch preview. Added a Phase 1
+  item to fix this directly (moved out of the Validation Plan, where it
+  was only an assumption).
