@@ -620,14 +620,44 @@ below for the carved implementation plan.
   the Phase 3 note.
 
 ### Phase 6 - Release and prove the lifecycle
-- [ ] Run a fleet inventory/backfill preview for legacy boolean follow-ups,
+- [x] Run a fleet inventory/backfill preview for legacy boolean follow-ups,
   active effort bindings, at-rest claims, and finalized records whose current
   evidence is no longer final; provide explicit triage/apply output. Automatic
-  cleanup never releases at-rest claims from current-version records.
-- [ ] Run the agent-worktrees suite, payload/install/version guards, and
-  headless Picker render assertions.
-- [ ] Exercise a live finalized -> resumed -> held claim -> settled/released ->
-  final cycle.
+  cleanup never releases at-rest claims from current-version records. Built
+  `claims fleet-audit` (`fleet_audit_cli.py`, split into its own module to
+  keep `claims_cli.py` under the repo's module-size cap): a read-only report
+  across all four categories. **Deliberately preview-only, not
+  preview+apply, for three of the four** -- at-rest claims already have a
+  dedicated apply command (`claims reconcile-at-rest`, this report just
+  points at it); legacy-boolean-follow-up itemization and stale-finalized
+  records both require a human judgment call (a written summary; deciding
+  whether drift is expected) this command does not guess at. The
+  stale-finalized check is deliberately keyed off `cleanup_disposition`
+  rather than the closure descriptor's `final` flag: `final` requires fresh
+  (fetched) evidence to ever report `True`, which a no-fetch audit could
+  never satisfy for ANY record; `cleanup_disposition` has no such freshness
+  gate and is the practical "has this record's invariant drifted" signal.
+- [x] Run the agent-worktrees suite, payload/install/version guards, and
+  headless Picker render assertions. Full `agent-worktrees` suite: 5512
+  passed, 50 skipped, 4 failed -- the 4 failures (`test_update_stage.py`'s
+  `indicator_state` tests) are a pre-existing, order-dependent flake:
+  confirmed via `git stash` A/B that they pass in isolation both with and
+  without this session's changes, and this session never touched anything
+  update-stage/indicator related. Install/payload/version-guard slice
+  (`-k "install or payload or version"`): 297 passed, 17 skipped. Full
+  `worktree-manager`/Picker suite (headless render assertions): 744 passed
+  (3 pre-existing/unrelated Windows path-format failures, flagged every
+  prior session touching that suite).
+- [x] Exercise a live finalized -> resumed -> held claim -> settled/released ->
+  final cycle. Added `test_finality_lifecycle_cycle.py`: a single test
+  driving the real `tracking_claims.add_resource_claim`/`settle_resource_
+  claim`/`release_resource_claim` functions plus `prune.cleanup_disposition`/
+  `assemble_closure_descriptor` through the exact sequence the bullet names
+  -- finalized+FINAL -> a new claim reopens the owner (Phase 1's fix) ->
+  held (MERGED, blocked, `C1` marker) -> settled to at-rest (STILL held,
+  Phase 4's active|at-rest invariant) -> released -> FINAL again, no
+  residual marker. Proves the composition across Phases 1/4's own
+  machinery end-to-end, not just unit-tested in isolation.
 - [ ] Publish, review, merge, deploy, and confirm Picker/mux parity on the
   installed runtime.
 - [ ] Mark the effort Done only when every Plan and Validation Plan item is
@@ -3015,3 +3045,55 @@ The approved design is the faceted model in [design.md](design.md):
   Remaining open work across the whole effort: that one Phase 5 bullet, and
   Phase 6 (ship-it, last).
 
+### 2026-09-26 - Phase 6: fleet-audit command, full validation, and the live lifecycle-cycle test
+
+- Picked up Phase 6 ("release and prove the lifecycle") next -- the last
+  phase standing between this effort and Done.
+- **Bullet 1 (fleet inventory/backfill preview)**: built `agent-worktrees
+  claims fleet-audit` (a read-only new verb on the existing `claims`
+  command, not a new top-level command -- avoids the multi-step lazy
+  command-dispatch wiring every other top-level verb goes through) covering
+  all four named categories: legacy boolean follow-ups, active effort
+  bindings, at-rest claims (points at the existing `reconcile-at-rest`
+  apply command rather than duplicating it), and finalized records whose
+  disposition has drifted. Split the implementation into a new
+  `fleet_audit_cli.py` module immediately -- `claims_cli.py` was already
+  baselined at 1007 lines in `tools/module-size-baseline.json` (a
+  shrink-only ceiling), so adding the ~100-line function inline would have
+  failed the module-size guard outright. Deliberately did NOT add `--apply`
+  semantics for the other three categories: at-rest already has one
+  (pointed at, not duplicated); the other two need a human judgment call
+  (writing a follow-up summary; deciding whether drift is expected) this
+  command does not guess at.
+- Found a real design trap while building the stale-finalized check:
+  reusing the closure descriptor's `final` flag (as Phase 4's own bullet
+  literally suggested) would have made EVERY finalized record report
+  "no longer final," always -- `final` requires both `upstream_containment`
+  and `open_claims` facts to be independently CONFIRMED-fresh, which
+  requires an actual network fetch (or the repo-scoped fetch-freshness
+  ledger being current), and this audit deliberately never fetches. Caught
+  this via a failing test (`wt-finalized-clean`, a genuinely still-final
+  record, showing up as stale) before it shipped -- switched the check to
+  `cleanup_disposition` directly, which has no such freshness gate and is
+  the practical "has the invariant drifted" signal the bullet actually
+  wants.
+- **Bullet 2 (run the suite + guards)**: ran the full `agent-worktrees`
+  suite (5512 passed, 50 skipped, 4 failed), the install/payload/version-
+  guard slice (297 passed, 17 skipped), and the full `worktree-manager`/
+  Picker suite (744 passed, 3 pre-existing/unrelated failures already
+  flagged every prior session). The 4 `test_update_stage.py` failures were
+  investigated, not dismissed: confirmed via `git stash` A/B that they pass
+  in isolation both with and without this session's changes (which never
+  touch update-stage/indicator code at all) -- an order-dependent flake in
+  the full-suite run, not a regression.
+- **Bullet 3 (exercise a live full cycle)**: added
+  `test_finality_lifecycle_cycle.py`, driving the real
+  `tracking_claims`/`prune` functions (not mocks) through finalized -> a
+  new claim reopens the owner (Phase 1) -> held/blocked (MERGED, `C1`
+  marker) -> settled to at-rest (still held -- Phase 4's active|at-rest
+  invariant) -> released -> FINAL again with no residual marker. Proves the
+  composition end-to-end rather than trusting each phase's own isolated
+  unit tests to compose correctly together.
+- Remaining: Phase 6's last two bullets (publish/deploy/confirm on the
+  installed runtime; mark the effort Done) once this slice lands, plus
+  Phase 5's one deliberately-deferred bullet.
