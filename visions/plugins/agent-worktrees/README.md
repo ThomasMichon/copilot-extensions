@@ -271,13 +271,33 @@ around it.
 This is a deliberate reversal, not an extension: today, a CLI invocation that
 finds no daemon reachable degrades to direct file computation as a
 **correct, coequal** path (*Derived status* above). Under this direction, a
-degrade to direct file access remains available for resilience — the daemon
-being unreachable must never wedge worktree state shut — but it stops being
-coequal: it is a **degraded, advisory-only** path (read-only, never a write),
-clearly marked as such to whatever surfaced it, while the daemon is the only
-path a mutation may ever take. A CLI command's job becomes composing a
-request to the daemon and rendering its answer, not independently computing
-or writing the record itself.
+read degrade to direct file access remains available for resilience — the
+daemon being unreachable must never wedge worktree state shut — but it stops
+being coequal: it is a **degraded, advisory-only** path, clearly marked as
+such to whatever surfaced it. A *write* degrades differently, deliberately:
+when no daemon is reachable, a mutation runs the **exact same underlying
+write logic the daemon itself would have called** — imported and invoked
+in-process, never a second, forked implementation that could quietly drift
+from what the daemon enforces — and the fact that it bypassed the daemon is
+always explicitly logged, never silent. This keeps a mutation available even
+when the daemon cannot be reached, while keeping exactly one implementation
+of what a write means and a durable, inspectable trail of every time that
+implementation ran outside the daemon's own mediation. A CLI command's
+steady-state job is composing a request to the daemon and rendering its
+answer, not independently computing or writing the record itself; the
+logged direct-call fallback exists for the daemon-unreachable edge, not as
+an equally-preferred alternative.
+
+The daemon's authority is scoped to **one host**, matching *Derived
+status*'s existing "exactly one [accelerator] per host" guarantee exactly —
+it is not a cross-machine authority, and this direction does not introduce
+one. A worktree checked out on a different machine is reached the same way
+any other cross-host agent-worktrees operation already is: through that
+machine's own `agent-worktrees` CLI (over whatever transport reaches it),
+which then talks to *its own* local daemon. There is no direct daemon-to-
+daemon wire protocol between hosts; cross-machine reach is CLI-to-CLI,
+recursing into the same single-authority-per-host pattern on the far side,
+never a second, wider-scoped authority layered above it.
 
 The daemon's in-memory state is what "current" means; its durable YAML
 persistence is a recovery mechanism (warm-restore after a restart), never a
@@ -577,10 +597,15 @@ independently per worktree for the same evidence.
 
 ### no-writer-bypasses-the-daemon
 
-A mutation to worktree-lifetime state that did not go through the resident
-daemon is not a valid write, no matter how correctly it locks or serializes
-the YAML file it touched. A direct file write is a bug to fix, never an
-accepted second path, once *daemon-mediated-write-authority* is realized.
+Every mutation runs through exactly one implementation of what that write
+means — the daemon's own request handler in the steady state. When the
+daemon cannot be reached, the identical implementation may run directly,
+in-process, rather than forking a second write path — but that bypass is
+always explicitly logged, never silent, and never treated as an equally-
+preferred alternative to going through the daemon. A *second, independently
+maintained* implementation of a write — one that could drift from what the
+daemon enforces — is the thing this rules out, not a logged, same-code
+emergency path.
 
 ### durable-files-are-persistence-not-a-side-door
 
@@ -708,6 +733,21 @@ manager, or session-host implementation.
 
 ## Provenance
 
+- **2026-09-26** — Refined *The resident daemon as the authoritative
+  live-state database* and *no-writer-bypasses-the-daemon* to resolve three
+  open questions the prior same-day entry below left for operator input:
+  (1) a write with no daemon reachable runs the identical write
+  implementation directly, in-process (never a forked second
+  implementation), with the bypass always explicitly logged — not the
+  read-only-only degrade the prior entry had speculatively asserted; (2)
+  the daemon's authority is strictly **per-host**, matching *Derived
+  status*'s existing "exactly one per host" guarantee — a different
+  machine's worktree is reached through *that* machine's own
+  `agent-worktrees` CLI, which talks to its own local daemon, never a
+  direct cross-host daemon protocol; (3) sequencing against concurrent
+  effort work is tracked in the `agent-worktrees-authoritative-daemon`
+  effort's own Context, not the vision. Operator answers captured verbatim
+  in that effort's Journal.
 - **2026-09-26** — Added *The resident daemon as the authoritative
   live-state database* (Concepts & Components), *daemon-mediated-write-
   authority* and *single-write-path-across-plugins* (Features), and
