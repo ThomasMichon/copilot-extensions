@@ -1017,6 +1017,21 @@ function Install-Package {
             Name = 'agent-procutil'
             Package = 'agent-procutil'
             Path = Join-Path $PluginDir 'libs\agent-procutil'
+        },
+        @{
+            Name = 'dropin-registry'
+            Package = 'agent-dropin-registry'
+            Path = Join-Path $PluginDir 'libs\dropin-registry'
+        },
+        @{
+            Name = 'plugin-resolve'
+            Package = 'agent-plugin-resolve'
+            Path = Join-Path $PluginDir 'libs\plugin-resolve'
+        },
+        @{
+            Name = 'plugin-activation'
+            Package = 'agent-plugin-activation'
+            Path = Join-Path $PluginDir 'libs\plugin-activation'
         }
     )) {
         if (-not (Test-Path (Join-Path $lib.Path 'pyproject.toml'))) { continue }
