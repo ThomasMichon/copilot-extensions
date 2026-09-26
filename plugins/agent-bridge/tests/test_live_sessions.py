@@ -524,6 +524,53 @@ def test_route_ingest_without_markers_keeps_the_prior_beat(client_with_store: Te
     assert c.get("/api/v1/live-sessions/s1").json()["latest_progress"]["summary"] == "explicit beat"
 
 
+def _deliver(text: str, *, agent_id: str | None = None) -> dict:
+    data: dict = {"content": text}
+    if agent_id:
+        data["agentId"] = agent_id
+    return {"events": [{"type": "user.message", "data": data}]}
+
+
+def test_a_delivered_message_retires_a_blocker(client_with_store: TestClient) -> None:
+    """BLOCKED means waiting on someone: once a message reaches the session and
+    it goes on without blocking again, the beat stops saying it is blocked."""
+    c = client_with_store
+    c.post("/api/v1/live-sessions", json={"session_id": "s1", "worktree_id": "wt-1"})
+    c.post("/api/v1/live-sessions/s1/events", json=_say("PROGRESS pr=42 pr-build=running"))
+    c.post("/api/v1/live-sessions/s1/events", json=_say("BLOCKED: builds still running"))
+    # A sub-agent's prompt is not an answer to the blocker.
+    c.post("/api/v1/live-sessions/s1/events", json=_deliver("audit files", agent_id="sub-1"))
+    assert c.get("/api/v1/live-sessions/s1").json()["latest_progress"]["phase"] == "blocked"
+
+    c.post("/api/v1/live-sessions/s1/events", json=_deliver("carry on with the chain fixes"))
+    lp = c.get("/api/v1/live-sessions/s1").json()["latest_progress"]
+    assert lp["phase"] == "resumed" and "blocker" not in lp
+    assert lp["summary"] == "resumed after: builds still running"
+    assert lp["pr"] == "42" and lp["markers"] == {"pr": "42", "pr-build": "running"}
+
+
+def test_blocking_again_after_a_message_stays_blocked(client_with_store: TestClient) -> None:
+    c = client_with_store
+    c.post("/api/v1/live-sessions", json={"session_id": "s1", "worktree_id": "wt-1"})
+    c.post("/api/v1/live-sessions/s1/events", json=_say("BLOCKED: need a token"))
+    batch = {"events": [
+        {"type": "user.message", "data": {"content": "try again"}},
+        {"type": "assistant.message", "data": {"content": "BLOCKED: token still rejected"}},
+    ]}
+    c.post("/api/v1/live-sessions/s1/events", json=batch)
+    lp = c.get("/api/v1/live-sessions/s1").json()["latest_progress"]
+    assert (lp["phase"], lp["blocker"]) == ("blocked", "token still rejected")
+
+
+def test_a_message_without_a_prior_blocker_leaves_the_beat(client_with_store: TestClient) -> None:
+    c = client_with_store
+    c.post("/api/v1/live-sessions", json={"session_id": "s1", "worktree_id": "wt-1"})
+    c.post("/api/v1/live-sessions/s1/events", json=_say("PROGRESS build=ok"))
+    c.post("/api/v1/live-sessions/s1/events", json=_deliver("status?"))
+    lp = c.get("/api/v1/live-sessions/s1").json()["latest_progress"]
+    assert lp["phase"] == "build" and lp["markers"] == {"build": "ok"}
+
+
 # -- Phase 7 Slice 7c: operator-session progress ------------------------------
 
 
