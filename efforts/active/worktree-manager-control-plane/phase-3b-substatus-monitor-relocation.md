@@ -407,8 +407,17 @@ state where two long-lived writers are both intended to own it.
      Manager-owned sessions.
    - Unmanaged sessions remain on the old resident/direct path.
 
-4. [ ] **Cut the resident monitor's serve/reconcile loop over to the new
-       Manager-fed observation source for Manager-owned sessions.**
+4. [x] **Cut the resident monitor's serve/reconcile loop over to the new
+       Manager-fed observation source for Manager-owned sessions.** Landed in
+       [#3849](https://github.com/ThomasMichon/copilot-extensions/pull/3849):
+       `_monitor_sweep()` now serves the union of unmanaged
+       registry+direct-scan sessions and Manager-owned managed-cache sessions;
+       `pane_reaper.observe()` and `ResidentSessionReconciler.observe_mux()`
+       consume that union without turning a cache-only view into a complete
+       mux snapshot; cache-only managed incarnation changes now clear stale
+       publish/context state, direct-scan incarnations remain the fallback
+       when Manager omits one, and colliding cache rows now pick the fresh
+       live entry per mux session instead of whichever snapshot row won last.
    - Refactor `_monitor_sweep()` so its served-session set is a union of:
      - unmanaged sessions from the legacy `status-monitor.d` + direct mux scan;
      - Manager-owned sessions from the managed-mux cache.

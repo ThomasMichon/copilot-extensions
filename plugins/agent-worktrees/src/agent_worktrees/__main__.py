@@ -4047,15 +4047,7 @@ def _monitor_sweep(
     governance=None,
     managed_mux_cache=None,
 ) -> int:
-    """One coalescing pass over all live, registered ``wt-*`` sessions.
-
-    Returns the number of sessions served, or ``-1`` on a transient mux
-    enumeration failure. ``managed_mux_cache`` is additive-only here: its
-    currently-live session names are merged into ``catalog_observer`` only when
-    a direct mux scan is also available, so the complete-snapshot observer never
-    sees a Manager-only partial view. Serving/pruning still comes only from the
-    direct registry + mux scan; the later cutover expands that authority.
-    """
+    """One coalescing pass over the Step 4 served-session union."""
     from . import list_cli as _list_cli, mux_status_link as _mux_status_link, status_bar_cli as _status_bar_cli, status_monitor_runtime as _smr, status_updater_cli as _status_updater_cli
 
     _monitor_list_sessions = _self_override("_monitor_list_sessions", _smr._monitor_list_sessions)
@@ -4064,6 +4056,8 @@ def _monitor_sweep(
     _monitor_mux_set = _self_override("_monitor_mux_set", _smr._monitor_mux_set)
     _read_monitor_registry = _self_override("_read_monitor_registry", _smr._read_monitor_registry)
     _remove_monitor_entry = _self_override("_remove_monitor_entry", _smr._remove_monitor_entry)
+    _monitor_managed_session_union = _self_override("_monitor_managed_session_union", _smr._monitor_managed_session_union)
+    _monitor_update_session_incarnations = _self_override("_monitor_update_session_incarnations", _smr._monitor_update_session_incarnations)
     _warm_list_cache_for_active_project = _self_override("_warm_list_cache_for_active_project", _list_cli._warm_list_cache_for_active_project)
     _render_status_segment = _self_override("_render_status_segment", _status_bar_cli._render_status_segment)
     _render_status_context = _self_override("_render_status_context", _status_bar_cli._render_status_context)
@@ -4072,15 +4066,20 @@ def _monitor_sweep(
     reg_dir = _monitor_registry_dir()
     registry = _read_monitor_registry(reg_dir)
     served: list[tuple[str, str]] = []
-    managed_live = managed_mux_cache.live_session_names() if managed_mux_cache is not None else set()
+    managed_entries, observed_sessions, managed_served = _monitor_managed_session_union(
+        managed_mux_cache, registry
+    )
+    unmanaged_live_wt: set[str] = set()
+    live: dict[str, tuple[int, str]] = {}
+    live_wt: set[str] = set()
     if mux_bin:
         live = _monitor_list_sessions(mux_bin)
         if live is None:
             return -1
-        if catalog_observer is not None:
-            catalog_observer(set(live) | managed_live)
         live_wt = {n for n in live if n.startswith("wt-")}
-        stale_sessions = [s for s in registry if s not in live_wt]
+        unmanaged_live_wt = live_wt - set(managed_entries)
+        observed_sessions |= unmanaged_live_wt
+        stale_sessions = [s for s in registry if s not in live_wt and s not in managed_entries]
         if stale_sessions:
             _status_monitor_recheck(governance, "pre-mutation:prune-registry")
         for sess in stale_sessions:
@@ -4092,21 +4091,24 @@ def _monitor_sweep(
             if published is not None:
                 for key in [key for key in published if key[0] == sess]:
                     published.pop(key, None)
-        if incarnations is not None:
-            for sess in live_wt:
-                value = live.get(sess)
-                incarnation = str(value[1]) if isinstance(value, tuple) and len(value) > 1 else ""
-                prior = incarnations.get(sess)
-                if prior is not None and prior != incarnation:
-                    ctx_done.discard(sess)
-                    if published is not None:
-                        for key in [key for key in published if key[0] == sess]:
-                            published.pop(key, None)
-                incarnations[sess] = incarnation
-        served = [(s, p) for s, p in registry.items() if s in live_wt and p]
+        served = [(s, p) for s, p in registry.items() if s in unmanaged_live_wt and p]
+        if catalog_observer is not None:
+            catalog_observer(observed_sessions)
+    if incarnations is not None:
+        _monitor_update_session_incarnations(
+            incarnations, live, unmanaged_live_wt, managed_entries, ctx_done, published
+        )
+    served.extend(managed_served)
     if session_projects is not None:
         registered_paths: set[str] = set()
         for path in registry.values():
+            if not path:
+                continue
+            try:
+                registered_paths.add(os.path.normcase(os.path.realpath(path)))
+            except (OSError, ValueError):
+                continue
+        for _sess, path in served:
             if not path:
                 continue
             try:
@@ -4130,7 +4132,10 @@ def _monitor_sweep(
         with project_lock if project_lock is not None else contextlib.nullcontext():
             try:
                 path_key = os.path.normcase(os.path.realpath(path))
-                project = session_projects.get(path_key) if session_projects is not None else None
+                managed_entry = managed_entries.get(sess) or {}
+                project = managed_entry.get("project")
+                if (not isinstance(project, str) or not project) and session_projects is not None:
+                    project = session_projects.get(path_key)
                 if project:
                     cfg.set_active_project(project)
                 else:

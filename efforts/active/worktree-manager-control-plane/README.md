@@ -689,6 +689,37 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-09-26** — Merged Phase 3b Slice 2 Sub-slice 3 Step 4, PR
+  [#3849](https://github.com/ThomasMichon/copilot-extensions/pull/3849).
+  Cut the resident monitor's served-session/reconcile loop over to the new
+  Manager-fed observation source for Manager-owned mux sessions:
+  `_monitor_sweep()` now serves the union of unmanaged
+  `status-monitor.d`+direct-scan sessions and Manager-owned managed-cache
+  sessions; `pane_reaper.observe()` follows that same union; and
+  `ResidentSessionReconciler.observe_mux()` now sees Manager-owned live mux
+  sessions from that union whenever a successful direct scan is available,
+  instead of assuming every served session came from `_monitor_list_sessions()`.
+  Copilot review surfaced four real follow-up fixes before merge: clearing
+  stale `ctx_done`/`published` state on cache-only managed-session
+  incarnation changes; preserving the complete-snapshot contract by never
+  sending a cache-only managed subset to `observe_mux()` with no successful
+  direct scan; selecting the fresh live cache row per mux session when two
+  `(project, worktree_id)` entries reuse a session name; and falling back to
+  the direct mux incarnation when Manager omits `session_incarnation`, plus
+  a lazy `mux_link` import so `worktree_status_audit` keeps its
+  dependency-light import boundary. Validation: targeted managed-monitor
+  regressions green after the final fixes (`agent-worktrees`: 7 passed for
+  `test_status_monitor.py`/`test_worktree_status_audit.py`, plus 11 passed
+  for `test_active_paths.py` + `test_verify_worktree_active.py` earlier in
+  the slice). Full `worktree-manager` suite: 1438 passed, 7 skipped, same 3
+  pre-existing unrelated failures in
+  `tests/production_picker/test_data_ssh_sources.py`. Full
+  `agent-worktrees` suite on the final tree passed cleanly at 5600 passed,
+  50 skipped, 1 warning, which is better than this slice's earlier known
+  `tests/test_update_stage.py` baseline. Step 4 of this sub-slice's 6-step
+  ordered plan is complete; Steps 5-6 (updater-shim retirement and final
+  cleanup) remain open.
+
 - **2026-09-26** — Merged Phase 3b Slice 2 Sub-slice 3 Step 3, PR
   [#3825](https://github.com/ThomasMichon/copilot-extensions/pull/3825).
   Wired the managed-session cutover all the way through: `worktree-manager`
