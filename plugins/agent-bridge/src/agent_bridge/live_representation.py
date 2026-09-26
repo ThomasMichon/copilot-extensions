@@ -336,15 +336,27 @@ def progress_from_events(
     session's ``latest_progress`` (the UI's Progress column, ``resolve``) its
     milestones with no extra tool call from the agent. Returns None when the
     batch carries no marker, leaving the prior beat untouched.
+
+    A ``BLOCKED:`` milestone means the session is waiting on someone. Once a
+    message is delivered to it (a ``user.message`` that isn't a sub-agent's
+    prompt) and it doesn't block again in the same batch, the wait is over: the
+    beat keeps its markers but drops the blocker (phase ``resumed``), so a
+    session that went back to work never reads as blocked on a stale line.
     """
     from .session_manager import _parse_progress_markers
 
     markers: dict[str, str] = {}
     done = blocked = None
+    answered = False
     for event in raw_events:
-        if event.get("type") != "assistant.message":
+        etype = event.get("type")
+        data = event.get("data") or {}
+        if etype == "user.message" and not data.get("agentId"):
+            answered = True
             continue
-        text = str((event.get("data") or {}).get("content") or "")
+        if etype != "assistant.message":
+            continue
+        text = str(data.get("content") or "")
         markers.update(_parse_progress_markers(text))
         for line in text.splitlines():
             line = line.strip()
@@ -352,8 +364,18 @@ def progress_from_events(
                 done, blocked = line[5:].strip(), None
             elif line.startswith("BLOCKED:"):
                 blocked = line[8:].strip()
+                answered = False
     if not markers and done is None and blocked is None:
-        return None
+        prior_blocker = (prior or {}).get("blocker")
+        if not (answered and prior_blocker):
+            return None
+        resumed = build_progress_snapshot(
+            f"resumed after: {prior_blocker}", phase="resumed",
+            pr=(prior or {}).get("pr"), ts=ts,
+        )
+        if (prior or {}).get("markers"):
+            resumed["markers"] = dict(prior["markers"])
+        return resumed
     merged = dict((prior or {}).get("markers") or {})
     for key, value in markers.items():
         merged.pop(key, None)  # re-insert so the latest keys come last
