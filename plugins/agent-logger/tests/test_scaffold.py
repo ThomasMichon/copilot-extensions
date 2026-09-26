@@ -390,7 +390,7 @@ def test_repo_config_honored_when_registered_and_on_default_branch(
     registered project, on that project's registered default branch, gets
     its repo-local config honored end to end."""
     repo = tmp_path / "repo"
-    _init_git_repo(repo, remote="https://example.test/tmichon/demo.git", branch="main")
+    _init_git_repo(repo, remote="https://example.test/example-owner/demo.git", branch="main")
     (repo / ".agent-logger.yaml").write_text(
         "log:\n  path_template: logs/{title}.md\n",
         encoding="utf-8",
@@ -402,7 +402,7 @@ def test_repo_config_honored_when_registered_and_on_default_branch(
             {
                 "repos": {
                     "demo": {
-                        "remote": "git@example.test:tmichon/demo.git",
+                        "remote": "git@example.test:example-owner/demo.git",
                         "default_branch": "main",
                     }
                 }
@@ -427,7 +427,7 @@ def test_repo_config_honored_via_agent_home_registry(
     agent-worktrees' own legacy registry-root fallback -- rather than only
     ever looking under the bare ~/.agent-worktrees default."""
     repo = tmp_path / "repo"
-    _init_git_repo(repo, remote="https://example.test/tmichon/demo.git", branch="main")
+    _init_git_repo(repo, remote="https://example.test/example-owner/demo.git", branch="main")
     (repo / ".agent-logger.yaml").write_text(
         "log:\n  path_template: logs/{title}.md\n",
         encoding="utf-8",
@@ -441,7 +441,7 @@ def test_repo_config_honored_via_agent_home_registry(
             {
                 "repos": {
                     "demo": {
-                        "remote": "https://example.test/tmichon/demo.git",
+                        "remote": "https://example.test/example-owner/demo.git",
                         "default_branch": "main",
                     }
                 }
@@ -457,6 +457,45 @@ def test_repo_config_honored_via_agent_home_registry(
 
 
 @pytest.mark.no_autotrust
+def test_repo_config_honored_with_non_origin_remote_name(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A registered checkout using a non-``origin`` local remote name (e.g.
+    ``upstream``) must still be trusted -- the gate matches by URL across
+    ALL local remotes, not a hardcoded ``origin``."""
+    repo = tmp_path / "repo"
+    _init_git_repo(
+        repo,
+        remote="https://example.test/example-owner/demo.git",
+        branch="main",
+        remote_name="upstream",
+    )
+    (repo / ".agent-logger.yaml").write_text(
+        "log:\n  path_template: logs/{title}.md\n",
+        encoding="utf-8",
+    )
+
+    registry = tmp_path / "repos.yaml"
+    registry.write_text(
+        yaml.safe_dump(
+            {
+                "repos": {
+                    "demo": {
+                        "remote": "https://example.test/example-owner/demo.git",
+                        "default_branch": "main",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_WORKTREES_REPOS_YAML", str(registry))
+    monkeypatch.chdir(repo)
+
+    assert find_repo_config() == repo / ".agent-logger.yaml"
+
+
+@pytest.mark.no_autotrust
 def test_repo_config_ignored_when_repo_not_registered(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -464,7 +503,7 @@ def test_repo_config_ignored_when_repo_not_registered(
     (or the registry doesn't exist) gets its repo-local config ignored --
     never an error, just treated as absent."""
     repo = tmp_path / "repo"
-    _init_git_repo(repo, remote="https://example.test/tmichon/demo.git", branch="main")
+    _init_git_repo(repo, remote="https://example.test/example-owner/demo.git", branch="main")
     (repo / ".agent-logger.yaml").write_text(
         "log:\n  path_template: logs/{title}.md\n",
         encoding="utf-8",
@@ -486,7 +525,7 @@ def test_repo_config_ignored_when_not_on_default_branch(
     registered default branch) does not get its repo-local config honored --
     an unreviewed branch must not be able to redirect facility behavior."""
     repo = tmp_path / "repo"
-    _init_git_repo(repo, remote="https://example.test/tmichon/demo.git", branch="feature-x")
+    _init_git_repo(repo, remote="https://example.test/example-owner/demo.git", branch="feature-x")
     (repo / ".agent-logger.yaml").write_text(
         "log:\n  path_template: logs/{title}.md\n",
         encoding="utf-8",
@@ -498,7 +537,7 @@ def test_repo_config_ignored_when_not_on_default_branch(
             {
                 "repos": {
                     "demo": {
-                        "remote": "https://example.test/tmichon/demo.git",
+                        "remote": "https://example.test/example-owner/demo.git",
                         "default_branch": "main",
                     }
                 }
@@ -552,16 +591,19 @@ def test_repo_config_trust_override_env_bypasses_gate(
     ("a", "b"),
     [
         (
-            "https://example.test/tmichon/demo.git",
-            "git@example.test:tmichon/demo.git",
+            "https://example.test/example-owner/demo.git",
+            "git@example.test:example-owner/demo.git",
         ),
         (
-            "https://example.test/tmichon/demo",
-            "ssh://git@example.test/tmichon/demo.git",
+            "https://example.test/example-owner/demo",
+            "ssh://git@example.test/example-owner/demo.git",
         ),
         (
-            "https://EXAMPLE.test/Tmichon/Demo.git",
-            "https://example.test/tmichon/demo",
+            # Host case is folded; path case here is identical so this
+            # doesn't (yet) exercise path-case handling -- see the
+            # dedicated case-sensitivity tests below for that.
+            "https://EXAMPLE.test/example-owner/demo.git",
+            "https://example.test/example-owner/demo",
         ),
     ],
 )
@@ -571,8 +613,26 @@ def test_normalize_git_remote_matches_equivalent_forms(a: str, b: str) -> None:
 
 def test_normalize_git_remote_distinguishes_different_repos() -> None:
     assert _normalize_git_remote(
-        "https://example.test/tmichon/demo.git"
-    ) != _normalize_git_remote("https://example.test/tmichon/other.git")
+        "https://example.test/example-owner/demo.git"
+    ) != _normalize_git_remote("https://example.test/example-owner/other.git")
+
+
+def test_normalize_git_remote_path_case_sensitive_on_non_github_host() -> None:
+    """A self-hosted Git server (e.g. Gitea) can be case-sensitive on its
+    filesystem, so path case is preserved -- not folded -- for any host
+    other than github.com."""
+    assert _normalize_git_remote(
+        "https://example.test/Example-Owner/Demo.git"
+    ) != _normalize_git_remote("https://example.test/example-owner/demo.git")
+
+
+def test_normalize_git_remote_path_case_insensitive_on_github() -> None:
+    """github.com is known case-insensitive for owner/repo, so (mirroring
+    agent_worktrees.project_state's own identity resolution) a github.com
+    remote's path case is folded too."""
+    assert _normalize_git_remote(
+        "https://github.com/Example-Owner/Demo.git"
+    ) == _normalize_git_remote("https://github.com/example-owner/demo")
 
 
 def test_organization_cli_reports_manifest_ready_config(

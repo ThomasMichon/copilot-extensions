@@ -25,9 +25,10 @@ from __future__ import annotations
 import logging
 import os
 import platform
-import re
 import subprocess
 from pathlib import Path
+
+from plugin_activation import normalize_remote
 
 try:
     import yaml
@@ -37,24 +38,28 @@ except ImportError:  # pragma: no cover - pyyaml is a hard dependency
 log = logging.getLogger(__name__)
 
 _REPOS_YAML_ENV = "AGENT_WORKTREES_REPOS_YAML"
-_GIT_REMOTE_RE = re.compile(
-    r"^(?:https?://|git@|ssh://(?:git@)?)"
-    r"(?P<host>[^/:]+)[:/]+(?P<path>.+?)(?:\.git)?/?$"
-)
 
 
 def _normalize_git_remote(url: str) -> str | None:
-    """Normalize a git remote URL to ``host/owner/repo`` for comparison.
+    """Normalize a git remote URL for comparison, using the shared,
+    already-tested normalizer (``plugin_activation.normalize_remote``) that
+    agent-worktrees' own repository-identity resolution relies on --
+    handling the ``https://host/owner/repo(.git)``, ``git@host:owner/repo``,
+    and ``ssh://`` forms uniformly, folding host case but deliberately
+    preserving URL *path* case (a self-hosted Git server, e.g. Gitea, can be
+    case-sensitive on its filesystem).
 
-    Matches both the ``https://host/owner/repo(.git)`` and
-    ``git@host:owner/repo(.git)`` forms so a registry entry authored with
-    either style still matches a locally-configured remote in the other.
+    GitHub itself is known case-insensitive for ``owner/repo``, so -- exactly
+    mirroring ``agent_worktrees.project_state._normalized_repository_remote``
+    -- a ``github.com`` remote gets a further full casefold on top.
     """
-    text = url.strip()
-    match = _GIT_REMOTE_RE.match(text)
-    if not match:
+    normalized = normalize_remote(url)
+    if normalized is None or normalized.startswith("file-relative:"):
+        # A relative/unparseable value has no stable, comparable identity.
         return None
-    return f"{match.group('host').lower()}/{match.group('path').lower()}"
+    if normalized.startswith("network:github.com/"):
+        normalized = normalized.casefold()
+    return normalized
 
 
 # Ambient Git environment variables that redirect git's notion of "which
@@ -155,6 +160,11 @@ def _registered_default_branch(remote_url: str) -> str | None:
     except Exception:
         log.warning("failed to parse agent-worktrees repos registry at %s", path)
         return None
+    if not isinstance(data, dict):
+        # Malformed registry (e.g. a top-level list/scalar) is exactly the
+        # same "can't confirm registration" case as unreadable/missing --
+        # fail safe to untrusted, never raise into a config-loading path.
+        return None
     repos = data.get("repos")
     if not isinstance(repos, dict):
         return None
@@ -167,6 +177,26 @@ def _registered_default_branch(remote_url: str) -> str | None:
         if _normalize_git_remote(entry_remote) == normalized:
             return str(entry.get("default_branch") or "master")
     return None
+
+
+def _git_remote_urls(root: Path) -> list[str]:
+    """Return every configured remote URL in ``root`` (any local name).
+
+    agent-worktrees supports registering a project under a non-``origin``
+    local remote name (e.g. ``upstream``), so the trust decision must match
+    against ALL of a checkout's remotes, not assume ``origin`` -- a
+    registered checkout using a different local name would otherwise be
+    silently treated as unregistered.
+    """
+    output = _run_git(root, "config", "--get-regexp", r"^remote\..*\.url$")
+    if output is None:
+        return []
+    urls = []
+    for line in output.splitlines():
+        _, _, url = line.partition(" ")
+        if url:
+            urls.append(url)
+    return urls
 
 
 def repo_config_is_trusted(root: Path) -> bool:
@@ -183,17 +213,21 @@ def repo_config_is_trusted(root: Path) -> bool:
     if override in {"1", "true", "yes", "on"}:
         return True
 
-    remote = _run_git(root, "remote", "get-url", "origin")
-    if remote is None:
-        log.debug("%s: no git remote -- repo-local config untrusted", root)
+    remotes = _git_remote_urls(root)
+    if not remotes:
+        log.debug("%s: no git remotes -- repo-local config untrusted", root)
         return False
-    default_branch = _registered_default_branch(remote)
+    default_branch = None
+    for remote in remotes:
+        default_branch = _registered_default_branch(remote)
+        if default_branch is not None:
+            break
     if default_branch is None:
         log.warning(
-            "%s: remote %r is not a registered agent-worktrees project -- "
+            "%s: no remote (%s) is a registered agent-worktrees project -- "
             "ignoring its repo-local config",
             root,
-            remote,
+            ", ".join(remotes),
         )
         return False
     # ``symbolic-ref`` (not ``rev-parse --abbrev-ref``) so a fresh checkout

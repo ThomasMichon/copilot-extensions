@@ -11,8 +11,9 @@ import pytest
 def init_git_repo(
     path: Path,
     *,
-    remote: str | None = "https://example.test/tmichon/demo.git",
+    remote: str | None = "https://example.test/example-owner/demo.git",
     branch: str = "main",
+    remote_name: str = "origin",
 ) -> None:
     """Create a real (throwaway) git repo for trust-gate tests.
 
@@ -20,6 +21,9 @@ def init_git_repo(
     elsewhere in this suite (fine for tests that bypass the trust gate via
     the autouse fixture below), the trust gate itself shells out to real
     ``git`` commands, so exercising it honestly needs a real checkout.
+    ``remote_name`` defaults to ``origin`` but may be set to any other local
+    remote name (e.g. ``upstream``) to exercise that the trust gate matches
+    on URL, not on a hardcoded local remote name.
     """
     path.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", "-q", "-b", branch, str(path)], check=True)
@@ -32,7 +36,8 @@ def init_git_repo(
     )
     if remote is not None:
         subprocess.run(
-            ["git", "-C", str(path), "remote", "add", "origin", remote], check=True
+            ["git", "-C", str(path), "remote", "add", remote_name, remote],
+            check=True,
         )
 
 

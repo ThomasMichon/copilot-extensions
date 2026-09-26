@@ -381,7 +381,7 @@ def test_discover_tenant_ignored_when_not_on_default_branch(tmp_path, monkeypatc
     repo = src / "aperture-labs"
     init_git_repo(
         repo,
-        remote="https://example.test/tmichon/aperture-labs.git",
+        remote="https://example.test/example-owner/aperture-labs.git",
         branch="feature-x",
     )
     (repo / ".agent-logger.yaml").write_text(
@@ -402,7 +402,7 @@ def test_discover_tenant_ignored_when_not_on_default_branch(tmp_path, monkeypatc
                 "srcroot": {tenancy.current_platform(): str(src)},
                 "repos": {
                     "aperture-labs": {
-                        "remote": "https://example.test/tmichon/aperture-labs.git",
+                        "remote": "https://example.test/example-owner/aperture-labs.git",
                         "default_branch": "main",
                     }
                 },
