@@ -122,7 +122,7 @@ def _windows_run_dirs() -> list[Path]:
         for profile in users.iterdir():
             if profile.name.lower() in skip:
                 continue
-            ep = profile / ".agent-vault" / "run" / "endpoint.json"
+            ep = profile / ".agent-vault" / "run" / "endpoint.json"  # marketplace-isolation: allow legacy compatibility root
             try:
                 mtime = ep.stat().st_mtime
             except OSError:
@@ -327,7 +327,7 @@ def send_command(
 
 def _start_service_systemd() -> bool:
     """Start the vault service via systemd user unit if available."""
-    unit = os.environ.get(config.SYSTEMD_UNIT_ENV) or "agent-vault.service"
+    unit = os.environ.get(config.SYSTEMD_UNIT_ENV) or "agent-vault.service"  # marketplace-isolation: allow legacy-compatibility
     try:
         result = subprocess.run(
             ["systemctl", "--user", "is-enabled", unit],

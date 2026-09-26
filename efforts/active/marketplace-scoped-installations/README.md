@@ -386,6 +386,105 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-26 — `agent-vault`'s small remaining findings resolved (9 of the 44 left after `config.py`)
+
+- Fresh guard count for `dev` head (post `config.py` merge): 676, then 680
+  after further unrelated `dev` activity (confirmed via `git stash`/`git
+  stash pop` immediately before committing — the count drift between
+  sessions tracks unrelated concurrent commits, not a validation error;
+  this leg's own change always removes exactly 7 findings regardless of the
+  baseline).
+- Read `agent-vault`'s remaining small-file findings (`cli.py` 2,
+  `core_ext.py` 1, `service.py` 1, `winpipe.py` 1, `payload-invocation.json`
+  1, `SKILL.md` 3) individually, per the prior entry's own caution not to
+  assume shape from the file name:
+  - `cli.py:125` (`ep = profile / ".agent-vault" / "run" / "endpoint.json"`)
+    — inside `_windows_mount_candidates()`, a WSL-side glob over every
+    mounted Windows user profile's legacy `.agent-vault` runtime dir,
+    looking for the newest advertised endpoint; the function's own docstring
+    says it "Honors an explicit `AGENT_VAULT_WINDOWS_RUN_DIR` override" as
+    the cell-qualified escape hatch, with this glob being the legacy-
+    discovery fallback path. Same shape as `config.py`'s `home_dir()`
+    finding — annotated `allow legacy compatibility root`.
+  - `cli.py:330` (`unit = os.environ.get(config.SYSTEMD_UNIT_ENV) or
+    "agent-vault.service"`) — the identical env-override-with-legacy-
+    default shape as `config.py`'s `DEFAULT_SOCKET_PATH`/`DEFAULT_PIPE_PATH`
+    (just inlined instead of referencing a `DEFAULT_*` constant). Annotated
+    `allow legacy-compatibility`.
+  - `core_ext.py:45` (`CORE_ENDPOINT_ENV = "AGENT_VAULT_CORE_ENDPOINT"`) —
+    the identical env-var-*name*-declaration shape as `config.py`'s 5
+    corrected findings (a string holding the env var's name, not a fixed
+    identity value). Annotated with the same `allow env-var-name-
+    declaration` reason established in the prior entry's fixup.
+  - `service.py:73` (`log = logging.getLogger("agent-vault.service")`) — a
+    **distinct new guard false-positive shape**: this trips the guard's
+    literal `agent-[a-z0-9-]+\.service` pattern (the first alternative in
+    `_FIXED_UNIT`, matched anywhere in the line, not gated on the variable
+    name) because the *string value* happens to look like a systemd unit
+    name — but it's a Python `logging` namespace, not a live systemd/
+    process identity; dozens of other files across the codebase use the
+    identical `logging.getLogger("agent-<plugin>")` pattern and are never
+    flagged (confirmed via `grep`) because they don't end in a literal
+    `.service` suffix. Annotated with a new, precise `allow logger-
+    namespace` reason (no existing precedent fit this shape either).
+  - `winpipe.py:29` (`DEFAULT_PIPE_PATH = r"\\.\pipe\agent-vault"`) —
+    **not annotated; deleted instead**. Verified via `grep` across the whole
+    plugin (source + tests) that this module-level constant is a dead,
+    unused duplicate of `config.py`'s own `DEFAULT_PIPE_PATH` — nothing in
+    `winpipe.py` itself, nor any importer, ever references
+    `winpipe.DEFAULT_PIPE_PATH` (only `pipe_send`/`start_pipe_server`/
+    `IS_WINDOWS` are used from that module). Per the "Pre-Existing Issues —
+    Track It or Fix It" convention, a verified-dead line is fixed directly
+    (removed) rather than annotated as if it were intentional design.
+  - `SKILL.md:41` (the Linux/WSL runtime-defaults table row, dual-flagged
+    `global-plugin-binstub` + `fixed-service-identity` on one line) —
+    documents the current deployed legacy layout for setup/troubleshooting,
+    the same shape as the `copilot-extensions-harness` entry's `SKILL.md`
+    table-row annotations. Annotated with the established `allow deployed-
+    runtime-diagnostics` reason (HTML-comment form, matching that
+    precedent's exact syntax for markdown tables).
+- **Left 2 of the 9 deliberately unresolved this leg — both genuine guard/
+  doc-format limitations, not judgment calls to rush**:
+  - `payload-invocation.json:6` (`"legacyRuntimeRoot": ".agent-vault"`) —
+    confirmed this exact field/shape also exists verbatim in
+    `agent-index/payload-invocation.json:6` and
+    `agent-machines/payload-invocation.json:6` (`grep`-verified). The
+    2026-09-25 `phase-2-launcher-contracts.md` re-audit already flagged this
+    as "look[ing] like intentional migration metadata" but explicitly
+    "neither has been confirmed against the install contract or annotated"
+    — i.e. the effort's own docs already treat this as an open, cross-
+    plugin question bigger than one file. Annotating it here alone, ahead
+    of that confirmation, would risk exactly the kind of premature judgment
+    this PR-series' own review has now caught three separate times. Left
+    for a dedicated cross-plugin design pass.
+  - `SKILL.md:6` (the YAML frontmatter `description: >` folded block's
+    `self-provisioning \`~/.local/bin/agent-vault\` binstub(s)` phrase) —
+    **cannot use an inline marker here at all**: appending `# marketplace-
+    isolation: allow ...` (or any comment syntax) inside a YAML frontmatter
+    prose value would corrupt the actual skill description text shown to
+    users/agents, not merely suppress a guard finding. Every existing
+    `SKILL.md` marker precedent in the codebase lives inside a fenced code
+    block or a markdown table cell — none inside frontmatter prose. This is
+    a genuine guard/doc-format gap (the guard has no mechanism for
+    annotating description-block prose without visibly polluting it) —
+    flagged for a future guard-design pass (e.g. a whole-block marker on the
+    closing `description: >` line, or a documented rewording convention)
+    rather than solved ad hoc here.
+- Verified: `git diff origin/dev -- <5 touched files> | grep -c
+  "marketplace-isolation: allow"` = exactly 5 (matching the 5 annotated
+  findings; the 6th and 7th resolved findings are the `winpipe.py` deletion
+  and `SKILL.md:41`'s dual-category single-line suppression). `check-
+  marketplace-isolation.py --json` dropped by exactly 7 (680→673 at commit
+  time). `python -c "import ast; ast.parse(...)"` syntax check on all 4
+  touched `.py` files. `python tools/run-plugin-tests.py agent-vault` (the
+  canonical turn-key runner): 249 passed, 12 skipped — identical to the
+  pre-change baseline, confirming the `winpipe.py` deletion broke nothing.
+  `check-docs-consistency.py` OK. `check-changefile-presence.py --base
+  origin/dev` OK after adding a **`patch`**-typed changefile (per the prior
+  entry's corrected default — not repeating the `dev`-type mistake).
+  Manually confirmed the fix catches its own regression via `git stash`/
+  `git stash pop` (680→673→680→673).
+
 ### 2026-09-26 — `agent-vault`'s `config.py` 8 findings annotated (partial plugin slice)
 
 - Fresh guard count for `dev` head (post `context-handoff` merge): 684→688
