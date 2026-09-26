@@ -47,10 +47,20 @@ caught during that trial: converting a lib's copies to pointers and then
 running ``--restore-canonical`` blindly copied "no content" up into
 canonical). ``--materialize`` still fully handles pointer copies: it expands
 each one from canonical (writing real ``src/`` + version, then deleting the
-now-superseded pointer file) exactly like it refreshes a real copy. Only
-``src/`` is ever touched by a pointer -- ``tests/`` (and everything else in
-a copy) is deliberately out of scope, matching this guard's own existing
-invariant (it only ever compares ``src/`` across copies too).
+now-superseded pointer file) exactly like it refreshes a real copy.
+``src/`` is always refreshed for a pointer copy; ``tests/`` is refreshed
+too, but **only when the copy already carries one** -- a copy vendors
+``tests/`` from canonical as a deliberate, opt-in choice at
+``--pointerize`` time (some copies have none, e.g. a lib pointerized
+before this rule existed, or a consuming plugin whose own test runner
+never discovers nested ``libs/*/tests/`` anyway), and materialization must
+respect that choice rather than unilaterally introducing ``tests/`` a copy
+never had just because canonical happens to carry one. This differs from
+``check-vendored-libs-sync.py``'s own copies-vs-copies invariant (which
+only ever compares ``src/``, and still treats every copy's ``tests/`` as
+out of scope for *that* guard) -- the two tools intentionally diverge here:
+one guards drift between copies, the other refreshes a pointer's own
+vendored content from its single source of truth.
 
 Two pointer *kinds* exist, both identified purely by ``VENDOR_POINTER.json``:
 
@@ -505,13 +515,17 @@ def _write_passthrough_pointer(consumer: str, lib: str) -> Path:
     Requires ``libs/<lib>`` (canonical) to already exist with a real
     ``src/`` and a ``pyproject.toml``. Writes a REAL, installable
     ``pyproject.toml`` for the copy (a plain byte-for-byte copy of
-    canonical's own, matching every other vendored-copy's "only src/ is
-    ever a pointer" convention) plus a single-file passthrough
-    ``src/<pkg>/__init__.py`` shim -- never a real tree -- so
-    ``uv pip install -e .``/pytest/CI's own test-runner job keep working
-    unmodified on `dev`, with zero copy-drift risk (nothing to keep in
-    sync; editing canonical takes effect immediately, since the shim
-    re-resolves to canonical's real files on every fresh interpreter).
+    canonical's own) plus a single-file passthrough ``src/<pkg>/__init__.py``
+    shim -- never a real tree -- so ``uv pip install -e .``/pytest/CI's own
+    test-runner job keep working unmodified on `dev`, with zero copy-drift
+    risk (nothing to keep in sync; editing canonical takes effect
+    immediately, since the shim re-resolves to canonical's real files on
+    every fresh interpreter). Also vendors canonical's ``tests/`` verbatim
+    if canonical has one -- unlike ``src/``, this is the copy's one
+    deliberate opt-in choice: later refreshes (``--materialize``,
+    ``materialize_main.py``, ``preview_release.py``) only ever touch
+    ``tests/`` for a copy that already carries it, never introducing one
+    unilaterally.
     """
     canonical = LIBS_DIR / lib
     if not canonical.is_dir():
