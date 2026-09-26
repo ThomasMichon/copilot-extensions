@@ -105,6 +105,14 @@ def materialize(dest: Path, *, canonical_root: Path) -> list[str]:
         pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
         source_rel = pointer["source"]  # e.g. "libs/zdd"
         lib_copy_dir = pointer_path.parent
+
+        if _escapes_root(lib_copy_dir, dest):
+            log.append(
+                f"SKIP {lib_copy_dir}: pointer directory escapes the "
+                "checkout root (a symlinked plugin/libs path) -- refusing"
+            )
+            continue
+
         canonical = _resolve_within(canonical_root, source_rel)
 
         if canonical is None:
@@ -145,17 +153,24 @@ def materialize(dest: Path, *, canonical_root: Path) -> list[str]:
     return log
 
 
+def _escapes_root(candidate: Path, root: Path) -> bool:
+    """True when ``candidate``'s resolved (symlink-followed) location is not
+    ``root`` itself or a descendant of it."""
+    candidate_r = candidate.resolve()
+    root_r = root.resolve()
+    return candidate_r != root_r and root_r not in candidate_r.parents
+
+
 def _resolve_within(canonical_root: Path, source_rel: str) -> Path | None:
     """Resolve ``source_rel`` against ``canonical_root``, refusing an absolute
     path or any ``../`` traversal that would escape ``canonical_root``
     (including via a symlink). Returns ``None`` when the candidate escapes."""
     if Path(source_rel).is_absolute():
         return None
-    candidate = (canonical_root / source_rel).resolve()
-    root = canonical_root.resolve()
-    if candidate != root and root not in candidate.parents:
+    candidate = canonical_root / source_rel
+    if _escapes_root(candidate, canonical_root):
         return None
-    return candidate
+    return candidate.resolve()
 
 
 def _find_symlink(tree: Path) -> str | None:
@@ -214,7 +229,16 @@ def _ignore(_dir: str, names: list[str]) -> set[str]:
 def build(dest: Path, *, source_root: Path = REPO) -> list[str]:
     if dest.exists():
         shutil.rmtree(dest)
-    shutil.copytree(source_root, dest, ignore=_ignore)
+    # symlinks=True: preserve any tracked symlink AS a symlink in the
+    # snapshot rather than following it -- the default (False) would
+    # silently dereference and embed whatever external content a symlink
+    # anywhere in source_root (e.g. a canonical lib's src/) points at,
+    # before materialize()'s own per-pointer _find_symlink() check below
+    # even runs. A preserved symlink pointing outside dest is inert (a
+    # dangling/foreign reference in the snapshot, not embedded bytes); the
+    # per-pointer check then still catches and refuses a symlinked
+    # canonical lib source specifically.
+    shutil.copytree(source_root, dest, ignore=_ignore, symlinks=True)
     return materialize(dest, canonical_root=source_root)
 
 

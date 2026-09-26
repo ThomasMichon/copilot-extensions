@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -250,6 +251,51 @@ def test_materialize_refuses_a_symlinked_src_root(tmp_path: Path):
     assert any("SKIP" in line and "is a symlink" in line for line in log)
     assert (pointer_dir / "VENDOR_POINTER.json").exists()
     assert not (pointer_dir / "src").exists()
+
+
+def test_materialize_refuses_a_pointer_dir_that_escapes_dest(tmp_path: Path):
+    # find_pointers() globs under dest, but a symlinked plugin (or libs)
+    # directory could still resolve outside dest -- rmtree()/copytree()
+    # must never write there even though the pointer glob "found" it.
+    root = tmp_path / "repo"
+    _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
+    outside = tmp_path / "outside-plugin"
+    real_pointer_dir = _pointer(outside, "escaped-plugin", "zdd")
+    (root / "plugins").mkdir(parents=True, exist_ok=True)
+    (root / "plugins" / "escaped-plugin").symlink_to(
+        outside / "plugins" / "escaped-plugin", target_is_directory=True
+    )
+
+    log = mm.materialize(root, canonical_root=root)
+
+    assert any("SKIP" in line and "escapes the checkout root" in line for line in log)
+    assert (real_pointer_dir / "VENDOR_POINTER.json").exists()
+    assert not (real_pointer_dir / "src").exists()
+
+
+def test_build_preserves_a_symlink_instead_of_dereferencing_its_content(tmp_path: Path):
+    # The default shutil.copytree(symlinks=False) would dereference ANY
+    # symlink under source_root during the initial whole-tree snapshot
+    # copy, embedding external content into dest before materialize()'s
+    # own per-pointer symlink check even runs. build() must preserve
+    # symlinks instead.
+    source_root = tmp_path / "repo"
+    secret = tmp_path / "outside-repo-secret"
+    secret.mkdir()
+    (secret / "leaked.txt").write_text("do not leak\n", encoding="utf-8")
+    (source_root / "some-dir").mkdir(parents=True)
+    (source_root / "some-dir" / "a-link").symlink_to(secret, target_is_directory=True)
+    (source_root / "README.md").write_text("hello\n", encoding="utf-8")
+    dest = tmp_path / "dest"
+
+    mm.build(dest, source_root=source_root)
+
+    copied_link = dest / "some-dir" / "a-link"
+    assert copied_link.is_symlink(), "a-link must be preserved as a symlink, not dereferenced"
+    # Confirm the symlink is a real symlink object -- not a directory that
+    # copytree(symlinks=False) would have created containing an embedded
+    # copy of the secret's own files.
+    assert os.readlink(copied_link) == str(secret)
 
 
 def _file_pointer(root: Path, plugin: str, rel: str, *, source: str) -> Path:
