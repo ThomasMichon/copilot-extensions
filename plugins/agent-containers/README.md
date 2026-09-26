@@ -421,7 +421,11 @@ Docker command timeouts are normalized into per-member deferred results:
 liveness timeouts become unknown, while stop/remove/confirmation timeouts leave
 the hold fail-closed and do not abort reconciliation of sibling members.
 Typed rescue/generation/pin failures follow the same per-member rule across
-`up`, `down`, and `rm`.
+`up`, `down`, and `rm`. `agent-codespaces`' peer non-destructive capture verb
+(`sync-sessions`, session-rescue-parity Phase 3) uses the same busy exit
+code `75` and a `captured`/`rescued`-equivalent `ok`+`deferred` result shape,
+scaled down to one target instead of a fleet -- see that plugin's own
+README for the exact field names.
 
 Deploy holds expire after 15 minutes without heartbeat; session admissions
 expire after 5 minutes without heartbeat. This bounds PID-reuse failures.
