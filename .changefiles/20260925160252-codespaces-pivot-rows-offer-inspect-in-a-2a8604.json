@@ -1,9 +1,0 @@
-{
-  "comment": "CodeSpaces pivot rows offer Inspect in a new window and Watch, and carry the claim owner so attach passes --effort",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

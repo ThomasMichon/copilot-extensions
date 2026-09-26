@@ -1,9 +1,0 @@
-{
-  "comment": "Add reverse claim-owner lookup across registered worktree projects.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

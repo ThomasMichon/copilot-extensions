@@ -1,9 +1,0 @@
-{
-  "comment": "Fix peer_launch_adapter.validate_context() collapsing a Windows-style install-receipt path (e.g. 'N:\\marketplaces\\cell\\...') to '.' when computing its parent directory on a POSIX host, by parsing backslash-separated receipts with PureWindowsPath instead of the host-native Path flavour. Fixes test_validate_context_treats_windows_n_drive_receipt_as_a_path, which was blocking dev->main promotion (full - agent-worktrees CI job).",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

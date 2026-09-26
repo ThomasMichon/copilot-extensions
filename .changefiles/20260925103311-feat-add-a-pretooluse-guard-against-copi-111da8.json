@@ -1,9 +1,0 @@
-{
-  "comment": "feat: add a preToolUse guard against @copilot PR/issue mentions, scoped to this plugin's own repo",
-  "changes": [
-    {
-      "plugin": "copilot-extensions-harness",
-      "type": "patch"
-    }
-  ]
-}

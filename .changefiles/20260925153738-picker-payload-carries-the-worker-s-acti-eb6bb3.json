@@ -1,9 +1,0 @@
-{
-  "comment": "Picker payload carries the worker's activity and the pivot declares a worker block, so a Worktrees row can show the CodeSpace worker it supervises",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}
