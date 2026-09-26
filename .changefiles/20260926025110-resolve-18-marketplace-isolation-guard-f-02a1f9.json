@@ -1,9 +1,0 @@
-{
-  "comment": "Resolve 18 marketplace-isolation guard findings in agent-logger: annotate legacy-compatibility roots/values (config.py, sync/origin.py, filesystem.py), sibling-registry lookups (repo_trust.py, tenancy.py), a manually-verified cell-derived-suffix pair (runtime-gate.sh/.ps1), a sibling-plugin legacy root (register-cold-store-provider.ps1), deployed-runtime-diagnostics docs (SKILL.md rows), a doc-example (reference config.yaml), and fix a pre-existing runtime-gate.ps1 marker-placement bug",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}
