@@ -205,19 +205,20 @@ jobs:
     # mirrors why `promote` below needs its own `always()` for the same
     # reason.
     #
-    # `gate`'s own `is_dev` output is `true` for EVERY `workflow_dispatch`
-    # run regardless of which ref it was dispatched against (a pre-existing
-    # behavior `promote` already relies on and this job must not alter) --
-    # so a manual dispatch from `main` or any other ref could otherwise file
-    # an issue whose body wrongly claims a `dev` validation failure. The
-    # extra `github.ref == 'refs/heads/dev'` check (workflow_run events
-    # don't need it -- `gate` already verified real dev ancestry for those)
-    # closes that specifically for this job, without touching `gate`.
+    # `workflow_run`-only, deliberately: `workflow_dispatch` loads the
+    # ENTIRE workflow YAML from the dispatched ref (unlike `workflow_run`,
+    # which always resolves the workflow file from the default branch) --
+    # so allowing a dispatch against `dev` would make the whole job
+    # definition itself untrusted, not merely the checked-out script. This
+    # job doesn't need manual triggering (it exists to react automatically
+    # to real validation runs), so the fix is to just never offer that
+    # path, rather than trying to harden a job whose own YAML could be
+    # attacker-controlled.
     needs: [gate, full, worktree-manager, guards-full-sweep]
     if: >-
       always() &&
+      github.event_name == 'workflow_run' &&
       needs.gate.outputs.is_dev == 'true' &&
-      (github.event_name == 'workflow_run' || github.ref == 'refs/heads/dev') &&
       (needs.full.result == 'failure' ||
        needs.worktree-manager.result == 'failure' ||
        needs.guards-full-sweep.result == 'failure')
@@ -241,12 +242,12 @@ jobs:
         #
         # An EXPLICIT `ref:` naming the default branch is required, not
         # merely omitting `ref:` -- a bare checkout resolves differently
-        # per trigger type: for `workflow_run` it happens to land on the
-        # default branch, but for `workflow_dispatch` (which this job's
-        # own `if:` permits from `refs/heads/dev`) it resolves to
-        # whichever ref was manually dispatched, reopening the exact
-        # hole for that path. Naming the default branch explicitly is
-        # correct for every trigger type, not just the common one.
+        # per trigger type: for `workflow_run` it lands on the default
+        # branch, but a bare checkout under `workflow_dispatch` would
+        # resolve to whichever ref was manually dispatched -- moot for
+        # this job specifically now that its own `if:` is `workflow_run`-
+        # only (see above), but naming the default branch explicitly is
+        # correct and harmless defense-in-depth regardless of trigger.
         with:
           fetch-depth: 1
           ref: ${{ github.event.repository.default_branch }}

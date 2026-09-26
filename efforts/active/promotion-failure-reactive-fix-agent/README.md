@@ -613,3 +613,17 @@ _Pending._
   reached `file_issue` is always `True` (the dry-run case already
   returned earlier) — fixed to return 1, matching the same "never mask a
   broken watchdog behind a green step" contract. 31 tests, all passing.
+- **Ninth review pass found the deepest issue in this whole sequence:**
+  the previous round's checkout-ref fix only protected which *script*
+  runs, not the *job definition itself* — `workflow_dispatch` loads the
+  ENTIRE workflow YAML from the dispatched ref (unlike `workflow_run`,
+  which always resolves the workflow file from the default branch), so
+  permitting a manual dispatch against `dev` at all meant the whole job
+  -- steps, permissions, everything -- could be attacker-controlled by a
+  `dev` commit, no matter how carefully the checkout step itself was
+  pinned. There is no way to harden a job against an untrusted copy of
+  its own definition. Fixed the only way that actually closes it: made
+  `report-failure` `workflow_run`-only, full stop -- it never needed
+  manual dispatch (it exists to react automatically to real validation
+  runs), so the fix is removing the path entirely rather than trying to
+  defend it. No Python change this round, workflow-only.
