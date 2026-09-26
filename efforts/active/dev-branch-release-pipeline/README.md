@@ -1780,4 +1780,17 @@ efforts' own PRs).
     as a reviewer on `dev` PRs touching workflows (informational, not
     blocking) — the operator explicitly chose this split when the
     self-lockout risk was surfaced rather than have it applied silently.
+  - **Follow-up PR (#3701) review caught two real gaps, both fixed:**
+    (1) `.github/CODEOWNERS` didn't protect itself — a collaborator could
+    have reassigned workflow ownership by editing that file first, then
+    submitted workflow changes without the intended review; added an
+    explicit `/.github/CODEOWNERS @ThomasMichon` entry; (2) the
+    workflow's own comment overstated the current state, claiming
+    `APERTURE_RELEASE_TOKEN` was already an environment-scoped secret —
+    it is not (still a plain repository secret, migration still pending
+    the operator's own `gh secret set`); an environment's branch policy
+    cannot restrict a repository secret's visibility, so the scratch-
+    branch exfiltration path is **not yet actually closed** until that
+    migration happens. Rewrote the comment to say so plainly rather than
+    imply the fix was already complete.
 

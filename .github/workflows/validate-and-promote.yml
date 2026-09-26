@@ -204,13 +204,19 @@ jobs:
     # protected branches only (`dev`/`main`) and deliberately carries NO
     # required reviewer -- a required reviewer would pause every real,
     # fully-unattended promotion run waiting on a manual click, which
-    # would defeat the whole point of this pipeline. The security value
-    # here is entirely the branch restriction: `APERTURE_RELEASE_TOKEN`
-    # is an environment secret scoped to `main-promotion`, so a workflow
-    # smuggled onto an unprotected scratch branch (the live risk a
-    # security review surfaced) cannot reach it -- only a job that both
-    # declares this environment AND runs on `dev`/`main` can. It's still
-    # NOT a human-approval gate; every other guard below still applies.
+    # would defeat the whole point of this pipeline.
+    #
+    # **Not yet closed:** `APERTURE_RELEASE_TOKEN` below is still a plain
+    # REPOSITORY secret, not an environment secret -- an environment's
+    # branch policy cannot restrict a repository secret's visibility, so
+    # today a workflow on an unprotected scratch branch can still read it
+    # regardless of this job's `environment:` declaration. Migrating it to
+    # an environment-scoped secret under `main-promotion` (then deleting
+    # the repository-level copy) is the step that actually closes this —
+    # see the dev-branch-release-pipeline journal (2026-09-25 entry) for
+    # why that step needs the operator's own `gh secret set` and hasn't
+    # happened yet. Until it does, treat this environment's protection as
+    # configured-but-not-yet-effective for this specific secret.
     #
     # `main` carries a zero-bypass "pull request required" ruleset (a
     # personal GitHub account cannot grant the GitHub Actions app -- or any
