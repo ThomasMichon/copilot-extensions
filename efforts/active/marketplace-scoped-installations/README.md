@@ -468,7 +468,7 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
     since this is the *live*, correct cell-qualified value, not a legacy
     fallback — no existing token fit this shape).
   - `skills/log-session/SKILL.md:94` (a blockquote paragraph, not a table)
-    and `skills/session-sync-setup/SKILL.md`'s 5 findings (a mix of plain
+    and `skills/session-sync-setup/SKILL.md`'s 6 findings (a mix of plain
     paragraphs, a table cell, and a diagnostic command inside a bullet) —
     all describe the current deployed config-file location/systemd unit
     names for setup/troubleshooting guidance, the same shape as the
@@ -478,8 +478,8 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
     exact placement, but the guard's `_ALLOW_REASON` regex is a plain
     same-line text match with no markdown-structure awareness, so this
     was a safe, low-risk extension of the established pattern, verified by
-    checking the count dropped as expected). Annotated all 6 with `allow
-    deployed-runtime-diagnostics`.
+    checking the count dropped as expected). Annotated all 7 (1 + 6) with
+    `allow deployed-runtime-diagnostics`.
   - `skills/session-sync-setup/references/config.yaml:64`
     (`password_file: ~/.agent-logger/rsync.pass   # optional`) — inside a
     "canonical, copy-pasteable example" reference file (its own header
