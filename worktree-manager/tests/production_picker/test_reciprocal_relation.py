@@ -1,11 +1,7 @@
 from __future__ import annotations
 
 from worktree_manager.production_picker.picker_tui import derive
-from worktree_manager.production_picker.picker_tui.engine import (
-    ACTIVE_SPECS,
-    LIST_SPECS,
-    PickerScreen,
-)
+from worktree_manager.production_picker.picker_tui.engine import PickerScreen
 
 
 def _raw(**values):
@@ -32,6 +28,95 @@ def test_current_reciprocal_relation_is_preserved() -> None:
 
     assert row["reciprocal_relation"] == relation
     assert row["relation"] == "CONTROL"
+
+
+# ---------------------------------------------------------------------------
+# #3307 Phase 5: the retired "R" column's values fold into STATE/LIVE instead
+# ---------------------------------------------------------------------------
+
+def test_handed_off_relation_becomes_handoff_state_when_not_live() -> None:
+    relation = {
+        "version": 1,
+        "state": "handed-off",
+        "binding": {"state": "handed-off"},
+        "control": {"state": "none"},
+        "actions": [],
+    }
+
+    row = derive.norm(_raw(reciprocal_relation=relation), "host", "windows")
+
+    assert row["relation"] == "HANDOFF"
+    assert row["state"] == "HANDOFF"
+    # Not a FINAL/MERGED descriptor state, so no closure-style override.
+    assert row["state_style"] is None
+
+
+def test_live_session_beats_handoff_relation() -> None:
+    """A live process still wins ACTIVE over a stale HANDOFF relation -- a
+    successor already resumed, so the handoff itself is no longer the most
+    useful thing to show."""
+    relation = {
+        "version": 1,
+        "state": "handed-off",
+        "binding": {"state": "handed-off"},
+        "control": {"state": "none"},
+        "actions": [],
+    }
+
+    row = derive.norm(
+        _raw(reciprocal_relation=relation, mux_attached=True), "host", "windows")
+
+    assert row["state"] == "ACTIVE"
+
+
+def test_bucket_places_handoff_state_in_recent() -> None:
+    relation = {
+        "version": 1,
+        "state": "handed-off",
+        "binding": {"state": "handed-off"},
+        "control": {"state": "none"},
+        "actions": [],
+    }
+    row = derive.norm(_raw(reciprocal_relation=relation), "host", "windows")
+    _active, recent, _completed = derive.bucket([row])
+    assert [r["id"] for r in recent] == ["child"]
+
+
+def test_live_worktree_shows_acp_mode_when_bridge_interface() -> None:
+    """BOUND vs CONTROL folds into LIVE as a CLI/ACP interface-mode marker
+    (not the reciprocal_relation binding/control axis -- a worktree owned by
+    an orchestrating CLI session still reads as CONTROL despite its own live
+    session being ordinary CLI, so the mode marker uses ``interface``
+    directly)."""
+    row = derive.norm(
+        _raw(session_bound_live=True, interface="acp"), "host", "windows")
+    assert row["sess"] == "ACP"
+    assert row["state"] == "ACTIVE"
+
+
+def test_live_worktree_shows_proc_for_cli_interface() -> None:
+    row = derive.norm(
+        _raw(session_bound_live=True, interface="cli"), "host", "windows")
+    assert row["sess"] == "PROC"
+
+
+def test_controlled_elsewhere_cli_worktree_still_shows_proc() -> None:
+    """The common agent-orchestrated case (this very effort's own worktrees):
+    CONTROL no longer implies ACP -- a CLI-interface worktree owned by
+    another session still shows PROC, not ACP."""
+    relation = {
+        "version": 1,
+        "state": "controlled-elsewhere",
+        "binding": {"state": "bound-here"},
+        "control": {"state": "controlled-remote"},
+        "actions": [],
+    }
+    row = derive.norm(
+        _raw(reciprocal_relation=relation, session_bound_live=True,
+             interface="cli"),
+        "host", "windows")
+    assert row["relation"] == "CONTROL"
+    assert row["sess"] == "PROC"
 
 
 def test_legacy_controller_row_fails_closed() -> None:
@@ -132,40 +217,6 @@ def test_navigation_target_must_match_control_target() -> None:
 
     assert row["reciprocal_relation"]["compatibility"] == "invalid"
     assert row["reciprocal_relation"]["actions"] == []
-
-
-def test_relation_column_is_present_in_both_grids() -> None:
-    assert any(spec[0] == "relation" for spec in ACTIVE_SPECS)
-    assert any(spec[0] == "relation" for spec in LIST_SPECS)
-
-
-def test_relation_column_is_iconified_to_one_cell() -> None:
-    # iconify-relation: freed width goes to the flex `title` column instead
-    # of a 7-cell "RELATI…"-truncated text column.
-    active_spec = next(spec for spec in ACTIVE_SPECS if spec[0] == "relation")
-    list_spec = next(spec for spec in LIST_SPECS if spec[0] == "relation")
-    assert active_spec[2] == 1
-    assert list_spec[2] == 1
-
-
-def test_every_relation_short_label_has_an_icon() -> None:
-    from worktree_manager.production_picker.picker_tui import reciprocal
-    from worktree_manager.production_picker.picker_tui.engine import (
-        _RELATION_ICON,
-        _RELATION_STYLE,
-    )
-
-    # Every possible short_label() output (including the empty "unbound"
-    # string) must resolve to a defined icon/style -- an unmapped state would
-    # silently fall through to the generic "?" fallback in row_text.
-    possible_labels = {"BOUND", "CONTROL", "HANDOFF", "TERM", "AMBIG", ""}
-    assert set(_RELATION_ICON) == possible_labels
-    assert set(_RELATION_STYLE) == possible_labels
-    # Cross-check against the actual function, not just a duplicated set.
-    for state in ("bound-here", "controlled-elsewhere", "handed-off",
-                   "terminal", "ambiguous", "unbound"):
-        label = reciprocal.short_label({"state": state})
-        assert label in _RELATION_ICON
 
 
 def test_controller_navigation_requires_exact_loaded_target() -> None:
