@@ -668,6 +668,32 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-09-25** — Merged Phase 3b Slice 2 Sub-slice 3 Step 1, PR
+  [#3650](https://github.com/ThomasMichon/copilot-extensions/pull/3650)
+  (squash-merged into `dev` as `059c25a35`). Went through 21 review rounds
+  before landing (see the PR's own comment history for the full per-round
+  breakdown); the last three rounds each fixed a genuine finding surfaced
+  after a mid-session rebase onto the latest `dev` (which had itself landed
+  the Stage D lazy-dispatch decoupling since this branch's prior rebase):
+  rejecting an out-of-range rendezvous port before returning an endpoint,
+  resolving `status-monitor`'s managed-mux runtime home through the
+  cluster-free `_core_helper` path instead of a direct (and, under lazy
+  dispatch, unbound) `core._aw_runtime_home()` access, and gating
+  `CoalescingServer.close()`'s `shutdown()` call on the serve thread still
+  being alive rather than trusting its one-way readiness event alone (with
+  a regression test in both vendored `work_coalescing_singleton` copies,
+  which also caught and fixed a latent bug in the prior round's own test
+  that patched a bound method after the thread's target had already been
+  captured). Full suite re-run after the rebase: 8 pre-existing unrelated
+  failures (same four families as before -- git credential pinning,
+  lazy-dispatch cluster-scan parity, repos-clone auth-arg injection,
+  update-stage indicator state; one fewer than previously observed,
+  consistent with an unrelated upstream fix landing during the rebase),
+  5469 passed, 52 skipped. Step 1 of this sub-slice's 6-step ordered plan
+  is complete; Steps 2-6 (the Worktree Manager mux-companion daemon itself,
+  Mux-launch integration, and the writer-ownership cutover) remain
+  unclaimed.
+
 - **2026-09-25** — Landed Phase 3b Slice 2 Sub-slice 3 Step 1 (additive
   daemon-link contract + resident managed-mux cache seam), PR TBD. Added
   `mux_link.py`: rendezvous-parseable `managed_mux_*` fields published in

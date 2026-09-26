@@ -15,8 +15,9 @@
   (b) Mux `set-option` status-bar writes out of `agent-worktrees` and into a
   new Worktree Manager companion daemon, while keeping `agent-worktrees`
   as the sole owner/accumulator of worktree status data.
-- **Status:** In progress — Step 1 (of 6) landed 2026-09-25; Steps 2-6 not
-  yet implemented.
+- **Status:** In progress — Step 1 (of 6) landed 2026-09-25, merged as
+  [#3650](https://github.com/ThomasMichon/copilot-extensions/pull/3650);
+  Steps 2-6 not yet implemented.
 
 ## Why this needs its own ordered plan
 
