@@ -5,7 +5,7 @@
 - **Branch(es):** independent per-phase worktrees (land each phase's PR before
   starting the next)
 - **Created:** 2026-09-26
-- **Status:** Draft <!-- Draft | Active | Blocked | Done -->
+- **Status:** Active <!-- Draft | Active | Blocked | Done -->
 - **Vision:** extends
   [`visions/plugins/agent-worktrees`](../../../visions/plugins/agent-worktrees/README.md)
   (new concept *The resident daemon as the authoritative live-state
@@ -38,7 +38,12 @@
 - **Umbrella issue:** [#3761](https://github.com/ThomasMichon/copilot-extensions/issues/3761)
 - **Sub-issues:** [#3751](https://github.com/ThomasMichon/copilot-extensions/issues/3751)
   (the CPU-pinning bug whose diagnosis surfaced this direction; fixed in
-  #3755, unrelated to this effort's own scope but the reason it was found)
+  #3755, unrelated to this effort's own scope but the reason it was found),
+  [#3798](https://github.com/ThomasMichon/copilot-extensions/issues/3798)
+  (a residual accept-to-handler-dispatch drain race in the shared
+  `work_coalescing_singleton` library, found during #3779's review round 7;
+  tracked for Phase 3 rather than blocking Phase 2, which ships zero
+  production write verbs)
 
 ## Guiding Intent
 
@@ -125,7 +130,7 @@ starting point, not something to rebuild:
   documented boot-on-demand/subscribe/linger lifecycle.
 - `work_coalescing_singleton` (vendored, pure-stdlib, JSON-over-socket) —
   the transport this effort's new mutation-request `kind` would reuse,
-  alongside the existing `classify`/`worktree_status` kinds.
+  alongside the existing `classify`/`worktree_status`/`mux_link` kinds.
 - A durable, SQLite-backed cache layer (`worktree_status_cache.py`) proving
   the "in-memory hot path, SQLite for warm-restore only" pattern this effort
   needs for the tracking record itself, not just a derived-status
@@ -162,7 +167,7 @@ none of them mutate worktree state by writing tracking YAML directly.
 #### Proposed design (draft — for review, not yet implemented)
 
 **Wire `kind`:** a new `"tracking_write"` verb family alongside the
-accelerator's existing `classify`/`worktree_status` kinds on the same
+accelerator's existing `classify`/`worktree_status`/`mux_link` kinds on the same
 resident daemon (never a second daemon process — the vision's own *Not a
 second background service* Non-Goal still holds).
 
@@ -274,7 +279,7 @@ survey above.
         (rendezvous fields, `_monitor_sweep`). Phase 2 should land its new
         `tracking_write` wire kind additively, the same way that effort's
         own Step 1 (`mux_link.py`'s `ManagedMuxCache`) landed additively
-        alongside the existing `classify`/`worktree_status` kinds, and
+        alongside the existing `classify`/`worktree_status`/`mux_link` kinds, and
         should check that effort's latest Journal entry immediately before
         touching `cmd_status_monitor` to avoid a stale rebase.
       - **`agent-worktrees-external-status-accelerator`** and
@@ -285,31 +290,94 @@ survey above.
       - No other active effort was found touching `tracking.py`'s write
         functions or the resident daemon's core sweep/publish loop.
 
-### Phase 2 — Daemon mutation-verb plumbing _(not started; unblocked by Phase 1's resolved open questions)_
-- [ ] Confirm `module-componentization-discipline`'s `tracking.py` split is
-      at a stable resting point (or coordinate landing alongside it) before
-      enumerating Phase 2's mutation verbs against `tracking_claims.py` /
-      `tracking_lifecycle.py` / `tracking_session_registry.py` / the
-      remaining `tracking.py` persistence core.
-  - [ ] Add the `tracking_write` wire kind, mirroring `worktree_status_daemon.py`'s
-      structure (rendezvous fields, `start_server`, a `_with_boot` client
-      helper), landed additively alongside the existing `classify`/
-      `worktree_status`/`mux_link` kinds — never replacing or restructuring
-      those in the same change.
-- [ ] In-memory record store, warm-restored from YAML on daemon boot.
-- [ ] The daemon-unreachable fallback: a small shared helper each migrated
-      write function calls into on daemon-unreachable — `run_direct(fn,
-      *args, **kwargs)`-shaped, so the logging obligation lives in one place
-      rather than being hand-repeated at every call site — invoking the
-      exact function the daemon's own handler would have called, then
-      logging the bypass (worktree id, function name, reason the daemon was
-      unreachable, timestamp).
-- [ ] First migrated verb (smallest, most contained write — likely
-      `register_session` or a single disposition setter) as the end-to-end
-      proof, mirroring how the accelerator's own Phase 4 proved its design
-      with one in-process reference consumer before wider rollout.
+### Phase 2 — Daemon mutation-verb plumbing ✅ INFRA DONE 2026-09-26 (no call site migrated yet)
+- [x] Confirmed `module-componentization-discipline`'s `tracking.py` split is
+      at a stable resting point before starting: `tracking.py` sits exactly
+      at its 4009-line grandfathered ceiling with no journal activity since
+      2026-09-22 (4 days idle at the time this phase started) — a safe
+      resting point, not a moving target.
+  - [x] Added the `tracking_write` wire kind (`tracking_write.py`), mirroring
+      `classify_daemon.py`/`worktree_status_daemon.py`'s structure
+      (rendezvous fields, `start_server`, a `write_with_boot` client
+      helper), landed additively in `cmd_status_monitor` alongside the
+      existing `classify`/`worktree_status`/`mux_link` kinds — none of
+      those were touched or restructured.
+- [x] **Revised, not yet built:** a full persistent in-memory record store
+      (warm-restored from YAML on daemon boot, `worktree_status_cache.py`-
+      style) remains explicitly **deferred**, not part of this phase's
+      landed slice — see the granularity finding below for why forcing it
+      in now would have been premature. Today, a registered verb still does
+      its own fresh lock/load/mutate/save per call, whether invoked from the
+      daemon or directly; the correctness win landed is "every write
+      funnels through one process when reachable," not yet "every read is
+      served from a warm in-memory copy."
+- [x] The daemon-unreachable fallback: `tracking_write.run_direct(verb,
+      args, reason=...)` — calls the *same* function `tracking_write.
+      compute` would have called (via the shared `_VERBS` registry, see
+      `register_verb`), always logging the bypass first. `tracking_write.
+      dispatch()` is the single public entry point a migrated call site
+      uses in place of calling its function directly, minting a fresh,
+      unique coalescing key per call so two concurrent writes are never
+      merged into one execution (a write-specific difference from
+      `classify`/`worktree_status`'s read-safe coalescing).
+- [x] **Real finding, not yet acted on for the first verb:** inspecting
+      actual call sites (`register_session` in
+      `tracking_session_registry.py`, `mark_resumed` in `resolve_cli.py`/
+      `resolve_launch_cli.py`) found every one composes **several**
+      `tracking.*` mutation calls under one `_RecordLock` before **one**
+      `save_record` — never a single bare field-setter call in isolation.
+      **Corrects this phase's own earlier plan wording** ("named
+      operations... as request verbs," implying one verb per
+      `tracking.py` function): a verb must map to a call site's whole
+      guarded transaction, not to an individual setter, or a migration
+      would either multiply round trips per real operation or break the
+      atomicity that one lock + one save currently guarantees. See
+      `tracking_write.py`'s own module docstring ("Verb granularity note")
+      for the durable, code-level record of this correction.
+      _(agent-recommended — found via code inspection this session, not
+      operator-specified; flagged here per this skill's own demarcation
+      requirement.)_
+- [ ] **First migrated verb, still open:** given the granularity finding
+      above, `register_session`/`mark_resumed` (this phase's originally
+      named candidates) are each a multi-step guarded transaction, not a
+      quick, low-risk first proof to retrofit blind in one pass against a
+      hot, widely-used facility path (`register_session` specifically backs
+      the sessionStart hook). Deferred to Phase 3 rather than rushed here;
+      Phase 2's own infra is proven end-to-end instead via 27 unit tests
+      (`test_tracking_write.py`, after PR review rounds 2-4) exercising the
+      registry, dispatch, logged fallback, the unique-key-never-coalesces
+      guarantee, the ambiguous/safe outcome boundary, and in-flight-write
+      tracking, directly, without touching a live production call site.
+- [x] Tests: `test_tracking_write.py` (27 tests, after PR review rounds 2-3:
+      rendezvous parsing + port-bounds validation, verb registration/
+      dispatch, unregistered-verb/malformed-payload rejection, `run_direct`'s
+      logged bypass, daemon-reachable dispatch, both safe-fallback cases
+      (no endpoint found; endpoint found but connect fails), the
+      ambiguous-outcome-after-send exception, two-concurrent-writes-never-
+      coalesce, the verb-module loader, a genuine two-subprocess
+      process-boundary proof, and in-flight-write tracking independent of
+      subscriber lease lifecycle).
+      `test_status_monitor.py`'s existing daemon-lifecycle regression test
+      updated (3 → 4 `CoalescingServer.close()` calls: classify +
+      worktree_status + managed_mux + tracking_write) plus new
+      `tracking_write_*` rendezvous-field assertions and the
+      `TestWaitForTrackingWriteIdle` class added in review round 4. Full
+      suite (current, as of round 6): 5576 passed, 26 skipped, 5 failures
+      confirmed pre-existing/environment-dependent via `git stash`
+      (unrelated to this change — `test_doctor.py`/`test_update_stage.py`/
+      `test_registration_home.py`, all failing identically without these
+      changes).
 
-### Phase 3 — Migrate remaining write call sites _(not started)_
+### Phase 3 — Migrate the first real write call site, then the rest _(not started)_
+- [ ] Resolve [#3798](https://github.com/ThomasMichon/copilot-extensions/issues/3798)
+      (the accept-to-handler-dispatch drain race in the shared
+      `work_coalescing_singleton` library) before or alongside migrating
+      the first real verb — that is the point real write traffic starts to
+      exist and this residual race stops being purely theoretical.
+- [ ] Pick the first real call site to migrate given the corrected verb
+      granularity (a whole transaction, not a bare setter) — candidates to
+      evaluate: a narrower, lower-traffic disposition-assertion path before
+      `register_session`'s own sessionStart-hook-critical one.
 - [ ] One call site (or a closely related cluster) at a time, each its own
       reviewable PR, per this repo's serial-single-writer convention —
       across whichever of `tracking.py` / `tracking_claims.py` /
@@ -355,6 +423,329 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-09-26 — PR #3779 review round 8: missing wire-kind validation
+`compute` dispatched a verb without checking the request's own `kind`
+field, so a request mislabeled with a sibling daemon's kind (e.g.
+`"classify"`, sent to this daemon's own port) would still be dispatched as
+a mutation. Fixed by rejecting any request whose `kind != KIND`, mirroring
+`mux_link.py`'s own existing `_compute` guard exactly. One new test
+(`test_compute_rejects_a_request_labeled_with_a_different_kind`) — 132
+tests total across both files. Full suite: 5577 passed, same 5
+pre-existing failures. All gates clean.
+
+### 2026-09-26 — PR #3779 review round 7: a residual microsecond race, tracked as a follow-up rather than fixed inline
+Round 7 caught one further, genuinely real but much narrower race than
+round 6's: a connection can be `accept()`ed by the server's socket layer
+and queued to its handler thread *before* that thread's first line runs
+`owner.touch()` -- the call that increments the subscriber count
+`_tracking_write_busy()` reads. In that microsecond window, the busy
+predicate reads `False` even though a handler is about to execute a write.
+
+**Decision: track as a follow-up issue
+([#3798](https://github.com/ThomasMichon/copilot-extensions/issues/3798)),
+not fixed inline in this PR.** Reasoning:
+- Closing it properly requires the vendored `work_coalescing_singleton`
+  library itself (shared by `classify_daemon`/`worktree_status_daemon`/
+  `mux_link`, not just `tracking_write`) to track "accepted but not yet
+  dispatched to a handler" as its own state -- a shared-library change
+  serving four daemon kinds, warranting its own scoped design/review
+  rather than folding into an already-large Phase 2 PR seven review
+  rounds deep.
+- Phase 2 (this PR) ships **zero production write verbs** -- there is no
+  live write traffic today this microsecond race could actually affect.
+  Phase 3 (not yet started) registers the first real one.
+- The much larger, already-real gaps in this same shutdown path (draining
+  work accepted well before `close()`, stopping new work before draining,
+  the ambiguous/safe fallback boundary at the connect/send-receive split)
+  are already fixed by rounds 1-6.
+- This is "track it," not "ignore it," per the facility's own
+  pre-existing-issue discipline -- the follow-up issue records the
+  suggested direction (an explicit accept-time counter, independent of
+  subscribe/touch/release) for whoever picks it up, most naturally
+  alongside Phase 3's first real verb migration when write traffic
+  actually starts to exist.
+
+No code change this round; validation unchanged from round 6 (130 tests,
+all gates clean).
+
+### 2026-09-26 — PR #3779 review round 6: shutdown must stop accepting work before draining
+- **A new write could still race the shutdown wait.** Rounds 4/5 waited for
+  `_tracking_write_busy()` to clear *before* calling
+  `tracking_write_server.close()` -- but the server keeps accepting new
+  connections the entire time it isn't yet closed, so a fresh write could
+  arrive right after the final busy check passed and start executing just
+  as `close()` ran, which -- since `close()` never drains an already-
+  dispatched handler thread -- could still terminate the process
+  mid-transaction. Fixed by reordering: `close()` first (stops accepting
+  any *new* request immediately), *then* wait for `_tracking_write_busy()`
+  to clear. Every request the predicate can still observe from that point
+  on was necessarily accepted before `close()`, so the drain now genuinely
+  only waits on already-accepted work -- no request can arrive during the
+  wait itself.
+- Fixed the Plan's own stale validation count (still said "5573 passed"
+  after round 4 had already added 3 tests reaching 5576) -- the historical
+  journal entries correctly kept their own point-in-time counts; only the
+  live Plan checklist line needed the update.
+- No new tests needed: the existing `TestWaitForTrackingWriteIdle` unit
+  tests exercise the wait/deadline logic itself, which is unchanged; the
+  fix is purely a call-order swap in `cmd_status_monitor`'s `finally`
+  block, verified by rerunning the full daemon-lifecycle suite. Full
+  suite: 130 tests across `test_tracking_write.py`/`test_status_monitor.py`
+  passed; `check-module-size`/`check-install-contract`/
+  `check-changefile-presence`/`check-effort-vision-structure`: all clean.
+
+### 2026-09-26 — PR #3779 review round 5: shutdown wait used the wrong predicate; a documentation-accuracy fix
+- **The shutdown wait checked the wrong signal.** Round 4's
+  `_wait_for_tracking_write_idle` call passed `tracking_write.
+  has_inflight_write` directly -- but a request already *accepted* (its
+  `CoalescingServer` subscriber registered) has not yet entered `compute()`
+  (where the in-flight counter increments), so a shutdown could still slip
+  through that narrow window and close the server while a request was about
+  to execute. Fixed: pass this module's own combined `_tracking_write_busy`
+  predicate (subscriber count OR in-flight counter) instead -- the same one
+  the empty-strike branch already used. Renamed the function's parameter
+  from `has_inflight_write` to the more accurate `is_busy` and clarified its
+  docstring.
+- **Documentation didn't match the daemon it describes.** `tracking_write.py`'s
+  own docstring said it adds the *third* wire `KIND`, but `mux_link.py`
+  already publishes its own `CoalescingServer` kind from the same resident
+  monitor -- `tracking_write` is the *fourth*. Fixed the module docstring
+  and three other stale `classify`/`worktree_status`-only mentions in this
+  effort's own Context/Plan sections to include `mux_link` throughout.
+- No new tests needed (the fix is a one-line predicate swap covered by the
+  existing `TestWaitForTrackingWriteIdle` tests, which pass an arbitrary
+  `is_busy` callable already -- they never assumed
+  `has_inflight_write` specifically). Full suite: 5576 passed, same 5
+  pre-existing failures. `ruff check`, `check-module-size`,
+  `check-install-contract`, `check-changefile-presence`, `check-effort-
+  vision-structure`: all clean.
+
+### 2026-09-26 — PR #3779 review round 4: shutdown-safety gap, docstring overclaim, and a recurring stale count
+- **The busy check only protected one shutdown path.** Round 2's fix
+  guarded the empty-strike idle-exit branch, but `runtime_superseded()` /
+  `_other_current_monitor()` can reach the same `finally` block by a
+  different route (a runtime handoff, another monitor taking ownership) and
+  close `tracking_write_server` unconditionally, regardless of
+  `has_inflight_write()`. Fixed: extracted the wait/deadline logic into its
+  own `_wait_for_tracking_write_idle()` function (directly unit-testable
+  without driving the full monitor lifecycle) and call it, unconditionally,
+  right before `tracking_write_server.close()` in the `finally` block --
+  covering every shutdown path, not just one. Bounded at 10s
+  (`_TRACKING_WRITE_SHUTDOWN_GRACE_S`) so a genuinely wedged compute can
+  never block a shutdown/handoff forever.
+- **Docstring overclaimed what gets logged.** The module docstring promised
+  every direct-fallback log line carries "worktree/verb/reason," but
+  `run_direct`'s generic `(verb, args, reason)` API has no dedicated
+  worktree parameter -- verbs are deliberately shape-agnostic (see the
+  granularity note), so this was never actually enforceable. Fixed two
+  ways: revised the docstring to describe what's actually guaranteed
+  (verb + reason, always), and made `run_direct` opportunistically include
+  `args["worktree_id"]` in the log line when a verb's own args happen to
+  carry one under that key -- a best-effort inclusion, explicitly not a
+  contract every future verb must satisfy.
+- **The stale "14 tests" count recurred a third time** -- round 2 fixed the
+  Journal narrative, round 3 fixed one live checklist line but missed a
+  second one the reviewer found in the very next round. Fixed for real this
+  time (checked every remaining literal count in the Plan/Context sections,
+  not just the one flagged).
+- 3 new tests (`_wait_for_tracking_write_idle`, isolated from the full
+  monitor lifecycle: returns immediately when never busy, polls until busy
+  clears, gives up at the grace deadline). 30 tests total across
+  `test_tracking_write.py` (27) + the new `TestWaitForTrackingWriteIdle`
+  class in `test_status_monitor.py` (3). Full suite: 5576 passed, same 5
+  pre-existing failures. `ruff check`, `check-module-size`,
+  `check-install-contract`, `check-changefile-presence`: all clean.
+
+### 2026-09-26 — PR #3779 review round 3: 5 more real findings, all fixed
+Round 3 caught five further genuine issues, all in the same "does the
+ambiguity/liveness reasoning actually hold under real conditions" vein as
+round 2:
+
+- **`subscriber_count()` still wasn't the right in-flight signal.** A
+  client releases its own lease the moment its own request call returns or
+  times out -- which can happen well before the daemon-side compute (same
+  process, a different thread) actually finishes, since `CoalescingServer`
+  never cancels an accepted owner. Added `has_inflight_write()`: a simple
+  module-level counter incremented/decremented around the verb call inside
+  `compute()` itself, independent of any client's lease lifecycle. The
+  monitor's `_tracking_write_busy()` now checks both signals.
+- **The ambiguous/safe split was still wrong at the edges.** My round-2 fix
+  treated "endpoint found" as the boundary for ambiguity, but `DaemonUnavailable`
+  is also raised for a *pre-send* connect failure (a stale rendezvous entry
+  left by a since-exited daemon) -- genuinely safe, indistinguishable in
+  effect from never having dialed at all. The real boundary is "were request
+  bytes ever sent," not "was an endpoint found." Fixed by writing
+  `_send_tracking_write_request` -- a from-scratch client for this one wire
+  action, splitting the TCP connect (failure -> safe, new `_PreSendFailure`,
+  caught by `write_with_boot` and treated exactly like a pre-dial miss) from
+  the send/receive phase (failure -> `AmbiguousWriteOutcome`, unchanged).
+  `wcs_client.request()`'s single `except OSError` across the whole sequence
+  cannot make this distinction, so this module no longer calls it for the
+  write path (still uses `wcs_client.new_client_id`/`release` for the
+  existing subscriber-lease bookkeeping, unchanged).
+- **The coalescing key could theoretically be reused.** `write_with_boot`
+  accepted a caller-supplied `key`; only `dispatch` happened to always mint
+  a fresh one. Removed `key` from `write_with_boot`'s signature entirely --
+  it now mints its own `uuid4().hex` internally, so the
+  never-coalesce-two-writes guarantee is structural (every entry point),
+  not a convention every future caller has to remember.
+- **Port validation gap.** `endpoint_from_rendezvous` parsed a port as a
+  bare `int()` with no range check, so `0`, a negative value, or anything
+  above 65535 would be treated as a real endpoint and fail deep inside the
+  socket client instead of safely returning `None` (the no-endpoint
+  fallback path). Fixed with the same `0 < port < 65536` check
+  `mux_link.endpoint_from_rendezvous` already applies.
+- **Eager monitor-startup loading, done in round 2, was correctly credited**
+  but the stale-count Low finding recurred (my round-2 edit fixed the
+  Journal narrative but missed a live checklist line) -- fixed for real
+  this time; both occurrences of the stale count now read the current
+  count.
+- 9 new/changed tests (27 total, was 18): out-of-range and valid port
+  parsing for `endpoint_from_rendezvous`, the pre-send-connect-failure safe
+  fallback, and three `has_inflight_write` tests (idle, running, clears on
+  verb exception). Re-ran the full suite (5573 passed, same 5 pre-existing
+  failures), `ruff check`, `check-module-size`, `check-install-contract`,
+  `check-changefile-presence`: all clean.
+
+### 2026-09-26 — PR #3779 review round 2: 2 more real High findings, plus test-quality fixes
+Round 2 (3 High/Medium/Low remaining + 4 new, 1 resolved from round 1) caught
+two more genuine bugs beyond the cross-process registration gap:
+
+- **Ambiguous fallback retry after a dialed-but-failed request.**
+  `write_with_boot` treated *any* `DaemonUnavailable` (pre-dial miss **or**
+  a request that reached the daemon and then timed out) identically, always
+  running the same-code fallback. But `CoalescingServer` never cancels an
+  already-accepted owner compute when a caller's socket read times out --
+  so a post-dial failure is genuinely ambiguous (the daemon may already be
+  executing, or have already committed, the mutation), and blindly retrying
+  risks double-applying a non-idempotent write. Fixed: only a **pre-dial**
+  miss (no endpoint discoverable at all) is safe to auto-fallback; a
+  post-dial failure now raises a new `AmbiguousWriteOutcome` instead,
+  documented in both `tracking_write.py`'s module docstring and
+  `write_with_boot`/`dispatch`'s own docstrings. This refines (does not
+  contradict) operator-resolved Open Question 1 -- that answer covered "no
+  daemon reachable at all," not the separate ambiguous-timeout case, which
+  is a real engineering distinction surfaced by review, not something the
+  operator was actually asked about.
+- **Monitor could shut down mid-write.** The resident monitor's own
+  empty-strike idle-exit predicate checked `worktree_status_runtime`/
+  `managed_mux_runtime` demand but not `tracking_write_server`'s live
+  subscriber count -- an in-flight write with no other daemon activity
+  could see the monitor decide "empty" and close the server out from under
+  a still-waiting client. Fixed: both empty-strike branches now also check
+  `tracking_write_server.subscriber_count() > 0`, mirroring how
+  `has_active_demand()` already gates the same predicate for the read-side
+  daemons.
+- **`_ensure_verb_modules_loaded` now called eagerly at monitor startup**
+  too (not just lazily inside `compute`/`run_direct`), directly addressing
+  the still-open "load production verbs at the monitor's own startup/
+  import path" finding at its own file/line.
+- **Switched `_VERB_MODULES` to fully-qualified module names**
+  (`importlib.import_module(name)`, not package-relative) -- simpler, and
+  what let the process-boundary test's fixture module live outside the
+  `agent_worktrees` package entirely (a standalone temp module on
+  `sys.path`, exactly like a real external consumer would look).
+- **Fixed both flagged test-quality gaps:** the deadline-fallback test now
+  blocks the verb past the client's real socket timeout and asserts the
+  new `AmbiguousWriteOutcome` (previously it could pass either way,
+  proving nothing); the process-boundary test now declares the verb module
+  via `_VERB_MODULES` and calls `compute`/`run_direct` directly, letting
+  the *production* loader perform the import (previously it pre-imported
+  the module and hand-set `_verb_modules_loaded = True`, bypassing the
+  exact mechanism under test).
+- Updated stale "14 tests" references to 18 (2 net new: the ambiguous-
+  outcome test replaced the broken deadline test 1-for-1, plus a new
+  pre-dial-miss-still-falls-back test made the safe/unsafe distinction
+  explicit on both sides).
+- Added the required PR-description "Documentation impact" statement
+  (CONTRIBUTING.md § Documentation impact) the round-1 Low finding flagged
+  as missing.
+- Re-ran the full suite + `ruff check` + `check-module-size`/
+  `check-install-contract` after all fixes: all clean.
+
+### 2026-09-26 — PR #3779 review: closed a real cross-process registration gap
+GitHub's Copilot code review (2 High + 1 Low findings) on the Phase 2 PR
+caught a real bug before Phase 3 could build on top of it: `_VERBS` was a
+plain process-local module dict, but the resident daemon and a CLI process
+calling `dispatch`/`run_direct` are **separate Python processes** —
+`register_verb` called in one would never populate the other's dict, so
+every real verb (once Phase 3 added one) would have hit "unregistered verb"
+on the daemon side and silently always fallen back to `run_direct`. The
+daemon would never actually execute a write; `dispatch()` looked correct in
+tests only because those tests register and serve in the same process.
+
+Fixed with `_VERB_MODULES` (a tuple of module names, relative to this
+package, that self-register their own verb(s) via a plain `register_verb`
+call at their own import time) + `_ensure_verb_modules_loaded()` (idempotent,
+thread-safe, imports every listed module) called at the top of both
+`compute` and `run_direct` — so the daemon process and any CLI process
+arrive at the identical registry independently via Python's own import
+system, with no shared runtime state or wire-level registration protocol
+needed. `_VERB_MODULES` stays empty until Phase 3 adds its first real verb
+module; the contract is documented in `tracking_write.py`'s own module-level
+docstring for that module to follow.
+
+Added the literal process-boundary proof the review asked for: two genuinely
+separate `python` subprocesses (not the test process itself) import a
+throwaway verb module and invoke it — one through `compute`, one through
+`run_direct` — proving the fix works across a real OS process boundary, not
+just this test process's own single import cache. Plus two narrower unit
+tests (the loader imports each listed module exactly once; both `compute`
+and `run_direct` call the loader). 17 tests total in `test_tracking_write.py`
+now (was 14).
+
+Also addressed the review's Low finding: this Journal entry, plus the PR
+description's required "Documentation impact" statement (CONTRIBUTING.md
+§ Documentation impact) explaining that `tracking_write.py`'s own docstring
+is this change's authoritative documentation (no repo-root doc changed) and
+that the vision doesn't need a revision for a plumbing bug fix that carries
+no new guarantee or behavior change visible above the daemon-internals
+layer.
+
+### 2026-09-26 — Phase 2 infra landed (wire plumbing + fallback + tests); first call-site migration deferred to Phase 3
+- Verified `module-componentization-discipline`'s `tracking.py` split was a
+  safe resting point (exactly at its 4009-line ceiling, no journal activity
+  in 4 days) before starting, per Phase 1's resolved sequencing question.
+- Built `tracking_write.py`: the `tracking_write` wire kind, a verb
+  registry (`register_verb`/`compute`), `run_direct` (the logged,
+  same-code daemon-unreachable fallback), and `dispatch`/`write_with_boot`
+  (the public entry point, always minting a fresh coalescing key per call
+  so concurrent writes never merge). Wired additively into
+  `cmd_status_monitor` (`status_monitor_cli.py`): a fourth
+  `CoalescingServer` alongside `classify`/`worktree_status`/`mux_link`,
+  publishing `tracking_write_*` rendezvous fields, closed in the existing
+  shutdown path.
+- **Real finding while scoping the first migrated verb:** every actual
+  `tracking.py` write call site (`register_session`, `mark_resumed`, ...)
+  batches several mutation calls under one `_RecordLock` before one
+  `save_record` — never a bare single-setter call. This corrects Phase 2's
+  own earlier plan wording (documented in the Plan above and in
+  `tracking_write.py`'s own docstring): a verb must map to a call site's
+  whole guarded transaction, not an individual `tracking.py` function.
+  Demarcated as agent-recommended (found via inspection, not
+  operator-specified).
+- Given that correction, and that both originally-named first-verb
+  candidates turned out to be non-trivial, hot-path transactions
+  (`register_session` specifically backs the sessionStart hook), chose
+  **not** to rush a production call-site migration in the same pass as
+  new infra against a live, widely-used facility tool. Instead proved the
+  infra end-to-end via 14 new unit tests (`test_tracking_write.py`)
+  exercising the registry, dispatch, logged fallback, and the
+  never-coalesces-two-writes guarantee directly.
+- Fixed a real, expected regression in `test_status_monitor.py`'s existing
+  daemon-lifecycle test (mirrors the accelerator effort's own precedent,
+  2026-09-20: adding a fourth `CoalescingServer` moved its
+  `closed["n"] == 3` assertion to `4`) and added `tracking_write_*`
+  rendezvous-field assertions alongside the existing ones.
+- Full suite: 5549 passed, 26 skipped, 5 failures -- confirmed via
+  `git stash` to be pre-existing/environment-dependent (`test_doctor.py`,
+  `test_update_stage.py`, `test_registration_home.py`), unrelated to this
+  change and failing identically without it.
+- **Not yet done:** no production write call site actually goes through
+  the daemon yet -- `tracking_write.dispatch()` exists and is proven
+  correct in isolation, but nothing calls it outside its own tests. Phase
+  3 picks the first real transaction to migrate.
 
 ### 2026-09-26 — Open questions resolved; concurrent-effort survey done
 Operator answers, verbatim:
