@@ -343,21 +343,31 @@ def test_set_card_without_request_input_is_never_blocked(q):
     assert task.awaiting_steer is False
 
 
-def test_set_card_request_input_blocked_registration_scoped_by_machine(q):
-    """A registration pinned to a different machine does not block a task
-    targeting another machine."""
+def test_set_card_request_input_blocked_regardless_of_registration_machine(q):
+    """Deliberately NOT scoped by machine (see ``_steering_disallowed_labels``'s
+    docstring): a registration pinned to one machine still blocks a task
+    targeting a *different* machine -- and, more importantly, blocks an
+    *unpinned* task any worker on any machine could otherwise claim to
+    bypass a machine-scoped denylist (the bug a PR review caught: a task
+    with no ``target_machine`` was previously skipped by the old
+    machine-scope check entirely)."""
     q.register_registration(
         "supervised-lane",
         {"all_repos": True, "labels": ["intelligence-dampener-review"],
          "steering_disallowed_labels": ["intelligence-dampener-review"]},
         machine="wheatley",
     )
-    t = _held_with_label(
+    pinned = _held_with_label(
         q, label="intelligence-dampener-review", target_machine="lambda-core"
     )
+    unpinned = _held_with_label(
+        q, label="intelligence-dampener-review", worker="w2", target_machine=None
+    )
     card = steering.build_card(request_input=steering.parse_request_input("note"))
-    task = q.set_card(t.id, "w1", card=card)
-    assert task.awaiting_steer is True
+    with pytest.raises(TaskError, match="steering_disallowed_labels"):
+        q.set_card(pinned.id, "w1", card=card)
+    with pytest.raises(TaskError, match="steering_disallowed_labels"):
+        q.set_card(unpinned.id, "w2", card=card)
 
 
 def test_set_card_request_input_unrelated_label_is_not_blocked(q):

@@ -97,6 +97,23 @@ def test_single_family_connects_directly_with_no_race(monkeypatch):
 
     assert sock.family == socket.AF_INET
     assert elapsed < 0.1  # no head-start wait was paid
+    # http.client.HTTPConnection.connect() never reapplies its own timeout
+    # after this hook returns -- the winning socket must keep the
+    # connect-time timeout so the subsequent HTTP read stays bounded
+    # (caught in PR review; matches socket.create_connection's own behavior).
+    assert sock.timeout == 5.0
+
+
+def test_blackholed_primary_family_falls_back_preserves_timeout(monkeypatch):
+    behaviors = [
+        (socket.AF_INET6, {"kind": "block", "hang_seconds": 5.0}),
+        (socket.AF_INET, {"kind": "succeed"}),
+    ]
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo(behaviors))
+    monkeypatch.setattr(socket, "socket", _fake_socket_factory(behaviors))
+
+    sock = happy_eyeballs_connect("example.test", 443, timeout=5.0, head_start=0.1)
+    assert sock.timeout == 5.0
 
 
 def test_blackholed_primary_family_falls_back_within_head_start(monkeypatch):
@@ -153,9 +170,11 @@ def test_create_connection_shim_matches_socket_create_connection_signature(monke
 
 
 def test_late_loser_connection_is_closed(monkeypatch):
-    """A family that eventually connects *after* another family already won
-    the race must be closed, not leaked."""
+    """A family still in flight when another family wins must be actively
+    aborted -- closed promptly, not left to block out its own full timeout
+    (the resource-accumulation concern a PR review raised)."""
     release = threading.Event()
+    captured: dict[str, _FakeSocket] = {}
 
     class _SlowThenSucceed(_FakeSocket):
         def connect(self, sockaddr):
@@ -164,7 +183,9 @@ def test_late_loser_connection_is_closed(monkeypatch):
 
     def _socket(family, socktype, proto):
         if family == socket.AF_INET6:
-            return _SlowThenSucceed(family, socktype, proto, behavior={"kind": "succeed"})
+            sock = _SlowThenSucceed(family, socktype, proto, behavior={"kind": "succeed"})
+            captured["slow"] = sock
+            return sock
         return _FakeSocket(family, socktype, proto, behavior={"kind": "succeed"})
 
     behaviors = [(socket.AF_INET6, {"kind": "succeed"}), (socket.AF_INET, {"kind": "succeed"})]
@@ -173,5 +194,13 @@ def test_late_loser_connection_is_closed(monkeypatch):
 
     sock = happy_eyeballs_connect("example.test", 443, timeout=5.0, head_start=0.05)
     assert sock.family == socket.AF_INET  # the fast family won
-    release.set()
-    time.sleep(0.2)  # let the slow family's connect() return and self-close
+
+    # The winner actively closes every still-in-flight loser as soon as it
+    # wins -- confirm the slow AF_INET6 attempt was closed promptly, without
+    # waiting for its own blocked connect() to return on its own.
+    deadline = time.monotonic() + 1.0
+    while not captured["slow"].closed and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert captured["slow"].closed is True
+
+    release.set()  # let the slow thread's connect() unblock and self-terminate

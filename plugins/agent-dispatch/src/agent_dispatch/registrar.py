@@ -322,8 +322,15 @@ class ProfileDeclaration:
             args += ["--disposable-cli-label", label]
         for label in self.body.idle_nudge_exempt_labels:
             args += ["--idle-nudge-exempt-label", label]
-        for label in self.body.steering_disallowed_labels:
-            args += ["--steering-disallowed-label", label]
+        # NOTE: body.steering_disallowed_labels is deliberately NOT emitted
+        # here. This method renders the *foreground* `agent-dispatch
+        # supervise` argv, whose parser never registered
+        # `--steering-disallowed-label` (only `supervise register`'s parser
+        # did -- the field is coordinator-DB-only and the running
+        # subprocess never consumes it itself; see
+        # SupervisorDaemon._publish_declared_registrations). Emitting it
+        # here would produce an unrecognized-option failure for any
+        # declaration that sets the field (caught in PR review).
         if self.body.no_pair:
             args.append("--no-pair")
         if self.body.type == "headless" or self.body.headless_labels or self.fleet.headless:

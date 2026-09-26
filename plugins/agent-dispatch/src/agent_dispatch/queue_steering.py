@@ -56,23 +56,28 @@ class QueueSteeringMixin:
         ).fetchone()
         return row is not None
 
-    def _steering_disallowed_labels(self, *, target_machine: str | None) -> set[str]:
-        """Union of ``steering_disallowed_labels`` from every active, in-scope
+    def _steering_disallowed_labels(self) -> set[str]:
+        """Union of ``steering_disallowed_labels`` from every active
         registration -- the coordinator-side denylist a ``card
         set --request-input`` is checked against (see :meth:`set_card`).
 
-        A registration is in scope for ``target_machine`` when its own
-        ``machine`` is unset (facility-wide) or matches exactly. Only the two
-        kinds that carry a ``labels``/``steering_disallowed_labels`` pair
-        (mirroring :data:`Supervisor.idle_nudge_exempt_labels`'s scope) are
-        consulted.
+        Deliberately **not** scoped to the task's ``target_machine``: an
+        unpinned task is claimable on any machine
+        (``queue_common.machine_matches``), and a worker on a machine other
+        than the one a registration happens to be scoped to could otherwise
+        claim that same label's unpinned task and bypass the denylist
+        entirely (confirmed in PR review). The label itself is the policy
+        unit -- there is no facility case where the same label should be
+        blocked on one machine and allowed on another -- so this is a
+        flat, facility-wide union regardless of ``reg.machine``. Only the
+        two kinds that carry a ``labels``/``steering_disallowed_labels``
+        pair (mirroring :data:`Supervisor.idle_nudge_exempt_labels`'s
+        scope) are consulted.
         """
         blocked: set[str] = set()
         for kind in (RegistrationKind.SUPERVISED_LANE, RegistrationKind.EVALUATOR):
             for reg in self.list_registrations(kind=kind, include_paused=False):
                 if reg.status != RegistrationStatus.ACTIVE:
-                    continue
-                if reg.machine is not None and reg.machine != target_machine:
                     continue
                 labels = reg.spec.get("steering_disallowed_labels")
                 if labels:
@@ -119,7 +124,7 @@ class QueueSteeringMixin:
                 conn.execute("COMMIT")
                 raise TaskError(f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}")
             if awaiting:
-                blocked = self._steering_disallowed_labels(target_machine=task.target_machine)
+                blocked = self._steering_disallowed_labels()
                 stray = blocked & set(task.labels)
                 if stray:
                     conn.execute("COMMIT")

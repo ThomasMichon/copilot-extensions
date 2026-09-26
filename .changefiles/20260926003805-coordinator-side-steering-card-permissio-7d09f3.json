@@ -3,7 +3,7 @@
   "changes": [
     {
       "plugin": "agent-dispatch",
-      "type": "minor"
+      "type": "patch"
     }
   ]
 }

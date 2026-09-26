@@ -75,33 +75,59 @@ def happy_eyeballs_connect(
 
     winner: dict[str, socket.socket] = {}
     errors: list[tuple[int, BaseException]] = []
+    in_flight: dict[int, socket.socket] = {}
     done = threading.Event()
     all_settled = threading.Condition()
     remaining = len(primaries)
 
-    def attempt(order: int, info: tuple, delay: float) -> None:
+    def _settle() -> None:
         nonlocal remaining
+        remaining -= 1
+        all_settled.notify_all()
+
+    def attempt(order: int, info: tuple, delay: float) -> None:
         if delay and done.wait(delay):
             with all_settled:
-                remaining -= 1
-                all_settled.notify_all()
+                _settle()
             return  # a higher-priority attempt already won before we started
+        family, socktype, proto, _canonname, sockaddr = info
+        sock = socket.socket(family, socktype, proto)
+        sock.settimeout(timeout)
+        with all_settled:
+            if done.is_set():
+                # A winner was already picked during socket creation itself
+                # (vanishingly rare, but free to check) -- never even dial.
+                sock.close()
+                _settle()
+                return
+            in_flight[order] = sock
         try:
-            sock = _connect_one(info, timeout)
+            sock.connect(sockaddr)
         except OSError as exc:
             with all_settled:
+                in_flight.pop(order, None)
                 errors.append((order, exc))
-                remaining -= 1
-                all_settled.notify_all()
+                _settle()
             return
         with all_settled:
+            in_flight.pop(order, None)
             if done.is_set():
                 sock.close()  # connected, but lost the race -- drop it
             else:
                 winner["sock"] = sock
                 done.set()
-            remaining -= 1
-            all_settled.notify_all()
+                # Actively abort every other still-in-flight attempt instead
+                # of letting it block out its own full timeout for nothing:
+                # closing a socket while another thread is blocked in
+                # connect() on it reliably unblocks that call with an error
+                # on this transport's supported platforms.
+                for other in in_flight.values():
+                    try:
+                        other.close()
+                    except OSError:
+                        pass
+                in_flight.clear()
+            _settle()
 
     threads = [
         threading.Thread(
@@ -114,8 +140,9 @@ def happy_eyeballs_connect(
 
     # Return as soon as a winner exists OR every attempt has settled (all
     # failed) -- never block on a still-in-flight loser (real sockets bound
-    # that by their own ``settimeout``; daemon threads bound it for the
-    # process even if one somehow never returns).
+    # that by their own ``settimeout``; the active-abort above bounds it
+    # further; daemon threads bound it for the process even if one somehow
+    # never returns).
     deadline = timeout + head_start + 1.0
     with all_settled:
         while "sock" not in winner and remaining > 0:
@@ -139,7 +166,12 @@ def _connect_one(info: tuple, timeout: float) -> socket.socket:
     except OSError:
         sock.close()
         raise
-    sock.settimeout(None)
+    # Deliberately NOT cleared to ``None``: ``socket.create_connection`` (the
+    # function this replaces) leaves the connect-time timeout in place for
+    # subsequent reads too, and ``http.client.HTTPConnection.connect()``
+    # never reapplies ``self.timeout`` after this hook returns -- clearing it
+    # here would silently make the HTTP response read unbounded (caught in
+    # PR review).
     return sock
 
 
