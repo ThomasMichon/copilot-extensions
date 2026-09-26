@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from agent_worktrees import record_cache, tracking
 from agent_worktrees.effort_focus import ActiveEffort
 from agent_worktrees.tracking import (
     ClaimRef,
@@ -1978,6 +1979,91 @@ class TestListRecords:
     def test_nonexistent_dir(self, tmp_path: Path):
         records = list_records(tmp_path / "nonexistent")
         assert records == []
+
+
+class TestListRecordsCache:
+    """copilot-extensions#3721: list_records' per-file (mtime, size) cache."""
+
+    def _make(self, wt_id: str, **overrides) -> WorktreeRecord:
+        defaults = dict(
+            worktree_id=wt_id,
+            branch=f"worktree/{wt_id}",
+            worktree_path=f"/tmp/{wt_id}",
+            repo="test-repo",
+            machine="test",
+            platform="wsl",
+            started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00",
+            resume_count=0,
+            title=None,
+            status="active",
+            completed_at=None,
+            sessions=[],
+        )
+        defaults.update(overrides)
+        return WorktreeRecord(**defaults)
+
+    def setup_method(self):
+        # Each test starts with a cold cache: entries are keyed by absolute
+        # path, and tmp_path fixtures reuse paths across the whole suite run
+        # only within a single test's own tmp_path, so this is purely
+        # defensive isolation against cross-test pollution.
+        record_cache.clear()
+
+    def test_second_call_does_not_reparse_unchanged_file(
+        self, tmp_tracking_dir: Path, monkeypatch
+    ):
+        save_record(self._make("a"), tmp_tracking_dir / "a.yaml")
+        list_records(tmp_tracking_dir)  # warm the cache
+
+        calls = []
+        real_yaml_load = tracking._yaml_safe_load
+
+        def _spy(raw):
+            calls.append(1)
+            return real_yaml_load(raw)
+
+        monkeypatch.setattr(tracking, "_yaml_safe_load", _spy)
+        records = list_records(tmp_tracking_dir)
+
+        assert len(records) == 1
+        assert calls == []  # cache hit: no reparse
+
+    def test_cache_invalidates_on_content_change(self, tmp_tracking_dir: Path):
+        rec = self._make("a", title=None)
+        save_record(rec, tmp_tracking_dir / "a.yaml")
+        first = list_records(tmp_tracking_dir)
+        assert first[0].title is None
+
+        rec.title = "Renamed"
+        save_record(rec, tmp_tracking_dir / "a.yaml")
+        second = list_records(tmp_tracking_dir)
+        assert second[0].title == "Renamed"
+
+    def test_cache_picks_up_added_and_removed_files(self, tmp_tracking_dir: Path):
+        save_record(self._make("a"), tmp_tracking_dir / "a.yaml")
+        assert len(list_records(tmp_tracking_dir)) == 1
+
+        save_record(self._make("b"), tmp_tracking_dir / "b.yaml")
+        assert len(list_records(tmp_tracking_dir)) == 2
+
+        (tmp_tracking_dir / "a.yaml").unlink()
+        remaining = list_records(tmp_tracking_dir)
+        assert len(remaining) == 1
+        assert remaining[0].worktree_id == "b"
+
+    def test_returned_records_are_independent_copies(self, tmp_tracking_dir: Path):
+        save_record(self._make("a", title=None), tmp_tracking_dir / "a.yaml")
+        first = list_records(tmp_tracking_dir)
+        first[0].title = "Mutated by caller"
+
+        second = list_records(tmp_tracking_dir)
+        assert second[0].title is None  # cache entry itself was never touched
+
+        third = list_records(tmp_tracking_dir)
+        third[0].sessions.append("leaked")
+        fourth = list_records(tmp_tracking_dir)
+        assert fourth[0].sessions == []  # deep copy: no shared mutable list
 
 
 # ---------------------------------------------------------------------------
