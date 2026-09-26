@@ -219,29 +219,30 @@ shape before committing to a design)_
       guard) to validate a pointer's schema and confirm its `source` target
       actually exists and matches canonical, before treating any real
       conversion as complete.
-- [ ] **`materialize_main.py`'s directory-pointer path has no root-
-      containment check** (confirmed in review — `materialize()` resolves
-      `canonical = canonical_root / source_rel` directly for a directory
-      pointer, unlike the file-pointer path, which validates through
-      `_resolve_within()` to refuse an absolute path or `../` escape).
-      A committed `source` value that traverses outside `canonical_root`
-      could make promotion copy an arbitrary runner-local path into the
-      release snapshot. Fix `materialize()` to route the directory-pointer
-      case through `_resolve_within()` (or an equivalent containment check)
-      before Phase 1 converts any real lib, and add the same validation to
-      whichever guard the item above builds.
-- [ ] **Promotion must fail closed on any unresolved pointer, not just log
-      it** (confirmed in review — `materialize()` reports a missing or
-      escaping `source` as a `SKIP` log line, but
-      `promote_release.consume_pending_changes()` captures that
-      `materialize_log` in its return value and never inspects it for a
-      failure marker; a malformed/unavailable pointer would currently ride
-      straight through into the shipped `main` snapshot as an unexpanded
-      stub). Make `consume_pending_changes()` (or its caller) raise/abort
-      promotion when `materialize_log` contains any `SKIP` or the
-      containment check above rejects a source — an unresolved pointer must
-      block the promotion commit, never merely appear in a log nobody
-      reads.
+- [x] **`materialize_main.py`'s directory-pointer path has no root-
+      containment check** — **Done, PR #3752.** `materialize()`'s
+      directory-pointer path now routes through `_resolve_within()`
+      identically to the file-pointer path. Review found this needed to go
+      further: the resolved canonical directory's own `src/` tree could
+      still contain (or itself be) a symlink escaping containment
+      (`shutil.copytree` follows symlinks by default) — added
+      `_find_symlink()`, refusing any symlink under a canonical lib's
+      `src/` outright, and a destination-side check (`_escapes_root()`,
+      shared with `_resolve_within()`) refusing a pointer whose own
+      directory resolves outside `dest` via a symlinked ancestor.
+      `build()`'s initial whole-tree snapshot copy also now preserves
+      symlinks (`symlinks=True`) instead of dereferencing them, closing a
+      gap where content could leak before `materialize()`'s own checks
+      ever ran. `find_pointers()` also now covers `worktree-manager/
+      libs/*` (see the item below, done as part of the same PR).
+- [x] **`materialize_main.py`/`find_pointers()` tooling now covers
+      `worktree-manager/libs/*`** — **Done, PR #3752** (the tooling gap;
+      the actual real-copy conversion for that tree is still the
+      "Apply the already-validated mechanism" item above, not yet done).
+- [x] **Promotion must fail closed on any unresolved pointer, not just log
+      it** — **Done, PR #3752.** `consume_pending_changes()` now inspects
+      `materialize()`'s log for any `SKIP` entry and raises
+      `PromotionError`, aborting the promotion.
 - [ ] **`preview_release.py` cannot currently build a scratch install for a
       pointerized lib** (confirmed in review — `_materialize_into_preview()`
       calls `sync_vendored_libs._materialize_blocked()`, which treats a
@@ -348,12 +349,15 @@ shape before committing to a design)_
       building a scratch local-install preview, using the
       `_materialize_into_preview()` fix from Phase 1 (not merely hoped to
       already work).
-- [ ] `materialize_main.py`'s directory-pointer path refuses a `source`
+- [x] `materialize_main.py`'s directory-pointer path refuses a `source`
       that escapes `canonical_root` (the same containment guarantee the
-      file-pointer path already has via `_resolve_within()`).
-- [ ] A promotion run against a deliberately malformed/unresolvable pointer
+      file-pointer path already has via `_resolve_within()`). **Done, PR
+      #3752** — also extended to reject a symlink inside/as the canonical
+      `src/` tree and a destination pointer path escaping `dest`.
+- [x] A promotion run against a deliberately malformed/unresolvable pointer
       (missing `source`, escaping `source`) aborts the promotion rather
       than producing a `main` snapshot containing an unexpanded stub.
+      **Done, PR #3752** (`test_promote_refuses_when_a_pointer_does_not_resolve`).
 - [ ] A pointer-ized `scripts/installer-engine.{sh,ps1}` runs correctly
       **in dev**, unmaterialized, called from a plugin's own (never
       pointerized) `install.sh`/`install.ps1` wrapper across folders into
@@ -477,3 +481,45 @@ _Pending._
   zero-finding pass that may never come. Merging once CI is green;
   further findings on execution (not on this plan document) belong in the
   phase PRs that actually implement it.
+
+### 2026-09-26 — Phase 1 execution begins: safety-hardening slice landed (PR #3752)
+- Started executing Phase 1. Rather than attempt the whole phase (dev-time
+  resolver decision + bulk conversion + tooling extension) in one PR, split
+  off the three findings that were already fully specified and independent
+  of the still-undecided resolver design: directory-pointer containment,
+  `worktree-manager/libs/*` tooling coverage, and promotion fail-closed
+  behavior. Landed as `tools/materialize_main.py` + `tools/promote_release.py`
+  changes, PR #3752, after 3 review rounds that found real, deeper gaps
+  than the plan's own text anticipated:
+  - Round 1: the containment fix itself (route directory pointers through
+    `_resolve_within()`, extend `find_pointers()`).
+  - Round 2 finding: `shutil.copytree` follows symlinks by default, so a
+    canonical lib's `src/` containing (or itself being) a symlink would
+    leak external content past the new containment check. Added
+    `_find_symlink()`, refusing any symlink in a canonical lib source
+    outright.
+  - Round 3 findings (two): (a) `find_pointers()` follows a symlinked
+    plugin/libs directory when globbing under `dest`, so a pointer whose
+    own containing directory resolves outside `dest` would still be
+    "found" and written to. Added `_escapes_root()` (shared with
+    `_resolve_within()`) as a destination-side containment check. (b)
+    `build()`'s initial whole-repo snapshot copy used
+    `shutil.copytree(symlinks=False)`, dereferencing any symlink anywhere
+    in the source tree *before* `materialize()`'s own checks ever ran —
+    fixed by passing `symlinks=True` (confirmed safe: no tracked symlink
+    exists in this repo today, via `git ls-files -s`).
+  - 21 new tests total across the PR's four commits. Merged after CI green
+    and merge state clean (a possible 4th review round was not observed
+    within a reasonable wait after the 3rd fix; CI and merge-state were
+    both clean, and this repo's review is advisory/non-blocking).
+- Marked the containment, worktree-manager-tooling, and fail-closed Plan
+  items `[x]` above; the Validation Plan's two matching items likewise.
+- **Not yet done, still blocking the bulk conversion**: the dev-time
+  resolver design decision (Plan's first Phase 1 item — how
+  `run-plugin-tests.py`'s editable `uv pip install -e` handles a
+  pointer-only lib directory), the `check-vendored-libs-sync.py` pointer-
+  schema/canonical-target validation, the `preview_release.py` pointer-
+  materialization fix, and the actual conversion of every real
+  `plugins/*/libs/*` + `worktree-manager/libs/*` copy. Next session should
+  pick up the dev-time resolver decision next, since the bulk conversion
+  item is explicitly gated on it.
