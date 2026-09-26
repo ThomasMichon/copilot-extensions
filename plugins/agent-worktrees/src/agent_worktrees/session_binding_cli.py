@@ -50,6 +50,12 @@ def _ensure_status_monitor(*args, **kwargs):
     return _core_helper("_ensure_status_monitor", status_monitor_runtime._ensure_status_monitor)(*args, **kwargs)
 
 
+def _register_session_for_monitor(*args, **kwargs):
+    return _core_helper(
+        "_register_session_for_monitor", status_monitor_runtime._register_session_for_monitor
+    )(*args, **kwargs)
+
+
 def _activate_project_for_path(*args, **kwargs):
     return _core_helper("_activate_project_for_path", status_updater_cli._activate_project_for_path)(*args, **kwargs)
 
@@ -88,6 +94,27 @@ def _resolve_active_project(*args, **kwargs):
 
 def _find_tracking_file_by_session(*args, **kwargs):
     return _core_helper("_find_tracking_file_by_session", session_tracking_cli._find_tracking_file_by_session)(*args, **kwargs)
+
+
+def _register_manager_owned_monitor_session(
+    worktree_id: str,
+    path: str | None,
+    *,
+    project: str | None,
+    session_name: str | None = None,
+) -> bool:
+    from . import managed_mux_registry
+
+    if not _status_monitor_enabled():
+        return False
+    managed_session = managed_mux_registry.live_mux_session_name(
+        worktree_id, project=project, session_name=session_name
+    )
+    if not managed_session:
+        return False
+    return _register_session_for_monitor(
+        managed_session, path
+    ) and _ensure_status_monitor()
 
 
 def _session_handoff_token() -> str:
@@ -487,7 +514,13 @@ def cmd_register_session(args: argparse.Namespace) -> int:
             inside = False
         if not inside:
             upd_path = record.worktree_path
-    _spawn_status_updater(wt_id, upd_path)
+    if not _register_manager_owned_monitor_session(
+        wt_id,
+        upd_path,
+        project=cfg.active_project(),
+        session_name=(recovered_mux or {}).get("session_name"),
+    ):
+        _spawn_status_updater(wt_id, upd_path)
 
     if getattr(args, "emit_context", False):
         target_cwd = record.worktree_path if record is not None else cwd or "<unknown>"
@@ -648,7 +681,12 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
             upd_path = tracking.load_record(rec_path).worktree_path
     except Exception:
         upd_path = None
-    _spawn_status_updater(wt_id, upd_path or wdir)
+    if not _register_manager_owned_monitor_session(
+        wt_id,
+        upd_path or wdir,
+        project=cfg.active_project(),
+    ):
+        _spawn_status_updater(wt_id, upd_path or wdir)
 
     try:
         record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")

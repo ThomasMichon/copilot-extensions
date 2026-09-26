@@ -19,7 +19,13 @@
   [#3650](https://github.com/ThomasMichon/copilot-extensions/pull/3650);
   Step 2 landed 2026-09-26, merged as
   [#3724](https://github.com/ThomasMichon/copilot-extensions/pull/3724);
-  Steps 3-6 not yet implemented.
+  Step 3 landed 2026-09-26, merged as
+  [#3825](https://github.com/ThomasMichon/copilot-extensions/pull/3825);
+  Step 4 landed 2026-09-26, merged as
+  [#3849](https://github.com/ThomasMichon/copilot-extensions/pull/3849);
+  Step 5 landed 2026-09-26, merged as
+  [#3859](https://github.com/ThomasMichon/copilot-extensions/pull/3859);
+  Step 6 not yet implemented.
 
 ## Why this needs its own ordered plan
 
@@ -428,8 +434,14 @@ state where two long-lived writers are both intended to own it.
      zero-provider lane and for any daemon logic still explicitly scoped to that
      lane.
 
-5. [ ] **Retire the per-session updater as a registration shim for
+5. [x] **Retire the per-session updater as a registration shim for
        Manager-owned sessions; keep it only as the zero-provider fallback.**
+   Landed in [#3859](https://github.com/ThomasMichon/copilot-extensions/pull/3859):
+   `register-session` / `bind-session` now short-circuit Manager-owned mux
+   sessions through a direct resident-monitor registration path keyed by the
+   live Worktree Manager mapping, while unmanaged sessions -- and any
+   monitor-disabled or monitor-unavailable fallback -- still re-seed the
+   per-session `status-updater` exactly as before.
    - Replace unconditional `_spawn_status_updater(...)` reseeds from
      `register-session` / `bind-session` with a direct monitor-registration path
      for Manager-owned sessions.

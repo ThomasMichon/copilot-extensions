@@ -265,8 +265,8 @@ realized in `main`; unchecked items are the remaining delta.
             wired, and bumped `__version__` (`0.1.0-dev36` →
             `0.1.0-dev37`) so already-installed machines actually redeploy
             the corrected payload.
-      - [ ] **Sub-slice 3 (direction set 2026-09-14; planned 2026-09-17; Step 1
-            landed 2026-09-25; Steps 2-6 not yet implemented):**
+      - [ ] **Sub-slice 3 (direction set 2026-09-14; planned 2026-09-17; Steps
+            1-5 landed 2026-09-25/26; Step 6 not yet implemented):**
             split the resident status-monitor's push/observe legs into
             Worktree Manager — agent-worktrees keeps sole ownership of
             accumulating/tracking session status; Worktree Manager takes a
@@ -688,6 +688,26 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-09-26** — Merged Phase 3b Slice 2 Sub-slice 3 Step 5, PR
+  [#3859](https://github.com/ThomasMichon/copilot-extensions/pull/3859).
+  Retired the per-session updater as the registration-time shim for
+  Manager-owned mux sessions: `register-session` / `bind-session` now read
+  the live Worktree Manager mux-mapping registry, register the matching mux
+  session with the resident status monitor directly, and skip spawning
+  `status-updater` entirely on that Manager-owned lane. Unmanaged sessions
+  keep the old reseed path, and monitor-disabled / monitor-unavailable cases
+  still fall back to the per-session updater exactly as before. Copilot
+  review found no code defect in the implementation itself; the only follow-up
+  was adding the required Documentation impact statement to the PR body
+  before merge. Validation: new targeted registration-path regressions green
+  (`agent-worktrees`: 112 passed across `test_register_session.py`,
+  `test_bind_session.py`, and `test_status_updater.py`); full
+  `worktree-manager` suite: 1440 passed, 7 skipped, same 3 pre-existing
+  unrelated failures in `tests/production_picker/test_data_ssh_sources.py`;
+  full `agent-worktrees` suite: 5603 passed, 50 skipped, 1 warning. Step 5
+  of this sub-slice's 6-step ordered plan is complete; only Step 6 (final
+  cleanup/deletion) remains open.
 
 - **2026-09-26** — Merged Phase 3b Slice 2 Sub-slice 3 Step 4, PR
   [#3849](https://github.com/ThomasMichon/copilot-extensions/pull/3849).
