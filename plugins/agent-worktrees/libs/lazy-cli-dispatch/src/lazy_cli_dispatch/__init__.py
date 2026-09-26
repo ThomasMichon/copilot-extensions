@@ -1,0 +1,63 @@
+# VENDOR_POINTER: source=libs/lazy-cli-dispatch kind=src-passthrough
+"""Vendor-pointer passthrough stub for the ``lazy-cli-dispatch`` shared lib
+(agent-cli-lazy-dispatch Phase 2's dev-branch vendoring mechanism -- see
+tools/sync-vendored-libs.py's own module docstring for the full
+"src-passthrough" pointer design).
+
+Every import of this package resolves through ordinary Python import
+machinery straight to the canonical ``libs/lazy-cli-dispatch/src/lazy_cli_dispatch`` tree -- do NOT
+hand-edit this file; regenerate it via
+``python tools/sync-vendored-libs.py --pointerize <plugin> lazy-cli-dispatch``.
+A production (main-branch) release never ships this stub:
+``tools/materialize_main.py`` expands it into a real, byte-identical copy
+at promotion time.
+"""
+from __future__ import annotations
+
+import importlib.util
+import sys
+from pathlib import Path
+
+
+def _find_repo_root(start):
+    """Walk upward from ``start`` for the monorepo root -- the first
+    ancestor carrying both a ``libs/`` and a ``plugins/`` directory. This
+    stub only ever runs inside a full dev-branch checkout of that monorepo
+    (a real release materializes it into a real copy first), so this
+    signature is a safe, stable way to locate it without depending on this
+    file's own exact nesting depth under ``plugins/<plugin>/libs/<lib>/``."""
+    for candidate in (start, *start.parents):
+        if (candidate / "libs").is_dir() and (candidate / "plugins").is_dir():
+            return candidate
+    return None
+
+
+_here = Path(__file__).resolve()
+_repo_root = _find_repo_root(_here)
+if _repo_root is None:
+    raise ImportError(
+        __name__ + ": vendor-pointer passthrough stub could not locate the "
+        "monorepo root (an ancestor with both libs/ and plugins/) -- this "
+        "stub only works inside a full dev-branch checkout; a real release "
+        "must materialize it into a real copy first (tools/materialize_main.py)."
+    )
+
+_canonical_pkg_dir = _repo_root / "libs" / "lazy-cli-dispatch" / "src" / "lazy_cli_dispatch"
+_canonical_init = _canonical_pkg_dir / "__init__.py"
+if not _canonical_init.is_file():
+    raise ImportError(
+        __name__ + ": canonical source not found at " + str(_canonical_init)
+    )
+
+# Standard "self-replacing module" technique: CPython's import machinery
+# re-fetches ``sys.modules[name]`` AFTER this file's own exec finishes (see
+# ``importlib._bootstrap._load_unlocked``), so swapping the entry here mid-
+# init correctly hands the REAL, canonical module back to whatever
+# triggered this import (``import lazy_cli_dispatch`` and ``from lazy_cli_dispatch import x`` both
+# resolve to it) -- this stub's own module object is discarded.
+_spec = importlib.util.spec_from_file_location(
+    __name__, _canonical_init, submodule_search_locations=[str(_canonical_pkg_dir)]
+)
+_module = importlib.util.module_from_spec(_spec)
+sys.modules[__name__] = _module
+_spec.loader.exec_module(_module)

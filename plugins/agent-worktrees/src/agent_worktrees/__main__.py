@@ -52,7 +52,6 @@ import argparse
 import contextlib
 import dataclasses
 import hashlib
-import importlib
 import json
 import os
 import platform
@@ -90,6 +89,8 @@ from agent_procutil import (
     windowless_daemon_kwargs as _windowless_daemon_kwargs_impl,
     windowless_python_env,
 )
+from lazy_cli_dispatch import dispatch_lazy as _shared_dispatch_lazy
+from lazy_cli_dispatch import self_override as _shared_self_override
 
 from . import (
     activity,
@@ -7567,36 +7568,31 @@ _CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
 def _dispatch_lazy(command: str, args_list: list[str]) -> int:
     """Fast-path dispatch for a module-delegated subcommand.
 
-    Imports and registers only the ONE module that owns `command`'s parser
-    and handler (per _LAZY_DISPATCH_TABLE), instead of build_parser()'s full
-    eager surface. The resulting parser/help text for this one subcommand is
-    identical to what build_parser() would have produced for it.
+    Thin wrapper around the shared ``lazy_cli_dispatch`` mechanism
+    (agent-cli-lazy-dispatch effort Phase 2's own first adopter, extracted
+    from this exact function): imports and registers only the ONE module
+    that owns `command`'s parser and handler (per _LAZY_DISPATCH_TABLE),
+    instead of build_parser()'s full eager surface. The resulting
+    parser/help text for this one subcommand is identical to what
+    build_parser() would have produced for it.
     """
-    module_name, handler_attr = _LAZY_DISPATCH_TABLE[command]
-    if module_name not in _CLUSTER_FREE_MODULES:
-        _ensure_cluster_loaded()
-    module = importlib.import_module(f"{__package__}.{module_name}")
-    parser = argparse.ArgumentParser(
+    return _shared_dispatch_lazy(
+        command, args_list,
+        dispatch_table=_LAZY_DISPATCH_TABLE,
+        package=__package__,
         prog="agent-worktrees",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        ensure_cluster_loaded=_ensure_cluster_loaded,
+        cluster_free_modules=_CLUSTER_FREE_MODULES,
+        # Prefer an already-populated COMMAND_MAP's entry when one exists
+        # (real runtime never builds COMMAND_MAP for a fast-tracked command,
+        # so this is normally a no-op fallthrough to the module's own
+        # handler attribute -- but a caller that already loaded the full
+        # surface, or a test that monkeypatches COMMAND_MAP[command] to
+        # intercept dispatch, gets the override it expects instead of
+        # silently bypassing it).
+        command_map=globals().get("COMMAND_MAP"),
+        register_cli_modules=frozenset({"pane_lifecycle"}),
     )
-    sub = parser.add_subparsers(dest="command", required=True)
-    if module_name == "pane_lifecycle":
-        module.register_cli(sub)
-    else:
-        module.add_parsers(sub)
-    args = parser.parse_args(args_list)
-    # Prefer an already-populated COMMAND_MAP's entry when one exists (real
-    # runtime never builds COMMAND_MAP for a fast-tracked command, so this is
-    # normally a no-op fallthrough to the module attribute below -- but a
-    # caller that already loaded the full surface, or a test that
-    # monkeypatches COMMAND_MAP[command] to intercept dispatch, gets the
-    # override it expects instead of silently bypassing it).
-    command_map = globals().get("COMMAND_MAP")
-    handler = command_map.get(command) if command_map else None
-    if handler is None:
-        handler = getattr(module, handler_attr)
-    return handler(args)
 
 
 # A cluster of CLI submodules cross-reference each other's helpers through
@@ -7624,11 +7620,12 @@ def _self_override(name: str, local):
     """`__main__`-side mirror of every sibling module's `_core_helper`:
     prefers a monkeypatched/pre-bound global on this module (e.g. a test's
     ``monkeypatch.setattr(m, name, fake)``) over `local` (a direct sibling
-    import), so a Stage D local-shadow fix never bypasses such a test."""
-    candidate = globals().get(name)
-    if callable(candidate) and candidate is not local:
-        return candidate
-    return local
+    import), so a Stage D local-shadow fix never bypasses such a test.
+
+    Thin wrapper around the shared ``lazy_cli_dispatch.self_override``
+    (agent-cli-lazy-dispatch effort Phase 2), passing this module's own
+    live ``globals()`` so a later monkeypatch is still visible."""
+    return _shared_self_override(globals(), name, local)
 
 
 def _ensure_cluster_loaded() -> None:
