@@ -309,6 +309,107 @@ def test_closed_or_stale_effort_is_not_oriented(tmp_path):
     assert ef.orientation(repo, ref) == ""
 
 
+def test_lint_effort_reports_nothing_for_a_clean_readme(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    relative = _effort(repo)
+    assert ef.lint_effort(repo, relative) == []
+    # participant/slice checks are opt-in and pass when declared
+    assert ef.lint_effort(
+        repo, relative, participant="Driver", slice_name="Phase 2 - Bind active effort",
+    ) == []
+
+
+def test_lint_effort_names_the_missing_bullet_marker_specifically(tmp_path):
+    """The exact near-miss copilot-extensions#2631 reports: a bare
+    "**Slug:** ..." bold line renders identically to the bulleted form in
+    Markdown, but only the bulleted form parses -- lint must name that
+    specific fix, not a generic "is required"."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    relative = _effort(repo)
+    path = repo / Path(*relative.split("/"))
+    text = path.read_text(encoding="utf-8").replace(
+        "- **Slug:** `durable-loop`", "**Slug:** `durable-loop`",
+    )
+    path.write_text(text, encoding="utf-8")
+
+    findings = ef.lint_effort(repo, relative)
+    assert len(findings) == 1
+    assert findings[0]["field"] == "slug"
+    assert "not a bulleted list item" in findings[0]["message"]
+    assert "`- **Slug:** ...`" in findings[0]["message"]
+
+
+def test_lint_effort_reports_every_finding_in_one_pass(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    relative = _effort(repo)
+    path = repo / Path(*relative.split("/"))
+    text = path.read_text(encoding="utf-8")
+    # Strip the Slug header entirely, and the Validation Plan heading, in
+    # one shot -- both should be reported together, not one at a time.
+    text = text.replace("- **Slug:** `durable-loop`\n", "")
+    text = text.replace("## Validation Plan", "## Not Validation Plan")
+    path.write_text(text, encoding="utf-8")
+
+    findings = ef.lint_effort(repo, relative)
+    fields = {f["field"] for f in findings}
+    assert fields == {"slug", "validation_plan"}
+
+
+def test_lint_effort_flags_unrecognized_status(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    relative = _effort(repo, status="Dnoe")
+    findings = ef.lint_effort(repo, relative)
+    assert any(f["field"] == "status" and "not recognized" in f["message"] for f in findings)
+
+
+def test_lint_effort_checks_participant_and_slice_only_when_given(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    relative = _effort(repo)
+    # Clean without participant/slice checks.
+    assert ef.lint_effort(repo, relative) == []
+    findings = ef.lint_effort(repo, relative, participant="Nobody", slice_name="Nowhere")
+    fields = {f["field"] for f in findings}
+    assert fields == {"participant", "slice"}
+
+
+def test_lint_effort_reports_a_single_finding_for_an_unreadable_path(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    findings = ef.lint_effort(repo, "efforts/active/missing/README.md")
+    # The exact EffortFocusError text differs by platform (the POSIX
+    # no-follow-handle path vs. the Windows fallback path), so only assert
+    # the shape: a single "path" finding naming an unreadable README.
+    assert findings == [{"field": "path", "message": findings[0]["message"]}]
+    assert findings[0]["message"]
+
+
+def test_cmd_effort_focus_lint_cli(tmp_path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    relative = _effort(repo)
+    args = _args("lint", path=relative, repo_root=str(repo))
+    rc = session_metadata_cli.cmd_effort_focus(args)
+    assert rc == 0
+    assert f"{relative}: OK" in capsys.readouterr().out
+
+
+def test_cmd_effort_focus_lint_cli_json_reports_findings(tmp_path, capfd):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    relative = _effort(repo, status="Dnoe")
+    args = _args("lint", path=relative, repo_root=str(repo), json=True)
+    rc = session_metadata_cli.cmd_effort_focus(args)
+    assert rc == 1
+    payload = capfd.readouterr().out
+    assert '"ok": false' in payload
+    assert '"field": "status"' in payload
+
+
 def test_bind_show_and_transfer_release(cli_env, capsys, monkeypatch):
     repo, record, tracking_dir = cli_env
     relative = _effort(repo)
