@@ -248,7 +248,7 @@ Payload:
   "values": {
     "@aw_updater": "12345",
     "@aw_updater_prefix": "C:\\Users\\...\\Python",
-    "@aw_ctx": "tmichon-book2 | repo:1c4f ",
+    "@aw_ctx": "example-machine | repo:1c4f ",
     "@aw_seg": "WIP ..."
   },
   "rendered_at": "2026-09-17T08:00:15Z",

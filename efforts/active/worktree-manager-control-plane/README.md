@@ -516,7 +516,7 @@ call site.
         version-gated (`>= 0.1.0-dev75`) present-or-fallback to the
         unchanged local implementation.
   - [x] **Step 5c — live-machine validation trial**, operator-supervised on
-        tmichon-book2: confirmed the installed `install.ps1` actually ran
+        a live machine: confirmed the installed `install.ps1` actually ran
         the new Worktree Manager path (`--live: writes applied`) and left
         the real fragment/`state.json`/`settings.json` byte-identical to
         before (idempotent, non-destructive). `--live` is proven safe on
@@ -727,7 +727,7 @@ claiming discipline alone.
   proved worktree-manager's fragment output was byte-identical to the
   already-installed fragment and converged to zero plan changes. After
   landing, ran `worktree-manager update` (`0.1.0-dev65` -> `dev75`) and
-  `agent-worktrees update` (`1.5.5-dev260` -> `dev261`) on tmichon-book2,
+  `agent-worktrees update` (`1.5.5-dev260` -> `dev261`) on that machine,
   then invoked the installed `install.ps1`'s `refresh-profiles` action
   directly: its own output confirmed the NEW path ran ("Windows Terminal
   profiles deployed via Worktree Manager" + the deploy plan's `-> LIVE:
