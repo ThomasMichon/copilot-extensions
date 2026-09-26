@@ -185,6 +185,7 @@ def has_inflight_write() -> bool:
 #: ad-hoc `register_verb` calls from arbitrary call sites.
 _VERB_MODULES: tuple[str, ...] = (
     "agent_worktrees.tracking_disposition_write",
+    "agent_worktrees.tracking_followup_write",
 )
 
 _verb_modules_loaded = False

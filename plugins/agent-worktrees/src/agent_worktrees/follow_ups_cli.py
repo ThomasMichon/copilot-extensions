@@ -5,8 +5,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from . import activity, output, tracking
 from . import config as cfg
+from . import output, tracking
 
 
 def _core():
@@ -102,6 +102,27 @@ def _follow_up_to_json(fu: tracking.FollowUpRecord) -> dict:
     }
 
 
+def _dispatch_follow_up(verb: str, verb_args: dict):
+    """Dispatch one of the follow-up verbs (``follow_up_add``/``_resolve``/
+    ``_dismiss``, see ``tracking_followup_write.py``) through the resident
+    daemon's write path when reachable, falling back to the identical
+    in-process code (logged) when it is not (agent-worktrees-authoritative-
+    daemon effort, Phase 3). Raises ``tracking_write.AmbiguousWriteOutcome``
+    for the one genuinely unsafe case (a request that reached the daemon and
+    then failed) -- callers must handle it, never silently retry.
+    """
+    from . import locks as _locks
+    from . import status_monitor_runtime as _smr
+    from . import tracking_write
+
+    return tracking_write.dispatch(
+        verb,
+        verb_args,
+        read_lock_data=lambda: _locks.read_lock(_smr._monitor_lock_path()),
+        ensure_monitor=_smr._ensure_status_monitor if _smr._status_monitor_enabled() else None,
+    )
+
+
 def cmd_follow_ups(args: argparse.Namespace) -> int:
     """Dispatch the follow-ups verb."""
     target = list(getattr(args, "target", None) or [])
@@ -177,7 +198,7 @@ def _follow_ups_show(args: argparse.Namespace, worktree_id: str | None) -> int:
 
 
 def _follow_ups_add(args: argparse.Namespace, summary: str) -> int:
-    from . import claims_cli
+    from . import claims_cli, tracking_write
 
     config = cfg.load_config()
     blocked = claims_cli._require_coordination_readiness(config, json_out=args.json)
@@ -190,36 +211,41 @@ def _follow_ups_add(args: argparse.Namespace, summary: str) -> int:
         output.err(f"worktree not found: {wt_id}")
         return 1
     refs = _parse_follow_up_refs(getattr(args, "follow_up_refs", None))
-    with tracking._RecordLock(rec_path, require_sidecar=True):
-        rec = tracking.load_record(rec_path)
-        was_finalized = rec.status == "finalized"
-        try:
-            item = tracking.add_follow_up(rec, summary, refs=refs, save=False)
-        except ValueError as exc:
-            if args.json:
-                return _json_error(str(exc))
-            output.err(str(exc))
-            return 1
-        reopened = was_finalized and rec.status == "active"
-        tracking.save_record(rec, rec_path)
-    activity.log_event(
-        "follow_up_added",
-        worktree_id=wt_id,
-        follow_up_id=item.id,
-        summary=item.summary,
-        refs=[f"{r.kind}:{r.ref}" for r in item.refs],
-        reopened=reopened,
-    )
+    try:
+        result = _dispatch_follow_up(
+            "follow_up_add",
+            {
+                "worktree_id": wt_id,
+                "yaml_path": str(rec_path),
+                "summary": summary,
+                "refs": [{"kind": r.kind, "ref": r.ref} for r in refs],
+            },
+        )
+    except tracking_write.AmbiguousWriteOutcome as exc:
+        msg = f"follow-ups add: write to {wt_id} is in an unknown state: {exc}"
+        if args.json:
+            return _json_error(msg)
+        output.err(msg)
+        return 1
+    if result.get("error") == "frozen":
+        if args.json:
+            return _json_error(result["message"])
+        output.err(result["message"])
+        return 1
+    item = result["follow_up"]
+    reopened = result["reopened"]
     if args.json:
-        _json_output({"worktree_id": wt_id, **_follow_up_to_json(item), "reopened": reopened})
+        _json_output({"worktree_id": wt_id, **item, "reopened": reopened})
         return 0
-    print(f"added follow-up {item.id} on {wt_id}: {item.summary}")
+    print(f"added follow-up {item['id']} on {wt_id}: {item['summary']}")
     if reopened:
         print(f"  reopened {wt_id}: finalized -> active (new open follow-up)")
     return 0
 
 
 def _follow_ups_resolve(args: argparse.Namespace, follow_up_id: str) -> int:
+    from . import tracking_write
+
     config = cfg.load_config()
     wt_id, rec_path = _follow_ups_record_path(args, config)
     if not rec_path.exists():
@@ -227,35 +253,39 @@ def _follow_ups_resolve(args: argparse.Namespace, follow_up_id: str) -> int:
             return _json_error(f"worktree not found: {wt_id}")
         output.err(f"worktree not found: {wt_id}")
         return 1
-    with tracking._RecordLock(rec_path, require_sidecar=True):
-        rec = tracking.load_record(rec_path)
-        item = tracking.resolve_follow_up(
-            rec,
-            follow_up_id,
-            result_ref=getattr(args, "follow_up_result_ref", None),
-            save=False,
+    try:
+        result = _dispatch_follow_up(
+            "follow_up_resolve",
+            {
+                "worktree_id": wt_id,
+                "yaml_path": str(rec_path),
+                "follow_up_id": follow_up_id,
+                "result_ref": getattr(args, "follow_up_result_ref", None),
+            },
         )
-        if item is None:
-            msg = f"follow-ups resolve: no such follow-up {follow_up_id!r} on {wt_id}"
-            if args.json:
-                return _json_error(msg)
-            output.err(msg)
-            return 1
-        tracking.save_record(rec, rec_path)
-    activity.log_event(
-        "follow_up_resolved",
-        worktree_id=wt_id,
-        follow_up_id=item.id,
-        result_ref=item.result_ref,
-    )
+    except tracking_write.AmbiguousWriteOutcome as exc:
+        msg = f"follow-ups resolve: write to {wt_id} is in an unknown state: {exc}"
+        if args.json:
+            return _json_error(msg)
+        output.err(msg)
+        return 1
+    if result.get("error") == "not_found":
+        msg = f"follow-ups resolve: no such follow-up {follow_up_id!r} on {wt_id}"
+        if args.json:
+            return _json_error(msg)
+        output.err(msg)
+        return 1
+    item = result["follow_up"]
     if args.json:
-        _json_output({"worktree_id": wt_id, **_follow_up_to_json(item)})
+        _json_output({"worktree_id": wt_id, **item})
         return 0
-    print(f"resolved follow-up {item.id} on {wt_id}")
+    print(f"resolved follow-up {item['id']} on {wt_id}")
     return 0
 
 
 def _follow_ups_dismiss(args: argparse.Namespace, follow_up_id: str) -> int:
+    from . import tracking_write
+
     config = cfg.load_config()
     reason = (getattr(args, "follow_up_reason", "") or "").strip()
     if not reason:
@@ -270,24 +300,31 @@ def _follow_ups_dismiss(args: argparse.Namespace, follow_up_id: str) -> int:
             return _json_error(f"worktree not found: {wt_id}")
         output.err(f"worktree not found: {wt_id}")
         return 1
-    with tracking._RecordLock(rec_path, require_sidecar=True):
-        rec = tracking.load_record(rec_path)
-        item = tracking.dismiss_follow_up(rec, follow_up_id, reason=reason, save=False)
-        if item is None:
-            msg = f"follow-ups dismiss: no such follow-up {follow_up_id!r} on {wt_id}"
-            if args.json:
-                return _json_error(msg)
-            output.err(msg)
-            return 1
-        tracking.save_record(rec, rec_path)
-    activity.log_event(
-        "follow_up_dismissed",
-        worktree_id=wt_id,
-        follow_up_id=item.id,
-        reason=reason,
-    )
+    try:
+        result = _dispatch_follow_up(
+            "follow_up_dismiss",
+            {
+                "worktree_id": wt_id,
+                "yaml_path": str(rec_path),
+                "follow_up_id": follow_up_id,
+                "reason": reason,
+            },
+        )
+    except tracking_write.AmbiguousWriteOutcome as exc:
+        msg = f"follow-ups dismiss: write to {wt_id} is in an unknown state: {exc}"
+        if args.json:
+            return _json_error(msg)
+        output.err(msg)
+        return 1
+    if result.get("error") == "not_found":
+        msg = f"follow-ups dismiss: no such follow-up {follow_up_id!r} on {wt_id}"
+        if args.json:
+            return _json_error(msg)
+        output.err(msg)
+        return 1
+    item = result["follow_up"]
     if args.json:
-        _json_output({"worktree_id": wt_id, **_follow_up_to_json(item)})
+        _json_output({"worktree_id": wt_id, **item})
         return 0
-    print(f"dismissed follow-up {item.id} on {wt_id}: {reason}")
+    print(f"dismissed follow-up {item['id']} on {wt_id}: {reason}")
     return 0

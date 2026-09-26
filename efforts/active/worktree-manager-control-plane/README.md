@@ -331,7 +331,7 @@ realized in `main`; unchecked items are the remaining delta.
       worktrees with a recorded `session_backend` binding must keep resolving
       correctly against the relocated code.
 
-### Phase 3c — Picker non-blocking I/O (Planned)
+### Phase 3c — Picker non-blocking I/O (Planned — ordered migration plan authored, implementation not started)
 - [ ] Make every I/O-touching Picker surface — pivot loads (built-in and
       plugin-contributed), menu opens, and action execution with progress
       reporting — consistently non-blocking, closing the gap found while
@@ -348,7 +348,7 @@ realized in `main`; unchecked items are the remaining delta.
       background-task primitive, migrating `setup()` onto it, a regression
       guard against future synchronous menu-opens, and a cross-repo proposal
       for built-in-verb progress percentages):
-      [`phase-3c-picker-nonblocking-io.md`](phase-3c-picker-nonblocking-io.md).
+      [`phase-3c-non-blocking-io.md`](phase-3c-non-blocking-io.md).
 
 ### Phase 3d — Retire the Picker's in-process engine-module boundary (Planned — #3359, #3360)
 
@@ -690,6 +690,17 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-09-26** — Re-authored the Phase 3c planning doc to match the
+  Phase 3b/3e ordered-slice discipline and renamed it to
+  [`phase-3c-non-blocking-io.md`](phase-3c-non-blocking-io.md). The new
+  plan now carries the same reviewed shape as the other active sub-slice
+  docs: governing-vision header, explicit "Why this needs its own ordered
+  plan" hazard statement, evidence-based current-state inventory, precise
+  target end-state, additive-seam → cutover → cleanup ordered steps,
+  contract/step/end-to-end validation, a bounded cross-repo proposal note,
+  and explicit Non-Goals. No implementation landed in this pass; Phase 3c
+  remains planning-only, but the README status line now says so plainly.
 
 - **2026-09-26** — Merged Phase 3b Slice 2 Sub-slice 3 Step 6, PR
   [#3865](https://github.com/ThomasMichon/copilot-extensions/pull/3865).
@@ -1167,7 +1178,7 @@ claiming discipline alone.
   surfaced (and a reverted same-session prototype for) `setup()`'s
   synchronous pivot-registry scan + single-machine data load blocking the
   render thread. See
-  [`phase-3c-picker-nonblocking-io.md`](phase-3c-picker-nonblocking-io.md)
+  [`phase-3c-non-blocking-io.md`](phase-3c-non-blocking-io.md)
   for the full audit, the specific race the reverted prototype hit, and the
   ordered slice plan. No implementation in this pass -- planning only.
 
