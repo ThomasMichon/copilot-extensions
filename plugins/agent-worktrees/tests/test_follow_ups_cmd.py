@@ -10,8 +10,7 @@ import types
 from contextlib import redirect_stdout
 
 from agent_worktrees import __main__ as m
-from agent_worktrees import state_root
-from agent_worktrees import tracking
+from agent_worktrees import state_root, tracking
 
 
 def _seed(tmp_path, monkeypatch):
@@ -128,6 +127,27 @@ def test_resolve_unknown_id(tmp_path, monkeypatch, capfd):
     assert rc == 1
     out = json.loads(capfd.readouterr().out)
     assert "no such follow-up" in out["error"]
+
+
+def test_add_ambiguous_write_outcome_is_reported_not_swallowed(tmp_path, monkeypatch, capfd):
+    """agent-worktrees-authoritative-daemon Phase 3: a write whose daemon
+    request was sent and then failed is genuinely ambiguous -- the command
+    must surface `AmbiguousWriteOutcome` as a reported failure, never
+    silently retry or swallow it."""
+    from agent_worktrees import tracking_write
+
+    tdir = _seed(tmp_path, monkeypatch)
+
+    def _raise(*_args, **_kwargs):
+        raise tracking_write.AmbiguousWriteOutcome("request sent, no response")
+
+    monkeypatch.setattr(tracking_write, "dispatch", _raise)
+    rc = m.cmd_follow_ups(_args(["add", "will", "not", "land"]))
+    assert rc == 1
+    out = json.loads(capfd.readouterr().out)
+    assert "unknown state" in out["error"]
+    # Refused before any mutation -- the record must be untouched.
+    assert tracking.load_record(tdir / "wt-A.yaml").follow_ups == []
 
 
 def test_show_reports_open_count(tmp_path, monkeypatch, capfd):
