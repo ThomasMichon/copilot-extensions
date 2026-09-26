@@ -18,15 +18,20 @@ import pytest
 
 SCRIPT = Path(__file__).resolve().parent / "ci_failure_watchdog.py"
 
+# Realistic Actions job log shape: EVERY line is timestamp-prefixed by the
+# runner, including pytest's own FAILED summary line -- a fixture without
+# that prefix would hide a real "^FAILED never matches a real log" bug
+# (exactly the bug a review pass caught here).
 SAMPLE_PYTEST_LOG = """
-2026-09-26T05:08:32Z tests/test_first_install_bootstrap.py::test_a PASSED
-2026-09-26T05:08:33Z tests/test_first_install_bootstrap.py::test_b FAILED
-=========================== short test summary info ============================
-FAILED tests/test_first_install_bootstrap.py::test_posix_lean_provision_installs_resolver_and_launchers_reenter_runtime - Failed: Timeout (>30.0s) from pytest-timeout.
-1 failed, 592 passed, 5 skipped in 64.97s (0:01:04)
+2026-09-26T05:08:32.1000000Z tests/test_first_install_bootstrap.py::test_a PASSED
+2026-09-26T05:08:33.2000000Z tests/test_first_install_bootstrap.py::test_b FAILED
+2026-09-26T05:08:34.3000000Z =========================== short test summary info ============================
+2026-09-26T05:08:34.4000000Z FAILED tests/test_first_install_bootstrap.py::test_posix_lean_provision_installs_resolver_and_launchers_reenter_runtime - Failed: Timeout (>30.0s) from pytest-timeout.
+2026-09-26T05:08:34.5000000Z 1 failed, 592 passed, 5 skipped in 64.97s (0:01:04)
 """
 
 SAMPLE_NON_PYTEST_LOG = "\n".join(f"line {i}" for i in range(60)) + "\nERROR: module too large\nExit 1\n"
+
 
 
 def _load_watchdog():
@@ -48,6 +53,14 @@ def test_extract_failed_test_ids_finds_the_node_id(watchdog):
     assert ids == [
         "tests/test_first_install_bootstrap.py::test_posix_lean_provision_installs_resolver_and_launchers_reenter_runtime"
     ]
+
+
+def test_extract_failed_test_ids_matches_a_timestamp_prefixed_line(watchdog):
+    # A real Actions log timestamps EVERY line, including pytest's own
+    # FAILED summary line -- an un-stripped `^FAILED` anchor never matches
+    # a real log at all. Regression for that exact bug.
+    log = "2026-09-26T05:08:34.4000000Z FAILED tests/x.py::test_y - AssertionError\n"
+    assert watchdog.extract_failed_test_ids(log) == ["tests/x.py::test_y"]
 
 
 def test_extract_failed_test_ids_dedupes_and_preserves_order(watchdog):

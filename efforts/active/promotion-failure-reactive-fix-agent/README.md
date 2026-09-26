@@ -522,3 +522,16 @@ _Pending._
   timestamp prefix before hashing (keeping the real, timestamped excerpt
   for the human-facing issue/comment body); regression test confirms two
   identical failures with different timestamps now produce the same key.
+- **Fourth review pass caught the most severe bug yet, now fixed:** a
+  real Actions job log timestamps **every** line, including pytest's own
+  `FAILED <nodeid>` summary line -- so `^FAILED` (anchored at true line
+  start) would **never match a single real log**, making Phase 1's
+  detection a complete no-op in production despite 22/22 tests passing.
+  The tests passed because the hand-written `SAMPLE_PYTEST_LOG` fixture
+  didn't actually include a timestamp prefix on that line -- an
+  unrealistic fixture hid a bug real logs would have hit every time.
+  Fixed by matching against the already-existing `_strip_timestamps()`
+  helper's output (reused, not duplicated) before applying the FAILED-line
+  regex; rewrote the fixture to timestamp every line realistically and
+  added a direct regression test. Worth remembering: a green test suite
+  only proves what the fixtures actually exercise.

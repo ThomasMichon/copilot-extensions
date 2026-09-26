@@ -58,6 +58,21 @@ SKIP_JOB_NAMES = frozenset(
 )
 
 _FAILED_TEST_RE = re.compile(r"^FAILED (.+)$", re.MULTILINE)
+_TIMESTAMP_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z ?", re.MULTILINE)
+
+
+def _strip_timestamps(text: str) -> str:
+    """Strip GitHub Actions' own per-line ISO-8601 timestamp prefix.
+
+    The job-level Actions log timestamps **every** line -- including
+    pytest's own ``FAILED <nodeid>`` summary lines, e.g.
+    ``2026-09-26T05:08:32.6650925Z FAILED tests/x.py::test_y - ...`` -- so
+    matching must happen on the timestamp-stripped text, never the raw log,
+    or a `^FAILED` anchor never matches a single real Actions log line.
+    This is also what makes the whole-job fallback signature dedupe
+    correctly across runs (see `build_signatures`).
+    """
+    return _TIMESTAMP_PREFIX_RE.sub("", text)
 
 
 @dataclass(frozen=True)
@@ -89,34 +104,22 @@ def extract_failed_test_ids(log_text: str) -> list[str]:
     """Return de-duplicated pytest ``FAILED <path>::<test>`` node ids found
     in ``log_text``, in first-seen order.
 
-    Only keeps candidates with a real node-id shape (containing ``::``) --
-    `tools/run-plugin-tests.py`'s own wrapper summary line (``FAILED
-    plugins: <name>``) also starts with ``FAILED`` but is not a node id;
-    letting it through would produce a misleading extra signature/issue
-    instead of falling through to the whole-job signature.
+    Matches against the timestamp-stripped text (see `_strip_timestamps`) --
+    a real Actions log timestamps every line, so an un-stripped ``^FAILED``
+    anchor never matches at all. Only keeps candidates with a real node-id
+    shape (containing ``::``) -- `tools/run-plugin-tests.py`'s own wrapper
+    summary line (``FAILED plugins: <name>``) also starts with ``FAILED``
+    but is not a node id; letting it through would produce a misleading
+    extra signature/issue instead of falling through to the whole-job
+    signature.
     """
     seen: dict[str, None] = {}
-    for match in _FAILED_TEST_RE.finditer(log_text):
+    for match in _FAILED_TEST_RE.finditer(_strip_timestamps(log_text)):
         candidate = _strip_summary_reason(match.group(1))
         if "::" not in candidate:
             continue
         seen.setdefault(candidate, None)
     return list(seen)
-
-
-_TIMESTAMP_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z ?", re.MULTILINE)
-
-
-def _strip_timestamps(text: str) -> str:
-    """Strip GitHub Actions' own per-line ISO-8601 timestamp prefix.
-
-    The job-level Actions log timestamps every line, so the identical
-    non-pytest failure (a `guards-full-sweep` script crash, a tool error)
-    gets a different hash on every run if the raw excerpt -- timestamps
-    included -- is what gets hashed for the whole-job fallback signature.
-    Stripping them first is what actually makes that fallback dedupe.
-    """
-    return _TIMESTAMP_PREFIX_RE.sub("", text)
 
 
 def _excerpt_around(log_text: str, needle: str, before: int = 15, after: int = 3) -> str:
