@@ -180,39 +180,65 @@ class TestDispatch:
         assert calls == [{"n": 2}]
         assert any("test-fallback" in r.message for r in caplog.records)
 
-    def test_dispatch_falls_back_when_daemon_exceeds_deadline(self):
-        """The verb itself is slow (not the transport), so the fallback --
-        being the *same* function -- reproduces that same cost when it runs;
-        this proves the daemon path was actually abandoned (deadline hit)
-        and the fallback then genuinely executed the verb, not a distinct
-        finished-instantly stand-in."""
+    def test_dispatch_raises_ambiguous_outcome_when_dialed_daemon_times_out(self):
+        """2026-09-26 PR review finding: a request that reached a
+        successfully-dialed daemon and then failed (deadline exceeded) must
+        NOT silently retry via run_direct -- the daemon's own owner compute
+        keeps running after the client gives up (CoalescingServer has no
+        cancellation), so a blind retry could double-apply a non-idempotent
+        write. Uses a real socket-level timeout (the verb blocks past the
+        client's own recv timeout, request_deadline_s + 1.0s) rather than a
+        deadline race that could still return the daemon's real answer.
+        """
         calls = []
+        release_gate = threading.Event()
 
         def _slow_verb(args):
             calls.append(dict(args))
-            time.sleep(0.3)
+            # Blocks past the client's own socket timeout
+            # (request_deadline_s + 1.0s, see wcs_client._send_recv) so the
+            # client-side read genuinely times out -- not a deadline-field
+            # race that might still return a real answer.
+            release_gate.wait(timeout=5)
             return {"via": "verb"}
 
-        tracking_write.register_verb("test-slow", _slow_verb)
+        tracking_write.register_verb("test-ambiguous", _slow_verb)
         server = tracking_write.start_server(tracking_write.compute)
         server.start()
         try:
             lock_data = _endpoint_dict(server)
-            result = tracking_write.dispatch(
-                "test-slow",
-                {},
-                read_lock_data=lambda: lock_data,
-                ensure_monitor=None,
-                request_deadline_s=0.05,
-            )
-            # The daemon round trip timed out (deadline << the verb's own
-            # 0.3s), so this ran through run_direct -- the verb still ran
-            # (once via the abandoned daemon call, once via the fallback),
-            # and the fallback's own result is what the caller sees.
-            assert result == {"via": "verb"}
-            assert len(calls) >= 1
+            with pytest.raises(tracking_write.AmbiguousWriteOutcome):
+                tracking_write.dispatch(
+                    "test-ambiguous",
+                    {},
+                    read_lock_data=lambda: lock_data,
+                    ensure_monitor=None,
+                    request_deadline_s=0.2,
+                )
+            # The daemon-side owner compute was genuinely invoked (this is
+            # exactly the ambiguity this behavior protects against) -- it
+            # just never got a chance to answer before the client's socket
+            # timed out.
+            assert len(calls) == 1
         finally:
+            release_gate.set()
             server.close()
+
+    def test_dispatch_still_falls_back_when_no_daemon_endpoint_found_at_all(self):
+        """The one case that IS safe to auto-retry: no endpoint was ever
+        discoverable, so nothing was ever sent anywhere."""
+        calls = []
+        tracking_write.register_verb(
+            "test-predial-miss", lambda args: calls.append(args) or {"via": "fallback"}
+        )
+        result = tracking_write.dispatch(
+            "test-predial-miss",
+            {},
+            read_lock_data=lambda: None,  # no daemon ever discoverable
+            ensure_monitor=None,
+        )
+        assert result == {"via": "fallback"}
+        assert calls == [{}]
 
     def test_two_concurrent_writes_never_coalesce_even_for_the_same_verb_and_args(self):
         """The write-specific guarantee this module adds over classify/
@@ -277,19 +303,19 @@ class TestVerbModuleLoading:
         import_calls = []
         real_import_module = tracking_write.importlib.import_module
 
-        def _spy(name, package=None):
-            import_calls.append((name, package))
-            return real_import_module(name, package)
+        def _spy(name):
+            import_calls.append(name)
+            return real_import_module(name)
 
         monkeypatch.setattr(tracking_write.importlib, "import_module", _spy)
-        # "config" is a real, side-effect-free-to-import-twice sibling module.
-        monkeypatch.setattr(tracking_write, "_VERB_MODULES", ("config",))
+        # A real, fully-qualified, side-effect-free-to-import-twice module.
+        monkeypatch.setattr(tracking_write, "_VERB_MODULES", ("agent_worktrees.config",))
         monkeypatch.setattr(tracking_write, "_verb_modules_loaded", False)
 
         tracking_write._ensure_verb_modules_loaded()
         tracking_write._ensure_verb_modules_loaded()  # second call: no-op
 
-        assert import_calls == [(".config", "agent_worktrees")]
+        assert import_calls == ["agent_worktrees.config"]
 
     def test_compute_and_run_direct_both_trigger_the_loader(self, monkeypatch):
         calls = {"n": 0}
@@ -308,12 +334,13 @@ class TestVerbModuleLoading:
         self, tmp_path
     ):
         """The literal process-boundary proof the review asked for: a verb
-        module is imported and its verb invoked by two independent `python`
-        subprocesses (not this test process at all) -- one exercising the
-        `compute` path (the daemon side), one exercising `run_direct` (the
-        fallback side) -- with no shared runtime state between them, only
-        the identical `_VERB_MODULES` declaration and the verb module's own
-        import-time `register_verb` call.
+        module is registered via the *production* `_ensure_verb_modules_loaded`
+        loader (never a hand-rolled import bypassing it) and invoked by two
+        independent `python` subprocesses (not this test process at all) --
+        one exercising the `compute` path (the daemon side), one exercising
+        `run_direct` (the fallback side) -- with no shared runtime state
+        between them, only the identical `_VERB_MODULES` declaration and the
+        verb module's own import-time `register_verb` call.
         """
         verb_module_dir = tmp_path / "verb_pkg"
         verb_module_dir.mkdir()
@@ -336,12 +363,19 @@ class TestVerbModuleLoading:
             import sys
             sys.path.insert(0, {verb_dir!r})
             from agent_worktrees import tracking_write
-            import boundary_test_verb  # noqa: F401 -- self-registers on import
 
-            tracking_write._VERB_MODULES = ()  # already imported explicitly above
-            tracking_write._verb_modules_loaded = True
+            # Only declare the module -- never import it directly here.
+            # The production loader (_ensure_verb_modules_loaded, invoked
+            # from inside compute/run_direct below) is what must perform
+            # the actual import and trigger boundary_test_verb's own
+            # register_verb call.
+            tracking_write._VERB_MODULES = ("boundary_test_verb",)
+            assert not tracking_write._verb_modules_loaded
+            assert "boundary-test-verb" not in tracking_write.registered_verbs()
+
             result = tracking_write.{call}
             assert result == {{"ran_in_subprocess": True, "args": {{"probe": 1}}}}, result
+            assert tracking_write._verb_modules_loaded
             print("OK")
             """
         )

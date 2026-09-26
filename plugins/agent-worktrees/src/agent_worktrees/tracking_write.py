@@ -19,6 +19,17 @@ same code, no fork), with log." :func:`run_direct` always logs the bypass
 alternative to going through the daemon (see the vision's
 ``no-writer-bypasses-the-daemon``).
 
+**The fallback only ever runs for a pre-dial miss.** :func:`run_direct` is
+reached automatically only when no daemon endpoint could be discovered at
+all (even after a boot-wait) -- nothing was ever sent anywhere, so nothing
+could have already run. A request that *was* sent to a successfully-dialed
+daemon and then failed (timeout, malformed response) is a genuinely
+different, ambiguous case -- the daemon may already be executing or have
+already committed the mutation -- and :func:`write_with_boot`/
+:func:`dispatch` raise :class:`AmbiguousWriteOutcome` there instead of
+silently retrying, per a 2026-09-26 PR review finding (this distinction did
+not exist in this module's first-landed version).
+
 **Coalescing key is always unique per write.** Unlike ``classify``/
 ``worktree_status`` (idempotent reads, safe to coalesce concurrent identical
 requests onto one answer), two writes must never join the same in-flight
@@ -67,6 +78,21 @@ from work_coalescing_singleton import client as wcs_client
 
 logger = logging.getLogger(__name__)
 
+
+class AmbiguousWriteOutcome(Exception):
+    """A write's daemon request failed *after* successfully dialing an
+    endpoint -- the mutation may already be committed, or still executing,
+    server-side (``CoalescingServer`` does not cancel an already-accepted
+    owner compute when a caller's own socket read times out). Unlike the
+    "no daemon reachable at all" case (safe: nothing was ever sent), this
+    state is never safe to silently retry via the same-code direct
+    fallback -- doing so could double-apply a non-idempotent write (a
+    counter increment, an appended session entry). The caller must decide:
+    report the error, or design the specific verb to be safely
+    idempotent/dedupable before ever allowing an automatic retry here.
+    """
+
+
 KIND = "tracking_write"
 
 #: A migrated verb is a real lock/load/mutate/save transaction -- comparable
@@ -91,17 +117,18 @@ _VERBS: dict[str, Callable[[dict], dict]] = {}
 #: `_VERBS` alone is a process-local dict; the resident daemon and any CLI
 #: process calling :func:`dispatch`/:func:`run_direct` are *separate*
 #: Python processes, so a `register_verb` call made in one never populates
-#: the other's dict). Each entry here is a **module name** (relative to this
-#: package) that self-registers its own verb(s) via `register_verb` calls in
-#: its own module-level code, purely as an import side effect -- never a
-#: function reference or a registration RPC. Every process that reaches this
-#: module's :func:`compute`/:func:`run_direct` first calls
-#: :func:`_ensure_verb_modules_loaded`, which imports every module listed
-#: here -- so the daemon process and a CLI process both arrive at the
-#: identical registry independently, with no shared mutable state or wire
-#: message required between them. Empty until Phase 3 migrates its first
-#: real verb; a verb-owning module is added here, not wired via ad-hoc
-#: `register_verb` calls from arbitrary call sites.
+#: the other's dict). Each entry here is a **fully-qualified module name**
+#: (e.g. ``"agent_worktrees.tracking_session_registry"`` for a real
+#: production verb module) that self-registers its own verb(s) via
+#: `register_verb` calls in its own module-level code, purely as an import
+#: side effect -- never a function reference or a registration RPC. Every
+#: process that reaches this module's :func:`compute`/:func:`run_direct`
+#: first calls :func:`_ensure_verb_modules_loaded`, which imports every
+#: module listed here -- so the daemon process and a CLI process both
+#: arrive at the identical registry independently, with no shared mutable
+#: state or wire message required between them. Empty until Phase 3
+#: migrates its first real verb; a verb-owning module is added here, not
+#: wired via ad-hoc `register_verb` calls from arbitrary call sites.
 _VERB_MODULES: tuple[str, ...] = ()
 
 _verb_modules_loaded = False
@@ -125,7 +152,7 @@ def _ensure_verb_modules_loaded() -> None:
         if _verb_modules_loaded:
             return
         for name in _VERB_MODULES:
-            importlib.import_module(f".{name}", __package__)
+            importlib.import_module(name)
         _verb_modules_loaded = True
 
 
@@ -263,11 +290,23 @@ def write_with_boot(
     poll_interval_s: float = 0.1,
 ) -> dict:
     """Dial, boot-and-wait if no resident monitor currently publishes a
-    tracking-write endpoint, then send one request -- mirrors
-    ``classify_daemon.classify_with_boot`` / ``worktree_status_daemon.
-    status_with_boot`` exactly (see either docstring for the full per-step
-    rationale). Never raises past this call: any miss at any stage runs
-    ``fallback()``.
+    tracking-write endpoint, then send one request.
+
+    Structurally mirrors ``classify_daemon.classify_with_boot`` /
+    ``worktree_status_daemon.status_with_boot``, but a write **cannot**
+    share their "any miss runs fallback()" contract: ``CoalescingServer``
+    does not cancel an already-accepted owner compute when a caller's own
+    socket read times out, so a request failure *after* a daemon endpoint
+    was successfully dialed is ambiguous -- the daemon may already be
+    executing, or have already committed, the mutation. Blindly running
+    the same-code fallback in that state risks double-applying a
+    non-idempotent write (a counter increment, an appended session entry).
+
+    Only a **pre-dial** miss (no endpoint discoverable at all, even after
+    the boot-wait) is unambiguous -- nothing was ever sent anywhere, so
+    ``fallback()`` is safe there and only there. A post-dial failure raises
+    :class:`AmbiguousWriteOutcome` instead of silently retrying (2026-09-26
+    PR review finding).
     """
     started = time.time()
 
@@ -296,8 +335,13 @@ def write_with_boot(
             request_deadline_s=request_deadline_s,
             client_id=client_id,
         )
-    except wcs_client.DaemonUnavailable:
-        return fallback()
+    except wcs_client.DaemonUnavailable as exc:
+        raise AmbiguousWriteOutcome(
+            "tracking_write request failed after successfully dialing the "
+            "daemon -- the mutation's outcome is unknown (it may already be "
+            "committed server-side); refusing to retry via the same-code "
+            f"direct fallback: {exc}"
+        ) from exc
     finally:
         wcs_client.release(host, port, token, client_id, timeout=request_deadline_s)
 
@@ -314,12 +358,19 @@ def dispatch(
     """The public entry point a migrated call site uses in place of calling
     its verb's function directly: try the resident daemon first (booting one
     on demand if none is reachable), falling back to :func:`run_direct`
-    (same code, logged) when no daemon can be reached at all.
+    (same code, logged) only when no daemon could be reached **at all**.
 
     A fresh, unique coalescing key is minted for every call (see this
     module's docstring, "Coalescing key is always unique per write") so two
     concurrent writes -- even for the same verb and worktree -- are never
     merged into one execution.
+
+    Raises :class:`AmbiguousWriteOutcome` when a daemon *was* reached but
+    the request itself then failed (a deadline/malformed-response/transport
+    error) -- that state is never safe to auto-retry (see
+    :func:`write_with_boot`'s own docstring). This is a genuine exception a
+    caller must handle deliberately, not a bug: it is the one case this
+    module refuses to paper over with a same-code fallback.
     """
     key = f"{verb}:{uuid.uuid4().hex}"
     payload = {"verb": verb, "args": args}

@@ -342,10 +342,13 @@ survey above.
       tests (`test_tracking_write.py`) exercising the registry, dispatch,
       logged fallback, and the unique-key-never-coalesces guarantee
       directly, without touching a live production call site.
-- [x] Tests: `test_tracking_write.py` (14 tests: rendezvous parsing, verb
-      registration/dispatch, unregistered-verb/malformed-payload rejection,
-      `run_direct`'s logged bypass, daemon-reachable vs. fallback dispatch,
-      deadline-exceeded fallback, and two-concurrent-writes-never-coalesce).
+- [x] Tests: `test_tracking_write.py` (18 tests, after the PR review round 2
+      additions below: rendezvous parsing, verb registration/dispatch,
+      unregistered-verb/malformed-payload rejection, `run_direct`'s logged
+      bypass, daemon-reachable dispatch, pre-dial-miss fallback, the
+      ambiguous-outcome-after-dial exception, two-concurrent-writes-never-
+      coalesce, the verb-module loader, and a genuine two-subprocess
+      process-boundary proof).
       `test_status_monitor.py`'s existing daemon-lifecycle regression test
       updated (3 → 4 `CoalescingServer.close()` calls: classify +
       worktree_status + managed_mux + tracking_write) plus new
@@ -405,6 +408,62 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-09-26 — PR #3779 review round 2: 2 more real High findings, plus test-quality fixes
+Round 2 (3 High/Medium/Low remaining + 4 new, 1 resolved from round 1) caught
+two more genuine bugs beyond the cross-process registration gap:
+
+- **Ambiguous fallback retry after a dialed-but-failed request.**
+  `write_with_boot` treated *any* `DaemonUnavailable` (pre-dial miss **or**
+  a request that reached the daemon and then timed out) identically, always
+  running the same-code fallback. But `CoalescingServer` never cancels an
+  already-accepted owner compute when a caller's socket read times out --
+  so a post-dial failure is genuinely ambiguous (the daemon may already be
+  executing, or have already committed, the mutation), and blindly retrying
+  risks double-applying a non-idempotent write. Fixed: only a **pre-dial**
+  miss (no endpoint discoverable at all) is safe to auto-fallback; a
+  post-dial failure now raises a new `AmbiguousWriteOutcome` instead,
+  documented in both `tracking_write.py`'s module docstring and
+  `write_with_boot`/`dispatch`'s own docstrings. This refines (does not
+  contradict) operator-resolved Open Question 1 -- that answer covered "no
+  daemon reachable at all," not the separate ambiguous-timeout case, which
+  is a real engineering distinction surfaced by review, not something the
+  operator was actually asked about.
+- **Monitor could shut down mid-write.** The resident monitor's own
+  empty-strike idle-exit predicate checked `worktree_status_runtime`/
+  `managed_mux_runtime` demand but not `tracking_write_server`'s live
+  subscriber count -- an in-flight write with no other daemon activity
+  could see the monitor decide "empty" and close the server out from under
+  a still-waiting client. Fixed: both empty-strike branches now also check
+  `tracking_write_server.subscriber_count() > 0`, mirroring how
+  `has_active_demand()` already gates the same predicate for the read-side
+  daemons.
+- **`_ensure_verb_modules_loaded` now called eagerly at monitor startup**
+  too (not just lazily inside `compute`/`run_direct`), directly addressing
+  the still-open "load production verbs at the monitor's own startup/
+  import path" finding at its own file/line.
+- **Switched `_VERB_MODULES` to fully-qualified module names**
+  (`importlib.import_module(name)`, not package-relative) -- simpler, and
+  what let the process-boundary test's fixture module live outside the
+  `agent_worktrees` package entirely (a standalone temp module on
+  `sys.path`, exactly like a real external consumer would look).
+- **Fixed both flagged test-quality gaps:** the deadline-fallback test now
+  blocks the verb past the client's real socket timeout and asserts the
+  new `AmbiguousWriteOutcome` (previously it could pass either way,
+  proving nothing); the process-boundary test now declares the verb module
+  via `_VERB_MODULES` and calls `compute`/`run_direct` directly, letting
+  the *production* loader perform the import (previously it pre-imported
+  the module and hand-set `_verb_modules_loaded = True`, bypassing the
+  exact mechanism under test).
+- Updated stale "14 tests" references to 18 (2 net new: the ambiguous-
+  outcome test replaced the broken deadline test 1-for-1, plus a new
+  pre-dial-miss-still-falls-back test made the safe/unsafe distinction
+  explicit on both sides).
+- Added the required PR-description "Documentation impact" statement
+  (CONTRIBUTING.md § Documentation impact) the round-1 Low finding flagged
+  as missing.
+- Re-ran the full suite + `ruff check` + `check-module-size`/
+  `check-install-contract` after all fixes: all clean.
 
 ### 2026-09-26 — PR #3779 review: closed a real cross-process registration gap
 GitHub's Copilot code review (2 High + 1 Low findings) on the Phase 2 PR

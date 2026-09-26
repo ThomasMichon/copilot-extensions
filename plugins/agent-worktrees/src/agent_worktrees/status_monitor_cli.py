@@ -197,6 +197,15 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
 
     tracking_write_server = None
     try:
+        # Load every verb-owning module (currently none -- see
+        # tracking_write._VERB_MODULES) eagerly at monitor startup, not
+        # lazily on the first request: a Phase 3 verb module's own
+        # `register_verb` call is then guaranteed to have run before this
+        # daemon ever answers a `tracking_write` request, closing the
+        # 2026-09-26 PR review's "load production verbs at the monitor's
+        # own startup/import path" finding at this call site specifically
+        # (compute/run_direct already call this too, idempotently).
+        tracking_write._ensure_verb_modules_loaded()
         tracking_write_server = tracking_write.start_server(tracking_write.compute)
         tracking_write_server.start()
     except Exception:
@@ -236,6 +245,13 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     _locks.write_lock(lock, extra=_lock_extra())
     empty_strikes = 0
     max_empty_strikes = 3
+
+    def _tracking_write_busy() -> bool:
+        return (
+            tracking_write_server is not None
+            and tracking_write_server.subscriber_count() > 0
+        )
+
     try:
         while True:
             if runtime_superseded():
@@ -296,12 +312,14 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             if served < 0:
                 time.sleep(interval)
                 continue
+
             if (
                 served == 0
                 and not external_projects
                 and not reconciler.has_live_worktree_mux
                 and not worktree_status_runtime.has_active_demand()
                 and not managed_mux_runtime.has_active_demand()
+                and not _tracking_write_busy()
             ):
                 empty_strikes += 1
                 if empty_strikes >= max_empty_strikes:
@@ -317,6 +335,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         or core.list_cache.recent_demand_projects()
                         or worktree_status_runtime.has_active_demand()
                         or managed_mux_runtime.has_active_demand()
+                        or _tracking_write_busy()
                     ):
                         empty_strikes = 0
                     else:
