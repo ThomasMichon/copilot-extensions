@@ -269,6 +269,35 @@ def test_register_managed_mapping_auto_assigns_revision_and_publishes_live(tmp_p
     assert observed[-1]["attached_clients"] == 2
 
 
+def test_register_managed_mapping_allocates_revision_under_registry_lock(tmp_path, monkeypatch):
+    observed = []
+    monkeypatch.setattr(mux_daemon, "ensure_daemon_running", lambda *a, **k: True)
+    monkeypatch.setattr(
+        mux_daemon,
+        "publish_live_observation",
+        lambda entry, **_kwargs: observed.append(dict(entry)) or {"applied": True},
+    )
+    barrier = threading.Barrier(2)
+    results = [None, None]
+
+    def _worker(index: int, attached_clients: int):
+        payload = _entry(attached_clients=attached_clients)
+        del payload["mapping_revision"]
+        barrier.wait()
+        results[index] = mux_daemon.register_managed_mapping(payload, root=tmp_path)
+
+    first = threading.Thread(target=_worker, args=(0, 1))
+    second = threading.Thread(target=_worker, args=(1, 2))
+    first.start()
+    second.start()
+    first.join()
+    second.join()
+
+    revisions = {result["revision"] for result in results}
+    assert revisions == {1, 2}
+    assert mux_daemon.get_mapping("proj", "wt-1", root=tmp_path)["mapping_revision"] == 2
+
+
 def test_remove_managed_mapping_publishes_a_tombstone(tmp_path, monkeypatch):
     observed = []
     monkeypatch.setattr(mux_daemon, "ensure_daemon_running", lambda *a, **k: True)

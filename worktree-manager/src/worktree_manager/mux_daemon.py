@@ -1,14 +1,10 @@
-"""Worktree Manager mux-companion daemon (Phase 3b Slice 2 Sub-slice 3 Step 2
+"""Worktree Manager mux-companion daemon (Phase 3b Slice 2 Sub-slice 3
 -- ``worktree-manager-control-plane`` effort).
 
-Still off the main launch path: this module adds the Manager-side resident
-daemon and its wire server, per
-``efforts/active/worktree-manager-control-plane/phase-3b-substatus-monitor-relocation.md``'s
-"Ordered implementation steps" (Step 2). Nothing here is yet called by
-``launch-session.ps1``/``launch-session.sh`` or the production Picker's real
-launch/join/restore/remux actions -- that cutover is Step 3. This step only
-proves the daemon's own lifecycle (start/idle-exit/restart recovery),
-independent of any real caller. The mapping registry itself
+Implements the Manager-side resident daemon and its wire server, plus the Step
+3 launch/join/cleanup helpers that keep the Manager-owned
+``worktree_id ⇄ mux session`` mapping current and publish ``mux-live-v1``
+observations into ``agent-worktrees``. The mapping registry itself
 (:class:`~worktree_manager.mux_mapping_registry.MuxMappingRegistry`) lives in
 the sibling ``mux_mapping_registry`` module -- split out purely to stay under
 this repo's per-module line cap; see that module's own docstring for the
@@ -24,8 +20,9 @@ directions of this slice's IPC contract are therefore implemented
 independently on each side:
 
 * **Manager -> agent-worktrees** (``mux-live-v1``, Step 3's job): pushed via
-  ``agent_worktrees.mux_link.mux_live_with_boot``, called from *this* module's
-  future Step-3 wiring -- not implemented yet.
+  this module's own lockfile-rendezvous + loopback client, now wired from the
+  real launch/join/cleanup path and refreshed opportunistically while the
+  daemon applies routed status.
 * **agent-worktrees -> Manager** (``mux-status-v1``, this module): THIS
   daemon is the wire *server* for that kind. :func:`build_compute` is the
   ``compute(kind, payload)`` callback a ``CoalescingServer`` wraps, mirroring
@@ -56,6 +53,7 @@ from .mux_mapping_registry import (
     get_mapping,
     registry_path,
     register_mapping,
+    register_next_mapping,
     remove_mapping,
 )
 from .self_install import default_root
@@ -331,18 +329,10 @@ def publish_live_observation(
 
 
 def register_managed_mapping(payload: dict, root: Path | None = None) -> dict:
-    payload = dict(payload)
+    ensure_daemon_running(root)
+    result = register_next_mapping(payload, root=root)
     project = payload.get("project")
     worktree_id = payload.get("worktree_id")
-    if "mapping_revision" not in payload and isinstance(project, str) and isinstance(worktree_id, str):
-        current = get_mapping(project, worktree_id, root=root)
-        payload["mapping_revision"] = (
-            int(current["mapping_revision"]) + 1
-            if isinstance(current, dict) and isinstance(current.get("mapping_revision"), int)
-            else 1
-        )
-    ensure_daemon_running(root)
-    result = register_mapping(payload, root=root)
     if result.get("applied") and isinstance(project, str) and isinstance(worktree_id, str):
         entry = get_mapping(project, worktree_id, root=root)
         if entry is not None:
