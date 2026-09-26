@@ -381,7 +381,14 @@ def _copy_payload(payload_dir: Path, slot: Path) -> None:
     if slot.exists():
         shutil.rmtree(slot)
     ignore = shutil.ignore_patterns(".git", ".venv", "__pycache__", "*.pyc")
-    shutil.copytree(payload_dir, slot, ignore=ignore)
+    # symlinks=True: a payload staged by self_update's tarball fetch may
+    # carry a preserved (not dereferenced -- see _fetch_via_tarball's own
+    # symlinks=True) symlink; copying it here with the default
+    # symlinks=False would dereference it at this second hop, still
+    # smuggling external content into the published slot one step later
+    # and defeating _materialize_payload_pointers' downstream symlink
+    # rejection.
+    shutil.copytree(payload_dir, slot, ignore=ignore, symlinks=True)
     _materialize_payload_pointers(payload_dir, slot)
 
 
@@ -576,7 +583,21 @@ def self_install(
     if not needs_install(version, r):
         return SelfInstallResult(version=version, action="already-current", root=str(r),
                                  slot=str(slot), marker=version, cleaned=cleaned)
-    _copy_payload(pd, slot)
+    try:
+        _copy_payload(pd, slot)
+    except RuntimeError as e:
+        # _materialize_payload_pointers() raises when a vendor-pointer copy
+        # inside the payload can't be resolved/expanded -- _copy_payload
+        # has already copytree'd the payload into slot by that point, so a
+        # bare re-raise would leave a partially-populated, broken slot on
+        # disk that a later needs_install() version-existence check could
+        # mistake for a valid install and skip retrying. Remove it so a
+        # retry starts clean, and report the failure rather than crashing
+        # the caller (self_update's own contract is best-effort/non-fatal).
+        if slot.exists():
+            shutil.rmtree(slot, ignore_errors=True)
+        return SelfInstallResult(version=version, action="error", root=str(r),
+                                 slot=str(slot), reason=str(e), cleaned=cleaned)
     stubs = _deploy_binstubs()
     _write_marker(r, version)  # publish last, so the marker only names a ready slot
     return SelfInstallResult(
@@ -656,10 +677,20 @@ def _fetch_via_tarball(staging: Path, url: str, *, timeout: int = 180) -> None:
         if payload is None:
             raise OSError(f"worktree-manager payload not found in tarball from {url}")
         _clear_dir(staging)
-        shutil.copytree(payload, staging / "worktree-manager")
+        # symlinks=True on every copytree below: shutil.copytree's default
+        # (symlinks=False) DEREFERENCES a symlink anywhere in the source
+        # tree, silently copying whatever file it points to -- a malicious
+        # or corrupted tarball could include a symlink entry pointing
+        # outside the extracted archive, and a naive copytree would smuggle
+        # that external content straight into staging before
+        # materialize_main ever gets a chance to reject it. Preserving
+        # symlinks as symlinks instead lets the existing canonical-symlink
+        # validation (_find_symlink()) correctly detect and refuse them
+        # downstream, the same as it already does for a real dev checkout.
+        shutil.copytree(payload, staging / "worktree-manager", symlinks=True)
         libs_source = payload.parent / "libs"
         if libs_source.is_dir():
-            shutil.copytree(libs_source, staging / "libs")
+            shutil.copytree(libs_source, staging / "libs", symlinks=True)
         # _materialize_payload_pointers() also needs tools/materialize_main.py
         # (a monorepo ancestor sibling, dynamically loaded -- see
         # _load_materialize_main()) to expand any pointer copy inside

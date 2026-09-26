@@ -11,8 +11,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 import worktree_manager.self_install as si
 from worktree_manager.self_install import (
     current_version,
@@ -255,8 +253,11 @@ def test_self_install_materializes_a_vendor_pointer_from_a_live_monorepo(tmp_pat
 def test_self_install_raises_when_pointer_present_without_monorepo_ancestor(tmp_path, monkeypatch):
     """The dependency-free, no-ancestor case: a pointer copy with no
     reachable canonical source would install successfully but be permanently
-    unimportable at runtime -- self_install must refuse rather than silently
-    ship a broken payload."""
+    unimportable at runtime -- self_install must report an error (rather
+    than crash or silently ship a broken payload), and self_update's own
+    "error"-action handling then forwards this cleanly (see
+    test_self_update_reports_error_and_cleans_up_when_pointer_unresolvable
+    in test_e2e_delivery.py / test_update.py)."""
     pd = _fake_payload(tmp_path, "6.6.6")
     copy_dir = pd / "libs" / "shared-lib"
     (copy_dir / "src" / "shared_lib").mkdir(parents=True)
@@ -269,11 +270,15 @@ def test_self_install_raises_when_pointer_present_without_monorepo_ancestor(tmp_
     root = tmp_path / "root"
     _patch_local_bin(monkeypatch, tmp_path)
 
-    with pytest.raises(RuntimeError, match="unmaterialized vendor pointers"):
-        self_install(pd, root=root, dry_run=False)
+    res = self_install(pd, root=root, dry_run=False)
+    assert res.action == "error"
+    assert "unmaterialized vendor pointers" in (res.reason or "")
     # Nothing was published -- a rejected install must not leave a broken
-    # slot or a marker naming it as current.
+    # slot on disk (it would otherwise be mistaken for a valid install by
+    # a later needs_install() existence check) or a marker naming it as
+    # current.
     assert current_version(root) is None
+    assert not version_slot("6.6.6", root).exists()
 
 
 def test_bin_directory_is_deployed_into_the_slot(tmp_path, monkeypatch):

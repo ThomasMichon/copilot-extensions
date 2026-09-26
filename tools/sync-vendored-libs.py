@@ -662,6 +662,11 @@ def _write_passthrough_pointer(consumer: str, lib: str) -> Path:
     canonical = LIBS_DIR / lib
     if not canonical.is_dir():
         raise SystemExit(f"{lib}: no canonical libs/{lib}/ to pointerize from")
+    if canonical.is_symlink():
+        raise SystemExit(
+            f"libs/{lib} is a symlink -- refusing (a canonical lib root "
+            "must be a real directory, not a link to an external tree)"
+        )
     canon_pp = canonical / "pyproject.toml"
     if not canon_pp.is_file():
         raise SystemExit(f"{lib}: canonical libs/{lib}/pyproject.toml missing")

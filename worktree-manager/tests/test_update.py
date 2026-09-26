@@ -244,6 +244,68 @@ def test_fetch_via_tarball_also_fetches_the_libs_sibling(tmp_path, monkeypatch):
     assert (staging / "tools" / "materialize_main.py").read_text() == "# real materializer\n"
 
 
+def test_fetch_via_tarball_preserves_symlinks_instead_of_dereferencing_them(tmp_path, monkeypatch):
+    """Round-8 review finding: shutil.copytree's default (symlinks=False)
+    DEREFERENCES a symlink anywhere in the source tree, silently copying
+    whatever it points to -- a malicious/corrupted tarball could embed a
+    symlink entry pointing OUTSIDE the extracted archive, and copytree
+    would smuggle that external file's content into staging before
+    materialize_main ever gets a chance to reject it. This proves the
+    fetched libs/ sibling preserves a symlink AS a symlink (not its
+    target's dereferenced content), so the existing canonical-symlink
+    validation can still detect and refuse it downstream."""
+    import tarfile
+
+    outside_target = tmp_path / "outside-secret.txt"
+    outside_target.write_text("should never be smuggled in\n")
+
+    archive_root = tmp_path / "archive-src"
+    top = archive_root / "copilot-extensions-main"
+    (top / "worktree-manager" / "src" / "worktree_manager").mkdir(parents=True)
+    (top / "worktree-manager" / "src" / "worktree_manager" / "__init__.py").write_text(
+        '__version__ = "9.9.9"\n'
+    )
+    (top / "worktree-manager" / "pyproject.toml").write_text(
+        "[project]\nname='x'\nversion='9.9.9'\n"
+    )
+    (top / "libs" / "shared-lib").mkdir(parents=True)
+    # A real symlink under libs/ pointing OUTSIDE the archive tree entirely --
+    # tarfile.add() (default dereference=False) stores this as an actual
+    # symlink tar entry, not the target's dereferenced content.
+    (top / "libs" / "shared-lib" / "evil-link").symlink_to(outside_target)
+
+    archive_path = tmp_path / "payload.tar.gz"
+    with tarfile.open(archive_path, "w:gz") as tf:
+        tf.add(top, arcname="copilot-extensions-main")
+
+    class _FakeResponse:
+        def __init__(self, data: bytes) -> None:
+            self._data = data
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self) -> bytes:
+            return self._data
+
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda url, timeout=None: _FakeResponse(archive_path.read_bytes()),
+    )
+
+    staging = tmp_path / "staging"
+    self_install._fetch_via_tarball(staging, "https://codeload.example/fake.tar.gz")
+
+    copied_link = staging / "libs" / "shared-lib" / "evil-link"
+    assert copied_link.is_symlink(), (
+        "the symlink was dereferenced into a real file -- external content "
+        "could be smuggled into staging undetected"
+    )
+
+
 @pytest.mark.parametrize("repo,ref,expected", [
     ("https://github.com/ThomasMichon/copilot-extensions.git", "main",
      "https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main"
