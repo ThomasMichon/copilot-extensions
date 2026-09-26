@@ -36,8 +36,6 @@ def test_lifecycle_methods_are_directly_importable():
     assert callable(QueueLifecycleMixin.complete)
     assert callable(QueueLifecycleMixin.complete_with_outcome)
     assert callable(QueueLifecycleMixin._completion_event_workers)
-    assert callable(QueueLifecycleMixin.suspend)
-    assert callable(QueueLifecycleMixin.resume)
     assert callable(QueueLifecycleMixin.release_suspended)
     assert callable(QueueLifecycleMixin.set_hold)
     assert callable(QueueLifecycleMixin.clear_hold)
@@ -59,8 +57,6 @@ def test_lifecycle_annotations_resolve_via_get_type_hints():
         "complete",
         "complete_with_outcome",
         "_completion_event_workers",
-        "suspend",
-        "resume",
         "release_suspended",
         "set_hold",
         "clear_hold",

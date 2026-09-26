@@ -13,8 +13,10 @@ its mixins, and performs no I/O: every function here is a pure computation
 over plain data (a monitor plus a "now" timestamp), the same
 declare-before-wire posture :mod:`agent_dispatch.task_state_machine` takes
 for the lifecycle table. Wiring a monitor into an actual suspend/wake call
-path is a later phase's job (see
-``efforts/active/agent-dispatch-monitor-and-confirmed-state/README.md``).
+path lives in :mod:`agent_dispatch.queue_suspend` (Phase 3 of
+``efforts/active/agent-dispatch-monitor-and-confirmed-state/README.md``),
+which imports :func:`suspend_monitor_columns` below rather than duplicating
+this module's pure logic.
 
 Exactly one monitor kind exists today: **cooldown** — a plain bounded timer
 that resolves once elapsed, with no other condition to check. This is
@@ -95,3 +97,26 @@ def is_resolved(monitor: Monitor, *, now: float) -> bool:
     if isinstance(monitor, CooldownMonitor):
         return now >= monitor.not_before
     raise TypeError(f"unknown monitor type: {type(monitor)!r}")  # pragma: no cover
+
+
+#: The default cooldown a bare ``suspend()`` call applies (see
+#: :mod:`agent_dispatch.queue_suspend`'s wiring) -- exported here rather than
+#: re-declared at the call site, per *suspension-requires-a-monitor*.
+DEFAULT_SUSPEND_COOLDOWN_SECONDS: float = DEFAULT_COOLDOWN_SECONDS
+
+
+def suspend_monitor_columns(
+    *, now: float, cooldown_seconds: float | None
+) -> dict[str, object]:
+    """Task-row column overrides for a suspend's chosen monitor.
+
+    ``cooldown_seconds=None`` is the explicit escape hatch a caller uses when
+    it has already arranged its own, more specific wait -- the returned
+    mapping then clears any monitor fields rather than setting a new
+    deadline, so a stale cooldown never lingers on a task that no longer
+    wants one.
+    """
+    if cooldown_seconds is None:
+        return {"monitor_kind": None, "monitor_not_before": None}
+    monitor = default_monitor(now=now, cooldown_seconds=cooldown_seconds)
+    return {"monitor_kind": monitor.kind.value, "monitor_not_before": monitor.not_before}
