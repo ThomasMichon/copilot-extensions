@@ -822,6 +822,50 @@ def test_pointerized_copy_from_import_also_resolves_to_canonical(repo: Path):
     assert result.stdout.strip() == "hi"
 
 
+def test_pointerized_copy_clears_a_nested_sub_packages_stale_bytecode_too(repo: Path):
+    # Round-22 review finding: the stub's stale-bytecode guard (#3802)
+    # originally only cleared _canonical_pkg_dir's OWN __pycache__ -- a
+    # nested sub-package (e.g. shared_lib/subpkg/__init__.py) has its OWN
+    # __pycache__ directory, which is just as eligible for the same
+    # coarse-mtime stale hit and is exposed to the ordinary import system
+    # the same way the top level is (via submodule_search_locations), so
+    # missing it defeats the guarantee for any canonical lib with real
+    # nested packages, not just flat sibling modules. Proven end-to-end:
+    # a nested sub-package's stale .pyc must not survive being imported by
+    # the pointer stub -- a fresh interpreter must always compile+run the
+    # CURRENT source.
+    _seed_canonical_lib(
+        repo, "shared-lib", version="0.1.0-dev1",
+        content="from shared_lib.subpkg import value\n",
+    )
+    subpkg = repo / "libs/shared-lib/src/shared_lib/subpkg"
+    subpkg.mkdir(parents=True)
+    (subpkg / "__init__.py").write_text("value = 1\n", encoding="utf-8")
+    (repo / "plugins/alpha").mkdir(parents=True)
+    _run(repo, "--pointerize", "alpha", "shared-lib")
+
+    stub = repo / "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py"
+    probe = (
+        "import sys; sys.path.insert(0, r'" + str(stub.parent.parent) + "'); "
+        "import shared_lib; print(shared_lib.value)"
+    )
+    result = subprocess.run([sys.executable, "-c", probe], cwd=repo,
+                            capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "1"
+    # The nested sub-package's own bytecode cache must now exist...
+    assert (subpkg / "__pycache__").is_dir()
+
+    # ...mutate it directly (no re-pointerize) -- the NEXT fresh
+    # interpreter must reflect the new content, not the stale nested
+    # sub-package .pyc, proving the stub's guard clears nested caches too.
+    (subpkg / "__init__.py").write_text("value = 2\n", encoding="utf-8")
+    result2 = subprocess.run([sys.executable, "-c", probe], cwd=repo,
+                             capture_output=True, text=True, check=False)
+    assert result2.returncode == 0, result2.stdout + result2.stderr
+    assert result2.stdout.strip() == "2"
+
+
 def test_check_excludes_src_passthrough_copy_from_agreement(repo: Path):
     _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="x = 1\n")
     _write(repo, "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py", "real = 1\n")

@@ -75,8 +75,18 @@ if not _canonical_init.is_file():
 # rmtree call -- the end state (no stale cache) is exactly what was wanted
 # either way, so only a genuine removal failure (e.g. PermissionError, a
 # locked file) fails closed.
-_pycache = _canonical_pkg_dir / "__pycache__"
-if _pycache.is_dir():
+#
+# A single top-level ``_canonical_pkg_dir / "__pycache__"`` clear misses a
+# NESTED sub-package's own cache directory (e.g. ``lazy_cli_dispatch/subpkg/__pycache__``
+# for a canonical lib with real nested packages, not just flat sibling
+# modules) -- that sub-package's own ``.pyc`` files are just as eligible
+# for the same coarse-mtime stale hit, and this stub's
+# submodule_search_locations exposes it to the ordinary import system the
+# same way it exposes the top level. rglob() finds every ``__pycache__``
+# anywhere under the canonical package, not just the one at its root.
+for _pycache in list(_canonical_pkg_dir.rglob("__pycache__")):
+    if not _pycache.is_dir():
+        continue  # a concurrent clear may have already removed it
     for _attempt in range(3):
         try:
             shutil.rmtree(_pycache)
