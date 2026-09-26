@@ -1,9 +1,0 @@
-{
-  "comment": "Annotate 5 marketplace-isolation guard findings in diagnosing-copilot-extensions and contributing-to-copilot-extensions SKILL.md docs as intentional legacy-fallback / doc-example (deployed-runtime diagnostics table + payload-vs-runtime concept description)",
-  "changes": [
-    {
-      "plugin": "copilot-extensions-harness",
-      "type": "dev"
-    }
-  ]
-}
