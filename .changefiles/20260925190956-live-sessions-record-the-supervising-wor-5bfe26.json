@@ -1,9 +1,0 @@
-{
-  "comment": "Live sessions record the supervising worktree (venue.supervisor_ref); live-sessions list --supervisor filters by it",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

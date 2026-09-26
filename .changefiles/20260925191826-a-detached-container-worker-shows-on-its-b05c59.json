@@ -1,9 +1,0 @@
-{
-  "comment": "A detached container worker shows on its supervising worktree's Picker row even without a fleet lease (resolved from the live session's supervisor_ref)",
-  "changes": [
-    {
-      "plugin": "agent-containers",
-      "type": "patch"
-    }
-  ]
-}
