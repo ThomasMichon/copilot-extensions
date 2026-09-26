@@ -217,13 +217,6 @@ class SupervisorDaemon:
         #: down live declared units (only a successful read that no longer lists a
         #: unit does). Empty until the first successful read.
         self._last_declared: list[dict] = []
-        #: ids most recently *published* to the coordinator's own store (see
-        #: ``_publish_declared_registrations``) -- diffed against each new
-        #: declared read so a unit dropped from the registrar/YAML source is
-        #: withdrawn from the coordinator too, not left behind as a
-        #: zombie registration the store-backed half of ``_desired()`` would
-        #: otherwise keep considering desired forever (regression caught in
-        #: PR review while adding the publish step itself).
         self._published_declared_ids: set[str] = set()
         self._last_merge_diagnostics: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
         self._companion_controller = companion_controller
@@ -372,20 +365,11 @@ class SupervisorDaemon:
         *error* the last successfully-read set is returned (not empty), so a transient
         discovery failure never tears down live declared units; a successful read that
         drops a unit still winds it down.
-
-        Also **publishes** each declared unit to the coordinator's own
-        registrations store (see :meth:`_publish_declared_registrations`) --
-        this local merge alone only ever fed this daemon's own
-        subprocess-desired-state computation below, never the coordinator's
-        ``GET /registrations`` surface. A coordinator-side policy consumer
-        (e.g. ``TaskQueue.set_card``'s ``steering_disallowed_labels`` gate)
-        reads only the coordinator's store, so a registrar-declared field
-        was invisible to it until this publish step existed (confirmed in
-        PR review, copilot-extensions#3731).
         """
         if self.declared_source is None:
             return []
         from .registrar_reconcile import declared_registrations
+        from .supervisor_daemon_registration_publish import publish_declared_registrations
 
         try:
             decls = list(self.declared_source())
@@ -393,62 +377,10 @@ class SupervisorDaemon:
             log.exception("failed to read declared profile set; keeping the last known set")
             return self._last_declared
         self._last_declared = declared_registrations(decls, machine=self.machine, env=self.env)
-        self._publish_declared_registrations(self._last_declared)
+        self._published_declared_ids = publish_declared_registrations(
+            self.client, self._last_declared, published_ids=self._published_declared_ids
+        )
         return self._last_declared
-
-    def _publish_declared_registrations(self, registrations: list[dict]) -> None:
-        """Upsert each declared registration into the coordinator's store,
-        and withdraw any previously-published id no longer declared.
-
-        Best-effort and idempotent (``register_registration`` upserts by the
-        declared id, preserving ``created_at``/``status``): a publish
-        failure for one unit, or for the whole coordinator being briefly
-        unreachable, is logged and skipped rather than tearing down the
-        reconcile loop -- the local subprocess-desired-state merge above
-        already has its own independent source of truth and must keep
-        working even if the coordinator is down. Only the kinds
-        ``register_registration`` itself accepts (``RegistrationKind.DIRECT``)
-        are published; a ``plugin-companion`` declaration has no coordinator-
-        side registration counterpart and is skipped (never published, never
-        tracked for withdrawal).
-
-        A dropped declaration is actively removed from the coordinator's
-        store, not merely left behind: a stale ``declared:...`` row would
-        otherwise remain visible to ``list_registrations()`` forever, which
-        would make the store-backed half of ``_desired()`` keep treating a
-        withdrawn unit as desired even after its registrar/YAML source no
-        longer lists it (regression caught in PR review while adding the
-        publish step itself).
-        """
-        published_ids: set[str] = set()
-        for reg in registrations:
-            kind = reg.get("kind")
-            if kind not in RegistrationKind.DIRECT:
-                continue
-            rid = reg.get("id")
-            published_ids.add(rid)
-            try:
-                self.client.register_registration(
-                    kind,
-                    reg["spec"],
-                    reg_id=rid,
-                    machine=reg.get("machine"),
-                    env=reg.get("env", "default"),
-                )
-            except Exception:  # pragma: no cover - coordinator reachability varies
-                log.exception(
-                    "failed to publish declared registration %s to the coordinator",
-                    rid,
-                )
-        for stale_id in self._published_declared_ids - published_ids:
-            try:
-                self.client.remove_registration(stale_id)
-            except Exception:  # pragma: no cover - coordinator reachability varies
-                log.exception(
-                    "failed to withdraw stale declared registration %s from the coordinator",
-                    stale_id,
-                )
-        self._published_declared_ids = published_ids
 
     def _overridden_off(self) -> set[str]:
         """Registration ids an operator has disabled via the override store.
@@ -487,27 +419,10 @@ class SupervisorDaemon:
         discovery layer and a later re-sync cannot quietly revive the unit (vision
         Behavior *overrides-take-precedence*). A dropped id is then wound down by the
         reconcile's stop-not-desired step."""
-        # NOTE: ``_declared()`` must run BEFORE the store read below -- it is
-        # also where a declaration dropped from the registrar/YAML source
-        # gets *withdrawn* from the coordinator's store (see
-        # ``_publish_declared_registrations``). Reading the store first would
-        # capture a stale, not-yet-withdrawn row and delay winding the unit
-        # down by one extra reconcile tick (caught by a test regression while
-        # adding the publish/withdraw step itself).
         declared = self._declared()
         regs = self.client.list_registrations(
             machine=self.machine, env=self.env, include_paused=False
         )
-        # Exclude this daemon's own just-published declared rows from the
-        # merge below: publishing them (so they're visible via the
-        # coordinator's `GET /registrations` for a coordinator-side policy
-        # consumer -- see `_publish_declared_registrations`) means
-        # `list_registrations()` now legitimately contains them too, but
-        # `merge_registration_sources` exists to reconcile a *genuinely*
-        # separate direct (operator-authored `supervise register`)
-        # registration against a declaration -- feeding it its own echo
-        # would double-count every declared unit as a spurious direct/
-        # declared conflict or dedup (caught by a test regression).
         regs = [r for r in regs if r.get("id") not in self._published_declared_ids]
         merged = merge_registration_sources(regs, declared)
         diagnostics = (tuple(merged.deduplicated), tuple(merged.conflicts))
