@@ -55,6 +55,18 @@ def test_extract_failed_test_ids_dedupes_and_preserves_order(watchdog):
     assert watchdog.extract_failed_test_ids(log) == ["a::x", "b::y"]
 
 
+def test_extract_failed_test_ids_preserves_spaces_in_parametrized_ids(watchdog):
+    # A naive \S+-style match would truncate at the first space inside the
+    # brackets; the real separator between node id and reason is " - ".
+    log = "FAILED tests/test_x.py::test_case[a b] - AssertionError: boom\n"
+    assert watchdog.extract_failed_test_ids(log) == ["tests/test_x.py::test_case[a b]"]
+
+
+def test_extract_failed_test_ids_with_no_reason_suffix(watchdog):
+    log = "FAILED tests/test_x.py::test_case[a b]\n"
+    assert watchdog.extract_failed_test_ids(log) == ["tests/test_x.py::test_case[a b]"]
+
+
 def test_build_signatures_one_per_failing_test(watchdog):
     sigs = watchdog.build_signatures("full - agent-worktrees", SAMPLE_PYTEST_LOG)
     assert len(sigs) == 1

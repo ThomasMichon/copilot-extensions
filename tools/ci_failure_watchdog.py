@@ -57,7 +57,7 @@ SKIP_JOB_NAMES = frozenset(
     }
 )
 
-_FAILED_TEST_RE = re.compile(r"^FAILED (\S+)", re.MULTILINE)
+_FAILED_TEST_RE = re.compile(r"^FAILED (.+)$", re.MULTILINE)
 
 
 @dataclass(frozen=True)
@@ -74,12 +74,23 @@ class FailureSignature:
         return f"CI failure: {self.job_name}"
 
 
+def _strip_summary_reason(raw: str) -> str:
+    """pytest's short-summary format is ``FAILED <nodeid>`` or ``FAILED
+    <nodeid> - <reason>``. A parametrized node id can itself contain spaces
+    (e.g. ``test_case[a b]``), so the separator can't be "the first
+    whitespace" -- split on the LAST `` - `` instead, which is where pytest
+    actually separates the node id from the reason."""
+    if " - " in raw:
+        return raw.rsplit(" - ", 1)[0]
+    return raw
+
+
 def extract_failed_test_ids(log_text: str) -> list[str]:
     """Return de-duplicated pytest ``FAILED <path>::<test>`` node ids found
     in ``log_text``, in first-seen order."""
     seen: dict[str, None] = {}
     for match in _FAILED_TEST_RE.finditer(log_text):
-        seen.setdefault(match.group(1), None)
+        seen.setdefault(_strip_summary_reason(match.group(1)), None)
     return list(seen)
 
 
