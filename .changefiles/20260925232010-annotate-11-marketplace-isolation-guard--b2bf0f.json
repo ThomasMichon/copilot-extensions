@@ -1,9 +1,0 @@
-{
-  "comment": "Annotate 11 marketplace-isolation guard findings in handoff-core.mjs as intentional cross-plugin sibling invocation (agent-worktrees/agent-dispatch runtime-root refs and provenance-verified runCli calls)",
-  "changes": [
-    {
-      "plugin": "context-handoff",
-      "type": "dev"
-    }
-  ]
-}
