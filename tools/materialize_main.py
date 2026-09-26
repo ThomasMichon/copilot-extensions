@@ -32,11 +32,14 @@ Two pointer kinds are expanded, generalized under the
   separate real copy to remove, so materializing overwrites the stub's
   content in place with the canonical file's bytes.
 
-No real plugin in this repo carries a lib pointer yet -- that conversion is
-Phase 2 of dev-branch-release-pipeline, and this tool remains a no-op for
-that kind against the real checkout until it lands. The file-pointer kind is
-no longer hypothetical: `docs/patterns/entity-relationship-model.md`'s three
-mirrors (`plugins/agent-worktrees/docs/`, `plugins/agent-bridge/docs/`,
+Both pointer kinds now check into real content in this repo, not just
+tests. Directory (lib) pointer adopters: `plugins/agent-worktrees/libs/
+lazy-cli-dispatch` and `work-coalescing-singleton` (also vendored via the
+extra top-level `worktree-manager/libs/work-coalescing-singleton`), each
+using the `src-passthrough` pointer kind (see
+`tools/sync-vendored-libs.py`'s own module docstring for that mechanism's
+full design). File-pointer adopters: `docs/patterns/entity-relationship-model.md`'s
+three mirrors (`plugins/agent-worktrees/docs/`, `plugins/agent-bridge/docs/`,
 `plugins/agent-dispatch/docs/`) were converted to real file pointers in
 Phase 2 of vendored-doc-pointers, so this tool now expands real content on
 every real promotion run, not just in tests.

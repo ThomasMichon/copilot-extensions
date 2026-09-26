@@ -244,16 +244,19 @@ def test_fetch_via_tarball_also_fetches_the_libs_sibling(tmp_path, monkeypatch):
     assert (staging / "tools" / "materialize_main.py").read_text() == "# real materializer\n"
 
 
-def test_fetch_via_tarball_preserves_symlinks_instead_of_dereferencing_them(tmp_path, monkeypatch):
-    """Round-8 review finding: shutil.copytree's default (symlinks=False)
-    DEREFERENCES a symlink anywhere in the source tree, silently copying
-    whatever it points to -- a malicious/corrupted tarball could embed a
-    symlink entry pointing OUTSIDE the extracted archive, and copytree
-    would smuggle that external file's content into staging before
-    materialize_main ever gets a chance to reject it. This proves the
-    fetched libs/ sibling preserves a symlink AS a symlink (not its
-    target's dereferenced content), so the existing canonical-symlink
-    validation can still detect and refuse it downstream."""
+def test_fetch_via_tarball_refuses_a_symlink_pointing_outside_the_archive(tmp_path, monkeypatch):
+    """Round-8 review finding (superseded by round-11's stronger fix):
+    shutil.copytree's default (symlinks=False) DEREFERENCES a symlink
+    anywhere in the source tree, silently copying whatever it points to --
+    a malicious/corrupted tarball could embed a symlink entry pointing
+    OUTSIDE the extracted archive, and copytree would smuggle that
+    external file's content into staging before materialize_main ever
+    gets a chance to reject it. Round-8 fixed this with symlinks=True
+    (preserve, don't dereference) so a LATER check could still catch it;
+    round-11 replaced the hand-rolled extraction validator with stdlib's
+    own filter="data", which rejects an absolute-target symlink like this
+    one OUTRIGHT at extraction time -- a strictly stronger guarantee than
+    merely preserving it for a downstream check to maybe catch."""
     import tarfile
 
     outside_target = tmp_path / "outside-secret.txt"
@@ -297,12 +300,12 @@ def test_fetch_via_tarball_preserves_symlinks_instead_of_dereferencing_them(tmp_
     )
 
     staging = tmp_path / "staging"
-    self_install._fetch_via_tarball(staging, "https://codeload.example/fake.tar.gz")
+    with pytest.raises(OSError, match="symlink|link to"):
+        self_install._fetch_via_tarball(staging, "https://codeload.example/fake.tar.gz")
 
     copied_link = staging / "libs" / "shared-lib" / "evil-link"
-    assert copied_link.is_symlink(), (
-        "the symlink was dereferenced into a real file -- external content "
-        "could be smuggled into staging undetected"
+    assert not copied_link.exists() and not copied_link.is_symlink(), (
+        "nothing should have been extracted from a rejected tarball"
     )
 
 
@@ -357,7 +360,7 @@ def test_fetch_via_tarball_refuses_a_symlinked_libs_root(tmp_path, monkeypatch):
     )
 
     staging = tmp_path / "staging"
-    with pytest.raises(OSError, match="symlink"):
+    with pytest.raises(OSError, match="symlink|link to"):
         self_install._fetch_via_tarball(staging, "https://codeload.example/fake.tar.gz")
 
 
@@ -408,7 +411,7 @@ def test_fetch_via_tarball_refuses_a_symlinked_tools_materializer(tmp_path, monk
     )
 
     staging = tmp_path / "staging"
-    with pytest.raises(OSError, match="symlink"):
+    with pytest.raises(OSError, match="symlink|link to"):
         self_install._fetch_via_tarball(staging, "https://codeload.example/fake.tar.gz")
 
 
@@ -469,7 +472,7 @@ def test_fetch_via_tarball_refuses_a_symlinked_extraction_top_dir(tmp_path, monk
     )
 
     staging = tmp_path / "staging"
-    with pytest.raises(OSError, match="symlink"):
+    with pytest.raises(OSError, match="symlink|link to"):
         self_install._fetch_via_tarball(staging, "https://codeload.example/fake.tar.gz")
 
 
@@ -522,7 +525,7 @@ def test_fetch_via_tarball_refuses_a_symlinked_tools_directory(tmp_path, monkeyp
     )
 
     staging = tmp_path / "staging"
-    with pytest.raises(OSError, match="symlink"):
+    with pytest.raises(OSError, match="symlink|link to"):
         self_install._fetch_via_tarball(staging, "https://codeload.example/fake.tar.gz")
 
 
@@ -617,3 +620,44 @@ def test_self_update_reports_updated(monkeypatch, tmp_path):
     res = self_install.self_update(root=tmp_path, dry_run=False)
     assert res.action == "updated"
     assert res.version == "0.1.0-dev9"
+
+
+def test_safe_extract_refuses_the_classic_tar_symlink_traversal_attack(tmp_path):
+    """Round-11 review finding: a path-only pre-check computed against
+    getmembers() BEFORE any extraction happens cannot catch the classic
+    tar symlink attack -- a symlink member (evil -> /tmp/outside) followed
+    by a second member using it as a path prefix (evil/payload.py) --
+    because at pre-check time neither path exists on disk yet, so a
+    lexical .resolve() sees no symlink to follow and both members pass;
+    only DURING extractall's own sequential member-by-member write does
+    the second member traverse through the just-created symlink and land
+    outside dest entirely (verified against the standard library by the
+    reviewer). filter="data" is stdlib's own defense against exactly this,
+    validating each member's resolved destination live as extraction
+    proceeds."""
+    import tarfile
+
+    outside = tmp_path / "outside-target"
+    outside.mkdir()
+
+    archive_path = tmp_path / "attack.tar.gz"
+    with tarfile.open(archive_path, "w:gz") as tf:
+        link_info = tarfile.TarInfo(name="evil")
+        link_info.type = tarfile.SYMTYPE
+        link_info.linkname = str(outside)
+        tf.addfile(link_info)
+        payload_info = tarfile.TarInfo(name="evil/payload.py")
+        payload_data = b"import os; os.system('echo pwned')\n"
+        payload_info.size = len(payload_data)
+        import io
+        tf.addfile(payload_info, io.BytesIO(payload_data))
+
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    with tarfile.open(archive_path, "r:gz") as tf:
+        with pytest.raises(OSError, match="symlink|link to"):
+            self_install._safe_extract(tf, dest)
+
+    # Nothing must have been written outside dest -- the attack's whole
+    # point was landing payload.py at outside/payload.py.
+    assert not (outside / "payload.py").exists()

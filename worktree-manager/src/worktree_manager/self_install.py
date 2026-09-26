@@ -670,13 +670,36 @@ def _clear_dir(d: Path) -> None:
 
 
 def _safe_extract(tf, dest: Path) -> None:
-    """Extract a tar, rejecting members that would escape ``dest`` (zip-slip)."""
+    """Extract a tar into ``dest``, refusing anything that would escape it.
+
+    Uses the stdlib's own ``filter="data"`` (available since Python 3.12,
+    backported as a security fix to older supported versions too) rather
+    than a hand-rolled path-only pre-check: a pre-check computed against
+    ``getmembers()`` BEFORE any extraction happens cannot catch a classic
+    tar symlink attack -- a symlink member (``evil -> /tmp/outside``)
+    followed by a second member using it as a path prefix
+    (``evil/payload.py``) -- because at pre-check time neither path exists
+    on disk yet, so a lexical ``.resolve()`` sees no symlink to follow and
+    both members pass; only DURING extractall's own sequential member-by-
+    member write does the second member actually traverse through the
+    just-created symlink and land outside ``dest`` entirely.
+    ``filter="data"`` is stdlib's purpose-built, security-reviewed defense
+    against exactly this: it validates each member (including a symlink's
+    resolved destination) against ``dest`` live, as extraction proceeds,
+    rather than trusting a snapshot taken before anything was written."""
+    import tarfile
+
     dest = dest.resolve()
-    for member in tf.getmembers():
-        target = (dest / member.name).resolve()
-        if dest not in target.parents and target != dest:
-            raise OSError(f"unsafe path in tarball: {member.name}")
-    tf.extractall(dest)  # noqa: S202 - members validated above
+    try:
+        tf.extractall(dest, filter="data")  # noqa: S202 - filter="data" validates live
+    except tarfile.TarError as e:
+        # filter="data" raises tarfile.FilterError (a TarError, not an
+        # OSError) on a rejected member -- but this function's caller
+        # contract (and _fetch_via_tarball's own documented "raises
+        # OSError on any failure") is OSError-only, so normalize here
+        # rather than letting a different exception type escape past
+        # self_update's own OSError/SubprocessError catch.
+        raise OSError(f"refused while extracting tarball: {e}") from e
 
 
 def _fetch_via_tarball(staging: Path, url: str, *, timeout: int = 180) -> None:

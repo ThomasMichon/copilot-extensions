@@ -261,6 +261,44 @@ def test_materialize_into_preview_still_respects_drift_check_for_a_real_copy(
     )
 
 
+def test_materialize_into_preview_refuses_a_symlinked_canonical_lib_root(
+    isolated: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    # canonical.is_dir() follows a `libs/<lib>` symlink to an external
+    # tree, and a scan starting at canonical/src would only ever see that
+    # external target's own contents -- the canonical lib ROOT itself must
+    # be rejected as a symlink, matching the safeguards already added to
+    # --pointerize and --materialize.
+    plugin_dir = _plugin(isolated, "agent-worktrees", "1.0.0")
+    pointer_copy = plugin_dir / "libs" / "shared-lib"
+    (pointer_copy / "src").mkdir(parents=True)
+    (pointer_copy / "src" / "__init__.py").write_text("original stub\n", encoding="utf-8")
+    (pointer_copy / "VENDOR_POINTER.json").write_text(
+        json.dumps({"schema": "copilot-extensions.vendor-pointer", "version": 1,
+                    "source": "libs/shared-lib", "kind": "src-passthrough"}) + "\n",
+        encoding="utf-8",
+    )
+
+    external = isolated / "outside-repo-lib-preview"
+    (external / "src").mkdir(parents=True)
+    (external / "src" / "__init__.py").write_text("smuggled = True\n", encoding="utf-8")
+
+    canonical_root = isolated / "canonical-libs"
+    canonical_root.mkdir(parents=True)
+    (canonical_root / "shared-lib").symlink_to(external, target_is_directory=True)
+
+    fake = _FakeSyncVendoredLibs(canonical_root)
+    monkeypatch.setattr(preview_release, "_load_sync_vendored_libs", lambda: fake)
+
+    dest = preview_release.build("agent-worktrees", isolated / "work")
+
+    # Nothing was expanded -- the copy's own stub content is untouched.
+    assert (dest / "libs" / "shared-lib" / "src" / "__init__.py").read_text() == (
+        "original stub\n"
+    )
+    assert (dest / "libs" / "shared-lib" / "VENDOR_POINTER.json").exists()
+
+
 def test_materialize_into_preview_preflights_tests_before_mutating_src(
     isolated: Path, monkeypatch: pytest.MonkeyPatch,
 ):

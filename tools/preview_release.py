@@ -98,6 +98,13 @@ def _materialize_into_preview(dest: Path) -> list[str]:
         if not canonical.is_dir():
             log.append(f"{lib}: no canonical libs/{lib}/ -- preview keeps the current copy")
             continue
+        if canonical.is_symlink():
+            log.append(
+                f"SKIP {lib_copy}: libs/{lib} is a symlink -- refusing (a "
+                "canonical lib root must be a real directory, not a link "
+                "to an external tree)"
+            )
+            continue
         # A DRY vendor-pointer copy (bare or src-passthrough) is never the
         # verified-agreeing "truth" sync-vendored-libs.py's own
         # cmd_materialize() compares against either -- its src/ is either
