@@ -1,0 +1,9 @@
+{
+  "comment": "Hard-block @copilot mentions in PR title/description and publish_source_marker (GitHubProvider) -- asking the cloud coding agent to act as a PR's own submitter invokes it to push unreviewed commits, not a review request.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
