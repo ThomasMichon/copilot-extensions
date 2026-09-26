@@ -4,9 +4,10 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice worktrees
 - **Created:** 2026-09-25
-- **Status:** Active — Phase 1 implemented and landed; Phase 1.5 (live
-  validation) partially complete: detection+filing proven live, dedup/
-  rate-limit path still open (see Journal); Phase 2 gated (see below)
+- **Status:** Active — Phase 1 implemented, landed, and now fully
+  live-validated (Phase 1.5 Done: detection, filing, and dedup/rate-
+  limiting all confirmed against real production data); Phase 2 gated
+  (see below)
 - **Vision:** none yet — this effort establishes the standing policy itself
   (safety envelope + trigger contract for a reactive fix agent); revisit
   once Phase 1 proves out whether it deserves its own harness-guidance
@@ -187,51 +188,31 @@ fixes."
             genuinely useful log excerpt (no ANSI garbage), correct
             `ci-failure-signature` label, and the standard "no fix
             attempted" status line.**
-      - [ ] Confirm no duplicate issue was filed for the same signature on
+      - [x] Confirm no duplicate issue was filed for the same signature on
             a second occurrence within the 6h window (only a real test of
             this, if the same failure recurs naturally or via the probe
-            below). **Not yet observed — genuinely unvalidated, per a
-            real review finding on this very journal entry (PR #3832):**
-            "exactly one issue currently exists for this signature" is
-            NOT evidence dedup/rate-limiting works, because the *first*
-            occurrence never produced an issue to begin with (that was
-            the bug PR #3815 fixed) — there has never yet been a second
-            occurrence for `process_signature`'s dedup path to have had a
-            chance to run against. This sub-item requires an actual
-            in-window repeat and its resulting silence (or, outside the
-            window, a comment) to be genuinely confirmed. This flaky test
-            has recurred naturally twice ~3.5h apart already, so a further
-            recurrence inside `#3830`'s 6h window (2026-09-26 12:10–18:10
-            UTC) is plausible — continuing to monitor for it rather than
-            declaring this closed.
-**Reactivated 2026-09-26 (PR #3850, merged 14:50:26 UTC — 2h deadline
-16:50:26 UTC) — for dedup/rate-limit validation specifically, not
-detection.** The sub-plan below was previously marked
-superseded/archived after run 36240803760 (2026-09-26 12:04 UTC)
-confirmed `report-failure` correctly detects and files a new issue
-end-to-end (see Journal) — that part of the probe genuinely is
-unnecessary to re-run. But the dedup/rate-limit sub-item (just above)
-remained open, and no natural in-window repeat of `#3830`'s signature
-occurred by this session's 4th monitoring tick (2026-09-26 ~14:30 UTC,
-well inside `#3830`'s own 6h window but with no further natural
-recurrence yet) — so, per this same Plan's own original design, the
-probe is now executed for that specific remaining gap. Steps below are
-followed as originally designed; the sub-bullets remain plain bullets
-(not `- [ ]` checkboxes) so this note reflects the same archived
-reference being actively walked through, not a re-opened live checklist
-duplicating the Plan structure above:
+            below). **Confirmed via the deliberate probe (PR #3850/#3852/
+            #3853) — see the dedicated sub-section below: an in-window
+            re-trigger correctly produced silence (no second issue, no
+            comment), while the initial occurrence correctly filed one.**
+- [x] ~~If no natural red run occurs within a reasonable observation
+      window (a few hours), inject one deliberately, carefully, and
+      revert promptly~~ — **Executed 2026-09-26 for the dedup/rate-limit
+      gap specifically** (natural occurrences already proved detection+
+      filing). Full writeup in the 2026-09-26 Journal entry below.
+- [x] Record findings (false positives, dedup accuracy, issue quality)
+      here before treating Phase 1 as proven and touching Phase 2's gate.
+      **Recorded in full in the Journal.**
 
-**Live progress (updated as observed, full writeup in Journal once
-complete):** first occurrence confirmed — run 36250176376 (2026-09-26
-~14:59 UTC) failed `full - agent-worktrees` on the probe test exactly as
-designed, and `report-failure` correctly filed a new issue,
-`#3851` (distinct signature `0548ebfd59f3`, correct run link/commit,
-clean log excerpt). **This PR is the deliberate small no-op re-trigger**
-for the dedup/rate-limit sub-item specifically: merging it while the
-probe test is still present re-runs the same real validation chain, and
-the correct expected outcome — per `process_signature`'s own design,
-inside the 6h window — is **silence**: no second issue, no comment on
-`#3851` either.
+**Phase 1.5 is Done.** Every sub-item above is now confirmed against
+real, live production data: detection (two natural occurrences, one
+revealing and fixing a real bug), filing (accurate signature/run link/
+excerpt), and dedup/rate-limiting (a genuine in-window repeat, correctly
+silent). See the Journal for the full incident-by-incident record.
+
+**Below: the original probe design, kept as historical record of what
+was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
+— no longer a pending/future plan:**
 
 * Hard stop, non-negotiable: the probe merge starts a clock.
   Maximum 2 hours from the probe PR's merge to the revert
@@ -1063,3 +1044,69 @@ _Pending._
   duplicated here — that effort owns the promotion pipeline itself,
   this one owns only the reactive-detection watchdog. No dedup-relevant
   Phase 1.5 signal from this occurrence; still watching for one.
+
+### 2026-09-26 — Phase 1.5 Done: the deliberate probe validated dedup/rate-limiting, the last open gap
+- No natural in-window repeat of `#3830`'s signature occurred by this
+  session's 4th monitoring tick (2026-09-26 ~14:30 UTC). Per the Plan's
+  own original design, executed the deliberate probe for the one
+  remaining gap: dedup/rate-limiting.
+- **PR #3850** (probe): added one new, obviously-synthetic, clearly-
+  commented failing test to `agent-worktrees` (a new file, no existing
+  test logic touched). **Review caught two real findings, both fixed
+  before merge:** (1) the effort doc's earlier "superseded" framing (set
+  when detection+filing was confirmed) contradicted this PR's premise
+  that no natural occurrence had happened — reconciled by explicitly
+  noting the reactivation was for dedup specifically; (2) the revert
+  wasn't yet demonstrably "prepared" per the Plan's own requirement —
+  addressed by stating the exact, deterministic two-file-deletion revert
+  command in the PR body ahead of merging. (A third, seemingly-recurring
+  finding about the same "superseded" framing turned out to be the
+  review tool re-listing an already-fixed thread rather than a new
+  issue — verified against the live diff, replied with evidence, and
+  requested a fresh review pass, which then showed the same three
+  threads again without a "Resolved since last review" section; given
+  the substance of all three was genuinely addressed via commit + reply
+  + PR-body update, and the clock mattered once merged, proceeded to
+  merge rather than chase further bot re-runs.) Merged **14:50:26 UTC**
+  — hard deadline **16:50:26 UTC**.
+- **First occurrence:** run 36250176376 (~14:59 UTC) failed
+  `full - agent-worktrees` on the probe test exactly as designed.
+  `report-failure` correctly filed a new issue, `#3851` (signature
+  `0548ebfd59f3`, correct run link/commit `012ecd20b`, a clean log
+  excerpt with the real assertion text, correct label).
+- **PR #3852** (deliberate no-op re-trigger, merged **15:16:36 UTC**,
+  ~26 minutes after the probe — well inside `#3851`'s 6h window):
+  a small, honest content-only change (recording the first occurrence
+  in this same doc) that re-ran the full validation chain while the
+  probe test was still present. **Review caught one real, precision-
+  relevant finding:** the probe's recorded merge timestamp
+  (14:50:43 UTC) was 17 seconds off GitHub's authoritative `mergedAt`
+  (14:50:26 UTC) — fixed, since the hard deadline is derived from it.
+  `Findings: None` after the fix.
+- **Second occurrence — the actual dedup confirmation:** run
+  36251674809 (~15:27 UTC) failed `full - agent-worktrees` on the same
+  probe test again, and `report-failure` logged exactly the expected
+  behavior: `[OK] #3851 already tracked and within the 6h rate limit --
+  not commenting.` Confirmed via `gh issue list --search` that `#3851`
+  remained the only issue for that signature, with `updatedAt` unchanged
+  from `createdAt` — no comment was added either, matching
+  `process_signature`'s own within-window design exactly.
+- **PR #3853** (revert): removed the probe test and its changefile,
+  with a new changefile for the removal. `Findings: None`. Merged
+  **15:37:26 UTC** — 47 minutes after the probe's merge, comfortably
+  inside the 2-hour deadline with over an hour to spare.
+- **Closed issue `#3851`** with an explanatory comment (it was a
+  deliberate synthetic probe, not a real bug; the dedup path it proved
+  is now durably recorded here).
+- **Phase 1.5 is now genuinely Done, on real evidence, not inference:**
+  detection (two natural occurrences, one of which surfaced and drove a
+  real fix), filing (accurate signature/run link/excerpt, twice), and
+  dedup/rate-limiting (a real in-window repeat, correctly silent) all
+  confirmed against actual production behavior. Stopping the recurring
+  monitoring schedule as this PR merges.
+- **Next:** Phase 2 (an actual fix-attempt mechanism via `gh-aw`)
+  remains gated on the vision-reconciliation question noted at the top
+  of this file. Phase 1.5's completion removes the only reason that gate
+  was ever conditioned on ("we don't even know Phase 1 works yet") —
+  it does not itself resolve the gate, which still needs a deliberate
+  decision, not inferred permission, before Phase 2 begins.
