@@ -84,6 +84,7 @@ def append(
     changed: list[str],
     kind: str = "status",
     session_id: str | None = None,
+    tracking_path: Path | None = None,
 ) -> None:
     """Append one history entry for *worktree_id*. Best-effort (never raises).
     Trims oldest entries past :data:`MAX_ENTRIES`.
@@ -102,6 +103,10 @@ def append(
     Both are omitted from the line when at their neutral default (``status`` /
     ``None``) so legacy readers and byte-comparisons of status-only histories are
     unaffected.
+
+    ``tracking_path`` is forwarded to :func:`history_path` unchanged -- see that
+    function's own docstring for why an explicit path is safer than the ambient
+    ``cfg.tracking_dir()`` default for a cross-project-capable caller.
     """
     try:
         entry: dict[str, Any] = {
@@ -115,7 +120,7 @@ def append(
             entry["kind"] = kind
         if session_id:
             entry["session"] = session_id
-        path = history_path(worktree_id)
+        path = history_path(worktree_id, tracking_path=tracking_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         lines: list[str] = []
         if path.exists():
