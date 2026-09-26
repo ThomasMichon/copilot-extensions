@@ -39,7 +39,7 @@ $ModeRunner = Join-Path $PSScriptRoot 'installation-context\installation-context
 $LegacyRoot = if ($env:AGENT_INDEX_HOME) {
     $env:AGENT_INDEX_HOME
 } else {
-    Join-Path $env:USERPROFILE '.agent-index'
+    Join-Path $env:USERPROFILE '.agent-index' # marketplace-isolation: allow legacy compatibility root
 }
 $Root = $LegacyRoot
 $Resolver = Join-Path $PSScriptRoot 'resolve-runtime.ps1'
