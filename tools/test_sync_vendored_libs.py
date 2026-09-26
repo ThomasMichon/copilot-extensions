@@ -267,6 +267,30 @@ def test_materialize_never_touches_a_real_copys_own_tests_directory(repo: Path):
     assert untouched.read_text() == "def test_it():\n    assert True  # plugin-specific\n"
 
 
+def test_materialize_refuses_a_symlink_in_canonical_tests(repo: Path):
+    # shutil.copytree's default symlinks=False follows and dereferences a
+    # symlink -- a canonical tests/ containing one must not let its target
+    # content leak into a vendored copy.
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "shared = 1\n")
+    _lib_pyproject(repo, "libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+    (repo / "libs/shared-lib/tests").mkdir(parents=True)
+    secret = repo.parent / "outside-repo-secret"
+    secret.mkdir()
+    (secret / "leaked.txt").write_text("do not leak\n", encoding="utf-8")
+    (repo / "libs/shared-lib/tests/evil-link").symlink_to(secret, target_is_directory=True)
+    _pointer(repo, "alpha", "shared-lib")
+    (repo / "plugins/alpha/libs/shared-lib/tests").mkdir(parents=True)
+    (repo / "plugins/alpha/libs/shared-lib/tests/placeholder.py").write_text(
+        "\n", encoding="utf-8"
+    )
+
+    result = _run(repo, "--materialize")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "Refused to materialize" in result.stderr
+    assert "is a symlink" in result.stderr
+    assert not (repo / "plugins/alpha/libs/shared-lib/tests/evil-link").exists()
+
+
 # --- src-passthrough vendor pointers (working real-Python forwarding) ---
 
 def _seed_canonical_lib(repo: Path, lib: str, *, version: str, content: str) -> Path:

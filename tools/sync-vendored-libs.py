@@ -325,12 +325,48 @@ def _canonical_drift(lib: str, copies: list[Path]) -> list[str]:
     return problems
 
 
+def _find_symlink(tree: Path) -> str | None:
+    """The first path (relative to ``tree``, or ``"."`` when ``tree`` itself
+    is the symlink) under ``tree`` that is a symlink, or ``None`` if none is
+    found. Mirrors ``materialize_main.py``'s own ``_find_symlink`` (kept as
+    a separate small copy rather than a cross-module import, since this
+    script's hyphenated filename can't be a normal ``import`` target).
+    ``tree.is_dir()`` alone is not enough: it follows a symlink, so a
+    symlinked ``tree`` itself would otherwise pass through unnoticed."""
+    if tree.is_symlink():
+        return "."
+    if not tree.is_dir():
+        return None
+    for entry in sorted(tree.rglob("*")):
+        if entry.is_symlink():
+            return str(entry.relative_to(tree))
+    return None
+
+
+def _safe_copytree(src: Path, dst: Path, *, label: str) -> None:
+    """``shutil.copytree(src, dst)`` after refusing any symlink under
+    ``src`` -- ``shutil.copytree``'s default ``symlinks=False`` follows and
+    dereferences a symlink, which would otherwise let a malicious or
+    accidental symlink under a canonical lib's ``src/``/``tests/`` leak
+    arbitrary filesystem content into a vendored copy or a shipped
+    release. A legitimate canonical lib has no reason to contain a
+    symlink at all, so any symlink found is refused outright."""
+    found = _find_symlink(src)
+    if found is not None:
+        where = label if found == "." else f"{label}/{found}"
+        raise SystemExit(
+            f"{where} is a symlink -- refusing (a canonical lib source "
+            "must contain only real files)"
+        )
+    shutil.copytree(src, dst)
+
+
 def _copy_src(src_lib: Path, dst_lib: Path) -> None:
     src, dst = src_lib / "src", dst_lib / "src"
     if dst.exists():
         shutil.rmtree(dst)
     if src.is_dir():
-        shutil.copytree(src, dst)
+        _safe_copytree(src, dst, label=f"{src_lib.name}/src")
 
 
 def _copy_tests(src_lib: Path, dst_lib: Path) -> None:
@@ -348,7 +384,7 @@ def _copy_tests(src_lib: Path, dst_lib: Path) -> None:
     if dst.exists():
         shutil.rmtree(dst)
     if src.is_dir():
-        shutil.copytree(src, dst)
+        _safe_copytree(src, dst, label=f"{src_lib.name}/tests")
 
 
 def _sync_version(src_lib: Path, dst_lib: Path) -> None:
@@ -473,24 +509,33 @@ def cmd_materialize(*, force: bool) -> int:
             blocked.append(reason)
             continue
         for copy in paths:
-            _copy_src(canonical, copy)
-            _sync_version(canonical, copy)
-            pointer = copy / POINTER_NAME
-            if pointer.exists():
-                # Only refresh a DRY-pointer copy's tests/, and only if it
-                # already carries one -- it was vendored from canonical at
-                # --pointerize time as a deliberate per-copy choice, and
-                # would otherwise go stale on every later canonical test
-                # change, with promotion silently snapshotting the stale
-                # tree into main. A copy that never carried tests/ (its
-                # --pointerize chose not to vendor it, e.g. because its
-                # only consumer never discovers libs/*/tests/) must not
-                # gain one unilaterally just because canonical has one. A
-                # real copy's own tests/ may be independently authored and
-                # is left untouched regardless.
-                if (copy / "tests").is_dir():
-                    _copy_tests(canonical, copy)
-                pointer.unlink()
+            try:
+                _copy_src(canonical, copy)
+                _sync_version(canonical, copy)
+                pointer = copy / POINTER_NAME
+                if pointer.exists():
+                    # Only refresh a DRY-pointer copy's tests/, and only if it
+                    # already carries one -- it was vendored from canonical at
+                    # --pointerize time as a deliberate per-copy choice, and
+                    # would otherwise go stale on every later canonical test
+                    # change, with promotion silently snapshotting the stale
+                    # tree into main. A copy that never carried tests/ (its
+                    # --pointerize chose not to vendor it, e.g. because its
+                    # only consumer never discovers libs/*/tests/) must not
+                    # gain one unilaterally just because canonical has one. A
+                    # real copy's own tests/ may be independently authored and
+                    # is left untouched regardless.
+                    if (copy / "tests").is_dir():
+                        _copy_tests(canonical, copy)
+                    pointer.unlink()
+            except SystemExit as exc:
+                # _copy_src()/_copy_tests() fail closed (raise) on a
+                # symlink under canonical -- catch per-copy so one lib's
+                # rejected copy doesn't abort materializing every other
+                # lib in the same --materialize run, matching this
+                # command's existing "collect every problem, report them
+                # all together" contract for the drift-refusal case above.
+                blocked.append(f"{lib}: {copy}: {exc}")
         print(f"{lib}: materialized into {len(paths)} copy/copies from canonical")
     if blocked:
         print(
