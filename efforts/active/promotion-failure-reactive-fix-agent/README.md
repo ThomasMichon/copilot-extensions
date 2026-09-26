@@ -221,6 +221,19 @@ fixes."
             confirm `report-failure` behaves exactly as in the
             natural-occurrence
             checklist above.
+      - [ ] **Before reverting, deliberately re-trigger the same
+            validation run once more** (`workflow_dispatch` on
+            `validate-and-promote.yml`, or push a trivial no-op commit) so
+            the identical signature occurs a second time within the 6h
+            window, and confirm the dedup/rate-limit path actually fires
+            -- a comment on the existing issue, never a second issue.
+            The probe as originally planned only ever produced one
+            occurrence, which would let this checklist be marked complete
+            without ever exercising the dedup path at all; a single
+            synthetic run doesn't prove Phase 1 handles the exact repeat-
+            failure case it exists for. If skipped for time, explicitly
+            record dedup as **unvalidated** here and do not treat Phase 1
+            as fully proven / Phase 2's gate as unblocked on that basis.
       - [ ] **Revert immediately once confirmed** (a follow-up PR deleting
             the probe test) — this deliberately jams every pending
             promotion for the observation window, the exact cost this
@@ -760,3 +773,13 @@ _Pending._
   `gate`'s own `if:` that requires `success` before doing anything. The
   earlier wording conflated "the trigger doesn't fire" with "gate no-ops"
   — corrected both occurrences.
+- **Fourth review pass caught the deepest gap in the probe design
+  itself:** as planned, the single synthetic probe produced exactly one
+  occurrence, then got reverted — meaning the checklist could be marked
+  complete without ever exercising the 6h dedup/rate-limit path at all,
+  the exact behavior that stops a persistently-flaky failure from
+  spamming a new issue per run. Added an explicit step to deliberately
+  re-trigger the same probe-induced failure once more before reverting
+  (confirming a comment lands on the existing issue, not a second one),
+  with an honest fallback: if skipped for time, record dedup as
+  unvalidated rather than silently treating Phase 1 as fully proven.
