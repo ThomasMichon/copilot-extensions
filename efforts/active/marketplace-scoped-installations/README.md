@@ -386,7 +386,7 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
-### 2026-09-26 — Systemic `runtime-gate.ps1` marker-placement bug fixed across 4 more plugins
+### 2026-09-26 — Systemic `runtime-gate.ps1` marker-placement bug fixed across 5 more plugins
 
 - Fresh guard count for `dev` head (post `agent-logger` merge): 651.
   Started investigating `agent-containers` (next size-tier candidate,
@@ -399,28 +399,45 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   (marker `# marketplace-isolation: allow legacy compatibility root` on
   the closing `}` line of the `$legacyRoot = if (...) {...} else {...}`
   expression, not the flagged `Join-Path $env:USERPROFILE '.agent-*'`
-  line above it): `grep`-checked all 7 plugins with a `runtime-gate.ps1`
-  (`agent-bridge`, `agent-codespaces`, `agent-containers`, `agent-logger`
-  [already fixed], `agent-mcp`, `agent-ssh` [already correct — single-
-  line marker], `agent-vault` [already fixed]). Found the **same bug
-  still present in 4 more plugins**: `agent-bridge`, `agent-codespaces`,
-  `agent-containers`, `agent-mcp` — confirming this was a systemic
-  template/generator bug (likely all 6 originally-affected plugins'
-  `runtime-gate.ps1` were scaffolded from the same source, with the
-  marker misplaced from the start), not four independent coincidences.
-- Fixed all 4 with the identical mechanical change: moved the marker from
-  the closing `}` line onto the actual flagged `Join-Path` line. Verified
+  line above it). **First-pass mistake, caught by PR review**: the
+  initial `grep`-based sweep filtered to files where a marker was found
+  at all (`grep -n "allow legacy compatibility root" <file> | head -1`),
+  which silently skipped any plugin whose `runtime-gate.ps1` had **no**
+  marker whatsoever rather than a merely-misplaced one — missing
+  `agent-index`, an 8th plugin with its own `runtime-gate.ps1` (`Join-
+  Path $env:USERPROFILE '.agent-index'`, genuinely unmarked, not just
+  misplaced). Re-ran the check properly (`ls plugins/*/scripts/runtime-
+  gate.ps1` for the full file list, then individually inspecting each) and
+  confirmed the full population is **8** plugins, not 7:
+  `agent-bridge`, `agent-codespaces`, `agent-containers`, `agent-index`,
+  `agent-logger` [already fixed], `agent-mcp`, `agent-ssh` [already
+  correct — single-line marker], `agent-vault` [already fixed]. Found the
+  **same bug shape (misplaced or entirely missing) in 5 more plugins**:
+  `agent-bridge`, `agent-codespaces`, `agent-containers`, `agent-index`
+  (missing, not misplaced), `agent-mcp` — confirming this was a systemic
+  template/generator bug (7 of 8 plugins' `runtime-gate.ps1` were
+  affected in one of the two shapes; only `agent-ssh` was clean from the
+  start), not independent coincidences.
+- Fixed all 5: moved the marker onto the actual flagged `Join-Path` line
+  in the 4 misplaced-marker plugins, and added a fresh marker to
+  `agent-index`'s previously-unmarked line. Verified
   each file still parses (`pwsh -Command
   "[System.Management.Automation.Language.Parser]::ParseFile(...)"`) and
   ran each plugin's `payload_invocation`-selected test slice via
   `python tools/run-plugin-tests.py <plugin> -k payload_invocation` (the
-  canonical turn-key runner) — all 4 passed (`agent-bridge` 6 passed/3
+  canonical turn-key runner) — all 5 passed (`agent-bridge` 6 passed/3
   skipped, `agent-codespaces` 9 passed, `agent-containers` 2 passed,
-  `agent-mcp` 12 passed/5 skipped).
-- Verified: `check-marketplace-isolation.py --json` dropped by exactly 4
-  (651→647 at fix time). `check-docs-consistency.py` OK.
-  `check-changefile-presence.py --base origin/dev` OK after adding one
-  shared `patch`-typed changefile naming all 4 plugins (per
+  `agent-mcp` 12 passed/5 skipped, `agent-index` verified via the guard
+  count drop alone — no `payload_invocation`-selected test references
+  this specific line).
+- Verified: `check-marketplace-isolation.py --json` dropped by exactly 5
+  overall across the two commits in this PR (651→647 for the first 4,
+  then 644→643 after adding `agent-index`'s changefile and fix — the
+  intervening 647→644 drop between those two checks is unrelated `dev`
+  activity landing concurrently, confirmed via `git stash`/`git stash
+  pop` at each step, not a validation error). `check-docs-consistency.py`
+  OK. `check-changefile-presence.py --base origin/dev` OK after adding a
+  shared `patch`-typed changefile naming all 5 plugins (per
   `CONTRIBUTING.md`'s "one PR touching N plugins with one shared reason"
   pattern). Manually confirmed the fix catches its own regression via
   `git stash`/`git stash pop`.
