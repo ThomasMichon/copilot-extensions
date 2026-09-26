@@ -193,9 +193,12 @@ def test_fetch_via_tarball_also_fetches_the_libs_sibling(tmp_path, monkeypatch):
     """A tarball-only fetch previously grabbed ONLY the worktree-manager/
     subtree, silently dropping the sibling libs/ that any src-passthrough
     vendor pointer inside the payload needs to resolve canonical content
-    from, and tools/materialize_main.py that expands it -- the resulting
-    staging tree must carry all three, the same monorepo-shaped layout a
-    git clone already produces for free."""
+    from -- the resulting staging tree must carry both, the same
+    monorepo-shaped layout a git clone already produces for free.
+    (tools/materialize_main.py is deliberately never fetched at all --
+    _materialize_payload_pointers uses the LOCAL, already-trusted
+    _trusted_pointer_materializer module instead, never dynamically
+    executing anything from the fetched, potentially untrusted source.)"""
     import tarfile
 
     archive_root = tmp_path / "archive-src"
@@ -209,10 +212,6 @@ def test_fetch_via_tarball_also_fetches_the_libs_sibling(tmp_path, monkeypatch):
      "shared_lib").mkdir(parents=True)
     (archive_root / "copilot-extensions-main" / "libs" / "shared-lib" / "src" /
      "shared_lib" / "__init__.py").write_text("value = 1\n")
-    (archive_root / "copilot-extensions-main" / "tools").mkdir(parents=True)
-    (archive_root / "copilot-extensions-main" / "tools" / "materialize_main.py").write_text(
-        "# real materializer\n"
-    )
 
     archive_path = tmp_path / "payload.tar.gz"
     with tarfile.open(archive_path, "w:gz") as tf:
@@ -241,7 +240,7 @@ def test_fetch_via_tarball_also_fetches_the_libs_sibling(tmp_path, monkeypatch):
 
     assert (staging / "worktree-manager" / "pyproject.toml").is_file()
     assert (staging / "libs" / "shared-lib" / "src" / "shared_lib" / "__init__.py").read_text() == "value = 1\n"
-    assert (staging / "tools" / "materialize_main.py").read_text() == "# real materializer\n"
+    assert not (staging / "tools").exists()
 
 
 def test_fetch_via_tarball_refuses_a_symlink_pointing_outside_the_archive(tmp_path, monkeypatch):
@@ -364,56 +363,6 @@ def test_fetch_via_tarball_refuses_a_symlinked_libs_root(tmp_path, monkeypatch):
         self_install._fetch_via_tarball(staging, "https://codeload.example/fake.tar.gz")
 
 
-def test_fetch_via_tarball_refuses_a_symlinked_tools_materializer(tmp_path, monkeypatch):
-    """Round-9 review finding: tool_source was checked with is_file() and
-    passed to shutil.copy2, both of which follow symlinks -- a tarball
-    could provide a symlinked tools/materialize_main.py pointing outside
-    the extracted tree, copying arbitrary host-readable content into
-    staging that _load_materialize_main later dynamically loads and
-    executes."""
-    import tarfile
-
-    outside = tmp_path / "outside-materializer.py"
-    outside.write_text("import os; os.system('echo pwned')\n")
-
-    archive_root = tmp_path / "archive-src"
-    top = archive_root / "copilot-extensions-main"
-    (top / "worktree-manager" / "src" / "worktree_manager").mkdir(parents=True)
-    (top / "worktree-manager" / "src" / "worktree_manager" / "__init__.py").write_text(
-        '__version__ = "9.9.9"\n'
-    )
-    (top / "worktree-manager" / "pyproject.toml").write_text(
-        "[project]\nname='x'\nversion='9.9.9'\n"
-    )
-    (top / "tools").mkdir(parents=True)
-    (top / "tools" / "materialize_main.py").symlink_to(outside)
-
-    archive_path = tmp_path / "payload.tar.gz"
-    with tarfile.open(archive_path, "w:gz") as tf:
-        tf.add(top, arcname="copilot-extensions-main")
-
-    class _FakeResponse:
-        def __init__(self, data: bytes) -> None:
-            self._data = data
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-        def read(self) -> bytes:
-            return self._data
-
-    monkeypatch.setattr(
-        "urllib.request.urlopen",
-        lambda url, timeout=None: _FakeResponse(archive_path.read_bytes()),
-    )
-
-    staging = tmp_path / "staging"
-    with pytest.raises(OSError, match="symlink|link to"):
-        self_install._fetch_via_tarball(staging, "https://codeload.example/fake.tar.gz")
-
 
 def test_fetch_via_tarball_refuses_a_symlinked_extraction_top_dir(tmp_path, monkeypatch):
     """Round-10 review finding: checking only payload.is_symlink() misses a
@@ -452,59 +401,6 @@ def test_fetch_via_tarball_refuses_a_symlinked_extraction_top_dir(tmp_path, monk
         link_info.type = tarfile.SYMTYPE
         link_info.linkname = "nested/real-target"
         tf.addfile(link_info)
-
-    class _FakeResponse:
-        def __init__(self, data: bytes) -> None:
-            self._data = data
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-        def read(self) -> bytes:
-            return self._data
-
-    monkeypatch.setattr(
-        "urllib.request.urlopen",
-        lambda url, timeout=None: _FakeResponse(archive_path.read_bytes()),
-    )
-
-    staging = tmp_path / "staging"
-    with pytest.raises(OSError, match="symlink|link to"):
-        self_install._fetch_via_tarball(staging, "https://codeload.example/fake.tar.gz")
-
-
-def test_fetch_via_tarball_refuses_a_symlinked_tools_directory(tmp_path, monkeypatch):
-    """Round-10 review finding: the symlink check covered
-    tools/materialize_main.py itself but not its tools/ PARENT -- if
-    tools/ itself is a symlink to another directory containing a real
-    (non-symlink) materialize_main.py, tool_source.is_symlink() alone is
-    False even though the whole tools/ tree was reached via a symlinked
-    parent."""
-    import tarfile
-
-    archive_root = tmp_path / "archive-src"
-    top = archive_root / "copilot-extensions-main"
-    (top / "worktree-manager" / "src" / "worktree_manager").mkdir(parents=True)
-    (top / "worktree-manager" / "src" / "worktree_manager" / "__init__.py").write_text(
-        '__version__ = "9.9.9"\n'
-    )
-    (top / "worktree-manager" / "pyproject.toml").write_text(
-        "[project]\nname='x'\nversion='9.9.9'\n"
-    )
-    real_tools = archive_root / "real-tools-target"
-    real_tools.mkdir(parents=True)
-    (real_tools / "materialize_main.py").write_text(
-        "import os; os.system('echo pwned')\n"
-    )
-    (top / "tools").symlink_to(real_tools, target_is_directory=True)
-
-    archive_path = tmp_path / "payload.tar.gz"
-    with tarfile.open(archive_path, "w:gz") as tf:
-        tf.add(top, arcname="copilot-extensions-main")
-        tf.add(real_tools, arcname="real-tools-target")
 
     class _FakeResponse:
         def __init__(self, data: bytes) -> None:

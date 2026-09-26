@@ -49,6 +49,28 @@ def test_materialize_expands_pointer_from_canonical(tmp_path: Path):
     assert '"0.1.0-dev5"' in pp
 
 
+def test_materialize_refuses_a_stray_symlink_anywhere_in_the_pointer_copy(tmp_path: Path):
+    # The src/tests/pyproject.toml checks validate the pieces this
+    # function itself knows about, but a pointer copy directory can carry
+    # other, unrelated entries too (e.g. a stray docs/link) --
+    # pointer_path.unlink() would otherwise leave such a symlink sitting
+    # untouched in the promoted payload, making the resulting main
+    # snapshot not self-contained.
+    root = tmp_path / "repo"
+    _canonical_lib(root, "zdd", version="0.1.0-dev5", content="real = True\n")
+    pointer_dir = _pointer(root, "agent-bridge", "zdd")
+    outside = root.parent / "outside-stray-target"
+    outside.mkdir()
+    (pointer_dir / "docs").mkdir()
+    (pointer_dir / "docs" / "link").symlink_to(outside, target_is_directory=True)
+
+    log = mm.materialize(root, canonical_root=root)
+
+    assert any("SKIP" in line and "is a symlink" in line for line in log)
+    assert (pointer_dir / mm.POINTER_NAME).exists()
+    assert (pointer_dir / "docs" / "link").is_symlink()
+
+
 def test_materialize_expands_canonical_tests_alongside_src(tmp_path: Path):
     # A pointer copy vendors tests/ from canonical too (--pointerize) --
     # promotion-time expansion must refresh it the same way it refreshes

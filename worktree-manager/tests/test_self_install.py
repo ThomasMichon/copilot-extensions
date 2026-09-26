@@ -195,11 +195,13 @@ def test_status_reports_marker_and_binstub(tmp_path, monkeypatch):
 
 
 def _fake_monorepo_with_pointer(tmp: Path, version: str) -> Path:
-    """A synthetic monorepo shape: <tmp>/monorepo/{worktree-manager,libs,tools}/
+    """A synthetic monorepo shape: <tmp>/monorepo/{worktree-manager,libs}/
     -- the payload's ``libs/<lib>`` carries an UN-materialized vendor pointer,
-    ``libs/`` (top-level) carries the real canonical content, and ``tools/``
-    carries a real copy of ``materialize_main.py`` (self-contained, stdlib
-    only) so ``_materialize_payload_pointers`` can dynamically load it.
+    and ``libs/`` (top-level) carries the real canonical content.
+    ``_materialize_payload_pointers`` never needs a fetched ``tools/`` at
+    all -- it uses the LOCAL, already-trusted
+    ``_trusted_pointer_materializer`` module shipped with worktree_manager
+    itself, never dynamically executing anything from the fetched source.
     Returns the payload dir (``<tmp>/monorepo/worktree-manager``)."""
     mono = tmp / "monorepo"
     pd = _fake_payload(mono, version)
@@ -220,13 +222,6 @@ def _fake_monorepo_with_pointer(tmp: Path, version: str) -> Path:
         '{"schema": "copilot-extensions.vendor-pointer", "version": 1, '
         '"source": "libs/shared-lib", "kind": "src-passthrough"}\n',
         encoding="utf-8",
-    )
-
-    tools_dir = mono / "tools"
-    tools_dir.mkdir(parents=True)
-    real_tool = Path(__file__).resolve().parents[2] / "tools" / "materialize_main.py"
-    (tools_dir / "materialize_main.py").write_text(
-        real_tool.read_text(encoding="utf-8"), encoding="utf-8"
     )
     return pd
 
@@ -250,39 +245,32 @@ def test_self_install_materializes_a_vendor_pointer_from_a_live_monorepo(tmp_pat
     assert (copy_dir / "src" / "shared_lib" / "__init__.py").read_text() == "value = 1\n"
 
 
-def test_self_install_refuses_a_symlinked_tools_directory_from_a_git_checkout(
+def test_self_install_never_requires_a_monorepo_ancestor_when_there_are_no_pointers(
     tmp_path, monkeypatch,
 ):
-    """Round-13 review finding: the tarball fetch path explicitly rejects a
-    symlinked tools/ or materialize_main.py, but self_install() -- the
-    ONE shared call site both self_update's git-clone AND tarball paths
-    route through via _materialize_payload_pointers -- had no equivalent
-    check of its own. A git checkout (not just a tarball) can carry a
-    symlinked tools/ just as readily, and _load_materialize_main()
-    dynamically EXECUTES that file, so a symlink there could run
-    arbitrary code from outside the fetched tree. This exercises the
-    fix directly against self_install() (the shared boundary), not just
-    the tarball-specific fetch path."""
-    pd = _fake_monorepo_with_pointer(tmp_path, "9.1.1")
-    mono = pd.parent
-    real_tools = mono / "tools"
-    outside_tools = tmp_path / "outside-tools"
-    outside_tools.mkdir()
-    (outside_tools / "materialize_main.py").write_text(
-        "import os; os.system('echo pwned')\n", encoding="utf-8"
+    """Round-18 review finding: when slot/libs exists but contains no
+    VENDOR_POINTER.json at all, a normal payload with real libs must not
+    even inspect (let alone require) a monorepo ancestor -- there is
+    nothing to materialize, so a fetch/checkout that never provides a
+    libs/ sibling (or one with an unrelated malformed file inside it)
+    must not fail installation."""
+    pd = _fake_payload(tmp_path, "6.6.7")
+    real_copy = pd / "libs" / "real-lib"
+    (real_copy / "src" / "real_lib").mkdir(parents=True)
+    (real_copy / "src" / "real_lib" / "__init__.py").write_text(
+        "value = 1\n", encoding="utf-8"
     )
-    import shutil as _shutil
-    _shutil.rmtree(real_tools)
-    real_tools.symlink_to(outside_tools, target_is_directory=True)
-
+    # No libs/ sibling next to pd at all -- if this were even inspected,
+    # a monorepo-ancestor-required error would fire; it must not be.
     root = tmp_path / "root"
     _patch_local_bin(monkeypatch, tmp_path)
 
     res = self_install(pd, root=root, dry_run=False)
-    assert res.action == "error"
-    assert "unmaterialized vendor pointers" in (res.reason or "")
-    assert current_version(root) is None
-    assert not version_slot("9.1.1", root).exists()
+    assert res.action == "installed"
+    slot = version_slot("6.6.7", root)
+    assert (slot / "libs" / "real-lib" / "src" / "real_lib" / "__init__.py").read_text() == (
+        "value = 1\n"
+    )
 
 
 def test_self_install_raises_when_pointer_present_without_monorepo_ancestor(tmp_path, monkeypatch):
@@ -489,28 +477,3 @@ def test_self_install_normalizes_a_malformed_pointer_failure_to_runtimeerror(tmp
     assert "pointer materialization" in (res.reason or "")
     assert current_version(root) is None
     assert not version_slot("8.8.8", root).exists()
-
-
-def test_self_install_normalizes_a_broken_materializer_load_failure(tmp_path, monkeypatch):
-    """A later gap in the same class as the malformed-pointer case above:
-    the exception-normalization try only wrapped materialize_libs_dir(),
-    but _load_materialize_main() -- which dynamically EXECUTES the
-    fetched tools/materialize_main.py via exec_module() -- ran BEFORE
-    that boundary. A syntax/import/runtime failure in that file (a
-    corrupted or incompatible fetched materializer) escaped
-    self_install()'s RuntimeError handler entirely, violating
-    self_update's best-effort contract and leaving the already-copied
-    slot behind."""
-    pd = _fake_monorepo_with_pointer(tmp_path, "8.9.9")
-    mono = pd.parent
-    (mono / "tools" / "materialize_main.py").write_text(
-        "this is not valid python syntax ((((\n", encoding="utf-8"
-    )
-    root = tmp_path / "root"
-    _patch_local_bin(monkeypatch, tmp_path)
-
-    res = self_install(pd, root=root, dry_run=False)
-    assert res.action == "error"
-    assert "could not load" in (res.reason or "")
-    assert current_version(root) is None
-    assert not version_slot("8.9.9", root).exists()

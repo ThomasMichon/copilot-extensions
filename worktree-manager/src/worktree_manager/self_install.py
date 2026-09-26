@@ -310,21 +310,6 @@ def _write_marker(root: Path, version: str) -> None:
     tmp.replace(root / MARKER)  # atomic publish
 
 
-def _load_materialize_main(monorepo_root: Path):
-    """Dynamically load ``tools/materialize_main.py`` from a live monorepo
-    checkout, without ever making it a real import-time dependency of this
-    dependency-free out-of-plugin payload (see this module's own docstring)
-    -- only reachable, and only ever called, when a monorepo ancestor is
-    actually present (see ``_materialize_payload_pointers``)."""
-    import importlib.util
-
-    path = monorepo_root / "tools" / "materialize_main.py"
-    spec = importlib.util.spec_from_file_location("materialize_main", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 def _materialize_payload_pointers(payload_dir: Path, slot: Path) -> None:
     """Expand any vendor-pointer lib copies under a freshly-copied
     ``slot/libs/*`` into real, self-contained content -- a standalone
@@ -335,6 +320,17 @@ def _materialize_payload_pointers(payload_dir: Path, slot: Path) -> None:
     into a real copy before (or as part of) publishing this slot, exactly
     the way a `main`-branch release already does.
 
+    Uses ``_trusted_pointer_materializer`` -- a real, statically-shipped
+    copy of ``tools/materialize_main.py``'s pointer-expansion core, NOT a
+    dynamic load of the fetched ``tools/materialize_main.py`` itself.
+    ``self_update`` supports user-configured forks/canary refs (see
+    ``source_config.py``), so the fetched tree is untrusted input;
+    dynamically loading and executing a file FROM it would hand a
+    compromised or merely untrusted update source arbitrary code
+    execution with the updater's own privileges. This module's code
+    always comes from the already-installed, already-trusted running
+    process -- only canonical file BYTES are ever read from the fetch.
+
     ``payload_dir`` is the SOURCE being copied (still-live at the moment
     this runs, whether a dev checkout or a freshly fetched self_update
     staging tree -- see ``self_update``'s git-clone/tarball paths, both of
@@ -344,61 +340,31 @@ def _materialize_payload_pointers(payload_dir: Path, slot: Path) -> None:
     in the copied slot is an unresolvable, permanently-broken import for
     whoever runs it next, so this raises rather than silently shipping it.
     """
+    from . import _trusted_pointer_materializer as materializer
+
     libs_dir = slot / "libs"
     if not libs_dir.is_dir():
         return
-    monorepo_root = payload_dir.parent
-    has_canonical = (monorepo_root / "libs").is_dir()
-    tools_dir = monorepo_root / "tools"
-    tool_source = tools_dir / "materialize_main.py"
-    # The git-clone self_update path never went through the tarball
-    # fetch's own symlink checks (those only guard _fetch_via_tarball) --
-    # a checked-out tree can carry a symlinked tools/ or
-    # materialize_main.py just as readily as a tarball can, and
-    # _load_materialize_main() below dynamically EXECUTES this file, so a
-    # symlink here could run arbitrary code from outside the fetched
-    # tree. Checked at this ONE shared call site (both self_update's
-    # git-clone and tarball paths route through _materialize_payload_pointers)
-    # rather than duplicating it in each fetch mechanism.
-    has_tool = (
-        tool_source.is_file()
-        and not tools_dir.is_symlink()
-        and not tool_source.is_symlink()
-    )
-    if not (has_canonical and has_tool):
-        materialize_main = None
-    else:
-        try:
-            materialize_main = _load_materialize_main(monorepo_root)
-        except Exception as e:  # noqa: BLE001 -- normalize ANY load/exec
-            # failure (a syntax error, import error, or module-level
-            # exception in the FETCHED tools/materialize_main.py) into the
-            # one exception type self_install() catches -- this call
-            # dynamically EXECUTES that file via exec_module(), so letting
-            # any exception type escape here would violate self_update's
-            # best-effort/non-fatal contract just as readily as an
-            # unnormalized materialize_libs_dir() failure would, and
-            # _copy_payload's own copytree has already run by this point,
-            # so the partially-copied slot needs the same cleanup path.
-            raise RuntimeError(
-                f"could not load {monorepo_root / 'tools' / 'materialize_main.py'}: {e}"
-            ) from e
-    unresolved = materialize_main.find_pointers_in_libs_dir(libs_dir) if materialize_main else \
-        [p for p in libs_dir.glob("*/VENDOR_POINTER.json")]
+    # Discover pointer markers FIRST, before deciding whether canonical is
+    # even reachable -- a normal payload with real (non-pointer) libs has
+    # nothing to materialize at all, so there's no reason to fail (or
+    # even inspect) canonical reachability for it.
+    unresolved = materializer.find_pointers_in_libs_dir(libs_dir)
     if not unresolved:
         return
-    if materialize_main is None:
+    monorepo_root = payload_dir.parent
+    has_canonical = (monorepo_root / "libs").is_dir()
+    if not has_canonical:
         names = ", ".join(sorted(p.parent.name for p in unresolved))
         raise RuntimeError(
             f"cannot install this payload: libs/{{{names}}} are unmaterialized "
-            "vendor pointers, but no monorepo ancestor (libs/ + "
-            "tools/materialize_main.py) is reachable from the fetched "
-            "payload to resolve canonical content from -- self_update's "
-            "fetch must provide the full monorepo shape, not just the "
-            "worktree-manager/ subtree"
+            "vendor pointers, but no monorepo ancestor (libs/) is reachable "
+            "from the fetched payload to resolve canonical content from -- "
+            "self_update's fetch must provide the full monorepo shape, not "
+            "just the worktree-manager/ subtree"
         )
     try:
-        log = materialize_main.materialize_libs_dir(libs_dir, canonical_root=monorepo_root)
+        log = materializer.materialize_libs_dir(libs_dir, canonical_root=monorepo_root)
     except Exception as e:  # noqa: BLE001 -- normalize ANY materialization
         # failure (a malformed pointer's json.JSONDecodeError/KeyError, an
         # OSError from a copy/remove failure, ...) into the one exception
@@ -782,14 +748,17 @@ def _fetch_via_tarball(staging: Path, url: str, *, timeout: int = 180) -> None:
     """Fetch + extract the worktree-manager payload from a GitHub tarball (no git).
 
     Replaces ``staging`` contents with the extracted ``worktree-manager/`` payload
-    PLUS its sibling ``libs/`` directory and ``tools/materialize_main.py``, so
-    ``staging/worktree-manager/pyproject.toml``, ``staging/libs/``, and
-    ``staging/tools/materialize_main.py`` all exist -- the same monorepo-shaped
-    layout the git clone produces. Both siblings are required for
+    PLUS its sibling ``libs/`` directory, so ``staging/worktree-manager/pyproject.toml``
+    and ``staging/libs/`` both exist -- the same monorepo-shaped layout the git
+    clone produces. ``libs/`` supplies canonical content for
     ``_materialize_payload_pointers`` to expand any vendor-pointer copy inside the
-    payload (``libs/`` supplies canonical content, ``tools/materialize_main.py`` is
-    dynamically loaded to do the expansion -- see that function's own docstring);
-    a tarball-only fetch that skipped either would leave those pointers permanently
+    payload -- expansion itself uses the LOCAL, already-trusted
+    ``_trusted_pointer_materializer`` module (never the fetched ``tools/``, which
+    this function deliberately does NOT fetch: ``self_update`` supports
+    user-configured forks/canary refs, so executing anything from that untrusted
+    tree would be a real supply-chain risk -- see
+    ``_materialize_payload_pointers``'s own docstring). A tarball-only fetch that
+    skipped the ``libs/`` sibling would leave those pointers permanently
     unresolvable in the installed slot.
     Raises ``OSError`` on any failure so the caller can degrade to an ``error`` result.
     """
@@ -842,36 +811,14 @@ def _fetch_via_tarball(staging: Path, url: str, *, timeout: int = 180) -> None:
         # ROOT -- shutil.copytree always creates dst as a real directory,
         # so if the root argument itself were a symlink, os.scandir would
         # transparently follow it with nowhere for a preserved-symlink
-        # object to even go. Each root (payload, libs_source, tool_source)
-        # is explicitly is_symlink()-checked before its own copy call.
+        # object to even go. Each root (payload, libs_source) is
+        # explicitly is_symlink()-checked before its own copy call.
         shutil.copytree(payload, staging / "worktree-manager", symlinks=True)
         libs_source = payload.parent / "libs"
         if libs_source.is_symlink():
             raise OSError(f"{libs_source} is a symlink -- refusing")
         if libs_source.is_dir():
             shutil.copytree(libs_source, staging / "libs", symlinks=True)
-        # _materialize_payload_pointers() also needs tools/materialize_main.py
-        # (a monorepo ancestor sibling, dynamically loaded -- see
-        # _load_materialize_main()) to expand any pointer copy inside
-        # libs/ before the standalone slot is published; a tarball fetch
-        # that copied libs/ but not this file would still hit the
-        # unresolved-pointer refusal.
-        tool_source = payload.parent / "tools" / "materialize_main.py"
-        tools_dir = payload.parent / "tools"
-        if tools_dir.is_symlink():
-            # tool_source.is_symlink() alone misses this: if `tools/` itself
-            # is a symlink to another directory that happens to contain a
-            # real (non-symlink) materialize_main.py, tool_source itself
-            # would be a real file within that symlinked-to target -- the
-            # parent must be checked too, the same class of gap as
-            # payload/libs_source above.
-            raise OSError(f"{tools_dir} is a symlink -- refusing")
-        if tool_source.is_symlink():
-            raise OSError(f"{tool_source} is a symlink -- refusing")
-        if tool_source.is_file():
-            tool_dest = staging / "tools"
-            tool_dest.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(tool_source, tool_dest / "materialize_main.py")
 
 
 def self_update(

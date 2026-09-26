@@ -255,6 +255,23 @@ def _materialize_one_pointer(pointer_path: Path, *, checkout_root: Path, canonic
             "-- refusing to write through it blindly"
         )
 
+    # The checks above validate the pieces this function itself KNOWS
+    # about (src/, tests/, pyproject.toml) -- but a pointer copy directory
+    # can carry other, unrelated entries too (e.g. a stray docs/link), and
+    # pointer_path.unlink() below would leave any such symlink sitting
+    # untouched in the promoted payload, making the resulting main
+    # snapshot not self-contained (it could resolve outside the release).
+    # One final blanket scan of the WHOLE copy directory closes this,
+    # matching what _copy_payload() already does for self-install
+    # (_find_any_symlink(slot)).
+    stray_symlink = _find_symlink(lib_copy_dir)
+    if stray_symlink is not None:
+        where = str(lib_copy_dir) if stray_symlink == "." else f"{lib_copy_dir}/{stray_symlink}"
+        return (
+            f"SKIP {lib_copy_dir}: {where} is a symlink -- refusing (a "
+            "vendored copy must contain only real files)"
+        )
+
     _remove_path(dst_sub)
     if src_sub.is_dir():
         shutil.copytree(src_sub, dst_sub)
