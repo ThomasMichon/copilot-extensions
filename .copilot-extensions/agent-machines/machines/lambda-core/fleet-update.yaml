@@ -1,0 +1,31 @@
+# Opt lambda-core into agent-machines' unattended `fleet-update` sweep
+# (daily: `worktree-manager update`, the fleet-wide plugin install/update
+# orchestrator the operator already runs interactively as `<repo> update`
+# for each adopted repo -- this just runs the same flow unattended, on a
+# timer, a "VAV lite" built around git + a systemd timer).
+#
+# Filed after tracing why the deployed `agent-dispatch` coordinator sat
+# dev198 stale for days despite lambda-core's *self-update* sweep already
+# being opted in (aperture-labs' own self-update.yaml): that sweep had been
+# silently failing every single unattended run (systemd --user's own
+# manager environment lacks `~/.local/bin`, so every bare-name subprocess
+# call -- `agent-worktrees`, `worktree-manager` -- failed with
+# FileNotFoundError; fixed in PR #3801, this repo). `fleet-update` is a
+# distinct, independent mechanism (different scheduler, state directory,
+# and lock namespace) that reaches the same `worktree-manager update` flow
+# from copilot-extensions' own side, rather than only from another repo's
+# declared self-update sweep -- so copilot-extensions keeps itself current
+# even if a future self-update regression only affects that other path.
+#
+# Scoped to lambda-core only for now, matching aperture-labs' own
+# self-update.yaml scoping rationale: extend to borealis/wheatley once this
+# has run unattended on lambda-core for a while.
+
+schema_version: 3
+package: copilot-extensions/fleet-update-sweep
+
+resources:
+  - type: fleet-update
+    tier: sweep
+    state: present
+    platforms: [linux, wsl]
