@@ -21,46 +21,36 @@
 ## Guiding Intent
 
 `vendored-doc-pointers` (Done, pending archive) proved the DRY vendor-pointer
-pattern for one narrow surface (a single mirrored Markdown file) and the
-`dev-branch-release-pipeline` umbrella built the general-purpose machinery
-around it: `sync-vendored-libs.py` already understands a `VENDOR_POINTER.json`
-stub as a valid vendored-copy form, and `materialize_main.py` already expands
-both pointer kinds (directory/lib pointers, file pointers) from canonical at
-promotion time. A standalone trial run converted all 56 real vendored-lib
-copies to pointers and proved the round-trip byte-for-byte lossless — but
-**no real plugin in this repo carries a directory/lib pointer yet** (three
-real files already carry `kind=file` pointers, converted in
-`vendored-doc-pointers`' own Phase 2 — the gap is specifically the
-directory/lib kind); the mechanism is built and proven, but not applied to
-that surface.
+pattern for one narrow surface (a single mirrored Markdown file): one
+canonical source, a thin marker on `dev`, full expansion only in the
+materialized `main` release the install-contract already requires to be
+self-contained. This effort generalizes that same underlying promise —
+"impossible to drift, by construction," replacing "copy + a script that
+catches drift after the fact" — to every other construct in this repo that
+is duplicated byte-for-byte across plugins at authoring time: real
+shared-lib copies (`plugins/*/libs/*`, `worktree-manager/libs/*`) and,
+if `vendored-installer-engine` adopts it, the shared installer-engine
+surface.
 
-This effort's goal: close that gap, and generalize the *pattern itself* —
-not just apply it once more — to every construct in this repo that is
-duplicated byte-for-byte across plugins at authoring time: real shared-lib
-copies (today: byte copies + a drift-detecting checker, `check-vendored-libs-
-sync.py`), the shared installer-engine surface (`vendored-installer-engine`,
-a separate Active effort currently designed around byte-vendor +
-`sync-installer-engine.py --check` rather than a pointer stub), and whatever
-else surfaces as "and more" during Phase 1's audit. The pointer pattern's
-core promise — one canonical source, a thin stub on `dev`, full expansion
-only in the materialized `main` release the install-contract already
-requires to be self-contained — replaces "copy + a script that catches
-drift after the fact" with "impossible to drift, by construction," for every
-surface it's applied to.
+**The concrete mechanism differs by construct, resolved by the Design
+Decision immediately below** (superseding an earlier plan sketched before
+that decision — see the Journal's 2026-09-26 "Resolver decision" entry for
+the full history of how this effort arrived here):
 
-A second, distinct requirement from the same request: unlike a Markdown doc
-pointer (whose stub is inert, human-readable text — nobody executes a doc),
-a **script** pointer must remain **runnable in `dev`** without a
-materialize/preview step first, so in-place testing keeps working. This
-likely needs a new pointer *kind* beyond the existing directory/file
-forms — an executable stub that calls across plugin-folder boundaries into
-the canonical engine at dev-time, expanded to a fully self-contained inlined
-copy only when `materialize_main.py` builds the release `main` sees (never
-resolved across folders in what ships, matching `docs/install-contract.md`'s
-existing "no shared install module resolved at
-install or runtime" constraint for the *shipped* artifact — this effort does
-not relax that constraint, only what `dev`'s authoring-time form looks like
-beneath it).
+- **Libs**: an npm-workspace-style **live relative-path reference** (`uv`'s
+  `[tool.uv.sources]` `path` + `editable = true`, pointed directly at the
+  canonical `libs/<lib>` — no local directory of any kind in `dev`), not a
+  `VENDOR_POINTER.json` stub. Promotion copies canonical in and rewrites
+  the reference to the local, non-editable form real shipped installs
+  already use today.
+- **The shared installer engine** (if that effort adopts this pattern):
+  the same live-reference idea, expressed as a plugin's installer wrapper
+  directly dot-sourcing the canonical engine file via a relative path in
+  `dev` — no new marker/pointer format needed at all, since a shell
+  `source`/PowerShell `.` already does this natively.
+- **Docs** (`vendored-doc-pointers`, already shipped): unchanged — a
+  Markdown file has no package-manager equivalent of a live reference, so
+  it still needs a physical stub file expanded at promotion.
 
 ## Design decision — npm-workspace-style live reference over a `VENDOR_POINTER.json` stub (resolved 2026-09-26)
 
@@ -245,15 +235,16 @@ Repo: `ThomasMichon/copilot-extensions`.
   own README, "Scale" and Phase 0/1 sections). Explicitly **decided
   against** a git-fetch bootstrap in favor of byte-vendoring the shared
   engine specifically (see its own "Design decision" Journal entries),
-  citing the same install-contract constraint this effort's script-pointer
-  design must also respect — but its chosen *mechanism* for keeping the
-  engine's vendored copies in sync is `tools/sync-installer-engine.py
-  --check` (a drift detector: copies can go stale until CI catches it), not
-  a pointer stub (drift structurally impossible on `dev`). This effort's
-  Phase 2 scopes the new executable pointer kind to that same shared-engine
-  surface only — never the per-plugin wrapper/config, which must keep
-  varying by plugin — and evaluates whether the engine, once it lands,
-  should be re-expressed as a pointer instead of a byte-copy; coordinate
+  citing the same install-contract constraint this effort's canonical-
+  reference design (see Design Decision below) must also respect — but its
+  chosen *mechanism* for keeping the engine's vendored copies in sync is
+  `tools/sync-installer-engine.py --check` (a drift detector: copies can go
+  stale until CI catches it), not a live reference (drift structurally
+  impossible on `dev`). This effort's Phase 2 scopes the canonical-
+  reference idea to that same shared-engine surface only — never the
+  per-plugin wrapper/config, which must keep varying by plugin — and
+  evaluates whether the engine, once it lands, should be re-expressed that
+  way instead of byte-vendored; coordinate
   with that effort's own driver before changing its chosen mechanism out
   from under it, and do not silently fork its design.
 - **`docs/install-contract.md`** — the governing constraint both this effort
