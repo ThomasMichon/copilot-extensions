@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-work-coalescing-singleton"
-version = "0.1.0-dev1"
+version = "0.1.0-dev3"
 description = "Work-coalescing singleton daemon shape: coalesce/refcount/idle-exit wire protocol + client, for Copilot CLI plugins"
 readme = "README.md"
 license = "MIT"

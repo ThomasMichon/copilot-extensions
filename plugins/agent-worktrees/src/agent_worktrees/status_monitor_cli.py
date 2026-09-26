@@ -297,9 +297,18 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         # owner). tracking_write.has_inflight_write() tracks the compute
         # itself, in this same process, independent of any client's own
         # lease lifecycle (2026-09-26 PR review finding).
+        # active_handler_count() closes a third, narrower gap
+        # (copilot-extensions#3798): a connection can be accepted, and this
+        # counter incremented, before its handler thread's first line runs
+        # `owner.touch()` (what `subscriber_count()` reads) -- a shutdown
+        # racing that exact window would otherwise see neither predicate as
+        # busy even though a write is about to execute.
         return (
             tracking_write_server is not None
-            and tracking_write_server.subscriber_count() > 0
+            and (
+                tracking_write_server.subscriber_count() > 0
+                or tracking_write_server.active_handler_count() > 0
+            )
         ) or tracking_write.has_inflight_write()
 
     try:

@@ -42,8 +42,10 @@
   [#3798](https://github.com/ThomasMichon/copilot-extensions/issues/3798)
   (a residual accept-to-handler-dispatch drain race in the shared
   `work_coalescing_singleton` library, found during #3779's review round 7;
-  tracked for Phase 3 rather than blocking Phase 2, which ships zero
-  production write verbs)
+  resolved in Phase 3's PR #3807), [#3812](https://github.com/ThomasMichon/copilot-extensions/issues/3812)
+  (an unsupported-verb response during a daemon rolling upgrade
+  misclassified as `AmbiguousWriteOutcome`, found during #3807's review;
+  deferred, tracked for a future Phase 3 slice)
 
 ## Guiding Intent
 
@@ -368,21 +370,47 @@ survey above.
       `test_registration_home.py`, all failing identically without these
       changes).
 
-### Phase 3 — Migrate the first real write call site, then the rest _(not started)_
-- [ ] Resolve [#3798](https://github.com/ThomasMichon/copilot-extensions/issues/3798)
+### Phase 3 — Migrate the first real write call site, then the rest _(in progress)_
+- [x] Resolved [#3798](https://github.com/ThomasMichon/copilot-extensions/issues/3798)
       (the accept-to-handler-dispatch drain race in the shared
-      `work_coalescing_singleton` library) before or alongside migrating
-      the first real verb — that is the point real write traffic starts to
-      exist and this residual race stops being purely theoretical.
-- [ ] Pick the first real call site to migrate given the corrected verb
-      granularity (a whole transaction, not a bare setter) — candidates to
-      evaluate: a narrower, lower-traffic disposition-assertion path before
-      `register_session`'s own sessionStart-hook-critical one.
+      `work_coalescing_singleton` library) — `CoalescingServer` now exposes
+      `active_handler_count()`, incremented at `accept()` time (before the
+      handler thread is even spawned) and decremented once that handler
+      fully returns (including a failed-dispatch case, e.g. `Thread.start()`
+      raising), and `status_monitor_cli._tracking_write_busy()` ORs it in
+      alongside `subscriber_count()`/`has_inflight_write()`. Landed in PR
+      [#3807](https://github.com/ThomasMichon/copilot-extensions/pull/3807)
+      (see below), synced to both vendored copies (agent-worktrees +
+      worktree-manager) with a version bump per
+      `check-vendored-libs-sync.py`.
+- [x] Picked and migrated the first real call site: `status`'s write mode
+      (`_cmd_status_write` / the `status_disposition_write` verb, a new
+      `tracking_disposition_write.py` module) — the "narrower, lower-traffic
+      disposition-assertion path" this Plan named, not `register_session`
+      (sessionStart-hook-critical) or `mark_resumed`. Landed in PR
+      [#3807](https://github.com/ThomasMichon/copilot-extensions/pull/3807)
+      (8 review rounds — cross-project scoping for the disposition-history
+      sidecar AND the `status_reported` durable trace, both explicitly
+      threaded through rather than trusting a resident daemon's own ambient
+      `cfg.active_project()`; the #3798 fix above; a counter-leak-on-failed-
+      dispatch fix; a worktree-manager payload version bump for the
+      vendored library change). One residual finding — an unsupported-verb
+      response during a daemon rolling upgrade misclassified as
+      `AmbiguousWriteOutcome` — deliberately deferred as
+      [#3812](https://github.com/ThomasMichon/copilot-extensions/issues/3812)
+      rather than expanding this PR's scope, same rationale as #3798's own
+      original deferral.
 - [ ] One call site (or a closely related cluster) at a time, each its own
       reviewable PR, per this repo's serial-single-writer convention —
       across whichever of `tracking.py` / `tracking_claims.py` /
       `tracking_lifecycle.py` / `tracking_session_registry.py` currently
-      owns each function.
+      owns each function. `status_disposition_write` is the template to
+      follow for the next call site (a whole guarded transaction becomes a
+      registered verb in its own module; the call site dispatches and
+      handles `AmbiguousWriteOutcome`; any ambient-context read inside the
+      transaction — project, tracking dir, env vars — must be resolved by
+      the CALLER and passed as an explicit arg, never read inside the verb
+      itself).
 
 ### Phase 4 — Sibling-plugin guard + audit _(not started)_
 - [ ] Add the CI guard described above.
@@ -423,6 +451,92 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-09-26 — PR #3807: Phase 3's first migrated call site, `status_disposition_write`
+Picked the "narrower, lower-traffic disposition-assertion path" this Plan
+named as a safer first pick than `register_session`/`mark_resumed` — the
+`status` CLI command's write mode (`_cmd_status_write`). New
+`tracking_disposition_write.py` registers the whole guarded transaction
+(load -> terminal/effort-bound guards -> conditional reactivation ->
+`set_disposition` -> `save_record` -> once-per-session `status_reported`
+event) as a single `status_disposition_write` verb; `_cmd_status_write`
+now calls `tracking_write.dispatch(...)` instead of running the
+transaction directly.
+
+8 review rounds, all fixing real bugs, none inline-fixable without real
+design decisions:
+- **Cross-project scoping (2 findings, both real):** the disposition-
+  history sidecar (`disposition_history.append`) and the `status_reported`
+  durable trace (`activity.log_event` -> `handoff_trace.append_event`)
+  both defaulted to the *executing process's own ambient* `cfg.
+  tracking_dir()`/`cfg.active_project()` -- correct for every prior
+  caller (always the CLI process itself), but wrong the instant a
+  transaction can run inside the resident daemon, whose own ambient
+  project need not match the project a dispatched request actually
+  targets. Fixed by threading both explicitly through the verb's own
+  `args` (a `tracking_path`/`project` the CALLER resolves and passes in,
+  mirroring how `session_id` was already handled) rather than trusting
+  ambient context inside the verb. This is the general lesson for every
+  future call site this effort migrates: any ambient read inside a
+  transaction that becomes daemon-executable must become an explicit,
+  caller-resolved argument.
+- **Resolved #3798 for real** (previously just a tracked follow-up): the
+  accept-to-handler-dispatch drain race the reviewer correctly pointed out
+  is no longer purely theoretical once a real verb exists.
+  `CoalescingServer.active_handler_count()` now counts a connection from
+  `accept()` (before its handler thread is even spawned) through the
+  handler's full return -- a strict superset of the previous subscriber-
+  count-based busy window -- and `status_monitor_cli._tracking_write_busy()`
+  ORs it in. A follow-up round caught (and fixed) a leak: if delegating to
+  the handler thread itself fails (e.g. `Thread.start()` under resource
+  exhaustion), the counter must be decremented immediately rather than
+  relying on a handler-thread `finally` that will never run.
+- **Vendored-lib version discipline:** `work_coalescing_singleton` is
+  vendored in two places (agent-worktrees, worktree-manager) --
+  `check-vendored-libs-sync.py` requires byte-identical `src/` + matching
+  versions across both. Missed on the first pass (only the agent-worktrees
+  copy was edited); synced + bumped both to `0.1.0-dev3`. Separately,
+  worktree-manager has its OWN payload version
+  (`worktree_manager/__init__.py` + its `pyproject.toml`) gating
+  `self_install.py`'s upgrade check -- an existing installation would never
+  pick up the changed vendored code without also bumping that payload
+  version (`0.1.0-dev78` -> `0.1.0-dev79`). Two genuinely different version
+  surfaces, easy to conflate.
+- **One residual finding deliberately deferred** (matching #3798's own
+  original precedent): an unsupported-verb response during a daemon
+  rolling upgrade is misclassified as `AmbiguousWriteOutcome` (the daemon's
+  `compute()` raises for an unregistered verb, the shared library's
+  `_Handler.handle()` swallows it with no response, and the client reads
+  that as "request sent, outcome unknown" rather than "nothing could have
+  run"). Filed as [#3812](https://github.com/ThomasMichon/copilot-extensions/issues/3812)
+  -- narrow, real-but-rare (only during a rolling daemon restart), never a
+  data-corruption risk, and the right fix touches shared wire-protocol
+  plumbing beyond this first-verb migration's scope.
+
+`tracking.py` is at its exact 4009-line grandfathered ceiling; the small
+`set_disposition`/`disposition_history.append` parameter additions were
+paid for by rewrapping two unrelated pre-existing multi-line comments
+elsewhere in the same file (content unchanged, only relineated), the same
+"import-merge trick" pattern as PR #3755. `__main__.py` hit its own 7840-
+line ceiling from the call-site migration itself; paid for the same way
+(one pre-existing extra-blank-line lint nit fixed, two unrelated comment
+blocks rewrapped) plus reverting an ill-advised import-merge ruff/isort
+rejected.
+
+New tests: `test_tracking_disposition_write.py` (verb registration, both
+guards, the reactivation path, the once-per-session event, the cross-
+project scoping fix, one live-daemon end-to-end proof), a
+`test_status_write.py` case proving `AmbiguousWriteOutcome` is reported not
+swallowed, a `test_activity.py` case for the explicit-project override, and
+`work-coalescing-singleton`'s own `test_wire.py`/`test_server.py` gained
+real-TCP and simulated-failure coverage for `active_handler_count()`. Full
+suite: 5614 passed, same 5 pre-existing failures. All gates
+(`check-module-size.py`, `check-vendored-libs-sync.py`,
+`check-version-consistency.py`, ruff) clean.
+
+**Next Phase 3 slice:** pick the next `tracking.py`-family write call site
+using `status_disposition_write` as the template (whole-transaction verb,
+caller-resolved ambient context, its own reviewable PR).
 
 ### 2026-09-26 — PR #3779 review round 8: missing wire-kind validation
 `compute` dispatched a verb without checking the request's own `kind`

@@ -389,3 +389,20 @@ def test_log_event_does_not_write_gated_out_events_into_durable_trace_store(
         "handoff_cutover_claim", worktree_id="wt-1", outcome="already-claimed"
     )
     assert handoff_trace.read_trace("proj-a", "wt-1") == []
+
+
+def test_log_event_explicit_project_overrides_ambient_active_project(
+    patch_install_dir: Path, patch_active_project,
+):
+    """agent-worktrees-authoritative-daemon Phase 3 (2026-09-26 PR review
+    finding, round 2): a caller resolving its own real project explicitly
+    (e.g. a verb dispatched via the resident daemon, whose own ambient
+    ``cfg.active_project()`` need not match) must land the durable trace
+    under ITS project, never the executing process's ambient one."""
+    activity.log_event(
+        "handoff_requested", worktree_id="wt-1", session_id="s1", project="proj-b"
+    )
+    assert handoff_trace.read_trace("proj-b", "wt-1")
+    # The ambient project ("proj-a", per patch_active_project) must not have
+    # received a copy -- this is a redirect, not an additional destination.
+    assert handoff_trace.read_trace("proj-a", "wt-1") == []

@@ -111,3 +111,24 @@ def test_write_without_session_id_does_not_emit_stage_5(status_env, monkeypatch)
     main._cmd_status_write(args, summary="No session")
 
     assert activity.read_events(worktree_id="wt-status", event="status_reported") == []
+
+
+def test_ambiguous_write_outcome_is_reported_not_swallowed(status_env, monkeypatch):
+    """agent-worktrees-authoritative-daemon Phase 3: a write whose daemon
+    request was sent and then failed is genuinely ambiguous (the mutation may
+    already be committed server-side) -- `_cmd_status_write` must surface
+    `AmbiguousWriteOutcome` as a reported command failure, never silently
+    retry or swallow it (`tracking_write.dispatch`'s own contract)."""
+    from agent_worktrees import tracking_write
+
+    def _raise(*_args, **_kwargs):
+        raise tracking_write.AmbiguousWriteOutcome("request sent, no response")
+
+    monkeypatch.setattr(tracking_write, "dispatch", _raise)
+    args = argparse.Namespace(worktree_id=None)
+
+    assert main._cmd_status_write(args, summary="Will not land") == 1
+
+    # Refused before any mutation -- the record must be untouched.
+    record = tracking.load_record(status_env)
+    assert record.summary != "Will not land"
