@@ -449,8 +449,9 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   - `install.sh`/`install.ps1` (25 findings) — same blocked generic-wrapper
     backlog as `budget-guidance`/`agent-pull-requests`, not annotatable yet.
   - `scripts/runtime-gate.sh`/`.ps1` (10 remaining findings beyond the 2
-    already-marked lines, verified via `python -c "import json; ..."` count
-    over the guard's own JSON output, not eyeballed) — these set `AGENT_VAULT_SOCKET`/`PIPE`/
+    already-marked lines, verified by counting `category` entries whose
+    `path` contains `runtime-gate` in the guard's `--json` output rather
+    than eyeballing) — these set `AGENT_VAULT_SOCKET`/`PIPE`/
     `SYSTEMD_UNIT`/`TASK_NAME` using a `SERVICE_SUFFIX` derived from
     `scoped_identity_suffix "$RUNTIME_ROOT"` (a hash of the cell-specific
     runtime root) — i.e. these ARE already cell-qualified, just under a
@@ -479,7 +480,8 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   `git stash`/`git stash pop` that the same bare-`uv run` failure pre-exists
   untouched, then re-ran correctly via `tools/run-plugin-tests.py`): 249
   passed, 12 skipped. `check-docs-consistency.py` OK. `check-changefile-
-  presence.py --base origin/dev` OK after adding a dev changefile. Manually
+  presence.py --base origin/dev` OK after adding a `patch` changefile.
+  Manually
   confirmed the fix catches its own regression via `git stash`/`git stash
   pop` (688→680→688→680, the count drift between checks tracked unrelated
   `dev` commits landing concurrently, not a validation error).
