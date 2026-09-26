@@ -212,10 +212,12 @@ built-in body organization and frontmatter. The same `log:` block may supply
 `prepare-session-log --json` and `agent-logger organization` copy them into
 the manifest unchanged, eliminating wrapper-only injection.
 
-`schema_version` may be omitted for compatibility and is then treated as
-version 1. The loader rejects unsupported versions, malformed YAML, unknown
-fields/placeholders, invalid timezones, and output paths that are absolute or
-escape the repository. Repo-local config accepts only `root`, `path_template`,
+`schema_version` may be omitted, in which case it is treated as the current
+schema this build supports (3 as of this release) -- so an unversioned file
+already gets full access to `sync.local_path`, not just `log:`. The loader
+rejects unsupported versions, malformed YAML, unknown fields/placeholders,
+invalid timezones, and output paths that are absolute or escape the
+repository. Repo-local config accepts only `root`, `path_template`,
 `timezone`, `note_marker`, `template`, `narration_style`, `exemplars`, and
 `closing_remark` under `log:`; as of schema v3 it additionally accepts a
 single `sync.local_path` (an absolute path, e.g. a shared NAS mount) -- the

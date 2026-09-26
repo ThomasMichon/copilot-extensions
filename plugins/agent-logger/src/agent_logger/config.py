@@ -422,6 +422,14 @@ def find_repo_config(start: Path | None = None) -> Path | None:
     Otherwise the nearest git root is searched for :data:`REPO_CONFIG_FILENAMES`,
     but only when that repo is a registered project checked out on its
     default branch -- see :func:`agent_logger.repo_trust.repo_config_is_trusted`.
+
+    The explicit-file override is likewise gated: it names a *file*, not a
+    trust decision, so an untrusted checkout could otherwise use it to
+    bypass the gate entirely by pointing it at its own repo-local config.
+    The file's containing git root is resolved and trust-checked the same
+    way. A candidate that is a symlink (committed or otherwise) is rejected
+    outright -- discovery must never follow a link out of the checkout to
+    read arbitrary machine-local YAML.
     """
     env = os.environ.get("AGENT_LOGGER_REPO_CONFIG")
     if env:
@@ -432,6 +440,11 @@ def find_repo_config(start: Path | None = None) -> Path | None:
             raise RepositoryConfigError(
                 f"AGENT_LOGGER_REPO_CONFIG does not name a file: {explicit}"
             )
+        if explicit.is_symlink():
+            return None
+        explicit_root = _find_repo_root(explicit.parent)
+        if explicit_root is not None and not repo_config_is_trusted(explicit_root):
+            return None
         return explicit
 
     root = _find_repo_root(start)
@@ -441,7 +454,7 @@ def find_repo_config(start: Path | None = None) -> Path | None:
         return None
     for name in REPO_CONFIG_FILENAMES:
         candidate = root / name
-        if candidate.is_file():
+        if candidate.is_file() and not candidate.is_symlink():
             return candidate
     return None
 

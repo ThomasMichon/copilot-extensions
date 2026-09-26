@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -350,6 +352,161 @@ def test_missing_explicit_repo_config_is_an_error(
         load_config(home=tmp_path / "home")
 
 
+@pytest.mark.no_autotrust
+def test_explicit_repo_config_env_still_requires_trust(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """AGENT_LOGGER_REPO_CONFIG names a *file*, not a trust decision -- an
+    untrusted (unregistered) checkout must not be able to bypass the gate
+    just because something points this variable at its own repo-local
+    file."""
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, remote="https://example.test/example-owner/demo.git", branch="main")
+    config_file = repo / ".agent-logger.yaml"
+    config_file.write_text("log:\n  path_template: logs/{title}.md\n", encoding="utf-8")
+    monkeypatch.setenv("AGENT_WORKTREES_REPOS_YAML", str(tmp_path / "no-such-registry.yaml"))
+    monkeypatch.setenv("AGENT_LOGGER_REPO_CONFIG", str(config_file))
+
+    assert find_repo_config() is None
+
+
+@pytest.mark.no_autotrust
+def test_repo_config_rejects_symlinked_candidate(tmp_path: Path, monkeypatch) -> None:
+    """A committed/local symlink standing in for .agent-logger.yaml must be
+    rejected outright -- discovery must never follow a link out of the
+    checkout to read arbitrary machine-local YAML."""
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, remote="https://example.test/example-owner/demo.git", branch="main")
+    outside_target = tmp_path / "outside.yaml"
+    outside_target.write_text("log:\n  path_template: logs/{title}.md\n", encoding="utf-8")
+    (repo / ".agent-logger.yaml").symlink_to(outside_target)
+
+    registry = tmp_path / "repos.yaml"
+    registry.write_text(
+        yaml.safe_dump(
+            {
+                "repos": {
+                    "demo": {
+                        "remote": "https://example.test/example-owner/demo.git",
+                        "default_branch": "main",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_WORKTREES_REPOS_YAML", str(registry))
+    monkeypatch.chdir(repo)
+
+    assert find_repo_config() is None
+
+
+@pytest.mark.no_autotrust
+def test_repo_config_ignored_on_conflicting_registered_default_branches(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A checkout with two local remotes that each match a DIFFERENT
+    registered project, with different default branches, has no single
+    resolvable trust decision -- must fail safe to untrusted rather than
+    picking whichever remote git happens to enumerate first."""
+    repo = tmp_path / "repo"
+    _init_git_repo(
+        repo,
+        remote="https://example.test/example-owner/demo.git",
+        branch="main",
+        remote_name="origin",
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "remote",
+            "add",
+            "upstream",
+            "https://example.test/example-owner/other.git",
+        ],
+        check=True,
+    )
+    (repo / ".agent-logger.yaml").write_text(
+        "log:\n  path_template: logs/{title}.md\n", encoding="utf-8"
+    )
+
+    registry = tmp_path / "repos.yaml"
+    registry.write_text(
+        yaml.safe_dump(
+            {
+                "repos": {
+                    "demo": {
+                        "remote": "https://example.test/example-owner/demo.git",
+                        "default_branch": "main",
+                    },
+                    "other": {
+                        "remote": "https://example.test/example-owner/other.git",
+                        "default_branch": "develop",
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_WORKTREES_REPOS_YAML", str(registry))
+    monkeypatch.chdir(repo)
+
+    assert find_repo_config() is None
+
+
+@pytest.mark.no_autotrust
+def test_repo_config_ignores_global_git_config_remote(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The remote probe must be scoped to the checkout's LOCAL config
+    (--local) -- a global/system git config entry matching a registered
+    project must not let a checkout with no local remote at all pass the
+    gate."""
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, remote=None, branch="main")
+    (repo / ".agent-logger.yaml").write_text(
+        "log:\n  path_template: logs/{title}.md\n", encoding="utf-8"
+    )
+
+    registry = tmp_path / "repos.yaml"
+    registry.write_text(
+        yaml.safe_dump(
+            {
+                "repos": {
+                    "demo": {
+                        "remote": "https://example.test/example-owner/demo.git",
+                        "default_branch": "main",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_WORKTREES_REPOS_YAML", str(registry))
+
+    # Sandbox a fake "global" git config (never touches the real one) that
+    # declares the same URL as a remote -- git config --local must ignore it.
+    fake_global = tmp_path / "fake-gitconfig"
+    subprocess.run(
+        [
+            "git",
+            "config",
+            "--file",
+            str(fake_global),
+            "remote.origin.url",
+            "https://example.test/example-owner/demo.git",
+        ],
+        check=True,
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(fake_global))
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+    monkeypatch.chdir(repo)
+
+    assert find_repo_config() is None
+
+
 def test_config_cli_reports_repository_validation_error(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
@@ -571,10 +728,12 @@ def test_repo_config_ignored_when_no_git_remote(tmp_path: Path, monkeypatch) -> 
 def test_repo_config_trust_override_env_bypasses_gate(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """``AGENT_LOGGER_TRUST_REPO_CONFIG=1`` is a machine-local escape hatch
-    for an operator who has independently confirmed a checkout is safe --
-    it must never be settable by the repo itself, only by the local
-    environment, but when set it does bypass the registry/branch checks."""
+    """``AGENT_LOGGER_TRUST_REPO_CONFIG=<path>`` is a machine-local escape
+    hatch for an operator who has independently confirmed one specific
+    checkout is safe -- it must never be settable by the repo itself, only
+    by the local environment, and it is scoped to that exact resolved path
+    (never a global boolean, which would also trust every OTHER unregistered
+    checkout probed in the same process)."""
     repo = tmp_path / "repo"
     _init_git_repo(repo, remote=None, branch="main")
     (repo / ".agent-logger.yaml").write_text(
@@ -582,9 +741,28 @@ def test_repo_config_trust_override_env_bypasses_gate(
         encoding="utf-8",
     )
     monkeypatch.chdir(repo)
-    monkeypatch.setenv("AGENT_LOGGER_TRUST_REPO_CONFIG", "1")
+    monkeypatch.setenv("AGENT_LOGGER_TRUST_REPO_CONFIG", str(repo.resolve()))
 
     assert find_repo_config() == repo / ".agent-logger.yaml"
+
+
+@pytest.mark.no_autotrust
+def test_repo_config_trust_override_env_does_not_bypass_other_checkouts(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Trusting one checkout via the override must not trust a DIFFERENT
+    unregistered checkout probed in the same process."""
+    trusted = tmp_path / "trusted"
+    _init_git_repo(trusted, remote=None, branch="main")
+    other = tmp_path / "other"
+    _init_git_repo(other, remote=None, branch="main")
+    (other / ".agent-logger.yaml").write_text(
+        "log:\n  path_template: logs/{title}.md\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_LOGGER_TRUST_REPO_CONFIG", str(trusted.resolve()))
+
+    assert find_repo_config(other) is None
 
 
 @pytest.mark.parametrize(

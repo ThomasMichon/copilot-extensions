@@ -187,8 +187,13 @@ def _git_remote_urls(root: Path) -> list[str]:
     against ALL of a checkout's remotes, not assume ``origin`` -- a
     registered checkout using a different local name would otherwise be
     silently treated as unregistered.
+
+    ``--local`` restricts the read to the checkout's own ``.git/config`` --
+    without it, ``git config`` also reads global/system configuration, so a
+    global ``remote.*.url`` matching a registered project could make a
+    checkout with no local remote at all pass the gate.
     """
-    output = _run_git(root, "config", "--get-regexp", r"^remote\..*\.url$")
+    output = _run_git(root, "config", "--local", "--get-regexp", r"^remote\..*\.url$")
     if output is None:
         return []
     urls = []
@@ -203,33 +208,64 @@ def repo_config_is_trusted(root: Path) -> bool:
     """Is ``root`` a registered project checked out on its default branch?
 
     See the module docstring above for the full threat model. Set
-    ``$AGENT_LOGGER_TRUST_REPO_CONFIG=1`` to bypass this gate for a single
-    machine after the operator has independently confirmed the checkout is
+    ``$AGENT_LOGGER_TRUST_REPO_CONFIG`` to an absolute checkout path (or an
+    ``os.pathsep``-joined list of them) to bypass this gate for exactly
+    those checkouts after the operator has independently confirmed each is
     safe (e.g. local development against an unregistered clone); this is a
     machine-local environment choice, never something a repo can set for
-    itself.
+    itself, and it is deliberately scoped to specific paths rather than a
+    global boolean -- a global bypass would also apply to every OTHER
+    checkout probed in the same process (e.g. every adopted repo
+    ``discover_tenants`` iterates), not just the one the operator confirmed.
+
+    Fails *safe* on ambiguity: a checkout whose remotes match more than one
+    registered project with *different* default branches has no single
+    resolvable trust decision, so it is treated as untrusted rather than
+    picking whichever remote happened to be checked first.
     """
-    override = os.environ.get("AGENT_LOGGER_TRUST_REPO_CONFIG", "").strip().lower()
-    if override in {"1", "true", "yes", "on"}:
-        return True
+    override = os.environ.get("AGENT_LOGGER_TRUST_REPO_CONFIG", "").strip()
+    if override:
+        trusted_paths = {
+            Path(p).expanduser().resolve()
+            for p in override.split(os.pathsep)
+            if p.strip()
+        }
+        try:
+            resolved_root = root.resolve()
+        except OSError:
+            resolved_root = root
+        if resolved_root in trusted_paths:
+            return True
 
     remotes = _git_remote_urls(root)
     if not remotes:
-        log.debug("%s: no git remotes -- repo-local config untrusted", root)
+        log.debug("%s: no local git remotes -- repo-local config untrusted", root)
         return False
-    default_branch = None
-    for remote in remotes:
-        default_branch = _registered_default_branch(remote)
-        if default_branch is not None:
-            break
-    if default_branch is None:
+    # Collect every registered match rather than stopping at the first --
+    # a raw remote URL can carry embedded credentials, so only a count (never
+    # the URLs themselves) is ever logged.
+    default_branches = {
+        branch
+        for remote in remotes
+        if (branch := _registered_default_branch(remote)) is not None
+    }
+    if not default_branches:
         log.warning(
-            "%s: no remote (%s) is a registered agent-worktrees project -- "
-            "ignoring its repo-local config",
+            "%s: none of its %d local remote(s) is a registered agent-worktrees "
+            "project -- ignoring its repo-local config",
             root,
-            ", ".join(remotes),
+            len(remotes),
         )
         return False
+    if len(default_branches) > 1:
+        log.warning(
+            "%s: its remotes match registered projects with conflicting "
+            "default branches (%s) -- ignoring its repo-local config",
+            root,
+            ", ".join(sorted(default_branches)),
+        )
+        return False
+    (default_branch,) = default_branches
     # ``symbolic-ref`` (not ``rev-parse --abbrev-ref``) so a fresh checkout
     # with no commits yet still resolves its branch name instead of failing;
     # it still fails (fail-safe -> untrusted) on a genuinely detached HEAD.

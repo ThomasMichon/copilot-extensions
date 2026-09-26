@@ -157,7 +157,9 @@ def find_tenant_config(repo_path: Path) -> Path | None:
     A dedicated ``.agent-logger.tenant.yaml`` is searched before the shared
     ``.agent-logger.yaml``. Only a file that actually carries a ``tenant``
     mapping is returned, so a log-only ``.agent-logger.yaml`` never shadows a
-    real tenant declaration in a lower-priority file.
+    real tenant declaration in a lower-priority file. A candidate that is a
+    symlink is rejected outright -- a committed link must not let a tenant
+    declaration read arbitrary machine-local YAML from outside the checkout.
 
     Applies the same registered-project + default-branch trust gate as
     ``config.find_repo_config`` (see :func:`agent_logger.repo_trust.repo_config_is_trusted`):
@@ -169,7 +171,11 @@ def find_tenant_config(repo_path: Path) -> Path | None:
         return None
     for name in (*TENANT_CONFIG_FILENAMES, *REPO_CONFIG_FILENAMES):
         candidate = repo_path / name
-        if candidate.is_file() and isinstance(_read_yaml(candidate).get("tenant"), dict):
+        if (
+            candidate.is_file()
+            and not candidate.is_symlink()
+            and isinstance(_read_yaml(candidate).get("tenant"), dict)
+        ):
             return candidate
     return None
 
