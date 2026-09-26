@@ -8,21 +8,21 @@ the ``.copilot-extensions/agent-machines/`` requirement-package convention
 it still reads) for a **consuming** repo to declare its own desired machine
 state -- gated to specific machines, sometimes down to a
 ``machines/<machine>/`` folder keyed by the literal machine name. That
-content belongs exclusively in the repo that *consumes* the plugin (e.g. the
-facility's own private aperture-labs control repo), never in
-copilot-extensions itself: this repo is public, a package here would
-publish a real machine name/topology to the world, and -- structurally --
-copilot-extensions has no machine of its own to converge; it only ships the
-mechanism.
+content belongs exclusively in the repo that *consumes* the plugin (e.g. an
+operator's own private control repo), never in copilot-extensions itself:
+this repo is public, a package here would publish a real machine
+name/topology to the world, and -- structurally -- copilot-extensions has
+no machine of its own to converge; it only ships the mechanism.
 
-Confirmed live (2026-09-26): an agent authoring a facility fleet-update
-opt-in package almost committed it straight into copilot-extensions'
-``.copilot-extensions/agent-machines/machines/lambda-core/`` before the
-PR-open tooling's own branch-name privacy check caught the leak and the
-operator redirected the package into aperture-labs instead. This guard
-makes that redirection the enforced default for every future contributor,
-not a caught-by-luck save -- see the ``agent-machines-setup`` skill's own
-"Author a requirement package" section, which now states the same rule.
+Confirmed live (2026-09-26): an agent authoring a private facility's
+fleet-update opt-in package almost committed it straight into
+copilot-extensions' ``.copilot-extensions/agent-machines/machines/<machine>/``
+before the PR-open tooling's own branch-name privacy check caught the leak
+and the operator redirected the package into their private control repo
+instead. This guard makes that redirection the enforced default for every
+future contributor, not a caught-by-luck save -- see the
+``agent-machines-setup`` skill's own "Author a requirement package"
+section, which now states the same rule.
 
 Whole-tree, not diff-scoped: this is a structural repo-shape invariant (like
 ``check-module-size.py``), not a content-diff privacy scan -- there is

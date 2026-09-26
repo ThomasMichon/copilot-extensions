@@ -79,9 +79,10 @@ Verify:
 > to converge -- a package committed here would publish real machine
 > names/topology to the world. Put it in the repo that actually adopts the
 > pattern (e.g. your facility's own private control repo) instead. This is
-> a hard-enforced rule, not just guidance: `tools/check-no-agent-machines-
-> packages.py` (wired into CI and the pre-push hook) fails the build if any
-> of the paths below ever appear in this repo's own tree.
+> a hard-enforced rule, not just guidance:
+> `tools/check-no-agent-machines-packages.py` (wired into CI and the
+> pre-push hook) fails the build if any of the paths below ever appear in
+> this repo's own tree.
 
 A **requirement package** is one complete YAML file under either:
 
