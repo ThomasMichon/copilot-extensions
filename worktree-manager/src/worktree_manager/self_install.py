@@ -711,6 +711,15 @@ def _fetch_via_tarball(staging: Path, url: str, *, timeout: int = 180) -> None:
         # codeload extracts to a single <name>-<ref>/ top dir; find the payload.
         payload = None
         for rdir in (p for p in extract.iterdir() if p.is_dir()):
+            if rdir.is_symlink():
+                # rdir.is_dir() above already follows a symlink -- checking
+                # only payload (rdir / "worktree-manager") afterward misses
+                # THIS case: a symlinked top-level extraction dir whose own
+                # "worktree-manager" subpath is a real (non-symlink) file
+                # within the symlinked target, so payload.is_symlink() alone
+                # would be False even though the whole tree was reached via
+                # a symlinked parent.
+                raise OSError(f"extracted tarball entry {rdir} is a symlink -- refusing")
             cand = rdir / "worktree-manager"
             if (cand / "pyproject.toml").is_file():
                 payload = cand
@@ -749,6 +758,15 @@ def _fetch_via_tarball(staging: Path, url: str, *, timeout: int = 180) -> None:
         # that copied libs/ but not this file would still hit the
         # unresolved-pointer refusal.
         tool_source = payload.parent / "tools" / "materialize_main.py"
+        tools_dir = payload.parent / "tools"
+        if tools_dir.is_symlink():
+            # tool_source.is_symlink() alone misses this: if `tools/` itself
+            # is a symlink to another directory that happens to contain a
+            # real (non-symlink) materialize_main.py, tool_source itself
+            # would be a real file within that symlinked-to target -- the
+            # parent must be checked too, the same class of gap as
+            # payload/libs_source above.
+            raise OSError(f"{tools_dir} is a symlink -- refusing")
         if tool_source.is_symlink():
             raise OSError(f"{tool_source} is a symlink -- refusing")
         if tool_source.is_file():

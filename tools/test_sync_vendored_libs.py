@@ -215,6 +215,48 @@ def test_materialize_expands_pointer_copy_and_removes_pointer_file(repo: Path):
     assert not (repo / "plugins/alpha/libs/shared-lib/VENDOR_POINTER.json").exists()
 
 
+def test_materialize_refuses_a_symlinked_canonical_lib_root(repo: Path):
+    # A `libs/<lib>` link to an external tree must be caught even though
+    # canonical/src itself is a real directory within that external tree.
+    external = repo.parent / "outside-repo-lib-materialize"
+    (external / "src" / "shared_lib").mkdir(parents=True)
+    (external / "src" / "shared_lib" / "__init__.py").write_text(
+        "smuggled = True\n", encoding="utf-8"
+    )
+    (repo / "libs").mkdir(parents=True)
+    (repo / "libs/shared-lib").symlink_to(external, target_is_directory=True)
+    _pointer(repo, "alpha", "shared-lib")
+    original = (repo / "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py")
+    original.parent.mkdir(parents=True, exist_ok=True)
+    original.write_text("original stub\n", encoding="utf-8")
+
+    result = _run(repo, "--materialize")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "symlink" in result.stderr
+    # The copy's own content must be untouched -- nothing was expanded.
+    assert original.read_text() == "original stub\n"
+    assert (repo / "plugins/alpha/libs/shared-lib/VENDOR_POINTER.json").exists()
+
+
+def test_materialize_refuses_a_canonical_lib_with_no_src_directory(repo: Path):
+    # An incomplete canonical lib with no src/ at all must be refused
+    # BEFORE the copy's existing src/ is deleted with nothing to replace
+    # it -- otherwise the pointer marker would still get unlinked below as
+    # if expansion had succeeded, publishing a broken, source-less copy.
+    (repo / "libs/shared-lib").mkdir(parents=True)  # no src/ subdirectory
+    _lib_pyproject(repo, "libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+    _pointer(repo, "alpha", "shared-lib")
+    original = repo / "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py"
+    original.parent.mkdir(parents=True, exist_ok=True)
+    original.write_text("original stub\n", encoding="utf-8")
+
+    result = _run(repo, "--materialize")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "src not found" in result.stderr
+    assert original.read_text() == "original stub\n"
+    assert (repo / "plugins/alpha/libs/shared-lib/VENDOR_POINTER.json").exists()
+
+
 def test_materialize_pointer_copy_is_never_blocked_by_drift_gate(repo: Path):
     """A pointer copy has no version of its own to compare against canonical,
     so there is nothing for the "copies moved ahead" safety gate to block --

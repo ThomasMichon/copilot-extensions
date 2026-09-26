@@ -412,6 +412,111 @@ def test_fetch_via_tarball_refuses_a_symlinked_tools_materializer(tmp_path, monk
         self_install._fetch_via_tarball(staging, "https://codeload.example/fake.tar.gz")
 
 
+def test_fetch_via_tarball_refuses_a_symlinked_extraction_top_dir(tmp_path, monkeypatch):
+    """Round-10 review finding: checking only payload.is_symlink() misses a
+    symlinked TOP-LEVEL extraction dir (the codeload <hash>-<ref>/ dir)
+    whose own worktree-manager/ subpath is a real (non-symlink) file
+    within the symlinked-to target -- rdir.is_dir() already follows the
+    symlink to find it, so payload itself would never be a symlink even
+    though the whole tree was reached via a symlinked parent."""
+    import tarfile
+
+    outside = tmp_path / "outside-extraction-root"
+    (outside / "worktree-manager" / "src" / "worktree_manager").mkdir(parents=True)
+    (outside / "worktree-manager" / "src" / "worktree_manager" / "__init__.py").write_text(
+        '__version__ = "9.9.9"\n'
+    )
+    (outside / "worktree-manager" / "pyproject.toml").write_text(
+        "[project]\nname='x'\nversion='9.9.9'\n"
+    )
+
+    archive_path = tmp_path / "payload.tar.gz"
+    with tarfile.open(archive_path, "w:gz") as tf:
+        # Store the real content under a different name, then add a
+        # symlink member for the top-level dir codeload extraction expects
+        # -- exactly mirroring a tarball whose top dir is a symlink.
+        tf.add(outside, arcname="real-target")
+        link_info = tarfile.TarInfo(name="copilot-extensions-main")
+        link_info.type = tarfile.SYMTYPE
+        link_info.linkname = "real-target"
+        tf.addfile(link_info)
+
+    class _FakeResponse:
+        def __init__(self, data: bytes) -> None:
+            self._data = data
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self) -> bytes:
+            return self._data
+
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda url, timeout=None: _FakeResponse(archive_path.read_bytes()),
+    )
+
+    staging = tmp_path / "staging"
+    with pytest.raises(OSError, match="symlink"):
+        self_install._fetch_via_tarball(staging, "https://codeload.example/fake.tar.gz")
+
+
+def test_fetch_via_tarball_refuses_a_symlinked_tools_directory(tmp_path, monkeypatch):
+    """Round-10 review finding: the symlink check covered
+    tools/materialize_main.py itself but not its tools/ PARENT -- if
+    tools/ itself is a symlink to another directory containing a real
+    (non-symlink) materialize_main.py, tool_source.is_symlink() alone is
+    False even though the whole tools/ tree was reached via a symlinked
+    parent."""
+    import tarfile
+
+    archive_root = tmp_path / "archive-src"
+    top = archive_root / "copilot-extensions-main"
+    (top / "worktree-manager" / "src" / "worktree_manager").mkdir(parents=True)
+    (top / "worktree-manager" / "src" / "worktree_manager" / "__init__.py").write_text(
+        '__version__ = "9.9.9"\n'
+    )
+    (top / "worktree-manager" / "pyproject.toml").write_text(
+        "[project]\nname='x'\nversion='9.9.9'\n"
+    )
+    real_tools = archive_root / "real-tools-target"
+    real_tools.mkdir(parents=True)
+    (real_tools / "materialize_main.py").write_text(
+        "import os; os.system('echo pwned')\n"
+    )
+    (top / "tools").symlink_to(real_tools, target_is_directory=True)
+
+    archive_path = tmp_path / "payload.tar.gz"
+    with tarfile.open(archive_path, "w:gz") as tf:
+        tf.add(top, arcname="copilot-extensions-main")
+        tf.add(real_tools, arcname="real-tools-target")
+
+    class _FakeResponse:
+        def __init__(self, data: bytes) -> None:
+            self._data = data
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self) -> bytes:
+            return self._data
+
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda url, timeout=None: _FakeResponse(archive_path.read_bytes()),
+    )
+
+    staging = tmp_path / "staging"
+    with pytest.raises(OSError, match="symlink"):
+        self_install._fetch_via_tarball(staging, "https://codeload.example/fake.tar.gz")
+
+
 @pytest.mark.parametrize("repo,ref,expected", [
     ("https://github.com/ThomasMichon/copilot-extensions.git", "main",
      "https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main"

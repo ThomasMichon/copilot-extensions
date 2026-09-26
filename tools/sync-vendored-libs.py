@@ -548,6 +548,13 @@ def cmd_materialize(*, force: bool) -> int:
         canonical = LIBS_DIR / lib
         if not canonical.is_dir():
             continue
+        if canonical.is_symlink():
+            blocked.append(
+                f"{lib}: libs/{lib} is a symlink -- refusing (a canonical "
+                "lib root must be a real directory, not a link to an "
+                "external tree)"
+            )
+            continue
         real = _real_copies(paths)
         reason = None if (force or not real) else _materialize_blocked(lib, canonical, real[0])
         if reason:
@@ -567,7 +574,20 @@ def cmd_materialize(*, force: bool) -> int:
                 # stale tests/, pointer marker still present) that a retry
                 # or another consumer could observe. Validate first, mutate
                 # only once nothing here would fail.
-                src_bad = _find_symlink(canonical / "src")
+                canon_src = canonical / "src"
+                if not canon_src.is_dir():
+                    # _safe_replace_tree() removes the destination and then
+                    # silently does nothing when src is missing -- without
+                    # this check, an incomplete canonical lib with no src/
+                    # at all would delete this copy's importable source,
+                    # find nothing to replace it with, and still unlink the
+                    # pointer marker below as if expansion had succeeded,
+                    # publishing a broken copy.
+                    raise SystemExit(
+                        f"{canonical.name}/src not found -- refusing "
+                        "(canonical lib source must exist)"
+                    )
+                src_bad = _find_symlink(canon_src)
                 if src_bad is not None:
                     where = f"{canonical.name}/src" if src_bad == "." else f"{canonical.name}/src/{src_bad}"
                     raise SystemExit(
