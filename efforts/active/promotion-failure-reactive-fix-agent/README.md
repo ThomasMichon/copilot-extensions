@@ -153,6 +153,48 @@ fixes."
       on the latest occurrence comment (or the issue's own filing time if
       none yet).
 
+### Phase 1.5 — Live validation (real observation window, prerequisite for Phase 2)
+- [ ] **Monitor real `validate-and-promote.yml` runs for a naturally-
+      occurring red `full`/`worktree-manager`/`guards-full-sweep` failure**
+      (this repo has enough concurrent PR/promotion activity that one is
+      likely within hours, not days). When one occurs:
+      - [ ] Confirm `report-failure` actually ran (not skipped) and its
+            conclusion.
+      - [ ] Confirm exactly one issue was filed (or an existing one
+            commented, if a repeat), labeled `ci-failure-signature`, with
+            an accurate signature, correct run link/SHA, and a genuinely
+            useful log excerpt — not truncated/garbled.
+      - [ ] Confirm no duplicate issue was filed for the same signature on
+            a second occurrence within the 6h window (only a real test of
+            this, if the same failure recurs naturally or via the probe
+            below).
+- [ ] **If no natural red run occurs within a reasonable observation
+      window (a few hours), inject one deliberately, carefully, and
+      revert promptly:**
+      - [ ] Add ONE new, obviously-synthetic, clearly-commented failing
+            test to a single low-traffic plugin's suite (e.g.
+            `assert False, "Deliberate Phase 1 validation probe for
+            promotion-failure-reactive-fix-agent -- safe to delete, see
+            efforts/active/promotion-failure-reactive-fix-agent"`) — never
+            touch existing test logic, never something with side effects,
+            never `.github/workflows/**`.
+      - [ ] Land it via the normal PR flow to `dev` like any other change
+            (small, honest PR description naming this as a deliberate,
+            temporary probe for this effort — never disguised as a real
+            bug).
+      - [ ] Watch the resulting `full - <plugin>` failure and confirm
+            `report-failure` behaves exactly as in the natural-occurrence
+            checklist above.
+      - [ ] **Revert immediately once confirmed** (a follow-up PR deleting
+            the probe test) — this deliberately jams every pending
+            promotion for the observation window, the exact cost this
+            whole effort exists to shorten, so keep that window as short
+            as the observation genuinely requires and never longer.
+      - [ ] Note in the Journal whether the resulting issue/comment was
+            left in place (as evidence) or closed once confirmed working.
+- [ ] Record findings (false positives, dedup accuracy, issue quality)
+      here before treating Phase 1 as proven and touching Phase 2's gate.
+
 ### Phase 2 — Wire the reactive fix attempt (the actual "attempt a fix")
 - [ ] **Gate (blocks the rest of this phase):** resolve the Vision
       reconciliation noted in the header above — decide whether this
@@ -627,3 +669,24 @@ _Pending._
   manual dispatch (it exists to react automatically to real validation
   runs), so the fix is removing the path entirely rather than trying to
   defend it. No Python change this round, workflow-only.
+- **PR #3746 merged to `dev`, `report-failure` bootstrapped onto `main`
+  via workflows-only PR #3776 (main source gate passed cleanly).** Phase
+  1 is live end-to-end. Confirmed via the pipeline's own subsequent runs
+  that the new job is picked up correctly.
+
+### 2026-09-26 — Next: live validation (Phase 1.5)
+- Operator: "let's monitor, and potentially cause a careful build/test
+  break somehow. Inevitably one will go in on its own." Added a new
+  Phase 1.5 to the Plan above: monitor real `validate-and-promote.yml`
+  runs for a naturally-occurring red build first (this repo has enough
+  concurrent activity that one is likely soon); only if none occurs
+  within a reasonable window, deliberately inject one small, obviously-
+  synthetic, clearly-labeled failing test via the normal PR flow, watch
+  `report-failure` react, verify issue quality, then revert **promptly**
+  (a follow-up PR) — the deliberate probe still jams every pending
+  promotion for its whole window, the exact cost this effort exists to
+  shorten, so that window must stay as short as the observation
+  genuinely requires.
+- Not yet executed — this is the durable plan for whichever session
+  picks up the monitoring next (a recurring scheduled check, or a fresh
+  session resuming this file).
