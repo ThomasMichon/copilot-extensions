@@ -19,6 +19,14 @@ or ``mark_resumed`` (embedded in a bigger resume flow) -- an operator-invoked
 in as ``session_id`` -- reading it here would read the *daemon's* environment
 when this verb runs via the resident daemon, not the CLI invocation's, which
 would silently break the once-per-session ``status_reported`` bookkeeping.
+
+**The disposition-history sidecar is explicitly scoped, never ambient.**
+``tracking.set_disposition`` is passed ``tracking_path=yaml_path.parent``
+(this verb's own resolved record directory) rather than relying on its
+default ``cfg.tracking_dir()`` fallback -- the daemon process's own ambient
+active project need not match the project the dispatching CLI call actually
+targets, and an ambient-scoped write would silently corrupt a *different*
+project's disposition-history sidecar (2026-09-26 PR review finding).
 """
 
 from __future__ import annotations
@@ -66,6 +74,7 @@ def apply_status_disposition(args: dict) -> dict:
             follow_up=follow_up,
             session_id=session_id,
             save=False,
+            tracking_path=yaml_path.parent,
         )
         tracking.save_record(record)
         # Stage 5 (status_reported): once per session_id, held under the

@@ -146,6 +146,31 @@ def test_status_reported_not_emitted_without_session_id(record_path):
     assert events == []
 
 
+def test_history_sidecar_targets_the_record_own_directory_not_ambient_cwd(
+    record_path, tmp_path, monkeypatch
+):
+    """2026-09-26 PR review finding: the verb may run inside the resident
+    daemon process, whose own ambient active project need not match the
+    project the dispatching CLI call actually targets. An ambient-scoped
+    ``cfg.tracking_dir()`` history write would silently corrupt a
+    *different* project's sidecar. Points the ambient project somewhere
+    else entirely and proves the history entry still lands beside
+    ``record_path``, never in the ambient directory."""
+    ambient_dir = tmp_path / "some-other-projects-tracking-dir"
+    ambient_dir.mkdir()
+    monkeypatch.setattr("agent_worktrees.config.tracking_dir", lambda: ambient_dir)
+
+    tracking_disposition_write.apply_status_disposition(
+        {"worktree_id": "wt-disp", "yaml_path": str(record_path), "summary": "scoped write"}
+    )
+
+    own_history = record_path.parent / "wt-disp.history.jsonl"
+    ambient_history = ambient_dir / "wt-disp.history.jsonl"
+    assert own_history.exists()
+    assert "scoped write" in own_history.read_text(encoding="utf-8")
+    assert not ambient_history.exists()
+
+
 def test_dispatch_reaches_the_verb_through_a_live_daemon(record_path):
     """End-to-end: unlike the direct-fallback path already covered by
     ``test_status_write.py``, this proves ``tracking_write.dispatch`` reaches
