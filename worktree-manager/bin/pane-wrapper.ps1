@@ -293,10 +293,15 @@ if (
 ) {
     try {
         $managerRoot = Split-Path -Parent $PSScriptRoot
-        & uv run --quiet --project $managerRoot -m worktree_manager `
-            mux-daemon remove `
-            "--project=$awProject" `
-            "--worktree-id=$awWt" *> $null
+        # Dispatch detached (real-bug follow-up to #3825): this is
+        # teardown, not attach, but blocking the pane's own exit on the
+        # same tens-of-seconds-worst-case CLI edge delays it for no
+        # benefit.
+        Start-Process -FilePath 'uv' -ArgumentList @(
+            'run', '--quiet', '--project', $managerRoot,
+            '-m', 'worktree_manager', 'mux-daemon', 'remove',
+            "--project=$awProject", "--worktree-id=$awWt"
+        ) -WindowStyle Hidden -ErrorAction Stop | Out-Null
     } catch {}
 }
 
