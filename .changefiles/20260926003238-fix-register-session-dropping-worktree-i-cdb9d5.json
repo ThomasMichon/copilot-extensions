@@ -1,9 +1,0 @@
-{
-  "comment": "Fix register_session() dropping --worktree-id whenever --cwd was known, causing delegate/child worktrees to undercount turns (dotfiles#458).",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}
