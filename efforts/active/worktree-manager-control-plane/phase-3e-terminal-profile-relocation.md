@@ -10,8 +10,9 @@
   selection into real terminal-app fragments) — a **separate** capability
   from Mux/AHP session mechanics (Phase 3b), sharing only the general
   "terminal handling leaves agent-worktrees" direction.
-- **Status:** Planned — this doc is Phase 3e's first checkbox (the reviewed
-  migration plan); no code has moved yet.
+- **Status:** Done — all 7 ordered implementation steps below are landed
+  (Step 6, the CLI-verb/legacy-Picker cutover, via PR
+  [#3626](https://github.com/ThomasMichon/copilot-extensions/pull/3626)).
 
 ## Why this slice, and why it's harder than it first looked
 
@@ -242,7 +243,7 @@ rewrite is a separate, already-existing migration concern that moves with
      absent, unhealthy, or too old. Followed Phase 3b Sub-slice 2a's
      present-or-fallback shape exactly.
    - [x] **5c. Live-machine validation trial.** **Done, operator-supervised,
-     on tmichon-book2 (per operator direction: "repoint and trial now").**
+     on the operator's machine (per operator direction: "repoint and trial now").**
      Sequence: (1) dry-run preview (`terminal-fragment dotfiles --explain`
      / `--deploy`, no `--live`) proved worktree-manager's plain fragment
      output and deploy plan were byte-identical (same 14 profile GUIDs) to
