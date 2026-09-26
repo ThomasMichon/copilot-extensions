@@ -435,10 +435,10 @@ parallelizable across worktrees.
       icon-table completeness) -- the field-computation and navigation-
       gating tests they sat alongside are untouched.
 
-### Phase 6 — SESS/TURNS column on LIVE rows
-- [ ] Add a combined `SESS/TURNS` (or equivalent) column: total session
+### Phase 6 — SESS/TURNS column on LIVE rows (Done 2026-09-25)
+- [x] Add a combined `SESS/TURNS` (or equivalent) column: total session
       count for the worktree, and the current session's turn number.
-- [ ] Fix delegate/child worktrees incorrectly showing 0 turns
+- [x] Fix delegate/child worktrees incorrectly showing 0 turns
       (dotfiles#458) as part of this column's data path, since it is the
       same undercount this column would otherwise inherit.
 
@@ -769,5 +769,76 @@ reviewed-plan PR per the standard effort review gate before Phase 1 begins._
 - **Next up: Phase 6** — combined SESS/TURNS column on LIVE rows, plus
   fixing delegate/child worktrees incorrectly showing 0 turns
   (dotfiles#458). Not yet started.
+
+### Phase 6 — SESS/TURNS column on LIVE rows (Done 2026-09-25)
+- **SESS/TURNS column:** `derive._sess_turns(w)` renders
+  `"<session_count>/<turn_count>"` (e.g. `"3/47"`), falling back to `"-"`
+  for the session half when `session_count` is absent (a fixture, or a
+  remote too old to report it) rather than fabricating a count -- the turn
+  half always renders. Wired into `norm()`'s row dict as `sess_turns`
+  alongside the existing `turns`/`session_count` keys (kept, unchanged, for
+  back-compat -- `engine_dialogs.py`'s detail lines still read `turns`
+  directly). `ACTIVE_SPECS` (LIVE rows) gains a new `sess_turns` column
+  (header `SESS/T`, width 7, right-aligned, drop-priority 9 -- least
+  essential of the LIVE-row columns); `LIST_SPECS`'s old standalone `t`
+  turns-only column is replaced in place by the same `sess_turns` column
+  (same drop-priority 8 it had).
+- **dotfiles#458 (delegate/child 0-turns undercount) -- root-caused and
+  fixed:** the actual bug was in `agent_bridge.worktree_lineage
+  .register_session()`, NOT in `agent_worktrees.sessions.scan_sessions_fast`
+  (the registry-enrichment path investigated last slice, which turned out
+  to be working as designed). `register_session()` built its CLI argv as an
+  **either/or**: whenever `worktree_dir` (`target.cwd`) was truthy it sent
+  *only* `--cwd`, silently dropping the already-resolved, always-reliable
+  `--worktree-id` (`target.worktree_id`) it also had in hand. `register
+  -session`'s own docstring claim that it "does not resolve a bare
+  --worktree-id" was stale/copy-pasted from a *different* command
+  (`session-role`'s own docstring genuinely says that) -- `register-session`
+  has always accepted and used `--worktree-id` directly
+  (`cmd_register_session`'s own `--worktree-id` help text: "resolved from
+  --cwd when omitted", implying the reverse is true too). So every local/ACP
+  session registration for a worktree with a known `cwd` fell back entirely
+  on `register-session`'s own fragile cwd-based inference chain
+  (`_activate_project_for_path`'s git-toplevel + reverse-project-lookup,
+  then `tracking.find_worktree_id_by_cwd`'s path-prefix match against every
+  tracked `worktree_path`) -- any one of which can silently fail for a
+  delegate/child worktree (a path-normalization mismatch, an unresolvable
+  project at the time the subprocess's cwd was set, etc.), fail-open, with
+  no error surfaced. Fixed by always passing **both** flags when both are
+  known: `--worktree-id` first (so a delegate/child registration bypasses
+  the fragile cwd chain entirely and goes straight to the correct project
+  via `_activate_project_for_worktree_id`), `--cwd` still included as
+  `register-session`'s own existing fallback. `cmd_register_session` itself
+  needed no change -- passing an explicit `--worktree-id` already short-
+  circuits its cwd-resolution branch, and its existing
+  `if not cfg.active_project(): _activate_project_for_worktree_id(wt_id)`
+  guard already recovers the right project whenever the subprocess's own
+  CWD-based startup resolution left no project active (the common failure
+  shape for a session-host-mode local dispatch whose OS-level cwd doesn't
+  resolve to any adopted project).
+- Updated the one existing argv-shape test
+  (`test_register_session_argv` in `test_worktree_lineage.py`) to assert
+  both flags are now sent together; the no-cwd fallback test
+  (`test_register_session_argv_no_dir_fallback`) was already correct and
+  untouched. New test: `test_sess_turns_combines_session_count_and_turn
+  _count` in `test_picker_tui.py`, alongside the existing `_sessionless`
+  coverage it mirrors.
+- Golden screenshots regenerated (`AGENT_WORKTREES_UPDATE_GOLDENS=1`) for
+  all 7 affected goldens (the `T` -> `SESS/T` header rename and `N` ->
+  `-/N` cell format) -- diffs are exactly the intended column change, no
+  incidental drift.
+- Full suites: `agent-bridge/tests/test_worktree_lineage.py` 15/15;
+  `agent-worktrees/tests/test_register_session.py` 44/44 (unchanged --
+  confirms `cmd_register_session` itself needed no edit); worktree-manager
+  `tests/production_picker/` 749 passed/1 skipped (up from 741/1; +7 tests
+  net, some retired-column assertions folded into new ones, some added).
+  A full-repo `agent-bridge`/`agent-worktrees` suite run was also started
+  for extra safety beyond the targeted files above, but both are broad,
+  long-running suites (tens of minutes) unrelated to this change's actual
+  surface (a single CLI-argv construction + a column/derive addition); cut
+  short in favor of the targeted, directly-relevant runs above once those
+  were green, rather than blocking on unrelated slow coverage.
+- **Next up: Phase 7** — session/handoff-head mismatch warning + Sessions
+  sub-menu. Not yet started.
 
 
