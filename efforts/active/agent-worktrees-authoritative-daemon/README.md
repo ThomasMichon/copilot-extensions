@@ -22,6 +22,19 @@
   same resident-daemon precedent (`classify_daemon.py`,
   `worktree_status_daemon.py`, `work_coalescing_singleton`) as its starting
   infrastructure rather than building a third daemon.
+  `module-componentization-discipline`
+  (`efforts/active/module-componentization-discipline/README.md`) — has
+  already split `tracking.py`'s write surface into `tracking_claims.py` /
+  `tracking_lifecycle.py` / `tracking_session_registry.py`; Phase 2's
+  mutation-verb enumeration targets those modules' current boundaries (see
+  Plan's resolved open questions). No fork of that split is planned here.
+  `worktree-manager-control-plane`
+  (`efforts/active/worktree-manager-control-plane/README.md`), Sub-slice 3
+  — relocates only the resident status-monitor's **mux-presentation** half
+  to a companion daemon; that effort's own text keeps "accumulating/
+  tracking session status" (this effort's exact scope) in agent-worktrees.
+  Complementary, not colliding — see Plan's resolved open questions for the
+  landing-order note.
 - **Umbrella issue:** [#3761](https://github.com/ThomasMichon/copilot-extensions/issues/3761)
 - **Sub-issues:** [#3751](https://github.com/ThomasMichon/copilot-extensions/issues/3751)
   (the CPU-pinning bug whose diagnosis surfaced this direction; fixed in
@@ -207,42 +220,101 @@ existing read-only accessors (`load_record_by_id`, `find_worktree_id_by_cwd`,
 consistent with today's actual (all read-only) usage found in the Context
 survey above.
 
-#### Open questions (must resolve before Phase 2 starts)
+#### Open questions — RESOLVED 2026-09-26 (operator answers, verbatim in Journal)
 
-- [ ] **What does a write do when no daemon is reachable and one cannot be
-      booted on demand (the boot-on-demand path itself fails)?** Candidates:
-      (a) block and retry with a bounded timeout, surfacing a clear "no
-      authority reachable" error rather than silently degrading to a direct
-      write; (b) a narrowly-scoped, explicitly-logged direct-write
-      fallback strictly for this failure mode, accepted as a documented,
-      rare exception to `no-writer-bypasses-the-daemon` rather than a silent
-      violation of it. This is a real design tradeoff (availability vs. the
-      single-writer guarantee) the operator should decide, not something
-      to default silently.
-- [ ] **Multi-host / multi-machine scope.** The accelerator's daemon is
-      resident **per host** — a worktree checked out on one machine has its
-      own daemon. Does this effort's authority claim extend across machines
-      (e.g. two machines sharing a state root), or does it stay strictly
-      per-host like the accelerator it extends? Needs an explicit answer
-      before Phase 2's wire contract is finalized.
-- [ ] **Sequencing vs. other in-flight agent-worktrees work.** Confirm this
-      does not collide with other active efforts touching `tracking.py` or
-      the resident daemon (check `efforts/active/` for concurrent drivers
-      before Phase 2 starts cutting code).
+- [x] **Write fallback when no daemon is reachable:** resolved as an
+      **internal, import-based fallback** — a write with no daemon reachable
+      (including a failed boot-on-demand attempt) runs the **exact same
+      underlying write function** the daemon's own request handler would
+      have called, invoked directly, in-process — never a second, forked
+      implementation that could drift from what the daemon enforces. The
+      bypass is **always explicitly logged**, so it is visible and
+      reconcilable after the fact, never a silent side door. This resolves
+      the availability-vs.-single-writer tradeoff without picking a hard
+      block: a mutation is never refused merely because the daemon is
+      briefly unreachable, and the log gives a durable trail of every time
+      that happened.
+- [x] **Multi-host / multi-machine scope:** resolved as **strictly
+      per-host** — unchanged from the accelerator's existing "exactly one
+      [daemon] per host" guarantee. Cross-machine reads/writes are **not** a
+      cross-host daemon protocol: they route to the *other* machine's own
+      `agent-worktrees` CLI (over whatever transport already reaches that
+      host — e.g. the facility's own SSH/agent-bridge conventions in an
+      adopting repo), which then talks to *its own* local daemon exactly as
+      a same-host caller would. Authority recurses per-host; it never
+      widens to a shared cross-host authority.
+- [x] **Sequencing vs. other in-flight work:** resolved as **reconcile, and
+      ideally consolidate unfinished work** rather than land in parallel
+      unaware. Concurrent-effort survey (this session):
+      - **`module-componentization-discipline`** (Active) has already split
+        `tracking.py`'s write surface into `tracking_claims.py` (claim/
+        follow-up/orphanage ledger), `tracking_lifecycle.py` (asserted
+        head/handoff/create primitives), and `tracking_session_registry.py`
+        (hook/session-registry + repo-freshness helpers), leaving
+        `tracking.py` itself as "the persistence-heavy core: `WorktreeRecord`,
+        YAML load/save/merge, locking/stamp-queue machinery." **No
+        collision** — this is complementary, and genuinely useful prior
+        work: Phase 2's named mutation verbs should enumerate against these
+        already-split modules' functions, not a monolithic `tracking.py`,
+        and Phase 2 should start once that module's own remaining split
+        work (if any is still in flight) has landed, so the daemon wraps
+        stable module boundaries rather than a moving target. Coordinate by
+        reading that effort's own Journal before Phase 2 begins; do not
+        fork a second `tracking.py`-splitting effort here.
+      - **`worktree-manager-control-plane`** (Active), Sub-slice 3 (Step 1
+        landed 2026-09-25, Steps 2-6 not yet implemented,
+        [`phase-3b-substatus-monitor-relocation.md`](../worktree-manager-control-plane/phase-3b-substatus-monitor-relocation.md))
+        relocates the resident status-monitor's **mux-presentation** half
+        (the worktree⇄mux pane mapping, painting the status bar) into a
+        companion daemon owned by Worktree Manager. Its own text is explicit
+        that "agent-worktrees keeps sole ownership of accumulating/tracking
+        session status" — i.e. exactly the write-authority state surface
+        this effort claims. **No collision, but a real dependency worth
+        watching**: both efforts touch `cmd_status_monitor`'s wiring
+        (rendezvous fields, `_monitor_sweep`). Phase 2 should land its new
+        `tracking_write` wire kind additively, the same way that effort's
+        own Step 1 (`mux_link.py`'s `ManagedMuxCache`) landed additively
+        alongside the existing `classify`/`worktree_status` kinds, and
+        should check that effort's latest Journal entry immediately before
+        touching `cmd_status_monitor` to avoid a stale rebase.
+      - **`agent-worktrees-external-status-accelerator`** and
+        **`worktrees-pivot-ux-overhaul`** — already accounted for in this
+        effort's header (`Related`) and Context above; no further
+        reconciliation needed (read-only consumers, unaffected by adding a
+        write path).
+      - No other active effort was found touching `tracking.py`'s write
+        functions or the resident daemon's core sweep/publish loop.
 
-### Phase 2 — Daemon mutation-verb plumbing _(not started; scope firms up after Phase 1 review)_
-- [ ] Add the `tracking_write` wire kind, mirroring `worktree_status_daemon.py`'s
+### Phase 2 — Daemon mutation-verb plumbing _(not started; unblocked by Phase 1's resolved open questions)_
+- [ ] Confirm `module-componentization-discipline`'s `tracking.py` split is
+      at a stable resting point (or coordinate landing alongside it) before
+      enumerating Phase 2's mutation verbs against `tracking_claims.py` /
+      `tracking_lifecycle.py` / `tracking_session_registry.py` / the
+      remaining `tracking.py` persistence core.
+  - [ ] Add the `tracking_write` wire kind, mirroring `worktree_status_daemon.py`'s
       structure (rendezvous fields, `start_server`, a `_with_boot` client
-      helper).
+      helper), landed additively alongside the existing `classify`/
+      `worktree_status`/`mux_link` kinds — never replacing or restructuring
+      those in the same change.
 - [ ] In-memory record store, warm-restored from YAML on daemon boot.
+- [ ] The daemon-unreachable fallback: a small shared helper each migrated
+      write function calls into on daemon-unreachable — `run_direct(fn,
+      *args, **kwargs)`-shaped, so the logging obligation lives in one place
+      rather than being hand-repeated at every call site — invoking the
+      exact function the daemon's own handler would have called, then
+      logging the bypass (worktree id, function name, reason the daemon was
+      unreachable, timestamp).
 - [ ] First migrated verb (smallest, most contained write — likely
       `register_session` or a single disposition setter) as the end-to-end
       proof, mirroring how the accelerator's own Phase 4 proved its design
       with one in-process reference consumer before wider rollout.
 
-### Phase 3 — Migrate remaining `tracking.py` write call sites _(not started)_
+### Phase 3 — Migrate remaining write call sites _(not started)_
 - [ ] One call site (or a closely related cluster) at a time, each its own
-      reviewable PR, per this repo's serial-single-writer convention.
+      reviewable PR, per this repo's serial-single-writer convention —
+      across whichever of `tracking.py` / `tracking_claims.py` /
+      `tracking_lifecycle.py` / `tracking_session_registry.py` currently
+      owns each function.
 
 ### Phase 4 — Sibling-plugin guard + audit _(not started)_
 - [ ] Add the CI guard described above.
@@ -277,10 +349,40 @@ survey above.
 
 ## Proposal
 
-_Pending Phase 1 review — see the "Proposed design" and "Open questions"
-subsections under Phase 1 above._
+Phase 1's design and all three open questions are now resolved (see Plan
+above). Pending: this repo's automated PR review on the resolution PR, and
+confirming `module-componentization-discipline`'s `tracking.py` split has
+reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-09-26 — Open questions resolved; concurrent-effort survey done
+Operator answers, verbatim:
+
+1. "Internal import-based fallback to run the correct direct-write
+   (reusing same code, no fork), with log"
+2. "Strictly per host. Cross-machine reads/writes go to other machine's
+   CLI, which then wraps its daemon"
+3. "We'll have to reconcile. Ideally consolidate unfinished work"
+
+Resolved the design accordingly (see Plan's *Open questions — RESOLVED*
+above) and amended the vision's *The resident daemon as the authoritative
+live-state database* concept and *no-writer-bypasses-the-daemon* behavior
+to match — the prior same-day vision entry had speculatively asserted a
+read-only-only degrade for writes, which answer (1) explicitly overrides.
+
+Ran the concurrent-effort survey answer (3) asked for: grepped
+`efforts/active/*/README.md` for `tracking.py`/daemon/status-monitor
+references, found 14 incidental hits, and read the real candidates in full.
+Two are genuinely relevant and now cross-linked (both header `Related` and
+Plan): `module-componentization-discipline` (already split `tracking.py`'s
+write surface into `tracking_claims.py`/`tracking_lifecycle.py`/
+`tracking_session_registry.py` — complementary, Phase 2 targets those
+boundaries) and `worktree-manager-control-plane`'s Sub-slice 3 (relocates
+only the mux-presentation half of the status-monitor; that effort's own
+text explicitly keeps state-tracking authority in agent-worktrees). No
+actual duplication found — nothing to merge, only to sequence and
+cross-reference, which is now done.
 
 ### 2026-09-26 — Effort created; vision amended
 - Operator direction (this session, captured verbatim in Context above):
