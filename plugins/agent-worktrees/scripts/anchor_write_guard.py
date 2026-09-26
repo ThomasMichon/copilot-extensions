@@ -163,7 +163,16 @@ _GIT_WRITE_SUB = re.compile(
 # always-available equivalent. ``cross_repo_guard`` keeps its own
 # independent copy of this list (different guard, different repo-delegation
 # reasoning) and is unaffected either way.
-_GIT_PULL_SUB = re.compile(r"\bpull\b", re.IGNORECASE)
+#
+# The exemption must identify the actual git SUBCOMMAND, not merely search
+# the segment for the word ``pull`` -- a bare substring search would
+# misclassify ``git commit -m 'pull --ff-only'`` (a real commit, quoting
+# unrelated text) as an exempt pull. This anchors on ``git`` (+ optional
+# ``-C <path>``) followed immediately by the subcommand word.
+_GIT_SUBCOMMAND = re.compile(
+    r"""^\s*["']?git\b(?:\s+-C\s+(?:"[^"]*"|'[^']*'|\S+))?\s+([A-Za-z][\w-]*)""",
+    re.IGNORECASE,
+)
 _GIT_FF_ONLY_FLAG = re.compile(r"--ff-only\b", re.IGNORECASE)
 # A ``-C`` (git change-directory) flag anywhere in a git segment.
 _GIT_DASH_C_FLAG = re.compile(r"(?:^|\s)-C\b", re.IGNORECASE)
@@ -499,10 +508,14 @@ def _shell_hit(cmd: str, cwd: str, anchors: list[dict]) -> dict | None:
         at_write_cmd = bool(_WRITE_CMD_START.match(eff))
         is_git = bool(_GIT_START.match(eff))
         git_write = is_git and bool(_GIT_WRITE_SUB.search(seg))
-        # A ``pull`` invocation is exempt from ``git_write`` ONLY when it
-        # explicitly carries ``--ff-only`` -- see ``_GIT_PULL_SUB``'s comment.
-        # Any other write-sub verb (or a pull lacking that flag) is untouched.
-        if git_write and _GIT_PULL_SUB.search(seg) and _GIT_FF_ONLY_FLAG.search(seg):
+        # A ``pull`` invocation is exempt from ``git_write`` ONLY when its
+        # actual SUBCOMMAND (not merely the word ``pull`` anywhere in the
+        # segment -- see ``_GIT_SUBCOMMAND``'s comment) is ``pull`` and the
+        # segment also explicitly carries ``--ff-only``. Any other write-sub
+        # verb (or a pull lacking that flag) is untouched.
+        subcmd = _GIT_SUBCOMMAND.match(eff)
+        is_pull = bool(subcmd and subcmd.group(1).lower() == "pull")
+        if git_write and is_pull and _GIT_FF_ONLY_FLAG.search(seg):
             git_write = False
         has_dash_c = is_git and bool(_GIT_DASH_C_FLAG.search(seg))
         for a in anchors:

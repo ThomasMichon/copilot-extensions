@@ -193,6 +193,20 @@ def test_shell_git_bare_pull_without_ff_only_from_anchor_cwd_denies(
     assert d and d["permissionDecision"] == "deny"
 
 
+def test_shell_git_commit_with_pull_ff_only_in_message_denies(
+    tmp_path, anchor,
+):
+    """The ``--ff-only`` exemption must key off the actual git SUBCOMMAND,
+    not a bare substring search -- a ``commit`` whose message happens to
+    contain the literal text ``pull --ff-only`` is still a genuine commit
+    and must still deny."""
+    gp = anchor[0]["path"]
+    d = guard.decide(
+        _shell("git commit -m 'pull --ff-only'", gp),
+        env={}, home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
 def test_shell_git_commit_still_denies_alongside_pull_exemption(
     tmp_path, anchor,
 ):
