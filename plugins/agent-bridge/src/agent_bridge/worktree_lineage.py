@@ -114,17 +114,25 @@ def register_session(
 
     ``session_id`` is the **ACP** session id -- the durable Copilot session id
     that matches ``~/.copilot/session-state`` and agent-worktrees tracking.
-    Resolution is by ``--cwd``/cwd (the worktree checkout) because
-    ``register-session`` does not resolve a bare ``--worktree-id``. Returns True
-    on a zero-exit write, else False.
+
+    Passes **both** ``--worktree-id`` (already resolved by the caller) and
+    ``--cwd`` (the worktree checkout) when both are known: ``--worktree-id``
+    lets ``register-session`` bypass its fragile cwd-based project/worktree
+    inference entirely (a git-toplevel + reverse-project-lookup + path-prefix
+    match against every tracked ``worktree_path`` -- any one of which can fail
+    for a delegate/child worktree, e.g. a path-normalization mismatch or an
+    unresolvable project at the time this subprocess's cwd was set), while
+    ``--cwd`` is kept as the fallback ``register-session`` itself uses if the
+    id ever fails to resolve to a project (dotfiles#458: this used to be
+    an either/or, silently dropping the already-known-correct worktree_id
+    whenever ``worktree_dir`` was set, which is the common local/ACP case).
+    Returns True on a zero-exit write, else False.
     """
     if not worktree_id or not session_id:
         return False
-    args = ["register-session", "--session-id", session_id]
+    args = ["register-session", "--session-id", session_id, "--worktree-id", worktree_id]
     if worktree_dir:
         args += ["--cwd", worktree_dir]
-    else:
-        args += ["--worktree-id", worktree_id]
     if pid is not None:
         args += ["--pid", str(pid)]
     if pane:

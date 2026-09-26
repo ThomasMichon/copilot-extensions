@@ -159,6 +159,80 @@ def test_shell_read_into_anchor_allows(tmp_path, anchor):
                         env={}, home=tmp_path, anchors=anchor) is None
 
 
+def test_shell_git_pull_ff_only_with_dashC_into_anchor_allows(tmp_path, anchor):
+    """``git pull --ff-only`` is exempt: git structurally refuses instead of
+    ever creating a merge commit or applying ``pull.rebase``, so it can
+    never introduce agent-authored content."""
+    gp = anchor[0]["path"]
+    assert guard.decide(
+        _shell(f'git -C "{gp}" pull --ff-only origin main', tmp_path),
+        env={}, home=tmp_path, anchors=anchor) is None
+
+
+def test_shell_git_pull_ff_only_from_anchor_cwd_allows(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    assert guard.decide(_shell("git pull origin main --ff-only", gp),
+                        env={}, home=tmp_path, anchors=anchor) is None
+
+
+def test_shell_git_fetch_from_anchor_cwd_allows(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    assert guard.decide(_shell("git fetch origin", gp),
+                        env={}, home=tmp_path, anchors=anchor) is None
+
+
+def test_shell_git_bare_pull_without_ff_only_from_anchor_cwd_denies(
+    tmp_path, anchor,
+):
+    """A bare ``git pull`` (no ``--ff-only``) is NOT exempt -- on a diverged
+    anchor its default merge could create a genuine new local commit, so it
+    stays denied exactly like every other git-write verb."""
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell("git pull origin main", gp), env={},
+                     home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_git_pull_with_ff_only_substring_in_branch_name_denies(
+    tmp_path, anchor,
+):
+    """The ``--ff-only`` match must require a standalone argument, not a
+    substring anywhere in the segment -- a branch name that merely CONTAINS
+    the literal text ``--ff-only`` (no real flag passed) is still an unsafe
+    bare pull and must still deny."""
+    gp = anchor[0]["path"]
+    d = guard.decide(
+        _shell("git pull origin release/--ff-only", gp),
+        env={}, home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_git_commit_with_pull_ff_only_in_message_denies(
+    tmp_path, anchor,
+):
+    """The ``--ff-only`` exemption must key off the actual git SUBCOMMAND,
+    not a bare substring search -- a ``commit`` whose message happens to
+    contain the literal text ``pull --ff-only`` is still a genuine commit
+    and must still deny."""
+    gp = anchor[0]["path"]
+    d = guard.decide(
+        _shell("git commit -m 'pull --ff-only'", gp),
+        env={}, home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_git_commit_still_denies_alongside_pull_exemption(
+    tmp_path, anchor,
+):
+    """The ``pull --ff-only`` exemption must not have loosened any OTHER git
+    mutation verb -- ``commit`` (and by the same list, merge/rebase/
+    checkout/etc.) still denies."""
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell("git commit -m x", gp), env={}, home=tmp_path,
+                     anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
 # -- cwd-scoped git mutation (no path named) -- the incident-class case --------
 
 def test_shell_git_commit_from_anchor_cwd_denies(tmp_path, anchor):

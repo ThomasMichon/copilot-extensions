@@ -86,8 +86,12 @@ def test_register_session_argv(monkeypatch):
     ok = wl.register_session("wt-a", "acp-1", pid=42, worktree_dir="/wt/a")
     assert ok is True
     argv = captured["argv"]
+    # dotfiles#458: both --worktree-id and --cwd are always passed together
+    # when known, so register-session can use the already-resolved id
+    # directly instead of depending solely on fragile cwd-based inference.
     assert argv[1:] == [
-        "register-session", "--session-id", "acp-1", "--cwd", "/wt/a", "--pid", "42",
+        "register-session", "--session-id", "acp-1", "--worktree-id", "wt-a",
+        "--cwd", "/wt/a", "--pid", "42",
     ]
 
 
