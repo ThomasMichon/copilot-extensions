@@ -6,12 +6,12 @@
 
    + New worktree…     ✕ Clean     ⟳ Sync     creates on anomalous-potato Win  (this host)
 
-  ID     STATE      AGE    LIVE   T     CLAIMS
+  ID     STATE      AGE    LIVE   SESS/T    CLAIMS
   ── Active ──────────────────────────────────────────────────────────────────────────────────────────────────────────
-☐ h002   ACTIVE     8h     ACP      3
+☐ h002   ACTIVE     8h     ACP        -/3
       [acp] Bridge-driven worktree: active
   ── Recent ──────────────────────────────────────────────────────────────────────────────────────────────────────────
-☐ h001   HANDOFF    7d     ·        5
+☐ h001   HANDOFF    7d     ·          -/5
       Ready for a successor: handoff
   ── Completed ───────────────────────────────────────────────────────────────────────────────────────────────────────
     (none)
