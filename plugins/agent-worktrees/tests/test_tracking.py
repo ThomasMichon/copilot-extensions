@@ -2820,6 +2820,49 @@ class TestRetireRecord:
         assert not (harness_dir / "wt-harness.yaml").exists()
         assert not (knowledge_dir / "wt-k.yaml").exists()
 
+    def test_retire_after_peer_already_hard_deleted_both_does_not_recreate(
+        self, tmp_path: Path, monkeypatch,
+    ):
+        """Deterministic (non-threaded) regression for the race the
+        concurrent test above only sometimes hit: retire_record's own
+        both-reaped hard-delete branch already unlinks BOTH this record's
+        file and its sibling's -- so a second, "losing" retire_record call
+        for the SAME already-deleted record must recognize its own file is
+        gone and return, never recreate it via the tombstone-write fallback
+        (copilot-extensions#3749)."""
+        harness_dir = tmp_path / ".citadel-harness" / "worktrees"
+        knowledge_dir = tmp_path / ".citadel-knowledge" / "worktrees"
+        monkeypatch.setattr(
+            "agent_worktrees.config.project_dir",
+            lambda name=None: tmp_path / f".{name}",
+        )
+
+        now = "2026-06-01T12:00:00"
+        harness = self._rec(
+            "wt-harness", pair_id="p1", pair_role="harness",
+            pair_ref="test/citadel-knowledge/wt-k", pair_kind="worktree",
+            status="finalized", completed_at=now, reaped_at=now,
+        )
+        knowledge = self._rec(
+            "wt-k", pair_id="p1", pair_role="knowledge",
+            pair_ref="test/citadel-harness/wt-harness", pair_kind="worktree",
+            status="finalized", completed_at=now, reaped_at=now,
+        )
+        save_record(harness, harness_dir / "wt-harness.yaml")
+        save_record(knowledge, knowledge_dir / "wt-k.yaml")
+
+        # The harness-side call runs to completion first (as if it "won"
+        # the race) -- its both-reaped branch hard-deletes BOTH files.
+        assert retire_record(harness, harness_dir) is True
+        assert not (harness_dir / "wt-harness.yaml").exists()
+        assert not (knowledge_dir / "wt-k.yaml").exists()
+
+        # The knowledge-side call (the "loser") still runs afterward with
+        # its own stale in-memory `knowledge` object -- it must notice its
+        # own file is already gone and stop, not recreate it.
+        assert retire_record(knowledge, knowledge_dir) is True
+        assert not (knowledge_dir / "wt-k.yaml").exists()
+
     def test_live_finalized_sibling_is_not_mistaken_for_reaped(
         self, tmp_path: Path, monkeypatch
     ):
