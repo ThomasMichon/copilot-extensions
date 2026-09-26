@@ -15,6 +15,51 @@ def _endpoint(server: CoalescingServer) -> tuple[str, int, str]:
     return host, int(port_s), rv["token"]
 
 
+def test_active_handler_count_is_nonzero_during_a_slow_request_and_zero_after():
+    """copilot-extensions#3798: `active_handler_count()` must reflect a
+    connection accepted and dispatched to its handler thread even while
+    that handler is mid-execution (not just while a client holds a
+    subscribe lease) -- and drop back to zero once the handler returns."""
+    release_gate = threading.Event()
+    seen_count_during_compute: list[int] = []
+
+    def _slow_compute(kind, payload):
+        seen_count_during_compute.append(server.active_handler_count())
+        release_gate.wait(timeout=5)
+        return {"ok": True}
+
+    server = CoalescingServer(_slow_compute, linger_seconds=0.2)
+    server.start()
+    try:
+        assert server.active_handler_count() == 0
+        host, port, token = _endpoint(server)
+        cid = client.new_client_id()
+        t = threading.Thread(
+            target=client.request,
+            kwargs={
+                "host": host, "port": port, "token": token,
+                "kind": "slow", "key": "k1", "payload": {},
+                "request_deadline_s": 5.0, "client_id": cid,
+            },
+        )
+        t.start()
+        try:
+            deadline = time.time() + 2.0
+            while not seen_count_during_compute and time.time() < deadline:
+                time.sleep(0.02)
+            assert seen_count_during_compute == [1]
+            assert server.active_handler_count() == 1
+        finally:
+            release_gate.set()
+            t.join(timeout=5)
+        deadline = time.time() + 2.0
+        while server.active_handler_count() != 0 and time.time() < deadline:
+            time.sleep(0.02)
+        assert server.active_handler_count() == 0
+    finally:
+        server.close()
+
+
 def test_full_roundtrip_subscribe_request_release():
     server = CoalescingServer(
         lambda kind, payload: {"doubled": payload["n"] * 2}, linger_seconds=0.2

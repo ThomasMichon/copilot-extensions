@@ -223,6 +223,38 @@ def test_new_subscribe_cancels_pending_linger():
         server.close()
 
 
+def test_active_handler_count_starts_at_zero():
+    server = _make_server()
+    try:
+        assert server.active_handler_count() == 0
+    finally:
+        server.close()
+
+
+def test_active_handler_count_is_decremented_when_request_delegation_fails(monkeypatch):
+    """copilot-extensions#3798 round-4 review finding: `ThreadingMixIn.
+    process_request` only creates and starts the handler thread -- if THAT
+    itself raises (e.g. `Thread.start()` failing under OS thread
+    exhaustion), `process_request_thread`'s own decrement never runs. The
+    counter must still return to zero via the accept-time `except` clause,
+    not stay permanently inflated and block every future shutdown-drain
+    wait."""
+    import socketserver
+
+    server = _make_server()
+    try:
+        def _raise(self, request, client_address):
+            raise RuntimeError("simulated thread-creation failure")
+
+        monkeypatch.setattr(socketserver.ThreadingMixIn, "process_request", _raise)
+        assert server.active_handler_count() == 0
+        with pytest.raises(RuntimeError):
+            server._server.process_request(object(), ("127.0.0.1", 0))
+        assert server.active_handler_count() == 0
+    finally:
+        server.close()
+
+
 def test_liveness_reap_drops_stale_subscriber_and_goes_idle():
     idle = threading.Event()
     server = _make_server(on_idle=idle.set, subscriber_ttl=0.1, reap_interval=0.05)

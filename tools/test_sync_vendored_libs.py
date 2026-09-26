@@ -215,6 +215,154 @@ def test_materialize_expands_pointer_copy_and_removes_pointer_file(repo: Path):
     assert not (repo / "plugins/alpha/libs/shared-lib/VENDOR_POINTER.json").exists()
 
 
+def test_materialize_refuses_a_stray_symlink_anywhere_in_the_pointer_copy(repo: Path):
+    # The src/tests/pyproject.toml checks validate the pieces this
+    # function itself knows about, but a pointer copy directory can carry
+    # other, unrelated entries too (e.g. a stray docs/link) -- without a
+    # final blanket scan, _copy_src()/pointer.unlink() would proceed and
+    # leave such a symlink sitting untouched in the materialized copy,
+    # making it not self-contained. Mirrors materialize_main.py's own
+    # final blanket scan.
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "canonical content\n")
+    _lib_pyproject(repo, "libs/shared-lib/pyproject.toml", "0.1.0-dev5")
+    _pointer(repo, "alpha", "shared-lib")
+    _lib_pyproject(repo, "plugins/alpha/libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+    outside = repo.parent / "outside-stray-target-cmd-materialize"
+    outside.mkdir()
+    copy_docs = repo / "plugins/alpha/libs/shared-lib/docs"
+    copy_docs.mkdir()
+    (copy_docs / "link").symlink_to(outside, target_is_directory=True)
+
+    result = _run(repo, "--materialize")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "is a symlink" in result.stderr
+    # Nothing was mutated -- pointer marker still present, stray symlink
+    # untouched.
+    assert (repo / "plugins/alpha/libs/shared-lib/VENDOR_POINTER.json").exists()
+    assert (copy_docs / "link").is_symlink()
+
+
+def test_materialize_refuses_and_preserves_the_pointer_for_a_symlinked_copy_pyproject_toml(
+    repo: Path,
+):
+    # A symlinked destination pyproject.toml is now preflighted BEFORE
+    # _copy_src() runs (round-17 review finding): _sync_version()'s own
+    # guard only silently returns without writing, which isn't enough on
+    # its own -- without the caller-side preflight, this loop would
+    # continue on to mutate src/ and unlink the pointer marker as though
+    # everything succeeded, leaving a pointer-free copy with an unsafe
+    # linked pyproject.toml surviving untouched.
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "canonical content\n")
+    _lib_pyproject(repo, "libs/shared-lib/pyproject.toml", "0.1.0-dev5")
+    _pointer(repo, "alpha", "shared-lib")
+    original = repo / "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py"
+    original.parent.mkdir(parents=True, exist_ok=True)
+    original.write_text("original stub\n", encoding="utf-8")
+    victim = repo.parent / "outside-victim-copy-pyproject.toml"
+    victim.write_text('[project]\nname = "victim"\nversion = "1.2.3"\n', encoding="utf-8")
+    (repo / "plugins/alpha/libs/shared-lib/pyproject.toml").symlink_to(victim)
+
+    result = _run(repo, "--materialize")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "symlink" in result.stderr
+
+    # Nothing was mutated -- src/ untouched, victim untouched, pointer
+    # marker still present (this copy is still "pending", not silently
+    # published pointer-free).
+    assert original.read_text() == "original stub\n"
+    assert victim.read_text() == '[project]\nname = "victim"\nversion = "1.2.3"\n'
+    assert (repo / "plugins/alpha/libs/shared-lib/VENDOR_POINTER.json").exists()
+
+
+def test_materialize_refuses_a_symlinked_canonical_lib_root(repo: Path):
+    # A `libs/<lib>` link to an external tree must be caught even though
+    # canonical/src itself is a real directory within that external tree.
+    external = repo.parent / "outside-repo-lib-materialize"
+    (external / "src" / "shared_lib").mkdir(parents=True)
+    (external / "src" / "shared_lib" / "__init__.py").write_text(
+        "smuggled = True\n", encoding="utf-8"
+    )
+    (repo / "libs").mkdir(parents=True)
+    (repo / "libs/shared-lib").symlink_to(external, target_is_directory=True)
+    _pointer(repo, "alpha", "shared-lib")
+    original = (repo / "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py")
+    original.parent.mkdir(parents=True, exist_ok=True)
+    original.write_text("original stub\n", encoding="utf-8")
+
+    result = _run(repo, "--materialize")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "symlink" in result.stderr
+    # The copy's own content must be untouched -- nothing was expanded.
+    assert original.read_text() == "original stub\n"
+    assert (repo / "plugins/alpha/libs/shared-lib/VENDOR_POINTER.json").exists()
+
+
+def test_materialize_refuses_a_canonical_lib_with_no_src_directory(repo: Path):
+    # An incomplete canonical lib with no src/ at all must be refused
+    # BEFORE the copy's existing src/ is deleted with nothing to replace
+    # it -- otherwise the pointer marker would still get unlinked below as
+    # if expansion had succeeded, publishing a broken, source-less copy.
+    (repo / "libs/shared-lib").mkdir(parents=True)  # no src/ subdirectory
+    _lib_pyproject(repo, "libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+    _pointer(repo, "alpha", "shared-lib")
+    original = repo / "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py"
+    original.parent.mkdir(parents=True, exist_ok=True)
+    original.write_text("original stub\n", encoding="utf-8")
+
+    result = _run(repo, "--materialize")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "src not found" in result.stderr
+    assert original.read_text() == "original stub\n"
+    assert (repo / "plugins/alpha/libs/shared-lib/VENDOR_POINTER.json").exists()
+
+
+def test_materialize_refuses_a_symlinked_copy_root(repo: Path):
+    # _lib_copies() admits any lib.is_dir(), which follows a symlink, but
+    # the per-copy loop never rejected `copy` itself being a symlink (e.g.
+    # plugins/alpha/libs/shared-lib -> ../beta/libs/shared-lib) -- without
+    # this, _copy_src() would reach real child paths through the link,
+    # overwriting the TARGET's own src/version and unlinking the TARGET's
+    # pointer marker.
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "canonical content\n")
+    _lib_pyproject(repo, "libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+    _pointer(repo, "beta", "shared-lib")
+    target = repo / "plugins/beta/libs/shared-lib"
+    (target / "innocent.txt").write_text("do not touch\n", encoding="utf-8")
+
+    (repo / "plugins/alpha/libs").mkdir(parents=True)
+    (repo / "plugins/alpha/libs/shared-lib").symlink_to(target, target_is_directory=True)
+
+    result = _run(repo, "--materialize")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "symlink" in result.stderr
+    # The target's own content must be untouched by the attacker's
+    # symlinked copy attempt (its own genuine pointer may still
+    # legitimately expand independently -- that's expected and fine).
+    assert (target / "innocent.txt").read_text() == "do not touch\n"
+    assert (repo / "plugins/alpha/libs/shared-lib").is_symlink()
+
+
+def test_materialize_refuses_a_symlinked_ancestor_of_the_copy_root(repo: Path):
+    # _lib_copies() follows symlinks in plugins/<plugin> and libs while
+    # discovering `copy` -- checking only the final copy path (round 13's
+    # fix) misses a symlinked ANCESTOR (e.g. plugins/<plugin> itself),
+    # which could make --materialize write through to another consumer
+    # via the same class of attack, just one level higher.
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "canonical content\n")
+    _lib_pyproject(repo, "libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+    _pointer(repo, "beta", "shared-lib")
+    target = repo / "plugins/beta"
+    (target / "innocent.txt").write_text("do not touch\n", encoding="utf-8")
+
+    (repo / "plugins/alpha").symlink_to(target, target_is_directory=True)
+
+    result = _run(repo, "--materialize")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "symlink" in result.stderr
+    assert (target / "innocent.txt").read_text() == "do not touch\n"
+    assert (repo / "plugins/alpha").is_symlink()
+
+
 def test_materialize_pointer_copy_is_never_blocked_by_drift_gate(repo: Path):
     """A pointer copy has no version of its own to compare against canonical,
     so there is nothing for the "copies moved ahead" safety gate to block --
@@ -227,6 +375,141 @@ def test_materialize_pointer_copy_is_never_blocked_by_drift_gate(repo: Path):
     result = _run(repo, "--materialize")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Refused to materialize" not in result.stderr
+
+
+def test_materialize_refreshes_a_pointer_copys_stale_tests_directory(repo: Path):
+    # A pointer copy vendors tests/ from canonical at --pointerize time;
+    # --materialize must refresh it too, or a canonical test change after
+    # pointerizing leaves the copy running (and eventually shipping) a
+    # stale tests/ tree.
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "canonical content\n")
+    _write(repo, "libs/shared-lib/tests/test_thing.py", "def test_it():\n    pass\n")
+    _lib_pyproject(repo, "libs/shared-lib/pyproject.toml", "0.1.0-dev5")
+    _pointer(repo, "alpha", "shared-lib")
+    _write(repo, "plugins/alpha/libs/shared-lib/tests/test_thing.py",
+           "def test_it():\n    assert False  # stale\n")
+
+    result = _run(repo, "--materialize")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    refreshed = repo / "plugins/alpha/libs/shared-lib/tests/test_thing.py"
+    assert refreshed.read_text() == "def test_it():\n    pass\n"
+
+
+def test_materialize_never_touches_a_real_copys_own_tests_directory(repo: Path):
+    # tests/ refresh is scoped to pointer copies only -- a real copy's own
+    # tests/ may be independently authored per plugin and must not be
+    # silently overwritten.
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "shared = 1\n")
+    _write(repo, "libs/shared-lib/tests/test_thing.py", "def test_it():\n    pass\n")
+    _lib_pyproject(repo, "libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+    _write(repo, "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py", "shared = 1\n")
+    _write(repo, "plugins/alpha/libs/shared-lib/tests/test_thing.py",
+           "def test_it():\n    assert True  # plugin-specific\n")
+    _lib_pyproject(repo, "plugins/alpha/libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+
+    result = _run(repo, "--materialize")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    untouched = repo / "plugins/alpha/libs/shared-lib/tests/test_thing.py"
+    assert untouched.read_text() == "def test_it():\n    assert True  # plugin-specific\n"
+
+
+def test_materialize_refuses_a_symlink_in_canonical_tests(repo: Path):
+    # shutil.copytree's default symlinks=False follows and dereferences a
+    # symlink -- a canonical tests/ containing one must not let its target
+    # content leak into a vendored copy.
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "shared = 1\n")
+    _lib_pyproject(repo, "libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+    (repo / "libs/shared-lib/tests").mkdir(parents=True)
+    secret = repo.parent / "outside-repo-secret"
+    secret.mkdir()
+    (secret / "leaked.txt").write_text("do not leak\n", encoding="utf-8")
+    (repo / "libs/shared-lib/tests/evil-link").symlink_to(secret, target_is_directory=True)
+    _pointer(repo, "alpha", "shared-lib")
+    (repo / "plugins/alpha/libs/shared-lib/tests").mkdir(parents=True)
+    (repo / "plugins/alpha/libs/shared-lib/tests/placeholder.py").write_text(
+        "\n", encoding="utf-8"
+    )
+
+    result = _run(repo, "--materialize")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "Refused to materialize" in result.stderr
+    assert "is a symlink" in result.stderr
+    assert not (repo / "plugins/alpha/libs/shared-lib/tests/evil-link").exists()
+
+
+def test_materialize_rejection_never_destroys_the_previous_tests_content(repo: Path):
+    # _copy_tests() must validate canonical BEFORE deleting the copy's own
+    # existing tests/ -- a rejected refresh (canonical has a symlink) must
+    # leave the copy's previous, safe tests/ content intact, not destroy it
+    # and leave nothing behind.
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "shared = 1\n")
+    _lib_pyproject(repo, "libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+    (repo / "libs/shared-lib/tests").mkdir(parents=True)
+    secret = repo.parent / "outside-repo-secret2"
+    secret.mkdir()
+    (repo / "libs/shared-lib/tests/evil-link").symlink_to(secret, target_is_directory=True)
+    _pointer(repo, "alpha", "shared-lib")
+    original = repo / "plugins/alpha/libs/shared-lib/tests"
+    original.mkdir(parents=True)
+    (original / "test_thing.py").write_text("def test_it():\n    pass\n", encoding="utf-8")
+
+    _run(repo, "--materialize")
+
+    assert (original / "test_thing.py").read_text() == "def test_it():\n    pass\n"
+
+
+def test_materialize_rejects_a_bad_tests_symlink_before_touching_src(repo: Path):
+    # A copy carrying both src/ and tests/ must have BOTH canonical trees
+    # validated before either is mutated -- otherwise a rejected tests/
+    # refresh (found only after src/ was already replaced) would leave the
+    # copy in a mixed state: fresh src/, stale tests/, and the pointer
+    # marker still present (materialize would then look "half done" on a
+    # retry, or a promotion could snapshot the mismatched pair).
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "fresh canonical\n")
+    _lib_pyproject(repo, "libs/shared-lib/pyproject.toml", "0.1.0-dev2")
+    (repo / "libs/shared-lib/tests").mkdir(parents=True)
+    secret = repo.parent / "outside-repo-secret3"
+    secret.mkdir()
+    (repo / "libs/shared-lib/tests/evil-link").symlink_to(secret, target_is_directory=True)
+    _pointer(repo, "alpha", "shared-lib")
+    copy_dir = repo / "plugins/alpha/libs/shared-lib"
+    (copy_dir / "src/shared_lib").mkdir(parents=True)
+    (copy_dir / "src/shared_lib/__init__.py").write_text("stale stub\n", encoding="utf-8")
+    (copy_dir / "tests").mkdir(parents=True)
+    (copy_dir / "tests/test_thing.py").write_text(
+        "def test_it():\n    pass\n", encoding="utf-8"
+    )
+
+    result = _run(repo, "--materialize")
+    assert result.returncode == 1, result.stdout + result.stderr
+
+    # src/ was never touched -- the rejection happened before any mutation.
+    assert (copy_dir / "src/shared_lib/__init__.py").read_text() == "stale stub\n"
+    # tests/ was never touched either.
+    assert (copy_dir / "tests/test_thing.py").read_text() == "def test_it():\n    pass\n"
+    # The pointer marker is still present -- this copy is still "pending".
+    assert (copy_dir / "VENDOR_POINTER.json").exists()
+
+
+def test_materialize_catches_a_dangling_tests_symlink_at_the_destination(repo: Path):
+    # A dangling (or non-directory-target) symlink at copy/tests has
+    # is_dir()==False, since is_dir() follows the link to a target that
+    # isn't there -- an is_dir()-only "does this copy have tests/" gate
+    # would silently ignore it, leaving it untouched in a materialized
+    # release.
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "shared = 1\n")
+    _write(repo, "libs/shared-lib/tests/test_thing.py", "def test_it():\n    pass\n")
+    _lib_pyproject(repo, "libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+    _pointer(repo, "alpha", "shared-lib")
+    copy_tests = repo / "plugins/alpha/libs/shared-lib/tests"
+    copy_tests.symlink_to(repo.parent / "does-not-exist", target_is_directory=True)
+
+    result = _run(repo, "--materialize")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "Refused to materialize" in result.stderr
+    assert "destination" in result.stderr and "is a symlink" in result.stderr
 
 
 # --- src-passthrough vendor pointers (working real-Python forwarding) ---
@@ -269,6 +552,144 @@ def test_pointerize_refuses_when_canonical_lib_missing(repo: Path):
     assert "no canonical libs/ghost-lib" in (result.stdout + result.stderr)
 
 
+def test_pointerize_refuses_a_symlinked_src_root(repo: Path):
+    # The canonical src/ ROOT being a symlink (not just a symlink somewhere
+    # inside it) must be caught too -- scanning from canon_pkg_dir
+    # (canonical/src/<pkg>) instead of canonical/src itself would miss
+    # this: canon_pkg_dir is constructed by joining paths, so is_dir()
+    # transparently follows the src/ symlink and _find_symlink() only ever
+    # sees the (external) target's own contents, letting --pointerize
+    # accept an external source tree even though the materializers
+    # explicitly reject a symlinked src/ root.
+    _lib_pyproject(repo, "libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+    external = repo.parent / "outside-repo-src"
+    (external / "shared_lib").mkdir(parents=True)
+    (external / "shared_lib" / "__init__.py").write_text("value = 1\n", encoding="utf-8")
+    (repo / "libs/shared-lib/src").symlink_to(external, target_is_directory=True)
+    (repo / "plugins/alpha").mkdir(parents=True)
+
+    result = _run(repo, "--pointerize", "alpha", "shared-lib")
+    assert result.returncode != 0
+    assert "is a symlink" in (result.stdout + result.stderr)
+    assert not (repo / "plugins/alpha/libs/shared-lib").exists()
+
+
+def test_pointerize_refuses_a_symlinked_canonical_lib_root(repo: Path):
+    # A `libs/<lib>` link to an external tree must be caught even though
+    # canonical/src itself is a real directory -- the check must validate
+    # the canonical LIB ROOT itself, not only its src/ subdirectory.
+    external = repo.parent / "outside-repo-lib"
+    (external / "src" / "shared_lib").mkdir(parents=True)
+    (external / "src" / "shared_lib" / "__init__.py").write_text("value = 1\n", encoding="utf-8")
+    (external / "pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "0.1.0-dev1"\n', encoding="utf-8"
+    )
+    (repo / "libs").mkdir(parents=True)
+    (repo / "libs/shared-lib").symlink_to(external, target_is_directory=True)
+    (repo / "plugins/alpha").mkdir(parents=True)
+
+    result = _run(repo, "--pointerize", "alpha", "shared-lib")
+    assert result.returncode != 0
+    assert "is a symlink" in (result.stdout + result.stderr)
+    assert not (repo / "plugins/alpha/libs/shared-lib").exists()
+
+
+def test_pointerize_refuses_a_symlinked_canonical_libs_ancestor(repo: Path):
+    # canonical.is_symlink() (checked separately) only catches
+    # `libs/<lib>` itself being a symlink -- if an ANCESTOR is a symlink
+    # (the top-level `libs/` directory itself), canonical/lib still
+    # resolves through it, and every later check (is_dir(),
+    # _find_symlink(canonical / "src"), etc.) only ever sees the
+    # (external) redirect target's own contents, letting --pointerize
+    # vendor an external tree into a consumer.
+    external = repo.parent / "outside-repo-libs-dir"
+    (external / "shared-lib" / "src" / "shared_lib").mkdir(parents=True)
+    (external / "shared-lib" / "src" / "shared_lib" / "__init__.py").write_text(
+        "value = 1\n", encoding="utf-8"
+    )
+    (external / "shared-lib" / "pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "0.1.0-dev1"\n', encoding="utf-8"
+    )
+    (repo / "libs").symlink_to(external, target_is_directory=True)
+    (repo / "plugins/alpha").mkdir(parents=True)
+
+    result = _run(repo, "--pointerize", "alpha", "shared-lib")
+    assert result.returncode != 0
+    assert "is a symlink" in (result.stdout + result.stderr)
+    assert not (repo / "plugins/alpha/libs/shared-lib").exists()
+
+
+def test_pointerize_refuses_a_symlinked_canonical_pyproject_toml(repo: Path):
+    # canon_pp.is_file() (checked earlier) follows a symlink, and
+    # shutil.copy2 would copy an arbitrary external pyproject.toml into
+    # the new consumer tree.
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
+    victim = repo.parent / "outside-victim-pyproject.toml"
+    victim.write_text('[project]\nname = "victim"\nversion = "9.9.9"\n', encoding="utf-8")
+    (repo / "libs/shared-lib/pyproject.toml").unlink()
+    (repo / "libs/shared-lib/pyproject.toml").symlink_to(victim)
+    (repo / "plugins/alpha").mkdir(parents=True)
+
+    result = _run(repo, "--pointerize", "alpha", "shared-lib")
+    assert result.returncode != 0
+    assert "is a symlink" in (result.stdout + result.stderr)
+    assert not (repo / "plugins/alpha/libs/shared-lib").exists()
+
+
+def test_pointerize_refuses_a_symlinked_canonical_readme(repo: Path):
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
+    victim = repo.parent / "outside-victim-readme.md"
+    victim.write_text("# victim\n", encoding="utf-8")
+    (repo / "libs/shared-lib/README.md").unlink()
+    (repo / "libs/shared-lib/README.md").symlink_to(victim)
+    (repo / "plugins/alpha").mkdir(parents=True)
+
+    result = _run(repo, "--pointerize", "alpha", "shared-lib")
+    assert result.returncode != 0
+    assert "is a symlink" in (result.stdout + result.stderr)
+    assert not (repo / "plugins/alpha/libs/shared-lib").exists()
+
+
+def test_pointerize_supports_the_worktree_manager_extra_consumer_tree(repo: Path):
+    # worktree-manager sits at the repo root, not under plugins/ -- confirm
+    # --pointerize resolves it via _consumer_dir() the same way _lib_copies()
+    # already does for --check/--materialize.
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
+    (repo / "worktree-manager").mkdir(parents=True)
+
+    result = _run(repo, "--pointerize", "worktree-manager", "shared-lib")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    copy_dir = repo / "worktree-manager/libs/shared-lib"
+    assert (copy_dir / "VENDOR_POINTER.json").exists()
+    assert not (repo / "plugins/worktree-manager").exists()
+
+
+def test_pointerize_refuses_an_unknown_consumer(repo: Path):
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
+    result = _run(repo, "--pointerize", "not-a-real-consumer", "shared-lib")
+    assert result.returncode != 0
+    assert "not a known consumer" in (result.stdout + result.stderr)
+
+
+def test_pointerize_refuses_a_symlinked_consumer_libs_ancestor(repo: Path):
+    # _consumer_dir() resolves via plugin_dir.is_dir(), which follows a
+    # symlink -- a symlinked consumer root or consumer/libs directory
+    # could redirect --pointerize outside the checkout, and the
+    # destructive shutil.rmtree(copy_dir) in _write_passthrough_pointer()
+    # would then delete/recreate whatever external tree it points at.
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
+    outside = repo.parent / "outside-consumer-libs"
+    outside.mkdir(parents=True)
+    (repo / "plugins/alpha").mkdir(parents=True)
+    (repo / "plugins/alpha/libs").symlink_to(outside, target_is_directory=True)
+
+    result = _run(repo, "--pointerize", "alpha", "shared-lib")
+    assert result.returncode != 0
+    assert "is a symlink" in (result.stdout + result.stderr)
+    assert not (outside / "shared-lib").exists()
+
+
 def test_pointerize_overwrites_a_stale_existing_copy(repo: Path):
     _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="x = 1\n")
     _write(repo, "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py", "stale\n")
@@ -278,6 +699,76 @@ def test_pointerize_overwrites_a_stale_existing_copy(repo: Path):
     assert result.returncode == 0, result.stdout + result.stderr
     assert not (repo / "plugins/alpha/libs/shared-lib/leftover.txt").exists()
     assert (repo / "plugins/alpha/libs/shared-lib/VENDOR_POINTER.json").exists()
+
+
+def test_pointerize_vendors_canonicals_tests_directory(repo: Path):
+    # A consumer with no `testpaths` override (e.g. worktree-manager) uses
+    # pytest's own default recursive discovery, which would run a copy's
+    # own libs/<lib>/tests/ directly -- silently dropping it (as an earlier
+    # draft of this fix did) would silently drop real test coverage, not
+    # just leave a drift-check comparison out of scope.
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
+    _write(repo, "libs/shared-lib/tests/test_thing.py", "def test_it():\n    assert True\n")
+    (repo / "plugins/alpha").mkdir(parents=True)
+
+    result = _run(repo, "--pointerize", "alpha", "shared-lib")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    vendored_test = repo / "plugins/alpha/libs/shared-lib/tests/test_thing.py"
+    assert vendored_test.read_text() == "def test_it():\n    assert True\n"
+
+
+def test_pointerize_is_a_noop_for_tests_when_canonical_has_none(repo: Path):
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
+    (repo / "plugins/alpha").mkdir(parents=True)
+
+    result = _run(repo, "--pointerize", "alpha", "shared-lib")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (repo / "plugins/alpha/libs/shared-lib/tests").exists()
+
+
+def test_repointerize_preserves_a_prior_no_tests_decision(repo: Path):
+    # A copy that was FIRST pointerized before canonical grew a tests/
+    # directory (or whose --pointerize deliberately chose none) must keep
+    # that choice on every later re-pointerize (e.g. to regenerate a stub
+    # after a template/wording change) -- it must never silently gain a
+    # tests/ it never had just because canonical happens to have one by
+    # the time of the re-run. Otherwise a copy matching what `main` ships
+    # today would drift the next time its stub is regenerated.
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
+    (repo / "plugins/alpha").mkdir(parents=True)
+
+    # First pointerize: canonical has no tests/ yet.
+    result = _run(repo, "--pointerize", "alpha", "shared-lib")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (repo / "plugins/alpha/libs/shared-lib/tests").exists()
+
+    # Canonical grows a tests/ directory afterward.
+    _write(repo, "libs/shared-lib/tests/test_thing.py", "def test_it():\n    assert True\n")
+
+    # Re-pointerizing the SAME already-pointer copy must not introduce it.
+    result = _run(repo, "--pointerize", "alpha", "shared-lib")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (repo / "plugins/alpha/libs/shared-lib/tests").exists()
+
+
+def test_repointerize_preserves_a_prior_has_tests_decision(repo: Path):
+    # The mirror case: a copy that already vendored tests/ keeps getting a
+    # refreshed tests/ across a re-pointerize, rather than losing it.
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
+    _write(repo, "libs/shared-lib/tests/test_thing.py", "def test_it():\n    assert True\n")
+    (repo / "plugins/alpha").mkdir(parents=True)
+
+    result = _run(repo, "--pointerize", "alpha", "shared-lib")
+    assert result.returncode == 0, result.stdout + result.stderr
+    vendored_test = repo / "plugins/alpha/libs/shared-lib/tests/test_thing.py"
+    assert vendored_test.read_text() == "def test_it():\n    assert True\n"
+
+    # Canonical's test content changes; re-pointerizing should refresh it.
+    _write(repo, "libs/shared-lib/tests/test_thing.py", "def test_it():\n    assert False\n")
+    result = _run(repo, "--pointerize", "alpha", "shared-lib")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert vendored_test.read_text() == "def test_it():\n    assert False\n"
 
 
 def test_pointerized_copy_forwards_imports_to_canonical_end_to_end(repo: Path):
@@ -329,6 +820,50 @@ def test_pointerized_copy_from_import_also_resolves_to_canonical(repo: Path):
                             capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == "hi"
+
+
+def test_pointerized_copy_clears_a_nested_sub_packages_stale_bytecode_too(repo: Path):
+    # Round-22 review finding: the stub's stale-bytecode guard (#3802)
+    # originally only cleared _canonical_pkg_dir's OWN __pycache__ -- a
+    # nested sub-package (e.g. shared_lib/subpkg/__init__.py) has its OWN
+    # __pycache__ directory, which is just as eligible for the same
+    # coarse-mtime stale hit and is exposed to the ordinary import system
+    # the same way the top level is (via submodule_search_locations), so
+    # missing it defeats the guarantee for any canonical lib with real
+    # nested packages, not just flat sibling modules. Proven end-to-end:
+    # a nested sub-package's stale .pyc must not survive being imported by
+    # the pointer stub -- a fresh interpreter must always compile+run the
+    # CURRENT source.
+    _seed_canonical_lib(
+        repo, "shared-lib", version="0.1.0-dev1",
+        content="from shared_lib.subpkg import value\n",
+    )
+    subpkg = repo / "libs/shared-lib/src/shared_lib/subpkg"
+    subpkg.mkdir(parents=True)
+    (subpkg / "__init__.py").write_text("value = 1\n", encoding="utf-8")
+    (repo / "plugins/alpha").mkdir(parents=True)
+    _run(repo, "--pointerize", "alpha", "shared-lib")
+
+    stub = repo / "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py"
+    probe = (
+        "import sys; sys.path.insert(0, r'" + str(stub.parent.parent) + "'); "
+        "import shared_lib; print(shared_lib.value)"
+    )
+    result = subprocess.run([sys.executable, "-c", probe], cwd=repo,
+                            capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "1"
+    # The nested sub-package's own bytecode cache must now exist...
+    assert (subpkg / "__pycache__").is_dir()
+
+    # ...mutate it directly (no re-pointerize) -- the NEXT fresh
+    # interpreter must reflect the new content, not the stale nested
+    # sub-package .pyc, proving the stub's guard clears nested caches too.
+    (subpkg / "__init__.py").write_text("value = 2\n", encoding="utf-8")
+    result2 = subprocess.run([sys.executable, "-c", probe], cwd=repo,
+                             capture_output=True, text=True, check=False)
+    assert result2.returncode == 0, result2.stdout + result2.stderr
+    assert result2.stdout.strip() == "2"
 
 
 def test_check_excludes_src_passthrough_copy_from_agreement(repo: Path):

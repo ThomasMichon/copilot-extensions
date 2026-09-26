@@ -49,6 +49,68 @@ def test_materialize_expands_pointer_from_canonical(tmp_path: Path):
     assert '"0.1.0-dev5"' in pp
 
 
+def test_materialize_refuses_a_stray_symlink_anywhere_in_the_pointer_copy(tmp_path: Path):
+    # The src/tests/pyproject.toml checks validate the pieces this
+    # function itself knows about, but a pointer copy directory can carry
+    # other, unrelated entries too (e.g. a stray docs/link) --
+    # pointer_path.unlink() would otherwise leave such a symlink sitting
+    # untouched in the promoted payload, making the resulting main
+    # snapshot not self-contained.
+    root = tmp_path / "repo"
+    _canonical_lib(root, "zdd", version="0.1.0-dev5", content="real = True\n")
+    pointer_dir = _pointer(root, "agent-bridge", "zdd")
+    outside = root.parent / "outside-stray-target"
+    outside.mkdir()
+    (pointer_dir / "docs").mkdir()
+    (pointer_dir / "docs" / "link").symlink_to(outside, target_is_directory=True)
+
+    log = mm.materialize(root, canonical_root=root)
+
+    assert any("SKIP" in line and "is a symlink" in line for line in log)
+    assert (pointer_dir / mm.POINTER_NAME).exists()
+    assert (pointer_dir / "docs" / "link").is_symlink()
+
+
+def test_materialize_expands_canonical_tests_alongside_src(tmp_path: Path):
+    # A pointer copy vendors tests/ from canonical too (--pointerize) --
+    # promotion-time expansion must refresh it the same way it refreshes
+    # src/, otherwise a canonical test change after pointerizing would ship
+    # a stale tests/ tree into main.
+    root = tmp_path / "repo"
+    canonical = _canonical_lib(root, "zdd", version="0.1.0-dev5", content="real = True\n")
+    (canonical / "tests").mkdir(parents=True)
+    (canonical / "tests" / "test_zdd.py").write_text("def test_it():\n    pass\n",
+                                                       encoding="utf-8")
+    pointer_dir = _pointer(root, "agent-bridge", "zdd")
+    # The pointer copy's own (now-stale) tests/ predates the canonical edit.
+    (pointer_dir / "tests").mkdir(parents=True)
+    (pointer_dir / "tests" / "test_zdd.py").write_text("def test_it():\n    assert False\n",
+                                                        encoding="utf-8")
+
+    mm.materialize(root, canonical_root=root)
+
+    refreshed = pointer_dir / "tests" / "test_zdd.py"
+    assert refreshed.read_text() == "def test_it():\n    pass\n"
+
+
+def test_materialize_never_introduces_tests_a_copy_never_vendored(tmp_path: Path):
+    # A pointer copy that deliberately never vendored tests/ (--pointerize
+    # chose not to, or a copy was pointerized before tests/ vendoring
+    # existed) must not gain one unilaterally just because canonical has
+    # one -- introducing new content beyond what a copy already committed
+    # to is out of scope for a refresh.
+    root = tmp_path / "repo"
+    canonical = _canonical_lib(root, "zdd", version="0.1.0-dev5", content="real = True\n")
+    (canonical / "tests").mkdir(parents=True)
+    (canonical / "tests" / "test_zdd.py").write_text("def test_it():\n    pass\n",
+                                                       encoding="utf-8")
+    pointer_dir = _pointer(root, "agent-bridge", "zdd")  # no local tests/ at all
+
+    mm.materialize(root, canonical_root=root)
+
+    assert not (pointer_dir / "tests").exists()
+
+
 def test_materialize_skips_missing_canonical(tmp_path: Path):
     root = tmp_path / "repo"
     _pointer(root, "agent-bridge", "ghost-lib")  # no libs/ghost-lib/ exists
@@ -57,6 +119,171 @@ def test_materialize_skips_missing_canonical(tmp_path: Path):
     assert any("SKIP" in line and "not found" in line for line in log)
     # Pointer must be left in place since nothing was expanded.
     assert (root / "plugins/agent-bridge/libs/ghost-lib/VENDOR_POINTER.json").exists()
+
+
+def test_materialize_refuses_a_symlinked_pointer_directory_pointing_inside_root(tmp_path: Path):
+    # A pointer directory symlinked to ANOTHER directory still inside
+    # checkout_root passes _escapes_root's resolved-path check (its target
+    # is legitimately within root) -- but expanding it would silently
+    # overwrite that OTHER directory's own content and unlink ITS pointer
+    # marker. The pointer directory itself being a symlink must be
+    # rejected outright.
+    root = tmp_path / "repo"
+    _canonical_lib(root, "zdd", version="0.1.0-dev1", content="shared\n")
+    victim = _pointer(root, "victim-plugin", "zdd")
+    (victim / "innocent.txt").write_text("do not touch\n", encoding="utf-8")
+
+    attacker_dir = root / "plugins" / "agent-bridge" / "libs"
+    attacker_dir.mkdir(parents=True)
+    (attacker_dir / "zdd").symlink_to(victim, target_is_directory=True)
+
+    log = mm.materialize(root, canonical_root=root)
+    assert any("SKIP" in line and "symlink" in line for line in log)
+    # The victim's own content must be untouched (its own genuine pointer
+    # legitimately expands independently -- that's expected and fine).
+    assert (victim / "innocent.txt").read_text() == "do not touch\n"
+    # The attacker's symlink itself must remain untouched -- never expanded
+    # into a real copy that would duplicate/corrupt the victim's content.
+    assert (attacker_dir / "zdd").is_symlink()
+
+
+def test_materialize_refuses_a_symlinked_ancestor_directory(tmp_path: Path):
+    # Checking only lib_copy_dir itself misses a symlinked ANCESTOR (e.g.
+    # plugins/<plugin> or plugins/<plugin>/libs itself): find_pointers()'s
+    # own glob already follows such an intermediate symlink to discover
+    # the pointer file, and if it resolves to another directory still
+    # inside checkout_root, a resolved-path escape check alone would
+    # accept it too -- letting the src_sub removal/copy overwrite that
+    # OTHER directory's own content and unlink ITS marker.
+    root = tmp_path / "repo"
+    _canonical_lib(root, "zdd", version="0.1.0-dev1", content="shared\n")
+    victim = _pointer(root, "victim-plugin", "zdd")
+    (victim / "innocent.txt").write_text("do not touch\n", encoding="utf-8")
+
+    # The attacker's OWN plugin dir (not just its libs/<lib> copy) is a
+    # symlink pointing at the victim's plugin dir.
+    (root / "plugins" / "attacker-plugin").symlink_to(
+        root / "plugins" / "victim-plugin", target_is_directory=True
+    )
+
+    log = mm.materialize(root, canonical_root=root)
+    assert any("SKIP" in line and "is a symlink" in line for line in log)
+    assert (victim / "innocent.txt").read_text() == "do not touch\n"
+    assert (root / "plugins" / "attacker-plugin").is_symlink()
+
+
+def test_materialize_refuses_an_ancestor_symlink_resolving_exactly_to_root(tmp_path: Path):
+    # Round-14 review finding: _find_symlinked_ancestor's is_symlink()
+    # check must run BEFORE the resolved-path termination test, not
+    # after -- a symlink whose target happens to resolve to `root` itself
+    # (e.g. plugins/evil -> ..) would otherwise short-circuit the walk as
+    # "reached root, nothing to check" without ever inspecting that
+    # symlink, letting the later replacement + pointer_path.unlink() write
+    # through to the checkout root itself.
+    root = tmp_path / "repo"
+    _canonical_lib(root, "zdd", version="0.1.0-dev1", content="shared\n")
+    (root / "src").mkdir()  # something already at root/src, must survive
+    (root / "src" / "sentinel.txt").write_text("do not touch\n", encoding="utf-8")
+
+    # plugins/evil-plugin -> root itself (resolves exactly to root_r).
+    (root / "plugins").mkdir(parents=True, exist_ok=True)
+    (root / "plugins" / "evil-plugin").symlink_to(root, target_is_directory=True)
+    # "ghost" (not "zdd") -- through the symlink this literally aliases
+    # root/libs/ghost, which must not already exist (avoid colliding with
+    # the canonical zdd lib _canonical_lib() already created above).
+    libs_dir = root / "plugins" / "evil-plugin" / "libs" / "ghost"
+    libs_dir.mkdir(parents=True)
+    (libs_dir / mm.POINTER_NAME).write_text(
+        json.dumps({"schema": "copilot-extensions.vendor-pointer", "version": 1,
+                    "source": "libs/zdd"}) + "\n",
+        encoding="utf-8",
+    )
+
+    log = mm.materialize(root, canonical_root=root)
+    assert any("SKIP" in line and "is a symlink" in line for line in log)
+    # Nothing was written through to the checkout root itself.
+    assert (root / "src" / "sentinel.txt").read_text() == "do not touch\n"
+    assert not (root / "VENDOR_POINTER.json").exists()
+
+
+def test_materialize_refuses_a_symlinked_canonical_source_before_resolving(tmp_path: Path):
+    # _resolve_within() only validates that the RESOLVED candidate stays
+    # within canonical_root -- if canonical_root/source_rel (e.g.
+    # libs/<lib>) is ITSELF a symlink to ANOTHER directory still inside
+    # canonical_root, that check accepts it and returns the resolved
+    # (symlink-followed) target, so every later scan only ever examines
+    # the TARGET's own contents, never noticing the redirect. Must be
+    # checked BEFORE resolving, not after.
+    root = tmp_path / "repo"
+    victim = root / "libs" / "victim-lib"
+    (victim / "src" / "victim_lib").mkdir(parents=True)
+    (victim / "src" / "victim_lib" / "__init__.py").write_text(
+        "do not touch\n", encoding="utf-8"
+    )
+    (victim / "pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "0.1.0-dev1"\n', encoding="utf-8"
+    )
+
+    # libs/evil-lib -> libs/victim-lib (still inside canonical_root == root).
+    (root / "libs" / "evil-lib").symlink_to(victim, target_is_directory=True)
+    _pointer(root, "agent-bridge", "evil-lib")
+
+    log = mm.materialize(root, canonical_root=root)
+    assert any("SKIP" in line and "is a symlink" in line for line in log)
+    assert (victim / "src" / "victim_lib" / "__init__.py").read_text() == "do not touch\n"
+
+
+def test_materialize_refuses_a_symlinked_pyproject_toml_before_version_sync(tmp_path: Path):
+    # canon_pp.is_file()/copy_pp.exists() both follow symlinks -- a
+    # pointer copy with pyproject.toml linked to another file (or
+    # canonical's own linked elsewhere) would make read_text()/
+    # write_text() follow the link, letting promotion silently read from
+    # or overwrite an arbitrary external target while updating the
+    # version. Must be preflighted BEFORE src/tests are mutated, not
+    # checked only right before the read/write (which would leave a
+    # mixed partial state: fresh src/, stale pyproject.toml, pointer
+    # marker still present).
+    root = tmp_path / "repo"
+    _canonical_lib(root, "zdd", version="0.1.0-dev5", content="fresh\n")
+    victim = root.parent / "outside-victim-pyproject.toml"
+    victim.write_text('[project]\nname = "victim"\nversion = "9.9.9"\n', encoding="utf-8")
+    (root / "libs" / "zdd" / "pyproject.toml").unlink()
+    (root / "libs" / "zdd" / "pyproject.toml").symlink_to(victim)
+
+    pointer_dir = _pointer(root, "agent-bridge", "zdd")
+    (pointer_dir / "src" / "zdd").mkdir(parents=True)
+    (pointer_dir / "src" / "zdd" / "__init__.py").write_text("stale stub\n", encoding="utf-8")
+
+    log = mm.materialize(root, canonical_root=root)
+    assert any("SKIP" in line and "is a symlink" in line for line in log)
+    # Nothing was mutated -- neither the copy's src/ nor the victim file.
+    assert (pointer_dir / "src" / "zdd" / "__init__.py").read_text() == "stale stub\n"
+    assert victim.read_text() == '[project]\nname = "victim"\nversion = "9.9.9"\n'
+    assert (pointer_dir / mm.POINTER_NAME).exists()
+
+
+def test_materialize_skips_a_canonical_lib_with_no_src_directory_at_all(tmp_path: Path):
+    # _find_symlink() returns None for a MISSING src/ too, not just "no
+    # symlink found inside it" -- an incomplete/malformed canonical lib
+    # must be refused here, before the copy's existing src/ gets deleted
+    # with nothing to replace it (which would publish a pointer-free
+    # copy with NO importable source at all).
+    root = tmp_path / "repo"
+    (root / "libs" / "zdd").mkdir(parents=True)  # no src/ subdirectory
+    (root / "libs" / "zdd" / "pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "0.1.0-dev1"\n', encoding="utf-8"
+    )
+    pointer_dir = _pointer(root, "agent-bridge", "zdd")
+    (pointer_dir / "src" / "zdd").mkdir(parents=True)
+    (pointer_dir / "src" / "zdd" / "__init__.py").write_text("stub\n", encoding="utf-8")
+
+    log = mm.materialize(root, canonical_root=root)
+    assert any("SKIP" in line and "src not found" in line for line in log)
+    # The copy's existing (real) src/ must be untouched, and the pointer
+    # marker must still be present -- nothing was actually expanded.
+    assert (pointer_dir / "src" / "zdd" / "__init__.py").read_text() == "stub\n"
+    assert (pointer_dir / mm.POINTER_NAME).exists()
+
 
 
 def test_materialize_handles_multiple_pointers_for_same_lib(tmp_path: Path):
@@ -147,6 +374,51 @@ def test_materialize_expands_worktree_manager_pointer(tmp_path: Path):
     assert any(line.startswith("OK") for line in log)
     copy_src = root / "worktree-manager/libs/zdd/src/zdd/__init__.py"
     assert copy_src.read_text() == "shared\n"
+
+
+def test_find_pointers_in_libs_dir_finds_a_pointer_directly_under_libs(tmp_path: Path):
+    """The shape a copied-out payload has (e.g. a self-installed
+    worktree-manager slot's own <slot>/libs/*), unlike find_pointers()'s
+    fixed plugins/*/libs/* / worktree-manager/libs/* repo-root-relative
+    glob."""
+    libs_dir = tmp_path / "slot" / "libs"
+    d = libs_dir / "zdd"
+    d.mkdir(parents=True)
+    (d / mm.POINTER_NAME).write_text(
+        json.dumps({"schema": "copilot-extensions.vendor-pointer", "version": 1,
+                    "source": "libs/zdd"}) + "\n",
+        encoding="utf-8",
+    )
+    found = mm.find_pointers_in_libs_dir(libs_dir)
+    assert [p.parent.name for p in found] == ["zdd"]
+
+
+def test_find_pointers_in_libs_dir_empty_when_no_libs_dir(tmp_path: Path):
+    assert mm.find_pointers_in_libs_dir(tmp_path / "nope") == []
+
+
+def test_materialize_libs_dir_expands_a_pointer_from_canonical(tmp_path: Path):
+    """The case worktree_manager.self_install's _materialize_payload_pointers
+    needs: expanding a copied-out slot's own libs/<lib> directly (not a
+    whole repo-checkout-shaped tree)."""
+    root = tmp_path / "repo"
+    _canonical_lib(root, "zdd", version="0.3.0-dev1", content="from-canonical\n")
+
+    libs_dir = tmp_path / "slot" / "libs"
+    copy_dir = libs_dir / "zdd"
+    (copy_dir / "src" / "zdd").mkdir(parents=True)
+    (copy_dir / "src" / "zdd" / "__init__.py").write_text("stub\n", encoding="utf-8")
+    (copy_dir / mm.POINTER_NAME).write_text(
+        json.dumps({"schema": "copilot-extensions.vendor-pointer", "version": 1,
+                    "source": "libs/zdd"}) + "\n",
+        encoding="utf-8",
+    )
+
+    log = mm.materialize_libs_dir(libs_dir, canonical_root=root)
+
+    assert any(line.startswith("OK") for line in log)
+    assert not (copy_dir / mm.POINTER_NAME).exists()
+    assert (copy_dir / "src" / "zdd" / "__init__.py").read_text() == "from-canonical\n"
 
 
 def _pointer_with_source(root: Path, plugin: str, lib: str, *, source: str) -> Path:
@@ -253,6 +525,70 @@ def test_materialize_refuses_a_symlinked_src_root(tmp_path: Path):
     assert not (pointer_dir / "src").exists()
 
 
+def test_materialize_refuses_a_symlinked_tests_root(tmp_path: Path):
+    # The tests/ refresh added alongside src/ needs the same symlink
+    # containment guarantee -- a canonical lib whose tests/ is a symlink
+    # (or contains one) must not let shutil.copytree leak external content.
+    # The tests/ refresh only runs at all when the copy already vendors
+    # tests/ (see the "gated on the copy already having tests/" design), so
+    # this test seeds the copy with one before exercising the symlink path.
+    root = tmp_path / "repo"
+    secret = tmp_path / "outside-repo-secret-tests"
+    secret.mkdir()
+    (secret / "leaked.txt").write_text("do not leak\n", encoding="utf-8")
+    canonical = _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
+    (canonical / "tests").symlink_to(secret, target_is_directory=True)
+    pointer_dir = _pointer(root, "agent-bridge", "zdd")
+    (pointer_dir / "tests").mkdir(parents=True)
+    (pointer_dir / "tests" / "test_zdd.py").write_text("def test_it():\n    pass\n",
+                                                        encoding="utf-8")
+
+    log = mm.materialize(root, canonical_root=root)
+
+    assert any("SKIP" in line and "is a symlink" in line for line in log)
+    assert (pointer_dir / "VENDOR_POINTER.json").exists()
+    assert not (pointer_dir / "src").exists()
+
+
+def test_materialize_rejection_never_destroys_previous_tests_content(tmp_path: Path):
+    # The symlink check for tests/ must run BEFORE anything is deleted --
+    # a rejected refresh must leave the copy's previous, safe tests/
+    # content intact, not destroy it and leave nothing behind.
+    root = tmp_path / "repo"
+    secret = tmp_path / "outside-repo-secret-tests2"
+    secret.mkdir()
+    canonical = _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
+    (canonical / "tests").symlink_to(secret, target_is_directory=True)
+    pointer_dir = _pointer(root, "agent-bridge", "zdd")
+    original_tests = pointer_dir / "tests"
+    original_tests.mkdir(parents=True)
+    (original_tests / "test_zdd.py").write_text("def test_it():\n    pass\n", encoding="utf-8")
+
+    mm.materialize(root, canonical_root=root)
+
+    assert (original_tests / "test_zdd.py").read_text() == "def test_it():\n    pass\n"
+
+
+def test_materialize_catches_a_dangling_tests_symlink_at_the_destination(tmp_path: Path):
+    # A dangling (or non-directory-target) symlink at the copy's own
+    # tests/ has is_dir()==False, since is_dir() follows the link to a
+    # target that isn't there -- an is_dir()-only "does this copy have
+    # tests/" gate would silently ignore it, leaving it untouched in a
+    # materialized release.
+    root = tmp_path / "repo"
+    _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
+    (root / "libs/zdd/tests").mkdir(parents=True)
+    (root / "libs/zdd/tests/test_zdd.py").write_text("def test_it():\n    pass\n",
+                                                       encoding="utf-8")
+    pointer_dir = _pointer(root, "agent-bridge", "zdd")
+    (pointer_dir / "tests").symlink_to(tmp_path / "does-not-exist", target_is_directory=True)
+
+    log = mm.materialize(root, canonical_root=root)
+
+    assert any("SKIP" in line and "destination" in line and "is a symlink" in line
+               for line in log)
+
+
 def test_materialize_refuses_a_pointer_dir_that_escapes_dest(tmp_path: Path):
     # find_pointers() globs under dest, but a symlinked plugin (or libs)
     # directory could still resolve outside dest -- rmtree()/copytree()
@@ -268,7 +604,7 @@ def test_materialize_refuses_a_pointer_dir_that_escapes_dest(tmp_path: Path):
 
     log = mm.materialize(root, canonical_root=root)
 
-    assert any("SKIP" in line and "escapes the checkout root" in line for line in log)
+    assert any("SKIP" in line and "is a symlink" in line for line in log)
     assert (real_pointer_dir / "VENDOR_POINTER.json").exists()
     assert not (real_pointer_dir / "src").exists()
 
@@ -340,6 +676,32 @@ def test_materialize_skips_file_pointer_with_missing_canonical(tmp_path: Path):
                for line in log)
     # Left untouched -- still the stub, since nothing was expanded.
     assert pointer.read_text().startswith("<!-- VENDOR_POINTER:")
+
+
+def test_materialize_refuses_a_symlinked_file_pointer(tmp_path: Path):
+    # find_file_pointers()'s own is_file() check follows a symlink, and
+    # pointer_path.write_bytes() would follow it again -- a symlinked
+    # pointer path (or an ancestor between it and dest) would let
+    # materialization overwrite the symlink's TARGET outside the
+    # snapshot, the same class of gap already fixed for the
+    # directory-pointer path.
+    root = tmp_path / "repo"
+    _canonical_file(root, "docs/patterns/thing.md", content="# Thing\n\nreal content\n")
+    victim = root.parent / "outside-victim-pointer.md"
+    victim.write_text(
+        "<!-- VENDOR_POINTER: source=docs/patterns/thing.md kind=file -->\n\n"
+        "This file is a vendored pointer; see the canonical source above.\n",
+        encoding="utf-8",
+    )
+    pointer_path = root / "plugins" / "agent-bridge" / "docs" / "thing.md"
+    pointer_path.parent.mkdir(parents=True)
+    pointer_path.symlink_to(victim)
+
+    log = mm.materialize(root, canonical_root=root)
+    assert any("SKIP" in line and "(file pointer)" in line and "is a symlink" in line
+               for line in log)
+    # Nothing was overwritten through the symlink.
+    assert victim.read_text().startswith("<!-- VENDOR_POINTER:")
 
 
 def test_materialize_refuses_absolute_source_path(tmp_path: Path):

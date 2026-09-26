@@ -53,6 +53,22 @@ def _write_payload(root: Path, version: str) -> None:
     )
 
 
+def _write_payload_with_unresolvable_pointer(root: Path, version: str) -> None:
+    """Like ``_write_payload``, but the payload's own ``libs/<lib>`` carries
+    an un-materialized vendor pointer, and the remote has NO top-level
+    ``libs/`` of its own -- the "no monorepo ancestor to resolve canonical
+    from" case ``_materialize_payload_pointers`` must refuse rather than
+    silently ship."""
+    _write_payload(root, version)
+    copy_dir = root / "worktree-manager" / "libs" / "shared-lib"
+    (copy_dir / "src" / "shared_lib").mkdir(parents=True)
+    (copy_dir / "src" / "shared_lib" / "__init__.py").write_text("# stub\n", "utf-8")
+    (copy_dir / "VENDOR_POINTER.json").write_text(
+        '{"schema": "copilot-extensions.vendor-pointer", "version": 1, '
+        '"source": "libs/shared-lib", "kind": "src-passthrough"}\n', "utf-8",
+    )
+
+
 def _make_remote(tmp: Path, version: str, branch: str = "main") -> Path:
     """A local git repo (on ``branch``) serving a bumped worktree-manager payload."""
     remote = tmp / "remote"
@@ -92,6 +108,34 @@ def test_self_update_fetches_local_remote_and_publishes_new_slot(tmp_path, monke
     assert version_slot("1.0.0", root).is_dir()
     # The published slot carries the fetched payload.
     assert (version_slot("9.9.9", root) / "src" / "worktree_manager" / "__init__.py").exists()
+
+
+def test_self_update_reports_error_and_cleans_up_when_pointer_unresolvable(tmp_path, monkeypatch):
+    """Round-8 review finding: self_update() must translate a materialization
+    failure into a clean SelfUpdateResult(action="error") -- not let the
+    RuntimeError escape past self_update's own documented best-effort/
+    non-fatal contract -- and must not leave a broken slot behind that a
+    later needs_install() existence check could mistake for a valid
+    install."""
+    root = tmp_path / "root"
+    monkeypatch.setattr(si, "local_bin", lambda: tmp_path / "localbin")
+    _seed_older_install(tmp_path, root, "1.0.0")
+
+    remote = tmp_path / "remote"
+    remote.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(remote)], check=True)
+    _write_payload_with_unresolvable_pointer(remote, "9.9.9")
+    subprocess.run(["git", "-C", str(remote), *_GIT_ID, "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(remote), *_GIT_ID, "commit", "-q", "-m", "payload"],
+                   check=True)
+    sc.set_source(repo=str(remote), root=root)
+
+    res = self_update(root=root, ref="main", dry_run=False)
+    assert res.action == "error"
+    assert "unmaterialized vendor pointers" in (res.reason or "")
+    # The prior install is untouched, and no broken new slot was left behind.
+    assert current_version(root) == "1.0.0"
+    assert not version_slot("9.9.9", root).exists()
 
 
 def test_self_update_second_run_is_version_gated(tmp_path, monkeypatch):
