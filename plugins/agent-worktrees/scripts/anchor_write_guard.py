@@ -51,8 +51,10 @@ Escape hatches / modes:
     at all -- the guard's shell heuristic looks for a literal ``git`` mutation
     verb in the command text, and this CLI verb shells out to git internally
     rather than the agent invoking ``git`` directly. Prefer it over a raw
-    ``git pull``/``git fetch`` whenever the goal is only catching the anchor
-    up with its remote, not editing it.
+    ``git pull`` (a bare ``git fetch`` alone never trips this guard --
+    it never mutates the working tree -- but still needs a follow-up
+    ``merge``/``rebase`` to actually catch the anchor up, which does) whenever
+    the goal is only catching the anchor up with its remote, not editing it.
   * ``agent-worktrees repos allow-edits <repo> --reason "..."`` opens a
     time-boxed break-glass (``~/.agent-worktrees/allow-edits.json``) the guard
     honors.

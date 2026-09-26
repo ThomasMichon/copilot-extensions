@@ -229,8 +229,10 @@ never force-updates or creates merge commits. Naming one or more repos
 combinable with `--tag`/`--class`; a named repo that isn't registered at all
 is reported as its own `not registered` result. This is the sanctioned way to
 catch a worktree-class repo's **anchor** checkout up with its remote without
-tripping `anchor_write_guard` (which blocks a literal `git pull`/`git fetch`
-run directly against the anchor).
+tripping `anchor_write_guard` (which blocks a literal `git pull` -- and any
+other git mutation verb -- run directly against the anchor; a bare `git
+fetch` was never blocked, but still needs a follow-up `merge`/`rebase` that
+would be).
 
 ## Data File
 
