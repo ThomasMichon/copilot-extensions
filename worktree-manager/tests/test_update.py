@@ -432,13 +432,22 @@ def test_fetch_via_tarball_refuses_a_symlinked_extraction_top_dir(tmp_path, monk
 
     archive_path = tmp_path / "payload.tar.gz"
     with tarfile.open(archive_path, "w:gz") as tf:
-        # Store the real content under a different name, then add a
-        # symlink member for the top-level dir codeload extraction expects
-        # -- exactly mirroring a tarball whose top dir is a symlink.
-        tf.add(outside, arcname="real-target")
+        # Nest the real content one level deeper ("nested/real-target",
+        # not a bare top-level "real-target" sibling) so it can NEVER
+        # independently satisfy the loop's own payload search: extract/
+        # would otherwise contain TWO candidate top-level dirs (the real
+        # one AND the symlink), and since extract.iterdir()'s enumeration
+        # order is filesystem-dependent (not guaranteed), the loop could
+        # non-deterministically pick the real, non-symlinked "real-target"
+        # entry FIRST and never even reach the symlinked entry -- exactly
+        # the flake this nesting eliminates: "nested" itself has no
+        # worktree-manager/pyproject.toml directly inside it (only
+        # nested/real-target/worktree-manager/... does), so it can never
+        # satisfy the search on its own.
+        tf.add(outside, arcname="nested/real-target")
         link_info = tarfile.TarInfo(name="copilot-extensions-main")
         link_info.type = tarfile.SYMTYPE
-        link_info.linkname = "real-target"
+        link_info.linkname = "nested/real-target"
         tf.addfile(link_info)
 
     class _FakeResponse:
