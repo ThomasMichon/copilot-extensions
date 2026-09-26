@@ -83,6 +83,34 @@ def test_build_signatures_falls_back_to_whole_job_when_no_test_id(watchdog):
     assert "module too large" in sigs[0].excerpt
 
 
+def test_extract_failed_test_ids_ignores_run_plugin_tests_wrapper_summary(watchdog):
+    # tools/run-plugin-tests.py's own wrapper emits "FAILED plugins: <name>"
+    # on a failed job -- it starts with "FAILED" like a real pytest summary
+    # line but has no "::" node-id shape, and must never produce a
+    # misleading extra signature/issue.
+    log = "FAILED plugins: agent-worktrees\n"
+    assert watchdog.extract_failed_test_ids(log) == []
+
+
+def test_build_signatures_falls_back_to_whole_job_for_the_wrapper_summary_alone(watchdog):
+    log = "some earlier output\nFAILED plugins: agent-worktrees\n"
+    sigs = watchdog.build_signatures("full - agent-worktrees", log)
+    assert len(sigs) == 1
+    assert sigs[0].test_id is None
+
+
+def test_signature_key_fallback_is_stable_across_different_timestamps(watchdog):
+    # The real Actions log timestamps every line -- the same underlying
+    # failure must still dedupe across two runs whose timestamps differ.
+    excerpt_a = "2026-09-26T05:08:32.0000000Z ERROR: module too large\n2026-09-26T05:08:32.1000000Z Exit 1\n"
+    excerpt_b = "2026-09-27T11:22:33.4444444Z ERROR: module too large\n2026-09-27T11:22:33.5555555Z Exit 1\n"
+
+    sigs_a = watchdog.build_signatures("guards (full-tree, non-PR-scoped)", excerpt_a)
+    sigs_b = watchdog.build_signatures("guards (full-tree, non-PR-scoped)", excerpt_b)
+
+    assert sigs_a[0].key == sigs_b[0].key
+
+
 def test_signature_key_is_stable_for_the_same_test_id(watchdog):
     a = watchdog.signature_key("job", "path::test")
     b = watchdog.signature_key("job", "path::test")

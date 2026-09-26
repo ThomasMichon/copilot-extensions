@@ -503,3 +503,22 @@ _Pending._
   gotcha, `report-failure` will not actually execute until this same diff
   also reaches `main` via a workflows-only companion PR — queued as the
   next action once this PR merges to `dev`.
+- **Second review pass caught one real parsing bug and one real dedup
+  bug, both fixed:** (1) parametrized node ids can contain spaces (e.g.
+  `test_case[a b]`), which the original `\S+` pattern truncated at the
+  first one; matched the full line and split on the last `` - `` (the
+  real node-id/reason boundary) instead; (2) that same broad match also
+  swallowed `run-plugin-tests.py`'s own non-test `FAILED plugins: <name>`
+  wrapper line, which would have produced a misleading extra
+  signature/issue — now requires a genuine `::` node-id shape before
+  accepting a match, falling through to the whole-job signature
+  otherwise. Regression tests added for both.
+- **Third review pass caught a real dedup-breaking bug:** the whole-job
+  fallback signature hashed the raw log excerpt, which the Actions log
+  timestamps on every line — so the *identical* non-pytest failure
+  (a `guards-full-sweep` script crash) got a different hash, and a
+  different issue, on every single occurrence, silently defeating the
+  entire point of that fallback path. Strip the per-line ISO-8601
+  timestamp prefix before hashing (keeping the real, timestamped excerpt
+  for the human-facing issue/comment body); regression test confirms two
+  identical failures with different timestamps now produce the same key.

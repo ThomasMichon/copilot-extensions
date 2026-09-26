@@ -87,11 +87,36 @@ def _strip_summary_reason(raw: str) -> str:
 
 def extract_failed_test_ids(log_text: str) -> list[str]:
     """Return de-duplicated pytest ``FAILED <path>::<test>`` node ids found
-    in ``log_text``, in first-seen order."""
+    in ``log_text``, in first-seen order.
+
+    Only keeps candidates with a real node-id shape (containing ``::``) --
+    `tools/run-plugin-tests.py`'s own wrapper summary line (``FAILED
+    plugins: <name>``) also starts with ``FAILED`` but is not a node id;
+    letting it through would produce a misleading extra signature/issue
+    instead of falling through to the whole-job signature.
+    """
     seen: dict[str, None] = {}
     for match in _FAILED_TEST_RE.finditer(log_text):
-        seen.setdefault(_strip_summary_reason(match.group(1)), None)
+        candidate = _strip_summary_reason(match.group(1))
+        if "::" not in candidate:
+            continue
+        seen.setdefault(candidate, None)
     return list(seen)
+
+
+_TIMESTAMP_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z ?", re.MULTILINE)
+
+
+def _strip_timestamps(text: str) -> str:
+    """Strip GitHub Actions' own per-line ISO-8601 timestamp prefix.
+
+    The job-level Actions log timestamps every line, so the identical
+    non-pytest failure (a `guards-full-sweep` script crash, a tool error)
+    gets a different hash on every run if the raw excerpt -- timestamps
+    included -- is what gets hashed for the whole-job fallback signature.
+    Stripping them first is what actually makes that fallback dedupe.
+    """
+    return _TIMESTAMP_PREFIX_RE.sub("", text)
 
 
 def _excerpt_around(log_text: str, needle: str, before: int = 15, after: int = 3) -> str:
@@ -122,11 +147,14 @@ def build_signatures(job_name: str, log_text: str) -> list[FailureSignature]:
     test_ids = extract_failed_test_ids(log_text)
     if not test_ids:
         excerpt = "\n".join(log_text.splitlines()[-40:])
+        # Hash the timestamp-stripped excerpt (stable across runs); keep the
+        # raw, timestamped excerpt for the human-facing issue/comment body.
+        stable_basis = _strip_timestamps(excerpt)
         return [
             FailureSignature(
                 job_name=job_name,
                 test_id=None,
-                key=signature_key(job_name, None, excerpt),
+                key=signature_key(job_name, None, stable_basis),
                 excerpt=excerpt,
             )
         ]
