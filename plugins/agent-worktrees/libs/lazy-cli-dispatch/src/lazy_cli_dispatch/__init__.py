@@ -7,7 +7,7 @@ tools/sync-vendored-libs.py's own module docstring for the full
 Every import of this package resolves through ordinary Python import
 machinery straight to the canonical ``libs/lazy-cli-dispatch/src/lazy_cli_dispatch`` tree -- do NOT
 hand-edit this file; regenerate it via
-``python tools/sync-vendored-libs.py --pointerize <plugin> lazy-cli-dispatch``.
+``python tools/sync-vendored-libs.py --pointerize <consumer> lazy-cli-dispatch``.
 A production (main-branch) release never ships this stub:
 ``tools/materialize_main.py`` expands it into a real, byte-identical copy
 at promotion time.

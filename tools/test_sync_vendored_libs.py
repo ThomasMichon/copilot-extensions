@@ -312,6 +312,39 @@ def test_materialize_rejection_never_destroys_the_previous_tests_content(repo: P
     assert (original / "test_thing.py").read_text() == "def test_it():\n    pass\n"
 
 
+def test_materialize_rejects_a_bad_tests_symlink_before_touching_src(repo: Path):
+    # A copy carrying both src/ and tests/ must have BOTH canonical trees
+    # validated before either is mutated -- otherwise a rejected tests/
+    # refresh (found only after src/ was already replaced) would leave the
+    # copy in a mixed state: fresh src/, stale tests/, and the pointer
+    # marker still present (materialize would then look "half done" on a
+    # retry, or a promotion could snapshot the mismatched pair).
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "fresh canonical\n")
+    _lib_pyproject(repo, "libs/shared-lib/pyproject.toml", "0.1.0-dev2")
+    (repo / "libs/shared-lib/tests").mkdir(parents=True)
+    secret = repo.parent / "outside-repo-secret3"
+    secret.mkdir()
+    (repo / "libs/shared-lib/tests/evil-link").symlink_to(secret, target_is_directory=True)
+    _pointer(repo, "alpha", "shared-lib")
+    copy_dir = repo / "plugins/alpha/libs/shared-lib"
+    (copy_dir / "src/shared_lib").mkdir(parents=True)
+    (copy_dir / "src/shared_lib/__init__.py").write_text("stale stub\n", encoding="utf-8")
+    (copy_dir / "tests").mkdir(parents=True)
+    (copy_dir / "tests/test_thing.py").write_text(
+        "def test_it():\n    pass\n", encoding="utf-8"
+    )
+
+    result = _run(repo, "--materialize")
+    assert result.returncode == 1, result.stdout + result.stderr
+
+    # src/ was never touched -- the rejection happened before any mutation.
+    assert (copy_dir / "src/shared_lib/__init__.py").read_text() == "stale stub\n"
+    # tests/ was never touched either.
+    assert (copy_dir / "tests/test_thing.py").read_text() == "def test_it():\n    pass\n"
+    # The pointer marker is still present -- this copy is still "pending".
+    assert (copy_dir / "VENDOR_POINTER.json").exists()
+
+
 def test_materialize_catches_a_dangling_tests_symlink_at_the_destination(repo: Path):
     # A dangling (or non-directory-target) symlink at copy/tests has
     # is_dir()==False, since is_dir() follows the link to a target that
@@ -428,6 +461,50 @@ def test_pointerize_is_a_noop_for_tests_when_canonical_has_none(repo: Path):
     result = _run(repo, "--pointerize", "alpha", "shared-lib")
     assert result.returncode == 0, result.stdout + result.stderr
     assert not (repo / "plugins/alpha/libs/shared-lib/tests").exists()
+
+
+def test_repointerize_preserves_a_prior_no_tests_decision(repo: Path):
+    # A copy that was FIRST pointerized before canonical grew a tests/
+    # directory (or whose --pointerize deliberately chose none) must keep
+    # that choice on every later re-pointerize (e.g. to regenerate a stub
+    # after a template/wording change) -- it must never silently gain a
+    # tests/ it never had just because canonical happens to have one by
+    # the time of the re-run. Otherwise a copy matching what `main` ships
+    # today would drift the next time its stub is regenerated.
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
+    (repo / "plugins/alpha").mkdir(parents=True)
+
+    # First pointerize: canonical has no tests/ yet.
+    result = _run(repo, "--pointerize", "alpha", "shared-lib")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (repo / "plugins/alpha/libs/shared-lib/tests").exists()
+
+    # Canonical grows a tests/ directory afterward.
+    _write(repo, "libs/shared-lib/tests/test_thing.py", "def test_it():\n    assert True\n")
+
+    # Re-pointerizing the SAME already-pointer copy must not introduce it.
+    result = _run(repo, "--pointerize", "alpha", "shared-lib")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (repo / "plugins/alpha/libs/shared-lib/tests").exists()
+
+
+def test_repointerize_preserves_a_prior_has_tests_decision(repo: Path):
+    # The mirror case: a copy that already vendored tests/ keeps getting a
+    # refreshed tests/ across a re-pointerize, rather than losing it.
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
+    _write(repo, "libs/shared-lib/tests/test_thing.py", "def test_it():\n    assert True\n")
+    (repo / "plugins/alpha").mkdir(parents=True)
+
+    result = _run(repo, "--pointerize", "alpha", "shared-lib")
+    assert result.returncode == 0, result.stdout + result.stderr
+    vendored_test = repo / "plugins/alpha/libs/shared-lib/tests/test_thing.py"
+    assert vendored_test.read_text() == "def test_it():\n    assert True\n"
+
+    # Canonical's test content changes; re-pointerizing should refresh it.
+    _write(repo, "libs/shared-lib/tests/test_thing.py", "def test_it():\n    assert False\n")
+    result = _run(repo, "--pointerize", "alpha", "shared-lib")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert vendored_test.read_text() == "def test_it():\n    assert False\n"
 
 
 def test_pointerized_copy_forwards_imports_to_canonical_end_to_end(repo: Path):

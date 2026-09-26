@@ -131,7 +131,7 @@ tools/sync-vendored-libs.py's own module docstring for the full
 Every import of this package resolves through ordinary Python import
 machinery straight to the canonical ``libs/{lib}/src/{pkg}`` tree -- do NOT
 hand-edit this file; regenerate it via
-``python tools/sync-vendored-libs.py --pointerize <plugin> {lib}``.
+``python tools/sync-vendored-libs.py --pointerize <consumer> {lib}``.
 A production (main-branch) release never ships this stub:
 ``tools/materialize_main.py`` expands it into a real, byte-identical copy
 at promotion time.
@@ -394,15 +394,17 @@ def _copy_src(src_lib: Path, dst_lib: Path) -> None:
 
 def _copy_tests(src_lib: Path, dst_lib: Path) -> None:
     """Copy ``src_lib``'s ``tests/`` into ``dst_lib``, the same way
-    ``_copy_src`` copies ``src/``. Used by ``--pointerize`` (always run,
-    introducing ``tests/`` fresh whenever canonical has one) and by
-    callers refreshing an ALREADY-vendored pointer copy's ``tests/`` (who
-    must gate the call on ``dst_lib``'s own ``tests/`` already existing
-    themselves -- see ``cmd_materialize()`` -- since ``--pointerize``
-    records a deliberate per-copy choice about whether to vendor
-    ``tests/`` at all, and refreshing must never unilaterally introduce
-    one a copy never had). Never used for a real (non-pointer) copy's own,
-    possibly independently authored ``tests/``."""
+    ``_copy_src`` copies ``src/``. Used both by ``--pointerize`` (gated by
+    the caller on the copy already having had its own ``tests/`` before
+    conversion -- see ``_write_passthrough_pointer``'s ``had_tests``) and
+    by callers refreshing an ALREADY-vendored pointer copy's ``tests/``
+    (who must gate the call on ``dst_lib``'s own ``tests/`` already
+    existing themselves -- see ``cmd_materialize()``). Neither caller ever
+    unilaterally introduces ``tests/`` for a copy that never had one --
+    that per-copy choice, once made, is preserved across every later
+    ``--pointerize``/``--materialize`` run. Never used for a real
+    (non-pointer) copy's own, possibly independently authored
+    ``tests/``."""
     _safe_replace_tree(src_lib / "tests", dst_lib / "tests", label=f"{src_lib.name}/tests")
 
 
@@ -529,9 +531,45 @@ def cmd_materialize(*, force: bool) -> int:
             continue
         for copy in paths:
             try:
+                pointer = copy / POINTER_NAME
+                copy_tests = copy / "tests"
+                refresh_tests = pointer.exists() and (
+                    copy_tests.is_dir() or copy_tests.is_symlink()
+                )
+                # Preflight BOTH replacement trees before writing anything:
+                # _copy_src() already mutates src/ before _copy_tests() gets
+                # a chance to reject a canonical tests/ symlink, which would
+                # otherwise leave this copy in a mixed state (fresh src/,
+                # stale tests/, pointer marker still present) that a retry
+                # or another consumer could observe. Validate first, mutate
+                # only once nothing here would fail.
+                src_bad = _find_symlink(canonical / "src")
+                if src_bad is not None:
+                    where = f"{canonical.name}/src" if src_bad == "." else f"{canonical.name}/src/{src_bad}"
+                    raise SystemExit(
+                        f"{where} is a symlink -- refusing (a canonical "
+                        "lib source must contain only real files)"
+                    )
+                if refresh_tests:
+                    if copy_tests.is_symlink():
+                        raise SystemExit(
+                            f"{copy}/tests (destination) is a symlink -- "
+                            "refusing to replace it blindly (a vendored "
+                            "copy must contain only real files)"
+                        )
+                    tests_bad = _find_symlink(canonical / "tests")
+                    if tests_bad is not None:
+                        where = (
+                            f"{canonical.name}/tests" if tests_bad == "."
+                            else f"{canonical.name}/tests/{tests_bad}"
+                        )
+                        raise SystemExit(
+                            f"{where} is a symlink -- refusing (a canonical "
+                            "lib source must contain only real files)"
+                        )
+
                 _copy_src(canonical, copy)
                 _sync_version(canonical, copy)
-                pointer = copy / POINTER_NAME
                 if pointer.exists():
                     # Only refresh a DRY-pointer copy's tests/, and only if it
                     # already carries one -- it was vendored from canonical at
@@ -543,14 +581,8 @@ def cmd_materialize(*, force: bool) -> int:
                     # only consumer never discovers libs/*/tests/) must not
                     # gain one unilaterally just because canonical has one. A
                     # real copy's own tests/ may be independently authored and
-                    # is left untouched regardless. Checks is_symlink() too,
-                    # not just is_dir() -- a dangling or non-directory
-                    # symlink at copy/tests is_dir()==False (it follows the
-                    # link to a target that isn't there), so an is_dir()-only
-                    # check would silently ignore it, leaving that symlink
-                    # to survive untouched into a materialized release.
-                    copy_tests = copy / "tests"
-                    if copy_tests.is_dir() or copy_tests.is_symlink():
+                    # is left untouched regardless.
+                    if refresh_tests:
                         _copy_tests(canonical, copy)
                     pointer.unlink()
             except SystemExit as exc:
@@ -591,11 +623,17 @@ def _write_passthrough_pointer(consumer: str, lib: str) -> Path:
     risk (nothing to keep in sync; editing canonical takes effect
     immediately, since the shim re-resolves to canonical's real files on
     every fresh interpreter). Also vendors canonical's ``tests/`` verbatim
-    if canonical has one -- unlike ``src/``, this is the copy's one
-    deliberate opt-in choice: later refreshes (``--materialize``,
-    ``materialize_main.py``, ``preview_release.py``) only ever touch
-    ``tests/`` for a copy that already carries it, never introducing one
-    unilaterally.
+    on a genuinely FIRST-time conversion (no prior pointer marker), if
+    canonical has one -- the copy's one deliberate opt-in choice.
+    Re-pointerizing an ALREADY-pointer copy (e.g. to regenerate a stub
+    after a template change) instead PRESERVES whatever that copy's own
+    prior tests/ decision was, never flipping a copy that deliberately has
+    none (matching what ``main`` ships for it) into one that suddenly does
+    just because canonical happens to have a tests/ today. This keeps
+    --pointerize idempotent/safe to re-run: later refreshes
+    (``--materialize``, ``materialize_main.py``, ``preview_release.py``)
+    follow the same preserve-don't-introduce rule, only ever touching
+    ``tests/`` for a copy that already carries it.
     """
     canonical = LIBS_DIR / lib
     if not canonical.is_dir():
@@ -609,9 +647,56 @@ def _write_passthrough_pointer(consumer: str, lib: str) -> Path:
             f"{lib}: canonical libs/{lib}/src/{lib.replace('-', '_')}/__init__.py "
             "missing -- only a plain single-package lib layout is supported"
         )
+    # Validate every canonical tree BEFORE touching the existing copy_dir
+    # at all: this function deletes copy_dir wholesale next, so if a later
+    # symlink rejection happened only once _copy_tests() ran, a failed
+    # --pointerize would destroy the old consumer copy and leave the new
+    # directory partially populated (pyproject.toml/README but no
+    # src/tests/pointer). Fail before any destructive action, not partway
+    # through building the replacement.
+    src_symlink_found = _find_symlink(canon_pkg_dir)
+    if src_symlink_found is not None:
+        where = f"{lib}/src" if src_symlink_found == "." else f"{lib}/src/{src_symlink_found}"
+        raise SystemExit(
+            f"{where} is a symlink -- refusing (a canonical lib source "
+            "must contain only real files)"
+        )
+    canon_tests = canonical / "tests"
+    tests_symlink_found = _find_symlink(canon_tests)
+    if tests_symlink_found is not None:
+        where = (
+            f"{lib}/tests" if tests_symlink_found == "." else f"{lib}/tests/{tests_symlink_found}"
+        )
+        raise SystemExit(
+            f"{where} is a symlink -- refusing (a canonical lib source "
+            "must contain only real files)"
+        )
 
     pkg = lib.replace("-", "_")
     copy_dir = _consumer_dir(consumer) / "libs" / lib
+    # Was this copy ALREADY a pointer copy (has a pointer marker) before
+    # this call? If so, re-pointerizing (e.g. to regenerate a stub after a
+    # template/wording change) must PRESERVE its prior tests/ decision --
+    # capture that BEFORE the wholesale rmtree below destroys the
+    # evidence, so a copy that deliberately has no tests/ (e.g.
+    # lazy-cli-dispatch, matching what main ships) doesn't silently gain
+    # one just because canonical happens to have one today. A genuinely
+    # FIRST-time conversion (no pointer marker yet -- whether copy_dir is
+    # a real pre-existing copy or doesn't exist at all) has no such prior
+    # decision to preserve, so it follows canonical instead: vendor
+    # tests/ if canonical has one, matching the documented default.
+    existing_tests = copy_dir / "tests"
+    was_already_pointer = (copy_dir / POINTER_NAME).exists()
+    if was_already_pointer:
+        had_tests = existing_tests.is_dir() or existing_tests.is_symlink()
+    else:
+        had_tests = canon_tests.is_dir()
+    if had_tests and existing_tests.is_symlink():
+        raise SystemExit(
+            f"{copy_dir}/tests (destination) is a symlink -- refusing to "
+            "replace it blindly (a vendored copy must contain only real "
+            "files)"
+        )
     if copy_dir.exists():
         shutil.rmtree(copy_dir)
     copy_dir.mkdir(parents=True)
@@ -628,9 +713,13 @@ def _write_passthrough_pointer(consumer: str, lib: str) -> Path:
     # unlike check-vendored-libs-sync.py's own src/-only invariant, silently
     # dropping this directory would silently drop real test coverage for
     # such a consumer, not just leave a comparison out of scope). Vendor it
-    # from canonical the same DRY way src/ already is, rather than deleting
-    # it or leaving whatever the pre-conversion copy happened to have.
-    _copy_tests(canonical, copy_dir)
+    # from canonical the same DRY way src/ already is -- but ONLY when the
+    # copy already had a tests/ of its own (see ``had_tests`` above): a copy
+    # that never carried tests/ (e.g. a consumer that never discovers
+    # libs/*/tests/) must not gain one unilaterally just because canonical
+    # happens to have one.
+    if had_tests:
+        _copy_tests(canonical, copy_dir)
 
     pkg_dir = copy_dir / "src" / pkg
     pkg_dir.mkdir(parents=True)
