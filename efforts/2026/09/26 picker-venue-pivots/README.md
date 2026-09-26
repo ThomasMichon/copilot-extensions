@@ -3,15 +3,15 @@
 - **Slug:** `picker-venue-pivots`
 - **Repo:** copilot-extensions
 - **Branch(es):** Phase 0+1 landed via
-  `worktree/tmichon-cloud1-win-20260921-183442-d733` (merged,
+  `worktree/operator-cloud1-win-20260921-183442-d733` (merged,
   `ThomasMichon/copilot-extensions#3219`); Phase 2 (Containers) landed via
-  `worktree/tmichon-cloud1-win-20260922-002606-0a9a` (merged,
+  `worktree/operator-cloud1-win-20260922-002606-0a9a` (merged,
   `ThomasMichon/copilot-extensions#3268`); Phase 3 (Open action) landed via
-  `worktree/tmichon-cloud1-win-20260922-022834-a59b` (merged,
+  `worktree/operator-cloud1-win-20260922-022834-a59b` (merged,
   `ThomasMichon/copilot-extensions#3279`); Phase 4 landed via
-  `worktree/tmichon-cloud1-win-20260922-113718-4a4e` (merged,
+  `worktree/operator-cloud1-win-20260922-113718-4a4e` (merged,
   `ThomasMichon/copilot-extensions#3285`); Phase 5 + Phase 4 follow-ups are
-  in `worktree/tmichon-cloud1-win-20260922-123333-e9c8`. Each remaining phase
+  in `worktree/operator-cloud1-win-20260922-123333-e9c8`. Each remaining phase
   or follow-up slice gets its own fresh worktree off `main`
   (Tasks-pane precedent).
 - **Created:** 2026-09-21
@@ -60,7 +60,7 @@ information fidelity:
 4. A reserved **driving-worktree mark** (a stat slot or the `[mark]` glyph)
    plus menu actions to jump to the driving worktree's Worktrees-pivot entry
    or open its Worktree Status card directly.
-5. For odsp-web: auto-journal a pushed-branch's resulting PR onto the
+5. For example-repo: auto-journal a pushed-branch's resulting PR onto the
    driving worktree's existing claim ledger
    (`agent-worktrees claims add pr <ref>`), so it appears in the row's
    claims-list with no manual claim step.
@@ -83,7 +83,7 @@ realization.
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| tmichon-cloud1 (this session) | Grounding against real code, vision + effort authoring, preview-rendering tooling, Phase 1+ implementation | `copilot-extensions.worktrees/tmichon-cloud1-win-20260921-183442-d733` |
+| operator-cloud1 (this session) | Grounding against real code, vision + effort authoring, preview-rendering tooling, Phase 1+ implementation | `copilot-extensions.worktrees/operator-cloud1-win-20260921-183442-d733` |
 
 ## Coordination
 
@@ -105,14 +105,14 @@ realization.
 
 **Read this section FIRST in any new session picking up this effort.**
 
-- **Worktree:** Phase 0+1 (`tmichon-cloud1-win-20260921-183442-d733`, PR
-  #3219), Phase 2 (`tmichon-cloud1-win-20260922-002606-0a9a`, PR #3268),
-  Phase 3 (`tmichon-cloud1-win-20260922-022834-a59b`, PR #3279), Phase 4
-  (`tmichon-cloud1-win-20260922-113718-4a4e`, PR #3285), and Phase 5 design
-  closeout (`tmichon-cloud1-win-20260922-123333-e9c8`) are merged. This
+- **Worktree:** Phase 0+1 (`operator-cloud1-win-20260921-183442-d733`, PR
+  #3219), Phase 2 (`operator-cloud1-win-20260922-002606-0a9a`, PR #3268),
+  Phase 3 (`operator-cloud1-win-20260922-022834-a59b`, PR #3279), Phase 4
+  (`operator-cloud1-win-20260922-113718-4a4e`, PR #3285), and Phase 5 design
+  closeout (`operator-cloud1-win-20260922-123333-e9c8`) are merged. This
   session is in the fresh follow-up worktree
-  `tmichon-cloud1-win-20260922-154146-755b` for the live-validation-discovered
-  Phase 4 odsp-web PR auto-claim bugfix.
+  `operator-cloud1-win-20260922-154146-755b` for the live-validation-discovered
+  Phase 4 example-repo PR auto-claim bugfix.
 - **Current phase:** Phases 0-5 are **fully complete**. This close-out pass
   reconciled the effort README's last stale unticked checklist items: one
   genuinely missing manifest-regression test was added, the already-existing
@@ -293,9 +293,9 @@ note explaining why, whenever the design is deliberately revised.
   `container`), `claims release`/`settle`/`sweep`. This effort's
   claims-list column reads that ledger through the driving-worktree
   cross-link — **no new claim storage or rendering**; the only new piece
-  is a *producer* (Phase 4's odsp-web PR auto-claim) calling the existing
+  is a *producer* (Phase 4's example-repo PR auto-claim) calling the existing
   `claims add pr <ref>` verb.
-- **odsp-web PR detection has no existing hook yet:** nothing in
+- **example-repo PR detection has no existing hook yet:** nothing in
   `agent-codespaces` today watches for a pushed ADO branch turning into a
   PR (`codespace_assets/ado-auth-helper-relay`/`ado-auth-helper-wrapper`
   handle ADO *auth*, not PR detection). Phase 4 needs to design this
@@ -628,7 +628,7 @@ owns the reusable remote CLI-mode embodiment machinery the hand-off lands on.
       so parity is structural (the same command runs either way), not a
       coincidence of testing.
 
-### Phase 4 — Driving-worktree navigation + odsp-web PR auto-claim
+### Phase 4 — Driving-worktree navigation + example-repo PR auto-claim
 - [x] Implement the reserved driving-worktree mark on both pivots (stat
       slot or `[mark]` glyph per Phase 0 decision) and its two menu
       actions: jump to the driving worktree's Worktrees-pivot entry, and
@@ -651,12 +651,12 @@ owns the reusable remote CLI-mode embodiment machinery the hand-off lands on.
       read the same Phase 1/2 `claims_summary` cross-link via
       `agent_worktrees.claims_rank`; only a new producer (`journal_claim`
       -> existing `claims add pr`) feeds it.
-- [x] Design and implement the odsp-web push→PR detection point (new: no
+- [x] Design and implement the example-repo push→PR detection point (new: no
       existing hook watches for this) that calls
       `agent-worktrees claims add pr <ref>` on the driving worktree when a
       CodeSpace's pushed ADO branch produces a PR. **Done:** detection is a
       best-effort, read-triggered probe in `pool.picker_payload` for
-      `microsoft/odsp-web` rows backed by a resolvable local driving
+      `example-org/example-repo` rows backed by a resolvable local driving
       worktree. It reuses the host's existing Codespaces + ADO auth lanes:
       probe the CodeSpace's current `remote.origin.url` over
       `gh codespace ssh`, parse the ADO repo coordinates, query active PRs
@@ -745,10 +745,10 @@ owns the reusable remote CLI-mode embodiment machinery the hand-off lands on.
       row (`friendly-eureka-x55xwv59xrwfv6qx`, `status: "RUNNING"`,
       `subtitle: "friendly-eureka-x55xwv59xrwfv6qx"`) and a real claimed row
       (`phase4-pr-autoclaim-validation-j6jw4jxww5v2qrj7`,
-      `worktree: "tmichon-cloud1-win-20260921-180855-6e3c"`,
+      `worktree: "operator-cloud1-win-20260921-180855-6e3c"`,
       `subtitle: "→ phase4-pr-autoclaim-validation-j6jw4jxww5v2qrj7"`,
       `sess: "IDLE"`). The equivalent Containers live pass could not run here
-      because `agent-containers fleet --json`, `agent-containers up odsp-web
+      because `agent-containers fleet --json`, `agent-containers up example-repo
       --json`, and `docker ps` all failed with the real machine-state error
       `Docker Desktop is unable to start`; see the 2026-09-23 Journal entry
       and follow-up issue `#3507`.
@@ -762,26 +762,30 @@ owns the reusable remote CLI-mode embodiment machinery the hand-off lands on.
 - [x] Unit tests for the driving-worktree mark/menu-navigation actions
       (jump-to-worktree, worktree-status-card) against fixed fixtures with
       and without a driving worktree.
-- [x] A live/manual check on a real odsp-web CodeSpace: push a real ADO
+- [x] A live/manual check on a real example-repo CodeSpace: push a real ADO
       topic branch, open the resulting PR, and confirm it appears in the
       row's claims-list with no manual claim step (Phase 4's own
       "validate beyond unit tests" case, not just a mocked push→PR
-      fixture). **Resolved (2026-09-22):** a real odsp-web CodeSpace
+      fixture). **Resolved (2026-09-22):** a real example-repo CodeSpace
       (`phase4-pr-autoclaim-validation-j6jw4jxww5v2qrj7`) on real branch
-      `feature/tmichon/docs-navigation-minor-doc-fix` and real ADO PR
-      `https://onedrive.visualstudio.com/ODSP-Web/_git/odsp-web/pullrequest/2398823`
+      `feature/operator/docs-navigation-minor-doc-fix` and real ADO PR
+      `https://dev.azure.com/example-org/example-project/_git/example-repo/pullrequest/12345`
       were revalidated against the fixed local source. Before the fix, the
       installed pool row still read `claims_summary: ""` while the GitHub
       CodeSpaces metadata stayed on `branch: "main"`. After probing the live
       workspace branch + ADO remote through the fixed helper path and
       journaling the result onto the driving worktree ledger, the worktree's
       ranked claims summary became
-      `PR https://onedrive.visualstudio.com/ODSP-Web/_git/odsp-web/pullrequest/2398823 · codespace weekly-update-page-tools-6697r9j7qgp3wxp`
+      `PR https://dev.azure.com/example-org/example-project/_git/example-repo/pullrequest/12345 · codespace weekly-update-page-tools-6697r9j7qgp3wxp`
       and `agent-worktrees claims ... --json` showed the new active `pr`
       claim entry. See the latest Journal entry for the exact commands and
       caveats.
 
 ## Journal
+
+### 2026-09-26 — Archived
+Every Plan and Validation Plan item is resolved. Moved to the dated archive
+path as part of a batch archive sweep of completed efforts.
 
 - **2026-09-23 (latest+16)** — Performed the final checklist-reconciliation
   pass that this effort's umbrella closure had skipped. First, I closed the
@@ -822,13 +826,13 @@ owns the reusable remote CLI-mode embodiment machinery the hand-off lands on.
   "running"`, `subtitle: "friendly-eureka-x55xwv59xrwfv6qx"`) and a real
   claimed row `phase4-pr-autoclaim-validation-j6jw4jxww5v2qrj7` with the
   Phase 4 fields present (`worktree:
-  "tmichon-cloud1-win-20260921-180855-6e3c"`, `worktree_id` same,
+  "operator-cloud1-win-20260921-180855-6e3c"`, `worktree_id` same,
   `has_driving_worktree: "true"`, `subtitle:
   "→ phase4-pr-autoclaim-validation-j6jw4jxww5v2qrj7"`, `sess: "IDLE"`).
   That is real non-fixture evidence that the shipped Codespaces pivot shape is
   rendering actual live venue state. The Containers side was blocked by real
   host state, not guesswork: `agent-containers fleet --json`,
-  `agent-containers up odsp-web --json`, and `docker ps` each failed with
+  `agent-containers up example-repo --json`, and `docker ps` each failed with
   `ERROR: Docker daemon not reachable. Is Docker Desktop running? (Error
   response from daemon: Docker Desktop is unable to start)`, `com.docker.service`
   remained `Stopped`, and unattended startup from this session did not
@@ -840,14 +844,14 @@ owns the reusable remote CLI-mode embodiment machinery the hand-off lands on.
   completed with evidence or explicitly transferred to a tracked objective.
 
 - **2026-09-22 (latest+15)** — Fixed the real live-validation-discovered bug
-  in Phase 4's odsp-web PR auto-claim path in fresh worktree
-  `tmichon-cloud1-win-20260922-154146-755b`. The live validation against real
+  in Phase 4's example-repo PR auto-claim path in fresh worktree
+  `operator-cloud1-win-20260922-154146-755b`. The live validation against real
   CodeSpace `phase4-pr-autoclaim-validation-j6jw4jxww5v2qrj7` proved the
   shipped Phase 4 mechanism was effectively non-functional for real
-  odsp-web venues: the GitHub CodeSpaces row always reports repository
-  `odsp-microsoft/odsp-web-codespaces` and keeps its `branch` metadata at the
-  creation-time branch (`main` here), so the old `_auto_claim_odsp_web_pr`
-  short-circuited before it ever looked at the real `/workspaces/odsp-web`
+  example-repo venues: the GitHub CodeSpaces row always reports repository
+  `example-org/example-repo-codespaces` and keeps its `branch` metadata at the
+  creation-time branch (`main` here), so the old `_auto_claim_example_repo_pr`
+  short-circuited before it ever looked at the real `/workspaces/example-repo`
   checkout. I removed that wrong GH-repo pre-gate, switched detection to a
   single live git probe that resolves the real workspace folder and reads both
   `remote.origin.url` and the actually checked-out branch in one remote round
@@ -860,11 +864,11 @@ owns the reusable remote CLI-mode embodiment machinery the hand-off lands on.
 
   Added regression coverage in `plugins/agent-codespaces/tests/test_pool.py`
   for all of the above: the GH-hosted CodeSpace repo no longer blocks a real
-  odsp-web workspace remote, the live checked-out branch wins when it differs
+  example-repo workspace remote, the live checked-out branch wins when it differs
   from the GH API `branch` field, the optimized ADO remote form still parses to
-  `odsp-web`, and the existing claim-journaling path stays intact. Targeted
+  `example-repo`, and the existing claim-journaling path stays intact. Targeted
   pool coverage (`uv run pytest tests/test_pool.py -k "codespace_git_probe or
-  auto_claim_odsp_web_pr or picker_payload_auto_claimed_pr_reads_like_existing_claim
+  auto_claim_example_repo_pr or picker_payload_auto_claimed_pr_reads_like_existing_claim
   or ado_remote_ref"`) passed cleanly. The full `agent-codespaces` suite also
   ran after `uv sync --extra dev`; it finished with **1150 passed / 28 skipped /
   4 failed**, all four in pre-existing unrelated tests
@@ -875,10 +879,10 @@ owns the reusable remote CLI-mode embodiment machinery the hand-off lands on.
   Closed the loop with real live revalidation instead of stopping at fixtures.
   The pre-fix installed binstub's pool row for
   `phase4-pr-autoclaim-validation-j6jw4jxww5v2qrj7` still showed
-  `repository: "odsp-microsoft/odsp-web-codespaces"`, `branch: "main"`, and
-  `claims_summary: ""` even though an SSH check of `/workspaces/odsp-web`
+  `repository: "example-org/example-repo-codespaces"`, `branch: "main"`, and
+  `claims_summary: ""` even though an SSH check of `/workspaces/example-repo`
   confirmed the real branch was
-  `feature/tmichon/docs-navigation-minor-doc-fix`. I then made one more tiny
+  `feature/operator/docs-navigation-minor-doc-fix`. I then made one more tiny
   doc-only commit on that real branch from the live CodeSpace so the still-open
   real ADO PR stayed current (`pullRequestId: 2398823`, status `active`,
   `lastMergeSourceCommit: 569a04e7a108e14e321bf5d20cb79d94bcfe3ecf`). Because a
@@ -886,17 +890,17 @@ owns the reusable remote CLI-mode embodiment machinery the hand-off lands on.
   installed binstub, I exercised the fixed local source directly from this
   worktree: `uv run python` imported the edited helper code, ran the real
   remote git probe against the live CodeSpace, resolved
-  `https://onedrive.visualstudio.com/ODSP-Web/_git/odsp-web/pullrequest/2398823`,
+  `https://dev.azure.com/example-org/example-project/_git/example-repo/pullrequest/12345`,
   and journaled it onto the driving worktree ledger. Concrete after-evidence:
-  `agent-worktrees claims tmichon-cloud1-win-20260921-180855-6e3c --json`
-  gained a new active `{"kind":"pr","ref":"https://onedrive.visualstudio.com/ODSP-Web/_git/odsp-web/pullrequest/2398823",...}`
+  `agent-worktrees claims operator-cloud1-win-20260921-180855-6e3c --json`
+  gained a new active `{"kind":"pr","ref":"https://dev.azure.com/example-org/example-project/_git/example-repo/pullrequest/12345",...}`
   entry, and the fixed `claims_summary` resolver for that driving worktree now
   reads
-  `PR https://onedrive.visualstudio.com/ODSP-Web/_git/odsp-web/pullrequest/2398823 · codespace weekly-update-page-tools-6697r9j7qgp3wxp`.
+  `PR https://dev.azure.com/example-org/example-project/_git/example-repo/pullrequest/12345 · codespace weekly-update-page-tools-6697r9j7qgp3wxp`.
   That closes the final explicit validation item for this effort.
 
 - **2026-09-22 (latest+14)** — Completed Phase 5's design-only closeout in
-  fresh worktree `tmichon-cloud1-win-20260922-123333-e9c8`. Searched the
+  fresh worktree `operator-cloud1-win-20260922-123333-e9c8`. Searched the
   active effort tree for the parallel "drive-CLI-agents-over-SSH" work and
   identified [`agent-bridge-cli-mode-sessions`](../agent-bridge-cli-mode-sessions/README.md)
   as the real counterpart: it already owns the provider-agnostic
@@ -930,11 +934,11 @@ owns the reusable remote CLI-mode embodiment machinery the hand-off lands on.
   the same question explicitly rather than rediscovering it from the Journal.
 
 - **2026-09-22 (latest+12)** — Investigated the remaining live/manual
-  odsp-web validation honestly instead of hand-waving it. Using the exact
+  example-repo validation honestly instead of hand-waving it. Using the exact
   session-catalog `agent-worktrees` / `agent-codespaces` binstubs,
-  `agent-worktrees related resolve odsp-web` confirmed the preferred locus
-  is a CodeSpace with checkout `/workspaces/odsp-web`; `gh codespace list`
-  showed existing odsp-web CodeSpaces; `agent-codespaces check
+  `agent-worktrees related resolve example-repo` confirmed the preferred locus
+  is a CodeSpace with checkout `/workspaces/example-repo`; `gh codespace list`
+  showed existing example-repo CodeSpaces; `agent-codespaces check
   friendly-eureka-x55xwv59xrwfv6qx --json` proved at least one venue is
   fully CLI-mode ready; and `agent-codespaces ssh` against the available
   venues showed two separate blockers to *this* session doing the full
@@ -944,18 +948,18 @@ owns the reusable remote CLI-mode embodiment machinery the hand-off lands on.
   `--force-claim` takeover of someone else's active venue; and
   (2) a separate shutdown CodeSpace
   (`weekly-update-page-tools-6697r9j7qgp3wxp`) could be started and
-  inspected safely enough to confirm the real odsp-web checkout and push
-  remote (`/workspaces/odsp-web`, ADO push URL present, host-side ADO bearer
+  inspected safely enough to confirm the real example-repo checkout and push
+  remote (`/workspaces/example-repo`, ADO push URL present, host-side ADO bearer
   minting available), but completing the actual Validation Plan item from
-  here would still mean mutating a real odsp-web topic branch and opening a
+  here would still mean mutating a real example-repo topic branch and opening a
   real ADO PR from an unattended copilot-extensions session with no
   sanctioned cleanup/ownership context. I therefore left the checkbox
   unchecked and recorded the exact commands + facts here so a dedicated
-  odsp-web session (or the operator directly) can run the real branch/PR
+  example-repo session (or the operator directly) can run the real branch/PR
   drill before closing the umbrella.
 
 - **2026-09-22 (latest+11)** — Completed Phase 4 in fresh worktree
-  `tmichon-cloud1-win-20260922-113718-4a4e`. Grounded the
+  `operator-cloud1-win-20260922-113718-4a4e`. Grounded the
   driving-worktree drill-in against the already-landed Tasks-pane
   precedent in three places: the picker's generic internal navigation
   surface (`engine_worktree_actions._internal_pivot_action` /
@@ -988,11 +992,11 @@ owns the reusable remote CLI-mode embodiment machinery the hand-off lands on.
   `status-segment --json` facts (`status_bar_cli._status_segment_json`),
   summarized into repo/worktree/branch/turn/live/git/closure/claims.
 
-  Implemented the odsp-web PR auto-claim as a **read-triggered, idempotent
+  Implemented the example-repo PR auto-claim as a **read-triggered, idempotent
   producer** in `agent_codespaces.pool` (the one new mechanism Phase 4
   actually needed). There was still no pre-existing hook for "branch push
   became PR", so the minimal consistent detection point is the codespace row
-  materialization itself: for a `microsoft/odsp-web` row backed by a
+  materialization itself: for a `example-org/example-repo` row backed by a
   resolvable local driving worktree, `picker_payload` now probes the
   CodeSpace's current `remote.origin.url` over `gh codespace ssh`, parses
   ADO repo coordinates (`ssh.dev.azure.com`, `dev.azure.com`, and
@@ -1030,8 +1034,8 @@ owns the reusable remote CLI-mode embodiment machinery the hand-off lands on.
   Phase-4 menu lane naturally differing most). The north-star design itself
   was not intentionally revised in this phase, so I recorded the
   comparison here rather than replacing the committed approved previews.
-  **Still outstanding:** the Validation Plan's real odsp-web live/manual
-  push→PR check remains unchecked; I confirmed odsp-web CodeSpaces are
+  **Still outstanding:** the Validation Plan's real example-repo live/manual
+  push→PR check remains unchecked; I confirmed example-repo CodeSpaces are
   accessible from this machine, but did not mutate a real branch/PR from a
   live venue inside this phase worktree.
 
@@ -1077,7 +1081,7 @@ owns the reusable remote CLI-mode embodiment machinery the hand-off lands on.
   different content, disambiguated). All CI checks green
   (`mergeStateStatus: CLEAN`); squash-merged via self-merge authority.
   Closed sub-issue `#3254`. Finalized that worktree and opened a fresh one
-  (`tmichon-cloud1-win-20260922-002606-0a9a`) off the post-merge `main` for
+  (`operator-cloud1-win-20260922-002606-0a9a`) off the post-merge `main` for
   Phase 2, per the effort's own per-phase-worktree convention.
 
   Completed Phase 2 (Containers pivot) in that fresh worktree. Grounded
@@ -1244,7 +1248,7 @@ owns the reusable remote CLI-mode embodiment machinery the hand-off lands on.
   is an accumulating snagged-signal stream, not limited to agent-bridge.
   Added a new Phase 4: a reserved driving-worktree mark/navigation (view
   driving worktree, or its Worktree Status card — mirroring
-  agent-dispatch's own direction) and an odsp-web-scoped PR auto-claim
+  agent-dispatch's own direction) and an example-repo-scoped PR auto-claim
   (a CodeSpace's pushed ADO branch auto-journals its resulting PR onto the
   driving worktree via the *existing* `agent-worktrees claims add pr <ref>`
   ledger — clarified in grounding that claims are that existing ledger, not

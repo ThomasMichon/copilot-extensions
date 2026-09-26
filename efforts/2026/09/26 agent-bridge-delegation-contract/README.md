@@ -138,6 +138,10 @@ new writer or default is enabled.
 
 ## Journal
 
+### 2026-09-26 — Archived
+Every Plan and Validation Plan item is resolved. Moved to the dated archive
+path as part of a batch archive sweep of completed efforts.
+
 ### 2026-08-31 — Kickoff
 
 - Claimed #1449 through the repository's issue-claim protocol.

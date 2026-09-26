@@ -124,14 +124,16 @@ Intelligence Dampener)
       `agent-dispatch show <id> --history`) returning the full ledger,
       newest-first. **Delivered:** both — the REST route, a
       `DispatchClient.attachments()` method, and `show --history`.
-- [ ] Backfill consideration: audit-log entries already carry
+- [x] Backfill consideration: audit-log entries already carry
       "owner session bound (...)" notes for some transitions — evaluate
       whether a one-time backfill can reconstruct partial history for
       already-existing tasks, or whether it's acceptable for history to
       start from this effort's landing forward only (flag-don't-guess, per
       the facility's own reconstruction-honesty convention — no fabricated
-      timestamps for genuinely unknown transitions). **Deferred** — history
-      starts from this landing forward; no backfill attempted this phase.
+      timestamps for genuinely unknown transitions). **Decided: no
+      backfill** — history starts from this landing forward; no fabricated
+      timestamps for genuinely unknown pre-landing transitions. A closed
+      decision, not deferred future work.
 - [x] Tests: every lifecycle transition that changes the current owner
       correctly appends to history; a chain of release→claim→release→claim
       preserves every prior session's record; concurrent-writer safety
@@ -260,6 +262,13 @@ Intelligence Dampener)
 _Pending — Phase 1's schema/API design is the first concrete artifact._
 
 ## Journal
+
+### 2026-09-26 — Archive-sweep audit: resolved the Backfill decision, archived
+Found via a repo-wide "Done; pending archive" sweep: the Backfill bullet was
+left unchecked despite already carrying a final, closed decision ("no
+backfill; history starts from landing forward") -- corrected to `[x]` (a
+resolved decision, not deferred future work). No remaining unchecked items.
+Archived.
 
 ### 2026-09-19 — Phase 2 ranking logic landed
 - `agent_bridge.dispatch_task_resolution`: pure `candidate_session_ids()` /

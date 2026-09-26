@@ -245,6 +245,10 @@ _Pending._
 
 ## Journal
 
+### 2026-09-26 — Archived
+Every Plan and Validation Plan item is resolved. Moved to the dated archive
+path as part of a batch archive sweep of completed efforts.
+
 ### 2026-09-26 — Effort complete: Status: Done
 - Every Plan phase (0-4) and every Validation Plan bullet is now resolved.
   The one remaining Plan item, the Bug-sweep's **#2631**, is transferred to

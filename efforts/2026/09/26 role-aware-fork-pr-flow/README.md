@@ -5,7 +5,7 @@
 - **Branch(es):** independent per-slice worktrees and pull requests
 - **Created:** 2026-09-10
 - **Status:** Done — all Phase 1/2a/2b/3 items landed; two Phase 2b items
-  remain explicitly deferred (see Proposal)
+  transferred to `#3872` (non-blocking, non-default-combination follow-ups)
 - **Vision:** `visions/plugins/agent-worktrees` — `contribution-aware-lifecycle`
 - **Umbrella issue:** _none yet — file on submission of Phase 2a's PR_
 - **Sub-issues:** _none yet_
@@ -48,7 +48,7 @@ consent/completion differently and aren't in scope here.
 ## Context
 
 - Originating conversation: standing up tiered CoreIdentity
-  Contributor/Maintainer access for `gim-home/odsp-web-harness` (a GitHub EMU
+  Contributor/Maintainer access for `example-org/example-harness` (a GitHub EMU
   repo) surfaced that its `CONTRIBUTING.md` had to document the fork-and-PR
   flow **by hand**, in plain `git`/`gh`, because `agent-worktrees` had nothing
   to offer a `Write`-but-not-`Maintain` contributor beyond "don't use this
@@ -78,7 +78,7 @@ consent/completion differently and aren't in scope here.
     surface, not through anything new here.
 - **Cross-repo placement:** this is the **canonical, target-owned** effort
   (copilot-extensions has adopted `efforts/` and the work is genuinely about
-  this repo's own PR orchestration). `gim-home/odsp-web-harness` keeps only a
+  this repo's own PR orchestration). `example-org/example-harness` keeps only a
   tracking pointer to this effort plus its own Phase-3 follow-up (updating its
   `CONTRIBUTING.md` once this lands).
 
@@ -214,7 +214,7 @@ publishes there.
       to a real local bare "fork" repo (not origin) and opens with the right
       `<owner>:<branch>` head; an explicit `fork.owner` override wins; an
       unconfigured repo is provably unaffected.
-- [ ] **Known gap, deferred:** the branch-reuse/stale-PR-pruning
+- [x] Deferred to `#3872`: branch-reuse/stale-PR-pruning
       reconciliation loop near the top of `create_pr` (detecting a prior
       active PR's branch as pruned/merged) still checks `remote` (origin)
       unconditionally. A repo that enables fork mode *after* already having a
@@ -224,13 +224,14 @@ publishes there.
       would have this reconciliation loop check the wrong remote. Not fixed
       this session — flagging it explicitly rather than leaving it a silent
       surprise.
-- [ ] `pr-merge`/`finalize` refusing self-merge for a non-`submitter-direct`
-      resolved role is **not yet done** — #2433 already gates `pr-merge --now`
-      on *live merge authority* (`actor_merge_authority`), which covers the
-      most important case (a contributor cannot self-merge regardless of what
-      `pr.merge_actor` says); a `pr.roles`-driven override of `merge_actor`
-      itself for `pr-merge`'s flow-classification (not just the authority gate)
-      is left for a follow-up increment if it proves necessary in practice.
+- [x] Deferred to `#3872`: `pr-merge`/`finalize` refusing self-merge for a
+      non-`submitter-direct` resolved role is **not yet done** — #2433
+      already gates `pr-merge --now` on *live merge authority*
+      (`actor_merge_authority`), which covers the most important case (a
+      contributor cannot self-merge regardless of what `pr.merge_actor`
+      says); a `pr.roles`-driven override of `merge_actor` itself for
+      `pr-merge`'s flow-classification (not just the authority gate) is
+      left for a follow-up increment if it proves necessary in practice.
 
 ### Phase 3 — Guidance + downstream adoption
 - [x] `docs/config-reference.md`: documented `pr.roles` / `pr.fork` + the
@@ -238,16 +239,16 @@ publishes there.
       matrix fields.
 - [x] **Live end-to-end validation against a real GitHub repo** (2026-09-11):
       ran the actual `agent-worktrees create-pr` CLI (updated runtime, not
-      mocks) against `gim-home/odsp-web-harness` with `pr.fork.enabled: true`.
+      mocks) against `example-org/example-harness` with `pr.fork.enabled: true`.
       First call correctly returned `needs_confirmation: "fork_setup"` and
       touched nothing (no remote added, no branch pushed); `--confirm-fork`
       then created/reused a real personal fork
-      (`tmichon_microsoft/odsp-web-harness-role-fork-test`, pre-existing under
+      (`operator_emu/example-harness-role-fork-test`, pre-existing under
       a non-default name — proved `ensure_fork`'s `POST .../forks` correctly
       recognizes and reuses an EXISTING fork under a non-default name rather
       than erroring or creating a colliding duplicate), pushed there, and
-      opened `gim-home/odsp-web-harness#290` with head
-      `tmichon_microsoft:pr/...` — exactly the designed shape. Closed without
+      opened `example-org/example-harness#290` with head
+      `operator_emu:pr/...` — exactly the designed shape. Closed without
       merging (test-only) and cleaned up all scratch artifacts (branches,
       local worktrees/registrations; the scratch fork repos themselves need
       an operator with `delete_repo` token scope to remove — flagged
@@ -255,17 +256,17 @@ publishes there.
   - **Noted edge case (not a bug, just a GitHub API interaction worth
     documenting):** `ensure_fork` doesn't pass an explicit target name to the
     fork-create API. If a caller already owns an unrelated repo with the
-    upstream's default name (this session's own `tmichon_microsoft` account
-    had exactly that — a stale, differently-sourced `odsp-web-harness`
+    upstream's default name (this session's own `operator_emu` account
+    had exactly that — a stale, differently-sourced `example-harness`
     fork), a *first-ever* fork of that name could hit a naming collision from
     GitHub's side depending on how it resolves the conflict. Untested because
     this session worked around it by pre-creating the fork under a custom
     name first; worth a follow-up if it surfaces in practice.
-- [x] `gim-home/odsp-web-harness` (separate repo, its own PR): adopt
+- [x] `example-org/example-harness` (separate repo, its own PR): adopt
   `pr.roles`/`pr.fork` in its `.agent-worktrees/config.yaml`, replacing its
   current "Tooling note" plain-`git`/`gh` workaround in `CONTRIBUTING.md` with
   real `agent-worktrees`-driven guidance. Merged
-  [gim-home/odsp-web-harness#292](https://github.com/gim-home/odsp-web-harness/pull/292);
+  [example-org/example-harness#292](https://github.com/example-org/example-harness/pull/292);
   tracked by that repo's own `role-aware-fork-pr-flow` pointer effort
   (archived), not here.
 - [x] Point that repo (and any other adopter) at `turnkey-reviewer-loops` for
@@ -286,12 +287,12 @@ publishes there.
       real GitHub API (fake provider `ensure_fork`).
 - [x] Phase 2b: a repo that never configures `pr.fork`/`pr.roles` is provably
       unaffected (`test_fork_mode_off_by_default`).
-- [x] Phase 3: `gim-home/odsp-web-harness` successfully drove a real
+- [x] Phase 3: `example-org/example-harness` successfully drove a real
       fork-based PR via `agent-worktrees` (not by hand) —
-      `gim-home/odsp-web-harness#290`, closed test-only, see Phase 3 above.
-- [x] Phase 3: `gim-home/odsp-web-harness` adopted `pr.roles`/`pr.fork` in its
+      `example-org/example-harness#290`, closed test-only, see Phase 3 above.
+- [x] Phase 3: `example-org/example-harness` adopted `pr.roles`/`pr.fork` in its
       own `.agent-worktrees/config.yaml` and rewrote its `CONTRIBUTING.md` —
-      [gim-home/odsp-web-harness#292](https://github.com/gim-home/odsp-web-harness/pull/292),
+      [example-org/example-harness#292](https://github.com/example-org/example-harness/pull/292),
       merged.
 
 ## Proposal
@@ -300,9 +301,9 @@ Phase 2a + Phase 2b are implemented, tested, and **live-validated end-to-end
 against a real GitHub repo** this session, submitted together as one PR
 (Phase 2a's own PR #2435 was still open/unmerged when Phase 2b work started,
 so it absorbed both slices rather than stacking a second PR on an unmerged
-one). Phase 3's downstream-adoption item — `gim-home/odsp-web-harness`'s own
+one). Phase 3's downstream-adoption item — `example-org/example-harness`'s own
 config/docs — has landed
-([gim-home/odsp-web-harness#292](https://github.com/gim-home/odsp-web-harness/pull/292),
+([example-org/example-harness#292](https://github.com/example-org/example-harness/pull/292),
 merged). All Plan and Validation Plan items for Phase 3 are resolved, including
 the previously-untested live-permission-resolution seam inside `create_pr`
 (now covered by `TestCreatePRRoleResolution`,
@@ -315,6 +316,14 @@ only if they prove necessary in practice. This effort is ready to move to
 `Done`.
 
 ## Journal
+
+### 2026-09-26 — Archive-sweep audit: transferred remaining Phase 2b items to #3872, archived
+Found via a repo-wide "Done; pending archive" sweep: the two remaining
+Phase 2b items were unchecked, non-blocking, deliberate deferrals with no
+named tracked objective. Filed
+[`#3872`](https://github.com/ThomasMichon/copilot-extensions/issues/3872)
+and corrected both to the machine-checked `Deferred to` form. No remaining
+unchecked items. Archived.
 
 ### 2026-09-12 — Closed the one untested Phase 3 seam
 - Added `TestCreatePRRoleResolution` to `test_pr_ops.py`: exercises the real
@@ -330,7 +339,7 @@ only if they prove necessary in practice. This effort is ready to move to
   Full suite: 4254 passed, 41 skipped, 0 regressions.
 
 ### 2026-09-11 — Phase 3 downstream adoption landed
-- Merged `gim-home/odsp-web-harness#292`: adopted `pr.roles.write`
+- Merged `example-org/example-harness#292`: adopted `pr.roles.write`
   (fork-based, no self-merge) / `pr.roles.maintain` (unchanged direct-push
   `submitter-direct`) plus a base `pr.fork` block in that repo's
   `.agent-worktrees/config.yaml`, and rewrote its `CONTRIBUTING.md`'s "How to
@@ -347,19 +356,19 @@ only if they prove necessary in practice. This effort is ready to move to
 
 ### 2026-09-11 — Live end-to-end validation
 - Ran the real `agent-worktrees create-pr` CLI (runtime updated post-merge,
-  not mocks) against `gim-home/odsp-web-harness` with `pr.fork.enabled: true`
+  not mocks) against `example-org/example-harness` with `pr.fork.enabled: true`
   set in a scratch project registration. First call: correctly returned
   `needs_confirmation: "fork_setup"`, verified no remote/branch mutation.
   `--confirm-fork`: created/reused a real fork
-  (`tmichon_microsoft/odsp-web-harness-role-fork-test`), pushed there, opened
-  `gim-home/odsp-web-harness#290` with the exact designed head shape
+  (`operator_emu/example-harness-role-fork-test`), pushed there, opened
+  `example-org/example-harness#290` with the exact designed head shape
   (`<owner>:<branch>`). Closed the PR test-only (never merged) and cleaned up
   local worktrees/registrations and the test branch.
 - Hit real GitHub org-policy friction while hunting for a usable
   cross-account fork pair before settling on the above (`github` org
   disallows private-repo forking; `microsoft` org allows repo creation more
   freely than expected — created and immediately deleted a probe repo there,
-  not an appropriate use of that namespace; EMU accounts (`tmichon_microsoft`)
+  not an appropriate use of that namespace; EMU accounts (`operator_emu`)
   can't cross-collaborate with personal accounts at all). None of this
   affected the harness or its content — purely account/namespace
   reconnaissance, fully cleaned up.
@@ -404,7 +413,7 @@ only if they prove necessary in practice. This effort is ready to move to
 
 ### 2026-09-10 — Kickoff + Phase 2a
 - Effort created; canonical placement decided (copilot-extensions, not the
-  originating odsp-web-harness repo, since this repo owns the implementation
+  originating example-harness repo, since this repo owns the implementation
   and has adopted `efforts/`).
 - Found `turnkey-reviewer-loops` (done) already covers the "automated
   self-reviewer with real approval/verdict power" half of the original

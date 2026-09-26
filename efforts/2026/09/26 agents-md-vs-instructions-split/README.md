@@ -1,11 +1,11 @@
 # AGENTS.md vs .github/instructions Split
 
 - **Slug:** `agents-md-vs-instructions-split`
-- **Repo:** copilot-extensions (primary; touches `gim-home/odsp-web-harness`
+- **Repo:** copilot-extensions (primary; touches a private downstream repo
   and the operator's dotfiles knowledge repo as audit targets)
 - **Branch(es):** independent per-phase worktrees
 - **Created:** 2026-09-17
-- **Status:** Done; pending archive -- all acceptance criteria satisfied;
+- **Status:** Done -- all acceptance criteria satisfied;
   `ThomasMichon/copilot-extensions#2825` closed.
 - **Vision:** none yet -- a formalization + audit, not new capability shape.
 - **Umbrella issue:** `ThomasMichon/copilot-extensions#2825`
@@ -25,9 +25,10 @@ own session-context work already use via `instruction-projections.json` + a
 `sessionStart` hook).
 
 That effort confirmed the principle in miniature for PR-conduct content only
-(odsp-web-harness needed a real trim; dotfiles and copilot-extensions' own
-`AGENTS.md` were already correctly scoped) but did not perform a deliberate,
-repo-wide audit against it. This effort tracks that larger initiative.
+(the private downstream repo needed a real trim; dotfiles and
+copilot-extensions' own `AGENTS.md` were already correctly scoped) but did
+not perform a deliberate, repo-wide audit against it. This effort tracks
+that larger initiative.
 
 ## Participants
 
@@ -52,7 +53,7 @@ principle write-up) plus an audit pass over:
 
 - This repo's own plugins (`plugins/*/AGENTS.md` where present, and each
   plugin's `instruction-projections.json`/`sessionStart` hooks).
-- `gim-home/odsp-web-harness`'s root `AGENTS.md` (already partially reviewed
+- A private downstream repo's root `AGENTS.md` (already partially reviewed
   for PR-conduct only in the prior effort -- extend to its full content).
 - The operator's dotfiles knowledge repo's root `AGENTS.md` (same extension).
 
@@ -68,12 +69,12 @@ principle write-up) plus an audit pass over:
 ## Plan
 
 ### Phase 1 -- Document the principle durably
-- [ ] Add a new pattern doc, `docs/patterns/agents-md-vs-instructions-split.md`,
+- [x] Add a new pattern doc, `docs/patterns/agents-md-vs-instructions-split.md`,
       stating the split, its rationale, and a short audit checklist/heuristic.
-- [ ] Reference it from `plugins/customizing-copilot/skills/authoring-harness-plugins/SKILL.md`
+- [x] Reference it from `plugins/customizing-copilot/skills/authoring-harness-plugins/SKILL.md`
       (item 5, "Own generic ambient policy") and from
       `docs/patterns/session-scoped-dynamic-guidance.md`'s "See Also".
-- [ ] Bump `plugin.json`/`pyproject.toml`/`marketplace.json` versions for
+- [x] Bump `plugin.json`/`pyproject.toml`/`marketplace.json` versions for
       `customizing-copilot` (doc lives under `docs/`, but the SKILL.md
       cross-reference is a plugin payload change); run
       `tools/check-version-bump.py`.
@@ -93,7 +94,7 @@ principle write-up) plus an audit pass over:
       extends the prior effort's Phase 4 finding beyond PR-conduct alone.
 - [x] No corrections needed for this repo.
 
-### Phase 3 -- Audit gim-home/odsp-web-harness
+### Phase 3 -- Audit the private downstream repo
 - [x] Re-read its root `AGENTS.md` in full (beyond the PR-conduct section
       already reviewed in the prior effort) against the principle --
       confirmed the current worktree state already reflects PR #436's fix
@@ -135,7 +136,7 @@ principle write-up) plus an audit pass over:
 - [x] Each of the three audited repos has an explicit finding recorded
       (either "already correctly scoped" or "corrected via PR #N") for its
       full `AGENTS.md`, not just PR-conduct content. (this repo:
-      already-correct; odsp-web-harness: already-correct, post-#436;
+      already-correct; the private downstream repo: already-correct, post-#436;
       dotfiles: corrected direct-to-`main`.)
 - [x] `ThomasMichon/copilot-extensions#2825`'s acceptance criteria are all
       checked and the issue is closed.
@@ -145,6 +146,15 @@ principle write-up) plus an audit pass over:
 _Pending._
 
 ## Journal
+
+### 2026-09-26 -- Archive-sweep audit: checked stale Phase 1 boxes, archived
+Found via a repo-wide "Done; pending archive" sweep: Phase 1's 3 checklist
+items were left unchecked despite the 2026-09-17 journal entry below stating
+they landed via PR #2831, and despite the doc/cross-references/version bump
+all genuinely present at HEAD (`docs/patterns/agents-md-vs-instructions-split.md`
+exists, cross-referenced from `authoring-harness-plugins/SKILL.md` and
+`session-scoped-dynamic-guidance.md`). A stale-checkbox bug, not incomplete
+work. Corrected; no remaining unchecked items. Archived.
 
 ### 2026-09-17 -- Kickoff
 - Effort created from a handoff continuing
@@ -160,9 +170,8 @@ _Pending._
   `session-scoped-dynamic-guidance.md`.
 - Bumped `customizing-copilot` `plugin.json` + marketplace catalog version
   (`0.1.0-dev73` -> `dev74`); `tools/check-version-bump.py` clean.
-- Landed on `worktree/tmichon-cloud1-win-20260917-114502-b7ce` (this
-  worktree); PR to be opened via `create-pr` in the same worktree once
-  remaining phases land, or split -- see next entries.
+- Landed on this worktree; PR to be opened via `create-pr` in the same
+  worktree once remaining phases land, or split -- see next entries.
 
 ### 2026-09-17 -- Phase 2 audit: this repo's own plugins + root AGENTS.md
 - Confirmed no `plugins/*/AGENTS.md` files exist in this repo.
@@ -172,15 +181,15 @@ _Pending._
   publication/version-bump policy, test/deploy mechanics, code standards).
   No change needed here.
 
-### 2026-09-17 -- Phase 3 audit: gim-home/odsp-web-harness
-- Re-read the full current `AGENTS.md` in the active odsp-web-harness
-  worktree (confirmed up to date with merged PR #436, which already fixed
+### 2026-09-17 -- Phase 3 audit: the private downstream repo
+- Re-read the full current `AGENTS.md` in the active worktree for that repo
+  (confirmed up to date with merged PR #436, which already fixed
   the PR-conduct restatement). No further misplacement found across the
   rest of the file (two-repo model, harness plugin enablement, worktree/
   knowledge resolution, statelessness invariant, persisting-knowledge
   routing). No change needed.
-- Note: the registered *anchor* checkout (`C:\Data\Src\odsp-web-harness`)
-  is >100 commits stale (never fetched/updated) and briefly produced a
+- Note: the registered *anchor* checkout was >100 commits stale (never
+  fetched/updated) and briefly produced a
   false-positive reading of the old, unfixed PR-conduct section -- always
   audit from an up-to-date worktree, not the anchor.
 
@@ -190,8 +199,8 @@ _Pending._
   a live, OS-assigned/discoverable value as static prose -- agent-bridge's
   own README states the default port is dynamic and discovered via
   `agent-bridge status` / `~/.agent-bridge/active.json`. This is exactly the
-  failure mode the principle targets (cf. the odsp-web-harness review-count
-  incident).
+  failure mode the principle targets (cf. the private-downstream-repo
+  review-count incident).
 - Corrected via a freshly carved paired knowledge worktree (the prior
   harness/knowledge pairing had already been finalized) and landed
   direct-to-`main` via dotfiles' own direct-commit flow

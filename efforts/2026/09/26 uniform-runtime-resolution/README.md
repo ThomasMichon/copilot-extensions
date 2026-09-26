@@ -104,6 +104,10 @@ separate, intentional runtime and keeps its explicit venv.
 
 ## Journal
 
+### 2026-09-26 — Archived
+Every Plan and Validation Plan item is resolved. Moved to the dated archive
+path as part of a batch archive sweep of completed efforts.
+
 ### 2026-08-19 - Kickoff (Phase 1)
 - Audited every Python-spawn site across the then-current runtime plugins; mapped the four
   divergent methods above. Confirmed the install-contract states a dual model
