@@ -6,7 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
-from . import activity, claim_handoffs, claims_owner, obligations, output, tracking
+from . import activity, claim_handoffs, claims_annotate, claims_owner, obligations, output, tracking
 from . import config as cfg, state_root as state_root_mod
 
 
@@ -49,6 +49,7 @@ def add_parsers(sub) -> None:
         default=None,
         help="[worktree_id] to show, OR 'add <kind> <ref>' to journal "
         "a new outbound claim, OR 'release <ref>' to retire one, "
+        "OR 'annotate <ref> --note NOTE' to update an existing claim's note, "
         "OR 'settle <ref>' to mark it at-rest (settled) / released, "
         "OR 'sweep' to reclaim provably-gone+safe obligations "
         "(never-wedge), OR 'reconcile-at-rest [<worktree-id> ...]' to "
@@ -201,6 +202,15 @@ def cmd_claims(args: argparse.Namespace) -> int:
             output.err("claims release: missing <ref>. Usage: claims release <ref> [--remove]")
             return 2
         return _claims_release(args, target[1])
+    if target and target[0] == "annotate":
+        if len(target) < 2:
+            if args.json:
+                return _json_error("claims annotate: missing <ref>", 2)
+            output.err("claims annotate: missing <ref>. Usage: claims annotate <ref> --note NOTE")
+            return 2
+        return claims_annotate.claims_annotate(
+            args, target[1], _infer_worktree_id, _json_error, _json_output, output,
+        )
     if target and target[0] == "settle":
         if len(target) < 2:
             if args.json:

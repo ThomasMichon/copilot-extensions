@@ -1200,6 +1200,21 @@ def test_cmd_launch_uses_direct_fallback_when_relocated_unavailable(
 def test_cmd_launch_uses_relocated_worktree_manager_launcher_when_available(
     monkeypatch, tmp_path
 ):
+    # cmd_launch mutates the real process os.environ directly (it must, to
+    # propagate to the child it hands off to) -- pre-touch each var it may
+    # set via monkeypatch.setenv so teardown restores the pre-test state
+    # regardless. Must be setenv, not delenv(raising=False) on an absent
+    # var: that combination is a documented no-op that registers no undo at
+    # all, so a later direct os.environ mutation from the SUT would leak
+    # WORKTREE_NO_UPDATE/etc. into every later test in this pytest worker
+    # (copilot-extensions#3749). An empty string reads as unset by this
+    # module's own `_env_get` (`os.environ.get(name) or None`).
+    for _leaked in (
+        "WORKTREE_NO_UPDATE", "WORKTREE_NO_MUX", "WORKTREE_VERBOSE",
+        "AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT",
+        "AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR",
+    ):
+        monkeypatch.setenv(_leaked, "")
     cell_runtime = tmp_path / "cell" / "plugins" / "agent-worktrees"
     cell_runtime.mkdir(parents=True)
     wm_root = tmp_path / "wmroot"
@@ -1262,6 +1277,17 @@ def test_cmd_launch_uses_relocated_worktree_manager_launcher_when_available(
 def test_cmd_launch_direct_fallback_runs_post_exit_and_preserves_env(
     monkeypatch, tmp_path
 ):
+    # See the sibling relocated-launcher test above: pre-touch every var
+    # cmd_launch may set on the real os.environ via monkeypatch.setenv (not
+    # delenv(raising=False), a no-op on an absent var that registers no
+    # undo) so teardown reverts them instead of leaking into later tests in
+    # this worker (#3749).
+    for _leaked in (
+        "WORKTREE_NO_UPDATE", "WORKTREE_NO_MUX", "WORKTREE_VERBOSE",
+        "AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT",
+        "AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR",
+    ):
+        monkeypatch.setenv(_leaked, "")
     cell_runtime = tmp_path / "cell" / "plugins" / "agent-worktrees"
     cell_runtime.mkdir(parents=True)
     monkeypatch.setattr(m.cfg, "_ACTIVE_PROJECT", "example")
