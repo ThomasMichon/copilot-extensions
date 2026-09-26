@@ -751,6 +751,56 @@ def _monitor_list_sessions(
     return out
 
 
+def _monitor_managed_session_union(
+    managed_mux_cache,
+    registry: dict[str, str],
+) -> tuple[dict[str, dict], set[str], list[tuple[str, str]]]:
+    if managed_mux_cache is None:
+        return {}, set(), []
+    live_sessions = managed_mux_cache.live_session_names()
+    if not live_sessions:
+        return {}, set(), []
+    entries: dict[str, dict] = {}
+    served: list[tuple[str, str]] = []
+    for entry in managed_mux_cache.snapshot().values():
+        session_name = entry.get("mux_session")
+        if session_name not in live_sessions:
+            continue
+        entries[session_name] = entry
+        path = entry.get("worktree_path")
+        if not isinstance(path, str) or not path:
+            path = registry.get(session_name) or ""
+        if path:
+            served.append((session_name, path))
+    return entries, set(entries), served
+
+
+def _monitor_update_session_incarnations(
+    incarnations: dict[str, str],
+    live: dict[str, tuple[int, str]],
+    unmanaged_live_wt: set[str],
+    managed_entries: dict[str, dict],
+    ctx_done: set[str],
+    published: dict[tuple[str, str], str] | None,
+) -> None:
+    current = {
+        sess: str(live[sess][1]) if isinstance(live.get(sess), tuple) and len(live[sess]) > 1 else ""
+        for sess in unmanaged_live_wt
+    }
+    current.update({
+        sess: str(entry.get("session_incarnation") or "")
+        for sess, entry in managed_entries.items()
+    })
+    for sess, incarnation in current.items():
+        prior = incarnations.get(sess)
+        if prior is not None and prior != incarnation:
+            ctx_done.discard(sess)
+            if published is not None:
+                for key in [key for key in published if key[0] == sess]:
+                    published.pop(key, None)
+        incarnations[sess] = incarnation
+
+
 def _monitor_session_state_handoff_path(
     session_id: str | None,
 ) -> Path | None:

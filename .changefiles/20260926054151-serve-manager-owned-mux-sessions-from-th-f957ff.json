@@ -1,0 +1,9 @@
+{
+  "comment": "Serve manager-owned mux sessions from the managed cache in the resident monitor",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
