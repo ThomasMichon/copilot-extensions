@@ -74,6 +74,10 @@ agent-bridge = "agent_bridge.__main__:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+# The /ui control surface's page, scripts, and stylesheet (routes/ui.py).
+agent_bridge = ["ui_static/*.html", "ui_static/*.js", "ui_static/*.css"]
+
 [tool.ruff]
 target-version = "py310"
 line-length = 99

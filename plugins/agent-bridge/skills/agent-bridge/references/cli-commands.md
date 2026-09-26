@@ -208,9 +208,16 @@ effort). Each venue registers under a venue-qualified identity
 
 Sign-in uses a one-time login code (single use, 60 s) in the URL fragment,
 which the page trades for the bearer token; the token itself never enters a
-URL or browser history. The page lists agents, ACP sessions, and live sessions; **Watch** streams a live
-session's represented activity (messages, reasoning, tool calls, questions) and
-the composer messages it (or queues a follow-up turn for an ACP session).
+URL or browser history. The page is a task board: each card is a worktree
+task, with its orchestrator session and the venue workers it supervises
+(joined through `venue.supervisor_ref`), grouped as **Needs you**, **Working**,
+**Monitoring PR**, **Done**, **Idle**, and **Earlier** (worktrees with no live
+session, with their PR's live title and state). Opening a task shows a session
+viewer that folds each stretch of tool calls into one collapsed line (expand
+it for inputs and outputs) and a composer that steers, queues, or interrupts.
+**New task** starts a Copilot session in a fresh Picker-visible worktree
+(`create --origin user`, then `embody --seed`); an Earlier task can be resumed
+or renamed. Filter with `/`, move with `j`/`k`, start a task with `n`.
 
 ### Choosing send vs create — check for an outstanding session first
 
