@@ -11,6 +11,9 @@ never-coalesce-two-writes guarantee unique keys provide.
 from __future__ import annotations
 
 import logging
+import subprocess
+import sys
+import textwrap
 import threading
 import time
 
@@ -25,12 +28,17 @@ def _endpoint_dict(server) -> dict:
 
 @pytest.fixture(autouse=True)
 def _clean_verb_registry():
-    # Tests register throwaway verbs into the module-level registry --
-    # isolate each test so one test's verb name never leaks into another's.
-    before = dict(tracking_write._VERBS)
+    # Tests register throwaway verbs into the module-level registry, and a
+    # few reach into the _VERB_MODULES/_verb_modules_loaded loader state --
+    # isolate each test so one test's changes never leak into another's.
+    before_verbs = dict(tracking_write._VERBS)
+    before_modules = tracking_write._VERB_MODULES
+    before_loaded = tracking_write._verb_modules_loaded
     yield
     tracking_write._VERBS.clear()
-    tracking_write._VERBS.update(before)
+    tracking_write._VERBS.update(before_verbs)
+    tracking_write._VERB_MODULES = before_modules
+    tracking_write._verb_modules_loaded = before_loaded
 
 
 def test_rendezvous_fields_are_namespaced_and_parseable():
@@ -254,3 +262,100 @@ class TestDispatch:
             assert results[1] == {"n": "same-args"}
         finally:
             server.close()
+
+
+class TestVerbModuleLoading:
+    """2026-09-26 PR review finding: `_VERBS` alone is process-local, so a
+    `register_verb` call made in one process (a CLI invocation) can never
+    populate a *different* process's (the resident daemon's) dict. These
+    tests cover the fix: `_VERB_MODULES` + `_ensure_verb_modules_loaded`,
+    which both `compute` and `run_direct` call so every process arrives at
+    the same registry independently via import, never shared mutable state.
+    """
+
+    def test_ensure_verb_modules_loaded_imports_every_listed_module_once(self, monkeypatch):
+        import_calls = []
+        real_import_module = tracking_write.importlib.import_module
+
+        def _spy(name, package=None):
+            import_calls.append((name, package))
+            return real_import_module(name, package)
+
+        monkeypatch.setattr(tracking_write.importlib, "import_module", _spy)
+        # "config" is a real, side-effect-free-to-import-twice sibling module.
+        monkeypatch.setattr(tracking_write, "_VERB_MODULES", ("config",))
+        monkeypatch.setattr(tracking_write, "_verb_modules_loaded", False)
+
+        tracking_write._ensure_verb_modules_loaded()
+        tracking_write._ensure_verb_modules_loaded()  # second call: no-op
+
+        assert import_calls == [(".config", "agent_worktrees")]
+
+    def test_compute_and_run_direct_both_trigger_the_loader(self, monkeypatch):
+        calls = {"n": 0}
+
+        def _fake_loader():
+            calls["n"] += 1
+
+        monkeypatch.setattr(tracking_write, "_ensure_verb_modules_loaded", _fake_loader)
+        tracking_write.register_verb("test-loader-compute", lambda args: {"ok": True})
+        tracking_write.compute(tracking_write.KIND, {"verb": "test-loader-compute"})
+        tracking_write.run_direct("test-loader-compute", {}, reason="test")
+
+        assert calls["n"] == 2
+
+    def test_verb_self_registered_by_a_genuinely_separate_process_is_reachable(
+        self, tmp_path
+    ):
+        """The literal process-boundary proof the review asked for: a verb
+        module is imported and its verb invoked by two independent `python`
+        subprocesses (not this test process at all) -- one exercising the
+        `compute` path (the daemon side), one exercising `run_direct` (the
+        fallback side) -- with no shared runtime state between them, only
+        the identical `_VERB_MODULES` declaration and the verb module's own
+        import-time `register_verb` call.
+        """
+        verb_module_dir = tmp_path / "verb_pkg"
+        verb_module_dir.mkdir()
+        (verb_module_dir / "boundary_test_verb.py").write_text(
+            textwrap.dedent(
+                """
+                from agent_worktrees import tracking_write
+
+                def _apply(args):
+                    return {"ran_in_subprocess": True, "args": args}
+
+                tracking_write.register_verb("boundary-test-verb", _apply)
+                """
+            ),
+            encoding="utf-8",
+        )
+
+        script_template = textwrap.dedent(
+            """
+            import sys
+            sys.path.insert(0, {verb_dir!r})
+            from agent_worktrees import tracking_write
+            import boundary_test_verb  # noqa: F401 -- self-registers on import
+
+            tracking_write._VERB_MODULES = ()  # already imported explicitly above
+            tracking_write._verb_modules_loaded = True
+            result = tracking_write.{call}
+            assert result == {{"ran_in_subprocess": True, "args": {{"probe": 1}}}}, result
+            print("OK")
+            """
+        )
+
+        for call in (
+            'compute(tracking_write.KIND, {"verb": "boundary-test-verb", "args": {"probe": 1}})',
+            'run_direct("boundary-test-verb", {"probe": 1}, reason="subprocess test")',
+        ):
+            script = script_template.format(verb_dir=str(verb_module_dir), call=call)
+            proc = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            assert proc.returncode == 0, proc.stdout + proc.stderr
+            assert "OK" in proc.stdout

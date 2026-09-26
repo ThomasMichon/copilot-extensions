@@ -55,7 +55,9 @@ depth -- it is a correctness step, not the final performance shape.
 
 from __future__ import annotations
 
+import importlib
 import logging
+import threading
 import time
 import uuid
 from collections.abc import Callable
@@ -85,6 +87,47 @@ SUBSCRIBER_TTL_SECONDS = 30.0
 
 _VERBS: dict[str, Callable[[dict], dict]] = {}
 
+#: The cross-process registration contract (2026-09-26 PR review finding --
+#: `_VERBS` alone is a process-local dict; the resident daemon and any CLI
+#: process calling :func:`dispatch`/:func:`run_direct` are *separate*
+#: Python processes, so a `register_verb` call made in one never populates
+#: the other's dict). Each entry here is a **module name** (relative to this
+#: package) that self-registers its own verb(s) via `register_verb` calls in
+#: its own module-level code, purely as an import side effect -- never a
+#: function reference or a registration RPC. Every process that reaches this
+#: module's :func:`compute`/:func:`run_direct` first calls
+#: :func:`_ensure_verb_modules_loaded`, which imports every module listed
+#: here -- so the daemon process and a CLI process both arrive at the
+#: identical registry independently, with no shared mutable state or wire
+#: message required between them. Empty until Phase 3 migrates its first
+#: real verb; a verb-owning module is added here, not wired via ad-hoc
+#: `register_verb` calls from arbitrary call sites.
+_VERB_MODULES: tuple[str, ...] = ()
+
+_verb_modules_loaded = False
+_verb_modules_lock = threading.Lock()
+
+
+def _ensure_verb_modules_loaded() -> None:
+    """Import every module named in :data:`_VERB_MODULES`, once per process.
+
+    Idempotent and thread-safe. Called at the top of both :func:`compute`
+    (the daemon-process path) and :func:`run_direct` (the direct-call
+    fallback, which may run in the daemon process or a separate CLI
+    process) -- see :data:`_VERB_MODULES`'s own docstring for why this is
+    what actually closes the cross-process registration gap, rather than a
+    convention a caller could forget to follow.
+    """
+    global _verb_modules_loaded
+    if _verb_modules_loaded:
+        return
+    with _verb_modules_lock:
+        if _verb_modules_loaded:
+            return
+        for name in _VERB_MODULES:
+            importlib.import_module(f".{name}", __package__)
+        _verb_modules_loaded = True
+
 
 def register_verb(name: str, fn: Callable[[dict], dict]) -> None:
     """Register a mutation verb.
@@ -93,12 +136,25 @@ def register_verb(name: str, fn: Callable[[dict], dict]) -> None:
     result dict. Called from both the daemon's own :func:`compute` and this
     module's :func:`run_direct` fallback -- the one place either path reaches
     the actual mutation, per this module's single-implementation guarantee.
+
+    Intended callers: a verb-owning module's own top level (so importing it
+    -- via :func:`_ensure_verb_modules_loaded`, per :data:`_VERB_MODULES` --
+    is what registers it, identically in every process), or a test that
+    needs a throwaway verb for the duration of one test. A production verb
+    registered from inside a CLI command's own function body would reproduce
+    the cross-process gap :data:`_VERB_MODULES` exists to close -- register
+    at import time, not call time.
     """
     _VERBS[name] = fn
 
 
 def registered_verbs() -> frozenset[str]:
-    """The currently registered verb names (tests / introspection)."""
+    """The currently registered verb names (tests / introspection).
+
+    Does **not** call :func:`_ensure_verb_modules_loaded` itself -- this is a
+    read of whatever is registered *right now* (useful for a test asserting
+    the loader's own effect), not a trigger for loading.
+    """
     return frozenset(_VERBS)
 
 
@@ -106,11 +162,13 @@ def compute(kind: str, payload: dict) -> dict:
     """``CoalescingServer``-shaped ``compute(kind, payload)`` callback.
 
     ``payload`` must carry ``verb`` (a name registered via
-    :func:`register_verb`) and may carry ``args`` (a dict passed to that
-    verb's function). Raises ``ValueError`` for an unregistered verb or a
-    malformed payload -- surfaced to the caller exactly like
-    ``_classify_daemon_compute``'s own validation errors.
+    :func:`register_verb`, directly or via :data:`_VERB_MODULES`) and may
+    carry ``args`` (a dict passed to that verb's function). Raises
+    ``ValueError`` for an unregistered verb or a malformed payload --
+    surfaced to the caller exactly like ``_classify_daemon_compute``'s own
+    validation errors.
     """
+    _ensure_verb_modules_loaded()
     verb = payload.get("verb")
     if not isinstance(verb, str) or not verb:
         raise ValueError("tracking_write request missing a verb name")
@@ -183,6 +241,7 @@ def run_direct(verb: str, args: dict, *, reason: str) -> dict:
     happened outside the daemon's own mediation. Raises ``ValueError`` for an
     unregistered verb, mirroring :func:`compute`'s own validation.
     """
+    _ensure_verb_modules_loaded()
     fn = _VERBS.get(verb)
     if fn is None:
         raise ValueError(f"tracking_write: unregistered verb {verb!r}")

@@ -406,6 +406,45 @@ reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
 
+### 2026-09-26 — PR #3779 review: closed a real cross-process registration gap
+GitHub's Copilot code review (2 High + 1 Low findings) on the Phase 2 PR
+caught a real bug before Phase 3 could build on top of it: `_VERBS` was a
+plain process-local module dict, but the resident daemon and a CLI process
+calling `dispatch`/`run_direct` are **separate Python processes** —
+`register_verb` called in one would never populate the other's dict, so
+every real verb (once Phase 3 added one) would have hit "unregistered verb"
+on the daemon side and silently always fallen back to `run_direct`. The
+daemon would never actually execute a write; `dispatch()` looked correct in
+tests only because those tests register and serve in the same process.
+
+Fixed with `_VERB_MODULES` (a tuple of module names, relative to this
+package, that self-register their own verb(s) via a plain `register_verb`
+call at their own import time) + `_ensure_verb_modules_loaded()` (idempotent,
+thread-safe, imports every listed module) called at the top of both
+`compute` and `run_direct` — so the daemon process and any CLI process
+arrive at the identical registry independently via Python's own import
+system, with no shared runtime state or wire-level registration protocol
+needed. `_VERB_MODULES` stays empty until Phase 3 adds its first real verb
+module; the contract is documented in `tracking_write.py`'s own module-level
+docstring for that module to follow.
+
+Added the literal process-boundary proof the review asked for: two genuinely
+separate `python` subprocesses (not the test process itself) import a
+throwaway verb module and invoke it — one through `compute`, one through
+`run_direct` — proving the fix works across a real OS process boundary, not
+just this test process's own single import cache. Plus two narrower unit
+tests (the loader imports each listed module exactly once; both `compute`
+and `run_direct` call the loader). 17 tests total in `test_tracking_write.py`
+now (was 14).
+
+Also addressed the review's Low finding: this Journal entry, plus the PR
+description's required "Documentation impact" statement (CONTRIBUTING.md
+§ Documentation impact) explaining that `tracking_write.py`'s own docstring
+is this change's authoritative documentation (no repo-root doc changed) and
+that the vision doesn't need a revision for a plumbing bug fix that carries
+no new guarantee or behavior change visible above the daemon-internals
+layer.
+
 ### 2026-09-26 — Phase 2 infra landed (wire plumbing + fallback + tests); first call-site migration deferred to Phase 3
 - Verified `module-componentization-discipline`'s `tracking.py` split was a
   safe resting point (exactly at its 4009-line ceiling, no journal activity
