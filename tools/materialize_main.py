@@ -150,6 +150,25 @@ def _materialize_one_pointer(pointer_path: Path, *, checkout_root: Path, canonic
             "checkout root (a symlinked plugin/libs path) -- refusing"
         )
 
+    # Check the pointer's declared source for a symlinked ancestor BEFORE
+    # resolving it: _resolve_within() below only validates that the
+    # RESOLVED candidate stays within canonical_root, but if
+    # canonical_root/source_rel (e.g. libs/<lib>) is ITSELF a symlink to
+    # another directory still inside canonical_root, that check accepts
+    # it and returns the resolved (symlink-followed) target -- so every
+    # later scan (_find_symlink(canonical / "src") etc.) only ever
+    # examines the TARGET's own contents, never noticing the redirect.
+    if not Path(source_rel).is_absolute():
+        unresolved_candidate = canonical_root / source_rel
+        bad_ancestor = _find_symlinked_ancestor(unresolved_candidate, canonical_root)
+        if bad_ancestor is not None:
+            return (
+                f"SKIP {lib_copy_dir}: {bad_ancestor} is a symlink -- "
+                "refusing (a canonical lib source, and every ancestor "
+                "between it and the canonical root, must be a real "
+                "directory)"
+            )
+
     canonical = _resolve_within(canonical_root, source_rel)
 
     if canonical is None:
@@ -367,6 +386,17 @@ def materialize_file_pointers(dest: Path, *, canonical_root: Path) -> list[str]:
     log: list[str] = []
     for pointer_path in find_file_pointers(dest):
         source_rel = _file_pointer_source(pointer_path)
+        if not Path(source_rel).is_absolute():
+            unresolved_candidate = canonical_root / source_rel
+            bad_ancestor = _find_symlinked_ancestor(unresolved_candidate, canonical_root)
+            if bad_ancestor is not None:
+                log.append(
+                    f"SKIP {pointer_path} (file pointer): {bad_ancestor} is a "
+                    "symlink -- refusing (a canonical file source, and every "
+                    "ancestor between it and the canonical root, must be a "
+                    "real file/directory)"
+                )
+                continue
         canonical = _resolve_within(canonical_root, source_rel)
 
         if canonical is None:

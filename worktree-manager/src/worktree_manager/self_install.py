@@ -368,7 +368,21 @@ def _materialize_payload_pointers(payload_dir: Path, slot: Path) -> None:
     if not (has_canonical and has_tool):
         materialize_main = None
     else:
-        materialize_main = _load_materialize_main(monorepo_root)
+        try:
+            materialize_main = _load_materialize_main(monorepo_root)
+        except Exception as e:  # noqa: BLE001 -- normalize ANY load/exec
+            # failure (a syntax error, import error, or module-level
+            # exception in the FETCHED tools/materialize_main.py) into the
+            # one exception type self_install() catches -- this call
+            # dynamically EXECUTES that file via exec_module(), so letting
+            # any exception type escape here would violate self_update's
+            # best-effort/non-fatal contract just as readily as an
+            # unnormalized materialize_libs_dir() failure would, and
+            # _copy_payload's own copytree has already run by this point,
+            # so the partially-copied slot needs the same cleanup path.
+            raise RuntimeError(
+                f"could not load {monorepo_root / 'tools' / 'materialize_main.py'}: {e}"
+            ) from e
     unresolved = materialize_main.find_pointers_in_libs_dir(libs_dir) if materialize_main else \
         [p for p in libs_dir.glob("*/VENDOR_POINTER.json")]
     if not unresolved:

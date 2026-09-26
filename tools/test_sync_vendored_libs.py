@@ -557,6 +557,24 @@ def test_pointerize_refuses_an_unknown_consumer(repo: Path):
     assert "not a known consumer" in (result.stdout + result.stderr)
 
 
+def test_pointerize_refuses_a_symlinked_consumer_libs_ancestor(repo: Path):
+    # _consumer_dir() resolves via plugin_dir.is_dir(), which follows a
+    # symlink -- a symlinked consumer root or consumer/libs directory
+    # could redirect --pointerize outside the checkout, and the
+    # destructive shutil.rmtree(copy_dir) in _write_passthrough_pointer()
+    # would then delete/recreate whatever external tree it points at.
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
+    outside = repo.parent / "outside-consumer-libs"
+    outside.mkdir(parents=True)
+    (repo / "plugins/alpha").mkdir(parents=True)
+    (repo / "plugins/alpha/libs").symlink_to(outside, target_is_directory=True)
+
+    result = _run(repo, "--pointerize", "alpha", "shared-lib")
+    assert result.returncode != 0
+    assert "is a symlink" in (result.stdout + result.stderr)
+    assert not (outside / "shared-lib").exists()
+
+
 def test_pointerize_overwrites_a_stale_existing_copy(repo: Path):
     _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="x = 1\n")
     _write(repo, "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py", "stale\n")

@@ -465,3 +465,28 @@ def test_self_install_normalizes_a_malformed_pointer_failure_to_runtimeerror(tmp
     assert "pointer materialization" in (res.reason or "")
     assert current_version(root) is None
     assert not version_slot("8.8.8", root).exists()
+
+
+def test_self_install_normalizes_a_broken_materializer_load_failure(tmp_path, monkeypatch):
+    """A later gap in the same class as the malformed-pointer case above:
+    the exception-normalization try only wrapped materialize_libs_dir(),
+    but _load_materialize_main() -- which dynamically EXECUTES the
+    fetched tools/materialize_main.py via exec_module() -- ran BEFORE
+    that boundary. A syntax/import/runtime failure in that file (a
+    corrupted or incompatible fetched materializer) escaped
+    self_install()'s RuntimeError handler entirely, violating
+    self_update's best-effort contract and leaving the already-copied
+    slot behind."""
+    pd = _fake_monorepo_with_pointer(tmp_path, "8.9.9")
+    mono = pd.parent
+    (mono / "tools" / "materialize_main.py").write_text(
+        "this is not valid python syntax ((((\n", encoding="utf-8"
+    )
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+
+    res = self_install(pd, root=root, dry_run=False)
+    assert res.action == "error"
+    assert "could not load" in (res.reason or "")
+    assert current_version(root) is None
+    assert not version_slot("8.9.9", root).exists()

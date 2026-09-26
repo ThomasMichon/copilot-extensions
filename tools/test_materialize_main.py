@@ -184,6 +184,33 @@ def test_materialize_refuses_an_ancestor_symlink_resolving_exactly_to_root(tmp_p
     assert not (root / "VENDOR_POINTER.json").exists()
 
 
+def test_materialize_refuses_a_symlinked_canonical_source_before_resolving(tmp_path: Path):
+    # _resolve_within() only validates that the RESOLVED candidate stays
+    # within canonical_root -- if canonical_root/source_rel (e.g.
+    # libs/<lib>) is ITSELF a symlink to ANOTHER directory still inside
+    # canonical_root, that check accepts it and returns the resolved
+    # (symlink-followed) target, so every later scan only ever examines
+    # the TARGET's own contents, never noticing the redirect. Must be
+    # checked BEFORE resolving, not after.
+    root = tmp_path / "repo"
+    victim = root / "libs" / "victim-lib"
+    (victim / "src" / "victim_lib").mkdir(parents=True)
+    (victim / "src" / "victim_lib" / "__init__.py").write_text(
+        "do not touch\n", encoding="utf-8"
+    )
+    (victim / "pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "0.1.0-dev1"\n', encoding="utf-8"
+    )
+
+    # libs/evil-lib -> libs/victim-lib (still inside canonical_root == root).
+    (root / "libs" / "evil-lib").symlink_to(victim, target_is_directory=True)
+    _pointer(root, "agent-bridge", "evil-lib")
+
+    log = mm.materialize(root, canonical_root=root)
+    assert any("SKIP" in line and "is a symlink" in line for line in log)
+    assert (victim / "src" / "victim_lib" / "__init__.py").read_text() == "do not touch\n"
+
+
 def test_materialize_skips_a_canonical_lib_with_no_src_directory_at_all(tmp_path: Path):
     # _find_symlink() returns None for a MISSING src/ too, not just "no
     # symlink found inside it" -- an incomplete/malformed canonical lib

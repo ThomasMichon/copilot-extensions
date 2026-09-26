@@ -779,6 +779,19 @@ def _write_passthrough_pointer(consumer: str, lib: str) -> Path:
 
     pkg = lib.replace("-", "_")
     copy_dir = _consumer_dir(consumer) / "libs" / lib
+    # _consumer_dir() resolves via plugin_dir.is_dir(), which follows a
+    # symlink -- a symlinked consumer root or consumer/libs directory
+    # could redirect --pointerize outside the checkout, and the
+    # destructive shutil.rmtree(copy_dir) below would then delete/
+    # recreate whatever external tree it points at. Validate every path
+    # component up to the repo root before any destructive operation.
+    bad_ancestor = _find_symlinked_ancestor(copy_dir, REPO)
+    if bad_ancestor is not None:
+        raise SystemExit(
+            f"{bad_ancestor} is a symlink -- refusing (a vendored copy "
+            "root, and every ancestor between it and the repository root, "
+            "must be a real directory)"
+        )
     # Was this copy ALREADY a pointer copy (has a pointer marker) before
     # this call? If so, re-pointerizing (e.g. to regenerate a stub after a
     # template/wording change) must PRESERVE its prior tests/ decision --
