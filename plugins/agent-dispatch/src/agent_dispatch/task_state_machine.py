@@ -75,6 +75,7 @@ ALL_STATES: frozenset[str] = frozenset(
         Status.STARTED,
         Status.SUSPENDED,
         Status.COMPLETED,
+        Status.CONFIRMED,
         Status.ABANDONED,
         Status.DEAD_LETTER,
     }
@@ -179,7 +180,36 @@ TRANSITIONS: tuple[Transition, ...] = (
         implemented_by="TaskQueue.complete_with_outcome",
     ),
     Transition(
+        name="confirm",
+        #: The corroborated close beyond a provisional ``complete``: an
+        #: evaluator's automatic corroboration for emitter-driven work, or
+        #: an operator's explicit review (the Completion Review card's
+        #: Confirm action) for self-tracked work with no evaluator. See the
+        #: vision's *verify-the-completion-claim* / *The lifecycle*.
+        from_states=frozenset({Status.COMPLETED}),
+        to_state=Status.CONFIRMED,
+        recovery_mode=RecoveryMode.SAFE_RETRY,
+        implemented_by="TaskQueue.confirm",
+    ),
+    Transition(
+        name="reopen_completed",
+        #: The Completion Review card's "Re-queue with steering" action, and
+        #: the operator's plain disagreement with a completion claim more
+        #: generally: the completion did not hold up (or more work is
+        #: wanted), so the task returns to the queue carrying its progress
+        #: forward, per *resume-the-goal-not-restart-it* -- never restarting
+        #: the goal from nothing.
+        from_states=frozenset({Status.COMPLETED}),
+        to_state=Status.QUEUED,
+        recovery_mode=RecoveryMode.SAFE_RETRY,
+        implemented_by="TaskQueue.reopen_completed",
+    ),
+    Transition(
         name="abandon",
+        #: Includes ``COMPLETED`` (2026-09-25, sourced from
+        #: ``Status.ABANDONABLE`` directly so this table can't drift from
+        #: it): the Completion Review card's Abandon action closes a
+        #: completed-but-unconfirmed task the operator disagrees with.
         from_states=Status.ABANDONABLE,
         to_state=Status.ABANDONED,
         recovery_mode=RecoveryMode.SAFE_RETRY,

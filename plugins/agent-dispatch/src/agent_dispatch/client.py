@@ -11,7 +11,7 @@ from collections.abc import Callable, Iterator, Sequence
 from typing import Any
 
 import httpx
-
+from .client_completion_review import CompletionReviewMixin
 from .client_registrations import RegistrationClientMixin
 from .client_worktree_status import WorktreeStatusClientMixin
 
@@ -41,7 +41,7 @@ class DispatchUpgradeRequired(DispatchError):
         super().__init__(426, detail)
 
 
-class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin):
+class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin):
     """A synchronous client for one coordinator base URL."""
 
     def __init__(
