@@ -1285,3 +1285,140 @@ def test_add_repo_cli_explicit_flag_wins_over_inrepo_declaration(
     assert entry is not None
     assert entry.default_branch == "release"
 
+
+def test_sync_all_filters_to_named_repos_only(home: Path, tmp_path: Path):
+    """``sync_all(names=...)`` must sync exactly the requested repos, not
+    every registered one -- the safe, no-new-commit way to fast-forward a
+    single anchor (e.g. ``repos sync <name>``) without touching unrelated
+    registered repos."""
+    a = tmp_path / "repo-a"
+    b = tmp_path / "repo-b"
+    _init_repo(a, branch="main")
+    _init_repo(b, branch="main")
+    repos.add_repo("repo-a", str(a), repo_class="singleton",
+                    default_branch="main", plat="windows")
+    repos.add_repo("repo-b", str(b), repo_class="singleton",
+                    default_branch="main", plat="windows")
+
+    results = repos.sync_all(names=("repo-a",), plat="windows")
+
+    assert [r[0] for r in results] == ["repo-a"]
+
+
+def test_sync_all_reports_a_requested_but_unregistered_name(
+    home: Path, tmp_path: Path,
+):
+    """A name that doesn't match any registered repo is surfaced as its own
+    ``not registered`` result, not silently dropped (so a caller can tell
+    "nothing to sync" apart from "no such repo -- likely a typo")."""
+    upstream = tmp_path / "upstream"
+    _init_repo(upstream, branch="main")
+    clone = tmp_path / "repo-a"
+    subprocess.run(["git", "clone", str(upstream), str(clone)],
+                    check=True, capture_output=True, text=True)
+    repos.add_repo("repo-a", str(clone), repo_class="singleton",
+                    default_branch="main", plat="windows")
+
+    results = repos.sync_all(names=("repo-a", "nonexistent"), plat="windows")
+
+    by_name = {name: (state, detail) for name, state, detail in results}
+    assert by_name["repo-a"][0] == "synced"
+    assert by_name["nonexistent"] == ("error", "not registered")
+
+
+def test_sync_all_combines_names_with_class_filter(home: Path, tmp_path: Path):
+    """``names`` narrows within, not instead of, an existing ``class_filter``
+    -- a repo matching the name but not the class is excluded."""
+    a = tmp_path / "repo-a"
+    _init_repo(a, branch="main")
+    repos.add_repo("repo-a", str(a), repo_class="reference",
+                    default_branch="main", plat="windows")
+
+    results = repos.sync_all(
+        names=("repo-a",), class_filter="singleton", plat="windows",
+    )
+
+    assert results == []
+
+
+def test_repos_cli_sync_accepts_a_positional_repo_name(
+    home: Path, tmp_path: Path, capsys,
+):
+    """``repos sync <name>`` (CLI dispatch) fast-forwards just that repo."""
+    from agent_worktrees import repos_cli
+
+    upstream = tmp_path / "upstream"
+    _init_repo(upstream, branch="main")
+    a = tmp_path / "repo-a"
+    b = tmp_path / "repo-b"
+    subprocess.run(["git", "clone", str(upstream), str(a)],
+                    check=True, capture_output=True, text=True)
+    subprocess.run(["git", "clone", str(upstream), str(b)],
+                    check=True, capture_output=True, text=True)
+    repos.add_repo("repo-a", str(a), repo_class="singleton",
+                    default_branch="main")
+    repos.add_repo("repo-b", str(b), repo_class="singleton",
+                    default_branch="main")
+
+    capsys.readouterr()  # discard the registration confirmations above
+    rc = repos_cli.cmd_repos_dispatch(["sync", "repo-a"])
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "repo-a" in out
+    assert "repo-b" not in out
+
+
+def test_repos_cli_sync_preserves_unquoted_multi_word_tag_value(
+    home: Path, tmp_path: Path, monkeypatch,
+):
+    """A regression the name-filter parsing must not introduce: the
+    pre-existing `repos sync --tag multi-machine system` documented usage
+    (an unquoted, space-separated tag value, not a trailing repo name) must
+    still resolve to a single tag filter, not misread its second word as an
+    explicit repo name."""
+    from agent_worktrees import repos_cli
+
+    captured: dict[str, object] = {}
+
+    def fake_sync_all(*, tag=None, class_filter=None, names=None, plat=None):
+        captured["tag"] = tag
+        captured["names"] = names
+        return []
+
+    monkeypatch.setattr(repos, "sync_all", fake_sync_all)
+
+    repos_cli.cmd_repos_dispatch(
+        ["sync", "--tag", "multi-machine", "system"]
+    )
+
+    assert captured["tag"] == "multi-machine system"
+    assert captured["names"] is None
+
+
+def test_repos_cli_sync_combines_leading_names_with_a_multi_word_tag(
+    home: Path, tmp_path: Path, monkeypatch,
+):
+    """Explicit repo names and an unquoted multi-word `--tag` value can
+    combine unambiguously as long as the names come first (the CLI's
+    documented positionals-then-flags convention) -- the ordering
+    `repos sync` must resolve, not just tolerate."""
+    from agent_worktrees import repos_cli
+
+    captured: dict[str, object] = {}
+
+    def fake_sync_all(*, tag=None, class_filter=None, names=None, plat=None):
+        captured["tag"] = tag
+        captured["names"] = names
+        return []
+
+    monkeypatch.setattr(repos, "sync_all", fake_sync_all)
+
+    repos_cli.cmd_repos_dispatch(
+        ["sync", "repo-a", "repo-b", "--tag", "multi-machine", "system"]
+    )
+
+    assert captured["names"] == ("repo-a", "repo-b")
+    assert captured["tag"] == "multi-machine system"
+
+
