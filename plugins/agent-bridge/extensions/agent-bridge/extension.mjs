@@ -59,6 +59,8 @@ const REPRESENT_TYPES = new Set([
   "session.usage_info",
   "assistant.turn_end",
   "permission.requested",
+  "session.compaction_start",
+  "session.compaction_complete",
 ]);
 const CONFIG_DIR = process.env.AGENT_BRIDGE_CONFIG_DIR
   ? process.env.AGENT_BRIDGE_CONFIG_DIR

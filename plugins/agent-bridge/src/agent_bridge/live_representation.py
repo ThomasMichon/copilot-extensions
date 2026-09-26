@@ -196,6 +196,25 @@ def translate_sdk_event(
             }),
         )]
 
+    if sdk_type == "session.compaction_start":
+        return [(
+            "compaction_start",
+            _out({
+                "conversation_tokens": d.get("conversationTokens"),
+                "system_tokens": d.get("systemTokens"),
+            }),
+        )]
+
+    if sdk_type == "session.compaction_complete":
+        return [(
+            "compaction_complete",
+            _out({
+                "success": bool(d.get("success")),
+                "tokens_removed": d.get("tokensRemoved"),
+                "post_compaction_tokens": d.get("postCompactionTokens"),
+            }),
+        )]
+
     if sdk_type == "assistant.turn_end":
         return [("turn_complete", _out({"stop_reason": None}))]
 

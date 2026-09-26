@@ -386,6 +386,50 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-25 — Vendored `plugin-activation` registry-root finding annotated (6 findings)
+
+- Fresh guard count for the `dev` head at this point: 707 findings (not the
+  handoff's ~707 estimate carried over verbatim -- re-ran per the effort's
+  own rule that counts drift). `customizing-copilot` carried exactly one
+  remaining `unqualified-runtime-root` finding: `resolve_active_plugins()`'s
+  `agent_worktrees_home = user_home / ".agent-worktrees"` in the vendored
+  `libs/plugin-activation` package (`sync-vendored-libs.py`/
+  `check-vendored-libs-sync.py` keep this package byte-identical across 8
+  copies: the top-level canonical `libs/plugin-activation`, plus 7 vendored
+  copies in `agent-bridge`, `agent-codespaces`, `agent-dispatch`,
+  `agent-machines`, `agent-worktrees`, `customizing-copilot`, and
+  `worktree-manager`).
+- Traced the line to `_verified_project_roots()`: it reads agent-worktrees'
+  own global `projects.yaml`/`repos.yaml` registry to resolve cell-scoped
+  project adoption for every consuming plugin. Phase 4's 2026-09-07 journal
+  entries already establish this exact registry as deliberately
+  legacy/global -- "Global project/repository registries ... remain legacy
+  until later attributable slices" -- matching the same
+  `# marketplace-isolation: allow legacy-default registry root` precedent
+  already used at `plugins/agent-worktrees/src/agent_worktrees/registry_paths.py`
+  and `plugins/agent-worktrees/scripts/registry_root.py`. This is category 2
+  (a genuine, already-intentional legacy fallback), not unconverted backlog.
+- Annotated the same physical line identically across all 8 copies (a
+  shorter reason token, `allow registry`, was required to stay within the
+  package's own `line-length = 99` ruff config -- the full precedent phrase
+  pushed the line to 118 chars). Re-ran `check-vendored-libs-sync.py` (still
+  byte-identical across all 8), `ruff check` on each copy (clean), the
+  package's own 59-test suite (canonical and, spot-checked,
+  `agent-worktrees`'s copy — both pass), and the guard's own test suite
+  (`test_check_marketplace_isolation.py` + `test_sync_vendored_libs.py`, 25
+  passed). Guard `unqualified-runtime-root` count dropped by exactly 6 (the
+  6 `plugins/`-scoped copies the guard scans; `worktree-manager/` isn't a
+  guard-scanned path but was fixed too to preserve the sync invariant).
+- **Process note for successors**: this session's first attempt edited the
+  files directly in the coordinator-resolved anchor checkout (the
+  non-worktree, personal-account root clone of this repo) before catching the
+  `anchor-write-guard` hook denial. Recovered by exporting the diff, creating
+  a proper disposable worktree via `copilot-extensions create --json`,
+  applying the diff there, and using the sanctioned
+  `agent-worktrees repos allow-edits copilot-extensions --reason "..."`
+  break-glass only to revert the stray anchor edit back to clean. Always
+  create the worktree *first*, per the effort's own standing gotcha.
+
 ### 2026-09-25 — `customizing-copilot`'s remaining `path-sibling-launch` finding resolved
 
 - The prior entry left `scan_plugin_sources.py`'s `_agent_worktrees_repo_root()`
