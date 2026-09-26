@@ -317,22 +317,29 @@ def _validate_absolute_path(value: Any, location: str) -> str:
     than repo-relative. Rejects ``~`` (a per-user expansion defeats the
     "same value for every machine" property this field exists for), a bare
     root (``/`` or a drive root), and any ``..`` segment.
+
+    Validated with **host-native** path semantics (:class:`pathlib.Path`,
+    not both ``PurePosixPath``/``PureWindowsPath``): :attr:`Config.sync_path`
+    later does ``Path(configured)`` on whichever machine reads this value, so
+    a foreign-platform absolute path (a Windows drive path committed while
+    read on POSIX, or vice versa) must not pass validation here only to be
+    silently reinterpreted as a *relative* path -- and therefore resolve
+    under the current working directory -- when actually consumed.
     """
     if not isinstance(value, str) or not value.strip():
         raise RepositoryConfigError(f"{location} must be a non-empty absolute path")
     text = value.strip()
     if text.startswith("~"):
         raise RepositoryConfigError(f"{location} must not use '~' (not machine-portable)")
-    posix = PurePosixPath(text)
-    windows = PureWindowsPath(text)
-    if not (posix.is_absolute() or windows.is_absolute()):
+    native = Path(text)
+    if not native.is_absolute():
         raise RepositoryConfigError(f"{location} must be an absolute path")
-    parts = posix.parts if posix.is_absolute() else windows.parts
-    if len(parts) <= 1:
+    if len(native.parts) <= 1:
         raise RepositoryConfigError(f"{location} must not be a bare filesystem root")
     if ".." in PurePosixPath(text.replace("\\", "/")).parts:
         raise RepositoryConfigError(f"{location} must not contain '..'")
     return text
+
 
 
 def _validate_template(

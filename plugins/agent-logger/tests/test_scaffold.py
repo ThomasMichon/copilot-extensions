@@ -277,6 +277,10 @@ def test_repo_config_sync_local_path_does_not_affect_other_sync_fields(
             "schema_version: 1\nsync:\n  local_path: '~/nas'\nlog: {}\n",
             "must not use '~'",
         ),
+        (
+            "schema_version: 1\nsync:\n  local_path: 'C:\\nas\\sessions'\nlog: {}\n",
+            "sync.local_path must be an absolute path",
+        ),
     ],
 )
 def test_repo_config_validation_errors(
@@ -412,6 +416,44 @@ def test_repo_config_honored_when_registered_and_on_default_branch(
     assert find_repo_config() == repo / ".agent-logger.yaml"
     cfg = load_config(home=tmp_path / "home")
     assert cfg.log_path_template == "logs/{title}.md"
+
+
+@pytest.mark.no_autotrust
+def test_repo_config_honored_via_agent_home_registry(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Without an explicit AGENT_WORKTREES_REPOS_YAML override, the trust
+    gate must still find the registry under $AGENT_HOME -- mirroring
+    agent-worktrees' own legacy registry-root fallback -- rather than only
+    ever looking under the bare ~/.agent-worktrees default."""
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, remote="https://example.test/tmichon/demo.git", branch="main")
+    (repo / ".agent-logger.yaml").write_text(
+        "log:\n  path_template: logs/{title}.md\n",
+        encoding="utf-8",
+    )
+
+    agent_home = tmp_path / "custom-agent-home"
+    registry_dir = agent_home / ".agent-worktrees"
+    registry_dir.mkdir(parents=True)
+    (registry_dir / "repos.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "repos": {
+                    "demo": {
+                        "remote": "https://example.test/tmichon/demo.git",
+                        "default_branch": "main",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("AGENT_WORKTREES_REPOS_YAML", raising=False)
+    monkeypatch.setenv("AGENT_HOME", str(agent_home))
+    monkeypatch.chdir(repo)
+
+    assert find_repo_config() == repo / ".agent-logger.yaml"
 
 
 @pytest.mark.no_autotrust

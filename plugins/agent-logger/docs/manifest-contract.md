@@ -233,11 +233,13 @@ sync:
 
 Repo-local config is only read from a checkout that is BOTH a project the
 operator has explicitly registered with `agent-worktrees` (matched by git
-remote URL against `~/.agent-worktrees/repos.yaml`) AND currently checked out
-on that project's registered `default_branch`. An arbitrary local clone, or a
-registered repo's feature/PR branch, gets no repo-local config at all --
-silently, never an error -- so a checkout can't redirect a facility machine's
-sync destination or log layout just by existing locally or by an unreviewed
+remote URL against agent-worktrees' `repos.yaml`, honoring `$AGENT_HOME`
+just like agent-worktrees' own legacy registry-root resolution) AND
+currently checked out on that project's registered `default_branch`. An
+arbitrary local clone, or a registered repo's feature/PR branch, gets no
+repo-local config at all -- silently, never an error -- so a checkout can't
+redirect a facility machine's sync destination or log layout just by
+existing locally or by an unreviewed
 branch. See `agent_logger/repo_trust.py` for the exact resolution logic and
 the `$AGENT_LOGGER_TRUST_REPO_CONFIG` machine-local override.
 

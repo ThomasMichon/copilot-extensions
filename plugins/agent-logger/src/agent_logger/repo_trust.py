@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import os
+import platform
 import re
 import subprocess
 from pathlib import Path
@@ -36,7 +37,6 @@ except ImportError:  # pragma: no cover - pyyaml is a hard dependency
 log = logging.getLogger(__name__)
 
 _REPOS_YAML_ENV = "AGENT_WORKTREES_REPOS_YAML"
-_REPOS_YAML_DEFAULT = "~/.agent-worktrees/repos.yaml"
 _GIT_REMOTE_RE = re.compile(
     r"^(?:https?://|git@|ssh://(?:git@)?)"
     r"(?P<host>[^/:]+)[:/]+(?P<path>.+?)(?:\.git)?/?$"
@@ -103,6 +103,30 @@ def _run_git(root: Path, *args: str) -> str | None:
     return output or None
 
 
+def _default_repos_yaml_root() -> Path:
+    """Mirror agent-worktrees' own legacy registry-root fallback (see
+    ``agent_worktrees.registry_paths._legacy_root``): honors ``$AGENT_HOME``
+    so a machine using that override is not silently treated as an
+    unregistered install.
+
+    Does NOT replicate agent-worktrees' further "validated installation
+    context" resolution (its ``COPILOT_EXTENSIONS_CONTEXT``-gated
+    marketplace-isolation payload-root indirection) -- that would require
+    importing agent-worktrees' own installed package, which is not a runtime
+    dependency plugins take on each other (agent-bridge's own repos.yaml
+    resolution has this identical, pre-existing scope; see
+    ``agent_bridge.agent_registry_common._REPOS_YAML_DEFAULT``).
+    """
+    override = os.environ.get("AGENT_HOME", "").strip()
+    if override:
+        return Path(override) / ".agent-worktrees"
+    if platform.system() == "Windows":
+        home = Path(os.environ.get("USERPROFILE") or Path.home())
+    else:
+        home = Path.home()
+    return home / ".agent-worktrees"
+
+
 def _registered_default_branch(remote_url: str) -> str | None:
     """Look up ``remote_url`` in the agent-worktrees repos registry.
 
@@ -117,7 +141,12 @@ def _registered_default_branch(remote_url: str) -> str | None:
     normalized = _normalize_git_remote(remote_url)
     if normalized is None:
         return None
-    path = Path(os.environ.get(_REPOS_YAML_ENV, _REPOS_YAML_DEFAULT)).expanduser()
+    override = os.environ.get(_REPOS_YAML_ENV, "").strip()
+    path = (
+        Path(override).expanduser()
+        if override
+        else _default_repos_yaml_root() / "repos.yaml"
+    )
     if not path.is_file():
         log.debug("agent-worktrees repos registry not found at %s", path)
         return None
