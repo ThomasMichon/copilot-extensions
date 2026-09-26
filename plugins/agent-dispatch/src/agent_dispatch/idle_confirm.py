@@ -21,19 +21,42 @@ IDLE_CONFIRM_COOLDOWN = 60.0
 
 
 def idle_confirm_message(task: dict) -> str:
-    """Work-bearing idle prompt: idle is not done; continue or complete for real."""
+    """Work-bearing idle prompt: idle is not done; continue or complete for real.
+
+    Composed from the task's own recorded objective (``goal``/``prompt``) and
+    ``done_criteria`` rather than a fixed generic sentence, so the worker is
+    re-oriented on *its actual assignment*, not a template that may not
+    describe it. Never suggests a steering card: that is a separate,
+    consciously-chosen resolution some task types may not have -- confirmed
+    live that suggesting it universally can strand a task for hours behind an
+    unanswered human-input gate.
+    """
     tid = task.get("id") or "unknown"
     title = str(task.get("title") or "").strip()
     named = f"task {tid}" + (f" ({title})" if title else "")
-    criteria = str(task.get("done_criteria") or task.get("goal") or "").strip()
+    objective = str(task.get("goal") or task.get("prompt") or title).strip()
+    objective_line = f"\nYour assignment: {objective}" if objective else ""
+    resume_line = (
+        "Idle does not mean done -- resume working toward the assignment "
+        "above now."
+        if objective
+        else "Idle does not mean done -- resume the task now."
+    )
+    criteria = str(task.get("done_criteria") or "").strip()
     criteria_line = f"\nDone-criteria: {criteria}" if criteria else ""
+    completion_clause = (
+        "if the done-criteria are genuinely met"
+        if criteria
+        else "if the assignment is genuinely, fully complete"
+    )
     return (
-        f"I see you are idle, but you have not completed {named}. "
-        "Idle after loading a skill or ending a turn is not completion. "
-        "Continue the original goal now; do not complete just to clear this prompt."
+        f"You are idle, but {named} is not marked complete.{objective_line}"
         f"{criteria_line}\n"
-        f"Only if those criteria are actually met, run `agent-dispatch complete {tid}`. "
-        "If you cannot proceed, post a steering card with --request-input."
+        f"{resume_line} Only run `agent-dispatch complete "
+        f"{tid}` {completion_clause}; do not complete just "
+        "to clear this prompt. If the assignment is genuinely blocked, use "
+        "whatever resolution your own task's instructions define for that "
+        "case (e.g. `agent-dispatch suspend`) -- do not invent one."
     )
 
 
@@ -49,8 +72,16 @@ def default_idle_confirm_nudge(target: str, task: dict) -> bool:
 
 
 def nudge_idle_headless_tasks(supervisor: Any, *, now: float) -> int:
-    """Idle is not done. Nudge STARTED headless bodies once per cooldown."""
+    """Idle is not done. Nudge STARTED headless bodies once per cooldown.
+
+    Skips any task carrying a label in ``supervisor.idle_nudge_exempt_labels``
+    -- that task type owns its own resume path (an in-process evaluator, or an
+    external one driven entirely through this CLI) and going idle with no new
+    activity is its correct resting state, not an unfinished turn. See
+    :attr:`Supervisor.idle_nudge_exempt_labels` for the full rationale.
+    """
     nudged = 0
+    exempt = getattr(supervisor, "idle_nudge_exempt_labels", None) or ()
     for res in supervisor._pool_reservations(state=SpawnState.SPAWNED):
         try:
             task = supervisor.client.get(res["task_id"])
@@ -61,6 +92,8 @@ def nudge_idle_headless_tasks(supervisor: Any, *, now: float) -> int:
             or task.get("status") != Status.STARTED
             or not task.get("owner")
         ):
+            continue
+        if exempt and set(task.get("labels") or ()).intersection(exempt):
             continue
         activity = None
         fleet = _parse_fleet_body_handle(res.get("session_handle"))

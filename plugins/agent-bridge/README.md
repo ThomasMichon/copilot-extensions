@@ -323,10 +323,16 @@ as a `bearer.<token>` WebSocket subprotocol (acp-ui's convention); a plain
 The server negotiates the `acp.v1` subprotocol. Print the token with
 `agent-bridge token` (it lives in `~/.agent-bridge/auth.yaml`).
 
-**Status UX.** `GET /ui` serves a dependency-free status page listing registered
-agents and live sessions, each with a copyable ACP WebSocket URL to paste into
-acp-ui. It calls the token-protected `/api/v1` endpoints (token entered once,
-kept in `localStorage`), so no data is exposed without auth.
+**Control surface.** `GET /ui` (open it signed in with `agent-bridge ui`) is a
+dependency-free task board for the sessions registered with this bridge: each
+worktree task with its orchestrator and supervised venue workers, a session
+viewer that collapses tool calls, new/resume/rename task verbs over the
+`agent-worktrees` CLI (`/api/v1/ui/workspaces`, `/api/v1/ui/tasks`), and the
+ACP agent/session URLs to paste into acp-ui. The page, scripts, and stylesheet
+ship as package data (`ui_static/`) served from a fixed allowlist under a CSP
+with no inline code; they carry no data. Data comes only from the
+token-protected `/api/v1` routes, and the task-launching verbs additionally
+require a same-origin request and are rate limited.
 
 > Hosted acp-ui is served over HTTPS, which (per the browser mixed-content rule)
 > can only dial `wss://` — not `ws://localhost`. For a local bridge, use the

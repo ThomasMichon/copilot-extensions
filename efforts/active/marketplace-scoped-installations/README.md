@@ -386,6 +386,49 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-25 — `context-handoff`'s 11 findings in `handoff-core.mjs` annotated
+
+- Fresh guard count for `dev` head `97c641fa0`: 696 findings, matching the
+  prior entry's post-merge baseline exactly. Read `agent-pull-requests`' 10
+  findings first per the prior handoff's recommended order: confirmed
+  genuine, unconverted Phase 2 launcher-contract backlog (`install.sh`/
+  `install.ps1`/`installer-engine.sh`/`.ps1` writing to
+  `$HOME/.agent-pull-requests` / `$HOME/.local/bin`), matching the
+  `budget-guidance` pattern from an earlier entry — not a quick annotation
+  slice, left untouched.
+- Moved to `context-handoff`'s 11 findings, all in a single real code file,
+  `plugins/context-handoff/extensions/context-handoff/handoff-core.mjs`
+  (lines 63, 72, 81, 1351, 1667, 2003, 2015, 2034, 2046, 2149, 2666). Read
+  the surrounding functions before classifying: `resolveSystemCliDescriptor`
+  (lines ~55-110) and `runCli` (line ~198) are a provenance-verified
+  sibling-plugin invocation utility — it resolves another plugin's payload
+  root, verifies the sibling's `plugin.json` manifest name and repository
+  match before invoking isolated argv, then the callers (`agentDispatch*`,
+  `readStatusMonitorRegistry`, `abandonSupersededHandoffs`,
+  `runAgentDispatchConsume`, `readTaskPayloadRaw`, the worktree history
+  writer) invoke `agent-worktrees`/`agent-dispatch` by name to coordinate
+  cross-plugin handoff state. This is the same established
+  "sibling-plugin-invocation"/"legacy-compatibility" category already used
+  elsewhere in the codebase (e.g. `agent-worktrees/src/agent_worktrees/
+  finalize.py`'s `allow provider-management`,
+  `agent-containers/src/agent_containers/config.py`'s
+  `allow legacy-compatibility`, `agent-dispatch/scripts/focus-guidance.sh`'s
+  `allow agent-worktrees-management`) — not new judgment, and not Phase 2
+  launcher-contract backlog since `context-handoff` doesn't own these paths,
+  it only references sibling plugins' own (still-legacy) runtime roots by
+  name. Annotated all 11 lines with `marketplace-isolation: allow
+  agent-worktrees-management` / `allow agent-dispatch-management` / `allow
+  agent-bridge-management` matching the referenced plugin.
+- Verified via `git diff origin/dev -- <file> | grep -c "marketplace-
+  isolation: allow"`: exactly 11 markers added (not eyeballed).
+- Verified: `check-marketplace-isolation.py --json` dropped from 696 to 685
+  (exactly the 11 annotated findings); `node --check` on the edited file;
+  `node --test` on `handoff-core.test.mjs` (50/50 pass), `cli-parity.test.mjs`
+  and `handoff-supersede.test.mjs` (all pass); `check-docs-consistency.py`
+  still OK; `check-changefile-presence.py --base origin/dev` OK after adding
+  a dev changefile. Manually confirmed the fix catches its own regression
+  via `git stash`/`git stash pop` (count went 685→696→685).
+
 ### 2026-09-25 — `copilot-extensions-harness`'s 5 findings annotated
 
 - Fresh guard count for `dev` head `4c51d882c`: 701 findings

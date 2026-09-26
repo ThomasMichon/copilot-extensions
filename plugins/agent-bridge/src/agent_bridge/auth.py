@@ -11,6 +11,8 @@ log = logging.getLogger("agent-bridge")
 
 # Paths that skip auth
 _PUBLIC_PATHS = frozenset({"/health", "/ui", "/ui/exchange", "/docs", "/openapi.json", "/redoc"})
+# The /ui page's static script and stylesheet files (no data; see routes/ui.py).
+_PUBLIC_PREFIXES = ("/ui/assets/",)
 
 
 class BearerAuthMiddleware(BaseHTTPMiddleware):
@@ -23,7 +25,8 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
-        if request.url.path in _PUBLIC_PATHS:
+        path = request.url.path
+        if path in _PUBLIC_PATHS or path.startswith(_PUBLIC_PREFIXES):
             return await call_next(request)
 
         auth = request.headers.get("Authorization", "")
