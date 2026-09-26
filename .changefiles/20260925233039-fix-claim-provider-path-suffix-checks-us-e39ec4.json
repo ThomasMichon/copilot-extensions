@@ -1,0 +1,9 @@
+{
+  "comment": "fix: claim-provider path-suffix checks use PureWindowsPath/PurePosixPath, not Path(), so os.name=nt simulation on POSIX doesn't crash on pathlib's frozen WindowsPath flavour",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
