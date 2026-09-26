@@ -193,6 +193,20 @@ def test_shell_git_bare_pull_without_ff_only_from_anchor_cwd_denies(
     assert d and d["permissionDecision"] == "deny"
 
 
+def test_shell_git_pull_with_ff_only_substring_in_branch_name_denies(
+    tmp_path, anchor,
+):
+    """The ``--ff-only`` match must require a standalone argument, not a
+    substring anywhere in the segment -- a branch name that merely CONTAINS
+    the literal text ``--ff-only`` (no real flag passed) is still an unsafe
+    bare pull and must still deny."""
+    gp = anchor[0]["path"]
+    d = guard.decide(
+        _shell("git pull origin release/--ff-only", gp),
+        env={}, home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
 def test_shell_git_commit_with_pull_ff_only_in_message_denies(
     tmp_path, anchor,
 ):

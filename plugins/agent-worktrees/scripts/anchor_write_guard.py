@@ -173,7 +173,9 @@ _GIT_SUBCOMMAND = re.compile(
     r"""^\s*["']?git\b(?:\s+-C\s+(?:"[^"]*"|'[^']*'|\S+))?\s+([A-Za-z][\w-]*)""",
     re.IGNORECASE,
 )
-_GIT_FF_ONLY_FLAG = re.compile(r"--ff-only\b", re.IGNORECASE)
+_GIT_FF_ONLY_FLAG = re.compile(
+    r"""(?:^|\s)["']?--ff-only["']?(?=\s|$)""", re.IGNORECASE,
+)
 # A ``-C`` (git change-directory) flag anywhere in a git segment.
 _GIT_DASH_C_FLAG = re.compile(r"(?:^|\s)-C\b", re.IGNORECASE)
 
