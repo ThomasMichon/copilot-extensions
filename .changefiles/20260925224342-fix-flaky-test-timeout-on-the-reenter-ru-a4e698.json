@@ -1,9 +1,0 @@
-{
-  "comment": "Fix flaky test-timeout on the reenter_runtime install integration test (heavy multi-subprocess chain, no per-test override; add one)",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

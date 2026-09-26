@@ -1,9 +1,0 @@
-{
-  "comment": "cleanup/GC now surface the closure descriptor's full blocker list (worktree-finality-and-obligations Phase 4); the cleanable/not decision itself is unchanged.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
