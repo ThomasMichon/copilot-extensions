@@ -1116,6 +1116,63 @@ no lifecycle-control logic invented at this layer.
       real inline read/write viewer is new `engine.py` surface, not a
       manifest-only addition — scope that explicitly when this phase starts.
 
+### Phase 10 — New Task composer (implementation)
+Realizes the [tasks-pane-ux vision](README.md)'s *The New Task composer*
+concept, added 2026-09-25 alongside the parent vision's monitor/confirmed
+primitives (PR #3622/#3625). No backend dependency on this effort's Phase 1
+sibling `agent-dispatch-monitor-and-confirmed-state` — composing and queuing
+a task is exactly today's `propose` + `queue` (already implemented), just
+never surfaced as a picker action.
+- [ ] A **New task…** pivot action on the Tasks pivot (`PivotAction`,
+      mirroring the Worktrees pane's **New worktree…**), opening the SAME
+      declarative composer machinery already proven for steering
+      (`kind:"form"` / `PivotFormScreen`) — no new modal widget.
+- [ ] Composer fields: title, free-form prompt/goal-payload textbox (reuse
+      the steering card's input widget), and a **tags & criteria picker**
+      built from the exact vocabulary a pool's filter already matches
+      against — repo lane (default: current), `requires`/`rejects`
+      capabilities, `role`, `task-type`. Source the picker's option list
+      from whatever already introspects a pool's filter vocabulary
+      (`registrar.py`/`overrides.py` — confirm the exact accessor when this
+      phase starts; not yet located in this session).
+- [ ] Submitting the composer is `propose` + `queue` against the
+      coordinator in one motion (client.py's existing calls), returning
+      immediately so the operator can open the composer again right away
+      for the next hand-authored task in a batch.
+- [ ] Tests: composer round-trips title/prompt/tags into the exact
+      `propose`/`queue` call shape; tags map onto the same pool-filter
+      predicate a registrar's own filter declaration would use (no
+      derivation gap vs. an emitter-authored task).
+
+### Phase 11 — Completion Review card (implementation)
+Realizes the [tasks-pane-ux vision](README.md)'s *The Completion Review
+card* concept. **Depends on**
+`agent-dispatch-monitor-and-confirmed-state`'s Phase 2 (`confirm`/
+`reopen_completed` on `TaskQueue`, plus `board_cli.py`'s `confirmed` group
+projection) — do not start this phase until that sibling effort's Phase 2
+has landed.
+- [ ] A **completed-but-unconfirmed** task's card, reached the same way the
+      steering card is — reusing `kind:"card"` (`PivotCardScreen`) — showing
+      the worker's result reference, accumulated progress log, and
+      prominent artifacts (reusing the Phase 5 shared artifacts surface).
+- [ ] Four actions, never a silent fifth: **Confirm** (calls
+      `TaskQueue.confirm`), **Re-queue with steering** (reuses the
+      steering-card input verbatim, calls `TaskQueue.reopen_completed` with
+      the given steer fields), **Abandon** (existing force-abandon verb),
+      **Save for later** (no-op — the card simply closes; per
+      *self-tracked-review-is-not-a-lane* this costs no pool slot and needs
+      no special "parked" bookkeeping beyond the task staying `completed`).
+- [ ] `task_phase` palette: add `confirmed` (green/terminal family, same
+      bucket as the existing `Completed`/`Abandoned` dark-grey-terminal
+      treatment) and ensure a `completed`-and-unconfirmed row is visually
+      distinguishable from a `confirmed` one (e.g. an inline "review
+      pending" marker) so the backlog of unreviewed completions is legible
+      at a glance, not just reachable by drilling in.
+- [ ] Tests: the card's four actions call the exact sibling-effort API
+      shapes; a `confirmed` task never offers this card (nothing to
+      review); an emitter-driven task whose evaluator already auto-confirmed
+      likewise never surfaces it.
+
 ## Validation Plan
 
 - [ ] Unit tests for the Phase 1 liveness-auto-transition-to-Suspended
@@ -1137,6 +1194,11 @@ no lifecycle-control logic invented at this layer.
       fencing (a stale caller must be rejected, not silently succeed).
 - [ ] Unit tests for the Configuration → Registrars view against
       `overrides.py` (`set_override`/`clear_override` round-trip).
+- [ ] Unit tests for the Phase 10 New Task composer: submitted tags map onto
+      the same pool-filter predicate vocabulary a registrar declares.
+- [ ] Unit tests for the Phase 11 Completion Review card's four actions
+      against `agent-dispatch-monitor-and-confirmed-state`'s
+      `confirm`/`reopen_completed` API shapes.
 - [ ] A picker-TUI snapshot/golden test (per `tests/production_picker/
       goldens/`) covering the shipped Tasks pane layout.
 - [ ] Manual pass against a live coordinator: steer a real blocked task,
@@ -1144,7 +1206,10 @@ no lifecycle-control logic invented at this layer.
       agent-dispatch does not re-queue it while paused), open a Proposed
       task into a CLI session and confirm it never resolves a pool or
       worker identity, then kill that CLI session and confirm the task
-      auto-transitions to Suspended rather than lingering as Started.
+      auto-transitions to Suspended rather than lingering as Started. Queue
+      a small hand-authored batch through the New Task composer, then walk
+      each to `confirmed`, `reopen`, and `abandon` through the Completion
+      Review card.
 
 ## Proposal
 
@@ -2599,3 +2664,19 @@ Phase 7 Plan text had drifted further than the implementation.**
   contained 300s per-sub-suite wall clock budget expired mid-run despite the
   underlying tests continuing to pass; treated as a runner-budget limit, not a
   product failure, and the native full suite above was the authoritative check.
+
+### 2026-09-25 — Phases 10-11 added: New Task composer + Completion Review card
+The agent-dispatch parent and tasks-pane-ux vision (PR #3622, re-landed as
+#3625 after a merge-target mistake) added two operator-facing concepts this
+session: **The New Task composer** and **The Completion Review card**. Carved
+those into this effort as Phase 10 and Phase 11 rather than opening a
+redundant tasks-pane effort, since this one already owns exactly this scope
+(Phases 0-9) and both new phases reuse machinery Phases 0/2/8 already built
+(the `kind:"form"`/`kind:"card"` pivot mechanism, the shared artifacts
+surface). Phase 11 has a real cross-effort dependency: it needs
+`TaskQueue.confirm`/`reopen_completed`, which live in the new sibling effort
+[`agent-dispatch-monitor-and-confirmed-state`](../agent-dispatch-monitor-and-confirmed-state/README.md)
+(not yet started) — noted inline on the phase so a resuming agent doesn't
+try to build the card against an API that doesn't exist yet. Phase 10 has no
+such dependency; it is pure `propose`+`queue` wiring and could start
+independently.

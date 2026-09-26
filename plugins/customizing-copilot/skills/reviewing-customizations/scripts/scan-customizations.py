@@ -449,6 +449,15 @@ def main(argv: list[str] | None = None) -> int:
         help="shortcut for --include-plugins ~/.copilot/installed-plugins",
     )
     ap.add_argument(
+        "--agent-worktrees-path",
+        help=(
+            "Resolved agent-worktrees command (e.g. the session command "
+            "catalog's argv[0]), used to resolve any agent-worktrees-repo "
+            "marketplace source with --from-settings. Falls back to an "
+            "ambient PATH lookup when omitted."
+        ),
+    )
+    ap.add_argument(
         "--owned-agent-root",
         action="append",
         default=[],
@@ -474,18 +483,31 @@ def main(argv: list[str] | None = None) -> int:
     projection_settings_error = None
     if args.from_settings:
         enabled_settings, _marketplaces = _merged_settings(root, require_trust=True)
-        sources += assemble_enabled_plugins(root, require_trust=True)
         try:
-            instruction_projections.validate_committed_settings(root)
-            repository_projection_sources = assemble_enabled_plugins(
-                root,
-                require_trust=False,
-                include_user=False,
-                include_local=False,
+            sources += assemble_enabled_plugins(
+                root, require_trust=True,
+                agent_worktrees_command=args.agent_worktrees_path,
             )
         except ValueError as exc:
-            repository_projection_sources = []
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        repository_projection_sources = []
+        try:
+            instruction_projections.validate_committed_settings(root)
+        except ValueError as exc:
             projection_settings_error = str(exc)
+        else:
+            try:
+                repository_projection_sources = assemble_enabled_plugins(
+                    root,
+                    require_trust=False,
+                    include_user=False,
+                    include_local=False,
+                    agent_worktrees_command=args.agent_worktrees_path,
+                )
+            except ValueError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return 2
     else:
         repository_projection_sources = None
 

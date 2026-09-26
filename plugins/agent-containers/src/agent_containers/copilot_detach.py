@@ -14,11 +14,19 @@ from typing import Any
 from agent_procutil import no_window_flags
 from venue_copilot import read_seed
 from venue_copilot.detached import launch_detached, public_plan, stop_detached
+from venue_copilot.models import model_copilot_args
 from venue_copilot.refs import upload_for
 
 _BUSY_EXIT = 75
 _RESERVATION_TTL = 900.0
 _RESERVE_RETRY_WINDOW = 90.0
+
+
+def _with_caller_model(requested: list[str]) -> list[str]:
+    """The caller's `--copilot-arg` list plus its own model / reasoning effort /
+    context tier (`venue_copilot.models`), so the worker doesn't silently run on
+    the venue's CLI defaults; an explicitly passed flag wins."""
+    return requested + model_copilot_args(requested)
 
 
 def _progress(stage: str, detail: str = "") -> None:
@@ -299,7 +307,7 @@ def cmd_detach(
             plan,
             seed=seed,
             driver=args.driver,
-            copilot_args=list(getattr(args, "copilot_args", None) or []),
+            copilot_args=_with_caller_model(list(getattr(args, "copilot_args", None) or [])),
             ensure_mux=bool(args.ensure_mux),
             register_timeout=float(args.register_timeout),
             progress=_progress,

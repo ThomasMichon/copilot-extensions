@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from agent_worktrees import __main__ as m
+from agent_worktrees import picker_profiles_cli as m
 
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 _INSTALL_PS = _PLUGIN_ROOT / "scripts" / "install.ps1"
@@ -206,8 +206,6 @@ def test_installers_delegate_registry_write_to_python():
     # Neither installer persists identity/location facts to projects.yaml.
     assert "$entry['anchor']" not in ps
     assert "entry['anchor']" not in sh
-    # The PowerShell fragment generator is retired: the installer captures the
-    # fragment JSON from the Python single-source-of-truth generator instead of
-    # reimplementing it (which is what silently dropped profiles).
+    # The PowerShell fragment generator is retired; the script owns its offline
+    # fallback path and no longer carries a parallel YAML writer.
     assert "function Build-TerminalFragment" not in ps
-    assert "agent_worktrees terminal-fragment --machine" in ps

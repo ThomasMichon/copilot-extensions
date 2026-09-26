@@ -165,6 +165,7 @@ agent-codespaces allocate <owner/repo> # Reuse/create/recycle/pressure decision
 agent-codespaces create <owner/repo>  # Create, guarded by reuse/budget checks
 agent-codespaces wait <name>          # Patiently wait for Available
 agent-codespaces stop <name>          # Recover sessions, then stop (preserve)
+agent-codespaces sync-sessions <name> # Non-destructive session capture (stays leased/running; never boots/stops/deletes; defers if held/unbound/mid-write)
 agent-codespaces finalize <name>      # Recover, stop, mark recovered/reusable
 agent-codespaces finalize <name> --delete  # Recover, verify off-box safety, delete
 agent-codespaces verify <name>        # Publish git-cleanliness safety verdict
@@ -185,6 +186,44 @@ There are also bridge-facing seams (`namespace-list`, `namespace-resolve`,
 `namespace-target-repo`, `namespace-ensure-ready`, `relay-profile`,
 `relay-launch-env`, `provision-command`, `acp-model-flags`). They are invoked by
 agent-bridge and are not the normal human/operator surface.
+
+### Periodic session capture (`sync-sessions`)
+
+This repo ships only the on-demand `sync-sessions` verb and its liveness gate
+-- it never schedules anything itself, exactly like `agent-containers`'
+`rescue-capture` (session-rescue-parity Phase 1's recorded decision: no
+existing repo-owned loop -- e.g. the Connection Owner daemon's
+`run_owner_daemon` -- covers every leased CodeSpace unconditionally, so
+scheduling stays a consumer concern). A downstream consumer that wants
+periodic evidence preservation for a long-lived, never-recycled CodeSpace
+wires its own external timer (cron, a systemd unit, a scheduled task) that
+periodically invokes:
+
+```bash
+agent-codespaces sync-sessions <name> --account <account> --json
+```
+
+The verb is safe to invoke on any schedule: it never boots a non-`Available`
+CodeSpace, defers (exit code `75`) whenever the box is held/unbound/mid-write
+or its own preflight fails (not found, account unauthenticatable, etc.), and
+is a no-op success when there are no sessions to capture. `75` covers every
+`deferred` case, not only transient contention -- **a consumer's timer must
+not blindly retry forever on `75`; always read the JSON `detail` field**, since
+a permanent configuration/identity problem (e.g. a missing account binding, an
+unmintable `gh` token) also returns `75` and will never resolve itself on a
+retry. Because account resolution is fail-closed (an explicit `--account` or
+an exact per-name binding only), a scheduled invocation should pass
+`--account` explicitly rather than rely on binding lookup succeeding
+unattended.
+
+`sync-sessions --json`'s result is `{ok, deferred, session_count, detail}` --
+`deferred` is the busy/held/not-ready/misconfigured case (exit `75`, `detail`
+explains which), `ok` is the capture/no-op-success signal otherwise, and
+`detail` always carries a human-readable reason. This is deliberately the
+same shape family as `rescue-capture`'s per-member result (`captured`/
+`rescues`/`deferred`, same busy exit code) scaled down to one target instead
+of a fleet, so a consumer already handling one provider's capture verb needs
+no new mental model for the other's.
 
 ### `create` options
 

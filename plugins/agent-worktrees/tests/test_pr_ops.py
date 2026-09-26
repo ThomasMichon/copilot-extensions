@@ -3480,6 +3480,81 @@ class TestWorktreeToDictPRs:
 
 
 # ---------------------------------------------------------------------------
+# _worktree_to_dict claims_summary (#3307 worktrees-pivot-ux-overhaul Phase 4)
+# ---------------------------------------------------------------------------
+
+class TestWorktreeToDictClaimsSummary:
+    def _rec(self, *, prs=None, resources=None):
+        return tracking.WorktreeRecord(
+            worktree_id="wt-003", branch="worktree/wt-003",
+            worktree_path="/tmp/wt3", repo="acme/sample", machine="m",
+            platform="wsl", started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
+            status="active", completed_at=None, sessions=None,
+            prs=prs or [], resources=resources or [],
+        )
+
+    def test_no_claims_or_prs_omits_claims_summary(self):
+        from agent_worktrees.__main__ import _worktree_to_dict
+        d = _worktree_to_dict(self._rec())
+        assert "claims_summary" not in d
+
+    def test_ledger_claim_surfaces_in_summary(self):
+        from agent_worktrees.__main__ import _worktree_to_dict
+        rec = self._rec(resources=[
+            tracking.ResourceClaim(kind="codespace", ref="cs-123", state="active"),
+        ])
+        d = _worktree_to_dict(rec)
+        assert d["claims_summary"] == "codespace cs-123"
+
+    def test_backfills_pr_claim_from_active_pr_when_ledger_has_none(self):
+        """A worktree whose PR predates the create-pr-time auto-claim (no
+        matching 'pr' kind in resources) still surfaces it -- no migration
+        needed."""
+        from agent_worktrees.__main__ import _worktree_to_dict
+        from agent_worktrees.tracking import PRRecord
+        rec = self._rec(prs=[PRRecord(state="open", branch="b", number=42)])
+        d = _worktree_to_dict(rec)
+        assert d["claims_summary"] == "PR #42"
+
+    def test_ledger_pr_claim_takes_precedence_over_backfill(self):
+        """A ledger already carrying a live 'pr' claim (the normal,
+        post-auto-claim path) is used as-is -- no duplicate/second entry."""
+        from agent_worktrees.__main__ import _worktree_to_dict
+        from agent_worktrees.tracking import PRRecord
+        rec = self._rec(
+            prs=[PRRecord(state="open", branch="b", number=42)],
+            resources=[tracking.ResourceClaim(
+                kind="pr", ref="acme/sample#42", state="active",
+            )],
+        )
+        d = _worktree_to_dict(rec)
+        assert d["claims_summary"] == "PR #42"
+
+    def test_no_backfill_for_merged_pr(self):
+        """A merged/closed PR is never backfilled -- summarize_claims would
+        filter it as non-live anyway (live_only=True default), so
+        backfilling one is pointless; confirms it stays absent."""
+        from agent_worktrees.__main__ import _worktree_to_dict
+        from agent_worktrees.tracking import PRRecord
+        rec = self._rec(prs=[PRRecord(state="merged", branch="b", number=7)])
+        d = _worktree_to_dict(rec)
+        assert "claims_summary" not in d
+
+    def test_pr_rank_beats_lower_priority_claim(self):
+        """PR outranks a codespace claim per the shared pecking order --
+        confirms the Worktrees pivot picks up the SAME ranking every
+        claims-showing pivot uses, not an invented one."""
+        from agent_worktrees.__main__ import _worktree_to_dict
+        rec = self._rec(resources=[
+            tracking.ResourceClaim(kind="codespace", ref="cs-1", state="active"),
+            tracking.ResourceClaim(kind="pr", ref="acme/sample#9", state="active"),
+        ])
+        d = _worktree_to_dict(rec)
+        assert d["claims_summary"] == "PR #9 \u00b7 codespace cs-1"
+
+
+# ---------------------------------------------------------------------------
 # _worktree_to_dict state exposure (list --json --classify, test-chamber #1290)
 # ---------------------------------------------------------------------------
 

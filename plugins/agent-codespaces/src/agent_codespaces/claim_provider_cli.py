@@ -214,49 +214,71 @@ def cmd_claim_reclaim(args: argparse.Namespace) -> int:
                     "detail": f"CodeSpace is leased to {lease.effort}; release it first",
                 }))
                 return 0
+
+            # session-rescue-parity Phase 1's lock-widening decision: hold the
+            # SSH target lock (a distinct mechanism from deploy_hold's
+            # provider-admission fence above) across sync+delete too, so a
+            # concurrent capture cannot land between the sync completing and
+            # the delete actually running.
+            from ssh_manager import TargetBusyError, TargetLock
+
+            target_lock = TargetLock(args.name, op="codespace-lifecycle")
             try:
-                recovery = sync_codespace_sessions(
-                    args.name, account=resolved_account, token=resolved_token,
-                )
-            except Exception as exc:
-                recovery = {"ok": False, "detail": str(exc)}
-            if not recovery.get("ok"):
+                target_lock.acquire(force=False)
+            except TargetBusyError as busy:
                 print(json.dumps({
                     "reclaimed": False,
-                    "detail": f"pre-delete session recovery failed: {recovery.get('detail', '')}",
-                }))
-                return 0
-            current_hold = verify_deploy_hold(args.name, hold.token)
-            remaining = current_hold.expires_at - time.time()
-            if remaining <= _DELETE_TIMEOUT_SECONDS + _DELETE_START_BUFFER_SECONDS:
-                mark_deploy_hold_uncertain(args.name, hold.token)
-                print(json.dumps({
-                    "reclaimed": False,
-                    "detail": (
-                        "provider hold budget is nearly exhausted; "
-                        "refusing to start deletion before the fence expires"
-                    ),
+                    "detail": f"SSH target busy, deferring reclaim: {busy}",
                 }))
                 return 0
             try:
-                delete_codespace(
-                    args.name,
-                    force=True,
-                    account=resolved_account,
-                    token=resolved_token,
-                )
-            except Exception as exc:
-                detail = str(exc)
-                if _codespace_looks_gone(detail):
-                    _release_lease_silently(args.name)
+                try:
+                    recovery = sync_codespace_sessions(
+                        args.name, account=resolved_account, token=resolved_token,
+                        lock=target_lock,
+                    )
+                except Exception as exc:
+                    recovery = {"ok": False, "detail": str(exc)}
+                if not recovery.get("ok"):
+                    detail = recovery.get("detail", "")
                     print(json.dumps({
-                        "reclaimed": True,
-                        "detail": f"CodeSpace {args.name} already gone",
+                        "reclaimed": False,
+                        "detail": f"pre-delete session recovery failed: {detail}",
                     }))
                     return 0
-                mark_deploy_hold_uncertain(args.name, hold.token)
-                print(json.dumps({"reclaimed": False, "detail": detail}))
-                return 0
+                current_hold = verify_deploy_hold(args.name, hold.token)
+                remaining = current_hold.expires_at - time.time()
+                if remaining <= _DELETE_TIMEOUT_SECONDS + _DELETE_START_BUFFER_SECONDS:
+                    mark_deploy_hold_uncertain(args.name, hold.token)
+                    print(json.dumps({
+                        "reclaimed": False,
+                        "detail": (
+                            "provider hold budget is nearly exhausted; "
+                            "refusing to start deletion before the fence expires"
+                        ),
+                    }))
+                    return 0
+                try:
+                    delete_codespace(
+                        args.name,
+                        force=True,
+                        account=resolved_account,
+                        token=resolved_token,
+                    )
+                except Exception as exc:
+                    detail = str(exc)
+                    if _codespace_looks_gone(detail):
+                        _release_lease_silently(args.name)
+                        print(json.dumps({
+                            "reclaimed": True,
+                            "detail": f"CodeSpace {args.name} already gone",
+                        }))
+                        return 0
+                    mark_deploy_hold_uncertain(args.name, hold.token)
+                    print(json.dumps({"reclaimed": False, "detail": detail}))
+                    return 0
+            finally:
+                target_lock.release()
             _release_lease_silently(args.name)
     except DeployHoldError as exc:
         print(json.dumps({"reclaimed": False, "detail": str(exc)}))

@@ -131,11 +131,59 @@ def test_assemble_from_pair_uses_public_command(monkeypatch):
     ]
 
 
+def test_assemble_prefers_explicit_command_over_ambient_path(monkeypatch):
+    """A caller-supplied resolved command must win over `PATH` -- the whole
+    point is not selecting a different marketplace/cell's ambient install."""
+    summary = _summary("no-op")
+    commands = []
+    monkeypatch.setattr(
+        ap.shutil, "which", lambda _name: "/wrong-cell/bin/agent-worktrees"
+    )
+    monkeypatch.setattr(
+        ap.subprocess,
+        "run",
+        lambda command, **_kwargs: commands.append(command) or _result(summary),
+    )
+
+    assert (
+        ap.assemble(
+            "/harness", "/knowledge",
+            agent_worktrees_command="/right-cell/bin/agent-worktrees",
+        )
+        == summary
+    )
+    assert commands == [
+        [
+            "/right-cell/bin/agent-worktrees",
+            "knowledge",
+            "compose-plugins",
+            "--harness-path",
+            "/harness",
+            "--knowledge-path",
+            "/knowledge",
+            "--json",
+        ]
+    ]
+
+
 def test_missing_command_is_explicit(monkeypatch):
     monkeypatch.setattr(ap.shutil, "which", lambda _name: None)
 
     with pytest.raises(ap.KnowledgePluginError, match="not found on PATH"):
         ap.assemble_from_pair()
+
+
+def test_explicit_ps1_without_powershell_host_fails_explicitly(monkeypatch):
+    """A resolved .ps1 command with no pwsh/powershell host must raise, not
+    silently fall through to an unexecutable argv[0]."""
+    if ap.os.name != "nt":
+        return
+    monkeypatch.setattr(ap.shutil, "which", lambda _name: None)
+
+    with pytest.raises(ap.KnowledgePluginError, match="PowerShell"):
+        ap.assemble_from_pair(
+            agent_worktrees_command=r"C:\right-cell\agent-worktrees.ps1"
+        )
 
 
 def test_execution_failure_is_explicit(monkeypatch):
@@ -210,7 +258,7 @@ def test_invalid_success_summary_is_explicit(monkeypatch, payload):
 
 
 def test_non_json_composed_output(monkeypatch, capsys):
-    monkeypatch.setattr(ap, "assemble", lambda *_args: _summary("composed"))
+    monkeypatch.setattr(ap, "assemble", lambda *_args, **_kwargs: _summary("composed"))
 
     assert ap.main(
         ["--harness-path", "/harness", "--knowledge-path", "/knowledge"]
@@ -222,6 +270,46 @@ def test_non_json_composed_output(monkeypatch, capsys):
         "  enabled: skills@personal",
         "Canonical command: agent-worktrees knowledge compose-plugins",
     ]
+
+
+def test_main_forwards_agent_worktrees_path_to_assemble(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        ap,
+        "assemble",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or _summary("composed"),
+    )
+
+    assert ap.main([
+        "--harness-path", "/harness",
+        "--knowledge-path", "/knowledge",
+        "--agent-worktrees-path", "/right-cell/agent-worktrees",
+        "--json",
+    ]) == 0
+
+    assert calls == [
+        (
+            ("/harness", "/knowledge"),
+            {"agent_worktrees_command": "/right-cell/agent-worktrees"},
+        )
+    ]
+
+
+def test_main_from_pair_forwards_agent_worktrees_path(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        ap,
+        "assemble_from_pair",
+        lambda **kwargs: calls.append(kwargs) or _summary("no-op"),
+    )
+
+    assert ap.main([
+        "--from-pair",
+        "--agent-worktrees-path", "/right-cell/agent-worktrees",
+        "--json",
+    ]) == 0
+
+    assert calls == [{"agent_worktrees_command": "/right-cell/agent-worktrees"}]
 
 
 @pytest.mark.parametrize(
@@ -251,7 +339,7 @@ def test_non_json_composed_output(monkeypatch, capsys):
 def test_from_pair_non_json_action_outputs(
     monkeypatch, capsys, summary, expected
 ):
-    monkeypatch.setattr(ap, "assemble_from_pair", lambda: summary)
+    monkeypatch.setattr(ap, "assemble_from_pair", lambda **_kwargs: summary)
 
     assert ap.main(["--from-pair"]) == 0
     assert capsys.readouterr().out.splitlines() == [
@@ -261,7 +349,7 @@ def test_from_pair_non_json_action_outputs(
 
 
 def test_json_error_output(monkeypatch, capsys):
-    def fail():
+    def fail(**_kwargs):
         raise ap.KnowledgePluginError("agent-worktrees unavailable")
 
     monkeypatch.setattr(ap, "assemble_from_pair", fail)
@@ -287,7 +375,7 @@ def test_json_error_output(monkeypatch, capsys):
 def test_main_invalid_summary_returns_documented_exit(
     monkeypatch, capsys, summary
 ):
-    monkeypatch.setattr(ap, "assemble_from_pair", lambda: summary)
+    monkeypatch.setattr(ap, "assemble_from_pair", lambda **_kwargs: summary)
 
     assert ap.main(["--from-pair", "--json"]) == 3
     payload = json.loads(capsys.readouterr().out)
@@ -296,7 +384,7 @@ def test_main_invalid_summary_returns_documented_exit(
 
 
 def test_non_json_error_output(monkeypatch, capsys):
-    def fail():
+    def fail(**_kwargs):
         raise ap.KnowledgePluginError("agent-worktrees unavailable")
 
     monkeypatch.setattr(ap, "assemble_from_pair", fail)

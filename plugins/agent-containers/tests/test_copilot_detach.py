@@ -67,6 +67,8 @@ class _FakeLock:
 
 @pytest.fixture
 def seams(monkeypatch):
+    # Hermetic: never read the developer's own ~/.copilot/settings.json model.
+    monkeypatch.setattr(detach, "model_copilot_args", lambda existing: [])
     calls = types.SimpleNamespace(
         run=[],
         reserve=[],
@@ -372,3 +374,10 @@ def test_dry_run_names_ref_files_and_a_missing_one_fails(seams, tmp_path, capsys
 
 
 _RELAY = {"require_live_relay_port": lambda: 61234, "relay_healthy": lambda p: True}
+
+
+def test_detached_session_mirrors_the_callers_model(monkeypatch):
+    seen = []
+    monkeypatch.setattr(detach, "model_copilot_args", lambda existing: seen.append(list(existing)) or ["--model=example-model"])
+    assert detach._with_caller_model(["--no-ask-user"]) == ["--no-ask-user", "--model=example-model"]
+    assert seen == [["--no-ask-user"]]

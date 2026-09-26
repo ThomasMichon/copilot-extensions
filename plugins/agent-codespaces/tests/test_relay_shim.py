@@ -538,11 +538,16 @@ def _require_bash():
 
 
 def _is_wsl_bash(bash) -> bool:
-    """The Microsoft Store WSL launcher lives under ``WindowsApps`` and runs the
-    shell *inside* the WSL VM, whose loopback is a separate network namespace
-    from the Windows host -- so its ``/dev/tcp/127.0.0.1`` cannot reach a
-    host-bound relay -- so the host-relay probe tests must skip on it."""
-    return "windowsapps" in (bash or "").lower()
+    """A WSL launcher runs the shell *inside* the WSL VM -- a genuinely
+    different runtime from a host-native shell (MSYS2/Git Bash), even when
+    its network namespace happens to reach the host (e.g. this machine's
+    `.wslconfig` sets `networkingMode=mirrored`, which lets WSL's loopback
+    reach the Windows host's -- so a bare loopback-reachability probe alone
+    is NOT a reliable WSL exclusion here). Exclude both known WSL launcher
+    locations: the Microsoft Store alias under ``WindowsApps``, and the
+    classic ``C:\\Windows\\System32\\bash.exe`` launcher."""
+    lowered = (bash or "").lower()
+    return "windowsapps" in lowered or "\\system32\\bash.exe" in lowered
 
 
 def _bash_reaches_host_loopback(bash) -> bool:

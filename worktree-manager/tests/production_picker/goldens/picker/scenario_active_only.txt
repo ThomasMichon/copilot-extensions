@@ -6,9 +6,9 @@
 
    + New worktree…     ✕ Clean     ⟳ Sync     creates on anomalous-potato Win  (this host)
 
-  ID     STATE    R   AGE    LIVE   T     PR
+  ID     STATE      AGE    LIVE   T     CLAIMS
   ── Active ──────────────────────────────────────────────────────────────────────────────────────────────────────────
-☐ a001   ACTIVE       15m    ●1      12   —
+☐ a001   ACTIVE     15m    ●1      12
       Ship the release notes: active
   ── Recent ──────────────────────────────────────────────────────────────────────────────────────────────────────────
     (none)

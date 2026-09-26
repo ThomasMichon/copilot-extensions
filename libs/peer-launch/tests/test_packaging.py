@@ -17,8 +17,9 @@ def test_all_packaged_launchers_and_validators_match():
     for plugin, filename in (
         ("agent-bridge", "_peer_launch.py"),
         ("agent-dispatch", "peer_launch.py"), ("agent-codespaces", "_peer_launch.py"),
-        ("agent-containers", "_peer_launch.py"), ("agent-logger", "_peer_launch.py"),
-        ("agent-index", "_peer_launch.py"), ("agent-machines", "_peer_launch.py"),
+        ("agent-containers", "_peer_launch.py"), ("agent-worktrees", "_peer_launch.py"),
+        ("agent-logger", "_peer_launch.py"), ("agent-index", "_peer_launch.py"),
+        ("agent-machines", "_peer_launch.py"),
     ):
         package = ROOT / "plugins" / plugin / "src" / plugin.replace("-", "_")
         assert (package / filename).read_bytes() == canonical.read_bytes()
@@ -54,7 +55,10 @@ def test_sync_tool_registers_all_packaged_primitives():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     destinations = {destination for _, destination in module.vendor_pairs()}
-    for plugin in ("agent-bridge", "agent-dispatch", "agent-codespaces", "agent-containers", "agent-logger", "agent-index", "agent-machines"):
+    for plugin in (
+        "agent-bridge", "agent-dispatch", "agent-codespaces", "agent-containers",
+        "agent-worktrees", "agent-logger", "agent-index", "agent-machines",
+    ):
         assert (
             ROOT / "plugins" / plugin / "src" / plugin.replace("-", "_")
             / "_installation_context.py"

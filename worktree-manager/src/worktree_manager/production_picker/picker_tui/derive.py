@@ -145,13 +145,21 @@ def _pr(w):
     return f"#{n}{tag}"
 
 
-def _state(w):
+def _state(w, relation_label=""):
     """Display label aligned with the canonical git WorktreeState vocabulary.
 
     Prefers the ``state`` field from ``list --json --classify`` (computed where
     git access exists, incl. per remote machine). Falls back to an approximation
     from tracking fields when classification is absent.
-    """
+
+    ``relation_label`` -- the already-computed ``reciprocal.short_label()``
+    (#3307 Phase 5: the retired "R" column's HANDOFF value folds in here as a
+    genuine state, ranked right after the live-session check so a
+    handed-off-but-not-yet-resumed worktree reads as HANDOFF rather than
+    whatever its stale git/tracking state would otherwise show). Passed in
+    (not recomputed) so ``norm()`` and :func:`_state_style` -- which must
+    agree with whatever ``_state()`` actually returned -- share one
+    computation."""
     # A live process owns the worktree regardless of a cached or concurrently
     # derived git/tracking state. Check this before the explicit ``state`` field
     # so a first-paint WIP/FINAL cannot hide a live PID lock.
@@ -165,6 +173,8 @@ def _state(w):
             or w.get("execution_leg_live")
             or w.get("session_bare_orphan")):
         return "ACTIVE"
+    if relation_label == "HANDOFF":
+        return "HANDOFF"
     st = (w.get("state") or "").lower()
     if st:
         # Conversation-only refinement: an UNUSED worktree whose session held
@@ -203,7 +213,7 @@ def _state(w):
     return (status or "?").upper()[:6]
 
 
-def _state_style(w):
+def _state_style(w, relation_label=""):
     """The closure descriptor's validated ``style`` (e.g. ``merged-blocked``),
     surfaced only when ``_state()`` itself actually resolved to FINAL/MERGED
     through the descriptor. Reuses ``_state()``'s own resolution (rather than
@@ -214,11 +224,14 @@ def _state_style(w):
     a state that never consults one), so a consumer that keys color purely off
     ``rec["state"]`` remains correct with no ``state_style`` present.
 
+    ``relation_label`` -- threaded through to :func:`_state` so both agree on
+    whether the row actually resolved to HANDOFF (#3307 Phase 5).
+
     Carried on the normalized record for a future renderer to key semantic
     styling off of; the engine does not yet consume this field to recolor a
     row -- it still colors by the plain ``state`` label alone.
     """
-    if _state(w) not in ("FINAL", "MERGED"):
+    if _state(w, relation_label) not in ("FINAL", "MERGED"):
         return None
     interpreted = prune.interpret_descriptor_payload(w.get("closure"))
     if interpreted["supported"] and interpreted["label"] in ("FINAL", "MERGED"):
@@ -469,7 +482,16 @@ def _sess(w):
             or w.get("session_bridge_live") or w.get("session_ahp_live")
             or w.get("execution_leg_live")
             or w.get("session_bare_orphan")):
-        return "PROC"
+        # #3307 Phase 5: the retired "R" column's BOUND-vs-CONTROL split
+        # folds in here as the worktree's own CLI/ACP interface mode
+        # (``interface``, already resolved by the engine: a bridge-hosted
+        # worktree runs ACP; everything else is a normal interactive CLI
+        # session) -- a more directly useful distinction than
+        # ``reciprocal_relation``'s binding/control axis, which a worktree
+        # created and owned by an orchestrating CLI session still reads as
+        # "controlled-elsewhere" despite the worktree's own live session
+        # being perfectly ordinary CLI.
+        return "ACP" if w.get("interface") == "acp" else "PROC"
     if w.get("session_lock_stale"):
         return "LOCK"
     return "·"
@@ -753,6 +775,10 @@ def norm(
         has_bound_session=bool(w.get("last_session_id")),
         has_controllers=bool(w.get("controllers") or w.get("controller_revision")),
     )
+    # #3307 Phase 5: computed ONCE, threaded into both ``_state()`` and
+    # ``_state_style()`` (which must agree on whether HANDOFF actually won)
+    # and reused below rather than recomputed for the ``relation`` field.
+    relation_label = reciprocal.short_label(reciprocal_relation)
     return {
         "id": w["id"],
         "id4": id4,
@@ -783,11 +809,11 @@ def norm(
         "awaiting_operator": awaiting_operator,
         "kind": kind,
         "tracking": w.get("status", ""),
-        "state": _state(w),
-        "state_style": _state_style(w),
+        "state": _state(w, relation_label),
+        "state_style": _state_style(w, relation_label),
         "status_markers": _status_markers(w),
         "asset_hints": _asset_hints(w),
-        "relation": reciprocal.short_label(reciprocal_relation),
+        "relation": relation_label,
         "reciprocal_relation": reciprocal_relation,
         "age": _age(
             w.get("completed_at") if w.get("status") == "finalized"
@@ -799,6 +825,13 @@ def norm(
         "session_count": w.get("session_count"),
         "sessionless": _sessionless(w),
         "pr": _pr(w),
+        # #3307 Phase 4: the engine's already-ranked claims summary (computed
+        # in ``agent_worktrees.__main__._worktree_to_dict`` via the shared
+        # ``claims_rank`` module -- see that call site's own docstring for
+        # why it is NOT computed here: the Manager/engine subprocess
+        # boundary this module deliberately never crosses). A hermetic
+        # string pass-through; "" when unclaimed/unresolvable.
+        "claims_summary": w.get("claims_summary") or "",
         # #3307 Phase 3: raw pass-through of the worktree's last real resume
         "last_resumed_at": w.get("last_resumed_at"),
         "cleanup_bucket": _bucket_from_raw(w),

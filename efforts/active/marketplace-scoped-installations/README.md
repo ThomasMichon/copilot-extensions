@@ -386,6 +386,170 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-25 — `customizing-copilot`'s remaining `path-sibling-launch` finding resolved
+
+- The prior entry left `scan_plugin_sources.py`'s `_agent_worktrees_repo_root()`
+  genuinely open, believing it was called from ~8 separate scan entrypoints
+  with no natural place to inject an explicit catalog-argv. Tracing the real
+  call graph found this was wrong: only `assemble_enabled_plugins()` can
+  reach it (via `_directory_marketplace_plugin`'s `agent-worktrees-repo`
+  source kind), and only 2 real call sites exist -- `scan-customizations.py`'s
+  `main()` (the actual agent-invoked CLI entrypoint) and
+  `instruction_projections.py`/`manage-instruction-projections.py`'s
+  `discover_enabled_sources()` wrapper (a second CLI entrypoint).
+  `projection_sync_worker.py` also calls `discover_enabled_sources()`, but as
+  a headless background sync daemon with no agent turn to supply a
+  catalog-resolved path -- left it on the ambient-`PATH` default, which is
+  the correct permanent behavior there, not a gap.
+- Threaded an optional `agent_worktrees_command` parameter through
+  `_agent_worktrees_repo_root` -> `_directory_marketplace_plugin` ->
+  `assemble_enabled_plugins` -> `discover_enabled_sources`, preferring it
+  over `shutil.which` exactly like the `harness-knowledge` fix (including
+  the same Windows `.ps1`-host handling). Added `--agent-worktrees-path` to
+  both `scan-customizations.py`'s and `manage-instruction-projections.py`'s
+  CLIs, and a usage note to `reviewing-customizations/SKILL.md`.
+- Review caught a real gap in the first pass: unlike `harness-knowledge`'s
+  `assemble_plugins.py` (which raises on an unhostable `.ps1`), this file's
+  resolver originally returned `None` for that case, and `None` is also
+  the existing "genuinely unresolvable, fall through to `installed_root`"
+  signal for every *ambient* resolution failure. That conflation meant an
+  **explicitly** supplied but unhostable command would silently degrade to
+  inspecting an unrelated `installed_root` payload instead of failing --
+  the opposite of what an explicit catalog-resolved command is for. Fixed
+  by having `_resolve_agent_worktrees_command` raise `ValueError` only for
+  the explicit-and-unhostable case (ambient `shutil.which` misses still
+  return `None` and fall through unchanged, matching every other
+  unresolvable-marketplace case). Wrapped both `scan-customizations.py`
+  call sites in their own `except ValueError` that exits 2 with a clear
+  message, keeping the pre-existing `validate_committed_settings` soft-error
+  path untouched and correctly ordered.
+- **Second review round widened the same fix**: the first pass only made
+  the unhostable-`.ps1` case fatal, but review caught that any *other*
+  failure of an explicitly supplied command (a stale path, a failing CLI,
+  empty output, a launch `OSError`) still returned `None` and fell through
+  to `installed_root` the same way -- the identical provenance-mismatch
+  risk, just for every non-`.ps1` failure mode. Restructured
+  `_agent_worktrees_repo_root` so *any* failure raises `ValueError` when an
+  explicit command was supplied, while ambient (`shutil.which`) failures
+  keep the pre-existing soft `None`. Added a parametrized regression test
+  covering 4 explicit-failure modes.
+- Review also caught that the CLI-forwarding paths in both
+  `scan-customizations.py`'s `main()` and
+  `manage-instruction-projections.py`'s `main()` were untested -- a
+  regression could drop the parsed flag before the real call and the suite
+  would stay green. Added a `main()`-level regression test for each,
+  supplying a conflicting ambient command and asserting the CLI-resolved
+  one is used. Also widened `reviewing-customizations/SKILL.md`'s usage
+  note (review caught it only mentioned `scan-customizations.py`, though
+  `manage-instruction-projections.py` shares the same flag and resolver).
+- Added 8 regression tests total across two review rounds
+  (explicit-wins-over-ambient, the Windows unhostable-`.ps1` raise, 4
+  parametrized explicit-failure modes, and the two `main()` CLI-forwarding
+  tests); manually confirmed each fails when its corresponding fix is
+  reverted (the Windows case via an isolated throwaway interpreter, since
+  it's platform-gated and this box is Linux).
+- **Third review round found two more edge cases**: (1) `bool("")` is
+  `False`, so `--agent-worktrees-path ""` was indistinguishable from "not
+  supplied" and silently used the ambient fallback -- switched the
+  explicit/ambient distinction from truthiness to `is not None`, with an
+  explicit-but-blank string raising immediately; my first regression test
+  for this used whitespace (`"   "`), which is truthy and didn't actually
+  exercise the bug -- caught in self-review before landing and corrected
+  to a true empty string. (2) `Path.resolve(strict=True)` can raise
+  `RuntimeError` (symlink loop) or `ValueError`, not just `OSError` --
+  widened the caught exception tuple so every explicit-resolution failure
+  stays fail-closed. Also corrected the SKILL.md note: `--from-settings`
+  is `scan`-only, so "`sync`/`scan --from-settings`" was a fabricated
+  invocation that would error; reworded to `sync` (no flag needed) versus
+  `scan --from-settings`.
+- Added 1 more regression test (blank explicit command); 9 total.
+- Validation: `python tools/check-marketplace-isolation.py --json`
+  (`path-sibling-launch` 52->51, `scan_plugin_sources.py`'s finding gone),
+  `python tools/check-docs-consistency.py`, `python
+  tools/check-module-size.py` (trimmed `instruction_projections.py` back
+  under its grandfathered ceiling), and `customizing-copilot`'s full
+  `scan-customizations`/`instruction-projections` test suite (177 passed,
+  including 9 new regression tests) via `test-supervisor`.
+
+### 2026-09-25 — `harness-knowledge`'s 2 `path-sibling-launch`/`unqualified-runtime-root` findings resolved
+
+- The 2026-09-24 note left `harness-knowledge`'s `assemble_plugins.py` (bare
+  `shutil.which("agent-worktrees")`) and `bind_knowledge.py` (a
+  `.agent-worktrees` path construction) as genuine, unconverted backlog
+  needing a design pass, since neither plugin has a runtime cell of its own
+  and the existing `_peer_launch.py` same-cell primitive is scoped to its 7
+  registered `OWNERS` runtime/service plugins.
+- The operator clarified the actual design: each runtime plugin's
+  sessionStart hook (`emit-command-catalog.{sh,ps1}` +
+  `write_session_guidance.py`, already deployed for most runtime plugins,
+  confirmed present for `agent-ssh`/`agent-vault`/13 others) writes its own
+  resolved base-path/argv into the session's
+  `instructions/<plugin>/session-guidance.instructions.md` file. Operative
+  skill instructions are meant to read that catalog and pass the resolved
+  `argv[0]` explicitly, rather than a script re-discovering it via ambient
+  `PATH` -- this is already documented in `design.md`'s "Invocation chain"
+  section and already the convention `working-cross-repo`'s own skill text
+  follows (`<agent-worktrees catalog argv[0]>`).
+- Applying that lens to the two findings individually (not as one class):
+  - `assemble_plugins.py`'s `_resolve_command()`: **review caught that my
+    first pass mischaracterized this.** `assemble_plugins.py`'s own
+    SKILL.md documents it as a "legacy compatibility delegate," but
+    `bind_knowledge.py`'s `bind()` calls `assemble()` -- which calls
+    `_resolve_command()` -- on **every normal bind** where both paths are
+    known (`bind()` line ~921), not merely as a rare manual fallback; its
+    own `--agent-worktrees-path` was resolved but never threaded into that
+    call. Annotating the `shutil.which` as an intentional legacy-only
+    fallback would have suppressed exactly the marketplace/cell mismatch
+    this guard exists to catch. Fixed properly instead: `_resolve_command`,
+    `_delegate`, `assemble`, and `assemble_from_pair` all now accept an
+    optional resolved command (preferring it over `shutil.which`, with the
+    ambient lookup kept only as the documented last-resort default);
+    `bind()` now passes its own `agent_worktrees_path` through; `main()`
+    gained a matching `--agent-worktrees-path` flag for standalone
+    invocation. Added regression coverage proving the explicit path wins
+    over a conflicting ambient `PATH` match in both `assemble()` directly
+    and via `bind()` (the `bind()` assertion specifically targets the
+    `compose-plugins` command after review caught a first-draft assertion
+    that was vacuous against other, already-correct `bind()` calls), plus
+    coverage that `main()`'s new `--agent-worktrees-path` flag actually
+    forwards to `assemble()`/`assemble_from_pair()` (review caught this was
+    untested). Each new test was manually confirmed to fail when its
+    corresponding fix is reverted. Also updated `binding-knowledge/SKILL.md`'s
+    direct-assembly example to pass `--agent-worktrees-path` (review caught
+    that the documented standalone command still omitted it, which would
+    have taken the ambient-fallback path even after the code fix). A final
+    review round caught one more real gap: an explicitly resolved `.ps1`
+    command with no `pwsh.exe`/`powershell.exe` host on `PATH` silently fell
+    through to an unexecutable `argv[0]` instead of failing explicitly (the
+    existing `bind_knowledge.py`-side helper already guards this case).
+    `_resolve_command` now raises `KnowledgePluginError` in that case;
+    verified the exact branch in an isolated throwaway interpreter (mutating
+    `os.name` inside the pytest process itself breaks `pathlib`/pytest's own
+    internals) and added a Windows-only regression test following the
+    codebase's existing `if ...os.name != "nt": return` skip convention.
+  - `bind_knowledge.py`'s `.agent-worktrees` / `"config.yaml"` finding was
+    never a peer-launch/runtime-root issue at all on closer read: it reads
+    the **knowledge repo's own committed, repository-owned configuration
+    file** (documented in the same SKILL.md's step 1), unrelated to
+    marketplace/cell identity. Annotated as `marketplace-isolation: allow
+    project-owned-config`.
+- Left `customizing-copilot`'s `scan_plugin_sources.py`
+  `_agent_worktrees_repo_root()` (the third finding in the original
+  2026-09-24 note) genuinely open: unlike the other two, it's a shared
+  library function imported by ~8 separate top-level scan entrypoints
+  (`scan-customizations.py`, `scan_skills.py`, `scan_agents.py`, etc.), not
+  a single agent-invoked call site with a natural place to accept an
+  explicit catalog-argv flag, and it resolves a `repo:` name declared in a
+  committed marketplace source config rather than being told a path by an
+  invoking agent turn. Fitting this into either the catalog-argv model or
+  an `OWNERS`-extended `_peer_launch.py` needs its own design decision, not
+  a same-pattern copy of the other two.
+- Validation: `python tools/check-marketplace-isolation.py --json`
+  (`path-sibling-launch` 53->52, `unqualified-runtime-root` 433->432),
+  `python tools/check-docs-consistency.py`, and `harness-knowledge`'s full
+  test suite (75 passed, including 5 new regression tests, each manually
+  confirmed to catch its regression) via `test-supervisor`.
+
 ### 2026-09-25 — `phase-2-launcher-contracts.md` re-synced against current `origin/main`
 
 - The 2026-09-24 note flagged that the launcher-contract inventory's own

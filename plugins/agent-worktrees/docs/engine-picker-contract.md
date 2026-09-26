@@ -152,7 +152,6 @@ version and be coordinated with the Manager.
 | `<project> list --json --classify --mux-details` | The core enumeration — every worktree with git-derived `state`, sync tags, mux details, and additive normalized `reciprocal_relation` presentation state. | `--include-other-platforms` (Windows), `--cache-only` (fast paint), `--stream` (incremental) are **optional** accelerators; the engine must still answer without them. An engine too old for `--classify` is tolerated by re-running without it. A Picker facing an older engine treats a missing reciprocal field as legacy data; it never infers controller authority from partial fields. |
 | `<project> list-sessions --worktree <id> --json` | Sessions belonging to a worktree. | |
 | `<project> recent-messages --worktree <id> --limit N --json` | Last few conversation turns (the read-only Messages overlay). | |
-| `<project> profiles get --json` | Current backend-profile grid. | |
 | `<project> get <key>` | Scalar project value (e.g. `machine`, paths). | Plain value on stdout, **not** JSON — a deliberate exception for single-scalar reads. |
 
 ## Pinned action verbs (the Picker's control plane)
@@ -166,8 +165,6 @@ version and be coordinated with the Manager.
 | `<project> finalize <id> --json` | Finalize a merged/completed worktree. |
 | `<project> sync --worktree-id <id> --json` | Fast-forward a clean, strictly-behind worktree. |
 | `<project> cleanup [--worktree-id <id>] [--clean] [--bare-only --yes] --json` | Remove completed/gone worktrees (single or bulk). |
-| `<project> profiles apply --json …` | Apply / reset the backend-profile grid. |
-
 ## What is *not* in the contract
 
 - **Human-formatted (non-`--json`) output.** Only the machine-readable shapes
@@ -175,6 +172,9 @@ version and be coordinated with the Manager.
 - **The bare, no-args invocation itself.** `<project>` with no args is the
   **seam** (DQ7): it resolves to the front-end (Manager if on PATH, else the
   bundled Picker) — it is not a data verb and returns no contract payload.
+- **Backend-profile reads/writes.** The old `profiles get/apply` engine verbs
+  are gone; the backend-profile grid now belongs to Worktree Manager's own
+  control plane rather than this engine contract.
 - **Internal helpers** the engine does not expose as `--json` verbs.
 
 ## See also

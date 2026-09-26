@@ -297,7 +297,35 @@ class WorktreesView:
                                    preview, preview_ids),
                     stop=("L", li), data=rec)
                 add(self._detail_line(rec, width))
+                for worker_line in self._worker_lines(rec, width):
+                    add(worker_line)
                 li += 1
+
+    def _worker_lines(self, rec, width, limit=2):
+        """One dim ``→ <venue> LIVE|IDLE <activity>`` line per remote worker
+        this worktree supervises (venue-pivots-ux: supervised workers, seen
+        from the worktree row), at most ``limit`` inline plus a ``+N more``
+        tail. The activity is the transient half, so it is what gets clipped.
+        Empty until a venue pivot has loaded (graceful absence)."""
+        workers = self._eng._worktree_supervised_workers(rec)
+        lines = []
+        for worker in workers[:limit]:
+            line = Text("      → ", style=C_DIM)
+            line.append(worker["label"] or worker["pivot"], style=C_LABEL)
+            live = worker["live"].upper()
+            if live:
+                line.append(" ")
+                line.append(live, style=_palette_style("state", live) or C_DIM)
+            if worker["activity"] and line.cell_len + 2 < width:
+                line.append("  ")
+                line.append(derive.truncate_text(worker["activity"], max(1, width - line.cell_len)),
+                            style=C_DIM)
+            if line.cell_len > width:
+                line.truncate(width, overflow="ellipsis")
+            lines.append(line)
+        if len(workers) > limit:
+            lines.append(Text(f"      → +{len(workers) - limit} more", style=C_DIM))
+        return lines
 
     def _detail_line(self, rec, width):
         """The worktree row's second (detail) line: ``Title: Activity`` --

@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import threading
 import types
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 import agent_procutil
 import pytest
@@ -278,6 +280,104 @@ def test_sweep_serves_live_registered_and_prunes_gone(tmp_path, monkeypatch):
     assert ctx_done == {"wt-a", "wt-b"}
     # no work for the gone or non-wt sessions
     assert not any(s in ("wt-gone", "other") for s, _, _ in calls)
+
+
+def test_sweep_merges_managed_mux_cache_into_catalog_observation_only(tmp_path, monkeypatch):
+    """Phase 3b Slice 2 Sub-slice 3 Step 1: a Manager-reported live session
+    must reach ``catalog_observer`` alongside the direct mux scan, but must
+    never be added to ``served`` (no writer-ownership change yet) and must
+    never trigger a ``set-option`` call of its own."""
+    from agent_worktrees import mux_link
+
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    m._register_session_for_monitor("wt-a", "/w/a")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    calls = _capture_set(monkeypatch)
+    observed: list[set[str]] = []
+
+    cache = mux_link.ManagedMuxCache()
+    cache.apply_observation(
+        {
+            "project": "proj",
+            "worktree_id": "wt-manager-owned",
+            "mux_session": "wt-manager-owned",
+            "mapping_revision": 1,
+            "live": True,
+        }
+    )
+
+    served = m._monitor_sweep(
+        "tmux",
+        "T",
+        "P",
+        set(),
+        catalog_observer=observed.append,
+        managed_mux_cache=cache,
+    )
+
+    assert served == 1  # only the directly-scanned wt-a
+    assert observed == [{"wt-a", "wt-manager-owned"}]
+    # Never wrote a status bar for the Manager-reported session -- observation
+    # only, no writer-ownership change in this step.
+    assert not any(sess == "wt-manager-owned" for sess, _, _ in calls)
+
+
+def test_sweep_without_managed_mux_cache_observes_only_the_direct_scan(tmp_path, monkeypatch):
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    m._register_session_for_monitor("wt-a", "/w/a")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    _capture_set(monkeypatch)
+    observed: list[set[str]] = []
+
+    m._monitor_sweep("tmux", "T", "P", set(), catalog_observer=observed.append)
+
+    assert observed == [{"wt-a"}]  # unchanged when managed_mux_cache is None
+
+
+def test_sweep_never_calls_catalog_observer_with_a_partial_manager_only_view(tmp_path):
+    """Copilot review finding: ``catalog_observer``
+    (``ResidentSessionReconciler.observe_mux``) is a *complete-snapshot*
+    API -- any session name missing from the passed set is treated as
+    genuinely gone and reaped. An earlier revision of this seam called
+    ``catalog_observer(managed_live)`` when no mux binary was locally
+    discoverable, which would incorrectly mark every *other*, ordinary
+    (non-Manager) session as dead too, since only the Manager-known subset
+    was ever passed. The safe behavior (this test) is to never call
+    ``catalog_observer`` at all in the no-mux-binary path -- a managed-only
+    partial view must never reach this complete-snapshot API."""
+    from agent_worktrees import mux_link
+
+    cache = mux_link.ManagedMuxCache()
+    cache.apply_observation(
+        {
+            "project": "proj",
+            "worktree_id": "wt-manager-owned",
+            "mux_session": "wt-manager-owned",
+            "mapping_revision": 1,
+            "live": True,
+        }
+    )
+    observed: list[set[str]] = []
+
+    served = m._monitor_sweep(
+        None,  # no mux_bin discovered on this host
+        "T",
+        "P",
+        set(),
+        catalog_observer=observed.append,
+        managed_mux_cache=cache,
+    )
+
+    assert served == 0  # no direct-scan serving happens without a mux binary
+    assert observed == []  # never called -- a partial view must never reach it
 
 
 def test_sweep_ctx_rendered_once(tmp_path, monkeypatch):
@@ -1230,11 +1330,85 @@ def test_monitor_claim_handoff_cutover_reclaims_expired_live_pid_claim(tmp_path,
     assert logged[-1][1]["stale_age_seconds"] >= 600
 
 
+def test_reclaim_does_not_overwrite_a_newer_live_claim_when_restoring(tmp_path):
+    """If the displaced content doesn't match what the staleness check
+    actually inspected (a third contender republished a genuinely live claim
+    at `path` in the interim), restoring must never clobber that live claim
+    -- even when something *else* has since occupied `path` a second time
+    before the restore itself runs."""
+    path = tmp_path / "handoff-1.json"
+    stale_claim = {"pid": 777, "token": "handoff-1"}
+    path.write_text(json.dumps(stale_claim), encoding="utf-8")
+
+    real_replace = os.replace
+    newer_claim = {"pid": 999, "token": "handoff-1", "created_at": "now"}
+
+    def replace_then_reoccupy(src, dst):
+        real_replace(src, dst)
+        # Simulate a third contender publishing a brand-new live claim at
+        # `path` in the exact window between our os.replace and our
+        # mismatch-driven restore attempt.
+        path.write_text(json.dumps(newer_claim), encoding="utf-8")
+
+    with patch("agent_worktrees.status_monitor_runtime.os.replace", side_effect=replace_then_reoccupy):
+        ok, reclaimed, error = m._monitor_reclaim_stale_handoff_cutover_claim(
+            path, {"pid": 111, "token": "handoff-1"},
+            expected_stale_claim={"pid": 42, "token": "handoff-1"},  # deliberate mismatch
+        )
+
+    assert (ok, reclaimed, error) == (True, False, None)
+    # The third contender's live claim must survive untouched.
+    assert json.loads(path.read_text(encoding="utf-8")) == newer_claim
+
+
+def test_reclaim_fails_closed_when_unreadable_claim_was_actually_live(tmp_path):
+    """A staleness check that found an unreadable/torn file (claim=None,
+    reason=age-expired via file mtime) must not let a reclaimer treat a
+    *now-readable, valid* claim at the same path as a match -- someone else
+    published a genuinely live claim there, not the torn file originally
+    assessed."""
+    path = tmp_path / "handoff-1.json"
+    live_claim = {"pid": 999, "token": "handoff-1"}
+    path.write_text(json.dumps(live_claim), encoding="utf-8")
+
+    ok, reclaimed, error = m._monitor_reclaim_stale_handoff_cutover_claim(
+        path, {"pid": 111, "token": "handoff-1"},
+        expected_stale_claim=None,  # the staleness check found no parseable claim
+    )
+
+    assert (ok, reclaimed, error) == (True, False, None)
+    assert json.loads(path.read_text(encoding="utf-8")) == live_claim
+
+
+def test_reclaim_proceeds_when_displaced_content_matches_expected(tmp_path):
+    """The ordinary, non-racing path: the displaced content matches exactly
+    what the staleness check inspected -- reclaim proceeds and publishes."""
+    path = tmp_path / "handoff-1.json"
+    stale_claim = {"pid": 777, "token": "handoff-1"}
+    path.write_text(json.dumps(stale_claim), encoding="utf-8")
+
+    ok, reclaimed, error = m._monitor_reclaim_stale_handoff_cutover_claim(
+        path, {"pid": 111, "token": "handoff-1"},
+        expected_stale_claim=stale_claim,
+    )
+
+    assert (ok, reclaimed, error) == (True, True, None)
+    assert json.loads(path.read_text(encoding="utf-8")) == {"pid": 111, "token": "handoff-1"}
+
+
 def test_monitor_claim_handoff_cutover_stale_reclaim_is_single_winner(tmp_path, monkeypatch):
     monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
     monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR_HANDOFF_CLAIM_STALE_SECONDS", "1")
     monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: None)
-    monkeypatch.setattr(m.locks, "pid_alive", lambda pid: False)
+    # Only the pre-seeded dead claim's pid (777) is "gone" -- the current
+    # process's own pid must read alive, exactly like reality (a process is
+    # never dead to itself). Mocking pid_alive to unconditionally return
+    # False for *every* pid -- including the reclaiming thread's own live
+    # pid -- was the actual root cause of this test's flakiness: it let a
+    # slower thread's staleness check see the faster thread's already-
+    # published, genuinely-live winning claim as "stale" too (pid-gone),
+    # triggering a second, cascading reclaim that could steal the win.
+    monkeypatch.setattr(m.locks, "pid_alive", lambda pid: pid != 777)
     monkeypatch.setattr(m.locks, "process_start_time", lambda pid: f"start-{pid}")
     claim_path = tmp_path / "status-monitor-handoffs.d" / "a" / "handoff-1.json"
     claim_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2264,7 +2438,10 @@ def test_classify_daemon_started_published_in_lock_and_closed_on_exit(
     assert "worktree_status_endpoint" in servers_stamp
     assert "worktree_status_token" in servers_stamp
     assert "worktree_status_generation" in servers_stamp
-    assert closed["n"] == 2  # classify_server + worktree_status_server
+    assert "managed_mux_endpoint" in servers_stamp
+    assert "managed_mux_token" in servers_stamp
+    assert "managed_mux_generation" in servers_stamp
+    assert closed["n"] == 3  # classify_server + worktree_status_server + managed_mux_server
 
 
 def test_sweep_rechecks_before_publish_and_retains_registered_session_on_generation_change(

@@ -13,6 +13,16 @@ from agent_containers import private_state
 
 
 def test_mountinfo_detection_prefers_longest_backing_mount():
+    # This helper parses Linux `/proc/self/mountinfo` output and is only ever
+    # called from `filesystem_type()` on a POSIX host (it returns "windows"
+    # immediately on `os.name == "nt"`, never reaching this parser). It also
+    # resolves the input `Path` using the CALLING platform's native
+    # semantics (`Path.resolve()`), so exercising it with `Path()` (a
+    # `WindowsPath` on Windows) against these POSIX-style fixture strings
+    # is platform-incoherent, not a real product gap -- skip on Windows to
+    # match the production gate.
+    if os.name == "nt":
+        pytest.skip("mountinfo parsing is POSIX-only; production never calls it on nt")
     text = "\n".join(
         [
             "1 0 0:1 / / rw - ext4 /dev/root rw",
@@ -31,6 +41,13 @@ def test_mountinfo_detection_prefers_longest_backing_mount():
 
 
 def test_real_posix_mode_failure_is_fatal(monkeypatch, tmp_path):
+    # `strict_posix_modes()` short-circuits to False on `os.name == "nt"`
+    # BEFORE consulting `filesystem_type()`, so this scenario (a strict,
+    # POSIX-mode-honoring backing filesystem where a real chmod failure
+    # must be fatal) is structurally unreachable on Windows -- the
+    # production code always treats Windows as best-effort. Skip to match.
+    if os.name == "nt":
+        pytest.skip("strict POSIX mode enforcement never applies on nt")
     path = tmp_path / "state"
     path.mkdir()
     monkeypatch.setattr(private_state, "filesystem_type", lambda _path: "ext4")
