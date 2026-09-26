@@ -430,7 +430,7 @@ each checkbox below.
 - [ ] Retire `_engine_runtime.py` (and its 9 proxy-module shims) once every
       call site above has converted or been reclassified.
 
-### Phase 3e — Relocate terminal-profile handling out of agent-worktrees (Planned — #3390)
+### Phase 3e — Relocate terminal-profile handling out of agent-worktrees (Done — #3390)
 
 Operator direction (2026-09-23), while scoping Phase 3d's `profiles`
 disposition: terminal handling of *every* kind — not just Mux presentation
@@ -522,12 +522,33 @@ call site.
         before (idempotent, non-destructive). `--live` is proven safe on
         this machine; still off by default everywhere else until
         independently exercised.
-- [ ] **Step 6 — clean, decisive cutover** (Mux/AHP precedent): delete
+- [x] **Step 6 — clean, decisive cutover** (Mux/AHP precedent): delete
       agent-worktrees' `profiles`/`terminal-fragment` CLI verbs, the
       terminal-mirroring parts of `repair`, and (pending the bundled-Picker
       disposition question) `picker_support/data_local.py`'s/
       `profiles_io.py`'s Profiles-grid path — the actual deletion commit,
-      kept last and separate for revertability.
+      kept last and separate for revertability. **Landed** — PR
+      [#3626](https://github.com/ThomasMichon/copilot-extensions/pull/3626),
+      including follow-up fixes from Copilot's own PR review: repointed
+      `install.ps1`'s `Deploy-TerminalFragmentLocally` fallback (no more
+      shell-out to the retired `terminal-fragment` verb), repointed the
+      bundled Picker's local-Apply mirror path and remote SSH dispatch onto
+      Worktree Manager's own `terminal_fragment.deploy_fragment`/CLI
+      directly, and fixed a real pre-existing bug in
+      `terminal_fragment.deploy_fragment()` (it reported `plan.applied =
+      True` unconditionally whenever `apply=True`, even when nothing was
+      actually written) with a new regression test.
+- [x] **Step 7 — close out Phase 3d's `profiles` checkbox** once
+      worktree-manager's Picker call sites import the relocated module
+      directly. **Verified** — Step 1's direct-import cutover already
+      landed in PR #3398, and Step 6 removes the last agent-worktrees-side
+      compatibility verbs/modules that would have kept the old surface
+      alive.
+
+Phase 3e is complete: every scope item (`agent_worktrees.profiles`,
+`agent_worktrees.terminal_fragment`, their CLI surface, and the bundled
+legacy Picker's terminal-mirroring call site) now lives solely in
+worktree-manager.
 
 ### Phase 4 — Bare-invocation seam & handoff (Plugin side landed; end-state pending)
 - [x] Plugin binstub seam resolves a no-args launch to a **usable** Manager on
@@ -667,6 +688,36 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-09-25** — Landed Phase 3e Step 6's remaining review-round fixes and
+  closed out the phase. PR
+  [#3626](https://github.com/ThomasMichon/copilot-extensions/pull/3626)
+  squash-merged into `dev` (`3ffc65145`), retiring agent-worktrees'
+  `profiles`/`terminal-fragment` CLI verbs and the bundled-Picker
+  Profiles-grid path now that Worktree Manager fully owns Terminal Fragment
+  handling; Copilot's own PR review caught and this session fixed real
+  regressions in the same PR (see Step 6's own bullet above for the full
+  breakdown). Updated `visions/plugins/agent-worktrees/README.md` and
+  `visions/installer/README.md` to state the boundary explicitly:
+  agent-worktrees ceases to own Terminal Fragments but continues to own
+  per-project binstubs. Marked Phase 3e **Done** in this README and its own
+  plan doc — all 7 ordered steps landed, no open items remain in this
+  phase. (Phases 3b/3c/3d remain in flight; see their own sections above
+  for current status.)
+
+- **2026-09-25** — Fixed two unrelated bugs blocking `copilot-extensions`'
+  `dev`->`main` promotion pipeline (the `full - agent-worktrees` CI job in
+  `validate-and-promote.yml`), discovered while chasing this effort:
+  `install.sh`'s `err()` helper wrote its health-gate rejection message to
+  stdout instead of stderr (PR
+  [#3702](https://github.com/ThomasMichon/copilot-extensions/pull/3702)),
+  and `peer_launch_adapter.validate_context()` mis-parsed a Windows-style
+  install-receipt path's parent directory on POSIX hosts (PR
+  [#3704](https://github.com/ThomasMichon/copilot-extensions/pull/3704)).
+  Both squash-merged; confirmed promotion resumed (`origin/main` advanced
+  to `3968500af`, `release: promote dev ... to main (#3708)`), unblocking
+  every contributor's merged-but-stuck `dev` work, including this effort's
+  own Phase 3e Step 6.
 
 - **2026-09-25** — Merged Phase 3b Slice 2 Sub-slice 3 Step 1, PR
   [#3650](https://github.com/ThomasMichon/copilot-extensions/pull/3650)
