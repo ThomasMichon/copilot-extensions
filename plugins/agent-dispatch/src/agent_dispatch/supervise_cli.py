@@ -217,6 +217,11 @@ def _build_registration_spec(args: argparse.Namespace) -> dict:
     ]
     if disposable_cli:
         spec["disposable_cli_labels"] = disposable_cli
+    idle_nudge_exempt = [
+        label for label in (getattr(args, "idle_nudge_exempt_label", None) or []) if label
+    ]
+    if idle_nudge_exempt:
+        spec["idle_nudge_exempt_labels"] = idle_nudge_exempt
     if getattr(args, "headless_agent", None):
         spec["headless_agent"] = args.headless_agent
     if getattr(args, "charter", None):
@@ -627,6 +632,9 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
     disposable_cli_labels = [
         label for label in (getattr(args, "disposable_cli_label", None) or []) if label
     ]
+    idle_nudge_exempt_labels = [
+        label for label in (getattr(args, "idle_nudge_exempt_label", None) or []) if label
+    ]
     charter = getattr(args, "charter", None)
     if charter and (backend in ("cli", "script") or cli_labels or script_labels):
         print(
@@ -748,6 +756,14 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 2
+        exempt = set(idle_nudge_exempt_labels)
+        if exempt - watched:
+            print(
+                "agent-dispatch supervise: every --idle-nudge-exempt-label "
+                "must also be watched by --label.",
+                file=sys.stderr,
+            )
+            return 2
         if backend == "cli":
             default_spawn = embody_spawn
             overrides = {label: headless_spawn for label in headless_labels}
@@ -849,6 +865,7 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
             reactive_interval=getattr(args, "reactive_interval", 2.0) or 2.0,
             supervisor_id=getattr(args, "supervisor_id", None),
             disposable_cli_labels=disposable_cli_labels,
+            idle_nudge_exempt_labels=idle_nudge_exempt_labels,
             capacity_gate=capacity_gate,
             evaluator=evaluator,
             redrive_fn=redrive_fn,

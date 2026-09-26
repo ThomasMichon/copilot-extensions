@@ -1,0 +1,9 @@
+{
+  "comment": "Exempt evaluator/emitter-owned task types from the generic idle-confirm nudge (new --idle-nudge-exempt-label / body.idle_nudge_exempt_labels), and stop the nudge from suggesting a steering card or a premature complete -- the nudge message is now composed from the task's own goal/prompt/done_criteria instead of a fixed sentence.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

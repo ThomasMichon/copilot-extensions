@@ -82,6 +82,8 @@ def declaration_to_spec(decl: ProfileDeclaration) -> dict:
         spec["cli_labels"] = list(decl.body.cli_labels)
     if decl.body.disposable_cli_labels:
         spec["disposable_cli_labels"] = list(decl.body.disposable_cli_labels)
+    if decl.body.idle_nudge_exempt_labels:
+        spec["idle_nudge_exempt_labels"] = list(decl.body.idle_nudge_exempt_labels)
     if decl.body.no_pair:
         spec["no_pair"] = True
     if decl.body.type == "headless" or decl.body.headless_labels or decl.fleet.headless:
