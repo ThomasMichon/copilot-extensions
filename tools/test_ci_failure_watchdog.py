@@ -207,16 +207,15 @@ def test_existing_issue_returns_the_match(watchdog, monkeypatch):
 
 
 def test_fetch_job_log_passes_allow_escape_sequences(watchdog, monkeypatch):
-    # Regression: `gh api` (hosted-runner version 2.101.0+, confirmed absent
-    # on some older dev-machine `gh` installs) refuses to print a raw
-    # non-JSON body containing ANSI escape sequences unless this flag is
-    # passed -- a terminal-safety guard, not an API restriction. Real job
-    # logs are almost always colored pytest output, so omitting this flag
-    # silently broke every real failure report in production (confirmed
-    # live against run 36230190121: both `_fetch_job_log` calls raised
-    # `LookupFailed`, and NO issue was filed for a real double-test-failure
-    # run). This script only regex-matches the captured text -- it is never
-    # rendered to a terminal -- so allowing escape sequences through is safe.
+    # Regression: `gh api` (since ~2.94) refuses to print a raw non-JSON
+    # body containing ANSI escape sequences unless this flag is passed -- a
+    # terminal-safety guard, not an API restriction. Real job logs are
+    # almost always colored pytest output, so omitting this flag silently
+    # broke every real failure report in production (confirmed live against
+    # run 36230190121: both `_fetch_job_log` calls raised `LookupFailed`,
+    # and NO issue was filed for a real double-test-failure run). This
+    # script only regex-matches the captured text -- it is never rendered
+    # to a terminal -- so allowing escape sequences through is safe.
     captured_args = []
 
     class _Run:
@@ -234,13 +233,63 @@ def test_fetch_job_log_passes_allow_escape_sequences(watchdog, monkeypatch):
 
     assert result == "some log text"
     assert "--allow-escape-sequences" in captured_args[0]
+    assert len(captured_args) == 1  # no fallback retry needed on success
+
+
+def test_fetch_job_log_falls_back_for_a_gh_version_without_the_flag(watchdog, monkeypatch):
+    # This repo's own clean-room helper still provisions gh 2.62.0 by
+    # default (tools/clean-room/lib/clean-room-lib.sh), predating
+    # --allow-escape-sequences entirely -- a real review finding. Such a
+    # `gh` rejects the flag with "unknown flag", but has no escape-sequence
+    # guard to begin with, so a plain retry without it must succeed.
+    calls = []
+
+    class _UnknownFlagRun:
+        returncode = 1
+        stdout = ""
+        stderr = "unknown flag: --allow-escape-sequences"
+
+    class _PlainRun:
+        returncode = 0
+        stdout = "some log text"
+        stderr = ""
+
+    def _fake_run(args):
+        calls.append(args)
+        return _UnknownFlagRun() if "--allow-escape-sequences" in args else _PlainRun()
+
+    monkeypatch.setattr(watchdog, "_run_gh", _fake_run)
+
+    result = watchdog._fetch_job_log("owner/repo", 123)
+
+    assert result == "some log text"
+    assert len(calls) == 2
+    assert "--allow-escape-sequences" not in calls[1]
+
+
+def test_fetch_job_log_strips_ansi_escape_sequences(watchdog, monkeypatch):
+    # A colored `FAILED ...` line must still match `_FAILED_TEST_RE` --
+    # a real review finding: allowing escape sequences through without
+    # stripping them would silently break per-test parsing/excerpting for
+    # exactly the colored output this fix exists to handle.
+    class _Run:
+        returncode = 0
+        stdout = "\x1b[31mFAILED tests/x.py::test_y\x1b[0m - AssertionError"
+        stderr = ""
+
+    monkeypatch.setattr(watchdog, "_run_gh", lambda *_a, **_k: _Run())
+
+    result = watchdog._fetch_job_log("owner/repo", 123)
+
+    assert result == "FAILED tests/x.py::test_y - AssertionError"
+    assert watchdog.extract_failed_test_ids(result) == ["tests/x.py::test_y"]
 
 
 def test_fetch_job_log_still_raises_lookup_failed_on_a_nonzero_exit(watchdog, monkeypatch):
     class _FailedRun:
         returncode = 1
         stdout = ""
-        stderr = "the response contains terminal escape sequences"
+        stderr = "some genuine, non-flag-related gh failure"
 
     monkeypatch.setattr(watchdog, "_run_gh", lambda *_a, **_k: _FailedRun())
 
