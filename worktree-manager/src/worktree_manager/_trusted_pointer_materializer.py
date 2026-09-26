@@ -20,9 +20,15 @@ itself; it only ever READS fetched content as DATA (canonical file
 bytes), never EXECUTES anything from the fetch.
 
 Keep this in sync BY HAND with ``tools/materialize_main.py`` when that
-module's pointer-expansion logic changes -- there is no automated check
-enforcing agreement (unlike the DRY vendor-pointer mechanism itself,
-this file's whole point is to NOT be kept in sync via dynamic loading).
+module's pointer-expansion logic changes -- this file's whole point is to
+NOT be kept in sync via dynamic loading, so no import-time or runtime
+mechanism enforces agreement. What DOES catch a drift:
+``worktree-manager/tests/test_trusted_materializer_parity.py`` runs the
+same battery of scenarios through both implementations' shared
+``materialize_libs_dir()``/``find_pointers_in_libs_dir()`` API (in a full
+monorepo checkout) and fails if either one behaves differently for the
+same input -- a test-time parity guard, not a build/import-time one, so
+still run it after any hand-applied sync.
 """
 from __future__ import annotations
 

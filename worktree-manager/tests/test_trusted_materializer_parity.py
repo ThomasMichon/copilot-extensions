@@ -179,3 +179,21 @@ def test_parity_refuses_a_stray_symlink_anywhere_in_the_pointer_copy(tmp_path: P
     got_trusted, got_canonical = _run_scenario(tmp_path, canonical, name="stray-symlink", build=build)
     assert got_trusted == got_canonical
     assert got_trusted == "skip: is a symlink"
+
+
+def test_parity_refreshes_a_stale_canonical_tests_directory(tmp_path: Path, canonical):
+    def build(root: Path, libs_dir: Path) -> None:
+        canon = _canonical_lib(root, "zdd", version="0.1.0-dev5", content="real = True\n")
+        (canon / "tests").mkdir(parents=True)
+        (canon / "tests" / "test_thing.py").write_text(
+            "def test_it():\n    pass\n", encoding="utf-8"
+        )
+        pointer_dir = _pointer(libs_dir, "zdd")
+        (pointer_dir / "tests").mkdir(parents=True)
+        (pointer_dir / "tests" / "test_thing.py").write_text(
+            "def test_it():\n    assert False  # stale\n", encoding="utf-8"
+        )
+
+    got_trusted, got_canonical = _run_scenario(tmp_path, canonical, name="stale-tests", build=build)
+    assert got_trusted == got_canonical == "ok"
+

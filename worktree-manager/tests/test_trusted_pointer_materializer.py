@@ -92,6 +92,35 @@ def test_materialize_libs_dir_refuses_a_canonical_lib_with_no_src(tmp_path: Path
     assert (pointer_dir / mat.POINTER_NAME).exists()
 
 
+def test_materialize_libs_dir_refreshes_a_stale_canonical_tests_directory(tmp_path: Path):
+    # A pointer copy that already carries tests/ (vendored at --pointerize
+    # time) must have it refreshed from canonical too, the same way its
+    # src/ is refreshed -- this is the trusted self-update path's own copy
+    # of tools/materialize_main.py's promotion-time tests/ refresh, and
+    # needs its own direct assertion here (not just parity coverage) so a
+    # regression in this module alone still fails a test even if the
+    # parity suite were ever skipped (e.g. outside a full monorepo
+    # checkout).
+    root = tmp_path / "repo"
+    canon = _canonical_lib(root, "zdd", version="0.1.0-dev5", content="real = True\n")
+    (canon / "tests").mkdir(parents=True)
+    (canon / "tests" / "test_thing.py").write_text(
+        "def test_it():\n    pass\n", encoding="utf-8"
+    )
+    libs_dir = tmp_path / "slot" / "libs"
+    pointer_dir = _pointer(libs_dir, "zdd")
+    (pointer_dir / "tests").mkdir(parents=True)
+    (pointer_dir / "tests" / "test_thing.py").write_text(
+        "def test_it():\n    assert False  # stale\n", encoding="utf-8"
+    )
+
+    log = mat.materialize_libs_dir(libs_dir, canonical_root=root)
+
+    assert any(line.startswith("OK") for line in log)
+    refreshed = pointer_dir / "tests" / "test_thing.py"
+    assert refreshed.read_text() == "def test_it():\n    pass\n"
+
+
 def test_find_pointers_in_libs_dir_empty_when_no_libs_dir(tmp_path: Path):
     assert mat.find_pointers_in_libs_dir(tmp_path / "nope") == []
 
