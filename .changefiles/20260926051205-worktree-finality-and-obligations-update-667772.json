@@ -1,0 +1,9 @@
+{
+  "comment": "worktree-finality-and-obligations: update two stale doc-pointer comments after archiving the effort to efforts/2026/08/28",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** reviewed plan PR, followed by serial implementation PRs
 - **Created:** 2026-08-28
-- **Status:** Active
+- **Status:** Done
 - **Vision:** `visions/agent-fabric` - `legible-live-state`,
   `resource-claims`, `resource-accountability`,
   `disposition-is-asserted-pulse-is-derived`, and
@@ -680,8 +680,15 @@ below for the carved implementation plan.
     `LegendScreen`/filter-parity tests actually driving the `?`/`/` keys
     through a real Textual pilot) passed pre-merge, which is the strongest
     confirmation available without a version bump this effort doesn't own.
-- [ ] Mark the effort Done only when every Plan and Validation Plan item is
-  complete or transferred to a named tracked objective.
+- [x] Mark the effort Done only when every Plan and Validation Plan item is
+  complete or transferred to a named tracked objective. Confirmed
+  (2026-09-26): every Plan item across Phases 1-9 is checked or explicitly
+  transferred (Phase 5's last bullet -> #3791; the bug-sweep's #2640 closed
+  as a duplicate), and every Validation Plan item is now checked off with a
+  direct citation or fixed (PR #3828: the one real remaining gap, "Blocker
+  precedence," plus test-only closures for Parity/Evidence-parity/
+  Claim-free, plus discovering Reopen history was already built). Flipping
+  this effort's own Status header to Done and closing #1312 below.
 
 ### Phase 7 - Reconcile deferred backlog
 

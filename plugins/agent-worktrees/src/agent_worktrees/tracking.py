@@ -525,7 +525,7 @@ def stamp_frozen_attribution(
 # is a qualified ``<machine>/<project>/<worktree_id>#<session_id>`` claim ref,
 # reusing the existing session-suffix grammar rather than a second
 # ``sessions:`` list) -- see Phase 8 of
-# ``efforts/active/worktree-finality-and-obligations/README.md``; the rest are
+# ``efforts/2026/08/28 worktree-finality-and-obligations/README.md``; the rest are
 # placeholders the ledger view already understands so later phases can
 # journal them without a schema change.
 ResourceKind = Literal[
