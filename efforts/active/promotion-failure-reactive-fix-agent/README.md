@@ -548,3 +548,17 @@ _Pending._
   `efforts/README.md`'s canonical Active index (still said Draft) —
   fixed; (3) the test count cited here (21) was already stale by the time
   it was written (26 by then) — corrected.
+- **Sixth review pass caught two more real bugs, both fixed:** (1) the
+  node-id/reason split used `rsplit(" - ", 1)`, which cuts at the LAST
+  `` - `` — a failure reason that itself contains `` - `` (e.g.
+  `AssertionError: left - right`) would wrongly swallow part of the
+  reason into the node id; replaced with a single regex that captures the
+  actual node-id shape directly (`path::name` plus an optional
+  `[params]` suffix) instead of capturing the whole line and splitting
+  after the fact — structurally safe against this, not just
+  better-tuned; (2) a job that exceeds its own `timeout-minutes` gets
+  conclusion `timed_out`, not `failure` (the exact class of failure this
+  effort was kicked off by) — the job-filter only checked for `failure`,
+  so a timed-out validation job would make the run red but the watchdog
+  would report "nothing to report." Now checks a `REPORTABLE_CONCLUSIONS`
+  set (`failure`, `timed_out`). 28 tests now, all passing.

@@ -80,6 +80,13 @@ def test_extract_failed_test_ids_with_no_reason_suffix(watchdog):
     assert watchdog.extract_failed_test_ids(log) == ["tests/test_x.py::test_case[a b]"]
 
 
+def test_extract_failed_test_ids_reason_containing_a_hyphen_separator(watchdog):
+    # A naive rsplit(" - ", 1) would cut at the LAST " - ", mistaking part
+    # of the reason itself for the node id when the reason contains " - ".
+    log = "FAILED tests/test_x.py::test_case - AssertionError: left - right\n"
+    assert watchdog.extract_failed_test_ids(log) == ["tests/test_x.py::test_case"]
+
+
 def test_build_signatures_one_per_failing_test(watchdog):
     sigs = watchdog.build_signatures("full - agent-worktrees", SAMPLE_PYTEST_LOG)
     assert len(sigs) == 1
@@ -351,3 +358,34 @@ def test_main_returns_zero_when_nothing_failed(watchdog, monkeypatch, capsys):
 
     assert rc == 0
     assert "nothing to report" in capsys.readouterr().out
+
+
+def test_main_reports_a_timed_out_job_not_just_failure(watchdog, monkeypatch, capsys):
+    # A job that exceeds its own timeout-minutes gets conclusion timed_out,
+    # not failure -- it still turns the run red and must be reportable.
+    jobs_response = {
+        "jobs": [
+            {"id": 1, "name": "gate (confirm this is a dev commit)", "conclusion": "success"},
+            {"id": 2, "name": "full - agent-worktrees", "conclusion": "timed_out"},
+        ]
+    }
+
+    class _JobsRun:
+        returncode = 0
+        stdout = json.dumps(jobs_response)
+        stderr = ""
+
+    def _fake_gh(args):
+        if args[:2] == ["api", "repos/owner/repo/actions/runs/1/jobs?per_page=100"]:
+            return _JobsRun()
+        raise AssertionError(f"unexpected gh call: {args}")
+
+    monkeypatch.setattr(watchdog, "_run_gh", _fake_gh)
+    monkeypatch.setattr(watchdog, "_fetch_job_log", lambda repo, job_id: SAMPLE_NON_PYTEST_LOG)
+
+    rc = watchdog.main(["--repo", "owner/repo", "--run-id", "1", "--sha", "deadbeef"])
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "nothing to report" not in out
+    assert "dry run" in out

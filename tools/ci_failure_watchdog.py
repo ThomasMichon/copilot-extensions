@@ -57,7 +57,23 @@ SKIP_JOB_NAMES = frozenset(
     }
 )
 
-_FAILED_TEST_RE = re.compile(r"^FAILED (.+)$", re.MULTILINE)
+# Job conclusions that mean "the run went red because of this job" --
+# `timed_out` (a job that exceeded its own `timeout-minutes`) turns the run
+# red exactly like `failure` and must be reportable too.
+REPORTABLE_CONCLUSIONS = frozenset({"failure", "timed_out"})
+
+_FAILED_TEST_RE = re.compile(
+    # A pytest node id is `<path with no spaces>::<name with no spaces or
+    # brackets>` optionally followed by a `[...]` parametrize suffix, whose
+    # *contents* may contain spaces (but not `]`). Capturing this shape
+    # directly -- rather than capturing the whole rest of the line and
+    # splitting on `` - `` afterwards -- is what makes this safe against a
+    # failure *reason* that itself contains `` - `` (e.g. "AssertionError:
+    # left - right"), which would otherwise be mistaken for the node-id/
+    # reason separator. The optional `` - <reason>`` tail is discarded.
+    r"^FAILED (\S+::[^\[\s]+(?:\[[^\]]*\])?)(?: - .*)?$",
+    re.MULTILINE,
+)
 _TIMESTAMP_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z ?", re.MULTILINE)
 
 
@@ -89,33 +105,22 @@ class FailureSignature:
         return f"CI failure: {self.job_name}"
 
 
-def _strip_summary_reason(raw: str) -> str:
-    """pytest's short-summary format is ``FAILED <nodeid>`` or ``FAILED
-    <nodeid> - <reason>``. A parametrized node id can itself contain spaces
-    (e.g. ``test_case[a b]``), so the separator can't be "the first
-    whitespace" -- split on the LAST `` - `` instead, which is where pytest
-    actually separates the node id from the reason."""
-    if " - " in raw:
-        return raw.rsplit(" - ", 1)[0]
-    return raw
-
-
 def extract_failed_test_ids(log_text: str) -> list[str]:
     """Return de-duplicated pytest ``FAILED <path>::<test>`` node ids found
     in ``log_text``, in first-seen order.
 
     Matches against the timestamp-stripped text (see `_strip_timestamps`) --
     a real Actions log timestamps every line, so an un-stripped ``^FAILED``
-    anchor never matches at all. Only keeps candidates with a real node-id
-    shape (containing ``::``) -- `tools/run-plugin-tests.py`'s own wrapper
-    summary line (``FAILED plugins: <name>``) also starts with ``FAILED``
-    but is not a node id; letting it through would produce a misleading
-    extra signature/issue instead of falling through to the whole-job
-    signature.
+    anchor never matches at all. `_FAILED_TEST_RE`'s node-id shape (a real
+    `::` boundary, no unescaped `` - `` inside it) already excludes
+    `tools/run-plugin-tests.py`'s own non-test wrapper summary line
+    (``FAILED plugins: <name>``), which would otherwise produce a
+    misleading extra signature/issue instead of falling through to the
+    whole-job signature.
     """
     seen: dict[str, None] = {}
     for match in _FAILED_TEST_RE.finditer(_strip_timestamps(log_text)):
-        candidate = _strip_summary_reason(match.group(1))
+        candidate = match.group(1)
         if "::" not in candidate:
             continue
         seen.setdefault(candidate, None)
@@ -351,9 +356,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[WARN] could not fetch run jobs, aborting: {error}", file=sys.stderr)
         return 0
 
+    # A job that exceeds its own `timeout-minutes` gets conclusion
+    # `timed_out`, not `failure` -- it still turns the run red (and is
+    # exactly what happened with the reenter_runtime flake this effort was
+    # kicked off by), so it must be reportable too, not silently dropped.
     failed_jobs = [
         job for job in jobs
-        if job.get("conclusion") == "failure" and job.get("name") not in SKIP_JOB_NAMES
+        if job.get("conclusion") in REPORTABLE_CONCLUSIONS and job.get("name") not in SKIP_JOB_NAMES
     ]
     if not failed_jobs:
         print("[OK] no failed (non-control) jobs found in this run -- nothing to report.")
