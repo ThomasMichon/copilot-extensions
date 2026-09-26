@@ -357,11 +357,11 @@ class TestReservationVenueRoutes:
             json={"worktree_id": "anchor-example@cs-1", "venue": _VENUE},
         )
         assert resp.status_code == 200, resp.text
-        assert resp.json()["venue"] == _VENUE
+        assert resp.json()["venue"] == {**_VENUE, "supervisor_ref": None}
         got = client.get(
             "/api/v1/live-sessions/cli-mode-reservations/anchor-example@cs-1"
         )
-        assert got.json()["venue"] == _VENUE
+        assert got.json()["venue"] == {**_VENUE, "supervisor_ref": None}
 
     def test_release_route_compare_and_delete(self, tmp_db: Database) -> None:
         client = self._client(tmp_db)
@@ -391,7 +391,7 @@ class TestReservationVenueRoutes:
         _register(tmp_db, "cli-1", "anchor-example@cs-1", time.time())
         view = client.get("/api/v1/live-sessions/cli-1").json()
         assert view["cli_mode"] is True
-        assert view["venue"] == _VENUE
+        assert view["venue"] == {**_VENUE, "supervisor_ref": None}
 
 
 def test_live_sessions_deregister_verb_deletes_the_exact_session(monkeypatch, capsys):

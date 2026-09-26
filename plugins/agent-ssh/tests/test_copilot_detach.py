@@ -30,6 +30,7 @@ def _args(**kw):
 @pytest.fixture
 def seams(monkeypatch):
     # Hermetic: never read the developer's own ~/.copilot/settings.json model.
+    monkeypatch.setattr(detach, "with_supervisor", lambda venue, ref=None: dict(venue))
     monkeypatch.setattr(detach, "model_copilot_args", lambda existing: [])
     calls = types.SimpleNamespace(
         remote=[],
