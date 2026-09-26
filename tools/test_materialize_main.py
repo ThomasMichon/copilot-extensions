@@ -99,6 +99,56 @@ def test_materialize_skips_missing_canonical(tmp_path: Path):
     assert (root / "plugins/agent-bridge/libs/ghost-lib/VENDOR_POINTER.json").exists()
 
 
+def test_materialize_refuses_a_symlinked_pointer_directory_pointing_inside_root(tmp_path: Path):
+    # A pointer directory symlinked to ANOTHER directory still inside
+    # checkout_root passes _escapes_root's resolved-path check (its target
+    # is legitimately within root) -- but expanding it would silently
+    # overwrite that OTHER directory's own content and unlink ITS pointer
+    # marker. The pointer directory itself being a symlink must be
+    # rejected outright.
+    root = tmp_path / "repo"
+    _canonical_lib(root, "zdd", version="0.1.0-dev1", content="shared\n")
+    victim = _pointer(root, "victim-plugin", "zdd")
+    (victim / "innocent.txt").write_text("do not touch\n", encoding="utf-8")
+
+    attacker_dir = root / "plugins" / "agent-bridge" / "libs"
+    attacker_dir.mkdir(parents=True)
+    (attacker_dir / "zdd").symlink_to(victim, target_is_directory=True)
+
+    log = mm.materialize(root, canonical_root=root)
+    assert any("SKIP" in line and "symlink" in line for line in log)
+    # The victim's own content must be untouched (its own genuine pointer
+    # legitimately expands independently -- that's expected and fine).
+    assert (victim / "innocent.txt").read_text() == "do not touch\n"
+    # The attacker's symlink itself must remain untouched -- never expanded
+    # into a real copy that would duplicate/corrupt the victim's content.
+    assert (attacker_dir / "zdd").is_symlink()
+
+
+def test_materialize_skips_a_canonical_lib_with_no_src_directory_at_all(tmp_path: Path):
+    # _find_symlink() returns None for a MISSING src/ too, not just "no
+    # symlink found inside it" -- an incomplete/malformed canonical lib
+    # must be refused here, before the copy's existing src/ gets deleted
+    # with nothing to replace it (which would publish a pointer-free
+    # copy with NO importable source at all).
+    root = tmp_path / "repo"
+    (root / "libs" / "zdd").mkdir(parents=True)  # no src/ subdirectory
+    (root / "libs" / "zdd" / "pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "0.1.0-dev1"\n', encoding="utf-8"
+    )
+    pointer_dir = _pointer(root, "agent-bridge", "zdd")
+    (pointer_dir / "src" / "zdd").mkdir(parents=True)
+    (pointer_dir / "src" / "zdd" / "__init__.py").write_text("stub\n", encoding="utf-8")
+
+    log = mm.materialize(root, canonical_root=root)
+    assert any("SKIP" in line and "src not found" in line for line in log)
+    # The copy's existing (real) src/ must be untouched, and the pointer
+    # marker must still be present -- nothing was actually expanded.
+    assert (pointer_dir / "src" / "zdd" / "__init__.py").read_text() == "stub\n"
+    assert (pointer_dir / mm.POINTER_NAME).exists()
+
+
+
 def test_materialize_handles_multiple_pointers_for_same_lib(tmp_path: Path):
     root = tmp_path / "repo"
     _canonical_lib(root, "zdd", version="0.1.0-dev9", content="shared\n")

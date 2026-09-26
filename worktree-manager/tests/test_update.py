@@ -306,6 +306,112 @@ def test_fetch_via_tarball_preserves_symlinks_instead_of_dereferencing_them(tmp_
     )
 
 
+def test_fetch_via_tarball_refuses_a_symlinked_libs_root(tmp_path, monkeypatch):
+    """Round-9 review finding: symlinks=True on copytree does NOT protect
+    the copytree's own SOURCE ROOT -- shutil.copytree always creates dst
+    as a real directory, so if libs_source itself were a symlink,
+    os.scandir would transparently follow it (there's nowhere for a
+    preserved-symlink object to even go at the copy root). A tarball
+    providing libs/ as a symlink must be refused before copytree ever
+    runs on it."""
+    import tarfile
+
+    outside = tmp_path / "outside-libs"
+    (outside / "shared-lib" / "src" / "shared_lib").mkdir(parents=True)
+    (outside / "shared-lib" / "src" / "shared_lib" / "__init__.py").write_text(
+        "smuggled = True\n"
+    )
+
+    archive_root = tmp_path / "archive-src"
+    top = archive_root / "copilot-extensions-main"
+    (top / "worktree-manager" / "src" / "worktree_manager").mkdir(parents=True)
+    (top / "worktree-manager" / "src" / "worktree_manager" / "__init__.py").write_text(
+        '__version__ = "9.9.9"\n'
+    )
+    (top / "worktree-manager" / "pyproject.toml").write_text(
+        "[project]\nname='x'\nversion='9.9.9'\n"
+    )
+    top.mkdir(parents=True, exist_ok=True)
+    (top / "libs").symlink_to(outside, target_is_directory=True)
+
+    archive_path = tmp_path / "payload.tar.gz"
+    with tarfile.open(archive_path, "w:gz") as tf:
+        tf.add(top, arcname="copilot-extensions-main")
+
+    class _FakeResponse:
+        def __init__(self, data: bytes) -> None:
+            self._data = data
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self) -> bytes:
+            return self._data
+
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda url, timeout=None: _FakeResponse(archive_path.read_bytes()),
+    )
+
+    staging = tmp_path / "staging"
+    with pytest.raises(OSError, match="symlink"):
+        self_install._fetch_via_tarball(staging, "https://codeload.example/fake.tar.gz")
+
+
+def test_fetch_via_tarball_refuses_a_symlinked_tools_materializer(tmp_path, monkeypatch):
+    """Round-9 review finding: tool_source was checked with is_file() and
+    passed to shutil.copy2, both of which follow symlinks -- a tarball
+    could provide a symlinked tools/materialize_main.py pointing outside
+    the extracted tree, copying arbitrary host-readable content into
+    staging that _load_materialize_main later dynamically loads and
+    executes."""
+    import tarfile
+
+    outside = tmp_path / "outside-materializer.py"
+    outside.write_text("import os; os.system('echo pwned')\n")
+
+    archive_root = tmp_path / "archive-src"
+    top = archive_root / "copilot-extensions-main"
+    (top / "worktree-manager" / "src" / "worktree_manager").mkdir(parents=True)
+    (top / "worktree-manager" / "src" / "worktree_manager" / "__init__.py").write_text(
+        '__version__ = "9.9.9"\n'
+    )
+    (top / "worktree-manager" / "pyproject.toml").write_text(
+        "[project]\nname='x'\nversion='9.9.9'\n"
+    )
+    (top / "tools").mkdir(parents=True)
+    (top / "tools" / "materialize_main.py").symlink_to(outside)
+
+    archive_path = tmp_path / "payload.tar.gz"
+    with tarfile.open(archive_path, "w:gz") as tf:
+        tf.add(top, arcname="copilot-extensions-main")
+
+    class _FakeResponse:
+        def __init__(self, data: bytes) -> None:
+            self._data = data
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self) -> bytes:
+            return self._data
+
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda url, timeout=None: _FakeResponse(archive_path.read_bytes()),
+    )
+
+    staging = tmp_path / "staging"
+    with pytest.raises(OSError, match="symlink"):
+        self_install._fetch_via_tarball(staging, "https://codeload.example/fake.tar.gz")
+
+
 @pytest.mark.parametrize("repo,ref,expected", [
     ("https://github.com/ThomasMichon/copilot-extensions.git", "main",
      "https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main"

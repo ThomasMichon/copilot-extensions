@@ -281,6 +281,28 @@ def test_self_install_raises_when_pointer_present_without_monorepo_ancestor(tmp_
     assert not version_slot("6.6.6", root).exists()
 
 
+def test_self_install_refuses_a_symlink_anywhere_in_the_payload(tmp_path, monkeypatch):
+    """Round-9 review finding: symlinks=True on the copytree PRESERVES a
+    symlink instead of dereferencing it, but preservation alone doesn't
+    make it safe to publish -- a symlink anywhere in the payload (not
+    just within a vendor-pointer's canonical src/tests) would survive into
+    the slot and could resolve outside it at runtime. self_install must
+    reject the whole payload rather than let it through, and must not
+    leave the partially-copied slot behind."""
+    pd = _fake_payload(tmp_path, "7.7.7")
+    outside = tmp_path / "outside-secret.txt"
+    outside.write_text("should never be reachable from the slot\n")
+    (pd / "sneaky-link").symlink_to(outside)
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+
+    res = self_install(pd, root=root, dry_run=False)
+    assert res.action == "error"
+    assert "symlink" in (res.reason or "")
+    assert current_version(root) is None
+    assert not version_slot("7.7.7", root).exists()
+
+
 def test_bin_directory_is_deployed_into_the_slot(tmp_path, monkeypatch):
     """Phase 3b Slice 2 (Mux relocation): the versioned self-install copies the
     WHOLE payload directory (``_copy_payload`` -> ``shutil.copytree``), so a
@@ -386,3 +408,25 @@ def test_self_install_command_dry_run(capsys):
 def test_doctor_shows_self_section(capsys):
     main(["doctor"])
     assert "worktree-manager (self)" in capsys.readouterr().out
+
+
+def test_self_install_normalizes_a_malformed_pointer_failure_to_runtimeerror(tmp_path, monkeypatch):
+    """Round-9 review finding: a malformed pointer file (bad JSON) can make
+    materialize_libs_dir() raise JSONDecodeError instead of returning a
+    SKIP line -- self_install() only translates RuntimeError, so this must
+    be normalized at the _materialize_payload_pointers boundary rather
+    than letting an unexpected exception type escape self_update's own
+    best-effort/non-fatal contract."""
+    pd = _fake_monorepo_with_pointer(tmp_path, "8.8.8")
+    # Corrupt the pointer file with invalid JSON.
+    (pd / "libs" / "shared-lib" / "VENDOR_POINTER.json").write_text(
+        "{not valid json", encoding="utf-8"
+    )
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+
+    res = self_install(pd, root=root, dry_run=False)
+    assert res.action == "error"
+    assert "pointer materialization" in (res.reason or "")
+    assert current_version(root) is None
+    assert not version_slot("8.8.8", root).exists()

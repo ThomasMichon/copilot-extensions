@@ -368,13 +368,46 @@ def _materialize_payload_pointers(payload_dir: Path, slot: Path) -> None:
             "fetch must provide the full monorepo shape, not just the "
             "worktree-manager/ subtree"
         )
-    log = materialize_main.materialize_libs_dir(libs_dir, canonical_root=monorepo_root)
+    try:
+        log = materialize_main.materialize_libs_dir(libs_dir, canonical_root=monorepo_root)
+    except Exception as e:  # noqa: BLE001 -- normalize ANY materialization
+        # failure (a malformed pointer's json.JSONDecodeError/KeyError, an
+        # OSError from a copy/remove failure, ...) into the one exception
+        # type self_install() knows to catch and translate to its
+        # documented action="error" result -- letting an unexpected
+        # exception type escape here would violate self_update's own
+        # best-effort/non-fatal contract just as readily as a raw
+        # RuntimeError would.
+        raise RuntimeError(
+            f"pointer materialization under {libs_dir} failed: {e}"
+        ) from e
     failures = [line for line in log if line.startswith("SKIP ")]
     if failures:
         raise RuntimeError(
             "refusing to install this payload: pointer materialization "
             "was rejected for " + "; ".join(failures)
         )
+
+
+def _find_any_symlink(tree: Path) -> Path | None:
+    """The first path under (and including) ``tree`` that is a symlink, or
+    ``None`` if none is found. Unlike the pointer-specific checks in
+    ``_materialize_payload_pointers`` (which only ever examine canonical's
+    ``src``/``tests`` and the pointer marker itself), this scans the WHOLE
+    copied payload: a symlink anywhere else in it (unrelated to any vendor
+    pointer) would still survive into the published slot untouched and
+    could resolve outside it at runtime -- ``symlinks=True`` on the
+    copytree calls preserves such a symlink faithfully rather than
+    dereferencing it, but preservation alone doesn't make it SAFE to
+    publish; this is the final blanket check before a slot goes live."""
+    if tree.is_symlink():
+        return tree
+    if not tree.is_dir():
+        return None
+    for entry in sorted(tree.rglob("*")):
+        if entry.is_symlink():
+            return entry
+    return None
 
 
 def _copy_payload(payload_dir: Path, slot: Path) -> None:
@@ -389,6 +422,14 @@ def _copy_payload(payload_dir: Path, slot: Path) -> None:
     # and defeating _materialize_payload_pointers' downstream symlink
     # rejection.
     shutil.copytree(payload_dir, slot, ignore=ignore, symlinks=True)
+    bad = _find_any_symlink(slot)
+    if bad is not None:
+        shutil.rmtree(slot, ignore_errors=True)
+        raise RuntimeError(
+            f"refusing to install this payload: {bad} is a symlink -- a "
+            "self-installed slot must contain only real files (a symlink "
+            "anywhere in it could resolve outside the slot at runtime)"
+        )
     _materialize_payload_pointers(payload_dir, slot)
 
 
@@ -676,6 +717,8 @@ def _fetch_via_tarball(staging: Path, url: str, *, timeout: int = 180) -> None:
                 break
         if payload is None:
             raise OSError(f"worktree-manager payload not found in tarball from {url}")
+        if payload.is_symlink():
+            raise OSError(f"worktree-manager payload at {payload} is a symlink -- refusing")
         _clear_dir(staging)
         # symlinks=True on every copytree below: shutil.copytree's default
         # (symlinks=False) DEREFERENCES a symlink anywhere in the source
@@ -687,8 +730,16 @@ def _fetch_via_tarball(staging: Path, url: str, *, timeout: int = 180) -> None:
         # symlinks as symlinks instead lets the existing canonical-symlink
         # validation (_find_symlink()) correctly detect and refuse them
         # downstream, the same as it already does for a real dev checkout.
+        # NOTE: symlinks=True does NOT protect the copytree's own SOURCE
+        # ROOT -- shutil.copytree always creates dst as a real directory,
+        # so if the root argument itself were a symlink, os.scandir would
+        # transparently follow it with nowhere for a preserved-symlink
+        # object to even go. Each root (payload, libs_source, tool_source)
+        # is explicitly is_symlink()-checked before its own copy call.
         shutil.copytree(payload, staging / "worktree-manager", symlinks=True)
         libs_source = payload.parent / "libs"
+        if libs_source.is_symlink():
+            raise OSError(f"{libs_source} is a symlink -- refusing")
         if libs_source.is_dir():
             shutil.copytree(libs_source, staging / "libs", symlinks=True)
         # _materialize_payload_pointers() also needs tools/materialize_main.py
@@ -698,6 +749,8 @@ def _fetch_via_tarball(staging: Path, url: str, *, timeout: int = 180) -> None:
         # that copied libs/ but not this file would still hit the
         # unresolved-pointer refusal.
         tool_source = payload.parent / "tools" / "materialize_main.py"
+        if tool_source.is_symlink():
+            raise OSError(f"{tool_source} is a symlink -- refusing")
         if tool_source.is_file():
             tool_dest = staging / "tools"
             tool_dest.mkdir(parents=True, exist_ok=True)

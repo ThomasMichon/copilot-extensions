@@ -120,6 +120,15 @@ def _materialize_one_pointer(pointer_path: Path, *, checkout_root: Path, canonic
     source_rel = pointer["source"]  # e.g. "libs/zdd"
     lib_copy_dir = pointer_path.parent
 
+    # A symlinked lib_copy_dir pointing at ANOTHER directory still inside
+    # checkout_root passes _escapes_root's resolved-path check (its target
+    # is legitimately within root) -- but the src_sub removal/copy below
+    # would then silently overwrite that OTHER directory's own content and
+    # unlink its own pointer marker. Reject the pointer directory itself
+    # being a symlink outright, before the escape check even runs.
+    if lib_copy_dir.is_symlink():
+        return f"SKIP {lib_copy_dir}: pointer directory itself is a symlink -- refusing"
+
     if _escapes_root(lib_copy_dir, checkout_root):
         return (
             f"SKIP {lib_copy_dir}: pointer directory escapes the "
@@ -135,6 +144,15 @@ def _materialize_one_pointer(pointer_path: Path, *, checkout_root: Path, canonic
 
     src_sub = canonical / "src"
     dst_sub = lib_copy_dir / "src"
+    # _find_symlink() returns None for a MISSING src_sub too, not just "no
+    # symlink found inside it" -- an incomplete/malformed canonical lib
+    # with no src/ at all must be refused here, before dst_sub gets
+    # deleted below with nothing to replace it: without this check, an
+    # incomplete canonical lib would publish a pointer-free copy with NO
+    # importable source at all, and the pointer marker would still get
+    # unlinked as if the expansion had succeeded.
+    if not src_sub.is_dir():
+        return f"SKIP {lib_copy_dir}: canonical {source_rel}/src not found"
     symlink_found = _find_symlink(src_sub)
     if symlink_found is not None:
         where = f"{source_rel}/src" if symlink_found == "." else f"{source_rel}/src/{symlink_found}"
