@@ -1,9 +1,0 @@
-{
-  "comment": "suspend() now attaches a default cooldown monitor; the coordinator auto-resumes it once due (Phase 3 of agent-dispatch-monitor-and-confirmed-state).",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "minor"
-    }
-  ]
-}
