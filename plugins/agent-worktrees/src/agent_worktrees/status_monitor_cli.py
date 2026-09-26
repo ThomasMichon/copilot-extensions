@@ -17,14 +17,22 @@ _TRACKING_WRITE_SHUTDOWN_GRACE_S = 10.0
 
 
 def _wait_for_tracking_write_idle(
-    has_inflight_write,
+    is_busy,
     *,
     grace_s: float = _TRACKING_WRITE_SHUTDOWN_GRACE_S,
     poll_interval_s: float = 0.1,
     now=None,
     sleep=None,
 ) -> None:
-    """Block until ``has_inflight_write()`` is false or ``grace_s`` elapses.
+    """Block until ``is_busy()`` is false or ``grace_s`` elapses.
+
+    ``is_busy`` should be a caller's combined busy predicate (e.g. this
+    module's own ``_tracking_write_busy``, not ``tracking_write.
+    has_inflight_write`` alone) -- a request already accepted (registered as
+    a ``CoalescingServer`` subscriber) but not yet inside its ``compute()``
+    call (where the in-flight counter increments) would otherwise slip past
+    a check that only looked at the in-flight counter (2026-09-26 PR review
+    finding).
 
     Extracted as its own function (rather than inlined in the shutdown
     ``finally`` block) so the wait/deadline logic itself is directly unit-
@@ -38,7 +46,7 @@ def _wait_for_tracking_write_idle(
     now = now or _time.time
     sleep = sleep or _time.sleep
     deadline = now() + grace_s
-    while has_inflight_write() and now() < deadline:
+    while is_busy() and now() < deadline:
         sleep(poll_interval_s)
 
 
@@ -396,11 +404,15 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             # is still executing (runtime_superseded/_other_current_monitor
             # can reach this `finally` regardless of the empty-strike path
             # above) could terminate the process mid-transaction, leaving a
-            # non-idempotent write incomplete. Give an in-flight write a
-            # bounded window to finish before closing anyway -- a shutdown
-            # must still terminate eventually, never wait forever on a
-            # wedged compute.
-            _wait_for_tracking_write_idle(tracking_write.has_inflight_write)
+            # non-idempotent write incomplete. Waits on the same combined
+            # `_tracking_write_busy()` predicate the empty-strike branch
+            # uses -- `has_inflight_write()` alone misses the window between
+            # a request being accepted (subscriber registered) and its
+            # `compute()` call actually starting (where that counter
+            # increments), so subscriber_count() must stay part of the
+            # check here too. Bounded: a shutdown must still terminate
+            # eventually, never wait forever on a wedged compute.
+            _wait_for_tracking_write_idle(_tracking_write_busy)
             tracking_write_server.close()
         worktree_status_runtime.shutdown()
         managed_mux_runtime.shutdown()

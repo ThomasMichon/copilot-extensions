@@ -2,9 +2,9 @@
 
 ``agent-worktrees-authoritative-daemon`` effort, Phase 2. Mirrors
 :mod:`classify_daemon`/:mod:`worktree_status_daemon`'s structure (the same
-vendored ``work_coalescing_singleton`` transport, a third ``KIND`` alongside
-``classify``/``worktree_status`` on the same resident daemon -- never a
-second daemon process), but for **mutations** rather than reads.
+vendored ``work_coalescing_singleton`` transport, a fourth ``KIND`` alongside
+``classify``/``worktree_status``/``mux_link`` on the same resident daemon --
+never a second daemon process), but for **mutations** rather than reads.
 
 **The single-implementation guarantee.** Every verb registered here (see
 :func:`register_verb`) is called from exactly two places: the daemon's own

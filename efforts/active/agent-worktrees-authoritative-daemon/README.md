@@ -125,7 +125,7 @@ starting point, not something to rebuild:
   documented boot-on-demand/subscribe/linger lifecycle.
 - `work_coalescing_singleton` (vendored, pure-stdlib, JSON-over-socket) —
   the transport this effort's new mutation-request `kind` would reuse,
-  alongside the existing `classify`/`worktree_status` kinds.
+  alongside the existing `classify`/`worktree_status`/`mux_link` kinds.
 - A durable, SQLite-backed cache layer (`worktree_status_cache.py`) proving
   the "in-memory hot path, SQLite for warm-restore only" pattern this effort
   needs for the tracking record itself, not just a derived-status
@@ -162,7 +162,7 @@ none of them mutate worktree state by writing tracking YAML directly.
 #### Proposed design (draft — for review, not yet implemented)
 
 **Wire `kind`:** a new `"tracking_write"` verb family alongside the
-accelerator's existing `classify`/`worktree_status` kinds on the same
+accelerator's existing `classify`/`worktree_status`/`mux_link` kinds on the same
 resident daemon (never a second daemon process — the vision's own *Not a
 second background service* Non-Goal still holds).
 
@@ -274,7 +274,7 @@ survey above.
         (rendezvous fields, `_monitor_sweep`). Phase 2 should land its new
         `tracking_write` wire kind additively, the same way that effort's
         own Step 1 (`mux_link.py`'s `ManagedMuxCache`) landed additively
-        alongside the existing `classify`/`worktree_status` kinds, and
+        alongside the existing `classify`/`worktree_status`/`mux_link` kinds, and
         should check that effort's latest Journal entry immediately before
         touching `cmd_status_monitor` to avoid a stale rebase.
       - **`agent-worktrees-external-status-accelerator`** and
@@ -411,6 +411,32 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-09-26 — PR #3779 review round 5: shutdown wait used the wrong predicate; a documentation-accuracy fix
+- **The shutdown wait checked the wrong signal.** Round 4's
+  `_wait_for_tracking_write_idle` call passed `tracking_write.
+  has_inflight_write` directly -- but a request already *accepted* (its
+  `CoalescingServer` subscriber registered) has not yet entered `compute()`
+  (where the in-flight counter increments), so a shutdown could still slip
+  through that narrow window and close the server while a request was about
+  to execute. Fixed: pass this module's own combined `_tracking_write_busy`
+  predicate (subscriber count OR in-flight counter) instead -- the same one
+  the empty-strike branch already used. Renamed the function's parameter
+  from `has_inflight_write` to the more accurate `is_busy` and clarified its
+  docstring.
+- **Documentation didn't match the daemon it describes.** `tracking_write.py`'s
+  own docstring said it adds the *third* wire `KIND`, but `mux_link.py`
+  already publishes its own `CoalescingServer` kind from the same resident
+  monitor -- `tracking_write` is the *fourth*. Fixed the module docstring
+  and three other stale `classify`/`worktree_status`-only mentions in this
+  effort's own Context/Plan sections to include `mux_link` throughout.
+- No new tests needed (the fix is a one-line predicate swap covered by the
+  existing `TestWaitForTrackingWriteIdle` tests, which pass an arbitrary
+  `is_busy` callable already -- they never assumed
+  `has_inflight_write` specifically). Full suite: 5576 passed, same 5
+  pre-existing failures. `ruff check`, `check-module-size`,
+  `check-install-contract`, `check-changefile-presence`, `check-effort-
+  vision-structure`: all clean.
 
 ### 2026-09-26 — PR #3779 review round 4: shutdown-safety gap, docstring overclaim, and a recurring stale count
 - **The busy check only protected one shutdown path.** Round 2's fix
