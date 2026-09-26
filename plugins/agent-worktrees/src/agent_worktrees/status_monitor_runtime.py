@@ -17,7 +17,7 @@ from pathlib import Path
 
 from agent_procutil import windowless_python
 
-from . import activity, locks, mux_link, sessions_pane_retire, tracking
+from . import activity, locks, sessions_pane_retire, tracking
 from . import config as cfg
 from . import status_updater_cli
 
@@ -756,6 +756,8 @@ def _monitor_managed_session_union(
     managed_mux_cache,
     registry: dict[str, str],
 ) -> tuple[dict[str, dict], set[str], list[tuple[str, str]]]:
+    from . import mux_link
+
     if managed_mux_cache is None:
         return {}, set(), []
     live_sessions = managed_mux_cache.live_session_names()
