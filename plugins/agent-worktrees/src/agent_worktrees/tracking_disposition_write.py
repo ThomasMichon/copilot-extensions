@@ -27,6 +27,14 @@ default ``cfg.tracking_dir()`` fallback -- the daemon process's own ambient
 active project need not match the project the dispatching CLI call actually
 targets, and an ambient-scoped write would silently corrupt a *different*
 project's disposition-history sidecar (2026-09-26 PR review finding).
+
+**The status_reported durable trace is scoped the same way.** The call site
+reads its own ``cfg.project_name()`` (mirroring ``session_id`` above) and
+passes it in as ``project``, forwarded to ``activity.log_event``'s explicit
+``project`` override -- ``handoff_trace.append_event`` otherwise falls back
+to the executing process's own ambient ``cfg.active_project()``, which is
+the same cross-project hazard as the sidecar above (2026-09-26 PR review
+finding, round 2).
 """
 
 from __future__ import annotations
@@ -40,10 +48,10 @@ def apply_status_disposition(args: dict) -> dict:
     """Registered as the ``status_disposition_write`` verb (see module
     docstring). ``args`` carries everything the transaction needs, computed
     by the call site (worktree id + record path already resolved, session id
-    already read from the caller's own environment). Returns a JSON-safe
-    result the call site uses to render its own message and error paths --
-    never raises for an expected guard rejection (terminal/effort-bound),
-    only for a genuinely unexpected failure.
+    and project already read from the caller's own environment/context).
+    Returns a JSON-safe result the call site uses to render its own message
+    and error paths -- never raises for an expected guard rejection
+    (terminal/effort-bound), only for a genuinely unexpected failure.
     """
     worktree_id = args["worktree_id"]
     # `args` crosses the wire as JSON when a daemon serves the request, so a
@@ -56,6 +64,7 @@ def apply_status_disposition(args: dict) -> dict:
     title = args.get("title")
     follow_up = args.get("follow_up")
     session_id = args.get("session_id")
+    project = args.get("project")
 
     with tracking._RecordLock(yaml_path):
         record = tracking.load_record(yaml_path)
@@ -85,7 +94,12 @@ def apply_status_disposition(args: dict) -> dict:
             e.get("session_id") == session_id
             for e in activity.read_events(worktree_id=worktree_id, event="status_reported")
         ):
-            activity.log_event("status_reported", worktree_id=worktree_id, session_id=session_id)
+            activity.log_event(
+                "status_reported",
+                worktree_id=worktree_id,
+                session_id=session_id,
+                project=project,
+            )
 
     return {
         "ok": True,

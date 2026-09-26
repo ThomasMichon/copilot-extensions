@@ -171,6 +171,30 @@ def test_history_sidecar_targets_the_record_own_directory_not_ambient_cwd(
     assert not ambient_history.exists()
 
 
+def test_status_reported_project_is_read_from_args_not_ambient(
+    record_path, monkeypatch, monkeypatch_config
+):
+    """2026-09-26 PR review finding, round 2: the status_reported durable
+    trace must land under the project the call site actually resolved
+    (``args["project"]``), never the executing process's own ambient
+    ``cfg.active_project()`` -- a resident daemon's ambient project need not
+    match the project a dispatched request actually targets."""
+    from agent_worktrees import handoff_trace
+
+    monkeypatch.setattr("agent_worktrees.config.active_project", lambda: "daemon-ambient")
+    tracking_disposition_write.apply_status_disposition(
+        {
+            "worktree_id": "wt-disp",
+            "yaml_path": str(record_path),
+            "summary": "scoped event",
+            "session_id": "sess-proj",
+            "project": "the-real-project",
+        }
+    )
+    assert handoff_trace.read_trace("the-real-project", "wt-disp")
+    assert handoff_trace.read_trace("daemon-ambient", "wt-disp") == []
+
+
 def test_dispatch_reaches_the_verb_through_a_live_daemon(record_path):
     """End-to-end: unlike the direct-fallback path already covered by
     ``test_status_write.py``, this proves ``tracking_write.dispatch`` reaches
