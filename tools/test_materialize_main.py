@@ -110,6 +110,89 @@ def test_find_pointers_returns_sorted_paths(tmp_path: Path):
     assert [p.parent.parent.parent.name for p in found] == ["alpha-plugin", "zeta-plugin"]
 
 
+def _worktree_manager_pointer(root: Path, lib: str) -> Path:
+    """Create a directory pointer under the extra top-level
+    ``worktree-manager/libs/<lib>`` tree (mirrors ``sync-vendored-libs.py``'s
+    own extra-tree handling, not the ``plugins/*/libs/*`` shape)."""
+    d = root / "worktree-manager" / "libs" / lib
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "VENDOR_POINTER.json").write_text(
+        json.dumps({"schema": "copilot-extensions.vendor-pointer", "version": 1,
+                    "source": f"libs/{lib}"}) + "\n",
+        encoding="utf-8",
+    )
+    (d / "pyproject.toml").write_text('[project]\nname = "x"\nversion = "0.0.0"\n',
+                                       encoding="utf-8")
+    return d
+
+
+def test_find_pointers_includes_worktree_manager(tmp_path: Path):
+    root = tmp_path / "repo"
+    _pointer(root, "agent-bridge", "libA")
+    _worktree_manager_pointer(root, "libB")
+
+    found = mm.find_pointers(root)
+    assert len(found) == 2
+    assert any(p.parent.parent.parent.name == "worktree-manager" for p in found)
+
+
+def test_materialize_expands_worktree_manager_pointer(tmp_path: Path):
+    root = tmp_path / "repo"
+    _canonical_lib(root, "zdd", version="0.2.0-dev1", content="shared\n")
+    _worktree_manager_pointer(root, "zdd")
+
+    log = mm.materialize(root, canonical_root=root)
+
+    assert any(line.startswith("OK") for line in log)
+    copy_src = root / "worktree-manager/libs/zdd/src/zdd/__init__.py"
+    assert copy_src.read_text() == "shared\n"
+
+
+def _pointer_with_source(root: Path, plugin: str, lib: str, *, source: str) -> Path:
+    """Like ``_pointer``, but with an arbitrary (possibly malicious) ``source``
+    value instead of the well-formed ``libs/<lib>`` default."""
+    d = root / "plugins" / plugin / "libs" / lib
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "VENDOR_POINTER.json").write_text(
+        json.dumps({"schema": "copilot-extensions.vendor-pointer", "version": 1,
+                    "source": source}) + "\n",
+        encoding="utf-8",
+    )
+    (d / "pyproject.toml").write_text('[project]\nname = "x"\nversion = "0.0.0"\n',
+                                       encoding="utf-8")
+    return d
+
+
+def test_materialize_refuses_absolute_source_path_for_directory_pointer(tmp_path: Path):
+    root = tmp_path / "repo"
+    secret = tmp_path / "outside-repo-secret"
+    (secret / "src" / "evil").mkdir(parents=True)
+    (secret / "src" / "evil" / "__init__.py").write_text("leak = True\n", encoding="utf-8")
+    pointer_dir = _pointer_with_source(root, "agent-bridge", "evil", source=str(secret))
+
+    log = mm.materialize(root, canonical_root=root)
+
+    assert any("SKIP" in line and "escapes the canonical root" in line for line in log)
+    assert (pointer_dir / "VENDOR_POINTER.json").exists()
+    assert not (pointer_dir / "src").exists()
+
+
+def test_materialize_refuses_traversal_source_path_for_directory_pointer(tmp_path: Path):
+    root = tmp_path / "repo"
+    secret = tmp_path / "outside-repo-secret"
+    (secret / "src" / "evil").mkdir(parents=True)
+    (secret / "src" / "evil" / "__init__.py").write_text("leak = True\n", encoding="utf-8")
+    pointer_dir = _pointer_with_source(
+        root, "agent-bridge", "evil", source="../outside-repo-secret"
+    )
+
+    log = mm.materialize(root, canonical_root=root)
+
+    assert any("SKIP" in line and "escapes the canonical root" in line for line in log)
+    assert (pointer_dir / "VENDOR_POINTER.json").exists()
+    assert not (pointer_dir / "src").exists()
+
+
 def _file_pointer(root: Path, plugin: str, rel: str, *, source: str) -> Path:
     """Create a vendored *file* pointer stub at ``plugins/<plugin>/<rel>``."""
     d = root / "plugins" / plugin

@@ -11,9 +11,13 @@ trial clone (see the effort's Journal).
 Two pointer kinds are expanded, generalized under the
 `vendored-doc-pointers` effort (see its README, Phase 1):
 
-* **Directory (lib) pointers** -- `plugins/<plugin>/libs/<lib>/VENDOR_POINTER.json`,
-  a JSON sidecar next to a lib copy that has no `src/` of its own. Expanded
-  from the canonical `libs/<lib>` directory; only `src/` and the declared
+* **Directory (lib) pointers** -- `plugins/<plugin>/libs/<lib>/VENDOR_POINTER.json`
+  (also `worktree-manager/libs/<lib>/VENDOR_POINTER.json`, the one extra
+  top-level tree `sync-vendored-libs.py`/`check-vendored-libs-sync.py` also
+  scan), a JSON sidecar next to a lib copy that has no `src/` of its own.
+  Expanded from the canonical `libs/<lib>` directory (refusing any `source`
+  that escapes the canonical root, the same containment guarantee the file
+  pointer kind below already has); only `src/` and the declared
   `pyproject.toml` version are ever touched, matching
   `check-vendored-libs-sync.py`'s own existing invariant.
 * **File pointers** -- any single vendored file (e.g. a mirrored Markdown
@@ -55,7 +59,13 @@ _FILE_POINTER_RE = re.compile(
 
 
 def find_pointers(root: Path) -> list[Path]:
-    return sorted(root.glob("plugins/*/libs/*/" + POINTER_NAME))
+    """Every directory/lib pointer under ``root``: ``plugins/*/libs/*`` and
+    the extra top-level ``worktree-manager/libs/*`` tree that
+    ``sync-vendored-libs.py``/``check-vendored-libs-sync.py`` also scan (see
+    those tools' own ``_lib_copies()``/extra-tree handling)."""
+    return sorted(
+        root.glob("plugins/*/libs/*/" + POINTER_NAME)
+    ) + sorted(root.glob("worktree-manager/libs/*/" + POINTER_NAME))
 
 
 def _file_pointer_source(path: Path) -> str | None:
@@ -94,9 +104,13 @@ def materialize(dest: Path, *, canonical_root: Path) -> list[str]:
     for pointer_path in find_pointers(dest):
         pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
         source_rel = pointer["source"]  # e.g. "libs/zdd"
-        canonical = canonical_root / source_rel
         lib_copy_dir = pointer_path.parent
+        canonical = _resolve_within(canonical_root, source_rel)
 
+        if canonical is None:
+            log.append(f"SKIP {lib_copy_dir}: source {source_rel!r} escapes "
+                        "the canonical root -- refusing")
+            continue
         if not canonical.is_dir():
             log.append(f"SKIP {lib_copy_dir}: canonical {source_rel} not found")
             continue
