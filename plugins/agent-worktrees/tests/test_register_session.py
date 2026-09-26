@@ -13,6 +13,8 @@ import io
 import json
 from pathlib import Path
 
+import pytest
+
 from agent_worktrees import __main__ as m
 from agent_worktrees import config as cfg
 from agent_worktrees import activity, git_ops, session_projection, sessions, tracking
@@ -69,6 +71,35 @@ def _repo_with_worktree(tmp_path: Path, name: str = "anchor") -> tuple[Path, Pat
         cwd=anchor,
     )
     return anchor, worktree
+
+
+def _write_managed_mux_mapping(
+    root: Path,
+    *,
+    project: str,
+    worktree_id: str,
+    worktree_path: str,
+    mux_session: str,
+    live: bool = True,
+    mapping_revision: int = 1,
+) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "mux-mapping.json").write_text(
+        json.dumps(
+            [
+                {
+                    "project": project,
+                    "worktree_id": worktree_id,
+                    "worktree_path": worktree_path,
+                    "mux_session": mux_session,
+                    "mux_bin": "psmux",
+                    "mapping_revision": mapping_revision,
+                    "live": live,
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
 
 
 class TestRegisterSessionStdin:
@@ -1179,6 +1210,48 @@ class TestRegisterSessionReseedsStatusUpdater:
         # Seeds the resolved worktree id against the payload cwd (the worktree).
         assert seen == [("wt-x", "/tmp/src/wt-x/sub")]
 
+    def test_manager_owned_session_registers_with_monitor_instead_of_spawning_updater(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch, tmp_path: Path
+    ):
+        _save_record(tmp_tracking_dir, "wt-managed", "/tmp/src/wt-managed")
+        manager_root = tmp_path / "manager-root"
+        _write_managed_mux_mapping(
+            manager_root,
+            project="test-project",
+            worktree_id="wt-managed",
+            worktree_path="/tmp/src/wt-managed",
+            mux_session="wt-managed",
+        )
+        monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(manager_root))
+        monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "1")
+        seen: list[tuple[str, str | None]] = []
+        ensured: list[bool] = []
+        monkeypatch.setattr(
+            m, "_spawn_status_updater",
+            lambda *_args, **_kwargs: pytest.fail("manager-owned sessions must not spawn status-updater"),
+        )
+        monkeypatch.setattr(
+            m,
+            "_register_session_for_monitor",
+            lambda sess, path: seen.append((sess, path)) or True,
+        )
+        monkeypatch.setattr(
+            m, "_ensure_status_monitor", lambda: ensured.append(True) or True
+        )
+        monkeypatch.setattr(
+            m,
+            "_activate_project_for_worktree_id",
+            lambda _wid: cfg.set_active_project("test-project") or "test-project",
+        )
+        payload = '{"sessionId":"sess-managed","cwd":"/tmp/src/wt-managed/sub"}'
+        monkeypatch.setattr(m.sys, "stdin", io.StringIO(payload))
+
+        rc = m.cmd_register_session(_args(stdin=True))
+
+        assert rc == 0
+        assert seen == [("wt-managed", "/tmp/src/wt-managed/sub")]
+        assert ensured
+
     def test_reseed_falls_back_to_record_path_when_cwd_absent(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
     ):
@@ -1217,6 +1290,29 @@ class TestRegisterSessionReseedsStatusUpdater:
 
         assert rc == 0
         assert seen == []
+
+    def test_monitor_disabled_unmanaged_session_still_spawns_status_updater(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        _save_record(tmp_tracking_dir, "wt-unmanaged", "/tmp/src/wt-unmanaged")
+        monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "0")
+        seen: list[tuple[str, str | None]] = []
+        monkeypatch.setattr(
+            m, "_spawn_status_updater",
+            lambda wt, path: seen.append((wt, path)) or True,
+        )
+        monkeypatch.setattr(
+            m,
+            "_register_session_for_monitor",
+            lambda *_args, **_kwargs: pytest.fail("monitor-disabled mode must not register via the monitor"),
+        )
+        payload = '{"sessionId":"sess-um","cwd":"/tmp/src/wt-unmanaged/sub"}'
+        monkeypatch.setattr(m.sys, "stdin", io.StringIO(payload))
+
+        rc = m.cmd_register_session(_args(stdin=True))
+
+        assert rc == 0
+        assert seen == [("wt-unmanaged", "/tmp/src/wt-unmanaged/sub")]
 
     def test_unbound_start_emits_projection_recovery_context(
         self,

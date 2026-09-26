@@ -1,9 +1,9 @@
 {
   "last_promotion": {
-    "dev_head": "ad9e7840db0b18c1be43f3671ad74105a22689fd",
-    "main_before": "78063133d80c5909a630632fcc01ad985836454c",
-    "promoted_at": "2026-09-26T16:00:24Z",
-    "tag": "promote-20260926160024"
+    "dev_head": "615e14e0645971c189490b63a3323d6e06c400ed",
+    "main_before": "ddae15bafaf1bf1e9fb42563714b7bf16d91d2c4",
+    "promoted_at": "2026-09-26T17:14:35Z",
+    "tag": "promote-20260926171435"
   },
   "last_rollback": null,
   "pause_reason": null,
