@@ -179,10 +179,13 @@ def has_inflight_write() -> bool:
 #: first calls :func:`_ensure_verb_modules_loaded`, which imports every
 #: module listed here -- so the daemon process and a CLI process both
 #: arrive at the identical registry independently, with no shared mutable
-#: state or wire message required between them. Empty until Phase 3
-#: migrates its first real verb; a verb-owning module is added here, not
-#: wired via ad-hoc `register_verb` calls from arbitrary call sites.
-_VERB_MODULES: tuple[str, ...] = ()
+#: state or wire message required between them. Phase 3's first migrated
+#: verb (`status_disposition_write`, see `tracking_disposition_write.py`) is
+#: the first real entry; a verb-owning module is added here, not wired via
+#: ad-hoc `register_verb` calls from arbitrary call sites.
+_VERB_MODULES: tuple[str, ...] = (
+    "agent_worktrees.tracking_disposition_write",
+)
 
 _verb_modules_loaded = False
 _verb_modules_lock = threading.Lock()

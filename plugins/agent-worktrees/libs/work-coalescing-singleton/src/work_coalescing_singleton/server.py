@@ -62,6 +62,36 @@ class _Server(socketserver.ThreadingTCPServer):
         # Repeated calls are harmless (`Event.set()` is idempotent).
         self.owner._serve_running.set()
 
+    def process_request(self, request, client_address) -> None:
+        # copilot-extensions#3798: counted the instant a connection is
+        # accepted, strictly BEFORE `ThreadingMixIn.process_request` spawns
+        # the per-request handler thread -- the narrow accept-to-dispatch
+        # gap a consumer's own subscriber-count-based busy predicate cannot
+        # see (a connection can be accepted, and this counter incremented,
+        # before that new thread's first line ever runs). Decremented in
+        # `process_request_thread` below, only once the handler has fully
+        # returned -- a strict superset of "inside `_Handler.handle()`".
+        self.owner._on_request_accepted()
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            # Copilot review finding: `ThreadingMixIn.process_request` only
+            # creates and starts the handler thread -- if that itself fails
+            # (e.g. `Thread.start()` raising under OS thread exhaustion),
+            # `process_request_thread` below never runs, so its own
+            # decrement would never fire, permanently inflating the count
+            # and blocking every future shutdown-drain wait. Decrement here
+            # before re-raising so a failed delegation is never counted as
+            # "still handling a request".
+            self.owner._on_request_finished()
+            raise
+
+    def process_request_thread(self, request, client_address) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self.owner._on_request_finished()
+
 
 class _Handler(socketserver.StreamRequestHandler):
     def handle(self) -> None:
@@ -152,6 +182,13 @@ class CoalescingServer:
         self._linger_timer: threading.Timer | None = None
         self._closed = False
         self._started = False
+        # copilot-extensions#3798: incremented at `accept()` time (see
+        # `_Server.process_request`), decremented only once the handler
+        # thread has fully returned (`_Server.process_request_thread`) --
+        # a strict superset of the subscriber-count-based busy window, so
+        # a consumer's own shutdown-drain predicate can see a connection
+        # that was accepted but has not yet reached `_Handler.handle()`.
+        self._active_handlers = 0
         # Serializes the whole start()/close() state transition (Copilot
         # review finding): without this, close() could run concurrently
         # between a successful `Thread.start()` and its own following flag
@@ -335,6 +372,23 @@ class CoalescingServer:
     def subscriber_count(self) -> int:
         with self._lock:
             return len(self._subscribers)
+
+    def _on_request_accepted(self) -> None:
+        with self._lock:
+            self._active_handlers += 1
+
+    def _on_request_finished(self) -> None:
+        with self._lock:
+            self._active_handlers -= 1
+
+    def active_handler_count(self) -> int:
+        """Connections accepted but not yet fully handled (copilot-
+        extensions#3798) -- a strict superset of the accept-to-dispatch gap
+        ``subscriber_count()``/an in-process compute counter alone cannot
+        see. A consumer's own shutdown-drain busy predicate should OR this
+        in alongside its existing checks."""
+        with self._lock:
+            return self._active_handlers
 
     def _cancel_linger_locked(self) -> None:
         if self._linger_timer is not None:

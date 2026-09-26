@@ -236,6 +236,7 @@ def log_event(
     handoff_token: str | None = None,
     predecessor_session_id: str | None = None,
     successor_session_id: str | None = None,
+    project: str | None = None,
     **fields: object,
 ) -> None:
     """Append a single high-level lifecycle event. Never raises.
@@ -253,6 +254,11 @@ def log_event(
             launcher entry and threaded through the flow so every record of one
             launch shares it (``agent-worktrees activity --launch-id``).
         source: Originating component ("python" or "launcher").
+        project: Explicit project name for the durable per-project trace store
+            (below) -- overrides the ambient ``cfg.active_project()`` default,
+            required for any caller (e.g. a resident daemon serving more than
+            one project) whose own ambient project may not match this event's
+            actual worktree.
         **fields: Extra context (branch, reason, exit_code, ...). ``None``
             values are dropped. ``stage``/``stage_name`` are reserved: a
             caller-supplied value is dropped in favor of the canonical
@@ -323,7 +329,7 @@ def log_event(
             # Best-effort and project-scoped: a caller with no resolved
             # active project (a rare ambient context) still gets the
             # activity.jsonl record above, just not this durable copy.
-            handoff_trace.append_event(cfg.active_project(), worktree_id, record)
+            handoff_trace.append_event(project or cfg.active_project(), worktree_id, record)
     except Exception as exc:
         # A diagnostic log must never interfere with the operation it
         # observes -- delivery stays best-effort and this never raises into

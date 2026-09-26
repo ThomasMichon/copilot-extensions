@@ -373,18 +373,16 @@ class PRRecord:
     repo: str = ""           # target repo "owner/name"; default = worktree repo
     opened_at: str = ""      # ISO timestamp the PR record was opened
     closed_at: str = ""      # ISO timestamp the PR reached a terminal state
-    # codename-attribution-by-default (rounds 26-39): this PR's attribution
-    # decision, FROZEN once at creation time and never re-derived from live
-    # config afterward -- see design.md § Per-PR attribution freeze for the
-    # full rationale. `attribution_mode` is one of the closed set
-    # {"", "false", "true", "codename"} ("" is the empty legacy sentinel:
-    # unset, predates this mechanism, OR a partial/malformed persisted
-    # pair -- never treated as authorizing publication).
-    # `attribution_explicit` records whether the frozen decision came from
-    # an EXPLICIT per-call override/config key, versus the bare implicit
-    # default -- itself frozen alongside the mode, since a `False` explicit
-    # value is a legitimate frozen state (e.g. an implicit codename
-    # decision) that must not be confused with the unset sentinel.
+    # codename-attribution-by-default (rounds 26-39): this PR's attribution decision,
+    # FROZEN once at creation time and never re-derived from live config afterward -- see
+    # design.md § Per-PR attribution freeze for the full rationale. `attribution_mode` is
+    # one of the closed set {"", "false", "true", "codename"} ("" is the empty legacy
+    # sentinel: unset, predates this mechanism, OR a partial/malformed persisted pair --
+    # never treated as authorizing publication).
+    # `attribution_explicit` records whether the frozen decision came from an EXPLICIT per-
+    # call override/config key, versus the bare implicit default -- itself frozen alongside
+    # the mode, since a `False` explicit value is a legitimate frozen state (e.g. an
+    # implicit codename decision) that must not be confused with the unset sentinel.
     attribution_mode: str = ""
     attribution_explicit: bool = False
     # A random UUID assigned ONCE when this entry is first created, and
@@ -3306,14 +3304,13 @@ def update_status(
         save_record(record)
 
 
-#: C0 control characters that must never reach the tracking YAML. TAB (\x09),
-#: LF (\x0a) and CR (\x0d) are legitimate YAML stream characters and are kept;
-#: the rest (BEL \x07, etc.) are illegal in a YAML scalar and, once persisted,
-#: make ``yaml.safe_load`` raise a ``ReaderError`` on EVERY subsequent read --
-#: wedging all future disposition writes (alice_example/dotfiles#1789). A
-#: stray BEL is easy to
-#: introduce from a caller (e.g. PowerShell renders a literal backtick-a ``` `a ```
-#: as \x07), so sanitize defensively on write and self-heal on read.
+#: C0 control characters that must never reach the tracking YAML. TAB (\x09), LF (\x0a)
+#: and CR (\x0d) are legitimate YAML stream characters and are kept; the rest (BEL \x07,
+#: etc.) are illegal in a YAML scalar and, once persisted, make ``yaml.safe_load`` raise
+#: a ``ReaderError`` on EVERY subsequent read -- wedging all future disposition writes
+#: (alice_example/dotfiles#1789). A stray BEL is easy to introduce from a caller (e.g.
+#: PowerShell renders a literal backtick-a ``` `a ``` as \x07), so sanitize defensively
+#: on write and self-heal on read.
 _ILLEGAL_CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
@@ -3372,9 +3369,9 @@ def set_disposition(
     session_id: str | None = None,
     kind: str = "status",
     save: bool = True,
+    tracking_path: Path | None = None,
 ) -> None:
-    """Set the agent-asserted disposition overlay (summary / title / follow-up)
-    and save.
+    """Set the agent-asserted disposition overlay (summary / title / follow-up) and save.
 
     Orthogonal to git/session state -- this records what only the agent knows:
     whether the worktree is genuinely *resolved* or still has *actionable
@@ -3386,6 +3383,8 @@ def set_disposition(
     Stamps ``status_note_at`` (which the postToolUse nudge watches to reset its
     drift counter) and appends a durable entry to the worktree's
     disposition-history sidecar (see :mod:`agent_worktrees.disposition_history`).
+    ``tracking_path`` scopes that sidecar write to an explicit project, not the
+    ambient ``cfg.tracking_dir()`` -- for a caller (e.g. a daemon) serving several projects.
     """
     changed: list[str] = []
     if summary is not None:
@@ -3418,6 +3417,7 @@ def set_disposition(
             changed=changed,
             kind=kind,
             session_id=session_id,
+            tracking_path=tracking_path,
         )
     if save:
         save_record(record)
