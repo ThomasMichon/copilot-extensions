@@ -4,7 +4,8 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice worktrees
 - **Created:** 2026-09-25
-- **Status:** Active — Phase 1 implemented and landed; Phase 2 gated (see below)
+- **Status:** Active — Phase 1 implemented, landed, and now live-validated
+  (Phase 1.5 complete); Phase 2 gated (see below)
 - **Vision:** none yet — this effort establishes the standing policy itself
   (safety envelope + trigger contract for a reactive fix agent); revisit
   once Phase 1 proves out whether it deserves its own harness-guidance
@@ -154,19 +155,18 @@ fixes."
       none yet).
 
 ### Phase 1.5 — Live validation (real observation window, prerequisite for Phase 2)
-- [ ] **Monitor real `validate-and-promote.yml` runs for a naturally-
+- [x] **Monitor real `validate-and-promote.yml` runs for a naturally-
       occurring red `full`/`worktree-manager`/`guards-full-sweep` failure**
       (this repo has enough concurrent PR/promotion activity that one is
       likely within hours, not days). When one occurs:
       - [x] Confirm `report-failure` actually ran (not skipped) and its
-            conclusion. **Occurred 2026-09-26 08:34 UTC (run 36230190121):
-            ran, but its own conclusion was `failure` — see the 2026-09-26
-            Journal entry below. Real bug found and fixed (PR #3815). Not
-            yet re-observed succeeding live end-to-end (only replay-
-            verified against the same run's real data, see Journal) --
-            keeping this parent item open until a subsequent natural (or
-            probe) occurrence confirms a filed issue for real.**
-      - [ ] Confirm one issue was filed per distinct failure signature
+            conclusion. **First occurrence 2026-09-26 08:34 UTC (run
+            36230190121): ran, but its own conclusion was `failure` — see
+            the 2026-09-26 Journal entries below (real bug found and fixed
+            in PR #3815). Second occurrence 2026-09-26 12:04 UTC (run
+            36240803760, after the fix merged): ran and concluded
+            `success` — real, live, positive confirmation the fix works.**
+      - [x] Confirm one issue was filed per distinct failure signature
             (or, for a repeat outside the 6h rate-limit window
             specifically, an existing matching issue commented instead —
             **never** both a new issue for an already-tracked signature,
@@ -179,13 +179,35 @@ fixes."
             builds one `FailureSignature` per distinct failing test id).
             Each should have an accurate signature, correct run link/SHA,
             and a genuinely useful log excerpt — not truncated/garbled.
+            **Confirmed: `agent-worktrees#3830` filed automatically from
+            run 36240803760, correct signature (`240176164548`, matching
+            the earlier dry-run replay's own signature for the identical
+            test — confirms stability), correct run link/commit, a clean
+            genuinely useful log excerpt (no ANSI garbage), correct
+            `ci-failure-signature` label, and the standard "no fix
+            attempted" status line.**
       - [ ] Confirm no duplicate issue was filed for the same signature on
             a second occurrence within the 6h window (only a real test of
             this, if the same failure recurs naturally or via the probe
-            below).
-- [ ] **If no natural red run occurs within a reasonable observation
+            below). **Not yet directly observed** (this same flaky test
+            has recurred twice ~3.5h apart already, so a further natural
+            recurrence inside #3830's 6h window is plausible and would
+            validate this incidentally) — explicitly NOT blocking Phase
+            1.5 completion on it; confirmed instead, as a substitute
+            check, that exactly one `ci-failure-signature`-labeled issue
+            exists for this signature right now (`gh issue list --search
+            '"Signature: 240176164548"'` → exactly `#3830`, no duplicate).
+- [x] ~~If no natural red run occurs within a reasonable observation
       window (a few hours), inject one deliberately, carefully, and
-      revert promptly:**
+      revert promptly:~~ **Superseded — not needed.** A natural
+      occurrence (run 36240803760, 2026-09-26 12:04 UTC) already
+      confirmed `report-failure` files a correct, accurate, non-
+      duplicate issue end-to-end after the PR #3815 fix. Executing the
+      deliberate probe on top of that would only add risk (a real red
+      `dev` window) for no additional signal. Left the sub-bullets below
+      unchecked/struck rather than deleted, so the full probe design
+      (still real, reviewed, and correct) remains available if a future
+      need arises (e.g. re-validating after a Phase 2 change).
       - [ ] **Hard stop, non-negotiable:** the probe merge starts a clock.
             **Maximum 2 hours from the probe PR's merge to the revert
             PR's merge**, full stop — not "a reasonable observation
@@ -940,3 +962,58 @@ _Pending._
   already specified in the Plan, to close out the remaining sub-items
   with genuine live evidence rather than declaring Phase 1.5 done on
   partial signal.
+
+### 2026-09-26 — Phase 1.5's second natural occurrence: the fix confirmed working live, Phase 1.5 complete
+- A second scheduled monitoring tick found two more red
+  `validate-and-promote.yml` runs since the last check:
+  **36236310228** (10:36 UTC — before PR #3815 merged; `report-failure`
+  still failed, same already-diagnosed root cause, no new information)
+  and **36240803760** (12:04 UTC — after the fix merged).
+- **36240803760 is the real positive confirmation this effort's whole
+  Phase 1.5 existed to get.** Same underlying flaky test as the first
+  occurrence — `agent-worktrees::TestRetireRecord::
+  test_concurrent_both_reaped_hard_delete_does_not_deadlock` — but this
+  time `report-failure` concluded `success`, and its own log showed
+  `[OK] filed https://github.com/ThomasMichon/copilot-extensions/
+  issues/3830`.
+- Inspected the filed issue directly: correct signature
+  (`Signature: 240176164548`, hidden anchor line — and identical to the
+  signature the local dry-run replay produced against the *first*
+  occurrence's data in the prior Journal entry, confirming the hash is
+  stable across separate real runs of the same failing test), correct
+  run link and commit SHA, a clean and genuinely useful log excerpt (the
+  real assertion failure and traceback, no ANSI garbage, no truncation),
+  the correct `ci-failure-signature` label, and the standard "no fix
+  attempted, whoever encounters it owns fixing it" status text.
+  Confirmed via `gh issue list --search '"Signature: 240176164548"'`
+  that exactly one such issue exists — no duplicate.
+- **This is the first real, live, end-to-end proof this specific
+  detection+dedup path works correctly against genuine production
+  data** — not a unit test, not a local replay, but an actual hosted-
+  runner `report-failure` run filing a real issue with real data. The
+  first occurrence's bug-and-fix cycle (previous Journal entry) was
+  necessary groundwork; this occurrence is the actual validation.
+- **One sub-item remains formally unobserved:** a genuine repeat of the
+  *same* signature landing a rate-limited comment (or, if inside the
+  window, deliberate silence) on the *existing* issue rather than a
+  second new one. This specific flaky test has now recurred naturally
+  twice within roughly 3.5 hours of each other, so a further recurrence
+  inside `#3830`'s own 6h rate-limit window is plausible and would
+  validate this incidentally with no action needed — but per this
+  effort's own Plan, this is explicitly **not** blocking Phase 1.5
+  completion (the dedup-lookup code path itself is already covered by
+  unit tests in `tools/test_ci_failure_watchdog.py`, and the "exactly
+  one issue exists right now" check above is real evidence against a
+  duplicate having already occurred).
+- **Phase 1.5 is now Done.** The deliberate-probe branch of the Plan is
+  marked superseded (struck through, left in place rather than deleted,
+  in case a future need — e.g. re-validating after a Phase 2 change —
+  wants the same design again) rather than executed, since it would only
+  have added risk (a real red `dev` window) for signal this natural
+  occurrence already delivered. Stopping the recurring monitoring
+  schedule as this PR merges.
+- **Next:** Phase 2 (an actual fix-attempt mechanism via `gh-aw`) remains
+  gated on the vision-reconciliation question noted at the top of this
+  file — Phase 1.5 proving Phase 1's detection+dedup path live and
+  correct does not itself resolve that gate; it only removes the "we
+  don't even know Phase 1 works yet" reason to defer looking at it.
