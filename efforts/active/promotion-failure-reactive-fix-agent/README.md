@@ -161,9 +161,13 @@ fixes."
       - [ ] Confirm `report-failure` actually ran (not skipped) and its
             conclusion.
       - [ ] Confirm one issue was filed per distinct failure signature
-            (or an existing matching one commented, if a repeat) — not
-            necessarily exactly one overall: a run with multiple distinct
-            failing tests legitimately produces multiple
+            (or, for a repeat outside the 6h rate-limit window
+            specifically, an existing matching issue commented instead —
+            **never** both a new issue for an already-tracked signature,
+            and never a comment for a repeat still *within* the window,
+            which `process_signature` deliberately does neither for) —
+            not necessarily exactly one issue overall: a run with
+            multiple distinct failing tests legitimately produces multiple
             `ci-failure-signature`-labeled issues, one per signature, per
             the watchdog's own design (`tools/ci_failure_watchdog.py`
             builds one `FailureSignature` per distinct failing test id).
@@ -223,8 +227,10 @@ fixes."
             checklist above.
       - [ ] **Before reverting, deliberately re-trigger the same
             validation run once more via a real `workflow_run` event** —
-            push a trivial no-op commit to `dev` while the probe test is
-            still present (NOT `workflow_dispatch`: `report-failure` is
+            merge a small, trivial no-op PR into `dev` (this repo blocks
+            direct pushes to `dev`; every change lands through the normal
+            PR flow, no exception here) while the probe test is still
+            present (NOT `workflow_dispatch`: `report-failure` is
             restricted to `github.event_name == 'workflow_run'`, so a
             manual dispatch would re-run the failing `full` job but skip
             the watchdog entirely and validate nothing). Confirm the
@@ -800,6 +806,14 @@ _Pending._
   (2) `workflow_dispatch` was suggested as one re-trigger option, but
   `report-failure` is now `workflow_run`-only (this session's own earlier
   security fix) — a manual dispatch would re-run the failing job but
-  skip the watchdog entirely, validating nothing. Corrected to: push a
-  trivial no-op commit to `dev` (a real `workflow_run` event) and expect
+  skip the watchdog entirely, validating nothing. Corrected to: merge a
+  trivial no-op PR into `dev` (a real `workflow_run` event) and expect
   silence (rate-limited), not a comment.
+- **Sixth review pass caught two more real inconsistencies, both fixed:**
+  (1) the *first* checklist item (natural occurrence) still said a repeat
+  gets "commented" unconditionally — made explicit that a comment only
+  happens for a repeat *outside* the 6h window, matching the more
+  precise wording already added to the dedup step; (2) the re-trigger
+  step said "push a trivial no-op commit to `dev`," but this repo blocks
+  direct pushes to `dev` entirely — corrected to a small no-op PR merged
+  the normal way.
