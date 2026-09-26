@@ -1210,7 +1210,7 @@ class TestRegisterSessionReseedsStatusUpdater:
         # Seeds the resolved worktree id against the payload cwd (the worktree).
         assert seen == [("wt-x", "/tmp/src/wt-x/sub")]
 
-    def test_manager_owned_session_registers_with_monitor_instead_of_spawning_updater(
+    def test_manager_owned_session_skips_registry_and_only_ensures_monitor(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch, tmp_path: Path
     ):
         _save_record(tmp_tracking_dir, "wt-managed", "/tmp/src/wt-managed")
@@ -1224,7 +1224,6 @@ class TestRegisterSessionReseedsStatusUpdater:
         )
         monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(manager_root))
         monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "1")
-        seen: list[tuple[str, str | None]] = []
         ensured: list[bool] = []
         monkeypatch.setattr(
             m, "_spawn_status_updater",
@@ -1233,7 +1232,7 @@ class TestRegisterSessionReseedsStatusUpdater:
         monkeypatch.setattr(
             m,
             "_register_session_for_monitor",
-            lambda sess, path: seen.append((sess, path)) or True,
+            lambda *_args, **_kwargs: pytest.fail("manager-owned sessions must not reseed status-monitor.d"),
         )
         monkeypatch.setattr(
             m, "_ensure_status_monitor", lambda: ensured.append(True) or True
@@ -1245,11 +1244,8 @@ class TestRegisterSessionReseedsStatusUpdater:
         )
         payload = '{"sessionId":"sess-managed","cwd":"/tmp/src/wt-managed/sub"}'
         monkeypatch.setattr(m.sys, "stdin", io.StringIO(payload))
-
         rc = m.cmd_register_session(_args(stdin=True))
-
         assert rc == 0
-        assert seen == [("wt-managed", "/tmp/src/wt-managed/sub")]
         assert ensured
 
     def test_reseed_falls_back_to_record_path_when_cwd_absent(

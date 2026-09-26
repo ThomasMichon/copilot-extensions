@@ -112,9 +112,14 @@ def _register_manager_owned_monitor_session(
     )
     if not managed_session:
         return False
-    return _register_session_for_monitor(
-        managed_session, path
-    ) and _ensure_status_monitor()
+    if not _ensure_status_monitor():
+        activity.log_event(
+            "status_monitor_unavailable",
+            worktree_id=worktree_id,
+            source="manager-owned-session-binding",
+            mux_session=managed_session,
+        )
+    return True
 
 
 def _session_handoff_token() -> str:

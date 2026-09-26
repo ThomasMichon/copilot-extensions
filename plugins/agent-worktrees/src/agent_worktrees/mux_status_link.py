@@ -119,6 +119,7 @@ def publish_managed_session_status(
     project: str | None,
     path: str,
     session_name: str,
+    worktree_id: str | None = None,
     values: dict[str, str],
     published: dict[tuple[str, str], str] | None,
     prefix: str,
@@ -129,13 +130,15 @@ def publish_managed_session_status(
 ) -> dict | None:
     if managed_mux_cache is None or not project:
         return None
-    try:
-        worktree_id = resolve_worktree_id(path, project=project)
-    except Exception:
+    resolved_worktree_id = worktree_id
+    if not resolved_worktree_id:
+        try:
+            resolved_worktree_id = resolve_worktree_id(path, project=project)
+        except Exception:
+            return None
+    if not resolved_worktree_id:
         return None
-    if not worktree_id:
-        return None
-    entry = managed_mux_cache.get(project, worktree_id)
+    entry = managed_mux_cache.get(project, resolved_worktree_id)
     if not (
         entry
         and entry.get("live")
@@ -154,7 +157,7 @@ def publish_managed_session_status(
     result = push_status_via_daemon(
         {
             "project": project,
-            "worktree_id": worktree_id,
+            "worktree_id": resolved_worktree_id,
             "values": changed_values,
             "rendered_at": datetime.now(timezone.utc).isoformat(),
             "monitor_generation": f"{prefix}:{token}",

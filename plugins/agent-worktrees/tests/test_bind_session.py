@@ -88,7 +88,7 @@ def _neutralize(monkeypatch, captured: dict) -> None:
 
 
 class TestBindSession:
-    def test_manager_owned_session_registers_with_monitor_instead_of_spawning_updater(
+    def test_manager_owned_session_skips_registry_and_only_ensures_monitor(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch, tmp_path: Path
     ):
         _save_record(tmp_tracking_dir, "wt-managed", "/tmp/src/wt-managed")
@@ -104,7 +104,6 @@ class TestBindSession:
         monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "1")
         captured: dict = {}
         _neutralize(monkeypatch, captured)
-        seen: list[tuple[str, str | None]] = []
         ensured: list[bool] = []
         monkeypatch.setattr(
             m, "_spawn_status_updater",
@@ -113,7 +112,7 @@ class TestBindSession:
         monkeypatch.setattr(
             m,
             "_register_session_for_monitor",
-            lambda sess, path: seen.append((sess, path)) or True,
+            lambda *_args, **_kwargs: pytest.fail("manager-owned sessions must not reseed status-monitor.d"),
         )
         monkeypatch.setattr(
             m, "_ensure_status_monitor", lambda: ensured.append(True) or True
@@ -126,7 +125,6 @@ class TestBindSession:
 
         assert rc == 0
         assert captured["bound"] is True
-        assert seen == [("wt-managed", "/tmp/src/wt-managed")]
         assert ensured
 
     def test_acknowledges_session_start_candidate_atomically(

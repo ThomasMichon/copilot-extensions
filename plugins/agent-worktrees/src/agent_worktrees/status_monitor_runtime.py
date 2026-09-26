@@ -505,6 +505,59 @@ def _remove_monitor_entry(reg_dir: Path, sess: str) -> None:
         (reg_dir / sess).unlink()
     except OSError:
         pass
+def _manager_owned_mapping_for_session(session_name: str, *, managed_mux_cache=None) -> dict | None:
+    if not session_name:
+        return None
+    current = None
+    if managed_mux_cache is not None:
+        from . import mux_link
+
+        live_sessions = managed_mux_cache.live_session_names()
+        if session_name not in live_sessions:
+            return None
+        now = time.time()
+        for entry in managed_mux_cache.snapshot().values():
+            if (
+                isinstance(entry, dict)
+                and entry.get("live")
+                and entry.get("mux_session") == session_name
+                and isinstance(entry.get("received_at"), (int, float))
+                and now - entry["received_at"] <= mux_link.MAPPING_STALE_AFTER_SECONDS
+            ):
+                if current is None:
+                    current = entry
+                    continue
+                current_revision = current.get("mapping_revision", -1)
+                entry_revision = entry.get("mapping_revision", -1)
+                if entry_revision > current_revision or (
+                    entry_revision == current_revision
+                    and entry.get("received_at", 0) >= current.get("received_at", 0)
+                ):
+                    current = entry
+        return current
+    from . import managed_mux_registry
+
+    return managed_mux_registry.live_mapping_for_session(session_name)
+def _monitor_unmanaged_live_sessions(live_wt: set[str], registry: dict[str, str], managed_entries: dict[str, dict], *, managed_mux_cache=None) -> tuple[set[str], list[str]]:
+    manager_owned_live_wt = {sess for sess in live_wt if _manager_owned_mapping_for_session(sess, managed_mux_cache=managed_mux_cache)}
+    unmanaged_live_wt = live_wt - set(managed_entries) - manager_owned_live_wt
+    prune_sessions = sorted(
+        {
+            *(sess for sess in registry if _manager_owned_mapping_for_session(sess, managed_mux_cache=managed_mux_cache)),
+            *(sess for sess in registry if sess not in unmanaged_live_wt),
+        }
+    )
+    return unmanaged_live_wt, prune_sessions
+def _monitor_prune_registry_sessions(reg_dir: Path, registry: dict[str, str], prune_sessions: list[str], ctx_done: set[str], incarnations: dict[str, str] | None, published: dict[tuple[str, str], str] | None) -> None:
+    for sess in prune_sessions:
+        _remove_monitor_entry(reg_dir, sess)
+        registry.pop(sess, None)
+        ctx_done.discard(sess)
+        if incarnations is not None:
+            incarnations.pop(sess, None)
+        if published is not None:
+            for key in [key for key in published if key[0] == sess]:
+                published.pop(key, None)
 
 
 def _windowless_python() -> str:

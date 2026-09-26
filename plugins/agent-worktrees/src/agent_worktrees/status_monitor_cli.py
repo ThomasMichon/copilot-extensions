@@ -137,8 +137,18 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     _locks.write_lock(lock, extra={"prefix": my_prefix, "mux": bool(mux_bin)})
 
     ctx_done: set[str] = set()
+
+    def _register_unmanaged_monitor_session(sess: str, path: str | None) -> bool:
+        if status_monitor_runtime._manager_owned_mapping_for_session(
+            sess, managed_mux_cache=managed_mux_runtime.cache
+        ):
+            return False
+        return _core_helper(
+            "_register_session_for_monitor", status_monitor_runtime._register_session_for_monitor
+        )(sess, path)
+
     reconciler = session_catalog.ResidentSessionReconciler(
-        register_monitor_session=_core_helper("_register_session_for_monitor", status_monitor_runtime._register_session_for_monitor)
+        register_monitor_session=_register_unmanaged_monitor_session
     )
     pane_reconciler = pane_reaper.ResidentPaneReconciler(
         activate_project=activate_project_for_path

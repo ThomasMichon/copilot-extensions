@@ -4055,8 +4055,10 @@ def _monitor_sweep(
     _activate_project_for_path = _self_override("_activate_project_for_path", _status_updater_cli._activate_project_for_path)
     _monitor_mux_set = _self_override("_monitor_mux_set", _smr._monitor_mux_set)
     _read_monitor_registry = _self_override("_read_monitor_registry", _smr._read_monitor_registry)
-    _remove_monitor_entry = _self_override("_remove_monitor_entry", _smr._remove_monitor_entry)
+    _manager_owned_mapping_for_session = _self_override("_manager_owned_mapping_for_session", _smr._manager_owned_mapping_for_session)
     _monitor_managed_session_union = _self_override("_monitor_managed_session_union", _smr._monitor_managed_session_union)
+    _monitor_unmanaged_live_sessions = _self_override("_monitor_unmanaged_live_sessions", _smr._monitor_unmanaged_live_sessions)
+    _monitor_prune_registry_sessions = _self_override("_monitor_prune_registry_sessions", _smr._monitor_prune_registry_sessions)
     _monitor_update_session_incarnations = _self_override("_monitor_update_session_incarnations", _smr._monitor_update_session_incarnations)
     _warm_list_cache_for_active_project = _self_override("_warm_list_cache_for_active_project", _list_cli._warm_list_cache_for_active_project)
     _render_status_segment = _self_override("_render_status_segment", _status_bar_cli._render_status_segment)
@@ -4071,26 +4073,17 @@ def _monitor_sweep(
     )
     unmanaged_live_wt: set[str] = set()
     live: dict[str, tuple[int, str]] = {}
-    live_wt: set[str] = set()
+    stale_sessions: list[str] = []
     if mux_bin:
         live = _monitor_list_sessions(mux_bin)
         if live is None:
             return -1
-        live_wt = {n for n in live if n.startswith("wt-")}
-        unmanaged_live_wt = live_wt - set(managed_entries)
+        unmanaged_live_wt, stale_sessions = _monitor_unmanaged_live_sessions({n for n in live if n.startswith("wt-")}, registry, managed_entries, managed_mux_cache=managed_mux_cache)
         observed_sessions |= unmanaged_live_wt
-        stale_sessions = [s for s in registry if s not in live_wt and s not in managed_entries]
-        if stale_sessions:
-            _status_monitor_recheck(governance, "pre-mutation:prune-registry")
-        for sess in stale_sessions:
-            _remove_monitor_entry(reg_dir, sess)
-            registry.pop(sess, None)
-            ctx_done.discard(sess)
-            if incarnations is not None:
-                incarnations.pop(sess, None)
-            if published is not None:
-                for key in [key for key in published if key[0] == sess]:
-                    published.pop(key, None)
+    if stale_sessions:
+        _status_monitor_recheck(governance, "pre-mutation:prune-registry")
+        _monitor_prune_registry_sessions(reg_dir, registry, stale_sessions, ctx_done, incarnations, published)
+    if mux_bin:
         served = [(s, p) for s, p in registry.items() if s in unmanaged_live_wt and p]
         if catalog_observer is not None:
             catalog_observer(observed_sessions)
@@ -4128,11 +4121,13 @@ def _monitor_sweep(
         context_value = None
         segment_value = ""
         project = None
+        managed_entry = managed_entries.get(sess)
+        manager_owned = bool(managed_entry) or bool(_manager_owned_mapping_for_session(sess, managed_mux_cache=managed_mux_cache))
         _wait_for_lifecycle_priority(lifecycle_priority)
         with project_lock if project_lock is not None else contextlib.nullcontext():
             try:
                 path_key = os.path.normcase(os.path.realpath(path))
-                managed_entry = managed_entries.get(sess) or {}
+                managed_entry = managed_entry or {}
                 project = managed_entry.get("project")
                 if (not isinstance(project, str) or not project) and session_projects is not None:
                     project = session_projects.get(path_key)
@@ -4190,6 +4185,7 @@ def _monitor_sweep(
             project=project,
             path=path,
             session_name=sess,
+            worktree_id=managed_entry.get("worktree_id") if isinstance(managed_entry, dict) else None,
             values=values,
             published=published,
             prefix=prefix,
@@ -4197,6 +4193,10 @@ def _monitor_sweep(
             resolve_worktree_id=tracking.find_worktree_id_by_cwd,
             before_publish=lambda: _status_monitor_recheck(governance, "pre-mutation:publish-status"),
         )
+        if manager_owned:
+            if manager_result is not None and manager_result.get("context_published"):
+                ctx_done.add(sess)
+            continue
         if manager_result is None:
             _status_monitor_recheck(governance, "pre-mutation:publish-status")
             _publish("@aw_updater", token)
