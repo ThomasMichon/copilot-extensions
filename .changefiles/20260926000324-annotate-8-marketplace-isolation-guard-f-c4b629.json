@@ -1,0 +1,9 @@
+{
+  "comment": "Annotate 8 marketplace-isolation guard findings in config.py: 3 genuine legacy-default fallback values (env-override-with-legacy-default pattern already established in this plugin's runtime-gate.sh/.ps1) plus 5 env-var-name-declaration false positives (guard regex matches on the variable name, not a fixed identity value)",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}
