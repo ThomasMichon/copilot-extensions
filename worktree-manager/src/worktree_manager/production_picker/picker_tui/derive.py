@@ -497,6 +497,19 @@ def _sess(w):
     return "·"
 
 
+def _sess_turns(w):
+    """Combined SESS/TURNS display (#3307 Phase 6): total session count the
+    worktree has ever had, over the current session's turn count -- e.g.
+    ``"3/47"``. ``session_count`` can be absent (a fixture, or a remote too
+    old to report it, #662) -- rendered as ``"-"`` rather than fabricating a
+    count; ``turn_count`` always renders (already defaulted to 0 by every
+    caller of this function, same as the standalone ``turns`` field it
+    augments)."""
+    sc = w.get("session_count")
+    sc_display = sc if isinstance(sc, int) else "-"
+    return f"{sc_display}/{w.get('turn_count', 0)}"
+
+
 def _age_secs(w):
     ts = (w.get("completed_at") if w.get("status") == "finalized"
           else w.get("started_at"))
@@ -823,6 +836,10 @@ def norm(
         "sess": _sess(w),
         "turns": w.get("turn_count", 0),
         "session_count": w.get("session_count"),
+        # #3307 Phase 6: combined SESS/TURNS column ("3/47") for both the
+        # Worktrees pivot's ACTIVE (LIVE rows) and Recent sections -- see
+        # ``_sess_turns``'s own docstring.
+        "sess_turns": _sess_turns(w),
         "sessionless": _sessionless(w),
         "pr": _pr(w),
         # #3307 Phase 4: the engine's already-ranked claims summary (computed

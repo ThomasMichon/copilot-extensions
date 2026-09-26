@@ -6,11 +6,11 @@
 
    + New worktree…     ✕ Clean     ⟳ Sync     creates on anomalous-potato Win  (this host)
 
-  ID     STATE      AGE    LIVE   T     CLAIMS
+  ID     STATE      AGE    LIVE   SESS/T    CLAIMS
   ── Active ──────────────────────────────────────────────────────────────────────────────────────────────────────────
     (none)
   ── Recent ──────────────────────────────────────────────────────────────────────────────────────────────────────────
-☐ c001   WIP        3h     ·        8   PR #4821
+☐ c001   WIP        3h     ·          -/8   PR #4821
       Add the retry budget: wip
   ── Completed ───────────────────────────────────────────────────────────────────────────────────────────────────────
     (none)
