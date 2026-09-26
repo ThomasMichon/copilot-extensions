@@ -5,7 +5,7 @@
 - **Branch(es):** per-slice worktree branch (see the driving worktree's own
   metadata; not recorded here to keep this public artifact generic)
 - **Created:** 2026-09-22
-- **Status:** Active
+- **Status:** Done
 - **Vision:** `visions/plugin-services` §Concepts & Components (extends: adds the
   **Claim provider** concept and the explicit plugin-stack layering rule)
 - **Umbrella issue:** [ThomasMichon/copilot-extensions#3295](https://github.com/ThomasMichon/copilot-extensions/issues/3295)
@@ -203,24 +203,28 @@ design note for the rebinding work:
 
 _Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
 
-- [ ] **#2631** agent-worktrees: three traceability gaps -- unclear effort-focus validation errors, silent activity-log worktree-id resolution, no retroactive claims annotation
-  - Names claims annotation traceability directly -- this is exactly the claim-provider-pattern's scope.
+- [x] Deferred to `#2631`: agent-worktrees: three traceability gaps -- unclear
+  effort-focus validation errors, silent activity-log worktree-id resolution,
+  no retroactive claims annotation. Names claims annotation traceability
+  directly (this effort's scope), but was never triaged into a numbered
+  phase here -- left as its own tracked issue rather than expanding this
+  effort's Plan retroactively.
 
 ## Validation Plan
 
-- [ ] Unit tests for the claim-provider registry primitive (manifest
+- [x] Unit tests for the claim-provider registry primitive (manifest
   parsing, missing/malformed manifest handling, namespace resolution,
   reconciliation across authoritative/indeterminate scans) mirroring
   `agent-bridge`'s `test_provider_sources.py` coverage shape.
-- [ ] Unit tests proving `cleanup.py` and `claims_cli.py` resolve through
+- [x] Unit tests proving `cleanup.py` and `claims_cli.py` resolve through
   the provider registry and degrade identically to today when no provider
   manifest exists.
-- [ ] `check-marketplace-isolation.py`'s `path-sibling-launch` count drops
+- [x] `check-marketplace-isolation.py`'s `path-sibling-launch` count drops
   by exactly the 2 converted call sites (currently tracked at 42 after the
   most recent marketplace-scoped-installations slice).
-- [ ] Full test suites for agent-worktrees, agent-dispatch, agent-
+- [x] Full test suites for agent-worktrees, agent-dispatch, agent-
   codespaces, and agent-containers pass on both Windows and WSL/Linux.
-- [ ] `check-version-bump.py`, `check-version-consistency.py`, `check-
+- [x] `check-version-bump.py`, `check-version-consistency.py`, `check-
   module-size.py`, `check-install-contract.py`, and `ruff check --select
   F,E9` all pass for every touched plugin.
 - [x] Phase 4: unit tests for the new agent-codespaces `deploy_hold`
@@ -240,6 +244,67 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
 _Pending._
 
 ## Journal
+
+### 2026-09-26 — Effort complete: Status: Done
+- Every Plan phase (0-4) and every Validation Plan bullet is now resolved.
+  The one remaining Plan item, the Bug-sweep's **#2631**, is transferred to
+  that issue's own tracker (never triaged into a numbered phase here) using
+  the standard `Deferred to` form, per this effort's own completion gate.
+- The Proposal section was never populated -- this effort never needed one
+  (Plan/Validation Plan carried the work directly); leaving it `_Pending._`
+  does not block completion.
+- Landed via the seven merged PRs referenced throughout this Journal
+  (#3388, #3465, #3471, #3505, #3705, #3727, #3742, #3759) plus the two
+  public tracking issues #3295 (umbrella) and #3461 (Phase 4, closed).
+  ThomasMichon/copilot-extensions#3749 remains open, tracking 5 unrelated
+  pre-existing test failures surfaced by this effort's own validation
+  sweep -- not this effort's to fix, filed for a future maintainer pass.
+- Not yet moved to the dated archive path -- following this repo's existing
+  practice of listing completed efforts as "Done; pending archive" in the
+  active index until a batch archive pass.
+
+### 2026-09-26 — Confirmed all remaining (non-Phase-4) Validation Plan bullets
+- Registry-primitive coverage: `test_claim_providers.py` already proves
+  manifest parsing (`schema_version`, NUL-byte rejection, unsafe-namespace
+  rejection, at-least-one-command requirement), malformed-manifest
+  degrade-with-finding, inactive-plugin degrade-to-no-provider, and
+  duplicate-namespace-keeps-first-with-finding -- mirroring `agent-bridge`'s
+  `test_provider_sources.py` coverage shape. No new tests were needed.
+- Call-site conversion coverage: `test_cleanup.py` proves `_run_codespaces`
+  resolves via the claim-provider registry, degrades to `None` with no
+  provider registered, and never falls back to legacy on an explicit-context
+  refusal; `test_claims_cmd.py` proves the equivalent for
+  `_dispatch_assigned_tasks` (post-rename). No new tests were needed.
+- `check-marketplace-isolation.py --json` currently reports 44
+  `path-sibling-launch` findings (up from the 42 recorded when this bullet
+  was written, due to unrelated repo-wide drift across the many PRs merged
+  since) -- so a raw count comparison no longer isolates this effort's own
+  effect. Verified per-site instead: `claims_cli.py` has zero
+  `path-sibling-launch` findings (the `dispatch-task:` conversion is fully
+  clean), and `cleanup.py`'s one remaining hit is `_run_worktrees`'s
+  same-tier (agent-worktrees calling its own binstub for a cross-project
+  reclaim) `shutil.which`, an unrelated pre-existing call site Phase 3 was
+  never scoped to touch -- confirming both of this effort's own violation
+  call sites are gone.
+- Full suite sweep on both Windows and WSL/Linux: `agent-worktrees`
+  (already confirmed for Phase 4), `agent-codespaces`, `agent-containers`
+  (already confirmed for Phase 4), and `agent-dispatch` (2243 tests on
+  Windows, 3467 tests on WSL/Linux, all green) -- completing the general
+  (non-Phase-4) cross-plugin suite bullet, which additionally required
+  agent-dispatch beyond the three Phase 4 already covered.
+- Guard sweep: `check-version-consistency.py`, `check-module-size.py`, and
+  `check-install-contract.py` all pass clean at HEAD; `ruff check --select
+  F,E9` passes clean across `agent-worktrees`/`agent-codespaces`/
+  `agent-containers`/`agent-dispatch`. `check-version-bump.py` is a
+  diff-based per-PR gate already enforced by this repo's `guards + lint`
+  CI check on every merged PR in this effort (#3388, #3465, #3471, #3505,
+  #3705, #3727, #3742, #3759) -- nothing left to re-verify standalone at a
+  synced, no-diff HEAD.
+- Every Plan phase (0-4) and every Validation Plan bullet is now checked
+  except the standalone Bug-sweep item (**#2631**, its own tracked issue,
+  intentionally left for whoever picks it up next) and the Proposal
+  section (still `_Pending._`, never populated by this effort -- not a
+  gate any Plan/Validation Plan item depends on).
 
 ### 2026-09-25 — Phase 4 Validation Plan: confirmed both outstanding bullets, fixed a Linux/WSL suite blocker
 - Confirmed the `peer_env()` rebind/strip-fallback Validation Plan bullet

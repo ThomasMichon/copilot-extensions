@@ -57,7 +57,7 @@ def add_parsers(sub) -> None:
         "list obligations re-homed by an --abandon finalize (pending "
         "cleanup), OR 'cleanup [<ref-or-source-worktree> ...]' to "
         "reclaim matching re-homed obligations (no selector = all; "
-        "--apply to act)",
+        "--apply to act), OR 'fleet-audit' for a read-only obligation inventory",
     )
     p.add_argument(
         "--remove",
@@ -227,6 +227,9 @@ def cmd_claims(args: argparse.Namespace) -> int:
         return _claims_cleanup(args)
     if target and target[0] == "orphans":
         return _claims_orphans(args)
+    if target and target[0] == "fleet-audit":
+        from . import fleet_audit_cli
+        return fleet_audit_cli.cmd_fleet_audit(args)
     worktree_id = target[0] if target else None
     return _claims_show(args, worktree_id)
 
