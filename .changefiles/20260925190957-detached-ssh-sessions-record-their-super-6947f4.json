@@ -1,9 +1,0 @@
-{
-  "comment": "Detached SSH sessions record their supervising worktree so a successor can find them after a handoff",
-  "changes": [
-    {
-      "plugin": "agent-ssh",
-      "type": "patch"
-    }
-  ]
-}
