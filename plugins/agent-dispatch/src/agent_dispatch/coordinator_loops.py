@@ -442,6 +442,16 @@ async def _gc_loop(
                 counts.get("checked", 0),
             )
             bus.publish({"type": "task.reconciled", "requeued": requeued, **counts})
+        # Piggyback the cooldown-monitor reconciler on the same always-on
+        # cadence: a bare suspend's default cooldown (Phase 3 of
+        # agent-dispatch-monitor-and-confirmed-state) needs the same
+        # unconditional "never just sit there" guarantee liveness GC already
+        # gives held tasks, so it shares this loop rather than needing its
+        # own opt-in toggle (unlike handoff_fallback, below).
+        resumed = await asyncio.to_thread(queue.reconcile_cooldowns)
+        if resumed:
+            log.info("cooldown reconcile auto-resumed %d suspended task(s)", resumed)
+            bus.publish({"type": "task.reconciled", "cooldown_resumed": resumed})
 
 
 async def _orphan_reap_loop(
