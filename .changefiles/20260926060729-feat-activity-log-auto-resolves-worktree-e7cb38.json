@@ -1,9 +1,0 @@
-{
-  "comment": "feat: activity-log auto-resolves worktree-id from cwd, claims annotate, effort-focus lint (copilot-extensions#2631)",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "minor"
-    }
-  ]
-}
