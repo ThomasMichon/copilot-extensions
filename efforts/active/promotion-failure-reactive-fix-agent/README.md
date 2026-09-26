@@ -180,6 +180,20 @@ fixes."
 - [ ] **If no natural red run occurs within a reasonable observation
       window (a few hours), inject one deliberately, carefully, and
       revert promptly:**
+      - [ ] **Hard stop, non-negotiable:** the probe merge starts a clock.
+            **Maximum 2 hours from the probe PR's merge to the revert
+            PR's merge**, full stop — not "a reasonable observation
+            window," an actual deadline. Set a real reminder/timer for it
+            when the probe merges. If verification is still incomplete
+            when the deadline arrives (checks stalled, the revert PR
+            itself isn't merging, anything not going as planned), **open
+            and merge the revert PR immediately anyway** — an incomplete
+            observation is a fully acceptable outcome (record it as such
+            in the Journal); leaving `dev` red indefinitely while chasing
+            a clean observation is not. The revert PR is small and simple
+            enough to prepare in parallel with the probe PR (same diff,
+            inverted) so "the revert PR isn't merging" is never itself the
+            blocker.
       - [ ] **Target `agent-worktrees` specifically, not just any
             "low-traffic plugin"** (a real review finding on this Plan
             itself): `ci.yml`'s Linux smoke tier only *collects* (imports,
@@ -817,3 +831,13 @@ _Pending._
   step said "push a trivial no-op commit to `dev`," but this repo blocks
   direct pushes to `dev` entirely — corrected to a small no-op PR merged
   the normal way.
+- **Seventh review pass caught a real safety gap: no hard stop.**
+  "A reasonable observation window (a few hours)" and "revert promptly"
+  are both soft language — if verification stalled (checks jam, the
+  revert PR itself doesn't merge cleanly), nothing in the plan actually
+  bounded how long `dev` could stay red. Added a genuine, non-negotiable
+  2-hour maximum from probe-merge to revert-merge, with an explicit
+  instruction to merge the revert anyway if the deadline arrives mid-
+  observation (an incomplete observation is acceptable; an unbounded red
+  `dev` is not), and a note to prepare the revert PR in parallel so it's
+  never itself the source of delay.
