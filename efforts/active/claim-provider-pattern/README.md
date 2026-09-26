@@ -227,11 +227,11 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
   equivalent (acquire/reject-when-held/heartbeat/expiry/cleanup) mirroring
   `agent-containers`' `test_lease.py` coverage shape; `cmd_claim_reclaim`
   proven to hold the fence for the full destructive-reclaim duration.
-- [ ] Phase 4: unit tests proving `peer_env()` rebinds (not strips) target
+- [x] Phase 4: unit tests proving `peer_env()` rebinds (not strips) target
   identity when a registered peer exists, and still degrades to today's
   strip-and-fallback behavior for any plugin that hasn't registered as a
   peer.
-- [ ] Phase 4: full test suites for agent-worktrees, agent-codespaces, and
+- [x] Phase 4: full test suites for agent-worktrees, agent-codespaces, and
   agent-containers pass on both Windows and WSL/Linux after each Phase 4
   slice.
 
@@ -240,6 +240,43 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
 _Pending._
 
 ## Journal
+
+### 2026-09-25 — Phase 4 Validation Plan: confirmed both outstanding bullets, fixed a Linux/WSL suite blocker
+- Confirmed the `peer_env()` rebind/strip-fallback Validation Plan bullet
+  against `plugins/agent-worktrees/tests/test_claim_providers.py`, already
+  in place from PR #3505: `test_resolve_claim_status_uses_peer_launch_
+  for_registered_peer_with_marketplace_suffix` (rebind through
+  `peer_launch_adapter.run` for a registered peer), `test_resolve_claim_
+  status_refusal_is_not_downgraded_to_legacy` and `test_resolve_claim_
+  status_degrades_when_registered_peer_is_absent` (a refusal or an absent
+  peer never silently falls back to the legacy path), and `test_resolve_
+  claim_status_legacy_path_still_runs_without_explicit_context` (strip-
+  and-fallback still runs when there is no explicit installation
+  context). No new tests were needed for this bullet.
+- While confirming the "full suite on both Windows and WSL/Linux" bullet,
+  found the WSL/Linux run of `agent-worktrees` aborted with an
+  `INTERNALERROR` partway through sub-suite 1/9: several `claim_
+  providers.py` helpers used bare `Path(...)` to inspect a Windows-style
+  command path's suffix/name whenever `os.name == "nt"`, which is fine on
+  a real Windows host but crashes on a real POSIX process the instant a
+  test monkeypatches `os.name` to `"nt"` to exercise that branch --
+  pathlib's `WindowsPath` flavour support is frozen `False` at
+  interpreter-start time, so patching `os.name` at runtime doesn't make it
+  usable. Fixed in PR #3742 by switching those call sites to
+  `PureWindowsPath`/`PurePosixPath` (lexical-only, always instantiable),
+  with no behavior change on a real platform. Filed
+  ThomasMichon/copilot-extensions#3749 for 5 remaining failures found
+  during this sweep that are unrelated to claim-provider-pattern (an
+  `agent-worktrees` `test_update_stage` indicator-state group and one
+  `test_tracking` concurrency test) -- not fixed here, tracked separately.
+- Validation after the fix: full `agent-worktrees` suite passes on Windows
+  (unaffected, 81 claim-provider tests green) and on WSL/Linux (5503
+  passed / 41 skipped / 3 deselected across all 9 sub-suites, aside from
+  the 5 tracked-separately failures above); full `agent-codespaces` and
+  `agent-containers` suites pass on both Windows and WSL/Linux (one
+  transient Windows file-lock timing flake and one transient Linux
+  heartbeat-timing flake, each reproduced clean on a single retry --
+  host-load sensitive, not a regression).
 
 ### 2026-09-25 — Phase 4 item 3: confirmed already implemented, no code change needed
 - Re-read `plugins/agent-codespaces/src/agent_codespaces/gh_account.py::_lookup()`
