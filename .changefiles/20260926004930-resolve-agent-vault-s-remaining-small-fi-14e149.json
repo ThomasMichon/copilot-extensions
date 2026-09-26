@@ -1,9 +1,0 @@
-{
-  "comment": "Resolve agent-vault's remaining small-file marketplace-isolation findings: annotate 5 (legacy-compatibility root/value, env-var-name, logger-namespace, doc-table shapes) and remove 1 genuinely dead unused constant in winpipe.py",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}
