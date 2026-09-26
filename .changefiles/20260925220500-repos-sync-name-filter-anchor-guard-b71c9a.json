@@ -1,9 +1,0 @@
-{
-  "comment": "Add repo-name filtering to agent-worktrees' `repos sync` (both the sync_all() API and the CLI: `repos sync [<repo> ...] [--tag T] [--class C]`), so a single anchor can be safely fast-forwarded (fetch + merge --ff-only, skipping dirty/diverged/detached) without touching every registered repo. Points to it from anchor_write_guard's deny message and docstring as the sanctioned no-new-commit alternative to a raw `git pull`/`git fetch` on a worktree-class anchor.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
