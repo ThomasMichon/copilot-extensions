@@ -38,7 +38,7 @@ Runtime defaults:
 | Host | Runtime | Binstub(s) | Service |
 |------|---------|------------|---------|
 | Windows | `%USERPROFILE%\.agent-vault` | `%USERPROFILE%\.local\bin\agent-vault.ps1` + `.cmd` | Scheduled Task `AgentVault` |
-| Linux / WSL | `~/.agent-vault` | `~/.local/bin/agent-vault` + `vault-askpass` | systemd user unit `agent-vault.service` when systemd is available |
+| Linux / WSL | `~/.agent-vault` | `~/.local/bin/agent-vault` + `vault-askpass` | systemd user unit `agent-vault.service` when systemd is available <!-- marketplace-isolation: allow deployed-runtime-diagnostics --> |
 
 ## Prerequisites
 
