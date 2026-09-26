@@ -21,12 +21,14 @@ PROMPT_STARTUP_GRACE="${WORKTREE_PROMPT_STARTUP_GRACE:-3}"
 # Optional leading `--aw-wt <id>`: the worktree id for the pane_exited activity
 # mark. Consumed here so it is never forwarded to the wrapped command.
 AW_WT=""
+AW_PROJECT=""
 INITIAL_PROMPT_B64=""
 INITIAL_PROMPT_RECEIPT_B64=""
 AHP_TOKEN_FILE=""
 while [[ $# -ge 2 ]]; do
     case "$1" in
         --aw-wt) AW_WT="$2" ;;
+        --aw-project) AW_PROJECT="$2" ;;
         --aw-prompt-b64) INITIAL_PROMPT_B64="$2" ;;
         --aw-prompt-receipt-b64) INITIAL_PROMPT_RECEIPT_B64="$2" ;;
         --aw-ahp-token-file) AHP_TOKEN_FILE="$2" ;;
@@ -140,6 +142,15 @@ if command -v agent-worktrees >/dev/null 2>&1; then
         ${WORKTREE_LAUNCH_ID:+--launch-id "$WORKTREE_LAUNCH_ID"} \
         --field "exit_code=$EXIT_CODE" --field "runtime=$RUNTIME" \
         >/dev/null 2>&1 & ) || true
+fi
+if command -v uv >/dev/null 2>&1 \
+    && [[ -n "$AW_PROJECT" && -n "$AW_WT" ]]; then
+    WM_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P 2>/dev/null || true)"
+    if [[ -n "$WM_ROOT" ]]; then
+        uv run --quiet --project "$WM_ROOT" -m worktree_manager mux-daemon remove \
+            --project="$AW_PROJECT" \
+            --worktree-id="$AW_WT" >/dev/null 2>&1 || true
+    fi
 fi
 
 # Intentional interrupt -- exit silently so post-exit finalization runs
