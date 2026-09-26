@@ -46,14 +46,20 @@ Escape hatches / modes:
   * ``ANCHOR_WRITE_GUARD_MODE=deny|ask|warn|off`` (default ``deny``) picks the
     action on a hit.
   * A plain ``git pull`` (and a bare ``git fetch`` alone, which never
-    mutates the working tree) is never blocked on an anchor: this guard's
+    mutates the working tree) is never blocked on an anchor. This guard's
     invariant is "no agent-authored content" -- a stray edit/commit that
-    never lands through the PR flow -- and a pull only ever brings in
-    commits that already exist upstream, so it structurally cannot violate
-    that invariant. ``agent-worktrees repos sync <repo>`` is a convenience
-    wrapper worth preferring anyway: fetch + ``merge --ff-only``, skipping
-    (never forcing) a dirty/diverged/detached checkout, instead of a plain
-    pull's own merge-commit-on-divergence default.
+    never lands through the PR flow. An anchor this guard has kept clean
+    (never merged/rebased/committed into) has no local commits to diverge
+    from upstream, so a pull against it can only ever fast-forward -- no new
+    commit is created either way. If the anchor *did* somehow drift (a
+    break-glass edit, manual work outside this guard), a plain pull's
+    default merge strategy WOULD create a genuine new local merge commit
+    (or, with ``pull.rebase`` configured, rewrite existing local commits) --
+    exactly the failure mode ``agent-worktrees repos sync <repo>`` exists to
+    avoid: it always fetches + ``merge --ff-only``, skipping (never forcing)
+    a dirty/diverged/detached checkout rather than ever creating a merge
+    commit. Prefer ``repos sync`` whenever that fast-forward-only guarantee
+    actually matters instead of trusting a plain pull's default behavior.
   * ``agent-worktrees repos allow-edits <repo> --reason "..."`` opens a
     time-boxed break-glass (``~/.agent-worktrees/allow-edits.json``) the guard
     honors.
@@ -141,12 +147,16 @@ _WRITE_CMD_START = re.compile(
 _GIT_START = re.compile(r"^\s*[\"']?git\b", re.IGNORECASE)
 # ``pull`` is deliberately absent: this guard's invariant is "no agent-
 # authored content lands in the anchor" (a stray commit, an edit that never
-# goes through the worktree/PR flow) -- a plain ``git pull`` only ever
-# fast-forwards (or merges) in commits that already exist upstream, so it
-# can never introduce content this guard exists to block. Blocking it just
-# forced a clunkier `repos sync <repo>` detour for a routine, harmless
-# "catch the anchor up" operation. Other guards (``cross_repo_guard``) keep
-# their own independent copy of this list and are unaffected.
+# goes through the worktree/PR flow). An anchor this guard has kept clean has
+# no local commits to diverge from upstream, so a pull against it can only
+# fast-forward. A DIVERGED anchor's pull could still create a genuine new
+# local merge commit (or rewrite commits under ``pull.rebase``) -- that risk
+# is accepted here in favor of `repos sync <repo>` (guaranteed
+# fast-forward-only, never forces) being the safer choice whenever that
+# guarantee actually matters, rather than blocking every pull outright and
+# forcing a clunkier detour for the common, harmless "catch up" case. Other
+# guards (``cross_repo_guard``) keep their own independent copy of this list
+# and are unaffected.
 _GIT_WRITE_SUB = re.compile(
     r"\b(?:add|commit|apply|checkout|switch|reset|restore|clean|rm|mv|stash|"
     r"merge|rebase|cherry-pick|revert|init)\b",

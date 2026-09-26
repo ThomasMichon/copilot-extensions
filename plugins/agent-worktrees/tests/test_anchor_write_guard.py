@@ -160,9 +160,9 @@ def test_shell_read_into_anchor_allows(tmp_path, anchor):
 
 
 def test_shell_git_pull_with_dashC_into_anchor_allows(tmp_path, anchor):
-    """A plain ``git pull`` only ever brings in commits that already exist
-    upstream -- it can never introduce the agent-authored content this guard
-    exists to block -- so it must never be denied, unlike ``commit``/``add``/
+    """``git pull`` is exempt: a divergent pull could still create a local
+    merge commit, but that risk is accepted in favor of never blocking a
+    routine "catch up" -- it must never be denied, unlike ``commit``/``add``/
     etc."""
     gp = anchor[0]["path"]
     assert guard.decide(_shell(f'git -C "{gp}" pull origin main', tmp_path),
