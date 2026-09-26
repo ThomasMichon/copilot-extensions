@@ -127,6 +127,31 @@ def test_promote_creates_wholesale_replace_commit(repo: Path):
     assert worktrees.count("\n") == 0 or len(worktrees.splitlines()) == 1
 
 
+def test_promote_refuses_when_a_pointer_does_not_resolve(repo: Path):
+    # A malformed/dangling VENDOR_POINTER.json on dev (pointing at a lib
+    # that doesn't exist in canonical libs/) must abort promotion, not ship
+    # an unexpanded stub into main.
+    _git(["checkout", "-q", "dev"], repo)
+    pointer_dir = repo / "plugins" / "demo-plugin" / "libs" / "ghost-lib"
+    pointer_dir.mkdir(parents=True)
+    (pointer_dir / "VENDOR_POINTER.json").write_text(
+        json.dumps({"schema": "copilot-extensions.vendor-pointer", "version": 1,
+                    "source": "libs/ghost-lib"}) + "\n",
+        encoding="utf-8",
+    )
+    _commit(repo, "demo-plugin: add a dangling vendor pointer")
+    _git(["checkout", "-q", "main"], repo)
+    main_before = _git(["rev-parse", "main"], repo)
+
+    with pytest.raises(pr.PromotionError, match="did not resolve"):
+        pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
+
+    # main's ref was not moved, and no leftover scratch worktree remains.
+    assert _git(["rev-parse", "main"], repo) == main_before
+    worktrees = _git(["worktree", "list"], repo)
+    assert worktrees.count("\n") == 0 or len(worktrees.splitlines()) == 1
+
+
 def test_promote_push_moves_main_and_pushes_tag(tmp_path: Path, repo: Path):
     origin = tmp_path / "origin.git"
     _git(["init", "-q", "--bare", str(origin)], tmp_path)
