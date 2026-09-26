@@ -157,7 +157,7 @@ fixes."
       none yet).
 
 ### Phase 1.5 — Live validation (real observation window, prerequisite for Phase 2)
-- [ ] **Monitor real `validate-and-promote.yml` runs for a naturally-
+- [x] **Monitor real `validate-and-promote.yml` runs for a naturally-
       occurring red `full`/`worktree-manager`/`guards-full-sweep` failure**
       (this repo has enough concurrent PR/promotion activity that one is
       likely within hours, not days). When one occurs:
