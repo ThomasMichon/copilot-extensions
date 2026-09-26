@@ -1,9 +1,0 @@
-{
-  "comment": "HTTP bridge transport races IPv4/IPv6 address families (Happy-Eyeballs-lite, RFC 8305) instead of blocking the full per-call timeout on a black-holed family. Fixes aperture-labs#7553.",
-  "changes": [
-    {
-      "plugin": "agent-mcp",
-      "type": "patch"
-    }
-  ]
-}

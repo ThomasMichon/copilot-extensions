@@ -1,9 +1,0 @@
-{
-  "comment": "work_coalescing_singleton: fix call_with_fallback exception handling and owner response-deadline enforcement (vendored lib sync)",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
