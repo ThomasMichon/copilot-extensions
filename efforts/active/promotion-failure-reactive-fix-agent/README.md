@@ -153,6 +153,125 @@ fixes."
       on the latest occurrence comment (or the issue's own filing time if
       none yet).
 
+### Phase 1.5 — Live validation (real observation window, prerequisite for Phase 2)
+- [ ] **Monitor real `validate-and-promote.yml` runs for a naturally-
+      occurring red `full`/`worktree-manager`/`guards-full-sweep` failure**
+      (this repo has enough concurrent PR/promotion activity that one is
+      likely within hours, not days). When one occurs:
+      - [ ] Confirm `report-failure` actually ran (not skipped) and its
+            conclusion.
+      - [ ] Confirm one issue was filed per distinct failure signature
+            (or, for a repeat outside the 6h rate-limit window
+            specifically, an existing matching issue commented instead —
+            **never** both a new issue for an already-tracked signature,
+            and never a comment for a repeat still *within* the window,
+            which `process_signature` deliberately does neither for) —
+            not necessarily exactly one issue overall: a run with
+            multiple distinct failing tests legitimately produces multiple
+            `ci-failure-signature`-labeled issues, one per signature, per
+            the watchdog's own design (`tools/ci_failure_watchdog.py`
+            builds one `FailureSignature` per distinct failing test id).
+            Each should have an accurate signature, correct run link/SHA,
+            and a genuinely useful log excerpt — not truncated/garbled.
+      - [ ] Confirm no duplicate issue was filed for the same signature on
+            a second occurrence within the 6h window (only a real test of
+            this, if the same failure recurs naturally or via the probe
+            below).
+- [ ] **If no natural red run occurs within a reasonable observation
+      window (a few hours), inject one deliberately, carefully, and
+      revert promptly:**
+      - [ ] **Hard stop, non-negotiable:** the probe merge starts a clock.
+            **Maximum 2 hours from the probe PR's merge to the revert
+            PR's merge**, full stop — not "a reasonable observation
+            window," an actual deadline. Set a real reminder/timer for it
+            when the probe merges. If verification is still incomplete
+            when the deadline arrives (checks stalled, the revert PR
+            itself isn't merging, anything not going as planned), **open
+            and merge the revert PR immediately anyway** — an incomplete
+            observation is a fully acceptable outcome (record it as such
+            in the Journal); leaving `dev` red indefinitely while chasing
+            a clean observation is not. The revert PR is small and simple
+            enough to prepare in parallel with the probe PR (same diff,
+            inverted) so "the revert PR isn't merging" is never itself the
+            blocker.
+      - [ ] **Target `agent-worktrees` specifically, not just any
+            "low-traffic plugin"** (a real review finding on this Plan
+            itself): `ci.yml`'s Linux smoke tier only *collects* (imports,
+            never executes) `agent-worktrees`' tests on push/PR --
+            `HEAVY_PLUGIN: agent-worktrees` / `--collect-only` -- while
+            every other plugin's tests actually *run* there. (`ci.yml`
+            also has a separate `worktrees-windows-launch` job that DOES
+            execute one specific, narrowly-filtered `agent-worktrees` test
+            -- `-k status_daemon_console_root_contains_psmux_descendants`
+            -- so the claim isn't that this plugin's suite is never
+            executed on push/PR at all, only that neither existing path
+            would catch a *new*, differently-named probe test.) A
+            deliberately failing test added to any OTHER plugin's real
+            (non-filtered) suite would fail `ci.yml` itself first; the
+            `workflow_run` trigger itself still fires on that failed `CI`
+            run (`types: [completed]` fires for any conclusion), but
+            `gate`'s own `if:` requires `github.event.workflow_run.
+            conclusion == 'success'` before doing anything -- so `gate`
+            would produce `is_dev=false`/no-op and `report-failure` would
+            never fire -- defeating the entire probe. `agent-
+            worktrees` is the one plugin where a new, distinctly-named
+            test evades both of `ci.yml`'s existing execution paths, so
+            `ci.yml` stays green and `gate` proceeds normally, landing on
+            the real target: the `full -
+            agent-worktrees` job.
+      - [ ] Add ONE new, obviously-synthetic, clearly-commented failing
+            test to `agent-worktrees`' suite (e.g.
+            `assert False, "Deliberate Phase 1 validation probe for
+            promotion-failure-reactive-fix-agent -- safe to delete, see
+            efforts/active/promotion-failure-reactive-fix-agent"`) — never
+            touch existing test logic, never something with side effects,
+            never `.github/workflows/**`.
+      - [ ] **Add a changefile for `agent-worktrees`** (`python
+            tools/changefile.py add --plugin agent-worktrees --type dev
+            --comment "..."`) — this PR touches `plugins/agent-worktrees/`
+            content, so the repo's changefile-presence guard requires one;
+            the same is true for the follow-up revert PR below.
+      - [ ] Land it via the normal PR flow to `dev` like any other change
+            (small, honest PR description naming this as a deliberate,
+            temporary probe for this effort — never disguised as a real
+            bug).
+      - [ ] Watch the resulting `full - agent-worktrees` failure and
+            confirm `report-failure` behaves exactly as in the
+            natural-occurrence
+            checklist above.
+      - [ ] **Before reverting, deliberately re-trigger the same
+            validation run once more via a real `workflow_run` event** —
+            merge a small, trivial no-op PR into `dev` (this repo blocks
+            direct pushes to `dev`; every change lands through the normal
+            PR flow, no exception here) while the probe test is still
+            present (NOT `workflow_dispatch`: `report-failure` is
+            restricted to `github.event_name == 'workflow_run'`, so a
+            manual dispatch would re-run the failing `full` job but skip
+            the watchdog entirely and validate nothing). Confirm the
+            identical signature occurs a second time **within** the 6h
+            window and that rate-limiting actually holds: **no** second
+            issue and **no** new comment either (`process_signature`
+            deliberately returns without commenting while
+            `is_rate_limited(...)` is true) — a comment only appears once
+            the window has genuinely expired, which isn't practical to
+            wait out here. The probe as originally planned only ever
+            produced one occurrence, which would let this checklist be
+            marked complete without ever exercising the dedup path at
+            all; a single synthetic run doesn't prove Phase 1 handles the
+            exact repeat-failure case it exists for. If skipped for time,
+            explicitly record dedup as **unvalidated** here and do not
+            treat Phase 1 as fully proven / Phase 2's gate as unblocked on
+            that basis.
+      - [ ] **Revert immediately once confirmed** (a follow-up PR deleting
+            the probe test) — this deliberately jams every pending
+            promotion for the observation window, the exact cost this
+            whole effort exists to shorten, so keep that window as short
+            as the observation genuinely requires and never longer.
+      - [ ] Note in the Journal whether the resulting issue/comment was
+            left in place (as evidence) or closed once confirmed working.
+- [ ] Record findings (false positives, dedup accuracy, issue quality)
+      here before treating Phase 1 as proven and touching Phase 2's gate.
+
 ### Phase 2 — Wire the reactive fix attempt (the actual "attempt a fix")
 - [ ] **Gate (blocks the rest of this phase):** resolve the Vision
       reconciliation noted in the header above — decide whether this
@@ -627,3 +746,98 @@ _Pending._
   manual dispatch (it exists to react automatically to real validation
   runs), so the fix is removing the path entirely rather than trying to
   defend it. No Python change this round, workflow-only.
+- **PR #3746 merged to `dev`, `report-failure` bootstrapped onto `main`
+  via workflows-only PR #3776 (main source gate passed cleanly).** Phase
+  1 is live end-to-end. Confirmed via the pipeline's own subsequent runs
+  that the new job is picked up correctly.
+
+### 2026-09-26 — Next: live validation (Phase 1.5)
+- Operator: "let's monitor, and potentially cause a careful build/test
+  break somehow. Inevitably one will go in on its own." Added a new
+  Phase 1.5 to the Plan above: monitor real `validate-and-promote.yml`
+  runs for a naturally-occurring red build first (this repo has enough
+  concurrent activity that one is likely soon); only if none occurs
+  within a reasonable window, deliberately inject one small, obviously-
+  synthetic, clearly-labeled failing test via the normal PR flow, watch
+  `report-failure` react, verify issue quality, then revert **promptly**
+  (a follow-up PR) — the deliberate probe still jams every pending
+  promotion for its whole window, the exact cost this effort exists to
+  shorten, so that window must stay as short as the observation
+  genuinely requires.
+- Not yet executed — this is the durable plan for whichever session
+  picks up the monitoring next (a recurring scheduled check, or a fresh
+  session resuming this file).
+- **Copilot review caught a real design flaw in the probe plan itself:**
+  targeting "any low-traffic plugin" would have made the probe self-
+  defeating for most plugins — `ci.yml`'s smoke tier actually *executes*
+  every plugin's tests on push/PR except `agent-worktrees` (collect-only
+  there, per `HEAVY_PLUGIN`), and `gate`'s own `if:` requires the
+  upstream `CI` run to have concluded `success` before it does anything
+  (the `workflow_run` trigger itself fires on any conclusion — it's
+  `gate` that no-ops on a failure, not the trigger declining to fire). A
+  failing test in any other plugin would fail `ci.yml` first, `gate`
+  would produce `is_dev=false`, and `report-failure` would never fire.
+  Corrected the plan to name `agent-worktrees` specifically as the
+  only plugin where the probe actually reaches the intended `full -
+  agent-worktrees` job.
+- **Second review pass caught three more real refinements, all fixed:**
+  (1) the "confirm exactly one issue was filed" checklist item was too
+  strict — the watchdog legitimately files one issue per distinct
+  failure signature, so a multi-failure run can correctly produce
+  several; corrected to "one issue per distinct signature"; (2) the
+  Linux-collect-only rationale was factually incomplete — `ci.yml` also
+  has a `worktrees-windows-launch` job that executes one specific,
+  narrowly `-k`-filtered `agent-worktrees` test, so the accurate claim is
+  that a *new, differently-named* probe test evades both existing
+  execution paths, not that the suite is never executed at all;
+  corrected the wording; (3) the probe PR (and its follow-up revert)
+  touch `plugins/agent-worktrees/` content, so both need a pending
+  `agent-worktrees` changefile per this repo's changefile-presence guard
+  — added as an explicit checklist item so "the normal PR flow" doesn't
+  quietly omit it.
+- **Third review pass caught one wording nit, fixed in both places it
+  appeared:** `validate-and-promote.yml`'s `workflow_run` trigger itself
+  fires on ANY upstream `CI` conclusion (`types: [completed]`); it's
+  `gate`'s own `if:` that requires `success` before doing anything. The
+  earlier wording conflated "the trigger doesn't fire" with "gate no-ops"
+  — corrected both occurrences.
+- **Fourth review pass caught the deepest gap in the probe design
+  itself:** as planned, the single synthetic probe produced exactly one
+  occurrence, then got reverted — meaning the checklist could be marked
+  complete without ever exercising the 6h dedup/rate-limit path at all,
+  the exact behavior that stops a persistently-flaky failure from
+  spamming a new issue per run. Added an explicit step to deliberately
+  re-trigger the same probe-induced failure once more before reverting
+  (confirming a comment lands on the existing issue, not a second one),
+  with an honest fallback: if skipped for time, record dedup as
+  unvalidated rather than silently treating Phase 1 as fully proven.
+- **Fifth review pass caught two real self-contradictions in that same
+  new step:** (1) a second occurrence *within* the stated 6h window
+  should verify **no** new issue and **no** new comment either —
+  `process_signature` deliberately holds off commenting while
+  `is_rate_limited(...)` is true, so "confirm a comment lands" was
+  simply wrong for a re-trigger that happens minutes later, not hours;
+  (2) `workflow_dispatch` was suggested as one re-trigger option, but
+  `report-failure` is now `workflow_run`-only (this session's own earlier
+  security fix) — a manual dispatch would re-run the failing job but
+  skip the watchdog entirely, validating nothing. Corrected to: merge a
+  trivial no-op PR into `dev` (a real `workflow_run` event) and expect
+  silence (rate-limited), not a comment.
+- **Sixth review pass caught two more real inconsistencies, both fixed:**
+  (1) the *first* checklist item (natural occurrence) still said a repeat
+  gets "commented" unconditionally — made explicit that a comment only
+  happens for a repeat *outside* the 6h window, matching the more
+  precise wording already added to the dedup step; (2) the re-trigger
+  step said "push a trivial no-op commit to `dev`," but this repo blocks
+  direct pushes to `dev` entirely — corrected to a small no-op PR merged
+  the normal way.
+- **Seventh review pass caught a real safety gap: no hard stop.**
+  "A reasonable observation window (a few hours)" and "revert promptly"
+  are both soft language — if verification stalled (checks jam, the
+  revert PR itself doesn't merge cleanly), nothing in the plan actually
+  bounded how long `dev` could stay red. Added a genuine, non-negotiable
+  2-hour maximum from probe-merge to revert-merge, with an explicit
+  instruction to merge the revert anyway if the deadline arrives mid-
+  observation (an incomplete observation is acceptable; an unbounded red
+  `dev` is not), and a note to prepare the revert PR in parallel so it's
+  never itself the source of delay.

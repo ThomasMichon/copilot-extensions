@@ -167,6 +167,17 @@ jobs:
         run: python tools/check-module-size.py
       - name: Module size guard tests
         run: python -m pytest -q tools/test_check_module_size.py
+      - name: No agent-machines consuming-side packages in this repo
+        # agent-machines packages declare a CONSUMING repo's own desired
+        # machine state (sometimes gated down to a literal machine name);
+        # that content belongs exclusively in the repo that adopts the
+        # pattern (e.g. the facility's own private control repo), never in
+        # copilot-extensions itself -- this repo is public and has no
+        # machine of its own to converge. See the guard's own docstring for
+        # the live incident that motivated it.
+        run: python tools/check-no-agent-machines-packages.py
+      - name: No agent-machines consuming-side packages guard tests
+        run: python -m pytest -q tools/test_check_no_agent_machines_packages.py
       - name: Module health watchdog tests
         run: python -m pytest -q tools/test_module_health_watchdog.py
       - name: CI failure watchdog tests
