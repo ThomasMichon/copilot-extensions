@@ -1,14 +1,10 @@
-"""Worktree Manager mux-companion daemon (Phase 3b Slice 2 Sub-slice 3 Step 2
+"""Worktree Manager mux-companion daemon (Phase 3b Slice 2 Sub-slice 3
 -- ``worktree-manager-control-plane`` effort).
 
-Still off the main launch path: this module adds the Manager-side resident
-daemon and its wire server, per
-``efforts/active/worktree-manager-control-plane/phase-3b-substatus-monitor-relocation.md``'s
-"Ordered implementation steps" (Step 2). Nothing here is yet called by
-``launch-session.ps1``/``launch-session.sh`` or the production Picker's real
-launch/join/restore/remux actions -- that cutover is Step 3. This step only
-proves the daemon's own lifecycle (start/idle-exit/restart recovery),
-independent of any real caller. The mapping registry itself
+Implements the Manager-side resident daemon and its wire server, plus the Step
+3 launch/join/cleanup helpers that keep the Manager-owned
+``worktree_id ⇄ mux session`` mapping current and publish ``mux-live-v1``
+observations into ``agent-worktrees``. The mapping registry itself
 (:class:`~worktree_manager.mux_mapping_registry.MuxMappingRegistry`) lives in
 the sibling ``mux_mapping_registry`` module -- split out purely to stay under
 this repo's per-module line cap; see that module's own docstring for the
@@ -24,8 +20,9 @@ directions of this slice's IPC contract are therefore implemented
 independently on each side:
 
 * **Manager -> agent-worktrees** (``mux-live-v1``, Step 3's job): pushed via
-  ``agent_worktrees.mux_link.mux_live_with_boot``, called from *this* module's
-  future Step-3 wiring -- not implemented yet.
+  this module's own lockfile-rendezvous + loopback client, now wired from the
+  real launch/join/cleanup path and refreshed opportunistically while the
+  daemon applies routed status.
 * **agent-worktrees -> Manager** (``mux-status-v1``, this module): THIS
   daemon is the wire *server* for that kind. :func:`build_compute` is the
   ``compute(kind, payload)`` callback a ``CoalescingServer`` wraps, mirroring
@@ -43,7 +40,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from work_coalescing_singleton import CoalescingServer
@@ -56,6 +53,7 @@ from .mux_mapping_registry import (
     get_mapping,
     registry_path,
     register_mapping,
+    register_next_mapping,
     remove_mapping,
 )
 from .self_install import default_root
@@ -80,6 +78,9 @@ REQUEST_DEADLINE_S = 5.0
 #: How long a caller may boot-wait for this daemon (mirrors
 #: ``mux_link.BOOT_WAIT_S``).
 BOOT_WAIT_S = 6.0
+LIVE_KIND = "mux-live-v1"
+LIVE_REQUEST_DEADLINE_S = 2.0
+LIVE_BOOT_WAIT_S = 6.0
 
 LINGER_SECONDS = 5.0
 SUBSCRIBER_TTL_SECONDS = 20.0
@@ -144,6 +145,214 @@ def read_lock_data(path: Path) -> dict | None:
     except (ValueError, TypeError):
         return None
     return data if isinstance(data, dict) else None
+
+
+def _agent_worktrees_root() -> Path | None:
+    from . import agent_plugin_runtime
+
+    slot = agent_plugin_runtime.resolve_installed_plugin_slot("agent-worktrees")
+    if slot is None:
+        return None
+    return slot.parent.parent
+
+
+def _status_monitor_lock_path() -> Path | None:
+    root = _agent_worktrees_root()
+    return None if root is None else root / "status-monitor.lock"
+
+
+def _status_monitor_endpoint_from_rendezvous(data: dict | None) -> tuple[str, int, str] | None:
+    if not isinstance(data, dict):
+        return None
+    endpoint = data.get("managed_mux_endpoint")
+    token = data.get("managed_mux_token")
+    if not isinstance(endpoint, str) or not isinstance(token, str) or not token:
+        return None
+    host, _, port_s = endpoint.partition(":")
+    if not host or not port_s:
+        return None
+    try:
+        port = int(port_s)
+    except ValueError:
+        return None
+    if not 0 < port < 65536:
+        return None
+    return host, port, token
+
+
+def _ensure_status_monitor_running() -> bool:
+    from . import engine_client
+
+    base = engine_client.engine_base_command()
+    if not base:
+        return False
+    kwargs: dict = {
+        "capture_output": True,
+        "text": True,
+        "timeout": 30,
+        "check": False,
+        "env": engine_client._engine_environment(),
+        "stdin": subprocess.DEVNULL,
+    }
+    if os.name == "nt":
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        proc = subprocess.run([*base, "status-monitor-restart"], **kwargs)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0
+
+
+def live_push_key(payload: dict) -> str:
+    project = payload.get("project")
+    worktree_id = payload.get("worktree_id")
+    revision = payload.get("mapping_revision")
+    if not isinstance(project, str) or not project:
+        raise ValueError("mux-live-v1 payload missing 'project'")
+    if not isinstance(worktree_id, str) or not worktree_id:
+        raise ValueError("mux-live-v1 payload missing 'worktree_id'")
+    if isinstance(revision, bool) or not isinstance(revision, int):
+        raise ValueError("mux-live-v1 payload missing 'mapping_revision'")
+    return f"{len(project)}:{project}:{len(worktree_id)}:{worktree_id}:{revision}"
+
+
+def mux_live_via_daemon(
+    lock_data: dict | None,
+    *,
+    payload: dict,
+    fallback: Callable[[], dict],
+    request_deadline_s: float = LIVE_REQUEST_DEADLINE_S,
+) -> dict:
+    endpoint = _status_monitor_endpoint_from_rendezvous(lock_data)
+    if endpoint is None:
+        return fallback()
+    key = live_push_key(payload)
+    host, port, token = endpoint
+    client_id = wcs_client.new_client_id()
+    try:
+        return wcs_client.request(
+            host,
+            port,
+            token,
+            kind=LIVE_KIND,
+            key=key,
+            payload=payload,
+            request_deadline_s=request_deadline_s,
+            client_id=client_id,
+        )
+    except wcs_client.DaemonUnavailable:
+        return fallback()
+    finally:
+        wcs_client.release(host, port, token, client_id, timeout=request_deadline_s)
+
+
+def mux_live_with_boot(
+    *,
+    read_lock_data: Callable[[], dict | None],
+    ensure_monitor: Callable[[], bool] | None,
+    payload: dict,
+    fallback: Callable[[], dict],
+    request_deadline_s: float = LIVE_REQUEST_DEADLINE_S,
+    boot_wait_s: float = LIVE_BOOT_WAIT_S,
+    poll_interval_s: float = 0.1,
+) -> dict:
+    started = time.time()
+
+    def _dial() -> tuple[str, int, str] | None:
+        return _status_monitor_endpoint_from_rendezvous(read_lock_data())
+
+    endpoint = _dial()
+    if endpoint is None and ensure_monitor is not None:
+        ensure_monitor()
+        while endpoint is None and time.time() - started < boot_wait_s:
+            time.sleep(poll_interval_s)
+            endpoint = _dial()
+    if endpoint is None:
+        return fallback()
+
+    host, port, token = endpoint
+    client_id = wcs_client.new_client_id()
+    try:
+        return wcs_client.request(
+            host,
+            port,
+            token,
+            kind=LIVE_KIND,
+            key=live_push_key(payload),
+            payload=payload,
+            request_deadline_s=request_deadline_s,
+            client_id=client_id,
+        )
+    except wcs_client.DaemonUnavailable:
+        return fallback()
+    finally:
+        wcs_client.release(host, port, token, client_id, timeout=request_deadline_s)
+
+
+def _mapping_to_observation(entry: dict) -> dict:
+    return {
+        "project": entry["project"],
+        "worktree_id": entry["worktree_id"],
+        "worktree_path": entry.get("worktree_path"),
+        "mux_session": entry["mux_session"],
+        "session_incarnation": entry.get("session_incarnation") or "",
+        "panes": list(entry.get("panes") or []),
+        "attached_clients": int(entry.get("attached_clients") or 0),
+        "live": bool(entry.get("live", True)),
+        "mapping_revision": int(entry["mapping_revision"]),
+        "observed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+
+
+def _monitor_unavailable() -> dict:
+    return {"applied": False, "reason": "monitor-unavailable"}
+
+
+def publish_live_observation(
+    entry: dict,
+    *,
+    ensure_monitor: bool = True,
+    request_deadline_s: float = LIVE_REQUEST_DEADLINE_S,
+    boot_wait_s: float = LIVE_BOOT_WAIT_S,
+) -> dict:
+    lock = _status_monitor_lock_path()
+    if lock is None:
+        return _monitor_unavailable()
+    return mux_live_with_boot(
+        read_lock_data=lambda: read_lock_data(lock),
+        ensure_monitor=_ensure_status_monitor_running if ensure_monitor else None,
+        payload=_mapping_to_observation(entry),
+        fallback=_monitor_unavailable,
+        request_deadline_s=request_deadline_s,
+        boot_wait_s=boot_wait_s,
+    )
+
+
+def register_managed_mapping(payload: dict, root: Path | None = None) -> dict:
+    ensure_daemon_running(root)
+    result = register_next_mapping(payload, root=root)
+    project = payload.get("project")
+    worktree_id = payload.get("worktree_id")
+    if result.get("applied") and isinstance(project, str) and isinstance(worktree_id, str):
+        entry = get_mapping(project, worktree_id, root=root)
+        if entry is not None:
+            publish_live_observation(entry, ensure_monitor=True)
+    return result
+
+
+def remove_managed_mapping(
+    project: str,
+    worktree_id: str,
+    *,
+    mapping_revision: int | None = None,
+    root: Path | None = None,
+) -> dict:
+    result = remove_mapping(project, worktree_id, mapping_revision=mapping_revision, root=root)
+    if result.get("applied"):
+        entry = get_mapping(project, worktree_id, root=root)
+        if entry is not None:
+            publish_live_observation(entry, ensure_monitor=True)
+    return result
 
 
 def rendezvous_fields(server: CoalescingServer) -> dict:
@@ -396,6 +605,9 @@ def build_compute(
             # same probe forever.
             if not _mux_session_alive(entry["mux_bin"], entry["mux_session"]):
                 registry.remove(project, worktree_id, mapping_revision=entry["mapping_revision"])
+                tombstone = registry.get(project, worktree_id)
+                if tombstone is not None:
+                    publish_live_observation(tombstone, ensure_monitor=False)
                 return {"applied": False, "reason": "not-live"}
 
             # Recheck immediately before the actual write (Copilot review
@@ -425,6 +637,10 @@ def build_compute(
                 registry.record_applied_render(
                     project, worktree_id, rendered_at, mapping_revision=entry["mapping_revision"]
                 )
+            if ok:
+                refreshed = registry.get(project, worktree_id)
+                if refreshed is not None:
+                    publish_live_observation(refreshed, ensure_monitor=False)
             return {"applied": ok} if ok else {"applied": False, "reason": "apply-failed"}
 
     return _compute
@@ -681,10 +897,16 @@ def _spawn_detached(argv: list[str]) -> bool:
     hook/classify servers' callers can) and is not yet on any production
     launch path (Step 2's own explicit scope). Revisit if/when Step 3 wires
     this into a UX-visible launch flow."""
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in {"GH_TOKEN", "GITHUB_TOKEN", "AGENT_WORKTREES_AHP_AUTH_TOKEN"}
+    }
     kwargs: dict = {
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,
         "stderr": subprocess.DEVNULL,
+        "env": env,
     }
     if sys.platform == "win32":
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS

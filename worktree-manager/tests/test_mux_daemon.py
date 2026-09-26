@@ -6,12 +6,14 @@ this step's own scope (see ``mux_daemon.py``'s module docstring)."""
 
 from __future__ import annotations
 
+import json
 import subprocess
 import threading
 import time
 from pathlib import Path
 
 import pytest
+from work_coalescing_singleton import CoalescingServer
 from work_coalescing_singleton import client as wcs_client
 
 from worktree_manager import mux_daemon
@@ -244,6 +246,74 @@ def test_register_and_remove_mapping_helpers(tmp_path):
     assert tombstoned["live"] is False
 
 
+def test_register_managed_mapping_auto_assigns_revision_and_publishes_live(tmp_path, monkeypatch):
+    observed = []
+    monkeypatch.setattr(mux_daemon, "ensure_daemon_running", lambda *a, **k: True)
+    monkeypatch.setattr(
+        mux_daemon,
+        "publish_live_observation",
+        lambda entry, **_kwargs: observed.append(dict(entry)) or {"applied": True},
+    )
+
+    first = _entry()
+    del first["mapping_revision"]
+    result = mux_daemon.register_managed_mapping(first, root=tmp_path)
+    assert result == {"applied": True, "revision": 1}
+
+    second = _entry(attached_clients=2)
+    del second["mapping_revision"]
+    result2 = mux_daemon.register_managed_mapping(second, root=tmp_path)
+    assert result2 == {"applied": True, "revision": 2}
+
+    assert [entry["mapping_revision"] for entry in observed] == [1, 2]
+    assert observed[-1]["attached_clients"] == 2
+
+
+def test_register_managed_mapping_allocates_revision_under_registry_lock(tmp_path, monkeypatch):
+    observed = []
+    monkeypatch.setattr(mux_daemon, "ensure_daemon_running", lambda *a, **k: True)
+    monkeypatch.setattr(
+        mux_daemon,
+        "publish_live_observation",
+        lambda entry, **_kwargs: observed.append(dict(entry)) or {"applied": True},
+    )
+    barrier = threading.Barrier(2)
+    results = [None, None]
+
+    def _worker(index: int, attached_clients: int):
+        payload = _entry(attached_clients=attached_clients)
+        del payload["mapping_revision"]
+        barrier.wait()
+        results[index] = mux_daemon.register_managed_mapping(payload, root=tmp_path)
+
+    first = threading.Thread(target=_worker, args=(0, 1))
+    second = threading.Thread(target=_worker, args=(1, 2))
+    first.start()
+    second.start()
+    first.join()
+    second.join()
+
+    revisions = {result["revision"] for result in results}
+    assert revisions == {1, 2}
+    assert mux_daemon.get_mapping("proj", "wt-1", root=tmp_path)["mapping_revision"] == 2
+
+
+def test_remove_managed_mapping_publishes_a_tombstone(tmp_path, monkeypatch):
+    observed = []
+    monkeypatch.setattr(mux_daemon, "ensure_daemon_running", lambda *a, **k: True)
+    monkeypatch.setattr(
+        mux_daemon,
+        "publish_live_observation",
+        lambda entry, **_kwargs: observed.append(dict(entry)) or {"applied": True},
+    )
+
+    mux_daemon.register_managed_mapping(_entry(), root=tmp_path)
+    result = mux_daemon.remove_managed_mapping("proj", "wt-1", root=tmp_path)
+
+    assert result == {"applied": True}
+    assert observed[-1]["live"] is False
+
+
 # ---------------------------------------------------------------------------
 # endpoint_from_rendezvous
 # ---------------------------------------------------------------------------
@@ -269,6 +339,53 @@ def test_endpoint_from_rendezvous_rejects_malformed_or_out_of_range():
         {"manager_mux_endpoint": "127.0.0.1:5555", "manager_mux_token": "t"}
     )
     assert result == ("127.0.0.1", 5555, "t")
+
+
+def test_mux_live_with_boot_waits_for_status_monitor_endpoint_after_ensure(tmp_path):
+    seen = []
+
+    def _compute(kind, payload):
+        seen.append((kind, payload))
+        return {"applied": True, "revision": payload["mapping_revision"]}
+
+    server = CoalescingServer(_compute, linger_seconds=5.0, subscriber_ttl=30.0)
+    server.start()
+    try:
+        lock = tmp_path / "status-monitor.lock"
+        rendezvous = server.rendezvous()
+
+        def _ensure():
+            def _publish():
+                time.sleep(0.05)
+                lock.write_text(
+                    json.dumps(
+                        {
+                            "managed_mux_endpoint": rendezvous["endpoint"],
+                            "managed_mux_token": rendezvous["token"],
+                            "managed_mux_generation": rendezvous["generation"],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+            threading.Thread(target=_publish, daemon=True).start()
+            return True
+
+        result = mux_daemon.mux_live_with_boot(
+            read_lock_data=lambda: mux_daemon.read_lock_data(lock),
+            ensure_monitor=_ensure,
+            payload=_entry(),
+            fallback=lambda: {"from": "fallback"},
+            boot_wait_s=1.0,
+            poll_interval_s=0.01,
+        )
+    finally:
+        server.close()
+
+    assert result == {"applied": True, "revision": 1}
+    assert len(seen) == 1
+    assert seen[0][0] == mux_daemon.LIVE_KIND
+    assert seen[0][1]["worktree_id"] == "wt-1"
 
 
 # ---------------------------------------------------------------------------
@@ -982,6 +1099,27 @@ def test_ensure_daemon_running_end_to_end_with_a_real_subprocess(tmp_path):
             proc.kill()
 
 
+def test_spawn_detached_scrubs_auth_env(monkeypatch):
+    captured = {}
+
+    def _fake_popen(argv, **kwargs):
+        captured["argv"] = argv
+        captured["env"] = dict(kwargs["env"])
+        class _Proc:
+            pass
+        return _Proc()
+
+    monkeypatch.setattr(subprocess, "Popen", _fake_popen)
+    monkeypatch.setenv("GH_TOKEN", "gh-token")
+    monkeypatch.setenv("GITHUB_TOKEN", "github-token")
+    monkeypatch.setenv("AGENT_WORKTREES_AHP_AUTH_TOKEN", "ahp-token")
+
+    assert mux_daemon._spawn_detached(["python", "-m", "worktree_manager"]) is True
+    assert "GH_TOKEN" not in captured["env"]
+    assert "GITHUB_TOKEN" not in captured["env"]
+    assert "AGENT_WORKTREES_AHP_AUTH_TOKEN" not in captured["env"]
+
+
 # ---------------------------------------------------------------------------
 # run_daemon_foreground idle-exit lifecycle
 # ---------------------------------------------------------------------------
@@ -1127,4 +1265,3 @@ def test_ensure_daemon_running_serializes_concurrent_first_callers(tmp_path, mon
 
     assert results == [True, True]
     assert 1 <= len(spawn_calls) <= 2
-

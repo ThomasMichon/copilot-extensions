@@ -4049,36 +4049,14 @@ def _monitor_sweep(
 ) -> int:
     """One coalescing pass over all live, registered ``wt-*`` sessions.
 
-    Returns the number of sessions served, or ``-1`` on a *transient* mux
-    enumeration failure (so the caller neither prunes nor idle-exits on a
-    hiccup).  For each served session it wins the ``@aw_updater`` election (so a
-    lingering per-session updater stands down), renders ``@aw_ctx`` once and
-    ``@aw_seg`` every pass -- the same renders the per-session updater did,
-    coalesced into one process.  Registry entries whose session is definitively
-    gone are pruned.
-
-    ``managed_mux_cache`` (a ``mux_link.ManagedMuxCache``, Phase 3b Slice 2
-    Sub-slice 3 Step 1) is optional and, for this step, purely additive: its
-    currently-live session names are merged into ``catalog_observer``
-    alongside the direct mux scan's own **complete** set -- but it never
-    adds an entry to ``served`` and never changes which sessions this
-    sweep writes ``set-option`` for. That writer-ownership cutover is a
-    later, separate step. This merge only happens inside the direct
-    ``mux_bin`` scan (Copilot review finding, reverting an earlier attempt
-    to also observe it standalone): ``catalog_observer``
-    (``ResidentSessionReconciler.observe_mux``) is a *complete-snapshot*
-    API -- any session name missing from the passed set is treated as
-    genuinely gone and reaped. Calling it with only the Manager-known
-    subset when no mux binary is locally discoverable would incorrectly
-    mark every *other*, ordinary session as dead too. A managed-only
-    partial view must never reach this API; a real completeness/managed-
-    scope path is a separate, later concern.
+    Returns the number of sessions served, or ``-1`` on a transient mux
+    enumeration failure. ``managed_mux_cache`` is additive-only here: its
+    currently-live session names are merged into ``catalog_observer`` only when
+    a direct mux scan is also available, so the complete-snapshot observer never
+    sees a Manager-only partial view. Serving/pruning still comes only from the
+    direct registry + mux scan; the later cutover expands that authority.
     """
-    # Stage D: resolve deferred names via _self_override (cluster-free owners).
-    from . import list_cli as _list_cli
-    from . import status_bar_cli as _status_bar_cli
-    from . import status_monitor_runtime as _smr
-    from . import status_updater_cli as _status_updater_cli
+    from . import list_cli as _list_cli, mux_status_link as _mux_status_link, status_bar_cli as _status_bar_cli, status_monitor_runtime as _smr, status_updater_cli as _status_updater_cli
 
     _monitor_list_sessions = _self_override("_monitor_list_sessions", _smr._monitor_list_sessions)
     _monitor_registry_dir = _self_override("_monitor_registry_dir", _smr._monitor_registry_dir)
@@ -4089,6 +4067,7 @@ def _monitor_sweep(
     _warm_list_cache_for_active_project = _self_override("_warm_list_cache_for_active_project", _list_cli._warm_list_cache_for_active_project)
     _render_status_segment = _self_override("_render_status_segment", _status_bar_cli._render_status_segment)
     _render_status_context = _self_override("_render_status_context", _status_bar_cli._render_status_context)
+    _publish_managed_session_status = _self_override("_publish_managed_session_status", _mux_status_link.publish_managed_session_status)
 
     reg_dir = _monitor_registry_dir()
     registry = _read_monitor_registry(reg_dir)
@@ -4146,6 +4125,7 @@ def _monitor_sweep(
             pane_observer(sess, path)
         context_value = None
         segment_value = ""
+        project = None
         _wait_for_lifecycle_priority(lifecycle_priority)
         with project_lock if project_lock is not None else contextlib.nullcontext():
             try:
@@ -4187,9 +4167,6 @@ def _monitor_sweep(
                 except Exception:
                     pass
 
-        # Win the single-instance election so any per-session updater retires,
-        # publishing our current-runtime prefix so it defers to us (not to a
-        # superseded owner) -- see cmd_status_updater's debounce.
         def _publish(option: str, value: str, session: str = sess) -> bool:
             key = (session, option)
             if published is not None and published.get(key) == value:
@@ -4199,12 +4176,31 @@ def _monitor_sweep(
                 published[key] = value
             return success
 
-        _status_monitor_recheck(governance, "pre-mutation:publish-status")
-        _publish("@aw_updater", token)
-        _publish("@aw_updater_prefix", prefix)
-        if context_value is not None and _publish("@aw_ctx", context_value):
+        values = {"@aw_updater": token, "@aw_updater_prefix": prefix, "@aw_seg": segment_value}
+        if context_value is not None:
+            values["@aw_ctx"] = context_value
+
+        manager_result = _publish_managed_session_status(
+            managed_mux_cache=managed_mux_cache,
+            project=project,
+            path=path,
+            session_name=sess,
+            values=values,
+            published=published,
+            prefix=prefix,
+            token=token,
+            resolve_worktree_id=tracking.find_worktree_id_by_cwd,
+            before_publish=lambda: _status_monitor_recheck(governance, "pre-mutation:publish-status"),
+        )
+        if manager_result is None:
+            _status_monitor_recheck(governance, "pre-mutation:publish-status")
+            _publish("@aw_updater", token)
+            _publish("@aw_updater_prefix", prefix)
+            if context_value is not None and _publish("@aw_ctx", context_value):
+                ctx_done.add(sess)
+            _publish("@aw_seg", segment_value)
+        elif manager_result.get("context_published"):
             ctx_done.add(sess)
-        _publish("@aw_seg", segment_value)
     # A pending-handoff worktree that this tick's served-pane pass never
     # observed (dormant since the last sweep, or missed by a stale project
     # scope) can still need its cutover check run -- that is the whole point

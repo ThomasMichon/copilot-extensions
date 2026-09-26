@@ -1005,30 +1005,26 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
                 aw_apply_tmux_session_options "$1" "${WORKTREE_ID:-}" || true
             fi
         }
-        # Spawn the common, in-process Python status-updater (detached). It
-        # keeps this session's @aw_ctx/@aw_seg vars fresh OFF the render path,
-        # so the bar reads #{@aw_ctx}/#{@aw_seg} with zero spawn per repaint.
-        # Safe to call on every create/join/handoff: an @aw_updater token
-        # elects a single live updater and older ones self-retire. The updater
-        # self-terminates within one interval of the session ending.
-        _aw_spawn_status_updater() {
+        # Register the Manager-owned mux mapping and immediately publish a
+        # live observation into agent-worktrees. Once that cache entry exists,
+        # the resident status-monitor routes rendered @aw_* values through
+        # Worktree Manager's daemon instead of leaving a per-session
+        # status-updater loop behind.
+        _aw_publish_managed_mux_live() {
             local sess="$1"
-            local aw; aw="$(command -v agent-worktrees 2>/dev/null || true)"
-            [[ -x "$aw" ]] || aw="$HOME/.local/bin/agent-worktrees"
-            [[ -x "$aw" ]] || return 0
-            # Capture the worktree path BEFORE the subshell cd's away.
-            local spath="${STATUS_PATH:-${WORK_DIR:-$PWD}}"
-            # Root the detached loop at $HOME, never the caller's cwd: under the
-            # sessionStart reseed hook the cwd is the plugin payload dir, and a
-            # child holding it as its cwd blocks `copilot plugin update` from
-            # replacing the payload on Windows (os error 32). Uniform on POSIX
-            # (harmless: it locates its worktree via --path).
-            ( cd "$HOME" 2>/dev/null || cd / ;
-              env -u GH_TOKEN -u GITHUB_TOKEN \
-                  -u AGENT_WORKTREES_AHP_AUTH_TOKEN \
-                  setsid "$aw" status-updater --session "$sess" --mux tmux \
-                  --path "$spath" >/dev/null 2>&1 < /dev/null & )
-            disown 2>/dev/null || true
+            local spath="$2"
+            [[ -n "$sess" && -n "${LAUNCH_PROJECT:-}" && -n "${WORKTREE_ID:-}" ]] || return 0
+            command -v uv >/dev/null 2>&1 || return 0
+            local wm_root
+            wm_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P 2>/dev/null || true)"
+            [[ -n "$wm_root" ]] || return 0
+            uv run --quiet --project "$wm_root" -m worktree_manager mux-daemon register \
+                --project="$LAUNCH_PROJECT" \
+                --worktree-id="$WORKTREE_ID" \
+                --worktree-path="$spath" \
+                --mux-session="$sess" \
+                --mux-bin=tmux >/dev/null 2>&1 \
+                || setup_log WARN "tmux: managed mux registration failed for $sess"
         }
 
         # If a tmux session already exists for this worktree, join it.
@@ -1039,7 +1035,7 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
             # Refresh per-session options on (re)connect so a long-lived
             # session picks up the current bar without us owning the global.
             _aw_apply_session_opts "$TMUX_SESS"
-            _aw_spawn_status_updater "$TMUX_SESS"
+            _aw_publish_managed_mux_live "$TMUX_SESS" "${STATUS_PATH:-${WORK_DIR:-$PWD}}"
             set +e
             if [[ -n "${TMUX:-}" ]]; then
                 tmux switch-client -t "=$TMUX_SESS"
@@ -1134,6 +1130,9 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
         fi
         if [[ -r "$PANE_WRAPPER" ]]; then
             PANE_CONTROL=(--aw-wt "${WORKTREE_ID:-}")
+            if [[ -n "${LAUNCH_PROJECT:-}" ]]; then
+                PANE_CONTROL+=(--aw-project "$LAUNCH_PROJECT")
+            fi
             if [[ -n "$AHP_TOKEN_FILE" ]]; then
                 PANE_CONTROL+=(--aw-ahp-token-file "$AHP_TOKEN_FILE")
             fi
@@ -1211,7 +1210,7 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
             activity_log mux_attached "$WORKTREE_ID" mux=create \
                 "attempts=$TMUX_CREATE_TOTAL_ATTEMPTS"
             _aw_apply_session_opts "$TMUX_SESS"
-            _aw_spawn_status_updater "$TMUX_SESS"
+            _aw_publish_managed_mux_live "$TMUX_SESS" "${STATUS_PATH:-${WORK_DIR:-$PWD}}"
             if [[ -n "${TMUX:-}" ]]; then
                 tmux switch-client -t "=$TMUX_SESS"
             else
