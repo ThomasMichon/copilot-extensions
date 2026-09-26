@@ -92,7 +92,9 @@ def _materialize_into_preview(dest: Path) -> list[str]:
     if not libs_dir.is_dir():
         return log
     svl = _load_sync_vendored_libs()
-    for lib_copy in sorted(p for p in libs_dir.iterdir() if p.is_dir()):
+    for lib_copy in sorted(
+        p for p in libs_dir.iterdir() if p.is_dir() or p.is_symlink()
+    ):
         lib = lib_copy.name
         canonical = svl.LIBS_DIR / lib
         if not canonical.is_dir():
@@ -173,13 +175,35 @@ def _materialize_into_preview(dest: Path) -> list[str]:
                 where = f"{lib}/tests" if tests_bad == "." else f"{lib}/tests/{tests_bad}"
                 log.append(f"SKIP {lib_copy}: {where} is a symlink -- refusing")
                 continue
+        # _sync_version() guards internally against a symlinked canonical
+        # or destination pyproject.toml (returning without writing), but
+        # that alone isn't enough: this code would still continue on to
+        # _copy_src() (mutating src/) and later unlink the pointer marker
+        # as though everything succeeded, leaving a pointer-free preview
+        # with an unsafe linked pyproject.toml surviving untouched.
+        # Preflight both paths here, alongside src/tests, and preserve
+        # the pointer on rejection.
+        canon_pp = canonical / "pyproject.toml"
+        copy_pp = lib_copy / "pyproject.toml"
+        if canon_pp.is_symlink():
+            log.append(f"SKIP {lib_copy}: {lib}/pyproject.toml is a symlink -- refusing")
+            continue
+        if copy_pp.is_symlink():
+            log.append(
+                f"SKIP {lib_copy}: pyproject.toml (destination) is a symlink "
+                "-- refusing to write through it blindly"
+            )
+            continue
         svl._copy_src(canonical, lib_copy)
         # svl._sync_version() guards against a symlinked canonical or
-        # destination pyproject.toml INTERNALLY (checking both
+        # destination pyproject.toml INTERNALLY too (checking both
         # src_pp.is_symlink() and pp.is_symlink() before any read/write) --
         # this is the same shared function cmd_materialize() and
-        # cmd_restore_canonical() call too, so the protection applies
-        # uniformly here without a separate check in this file.
+        # cmd_restore_canonical() call too. The preflight above still
+        # matters: _sync_version()'s own guard silently returns rather
+        # than signaling failure to this caller, so without the preflight
+        # this loop would continue past a rejected sync as though nothing
+        # were wrong.
         svl._sync_version(canonical, lib_copy)
         if refresh_tests:
             # A pointer copy MAY vendor tests/ from canonical too

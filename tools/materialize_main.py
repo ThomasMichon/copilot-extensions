@@ -400,6 +400,20 @@ def materialize_file_pointers(dest: Path, *, canonical_root: Path) -> list[str]:
     overwrites the stub's content with the canonical file's bytes in place."""
     log: list[str] = []
     for pointer_path in find_file_pointers(dest):
+        # find_file_pointers()'s own is_file() check follows a symlink, and
+        # pointer_path.write_bytes() below would follow it again -- a
+        # symlinked pointer path (or an ancestor between it and dest)
+        # would let materialization overwrite the symlink's TARGET outside
+        # the snapshot, the same class of gap already fixed for the
+        # directory-pointer path.
+        bad_ancestor = _find_symlinked_ancestor(pointer_path, dest)
+        if bad_ancestor is not None:
+            log.append(
+                f"SKIP {pointer_path} (file pointer): {bad_ancestor} is a "
+                "symlink -- refusing (a file pointer, and every ancestor "
+                "between it and dest, must be a real file/directory)"
+            )
+            continue
         source_rel = _file_pointer_source(pointer_path)
         if not Path(source_rel).is_absolute():
             unresolved_candidate = canonical_root / source_rel

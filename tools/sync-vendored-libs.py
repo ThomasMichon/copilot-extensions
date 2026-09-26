@@ -672,6 +672,28 @@ def cmd_materialize(*, force: bool) -> int:
                             "lib source must contain only real files)"
                         )
 
+                # _sync_version() guards internally against a symlinked
+                # canonical or destination pyproject.toml (returning
+                # without writing), but that alone isn't enough: this
+                # loop would still continue on to _copy_src() (mutating
+                # src/) and unlink the pointer marker below as though
+                # everything succeeded, leaving a pointer-free copy with
+                # an unsafe linked pyproject.toml surviving untouched.
+                # Preflight both paths here, alongside src/tests.
+                canon_pp = canonical / "pyproject.toml"
+                copy_pp = copy / "pyproject.toml"
+                if canon_pp.is_symlink():
+                    raise SystemExit(
+                        f"{canonical.name}/pyproject.toml is a symlink -- "
+                        "refusing (a canonical lib's metadata must be a "
+                        "real file)"
+                    )
+                if copy_pp.is_symlink():
+                    raise SystemExit(
+                        f"{copy}/pyproject.toml (destination) is a symlink "
+                        "-- refusing to write through it blindly"
+                    )
+
                 _copy_src(canonical, copy)
                 _sync_version(canonical, copy)
                 if pointer.exists():

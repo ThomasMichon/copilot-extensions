@@ -656,6 +656,32 @@ def test_materialize_skips_file_pointer_with_missing_canonical(tmp_path: Path):
     assert pointer.read_text().startswith("<!-- VENDOR_POINTER:")
 
 
+def test_materialize_refuses_a_symlinked_file_pointer(tmp_path: Path):
+    # find_file_pointers()'s own is_file() check follows a symlink, and
+    # pointer_path.write_bytes() would follow it again -- a symlinked
+    # pointer path (or an ancestor between it and dest) would let
+    # materialization overwrite the symlink's TARGET outside the
+    # snapshot, the same class of gap already fixed for the
+    # directory-pointer path.
+    root = tmp_path / "repo"
+    _canonical_file(root, "docs/patterns/thing.md", content="# Thing\n\nreal content\n")
+    victim = root.parent / "outside-victim-pointer.md"
+    victim.write_text(
+        "<!-- VENDOR_POINTER: source=docs/patterns/thing.md kind=file -->\n\n"
+        "This file is a vendored pointer; see the canonical source above.\n",
+        encoding="utf-8",
+    )
+    pointer_path = root / "plugins" / "agent-bridge" / "docs" / "thing.md"
+    pointer_path.parent.mkdir(parents=True)
+    pointer_path.symlink_to(victim)
+
+    log = mm.materialize(root, canonical_root=root)
+    assert any("SKIP" in line and "(file pointer)" in line and "is a symlink" in line
+               for line in log)
+    # Nothing was overwritten through the symlink.
+    assert victim.read_text().startswith("<!-- VENDOR_POINTER:")
+
+
 def test_materialize_refuses_absolute_source_path(tmp_path: Path):
     root = tmp_path / "repo"
     secret = tmp_path / "outside-repo-secret.txt"

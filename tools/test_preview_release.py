@@ -350,6 +350,80 @@ def test_materialize_into_preview_refuses_a_symlinked_destination_ancestor(
     assert (dest / "libs" / "shared-lib").is_symlink()
 
 
+def test_materialize_into_preview_refuses_a_dangling_destination_symlink(
+    isolated: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    # Round-17 review finding: the candidate-discovery loop only admitted
+    # entries where p.is_dir() is true -- a DANGLING (or non-directory-
+    # target) symlink at dest/libs/<lib> has is_dir()==False (it follows
+    # the link to a target that isn't there), so it was silently SKIPPED
+    # by iteration itself, never even reaching the ancestor-symlink check,
+    # and would survive untouched in the preview tree despite the
+    # surrounding code's claim that preview copies contain only real
+    # directories.
+    dest = isolated / "direct-dest"
+    (dest / "libs").mkdir(parents=True)
+    (dest / "libs" / "shared-lib").symlink_to(
+        isolated / "does-not-exist", target_is_directory=True
+    )
+
+    canonical_root = isolated / "canonical-libs"
+    canonical_lib = canonical_root / "shared-lib"
+    (canonical_lib / "src").mkdir(parents=True)
+    (canonical_lib / "src" / "__init__.py").write_text("smuggled = True\n", encoding="utf-8")
+
+    fake = _FakeSyncVendoredLibs(canonical_root)
+    monkeypatch.setattr(preview_release, "_load_sync_vendored_libs", lambda: fake)
+
+    log = preview_release._materialize_into_preview(dest)
+
+    assert any("SKIP" in line and "is a symlink" in line for line in log)
+    assert (dest / "libs" / "shared-lib").is_symlink()
+
+
+def test_materialize_into_preview_refuses_and_preserves_the_pointer_for_a_symlinked_pyproject_toml(
+    isolated: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    # Round-17 review finding: _sync_version()'s own guard only silently
+    # returns without writing, which isn't enough on its own -- without a
+    # caller-side preflight, this loop would continue on to _copy_src()
+    # (mutating src/) and unlink the pointer marker as though everything
+    # succeeded, leaving a pointer-free preview with an unsafe linked
+    # pyproject.toml surviving untouched. Exercises
+    # _materialize_into_preview() directly: build()'s own initial
+    # (dereferencing) copytree would neutralize a symlinked SOURCE
+    # pyproject.toml before this function ever saw it, so this
+    # destination-side attack shape isn't reachable through build() alone
+    # -- but the function itself must still refuse it defensively.
+    dest = isolated / "direct-dest"
+    copy_dir = dest / "libs" / "shared-lib"
+    (copy_dir / "src").mkdir(parents=True)
+    (copy_dir / "src" / "__init__.py").write_text("original stub\n", encoding="utf-8")
+    (copy_dir / "VENDOR_POINTER.json").write_text(
+        json.dumps({"schema": "copilot-extensions.vendor-pointer", "version": 1,
+                    "source": "libs/shared-lib", "kind": "src-passthrough"}) + "\n",
+        encoding="utf-8",
+    )
+    victim = isolated / "outside-victim-preview-pyproject.toml"
+    victim.write_text('[project]\nname = "victim"\nversion = "1.2.3"\n', encoding="utf-8")
+    (copy_dir / "pyproject.toml").symlink_to(victim)
+
+    canonical_root = isolated / "canonical-libs"
+    canonical_lib = canonical_root / "shared-lib"
+    (canonical_lib / "src").mkdir(parents=True)
+    (canonical_lib / "src" / "__init__.py").write_text("fresh = True\n", encoding="utf-8")
+
+    fake = _FakeSyncVendoredLibs(canonical_root)
+    monkeypatch.setattr(preview_release, "_load_sync_vendored_libs", lambda: fake)
+
+    log = preview_release._materialize_into_preview(dest)
+
+    assert any("SKIP" in line and "is a symlink" in line for line in log)
+    assert (copy_dir / "src" / "__init__.py").read_text() == "original stub\n"
+    assert victim.read_text() == '[project]\nname = "victim"\nversion = "1.2.3"\n'
+    assert (copy_dir / "VENDOR_POINTER.json").exists()
+
+
 def test_materialize_into_preview_refuses_a_canonical_lib_with_no_src_directory(
     isolated: Path, monkeypatch: pytest.MonkeyPatch,
 ):

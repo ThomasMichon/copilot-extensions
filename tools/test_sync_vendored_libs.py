@@ -215,29 +215,36 @@ def test_materialize_expands_pointer_copy_and_removes_pointer_file(repo: Path):
     assert not (repo / "plugins/alpha/libs/shared-lib/VENDOR_POINTER.json").exists()
 
 
-def test_materialize_never_syncs_version_through_a_symlinked_pyproject_toml(repo: Path):
-    # _sync_version()'s src_pp.is_symlink()/pp.is_symlink() guard: a
-    # pointer copy with pyproject.toml linked to another file (or
-    # canonical's own linked elsewhere) must never have read_text()/
-    # write_text() follow that link -- promotion must not silently read
-    # from or overwrite an arbitrary external target while updating the
-    # version.
+def test_materialize_refuses_and_preserves_the_pointer_for_a_symlinked_copy_pyproject_toml(
+    repo: Path,
+):
+    # A symlinked destination pyproject.toml is now preflighted BEFORE
+    # _copy_src() runs (round-17 review finding): _sync_version()'s own
+    # guard only silently returns without writing, which isn't enough on
+    # its own -- without the caller-side preflight, this loop would
+    # continue on to mutate src/ and unlink the pointer marker as though
+    # everything succeeded, leaving a pointer-free copy with an unsafe
+    # linked pyproject.toml surviving untouched.
     _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "canonical content\n")
     _lib_pyproject(repo, "libs/shared-lib/pyproject.toml", "0.1.0-dev5")
     _pointer(repo, "alpha", "shared-lib")
+    original = repo / "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py"
+    original.parent.mkdir(parents=True, exist_ok=True)
+    original.write_text("original stub\n", encoding="utf-8")
     victim = repo.parent / "outside-victim-copy-pyproject.toml"
     victim.write_text('[project]\nname = "victim"\nversion = "1.2.3"\n', encoding="utf-8")
     (repo / "plugins/alpha/libs/shared-lib/pyproject.toml").symlink_to(victim)
 
     result = _run(repo, "--materialize")
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "symlink" in result.stderr
 
-    # src/ still expands normally (the symlinked pyproject.toml only
-    # blocks the version-sync step, not the rest of expansion), but the
-    # victim file must be completely untouched.
-    copy_src = repo / "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py"
-    assert copy_src.read_text() == "canonical content\n"
+    # Nothing was mutated -- src/ untouched, victim untouched, pointer
+    # marker still present (this copy is still "pending", not silently
+    # published pointer-free).
+    assert original.read_text() == "original stub\n"
     assert victim.read_text() == '[project]\nname = "victim"\nversion = "1.2.3"\n'
+    assert (repo / "plugins/alpha/libs/shared-lib/VENDOR_POINTER.json").exists()
 
 
 def test_materialize_refuses_a_symlinked_canonical_lib_root(repo: Path):
