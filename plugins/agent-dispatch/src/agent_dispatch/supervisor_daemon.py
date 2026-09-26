@@ -217,6 +217,7 @@ class SupervisorDaemon:
         #: down live declared units (only a successful read that no longer lists a
         #: unit does). Empty until the first successful read.
         self._last_declared: list[dict] = []
+        self._published_declared_ids: set[str] = set()
         self._last_merge_diagnostics: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
         self._companion_controller = companion_controller
         self._runtime_materializer = runtime_materializer
@@ -368,6 +369,7 @@ class SupervisorDaemon:
         if self.declared_source is None:
             return []
         from .registrar_reconcile import declared_registrations
+        from .supervisor_daemon_registration_publish import publish_declared_registrations
 
         try:
             decls = list(self.declared_source())
@@ -375,6 +377,9 @@ class SupervisorDaemon:
             log.exception("failed to read declared profile set; keeping the last known set")
             return self._last_declared
         self._last_declared = declared_registrations(decls, machine=self.machine, env=self.env)
+        self._published_declared_ids = publish_declared_registrations(
+            self.client, self._last_declared, published_ids=self._published_declared_ids
+        )
         return self._last_declared
 
     def _overridden_off(self) -> set[str]:
@@ -414,10 +419,11 @@ class SupervisorDaemon:
         discovery layer and a later re-sync cannot quietly revive the unit (vision
         Behavior *overrides-take-precedence*). A dropped id is then wound down by the
         reconcile's stop-not-desired step."""
+        declared = self._declared()
         regs = self.client.list_registrations(
             machine=self.machine, env=self.env, include_paused=False
         )
-        declared = self._declared()
+        regs = [r for r in regs if r.get("id") not in self._published_declared_ids]
         merged = merge_registration_sources(regs, declared)
         diagnostics = (tuple(merged.deduplicated), tuple(merged.conflicts))
         if diagnostics != self._last_merge_diagnostics:

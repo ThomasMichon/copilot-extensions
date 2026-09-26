@@ -386,6 +386,172 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-26 — Guard-code fix: `_CELL_QUALIFIER` now recognizes `RUNTIME_ROOT` (narrowed after review)
+
+- Fresh guard count for `dev` head (post `agent-vault` small-findings
+  merge): 673. Investigated the prior entry's flagged "genuine guard blind
+  spot" candidate — `agent-vault`'s `runtime-gate.sh`/`.ps1` findings that
+  set service identity via a `SERVICE_SUFFIX`/`serviceSuffix` hash derived
+  from `scoped_identity_suffix "$RUNTIME_ROOT"` (the cell-specific runtime
+  root) — this time going with the guard-code-fix path (option (a) from
+  the prior entry) rather than annotation, having first confirmed
+  `RUNTIME_ROOT` is a **broadly shared, cross-plugin convention**: the
+  standard Phase 3 installation-context variable used by `agent-bridge`,
+  `agent-codespaces`, `agent-containers`, `agent-logger`, `agent-mcp`,
+  `agent-ssh`, and `agent-vault`'s `runtime-gate.sh` files, and the
+  identical `scoped_identity_suffix`/`SERVICE_SUFFIX` pattern also exists
+  in `agent-logger/scripts/runtime-gate.sh`/`.ps1`.
+- **First-pass mistake, caught by PR review (the third catch in this
+  effort's own history, after the two on the `agent-vault` `config.py`
+  PR)**: the first version of this fix added `runtime[_]?root|
+  service[_]?suffix|scoped[_]?identity[_]?suffix` to `_CELL_QUALIFIER` —
+  all three as bare, purely lexical keyword matches. The review correctly
+  flagged that `_CELL_QUALIFIER.search(code)` is a same-line lexical check
+  only (no dataflow tracing), so this would ALSO suppress a
+  **hardcoded**, non-cell-derived value merely because its variable name
+  happened to contain "service_suffix" — e.g. `SERVICE_SUFFIX='shared'`
+  interpolated into `agent-example-$SERVICE_SUFFIX.service` would produce
+  no finding at all, even though that identity is genuinely shared across
+  every cell. This is a real, narrower-than-`runtime_root` risk:
+  `RUNTIME_ROOT` is always a runtime-resolved installation-context value
+  (assigned from an explicit CLI/env argument or the installation-context
+  resolver, never a source-hardcoded literal, across every plugin using
+  the Phase 3 pattern) — the same tier of trust the guard already extends
+  to the pre-existing `installation_id`/`marketplace_id`/`cell_id`
+  keywords (see the existing `test_fixed_identity_ignores_mapping_prose_
+  and_cell_qualified_value` test, which already trusts a bare
+  `{installation_id}` interpolation lexically). `SERVICE_SUFFIX`, being a
+  **locally computed, plugin-invented** intermediate variable (not a
+  canonical Phase 3 primitive), carries no such guarantee — its
+  trustworthiness depends entirely on *how* it was derived, which a
+  same-line lexical check cannot verify. A real fix would need whole-file
+  dataflow tracing (does this specific variable's *own* assignment,
+  possibly many lines earlier, call `scoped_identity_suffix` on an
+  already-qualified argument?) — and even that breaks down for
+  `agent-vault`'s PowerShell variant, which inlines the SHA256 derivation
+  across a multi-line block with no named helper function to anchor on,
+  rather than calling a single-line function like the shell version does.
+  Building genuine cross-line/cross-language dataflow verification into
+  this guard is a disproportionate scope increase for what should be a
+  small, well-scoped fix — so rather than attempt it, **scaled back to
+  the safe subset**: keep only `runtime[_]?root` in `_CELL_QUALIFIER`
+  (case-insensitive, matching both `RUNTIME_ROOT` snake_case and
+  `$runtimeRoot` camelCase), and drop `service[_]?suffix`/`scoped[_]?
+  identity[_]?suffix` entirely. This only suppresses findings on lines
+  that directly interpolate `$RUNTIME_ROOT`/`$runtimeRoot` themselves
+  (e.g. `export AGENT_VAULT_SOCKET="$RUNTIME_ROOT/run/agent-vault.sock"`)
+  — lines that reference only `$SERVICE_SUFFIX`/`$serviceSuffix` without
+  `$RUNTIME_ROOT` on the same line remain correctly flagged, exactly
+  matching the review's own hardcoded-suffix scenario.
+- **Audited the narrowed change's full impact before finalizing**: diffed
+  the guard's `--json` output against the unmodified guard (via `git
+  checkout HEAD~1 -- tools/check-marketplace-isolation.py
+  plugins/agent-vault/scripts/runtime-gate.ps1` on the committed state,
+  not an uncommitted stash, to avoid conflating the narrowing with
+  unrelated build-artifact drift from `.egg-info/` files a local `uv
+  sync` had generated) and confirmed **zero new findings appear, only
+  removals**. Precise result: **5 findings suppressed across 2 plugins**
+  — `agent-vault` 4 (`runtime-gate.sh` lines that directly interpolate
+  `$RUNTIME_ROOT`) and `agent-logger` 1 (its `runtime-gate.ps1`'s
+  `$runtimeRoot` reference). This is meaningfully smaller than the first
+  attempt's 28, but every one of these 5 is now provably safe under the
+  same trust tier already extended to `installation_id`/`marketplace_id`/
+  `cell_id` — the remaining `SERVICE_SUFFIX`-only findings in both
+  plugins' `runtime-gate.*`/`install.*` files are correctly still
+  flagged and left for a future leg (see below).
+- **Also fixed a pre-existing, unrelated marker-placement bug** discovered
+  while investigating: `agent-vault/scripts/runtime-gate.ps1`'s existing
+  `allow legacy compatibility root` marker was on the closing `}` line of
+  an `if`/`else` expression, not on the actual flagged `Join-Path
+  $env:USERPROFILE '.agent-vault'` line two lines above — the exact same
+  same-line-marker mistake this PR-series' own review caught twice before,
+  except this one predates this effort's involvement entirely and was
+  never a "my annotation" mistake to catch via review; it simply never
+  worked. Moved the marker onto the flagged line itself (the 5th and final
+  finding in the total above).
+- Added test coverage: `tools/test_check_marketplace_isolation.py` gained
+  `test_fixed_identity_ignores_runtime_root_reference` (the safe positive
+  case — a bare `$RUNTIME_ROOT`/`$runtimeRoot` interpolation is trusted)
+  and `test_fixed_identity_still_flags_hardcoded_suffix_variable` (the
+  review's own negative case — a hardcoded `SERVICE_SUFFIX='shared'` must
+  still be flagged, proving the narrowed fix does not reintroduce the
+  gap the review caught).
+- Verified: the guard's own regression suite — 15 passed (13 pre-existing
+  + 2 new, replacing the 1 originally-added test that covered the now-
+  removed `service_suffix` behavior). `check-marketplace-isolation.py
+  --json` dropped by exactly 5 (673→668, computed against the prior
+  commit via `git checkout HEAD~1 --`, not a stash, to isolate the change
+  from unrelated `.egg-info/` build-artifact drift). `pwsh -Command
+  "[System.Management.Automation.Language.Parser]::ParseFile(...)"`
+  confirmed `runtime-gate.ps1` still parses after the marker move.
+  `python tools/run-plugin-tests.py agent-vault -k payload_invocation`:
+  9 passed, 2 skipped (the tests that reference `runtime-gate.ps1`'s
+  content). `check-docs-consistency.py` OK. `check-changefile-presence.py
+  --base origin/dev` OK — `tools/` itself needs no changefile (repo-root,
+  not vendored into any plugin's payload, per `CONTRIBUTING.md`), but the
+  `runtime-gate.ps1` marker fix does; added a `patch`-typed one for
+  `agent-vault`.
+- **Left for a future leg, now correctly still-flagged rather than
+  silently suppressed**: `agent-vault`'s remaining `runtime-gate.sh`/
+  `.ps1` `SERVICE_SUFFIX`-only findings and `agent-logger`'s equivalent
+  findings genuinely need either (a) real whole-file/cross-language
+  dataflow verification in the guard (a bigger, standalone effort, not
+  attempted here) or (b) per-line annotation once each is individually
+  confirmed to derive from a real `scoped_identity_suffix` call — do not
+  casually reach for a third option of just re-adding the keyword; that's
+  the exact mistake this entry documents catching.
+- **A third review round caught one more gap in the narrowed fix**: the
+  `runtime[_]?root` alternative was still a bare same-line lexical match,
+  so a line merely *mentioning* `RUNTIME_ROOT` as an assignment target
+  (not an actual `$RUNTIME_ROOT` dereference) — e.g.
+  `RUNTIME_ROOT='/shared'; AGENT_EXAMPLE_SYSTEMD_UNIT='agent-example.
+  service'` on one physical line — would still incorrectly suppress the
+  unrelated hardcoded identity on that same line. Fixed by requiring the
+  `$`/`${` sigil directly before the keyword (`\$\{?runtime[_]?root\b`),
+  so only a genuine variable dereference qualifies, never a bare mention
+  or an assignment target. Added
+  `test_fixed_identity_still_flags_hardcoded_runtime_root` covering
+  exactly this shape. Re-verified the real-world impact is unchanged (the
+  guard count stays at exactly 668 — all 5 originally-resolved findings
+  were genuine `$RUNTIME_ROOT`/`$runtimeRoot` dereferences, not bare
+  mentions, so tightening the match to require the sigil cost nothing).
+- **A fourth review round caught that the sigil requirement alone still
+  wasn't enough for PowerShell**: shell never sigils an assignment's LHS
+  (`RUNTIME_ROOT=...` has no `$`), but PowerShell sigils *both* reads and
+  writes (`$runtimeRoot = '...'` is itself sigiled) — so
+  `$runtimeRoot = '/shared'; $TaskName = 'Agent Example'` on one line
+  would still wrongly suppress the hardcoded `$TaskName` assignment. Fixed
+  with a negative lookahead excluding an immediately-following assignment
+  (`\$\{?runtime[_]?root\b(?!\s*=(?!=))` — rejects a trailing `= ` but
+  still allows a `==` comparison through). Added
+  `test_fixed_identity_still_flags_hardcoded_powershell_runtime_root`.
+  Re-verified the guard count is still exactly 668 (unchanged again — the
+  5 real findings were never assignment targets).
+- **A fifth review round caught a subtle regex-backtracking bug in the
+  fourth round's own fix**: the standalone `\}?` sat *before* the negative
+  lookahead, not inside it, so it was independently backtrackable — for
+  a braced PowerShell assignment (`${runtimeRoot} = '/shared'; $TaskName =
+  'Agent Example'`), the regex engine first tried consuming the `}` (the
+  lookahead then correctly failed on the assignment past it), but on
+  backtracking it tried the alternative of matching zero closing braces
+  instead, landing the lookahead's check *before* the literal `}` — where
+  `\s*=` doesn't match (since the next character is `}`, not whitespace or
+  `=`) — so the lookahead spuriously succeeded and the assignment slipped
+  through anyway. Verified this exact failure with a minimal standalone
+  Python reproduction before touching the fix (`/tmp/debug_regex.py`,
+  scratch, not committed) to confirm the mechanism, not just guess at it.
+  Fixed by moving the optional `\}?` *inside* the lookahead itself
+  (`\$\{?runtime[_]?root\b(?!\}?\s*=(?!=))`), so there is no longer a
+  separate backtrackable position between the identifier and the brace
+  check. Re-verified against all 6 known cases (braced/unbraced ×
+  assignment/dereference/no-sigil) with a standalone script before
+  re-running the real regression suite, then added
+  `test_fixed_identity_still_flags_hardcoded_braced_powershell_runtime_root`
+  to lock the fix into the guard's own suite (18 tests total: 13
+  pre-existing + 5 new across this entry's five rounds). Guard count is
+  still exactly 668 — unchanged for the fifth time in a row, since none of
+  the 5 real findings were ever braced assignment targets either.
+
 ### 2026-09-26 — `agent-vault`'s small remaining findings resolved (9 of the 44 left after `config.py`)
 
 - Fresh guard count for `dev` head (post `config.py` merge): 676, then 680

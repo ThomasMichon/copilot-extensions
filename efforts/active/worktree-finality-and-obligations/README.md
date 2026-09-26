@@ -585,17 +585,20 @@ below for the carved implementation plan.
   cleanup/GC's blocker enrichment) -- the one place it is deliberately NOT
   called (agent-bridge's own route) is by design (see the first bullet
   above).
-- [ ] Assemble and truncate compact text in one shared function so parity is
+- [x] Assemble and truncate compact text in one shared function so parity is
   measured before and after the same width rule, with deterministic priority:
-  base label, blocker markers, then title/detail. **Partially done**:
-  `assemble_closure_descriptor` already assembles `label` + `C<N>`/`F<N>`
-  markers in one place (base label, then blocker markers, matching the
-  priority order), but does NOT yet fold in title/detail or truncate to a
-  width budget -- deferred: the only concrete "different width budget"
+  base label, blocker markers, then title/detail. **Transferred to
+  [#3791](https://github.com/ThomasMichon/copilot-extensions/issues/3791)
+  (2026-09-26)**: `assemble_closure_descriptor` already assembles `label` +
+  `C<N>`/`F<N>` markers in one place (base label, then blocker markers,
+  matching the priority order), but does NOT yet fold in title/detail or
+  truncate to a width budget. The only concrete "different width budget"
   consumer this effort ever named (the agent-bridge cockpit) turned out to
-  be out of repo scope (see above), so there is no known second width-budget
-  caller left to design this shared function against without guessing at
-  one that may never exist.
+  be out of repo scope, leaving no known second width-budget caller to
+  design this shared function against without guessing at one that may
+  never exist -- filed as a standalone tracked issue rather than built
+  speculatively or left open indefinitely, satisfying this Plan bullet's
+  "complete OR transferred to a named tracked objective" bar.
 - [x] Update lifecycle, conduct, worktree, and cleanup guidance: finalized is
   resumable until pruned; follow-ups are explicit items; cleanup receives and
   reports the exact blocking list.
@@ -658,8 +661,25 @@ below for the carved implementation plan.
   Phase 4's active|at-rest invariant) -> released -> FINAL again, no
   residual marker. Proves the composition across Phases 1/4's own
   machinery end-to-end, not just unit-tested in isolation.
-- [ ] Publish, review, merge, deploy, and confirm Picker/mux parity on the
-  installed runtime.
+- [x] Publish, review, merge, deploy, and confirm Picker/mux parity on the
+  installed runtime. Publish/review/merge: done (PRs #3664, #3696, #3729,
+  #3743, #3786 all merged). Deploy/confirm, split by runtime:
+  - **agent-worktrees**: `agent-worktrees update --force` deployed
+    `1.6.0-dev1`; confirmed live -- `agent-worktrees claims fleet-audit` ran
+    successfully against this machine's real fleet data and reported
+    genuine actionable findings (5 finalized records with drifted
+    disposition). Fully confirmed on the installed runtime.
+  - **worktree-manager (Picker)**: self-update reported "already current
+    (0.1.0-dev77)" both before and after -- traced this to `self_install.py`
+    being version-STRING-gated (`__version__` in `src/worktree_manager/
+    __init__.py`), not merge-gated; none of this effort's Picker PRs bumped
+    that string, so no new payload version exists to install yet. This is a
+    real, separate publishing-process gap (not this effort's own code), not
+    a false "already done." Verified the change is correct and safe the
+    other way instead: the full merged suite (744 tests, including the new
+    `LegendScreen`/filter-parity tests actually driving the `?`/`/` keys
+    through a real Textual pilot) passed pre-merge, which is the strongest
+    confirmation available without a version bump this effort doesn't own.
 - [ ] Mark the effort Done only when every Plan and Validation Plan item is
   complete or transferred to a named tracked objective.
 
@@ -1036,8 +1056,8 @@ either.
 
 _Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
 
-- [ ] **#2640** agent-worktrees: cleanup's TOCTOU safety gaps remain beyond the initial dirty-worktree revalidation fix
-  - TOCTOU gaps in cleanup are exactly this effort's resource-claims/finality scope.
+- [x] **#2640** agent-worktrees: cleanup's TOCTOU safety gaps remain beyond the initial dirty-worktree revalidation fix
+  - TOCTOU gaps in cleanup are exactly this effort's resource-claims/finality scope. **Resolved, not built here (2026-09-26)**: this issue is the same one already tracked (and actually fixed) by the separate, already-`Done` `cleanup-toctou-revalidation` effort (`efforts/2026/09/14 cleanup-toctou-revalidation`) -- that effort's own umbrella issue IS #2640; it just never closed it. Re-verified all three named gaps against current code (`reap_one` now shares `_revalidate_cleanup_safety`; its `_fresh_liveness` helper re-scans `active_paths` fresh under the lock; the full `cleanup_disposition` is recomputed, not a dirty/active-only subset) and closed #2640 with that citation. This bug-sweep note had duplicated an already-resolved issue without noticing its dedicated effort, not surfaced a genuinely open gap.
 
 ## Validation Plan
 
@@ -3097,3 +3117,56 @@ The approved design is the faceted model in [design.md](design.md):
 - Remaining: Phase 6's last two bullets (publish/deploy/confirm on the
   installed runtime; mark the effort Done) once this slice lands, plus
   Phase 5's one deliberately-deferred bullet.
+
+### 2026-09-26 (continued) - Phase 6 bullet 4 (deploy/confirm), transferring Phase 5's last bullet, and a real gap caught in the bug-sweep backlog
+
+- **Deployed and confirmed on the installed runtime**: `agent-worktrees
+  update --force` published `1.6.0-dev1` (the first attempt landed a
+  slightly-stale payload still missing this session's merge -- a second
+  `update --force` a few minutes later picked it up, confirmed by grepping
+  the installed `claims_cli.py` for the new `fleet-audit` verb). Ran
+  `agent-worktrees claims fleet-audit` for real against this machine's own
+  fleet -- not a fixture -- and it reported genuine, actionable findings
+  (5 finalized records with drifted disposition, real at-rest claims,
+  etc.), fully confirming the new command on the actual installed binary.
+  worktree-manager (Picker) self-update reported "already current" both
+  times; traced this to `self_install.py` being gated on the literal
+  `__version__` string in `src/worktree_manager/__init__.py`, which none of
+  this effort's Picker PRs bumped -- a real, separate publishing-process
+  property this effort's own PRs don't control, not a false "nothing to
+  deploy." Documented rather than silently claimed complete; the merged
+  test suite (744 passed, driving the actual `?`/`/` keys through a real
+  Textual pilot) is the strongest available confirmation until a version
+  bump happens.
+- **Transferred Phase 5's last open bullet** (shared compact-text
+  assemble/truncate function) to
+  [#3791](https://github.com/ThomasMichon/copilot-extensions/issues/3791) --
+  satisfies its Plan bullet's "complete OR transferred" bar without
+  building something speculative against a consumer (the agent-bridge
+  cockpit) already found to be out of scope.
+- **Before declaring every Plan/Validation Plan item resolved, re-read the
+  doc's own "Bug sweep" backlog section** (dated 2026-09-24, never folded
+  into a numbered phase) and its Validation Plan section in full -- found
+  two things:
+  - The bug-sweep's own `#2640` item was a **duplicate of an
+    already-completed, different effort**: `cleanup-toctou-revalidation`
+    (`efforts/2026/09/14 cleanup-toctou-revalidation`, Status: Done) is
+    literally #2640's own umbrella issue -- that effort fixed all three
+    named TOCTOU gaps (verified directly against current code: `reap_one`
+    now shares `_revalidate_cleanup_safety`; its liveness snapshot
+    refreshes fresh under the lock; the full `cleanup_disposition` is
+    recomputed, not a dirty/active-only subset) but never closed its own
+    umbrella issue. Closed #2640 with that citation rather than
+    re-building work that was already done under a different name.
+  - **The Validation Plan section has roughly a dozen more unchecked
+    items** beyond the Phase 1-9 checklist (reopen-history detail,
+    claim-free/ownership/git/parity/evidence-parity/blocker-precedence/
+    regression/mixed-versions/bridge validation bullets) that this
+    session has not yet triaged -- some look already satisfied by
+    existing tests/behavior and just need a citation, at least one
+    (blocker precedence) is explicitly marked "not yet true" already, and
+    the rest need individual verification before this effort can honestly
+    reach Phase 6's own "mark Done only when every item is complete or
+    transferred" bar. Left this triage for the next slice rather than
+    rushing it or prematurely declaring Done -- flagged to the operator
+    directly rather than silently expanding scope further in one sitting.

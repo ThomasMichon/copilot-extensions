@@ -103,6 +103,54 @@ def test_expired_deadline_raises_unavailable_without_blocking_owner():
         server.close()
 
 
+def test_owner_own_deadline_is_enforced_after_compute_completes():
+    """Copilot review finding: the owner path never checked its own
+    ``deadline`` after ``_compute`` finished, so a slow computation could
+    run past the caller's request budget and still return a (late) result
+    to the owner -- unlike a joiner, which is already deadline-bound via
+    ``event.wait(timeout=remaining)``. A joiner with a *longer* deadline
+    must still get the real (completed) result even though the owner's own
+    call raises ``Unavailable``."""
+    release = threading.Event()
+
+    def compute(kind, payload):
+        release.wait(timeout=5)
+        return {"ok": True}
+
+    server = CoalescingServer(compute, linger_seconds=0.1)
+    try:
+        owner_result: dict = {}
+        owner_error: dict = {}
+
+        def owner():
+            try:
+                owner_result["r"] = server.handle_request("k", "slow", {}, time.time() + 0.1)
+            except Unavailable:
+                owner_error["hit"] = True
+
+        t = threading.Thread(target=owner)
+        t.start()
+        time.sleep(0.05)  # let the owner register as the in-flight owner first
+
+        def releaser():
+            # Fires well after the owner's own 0.1s deadline has elapsed,
+            # but well before the joiner's 5s one -- proving the owner sees
+            # Unavailable while the joiner still gets the real result.
+            time.sleep(0.2)
+            release.set()
+
+        threading.Thread(target=releaser).start()
+
+        joiner_result = server.handle_request("k", "slow", {}, time.time() + 5)
+        assert joiner_result == {"ok": True}
+
+        t.join(timeout=2)
+        assert owner_error.get("hit") is True
+        assert "r" not in owner_result
+    finally:
+        server.close()
+
+
 def test_compute_error_is_raised_to_every_joiner():
     gate = threading.Event()
 
