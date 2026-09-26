@@ -133,10 +133,42 @@ def materialize(dest: Path, *, canonical_root: Path) -> list[str]:
                 "(a canonical lib source must contain only real files)"
             )
             continue
+
+        # A DRY-pointer copy MAY vendor tests/ from canonical the same way
+        # (--pointerize) -- refresh it here too if the copy already carries
+        # one, otherwise a canonical test change after pointerizing leaves
+        # this copy's tests/ stale and promotion would silently snapshot
+        # that stale tree into main. Gated on the copy ALREADY having a
+        # tests/ dir (not merely on canonical having one): --pointerize
+        # records a deliberate choice per copy, and promotion must respect
+        # "this copy chose not to vendor tests/" rather than unilaterally
+        # introducing one a copy never had. Only ever done for a pointer
+        # copy (this whole branch is the pointer-expansion path) -- a real
+        # copy's own tests/ is never touched by this function at all.
+        dst_tests_sub = lib_copy_dir / "tests"
+        tests_sub = canonical / "tests"
+        if dst_tests_sub.is_dir():
+            tests_symlink_found = _find_symlink(tests_sub)
+            if tests_symlink_found is not None:
+                where = (
+                    f"{source_rel}/tests" if tests_symlink_found == "."
+                    else f"{source_rel}/tests/{tests_symlink_found}"
+                )
+                log.append(
+                    f"SKIP {lib_copy_dir}: {where} is a symlink -- refusing "
+                    "(a canonical lib source must contain only real files)"
+                )
+                continue
+
         if dst_sub.exists():
             shutil.rmtree(dst_sub)
         if src_sub.is_dir():
             shutil.copytree(src_sub, dst_sub)
+
+        if dst_tests_sub.is_dir():
+            shutil.rmtree(dst_tests_sub)
+            if tests_sub.is_dir():
+                shutil.copytree(tests_sub, dst_tests_sub)
 
         canon_pp = canonical / "pyproject.toml"
         copy_pp = lib_copy_dir / "pyproject.toml"

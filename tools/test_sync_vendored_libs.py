@@ -229,6 +229,44 @@ def test_materialize_pointer_copy_is_never_blocked_by_drift_gate(repo: Path):
     assert "Refused to materialize" not in result.stderr
 
 
+def test_materialize_refreshes_a_pointer_copys_stale_tests_directory(repo: Path):
+    # A pointer copy vendors tests/ from canonical at --pointerize time;
+    # --materialize must refresh it too, or a canonical test change after
+    # pointerizing leaves the copy running (and eventually shipping) a
+    # stale tests/ tree.
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "canonical content\n")
+    _write(repo, "libs/shared-lib/tests/test_thing.py", "def test_it():\n    pass\n")
+    _lib_pyproject(repo, "libs/shared-lib/pyproject.toml", "0.1.0-dev5")
+    _pointer(repo, "alpha", "shared-lib")
+    _write(repo, "plugins/alpha/libs/shared-lib/tests/test_thing.py",
+           "def test_it():\n    assert False  # stale\n")
+
+    result = _run(repo, "--materialize")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    refreshed = repo / "plugins/alpha/libs/shared-lib/tests/test_thing.py"
+    assert refreshed.read_text() == "def test_it():\n    pass\n"
+
+
+def test_materialize_never_touches_a_real_copys_own_tests_directory(repo: Path):
+    # tests/ refresh is scoped to pointer copies only -- a real copy's own
+    # tests/ may be independently authored per plugin and must not be
+    # silently overwritten.
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "shared = 1\n")
+    _write(repo, "libs/shared-lib/tests/test_thing.py", "def test_it():\n    pass\n")
+    _lib_pyproject(repo, "libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+    _write(repo, "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py", "shared = 1\n")
+    _write(repo, "plugins/alpha/libs/shared-lib/tests/test_thing.py",
+           "def test_it():\n    assert True  # plugin-specific\n")
+    _lib_pyproject(repo, "plugins/alpha/libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+
+    result = _run(repo, "--materialize")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    untouched = repo / "plugins/alpha/libs/shared-lib/tests/test_thing.py"
+    assert untouched.read_text() == "def test_it():\n    assert True  # plugin-specific\n"
+
+
 # --- src-passthrough vendor pointers (working real-Python forwarding) ---
 
 def _seed_canonical_lib(repo: Path, lib: str, *, version: str, content: str) -> Path:

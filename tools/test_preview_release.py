@@ -110,6 +110,13 @@ class _FakeSyncVendoredLibs:
             shutil.rmtree(dst)
         shutil.copytree(src_lib / "src", dst)
 
+    def _copy_tests(self, src_lib: Path, dst_lib: Path) -> None:
+        src, dst = src_lib / "tests", dst_lib / "tests"
+        if dst.exists():
+            shutil.rmtree(dst)
+        if src.is_dir():
+            shutil.copytree(src, dst)
+
     def _sync_version(self, src_lib: Path, dst_lib: Path) -> None:
         pass
 
@@ -177,6 +184,44 @@ def test_materialize_into_preview_bypasses_drift_check_for_a_pointer_copy(
     # The now-superseded pointer marker must not survive materialization --
     # the preview must be a fully real, no-pointer-remaining copy.
     assert not (lib_dest / "VENDOR_POINTER.json").exists()
+
+
+def test_materialize_into_preview_refreshes_a_pointer_copys_stale_tests(
+    isolated: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    # A pointer copy vendors tests/ from canonical too; the preview build
+    # must refresh it the same way it refreshes src/, matching
+    # materialize_main.py's own promotion-time expansion.
+    plugin_dir = _plugin(isolated, "agent-worktrees", "1.0.0")
+    pointer_copy = plugin_dir / "libs" / "shared-lib"
+    (pointer_copy / "src").mkdir(parents=True)
+    (pointer_copy / "src" / "__init__.py").write_text("stub = True\n", encoding="utf-8")
+    (pointer_copy / "tests").mkdir(parents=True)
+    (pointer_copy / "tests" / "test_thing.py").write_text(
+        "def test_it():\n    assert False  # stale\n", encoding="utf-8"
+    )
+    (pointer_copy / "VENDOR_POINTER.json").write_text(
+        json.dumps({"schema": "copilot-extensions.vendor-pointer", "version": 1,
+                    "source": "libs/shared-lib", "kind": "src-passthrough"}) + "\n",
+        encoding="utf-8",
+    )
+
+    canonical_root = isolated / "canonical-libs"
+    canonical_lib = canonical_root / "shared-lib"
+    (canonical_lib / "src").mkdir(parents=True)
+    (canonical_lib / "src" / "__init__.py").write_text("fresh = True\n", encoding="utf-8")
+    (canonical_lib / "tests").mkdir(parents=True)
+    (canonical_lib / "tests" / "test_thing.py").write_text(
+        "def test_it():\n    pass\n", encoding="utf-8"
+    )
+
+    fake = _FakeSyncVendoredLibs(canonical_root)
+    monkeypatch.setattr(preview_release, "_load_sync_vendored_libs", lambda: fake)
+
+    dest = preview_release.build("agent-worktrees", isolated / "work")
+
+    refreshed = dest / "libs" / "shared-lib" / "tests" / "test_thing.py"
+    assert refreshed.read_text() == "def test_it():\n    pass\n"
 
 
 def test_materialize_into_preview_still_respects_drift_check_for_a_real_copy(

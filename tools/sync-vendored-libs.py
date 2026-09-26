@@ -129,6 +129,7 @@ at promotion time.
 from __future__ import annotations
 
 import importlib.util
+import shutil
 import sys
 from pathlib import Path
 
@@ -162,6 +163,21 @@ if not _canonical_init.is_file():
     raise ImportError(
         __name__ + ": canonical source not found at " + str(_canonical_init)
     )
+
+# Guard against a stale __pycache__ hit (copilot-extensions#3802): CPython's
+# default SourceFileLoader validates a cached .pyc by source mtime + size,
+# which a filesystem with coarse mtime resolution can satisfy even when the
+# source content genuinely changed between two edits -- silently serving
+# old bytecode for canonical's __init__.py AND every nested submodule this
+# stub's own submodule_search_locations exposes (e.g. client.py/server.py),
+# defeating this whole mechanism's "editing canonical takes effect
+# immediately" guarantee. Clearing canonical's own __pycache__ here forces
+# a fresh compile on every process that imports this stub -- this stub
+# only ever runs in a full dev-branch checkout (never shipped), so the
+# small recompute cost is a non-issue.
+_pycache = _canonical_pkg_dir / "__pycache__"
+if _pycache.is_dir():
+    shutil.rmtree(_pycache, ignore_errors=True)
 
 # Standard "self-replacing module" technique: CPython's import machinery
 # re-fetches ``sys.modules[name]`` AFTER this file's own exec finishes (see
@@ -307,6 +323,24 @@ def _copy_src(src_lib: Path, dst_lib: Path) -> None:
         shutil.copytree(src, dst)
 
 
+def _copy_tests(src_lib: Path, dst_lib: Path) -> None:
+    """Copy ``src_lib``'s ``tests/`` into ``dst_lib``, the same way
+    ``_copy_src`` copies ``src/``. Used by ``--pointerize`` (always run,
+    introducing ``tests/`` fresh whenever canonical has one) and by
+    callers refreshing an ALREADY-vendored pointer copy's ``tests/`` (who
+    must gate the call on ``dst_lib``'s own ``tests/`` already existing
+    themselves -- see ``cmd_materialize()`` -- since ``--pointerize``
+    records a deliberate per-copy choice about whether to vendor
+    ``tests/`` at all, and refreshing must never unilaterally introduce
+    one a copy never had). Never used for a real (non-pointer) copy's own,
+    possibly independently authored ``tests/``."""
+    src, dst = src_lib / "tests", dst_lib / "tests"
+    if dst.exists():
+        shutil.rmtree(dst)
+    if src.is_dir():
+        shutil.copytree(src, dst)
+
+
 def _sync_version(src_lib: Path, dst_lib: Path) -> None:
     version = _declared_version(src_lib)
     if version is None:
@@ -433,6 +467,19 @@ def cmd_materialize(*, force: bool) -> int:
             _sync_version(canonical, copy)
             pointer = copy / POINTER_NAME
             if pointer.exists():
+                # Only refresh a DRY-pointer copy's tests/, and only if it
+                # already carries one -- it was vendored from canonical at
+                # --pointerize time as a deliberate per-copy choice, and
+                # would otherwise go stale on every later canonical test
+                # change, with promotion silently snapshotting the stale
+                # tree into main. A copy that never carried tests/ (its
+                # --pointerize chose not to vendor it, e.g. because its
+                # only consumer never discovers libs/*/tests/) must not
+                # gain one unilaterally just because canonical has one. A
+                # real copy's own tests/ may be independently authored and
+                # is left untouched regardless.
+                if (copy / "tests").is_dir():
+                    _copy_tests(canonical, copy)
                 pointer.unlink()
         print(f"{lib}: materialized into {len(paths)} copy/copies from canonical")
     if blocked:
@@ -499,9 +546,7 @@ def _write_passthrough_pointer(consumer: str, lib: str) -> Path:
     # such a consumer, not just leave a comparison out of scope). Vendor it
     # from canonical the same DRY way src/ already is, rather than deleting
     # it or leaving whatever the pre-conversion copy happened to have.
-    canon_tests = canonical / "tests"
-    if canon_tests.is_dir():
-        shutil.copytree(canon_tests, copy_dir / "tests")
+    _copy_tests(canonical, copy_dir)
 
     pkg_dir = copy_dir / "src" / pkg
     pkg_dir.mkdir(parents=True)

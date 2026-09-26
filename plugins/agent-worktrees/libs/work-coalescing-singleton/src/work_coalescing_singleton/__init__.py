@@ -15,6 +15,7 @@ at promotion time.
 from __future__ import annotations
 
 import importlib.util
+import shutil
 import sys
 from pathlib import Path
 
@@ -48,6 +49,21 @@ if not _canonical_init.is_file():
     raise ImportError(
         __name__ + ": canonical source not found at " + str(_canonical_init)
     )
+
+# Guard against a stale __pycache__ hit (copilot-extensions#3802): CPython's
+# default SourceFileLoader validates a cached .pyc by source mtime + size,
+# which a filesystem with coarse mtime resolution can satisfy even when the
+# source content genuinely changed between two edits -- silently serving
+# old bytecode for canonical's __init__.py AND every nested submodule this
+# stub's own submodule_search_locations exposes (e.g. client.py/server.py),
+# defeating this whole mechanism's "editing canonical takes effect
+# immediately" guarantee. Clearing canonical's own __pycache__ here forces
+# a fresh compile on every process that imports this stub -- this stub
+# only ever runs in a full dev-branch checkout (never shipped), so the
+# small recompute cost is a non-issue.
+_pycache = _canonical_pkg_dir / "__pycache__"
+if _pycache.is_dir():
+    shutil.rmtree(_pycache, ignore_errors=True)
 
 # Standard "self-replacing module" technique: CPython's import machinery
 # re-fetches ``sys.modules[name]`` AFTER this file's own exec finishes (see

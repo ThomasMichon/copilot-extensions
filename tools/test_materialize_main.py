@@ -49,6 +49,46 @@ def test_materialize_expands_pointer_from_canonical(tmp_path: Path):
     assert '"0.1.0-dev5"' in pp
 
 
+def test_materialize_expands_canonical_tests_alongside_src(tmp_path: Path):
+    # A pointer copy vendors tests/ from canonical too (--pointerize) --
+    # promotion-time expansion must refresh it the same way it refreshes
+    # src/, otherwise a canonical test change after pointerizing would ship
+    # a stale tests/ tree into main.
+    root = tmp_path / "repo"
+    canonical = _canonical_lib(root, "zdd", version="0.1.0-dev5", content="real = True\n")
+    (canonical / "tests").mkdir(parents=True)
+    (canonical / "tests" / "test_zdd.py").write_text("def test_it():\n    pass\n",
+                                                       encoding="utf-8")
+    pointer_dir = _pointer(root, "agent-bridge", "zdd")
+    # The pointer copy's own (now-stale) tests/ predates the canonical edit.
+    (pointer_dir / "tests").mkdir(parents=True)
+    (pointer_dir / "tests" / "test_zdd.py").write_text("def test_it():\n    assert False\n",
+                                                        encoding="utf-8")
+
+    mm.materialize(root, canonical_root=root)
+
+    refreshed = pointer_dir / "tests" / "test_zdd.py"
+    assert refreshed.read_text() == "def test_it():\n    pass\n"
+
+
+def test_materialize_never_introduces_tests_a_copy_never_vendored(tmp_path: Path):
+    # A pointer copy that deliberately never vendored tests/ (--pointerize
+    # chose not to, or a copy was pointerized before tests/ vendoring
+    # existed) must not gain one unilaterally just because canonical has
+    # one -- introducing new content beyond what a copy already committed
+    # to is out of scope for a refresh.
+    root = tmp_path / "repo"
+    canonical = _canonical_lib(root, "zdd", version="0.1.0-dev5", content="real = True\n")
+    (canonical / "tests").mkdir(parents=True)
+    (canonical / "tests" / "test_zdd.py").write_text("def test_it():\n    pass\n",
+                                                       encoding="utf-8")
+    pointer_dir = _pointer(root, "agent-bridge", "zdd")  # no local tests/ at all
+
+    mm.materialize(root, canonical_root=root)
+
+    assert not (pointer_dir / "tests").exists()
+
+
 def test_materialize_skips_missing_canonical(tmp_path: Path):
     root = tmp_path / "repo"
     _pointer(root, "agent-bridge", "ghost-lib")  # no libs/ghost-lib/ exists
@@ -245,6 +285,31 @@ def test_materialize_refuses_a_symlinked_src_root(tmp_path: Path):
     )
     (lib_dir / "src").symlink_to(secret, target_is_directory=True)
     pointer_dir = _pointer(root, "agent-bridge", "zdd")
+
+    log = mm.materialize(root, canonical_root=root)
+
+    assert any("SKIP" in line and "is a symlink" in line for line in log)
+    assert (pointer_dir / "VENDOR_POINTER.json").exists()
+    assert not (pointer_dir / "src").exists()
+
+
+def test_materialize_refuses_a_symlinked_tests_root(tmp_path: Path):
+    # The tests/ refresh added alongside src/ needs the same symlink
+    # containment guarantee -- a canonical lib whose tests/ is a symlink
+    # (or contains one) must not let shutil.copytree leak external content.
+    # The tests/ refresh only runs at all when the copy already vendors
+    # tests/ (see the "gated on the copy already having tests/" design), so
+    # this test seeds the copy with one before exercising the symlink path.
+    root = tmp_path / "repo"
+    secret = tmp_path / "outside-repo-secret-tests"
+    secret.mkdir()
+    (secret / "leaked.txt").write_text("do not leak\n", encoding="utf-8")
+    canonical = _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
+    (canonical / "tests").symlink_to(secret, target_is_directory=True)
+    pointer_dir = _pointer(root, "agent-bridge", "zdd")
+    (pointer_dir / "tests").mkdir(parents=True)
+    (pointer_dir / "tests" / "test_zdd.py").write_text("def test_it():\n    pass\n",
+                                                        encoding="utf-8")
 
     log = mm.materialize(root, canonical_root=root)
 

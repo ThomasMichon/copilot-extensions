@@ -115,8 +115,20 @@ def _materialize_into_preview(dest: Path) -> list[str]:
             if reason:
                 log.append(reason)
                 continue
+        is_pointer = svl._is_pointer_copy(lib_copy)
         svl._copy_src(canonical, lib_copy)
         svl._sync_version(canonical, lib_copy)
+        if is_pointer and (lib_copy / "tests").is_dir():
+            # A pointer copy MAY vendor tests/ from canonical too
+            # (--pointerize); refresh it here as well if it already
+            # carries one, otherwise a preview built after a canonical
+            # test change would still show the pointer's now-stale tests/
+            # -- matching materialize_main.py's own promotion-time
+            # expansion. Gated on the copy already having tests/ so a
+            # pointer copy that deliberately never vendored it doesn't
+            # gain one unilaterally. Never done for a real copy's own
+            # (possibly independently authored) tests/.
+            svl._copy_tests(canonical, lib_copy)
         pointer = lib_copy / svl.POINTER_NAME
         if pointer.exists():
             pointer.unlink()
