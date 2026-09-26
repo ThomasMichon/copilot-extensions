@@ -50,14 +50,14 @@ surface it's applied to.
 
 A second, distinct requirement from the same request: unlike a Markdown doc
 pointer (whose stub is inert, human-readable text — nobody executes a doc),
-a **script** pointer (`install.sh`/`install.ps1` and similar) must remain
-**runnable in `dev`** without a materialize/preview step first, so in-place
-testing keeps working. This likely needs a new pointer *kind* beyond the
-existing directory/file forms — an executable stub that calls across
-plugin-folder boundaries into the canonical engine at dev-time, expanded to a
-fully self-contained inlined copy only when `materialize_main.py` builds the
-release `main` sees (never resolved across folders in what ships, matching
-`docs/install-contract.md`'s existing "no shared install module resolved at
+a **script** pointer must remain **runnable in `dev`** without a
+materialize/preview step first, so in-place testing keeps working. This
+likely needs a new pointer *kind* beyond the existing directory/file
+forms — an executable stub that calls across plugin-folder boundaries into
+the canonical engine at dev-time, expanded to a fully self-contained inlined
+copy only when `materialize_main.py` builds the release `main` sees (never
+resolved across folders in what ships, matching `docs/install-contract.md`'s
+existing "no shared install module resolved at
 install or runtime" constraint for the *shipped* artifact — this effort does
 not relax that constraint, only what `dev`'s authoring-time form looks like
 beneath it).
@@ -109,18 +109,25 @@ Repo: `ThomasMichon/copilot-extensions`.
   this effort's Phase 1.
 - **`efforts/active/vendored-installer-engine`** (Active, Draft) — a
   parallel, independently-scoped effort collapsing every `agent-*` plugin's
-  installer entrypoint (`install.ps1`/`.sh` or `init.ps1`/`.sh`) into one
-  canonical engine. Explicitly **decided against** a git-fetch bootstrap in
-  favor of byte-vendoring (see its own "Design decision" Journal entries),
+  installer entrypoint (`install.ps1`/`.sh` or `init.ps1`/`.sh`) into a
+  **shared engine** (`scripts/installer-engine.{sh,ps1}` — the byte-
+  identical, non-varying mechanics) plus a **thin per-service
+  wrapper/config** that stays genuinely per-plugin (launch command,
+  capability flags, sibling installs — never collapsed; see that effort's
+  own README, "Scale" and Phase 0/1 sections). Explicitly **decided
+  against** a git-fetch bootstrap in favor of byte-vendoring the shared
+  engine specifically (see its own "Design decision" Journal entries),
   citing the same install-contract constraint this effort's script-pointer
-  design must also respect — but its chosen *mechanism* for keeping vendored
-  copies in sync is `tools/sync-installer-engine.py --check` (a drift
-  detector: copies can go stale until CI catches it), not a pointer stub
-  (drift structurally impossible on `dev`). This effort's Phase 2 evaluates
-  whether that effort's canonical engine, once it lands, should be
-  re-expressed as a pointer instead of a byte-copy — coordinate with that
-  effort's own driver before changing its chosen mechanism out from under
-  it; do not silently fork its design.
+  design must also respect — but its chosen *mechanism* for keeping the
+  engine's vendored copies in sync is `tools/sync-installer-engine.py
+  --check` (a drift detector: copies can go stale until CI catches it), not
+  a pointer stub (drift structurally impossible on `dev`). This effort's
+  Phase 2 scopes the new executable pointer kind to that same shared-engine
+  surface only — never the per-plugin wrapper/config, which must keep
+  varying by plugin — and evaluates whether the engine, once it lands,
+  should be re-expressed as a pointer instead of a byte-copy; coordinate
+  with that effort's own driver before changing its chosen mechanism out
+  from under it, and do not silently fork its design.
 - **`docs/install-contract.md`** — the governing constraint both this effort
   and `vendored-installer-engine` must keep satisfying: the *shipped*
   payload is completely self-contained, with nothing resolved from a
@@ -214,6 +221,18 @@ shape before committing to a design)_
       case through `_resolve_within()` (or an equivalent containment check)
       before Phase 1 converts any real lib, and add the same validation to
       whichever guard the item above builds.
+- [ ] **Promotion must fail closed on any unresolved pointer, not just log
+      it** (confirmed in review — `materialize()` reports a missing or
+      escaping `source` as a `SKIP` log line, but
+      `promote_release.consume_pending_changes()` captures that
+      `materialize_log` in its return value and never inspects it for a
+      failure marker; a malformed/unavailable pointer would currently ride
+      straight through into the shipped `main` snapshot as an unexpanded
+      stub). Make `consume_pending_changes()` (or its caller) raise/abort
+      promotion when `materialize_log` contains any `SKIP` or the
+      containment check above rejects a source — an unresolved pointer must
+      block the promotion commit, never merely appear in a log nobody
+      reads.
 - [ ] **`preview_release.py` cannot currently build a scratch install for a
       pointerized lib** (confirmed in review — `_materialize_into_preview()`
       calls `sync_vendored_libs._materialize_blocked()`, which treats a
@@ -230,15 +249,23 @@ shape before committing to a design)_
       (`tools/run-plugin-tests.py <plugin>`) still passes post-conversion,
       using the dev-time resolver design from the first item above.
 
-### Phase 2 — Executable (script) pointer kind for install.sh/install.ps1
+### Phase 2 — Executable (script) pointer kind for the shared installer engine
+- [ ] **Scope correction (from review): this kind applies only to
+      `vendored-installer-engine`'s shared engine files**
+      (`scripts/installer-engine.{sh,ps1}`), never to a whole plugin's
+      `install.sh`/`install.ps1`/`init.*` entrypoint — that entrypoint stays
+      a per-service wrapper/config (launch command, capability flags,
+      sibling installs) that must keep varying by plugin, per that effort's
+      own design. Pointerizing a whole entrypoint would discard exactly
+      that per-plugin behavior.
 - [ ] Design the new pointer kind: an executable stub that, invoked
       directly on `dev` (no materialize step), calls across the
-      plugin-folder boundary into a canonical engine location (mirroring
-      how a `dev`-mode Python import already resolves an unconverted lib
-      directly from `libs/<lib>` with no local copy at all — confirm
-      whether that's actually how Python resolves it today, or whether a
-      `sys.path`/workspace config makes it work, before assuming the
-      script-pointer case is analogous).
+      plugin-folder boundary into the canonical shared-engine location
+      (mirroring how a `dev`-mode Python import already resolves an
+      unconverted lib directly from `libs/<lib>` with no local copy at all
+      — confirm whether that's actually how Python resolves it today, or
+      whether a `sys.path`/workspace config makes it work, before assuming
+      the script-pointer case is analogous).
 - [ ] Extend `materialize_main.py` to expand the new kind: replace the
       dev-time cross-folder-calling stub with the fully inlined canonical
       script content in the `main` snapshot, so what ships never resolves
@@ -292,10 +319,15 @@ shape before committing to a design)_
 - [ ] `materialize_main.py`'s directory-pointer path refuses a `source`
       that escapes `canonical_root` (the same containment guarantee the
       file-pointer path already has via `_resolve_within()`).
-- [ ] A pointer-ized `install.sh`/`install.ps1` runs correctly **in dev**,
-      unmaterialized, calling across folders into the canonical engine —
-      demonstrating the "in-place test scripts in `dev`" requirement is met
-      without requiring `preview_release.py`/materialization first.
+- [ ] A promotion run against a deliberately malformed/unresolvable pointer
+      (missing `source`, escaping `source`) aborts the promotion rather
+      than producing a `main` snapshot containing an unexpanded stub.
+- [ ] A pointer-ized `scripts/installer-engine.{sh,ps1}` runs correctly
+      **in dev**, unmaterialized, called from a plugin's own (never
+      pointerized) `install.sh`/`install.ps1` wrapper across folders into
+      the canonical engine — demonstrating the "in-place test scripts in
+      `dev`" requirement is met without requiring
+      `preview_release.py`/materialization first.
 - [ ] A materialized `main` build of the same plugin is fully self-contained
       — no cross-folder reference remains in the shipped payload — per
       `docs/install-contract.md`.
@@ -360,3 +392,18 @@ _Pending._
   with the installer-engine surface's own `sync-installer-engine.py` —
   corrected to assign it to a new generic pointer validator or
   `sync-installer-engine.py` itself, never the lib tool.
+- **Round 4 review (2026-09-26):** two more findings, both confirmed and
+  fixed: (1) `promote_release.consume_pending_changes()` captures
+  `materialize()`'s log but never inspects it for a `SKIP`/failure marker —
+  a malformed or containment-rejected pointer would currently ride straight
+  through into the shipped `main` snapshot as an unexpanded stub instead of
+  blocking promotion. Added a Phase 1 item requiring promotion to fail
+  closed on any unresolved pointer, plus a matching Validation Plan item.
+  (2) Phase 2's scope was too broad: `vendored-installer-engine`'s own
+  design keeps each plugin's `install.sh`/`install.ps1`/`init.*` as a
+  per-service wrapper/config, with only `scripts/installer-engine.{sh,ps1}`
+  as the byte-identical shared surface — pointerizing a whole entrypoint
+  would discard per-plugin arguments and lifecycle behavior. Corrected the
+  Phase 2 heading, design item, Context's description of that effort, and
+  the Validation Plan's install-script item to scope the new pointer kind
+  to the shared engine file only.
