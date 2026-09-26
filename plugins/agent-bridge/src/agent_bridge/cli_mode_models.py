@@ -26,6 +26,11 @@ class LiveSessionVenue(BaseModel):
     #: The multiplexer session name to attach to on that venue
     #: (``embody``'s own ``wt-<worktree_id>`` convention).
     mux_session_name: str
+    #: The worktree that launched and supervises this session, as a qualified
+    #: ``machine/project/worktree_id`` ref (no ``#session``), so a successor
+    #: session in that worktree -- e.g. after a context handoff -- can find the
+    #: workers it supervises. Optional; set by the venue's launch verb.
+    supervisor_ref: str | None = None
 
 
 class CreateCliModeReservationRequest(BaseModel):

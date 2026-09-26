@@ -298,12 +298,12 @@ def test_route_register_carries_venue_for_remote_cli_mode(client: TestClient) ->
         json={"session_id": "cli-remote", "worktree_id": "wt-1", "venue": venue},
     )
     assert r.status_code == 200, r.text
-    assert r.json()["venue"] == venue
+    assert r.json()["venue"] == {**venue, "supervisor_ref": None}
 
     # Read back consistently from every route that surfaces LiveSessionInfo.
-    assert client.get("/api/v1/live-sessions/cli-remote").json()["venue"] == venue
+    assert client.get("/api/v1/live-sessions/cli-remote").json()["venue"] == {**venue, "supervisor_ref": None}
     listed = client.get("/api/v1/live-sessions").json()["live_sessions"]
-    assert next(s for s in listed if s["session_id"] == "cli-remote")["venue"] == venue
+    assert next(s for s in listed if s["session_id"] == "cli-remote")["venue"] == {**venue, "supervisor_ref": None}
 
     r_local = client.post(
         "/api/v1/live-sessions",

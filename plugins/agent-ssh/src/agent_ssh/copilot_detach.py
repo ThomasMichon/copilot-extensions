@@ -25,6 +25,7 @@ from venue_copilot import (
 )
 from venue_copilot.detached import launch_detached, public_plan, stop_detached
 from venue_copilot.models import model_copilot_args
+from venue_copilot.supervisor import with_supervisor
 from venue_copilot.refs import upload_for
 
 _RESERVATION_TTL = 900.0
@@ -237,6 +238,7 @@ class _SshAdapter:
 
 def cmd_detach(args: argparse.Namespace) -> int:
     plan = plan_for(args)
+    plan["venue"] = with_supervisor(plan["venue"])  # successor can find this worker
     try:
         seed = read_seed(args)
         refs = upload_for(list(getattr(args, "ref_files", None) or []), plan["scope_id"])

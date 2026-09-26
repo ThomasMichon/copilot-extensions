@@ -760,9 +760,12 @@ two capabilities without the destructive take-over:
 - **Addressing by worktree handle.** `resolve` maps a worktree handle → its
   currently-live session, so `reply-to` survives a session handoff (an agent is
   a *series of sessions in one worktree*).
+- **Supervised venue workers.** A detached venue launch records its launching
+  worktree as `venue.supervisor_ref`, so a successor (after a handoff) finds
+  its workers with `live-sessions list --supervisor <machine/project/worktree_id>`.
 - **Reading the registry (CLI).**
   `<agent-bridge catalog argv[0]> live-sessions list
-  [--worktree-id <id>]` and
+  [--worktree-id <id>] [--supervisor <machine/project/worktree_id>]` and
   `<agent-bridge catalog argv[0]> live-sessions resolve --handle
   <session-id|worktree-handle>` expose the registry from the shell (add global
   `--json` for machine-readable output). Beyond registration/liveness the view

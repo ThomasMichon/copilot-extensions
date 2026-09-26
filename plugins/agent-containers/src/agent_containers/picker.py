@@ -257,6 +257,19 @@ def activity_from_live_session(live_session: dict[str, Any] | None) -> str:
     return f"{phase}: {summary}" if phase else str(summary)
 
 
+def supervising_worktree_id(live_session: dict[str, Any] | None) -> str:
+    """The tracked worktree id named by a live session's
+    ``venue.supervisor_ref`` (the worktree that launched a detached session on
+    this container), else ``""``. The fallback when the fleet lease doesn't name
+    a worktree -- a detached launch takes no lease -- so the supervising
+    worktree's Picker row still shows its worker. The id is taken from the
+    ref as-is (it names a worktree in any project, which the Picker matches by
+    full id)."""
+    venue = (live_session or {}).get("venue") or {}
+    ref = str(venue.get("supervisor_ref") or "").split("#", 1)[0]
+    return ref.rsplit("/", 1)[-1] if ref.count("/") >= 2 else ""
+
+
 def picker_fields(container_name: str, lease_effort: str | None) -> dict[str, Any]:
     """The three picker-only fields a Containers fleet row adds to its
     existing ``fleet --json`` shape: ``subtitle``, ``claims_summary``,
@@ -264,7 +277,8 @@ def picker_fields(container_name: str, lease_effort: str | None) -> dict[str, An
     `has_driving_worktree`, `worktree_status`). One entry point so
     `__main__._cmd_fleet` stays a thin caller."""
     live_session = live_session_for_venue("container", container_name)
-    driving_worktree_id = driving_worktree_id_for(lease_effort)
+    driving_worktree_id = (driving_worktree_id_for(lease_effort)
+                           or supervising_worktree_id(live_session))
     has_driving_worktree = bool(driving_worktree_id)
     subtitle = subtitle_for(container_name, lease_effort)
     activity = activity_from_live_session(live_session)

@@ -135,3 +135,27 @@ def test_worktree_status_for_worktree_unavailable_when_unresolvable():
     payload = worktree_status_for_worktree("maybe-effort")
     assert payload["status"] == "unknown"
     assert "No tracked driving worktree" in payload["body"]
+
+def test_detached_worker_row_resolves_its_supervising_worktree(monkeypatch):
+    import agent_containers.picker as picker
+
+    monkeypatch.setattr(picker, "live_session_for_venue", lambda kind, target: {
+        "liveness": "active",
+        "latest_progress": {"summary": "building"},
+        "session_id": "sid-1",
+        "venue": {"kind": "container", "target": "box-1",
+                  "supervisor_ref": "host/example-harness/host-win-20260925-120000-ab12#sess"},
+    })
+    monkeypatch.setattr(picker, "driving_worktree_id_for", lambda wt: "")
+    fields = picker_fields("box-1", None)
+    assert fields["worktree_id"] == "host-win-20260925-120000-ab12"
+    assert fields["has_driving_worktree"] == "true"
+    assert fields["session_id"] == "sid-1"
+
+
+def test_supervising_worktree_id_needs_a_qualified_ref():
+    from agent_containers.picker import supervising_worktree_id
+
+    assert supervising_worktree_id(None) == ""
+    assert supervising_worktree_id({"venue": {"supervisor_ref": "wt-only"}}) == ""
+    assert supervising_worktree_id({"venue": {"supervisor_ref": "h/p/wt-1#s"}}) == "wt-1"

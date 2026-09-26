@@ -49,6 +49,7 @@ from venue_copilot import (
 )
 
 from .model_launch import model_copilot_args
+from venue_copilot.supervisor import with_supervisor
 
 _BUSY_EXIT = 75
 _COORDINATION_EXIT = 78
@@ -353,6 +354,7 @@ def cmd_detach(
     except RuntimeError:
         codespace = False  # listing unavailable: unknown, not missing
     plan = plan_for(args, config, codespace)
+    plan["venue"] = with_supervisor(plan["venue"])  # successor can find this worker
     if codespace is None:
         # Fail before claiming or holding anything: a deleted CodeSpace
         # otherwise surfaces much later as a misleading forward timeout.
