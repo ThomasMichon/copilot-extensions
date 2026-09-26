@@ -193,6 +193,42 @@ def test_materialize_refuses_traversal_source_path_for_directory_pointer(tmp_pat
     assert not (pointer_dir / "src").exists()
 
 
+def test_materialize_refuses_an_escaping_symlink_within_canonical_src(tmp_path: Path):
+    # The pointer's own `source` (libs/zdd) is legitimately inside
+    # canonical_root, but the canonical directory's own src/ contains a
+    # symlink pointing outside it -- shutil.copytree would otherwise follow
+    # it and copy external content into the release snapshot.
+    root = tmp_path / "repo"
+    secret = tmp_path / "outside-repo-secret"
+    secret.mkdir()
+    (secret / "leaked.txt").write_text("do not leak\n", encoding="utf-8")
+    canonical = _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
+    (canonical / "src" / "evil-link").symlink_to(secret, target_is_directory=True)
+    pointer_dir = _pointer(root, "agent-bridge", "zdd")
+
+    log = mm.materialize(root, canonical_root=root)
+
+    assert any("SKIP" in line and "is a symlink" in line for line in log)
+    assert (pointer_dir / "VENDOR_POINTER.json").exists()
+    assert not (pointer_dir / "src").exists()
+
+
+def test_materialize_refuses_an_in_root_symlink_within_canonical_src(tmp_path: Path):
+    # Even a symlink that resolves *inside* canonical_root is refused --
+    # a legitimate vendored lib has no reason to contain any symlink.
+    root = tmp_path / "repo"
+    canonical = _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
+    other_lib = _canonical_lib(root, "other", version="0.1.0-dev1", content="other\n")
+    (canonical / "src" / "sneaky-link").symlink_to(other_lib, target_is_directory=True)
+    pointer_dir = _pointer(root, "agent-bridge", "zdd")
+
+    log = mm.materialize(root, canonical_root=root)
+
+    assert any("SKIP" in line and "is a symlink" in line for line in log)
+    assert (pointer_dir / "VENDOR_POINTER.json").exists()
+    assert not (pointer_dir / "src").exists()
+
+
 def _file_pointer(root: Path, plugin: str, rel: str, *, source: str) -> Path:
     """Create a vendored *file* pointer stub at ``plugins/<plugin>/<rel>``."""
     d = root / "plugins" / plugin

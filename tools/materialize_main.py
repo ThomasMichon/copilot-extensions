@@ -117,6 +117,14 @@ def materialize(dest: Path, *, canonical_root: Path) -> list[str]:
 
         src_sub = canonical / "src"
         dst_sub = lib_copy_dir / "src"
+        symlink_found = _find_symlink(src_sub)
+        if symlink_found is not None:
+            log.append(
+                f"SKIP {lib_copy_dir}: {source_rel}/src/{symlink_found} is a "
+                "symlink -- refusing (a canonical lib source must contain "
+                "only real files)"
+            )
+            continue
         if dst_sub.exists():
             shutil.rmtree(dst_sub)
         if src_sub.is_dir():
@@ -148,6 +156,25 @@ def _resolve_within(canonical_root: Path, source_rel: str) -> Path | None:
     if candidate != root and root not in candidate.parents:
         return None
     return candidate
+
+
+def _find_symlink(tree: Path) -> str | None:
+    """The first path (relative to ``tree``) under ``tree`` that is a
+    symlink, or ``None`` if none is found. ``_resolve_within`` only
+    validates the pointer's own ``source`` value; a legitimate-looking
+    canonical directory can still contain a symlink *within* it (e.g.
+    ``src/evil -> /etc``) that ``shutil.copytree`` would otherwise silently
+    follow, copying external content into the release snapshot. A
+    legitimate vendored lib has no reason to contain a symlink at all, so
+    any symlink here is refused outright -- simpler than distinguishing
+    escaping from non-escaping, and fails closed."""
+    if not tree.is_dir():
+        return None
+    for entry in sorted(tree.rglob("*")):
+        if entry.is_symlink():
+            return str(entry.relative_to(tree))
+    return None
+    return None
 
 
 def materialize_file_pointers(dest: Path, *, canonical_root: Path) -> list[str]:
