@@ -5,9 +5,16 @@
 - **Branch(es):** independent per-phase worktrees
 - **Created:** 2026-09-26
 - **Status:** Draft
-- **Vision:** none yet — may fold into `dev-branch-release-pipeline`'s own
-  eventual `visions/release-pipeline` entry rather than spawn a new one;
-  revisit once Phase 1 firms up
+- **Vision:** none yet, deliberately — this effort does not introduce a new
+  architectural direction; it extends `dev-branch-release-pipeline`'s own
+  already-active, still-vision-less design (that umbrella effort's own
+  header carries the identical "none yet" note for the same reason: the
+  design itself predates any spawned vision doc). The governing pattern
+  invariant this effort must keep satisfying is `docs/install-contract.md`'s
+  self-contained-shipped-payload guarantee (see Context) — no new invariant
+  is introduced, so no new pattern doc is required *before* Phase 1; Phase 3
+  writes `docs/patterns/vendor-pointer.md` to record the (unchanged)
+  invariant plus the (new) pointer-kind mechanics once they exist.
 - **Umbrella issue:** _TBD — file once this effort's plan clears review_
 - **Sub-issues:** _TBD_
 
@@ -21,8 +28,11 @@ stub as a valid vendored-copy form, and `materialize_main.py` already expands
 both pointer kinds (directory/lib pointers, file pointers) from canonical at
 promotion time. A standalone trial run converted all 56 real vendored-lib
 copies to pointers and proved the round-trip byte-for-byte lossless — but
-**no real plugin in this repo carries a pointer yet**; the mechanism is built
-and proven, but not applied.
+**no real plugin in this repo carries a directory/lib pointer yet** (three
+real files already carry `kind=file` pointers, converted in
+`vendored-doc-pointers`' own Phase 2 — the gap is specifically the
+directory/lib kind); the mechanism is built and proven, but not applied to
+that surface.
 
 This effort's goal: close that gap, and generalize the *pattern itself* —
 not just apply it once more — to every construct in this repo that is
@@ -162,19 +172,43 @@ shape before committing to a design)_
       converting, since a pointer has no way to express a local diff).
 
 ### Phase 1 — Convert real shared-lib copies to pointers
+- [ ] **Define the dev-time resolver before converting anything** (blocking
+      design gap found in review): `tools/run-plugin-tests.py` installs each
+      plugin's dependencies via `uv sync`, which resolves
+      `plugins/<plugin>/libs/<lib>` as a real local path package
+      (`[tool.uv.sources]`) — a directory containing only
+      `VENDOR_POINTER.json` (no `src/`, no `pyproject.toml`) is not
+      installable and `uv sync` fails outright. Decide and document one of:
+      (a) the pointer directory keeps a real `pyproject.toml` so it's still
+      a valid package, and only `src/` becomes a stub the resolver expands
+      before install; or (b) `run-plugin-tests.py` gains a materialize-first
+      step (mirroring `preview_release.py`'s "materialize into a scratch
+      copy, never touch the real tree" pattern) that expands every pointer
+      into its own temporary test tree before `uv sync` runs there. Do not
+      convert a single real lib copy until this is resolved and proven
+      against one real plugin.
 - [ ] Apply the already-validated, already-built mechanism
       (`sync-vendored-libs.py`'s pointer support, `materialize_main.py`'s
       expansion) to the real repo: convert every real
       `plugins/<plugin>/libs/<lib>/src` copy that is byte-identical to its
-      canonical `libs/<lib>` source into a `VENDOR_POINTER.json` stub.
-- [ ] Confirm `check-vendored-libs-sync.py` and the live promotion pipeline
-      (`promote_release.py` -> `materialize_main.py`) both handle the
-      converted real plugins correctly — not just the isolated trial clone.
+      canonical `libs/<lib>` source into a `VENDOR_POINTER.json` stub,
+      using whichever resolver design the item above settled on.
+- [ ] **`tools/check-vendored-libs-sync.py` does not currently recognize
+      pointers at all** (confirmed in review — it hashes whatever `src/`
+      exists and checks versions; it has no `VENDOR_POINTER` awareness, and
+      is a separate tool from `sync-vendored-libs.py`, which does). After
+      conversion, an empty or malformed pointer directory could silently
+      read as "synchronized" to this checker. Extend
+      `check-vendored-libs-sync.py` (or name and build a new dedicated
+      guard) to validate a pointer's schema and confirm its `source` target
+      actually exists and matches canonical, before treating any real
+      conversion as complete.
+- [ ] Confirm the live promotion pipeline (`promote_release.py` ->
+      `materialize_main.py`) handles the converted real plugins correctly —
+      not just the isolated trial clone.
 - [ ] Confirm every consuming plugin's own test suite
-      (`tools/run-plugin-tests.py <plugin>`) still passes post-conversion
-      (a pointer stub changes what's on disk on `dev`; anything that
-      imports the lib in a `dev`-mode test run must still resolve it
-      correctly).
+      (`tools/run-plugin-tests.py <plugin>`) still passes post-conversion,
+      using the dev-time resolver design from the first item above.
 
 ### Phase 2 — Executable (script) pointer kind for install.sh/install.ps1
 - [ ] Design the new pointer kind: an executable stub that, invoked
@@ -195,10 +229,11 @@ shape before committing to a design)_
       a phase *within* that effort instead of duplicated here, once its
       canonical engine exists to point at. Do not fork its design
       unilaterally.
-- [ ] Extend `sync-vendored-libs.py`/`check-vendored-libs-sync.py`-equivalent
-      guards (or a new dedicated one) to recognize the executable pointer
-      kind for drift/consistency checking, matching the existing
-      directory/file pointer guards.
+- [ ] Extend `sync-vendored-libs.py` and the new/extended guard from Phase 1
+      (whichever tool ends up owning pointer-schema validation) to
+      recognize the executable pointer kind for drift/consistency checking,
+      matching whatever real directory/file pointer guard Phase 1 actually
+      builds — not assuming one already exists.
 
 ### Phase 3 — Document the pattern; sweep for further "and more" candidates
 - [ ] Write `docs/patterns/vendor-pointer.md`: the three (by then) pointer
@@ -248,8 +283,22 @@ _Pending._
   needs already exists; it was built, validated, and then not applied to
   the real repo (libs) or not yet designed for at all (executable
   scripts).
-- Not started: no implementation yet. Next session should begin Phase 0
-  (confirm every real lib copy is genuinely byte-identical to canonical
-  before Phase 1 converts it) or, if that's already implicitly proven by
-  `check-vendored-libs-sync.py`'s existing clean state, skip straight to
-  Phase 1.
+- Not started: no implementation yet. Next session should begin Phase 0, or
+  if that's already implicitly proven, Phase 1's now-first item: define the
+  dev-time resolver (test-runner installability of a pointer-only
+  directory) before converting a single real lib copy.
+- **Round 1 review (2026-09-26):** four findings, all addressed before
+  merge: (1) Phase 1 didn't account for `tools/run-plugin-tests.py`
+  installing lib copies as real `uv` path packages — a bare
+  `VENDOR_POINTER.json` directory isn't installable; added a blocking
+  "define the dev-time resolver first" item. (2) `check-vendored-libs-
+  sync.py` was wrongly assumed pointer-aware (only `sync-vendored-libs.py`
+  is, a separate tool) — corrected, and added a Phase 1 item to extend it
+  with real schema/canonical-target validation. (3) Vision left unset with
+  a deferred rationale — firmed up: this effort deliberately carries no new
+  vision because it extends `dev-branch-release-pipeline`'s existing
+  design under the same already-governing `install-contract.md` invariant,
+  not a new architectural direction. (4) Guiding Intent's "no real plugin
+  carries a pointer yet" wrongly read as covering all pointer kinds —
+  qualified to the directory/lib kind specifically (three real files
+  already carry `kind=file` pointers).
