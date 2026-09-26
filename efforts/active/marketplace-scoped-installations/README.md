@@ -386,6 +386,62 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-26 — Systemic `runtime-gate.ps1` marker-placement bug fixed across 4 more plugins
+
+- Fresh guard count for `dev` head (post `agent-logger` merge): 651.
+  Started investigating `agent-containers` (next size-tier candidate,
+  36 findings) as a fresh triage target, but before diving into its more
+  varied findings, checked `runtime-gate.ps1:21` first (per the
+  `agent-vault`/`agent-logger` precedent of finding the exact same
+  marker-placement bug in two prior legs) — confirmed present again.
+- **Instead of fixing just `agent-containers` and moving on, checked
+  every plugin's `runtime-gate.ps1` for the identical bug shape first**
+  (marker `# marketplace-isolation: allow legacy compatibility root` on
+  the closing `}` line of the `$legacyRoot = if (...) {...} else {...}`
+  expression, not the flagged `Join-Path $env:USERPROFILE '.agent-*'`
+  line above it): `grep`-checked all 7 plugins with a `runtime-gate.ps1`
+  (`agent-bridge`, `agent-codespaces`, `agent-containers`, `agent-logger`
+  [already fixed], `agent-mcp`, `agent-ssh` [already correct — single-
+  line marker], `agent-vault` [already fixed]). Found the **same bug
+  still present in 4 more plugins**: `agent-bridge`, `agent-codespaces`,
+  `agent-containers`, `agent-mcp` — confirming this was a systemic
+  template/generator bug (likely all 6 originally-affected plugins'
+  `runtime-gate.ps1` were scaffolded from the same source, with the
+  marker misplaced from the start), not four independent coincidences.
+- Fixed all 4 with the identical mechanical change: moved the marker from
+  the closing `}` line onto the actual flagged `Join-Path` line. Verified
+  each file still parses (`pwsh -Command
+  "[System.Management.Automation.Language.Parser]::ParseFile(...)"`) and
+  ran each plugin's `payload_invocation`-selected test slice via
+  `python tools/run-plugin-tests.py <plugin> -k payload_invocation` (the
+  canonical turn-key runner) — all 4 passed (`agent-bridge` 6 passed/3
+  skipped, `agent-codespaces` 9 passed, `agent-containers` 2 passed,
+  `agent-mcp` 12 passed/5 skipped).
+- Verified: `check-marketplace-isolation.py --json` dropped by exactly 4
+  (651→647 at fix time). `check-docs-consistency.py` OK.
+  `check-changefile-presence.py --base origin/dev` OK after adding one
+  shared `patch`-typed changefile naming all 4 plugins (per
+  `CONTRIBUTING.md`'s "one PR touching N plugins with one shared reason"
+  pattern). Manually confirmed the fix catches its own regression via
+  `git stash`/`git stash pop`.
+- **Note on process**: this leg's edits were made in a worktree that had
+  already been used (and merged/finalized) for the prior `agent-logger`
+  PR; continuing to edit in it produced a stale, diverged-from-remote
+  branch state when it came time to push. Saved the diff as a patch file,
+  created a genuinely fresh `copilot-extensions` worktree per the effort's
+  own established discipline, and re-applied it there via `git apply`
+  before committing — a reminder that "always create a fresh worktree
+  per increment" means literally every increment, not just the first one
+  in a session.
+- **`agent-containers`' own remaining 35 findings were NOT triaged this
+  leg** (only its `runtime-gate.ps1:21` marker bug was fixed, incidentally
+  discovered while checking for the systemic pattern) — its findings span
+  many more files with more varied shapes (a vendored `venue_copilot` lib,
+  remote-SSH-transport path construction, `__main__.py`/`_invoke.py`
+  mixed doc/code) than `agent-vault`/`agent-logger` had, and deserve their
+  own dedicated read-first pass rather than a rushed continuation. Left
+  for a future leg.
+
 ### 2026-09-26 — `agent-logger`'s 18 findings resolved (first-time triage of this plugin)
 
 - Fresh guard count for `dev` head (post guard-fix merge): 666, then 669
