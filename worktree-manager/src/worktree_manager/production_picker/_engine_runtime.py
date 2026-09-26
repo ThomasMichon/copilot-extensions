@@ -106,6 +106,7 @@ def ensure_engine_runtime() -> Path:
         "plugin-resolve",
         "config-migrate",
         "single-instance-lease",
+        "lazy-cli-dispatch",
     ):
         lib_source = libs_root / lib / "src"
         if lib_source.is_dir() and str(lib_source) not in sys.path:

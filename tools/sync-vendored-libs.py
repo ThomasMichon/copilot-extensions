@@ -38,31 +38,54 @@ A plugin's vendored copy of a lib may, instead of carrying a real ``src/``,
 carry a single ``VENDOR_POINTER.json`` (``{"source": "libs/<lib>", ...}``) --
 this is the DRY *dev*-branch form the release-pipeline effort's promotion
 step exists to expand (validated end-to-end in a standalone trial clone; see
-the effort's Journal). A pointer copy is never a "real copy": it carries no
-content of its own, so it is excluded from copies-vs-copies agreement checks
-and from ``--restore-canonical``'s "which copy is the truth" selection --
-treating an empty pointer directory as truth would silently **wipe
-canonical** (a real bug caught during that trial: converting a lib's copies
-to pointers and then running ``--restore-canonical`` blindly copied "no
-content" up into canonical). ``--materialize`` still fully handles pointer
-copies: it expands each one from canonical (writing real ``src/`` + version,
-then deleting the now-superseded pointer file) exactly like it refreshes a
-real copy. Only ``src/`` is ever touched by a pointer -- ``tests/`` (and
-everything else in a copy) is deliberately out of scope, matching this
-guard's own existing invariant (it only ever compares ``src/`` across
-copies too). No real plugin in this repo has been converted to a pointer yet
--- that conversion is Phase 2 (the actual `dev` cutover), not this tool.
+the effort's Journal). A pointer copy is never a "real copy": its ``src/``
+(if any) is never this lib's real, verified-agreeing content, so it is
+excluded from copies-vs-copies agreement checks and from
+``--restore-canonical``'s "which copy is the truth" selection -- treating a
+pointer's own content as truth would silently **wipe canonical** (a real bug
+caught during that trial: converting a lib's copies to pointers and then
+running ``--restore-canonical`` blindly copied "no content" up into
+canonical). ``--materialize`` still fully handles pointer copies: it expands
+each one from canonical (writing real ``src/`` + version, then deleting the
+now-superseded pointer file) exactly like it refreshes a real copy. Only
+``src/`` is ever touched by a pointer -- ``tests/`` (and everything else in
+a copy) is deliberately out of scope, matching this guard's own existing
+invariant (it only ever compares ``src/`` across copies too).
+
+Two pointer *kinds* exist, both identified purely by ``VENDOR_POINTER.json``:
+
+* **bare** -- ``src/`` doesn't exist at all. Never actually installable
+  (`uv pip install -e .` fails outright: "does not appear to be a Python
+  project", confirmed empirically) -- unusable for any plugin still
+  developed/tested on `dev` (i.e. every real plugin today), only ever safe
+  for a lib whose consuming plugin has itself been fully retired from `dev`.
+* **src-passthrough** (``--pointerize``, agent-cli-lazy-dispatch Phase 2's
+  first real adopter, ``plugins/agent-worktrees/libs/lazy-cli-dispatch``) --
+  carries a real, importable ``src/<pkg>/__init__.py`` marked with a
+  ``# VENDOR_POINTER: source=libs/<lib> kind=src-passthrough`` first-line
+  comment, whose body sets its own package ``__path__`` to canonical's real
+  ``libs/<lib>/src/<pkg>`` directory. Every import of the vendored package
+  resolves through ordinary Python import machinery straight to canonical's
+  real modules -- `uv pip install -e .`, `run-plugin-tests.py`, and CI's own
+  test-runner job all keep working unmodified on `dev`, with zero copy-drift
+  risk (there is nothing to keep in sync; editing canonical takes effect
+  immediately). `--materialize`/`materialize_main.py` (the real dev->main
+  promotion path) still expand it into a real byte-identical copy exactly
+  like the bare kind -- a marketplace-installed plugin ships alone, with no
+  sibling `libs/` directory for the stub to forward into.
 
 Usage::
 
     python tools/sync-vendored-libs.py                    # --check (default)
     python tools/sync-vendored-libs.py --restore-canonical # copies -> canonical
     python tools/sync-vendored-libs.py --materialize        # canonical -> copies
+    python tools/sync-vendored-libs.py --pointerize agent-worktrees lazy-cli-dispatch
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import re
 import shutil
 import sys
@@ -76,10 +99,94 @@ POINTER_NAME = "VENDOR_POINTER.json"
 _IGNORE_PARTS = {"build", ".venv", "__pycache__", "dist"}
 _VERSION_RE = re.compile(r'^(\s*version\s*=\s*")([^"]+)(")', re.MULTILINE)
 
+# Generated verbatim into every src-passthrough pointer copy's
+# ``src/<pkg>/__init__.py`` -- see this module's own docstring for the
+# design rationale. Deliberately avoids f-strings in the GENERATED code's
+# own error messages (plain string concatenation instead) so this template
+# can use plain ``str.format()`` with only ``{lib}``/``{pkg}`` placeholders,
+# without escaping every other brace in the generated file.
+_PASSTHROUGH_TEMPLATE = '''\
+# VENDOR_POINTER: source=libs/{lib} kind=src-passthrough
+"""Vendor-pointer passthrough stub for the ``{lib}`` shared lib
+(agent-cli-lazy-dispatch Phase 2's dev-branch vendoring mechanism -- see
+tools/sync-vendored-libs.py's own module docstring for the full
+"src-passthrough" pointer design).
+
+Every import of this package resolves through ordinary Python import
+machinery straight to the canonical ``libs/{lib}/src/{pkg}`` tree -- do NOT
+hand-edit this file; regenerate it via
+``python tools/sync-vendored-libs.py --pointerize <plugin> {lib}``.
+A production (main-branch) release never ships this stub:
+``tools/materialize_main.py`` expands it into a real, byte-identical copy
+at promotion time.
+"""
+from __future__ import annotations
+
+import importlib.util
+import sys
+from pathlib import Path
+
+
+def _find_repo_root(start):
+    """Walk upward from ``start`` for the monorepo root -- the first
+    ancestor carrying both a ``libs/`` and a ``plugins/`` directory. This
+    stub only ever runs inside a full dev-branch checkout of that monorepo
+    (a real release materializes it into a real copy first), so this
+    signature is a safe, stable way to locate it without depending on this
+    file's own exact nesting depth under ``plugins/<plugin>/libs/<lib>/``."""
+    for candidate in (start, *start.parents):
+        if (candidate / "libs").is_dir() and (candidate / "plugins").is_dir():
+            return candidate
+    return None
+
+
+_here = Path(__file__).resolve()
+_repo_root = _find_repo_root(_here)
+if _repo_root is None:
+    raise ImportError(
+        __name__ + ": vendor-pointer passthrough stub could not locate the "
+        "monorepo root (an ancestor with both libs/ and plugins/) -- this "
+        "stub only works inside a full dev-branch checkout; a real release "
+        "must materialize it into a real copy first (tools/materialize_main.py)."
+    )
+
+_canonical_pkg_dir = _repo_root / "libs" / "{lib}" / "src" / "{pkg}"
+_canonical_init = _canonical_pkg_dir / "__init__.py"
+if not _canonical_init.is_file():
+    raise ImportError(
+        __name__ + ": canonical source not found at " + str(_canonical_init)
+    )
+
+# Standard "self-replacing module" technique: CPython's import machinery
+# re-fetches ``sys.modules[name]`` AFTER this file's own exec finishes (see
+# ``importlib._bootstrap._load_unlocked``), so swapping the entry here mid-
+# init correctly hands the REAL, canonical module back to whatever
+# triggered this import (``import {pkg}`` and ``from {pkg} import x`` both
+# resolve to it) -- this stub's own module object is discarded.
+_spec = importlib.util.spec_from_file_location(
+    __name__, _canonical_init, submodule_search_locations=[str(_canonical_pkg_dir)]
+)
+_module = importlib.util.module_from_spec(_spec)
+sys.modules[__name__] = _module
+_spec.loader.exec_module(_module)
+'''
+
 
 def _is_pointer_copy(path: Path) -> bool:
-    """True when ``path`` is a DRY vendor-pointer stub, not a real copy."""
-    return (path / POINTER_NAME).is_file() and not (path / "src").is_dir()
+    """True when ``path`` is a DRY vendor-pointer copy, not a real copy.
+
+    A pointer copy is identified solely by ``VENDOR_POINTER.json``'s
+    presence, regardless of whether ``src/`` exists: the original ("bare")
+    pointer kind carries no ``src/`` at all, while the working
+    "src-passthrough" kind (see ``_write_passthrough_pointer``) carries a
+    real, importable ``src/<pkg>/__init__.py`` stub that forwards every
+    import to canonical at runtime via ``__path__`` -- so `uv pip install
+    -e .` and ordinary test imports keep working on `dev, unlike the bare
+    kind. Either way its ``src/`` (if any) is never this lib's real,
+    verified-agreeing content, so it must stay excluded from copies-vs-
+    copies comparison and from ``--restore-canonical``'s truth selection.
+    """
+    return (path / POINTER_NAME).is_file()
 
 
 def _real_copies(paths: list[Path]) -> list[Path]:
@@ -317,6 +424,74 @@ def cmd_materialize(*, force: bool) -> int:
     return 0
 
 
+def _write_passthrough_pointer(plugin: str, lib: str) -> Path:
+    """Convert ``plugins/<plugin>/libs/<lib>`` into a **src-passthrough**
+    vendor pointer forwarding to canonical ``libs/<lib>`` (see this module's
+    own docstring for the full design).
+
+    Requires ``libs/<lib>`` (canonical) to already exist with a real
+    ``src/`` and a ``pyproject.toml``. Writes a REAL, installable
+    ``pyproject.toml`` for the copy (a plain byte-for-byte copy of
+    canonical's own, matching every other vendored-copy's "only src/ is
+    ever a pointer" convention) plus a single-file passthrough
+    ``src/<pkg>/__init__.py`` shim -- never a real tree -- so
+    ``uv pip install -e .``/pytest/CI's own test-runner job keep working
+    unmodified on `dev`, with zero copy-drift risk (nothing to keep in
+    sync; editing canonical takes effect immediately, since the shim
+    re-resolves to canonical's real files on every fresh interpreter).
+    """
+    canonical = LIBS_DIR / lib
+    if not canonical.is_dir():
+        raise SystemExit(f"{lib}: no canonical libs/{lib}/ to pointerize from")
+    canon_pp = canonical / "pyproject.toml"
+    if not canon_pp.is_file():
+        raise SystemExit(f"{lib}: canonical libs/{lib}/pyproject.toml missing")
+    canon_pkg_dir = canonical / "src" / lib.replace("-", "_")
+    if not (canon_pkg_dir / "__init__.py").is_file():
+        raise SystemExit(
+            f"{lib}: canonical libs/{lib}/src/{lib.replace('-', '_')}/__init__.py "
+            "missing -- only a plain single-package lib layout is supported"
+        )
+
+    pkg = lib.replace("-", "_")
+    copy_dir = PLUGINS_DIR / plugin / "libs" / lib
+    if copy_dir.exists():
+        shutil.rmtree(copy_dir)
+    copy_dir.mkdir(parents=True)
+
+    shutil.copy2(canon_pp, copy_dir / "pyproject.toml")
+    readme = canonical / "README.md"
+    if readme.is_file():
+        shutil.copy2(readme, copy_dir / "README.md")
+
+    pkg_dir = copy_dir / "src" / pkg
+    pkg_dir.mkdir(parents=True)
+    (pkg_dir / "__init__.py").write_text(
+        _PASSTHROUGH_TEMPLATE.format(lib=lib, pkg=pkg), encoding="utf-8"
+    )
+
+    (copy_dir / POINTER_NAME).write_text(
+        json.dumps(
+            {
+                "schema": "copilot-extensions.vendor-pointer",
+                "version": 1,
+                "source": f"libs/{lib}",
+                "kind": "src-passthrough",
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return copy_dir
+
+
+def cmd_pointerize(plugin: str, lib: str) -> int:
+    dest = _write_passthrough_pointer(plugin, lib)
+    print(f"{lib}: pointerized {dest.relative_to(REPO)} (src-passthrough) -> libs/{lib}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -326,10 +501,16 @@ def main(argv: list[str] | None = None) -> int:
                        help="copy the (verified-agreeing) vendored copies up into canonical")
     mode.add_argument("--materialize", action="store_true",
                        help="copy canonical down into every vendored copy (refuses drifted libs)")
+    mode.add_argument("--pointerize", nargs=2, metavar=("PLUGIN", "LIB"),
+                       help="convert plugins/<PLUGIN>/libs/<LIB> into a src-passthrough "
+                            "vendor pointer forwarding to libs/<LIB>")
     ap.add_argument("--force", action="store_true",
                      help="with --materialize, proceed even if canonical looks drifted")
     args = ap.parse_args(argv)
 
+    if args.pointerize:
+        plugin, lib = args.pointerize
+        return cmd_pointerize(plugin, lib)
     if args.restore_canonical:
         return cmd_restore_canonical()
     if args.materialize:

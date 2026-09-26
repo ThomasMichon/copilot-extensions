@@ -9,6 +9,7 @@ Run:  python -m pytest tools/test_sync_vendored_libs.py
 """
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -226,3 +227,131 @@ def test_materialize_pointer_copy_is_never_blocked_by_drift_gate(repo: Path):
     result = _run(repo, "--materialize")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Refused to materialize" not in result.stderr
+
+
+# --- src-passthrough vendor pointers (working real-Python forwarding) ---
+
+def _seed_canonical_lib(repo: Path, lib: str, *, version: str, content: str) -> Path:
+    pkg = lib.replace("-", "_")
+    _write(repo, f"libs/{lib}/src/{pkg}/__init__.py", content)
+    _lib_pyproject(repo, f"libs/{lib}/pyproject.toml", version)
+    (repo / f"libs/{lib}/README.md").write_text("# doc\n", encoding="utf-8")
+    return repo / "libs" / lib
+
+
+def test_pointerize_writes_a_src_passthrough_pointer(repo: Path):
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev3", content="value = 1\n")
+    (repo / "plugins/alpha").mkdir(parents=True)
+
+    result = _run(repo, "--pointerize", "alpha", "shared-lib")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "pointerized" in result.stdout
+
+    copy_dir = repo / "plugins/alpha/libs/shared-lib"
+    pointer = json.loads((copy_dir / "VENDOR_POINTER.json").read_text())
+    assert pointer == {
+        "schema": "copilot-extensions.vendor-pointer",
+        "version": 1,
+        "source": "libs/shared-lib",
+        "kind": "src-passthrough",
+    }
+    # A REAL, installable pyproject.toml -- synced from canonical, not a stub.
+    assert '"0.1.0-dev3"' in (copy_dir / "pyproject.toml").read_text()
+    stub = (copy_dir / "src/shared_lib/__init__.py").read_text()
+    assert stub.startswith("# VENDOR_POINTER: source=libs/shared-lib kind=src-passthrough\n")
+    assert "spec_from_file_location" in stub
+
+
+def test_pointerize_refuses_when_canonical_lib_missing(repo: Path):
+    (repo / "plugins/alpha").mkdir(parents=True)
+    result = _run(repo, "--pointerize", "alpha", "ghost-lib")
+    assert result.returncode != 0
+    assert "no canonical libs/ghost-lib" in (result.stdout + result.stderr)
+
+
+def test_pointerize_overwrites_a_stale_existing_copy(repo: Path):
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="x = 1\n")
+    _write(repo, "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py", "stale\n")
+    _write(repo, "plugins/alpha/libs/shared-lib/leftover.txt", "should be gone\n")
+
+    result = _run(repo, "--pointerize", "alpha", "shared-lib")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (repo / "plugins/alpha/libs/shared-lib/leftover.txt").exists()
+    assert (repo / "plugins/alpha/libs/shared-lib/VENDOR_POINTER.json").exists()
+
+
+def test_pointerized_copy_forwards_imports_to_canonical_end_to_end(repo: Path):
+    """The real, load-bearing guarantee: a fresh interpreter that imports the
+    pointerized package gets canonical's actual live content, not a stale
+    snapshot -- proven by mutating canonical AFTER pointerizing and re-
+    importing in a brand-new subprocess (no import caching across runs)."""
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
+    (repo / "plugins/alpha").mkdir(parents=True)
+    _run(repo, "--pointerize", "alpha", "shared-lib")
+
+    stub = repo / "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py"
+    probe = (
+        "import sys; sys.path.insert(0, r'" + str(stub.parent.parent) + "'); "
+        "import shared_lib; print(shared_lib.value)"
+    )
+    result = subprocess.run([sys.executable, "-c", probe], cwd=repo,
+                            capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "1"
+
+    # Mutate canonical directly (no re-pointerize) -- the stub must reflect
+    # the new content on the NEXT fresh interpreter, proving there is
+    # nothing cached/copied to keep in sync.
+    (repo / "libs/shared-lib/src/shared_lib/__init__.py").write_text("value = 2\n", encoding="utf-8")
+    result2 = subprocess.run([sys.executable, "-c", probe], cwd=repo,
+                             capture_output=True, text=True, check=False)
+    assert result2.returncode == 0, result2.stdout + result2.stderr
+    assert result2.stdout.strip() == "2"
+
+
+def test_pointerized_copy_from_import_also_resolves_to_canonical(repo: Path):
+    """``from pkg import name`` must resolve through the same self-replacing-
+    module swap as a plain ``import pkg`` -- exercised separately since it is
+    a different import bytecode path."""
+    _seed_canonical_lib(
+        repo, "shared-lib", version="0.1.0-dev1",
+        content="def greet():\n    return 'hi'\n",
+    )
+    (repo / "plugins/alpha").mkdir(parents=True)
+    _run(repo, "--pointerize", "alpha", "shared-lib")
+
+    stub = repo / "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py"
+    probe = (
+        "import sys; sys.path.insert(0, r'" + str(stub.parent.parent) + "'); "
+        "from shared_lib import greet; print(greet())"
+    )
+    result = subprocess.run([sys.executable, "-c", probe], cwd=repo,
+                            capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "hi"
+
+
+def test_check_excludes_src_passthrough_copy_from_agreement(repo: Path):
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="x = 1\n")
+    _write(repo, "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py", "real = 1\n")
+    _lib_pyproject(repo, "plugins/alpha/libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+    (repo / "plugins/beta").mkdir(parents=True)
+    _run(repo, "--pointerize", "beta", "shared-lib")
+
+    result = _run(repo, "--check")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "COPIES OUT OF SYNC" not in result.stdout
+    assert "1 DRY pointer copy/copies" in result.stdout
+
+
+def test_materialize_expands_a_src_passthrough_copy_into_a_real_copy(repo: Path):
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev5", content="real content\n")
+    (repo / "plugins/alpha").mkdir(parents=True)
+    _run(repo, "--pointerize", "alpha", "shared-lib")
+
+    result = _run(repo, "--materialize")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    copy_src = repo / "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py"
+    assert copy_src.read_text() == "real content\n"
+    assert not (repo / "plugins/alpha/libs/shared-lib/VENDOR_POINTER.json").exists()

@@ -689,6 +689,43 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-09-26** — Merged Phase 3b Slice 2 Sub-slice 3 Step 2, PR
+  [#3724](https://github.com/ThomasMichon/copilot-extensions/pull/3724)
+  (squash-merged into `dev` as `7fe5d2017`). Went through 5 review rounds
+  before landing, each fixing genuine concurrency/data-integrity findings
+  surfaced against the daemon/registry design: tombstone-vs-delete
+  semantics and two distinct stale-resurrection paths for `remove()`;
+  serializing the daemon's whole check-then-spawn boot sequence, then
+  replacing that with a true single-instance lease held for the daemon's
+  entire lifetime (closing a direct-CLI-run bypass and a residual
+  TOCTOU on exit-time lock cleanup); a coalescing-key derivation
+  (`status_push_key`) that folds in both `rendered_at` and a values hash so
+  distinct renders never silently coalesce; a per-worktree in-process lock
+  plus a **durable** (registry-persisted, restart-surviving) last-applied
+  ordering fence so concurrent/out-of-order renders can't violate
+  last-write-wins; revalidating a mapping's mux session against the real
+  mux server before ever writing to it; rechecking the mapping fresh
+  immediately before the actual apply (not from an earlier snapshot);
+  fencing in-flight handlers before shutdown/lease release; and two
+  further registry-fencing refinements (equal-revision resurrection past a
+  tombstone, and not inheriting a stale ordering fence across a genuinely
+  new mapping incarnation). Two narrower findings (bounding concurrent
+  request handling in `work_coalescing_singleton` itself) were declined
+  with rationale -- a pre-existing characteristic of the shared library
+  affecting every existing caller, not a regression from this PR, tracked
+  as a follow-up rather than blocking. Split `MuxMappingRegistry` out into
+  its own `mux_mapping_registry.py` module partway through, since the
+  round-4 additions pushed `mux_daemon.py` past this repo's 1000-line
+  module cap. Final state: 91 targeted tests green (including real
+  two-concurrent-callers and two-racing-daemons spawn-race tests, a real
+  handler-in-flight-during-shutdown test, and a durable-fence-survives-
+  restart test); full `worktree-manager` suite 1431 passed, 7 skipped,
+  same 3 pre-existing unrelated failures (`test_data_ssh_sources.py`,
+  untouched by this change) throughout. Step 2 of this sub-slice's 6-step
+  ordered plan is complete; Steps 3-6 (the managed-session cutover, the
+  resident monitor's observation-source switch, updater retirement, and
+  final cleanup) remain unclaimed.
+
 - **2026-09-25** — Landed Phase 3b Slice 2 Sub-slice 3 Step 2 (Worktree
   Manager mux-companion daemon + mapping registry, still off the main
   launch path), PR TBD. Added `worktree_manager/mux_daemon.py`: a host-wide
