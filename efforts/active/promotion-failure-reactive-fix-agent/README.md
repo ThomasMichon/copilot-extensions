@@ -303,8 +303,9 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
   as the observation genuinely requires and never longer.
 * Note in the Journal whether the resulting issue/comment was
   left in place (as evidence) or closed once confirmed working.
-- [ ] Record findings (false positives, dedup accuracy, issue quality)
-      here before treating Phase 1 as proven and touching Phase 2's gate.
+* Record findings (false positives, dedup accuracy, issue quality)
+  here before treating Phase 1 as proven and touching Phase 2's gate.
+  **Done — see the completion note above and the Journal.**
 
 ### Phase 2 — Wire the reactive fix attempt (the actual "attempt a fix")
 - [ ] **Gate (blocks the rest of this phase):** resolve the Vision
