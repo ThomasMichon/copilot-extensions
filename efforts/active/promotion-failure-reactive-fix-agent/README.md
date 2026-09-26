@@ -204,8 +204,9 @@ fixes."
             recurrence inside `#3830`'s 6h window (2026-09-26 12:10–18:10
             UTC) is plausible — continuing to monitor for it rather than
             declaring this closed.
-**Reactivated 2026-09-26 (PR #3850) — for dedup/rate-limit validation
-specifically, not detection.** The sub-plan below was previously marked
+**Reactivated 2026-09-26 (PR #3850, merged 14:50:26 UTC — 2h deadline
+16:50:26 UTC) — for dedup/rate-limit validation specifically, not
+detection.** The sub-plan below was previously marked
 superseded/archived after run 36240803760 (2026-09-26 12:04 UTC)
 confirmed `report-failure` correctly detects and files a new issue
 end-to-end (see Journal) — that part of the probe genuinely is
@@ -219,6 +220,18 @@ followed as originally designed; the sub-bullets remain plain bullets
 (not `- [ ]` checkboxes) so this note reflects the same archived
 reference being actively walked through, not a re-opened live checklist
 duplicating the Plan structure above:
+
+**Live progress (updated as observed, full writeup in Journal once
+complete):** first occurrence confirmed — run 36250176376 (2026-09-26
+~14:59 UTC) failed `full - agent-worktrees` on the probe test exactly as
+designed, and `report-failure` correctly filed a new issue,
+`#3851` (distinct signature `0548ebfd59f3`, correct run link/commit,
+clean log excerpt). **This PR is the deliberate small no-op re-trigger**
+for the dedup/rate-limit sub-item specifically: merging it while the
+probe test is still present re-runs the same real validation chain, and
+the correct expected outcome — per `process_signature`'s own design,
+inside the 6h window — is **silence**: no second issue, no comment on
+`#3851` either.
 
 * Hard stop, non-negotiable: the probe merge starts a clock.
   Maximum 2 hours from the probe PR's merge to the revert
