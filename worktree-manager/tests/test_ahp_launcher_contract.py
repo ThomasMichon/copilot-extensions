@@ -21,7 +21,7 @@ def test_windows_launcher_hard_binds_and_disables_post_exit():
     assert "ConvertFrom-SecureString $secureToken" in source
     assert "@('-AwAhpTokenFile', $ahpTokenFile)" in source
     assert "$prop.Name -in @(" in source
-    assert "Start-StatusUpdater" in source
+    assert "Invoke-AwManagedMuxState -Action activate" in source
     assert "$cmd += $CopilotPassthrough" in source
     assert "$cmd += $ahpArgs" in source
     assert "$arg -like '--ahp=*' -or $arg -like '--resume=*'" in source
@@ -53,6 +53,7 @@ def test_posix_launcher_hard_binds_and_disables_post_exit():
     assert "env -u GH_TOKEN -u GITHUB_TOKEN" in source
     assert "-u COPILOT_CLI_ENABLED_FEATURE_FLAGS tmux" in source
     assert '-e "GH_TOKEN=' not in source
+    assert '_aw_managed_mux_state activate "$TMUX_SESS"' in source
     wrapper = (ROOT / "bin" / "pane-wrapper.sh").read_text()
     assert "env -u GITHUB_TOKEN -u AGENT_WORKTREES_AHP_AUTH_TOKEN" in wrapper
     assert 'CMD_ARRAY+=("${COPILOT_PASSTHROUGH[@]}")' in source

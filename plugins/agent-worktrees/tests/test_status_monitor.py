@@ -22,6 +22,7 @@ from unittest.mock import patch
 
 import agent_procutil
 import pytest
+from work_coalescing_singleton.server import CoalescingServer
 
 from agent_worktrees import __main__ as m
 
@@ -251,6 +252,19 @@ def _capture_set(monkeypatch):
     return calls
 
 
+def _write_manager_lock(path, server):
+    rv = server.rendezvous()
+    path.write_text(
+        json.dumps(
+            {
+                "manager_mux_endpoint": rv["endpoint"],
+                "manager_mux_token": rv["token"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_sweep_serves_live_registered_and_prunes_gone(tmp_path, monkeypatch):
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
@@ -340,6 +354,150 @@ def test_sweep_without_managed_mux_cache_observes_only_the_direct_scan(tmp_path,
     m._monitor_sweep("tmux", "T", "P", set(), catalog_observer=observed.append)
 
     assert observed == [{"wt-a"}]  # unchanged when managed_mux_cache is None
+
+
+def test_sweep_routes_manager_owned_session_to_manager_daemon(tmp_path, monkeypatch):
+    from agent_worktrees import mux_link, mux_status_link
+
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    m._register_session_for_monitor("wt-managed", "/w/managed")
+    monkeypatch.setattr(
+        m,
+        "_monitor_list_sessions",
+        lambda mux_bin: {"wt-managed": (1, "session-1:100")},
+    )
+    monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    direct_calls = _capture_set(monkeypatch)
+    observed_payloads: list[dict] = []
+
+    def _compute(kind: str, payload: dict) -> dict:
+        observed_payloads.append(dict(payload))
+        return {"applied": True}
+
+    server = CoalescingServer(_compute)
+    server.start()
+    try:
+        lock = tmp_path / "mux-daemon.lock"
+        _write_manager_lock(lock, server)
+        monkeypatch.setattr(mux_status_link, "lock_path", lambda root=None: lock)
+
+        cache = mux_link.ManagedMuxCache()
+        cache.apply_observation(
+            {
+                "project": "proj",
+                "worktree_id": "wt-managed",
+                "mux_session": "wt-managed",
+                "mapping_revision": 1,
+                "live": True,
+            }
+        )
+
+        served = m._monitor_sweep(
+            "tmux",
+            "TOK",
+            "PFX",
+            set(),
+            managed_mux_cache=cache,
+        )
+
+        assert served == 1
+        assert direct_calls == []  # Manager-owned path never falls back to direct writes
+        assert observed_payloads == [
+            {
+                "project": "proj",
+                "worktree_id": "wt-managed",
+                "values": {
+                    "@aw_updater": "TOK",
+                    "@aw_updater_prefix": "PFX",
+                    "@aw_ctx": "CTX",
+                    "@aw_seg": "SEG",
+                },
+                "rendered_at": observed_payloads[0]["rendered_at"],
+                "monitor_generation": "PFX",
+            }
+        ]
+    finally:
+        server.close()
+
+
+def test_sweep_preserves_unmanaged_direct_path_when_managed_session_is_present(tmp_path, monkeypatch):
+    from agent_worktrees import mux_link, mux_status_link
+
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    m._register_session_for_monitor("wt-managed", "/w/managed")
+    m._register_session_for_monitor("wt-unmanaged", "/w/unmanaged")
+    monkeypatch.setattr(
+        m,
+        "_monitor_list_sessions",
+        lambda mux_bin: {
+            "wt-managed": (1, "session-1:100"),
+            "wt-unmanaged": (1, "session-2:100"),
+        },
+    )
+    monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    direct_calls = _capture_set(monkeypatch)
+    observed_payloads: list[dict] = []
+
+    server = CoalescingServer(lambda kind, payload: observed_payloads.append(dict(payload)) or {"applied": True})
+    server.start()
+    try:
+        lock = tmp_path / "mux-daemon.lock"
+        _write_manager_lock(lock, server)
+        monkeypatch.setattr(mux_status_link, "lock_path", lambda root=None: lock)
+
+        cache = mux_link.ManagedMuxCache()
+        cache.apply_observation(
+            {
+                "project": "proj",
+                "worktree_id": "wt-managed",
+                "mux_session": "wt-managed",
+                "mapping_revision": 1,
+                "live": True,
+            }
+        )
+
+        served = m._monitor_sweep("tmux", "TOK", "PFX", set(), managed_mux_cache=cache)
+
+        assert served == 2
+        assert any(call[0] == "wt-unmanaged" for call in direct_calls)
+        assert not any(call[0] == "wt-managed" for call in direct_calls)
+        assert [payload["worktree_id"] for payload in observed_payloads] == ["wt-managed"]
+    finally:
+        server.close()
+
+
+def test_sweep_skips_manager_owned_session_when_manager_daemon_is_unreachable(tmp_path, monkeypatch):
+    from agent_worktrees import mux_link, mux_status_link
+
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    m._register_session_for_monitor("wt-managed", "/w/managed")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-managed": 1})
+    monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    direct_calls = _capture_set(monkeypatch)
+    monkeypatch.setattr(mux_status_link, "lock_path", lambda root=None: tmp_path / "missing.lock")
+
+    cache = mux_link.ManagedMuxCache()
+    cache.apply_observation(
+        {
+            "project": "proj",
+            "worktree_id": "wt-managed",
+            "mux_session": "wt-managed",
+            "mapping_revision": 1,
+            "live": True,
+        }
+    )
+
+    assert m._monitor_sweep("tmux", "TOK", "PFX", set(), managed_mux_cache=cache) == 1
+    assert direct_calls == []
 
 
 def test_sweep_never_calls_catalog_observer_with_a_partial_manager_only_view(tmp_path):

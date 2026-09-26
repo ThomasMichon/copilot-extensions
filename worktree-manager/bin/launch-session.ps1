@@ -282,6 +282,15 @@ function Resolve-RuntimePython {
     return $AwPy
 }
 
+function Resolve-ManagerPython {
+    $managerRoot = Split-Path -Parent $PSScriptRoot
+    $slotPython = Join-Path $managerRoot 'Scripts\python.exe'
+    if (Test-Path -LiteralPath $slotPython -PathType Leaf) {
+        return $slotPython
+    }
+    return $null
+}
+
 function Invoke-RuntimePreflight {
     # Runs a best-effort `agent_worktrees` preflight subcommand (knowledge
     # composition, marketplace overrides, ...) with retry-and-reresolve.
@@ -1419,51 +1428,72 @@ function Invoke-AwPsmuxAttach {
         }
     }
 }
-# Start the detached status-bar updater for a session. It renders the
-# identity (@aw_ctx) once and refreshes the git-disposition (@aw_seg) off
-# psmux's paint path, so the status bar never spawns a process per render.
-# Best-effort: a failure here just leaves a static/blank bar, never blocks
-# the launch.  Safe to call on every create/join: the updater's @aw_updater
-# token elects a single live instance, so older ones self-retire.
-function Start-StatusUpdater {
-    param([string]$Session, [string]$WorkDir)
-    if (-not $Session) { return }
-    try {
-        $updArgs = @('-m', 'agent_worktrees', 'status-updater',
-                     '--session', $Session, '--mux', 'psmux')
-        if ($WorkDir) { $updArgs += @('--path', $WorkDir) }
-        # conhost --headless: -WindowStyle Hidden alone is ignored by the DefTerm
-        # handoff and can flash a console (windows-launch-hardening #786).
-        $savedAuth = @{}
-        foreach ($name in @(
-            'GH_TOKEN',
-            'GITHUB_TOKEN',
-            'AGENT_WORKTREES_AHP_AUTH_TOKEN'
-        )) {
-            $savedAuth[$name] = [Environment]::GetEnvironmentVariable(
-                $name,
-                'Process'
-            )
-            [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+# Step 3 managed-session cutover: Worktree Manager-owned launches stop spawning
+# the legacy per-session `status-updater`. Instead the launcher tells
+# `worktree-manager mux-daemon activate|deactivate` about the live mux session;
+# that bundled CLI edge owns the mapping-registry write, daemon ensure, and the
+# `mux-live-v1` observation push to agent-worktrees. Best-effort like the old
+# updater spawn: a control-plane hiccup logs a warning but never blocks attach.
+function Invoke-AwManagedMuxState {
+    param(
+        [Parameter(Mandatory)][ValidateSet('activate', 'deactivate')][string]$Action,
+        [Parameter(Mandatory)][string]$Project,
+        [Parameter(Mandatory)][string]$WorktreeId,
+        [Parameter(Mandatory)][string]$Session,
+        [string]$WorkDir,
+        [string]$MuxBin
+    )
+    if (-not $Session -or -not $Project -or -not $WorktreeId) { return $false }
+    $managerPython = Resolve-ManagerPython
+    $managerCmd = $null
+    if (-not $managerPython -or -not (Test-Path -LiteralPath $managerPython)) {
+        $managerCmd = @(
+            'worktree-manager.cmd',
+            'worktree-manager.ps1',
+            'worktree-manager'
+        ) | ForEach-Object {
+            Get-Command $_ -ErrorAction SilentlyContinue
+        } | Select-Object -First 1
+        if (-not $managerCmd) {
+            Write-SetupLog "psmux: manager runtime command unavailable for mux-daemon $Action" 'WARN'
+            return $false
         }
-        try {
-            Start-Process -FilePath 'conhost.exe' `
-                -ArgumentList (@('--headless', "`"$VenvPython`"") + $updArgs) `
-                -WorkingDirectory $HOME -WindowStyle Hidden `
-                -ErrorAction Stop | Out-Null
-        } finally {
-            foreach ($name in $savedAuth.Keys) {
-                [Environment]::SetEnvironmentVariable(
-                    $name,
-                    $savedAuth[$name],
-                    'Process'
-                )
-            }
-        }
-        Write-SetupLog "psmux: started status-updater for $Session"
-    } catch {
-        Write-SetupLog "psmux: status-updater spawn failed: $($_.Exception.Message)" 'WARN'
     }
+    $muxArgs = @(
+        'mux-daemon', $Action,
+        "--project=$Project",
+        "--worktree-id=$WorktreeId",
+        "--mux-session=$Session"
+    )
+    if ($Action -eq 'activate') {
+        if (-not $WorkDir) {
+            Write-SetupLog "psmux: missing worktree path for mux-daemon activate" 'WARN'
+            return $false
+        }
+        if (-not $MuxBin) {
+            Write-SetupLog "psmux: missing mux binary for mux-daemon activate" 'WARN'
+            return $false
+        }
+        $muxArgs += @("--worktree-path=$WorkDir", "--mux-bin=$MuxBin")
+    }
+    try {
+        if ($managerPython -and (Test-Path -LiteralPath $managerPython)) {
+            $output = & $managerPython @('-m', 'worktree_manager') @muxArgs 2>&1
+        } else {
+            $output = & $managerCmd.Source @muxArgs 2>&1
+        }
+        $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+        $text = (($output | ForEach-Object { "$_" }) -join '').Trim()
+        $detail = if ($text) { ": $text" } else { '' }
+        if ($exitCode -eq 0) {
+            Write-SetupLog "psmux: mux-daemon $Action ok for $Session$detail"
+            return $true
+        }
+        Write-SetupLog "psmux: mux-daemon $Action failed for $Session (exit $exitCode)$detail" 'WARN'
+    } catch {
+        Write-SetupLog "psmux: mux-daemon $Action errored for $Session: $($_.Exception.Message)" 'WARN'
+    }
+    return $false
 }
 # Per-session psmux options (status bar + behaviors). agent-worktrees does NOT
 # own ~/.psmux.conf; the launcher stamps these onto each session it creates or
@@ -1531,9 +1561,15 @@ if (-not $noMux) {
         # source-file) so a rejoined long-lived session picks up PageUp/wheel/
         # arrow passthrough.
         Invoke-AwPsmuxPassthroughSafe $sessName
-        # (Re)assert the updater on join: if the prior one died, this revives
-        # the bar; if it's alive, the token guard makes the new one retire.
-        Start-StatusUpdater $sessName $muxStatusPath
+        # (Re)assert the Manager-owned mux mapping on join: this refreshes the
+        # daemon-owned bar-writer path without starting the legacy
+        # per-session updater.
+        Invoke-AwManagedMuxState -Action activate `
+            -Project $script:LaunchProject `
+            -WorktreeId $plan.worktree_id `
+            -Session $sessName `
+            -WorkDir $muxStatusPath `
+            -MuxBin $script:AwPsmuxBin | Out-Null
         # Write last_session AFTER spawning the updater, immediately before
         # attach -- mirroring the create branch below. The updater connects to
         # psmux as a background client, which can rewrite ~/.psmux/last_session;
@@ -1817,14 +1853,19 @@ if (-not $noMux) {
             'mux=create',
             "attempts=$totalCreateAttempts"
         )
-        # Session created: stamp per-session options + start its status-bar
-        # updater (one per session, before any nested-create early-exit so the
-        # bar populates either way).
+        # Session created: stamp per-session options + publish the live
+        # Manager-owned mapping before any nested-create early-exit, so the
+        # daemon-owned status path sees the session immediately.
         Set-AwSessionOptionsSafe $sessName
         # Apply the keystroke passthrough to the new session's server
         # (per-session source-file) so PageUp/wheel/arrows reach Copilot.
         Invoke-AwPsmuxPassthroughSafe $sessName
-        Start-StatusUpdater $sessName $muxStatusPath
+        Invoke-AwManagedMuxState -Action activate `
+            -Project $script:LaunchProject `
+            -WorktreeId $plan.worktree_id `
+            -Session $sessName `
+            -WorkDir $muxStatusPath `
+            -MuxBin $script:AwPsmuxBin | Out-Null
         if ($nested) {
             Write-Host "Session created: $sessName (open a new terminal to join)"
             exit 0
@@ -1862,6 +1903,10 @@ if (-not $noMux) {
         if ($LASTEXITCODE -ne 0) {
             Write-SetupLog "psmux session gone, running post-exit checks"
             Write-ActivityLog -Event 'copilot_exited' -WorktreeId $plan.worktree_id -Fields @('mux=psmux')
+            Invoke-AwManagedMuxState -Action deactivate `
+                -Project $script:LaunchProject `
+                -WorktreeId $plan.worktree_id `
+                -Session $sessName | Out-Null
 
             # Post-exit finalization
             if ($plan.post_exit -and $plan.worktree_id) {

@@ -100,19 +100,21 @@ def test_status_bar_reads_at_vars_not_cli():
     assert "#(cat " not in text, "the cache-file reader is retired"
 
 
-def test_launcher_spawns_common_status_updater():
+def test_launcher_activates_manager_owned_mux_status_path():
     text = _LAUNCHER.read_text(encoding="utf-8")
-    assert "_aw_spawn_status_updater" in text, "launcher must spawn the updater"
-    assert "status-updater --session" in text
-    assert "--mux tmux" in text, "the tmux launcher must target the tmux watcher"
-    # The per-session apply is still threaded with the worktree id (call-site
-    # compatibility) even though the watcher classifies by path.
+    assert "_aw_managed_mux_state" in text, "launcher must drive the mux-daemon seam"
+    assert "mux-daemon" in text
+    assert '"activate"' in text
+    assert "--worktree-path=" in text
+    assert "--mux-bin=" in text
+    assert "status-updater --session" not in text
+    # The per-session apply is still threaded with the worktree id.
     assert 'aw_apply_tmux_session_options "$1" "${WORKTREE_ID:-}"' in text
 
 
 def test_status_writer_retired():
     assert not (_BIN / "status-writer.sh").exists(), (
-        "the bash status-writer is superseded by the common status-updater"
+        "the bash status-writer is superseded by the daemon-owned status path"
     )
 
 

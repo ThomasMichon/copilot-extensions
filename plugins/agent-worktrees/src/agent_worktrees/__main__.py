@@ -4057,25 +4057,17 @@ def _monitor_sweep(
     coalesced into one process.  Registry entries whose session is definitively
     gone are pruned.
 
-    ``managed_mux_cache`` (a ``mux_link.ManagedMuxCache``, Phase 3b Slice 2
-    Sub-slice 3 Step 1) is optional and, for this step, purely additive: its
-    currently-live session names are merged into ``catalog_observer``
-    alongside the direct mux scan's own **complete** set -- but it never
-    adds an entry to ``served`` and never changes which sessions this
-    sweep writes ``set-option`` for. That writer-ownership cutover is a
-    later, separate step. This merge only happens inside the direct
-    ``mux_bin`` scan (Copilot review finding, reverting an earlier attempt
-    to also observe it standalone): ``catalog_observer``
-    (``ResidentSessionReconciler.observe_mux``) is a *complete-snapshot*
-    API -- any session name missing from the passed set is treated as
-    genuinely gone and reaped. Calling it with only the Manager-known
-    subset when no mux binary is locally discoverable would incorrectly
-    mark every *other*, ordinary session as dead too. A managed-only
-    partial view must never reach this API; a real completeness/managed-
-    scope path is a separate, later concern.
+    ``managed_mux_cache`` is optional. Step 3 merges its live session names
+    into ``catalog_observer``'s complete direct-scan set and redirects those
+    Manager-owned sessions' rendered ``@aw_*`` values over ``mux-status-v1``
+    to Worktree Manager's daemon instead of calling ``_monitor_mux_set()``
+    directly; unmanaged sessions stay on the old direct path. The catalog-observation merge still only happens inside the direct ``mux_bin`` scan because
+    ``catalog_observer`` is a complete-snapshot API: a managed-only partial view when no mux binary is locally discoverable would incorrectly reap
+    every ordinary session omitted from that set.
     """
     # Stage D: resolve deferred names via _self_override (cluster-free owners).
     from . import list_cli as _list_cli
+    from . import mux_status_link as _mux_status_link
     from . import status_bar_cli as _status_bar_cli
     from . import status_monitor_runtime as _smr
     from . import status_updater_cli as _status_updater_cli
@@ -4093,7 +4085,7 @@ def _monitor_sweep(
     reg_dir = _monitor_registry_dir()
     registry = _read_monitor_registry(reg_dir)
     served: list[tuple[str, str]] = []
-    managed_live = managed_mux_cache.live_session_names() if managed_mux_cache is not None else set()
+    managed_live, managed_entries_by_session = _mux_status_link.live_entries_by_session(managed_mux_cache)
     if mux_bin:
         live = _monitor_list_sessions(mux_bin)
         if live is None:
@@ -4137,9 +4129,7 @@ def _monitor_sweep(
         for key in list(session_projects):
             if key not in registered_paths:
                 session_projects.pop(key, None)
-    warm_projects: dict[str, str | None] = {
-        project: None for project in (picker_projects or set())
-    }
+    warm_projects: dict[str, str | None] = {project: None for project in (picker_projects or set())}
     served_path_keys: set[str] = set()
     for sess, path in served:
         if pane_observer is not None:
@@ -4187,9 +4177,6 @@ def _monitor_sweep(
                 except Exception:
                     pass
 
-        # Win the single-instance election so any per-session updater retires,
-        # publishing our current-runtime prefix so it defers to us (not to a
-        # superseded owner) -- see cmd_status_updater's debounce.
         def _publish(option: str, value: str, session: str = sess) -> bool:
             key = (session, option)
             if published is not None and published.get(key) == value:
@@ -4198,8 +4185,18 @@ def _monitor_sweep(
             if published is not None and success:
                 published[key] = value
             return success
-
         _status_monitor_recheck(governance, "pre-mutation:publish-status")
+        handled, ok, reason = _mux_status_link.dispatch_managed_status(
+            sess, live_names=managed_live, entries_by_session=managed_entries_by_session,
+            token=token, prefix=prefix, context_value=context_value, segment_value=segment_value,
+            published=published,
+        )
+        if handled:
+            if ok and context_value is not None:
+                ctx_done.add(sess)
+            elif not ok:
+                print(f"status-monitor: WM status push skipped for {sess} ({reason or 'unknown'})", file=sys.stderr)
+            continue
         _publish("@aw_updater", token)
         _publish("@aw_updater_prefix", prefix)
         if context_value is not None and _publish("@aw_ctx", context_value):

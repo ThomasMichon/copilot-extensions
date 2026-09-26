@@ -1,0 +1,9 @@
+{
+  "comment": "Phase 3b Sub-slice 3 Step 3: route Manager-owned mux status writes through the Worktree Manager companion daemon (mux-status-v1) instead of direct set-option; unmanaged sessions unchanged.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "minor"
+    }
+  ]
+}

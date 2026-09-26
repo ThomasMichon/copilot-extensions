@@ -105,6 +105,12 @@ def run(
     resolved_mock = _resolve_mock_mode(mock_mode)
     cli, default_live = _prepare(project, heal=not resolved_mock)
     if not resolved_mock:
+        try:
+            from .. import mux_daemon
+
+            mux_daemon.ensure_daemon_running()
+        except Exception:
+            pass
         _start_housekeeping(cli)
     picker_root = None if resolved_mock else cli._start_picker_monitor_root()
     live = False if local else default_live

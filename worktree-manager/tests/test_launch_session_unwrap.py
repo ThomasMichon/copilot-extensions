@@ -152,19 +152,21 @@ def test_launchers_pass_project_to_resolve_and_post_exit():
 
 
 def test_launchers_render_status_bar_from_worktree_path():
-    """Bare resume launches Copilot in HOME, so the status-updater must render
-    from the plan's status_path (the real worktree) -- not work_dir (HOME) --
-    or the bar loses the worktree's repo:id4 locus + git disposition."""
+    """Bare resume launches Copilot in HOME, so the Manager-owned mux-status
+    activation must use the plan's status_path (the real worktree) -- not
+    work_dir (HOME) -- or the bar loses the worktree's repo:id4 locus + git
+    disposition."""
     ps = _LAUNCH_PS1.read_text()
     sh = _LAUNCH_SCRIPT.read_text()
-    # PowerShell: resolve status_path (fallback work_dir) and feed the updater.
+    # PowerShell: resolve status_path (fallback work_dir) and feed the Manager
+    # activation helper.
     assert "$plan.PSObject.Properties['status_path']" in ps
-    assert "Start-StatusUpdater $sessName $muxStatusPath" in ps
-    assert "Start-StatusUpdater $sessName $plan.work_dir" not in ps
-    # bash: parse STATUS_PATH (fallback work_dir) and pass it as --path.
+    assert "-WorkDir $muxStatusPath" in ps
+    assert "-WorkDir $plan.work_dir" not in ps
+    # bash: parse STATUS_PATH (fallback work_dir) and pass it as --worktree-path.
     assert "d.get('status_path') or d.get('work_dir','')" in sh
-    assert 'spath="${STATUS_PATH:-${WORK_DIR:-$PWD}}"' in sh
-    assert '--path "$spath"' in sh
+    assert '"${STATUS_PATH:-${WORK_DIR:-$PWD}}"' in sh
+    assert '--worktree-path=' in sh
 
 
 def test_windows_launcher_encodes_wrapped_psmux_pane_argv():
