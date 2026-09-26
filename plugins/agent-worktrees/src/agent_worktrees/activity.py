@@ -67,6 +67,7 @@ Events are intentionally high-level:
   claim_added               ``claims add`` journaled a new outbound resource
                             claim (or reopened a finalized worktree via one)
   claim_released            ``claims release`` released or removed a claim
+  claim_annotated           ``claims annotate`` updated an existing claim's note
   claim_settled             ``claims settle`` set a claim's terminal
                             disposition (released/at-rest)
   claim_abandoned           ``claims sweep --apply`` flipped an abandoned,
@@ -129,6 +130,7 @@ from pathlib import Path
 
 from . import config as cfg
 from . import handoff_trace
+from .worktree_identity import _infer_worktree_id_from_cwd
 
 # Rolling retention window. Lines older than this are dropped on prune.
 RETENTION_DAYS = 7
@@ -539,10 +541,28 @@ def cmd_activity_log(args) -> int:
     """``agent-worktrees activity-log`` -- append one event (launcher hook).
 
     Extra context is passed as repeatable ``--field key=value`` args.
+
+    ``--worktree-id`` defaults to the explicit CLI value; when omitted, it is
+    auto-resolved from the current working directory the same way most other
+    subcommands do (:func:`worktree_identity._infer_worktree_id_from_cwd`).
+    A caller that cannot be resolved either way fails loudly (non-zero exit
+    + stderr) rather than silently appending a `worktree_id: null` entry --
+    such an entry is invisible to `agent-worktrees activity --worktree-id
+    <id>` (it only surfaces when querying with no worktree filter at all),
+    defeating the log's main use as a per-worktree durable trace
+    (copilot-extensions#2631).
     """
     event = getattr(args, "event", None)
     if not event:
         print("Usage: activity-log EVENT [--worktree-id ID] ...", file=sys.stderr)
+        return 1
+    worktree_id = getattr(args, "worktree_id", None) or _infer_worktree_id_from_cwd()
+    if not worktree_id:
+        print(
+            "activity-log: could not determine worktree ID from --worktree-id "
+            "or the current directory; pass --worktree-id explicitly.",
+            file=sys.stderr,
+        )
         return 1
     fields: dict[str, object] = {}
     for item in getattr(args, "field", None) or []:
@@ -553,7 +573,7 @@ def cmd_activity_log(args) -> int:
                 fields[key] = value
     log_event(
         event,
-        worktree_id=getattr(args, "worktree_id", None),
+        worktree_id=worktree_id,
         session_id=getattr(args, "session_id", None),
         launch_id=getattr(args, "launch_id", None),
         source=getattr(args, "source", None) or "launcher",

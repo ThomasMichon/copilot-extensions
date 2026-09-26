@@ -75,18 +75,25 @@ def add_parsers(sub) -> None:
 
     p = sub.add_parser(
         "effort-focus",
-        help="Bind, inspect, replace, or release this worktree's active effort",
+        help="Bind, inspect, replace, release, or lint this worktree's active effort",
     )
-    p.add_argument("action", choices=("bind", "show", "release"))
+    p.add_argument("action", choices=("bind", "show", "release", "lint"))
     p.add_argument(
-        "path", nargs="?", default=None, help="Repository-relative effort README path (bind)"
+        "path", nargs="?", default=None, help="Repository-relative effort README path (bind, lint)"
     )
-    p.add_argument("--participant", default=None, help="Declared participant identity (bind)")
+    p.add_argument(
+        "--repo-root",
+        default=None,
+        help="Repository root to resolve 'path' against (lint only; default: cwd). "
+        "Standalone -- unlike bind/show/release, lint needs no tracked/registered "
+        "worktree, so it can run at effort-authoring time or in CI.",
+    )
+    p.add_argument("--participant", default=None, help="Declared participant identity (bind, lint)")
     p.add_argument(
         "--slice",
         dest="effort_slice",
         default=None,
-        help="Declared Plan/Coordination slice (bind)",
+        help="Declared Plan/Coordination slice (bind, lint)",
     )
     p.add_argument(
         "--replace", action="store_true", help="Explicitly replace an existing binding (bind)"
@@ -376,8 +383,51 @@ def _effort_storage_root(config: cfg.Config, worktree_root: Path) -> Path:
     return worktree_root
 
 
+def _cmd_effort_focus_lint(args) -> int:
+    """``effort-focus lint`` -- standalone effort README schema validation.
+
+    Reuses the exact validator ``effort-focus bind`` runs (see
+    ``effort_focus.lint_effort``), but requires no tracked/registered
+    worktree -- runnable at effort-authoring time or in CI, per the
+    facility follow-up on copilot-extensions#2631: catch a schema defect
+    long before a bind-time surprise, not one exception at a time.
+    """
+    if not args.path:
+        message = "lint requires a repository-relative effort README path"
+        if args.json:
+            return _json_error(message)
+        output.err(message)
+        return 1
+    repo_root = Path(args.repo_root) if getattr(args, "repo_root", None) else Path.cwd()
+    try:
+        relative_path = effort_focus.normalize_relative_path(args.path)
+    except effort_focus.EffortFocusError as exc:
+        if args.json:
+            return _json_error(str(exc))
+        output.err(str(exc))
+        return 1
+    findings = effort_focus.lint_effort(
+        repo_root,
+        relative_path,
+        participant=getattr(args, "participant", None),
+        slice_name=getattr(args, "effort_slice", None),
+    )
+    if args.json:
+        _json_output({"path": relative_path, "ok": not findings, "findings": findings})
+        return 0 if not findings else 1
+    if not findings:
+        print(f"{relative_path}: OK")
+        return 0
+    print(f"{relative_path}: {len(findings)} finding(s)")
+    for finding in findings:
+        print(f"  [{finding['field']}] {finding['message']}")
+    return 1
+
+
 def cmd_effort_focus(args) -> int:
-    """Bind, show, replace, or release a worktree's canonical effort slice."""
+    """Bind, show, replace, release, or lint a worktree's canonical effort slice."""
+    if args.action == "lint":
+        return _cmd_effort_focus_lint(args)
     config = cfg.load_config()
     worktree_id = _infer_worktree_id(getattr(args, "worktree_id", None), config)
     if not worktree_id:

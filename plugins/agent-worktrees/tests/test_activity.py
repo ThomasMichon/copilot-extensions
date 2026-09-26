@@ -312,6 +312,54 @@ def test_cmd_activity_log_forwards_launch_id(patch_install_dir: Path):
     assert rec["setup_log"] == "/tmp/setup-1.log"
 
 
+def test_cmd_activity_log_resolves_worktree_id_from_cwd(patch_install_dir: Path, monkeypatch):
+    """No --worktree-id: falls back to cwd resolution rather than logging a
+    null-worktree_id entry invisible to `activity --worktree-id <id>`
+    (copilot-extensions#2631)."""
+    monkeypatch.setattr(
+        "agent_worktrees.activity._infer_worktree_id_from_cwd", lambda: "wt-cwd",
+    )
+
+    class Args:
+        event = "mux_attached"
+        worktree_id = None
+        session_id = None
+        launch_id = None
+        source = "launcher"
+        field = ("mux=join",)
+
+    rc = activity.cmd_activity_log(Args())
+    assert rc == 0
+    rec = activity.read_events()[0]
+    assert rec["worktree_id"] == "wt-cwd"
+    # explicit still wins over cwd resolution
+    assert len(activity.read_events(worktree_id="wt-cwd")) == 1
+
+
+def test_cmd_activity_log_fails_loudly_when_worktree_id_unresolvable(
+    patch_install_dir: Path, monkeypatch, capsys,
+):
+    """Neither --worktree-id nor cwd resolves: fail loudly (non-zero exit +
+    stderr) instead of silently appending an orphaned entry
+    (copilot-extensions#2631)."""
+    monkeypatch.setattr(
+        "agent_worktrees.activity._infer_worktree_id_from_cwd", lambda: None,
+    )
+
+    class Args:
+        event = "mux_attached"
+        worktree_id = None
+        session_id = None
+        launch_id = None
+        source = "launcher"
+        field = ()
+
+    rc = activity.cmd_activity_log(Args())
+    assert rc != 0
+    assert "could not determine worktree ID" in capsys.readouterr().err
+    assert activity.read_events() == []
+
+
 def test_cmd_activity_invalid_since(patch_install_dir: Path, capsys):
     class Args:
         since = "nonsense"
