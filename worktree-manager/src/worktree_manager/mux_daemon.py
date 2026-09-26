@@ -380,12 +380,17 @@ class MuxMappingRegistry:
     def remove(
         self, project: str, worktree_id: str, *, mapping_revision: int | None = None
     ) -> dict:
-        """Delete a mapping entry outright (the Manager fully owns this
-        data; no tombstone is needed the way an *observation* cache needs
-        one -- see the module docstring). If ``mapping_revision`` is given,
-        a stored entry at a *newer* revision is left in place rather than
-        removed (an out-of-order remove arriving after a newer register
-        must not clobber it)."""
+        """Tombstone (``live: false``) rather than delete a mapping entry
+        (Copilot review finding): deleting it outright loses the
+        monotonic-revision high-water mark the wire contract depends on --
+        register revision 5, remove at revision 6, then a delayed register
+        at revision 5 arrives: with the entry gone, ``register()`` would
+        see no current entry and accept the stale mapping, resurrecting it.
+        Persisting a tombstone at the removal's own revision keeps the
+        guard intact. If ``mapping_revision`` is given, a stored entry at a
+        *newer* revision is left in place rather than tombstoned (an
+        out-of-order remove arriving after a newer register must not
+        clobber it)."""
         key = (project, worktree_id)
         with self._interprocess_lock():
             entries = self._read_all()
@@ -398,7 +403,11 @@ class MuxMappingRegistry:
                     "reason": "stale_revision",
                     "current_revision": current["mapping_revision"],
                 }
-            del entries[key]
+            tombstone = dict(current)
+            tombstone["live"] = False
+            if mapping_revision is not None:
+                tombstone["mapping_revision"] = mapping_revision
+            entries[key] = tombstone
             self._write_all(entries)
         return {"applied": True}
 
@@ -598,7 +607,16 @@ def ensure_daemon_running(
     lock = lock_path(resolved_root)
     if _daemon_is_live(read_lock_data(lock)):
         return True
-    if not _spawn_detached([sys.executable, "-m", "worktree_manager", "mux-daemon", "run"]):
+    # Propagate the resolved root to the child (Copilot review finding):
+    # without this, a caller-supplied non-default `root` (e.g. a test's
+    # scratch directory) would wait on a lock under that root while the
+    # spawned `mux-daemon run` resolved its own default installation root
+    # instead, so this helper would report failure despite successfully
+    # spawning a daemon.
+    argv = [sys.executable, "-m", "worktree_manager", "mux-daemon", "run"]
+    if root is not None:
+        argv.append(f"--root={root}")
+    if not _spawn_detached(argv):
         return False
     started = time.time()
     while time.time() - started < boot_wait_s:

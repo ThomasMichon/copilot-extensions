@@ -9,6 +9,7 @@ from __future__ import annotations
 import subprocess
 import threading
 import time
+from pathlib import Path
 
 import pytest
 from work_coalescing_singleton import client as wcs_client
@@ -102,12 +103,31 @@ def test_registry_survives_a_simulated_daemon_restart(tmp_path):
     assert second.get("proj", "wt-1")["mapping_revision"] == 2
 
 
-def test_registry_remove_deletes_entry(tmp_path):
+def test_registry_remove_tombstones_entry(tmp_path):
+    """Copilot review finding: remove() must persist a tombstone
+    (``live: false``), not delete the entry outright -- deleting it would
+    lose the monotonic-revision high-water mark, letting a delayed
+    out-of-order register at a lower revision resurrect a removed mapping."""
     registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
-    registry.register(_entry())
+    registry.register(_entry(mapping_revision=5))
     result = registry.remove("proj", "wt-1")
     assert result == {"applied": True}
-    assert registry.get("proj", "wt-1") is None
+    entry = registry.get("proj", "wt-1")
+    assert entry is not None
+    assert entry["live"] is False
+    assert entry["mapping_revision"] == 5
+
+
+def test_registry_remove_prevents_stale_resurrection(tmp_path):
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry(mapping_revision=5))
+    registry.remove("proj", "wt-1", mapping_revision=6)
+    # A delayed, out-of-order register at the ORIGINAL (now-stale) revision
+    # must not resurrect the removed mapping.
+    result = registry.register(_entry(mapping_revision=5))
+    assert result["applied"] is False
+    assert result["reason"] == "stale_revision"
+    assert registry.get("proj", "wt-1")["live"] is False
 
 
 def test_registry_remove_is_idempotent_when_absent(tmp_path):
@@ -165,7 +185,9 @@ def test_register_and_remove_mapping_helpers(tmp_path):
     assert mux_daemon.get_mapping("proj", "wt-1", root=tmp_path)["live"] is True
     result = mux_daemon.remove_mapping("proj", "wt-1", root=tmp_path)
     assert result["applied"] is True
-    assert mux_daemon.get_mapping("proj", "wt-1", root=tmp_path) is None
+    tombstoned = mux_daemon.get_mapping("proj", "wt-1", root=tmp_path)
+    assert tombstoned is not None
+    assert tombstoned["live"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -384,6 +406,64 @@ def test_daemon_is_live_true_for_a_real_running_server(tmp_path):
         assert mux_daemon._daemon_is_live(rv) is True
     finally:
         server.close()
+
+
+def test_ensure_daemon_running_propagates_root_to_spawned_child(tmp_path, monkeypatch):
+    """Copilot review finding: a caller-supplied non-default ``root`` must
+    reach the spawned ``mux-daemon run`` child too -- otherwise
+    ``ensure_daemon_running`` waits on a lock under ``root`` while the
+    child publishes its own lock under the default installation root, so
+    this helper reports failure despite successfully spawning a daemon."""
+    captured: dict = {}
+
+    def _fake_spawn(argv):
+        captured["argv"] = argv
+        return False  # spawn "succeeds" at the OS level is irrelevant here
+
+    monkeypatch.setattr(mux_daemon, "_spawn_detached", _fake_spawn)
+    mux_daemon.ensure_daemon_running(tmp_path, boot_wait_s=0.05)
+    assert any(arg == f"--root={tmp_path}" for arg in captured["argv"])
+
+
+def test_ensure_daemon_running_end_to_end_with_a_real_subprocess(tmp_path):
+    """A genuine integration test: spawn the real ``mux-daemon run`` CLI as
+    a subprocess (not mocked) and confirm ``ensure_daemon_running`` finds it
+    live under the exact scratch root it was told to use."""
+    import sys
+
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "worktree_manager",
+            "mux-daemon",
+            "run",
+            f"--root={tmp_path}",
+        ],
+        cwd=str(Path(__file__).resolve().parent.parent / "src"),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        deadline = time.time() + 10
+        live = False
+        while time.time() < deadline:
+            data = mux_daemon.read_lock_data(mux_daemon.lock_path(tmp_path))
+            if data is not None and mux_daemon._daemon_is_live(data):
+                live = True
+                break
+            time.sleep(0.1)
+        assert live, "the real subprocess never published a live rendezvous under the given root"
+        # ensure_daemon_running must recognize this already-running daemon
+        # as live (no second spawn needed) -- proves it reads the SAME lock
+        # path the child actually published under.
+        assert mux_daemon.ensure_daemon_running(tmp_path) is True
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
 
 
 # ---------------------------------------------------------------------------

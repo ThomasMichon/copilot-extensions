@@ -57,9 +57,26 @@ def test_mux_daemon_register_show_remove_roundtrip(capsys):
     removed = json.loads(capsys.readouterr().out)
     assert removed == {"applied": True}
 
+    # remove() tombstones (live: false) rather than deleting -- show still
+    # finds the entry, just no longer live.
     rc = main(["mux-daemon", "show", "--project=proj", "--worktree-id=wt-1"])
-    assert rc == 1
-    assert json.loads(capsys.readouterr().out) is None
+    assert rc == 0
+    tombstoned = json.loads(capsys.readouterr().out)
+    assert tombstoned["live"] is False
+
+
+def test_mux_daemon_remove_rejects_non_integer_revision(capsys):
+    rc = main(
+        [
+            "mux-daemon",
+            "remove",
+            "--project=proj",
+            "--worktree-id=wt-1",
+            "--mapping-revision=not-a-number",
+        ]
+    )
+    assert rc == 2
+    assert "must be an integer" in capsys.readouterr().out
 
 
 def test_mux_daemon_register_rejects_missing_required_field(capsys):

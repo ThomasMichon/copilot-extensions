@@ -820,7 +820,13 @@ def _cmd_mux_daemon(rest: list[str]) -> int:
         return 2
     action = args.pop(0)
     if action == "run":
-        return mux_daemon.run_daemon_foreground()
+        from pathlib import Path
+
+        root = None
+        for arg in args:
+            if arg.startswith("--root="):
+                root = Path(arg.split("=", 1)[1])
+        return mux_daemon.run_daemon_foreground(root)
     if action == "ensure":
         ok = mux_daemon.ensure_daemon_running()
         print(json.dumps({"running": ok}))
@@ -858,7 +864,12 @@ def _cmd_mux_daemon(rest: list[str]) -> int:
             elif arg.startswith("--worktree-id="):
                 worktree_id = arg.split("=", 1)[1]
             elif arg.startswith("--mapping-revision="):
-                revision = int(arg.split("=", 1)[1])
+                revision_raw = arg.split("=", 1)[1]
+                try:
+                    revision = int(revision_raw)
+                except ValueError:
+                    print("error: --mapping-revision must be an integer")
+                    return 2
         if not project or not worktree_id:
             print("error: remove needs --project=NAME --worktree-id=ID")
             return 2

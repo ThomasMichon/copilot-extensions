@@ -398,6 +398,17 @@ class CoalescingServer:
                 with self._lock:
                     self._inflight.pop(map_key, None)
                 inflight.event.set()
+            # Enforce the OWNER's own response deadline too (Copilot review
+            # finding): without this, a slow `_compute` could finish after
+            # this caller's own budget expired and still return a result
+            # here -- unlike a joiner, which is already deadline-bound via
+            # `event.wait(timeout=remaining)` below. The completed
+            # `inflight.result`/`inflight.error` stay set on the shared
+            # `_InFlight` regardless, so a joiner with a longer deadline
+            # still gets the real result -- only this owner's own return
+            # path is late.
+            if deadline <= time.time():
+                raise Unavailable
         else:
             remaining = deadline - time.time()
             if remaining <= 0 or not inflight.event.wait(timeout=remaining):
