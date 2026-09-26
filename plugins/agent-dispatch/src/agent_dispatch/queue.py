@@ -102,6 +102,7 @@ from .queue_spawn_reservations import (  # noqa: F401 -- re-exported for existin
 )
 from .queue_storage import QueueStorageMixin
 from .queue_steering import QueueSteeringMixin
+from .queue_suspend import QueueSuspendMixin
 from .registrations import (  # noqa: F401 -- re-exported for existing call sites/tests
     RegistrationError,
     RegistrationKind,
@@ -131,6 +132,7 @@ class TaskQueue(
     QueueStorageMixin,
     QueueClaimQueriesMixin,
     QueueLifecycleMixin,
+    QueueSuspendMixin,
     QueueCompletionReviewMixin,
     LivenessMixin,
     HandoffFallbackMixin,
