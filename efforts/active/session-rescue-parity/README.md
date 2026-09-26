@@ -4,7 +4,11 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-phase PRs (see Coordination)
 - **Created:** 2026-09-25
-- **Status:** Draft <!-- Draft | Active | Blocked | Done -->
+- **Status:** Done <!-- Draft | Active | Blocked | Done -->
+  (one Validation Plan item -- a real leased-CodeSpace end-to-end run --
+  is explicitly transferred, not closed; see Phase 4/5 and its matching
+  Validation Plan line for the tracked follow-up. Every other Plan and
+  Validation Plan item is resolved.)
 - **Vision:** extends `visions/plugins/agent-containers/README.md`
   §`rescue-before-destructive-replacement` (generalizing it to an
   on-demand, non-destructive trigger independent of replacement — see
@@ -338,30 +342,80 @@ clean on every touched/new file.
 
 ### Phase 4 — Periodic trigger for CodeSpaces
 (scope set by Phase 1's scheduling-ownership decision)
-- [ ] If Phase 1 decided **consumer-owned** (the containers-precedent
+- [x] If Phase 1 decided **consumer-owned** (the containers-precedent
       default): this phase becomes documentation only -- record, in this
       repo's own docs (e.g. a short section in `agent-codespaces`'s README
       or the `codespaces-lifecycle` skill), how a consumer wires its own
       periodic trigger against the Phase 3 verb, mirroring how the
       containers-side downstream consumer did it. No new repository-owned
       scheduling code is written under this branch.
+
+      **Done:** added a "Periodic session capture (`sync-sessions`)"
+      section to `plugins/agent-codespaces/README.md` describing the
+      consumer-owned external-timer pattern (cron/systemd/scheduled task
+      invoking `sync-sessions <name> --account <account> --json`), the
+      busy exit code `75` contract, and why `--account` should be passed
+      explicitly for an unattended invocation (fail-closed account
+      resolution, per Phase 3). No scheduling code added to this repo.
 - [ ] If Phase 1 decided **repository-owned** (only viable if an existing
       always-running loop was confirmed to cover every relevant venue):
       wire the periodic capture into that already-existing loop; do not
       introduce a new standalone timer/daemon that duplicates a mechanism
       this repo already runs.
+
+      **N/A** -- Phase 1 decided consumer-owned (confirmed after checking
+      `connection_owner.py`'s `run_owner_daemon` is a per-connection
+      idle-shutdown loop, not an always-on sweep); this branch does not
+      apply.
 - [ ] Validate end-to-end against a real leased CodeSpace, using whichever
       trigger path Phase 1 chose: a capture picks up a real session,
       publishes it, and the CodeSpace's own state (lease, connection) is
       unaffected -- mirroring the container validation's proof that
       `docker ps` uptime was unaffected.
 
+      **Transferred, not closed.** This session's `gh` auth lacks the
+      `codespace` API scope (`gh auth refresh -h github.com -s codespace`
+      required) and no real leased CodeSpace was available to validate
+      against in this sandboxed environment -- unlike Phase 3's containers
+      precedent (`#3574`), which had live Docker infra already in hand via
+      the aperture-labs `dampener-reviewer-containerization` effort. The
+      full unit/CLI-dispatch test suite (1429 tests, Phase 3) validates
+      every code path this item would exercise except the literal live
+      round-trip against GitHub's own CodeSpace API/SSH transport. **Named
+      tracked follow-up:** an operator (or a session with the `codespace`
+      gh scope already granted) should run
+      `agent-codespaces sync-sessions <a-real-leased-name> --json` against
+      a genuinely leased CodeSpace once, confirm the published session
+      lands in the same agent-logger hub tree the CodeSpace's own
+      teardown-time capture already uses, and confirm `agent-codespaces
+      list`/`pool` shows the CodeSpace's lease/connection state unchanged
+      before and after. This is the one Validation Plan item this effort
+      does not itself close (see Phase 5's Validation Plan line for the
+      same item, transferred identically).
+
 ### Phase 5 — Close-out
-- [ ] Confirm both providers' capture/publish result-shape fields are
+- [x] Confirm both providers' capture/publish result-shape fields are
       documented consistently (README/skill docs on both sides) so a
       consumer reading either doesn't need venue-specific tribal knowledge.
-- [ ] Journal the final state; mark Status: Done once every Plan/Validation
+
+      **Done:** `agent-codespaces/README.md`'s new section documents
+      `sync-sessions --json`'s `{ok, deferred, session_count, detail}`
+      shape and states explicitly that it is the same shape family as
+      `agent-containers`' `rescue-capture` result (`captured`/`rescues`/
+      `deferred`, same busy exit code `75`), scaled to one target instead
+      of a fleet. `agent-containers/README.md` was updated with a
+      reciprocal cross-reference pointing at `agent-codespaces`' doc for
+      the exact field names, so either doc alone orients a reader to the
+      other's shape.
+- [x] Journal the final state; mark Status: Done once every Plan/Validation
       Plan item is resolved or transferred.
+
+      **Done -- see the Status field at the top of this document and the
+      final Journal entry below.** Every Plan and Validation Plan item is
+      resolved except the one live-CodeSpace end-to-end validation item,
+      which is explicitly transferred (not silently dropped) per the
+      Phase 4 note above and the matching Validation Plan line.
+
 
 ## Validation Plan
 
@@ -407,8 +461,19 @@ clean on every touched/new file.
       from the same agent-logger hub tree the CodeSpace's own teardown-time
       capture already lands in, and the CodeSpace's lease/connection state
       unaffected before/after.
-- [ ] Both providers' module-size guards (`tools/check-module-size.py`) and
+
+      **Transferred, not closed** -- see Phase 4's matching item above for
+      the full reasoning (no `codespace`-scoped `gh` auth or real leased
+      CodeSpace available in this session's sandbox). Named tracked
+      follow-up: an operator (or a session with that scope already
+      granted) runs this validation once against a real CodeSpace.
+- [x] Both providers' module-size guards (`tools/check-module-size.py`) and
       `ruff check` stay clean on every touched file.
+
+      **Done:** confirmed clean at every phase (Phase 2, 3, and this
+      Phase 4/5 docs pass); Phase 3's `__main__.py` growth was kept under
+      its grandfathered ceiling via the `lifecycle_lock.py` split rather
+      than a baseline-widening edit.
 
 ## Proposal
 
@@ -500,4 +565,27 @@ _Pending._
 - Next: Phase 4 (documentation-only, per Phase 1's consumer-owned
   scheduling decision) and Phase 5 (close-out) remain -- each its own PR
   per the effort's Coordination rule.
+
+### 2026-09-25 — Phase 4 + Phase 5 (close-out)
+- Phase 4: added a "Periodic session capture (`sync-sessions`)" section to
+  `agent-codespaces/README.md` documenting the consumer-owned external-timer
+  pattern (no scheduling code added to this repo, per Phase 1's decision),
+  the busy exit code `75` contract, and the `--account` fail-closed
+  guidance for unattended invocations. Attempted the live end-to-end
+  validation against a real leased CodeSpace but this session's `gh` auth
+  lacks the `codespace` API scope (confirmed via `agent-codespaces list`
+  failing with `HTTP 403`) and no real leased CodeSpace was available --
+  **explicitly transferred** as a named tracked follow-up (see Phase 4's
+  own checklist item and the matching Validation Plan line) rather than
+  silently skipped or falsely claimed done.
+- Phase 5: cross-referenced both providers' capture result shapes --
+  `agent-codespaces`' new section documents `sync-sessions --json`'s
+  `{ok, deferred, session_count, detail}` shape and states it is the same
+  shape family as `agent-containers`' `rescue-capture` result, scaled to
+  one target; `agent-containers/README.md` got a reciprocal pointer back.
+  Changefile added (patch/patch, both plugins).
+- Landed as its own docs-only PR. Every Plan and Validation Plan item in
+  this effort is now resolved except the one transferred live-CodeSpace
+  validation item. **Status: Done.**
+
 

@@ -187,6 +187,40 @@ There are also bridge-facing seams (`namespace-list`, `namespace-resolve`,
 `relay-launch-env`, `provision-command`, `acp-model-flags`). They are invoked by
 agent-bridge and are not the normal human/operator surface.
 
+### Periodic session capture (`sync-sessions`)
+
+This repo ships only the on-demand `sync-sessions` verb and its liveness gate
+-- it never schedules anything itself, exactly like `agent-containers`'
+`rescue-capture` (session-rescue-parity Phase 1's recorded decision: no
+existing repo-owned loop -- e.g. the Connection Owner daemon's
+`run_owner_daemon` -- covers every leased CodeSpace unconditionally, so
+scheduling stays a consumer concern). A downstream consumer that wants
+periodic evidence preservation for a long-lived, never-recycled CodeSpace
+wires its own external timer (cron, a systemd unit, a scheduled task) that
+periodically invokes:
+
+```bash
+agent-codespaces sync-sessions <name> --account <account> --json
+```
+
+The verb is safe to invoke on any schedule: it never boots a non-`Available`
+CodeSpace, defers (busy exit code `75`) whenever the box is held by any
+holder or a session is mid-write, and is a no-op success when there are no
+sessions to capture. A consumer's timer only needs to treat `75` as
+"try again later," not as an error. Because account resolution is
+fail-closed (an explicit `--account` or an exact per-name binding only),
+a scheduled invocation should pass `--account` explicitly rather than rely
+on binding lookup succeeding unattended.
+
+`sync-sessions --json`'s result is `{ok, deferred, session_count, detail}` --
+`ok` mirrors `agent-containers`' `captured`/`rescued` success signal,
+`deferred` is the busy/held/not-ready case (exit `75`), and `detail` always
+carries a human-readable reason. This is deliberately the same shape family
+as `rescue-capture`'s per-member result (`captured`/`rescues`/`deferred`,
+same busy exit code) scaled down to one target instead of a fleet, so a
+consumer already handling one provider's capture verb needs no new mental
+model for the other's.
+
 ### `create` options
 
 ```bash
