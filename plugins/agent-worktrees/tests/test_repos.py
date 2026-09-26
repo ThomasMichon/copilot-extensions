@@ -1369,3 +1369,30 @@ def test_repos_cli_sync_accepts_a_positional_repo_name(
     assert "repo-b" not in out
 
 
+def test_repos_cli_sync_preserves_unquoted_multi_word_tag_value(
+    home: Path, tmp_path: Path, monkeypatch,
+):
+    """A regression the name-filter parsing must not introduce: the
+    pre-existing `repos sync --tag multi-machine system` documented usage
+    (an unquoted, space-separated tag value, not a trailing repo name) must
+    still resolve to a single tag filter, not misread its second word as an
+    explicit repo name."""
+    from agent_worktrees import repos_cli
+
+    captured: dict[str, object] = {}
+
+    def fake_sync_all(*, tag=None, class_filter=None, names=None, plat=None):
+        captured["tag"] = tag
+        captured["names"] = names
+        return []
+
+    monkeypatch.setattr(repos, "sync_all", fake_sync_all)
+
+    repos_cli.cmd_repos_dispatch(
+        ["sync", "--tag", "multi-machine", "system"]
+    )
+
+    assert captured["tag"] == "multi-machine system"
+    assert captured["names"] is None
+
+

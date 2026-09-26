@@ -417,31 +417,37 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
     if sub == "sync":
         tag = None
         class_filter = None
-        consumed_idxs: set[int] = set()
-        if "--tag" in rest:
-            idx = rest.index("--tag")
-            consumed_idxs.add(idx)
-            if idx + 1 < len(rest):
-                tag = rest[idx + 1]
-                consumed_idxs.add(idx + 1)
-        for flag in ("--class", "--type"):
-            if flag in rest:
-                idx = rest.index(flag)
-                consumed_idxs.add(idx)
-                if idx + 1 < len(rest):
-                    class_filter = rest[idx + 1]
-                    consumed_idxs.add(idx + 1)
-        # Any remaining bare tokens (not consumed as a flag or its value) are
-        # explicit repo names -- lets a caller fast-forward exactly one
-        # anchor (`repos sync <name>`) instead of every registered repo, the
-        # same safe fetch + `merge --ff-only` (skips dirty/diverged/detached)
-        # `sync_repo` always used, just scoped down.
-        names = tuple(
-            tok for i, tok in enumerate(rest)
-            if i not in consumed_idxs and not tok.startswith("--")
-        )
+        name_list: list[str] = []
+        i = 0
+        while i < len(rest):
+            tok = rest[i]
+            if tok == "--tag":
+                # Consume every following bare token (until the next `--`
+                # flag) as one space-joined tag value -- preserves the
+                # pre-existing (unquoted, multi-word) `--tag multi-machine
+                # system` usage instead of misreading its trailing word as
+                # an explicit repo name.
+                j = i + 1
+                while j < len(rest) and not rest[j].startswith("--"):
+                    j += 1
+                tag = " ".join(rest[i + 1:j]) or None
+                i = j
+                continue
+            if tok in ("--class", "--type"):
+                if i + 1 < len(rest):
+                    class_filter = rest[i + 1]
+                i += 2
+                continue
+            if not tok.startswith("--"):
+                # A bare, unconsumed token is an explicit repo name -- lets
+                # a caller fast-forward exactly one anchor (`repos sync
+                # <name>`) instead of every registered repo, the same safe
+                # fetch + `merge --ff-only` (skips dirty/diverged/detached)
+                # `sync_repo` always used, just scoped down.
+                name_list.append(tok)
+            i += 1
         results = repos.sync_all(
-            tag=tag, class_filter=class_filter, names=names or None,
+            tag=tag, class_filter=class_filter, names=tuple(name_list) or None,
         )
         if not results:
             print("No repos registered.")

@@ -140,7 +140,7 @@ repos clone <remote> [--name N] [--target PATH]
 repos srcroot [--set PATH] [--platform windows|wsl|linux]
 repos migrate [--default-class reference|singleton|worktree]
 repos status [--tag T] [--class C] [--json]
-repos sync [--tag T] [--class C]
+repos sync [<repo> ...] [--tag T] [--class C]
 repos account [list|set <owner> <login>|unset <owner>]   # org->login map
 repos account-for <owner|owner/name|reponame>            # print resolved login
 repos allow-edits <repo> --reason <why> [--minutes N]    # break-glass grant
@@ -219,11 +219,18 @@ If the repo has no local path but has a remote, suggest cloning it.
 ```bash
 <agent-worktrees catalog argv[0]> repos status                 # branch, dirty, ahead/behind
 <agent-worktrees catalog argv[0]> repos sync --tag multi-machine system    # fetch + ff-merge (skips dirty)
+<agent-worktrees catalog argv[0]> repos sync copilot-extensions            # fast-forward just that one repo
 ```
 
 `sync` only fast-forwards the default branch and **skips** any repo whose
 working tree is dirty or whose checkout is on a non-default branch — it
-never force-updates or creates merge commits.
+never force-updates or creates merge commits. Naming one or more repos
+(`repos sync <repo> [<repo> ...]`) narrows the sync to exactly those,
+combinable with `--tag`/`--class`; a named repo that isn't registered at all
+is reported as its own `not registered` result. This is the sanctioned way to
+catch a worktree-class repo's **anchor** checkout up with its remote without
+tripping `anchor_write_guard` (which blocks a literal `git pull`/`git fetch`
+run directly against the anchor).
 
 ## Data File
 
