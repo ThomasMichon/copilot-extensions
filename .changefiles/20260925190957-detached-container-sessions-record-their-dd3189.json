@@ -1,0 +1,9 @@
+{
+  "comment": "Detached container sessions record their supervising worktree so a successor can find them after a handoff",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

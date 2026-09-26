@@ -15,6 +15,7 @@ from agent_procutil import no_window_flags
 from venue_copilot import read_seed
 from venue_copilot.detached import launch_detached, public_plan, stop_detached
 from venue_copilot.models import model_copilot_args
+from venue_copilot.supervisor import with_supervisor
 from venue_copilot.refs import upload_for
 
 _BUSY_EXIT = 75
@@ -262,6 +263,7 @@ def cmd_detach(
     except RuntimeError as exc:
         return _fail(str(exc))
     plan = plan_for(args, target)
+    plan["venue"] = with_supervisor(plan["venue"])  # successor can find this worker
     try:
         seed = read_seed(args)
         refs = upload_for(list(getattr(args, "ref_files", None) or []), plan["scope_id"])

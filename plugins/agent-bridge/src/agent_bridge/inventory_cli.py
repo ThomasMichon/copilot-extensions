@@ -330,6 +330,10 @@ def _cmd_live_sessions(args: argparse.Namespace) -> None:
             print("[>] Live-sessions endpoint not available (service may need restart)")
             return
         raise
+    supervisor = (getattr(args, "supervisor", None) or "").split("#", 1)[0].strip()
+    if supervisor:
+        sessions = [s for s in sessions
+                    if ((s.get("venue") or {}).get("supervisor_ref") or "") == supervisor]
     if args.json:
         core._json_out(sessions)
         return
@@ -404,6 +408,7 @@ def register_inventory_commands(sub: argparse._SubParsersAction) -> None:
     live_sub = live_p.add_subparsers(dest="live_action")
     live_list_p = live_sub.add_parser("list", help="List registered live interactive CLI sessions")
     live_list_p.add_argument("--worktree-id", help="Filter by worktree id")
+    live_list_p.add_argument("--supervisor", help="Only venue sessions supervised by this worktree ref (machine/project/worktree_id)")
     live_list_p.add_argument("--all", dest="include_dead", action="store_true", help="include dead (expired / taken-over) rows, normally hidden")
     live_list_p.set_defaults(func=_cmd_live_sessions)
     live_resolve_p = live_sub.add_parser("resolve", help="Resolve a session id OR worktree handle to its live session")
