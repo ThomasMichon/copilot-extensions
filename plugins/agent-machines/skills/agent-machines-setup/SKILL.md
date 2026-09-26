@@ -72,6 +72,17 @@ Verify:
 
 ## Author a requirement package
 
+> **Author it in your own consuming repo, never in copilot-extensions
+> itself.** This plugin ships the mechanism; a requirement package declares
+> *a consuming repo's* desired machine state, sometimes gated to a literal
+> machine name. copilot-extensions is public and has no machine of its own
+> to converge -- a package committed here would publish real machine
+> names/topology to the world. Put it in the repo that actually adopts the
+> pattern (e.g. your facility's own private control repo) instead. This is
+> a hard-enforced rule, not just guidance: `tools/check-no-agent-machines-
+> packages.py` (wired into CI and the pre-push hook) fails the build if any
+> of the paths below ever appear in this repo's own tree.
+
 A **requirement package** is one complete YAML file under either:
 
 - `.copilot-extensions/agent-machines/all/` for shared packages; or

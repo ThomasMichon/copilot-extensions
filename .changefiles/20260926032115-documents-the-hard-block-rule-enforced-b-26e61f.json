@@ -1,0 +1,9 @@
+{
+  "comment": "Documents the hard-block rule (enforced by a new repo-root tools/check-no-agent-machines-packages.py guard) that agent-machines requirement packages must never be authored in copilot-extensions itself -- they belong in the consuming repo.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}
