@@ -201,7 +201,14 @@ shape before committing to a design)_
       expansion) to the real repo: convert every real
       `plugins/<plugin>/libs/<lib>/src` copy that is byte-identical to its
       canonical `libs/<lib>` source into a `VENDOR_POINTER.json` stub,
-      using whichever resolver design the item above settled on.
+      using whichever resolver design the item above settled on. **Also
+      cover `worktree-manager/libs/*`** (confirmed in review — both
+      `sync-vendored-libs.py` and `check-vendored-libs-sync.py` already
+      scan this extra tree alongside `plugins/*/libs/*`; leaving it
+      unconverted while extending `materialize_main.find_pointers()`
+      elsewhere would leave those copies out of scope by omission, not
+      decision). If any part of that surface is deliberately excluded,
+      state that explicitly rather than leaving the gap implicit.
 - [ ] **`tools/check-vendored-libs-sync.py` does not currently recognize
       pointers at all** (confirmed in review — it hashes whatever `src/`
       exists and checks versions; it has no `VENDOR_POINTER` awareness, and
@@ -280,7 +287,13 @@ shape before committing to a design)_
       dev-time cross-folder-calling stub with the fully inlined canonical
       script content in the `main` snapshot, so what ships never resolves
       anything outside its own plugin's payload (per `docs/install-
-      contract.md`).
+      contract.md`). **Apply the same root-containment guarantee required
+      for directory pointers** (confirmed in review — the executable
+      kind's `source` is equally committed metadata; without rejecting an
+      absolute path or a `../`/symlink escape before copying, promotion or
+      preview could read arbitrary runner-local script content into the
+      shipped plugin). Add regression coverage for a missing/escaping
+      executable source in both materializers (real + preview).
 - [ ] **`tools/preview_release.py` has no materialization path for an
       executable pointer** (confirmed in review — its scratch-preview build
       only calls `_materialize_into_preview()` for library copies and
@@ -303,6 +316,14 @@ shape before committing to a design)_
       Assign this to either a new, generic pointer validator/materializer
       shared across all pointer kinds, or to `sync-installer-engine.py`
       itself — not to the lib-scoped tool.
+- [ ] **`tools/check-install-contract.py`'s existing install-contract guard
+      calls `sync-installer-engine.py`'s `verify()` directly** (confirmed
+      in review — it compares each adopter file byte-for-byte against the
+      canonical engine). If a pointerized engine copy is no longer a byte
+      copy, this call path will reject every converted adopter as
+      out-of-sync. Update or replace this call path as part of the
+      executable-pointer rollout — not merely add a new, unconnected
+      validator alongside a guard that still fails.
 
 ### Phase 3 — Document the pattern; sweep for further "and more" candidates
 - [ ] Write `docs/patterns/vendor-pointer.md`: the three (by then) pointer
@@ -431,3 +452,16 @@ _Pending._
   item testing both platforms. (2) Round-1's fix wrongly described the
   test runner's install command as `uv sync`; corrected throughout to the
   actual editable `uv pip install -e`.
+- **Round 6 review (2026-09-26):** three more findings, all confirmed and
+  fixed: (1) the executable pointer kind needed the same root-containment
+  guarantee just added for directory pointers — added to the
+  `materialize_main.py` item, with regression coverage required in both
+  materializers. (2) Phase 1's real-conversion scope missed
+  `worktree-manager/libs/*`, a tree both `sync-vendored-libs.py` and
+  `check-vendored-libs-sync.py` already scan alongside `plugins/*/libs/*` —
+  added explicit coverage (or an explicit exclusion decision) to that Plan
+  item. (3) `check-install-contract.py`'s existing guard calls
+  `sync-installer-engine.py`'s `verify()` directly, which byte-compares
+  every adopter — a pointerized engine copy would fail that check even
+  after a new pointer validator exists. Added a Phase 2 item to update or
+  replace that call path.
