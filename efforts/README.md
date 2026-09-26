@@ -16,6 +16,7 @@ that pattern to this repository.
 | [Dev/Main Release Pipeline](active/dev-branch-release-pipeline/README.md) | Draft | #3336 |
 | [Promotion-Failure Reactive Fix Agent](active/promotion-failure-reactive-fix-agent/README.md) | Draft | _TBD_ |
 | [Vendored Doc Pointers](active/vendored-doc-pointers/README.md) | Done; pending archive | #3565 |
+| [Vendor Pointer Generalization](active/vendor-pointer-generalization/README.md) | Draft | See effort |
 | [Ambient Guidance Navigability](active/ambient-guidance-navigability/README.md) | Active | #3033 |
 | [Unified Skill Review](active/unified-skill-review/README.md) | Draft | #2847 |
 | [Handoff Cutover Lifecycle Journal](active/handoff-cutover-lifecycle-journal/README.md) | Draft | #2457 |
