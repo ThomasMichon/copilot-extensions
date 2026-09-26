@@ -455,6 +455,24 @@ def _resolve_owner_ref_record_path(
     return (path, parsed.worktree_id, None)
 
 
+def _dispatch_claim(verb: str, verb_args: dict):
+    """Dispatch one of the resource-claim verbs (``claim_add``/``_release``/
+    ``_settle``, ``tracking_claim_write.py``) through the daemon's write path
+    when reachable, else the identical in-process code (logged). Raises
+    ``tracking_write.AmbiguousWriteOutcome`` when a sent request then failed.
+    """
+    from . import locks as _locks
+    from . import status_monitor_runtime as _smr
+    from . import tracking_write
+
+    return tracking_write.dispatch(
+        verb,
+        verb_args,
+        read_lock_data=lambda: _locks.read_lock(_smr._monitor_lock_path()),
+        ensure_monitor=_smr._ensure_status_monitor if _smr._status_monitor_enabled() else None,
+    )
+
+
 def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
     """Journal a new outbound resource claim on a worktree."""
     valid_kinds = {"worktree", "codespace", "container", "ssh", "workdir", "pr", "task"}
@@ -505,54 +523,41 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
             return _json_error(f"worktree not found: {wt_id}")
         output.err(f"worktree not found: {wt_id}")
         return 1
-    with tracking._RecordLock(rec_path, require_sidecar=True):
-        rec = tracking.load_record(rec_path)
-        if rec.status in {"finalizing", "orphaned"}:
-            msg = (
-                f"claims add: owner worktree {wt_id} is {rec.status}; "
-                "creator ownership is frozen and cannot accept new resources"
-            )
-            if args.json:
-                return _json_error(msg)
-            output.err(msg)
-            return 1
-        was_finalized = rec.status == "finalized"
-        claim = tracking.ResourceClaim(
-            kind=kind,
-            ref=ref,
-            created_at=tracking._now_iso(),
-            state=obligations.ACTIVE,
-            note=getattr(args, "note", "") or "",
+    from . import tracking_write
+
+    try:
+        result = _dispatch_claim(
+            "claim_add",
+            {
+                "worktree_id": wt_id,
+                "yaml_path": str(rec_path),
+                "kind": kind,
+                "ref": ref,
+                "note": getattr(args, "note", "") or "",
+            },
         )
-        tracking.add_resource_claim(rec, claim, save=False)
-        reopened = was_finalized and rec.status == "active"
-        # worktree-finality-and-obligations Phase 2: on reopen, surface what
-        # the earlier finalize's `release_all_resources` cascade let go --
-        # reopening restores the worktree to `active`, never those resources.
-        released_by_finalize = (
-            list(rec.last_finalize_released) if reopened else []
-        )
-        tracking.save_record(rec, rec_path)
-    activity.log_event(
-        "claim_added",
-        worktree_id=wt_id,
-        kind=kind,
-        ref=ref,
-        state=obligations.ACTIVE,
-        reopened=reopened,
-    )
+    except tracking_write.AmbiguousWriteOutcome as exc:
+        msg = f"claims add: write to {wt_id} is in an unknown state: {exc}"
+        if args.json:
+            return _json_error(msg)
+        output.err(msg)
+        return 1
+    if result.get("error") == "frozen":
+        if args.json:
+            return _json_error(result["message"])
+        output.err(result["message"])
+        return 1
+    reopened = result["reopened"]
+    released_by_finalize = result["released_by_finalize"]
     if args.json:
         _json_output(
             {
                 "worktree_id": wt_id,
                 "kind": kind,
                 "ref": ref,
-                "state": obligations.ACTIVE,
+                "state": result["state"],
                 "reopened": reopened,
-                "released_by_earlier_finalize": [
-                    {"kind": c.kind, "ref": c.ref, "note": c.note}
-                    for c in released_by_finalize
-                ],
+                "released_by_earlier_finalize": released_by_finalize,
             }
         )
         return 0
@@ -565,9 +570,9 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
                 "-- review/re-claim if still needed):"
             )
             for c in released_by_finalize:
-                label = f"    · {c.kind}: {c.ref}"
-                if c.note:
-                    label += f" ({c.note})"
+                label = f"    · {c['kind']}: {c['ref']}"
+                if c["note"]:
+                    label += f" ({c['note']})"
                 print(label)
     return 0
 
@@ -614,40 +619,35 @@ def _claims_release(args: argparse.Namespace, ref: str) -> int:
             return _json_error(f"worktree not found: {wt_id}")
         output.err(f"worktree not found: {wt_id}")
         return 1
-    with tracking._RecordLock(rec_path, require_sidecar=True):
-        rec = tracking.load_record(rec_path)
-        match = next((c for c in rec.resources if c.ref == ref), None)
-        if match is None:
-            if args.json:
-                return _json_error(f"no outbound claim with ref: {ref}")
-            output.err(f"no outbound claim with ref: {ref} on {wt_id}")
-            return 1
-        reservation = tracking.claim_handoff_reservation(rec, match)
-        if reservation:
-            msg = (
-                f"claim {ref} is reserved by offered handoff bundle "
-                f"{reservation}; accept, decline, or cancel it first"
-            )
-            if args.json:
-                return _json_error(msg)
-            output.err(msg)
-            return 1
-        remove = getattr(args, "remove", False)
-        kind = match.kind
-        if remove:
-            rec.resources = [c for c in rec.resources if c.ref != ref]
-            action = "removed"
-        else:
-            match.state = "released"
-            action = "released"
-        tracking.save_record(rec, rec_path)
-    activity.log_event(
-        "claim_released",
-        worktree_id=wt_id,
-        kind=kind,
-        ref=ref,
-        action=action,
-    )
+    from . import tracking_write
+
+    try:
+        result = _dispatch_claim(
+            "claim_release",
+            {
+                "worktree_id": wt_id,
+                "yaml_path": str(rec_path),
+                "ref": ref,
+                "remove": bool(getattr(args, "remove", False)),
+            },
+        )
+    except tracking_write.AmbiguousWriteOutcome as exc:
+        msg = f"claims release: write to {wt_id} is in an unknown state: {exc}"
+        if args.json:
+            return _json_error(msg)
+        output.err(msg)
+        return 1
+    if result.get("error") == "not_found":
+        if args.json:
+            return _json_error(f"no outbound claim with ref: {ref}")
+        output.err(f"no outbound claim with ref: {ref} on {wt_id}")
+        return 1
+    if result.get("error") == "reserved":
+        if args.json:
+            return _json_error(result["message"])
+        output.err(result["message"])
+        return 1
+    action = result["action"]
     if args.json:
         _json_output({"worktree_id": wt_id, "ref": ref, "action": action})
         return 0
@@ -691,34 +691,34 @@ def _claims_settle(args: argparse.Namespace, ref: str) -> int:
         output.err(f"worktree not found: {wt_id}")
         return 1
     disposition = obligations.RELEASED if getattr(args, "released", False) else obligations.AT_REST
-    with tracking._RecordLock(rec_path, require_sidecar=True):
-        rec = tracking.load_record(rec_path)
-        match = next((c for c in rec.resources if c.ref == ref), None)
-        reservation = tracking.claim_handoff_reservation(rec, match) if match is not None else ""
-        if reservation:
-            msg = (
-                f"claim {ref} is reserved by offered handoff bundle "
-                f"{reservation}; accept, decline, or cancel it first"
-            )
-            if args.json:
-                return _json_error(msg)
-            output.err(msg)
-            return 1
-        settled = tracking.settle_resource_claim(rec, ref, disposition, save=False)
-        if settled is not None:
-            tracking.save_record(rec, rec_path)
-    if settled is None:
+    from . import tracking_write
+
+    try:
+        result = _dispatch_claim(
+            "claim_settle",
+            {
+                "worktree_id": wt_id,
+                "yaml_path": str(rec_path),
+                "ref": ref,
+                "disposition": disposition,
+            },
+        )
+    except tracking_write.AmbiguousWriteOutcome as exc:
+        msg = f"claims settle: write to {wt_id} is in an unknown state: {exc}"
+        if args.json:
+            return _json_error(msg)
+        output.err(msg)
+        return 1
+    if result.get("error") == "reserved":
+        if args.json:
+            return _json_error(result["message"])
+        output.err(result["message"])
+        return 1
+    if result.get("error") == "not_found":
         if args.json:
             return _json_error(f"no outbound claim with ref: {ref}")
         output.err(f"no outbound claim with ref: {ref} on {wt_id}")
         return 1
-    activity.log_event(
-        "claim_settled",
-        worktree_id=wt_id,
-        kind=settled.kind,
-        ref=ref,
-        disposition=disposition,
-    )
     if args.json:
         _json_output({"worktree_id": wt_id, "ref": ref, "disposition": disposition})
         return 0

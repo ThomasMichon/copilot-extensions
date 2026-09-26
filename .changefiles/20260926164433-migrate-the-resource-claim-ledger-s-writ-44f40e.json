@@ -1,0 +1,9 @@
+{
+  "comment": "Migrate the resource-claim ledger's write transactions (add/release/settle) onto the tracking_write daemon-mediated verb path (agent-worktrees-authoritative-daemon Phase 3).",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
