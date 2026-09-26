@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from agent_procutil import no_window_kwargs
@@ -35,7 +35,17 @@ def validate_context() -> dict[str, Any] | None:
             pointer = context
         if not isinstance(pointer, str) or not pointer:
             raise ValueError("Explicit context must name its installation receipt")
-        root = Path(pointer).expanduser().parent
+        # The receipt may describe another OS's cell (e.g. a Windows-style
+        # `N:\...` path surfacing in a POSIX CI runner's captured context).
+        # A backslash never appears in a genuine POSIX path component, so its
+        # presence is an unambiguous signal to parse with `PureWindowsPath`
+        # instead -- a plain `Path(pointer)` on POSIX treats the whole
+        # backslash-separated string as one opaque component and silently
+        # collapses `.parent` to `.`.
+        if "\\" in pointer:
+            root = Path(str(PureWindowsPath(pointer).parent))
+        else:
+            root = Path(pointer).expanduser().parent
         return validate_owner(_OWNER, root, context)
     except (OSError, ValueError, ImportError) as error:
         raise ContextRefused(f"agent-worktrees installation context refused: {error}") from error
