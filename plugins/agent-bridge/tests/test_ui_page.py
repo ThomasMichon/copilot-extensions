@@ -1,10 +1,13 @@
-"""Tests for the built-in ``/ui`` page and the ``agent-bridge ui`` opener."""
+"""Tests for the built-in ``/ui`` control surface and the ``agent-bridge ui`` opener."""
 
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 import subprocess
+from importlib import resources
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -13,6 +16,10 @@ from fastapi.testclient import TestClient
 from agent_bridge import service_start_cli
 from agent_bridge.routes import ui
 
+STATIC = Path(str(resources.files("agent_bridge").joinpath("ui_static")))
+JS = ("app.js", "viewer.js", "model.js", "dom.js")
+needs_node = pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+
 
 def _client() -> TestClient:
     app = FastAPI()
@@ -20,46 +27,93 @@ def _client() -> TestClient:
     return TestClient(app)
 
 
-def test_ui_is_served_with_a_restrictive_csp() -> None:
+def _src(name: str) -> str:
+    return (STATIC / name).read_text(encoding="utf-8")
+
+
+def test_ui_is_served_with_a_strict_csp_and_no_inline_code() -> None:
     resp = _client().get("/ui")
     assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/html")
     csp = resp.headers["content-security-policy"]
     assert "default-src 'none'" in csp and "connect-src 'self'" in csp
+    assert "script-src 'self'" in csp and "style-src 'self'" in csp
+    assert "unsafe-inline" not in csp
     assert "frame-ancestors 'none'" in csp
     assert resp.headers["referrer-policy"] == "no-referrer"
+    assert resp.headers["x-content-type-options"] == "nosniff"
+    page = resp.text
+    # Every script/style is an external same-origin file; no inline handlers.
+    assert re.search(r"<script(?![^>]*\bsrc=)", page) is None
+    assert "<style" not in page and " onclick=" not in page and "style=" not in page
+    assert '<script type="module" src="/ui/assets/app.js">' in page
 
 
-def test_ui_exposes_live_sessions_watch_and_message_via_existing_routes() -> None:
-    page = _client().get("/ui").text
-    assert 'id="live"' in page and 'id="feed"' in page and 'id="msg"' in page
-    assert 'id="msg-delivery"' in page
-    assert 'value="interrupt">Interrupt &amp; send' in page
-    assert 'value="steer">Steer (next step)' in page
-    assert 'value="queue">Queue (after turn)' in page
-    # Only existing, token-protected API surfaces are used.
-    assert "/api/v1/live-sessions" in page
-    assert "/events?after=" in page and "/messages" in page
-    assert "/turns" in page and "queue: true" in page
-    assert "idempotency_key" in page
-    assert "delivery," in page
-    assert "interrupting the current turn" in page
+def test_every_allowlisted_asset_is_packaged_and_served_with_its_type() -> None:
+    client = _client()
+    for name, media in ui.ASSETS.items():
+        resp = client.get(f"/ui/assets/{name}")
+        assert resp.status_code == 200, name
+        assert resp.headers["content-type"] == media
+        assert resp.headers["content-security-policy"] == ui._CSP
+        assert resp.content == (STATIC / name).read_bytes()
+    shipped = {p.name for p in STATIC.iterdir() if p.suffix in (".js", ".css")}
+    assert shipped == set(ui.ASSETS)
 
 
-def test_ui_renders_event_content_as_text_only() -> None:
-    page = ui._PAGE
-    feed_code = page[page.index("function eventLine"):page.index("function handleBlock")]
-    assert "innerHTML" not in feed_code
-    assert "createTextNode" in feed_code
+@pytest.mark.parametrize("name", [
+    "ui.py", "index.html", "..%2Froutes%2Fui.py", "%2e%2e%2f__init__.py", "APP.JS", "app.js.map",
+])
+def test_assets_outside_the_allowlist_are_not_served(name: str) -> None:
+    assert _client().get(f"/ui/assets/{name}").status_code == 404
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
-def test_ui_script_is_valid_javascript(tmp_path) -> None:
-    script = ui._PAGE.split("<script>")[1].split("</script>")[0]
-    path = tmp_path / "ui.js"
-    path.write_text(script, encoding="utf-8")
+def test_assets_revalidate_by_etag() -> None:
+    client = _client()
+    first = client.get("/ui/assets/app.js")
+    assert first.headers["cache-control"] == "no-cache"
+    again = client.get("/ui/assets/app.js", headers={"If-None-Match": first.headers["etag"]})
+    assert again.status_code == 304 and not again.content
+
+
+def test_assets_are_public_but_ui_data_routes_need_the_token() -> None:
+    client = _authed_app()
+    assert client.get("/ui").status_code == 200
+    assert client.get("/ui/assets/app.css").status_code == 200
+    assert client.get("/api/v1/ui/workspaces").status_code == 401
+    assert client.post("/api/v1/ui/tasks", json={}).status_code == 401
+
+
+def test_package_data_ships_the_ui_assets() -> None:
+    pyproject = (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8")
+    assert '"ui_static/*.js"' in pyproject and '"ui_static/*.css"' in pyproject
+    assert '"ui_static/*.html"' in pyproject
+
+
+def test_ui_talks_only_to_existing_token_protected_routes() -> None:
+    code = "".join(_src(n) for n in JS)
+    for path in ("/api/v1/live-sessions", "/events?after=", "/messages", "/api/v1/ui/workspaces",
+                 "/api/v1/ui/tasks", "/api/v1/sessions", "/api/v1/agents", "/ui/exchange"):
+        assert path in code, path
+    assert "idempotency_key" in code
+    assert re.search(r"https?://(?!acp-ui\.github\.io)", _src("index.html") + code) is None
+
+
+def test_content_is_rendered_as_text_never_markup() -> None:
+    for name in JS:
+        src = _src(name)
+        assert "innerHTML" not in src and "outerHTML" not in src, name
+        assert "insertAdjacentHTML" not in src and "document.write" not in src, name
+    assert "createTextNode" in _src("dom.js")
+
+
+@needs_node
+@pytest.mark.parametrize("name", JS)
+def test_ui_scripts_are_valid_javascript_modules(tmp_path, name: str) -> None:
+    path = tmp_path / (name[:-3] + ".mjs")
+    path.write_text(_src(name), encoding="utf-8")
     result = subprocess.run(["node", "--check", str(path)], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
-
 
 class _FakeClient:
     def __init__(self, code="c0de-1", fail=False):
@@ -154,77 +208,8 @@ def test_unknown_or_expired_login_code_is_refused(monkeypatch) -> None:
 
 
 def test_page_trades_a_login_code_and_never_reads_a_token_from_the_url() -> None:
-    page = ui._PAGE
-    assert "/ui/exchange" in page and "code=" in page
-    assert "token=" not in page.split("<script>")[1]
+    app = _src("app.js")
+    assert "/ui/exchange" in app and "code=" in app
+    assert "token=" not in app
+    assert "history.replaceState" in app
 
-
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
-def test_ui_feed_renders_real_server_sse_frames(tmp_path) -> None:
-    """End to end on the wire format: SDK events -> bridge translator ->
-    EventLog -> the server's own SSE framing -> the page's handleBlock/addEvent
-    (run in node against a minimal DOM stub). Guards the payload-wrapper
-    regression where every feed line rendered without its text."""
-    import asyncio
-    import json
-
-    from agent_bridge.events import EventLog
-    from agent_bridge.live_representation import translate_sdk_event
-    from agent_bridge.routes.live_sessions import _RepresentedSession
-    from agent_bridge.routes.sessions import _sse_event_stream
-
-    log = EventLog(session_id="sim-1")
-    sdk = [
-        ("user.message", {"content": "Add a haiku"}),
-        ("assistant.reasoning", {"content": "Plan it"}),
-        ("tool.execution_start", {"toolCallId": "t1", "toolName": "bash", "arguments": {"command": "git status"}}),
-        ("tool.execution_complete", {"toolCallId": "t1", "success": True, "result": {"content": "On branch main"}}),
-        ("assistant.message", {"content": "done <b>not html</b>"}),
-        ("assistant.turn_end", {}),
-    ]
-    for sdk_type, data in sdk:
-        for event_type, payload in translate_sdk_event(sdk_type, data):
-            log.append(event_type, payload)
-    shim = _RepresentedSession(session_id="sim-1", event_log=log)
-
-    async def frames(n):
-        out = []
-        gen = _sse_event_stream(shim, 0, server=None, is_disconnected=None, mgr=None)
-        async for chunk in gen:
-            if chunk.startswith("id:"):
-                out.append(chunk)
-            if len(out) >= n:
-                break
-        await gen.aclose()
-        return out
-
-    wire = asyncio.run(frames(len(log._events)))
-    page = ui._PAGE
-    fns = page[page.index("function clip"):page.index("async function streamLive")]
-    harness = tmp_path / "feed.js"
-    harness.write_text(
-        "const rows = [];\n"
-        "const feed = {childElementCount: 0, scrollHeight: 0, scrollTop: 0, clientHeight: 0,\n"
-        "  appendChild(r) { rows.push(r); this.childElementCount++; }, removeChild() {}, firstChild: null};\n"
-        "const $ = () => feed;\n"
-        "const document = {createElement: () => ({kids: [], className: '', textContent: '',\n"
-        "  appendChild(k) { this.kids.push(k); }}), createTextNode: (t) => ({textContent: t})};\n"
-        "const MAX_FEED = 500;\n"
-        + fns +
-        "\nconst w = {lastId: 0};\n"
-        f"for (const f of {json.dumps(wire)}) handleBlock(w, f.replace(/\\n\\n$/, ''));\n"
-        "console.log(JSON.stringify({lastId: w.lastId, rows: rows.map((r) => ({cls: r.className,\n"
-        "  text: r.kids.map((k) => k.textContent).join(' ')}))}));\n",
-        encoding="utf-8",
-    )
-    result = subprocess.run(["node", str(harness)], capture_output=True, text=True, encoding="utf-8")
-    assert result.returncode == 0, result.stderr
-    out = json.loads(result.stdout)
-    texts = [r["text"] for r in out["rows"]]
-    assert out["lastId"] == len(wire)
-    assert texts[0] == "user Add a haiku"
-    assert texts[1] == "thinking Plan it"
-    assert texts[2].startswith("tool bash") and "git status" in texts[2]
-    assert texts[3] == "tool done On branch main"
-    assert texts[4] == "agent done <b>not html</b>"  # literal text, never markup
-    assert texts[5] == "— turn complete —"
