@@ -326,7 +326,7 @@ def _repository_issue_loop_status(
         and isinstance(emitter_health.get("updated_at"), (int, float))
         and time.time() - emitter_health["updated_at"] > stale_after
     )
-    active = [task for task in tasks if task.get("status") not in Status.TERMINAL]
+    active = [task for task in tasks if task.get("status") not in Status.CONCLUDED]
     default_spawn_attempts = int(worker_config.get("max_attempts", 3))
     label_spawn_attempts = {
         str(label): int(value)

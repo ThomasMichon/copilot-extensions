@@ -1820,3 +1820,46 @@ efforts' own PRs).
     the PR diff" — not a new category of exposure, just this effort being
     honest that the environment fix alone doesn't fully close it.
 
+### 2026-09-26 — Flaky-test fix: `full - agent-worktrees` test-timeout
+- Operator: "since you pointed out the flaky test this time, you get to
+  take a crack at fixing it to unblock deployment." The 05:06 UTC
+  in-progress `validate-and-promote.yml` run had `full - agent-worktrees`
+  fail on `tests/test_first_install_bootstrap.py::
+  test_posix_lean_provision_installs_resolver_and_launchers_reenter_runtime`
+  — `Failed: Timeout (>30.0s)` — blocking that run's promotion the same
+  way the earlier `agent-worktrees` flake did.
+- Diagnosed with real evidence, not guesswork: pulled the actual job log
+  (confirmed the timeout, not an assertion failure), then reproduced
+  against a throwaway clean-room clone in WSL — first with a hand-rolled
+  Python harness matching the test's exact `subprocess.run(capture_output=
+  True)` shape (passed), then via the repo's own bounded
+  `tools/run-plugin-tests.py agent-worktrees -k reenter_runtime` runner,
+  **20/20 clean passes in isolation** (~15s each). No logic bug, no hang,
+  no leaked file descriptor found — ruled out the daemon-FD-leak
+  hypothesis specifically (the test's fake `uv`/fake `python` shims fully
+  intercept the real `status-monitor-restart` call, so the real daemon-
+  spawn code path this test exercises never actually runs).
+- Root cause: this test does genuinely heavy, real multi-subprocess work
+  (a full payload `copytree`, then `install.sh provision`'s self-stage
+  re-exec + venv create + package install + versioned-activate +
+  status-monitor-restart round-trip, then two more launcher
+  `--version` subprocess calls — 5+ real subprocess spawns chained
+  together) with **no per-test timeout override**, inheriting the
+  suite-wide 30s default from `run-plugin-tests.py --test-timeout`. No
+  other test in this file carries an override either, so this one was
+  simply the first to be heavy enough to occasionally exceed 30s under
+  real CI concurrency/load — a legitimate margin problem, not a hang to
+  fix.
+- Fix: added `@pytest.mark.timeout(90)` to just this one test (3x
+  headroom over its ~15s isolated baseline), with an inline comment
+  explaining the reproduction findings so a future reader doesn't
+  mistake the marker for masking a real hang. Deliberately scoped to this
+  one test, not a global bump, so a genuinely wedged lighter test still
+  fails fast. Landed via a changefile + PR against `dev`.
+- Left as an explicit open item: this is the **second** distinct flaky
+  `agent-worktrees` test to block a promotion this session (the other was
+  `test_monitor_claim_handoff_cutover_stale_reclaim_is_single_winner`,
+  investigated but not fixed earlier). Worth a broader look, if this
+  keeps recurring, at whether `agent-worktrees`' suite as a whole needs a
+  systematic timeout-headroom pass rather than one-off fixes per flake.
+

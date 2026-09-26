@@ -59,6 +59,97 @@ def test_full_happy_path(q):
     assert done.completed_by == "w1"
 
 
+# -- confirm / reopen_completed (the completed -> confirmed lifecycle) ------
+
+
+def test_confirm_closes_a_completed_task(q):
+    t = q.create("work")
+    q.claim_one("w1")
+    q.start(t.id, "w1")
+    q.complete(t.id, "w1", result_ref="pr/1")
+    confirmed = q.confirm(t.id, actor="evaluator")
+    assert confirmed.status == Status.CONFIRMED
+
+
+def test_confirm_rejects_a_non_completed_task(q):
+    t = q.create("work")
+    with pytest.raises(TaskError):
+        q.confirm(t.id)
+
+
+def test_confirm_is_idempotent_on_replay(q):
+    t = q.create("work")
+    q.claim_one("w1")
+    q.start(t.id, "w1")
+    q.complete(t.id, "w1")
+    q.confirm(t.id)
+    again = q.confirm(t.id)  # replay: already confirmed
+    assert again.status == Status.CONFIRMED
+
+
+def test_reopen_completed_returns_to_queued_and_clears_the_claim(q):
+    t = q.create("work")
+    q.claim_one("w1")
+    q.start(t.id, "w1")
+    q.complete(t.id, "w1", result_ref="pr/1")
+    reopened = q.reopen_completed(t.id, reason="not actually done")
+    assert reopened.status == Status.QUEUED
+    assert reopened.result_ref is None
+    assert reopened.completed_by is None
+    # The reopened task is claimable again, exactly like fresh queued work.
+    claimed = q.claim_one("w2")
+    assert claimed is not None
+    assert claimed.id == t.id
+
+
+def test_reopen_completed_rejects_a_non_completed_task(q):
+    t = q.create("work")
+    with pytest.raises(TaskError):
+        q.reopen_completed(t.id)
+
+
+def test_reopen_completed_records_a_steer_atomically(q):
+    t = q.create("work")
+    q.claim_one("w1")
+    q.start(t.id, "w1")
+    q.complete(t.id, "w1")
+    q.reopen_completed(
+        t.id, steer_fields={"instructions": "also fix the docs"}, sender="operator"
+    )
+    log = q.steer_log(t.id)
+    assert len(log) == 1
+    assert log[0]["fields"] == {"instructions": "also fix the docs"}
+    assert log[0]["sender"] == "operator"
+    assert log[0]["taken"] is False
+
+
+def test_confirmed_and_completed_are_both_in_concluded(q):
+    assert Status.COMPLETED in Status.CONCLUDED
+    assert Status.CONFIRMED in Status.CONCLUDED
+    assert Status.COMPLETED not in Status.TERMINAL  # provisional, not terminal
+    assert Status.CONFIRMED in Status.TERMINAL
+
+
+def test_abandon_permits_a_completed_but_unconfirmed_task(q):
+    """The Completion Review card's Abandon action."""
+    t = q.create("work")
+    q.claim_one("w1")
+    q.start(t.id, "w1")
+    q.complete(t.id, "w1")
+    done = q.abandon(t.id, permitted=True, reason="not worth landing")
+    assert done.status == Status.ABANDONED
+
+
+def test_abandon_rejects_an_already_confirmed_task(q):
+    t = q.create("work")
+    q.claim_one("w1")
+    q.start(t.id, "w1")
+    q.complete(t.id, "w1")
+    q.confirm(t.id)
+    with pytest.raises(TaskError):
+        q.abandon(t.id, permitted=True, reason="too late")
+
+
 def test_complete_persists_schema_neutral_structured_result(q):
     t = q.create("work")
     q.claim_one("w1", task_id=t.id)

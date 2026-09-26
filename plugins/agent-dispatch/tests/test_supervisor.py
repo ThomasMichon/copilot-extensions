@@ -283,6 +283,37 @@ class QueueBackedClient:
             )
         )
 
+    def confirm(self, task_id, *, actor=None, expected_status=None, expected_generation=None):
+        return asdict(
+            self._q.confirm(
+                task_id,
+                actor=actor,
+                expected_status=expected_status,
+                expected_generation=expected_generation,
+            )
+        )
+
+    def reopen_completed(
+        self,
+        task_id,
+        *,
+        reason=None,
+        steer_fields=None,
+        sender=None,
+        expected_status=None,
+        expected_generation=None,
+    ):
+        return asdict(
+            self._q.reopen_completed(
+                task_id,
+                reason=reason,
+                steer_fields=steer_fields,
+                sender=sender,
+                expected_status=expected_status,
+                expected_generation=expected_generation,
+            )
+        )
+
     def release(self, task_id, worker_id, *, reason=None):
         return asdict(
             self._q.release_suspended(

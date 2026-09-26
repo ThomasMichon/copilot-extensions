@@ -108,6 +108,51 @@ def _cleanup_per_item_skip_reason(disp: prune.CleanupDisposition) -> str:
     return ""
 
 
+def _closure_blockers(
+    rec: tracking.WorktreeRecord,
+    info: git_ops.WorktreeStateInfo,
+    disp: prune.CleanupDisposition,
+    *,
+    turn_count: int = 0,
+) -> list[dict]:
+    """The closure descriptor's full ``blockers`` list for ``rec``/``info``/
+    ``disp`` (worktree-finality-and-obligations Phase 4) -- REPORTING only,
+    never a decision input; cleanup/GC's actual cleanable/not gate stays
+    exactly ``disp.cleanable`` (see the Plan bullet's own note on why a full
+    switch to the descriptor's ``action_disposition`` was deferred: it
+    degrades "safe" to "blocked" whenever evidence isn't a fresh fetch,
+    which would newly block cleanups this revalidation path -- no-fetch by
+    design -- has always allowed).
+
+    Unlike ``disp.reason`` (only the single FIRST blocking condition
+    ``cleanup_disposition`` short-circuited on), ``blockers`` independently
+    names every concurrently-true one -- e.g. a worktree that is both
+    held-claims AND has open follow-ups reports both, not just whichever
+    check ran first. ``evidence_mode``/``repo_fetch_fresh`` are fixed,
+    conservative placeholders: this helper only ever reads the returned
+    ``blockers`` field, which does not depend on either.
+    """
+    held_claims = sum(1 for c in rec.resources if c.is_live)
+    open_follow_ups = tracking.effective_open_follow_up_count(rec)
+    descriptor = prune.assemble_closure_descriptor(
+        rec, info, disp,
+        held_claims=held_claims, open_follow_ups=open_follow_ups,
+        evidence_mode="cached", turn_count=turn_count,
+    )
+    return descriptor.blockers
+
+
+def _enrich_reason_with_blockers(reason: str, blockers: list[dict]) -> str:
+    """Append every blocker code+count beyond the single one already named in
+    ``reason``, when :func:`_closure_blockers` found more than one
+    concurrently-true blocker -- a no-op (returns ``reason`` unchanged) when
+    there are 0 or 1, since the existing text already says everything."""
+    if len(blockers) <= 1:
+        return reason
+    parts = [f"{b['code']}\u00d7{b['count']}" for b in blockers]
+    return f"{reason} \u00b7 blockers: {', '.join(parts)}"
+
+
 @dataclasses.dataclass
 class RevalidationResult:
     """The canonical outcome of :func:`_revalidate_cleanup_safety`."""
@@ -273,7 +318,9 @@ def _revalidate_cleanup_safety(
                 paired_sibling_final=prune.default_paired_sibling_final,
             )
             if not disp.cleanable:
-                return RevalidationResult(False, disp.reason, disp.bucket)
+                blockers = _closure_blockers(latest, fresh_info, disp, turn_count=turns)
+                reason = _enrich_reason_with_blockers(disp.reason, blockers)
+                return RevalidationResult(False, reason, disp.bucket)
             failures, warnings = _do_reap(latest, fresh_info)
             return RevalidationResult(
                 True, disp.reason, disp.bucket, latest, fresh_info,
@@ -417,6 +464,13 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
             )
             cleanable = disp.cleanable
             skip_reason = _cleanup_per_item_skip_reason(disp)
+            if skip_reason:
+                # worktree-finality-and-obligations Phase 4: enrich with any
+                # OTHER concurrently-true blocker cleanup_disposition's own
+                # short-circuit would otherwise hide (reporting only -- see
+                # _closure_blockers' docstring; cleanable/not stays disp.cleanable).
+                blockers = _closure_blockers(rec, info, disp, turn_count=turns)
+                skip_reason = _enrich_reason_with_blockers(skip_reason, blockers)
             if not skip_reason and disp.bucket == "unused" and not cleanable:
                 unused_count += 1
             elif not skip_reason and disp.bucket == "conversation" and not cleanable:

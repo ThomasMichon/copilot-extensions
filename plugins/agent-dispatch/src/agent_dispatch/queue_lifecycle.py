@@ -395,7 +395,7 @@ class QueueLifecycleMixin:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
             _check_expected_status(task, expected_status)
-            if task.status in Status.TERMINAL:
+            if task.status in Status.CONCLUDED:
                 conn.execute("COMMIT")
                 raise TaskError(f"cannot hold a {task.status!r} task {task_id!r}")
             conn.execute(

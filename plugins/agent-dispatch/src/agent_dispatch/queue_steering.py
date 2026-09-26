@@ -139,9 +139,16 @@ class QueueSteeringMixin:
             except TaskError:
                 conn.execute("COMMIT")
                 raise
-            if task.status in Status.TERMINAL:
+            if task.status in Status.CONCLUDED:
                 conn.execute("COMMIT")
-                raise TaskError(f"cannot steer a {task.status!r} task")
+                raise TaskError(
+                    f"cannot steer a {task.status!r} task"
+                    + (
+                        " (use reopen_completed to re-queue it with steering)"
+                        if task.status == Status.COMPLETED
+                        else ""
+                    )
+                )
             conn.execute(
                 "INSERT INTO task_steer (task_id, ts, fields, sender) VALUES (?, ?, ?, ?)",
                 (task_id, ts, payload, sender),
@@ -237,7 +244,7 @@ class QueueSteeringMixin:
             if task is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
-            if task.status in Status.TERMINAL:
+            if task.status in Status.CONCLUDED:
                 conn.execute("COMMIT")
                 raise TaskError(f"cannot save a draft on a {task.status!r} task")
             conn.execute(
