@@ -1,0 +1,9 @@
+{
+  "comment": "Fix runtime-gate.ps1's misplaced marketplace-isolation marker: it was on the closing brace line, not the flagged Join-Path line, so it never actually suppressed the finding",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}
