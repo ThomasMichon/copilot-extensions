@@ -336,6 +336,117 @@ def test_fixed_identity_ignores_mapping_prose_and_cell_qualified_value(
     assert _categories(path, root) == []
 
 
+def test_fixed_identity_ignores_runtime_root_reference(
+    tmp_path: Path,
+) -> None:
+    """A service identity path/name that directly interpolates
+    ``$RUNTIME_ROOT``/``$runtimeRoot`` (the Phase 3 installation-context
+    primitive -- always a runtime-resolved value, never a source-hardcoded
+    literal) is not a fixed, unqualified identity, even when the containing
+    variable's own name (e.g. ``AGENT_EXAMPLE_SOCKET``) has no marketplace/
+    installation/cell keyword.
+    """
+    root = tmp_path
+    shell = _write(
+        root,
+        "plugins/example/scripts/runtime-gate.sh",
+        'export AGENT_EXAMPLE_SOCKET="$RUNTIME_ROOT/run/agent-example.sock"\n',
+    )
+    assert _categories(shell, root) == []
+
+    powershell = _write(
+        root,
+        "plugins/example/scripts/runtime-gate.ps1",
+        "$env:AGENT_EXAMPLE_SOCKET = Join-Path (Join-Path $runtimeRoot 'run')"
+        " 'agent-example.sock'\n",
+    )
+    assert _categories(powershell, root) == []
+
+
+def test_fixed_identity_still_flags_hardcoded_suffix_variable(
+    tmp_path: Path,
+) -> None:
+    """A locally named "suffix" variable is NOT blanket-trusted merely
+    because its name contains a qualifier-shaped word: unlike
+    ``RUNTIME_ROOT`` (always runtime-resolved), a variable such as
+    ``SERVICE_SUFFIX`` could be hardcoded to a fixed, shared literal by a
+    careless future edit -- e.g. ``SERVICE_SUFFIX='shared'`` interpolated
+    into ``agent-example-$SERVICE_SUFFIX.service``. The guard must keep
+    flagging that as a fixed-service-identity finding; it must not
+    suppress it just because the variable name resembles a real
+    cell-derived suffix used elsewhere in the codebase.
+    """
+    root = tmp_path
+    shell = _write(
+        root,
+        "plugins/example/scripts/runtime-gate.sh",
+        "SERVICE_SUFFIX='shared'\n"
+        'export AGENT_EXAMPLE_SYSTEMD_UNIT="agent-example-$SERVICE_SUFFIX.service"\n',
+    )
+    assert _categories(shell, root) == [
+        "fixed-service-identity",
+        "fixed-service-identity",
+    ]
+
+
+def test_fixed_identity_still_flags_hardcoded_runtime_root(
+    tmp_path: Path,
+) -> None:
+    """A bare mention of ``RUNTIME_ROOT`` (as an assignment target on the
+    same physical line as an unrelated hardcoded identity, not an actual
+    ``$RUNTIME_ROOT`` dereference) must not suppress that identity's own
+    finding -- ``_CELL_QUALIFIER`` is a same-line lexical check, so without
+    requiring the ``$`` sigil this would also trust
+    ``RUNTIME_ROOT='/shared'; AGENT_EXAMPLE_SYSTEMD_UNIT='agent-example.service'``
+    merely because the word "RUNTIME_ROOT" appears earlier on the line.
+    """
+    root = tmp_path
+    shell = _write(
+        root,
+        "plugins/example/scripts/runtime-gate.sh",
+        "RUNTIME_ROOT='/shared'; AGENT_EXAMPLE_SYSTEMD_UNIT='agent-example.service'\n",
+    )
+    assert _categories(shell, root) == ["fixed-service-identity"]
+
+
+def test_fixed_identity_still_flags_hardcoded_powershell_runtime_root(
+    tmp_path: Path,
+) -> None:
+    """PowerShell sigils an assignment's *target* too (unlike shell, where
+    only a read is sigiled), so requiring a bare ``$`` prefix is not enough
+    on its own: ``$runtimeRoot = '/shared'; $TaskName = 'Agent Example'``
+    must still flag the hardcoded ``$TaskName`` assignment, even though
+    ``$runtimeRoot`` (an assignment target, not a dereference) appears
+    earlier on the same line.
+    """
+    root = tmp_path
+    powershell = _write(
+        root,
+        "plugins/example/scripts/runtime-gate.ps1",
+        "$runtimeRoot = '/shared'; $TaskName = 'Agent Example'\n",
+    )
+    assert _categories(powershell, root) == ["fixed-service-identity"]
+
+
+def test_fixed_identity_still_flags_hardcoded_braced_powershell_runtime_root(
+    tmp_path: Path,
+) -> None:
+    """The same assignment-target exclusion must also apply to PowerShell's
+    braced form (``${runtimeRoot} = '...'``): the closing brace sits
+    between the identifier and the ``=``, so the "not immediately followed
+    by =" exclusion must skip past an optional closing brace too, or
+    ``${runtimeRoot} = '/shared'; $TaskName = 'Agent Example'`` would still
+    wrongly suppress the hardcoded ``$TaskName`` assignment.
+    """
+    root = tmp_path
+    powershell = _write(
+        root,
+        "plugins/example/scripts/runtime-gate.ps1",
+        "${runtimeRoot} = '/shared'; $TaskName = 'Agent Example'\n",
+    )
+    assert _categories(powershell, root) == ["fixed-service-identity"]
+
+
 def test_comments_and_allow_markers_are_not_flagged(tmp_path: Path) -> None:
     root = tmp_path
     shell = _write(

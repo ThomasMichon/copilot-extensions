@@ -17,7 +17,11 @@ independently, a client that probes modern then falls back to a legacy
 
 Uses the standard library (``urllib``) on a worker thread to avoid adding an
 HTTP dependency; the bridge is single-flight so blocking I/O off the event loop
-via :func:`asyncio.to_thread` is sufficient.
+via :func:`asyncio.to_thread` is sufficient. Connections race dual-stack
+address families (:mod:`.happy_eyeballs`) rather than using ``urlopen``'s
+default opener directly -- a black-holed IPv6 route would otherwise block
+every request for the full ``cfg.timeout`` before (maybe) falling back to
+IPv4 (confirmed live, aperture-labs#7553).
 """
 
 from __future__ import annotations
@@ -30,9 +34,16 @@ import urllib.request
 
 from .. import protocol as proto
 from .base import Transport
+from .happy_eyeballs import build_opener
 from .sse import parse_sse_events
 
 log = logging.getLogger("agent-mcp.http")
+
+#: One opener shared by every transport instance -- it holds no per-endpoint
+#: state (its handlers build a fresh connection per request, same as
+#: ``urlopen``'s default opener), so a single module-level instance is safe
+#: to reuse and avoids rebuilding the handler chain on every POST.
+_opener = build_opener()
 
 
 class HttpTransport(Transport):
@@ -78,7 +89,7 @@ class HttpTransport(Transport):
     def _post(self, headers: dict[str, str], body: bytes) -> tuple[int, dict[str, str], str]:
         req = urllib.request.Request(self._url, data=body, headers=headers, method="POST")
         try:
-            with urllib.request.urlopen(req, timeout=self.cfg.timeout) as resp:
+            with _opener.open(req, timeout=self.cfg.timeout) as resp:
                 text = resp.read().decode("utf-8", errors="replace")
                 return resp.status, {k.lower(): v for k, v in resp.headers.items()}, text
         except urllib.error.HTTPError as exc:

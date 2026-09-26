@@ -65,6 +65,7 @@ _KNOWN_BODY_KEYS = frozenset(
         "cli_labels",
         "disposable_cli_labels",
         "idle_nudge_exempt_labels",
+        "steering_disallowed_labels",
         "no_pair",
     }
 )
@@ -130,6 +131,16 @@ class Body:
     resting state, not an unfinished turn. Confirmed live that nudging it
     anyway can encourage the worker to reach for a resolution its own
     charter never sanctioned."""
+    steering_disallowed_labels: tuple[str, ...] = ()
+    """Labels forbidden from posting a ``request_input`` steering card at
+    all (enforced coordinator-side, in ``TaskQueue.set_card`` -- see the
+    ``set_card`` docstring). The *default is permissive*: an undeclared
+    label may still post a card. Name a label here only for a task type
+    with no human on the other end of a steering answer -- an
+    evaluator-owned auto-reviewer (Intelligence Dampener), a batch log
+    writer, or an Adjudication Board sweep/verdict worker are the
+    confirmed real cases this closes (copilot-extensions#3731,
+    aperture-labs#7589/#7585)."""
     no_pair: bool = False
     """Skip the paired-knowledge carve for every worktree this lane
     creates -- for a pool with no bound knowledge repo to give its workers
@@ -311,6 +322,15 @@ class ProfileDeclaration:
             args += ["--disposable-cli-label", label]
         for label in self.body.idle_nudge_exempt_labels:
             args += ["--idle-nudge-exempt-label", label]
+        # NOTE: body.steering_disallowed_labels is deliberately NOT emitted
+        # here. This method renders the *foreground* `agent-dispatch
+        # supervise` argv, whose parser never registered
+        # `--steering-disallowed-label` (only `supervise register`'s parser
+        # did -- the field is coordinator-DB-only and the running
+        # subprocess never consumes it itself; see
+        # SupervisorDaemon._publish_declared_registrations). Emitting it
+        # here would produce an unrecognized-option failure for any
+        # declaration that sets the field (caught in PR review).
         if self.body.no_pair:
             args.append("--no-pair")
         if self.body.type == "headless" or self.body.headless_labels or self.fleet.headless:
@@ -467,6 +487,10 @@ def _load_body(data: object) -> Body:
         idle_nudge_exempt_labels=_as_str_tuple(
             data.get("idle_nudge_exempt_labels"),
             key="body.idle_nudge_exempt_labels",
+        ),
+        steering_disallowed_labels=_as_str_tuple(
+            data.get("steering_disallowed_labels"),
+            key="body.steering_disallowed_labels",
         ),
         no_pair=_as_bool(data.get("no_pair", False), key="body.no_pair"),
     )
@@ -760,6 +784,14 @@ def load_declaration(
             raise RegistrarError(
                 f"body.idle_nudge_exempt_labels {sorted(stray)} are not in labels "
                 f"{sorted(decl.labels)} -- an exempt label must also be watched"
+            )
+    if decl.body.steering_disallowed_labels:
+        stray = set(decl.body.steering_disallowed_labels) - set(decl.labels)
+        if stray:
+            raise RegistrarError(
+                f"body.steering_disallowed_labels {sorted(stray)} are not in "
+                f"labels {sorted(decl.labels)} -- a disallowed label must also "
+                "be watched"
             )
     if decl.body.no_pair and decl.fleet.enabled:
         raise RegistrarError(

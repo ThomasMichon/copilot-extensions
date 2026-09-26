@@ -127,8 +127,13 @@ checkpoint-and-digest reconstruction path.
 
 Layered: built-in defaults → `$AGENT_LOGGER_HOME/config.yaml` → repo-local
 organization config (`.agent-logger.yaml` / `.agent-logger.yml` /
-`.config/agent-logger.yaml` / `.config/agent-logger.yml`, `log:` block only)
-→ `AGENT_LOGGER_*` environment overrides. Inspect runtime config with:
+`.config/agent-logger.yaml` / `.config/agent-logger.yml`, `log:` block plus
+schema v3's single `sync.local_path` field)
+→ `AGENT_LOGGER_*` environment overrides. Repo-local config is only honored
+for a checkout that is both a project registered with `agent-worktrees` and
+currently on that project's registered default branch -- see
+[`docs/manifest-contract.md`](docs/manifest-contract.md#trust-gate-only-a-registered-projects-default-branch-is-honored).
+Inspect runtime config with:
 
 ```
 agent-logger config
@@ -156,11 +161,14 @@ identity, default-branch state, declaration provenance, machine selectors,
 normalized claims, resource readiness, and conflicts are resolved before any
 later execution integration can perform side effects.
 
-Repository files use schema version 1 (an omitted version is accepted as v1
-for compatibility) and may set only `log.root`, `log.path_template`,
-`log.timezone`, `log.note_marker`, `log.template`, `log.narration_style`,
-`log.exemplars`, and `log.closing_remark`. Invalid or unsafe configuration
-fails explicitly instead of silently falling back.
+Repository files declare a `schema_version` (an omitted version is treated as
+the current schema, 3 as of this release) and may set `log.root`,
+`log.path_template`, `log.timezone`, `log.note_marker`, `log.template`,
+`log.narration_style`, `log.exemplars`, and `log.closing_remark`. Schema v3
+additionally allows a single `sync.local_path` (an absolute path, the same
+value for every machine in the fleet) -- no other sync setting, machine
+identity, or credential is ever repo-configurable. Invalid or unsafe
+configuration fails explicitly instead of silently falling back.
 
 ## License
 
