@@ -45,6 +45,14 @@ Escape hatches / modes:
     write-routing guard family.
   * ``ANCHOR_WRITE_GUARD_MODE=deny|ask|warn|off`` (default ``deny``) picks the
     action on a hit.
+  * ``agent-worktrees repos sync <repo>`` is the sanctioned no-new-commit
+    action on an anchor: fetch + ``merge --ff-only``, skipping (never
+    forcing) a dirty/diverged/detached checkout. It never reaches this guard
+    at all -- the guard's shell heuristic looks for a literal ``git`` mutation
+    verb in the command text, and this CLI verb shells out to git internally
+    rather than the agent invoking ``git`` directly. Prefer it over a raw
+    ``git pull``/``git fetch`` whenever the goal is only catching the anchor
+    up with its remote, not editing it.
   * ``agent-worktrees repos allow-edits <repo> --reason "..."`` opens a
     time-boxed break-glass (``~/.agent-worktrees/allow-edits.json``) the guard
     honors.
@@ -416,7 +424,11 @@ def _deny_reason(name: str, path: str) -> str:
         f"edit/commit is a latent hazard (dirty anchor blocks pulls; work that "
         f"never lands through the PR flow). Create/use a linked worktree and edit "
         f"THERE: `{name} create --json` (or `agent-worktrees create`), then work "
-        f"in the returned path. Reading the anchor is fine. If a direct anchor "
+        f"in the returned path. Reading the anchor is fine. Need only to catch "
+        f"the anchor up with its remote (no new commits, no edits)? "
+        f"`agent-worktrees repos sync {name}` does a safe fetch + "
+        f"`merge --ff-only` (skips a dirty/diverged/detached anchor rather than "
+        f"forcing it) and is exempt from this guard. If a direct anchor "
         f"edit is genuinely unavoidable (a recovery/bootstrap action), break "
         f"glass: `agent-worktrees repos allow-edits {name} --reason \"<why>\"` "
         f"(logged, time-boxed), then retry. (Disable: ANCHOR_WRITE_GUARD=off.)"

@@ -44,7 +44,8 @@ def _repos_usage() -> None:
     print("     [--platform windows|wsl|linux]")
     print("  migrate [--default-class C]         Import legacy ~/.git-repos")
     print("  status [--tag T] [--class C]        Show branch/dirty/ahead-behind")
-    print("  sync [--tag T] [--class C]          Fetch + fast-forward (skips dirty)")
+    print("  sync [<repo> ...] [--tag T] [--class C]  Fetch + fast-forward (skips dirty);")
+    print("                                      named repos only, else every registered one")
     print("  doctor [--fix] [--json]             Reconcile projects.yaml <-> repos.yaml")
     print("  account [list|set <owner> <login>|unset <owner>]")
     print("                                      Decoupled owner->gh-login map (account_map)")
@@ -81,6 +82,7 @@ def _repos_usage() -> None:
     print(f"  {project} repos find dotfiles")
     print(f"  {project} repos add my-lib D:\\Src\\my-lib --class reference")
     print(f"  {project} repos sync --tag multi-machine system")
+    print(f"  {project} repos sync copilot-extensions   # fast-forward just its anchor")
 
 
 def _clarify_registration_account(
@@ -415,16 +417,32 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
     if sub == "sync":
         tag = None
         class_filter = None
+        consumed_idxs: set[int] = set()
         if "--tag" in rest:
             idx = rest.index("--tag")
+            consumed_idxs.add(idx)
             if idx + 1 < len(rest):
                 tag = rest[idx + 1]
+                consumed_idxs.add(idx + 1)
         for flag in ("--class", "--type"):
             if flag in rest:
                 idx = rest.index(flag)
+                consumed_idxs.add(idx)
                 if idx + 1 < len(rest):
                     class_filter = rest[idx + 1]
-        results = repos.sync_all(tag=tag, class_filter=class_filter)
+                    consumed_idxs.add(idx + 1)
+        # Any remaining bare tokens (not consumed as a flag or its value) are
+        # explicit repo names -- lets a caller fast-forward exactly one
+        # anchor (`repos sync <name>`) instead of every registered repo, the
+        # same safe fetch + `merge --ff-only` (skips dirty/diverged/detached)
+        # `sync_repo` always used, just scoped down.
+        names = tuple(
+            tok for i, tok in enumerate(rest)
+            if i not in consumed_idxs and not tok.startswith("--")
+        )
+        results = repos.sync_all(
+            tag=tag, class_filter=class_filter, names=names or None,
+        )
         if not results:
             print("No repos registered.")
             return 0
