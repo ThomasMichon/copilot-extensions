@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-worktrees"
-version = "1.6.1-dev1"
+version = "1.6.2-dev1"
 description = "Worktree isolation system for concurrent Copilot CLI sessions"
 readme = "README.md"
 license = "MIT"
@@ -22,6 +22,7 @@ dependencies = [
     "agent-plugin-activation",
     "agent-single-instance-lease",
     "agent-work-coalescing-singleton",
+    "agent-lazy-cli-dispatch",
 ]
 
 [tool.uv.sources]
@@ -53,6 +54,14 @@ agent-single-instance-lease = { path = "libs/single-instance-lease" }
 # coalesce/refcount/idle-exit wire protocol + client (plugin-process-hygiene
 # #744/#2323). Vendored per plugin; byte-identical src across copies.
 agent-work-coalescing-singleton = { path = "libs/work-coalescing-singleton" }
+# Shared two-phase (argv-peek, lazy-import-by-table) fast-dispatch mechanism
+# (module ``lazy_cli_dispatch``, agent-cli-lazy-dispatch effort Phase 2).
+# This copy is a src-passthrough VENDOR_POINTER (see
+# tools/sync-vendored-libs.py's own docstring): its src/ forwards every
+# import to the real libs/lazy-cli-dispatch/src/ tree at runtime, so this
+# `dev`-branch checkout has nothing to keep manually in sync -- only a real
+# `main`-branch release (tools/materialize_main.py) ever gets a real copy.
+agent-lazy-cli-dispatch = { path = "libs/lazy-cli-dispatch" }
 
 [project.scripts]
 agent-worktrees = "agent_worktrees.__main__:console_entry"
