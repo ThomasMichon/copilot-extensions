@@ -26,6 +26,7 @@ import { homedir, release } from "node:os";
 import { approveAll } from "@github/copilot-sdk";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { InFlightMessages, deliveryPlan } from "./delivery.mjs";
+import { firstLoadThisSession } from "./announce.mjs";
 import { makeBridgeEndpoint } from "./bridge-endpoint.mjs";
 import { resolveMetadataAsync } from "./metadata.mjs";
 
@@ -455,4 +456,7 @@ process.once("SIGINT", shutdown);
 process.once("SIGTERM", shutdown);
 process.once("beforeExit", shutdown);
 
-await session.log("agent-bridge live-session extension loaded");
+// Announce once per session, not once per extension-host start (announce.mjs).
+if (firstLoadThisSession(state.sessionId)) {
+  await session.log("agent-bridge live-session extension loaded");
+}

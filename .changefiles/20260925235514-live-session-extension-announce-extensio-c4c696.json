@@ -1,0 +1,9 @@
+{
+  "comment": "live-session extension: announce 'extension loaded' once per session, not on every extension-host restart",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
