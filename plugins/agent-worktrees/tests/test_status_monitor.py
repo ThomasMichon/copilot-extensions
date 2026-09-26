@@ -282,6 +282,104 @@ def test_sweep_serves_live_registered_and_prunes_gone(tmp_path, monkeypatch):
     assert not any(s in ("wt-gone", "other") for s, _, _ in calls)
 
 
+def test_sweep_merges_managed_mux_cache_into_catalog_observation_only(tmp_path, monkeypatch):
+    """Phase 3b Slice 2 Sub-slice 3 Step 1: a Manager-reported live session
+    must reach ``catalog_observer`` alongside the direct mux scan, but must
+    never be added to ``served`` (no writer-ownership change yet) and must
+    never trigger a ``set-option`` call of its own."""
+    from agent_worktrees import mux_link
+
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    m._register_session_for_monitor("wt-a", "/w/a")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    calls = _capture_set(monkeypatch)
+    observed: list[set[str]] = []
+
+    cache = mux_link.ManagedMuxCache()
+    cache.apply_observation(
+        {
+            "project": "proj",
+            "worktree_id": "wt-manager-owned",
+            "mux_session": "wt-manager-owned",
+            "mapping_revision": 1,
+            "live": True,
+        }
+    )
+
+    served = m._monitor_sweep(
+        "tmux",
+        "T",
+        "P",
+        set(),
+        catalog_observer=observed.append,
+        managed_mux_cache=cache,
+    )
+
+    assert served == 1  # only the directly-scanned wt-a
+    assert observed == [{"wt-a", "wt-manager-owned"}]
+    # Never wrote a status bar for the Manager-reported session -- observation
+    # only, no writer-ownership change in this step.
+    assert not any(sess == "wt-manager-owned" for sess, _, _ in calls)
+
+
+def test_sweep_without_managed_mux_cache_observes_only_the_direct_scan(tmp_path, monkeypatch):
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    m._register_session_for_monitor("wt-a", "/w/a")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    _capture_set(monkeypatch)
+    observed: list[set[str]] = []
+
+    m._monitor_sweep("tmux", "T", "P", set(), catalog_observer=observed.append)
+
+    assert observed == [{"wt-a"}]  # unchanged when managed_mux_cache is None
+
+
+def test_sweep_never_calls_catalog_observer_with_a_partial_manager_only_view(tmp_path):
+    """Copilot review finding: ``catalog_observer``
+    (``ResidentSessionReconciler.observe_mux``) is a *complete-snapshot*
+    API -- any session name missing from the passed set is treated as
+    genuinely gone and reaped. An earlier revision of this seam called
+    ``catalog_observer(managed_live)`` when no mux binary was locally
+    discoverable, which would incorrectly mark every *other*, ordinary
+    (non-Manager) session as dead too, since only the Manager-known subset
+    was ever passed. The safe behavior (this test) is to never call
+    ``catalog_observer`` at all in the no-mux-binary path -- a managed-only
+    partial view must never reach this complete-snapshot API."""
+    from agent_worktrees import mux_link
+
+    cache = mux_link.ManagedMuxCache()
+    cache.apply_observation(
+        {
+            "project": "proj",
+            "worktree_id": "wt-manager-owned",
+            "mux_session": "wt-manager-owned",
+            "mapping_revision": 1,
+            "live": True,
+        }
+    )
+    observed: list[set[str]] = []
+
+    served = m._monitor_sweep(
+        None,  # no mux_bin discovered on this host
+        "T",
+        "P",
+        set(),
+        catalog_observer=observed.append,
+        managed_mux_cache=cache,
+    )
+
+    assert served == 0  # no direct-scan serving happens without a mux binary
+    assert observed == []  # never called -- a partial view must never reach it
+
+
 def test_sweep_ctx_rendered_once(tmp_path, monkeypatch):
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
@@ -2340,7 +2438,10 @@ def test_classify_daemon_started_published_in_lock_and_closed_on_exit(
     assert "worktree_status_endpoint" in servers_stamp
     assert "worktree_status_token" in servers_stamp
     assert "worktree_status_generation" in servers_stamp
-    assert closed["n"] == 2  # classify_server + worktree_status_server
+    assert "managed_mux_endpoint" in servers_stamp
+    assert "managed_mux_token" in servers_stamp
+    assert "managed_mux_generation" in servers_stamp
+    assert closed["n"] == 3  # classify_server + worktree_status_server + managed_mux_server
 
 
 def test_sweep_rechecks_before_publish_and_retains_registered_session_on_generation_change(
