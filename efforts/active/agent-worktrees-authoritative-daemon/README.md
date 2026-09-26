@@ -38,7 +38,12 @@
 - **Umbrella issue:** [#3761](https://github.com/ThomasMichon/copilot-extensions/issues/3761)
 - **Sub-issues:** [#3751](https://github.com/ThomasMichon/copilot-extensions/issues/3751)
   (the CPU-pinning bug whose diagnosis surfaced this direction; fixed in
-  #3755, unrelated to this effort's own scope but the reason it was found)
+  #3755, unrelated to this effort's own scope but the reason it was found),
+  [#3798](https://github.com/ThomasMichon/copilot-extensions/issues/3798)
+  (a residual accept-to-handler-dispatch drain race in the shared
+  `work_coalescing_singleton` library, found during #3779's review round 7;
+  tracked for Phase 3 rather than blocking Phase 2, which ships zero
+  production write verbs)
 
 ## Guiding Intent
 
@@ -364,6 +369,11 @@ survey above.
       changes).
 
 ### Phase 3 — Migrate the first real write call site, then the rest _(not started)_
+- [ ] Resolve [#3798](https://github.com/ThomasMichon/copilot-extensions/issues/3798)
+      (the accept-to-handler-dispatch drain race in the shared
+      `work_coalescing_singleton` library) before or alongside migrating
+      the first real verb — that is the point real write traffic starts to
+      exist and this residual race stops being purely theoretical.
 - [ ] Pick the first real call site to migrate given the corrected verb
       granularity (a whole transaction, not a bare setter) — candidates to
       evaluate: a narrower, lower-traffic disposition-assertion path before
@@ -413,6 +423,41 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-09-26 — PR #3779 review round 7: a residual microsecond race, tracked as a follow-up rather than fixed inline
+Round 7 caught one further, genuinely real but much narrower race than
+round 6's: a connection can be `accept()`ed by the server's socket layer
+and queued to its handler thread *before* that thread's first line runs
+`owner.touch()` -- the call that increments the subscriber count
+`_tracking_write_busy()` reads. In that microsecond window, the busy
+predicate reads `False` even though a handler is about to execute a write.
+
+**Decision: track as a follow-up issue
+([#3798](https://github.com/ThomasMichon/copilot-extensions/issues/3798)),
+not fixed inline in this PR.** Reasoning:
+- Closing it properly requires the vendored `work_coalescing_singleton`
+  library itself (shared by `classify_daemon`/`worktree_status_daemon`/
+  `mux_link`, not just `tracking_write`) to track "accepted but not yet
+  dispatched to a handler" as its own state -- a shared-library change
+  serving four daemon kinds, warranting its own scoped design/review
+  rather than folding into an already-large Phase 2 PR seven review
+  rounds deep.
+- Phase 2 (this PR) ships **zero production write verbs** -- there is no
+  live write traffic today this microsecond race could actually affect.
+  Phase 3 (not yet started) registers the first real one.
+- The much larger, already-real gaps in this same shutdown path (draining
+  work accepted well before `close()`, stopping new work before draining,
+  the ambiguous/safe fallback boundary at the connect/send-receive split)
+  are already fixed by rounds 1-6.
+- This is "track it," not "ignore it," per the facility's own
+  pre-existing-issue discipline -- the follow-up issue records the
+  suggested direction (an explicit accept-time counter, independent of
+  subscribe/touch/release) for whoever picks it up, most naturally
+  alongside Phase 3's first real verb migration when write traffic
+  actually starts to exist.
+
+No code change this round; validation unchanged from round 6 (130 tests,
+all gates clean).
 
 ### 2026-09-26 — PR #3779 review round 6: shutdown must stop accepting work before draining
 - **A new write could still race the shutdown wait.** Rounds 4/5 waited for
