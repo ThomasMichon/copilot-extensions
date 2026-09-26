@@ -322,6 +322,20 @@ def test_windows_stamp_reuses_immutable_version_snapshot() -> None:
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX installer integration")
+# Genuinely heavier than most tests in this file: a real payload copytree,
+# then `install.sh provision` (self-stage re-exec + venv create + package
+# install + versioned-activate + a status-monitor-restart round-trip),
+# followed by two more subprocess invocations of the generated launchers.
+# That's 5+ real subprocess spawns chained together -- reliably ~15s in
+# 20/20 isolated local reproductions, but observed to intermittently exceed
+# the suite-wide 30s pytest-timeout default under real CI concurrency (a
+# `full - agent-worktrees` run hit `Failed: Timeout (>30.0s)` here on an
+# otherwise-unrelated PR, blocking dev->main promotion). No logic bug found
+# -- this is legitimate multi-subprocess work that needs more headroom than
+# the blanket default under load, not a hang to fix. Give it real margin
+# rather than reaching for a global timeout bump that would mask a genuine
+# hang in a lighter test.
+@pytest.mark.timeout(90)
 def test_posix_lean_provision_installs_resolver_and_launchers_reenter_runtime(
     tmp_path: Path,
 ) -> None:

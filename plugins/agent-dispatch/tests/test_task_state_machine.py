@@ -25,7 +25,7 @@ from agent_dispatch.task_state_machine import (
 
 
 def test_all_states_match_queue_status():
-    """The declared table's state set is exactly ``Status``'s eight states."""
+    """The declared table's state set is exactly ``Status``'s nine states."""
     assert ALL_STATES == {
         Status.PROPOSED,
         Status.QUEUED,
@@ -33,6 +33,7 @@ def test_all_states_match_queue_status():
         Status.STARTED,
         Status.SUSPENDED,
         Status.COMPLETED,
+        Status.CONFIRMED,
         Status.ABANDONED,
         Status.DEAD_LETTER,
     }

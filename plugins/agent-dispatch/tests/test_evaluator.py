@@ -86,6 +86,39 @@ def test_emit_rule_without_title_template_raises():
         spec.evaluate(_completed_event())
 
 
+def test_confirm_rule_matches():
+    spec = ev.SpecEvaluator({"rules": [{
+        "on": "task.completed",
+        "when": {"labels_any": ["recipe:goal-driven"]},
+        "confirm": True,
+        "confirm_reason": "goal corroborated by recipe",
+    }]})
+    decisions = spec.evaluate(_completed_event(labels=("recipe:goal-driven",)))
+    assert len(decisions) == 1
+    assert isinstance(decisions[0], ev.Confirm)
+    assert decisions[0].reason == "goal corroborated by recipe"
+
+
+def test_emit_rule_wins_over_confirm_when_both_present_on_same_rule():
+    """``emit`` is checked first -- a rule authoring both keys is unusual, but
+    the precedence must be deterministic and documented, not accidental."""
+    spec = ev.SpecEvaluator({"rules": [{
+        "on": "task.completed",
+        "emit": {"title_template": "x"},
+        "confirm": True,
+    }]})
+    assert isinstance(spec.evaluate(_completed_event())[0], ev.Emit)
+
+
+def test_no_matching_confirm_rule_falls_through_to_noop():
+    spec = ev.SpecEvaluator({"rules": [{
+        "on": "task.completed",
+        "when": {"labels_any": ["recipe:goal-driven"]},
+        "confirm": True,
+    }]})
+    assert isinstance(spec.evaluate(_completed_event(labels=("other",)))[0], ev.NoOp)
+
+
 # -- apply -------------------------------------------------------------------
 
 
@@ -106,6 +139,47 @@ def test_apply_creates_follow_up_and_stamps_repo():
 def test_apply_noop_records_skip():
     out = ev.apply_decisions([ev.NoOp(reason="none")], creator=lambda *a, **k: {})
     assert out[0]["decision"] == "noop"
+
+
+def test_apply_confirm_calls_confirmer_with_task_id():
+    calls = []
+
+    def confirmer(task_id, **kwargs):
+        calls.append((task_id, kwargs))
+        return {"id": task_id, "status": "confirmed"}
+
+    decisions = [ev.Confirm(reason="corroborated")]
+    out = ev.apply_decisions(
+        decisions, creator=lambda *a, **k: {}, task_id="t-1", confirmer=confirmer
+    )
+    assert calls == [("t-1", {"actor": "evaluator"})]
+    assert out[0] == {"decision": "confirm", "confirmed": {"id": "t-1", "status": "confirmed"}}
+
+
+def test_apply_confirm_without_confirmer_is_skipped_not_raised():
+    out = ev.apply_decisions([ev.Confirm()], creator=lambda *a, **k: {}, task_id="t-1")
+    assert out[0]["decision"] == "confirm"
+    assert out[0]["skipped"] is True
+
+
+def test_apply_confirm_without_task_id_is_skipped_not_raised():
+    out = ev.apply_decisions(
+        [ev.Confirm()], creator=lambda *a, **k: {}, confirmer=lambda *a, **k: {}
+    )
+    assert out[0]["skipped"] is True
+
+
+def test_evaluate_and_apply_threads_task_id_to_confirmer():
+    calls = []
+    spec = ev.SpecEvaluator({"rules": [{"on": "task.completed", "confirm": True}]})
+    report = ev.evaluate_and_apply(
+        spec,
+        _completed_event(),
+        creator=lambda *a, **k: {},
+        confirmer=lambda tid, **k: calls.append(tid) or {"id": tid},
+    )
+    assert calls == ["t-1"]
+    assert report["applied"][0]["decision"] == "confirm"
 
 
 def test_evaluate_and_apply_dry_run_creates_nothing():

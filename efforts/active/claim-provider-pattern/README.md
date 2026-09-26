@@ -267,6 +267,8 @@ _Pending._
   (no unrelated regressions). No code changes landed for this item --
   checklist item 3 marked done on confirmation + existing test evidence
   alone, per the design note's own anticipation of this outcome.
+- PR #3705 (branch `phase4-item3-gh-account-confirm`) merged, landing this
+  checklist entry and the `efforts/README.md` active-effort index fix.
 
 ### 2026-09-23 — Phase 4 slice: agent-codespaces atomic deploy hold
 - Added an agent-codespaces provider `deploy_hold` fence mirroring

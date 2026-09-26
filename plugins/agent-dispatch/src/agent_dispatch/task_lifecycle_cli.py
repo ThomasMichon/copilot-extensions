@@ -288,6 +288,47 @@ def _cmd_reset(args: argparse.Namespace) -> int:
             )
         )
 
+def _cmd_confirm(args: argparse.Namespace) -> int:
+    """The Completion Review card's Confirm action -- corroborate a
+    completion claim and close the task for good."""
+    actor = args.actor or _core()._owner_from_identity(args)
+    with _core()._client(args) as c:
+        return _core()._emit(
+            c.confirm(
+                args.task_id,
+                actor=actor,
+                expected_status=args.expected_status,
+            )
+        )
+
+def _cmd_reopen(args: argparse.Namespace) -> int:
+    """The Completion Review card's Re-queue-with-steering action -- return
+    a completed-but-unconfirmed task to queued, progress preserved,
+    optionally attaching new operator steer fields atomically."""
+    steer_fields: dict[str, str] | None = None
+    if args.field:
+        steer_fields = {}
+        for item in args.field:
+            key, sep, value = item.partition("=")
+            if not sep:
+                print(
+                    f"agent-dispatch: --field must be key=value (got {item!r})",
+                    file=sys.stderr,
+                )
+                return 2
+            steer_fields[key.strip()] = value
+    sender = args.sender or _core()._owner_from_identity(args)
+    with _core()._client(args) as c:
+        return _core()._emit(
+            c.reopen_completed(
+                args.task_id,
+                reason=args.reason,
+                steer_fields=steer_fields,
+                sender=sender,
+                expected_status=args.expected_status,
+            )
+        )
+
 def _cmd_progress(args: argparse.Namespace) -> int:
     worker_id = _core()._resolve_owner(args, verb="progress")
     if worker_id is None:
