@@ -1,9 +1,0 @@
-{
-  "comment": "anchor_write_guard: stop blocking 'git pull --ff-only' (and a bare 'git fetch', which was already never blocked) against a worktree-class anchor. --ff-only makes git structurally refuse instead of ever creating a merge commit or applying a configured pull.rebase, so it can never introduce the agent-authored content this guard exists to block. A bare 'git pull' (no --ff-only) remains blocked like any other git mutation verb (commit, checkout, reset, merge, rebase, etc.); 'repos sync <repo>' is the always-available equivalent. cross_repo_guard keeps its own independent copy of the write-verb list and is unaffected.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
