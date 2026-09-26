@@ -1118,7 +1118,7 @@ def resolve_active_plugins(
     """Resolve global or registered-project sources with tri-state authority."""
     user_home = Path(home).expanduser() if home is not None else Path.home()
     copilot_home = user_home / ".copilot"
-    agent_worktrees_home = user_home / ".agent-worktrees"
+    agent_worktrees_home = user_home / ".agent-worktrees"  # marketplace-isolation: allow registry
     registry_findings: list[Finding] = []
     scopes: dict[str, set[str]] = defaultdict(set)
     local_roots: dict[str, set[Path]] = defaultdict(set)
