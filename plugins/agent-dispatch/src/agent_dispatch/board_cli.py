@@ -30,9 +30,10 @@ GROUPS = (
     "Queued",
     "Suspended",
     "Completed",
+    "Confirmed",
     "Abandoned",
 )
-TERMINAL = frozenset({"Completed", "Abandoned"})
+TERMINAL = frozenset({"Completed", "Confirmed", "Abandoned"})
 ACTIVITY_TTL_SECONDS = 90.0
 _RELAY_ENDPOINT: str | None = None
 
@@ -97,6 +98,8 @@ def _group(task: dict) -> str:
     status = task.get("status")
     if status == "completed":
         return "Completed"
+    if status == "confirmed":
+        return "Confirmed"
     if status in {"abandoned", "dead_letter"}:
         return "Abandoned"
     if task.get("awaiting_steer"):

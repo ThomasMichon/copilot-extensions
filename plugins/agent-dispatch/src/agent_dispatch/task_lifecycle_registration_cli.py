@@ -328,6 +328,45 @@ def register_task_lifecycle_commands(sub) -> None:
     )
     p.set_defaults(func=_core()._cmd_reset)
 
+    p = sub.add_parser(
+        "confirm",
+        help="the Completion Review card's Confirm action: corroborate a "
+        "completion claim and close the task for good (completed -> confirmed)",
+    )
+    p.add_argument("task_id")
+    p.add_argument("--actor", help="operator/evaluator identity recorded in the audit trail")
+    p.add_argument(
+        "--expected-status",
+        dest="expected_status",
+        help="reject with 'task changed; refresh and retry' if the task's "
+        "current status doesn't match this (a stale cached row)",
+    )
+    p.set_defaults(func=_core()._cmd_confirm)
+
+    p = sub.add_parser(
+        "reopen",
+        help="the Completion Review card's Re-queue-with-steering action: "
+        "return a completed-but-unconfirmed task to queued, progress "
+        "preserved (completed -> queued)",
+    )
+    p.add_argument("task_id")
+    p.add_argument("--reason", help="optional note recorded in the audit trail")
+    p.add_argument(
+        "--field",
+        action="append",
+        metavar="KEY=VALUE",
+        help="an operator steer field to attach atomically with the reopen "
+        "(repeatable); omit for a plain reopen with no new instructions",
+    )
+    p.add_argument("--sender", help="operator identity recorded on the attached steer, if any")
+    p.add_argument(
+        "--expected-status",
+        dest="expected_status",
+        help="reject with 'task changed; refresh and retry' if the task's "
+        "current status doesn't match this (a stale cached row)",
+    )
+    p.set_defaults(func=_core()._cmd_reopen)
+
     p = sub.add_parser("heartbeat", help="extend the lease on a held task")
     p.add_argument("task_id")
     p.add_argument("worker_id")

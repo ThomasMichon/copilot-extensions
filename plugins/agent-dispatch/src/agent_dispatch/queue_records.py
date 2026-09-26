@@ -29,7 +29,7 @@ class TaskError(RuntimeError):
 
 
 class Status:
-    """The eight task states (string constants, stored verbatim)."""
+    """The nine task states (string constants, stored verbatim)."""
 
     PROPOSED = "proposed"
     QUEUED = "queued"
@@ -37,7 +37,16 @@ class Status:
     STARTED = "started"
     #: Previously started, owner-preserving, dormant, and non-claimable.
     SUSPENDED = "suspended"
+    #: A worker's own **claim** that a goal is met -- provisional, not the
+    #: true terminal. It closes durably only once corroborated: see
+    #: ``CONFIRMED``.
     COMPLETED = "completed"
+    #: The true lifecycle terminal beyond ``COMPLETED``, reached via the
+    #: ``confirm`` transition once the completion claim is corroborated --
+    #: automatically by an evaluator for emitter-driven work, or explicitly
+    #: by whoever is tracking a self-tracked (no-evaluator) task. See the
+    #: agent-dispatch vision's *The lifecycle* / *verify-the-completion-claim*.
+    CONFIRMED = "confirmed"
     ABANDONED = "abandoned"
     #: Terminal failure: a held task requeued too many times (its owner kept
     #: going gone) -- an actionable dead-letter end state rather than churning
@@ -49,10 +58,26 @@ class Status:
     #: Non-terminal states that retain an owner. Suspended tasks are deliberately
     #: excluded from HELD because they have no active lease or embodiment.
     OWNED = frozenset({CLAIMED, STARTED, SUSPENDED})
-    #: Terminal states -- no further transitions.
-    TERMINAL = frozenset({COMPLETED, ABANDONED, DEAD_LETTER})
+    #: Terminal states -- no further transitions. ``COMPLETED`` moved OUT of
+    #: this set (2026-09-25): it is a worker's provisional claim, not the true
+    #: terminal -- see ``CONFIRMED``, which takes its place here. A call site
+    #: that means "no agent will do further work on this" (the OLD meaning of
+    #: "terminal" this constant used to carry, before ``CONFIRMED`` existed)
+    #: wants ``CONCLUDED`` below instead, not this.
+    TERMINAL = frozenset({CONFIRMED, ABANDONED, DEAD_LETTER})
+    #: States in which no agent is actively working the task anymore --
+    #: ``TERMINAL`` plus the provisional ``COMPLETED``. This is what
+    #: ``TERMINAL`` used to mean before ``CONFIRMED`` existed; every call site
+    #: that only ever cared about "is a worker still going to touch this,"
+    #: never about "is this durably, reviewably closed," should read this
+    #: instead of ``TERMINAL`` now that the two questions have different
+    #: answers for a completed-but-unconfirmed task.
+    CONCLUDED = frozenset({COMPLETED, CONFIRMED, ABANDONED, DEAD_LETTER})
     #: Non-terminal states from which an abandon (with permission) is allowed.
-    ABANDONABLE = frozenset({PROPOSED, QUEUED, CLAIMED, STARTED, SUSPENDED})
+    #: Includes ``COMPLETED`` (2026-09-25): the Completion Review card's
+    #: Abandon action closes a completed-but-unconfirmed task the operator
+    #: disagrees with, exactly like abandoning any other non-final task.
+    ABANDONABLE = frozenset({PROPOSED, QUEUED, CLAIMED, STARTED, SUSPENDED, COMPLETED})
 
 
 class SpawnState:

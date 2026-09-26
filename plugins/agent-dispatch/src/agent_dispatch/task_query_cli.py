@@ -42,23 +42,26 @@ _BOARD_GROUPS = (
     "Queued",
     "Suspended",
     "Completed",
+    "Confirmed",
     "Abandoned",
 )
-_BOARD_TERMINAL = frozenset({"Completed", "Abandoned"})
+_BOARD_TERMINAL = frozenset({"Completed", "Confirmed", "Abandoned"})
 
 
 def _board_group(task: dict) -> str:
     """The display group for a task on the picker board (see ``_BOARD_GROUPS``).
 
-    A **terminal** status (completed / abandoned / dead_letter) wins first -- a
-    task can carry a stale ``awaiting_steer`` flag after being abandoned while
-    blocked, and a finished task is never "Blocked". Otherwise ``awaiting_steer``
-    (a live task needing the operator's steer) wins over the raw lifecycle state,
-    then proposed/queued/suspended, else any other owned in-flight state reads
-    as *Started*."""
+    A **terminal** status (completed / confirmed / abandoned / dead_letter)
+    wins first -- a task can carry a stale ``awaiting_steer`` flag after being
+    abandoned while blocked, and a finished task is never "Blocked". Otherwise
+    ``awaiting_steer`` (a live task needing the operator's steer) wins over
+    the raw lifecycle state, then proposed/queued/suspended, else any other
+    owned in-flight state reads as *Started*."""
     st = task.get("status")
     if st == "completed":
         return "Completed"
+    if st == "confirmed":
+        return "Confirmed"
     if st in ("abandoned", "dead_letter"):
         return "Abandoned"
     if task.get("awaiting_steer"):
@@ -414,9 +417,9 @@ def _cmd_consume(args: argparse.Namespace) -> int:
         is_handoff = ("handoff" in (task.get("labels") or [])) or (
             task.get("source") == "context-handoff"
         )
-        if is_handoff and status == "completed":
+        if is_handoff and status in ("completed", "confirmed"):
             return _core()._consume_already_spent(task_id, task)
-        if status not in ("completed", "abandoned"):
+        if status not in ("completed", "confirmed", "abandoned"):
             owner: str | None = None
             if status == "proposed":
                 try:

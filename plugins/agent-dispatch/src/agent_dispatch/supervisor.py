@@ -3339,7 +3339,13 @@ class Supervisor:
             event = {"type": f"task.{task.get('status')}", "task": task}
             try:
                 decisions = self.evaluator.evaluate(event)
-                results = apply_decisions(decisions, creator=self.client.create, repo=self.repo)
+                results = apply_decisions(
+                    decisions,
+                    creator=self.client.create,
+                    repo=self.repo,
+                    task_id=tid,
+                    confirmer=self.client.confirm,
+                )
             except Exception:  # a domain evaluator/create must never crash the loop
                 log.exception("evaluator pass: advancing task %s failed", tid)
                 continue
@@ -3351,6 +3357,12 @@ class Supervisor:
                         tid,
                         event["type"],
                         r["created"].get("id"),
+                    )
+                elif r.get("decision") == "confirm" and r.get("confirmed"):
+                    log.info(
+                        "evaluator pass: task %s (%s) -> confirmed",
+                        tid,
+                        event["type"],
                     )
         # Bound the in-process guard so a long-lived supervisor doesn't grow it
         # without limit -- keep the most recent terminal ids (dedup_key still
