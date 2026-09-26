@@ -23,6 +23,8 @@ def _isolated_root(tmp_path, monkeypatch):
     imported reference to the same function)."""
     monkeypatch.setattr(mux_daemon, "default_root", lambda: tmp_path)
     monkeypatch.setattr(mux_mapping_registry, "default_root", lambda: tmp_path)
+    monkeypatch.setattr(mux_daemon, "ensure_daemon_running", lambda *a, **k: True)
+    monkeypatch.setattr(mux_daemon, "publish_live_observation", lambda *a, **k: {"applied": True})
     return tmp_path
 
 
@@ -69,6 +71,34 @@ def test_mux_daemon_register_show_remove_roundtrip(capsys):
     assert rc == 0
     tombstoned = json.loads(capsys.readouterr().out)
     assert tombstoned["live"] is False
+
+
+def test_mux_daemon_register_auto_assigns_revision_when_omitted(capsys):
+    rc = main(
+        [
+            "mux-daemon",
+            "register",
+            "--project=proj",
+            "--worktree-id=wt-1",
+            "--mux-session=wt-1",
+            "--mux-bin=psmux",
+        ]
+    )
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out) == {"applied": True, "revision": 1}
+
+    rc = main(
+        [
+            "mux-daemon",
+            "register",
+            "--project=proj",
+            "--worktree-id=wt-1",
+            "--mux-session=wt-1",
+            "--mux-bin=psmux",
+        ]
+    )
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out) == {"applied": True, "revision": 2}
 
 
 def test_mux_daemon_remove_rejects_non_integer_revision(capsys):

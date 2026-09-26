@@ -387,8 +387,15 @@ state where two long-lived writers are both intended to own it.
        ``test_data_ssh_sources.py``, a Picker-provider-source absolute-path
        validation area this change never touches).
 
-3. [ ] **Perform the managed-session cutover atomically: launch path,
-       observe path, and push path together.**
+3. [x] **Perform the managed-session cutover atomically: launch path,
+       observe path, and push path together.** Landed in
+       [#3825](https://github.com/ThomasMichon/copilot-extensions/pull/3825):
+       launch-session/pane-wrapper now register and retire Manager-owned mux
+       mappings through `worktree-manager mux-daemon`, immediately publish
+       `mux-live-v1` upserts/tombstones to `agent-worktrees`, and route
+       resident `@aw_*` status writes back through `mux-status-v1` whenever the
+       managed-mux cache owns that live session; unmanaged sessions stay on the
+       legacy resident/direct writer path.
    - Worktree Manager's mux launch/join/restore/remux actions start/update the
      mapping registry and ensure the companion daemon.
    - Those actions immediately publish `mux-live-v1` observation events to

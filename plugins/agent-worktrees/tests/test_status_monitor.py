@@ -342,6 +342,129 @@ def test_sweep_without_managed_mux_cache_observes_only_the_direct_scan(tmp_path,
     assert observed == [{"wt-a"}]  # unchanged when managed_mux_cache is None
 
 
+def test_sweep_routes_manager_owned_status_through_mux_status_v1(tmp_path, monkeypatch):
+    from agent_worktrees import mux_link
+
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    monkeypatch.setattr(
+        m,
+        "cfg",
+        types.SimpleNamespace(
+            set_active_project=lambda *_a, **_k: None,
+            project_name=lambda: "proj",
+            active_project=lambda: "proj",
+            tracking_dir=lambda: tmp_path,
+        ),
+    )
+    m._register_session_for_monitor("wt-a", "/w/a")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda *a, **k: "wt-a")
+    direct_calls = _capture_set(monkeypatch)
+    pushed = []
+    monkeypatch.setattr(
+        m,
+        "_publish_managed_session_status",
+        lambda **kwargs: pushed.append(kwargs) or {"handled": True, "applied": True, "context_published": True},
+        raising=False,
+    )
+
+    cache = mux_link.ManagedMuxCache()
+    cache.apply_observation(
+        {
+            "project": "proj",
+            "worktree_id": "wt-a",
+            "worktree_path": "/w/a",
+            "mux_session": "wt-a",
+            "mapping_revision": 1,
+            "live": True,
+        }
+    )
+
+    ctx_done: set[str] = set()
+    served = m._monitor_sweep(
+        "tmux",
+        "TOK",
+        "PFX",
+        ctx_done,
+        managed_mux_cache=cache,
+    )
+
+    assert served == 1
+    assert direct_calls == []
+    assert len(pushed) == 1
+    assert pushed[0]["project"] == "proj"
+    assert pushed[0]["session_name"] == "wt-a"
+    assert pushed[0]["values"] == {
+        "@aw_updater": "TOK",
+        "@aw_updater_prefix": "PFX",
+        "@aw_ctx": "CTX",
+        "@aw_seg": "SEG",
+    }
+    assert "wt-a" in ctx_done
+
+
+def test_sweep_keeps_unmanaged_sessions_on_the_direct_writer_path(tmp_path, monkeypatch):
+    from agent_worktrees import mux_link
+
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    monkeypatch.setattr(
+        m,
+        "cfg",
+        types.SimpleNamespace(
+            set_active_project=lambda *_a, **_k: None,
+            project_name=lambda: "proj",
+            active_project=lambda: "proj",
+            tracking_dir=lambda: tmp_path,
+        ),
+    )
+    m._register_session_for_monitor("wt-a", "/w/a")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda *a, **k: "wt-other")
+    direct_calls = _capture_set(monkeypatch)
+    pushed = []
+    monkeypatch.setattr(
+        m,
+        "_publish_managed_session_status",
+        lambda **kwargs: pushed.append(kwargs) or None,
+        raising=False,
+    )
+
+    cache = mux_link.ManagedMuxCache()
+    cache.apply_observation(
+        {
+            "project": "proj",
+            "worktree_id": "wt-a",
+            "worktree_path": "/w/a",
+            "mux_session": "wt-a",
+            "mapping_revision": 1,
+            "live": True,
+        }
+    )
+
+    served = m._monitor_sweep(
+        "tmux",
+        "TOK",
+        "PFX",
+        set(),
+        managed_mux_cache=cache,
+    )
+
+    assert served == 1
+    assert len(pushed) == 1
+    assert pushed[0]["project"] == "proj"
+    assert pushed[0]["session_name"] == "wt-a"
+    assert ("wt-a", "@aw_updater", "TOK") in direct_calls
+    assert ("wt-a", "@aw_seg", "SEG") in direct_calls
+
+
 def test_sweep_never_calls_catalog_observer_with_a_partial_manager_only_view(tmp_path):
     """Copilot review finding: ``catalog_observer``
     (``ResidentSessionReconciler.observe_mux``) is a *complete-snapshot*

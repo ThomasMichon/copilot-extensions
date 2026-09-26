@@ -689,6 +689,35 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-09-26** — Merged Phase 3b Slice 2 Sub-slice 3 Step 3, PR
+  [#3825](https://github.com/ThomasMichon/copilot-extensions/pull/3825).
+  Wired the managed-session cutover all the way through: `worktree-manager`
+  launch/join and pane-exit paths now register/remove Manager-owned mux
+  mappings through `mux-daemon`, ensure the companion daemon, and publish
+  `mux-live-v1` upserts/tombstones into `agent-worktrees`; the resident
+  `status-monitor` now routes rendered `@aw_*` payloads back through
+  `mux-status-v1` for sessions present in the managed-mux cache while
+  leaving unmanaged sessions on the old direct writer path. Review surfaced
+  five real follow-up fixes before merge: bumping the standalone Manager
+  payload to `0.1.0-dev80` so the launcher/daemon cutover actually ships,
+  moving revisionless mapping allocation under the registry lock so two
+  concurrent register calls cannot reuse the same `mapping_revision`,
+  adding direct wire-client coverage for `agent_worktrees.mux_status_link`,
+  scrubbing long-lived daemon spawns of relayed auth tokens, and updating
+  `mux_daemon.py`'s lifecycle docstring now that the launch path is live.
+  Validation: targeted suites green after the final review
+  fixes (`agent-worktrees`: 108 passed; `worktree-manager`: 111 passed).
+  Full `worktree-manager` suite after those fixes: 1436 passed, 7 skipped,
+  same 3 pre-existing unrelated failures (`tests/production_picker/
+  test_data_ssh_sources.py`). Full `agent-worktrees` suite on this slice's
+  final code path remained at the same known baseline failures outside this
+  change area: 5556 passed, 50 skipped, 4 pre-existing unrelated failures
+  (`tests/test_update_stage.py`); after the final module-size-only helper
+  extraction and the added direct client tests, the touched monitor/wire
+  surfaces reran green as targeted tests before merge. Step 3 of this
+  sub-slice's 6-step ordered plan is complete; Steps 4-6 (served-set
+  cutover, updater-shim retirement, and final cleanup) remain open.
+
 - **2026-09-26** — Merged Phase 3b Slice 2 Sub-slice 3 Step 2, PR
   [#3724](https://github.com/ThomasMichon/copilot-extensions/pull/3724)
   (squash-merged into `dev` as `7fe5d2017`). Went through 5 review rounds
