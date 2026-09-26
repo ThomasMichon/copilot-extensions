@@ -206,6 +206,48 @@ def test_existing_issue_returns_the_match(watchdog, monkeypatch):
     assert issue["number"] == 42
 
 
+def test_fetch_job_log_passes_allow_escape_sequences(watchdog, monkeypatch):
+    # Regression: `gh api` (hosted-runner version 2.101.0+, confirmed absent
+    # on some older dev-machine `gh` installs) refuses to print a raw
+    # non-JSON body containing ANSI escape sequences unless this flag is
+    # passed -- a terminal-safety guard, not an API restriction. Real job
+    # logs are almost always colored pytest output, so omitting this flag
+    # silently broke every real failure report in production (confirmed
+    # live against run 36230190121: both `_fetch_job_log` calls raised
+    # `LookupFailed`, and NO issue was filed for a real double-test-failure
+    # run). This script only regex-matches the captured text -- it is never
+    # rendered to a terminal -- so allowing escape sequences through is safe.
+    captured_args = []
+
+    class _Run:
+        returncode = 0
+        stdout = "some log text"
+        stderr = ""
+
+    def _fake_run(args):
+        captured_args.append(args)
+        return _Run()
+
+    monkeypatch.setattr(watchdog, "_run_gh", _fake_run)
+
+    result = watchdog._fetch_job_log("owner/repo", 123)
+
+    assert result == "some log text"
+    assert "--allow-escape-sequences" in captured_args[0]
+
+
+def test_fetch_job_log_still_raises_lookup_failed_on_a_nonzero_exit(watchdog, monkeypatch):
+    class _FailedRun:
+        returncode = 1
+        stdout = ""
+        stderr = "the response contains terminal escape sequences"
+
+    monkeypatch.setattr(watchdog, "_run_gh", lambda *_a, **_k: _FailedRun())
+
+    with pytest.raises(watchdog.LookupFailed):
+        watchdog._fetch_job_log("owner/repo", 123)
+
+
 def test_process_signature_dry_run_never_shells_out(watchdog, monkeypatch):
     called = False
 

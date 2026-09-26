@@ -202,7 +202,19 @@ def _fetch_run_jobs(repo: str, run_id: str) -> list[dict]:
 
 
 def _fetch_job_log(repo: str, job_id: int) -> str:
-    out = _run_gh(["api", f"repos/{repo}/actions/jobs/{job_id}/logs"])
+    # `--allow-escape-sequences`: real job logs are plain text (not JSON), and
+    # `gh api` (since ~2.94, confirmed present in the hosted runner's 2.101.0
+    # vs. this repo's older local dev version) refuses to print a raw
+    # non-JSON body containing ANSI escape sequences without this flag --
+    # a terminal-safety guard, not an API restriction. Colored pytest output
+    # (the overwhelmingly common case for a real failing job) trips it every
+    # time, which silently broke this exact call in production (confirmed
+    # live: `report-failure` filed nothing for a real double-test-failure
+    # run because both `_fetch_job_log` calls raised `LookupFailed` here).
+    # This script only ever regex-matches the captured text -- it is never
+    # rendered to a real terminal -- so allowing escape sequences through is
+    # safe here.
+    out = _run_gh(["api", f"repos/{repo}/actions/jobs/{job_id}/logs", "--allow-escape-sequences"])
     if out.returncode != 0:
         raise LookupFailed(out.stderr.strip() or f"gh api logs exited {out.returncode}")
     return out.stdout
