@@ -1,9 +1,0 @@
-{
-  "comment": "Annotate vendored plugin-activation's agent-worktrees registry-root read with a marketplace-isolation allow marker (legacy-default registry, already intentional).",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "dev"
-    }
-  ]
-}
