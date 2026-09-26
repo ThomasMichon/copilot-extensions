@@ -1,0 +1,9 @@
+{
+  "comment": "Worktrees Picker: new read-only Legend screen (? key) explaining state labels, closure-descriptor markers, and maintenance disposition chips.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "minor"
+    }
+  ]
+}

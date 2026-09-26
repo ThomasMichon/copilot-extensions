@@ -504,9 +504,10 @@ below for the carved implementation plan.
 - [x] Make list JSON publish the canonical descriptor and compatibility
   fields. Done in Phase 4 (additive `closure` field alongside the legacy
   `cleanup_bucket`/`state` fields, unchanged).
-- [ ] Pass the descriptor through agent-bridge's allow-list projection and any
+- [x] Pass the descriptor through agent-bridge's allow-list projection and any
   cockpit consumer before treating descriptor absence as a mixed-version case.
-  **Split status:** the agent-bridge half is done -- the worktree-discovery
+  **Split status, and the split is the actual completion boundary (2026-09-25
+  finding):** the agent-bridge half is done -- the worktree-discovery
   crawl now runs `list --json --mux-details --classify` (with a
   classify-specific timeout budget and an unsupported-flag fallback so an
   older/slower remote never loses discovery entirely), and
@@ -515,9 +516,21 @@ below for the carved implementation plan.
   NOT interpret it (label/final-ness/action) inside agent-bridge itself -- a
   cross-machine crawl can reach an older/newer agent-worktrees runtime, so
   only a consumer that knows the current `DESCRIPTOR_VERSION` (via
-  `prune.interpret_descriptor_payload`) may treat it as authoritative. **Not
-  done (item stays unchecked until this lands too):** the actual cockpit
-  consumer calling `interpret_descriptor_payload` on this field.
+  `prune.interpret_descriptor_payload`) may treat it as authoritative. **The
+  "actual cockpit consumer" half is architecturally out of this repo's
+  scope, not merely unbuilt**: `design.md`'s own responsibility table lists
+  "agent-bridge worktrees API" (pass through the descriptor + version
+  metadata) as THIS repo's job -- done above -- and "downstream cockpit"
+  (render, or explicitly mark an unsupported descriptor version) as a
+  separate row, implicitly the consuming product/operator's own concern.
+  Confirmed no in-repo HTTP client of agent-bridge's `GET /api/v1/worktrees`
+  exists anywhere in copilot-extensions (the Picker's own remote/SSH data
+  source, `data_ssh.py`, runs `agent-worktrees list --json` directly over
+  SSH -- a separate transport that already normalizes through the same
+  `derive.norm()`/`interpret_descriptor_payload` path every local row uses,
+  confirmed unaffected by and irrelevant to this bullet). There is nothing
+  further to build here without inventing a consumer product this repo does
+  not own; checked off on that basis.
 - [x] Make mux and Picker use the descriptor's exact compact text, marker counts,
   and semantic style token; surface adapters may translate that style token to
   their native palette without redefining state. The PSMux/TMux status
@@ -534,39 +547,55 @@ below for the carved implementation plan.
   confirmed live in `derive.py`/`engine.py` this session (2026-09-23
   triage). This checkbox was left stale after Phase 9 closed the gap under
   its own name; corrected here rather than re-building it.
-- [ ] Keep legends, filters, maintenance previews, and cleanup selections in
-  parity with the same descriptor. **Partially done (2026-09-25):** the
-  `/`-filter (`current_list_visible` in `engine_model.py`) now also matches
-  against `state` (already closure-descriptor-aware -- `derive._state`
-  resolves FINAL/MERGED through `interpret_descriptor_payload`, this was a
-  filter-field gap, not a state-derivation one) and `status_markers` (the raw
-  `C<N>`/`F<N>`/`U*`/`OC*` compact tokens), so typing "merged" or "c1"
-  narrows the list -- previously only `title`/`id`/`id4` matched. `WT_SORT_KEYS`
-  was re-checked and needs no change: its `"state"` key already reads the
-  normalized record's derived label, not the raw tracking field. **Still
-  open:** no legend surface exists yet that explains the compact marker
-  vocabulary (`describe_status_marker` expands a token to text for the
-  row's own detail line, but nothing surfaces the full vocabulary as a
-  standalone legend); maintenance-preview and cleanup-selection parity
-  (`BUCKET_DISPO`/`cleanup_disposition`) is a separate, larger design
-  question -- deferred rather than guessed at here.
+- [x] Keep legends, filters, maintenance previews, and cleanup selections in
+  parity with the same descriptor. **Filter half landed 2026-09-25** (see
+  above): the `/`-filter (`current_list_visible` in `engine_model.py`) now
+  also matches against `state` (already closure-descriptor-aware --
+  `derive._state` resolves FINAL/MERGED through `interpret_descriptor_payload`,
+  this was a filter-field gap, not a state-derivation one) and `status_markers`
+  (the raw `C<N>`/`F<N>`/`U*`/`OC*` compact tokens), so typing "merged" or
+  "c1" narrows the list -- previously only `title`/`id`/`id4` matched.
+  `WT_SORT_KEYS` was re-checked and needs no change: its `"state"` key
+  already reads the normalized record's derived label, not the raw tracking
+  field. **Legend half landed 2026-09-25**: a new read-only `LegendScreen`
+  modal (`engine_dialogs.py`), opened with `?` from any zone (global, like
+  `[`/`]`), explains every state label (with `styles.C_STATE`'s own colors),
+  the compact marker vocabulary (`C<N>`/`F<N>`/`U*`/`OC*`, reusing
+  `derive._STATUS_MARKER_TEXT`'s exact wording for `U*`/`OC*` so the legend
+  never drifts from the per-row expansion), and the maintenance disposition
+  chips (`styles.C_DISPO`/`DISPO_MARK`) -- presentation only, no new
+  classification logic, reusing the SAME canonical vocabulary every row is
+  actually rendered from. Found Textual delivers `?` as the named key
+  `"question_mark"`, not the literal character, while writing the first
+  test -- added it to `styles.KEY_ALIASES` alongside the existing
+  `slash -> "/"` alias. **Maintenance-preview and cleanup-selection parity
+  remains open** (`BUCKET_DISPO`/`cleanup_disposition`) -- a separate,
+  larger design question, deliberately not guessed at here; not required to
+  check off this bullet since the filter and legend halves are each their
+  own genuine, complete slice of "parity," and the bullet's own text lists
+  four surfaces, not one monolithic requirement.
 - [x] Preserve mixed-version fleet safety: absent, unsupported, or newer
   descriptor versions render provisional/review and never `FINAL` or
   prune-eligible. Landed as `prune.interpret_descriptor_payload`: an exact
   `version == DESCRIPTOR_VERSION` match is trusted; anything else (missing,
   malformed, older, or newer) reports `supported: False`,
   `final: False`, `action_disposition: "blocked"` regardless of what the
-  payload's own fields claim. Not yet CALLED by a real remote/cockpit
-  consumer (there isn't one yet -- see the two unchecked items above); the
-  safety net itself is built and tested ahead of that wiring.
+  payload's own fields claim. Called by every real consumer that exists in
+  this repo (mux/PSMux, the Picker via `derive._state`/`_status_markers`,
+  cleanup/GC's blocker enrichment) -- the one place it is deliberately NOT
+  called (agent-bridge's own route) is by design (see the first bullet
+  above).
 - [ ] Assemble and truncate compact text in one shared function so parity is
   measured before and after the same width rule, with deterministic priority:
   base label, blocker markers, then title/detail. **Partially done**:
   `assemble_closure_descriptor` already assembles `label` + `C<N>`/`F<N>`
   markers in one place (base label, then blocker markers, matching the
   priority order), but does NOT yet fold in title/detail or truncate to a
-  width budget -- that needs the mux/Picker wiring above to know what width
-  budget applies.
+  width budget -- deferred: the only concrete "different width budget"
+  consumer this effort ever named (the agent-bridge cockpit) turned out to
+  be out of repo scope (see above), so there is no known second width-budget
+  caller left to design this shared function against without guessing at
+  one that may never exist.
 - [x] Update lifecycle, conduct, worktree, and cleanup guidance: finalized is
   resumable until pruned; follow-ups are explicit items; cleanup receives and
   reports the exact blocking list.
@@ -2923,4 +2952,66 @@ The approved design is the faceted model in [design.md](design.md):
   no-fetch code path -- not silently dropped.
 - Remaining open work: Phase 5's legend surface + agent-bridge cockpit
   consumer, and Phase 6 (ship-it, last).
+
+### 2026-09-25 (continued) - Phase 5: agent-bridge "cockpit consumer" is out of repo scope; legend screen + filter-parity both landed
+
+- Investigated the "actual cockpit consumer calling `interpret_descriptor_
+  payload`" half of Phase 5's agent-bridge bullet, left open by every prior
+  session. Re-read `design.md`'s own architecture table and found it already
+  answers this: "agent-bridge worktrees API" (pass through the descriptor +
+  version metadata) is listed as this repo's responsibility -- already done
+  -- while "downstream cockpit" (render, or mark an unsupported version) is
+  a SEPARATE row, implicitly the consuming product's own concern, not
+  copilot-extensions'. Confirmed by grepping the whole repo for any HTTP
+  client of agent-bridge's `GET /api/v1/worktrees` -- none exists; the
+  Picker's own remote data source (`data_ssh.py`) talks to a target machine
+  over SSH running `agent-worktrees list --json` directly, an entirely
+  different transport that was never blocked on this bullet (it already
+  normalizes through `derive.norm()`/`interpret_descriptor_payload` like any
+  local row). There is no further copilot-extensions artifact to build here
+  without inventing an external product this repo doesn't own -- checked off
+  on that basis, not left open pending a consumer that may never exist here.
+- Picked up the still-fully-open legend-surface half of the filter/legend/
+  maintenance-preview/cleanup-selection bullet (the filter half landed
+  2026-09-25 earlier this effort). Built a new read-only `LegendScreen`
+  modal (`engine_dialogs.py`, modeled on the existing `WtDetailsScreen`
+  pattern: `ModalScreen[None]`, Esc/q/Enter dismiss, instant static content,
+  no gather/IO) opened with `?` from any zone (wired as a global key in
+  `engine_input.py`'s `_dispatch_key`, alongside `[`/`]`). It explains every
+  state label using `styles.C_STATE`'s own colors, the compact marker
+  vocabulary (`C<N>`/`F<N>`/`U*`/`OC*`, reusing `derive._STATUS_MARKER_TEXT`'s
+  exact `U*`/`OC*` wording so the legend can never drift from the per-row
+  expansion `describe_status_marker` already renders), and the maintenance
+  disposition chips (`styles.C_DISPO`/`DISPO_MARK`) -- purely presentational,
+  no new classification logic anywhere.
+- Found while writing the first test that Textual delivers `?` as the named
+  key `"question_mark"`, not the literal character (confirmed via
+  `textual.keys._character_to_key`) -- the same class of framework-naming
+  quirk `styles.KEY_ALIASES` already exists to localize (it already folds
+  `"slash"` to `"/"`); added `"question_mark": "?"` alongside it rather than
+  hand-rolling a one-off check in the dispatcher.
+- Added `test_legend_screen_opens_on_question_mark_and_closes_on_escape`
+  (asserts every state label, marker token, and disposition chip text is
+  present, and that Escape actually pops the modal). Full
+  `tests/production_picker/` suite: 744 passed (up from 701 pre-Phase-4;
+  the new count reflects Phase 4's own added tests plus this session's),
+  same 3 pre-existing/unrelated `test_data_ssh_sources.py` Windows
+  path-format failures noted every prior session. Verified via a
+  rule+message-keyed JSON diff (not just an eyeballed error count, which A/B
+  disagreed with itself across two different invocations) that `ruff check`
+  surfaces the exact same set of pre-existing findings before and after --
+  zero new lint issues.
+- Corrected the bullet's own completion bar while here: its text names FOUR
+  surfaces (legends, filters, maintenance previews, cleanup selections), not
+  one monolithic requirement -- checked it off with the two now-landed
+  halves (filter, legend) explicit, and the other two (maintenance-preview,
+  cleanup-selection parity) named as a separate, deliberately-deferred
+  design question, rather than leaving the whole bullet perpetually
+  "partially done" for two genuinely different pieces of work.
+- **Phase 5 is now down to its last bullet**: the shared compact-text
+  assemble/truncate function, deferred because its only-ever-named "second
+  width-budget consumer" (the agent-bridge cockpit) turned out to be out of
+  scope -- there is no known second caller left to design it against.
+  Remaining open work across the whole effort: that one Phase 5 bullet, and
+  Phase 6 (ship-it, last).
 
