@@ -363,6 +363,47 @@ class TestCleanupDisposition:
         d = prune.cleanup_disposition(rec, _info(S.ACTIVE))
         assert d.bucket == "active"
 
+    def test_held_claim_downgrades_unused_to_blocked(self):
+        # Validation Plan "Blocker precedence": an UNUSED record with a held
+        # claim must never render as the opt-in "unused" bucket -- a held
+        # claim always wins, regardless of the underlying git category.
+        rec = _rec(status="unused")
+        rec.resources = [
+            tracking.ResourceClaim(kind="codespace", ref="cs-1", state="active")
+        ]
+        d = prune.cleanup_disposition(rec, _info(S.UNUSED), turn_count=0,
+                                      include_unused=True,
+                                      include_conversations=True)
+        assert d.cleanable is False and d.bucket == "held-claims"
+
+    def test_held_claim_downgrades_conversation_only_to_blocked(self):
+        rec = _rec(status="unused")
+        rec.resources = [
+            tracking.ResourceClaim(kind="codespace", ref="cs-1", state="at-rest")
+        ]
+        d = prune.cleanup_disposition(rec, _info(S.UNUSED), turn_count=5,
+                                      include_conversations=True)
+        assert d.cleanable is False and d.bucket == "held-claims"
+
+    def test_follow_up_downgrades_unused_to_blocked(self):
+        rec = _rec(status="unused")
+        rec.follow_ups = [
+            tracking.FollowUpRecord(id="fu-1", summary="deploy it", state="open")
+        ]
+        d = prune.cleanup_disposition(rec, _info(S.UNUSED), turn_count=0,
+                                      include_unused=True)
+        assert d.cleanable is False and d.bucket == "follow-up"
+
+    def test_follow_up_downgrades_conversation_only_to_blocked(self):
+        rec = _rec(status="unused")
+        rec.follow_ups = [
+            tracking.FollowUpRecord(id="fu-1", summary="deploy it",
+                                    state="pending-transfer")
+        ]
+        d = prune.cleanup_disposition(rec, _info(S.UNUSED), turn_count=5,
+                                      include_conversations=True)
+        assert d.cleanable is False and d.bucket == "follow-up"
+
     def test_itemized_open_follow_up_downgrades_finalized_to_blocked(self):
         # worktree-finality-and-obligations Phase 3: an itemized open
         # follow-up blocks cleanup the same way the legacy boolean did.
@@ -771,6 +812,39 @@ class TestClosureDescriptor:
         assert d.final is True
         assert d.compact == "FINAL"
         assert "*" not in d.compact
+
+    def test_evidence_mode_matrix_agrees_on_the_same_fixture(self):
+        # Validation Plan "Evidence parity": the SAME live-worktree fixture
+        # rendered through cached, fetch-free, and refreshed-but-incomplete
+        # evidence modes must all agree (never FINAL/safe, consistently
+        # MERGED with an unconfirmed-fact marker); only a genuinely fresh AND
+        # complete refresh may promote to FINAL. Incomplete evidence can only
+        # ever lower confidence, never promote.
+        rec, info, disposition = self._final_inputs()
+
+        cached = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=0,
+            evidence_mode="cached", evidence_complete=True)
+        fetch_free = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=0,
+            evidence_mode="fetch-free", evidence_complete=True)
+        refreshed_incomplete = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=0,
+            evidence_mode="refreshed", evidence_complete=False)
+        refreshed_complete = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=0, open_follow_ups=0,
+            evidence_mode="refreshed", evidence_complete=True)
+
+        for d in (cached, fetch_free, refreshed_incomplete):
+            assert d.label == "MERGED"
+            assert d.final is False
+            assert d.action_disposition == "blocked"
+            assert d.compact == "MERGED U* OC*"
+
+        assert refreshed_complete.label == "FINAL"
+        assert refreshed_complete.final is True
+        assert refreshed_complete.action_disposition == "safe"
+        assert refreshed_complete.compact == "FINAL"
 
     def test_repo_fetch_fresh_confirms_upstream_containment_alone(self):
         # worktree-finality-and-obligations Phase 9: a repo-scoped ledger hit
