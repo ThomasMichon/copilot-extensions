@@ -70,7 +70,7 @@ UNLOCK_REQUIRED_ACTIONS = frozenset({
     "move", "mv",
 })
 
-log = logging.getLogger("agent-vault.service")
+log = logging.getLogger("agent-vault.service")  # marketplace-isolation: allow logger-namespace
 
 
 def _within_group(entry: str, group: str | None) -> bool:

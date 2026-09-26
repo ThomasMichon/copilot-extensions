@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice worktrees
 - **Created:** 2026-09-25
-- **Status:** Draft
+- **Status:** Active — Phase 1 implemented and landed; Phase 2 gated (see below)
 - **Vision:** none yet — this effort establishes the standing policy itself
   (safety envelope + trigger contract for a reactive fix agent); revisit
   once Phase 1 proves out whether it deserves its own harness-guidance
@@ -115,13 +115,14 @@ fixes."
 
 ## Plan
 
-### Phase 1 — Detection + dedup (no autonomous fix yet; report-only)
-- [ ] Add a step to `validate-and-promote.yml`'s `full`/`guards-full-sweep`/
+### Phase 1 — Detection + dedup (no autonomous fix yet; report-only) — Done
+- [x] Add a step to `validate-and-promote.yml`'s `full`/`guards-full-sweep`/
       `worktree-manager` jobs (or a new job gated on `if: failure()` after
       them) that, on any failure, extracts a compact failure signature: which
       job(s) failed, the specific failing test node id(s) (pytest's own
       `FAILED <path>::<test>` lines), and a short log excerpt.
-- [ ] **Carry a verified commit SHA, never trust `workflow_run.head_sha`
+      **Implemented:** a new `report-failure` job, `tools/ci_failure_watchdog.py`.
+- [x] **Carry a verified commit SHA, never trust `workflow_run.head_sha`
       alone.** `validate-and-promote.yml` is itself `workflow_run`-triggered,
       and this repo already had to stop trusting that event's own
       `head_sha` and instead carry a SHA independently verified via
@@ -131,16 +132,26 @@ fixes."
       the run ID) through to Phase 2 — never re-derive it naively from a
       `workflow_run` payload, or a diagnosis can attach to, and a fix PR
       can target, the wrong commit.
-- [ ] Dedup against existing open issues before filing anything new (search
+      **Implemented:** `report-failure` passes `needs.gate.outputs.sha`
+      directly as `--sha`; the script never re-derives it.
+- [x] Dedup against existing open issues before filing anything new (search
       by the test node id, not just the plugin name) — reuse the exact
       pattern `health-diagnosis-filer`/`reality-drift-filer` already use
       (VEI + Gitea-style search, adapted to `gh issue list --search`), so a
       persistently-flaky test gets ONE tracked issue that accumulates
       occurrences, never a new issue per red run.
-- [ ] File (or comment on) that issue, plain and factual: which run, which
+      **Implemented:** a hidden `Signature: <hash>` anchor line, searched
+      via `gh issue list --search`, mirroring
+      `module-health-watchdog.py`'s own `Module: <path>` pattern exactly.
+- [x] File (or comment on) that issue, plain and factual: which run, which
       test(s), the log excerpt, a link back to the run. No fix attempt yet.
-- [ ] Rate-limit: never file/comment more than once per N hours for the same
+      **Implemented**, with an explicit "no fix attempted" line in the
+      issue body.
+- [x] Rate-limit: never file/comment more than once per N hours for the same
       signature (open question: N — start conservative, e.g. 6h).
+      **Resolved: N = 6 hours** (`--rate-limit-hours`, default 6), anchored
+      on the latest occurrence comment (or the issue's own filing time if
+      none yet).
 
 ### Phase 2 — Wire the reactive fix attempt (the actual "attempt a fix")
 - [ ] **Gate (blocks the rest of this phase):** resolve the Vision
@@ -434,3 +445,185 @@ _Pending._
   detail, and this repo's Copilot review is explicitly non-blocking —
   merging now; any further hardening surfaces during actual Phase 1/2
   implementation instead.
+
+### 2026-09-26 — Way forward: execute Phase 1, defer the vision question
+- Operator: "let's work the effort and determine a way forward." Decided
+  **not** to force the vision-reconciliation gate now: the original Plan
+  always deferred that decision until *after* Phase 1 proved out (see the
+  Kickoff entry above), and the "gate" language a later review pass added
+  was about blocking Phase 2 specifically, not about blocking all forward
+  motion on this effort. Phase 1 was already explicitly noted as
+  unaffected. Forcing a premature vision decision with zero real operating
+  signal would be guessing; executing Phase 1 for real is what actually
+  generates the signal needed to answer it honestly later.
+- **Implemented and landed Phase 1 in full:** `tools/ci_failure_watchdog.py`
+  (signature extraction, dedup via a hidden `Signature: <hash>` anchor
+  mirroring `module-health-watchdog.py`'s own pattern, rate-limited
+  occurrence comments) plus a new `report-failure` job in
+  `validate-and-promote.yml`, gated on a genuine `dev`-commit failure and
+  carrying `needs.gate.outputs.sha` (never re-derived). 26 new tests (grew
+  from an initial 21 as review passes surfaced more edge cases), all
+  passing. Resolved the effort's own open question: rate-limit window =
+  6 hours.
+- Status moved Draft -> Active. Phase 2 remains explicitly gated on the
+  vision-reconciliation decision; that decision is deferred until Phase 1
+  has run for real against a genuine red build and its behavior (false
+  positives, dedup accuracy, issue quality) can be judged on evidence.
+- **Copilot PR review (#3746) caught four real bugs before this ever ran
+  for real, all fixed:** (1) the new `report-failure` job's `if:` had no
+  status-check function, so GitHub's implicit `success()` requirement
+  would have silently skipped it on the exact red run it exists to
+  report — added the same `always()` this workflow's own `promote` job
+  already needed for the identical reason; (2) `signature_key()` hashed
+  only the test id for a parseable failure, so the identical test node id
+  failing in two different vendored-lib plugin jobs (`full -
+  agent-bridge` vs `full - agent-mcp`, a real shape in this repo) would
+  wrongly collapse into one issue — job name is now always part of the
+  hash basis; (3) `gh issue list --json comments` returns a comment
+  *count*, not comment objects with timestamps (that shape only exists on
+  `gh issue view` for a single issue) — the rate-limit anchor was
+  simplified to just `updatedAt`, which GitHub already bumps on any new
+  comment, rather than adding a second API round-trip to recover what it
+  already tracks; (4) the new test file wasn't wired into `ci.yml`'s
+  per-file test enumeration (no wildcard discovery in this repo) —
+  added alongside `module-health-watchdog.py`'s own entry. Also deleted a
+  flaky smoke test that shelled out to the real `gh` CLI (network/auth-
+  dependent) in favor of the equivalent, already-present monkeypatched
+  coverage, and added an explicit cross-job dedup regression test.
+- **One reviewer finding was checked against live evidence and found
+  incorrect, not applied:** the claim that `gh api .../jobs/{id}/logs`
+  returns a ZIP archive. Fetched a real job's log with that exact command
+  live against this repo — it returns plain text directly (the ZIP format
+  is real, but only for the *run*-level logs endpoint,
+  `.../runs/{run_id}/logs`, which downloads every job's logs bundled
+  together; the *job*-level endpoint this script uses is documented and
+  observed to return plain text on its own). Replied on the review thread
+  with the evidence rather than silently "fixing" correct behavior.
+- **Still deliberately not landed on `main`:** `validate-and-promote.yml`
+  is `workflow_run`-triggered, so per this repo's now-familiar bootstrap
+  gotcha, `report-failure` will not actually execute until this same diff
+  also reaches `main` via a workflows-only companion PR — queued as the
+  next action once this PR merges to `dev`.
+- **Second review pass caught one real parsing bug and one real dedup
+  bug, both fixed:** (1) parametrized node ids can contain spaces (e.g.
+  `test_case[a b]`), which the original `\S+` pattern truncated at the
+  first one; matched the full line and split on the last `` - `` (the
+  real node-id/reason boundary) instead; (2) that same broad match also
+  swallowed `run-plugin-tests.py`'s own non-test `FAILED plugins: <name>`
+  wrapper line, which would have produced a misleading extra
+  signature/issue — now requires a genuine `::` node-id shape before
+  accepting a match, falling through to the whole-job signature
+  otherwise. Regression tests added for both.
+- **Third review pass caught a real dedup-breaking bug:** the whole-job
+  fallback signature hashed the raw log excerpt, which the Actions log
+  timestamps on every line — so the *identical* non-pytest failure
+  (a `guards-full-sweep` script crash) got a different hash, and a
+  different issue, on every single occurrence, silently defeating the
+  entire point of that fallback path. Strip the per-line ISO-8601
+  timestamp prefix before hashing (keeping the real, timestamped excerpt
+  for the human-facing issue/comment body); regression test confirms two
+  identical failures with different timestamps now produce the same key.
+- **Fourth review pass caught the most severe bug yet, now fixed:** a
+  real Actions job log timestamps **every** line, including pytest's own
+  `FAILED <nodeid>` summary line -- so `^FAILED` (anchored at true line
+  start) would **never match a single real log**, making Phase 1's
+  detection a complete no-op in production despite 22/22 tests passing.
+  The tests passed because the hand-written `SAMPLE_PYTEST_LOG` fixture
+  didn't actually include a timestamp prefix on that line -- an
+  unrealistic fixture hid a bug real logs would have hit every time.
+  Fixed by matching against the already-existing `_strip_timestamps()`
+  helper's output (reused, not duplicated) before applying the FAILED-line
+  regex; rewrote the fixture to timestamp every line realistically and
+  added a direct regression test. Worth remembering: a green test suite
+  only proves what the fixtures actually exercise.
+- **Fifth review pass caught three real, smaller issues, all fixed:**
+  (1) `gate`'s `is_dev` output is `true` for every `workflow_dispatch` run
+  regardless of ref (pre-existing `promote` behavior, not something this
+  effort should alter) — a manual dispatch from `main` or any other ref
+  could have filed an issue wrongly claiming a `dev` validation failure;
+  added a `report-failure`-local `github.ref == 'refs/heads/dev'` check
+  (skipped for `workflow_run` events, which `gate` already verifies) that
+  closes this without touching `gate`'s own shared logic; (2) this
+  effort's own status change to Active hadn't propagated to
+  `efforts/README.md`'s canonical Active index (still said Draft) —
+  fixed; (3) the test count cited here (21) was already stale by the time
+  it was written (26 by then) — corrected.
+- **Sixth review pass caught two more real bugs, both fixed:** (1) the
+  node-id/reason split used `rsplit(" - ", 1)`, which cuts at the LAST
+  `` - `` — a failure reason that itself contains `` - `` (e.g.
+  `AssertionError: left - right`) would wrongly swallow part of the
+  reason into the node id; replaced with a single regex that captures the
+  actual node-id shape directly (`path::name` plus an optional
+  `[params]` suffix) instead of capturing the whole line and splitting
+  after the fact — structurally safe against this, not just
+  better-tuned; (2) a job that exceeds its own `timeout-minutes` gets
+  conclusion `timed_out`, not `failure` (the exact class of failure this
+  effort was kicked off by) — the job-filter only checked for `failure`,
+  so a timed-out validation job would make the run red but the watchdog
+  would report "nothing to report." Now checks a `REPORTABLE_CONCLUSIONS`
+  set (`failure`, `timed_out`). 28 tests now, all passing.
+- **Seventh review pass caught the most serious finding of the whole
+  Phase 1 build, plus two smaller real ones, all fixed:** (1) **security:**
+  `report-failure` checked out `needs.gate.outputs.sha` -- the just-failed
+  `dev` commit itself, i.e. the very thing being diagnosed -- and executed
+  `tools/ci_failure_watchdog.py` *from that checkout*, while the job held
+  `issues: write` and a live `GH_TOKEN`. A commit on `dev` could therefore
+  smuggle its own modified copy of this exact script to exfiltrate the
+  token or file arbitrary issues, defeating the entire `workflow_run`
+  trust boundary this pipeline depends on -- the same class of mistake
+  `trusted-ci.yml` was hardened against earlier this session. Fixed by
+  removing the explicit `ref:` override on this job's checkout entirely:
+  with no `ref:`, `actions/checkout` resolves the workflow_run's own
+  natural ref, which -- exactly like the workflow file itself -- is the
+  trusted default branch. The diagnosed SHA still reaches the script, but
+  only ever as a `--sha` **data** argument, never as code that gets
+  checked out and run; (2) the tracking label's description was 123
+  characters against GitHub's 100-character cap, which would have failed
+  the label-creation step outright before the watchdog ever ran -- much
+  shorter description now; (3) both `gh` failure paths (job-list fetch,
+  per-job log fetch) unconditionally returned/continued with exit 0 even
+  in `--file-issue` mode, meaning a completely broken watchdog could
+  report success while detecting and filing nothing — now returns 1 in
+  that mode specifically (dry-run stays 0 regardless, matching the
+  documented contract). 31 tests now, all passing.
+- **Eighth review pass caught the deepest structural gap yet, plus two
+  smaller real ones, all fixed:** (1) **the trusted-checkout fix from the
+  previous round created a genuine bootstrap chicken-and-egg problem**:
+  `tools/ci_failure_watchdog.py` is a brand-new file that only exists on
+  `dev` right now, and — unlike a workflow-file change — it can't ride
+  `main-gate`'s workflow-only bootstrap lane (it isn't a workflow file);
+  it only reaches the default branch the normal way, via the next
+  ordinary green `dev`->`main` promotion. Until that happens, the trusted
+  (main) checkout genuinely won't have the file, and the step would
+  hard-fail on every red run in that window. Fixed by degrading
+  gracefully: the step now checks the file exists before invoking it,
+  logging a notice and exiting 0 instead of failing the job — a
+  permanent safety net against any future main/dev script-presence
+  mismatch, not just this one-time gap, not merely a wait-and-hope; (2)
+  the trusted-checkout fix itself had a trigger-type gap: omitting `ref:`
+  resolves to the default branch for `workflow_run` events, but for
+  `workflow_dispatch` (which this job's own `if:` explicitly permits from
+  `refs/heads/dev`) it resolves to whichever ref was manually dispatched
+  — reopening the exact hole for that one path. Now pins an EXPLICIT
+  `ref: ${{ github.event.repository.default_branch }}`, correct
+  regardless of trigger type; (3) `process_signature`'s own
+  `LookupFailed` handler (a per-signature dedup-lookup failure, distinct
+  from the two `main()`-level `gh` failure paths fixed last round) still
+  returned 0 unconditionally, even though by the time that branch is
+  reached `file_issue` is always `True` (the dry-run case already
+  returned earlier) — fixed to return 1, matching the same "never mask a
+  broken watchdog behind a green step" contract. 31 tests, all passing.
+- **Ninth review pass found the deepest issue in this whole sequence:**
+  the previous round's checkout-ref fix only protected which *script*
+  runs, not the *job definition itself* — `workflow_dispatch` loads the
+  ENTIRE workflow YAML from the dispatched ref (unlike `workflow_run`,
+  which always resolves the workflow file from the default branch), so
+  permitting a manual dispatch against `dev` at all meant the whole job
+  -- steps, permissions, everything -- could be attacker-controlled by a
+  `dev` commit, no matter how carefully the checkout step itself was
+  pinned. There is no way to harden a job against an untrusted copy of
+  its own definition. Fixed the only way that actually closes it: made
+  `report-failure` `workflow_run`-only, full stop -- it never needed
+  manual dispatch (it exists to react automatically to real validation
+  runs), so the fix is removing the path entirely rather than trying to
+  defend it. No Python change this round, workflow-only.

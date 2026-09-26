@@ -26,8 +26,6 @@ from collections.abc import Callable
 
 IS_WINDOWS = sys.platform == "win32"
 
-DEFAULT_PIPE_PATH = r"\\.\pipe\agent-vault"
-
 # Win32 constants
 _GENERIC_READ = 0x80000000
 _GENERIC_WRITE = 0x40000000
