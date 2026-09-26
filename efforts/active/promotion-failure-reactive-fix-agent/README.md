@@ -204,8 +204,8 @@ fixes."
             recurrence inside `#3830`'s 6h window (2026-09-26 12:10–18:10
             UTC) is plausible — continuing to monitor for it rather than
             declaring this closed.
-**Reactivated 2026-09-26 (PR #3850, merged 14:50:43 UTC — 2h deadline
-16:50:43 UTC) — for dedup/rate-limit validation specifically, not
+**Reactivated 2026-09-26 (PR #3850, merged 14:50:26 UTC — 2h deadline
+16:50:26 UTC) — for dedup/rate-limit validation specifically, not
 detection.** The sub-plan below was previously marked
 superseded/archived after run 36240803760 (2026-09-26 12:04 UTC)
 confirmed `report-failure` correctly detects and files a new issue
