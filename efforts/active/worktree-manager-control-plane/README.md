@@ -193,7 +193,7 @@ realized in `main`; unchecked items are the remaining delta.
       §`explicit-launch-target`, §`render-derive-not-own`, and
       §`programmatic-parity`.
 
-### Phase 3b — Relocate Mux + AHP execution mechanics out of agent-worktrees (Planned — #2062)
+### Phase 3b — Relocate Mux + AHP execution mechanics out of agent-worktrees (In progress — #2062)
 - [x] **Slice 1 (AHP):** move the AHP session backend
       (`agent_worktrees/ahp_backend.py`, the `session_backend`/`is_ahp` config
       schema, and the branches it threads through `__main__.py`,
@@ -265,8 +265,8 @@ realized in `main`; unchecked items are the remaining delta.
             wired, and bumped `__version__` (`0.1.0-dev36` →
             `0.1.0-dev37`) so already-installed machines actually redeploy
             the corrected payload.
-      - [ ] **Sub-slice 3 (direction set 2026-09-14; planned 2026-09-17; Steps
-            1-5 landed 2026-09-25/26; Step 6 not yet implemented):**
+      - [x] **Sub-slice 3 (direction set 2026-09-14; planned 2026-09-17; Done
+            2026-09-26 — #3865):**
             split the resident status-monitor's push/observe legs into
             Worktree Manager — agent-worktrees keeps sole ownership of
             accumulating/tracking session status; Worktree Manager takes a
@@ -275,10 +275,12 @@ realized in `main`; unchecked items are the remaining delta.
             panes, and applies the resident monitor's rendered status back
             into mux status bars. Reviewed, ordered plan:
             [`phase-3b-substatus-monitor-relocation.md`](phase-3b-substatus-monitor-relocation.md).
-            **Step 1 landed:** `mux_link.py`'s additive daemon-link contract
-            + resident `ManagedMuxCache` seam, wired into `cmd_status_monitor`
-            and merged (observation-only) into `_monitor_sweep`'s existing
-            `catalog_observer` call — see the phase doc's own Step 1 entry.
+            Final state: Manager-owned sessions never repopulate
+            `status-monitor.d`, never fall back to resident direct
+            `_monitor_mux_set()` writes, and recover monitor/daemon restarts via
+            Worktree Manager live-mapping republication instead. Unmanaged /
+            zero-provider sessions keep the existing direct/status-updater
+            fallback lane unchanged.
       - [x] **Sub-slice 4 (landed 2026-09-14): same-config marketplace-cell
             resolution + generic installed-binstub invocation.** Cross-cuts
             the `marketplace-scoped-installations` effort's installation-mode
@@ -688,6 +690,31 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-09-26** — Merged Phase 3b Slice 2 Sub-slice 3 Step 6, PR
+  [#3865](https://github.com/ThomasMichon/copilot-extensions/pull/3865).
+  Completed the final cleanup/deletion pass for the resident Mux
+  status-monitor split: manager-owned sessions no longer repopulate
+  `status-monitor.d`, the resident monitor no longer falls back to direct
+  `_monitor_mux_set()` writes for that lane, and Worktree Manager now
+  republishes live mux mappings when either daemon restarts so the cleanup
+  preserves restart recovery without reviving the legacy writer path.
+  Review-round fixes were small but real: rebasing onto newer `dev` forced a
+  second standalone version bump (`worktree-manager` `0.1.0-dev82` →
+  `0.1.0-dev83`), and the new registry-pruning helpers had to be extracted
+  out of `__main__.py` just enough to satisfy this repo's shrink-only
+  module-size ceiling. Validation: new end-to-end scenario tests now cover
+  the full Step 6 gate explicitly (`worktree-manager`: manager-owned
+  launch/teardown wire round-trip, daemon-restart republish, and
+  resident-monitor-restart republish; `agent-worktrees`: manager-owned
+  registry-prune/no-direct-write plus the existing zero-provider fallback
+  lane). Full `worktree-manager` suite: 1443 passed, 7 skipped, same 3
+  pre-existing unrelated failures in
+  `tests/production_picker/test_data_ssh_sources.py`; full
+  `agent-worktrees` suite: 5604 passed, 50 skipped, 1 warning. This closes
+  all 6 ordered steps of Sub-slice 3; Phase 3b itself remains **In
+  progress** because the broader optional same-machine AHP backend and the
+  remaining Phase 3b Mux follow-on items are still open in the Plan above.
 
 - **2026-09-26** — Merged Phase 3b Slice 2 Sub-slice 3 Step 5, PR
   [#3859](https://github.com/ThomasMichon/copilot-extensions/pull/3859).

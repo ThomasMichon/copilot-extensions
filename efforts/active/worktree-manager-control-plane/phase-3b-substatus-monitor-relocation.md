@@ -10,22 +10,24 @@
   Behaviors/*presentation-is-process-boundary-only* and
   Non-Goals/*Not a terminal or multiplexer owner*,
   *Not a home for a provider-specific config union*.
-- **Scope of this doc:** the **resident** Mux status-bar path only: moving
-  (a) Mux-liveness observation for Worktree-Manager-managed sessions and
-  (b) Mux `set-option` status-bar writes out of `agent-worktrees` and into a
-  new Worktree Manager companion daemon, while keeping `agent-worktrees`
-  as the sole owner/accumulator of worktree status data.
-- **Status:** In progress — Step 1 (of 6) landed 2026-09-25, merged as
+- **Scope of this doc:** the **resident** Mux status-bar path only: the now-
+  completed move of (a) Mux-liveness observation for Worktree-Manager-managed
+  sessions and (b) Mux `set-option` status-bar writes out of
+  `agent-worktrees` and into the Worktree Manager companion daemon, while
+  keeping `agent-worktrees` as the sole owner/accumulator of worktree status
+  data.
+- **Status:** Done — all 6 ordered steps landed; Step 1 merged 2026-09-25 as
   [#3650](https://github.com/ThomasMichon/copilot-extensions/pull/3650);
-  Step 2 landed 2026-09-26, merged as
+  Step 2 merged 2026-09-26 as
   [#3724](https://github.com/ThomasMichon/copilot-extensions/pull/3724);
-  Step 3 landed 2026-09-26, merged as
+  Step 3 merged 2026-09-26 as
   [#3825](https://github.com/ThomasMichon/copilot-extensions/pull/3825);
-  Step 4 landed 2026-09-26, merged as
+  Step 4 merged 2026-09-26 as
   [#3849](https://github.com/ThomasMichon/copilot-extensions/pull/3849);
-  Step 5 landed 2026-09-26, merged as
+  Step 5 merged 2026-09-26 as
   [#3859](https://github.com/ThomasMichon/copilot-extensions/pull/3859);
-  Step 6 not yet implemented.
+  Step 6 merged 2026-09-26 as
+  [#3865](https://github.com/ThomasMichon/copilot-extensions/pull/3865).
 
 ## Why this needs its own ordered plan
 
@@ -449,15 +451,20 @@ state where two long-lived writers are both intended to own it.
      when the session is not Manager-owned.
    - This is the step that removes the last accidental "third path."
 
-6. [ ] **Delete redundant manager-owned direct mux writes/assumptions from
-       `agent-worktrees`, then clean up docs/tests.**
-   - Remove any remaining `status-monitor` branch that still calls
-     `_monitor_mux_set()` for Manager-owned sessions.
-   - Restrict `status-monitor.d/<sess>` and direct monitor-side session pruning
-     to unmanaged sessions.
-   - Update the Phase 3b docs to state plainly that Manager-owned mux mapping
-     and status-bar writes are now fully outside `agent-worktrees`, while its
-     data authority remains unchanged.
+6. [x] **Delete redundant manager-owned direct mux writes/assumptions from
+       `agent-worktrees`, then clean up docs/tests.** Landed in
+       [#3865](https://github.com/ThomasMichon/copilot-extensions/pull/3865):
+       manager-owned sessions no longer repopulate `status-monitor.d` or fall
+       back to resident `_monitor_mux_set()` writes; the unmanaged
+       registry/pruning lane now explicitly strips any lingering
+       Worktree-Manager-owned session name before serving; and the Worktree
+       Manager daemon now republishes its live mux mappings when either it or
+       the resident monitor restarts, so the final cleanup does not regress the
+       restart-recovery scenarios this sub-slice gates. The docs now state the
+       final boundary plainly: Manager-owned mux mapping and mux status-bar
+       writes are fully outside `agent-worktrees`, while `agent-worktrees`
+       remains the sole status-data authority and the only unmanaged /
+       zero-provider fallback writer.
 
 This follows the same discipline as the AHP relocation plan: additive seam
 first, one crisp ownership cutover, then cleanup/deletion — never an indefinite
