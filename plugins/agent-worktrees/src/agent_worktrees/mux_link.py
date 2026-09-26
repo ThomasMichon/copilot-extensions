@@ -659,6 +659,13 @@ def endpoint_from_rendezvous(data: dict | None) -> tuple[str, int, str] | None:
         port = int(port_s)
     except ValueError:
         return None
+    if not 0 < port < 65536:
+        # A stale or malformed lock file could carry an out-of-range port
+        # (e.g. "127.0.0.1:99999"). Reject it here rather than returning an
+        # endpoint that later fails with a raw socket ValueError the caller
+        # doesn't convert to DaemonUnavailable, which would skip the
+        # documented fallback path (Copilot review finding).
+        return None
     return host, port, token
 
 

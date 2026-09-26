@@ -235,6 +235,37 @@ def test_close_after_a_failed_serve_thread_launch_never_blocks():
     assert not close_thread.is_alive(), "close() hung waiting on a never-started server"
 
 
+def test_close_after_serve_thread_dies_before_confirming_running_never_blocks():
+    """Copilot review finding: the sibling test above only exercises
+    ``Thread.start()`` itself raising, which leaves ``_serve_started``
+    ``False`` -- ``close()`` then short-circuits the ``_serve_started and
+    ...`` check and never even reaches ``_serve_running.wait()``. That
+    does not cover the actual partial-start failure this class's own
+    comments describe: ``Thread.start()`` succeeds (the OS thread object
+    is created and ``_serve_started`` is set ``True``), but the thread's
+    target callable (``serve_forever``) raises before ever calling
+    ``service_actions()`` -- so ``_serve_running`` is never set. ``close()``
+    must still return within its bounded wait (``_CLOSE_SERVE_WAIT_S``),
+    never hang waiting on a loop that will never confirm running."""
+    server = _make_server()
+
+    def _dies_immediately(poll_interval):
+        raise RuntimeError("simulated early serve_forever failure")
+
+    server._server.serve_forever = _dies_immediately
+    server.start()
+    assert server._serve_started is True
+    assert server._reap_started is True
+
+    start_time = time.time()
+    close_thread = threading.Thread(target=server.close)
+    close_thread.start()
+    close_thread.join(timeout=_CLOSE_SERVE_WAIT_S + 3)
+    elapsed = time.time() - start_time
+    assert not close_thread.is_alive(), "close() hung waiting on a serve loop that never confirmed running"
+    assert elapsed < _CLOSE_SERVE_WAIT_S + 2, "close() should not wait meaningfully longer than its own bound"
+
+
 def test_close_after_a_failed_reap_thread_launch_still_stops_the_serve_loop():
     """The other half of the same finding: if the serve thread starts fine
     but the *reap* thread's own launch fails, close() must still properly
