@@ -3523,53 +3523,56 @@ def _cmd_status_write(
             # preserve, but a plain traceback is still a defect).
             output.err(str(e))
             return 1
-    # Foreground verb (#4547): the whole load -> set_disposition -> save is a
-    # critical RMW held under the blocking record lock, so a concurrent Picker
-    # best-effort sweep skips rather than clobbering the disposition overlay.
-    with tracking._RecordLock(yaml_path):
-        record = tracking.load_record(yaml_path)
-        if record.kind in tracking.MANAGED_KINDS and record.status in {
-            "complete", "completed", "finalized",
-        }:
-            output.err(
-                f"Worktree {worktree_id} is terminal and managed; refusing disposition changes."
-            )
-            return 1
-        if follow_up is False and record.active_effort is not None:
-            output.err(
-                "Cannot resolve this worktree while an effort remains bound. "
-                "Complete, transfer, or replace it with 'effort-focus'."
-            )
-            return 1
-        if follow_up is True and record.status == "finalized":
-            tracking.update_status(record, "active", save=False)
-        session_id = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
-        tracking.set_disposition(
-            record,
-            summary=summary,
-            title=title,
-            follow_up=follow_up,
-            session_id=session_id,
-            save=False,
+    # agent-worktrees-authoritative-daemon Phase 3: the whole load ->
+    # set_disposition -> save transaction (formerly a foreground
+    # `tracking._RecordLock` block here, #4547) now runs as the registered
+    # `status_disposition_write` verb (see `tracking_disposition_write.py`),
+    # funneled through the resident daemon when reachable, or the identical
+    # code in-process (logged) when it is not -- see `tracking_write.dispatch`.
+    session_id = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
+    from . import locks as _locks
+    from . import status_monitor_runtime as _smr
+    from . import tracking_write
+
+    _monitor_lock_path = _self_override("_monitor_lock_path", _smr._monitor_lock_path)
+    _ensure_status_monitor = _self_override("_ensure_status_monitor", _smr._ensure_status_monitor)
+    _status_monitor_enabled = _self_override(
+        "_status_monitor_enabled", _smr._status_monitor_enabled
+    )
+    try:
+        result = tracking_write.dispatch(
+            "status_disposition_write",
+            {
+                "worktree_id": worktree_id,
+                "yaml_path": str(yaml_path),
+                "summary": summary,
+                "title": title,
+                "follow_up": follow_up,
+                "session_id": session_id,
+            },
+            read_lock_data=lambda: _locks.read_lock(_monitor_lock_path()),
+            ensure_monitor=_ensure_status_monitor if _status_monitor_enabled() else None,
         )
-        tracking.save_record(record)
-        # Stage 5 (status_reported): once per session_id (held under the
-        # same RecordLock as the write above so two concurrent writers can't
-        # both observe "no prior event" and double-emit). No `limit` here --
-        # the log is already retention-pruned, and a `limit` would silently
-        # drop an older matching event once a worktree accumulates enough
-        # newer ones, defeating the once-per-session guarantee.
-        if session_id and not any(
-            e.get("session_id") == session_id
-            for e in activity.read_events(worktree_id=worktree_id, event="status_reported")
-        ):
-            activity.log_event("status_reported", worktree_id=worktree_id, session_id=session_id)
-    flag = "follow-ups pending" if record.follow_up else "resolved"
+    except tracking_write.AmbiguousWriteOutcome as e:
+        output.err(f"Disposition write to worktree {worktree_id} is in an unknown state: {e}")
+        return 1
+    if result.get("error") == "terminal_managed":
+        output.err(
+            f"Worktree {worktree_id} is terminal and managed; refusing disposition changes."
+        )
+        return 1
+    if result.get("error") == "effort_bound":
+        output.err(
+            "Cannot resolve this worktree while an effort remains bound. "
+            "Complete, transfer, or replace it with 'effort-focus'."
+        )
+        return 1
+    flag = "follow-ups pending" if result["follow_up"] else "resolved"
     msg = f"[OK] Worktree {worktree_id[-4:]} disposition: {flag}"
-    if title is not None and record.title:
-        msg += f" -- title: {record.title}"
-    if record.summary:
-        msg += f" -- {record.summary}"
+    if title is not None and result["title"]:
+        msg += f" -- title: {result['title']}"
+    if result["summary"]:
+        msg += f" -- {result['summary']}"
     print(msg)
     return 0
 
