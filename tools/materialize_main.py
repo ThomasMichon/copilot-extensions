@@ -133,6 +133,13 @@ def materialize(dest: Path, *, canonical_root: Path) -> list[str]:
                 "(a canonical lib source must contain only real files)"
             )
             continue
+        if dst_sub.is_symlink():
+            log.append(
+                f"SKIP {lib_copy_dir}: {source_rel}/src (destination) is a "
+                "symlink -- refusing to replace it blindly (a vendored "
+                "copy must contain only real files)"
+            )
+            continue
 
         # A DRY-pointer copy MAY vendor tests/ from canonical the same way
         # (--pointerize) -- refresh it here too if the copy already carries
@@ -145,9 +152,22 @@ def materialize(dest: Path, *, canonical_root: Path) -> list[str]:
         # introducing one a copy never had. Only ever done for a pointer
         # copy (this whole branch is the pointer-expansion path) -- a real
         # copy's own tests/ is never touched by this function at all.
+        # Checks is_symlink() too, not just is_dir() -- a dangling or
+        # non-directory symlink there is_dir()==False (it follows the link
+        # to a target that isn't there), so an is_dir()-only check would
+        # silently ignore it and let it survive untouched into a
+        # materialized release.
         dst_tests_sub = lib_copy_dir / "tests"
         tests_sub = canonical / "tests"
-        if dst_tests_sub.is_dir():
+        refresh_tests = dst_tests_sub.is_dir() or dst_tests_sub.is_symlink()
+        if refresh_tests:
+            if dst_tests_sub.is_symlink():
+                log.append(
+                    f"SKIP {lib_copy_dir}: {source_rel}/tests (destination) "
+                    "is a symlink -- refusing to replace it blindly (a "
+                    "vendored copy must contain only real files)"
+                )
+                continue
             tests_symlink_found = _find_symlink(tests_sub)
             if tests_symlink_found is not None:
                 where = (
@@ -160,13 +180,12 @@ def materialize(dest: Path, *, canonical_root: Path) -> list[str]:
                 )
                 continue
 
-        if dst_sub.exists():
-            shutil.rmtree(dst_sub)
+        _remove_path(dst_sub)
         if src_sub.is_dir():
             shutil.copytree(src_sub, dst_sub)
 
-        if dst_tests_sub.is_dir():
-            shutil.rmtree(dst_tests_sub)
+        if refresh_tests:
+            _remove_path(dst_tests_sub)
             if tests_sub.is_dir():
                 shutil.copytree(tests_sub, dst_tests_sub)
 
@@ -226,6 +245,22 @@ def _find_symlink(tree: Path) -> str | None:
         if entry.is_symlink():
             return str(entry.relative_to(tree))
     return None
+
+
+def _remove_path(p: Path) -> None:
+    """Remove ``p`` whatever it is -- a real directory, a real file, or a
+    symlink (including a dangling one, where ``exists()``/``is_dir()`` are
+    both ``False`` since they follow the link to a target that isn't
+    there). A plain ``if p.exists(): shutil.rmtree(p)`` would silently
+    leave a dangling symlink at ``p`` untouched (and then
+    ``shutil.copytree`` would fail trying to create a directory where
+    that symlink already sits)."""
+    if p.is_symlink():
+        p.unlink()
+    elif p.is_dir():
+        shutil.rmtree(p)
+    elif p.exists():
+        p.unlink()
 
 
 def materialize_file_pointers(dest: Path, *, canonical_root: Path) -> list[str]:

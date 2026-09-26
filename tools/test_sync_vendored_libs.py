@@ -291,6 +291,46 @@ def test_materialize_refuses_a_symlink_in_canonical_tests(repo: Path):
     assert not (repo / "plugins/alpha/libs/shared-lib/tests/evil-link").exists()
 
 
+def test_materialize_rejection_never_destroys_the_previous_tests_content(repo: Path):
+    # _copy_tests() must validate canonical BEFORE deleting the copy's own
+    # existing tests/ -- a rejected refresh (canonical has a symlink) must
+    # leave the copy's previous, safe tests/ content intact, not destroy it
+    # and leave nothing behind.
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "shared = 1\n")
+    _lib_pyproject(repo, "libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+    (repo / "libs/shared-lib/tests").mkdir(parents=True)
+    secret = repo.parent / "outside-repo-secret2"
+    secret.mkdir()
+    (repo / "libs/shared-lib/tests/evil-link").symlink_to(secret, target_is_directory=True)
+    _pointer(repo, "alpha", "shared-lib")
+    original = repo / "plugins/alpha/libs/shared-lib/tests"
+    original.mkdir(parents=True)
+    (original / "test_thing.py").write_text("def test_it():\n    pass\n", encoding="utf-8")
+
+    _run(repo, "--materialize")
+
+    assert (original / "test_thing.py").read_text() == "def test_it():\n    pass\n"
+
+
+def test_materialize_catches_a_dangling_tests_symlink_at_the_destination(repo: Path):
+    # A dangling (or non-directory-target) symlink at copy/tests has
+    # is_dir()==False, since is_dir() follows the link to a target that
+    # isn't there -- an is_dir()-only "does this copy have tests/" gate
+    # would silently ignore it, leaving it untouched in a materialized
+    # release.
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "shared = 1\n")
+    _write(repo, "libs/shared-lib/tests/test_thing.py", "def test_it():\n    pass\n")
+    _lib_pyproject(repo, "libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+    _pointer(repo, "alpha", "shared-lib")
+    copy_tests = repo / "plugins/alpha/libs/shared-lib/tests"
+    copy_tests.symlink_to(repo.parent / "does-not-exist", target_is_directory=True)
+
+    result = _run(repo, "--materialize")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "Refused to materialize" in result.stderr
+    assert "destination" in result.stderr and "is a symlink" in result.stderr
+
+
 # --- src-passthrough vendor pointers (working real-Python forwarding) ---
 
 def _seed_canonical_lib(repo: Path, lib: str, *, version: str, content: str) -> Path:

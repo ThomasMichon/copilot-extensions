@@ -318,6 +318,45 @@ def test_materialize_refuses_a_symlinked_tests_root(tmp_path: Path):
     assert not (pointer_dir / "src").exists()
 
 
+def test_materialize_rejection_never_destroys_previous_tests_content(tmp_path: Path):
+    # The symlink check for tests/ must run BEFORE anything is deleted --
+    # a rejected refresh must leave the copy's previous, safe tests/
+    # content intact, not destroy it and leave nothing behind.
+    root = tmp_path / "repo"
+    secret = tmp_path / "outside-repo-secret-tests2"
+    secret.mkdir()
+    canonical = _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
+    (canonical / "tests").symlink_to(secret, target_is_directory=True)
+    pointer_dir = _pointer(root, "agent-bridge", "zdd")
+    original_tests = pointer_dir / "tests"
+    original_tests.mkdir(parents=True)
+    (original_tests / "test_zdd.py").write_text("def test_it():\n    pass\n", encoding="utf-8")
+
+    mm.materialize(root, canonical_root=root)
+
+    assert (original_tests / "test_zdd.py").read_text() == "def test_it():\n    pass\n"
+
+
+def test_materialize_catches_a_dangling_tests_symlink_at_the_destination(tmp_path: Path):
+    # A dangling (or non-directory-target) symlink at the copy's own
+    # tests/ has is_dir()==False, since is_dir() follows the link to a
+    # target that isn't there -- an is_dir()-only "does this copy have
+    # tests/" gate would silently ignore it, leaving it untouched in a
+    # materialized release.
+    root = tmp_path / "repo"
+    _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
+    (root / "libs/zdd/tests").mkdir(parents=True)
+    (root / "libs/zdd/tests/test_zdd.py").write_text("def test_it():\n    pass\n",
+                                                       encoding="utf-8")
+    pointer_dir = _pointer(root, "agent-bridge", "zdd")
+    (pointer_dir / "tests").symlink_to(tmp_path / "does-not-exist", target_is_directory=True)
+
+    log = mm.materialize(root, canonical_root=root)
+
+    assert any("SKIP" in line and "destination" in line and "is a symlink" in line
+               for line in log)
+
+
 def test_materialize_refuses_a_pointer_dir_that_escapes_dest(tmp_path: Path):
     # find_pointers() globs under dest, but a symlinked plugin (or libs)
     # directory could still resolve outside dest -- rmtree()/copytree()

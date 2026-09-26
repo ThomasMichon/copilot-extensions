@@ -343,14 +343,34 @@ def _find_symlink(tree: Path) -> str | None:
     return None
 
 
-def _safe_copytree(src: Path, dst: Path, *, label: str) -> None:
-    """``shutil.copytree(src, dst)`` after refusing any symlink under
-    ``src`` -- ``shutil.copytree``'s default ``symlinks=False`` follows and
+def _remove_path(p: Path) -> None:
+    """Remove ``p`` whatever it is -- a real directory, a real file, or a
+    symlink (including a dangling one, where ``exists()``/``is_dir()`` are
+    both ``False`` since they follow the link to a target that isn't
+    there). ``shutil.rmtree`` alone cannot remove a symlink (even one that
+    resolves to a directory), and a plain existence check would silently
+    leave a dangling symlink behind."""
+    if p.is_symlink():
+        p.unlink()
+    elif p.is_dir():
+        shutil.rmtree(p)
+    elif p.exists():
+        p.unlink()
+
+
+def _safe_replace_tree(src: Path, dst: Path, *, label: str) -> None:
+    """Replace ``dst`` with a copy of ``src``, refusing any symlink under
+    ``src`` (``shutil.copytree``'s default ``symlinks=False`` follows and
     dereferences a symlink, which would otherwise let a malicious or
     accidental symlink under a canonical lib's ``src/``/``tests/`` leak
     arbitrary filesystem content into a vendored copy or a shipped
-    release. A legitimate canonical lib has no reason to contain a
-    symlink at all, so any symlink found is refused outright."""
+    release -- a legitimate canonical lib has no reason to contain one at
+    all) and any symlink AT ``dst`` itself (a dangling/non-directory
+    symlink there would otherwise survive untouched, since ``is_dir()``
+    is ``False`` for it and no branch below would ever remove or replace
+    it). Validates ``src`` (and detects a symlinked ``dst``) BEFORE
+    removing anything, so a rejected copy leaves the previous ``dst``
+    content intact rather than destroying it and leaving nothing behind."""
     found = _find_symlink(src)
     if found is not None:
         where = label if found == "." else f"{label}/{found}"
@@ -358,15 +378,18 @@ def _safe_copytree(src: Path, dst: Path, *, label: str) -> None:
             f"{where} is a symlink -- refusing (a canonical lib source "
             "must contain only real files)"
         )
-    shutil.copytree(src, dst)
+    if dst.is_symlink():
+        raise SystemExit(
+            f"{label} (destination) is a symlink -- refusing to replace it "
+            "blindly (a vendored copy must contain only real files)"
+        )
+    _remove_path(dst)
+    if src.is_dir():
+        shutil.copytree(src, dst)
 
 
 def _copy_src(src_lib: Path, dst_lib: Path) -> None:
-    src, dst = src_lib / "src", dst_lib / "src"
-    if dst.exists():
-        shutil.rmtree(dst)
-    if src.is_dir():
-        _safe_copytree(src, dst, label=f"{src_lib.name}/src")
+    _safe_replace_tree(src_lib / "src", dst_lib / "src", label=f"{src_lib.name}/src")
 
 
 def _copy_tests(src_lib: Path, dst_lib: Path) -> None:
@@ -380,11 +403,7 @@ def _copy_tests(src_lib: Path, dst_lib: Path) -> None:
     ``tests/`` at all, and refreshing must never unilaterally introduce
     one a copy never had). Never used for a real (non-pointer) copy's own,
     possibly independently authored ``tests/``."""
-    src, dst = src_lib / "tests", dst_lib / "tests"
-    if dst.exists():
-        shutil.rmtree(dst)
-    if src.is_dir():
-        _safe_copytree(src, dst, label=f"{src_lib.name}/tests")
+    _safe_replace_tree(src_lib / "tests", dst_lib / "tests", label=f"{src_lib.name}/tests")
 
 
 def _sync_version(src_lib: Path, dst_lib: Path) -> None:
@@ -524,8 +543,14 @@ def cmd_materialize(*, force: bool) -> int:
                     # only consumer never discovers libs/*/tests/) must not
                     # gain one unilaterally just because canonical has one. A
                     # real copy's own tests/ may be independently authored and
-                    # is left untouched regardless.
-                    if (copy / "tests").is_dir():
+                    # is left untouched regardless. Checks is_symlink() too,
+                    # not just is_dir() -- a dangling or non-directory
+                    # symlink at copy/tests is_dir()==False (it follows the
+                    # link to a target that isn't there), so an is_dir()-only
+                    # check would silently ignore it, leaving that symlink
+                    # to survive untouched into a materialized release.
+                    copy_tests = copy / "tests"
+                    if copy_tests.is_dir() or copy_tests.is_symlink():
                         _copy_tests(canonical, copy)
                     pointer.unlink()
             except SystemExit as exc:

@@ -118,7 +118,8 @@ def _materialize_into_preview(dest: Path) -> list[str]:
         is_pointer = svl._is_pointer_copy(lib_copy)
         svl._copy_src(canonical, lib_copy)
         svl._sync_version(canonical, lib_copy)
-        if is_pointer and (lib_copy / "tests").is_dir():
+        pointer_tests = lib_copy / "tests"
+        if is_pointer and (pointer_tests.is_dir() or pointer_tests.is_symlink()):
             # A pointer copy MAY vendor tests/ from canonical too
             # (--pointerize); refresh it here as well if it already
             # carries one, otherwise a preview built after a canonical
@@ -127,7 +128,9 @@ def _materialize_into_preview(dest: Path) -> list[str]:
             # expansion. Gated on the copy already having tests/ so a
             # pointer copy that deliberately never vendored it doesn't
             # gain one unilaterally. Never done for a real copy's own
-            # (possibly independently authored) tests/.
+            # (possibly independently authored) tests/. Checks
+            # is_symlink() too, not just is_dir(), so a dangling/
+            # non-directory tests symlink isn't silently ignored.
             svl._copy_tests(canonical, lib_copy)
         pointer = lib_copy / svl.POINTER_NAME
         if pointer.exists():
