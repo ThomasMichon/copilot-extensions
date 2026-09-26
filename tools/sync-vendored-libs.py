@@ -96,6 +96,12 @@ PLUGINS_DIR = REPO / "plugins"
 LIBS_DIR = REPO / "libs"
 POINTER_NAME = "VENDOR_POINTER.json"
 
+# Consumer trees that sit outside plugins/ but still vendor shared libs the
+# same way -- kept in one place so every lib-copy-locating path (agreement
+# checks, --materialize, --pointerize) resolves a consumer consistently
+# instead of each hardcoding "plugins/<x>" and silently missing these.
+_EXTRA_CONSUMER_DIRS = ("worktree-manager",)
+
 _IGNORE_PARTS = {"build", ".venv", "__pycache__", "dist"}
 _VERSION_RE = re.compile(r'^(\s*version\s*=\s*")([^"]+)(")', re.MULTILINE)
 
@@ -194,6 +200,23 @@ def _real_copies(paths: list[Path]) -> list[Path]:
     return [p for p in paths if not _is_pointer_copy(p)]
 
 
+def _consumer_dir(consumer: str) -> Path:
+    """Resolve ``consumer``'s own root directory: a normal
+    ``plugins/<consumer>`` plugin, or one of the extra top-level trees
+    (``_EXTRA_CONSUMER_DIRS``) that vendor shared libs the same way without
+    living under ``plugins/``. Raises ``SystemExit`` for an unknown
+    consumer rather than silently resolving a nonexistent path."""
+    if consumer in _EXTRA_CONSUMER_DIRS:
+        return REPO / consumer
+    plugin_dir = PLUGINS_DIR / consumer
+    if plugin_dir.is_dir():
+        return plugin_dir
+    raise SystemExit(
+        f"{consumer}: not a known consumer (neither plugins/{consumer} nor "
+        f"one of the extra top-level trees {_EXTRA_CONSUMER_DIRS})"
+    )
+
+
 def _lib_copies() -> dict[str, list[Path]]:
     """Map ``lib name -> [copy paths]``, mirroring check-vendored-libs-sync.py."""
     copies: dict[str, list[Path]] = {}
@@ -205,7 +228,7 @@ def _lib_copies() -> dict[str, list[Path]]:
             for lib in sorted(libs.iterdir()):
                 if lib.is_dir():
                     copies.setdefault(lib.name, []).append(lib)
-    for extra in ("worktree-manager",):
+    for extra in _EXTRA_CONSUMER_DIRS:
         libs = REPO / extra / "libs"
         if not libs.is_dir():
             continue
@@ -424,10 +447,13 @@ def cmd_materialize(*, force: bool) -> int:
     return 0
 
 
-def _write_passthrough_pointer(plugin: str, lib: str) -> Path:
-    """Convert ``plugins/<plugin>/libs/<lib>`` into a **src-passthrough**
+def _write_passthrough_pointer(consumer: str, lib: str) -> Path:
+    """Convert ``<consumer's own dir>/libs/<lib>`` into a **src-passthrough**
     vendor pointer forwarding to canonical ``libs/<lib>`` (see this module's
-    own docstring for the full design).
+    own docstring for the full design). ``consumer`` is a normal
+    ``plugins/<name>`` plugin, or one of the extra top-level trees in
+    ``_EXTRA_CONSUMER_DIRS`` (e.g. ``worktree-manager``) -- resolved via
+    ``_consumer_dir()``.
 
     Requires ``libs/<lib>`` (canonical) to already exist with a real
     ``src/`` and a ``pyproject.toml``. Writes a REAL, installable
@@ -454,7 +480,7 @@ def _write_passthrough_pointer(plugin: str, lib: str) -> Path:
         )
 
     pkg = lib.replace("-", "_")
-    copy_dir = PLUGINS_DIR / plugin / "libs" / lib
+    copy_dir = _consumer_dir(consumer) / "libs" / lib
     if copy_dir.exists():
         shutil.rmtree(copy_dir)
     copy_dir.mkdir(parents=True)
@@ -463,6 +489,19 @@ def _write_passthrough_pointer(plugin: str, lib: str) -> Path:
     readme = canonical / "README.md"
     if readme.is_file():
         shutil.copy2(readme, copy_dir / "README.md")
+
+    # A copy's own tests/ is real content a consumer's default pytest
+    # auto-discovery may run directly (some consumers, e.g. worktree-manager,
+    # set no `testpaths` override and so recursively discover every
+    # test_*.py under their own tree, including a nested libs/<lib>/tests/ --
+    # unlike check-vendored-libs-sync.py's own src/-only invariant, silently
+    # dropping this directory would silently drop real test coverage for
+    # such a consumer, not just leave a comparison out of scope). Vendor it
+    # from canonical the same DRY way src/ already is, rather than deleting
+    # it or leaving whatever the pre-conversion copy happened to have.
+    canon_tests = canonical / "tests"
+    if canon_tests.is_dir():
+        shutil.copytree(canon_tests, copy_dir / "tests")
 
     pkg_dir = copy_dir / "src" / pkg
     pkg_dir.mkdir(parents=True)
@@ -486,8 +525,8 @@ def _write_passthrough_pointer(plugin: str, lib: str) -> Path:
     return copy_dir
 
 
-def cmd_pointerize(plugin: str, lib: str) -> int:
-    dest = _write_passthrough_pointer(plugin, lib)
+def cmd_pointerize(consumer: str, lib: str) -> int:
+    dest = _write_passthrough_pointer(consumer, lib)
     print(f"{lib}: pointerized {dest.relative_to(REPO)} (src-passthrough) -> libs/{lib}")
     return 0
 
@@ -501,16 +540,17 @@ def main(argv: list[str] | None = None) -> int:
                        help="copy the (verified-agreeing) vendored copies up into canonical")
     mode.add_argument("--materialize", action="store_true",
                        help="copy canonical down into every vendored copy (refuses drifted libs)")
-    mode.add_argument("--pointerize", nargs=2, metavar=("PLUGIN", "LIB"),
-                       help="convert plugins/<PLUGIN>/libs/<LIB> into a src-passthrough "
-                            "vendor pointer forwarding to libs/<LIB>")
+    mode.add_argument("--pointerize", nargs=2, metavar=("CONSUMER", "LIB"),
+                       help="convert <CONSUMER>/libs/<LIB> into a src-passthrough vendor "
+                            "pointer forwarding to libs/<LIB> -- CONSUMER is a plugins/ "
+                            "name or one of the extra top-level trees (worktree-manager)")
     ap.add_argument("--force", action="store_true",
                      help="with --materialize, proceed even if canonical looks drifted")
     args = ap.parse_args(argv)
 
     if args.pointerize:
-        plugin, lib = args.pointerize
-        return cmd_pointerize(plugin, lib)
+        consumer, lib = args.pointerize
+        return cmd_pointerize(consumer, lib)
     if args.restore_canonical:
         return cmd_restore_canonical()
     if args.materialize:

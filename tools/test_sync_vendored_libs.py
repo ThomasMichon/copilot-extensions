@@ -269,6 +269,28 @@ def test_pointerize_refuses_when_canonical_lib_missing(repo: Path):
     assert "no canonical libs/ghost-lib" in (result.stdout + result.stderr)
 
 
+def test_pointerize_supports_the_worktree_manager_extra_consumer_tree(repo: Path):
+    # worktree-manager sits at the repo root, not under plugins/ -- confirm
+    # --pointerize resolves it via _consumer_dir() the same way _lib_copies()
+    # already does for --check/--materialize.
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
+    (repo / "worktree-manager").mkdir(parents=True)
+
+    result = _run(repo, "--pointerize", "worktree-manager", "shared-lib")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    copy_dir = repo / "worktree-manager/libs/shared-lib"
+    assert (copy_dir / "VENDOR_POINTER.json").exists()
+    assert not (repo / "plugins/worktree-manager").exists()
+
+
+def test_pointerize_refuses_an_unknown_consumer(repo: Path):
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
+    result = _run(repo, "--pointerize", "not-a-real-consumer", "shared-lib")
+    assert result.returncode != 0
+    assert "not a known consumer" in (result.stdout + result.stderr)
+
+
 def test_pointerize_overwrites_a_stale_existing_copy(repo: Path):
     _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="x = 1\n")
     _write(repo, "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py", "stale\n")
@@ -278,6 +300,32 @@ def test_pointerize_overwrites_a_stale_existing_copy(repo: Path):
     assert result.returncode == 0, result.stdout + result.stderr
     assert not (repo / "plugins/alpha/libs/shared-lib/leftover.txt").exists()
     assert (repo / "plugins/alpha/libs/shared-lib/VENDOR_POINTER.json").exists()
+
+
+def test_pointerize_vendors_canonicals_tests_directory(repo: Path):
+    # A consumer with no `testpaths` override (e.g. worktree-manager) uses
+    # pytest's own default recursive discovery, which would run a copy's
+    # own libs/<lib>/tests/ directly -- silently dropping it (as an earlier
+    # draft of this fix did) would silently drop real test coverage, not
+    # just leave a drift-check comparison out of scope.
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
+    _write(repo, "libs/shared-lib/tests/test_thing.py", "def test_it():\n    assert True\n")
+    (repo / "plugins/alpha").mkdir(parents=True)
+
+    result = _run(repo, "--pointerize", "alpha", "shared-lib")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    vendored_test = repo / "plugins/alpha/libs/shared-lib/tests/test_thing.py"
+    assert vendored_test.read_text() == "def test_it():\n    assert True\n"
+
+
+def test_pointerize_is_a_noop_for_tests_when_canonical_has_none(repo: Path):
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
+    (repo / "plugins/alpha").mkdir(parents=True)
+
+    result = _run(repo, "--pointerize", "alpha", "shared-lib")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (repo / "plugins/alpha/libs/shared-lib/tests").exists()
 
 
 def test_pointerized_copy_forwards_imports_to_canonical_end_to_end(repo: Path):

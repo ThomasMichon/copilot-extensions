@@ -1,0 +1,9 @@
+{
+  "comment": "vendor-pointer-generalization: convert the work-coalescing-singleton shared-lib copy to a src-passthrough vendor pointer (dev-side authoring efficiency only -- promoted main content is byte-identical).",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "schema": "copilot-extensions.vendor-pointer",
+  "version": 1,
+  "source": "libs/work-coalescing-singleton",
+  "kind": "src-passthrough"
+}
