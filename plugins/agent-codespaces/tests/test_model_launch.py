@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from agent_codespaces.model_launch import build_model_flags, resolve_model_config
+from agent_codespaces.model_launch import build_model_flags, model_copilot_args, resolve_model_config
 
 
 def _settings(home: Path, text: str) -> None:
@@ -121,3 +121,30 @@ def test_acp_model_flags_command_prints_stripped_flags(monkeypatch, capsys) -> N
     out = capsys.readouterr().out
     assert rc == 0
     assert out.strip() == "--model m --reasoning-effort e"
+
+
+def test_model_copilot_args_mirror_host_settings(monkeypatch, tmp_path: Path) -> None:
+    home = _isolated_home(monkeypatch, tmp_path)
+    _settings(home, '{"model": "claude-opus-4.8", "effortLevel": "high", "contextTier": "long_context"}')
+
+    assert model_copilot_args(["--no-ask-user"]) == [
+        "--model=claude-opus-4.8",
+        "--reasoning-effort=high",
+        "--context=long_context",
+    ]
+
+
+def test_model_copilot_args_never_override_an_explicit_flag(monkeypatch, tmp_path: Path) -> None:
+    home = _isolated_home(monkeypatch, tmp_path)
+    _settings(home, '{"model": "claude-opus-4.8", "effortLevel": "high"}')
+
+    assert model_copilot_args(["--model=gpt-5.4", "--no-ask-user"]) == ["--reasoning-effort=high"]
+    assert model_copilot_args(["--model", "gpt-5.4"]) == ["--reasoning-effort=high"]
+
+
+def test_model_copilot_args_respect_opt_out_and_empty_settings(monkeypatch, tmp_path: Path) -> None:
+    home = _isolated_home(monkeypatch, tmp_path)
+    assert model_copilot_args([]) == []
+    _settings(home, '{"model": "claude-opus-4.8"}')
+    monkeypatch.setenv("AGENT_CODESPACES_MODEL_PROPAGATE", "0")
+    assert model_copilot_args([]) == []

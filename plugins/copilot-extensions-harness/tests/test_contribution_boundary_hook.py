@@ -22,12 +22,18 @@ def _without_plugin_root() -> dict[str, str]:
             if key != "COPILOT_PLUGIN_ROOT"}
 
 
-def test_manifest_uses_static_projection_without_hook() -> None:
+def test_manifest_uses_static_projection_for_context_without_a_session_hook() -> None:
+    """No sessionStart/additionalContext-composition hook -- that path is
+    intentionally deferred to native host composition (see README). A
+    preToolUse guardrail (the @copilot-mention guard) has no such
+    composition hazard and is registered via ``hooks.json`` instead."""
     manifest = json.loads((PLUGIN / "plugin.json").read_text(encoding="utf-8"))
-    assert "hooks" not in manifest
     assert "sessionContext" not in manifest
-    assert not (PLUGIN / "hooks.json").exists()
     assert not (PLUGIN / "session-context.json").exists()
+    assert manifest.get("hooks") == "hooks.json"
+    declared = json.loads((PLUGIN / "hooks.json").read_text(encoding="utf-8"))
+    assert "sessionStart" not in declared.get("hooks", {})
+    assert "preToolUse" in declared.get("hooks", {})
     declaration = json.loads(
         (PLUGIN / "instruction-projections.json").read_text(encoding="utf-8")
     )

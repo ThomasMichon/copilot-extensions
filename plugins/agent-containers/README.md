@@ -169,7 +169,10 @@ and prints a JSON handle with `session_id`, `scope_id`, and ready-made
 `status`/`observe`/`nudge`/`attach`/`stop` commands. `--stop` kills the
 container tmux session, verifies it is gone, stops the keeper, and deregisters
 the exact live-session row. Extra Copilot CLI flags can be repeated with
-`--copilot-arg`; use `--seed-file -` for long or multi-line prompts.
+`--copilot-arg`; use `--seed-file -` for long or multi-line prompts. A new
+session starts on the caller's own model, reasoning effort, and context tier
+(from `~/.copilot/settings.json`); an explicit `--copilot-arg=--model=...`
+wins and `AGENT_CODESPACES_MODEL_PROPAGATE=0` opts out.
 `--ref-file PATH` (repeatable, `--detach` only) copies an operator file outside
 the checkout to `~/.agent-bridge/refs/<batch>/` in the container and names it to
 the worker (seed for a new session, a message on rejoin).
@@ -418,7 +421,11 @@ Docker command timeouts are normalized into per-member deferred results:
 liveness timeouts become unknown, while stop/remove/confirmation timeouts leave
 the hold fail-closed and do not abort reconciliation of sibling members.
 Typed rescue/generation/pin failures follow the same per-member rule across
-`up`, `down`, and `rm`.
+`up`, `down`, and `rm`. `agent-codespaces`' peer non-destructive capture verb
+(`sync-sessions`, session-rescue-parity Phase 3) uses the same busy exit
+code `75` and a `captured`/`rescued`-equivalent `ok`+`deferred` result shape,
+scaled down to one target instead of a fleet -- see that plugin's own
+README for the exact field names.
 
 Deploy holds expire after 15 minutes without heartbeat; session admissions
 expire after 5 minutes without heartbeat. This bounds PID-reuse failures.

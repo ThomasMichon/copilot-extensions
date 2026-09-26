@@ -37,3 +37,6 @@ uv.lock
 
 .venv-tools/
 plugins/agent-worktrees/full_test_run*.log
+
+wcs_out.log
+wcs_err.log

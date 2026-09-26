@@ -60,6 +60,14 @@ def main(argv: list[str] | None = None) -> int:
             type=Path,
             help="override the installed plugin payload root",
         )
+        subparser.add_argument(
+            "--agent-worktrees-path",
+            help=(
+                "Resolved agent-worktrees command (e.g. the session command "
+                "catalog's argv[0]). Falls back to an ambient PATH lookup "
+                "when omitted."
+            ),
+        )
         if operation == "scan":
             subparser.add_argument(
                 "--from-settings",
@@ -92,6 +100,7 @@ def main(argv: list[str] | None = None) -> int:
                     else None
                 ),
                 require_trust=False,
+                agent_worktrees_command=args.agent_worktrees_path,
             )
         except ValueError as exc:
             result = Result(operation=args.operation)

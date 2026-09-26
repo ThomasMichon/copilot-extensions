@@ -194,13 +194,16 @@ whether or not it is interactive. Execution is provider-neutral: the app
 currently drives both the **TMux/PSMux presentation layer** and the **AHP
 session backend** — composable, not exclusive, choices — for launch, resume,
 and reattach, and may add ACP, SDK, App, or third-party hosts alongside them.
-The app is also the phased destination for **terminal-app profile handling**
+The app is also the phased destination for **Terminal Fragment handling**
 (which launch targets a machine's terminal app — Windows Terminal, Tabby,
 ... — carries a profile for, and mirroring that selection into real
-terminal-app fragments): a machine-local concern currently still split across
-agent-worktrees' `profiles`/`terminal-fragment`/`repair` CLI verbs, relocating
-here the same way Mux/AHP already did. No lightweight plugin carries or
-assumes any of these dependencies.
+terminal-app fragments): a machine-local concern relocating here the same way
+Mux/AHP already did. **Per-project binstubs are a different, unrelated
+artifact and are explicitly out of scope for this relocation** — deploying
+and repairing the PATH launcher scripts a registered project resolves to
+remains agent-worktrees' own responsibility; only the terminal-app *profile*
+selection model and its fragment-mirroring CLI verbs move here. No
+lightweight plugin carries or assumes any of these dependencies.
 
 ### plugin-updating-and-alignment
 Keeps the installed plugin set **current and mutually consistent** — updates
@@ -337,6 +340,18 @@ the app to keep *itself* current.
 
 ## Provenance
 
+- **2026-09-25** — Renamed *terminal-app profile selection and fragment
+  mirroring* to **Terminal Fragment handling** and added an explicit
+  carve-out: per-project binstubs (the PATH launcher scripts a registered
+  project resolves to) are a different, unrelated artifact and stay
+  agent-worktrees' own responsibility — only the terminal-app profile
+  selection model and its fragment-mirroring CLI verbs relocate here.
+  Operator direction while landing Phase 3e Step 6 (copilot-extensions#3390):
+  the code-level cutover surfaced real ambiguity between "terminal handling
+  of every kind" and the still-owned `repair --binstubs` surface, so this
+  vision is tightened to match the intended, narrower boundary. See the
+  mirrored provenance entry in
+  [`visions/plugins/agent-worktrees`](../plugins/agent-worktrees/README.md).
 - **2026-09-23** — Generalized the control-plane's ownership of terminal
   handling one step further: beyond Mux presentation and the AHP backend
   (#2062), **terminal-app profile selection and fragment mirroring**

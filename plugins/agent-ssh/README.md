@@ -34,7 +34,10 @@ reverse forward alive with a small keeper process, reserves a venue-qualified
 CLI-mode identity (`anchor-<repo>@<ssh-target>`), runs
 `agent-worktrees embody --anchor --bridge-scope-id ... --json` in the requested
 workspace, and prints a JSON handle with `status`, `observe`, `nudge`, `attach`,
-and `stop` commands. Windows SSH targets are not supported yet; run the
+and `stop` commands. A new session starts on the caller's own model,
+reasoning effort, and context tier (from `~/.copilot/settings.json`); an
+explicit `--copilot-arg=--model=...` wins and
+`AGENT_CODESPACES_MODEL_PROPAGATE=0` opts out. Windows SSH targets are not supported yet; run the
 orchestrator on that machine and use local `agent-worktrees embody` there.
 `--ref-file PATH` (repeatable) copies an operator file outside the checkout to
 `~/.agent-bridge/refs/<batch>/` and names it to the worker (seed for a new

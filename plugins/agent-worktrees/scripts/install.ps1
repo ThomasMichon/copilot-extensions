@@ -667,12 +667,58 @@ function Invoke-VersionedActivate {
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
     if (-not (Test-Path $py)) { return $true }
+    # A bare `import agent_worktrees` is NOT a sufficient health check: the
+    # `agent_worktrees` directory merely EXISTING makes it importable as a
+    # PEP 420 namespace package even when it holds zero `.py` files (e.g. an
+    # interrupted/partial `uv pip install` that never actually placed the
+    # package). That false pass let a broken slot get marked complete and
+    # activated with no working CLI. Importing the `__main__` submodule
+    # instead forces Python to resolve a real `__main__.py` and walk its full
+    # transitive import chain (config, project_state, the internal `libs/*`
+    # packages, etc.), so a partial install that dropped any of those pieces
+    # fails the gate here instead of silently activating.
+    #
+    # `import agent_worktrees.__main__` alone only exercises __main__'s EAGER
+    # imports -- the CLI defers ~35 submodules behind `_LAZY_DISPATCH_TABLE`/
+    # `_load_full_command_surface()`, so a slot missing one of those would
+    # still pass and only fail on its first real invocation. Call
+    # `_load_full_command_surface()` too so the completion marker means the
+    # complete CLI is importable, not just its entry point.
+    #
+    # Run with `-I` (isolated mode: ignores PYTHONPATH/other PYTHON* env vars
+    # AND excludes the working directory / script dir from sys.path) so a
+    # stale checkout's `src` dir or another on-disk `agent_worktrees` copy
+    # can't satisfy the import while $VenvPython points at the partial slot
+    # under test -- the explicit PYTHONPATH clear below is kept as
+    # defense-in-depth (matches the isolation already used by
+    # Register-ProjectEntry and the package-stamping probe below).
     $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-    & $VenvPython -c 'import agent_worktrees' 2>$null
+    $prevHealthPP = $env:PYTHONPATH
+    $env:PYTHONPATH = $null
+    $healthOut = & $VenvPython -I -c 'import agent_worktrees.__main__ as m; m._load_full_command_surface()' 2>&1
     $slotOk = ($LASTEXITCODE -eq 0)
+    $env:PYTHONPATH = $prevHealthPP
     $ErrorActionPreference = $prevEAP
     if (-not $slotOk) {
         Write-ServiceErr "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
+        if ($healthOut) { Write-ServiceErr "  $healthOut" }
+        # This slot may already carry a completion marker from an OLDER,
+        # less-strict installer run (dotfiles #7561): Test-SlotAlreadyComplete
+        # trusts a valid marker + matching payload hash and skips reinstalling,
+        # so without this the same stale-but-broken slot would keep failing
+        # this gate forever on every future run. Remove just the marker file
+        # (never the slot's other files -- safe even if this happens to be the
+        # CURRENTLY ACTIVE slot, since a JSON marker is never held open by a
+        # running interpreter the way its own module files can be) so a future
+        # run stops trusting it and either rebuilds it fresh or falls back to
+        # last-known-good (resolve_python's tiered fallback in
+        # versioned_runtime.py already treats a markerless slot as unhealthy).
+        # Filename matches versioned_runtime.py's own COMPLETE_MARKER constant.
+        $staleMarker = Join-Path $VenvDir '.install-complete.json'
+        if (Test-Path $staleMarker) {
+            Remove-Item $staleMarker -Force -ErrorAction SilentlyContinue
+            Write-ServiceChanged "Invalidated stale completion marker (versions/$SrcVersion)"
+        }
         return $false
     }
     Invoke-VersionedMarkComplete
@@ -2766,77 +2812,21 @@ function Deploy-TerminalFragmentViaWorktreeManager {
 }
 
 function Deploy-TerminalFragmentLocally {
-    <# The pre-Phase-3e-Step-5b implementation: generate the fragment via
-       agent_worktrees' own ``terminal-fragment`` verb, reconcile WT state,
-       and write the fragment file. Kept as the fallback for a machine
-       without a usable Worktree Manager install. Returns ``$false`` only
-       when fragment generation itself failed (matching the historical
-       ``Deploy-Shortcuts`` behaviour of skipping shortcut creation too). #>
+    <# Phase 3e Step 6 (copilot-extensions#3390): Terminal Fragment generation
+       is no longer owned by agent-worktrees at all -- ``agent_worktrees``'s
+       own ``terminal-fragment``/``profiles`` verbs (the only thing this
+       function used to shell out to) were retired in Step 6; see
+       ``visions/plugins/agent-worktrees``'s *Not a Terminal Fragment owner*
+       Non-Goal. There is no local (non-Worktree-Manager) implementation left
+       to fall back to -- degrade loudly instead of attempting a command that
+       no longer exists. Always returns ``$false`` (matching the historical
+       ``Deploy-Shortcuts`` behaviour of skipping shortcut creation when the
+       fragment can't be deployed), so this machine's WT profiles/shortcuts
+       simply go stale until a usable Worktree Manager install is present. #>
     param([string]$Machine)
 
-    # Deploy WT fragment - use a shared fragment directory for all projects
-    $fragmentDir = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\AgentWorktrees'
-    if (-not (Test-Path $fragmentDir)) {
-        New-Item -ItemType Directory -Path $fragmentDir -Force | Out-Null
-    }
-
-    # Collect GUIDs from existing fragment BEFORE any overwrites.
-    # We need these to compute stale GUIDs for state cleanup later.
-    $oldFragGuids = @()
-    $fragmentDst = Join-Path $fragmentDir 'agent-worktrees.json'
-    if (Test-Path $fragmentDst) {
-        try {
-            $oldFrag = Get-Content $fragmentDst -Raw | ConvertFrom-Json
-            $oldFragGuids += @($oldFrag.profiles | ForEach-Object { $_.guid.ToLower() })
-        } catch { }
-    }
-    $oldFragGuids = @($oldFragGuids | Sort-Object -Unique)
-
-    # Generate the fragment from the Python single-source-of-truth generator.
-    # First normalize any legacy display-name selections to canonical machine
-    # keys (idempotent), then capture the fragment JSON (stdout is pure JSON).
-    & $VenvPython -m agent_worktrees terminal-fragment --machine $Machine --migrate-selections 2>&1 |
-        ForEach-Object { Write-ServiceChanged "profiles: $_" }
-    $fragment = & $VenvPython -m agent_worktrees terminal-fragment --machine $Machine
-    if ($LASTEXITCODE -ne 0 -or -not $fragment) {
-        Write-ServiceErr "Fragment generation failed (agent_worktrees terminal-fragment exited $LASTEXITCODE)"
-        return $false
-    }
-    $newFragObj = $fragment | ConvertFrom-Json
-    $newFragGuids = @($newFragObj.profiles | ForEach-Object { $_.guid.ToLower() })
-
-    # Detect changed profiles: same GUID but different content (e.g. renamed
-    # machine, changed SSH alias).  These need WT rediscovery even though the
-    # GUID didn't change.
-    $changedGuids = @()
-    if ($oldFragGuids.Count -gt 0) {
-        $commonGuids = @($oldFragGuids | Where-Object { $_ -in $newFragGuids })
-        foreach ($g in $commonGuids) {
-            $oldP = $oldFrag.profiles | Where-Object { $_.guid.ToLower() -eq $g }
-            $newP = $newFragObj.profiles | Where-Object { $_.guid.ToLower() -eq $g }
-            if ($oldP -and $newP) {
-                $oldCmd  = if ($oldP.PSObject.Properties['commandline']) { $oldP.commandline } else { '' }
-                $newCmd  = if ($newP.PSObject.Properties['commandline']) { $newP.commandline } else { '' }
-                $oldName = if ($oldP.PSObject.Properties['name']) { $oldP.name } else { '' }
-                $newName = if ($newP.PSObject.Properties['name']) { $newP.name } else { '' }
-                if ($oldCmd -ne $newCmd -or $oldName -ne $newName) {
-                    $changedGuids += $g
-                }
-            }
-        }
-        if ($changedGuids.Count -gt 0) {
-            Write-ServiceChanged "$($changedGuids.Count) profile(s) changed content -- will force WT rediscovery"
-        }
-    }
-
-    # Clean WT state BEFORE writing the new fragment to avoid a race where
-    # WT reads the new fragment while stale GUIDs are still in state.json.
-    Sync-TerminalState -OldFragmentGuids $oldFragGuids -NewFragmentGuids $newFragGuids -ChangedGuids $changedGuids
-
-    # Write the new fragment
-    $fragment | Set-Content $fragmentDst -Encoding UTF8
-    Write-ServiceOk "Windows Terminal profiles deployed (fragment with all registered projects)"
-    return $true
+    Write-ServiceWarn "Worktree Manager is required to deploy Windows Terminal profiles (agent-worktrees no longer owns Terminal Fragments -- see visions/plugins/agent-worktrees's 'Not a Terminal Fragment owner' Non-Goal). Install or repair Worktree Manager, then re-run 'refresh-profiles'."
+    return $false
 }
 
 function Deploy-Shortcuts {

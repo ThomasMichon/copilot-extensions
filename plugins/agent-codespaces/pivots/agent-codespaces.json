@@ -31,6 +31,26 @@
       "verb": "open-venue"
     },
     {
+      "key": "inspect-window",
+      "label": "Inspect in a new window",
+      "kind": "internal",
+      "verb": "open-venue-window"
+    },
+    {
+      "key": "watch",
+      "label": "Watch (live-session view)",
+      "kind": "internal",
+      "verb": "open-bridge-ui",
+      "when": {"sess": ["LIVE", "IDLE"]}
+    },
+    {
+      "key": "send-message",
+      "label": "Send message",
+      "kind": "internal",
+      "verb": "send-worker-message",
+      "when": {"sess": ["LIVE", "IDLE"]}
+    },
+    {
       "key": "jump-driving-worktree",
       "label": "View driving worktree",
       "kind": "internal",
@@ -67,5 +87,6 @@
       "progress": true
     }
   ],
-  "empty_hint": "No CodeSpaces (is the GitHub CLI authenticated with the 'codespace' scope?)."
+  "empty_hint": "No CodeSpaces (is the GitHub CLI authenticated with the 'codespace' scope?).",
+  "worker": {"worktree": "worktree_id", "label": "display", "live": "sess", "activity": "activity"}
 }

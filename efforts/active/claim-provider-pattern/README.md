@@ -185,12 +185,13 @@ design note for the rebinding work:
   `deploy_hold`/`DeployHold`/`_DEPLOY_HOLDS_FILE` mechanism, and wire it
   into `agent-codespaces`' `claim_provider_cli.py::cmd_claim_reclaim` and
   `lease.py::borrow()`'s admission check.
-- [ ] Register agent-worktrees as an owner/peer in agent-codespaces' and
+- [x] Register agent-worktrees as an owner/peer in agent-codespaces' and
   agent-containers' own vendored `_peer_launch.py` (OWNERS/PEERS dicts),
-  and add matching wiring in `agent_worktrees.claim_providers.peer_env()`
-  so it REBINDS to each target plugin's own validated installation context
-  before invoking a sibling claim-provider callback, instead of stripping
-  `COPILOT_EXTENSIONS_CONTEXT`/`COPILOT_PLUGIN_ROOT`/`GH_TOKEN`/
+  and add matching wiring in `agent_worktrees.peer_launch_adapter` /
+  `agent_worktrees.claim_providers._run_provider_process()` so explicit-
+  context launches REBIND to each target plugin's own validated installation
+  context before invoking a sibling claim-provider callback, instead of
+  stripping `COPILOT_EXTENSIONS_CONTEXT`/`COPILOT_PLUGIN_ROOT`/`GH_TOKEN`/
   `GITHUB_TOKEN` and letting the sibling fall back to legacy/ambient mode.
 - [ ] Once rebinding lands, fix
   `agent-codespaces/gh_account.py::mapped_accounts()`/`_lookup()`/
@@ -253,6 +254,23 @@ _Pending._
   acquisition, rejection while held, heartbeat + expiry, cleanup of stale
   corrupt state, uncertain hold persistence, and callback ordering proving
   the fence stays live through recovery and deletion.
+
+### 2026-09-23 — Phase 4 slice: peer-launch rebinding for claim providers
+- Extended the canonical peer-launch roster so `agent-worktrees` can launch
+  into `agent-codespaces`, `agent-containers`, and `agent-dispatch`, added
+  agent-worktrees as a synced peer-launch/_installation_context vendor, and
+  registered both additions with the sync/packaging guards.
+- Added `agent_worktrees.peer_launch_adapter` to mirror the existing
+  agent-codespaces -> agent-worktrees peer-launch pattern: explicit-context
+  launches validate the agent-worktrees owner receipt, rebind into the
+  target plugin's own validated cell context, preserve caller-supplied
+  timeout/cwd, and fail closed on validation refusal instead of silently
+  downgrading to stripped-env legacy credentials.
+- Routed every existing `peer_env()` call site through the adapter
+  (`claim_providers._run_callback()`, `claims_cli._dispatch_assigned_tasks()`,
+  `cleanup._run_codespaces()`), leaving the stripped-env path only for true
+  no-context callers and keeping absent-peer behavior degradable as
+  `available: false`.
 
 ### 2026-09-23 — Phase 2/3 landed; Phase 4 opened from review follow-up
 - PR [#3388](https://github.com/ThomasMichon/copilot-extensions/pull/3388)

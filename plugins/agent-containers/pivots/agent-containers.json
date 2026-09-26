@@ -27,6 +27,26 @@
       "verb": "open-venue"
     },
     {
+      "key": "inspect-window",
+      "label": "Inspect in a new window",
+      "kind": "internal",
+      "verb": "open-venue-window"
+    },
+    {
+      "key": "watch",
+      "label": "Watch (live-session view)",
+      "kind": "internal",
+      "verb": "open-bridge-ui",
+      "when": {"sess": ["LIVE", "IDLE"]}
+    },
+    {
+      "key": "send-message",
+      "label": "Send message",
+      "kind": "internal",
+      "verb": "send-worker-message",
+      "when": {"sess": ["LIVE", "IDLE"]}
+    },
+    {
       "key": "jump-driving-worktree",
       "label": "View driving worktree",
       "kind": "internal",
@@ -56,5 +76,6 @@
       "confirm": true
     }
   ],
-  "empty_hint": "No fleet containers (run `agent-containers up <fleet>`)."
+  "empty_hint": "No fleet containers (run `agent-containers up <fleet>`).",
+  "worker": {"worktree": "worktree_id", "label": "name", "live": "sess", "activity": "activity"}
 }

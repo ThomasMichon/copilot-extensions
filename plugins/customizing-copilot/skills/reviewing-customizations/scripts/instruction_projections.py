@@ -1754,6 +1754,7 @@ def discover_enabled_sources(
     installed_root: Path | None = None,
     home: Path | None = None,
     require_trust: bool = False,
+    agent_worktrees_command: str | None = None,
 ) -> list[object]:
     """Reuse the customization scanner's existing settings/source resolver."""
     if not require_trust:
@@ -1770,11 +1771,9 @@ def discover_enabled_sources(
         spec.loader.exec_module(scanner)
     return scanner.assemble_enabled_plugins(
         repo_root,
-        installed_root=installed_root,
-        home=home,
-        require_trust=require_trust,
-        include_user=False,
-        include_local=False,
+        installed_root=installed_root, home=home, require_trust=require_trust,
+        include_user=False, include_local=False,
+        agent_worktrees_command=agent_worktrees_command,
     )
 
 

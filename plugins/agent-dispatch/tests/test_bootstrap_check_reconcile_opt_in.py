@@ -44,15 +44,31 @@ _OPT_IN_KEY = f"background_reconcile_{_PLUGIN_NAME}"
 
 
 def _resolve_bash() -> str | None:
-    """Return a usable Bash path, excluding the WindowsApps WSL alias stub."""
+    """Resolve a REAL bash, not Windows' WSL-launcher `bash.exe` shim.
+
+    On Windows, ``shutil.which("bash")`` can resolve to a WSL launcher stub
+    under ``WindowsApps`` or the classic ``C:\\Windows\\System32\\bash.exe``
+    -- neither is a real POSIX bash for this test's purposes (the System32
+    launcher invokes an actual WSL distro, which runs this script in a
+    different environment than the one under test). Prefer the real Git
+    Bash location when present, then fall back to a PATH-resolved bash with
+    both known WSL-launcher locations excluded.
+    """
+    git_bash = Path(r"C:\Program Files\Git\bin\bash.exe")
+    if git_bash.is_file():
+        return str(git_bash)
     path = os.environ.get("PATH")
     if path:
-        filtered = os.pathsep.join(part for part in path.split(os.pathsep) if "WindowsApps" not in part)
+        filtered = os.pathsep.join(
+            part for part in path.split(os.pathsep)
+            if "WindowsApps" not in part
+            and part.rstrip("\\").lower() != r"c:\windows\system32"
+        )
         bash = shutil.which("bash", path=filtered)
         if bash:
             return bash
     bash = shutil.which("bash")
-    if bash and "WindowsApps" not in bash:
+    if bash and "WindowsApps" not in bash and "\\system32\\" not in bash.lower():
         return bash
     return None
 
@@ -62,8 +78,14 @@ _BASH = _resolve_bash()
 
 def _bash_env_path(path: Path) -> str:
     text = str(path)
-    if _BASH and _BASH.lower().endswith("bash.exe") and len(text) >= 2 and text[1] == ":":
-        suffix = text[2:].replace("\\", "/")
+    if not (_BASH and len(text) >= 2 and text[1] == ":"):
+        return text
+    suffix = text[2:].replace("\\", "/")
+    bash_lower = _BASH.lower()
+    if bash_lower.endswith("bash.exe") and "\\git\\" in bash_lower:
+        # Git Bash (MSYS2) uses `/c/...`, not WSL's `/mnt/c/...`.
+        return f"/{text[0].lower()}{suffix}"
+    if bash_lower.endswith("bash.exe"):
         return f"/mnt/{text[0].lower()}{suffix}"
     return text
 

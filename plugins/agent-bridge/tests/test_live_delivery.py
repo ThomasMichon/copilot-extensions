@@ -256,6 +256,33 @@ def test_message_roundtrip_poll_and_ack(client: TestClient) -> None:
     ).json()["acked"] == 0
 
 
+def test_ack_marks_delivered_message_as_running_turn(
+    client: TestClient, tmp_db: Database
+) -> None:
+    _register(client)
+    # Seed the state observed before a peer steers an idle session.
+    tmp_db.update_live_turn_state(
+        "cli-1", turn_state="idle", last_activity_at=time.time()
+    )
+    assert client.get("/api/v1/live-sessions/cli-1").json()["turn_state"] == "idle"
+
+    sent = client.post(
+        "/api/v1/live-sessions/cli-1/messages",
+        json={"sender": "peer", "body": "continue", "delivery": "steer"},
+    )
+    assert sent.status_code == 200, sent.text
+    mid = sent.json()["message_id"]
+
+    acked = client.post(
+        "/api/v1/live-sessions/cli-1/messages/ack", json={"ids": [mid]}
+    )
+    assert acked.status_code == 200, acked.text
+    assert acked.json()["acked"] == 1
+    info = client.get("/api/v1/live-sessions/cli-1").json()
+    assert info["turn_state"] == "running"
+    assert info["liveness"] == "active"
+
+
 def test_message_post_is_idempotent_with_producer_key(
     client: TestClient,
 ) -> None:

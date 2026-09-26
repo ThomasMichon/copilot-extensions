@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import signal
+
+import pytest
+
 from agent_dispatch.reap import (
     CoordProc,
     ReapResult,
+    _confirmed_gone_or_reused,
     is_coordinator_cmdline,
     is_live_coordinator_pid,
     parse_ps_output,
@@ -12,6 +17,7 @@ from agent_dispatch.reap import (
     reap_abandoned_passive_backstop,
     reap_superseded_coordinators,
     select_superseded_pids,
+    terminate_pid,
 )
 
 # ---- is_coordinator_cmdline: precise coordinator matching -------------------
@@ -99,6 +105,33 @@ def _fixed_list(pids):
     return lambda: [CoordProc(p, f"python -m agent_dispatch serve #{p}") for p in pids]
 
 
+def test_reap_caps_thread_pool_workers(monkeypatch):
+    """A large accumulation of stragglers must not spawn one thread each."""
+    import concurrent.futures
+
+    import agent_dispatch.reap as reap_mod
+
+    captured: dict = {}
+    real_pool = concurrent.futures.ThreadPoolExecutor
+
+    class _CapturingPool(real_pool):
+        def __init__(self, *args, **kwargs):
+            captured["max_workers"] = kwargs.get(
+                "max_workers", args[0] if args else None,
+            )
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(concurrent.futures, "ThreadPoolExecutor", _CapturingPool)
+    many_pids = list(range(200, 220))  # 20 candidates, well over the cap
+    reap_superseded_coordinators(
+        keep_pids={100},
+        list_procs=_fixed_list([100, *many_pids]),
+        terminate=lambda pid: True,
+    )
+    assert captured["max_workers"] == reap_mod._REAP_MAX_WORKERS
+    assert captured["max_workers"] < len(many_pids)
+
+
 def test_reap_terminates_all_but_kept():
     killed: list[int] = []
     res = reap_superseded_coordinators(
@@ -106,8 +139,10 @@ def test_reap_terminates_all_but_kept():
         list_procs=_fixed_list([100, 200, 300, 999]),
         terminate=lambda pid: killed.append(pid) or True,
     )
-    assert killed == [200, 300]
-    assert res.reaped == [200, 300]
+    # Candidates run concurrently now (bounded-cleanup fix), so side-effect
+    # order across threads isn't guaranteed -- only the resulting sets are.
+    assert sorted(killed) == [200, 300]
+    assert res.reaped == [200, 300]  # result ordering is still deterministic
     assert res.ok
 
 
@@ -153,6 +188,237 @@ def test_reap_fail_soft_on_enumeration_error():
     assert res.reaped == []
     assert not res.ok
     assert any("enumeration failed" in e for e in res.errors)
+
+
+# ---- terminate_pid: confirmed-death escalation (generalizes #3068) ---------
+
+_SIGKILL = getattr(signal, "SIGKILL", signal.SIGTERM)  # SIGKILL is POSIX-only
+
+
+def test_terminate_pid_confirms_death_no_escalation(monkeypatch):
+    """A process that dies promptly after SIGTERM never gets SIGKILLed."""
+    sent: list[int] = []
+    monkeypatch.setattr("os.kill", lambda pid, sig: sent.append(sig))
+    alive_calls = {"n": 0}
+
+    def _pid_alive(pid):
+        alive_calls["n"] += 1
+        return alive_calls["n"] < 2  # alive once, then gone
+
+    ok = terminate_pid(
+        123,
+        grace_seconds=5.0,
+        poll_seconds=0.0,
+        sleep=lambda _s: None,
+        pid_alive=_pid_alive,
+        confirmed_gone_or_reused=lambda pid: False,  # still ours at the start
+        is_windows=False,
+    )
+    assert ok is True
+    assert sent == [signal.SIGTERM]  # never escalated
+
+
+def test_terminate_pid_skips_signal_when_already_confirmed_gone(monkeypatch):
+    """A stale candidate list can already be wrong by the time this runs --
+    never signal a pid confirmed gone/reused before the very first SIGTERM."""
+    sent: list[int] = []
+    monkeypatch.setattr("os.kill", lambda pid, sig: sent.append(sig))
+
+    ok = terminate_pid(
+        123,
+        confirmed_gone_or_reused=lambda pid: True,
+        is_windows=False,
+    )
+    assert ok is True
+    assert sent == []  # no signal ever sent to the (possibly reused) pid
+
+
+def test_terminate_pid_escalates_to_sigkill_when_stuck(monkeypatch):
+    """A process that ignores SIGTERM, then dies once SIGKILLed."""
+    if not hasattr(signal, "SIGKILL"):
+        pytest.skip("SIGKILL is POSIX-only; no distinct escalation signal here")
+    sent: list[int] = []
+    sigkill_sent = {"v": False}
+
+    def _kill(pid, sig):
+        sent.append(sig)
+        if sig == _SIGKILL:
+            sigkill_sent["v"] = True
+
+    monkeypatch.setattr("os.kill", _kill)
+
+    def _pid_alive(pid):
+        # Alive through the SIGTERM grace window; dies once SIGKILLed.
+        return not sigkill_sent["v"]
+
+    ok = terminate_pid(
+        123,
+        grace_seconds=1.0,
+        poll_seconds=1.0,  # one poll tick exhausts the grace window
+        kill_grace_seconds=1.0,
+        sleep=lambda _s: None,
+        pid_alive=_pid_alive,
+        confirmed_gone_or_reused=lambda pid: False,  # still our coordinator, just stuck
+        is_windows=False,
+    )
+    assert ok is True
+    assert sent == [signal.SIGTERM, _SIGKILL]
+
+
+def test_terminate_pid_never_escalates_against_a_reused_pid(monkeypatch):
+    """If the pid is recycled to an unrelated process *after* the first
+    signal but before escalation, don't SIGKILL it."""
+    sent: list[int] = []
+    monkeypatch.setattr("os.kill", lambda pid, sig: sent.append(sig))
+    calls = {"n": 0}
+
+    def _confirmed(pid):
+        calls["n"] += 1
+        return calls["n"] > 1  # ours at entry; reused by the escalation check
+
+    ok = terminate_pid(
+        123,
+        grace_seconds=1.0,
+        poll_seconds=1.0,
+        sleep=lambda _s: None,
+        pid_alive=lambda pid: True,  # *something* alive at that number
+        confirmed_gone_or_reused=_confirmed,
+        is_windows=False,
+    )
+    assert ok is True
+    assert sent == [signal.SIGTERM]  # SIGKILL never sent to the stranger
+
+
+def test_confirmed_gone_or_reused_treats_enumeration_failure_as_indeterminate():
+    """An enumeration failure must never read as a confirmed pid reuse."""
+
+    def _boom():
+        raise RuntimeError("ps exploded")
+
+    assert _confirmed_gone_or_reused(123, list_procs=_boom) is False
+
+
+def test_confirmed_gone_or_reused_default_does_not_swallow_probe_failure(monkeypatch):
+    """The default enumerator must be the *strict* one, not the fail-soft
+    ``iter_coordinator_processes`` -- a swallowed ``[]`` on real probe
+    failure is indistinguishable from "enumerated fine, pid not a
+    coordinator" and would wrongly read as a confirmed pid reuse."""
+    import agent_dispatch.reap as reap_mod
+
+    def _boom():
+        raise RuntimeError("ps exploded")
+
+    monkeypatch.setattr(reap_mod, "_iter_posix", _boom)
+    monkeypatch.setattr(reap_mod, "_iter_windows", _boom)
+    assert _confirmed_gone_or_reused(123) is False
+
+
+def test_terminate_pid_escalates_despite_indeterminate_enumeration(monkeypatch):
+    """A transient enumeration failure must not spare a genuine straggler."""
+    if not hasattr(signal, "SIGKILL"):
+        pytest.skip("SIGKILL is POSIX-only; no distinct escalation signal here")
+    sent: list[int] = []
+    sigkill_sent = {"v": False}
+
+    def _kill(pid, sig):
+        sent.append(sig)
+        if sig == _SIGKILL:
+            sigkill_sent["v"] = True
+
+    monkeypatch.setattr("os.kill", _kill)
+
+    def _pid_alive(pid):
+        return not sigkill_sent["v"]  # alive until actually SIGKILLed
+
+    def _boom(pid):
+        raise RuntimeError("ps exploded")
+
+    ok = terminate_pid(
+        123,
+        grace_seconds=1.0,
+        poll_seconds=1.0,
+        kill_grace_seconds=1.0,
+        sleep=lambda _s: None,
+        pid_alive=_pid_alive,
+        confirmed_gone_or_reused=lambda pid: _confirmed_gone_or_reused(pid, list_procs=_boom),
+        is_windows=False,
+    )
+    assert ok is True
+    assert sent == [signal.SIGTERM, _SIGKILL]  # escalated despite the failure
+
+
+def test_terminate_pid_survives_sigkill_reports_failure(monkeypatch):
+    """A process stuck in uninterruptible IO can outlive even SIGKILL."""
+    sent: list[int] = []
+    monkeypatch.setattr("os.kill", lambda pid, sig: sent.append(sig))
+
+    ok = terminate_pid(
+        123,
+        grace_seconds=1.0,
+        poll_seconds=1.0,
+        kill_grace_seconds=1.0,
+        sleep=lambda _s: None,
+        pid_alive=lambda pid: True,  # never reports dead, even post-SIGKILL
+        confirmed_gone_or_reused=lambda pid: False,
+        is_windows=False,
+    )
+    assert ok is False
+    assert sent == [signal.SIGTERM, _SIGKILL]
+
+
+def test_terminate_pid_already_gone_short_circuits(monkeypatch):
+    def _kill(pid, sig):
+        raise ProcessLookupError()
+
+    monkeypatch.setattr("os.kill", _kill)
+    assert terminate_pid(123, confirmed_gone_or_reused=lambda pid: False) is True
+
+
+def test_terminate_pid_returns_false_when_signal_delivery_fails(monkeypatch):
+    def _kill(pid, sig):
+        raise PermissionError()
+
+    monkeypatch.setattr("os.kill", _kill)
+    assert terminate_pid(123, confirmed_gone_or_reused=lambda pid: False) is False
+
+
+def test_terminate_pid_sigkill_failure_reports_false(monkeypatch):
+    if not hasattr(signal, "SIGKILL"):
+        pytest.skip("SIGKILL is POSIX-only; no distinct escalation signal here")
+    calls: list[int] = []
+
+    def _kill(pid, sig):
+        calls.append(sig)
+        if sig == _SIGKILL:
+            raise PermissionError()
+
+    monkeypatch.setattr("os.kill", _kill)
+    ok = terminate_pid(
+        123,
+        grace_seconds=0.1,
+        poll_seconds=0.1,
+        sleep=lambda _s: None,
+        pid_alive=lambda pid: True,
+        confirmed_gone_or_reused=lambda pid: False,
+        is_windows=False,
+    )
+    assert ok is False
+    assert calls == [signal.SIGTERM, _SIGKILL]
+
+
+def test_terminate_pid_windows_path_never_escalates(monkeypatch):
+    """On Windows, os.kill already maps to TerminateProcess -- no polling/escalation."""
+    sent: list[int] = []
+    monkeypatch.setattr("os.kill", lambda pid, sig: sent.append(sig))
+    pid_alive_calls = []
+    ok = terminate_pid(
+        123, pid_alive=lambda pid: pid_alive_calls.append(pid) or True,
+        confirmed_gone_or_reused=lambda pid: False,
+        is_windows=True,
+    )
+    assert ok is True
+    assert sent == [signal.SIGTERM]
+    assert pid_alive_calls == []  # never even consulted on the Windows path
 
 
 # ---- is_live_coordinator_pid: liveness + identity fused ---------------------

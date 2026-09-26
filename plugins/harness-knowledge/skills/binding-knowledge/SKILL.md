@@ -203,7 +203,8 @@ remains a compatibility delegate:
 ```
 python skills/binding-knowledge/scripts/assemble_plugins.py \
   --harness-path "<harness-anchor-path>" \
-  --knowledge-path "<knowledge-path>"
+  --knowledge-path "<knowledge-path>" \
+  --agent-worktrees-path "<agent-worktrees catalog argv[0]>"
 ```
 
 The canonical composer carries local (`directory`/`local`) marketplaces,

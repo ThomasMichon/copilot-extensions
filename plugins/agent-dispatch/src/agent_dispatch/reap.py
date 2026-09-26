@@ -41,6 +41,7 @@ import os
 import shlex
 import signal
 import subprocess
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -50,6 +51,22 @@ log = logging.getLogger(__name__)
 
 _ENUM_TIMEOUT_S = 15.0
 _COORD_NAMES = ("agent_dispatch", "agent-dispatch")
+
+# SIGTERM is cooperative on POSIX: a stuck or uninterruptible-IO process can
+# ignore it forever, leaving :func:`terminate_pid`'s caller believing it
+# "reaped" a straggler that is, in fact, still alive -- the same
+# believes-it-cleaned-up-but-didn't shape as #3068's self-retire gap,
+# generalized to this module's own termination primitive. Confirm actual
+# death within this grace window before reporting success; escalate to
+# SIGKILL if it hasn't.
+_TERMINATE_GRACE_S = 5.0
+_TERMINATE_POLL_S = 0.2
+
+# reap_superseded_coordinators terminates candidates concurrently (see its
+# docstring) to bound total wall time, but an unbounded one-thread-per-pid
+# pool would itself become a resource spike against a large accumulation of
+# stragglers -- exactly the scenario this reaper exists to clean up. Cap it.
+_REAP_MAX_WORKERS = 8
 
 
 @dataclass(frozen=True)
@@ -162,10 +179,21 @@ def _iter_windows() -> list[CoordProc]:
 def iter_coordinator_processes() -> list[CoordProc]:
     """Enumerate live coordinator processes (best-effort; ``[]`` on failure)."""
     try:
-        return _iter_windows() if os.name == "nt" else _iter_posix()
+        return _iter_coordinator_processes_strict()
     except Exception:  # best-effort: enumeration must never raise into a caller
         log.debug("coordinator enumeration failed", exc_info=True)
         return []
+
+
+def _iter_coordinator_processes_strict() -> list[CoordProc]:
+    """Like :func:`iter_coordinator_processes` but lets an enumeration failure
+    raise instead of collapsing it to ``[]``. :func:`_confirmed_gone_or_reused`
+    needs this distinction: if it were handed the fail-soft version, a
+    transient ``ps``/CIM failure would look identical to "enumerated fine,
+    pid not found" -- and get misread as *confirmed* pid reuse rather than an
+    indeterminate probe, silently sparing a genuine straggler from escalation.
+    """
+    return _iter_windows() if os.name == "nt" else _iter_posix()
 
 
 def is_live_coordinator_pid(
@@ -188,6 +216,33 @@ def is_live_coordinator_pid(
     return any(p.pid == pid for p in procs)
 
 
+def _confirmed_gone_or_reused(
+    pid: int,
+    *,
+    list_procs: Callable[[], list[CoordProc]] = _iter_coordinator_processes_strict,
+) -> bool:
+    """True only when enumeration *succeeded* and confirms ``pid`` is no
+    longer our coordinator (already gone, or the OS recycled the number to
+    an unrelated process). ``False`` -- meaning "do not skip escalation" --
+    covers both "it's still our coordinator" and an indeterminate outcome
+    (enumeration itself failed, e.g. a transient ``ps``/CIM error): a failed
+    probe must never be read as proof of a safe-to-skip pid reuse, or a
+    flaky enumeration call would silently spare a genuine straggler and
+    recreate the very false-"reaped" result this module exists to prevent.
+    The default ``list_procs`` is deliberately the *strict* (non-fail-soft)
+    enumerator -- the fail-soft ``iter_coordinator_processes`` would collapse
+    a real probe failure to ``[]``, which is indistinguishable here from "it
+    enumerated fine and the pid just isn't a coordinator" and would wrongly
+    read as a confirmed mismatch.
+    """
+    try:
+        procs = list_procs()
+    except Exception:  # best-effort; indeterminate, not a confirmed mismatch
+        log.debug("coordinator enumeration failed", exc_info=True)
+        return False
+    return not any(p.pid == pid for p in procs)
+
+
 def select_superseded_pids(
     procs: list[CoordProc], keep_pids: set[int],
 ) -> list[int]:
@@ -195,18 +250,127 @@ def select_superseded_pids(
     return [p.pid for p in procs if p.pid not in keep_pids]
 
 
-def terminate_pid(pid: int) -> bool:
-    """Terminate ``pid`` (SIGTERM on POSIX -> uvicorn drains + exits cleanly;
-    ``TerminateProcess`` on Windows via ``os.kill``). ``True`` on a delivered
-    signal or an already-gone process; ``False`` on a real failure."""
+def _pid_alive(pid: int) -> bool:
+    """Best-effort POSIX liveness probe via a signal-0 kill (no side effect)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists but not ours to signal-probe -- assume alive
+    return True
+
+
+def terminate_pid(
+    pid: int,
+    *,
+    grace_seconds: float = _TERMINATE_GRACE_S,
+    poll_seconds: float = _TERMINATE_POLL_S,
+    kill_grace_seconds: float | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+    pid_alive: Callable[[int], bool] = _pid_alive,
+    confirmed_gone_or_reused: Callable[[int], bool] | None = _confirmed_gone_or_reused,
+    is_windows: bool = os.name == "nt",
+) -> bool:
+    """Terminate ``pid`` and confirm it is actually gone before reporting so.
+
+    On Windows, ``os.kill`` maps straight to ``TerminateProcess`` -- already an
+    unconditional, immediate kill, so there is nothing to escalate. On POSIX,
+    ``SIGTERM`` is cooperative: a stuck process (wedged, or blocked in
+    uninterruptible IO) can simply never act on it. This waits up to
+    ``grace_seconds`` confirming real death via ``pid_alive``, then -- unless
+    ``confirmed_gone_or_reused`` reports the pid was definitively recycled to
+    an unrelated process in the meantime (an *indeterminate* probe never
+    counts) -- escalates to ``SIGKILL``, then confirms *that* death too within
+    ``kill_grace_seconds`` (defaults to ``grace_seconds``). A process that
+    survives even SIGKILL (stuck in uninterruptible IO) is reported as a
+    failure rather than a false "reaped". ``True`` only on confirmed death (or
+    an already-gone process); ``False`` when a signal could not be delivered,
+    or the process is still alive after every step above.
+
+    ``confirmed_gone_or_reused`` is also consulted *before the very first
+    signal*: a caller's own candidate list (an earlier enumeration pass) can
+    already be stale by the time this runs, so a coordinator this pid used to
+    identify may have already exited and had the number recycled before we
+    ever get here. This narrows -- it does not eliminate -- the inherent
+    pid-based TOCTOU race (a truly airtight guard needs an OS-bound process
+    handle/birth-time check that neither this module nor any of this
+    codebase's other pid-based termination paths currently use).
+    """
+    if confirmed_gone_or_reused is not None and confirmed_gone_or_reused(pid):
+        log.debug(
+            "pid=%s already confirmed gone or reused before the first signal "
+            "-- skipping rather than signalling a stale candidate", pid,
+        )
+        return True
+
+    if is_windows:
+        try:
+            os.kill(pid, signal.SIGTERM)
+            return True
+        except ProcessLookupError:
+            return True  # already gone -- the desired end state
+        except (PermissionError, OSError):
+            log.debug("could not terminate coordinator pid=%s", pid, exc_info=True)
+            return False
+
     try:
         os.kill(pid, signal.SIGTERM)
-        return True
     except ProcessLookupError:
         return True  # already gone -- the desired end state
     except (PermissionError, OSError):
         log.debug("could not terminate coordinator pid=%s", pid, exc_info=True)
         return False
+
+    deadline = time.monotonic() + grace_seconds
+    while time.monotonic() < deadline:
+        if not pid_alive(pid):
+            return True
+        sleep(poll_seconds)
+    if not pid_alive(pid):
+        return True
+
+    if confirmed_gone_or_reused is not None and confirmed_gone_or_reused(pid):
+        # pid_alive found *something* alive at that number, but enumeration
+        # positively confirms it is no longer our coordinator -- the OS
+        # already recycled it to an unrelated process in the tiny window
+        # since our last check. Escalating here would SIGKILL a stranger;
+        # the process we actually meant to terminate is already gone.
+        log.debug(
+            "pid=%s confirmed no longer our coordinator -- treating as "
+            "already gone rather than escalating against a reused pid", pid,
+        )
+        return True
+
+    log.warning(
+        "pid=%s did not exit within %.1fs of SIGTERM -- escalating to SIGKILL "
+        "to avoid reporting a reap that never actually completed (see #3068)",
+        pid, grace_seconds,
+    )
+    try:
+        os.kill(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+    except ProcessLookupError:
+        return True  # exited in the tiny window between the last check and now
+    except (PermissionError, OSError):
+        log.debug("could not SIGKILL coordinator pid=%s", pid, exc_info=True)
+        return False
+
+    kill_deadline = time.monotonic() + (
+        grace_seconds if kill_grace_seconds is None else kill_grace_seconds
+    )
+    while time.monotonic() < kill_deadline:
+        if not pid_alive(pid):
+            return True
+        sleep(poll_seconds)
+    if not pid_alive(pid):
+        return True
+
+    log.error(
+        "pid=%s is still alive after SIGKILL (likely stuck in uninterruptible "
+        "IO) -- reporting the reap as failed rather than a false success",
+        pid,
+    )
+    return False
 
 
 def reap_superseded_coordinators(
@@ -222,6 +386,16 @@ def reap_superseded_coordinators(
     (the reaper never terminates the sole coordinator when it cannot anchor on an
     active). Best-effort and fail-soft: returns a :class:`ReapResult`, never
     raises.
+
+    Candidates are terminated **concurrently** (a small thread pool), not one
+    at a time: ``terminate`` (``terminate_pid`` by default) can itself take up
+    to a ``grace_seconds`` + ``kill_grace_seconds`` wait per pid to confirm
+    real death before escalating, and this reap pass runs synchronously on a
+    deploy's critical path -- serially summing that wait across several
+    simultaneously-wedged stragglers would turn an accumulation of zombies
+    into an effectively hung deploy. Running them in parallel bounds the
+    whole pass to roughly one candidate's worst-case wait, regardless of how
+    many stragglers are found.
     """
     keep = {int(p) for p in keep_pids if p}
     result = ReapResult(skipped_keep=sorted(keep))
@@ -234,8 +408,16 @@ def reap_superseded_coordinators(
     except Exception as exc:  # best-effort: enumeration failure is non-fatal
         result.errors.append(f"enumeration failed: {exc}")
         return result
-    for pid in select_superseded_pids(procs, keep):
-        if terminate(pid):
+    pids = select_superseded_pids(procs, keep)
+    if not pids:
+        return result
+    from concurrent.futures import ThreadPoolExecutor
+
+    workers = min(len(pids), _REAP_MAX_WORKERS)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        outcomes = dict(zip(pids, pool.map(terminate, pids), strict=True))
+    for pid in pids:
+        if outcomes[pid]:
             result.reaped.append(pid)
         else:
             result.errors.append(f"terminate pid={pid} failed")

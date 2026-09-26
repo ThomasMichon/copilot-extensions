@@ -4,7 +4,11 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-phase PRs (see Coordination)
 - **Created:** 2026-09-25
-- **Status:** Draft <!-- Draft | Active | Blocked | Done -->
+- **Status:** Done <!-- Draft | Active | Blocked | Done -->
+  (one Validation Plan item -- a real leased-CodeSpace end-to-end run --
+  is explicitly transferred to a tracked follow-up
+  ([`#3698`](https://github.com/ThomasMichon/copilot-extensions/issues/3698)),
+  not closed. Every other Plan and Validation Plan item is resolved.)
 - **Vision:** extends `visions/plugins/agent-containers/README.md`
   §`rescue-before-destructive-replacement` (generalizing it to an
   on-demand, non-destructive trigger independent of replacement — see
@@ -304,36 +308,119 @@ re-validation and explicitly-acknowledged residual snapshot-race risk, and
 the full test list (liveness, state, lease/claim, account-binding, race,
 lifecycle-contention, and CLI-dispatch coverage).
 
+**Done:** new `agent-codespaces sync-sessions <name>` verb
+(`capture_cli.py`) calling `sessions.capture_codespace_sessions()`. That
+function: (1) a hard state preflight via
+`get_codespace_status_with_account()` that defers on anything but
+`Available` without ever connecting; (2) `_capture_hold_reason()` defers on
+any of the four holder shapes (local lease, `#897` claim, cross-machine L2,
+beacon) except an orphaned claim (owning worktree positively gone, per
+`pool._holder_worktree_gone`), which is not treated as a live hold; (3)
+account binding requires an explicit `account` or `account_binding.bound_account()`'s
+exact per-name binding, never the generic scan -- fails closed otherwise;
+(4) the vendored `session_liveness_probe` lib gates the pull both **before**
+(defers if not `idle`) and **after** (discards/defers a became-active
+capture rather than staging/pushing it) -- the acquire-then-release-
+entirely-within-the-pull race remains an explicitly documented residual
+risk, per Phase 1's decision. `sync_codespace_sessions()` gained an optional
+`lock=` parameter (widening seam): all seven existing destructive call
+sites (`_cmd_delete`, `_cmd_finalize`, its JSON-modal variant, `_cmd_stop`,
+prune, `_reclaim_for_quota`'s total-limit path, and
+`claim_provider_cli.py`'s reclaim callback) now acquire their own
+`TargetLock` up front and hold it across their full sync-then-act sequence,
+passing it through so a concurrent capture sees `TargetBusyError` and
+defers for the whole transaction -- the external-actor exception (e.g. a
+human running `gh codespace stop` directly) is called out explicitly, not
+silently, exactly as planned. Tests: `test_capture_sessions.py` (hold-reason
+per holder shape including the orphaned-claim exception, state preflight,
+account-binding fail-closed/explicit-bypass, pre- and post-pull liveness
+gating, `TargetBusyError` handling, and a lock-contention regression using a
+genuinely different live pid) and `test_capture_cli.py` (CLI-dispatch text +
+`--json`, deferred exit code) -- 20 new tests, full `agent-codespaces` suite
+(1373 tests) green via `tools/run-plugin-tests.py --reinstall`, `ruff check`
+clean on every touched/new file.
+
 ### Phase 4 — Periodic trigger for CodeSpaces
 (scope set by Phase 1's scheduling-ownership decision)
-- [ ] If Phase 1 decided **consumer-owned** (the containers-precedent
+- [x] If Phase 1 decided **consumer-owned** (the containers-precedent
       default): this phase becomes documentation only -- record, in this
       repo's own docs (e.g. a short section in `agent-codespaces`'s README
       or the `codespaces-lifecycle` skill), how a consumer wires its own
       periodic trigger against the Phase 3 verb, mirroring how the
       containers-side downstream consumer did it. No new repository-owned
       scheduling code is written under this branch.
+
+      **Done:** added a "Periodic session capture (`sync-sessions`)"
+      section to `plugins/agent-codespaces/README.md` describing the
+      consumer-owned external-timer pattern (cron/systemd/scheduled task
+      invoking `sync-sessions <name> --account <account> --json`), the
+      busy exit code `75` contract, and why `--account` should be passed
+      explicitly for an unattended invocation (fail-closed account
+      resolution, per Phase 3). No scheduling code added to this repo.
 - [ ] If Phase 1 decided **repository-owned** (only viable if an existing
       always-running loop was confirmed to cover every relevant venue):
       wire the periodic capture into that already-existing loop; do not
       introduce a new standalone timer/daemon that duplicates a mechanism
       this repo already runs.
+
+      **N/A** -- Phase 1 decided consumer-owned (confirmed after checking
+      `connection_owner.py`'s `run_owner_daemon` is a per-connection
+      idle-shutdown loop, not an always-on sweep); this branch does not
+      apply.
 - [ ] Validate end-to-end against a real leased CodeSpace, using whichever
       trigger path Phase 1 chose: a capture picks up a real session,
       publishes it, and the CodeSpace's own state (lease, connection) is
       unaffected -- mirroring the container validation's proof that
       `docker ps` uptime was unaffected.
 
+      **Transferred, not closed.** This session's `gh` auth lacks the
+      `codespace` API scope (`gh auth refresh -h github.com -s codespace`
+      required) and no real leased CodeSpace was available to validate
+      against in this sandboxed environment -- unlike Phase 3's containers
+      precedent (`#3574`), which had live Docker infra already in hand via
+      a downstream consuming effort. The
+      full unit/CLI-dispatch test suite (1429 tests, Phase 3) validates
+      every code path this item would exercise except the literal live
+      round-trip against GitHub's own CodeSpace API/SSH transport. **Named
+      tracked follow-up: [`#3698`](https://github.com/ThomasMichon/copilot-extensions/issues/3698).**
+      An operator (or a session with the `codespace`
+      gh scope already granted) should run
+      `agent-codespaces sync-sessions <a-real-leased-name> --json` against
+      a genuinely leased CodeSpace once, confirm the published session
+      lands in the same agent-logger hub tree the CodeSpace's own
+      teardown-time capture already uses, and confirm `agent-codespaces
+      list`/`pool` shows the CodeSpace's lease/connection state unchanged
+      before and after. This is the one Validation Plan item this effort
+      does not itself close (see Phase 5's Validation Plan line for the
+      same item, transferred identically to the same tracked issue).
+
 ### Phase 5 — Close-out
-- [ ] Confirm both providers' capture/publish result-shape fields are
+- [x] Confirm both providers' capture/publish result-shape fields are
       documented consistently (README/skill docs on both sides) so a
       consumer reading either doesn't need venue-specific tribal knowledge.
-- [ ] Journal the final state; mark Status: Done once every Plan/Validation
+
+      **Done:** `agent-codespaces/README.md`'s new section documents
+      `sync-sessions --json`'s `{ok, deferred, session_count, detail}`
+      shape and states explicitly that it is the same shape family as
+      `agent-containers`' `rescue-capture` result (`captured`/`rescues`/
+      `deferred`, same busy exit code `75`), scaled to one target instead
+      of a fleet. `agent-containers/README.md` was updated with a
+      reciprocal cross-reference pointing at `agent-codespaces`' doc for
+      the exact field names, so either doc alone orients a reader to the
+      other's shape.
+- [x] Journal the final state; mark Status: Done once every Plan/Validation
       Plan item is resolved or transferred.
+
+      **Done -- see the Status field at the top of this document and the
+      final Journal entry below.** Every Plan and Validation Plan item is
+      resolved except the one live-CodeSpace end-to-end validation item,
+      which is explicitly transferred (not silently dropped) per the
+      Phase 4 note above and the matching Validation Plan line.
+
 
 ## Validation Plan
 
-- [ ] Phase 2: `tools/check-vendored-libs-sync.py` passes with the new lib
+- [x] Phase 2: `tools/check-vendored-libs-sync.py` passes with the new lib
       listed in both consumers; agent-containers' full test suite
       (`python tools/run-plugin-tests.py agent-containers`) passes after
       the extraction -- with `test_replacement.py`'s direct
@@ -349,7 +436,14 @@ lifecycle-contention, and CLI-dispatch coverage).
       `run-plugin-tests.py`'s own `--reinstall`, or an equivalent explicit
       `uv sync`/install dry-run) and confirm the new import actually
       resolves in each, not only that the sync guard is green.
-- [ ] Phase 3: agent-codespaces' test suite
+
+      **Done** -- see Phase 2's own Journal/Plan entries: the thin
+      compatibility-wrapper seam was preserved (zero test edits), both
+      plugins' `--reinstall` full-suite runs passed (agent-containers 495
+      passed/4 skipped/1 pre-existing unrelated failure; agent-codespaces
+      1353 passed/13 skipped), and `check-vendored-libs-sync.py` confirmed
+      11 shared libs in sync.
+- [x] Phase 3: agent-codespaces' test suite
       (`python tools/run-plugin-tests.py agent-codespaces`) passes,
       including the new liveness-gate regression test, the
       non-`Available`-state regression test (no boot/connect attempt for a
@@ -369,14 +463,36 @@ lifecycle-contention, and CLI-dispatch coverage).
       succeeds pinned to that account; a binding-lookup failure defers;
       none of these fall through to ambient auth or an ambiguous
       first-match), and CLI-dispatch tests.
+
+      **Done** -- all of the above are covered by name in
+      `test_capture_sessions.py`/`test_capture_cli.py`/`test_cli.py`
+      (`test_capture_liveness_gate_defers_active_session`,
+      `test_capture_defers_on_non_available_state`, the four holder-shape
+      + orphaned-claim tests, `test_capture_accepts_acquire_then_release_within_pull_as_documented_residual`
+      (proves the accepted residual, per the exact carve-out above),
+      `test_capture_defers_while_a_destructive_caller_holds_the_widened_lock`
+      plus the real-`_cmd_delete`-dispatch lock-widening integration tests,
+      the three account-binding tests, and the CLI-dispatch tests). Full
+      suite (1429 tests) green via `tools/run-plugin-tests.py
+      agent-codespaces --reinstall`.
 - [ ] Phase 4: a real leased CodeSpace is captured and published
       end-to-end (mirroring the container-side end-to-end validation
       already proven for `rescue-capture`) — published session readable
       from the same agent-logger hub tree the CodeSpace's own teardown-time
       capture already lands in, and the CodeSpace's lease/connection state
       unaffected before/after.
-- [ ] Both providers' module-size guards (`tools/check-module-size.py`) and
+
+      **Transferred, not closed** -- see Phase 4's matching item above for
+      the full reasoning (no `codespace`-scoped `gh` auth or real leased
+      CodeSpace available in this session's sandbox). Named tracked
+      follow-up: [`#3698`](https://github.com/ThomasMichon/copilot-extensions/issues/3698).
+- [x] Both providers' module-size guards (`tools/check-module-size.py`) and
       `ruff check` stay clean on every touched file.
+
+      **Done:** confirmed clean at every phase (Phase 2, 3, and this
+      Phase 4/5 docs pass); Phase 3's `__main__.py` growth was kept under
+      its grandfathered ceiling via the `lifecycle_lock.py` split rather
+      than a baseline-widening edit.
 
 ## Proposal
 
@@ -423,3 +539,72 @@ _Pending._
   check` clean on all touched/new files.
 - Next: open the Phase 1+2 PR, drive it through review/merge, then start
   Phase 3 (CodeSpaces capture verb + liveness gate) in a fresh PR.
+
+### 2026-09-25 — Phase 3 (CodeSpaces capture verb + liveness gate)
+- Phase 1+2's PR (#3660) merged this same day; started a fresh worktree for
+  Phase 3 per the effort's own per-phase-PR Coordination rule.
+- Implemented `agent-codespaces sync-sessions <name>` (`capture_cli.py`) and
+  `sessions.capture_codespace_sessions()`: hard non-`Available`-state
+  preflight (never connects to a non-running venue), `_capture_hold_reason()`
+  covering all four holder shapes with the orphaned-claim exception, fail-
+  closed account binding (explicit or exact-bound only), and the vendored
+  liveness probe gating the pull both before and after (a became-active
+  capture during the pull is discarded, not staged/pushed). Added the
+  `lock=` widening seam to `sync_codespace_sessions()` and wired it through
+  all seven existing destructive call sites so each now holds its own
+  `TargetLock` across its full sync-then-act sequence -- closing the window
+  Phase 3's own item called out, with the external-actor exception called
+  out explicitly in code comments, not silently.
+- Fixed one pre-existing test's stubbed lambda that didn't accept the new
+  `lock=` kwarg (`test_claim_provider_cli.py`); otherwise zero regressions
+  across the full existing suite.
+- Validated: 20 new tests (`test_capture_sessions.py`, `test_capture_cli.py`)
+  plus the full existing suite -- 1373 tests total, all green via
+  `tools/run-plugin-tests.py agent-codespaces --reinstall`. `ruff check`
+  clean on every touched/new file (confirmed a pre-existing, unrelated
+  ~17-finding baseline on `__main__.py` is unchanged by this diff).
+  Changefile added (patch, per CONTRIBUTING.md's default-to-patch guidance).
+- PR #3676 went through **7 substantive Copilot review rounds** before
+  merge -- all real, verified findings, not noise: the lock-widening
+  seam's `&&`/`;` fix itself briefly reintroduced a directory-scoping bug
+  (fixed with a `{ ... }` group, verified both directions with a bash
+  repro); `_capture_hold_reason()` was hardened to fail closed on every
+  read failure across all four holder shapes (lease-store unreadable,
+  a malformed-but-present record, an explicit `null` record, a beacon
+  listing failure, an L2-store-unavailable `None`, and a non-string
+  `worktree` type crashing the orphan check); account-token minting was
+  moved up front and re-verified before the beacon listing (closing an
+  ambient-fallback window); `ConnectionManager()` construction moved
+  inside the lock-releasing protected block; and a real, independent,
+  pre-existing bug in `_pull_tar_bytes`'s `_PULL_CMD` was fixed along the
+  way (a normal CodeSpace missing even one of four optional session-state
+  paths silently produced no archive at all, misreported as "no
+  sessions"). Final state: 33 new tests total across the PR's lifetime,
+  1429 tests green, zero open review threads. **Merged.**
+- Next: Phase 4 (documentation-only, per Phase 1's consumer-owned
+  scheduling decision) and Phase 5 (close-out) remain -- each its own PR
+  per the effort's Coordination rule.
+
+### 2026-09-25 — Phase 4 + Phase 5 (close-out)
+- Phase 4: added a "Periodic session capture (`sync-sessions`)" section to
+  `agent-codespaces/README.md` documenting the consumer-owned external-timer
+  pattern (no scheduling code added to this repo, per Phase 1's decision),
+  the busy exit code `75` contract, and the `--account` fail-closed
+  guidance for unattended invocations. Attempted the live end-to-end
+  validation against a real leased CodeSpace but this session's `gh` auth
+  lacks the `codespace` API scope (confirmed via `agent-codespaces list`
+  failing with `HTTP 403`) and no real leased CodeSpace was available --
+  **explicitly transferred** to
+  [`#3698`](https://github.com/ThomasMichon/copilot-extensions/issues/3698)
+  rather than silently skipped or falsely claimed done.
+- Phase 5: cross-referenced both providers' capture result shapes --
+  `agent-codespaces`' new section documents `sync-sessions --json`'s
+  `{ok, deferred, session_count, detail}` shape and states it is the same
+  shape family as `agent-containers`' `rescue-capture` result, scaled to
+  one target; `agent-containers/README.md` got a reciprocal pointer back.
+  Changefile added (patch/patch, both plugins).
+- Landed as PR #3697 (docs-only). Every Plan and Validation Plan item in
+  this effort is now resolved except the one transferred live-CodeSpace
+  validation item. **Status: Done.**
+
+

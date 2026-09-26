@@ -11,6 +11,8 @@ import argparse
 import json
 import types
 
+import pytest
+
 import agent_worktrees.__main__ as m
 from agent_worktrees import cleanup, tracking
 from agent_worktrees import config as cfg
@@ -170,13 +172,19 @@ def test_run_codespaces_uses_providers_reclaim_command(monkeypatch):
                         lambda *a, **k: ({"codespace": provider}, ()))
     captured = {}
 
-    def _run(cmd, **kw):
-        captured["cmd"] = cmd
+    def _run(provider, *, callback_args, legacy_command, timeout, cwd=None):
+        captured["provider"] = provider.plugin
+        captured["callback_args"] = callback_args
+        captured["legacy_command"] = legacy_command
         return _proc(0)
-    monkeypatch.setattr(cleanup.subprocess, "run", _run)
+    monkeypatch.setattr(claim_providers, "_run_provider_process", _run)
     proc = cleanup._run_codespaces([("delete", True), ("cs-x", False), ("--force", True)])
     assert proc.returncode == 0
-    assert captured["cmd"] == ["agent-codespaces", "delete", "cs-x", "--force"]
+    assert captured == {
+        "provider": "agent-codespaces@marketplace",
+        "callback_args": ("delete", "cs-x", "--force"),
+        "legacy_command": ("agent-codespaces", "delete", "cs-x", "--force"),
+    }
 
 
 def test_run_codespaces_refuses_unsafe_name(monkeypatch):
@@ -197,12 +205,7 @@ def test_run_codespaces_refuses_unsafe_name(monkeypatch):
 
 
 def test_run_codespaces_still_invokes_with_a_namespaced_cell_context(monkeypatch):
-    """agent-worktrees ships with installationContext: required, so
-    COPILOT_EXTENSIONS_CONTEXT is present on EVERY real invocation -- this
-    must still invoke the resolved binstub (with a stripped/mitigated
-    environment), never refuse outright (an earlier revision did, which
-    silently disabled this feature in every normal marketplace
-    installation)."""
+    """Explicit-context calls must rebind through peer-launch."""
     from agent_worktrees import claim_providers
     provider = claim_providers.ClaimProviderManifest(
         namespace="codespace", plugin="agent-codespaces@marketplace",
@@ -210,16 +213,43 @@ def test_run_codespaces_still_invokes_with_a_namespaced_cell_context(monkeypatch
     monkeypatch.setattr(claim_providers, "discover_claim_providers",
                         lambda *a, **k: ({"codespace": provider}, ()))
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "agent-worktrees@copilot-extensions")
+    monkeypatch.setattr(claim_providers.peer_launch_adapter, "explicit_context", lambda: True)
     captured = {}
 
-    def _run(cmd, **kw):
-        captured["env"] = kw.get("env")
+    def _run(peer, *args, **kw):
+        captured["peer"] = peer
+        captured["args"] = args
+        captured["timeout"] = kw.get("timeout")
         return _proc(0)
-    monkeypatch.setattr(cleanup.subprocess, "run", _run)
+
+    monkeypatch.setattr(cleanup.subprocess, "run", lambda *a, **k: pytest.fail("legacy fallback used"))
+    monkeypatch.setattr(claim_providers.peer_launch_adapter, "run", _run)
     proc = cleanup._run_codespaces([("delete", True), ("cs-x", False), ("--force", True)])
     assert proc.returncode == 0
-    assert captured["env"] is not None
-    assert "COPILOT_EXTENSIONS_CONTEXT" not in captured["env"]
+    assert captured == {
+        "peer": "agent-codespaces",
+        "args": ("delete", "cs-x", "--force"),
+        "timeout": 660.0,
+    }
+
+
+def test_run_codespaces_refusal_does_not_fallback_to_legacy(monkeypatch):
+    from agent_worktrees import claim_providers
+
+    provider = claim_providers.ClaimProviderManifest(
+        namespace="codespace", plugin="agent-codespaces@marketplace",
+        plugin_root="/x", reclaim_command=("agent-codespaces",))
+    monkeypatch.setattr(claim_providers, "discover_claim_providers",
+                        lambda *a, **k: ({"codespace": provider}, ()))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "explicit")
+    monkeypatch.setattr(claim_providers.peer_launch_adapter, "explicit_context", lambda: True)
+    monkeypatch.setattr(
+        claim_providers.peer_launch_adapter,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(claim_providers.peer_launch_adapter.ContextRefused("refused")),
+    )
+    monkeypatch.setattr(cleanup.subprocess, "run", lambda *a, **k: pytest.fail("legacy fallback used"))
+    assert cleanup._run_codespaces([("delete", True), ("cs-x", False), ("--force", True)]) is None
 
 
 # ── reclaim_worktree ─────────────────────────────────────────────────────────

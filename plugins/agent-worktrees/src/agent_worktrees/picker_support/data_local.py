@@ -69,18 +69,6 @@ def machines():
     return [(f"{m} {e}", m, e, True)]
 
 
-def load_profile_column(machine, env):
-    """Read a host's terminal-profile column (local in-process / remote SSH)."""
-    from . import profiles_io
-    return profiles_io.load_column(machine, env)
-
-
-def apply_profile_column(machine, env, sels, *, mirror=True):
-    """Persist a host's terminal-profile column. Returns ``(ok, detail)``."""
-    from . import profiles_io
-    return profiles_io.apply_column(machine, env, sels, mirror=mirror)
-
-
 def reconcile_prs() -> int:
     """Best-effort: reconcile this machine's worktrees' active PR state against
     the provider, writing merged/closed back into the tracking YAML (#1423).

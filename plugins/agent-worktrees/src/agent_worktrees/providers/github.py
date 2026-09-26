@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 from urllib.parse import quote
 
 from ..pr_contract import Comment, CommentThread, PRSnapshot, Review, ThreadsResult
-from .base import ProviderError, PRScope, PullResult, run_cli
+from .base import ProviderError, PRScope, PullResult, reject_copilot_mention, run_cli
 
 
 # HTTP statuses worth retrying (network / 5xx / 429 / 408); 4xx (auth / not-found
@@ -105,6 +105,8 @@ class GitHubProvider:
         return env
 
     def create_pull(self, scope: PRScope, *, token: str | None = None) -> PullResult:
+        reject_copilot_mention(scope.title, what="PR title")
+        reject_copilot_mention(scope.body, what="PR description")
         args = [
             "gh", "pr", "create",
             "--repo", scope.repo,
@@ -207,6 +209,7 @@ class GitHubProvider:
         api_base: str = "",
         token: str | None = None,
     ) -> str:
+        reject_copilot_mention(marker)
         proc = run_cli(
             [
                 "gh",

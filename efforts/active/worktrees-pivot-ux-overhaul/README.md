@@ -340,21 +340,100 @@ parallelizable across worktrees.
       rendering, so left uncrossed; revisit if a later phase touches that
       path.
 
-### Phase 4 — CLAIMS column: adopt the shared pecking-order module
-- [ ] Wire the Worktrees pivot's PRs/claims section through
+### Phase 4 — CLAIMS column: adopt the shared pecking-order module (Done 2026-09-25)
+- [x] Wire the Worktrees pivot's PRs/claims section through
       `agent_worktrees.claims_rank` / `claims_cli`, matching the
       Codespaces/Containers pivots' already-shipped presentation
-      (`picker-venue-pivots`).
-- [ ] Rename/standardize the final top-line column label to `CLAIMS` on the
-      Worktrees pivot, consistent with the other pivots.
-- [ ] Read through the accelerator's cached claims graph (no independent
+      (`picker-venue-pivots`). **Done, with one deliberate architectural
+      difference from Codespaces/Containers**: those pivots' OWN backend
+      commands compute `claims_summary` (they soft-depend on
+      `agent_worktrees` as a library). `worktree-manager`'s Picker never
+      imports `agent_worktrees` directly -- it only reaches it across a
+      subprocess boundary (`list --json`), per the picker vision's
+      "Manager reaches the engine only across a process boundary"
+      principle (`demo.py`'s own docstring). So `claims_summary` is
+      computed ENGINE-side, in `agent_worktrees.__main__._worktree_to_dict`
+      (same package, direct import, right next to where `resources` -- the
+      claim ledger -- is already serialized), and the Picker's `derive.py`
+      just passes the ready-made string through -- a hermetic field, no
+      import, boundary intact. Backfills a synthetic `pr` claim from the
+      back-compat `active_pr()` when the ledger has no live `pr` claim yet
+      (covers a worktree whose PR predates the `create-pr`-time auto-claim);
+      never backfills a merged/closed PR (would be filtered as non-live
+      anyway). New engine tests: `TestWorktreeToDictClaimsSummary` (6 cases:
+      no-claims omission, ledger-only, backfill, ledger-takes-precedence,
+      no-backfill-for-merged, and rank ordering vs. a lower-priority claim).
+- [x] Rename/standardize the final top-line column label to `CLAIMS` on the
+      Worktrees pivot, consistent with the other pivots. **Done**:
+      `ACTIVE_SPECS`/`LIST_SPECS` (`engine_helpers.py`) column key
+      `"pr"` -> `"claims_summary"`, header `"pr"` -> `"claims"`. The
+      Maintenance pivot's own `CLEAN_SPECS` (a distinct cleanup-candidates
+      view, out of this phase's scope) keeps its `"pr"` column unchanged;
+      the row/sub-menu detail dialogs (`engine_dialogs.py`) also keep
+      showing the specific active-PR string via the untouched raw `"pr"`
+      field -- only the LIST's own top-line column standardized. Preserved
+      the merged-PR green highlight by keying the style off the still-
+      populated raw `"pr"` field (the shared `claims_rank.format_claim`
+      carries no merged marker of its own). Updated `scenario_claims`'s
+      golden fixture (now sets `claims_summary` directly, mirroring the
+      engine's own envelope) and regenerated all 6 affected goldens --
+      an unclaimed row's cell is now blank rather than the old `"—"`
+      placeholder, matching the Codespaces/Containers convention for "no
+      claims" exactly (a deliberate, not accidental, consequence of
+      standardizing).
+- [x] Read through the accelerator's cached claims graph (no independent
       per-render claim scan), per the vision's *warmth, not truth* rule.
+      **Done, satisfied by construction**: `claims_summary` reads only
+      `rec.resources` -- the already-persisted claim ledger loaded off the
+      YAML record -- never a fresh network/live scan. Same cost profile as
+      every other field `_worktree_to_dict` already emits per render.
 
-### Phase 5 — Replace the "R" column
-- [ ] Determine the "R" column's current source field (expected:
+### Phase 5 — Replace the "R" column (Done 2026-09-25)
+- [x] Determine the "R" column's current source field (expected:
       `resume_count`) and why it reads as meaningless in practice.
-- [ ] Decide its replacement — likely folded into Phase 6's SESS/TURNS
-      column rather than kept standalone; record the decision and rationale.
+      **Correction of the plan's own premise**: the source is NOT
+      `resume_count` -- it's `reciprocal_relation.short_label` (BOUND ●/
+      CONTROL ◐/HANDOFF ⇒/TERM ■/AMBIG ?), a real, actively-tested,
+      navigation-gating signal (CONTROL specifically backs a "Go to
+      controller" Actions-menu verb, `_reciprocal_target_row`). It read as
+      meaningless not because the data was fake, but because the bare
+      1-glyph column had no on-grid explanation, and an agent-orchestrated
+      worktree (e.g. every phase worktree in this very effort) reads as
+      CONTROL despite its own live session being ordinary CLI -- a confusing
+      mismatch between what the glyph implies and what's actually running.
+- [x] Decide its replacement (operator direction, 2026-09-25): retire the
+      standalone column entirely, redistributing its values rather than
+      folding into Phase 6's SESS/TURNS wholesale --
+      - **BOUND/CONTROL -> a CLI/ACP mode marker on the LIVE column**
+        (`derive._sess()`), keyed off the worktree's own already-resolved
+        `interface` field (bridge-hosted = ACP, everything else = CLI) --
+        NOT `reciprocal_relation`'s binding/control axis, which conflates
+        "who orchestrated this worktree" with "what interface is actually
+        running here" (confirmed distinct via the exact case above).
+      - **HANDOFF -> a genuine `state` value** (`derive._state()`), ranked
+        right after the live-session check, landing in the Recent section
+        via `bucket()`'s existing fallback (no bucket() change needed) --
+        new `C_STATE["HANDOFF"]` color.
+      - **TERM and AMBIG dropped** as redundant (TERM duplicates
+        state=FINAL/MERGED + the Completed section) and low-value (AMBIG
+        is a data-quality signal, not a routine display concern).
+      - The full `reciprocal_relation` data, `relation` short-label field,
+        and the "Go to controller" navigation action are **unchanged** --
+        only the grid glyph column is retired; nothing is lost, the
+        at-a-glance discoverability just moves to LIVE/STATE instead of a
+        standalone column.
+      `ACTIVE_SPECS`/`LIST_SPECS` (`engine_helpers.py`) drop the `"relation"`
+      column entirely; `state` widened 6->8 to fit "HANDOFF" without
+      truncation. `_RELATION_ICON`/`_RELATION_STYLE` (now unused) removed,
+      including their `engine.py` re-exports. New tests: 6 in
+      `test_reciprocal_relation.py` (HANDOFF-state fold-in, live-beats-
+      handoff precedence, bucket placement, ACP-vs-PROC mode, and the
+      CONTROL-but-still-PROC case confirming the two axes are genuinely
+      decoupled) + a new golden scenario (`scenario_handoff_acp.txt`)
+      exercising both fold-ins end-to-end in one capture. Retired 3 tests
+      that exercised the removed UI element itself (column presence/width,
+      icon-table completeness) -- the field-computation and navigation-
+      gating tests they sat alongside are untouched.
 
 ### Phase 6 — SESS/TURNS column on LIVE rows
 - [ ] Add a combined `SESS/TURNS` (or equivalent) column: total session
@@ -627,5 +706,68 @@ reviewed-plan PR per the standard effort review gate before Phase 1 begins._
 - **Next up: Phase 4** — CLAIMS column: adopt the shared
   `claims_rank`/`claims_cli` pecking-order module already shipped for the
   Codespaces/Containers pivots. Not yet started.
+
+### 2026-09-25 — Phase 4 complete: CLAIMS column via the shared claims_rank module
+- Key architectural finding before writing code: unlike Codespaces/
+  Containers (which soft-depend on `agent_worktrees` and compute
+  `claims_summary` in their OWN backend), `worktree-manager`'s Picker never
+  imports `agent_worktrees` as a library -- only across a subprocess
+  boundary. So `claims_summary` is computed ENGINE-side
+  (`agent_worktrees.__main__._worktree_to_dict`, same package as
+  `claims_rank`), not in the Picker's `derive.py`, keeping that boundary
+  intact -- `derive.norm()` just passes the ready-made string through.
+- Shipped: engine emits `claims_summary` (ranked via the shared
+  `claims_rank.summarize_claims`, backfilling a synthetic `pr` claim from
+  the back-compat `active_pr()` when the ledger predates the `create-pr`
+  auto-claim, never for a merged/closed PR); `ACTIVE_SPECS`/`LIST_SPECS`
+  column renamed `"pr"`/`"pr"` -> `"claims_summary"`/`"claims"` (Maintenance's
+  own `CLEAN_SPECS` and the row detail dialogs keep the untouched raw `"pr"`
+  field, out of this phase's scope); merged-PR green highlight preserved by
+  keying it off that same untouched raw field.
+- New tests: `TestWorktreeToDictClaimsSummary` (6 engine cases: omission,
+  ledger-only, backfill, ledger-precedence, no-backfill-for-merged, rank
+  ordering). Updated `scenario_claims`'s fixture + regenerated 6 goldens --
+  an unclaimed row's cell is now blank (was `"—"`), matching Codespaces/
+  Containers' own convention exactly, a deliberate consequence of
+  standardizing, not a regression.
+- Full suites: worktree-manager 1190 passed/1 skipped; agent-worktrees run
+  in progress at write time (prior slice's full run: 5435 passed/42
+  skipped/9 pre-existing failures) -- see the landed PR for final counts.
+- **Next up: Phase 5** — replace/retire the "R" column (unblocked by
+  Phase 1's screenshot comparison finding no historical precedent for it).
+  Not yet started.
+
+### 2026-09-25 — Phase 5 complete: "R" retired, values redistributed to STATE/LIVE
+- Corrected the plan's own premise mid-audit (third time this effort):
+  the column's source is `reciprocal_relation.short_label`
+  (BOUND/CONTROL/HANDOFF/TERM/AMBIG), not `resume_count` -- and CONTROL
+  specifically gates a real "Go to controller" Actions-menu navigation verb
+  (`_reciprocal_target_row`), not just a passive glyph. Presented this
+  finding plus a badge-based-retirement recommendation; the operator gave
+  a more specific, better redesign instead.
+- Operator's design: BOUND/CONTROL fold into LIVE as a CLI/ACP interface
+  mode marker (keyed off the worktree's own `interface` field, not
+  `reciprocal_relation`'s binding/control axis -- confirmed via a concrete
+  case that these are genuinely different signals: an agent-orchestrated
+  worktree's own live session is ordinary CLI despite reading CONTROL).
+  HANDOFF becomes a genuine `state` value. TERM/AMBIG dropped as
+  redundant/low-value. The underlying `reciprocal_relation` data and the
+  navigation action are untouched -- only the grid glyph column goes away.
+- Shipped: `derive._sess()` shows ACP vs PROC; `derive._state()` adds a
+  HANDOFF branch (threaded through `_state_style()` too, so both agree);
+  `ACTIVE_SPECS`/`LIST_SPECS` drop the `relation` column (state widened
+  6->8 to fit "HANDOFF"); `_RELATION_ICON`/`_RELATION_STYLE` removed as
+  now-unused, including their re-exports.
+- New tests: 6 in `test_reciprocal_relation.py` + a new golden scenario
+  (`scenario_handoff_acp.txt`) exercising both fold-ins together in one
+  capture -- confirmed HANDOFF lands in Recent and ACP/PROC render
+  correctly end-to-end. Retired 3 tests exercising the removed column
+  itself; kept every field-computation/navigation test.
+- Full suite: worktree-manager 1234 passed/1 skipped (up from 1227; +7 new
+  tests). No agent-worktrees engine changes this phase -- pure Picker-side
+  redistribution, so no second full suite run was needed.
+- **Next up: Phase 6** — combined SESS/TURNS column on LIVE rows, plus
+  fixing delegate/child worktrees incorrectly showing 0 turns
+  (dotfiles#458). Not yet started.
 
 

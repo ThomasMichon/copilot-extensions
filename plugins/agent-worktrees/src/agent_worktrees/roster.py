@@ -16,13 +16,9 @@ Both helpers degrade to an empty list when ``machines.yaml`` is unavailable;
 the engine then falls back to its built-in default axes.
 
 Relocated out of ``picker_tui/`` (2026-09-16, worktree-manager-control-plane
-Phase 3/6 Step 1.5): ``local_host()`` is called from ``cmd_profiles`` in
-``__main__.py`` (the standalone, SSH-able terminal-profile CLI command),
-not just from the Picker's Profiles view, so it can't be deleted along with
-the rest of the bundled Picker. ``data_local.py``/``data_ssh.py`` (both
-already-adapted, Manager-owned process-boundary files per the transplant
-byte-parity guard) and ``profiles_io.py`` still use it for the TUI's own
-Profiles view.
+Phase 3/6 Step 1.5): the roster-backed host/target vocabulary remains owned
+here even after the terminal-profile CLI surfaces moved out, so the bundled
+Picker support code can keep one canonical machine/environment mapping.
 """
 from __future__ import annotations
 

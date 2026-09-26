@@ -593,60 +593,6 @@ def test_route_to_sibling_no_project_omits_flag(monkeypatch, tmp_path):
     assert "--project" not in [str(c) for c in captured["cmd"]]
 
 
-def test_profiles_get_emits_self_diagonal(monkeypatch, capfd, tmp_path):
-    """`profiles get --json` emits this host's column incl. the locked self."""
-    import argparse
-
-    from agent_worktrees import config as cfg
-
-    cfg_path = tmp_path / "config.yaml"
-    monkeypatch.setattr(cfg, "default_config_path", lambda: cfg_path)
-    monkeypatch.setattr(m, "_profiles_host", lambda: ("Anomalous-Potato", "Win"))
-
-    rc = m.cmd_profiles(argparse.Namespace(profiles_action="get", json=True))
-    assert rc == 0
-    out = capfd.readouterr().out
-    assert '"machine": "Anomalous-Potato"' in out
-    assert '"kind": "agent"' in out
-
-
-def test_profiles_apply_writes_and_normalizes(monkeypatch, capfd, tmp_path):
-    """`profiles apply --set` persists the column with self forced in."""
-    import argparse
-    import json as _json
-
-    from agent_worktrees import config as cfg
-    from agent_worktrees import profiles as profiles_mod
-
-    cfg_path = tmp_path / "config.yaml"
-    monkeypatch.setattr(cfg, "default_config_path", lambda: cfg_path)
-    monkeypatch.setattr(m, "_profiles_host", lambda: ("Anomalous-Potato", "Win"))
-
-    rc = m.cmd_profiles(argparse.Namespace(
-        profiles_action="apply", json=True, no_mirror=True,
-        set=_json.dumps([{"machine": "Emancipation-Cube", "env": "Win", "kind": "shell"}]),
-    ))
-    assert rc == 0
-    capfd.readouterr()
-    loaded = profiles_mod.load_selection(cfg_path)
-    assert profiles_mod.TargetSel("Anomalous-Potato", "Win", "agent") in loaded
-    assert profiles_mod.TargetSel("Emancipation-Cube", "Win", "shell") in loaded
-
-
-def test_profiles_apply_rejects_bad_json(monkeypatch, tmp_path):
-    import argparse
-
-    from agent_worktrees import config as cfg
-
-    cfg_path = tmp_path / "config.yaml"
-    monkeypatch.setattr(cfg, "default_config_path", lambda: cfg_path)
-    monkeypatch.setattr(m, "_profiles_host", lambda: ("Anomalous-Potato", "Win"))
-
-    rc = m.cmd_profiles(argparse.Namespace(
-        profiles_action="apply", json=True, no_mirror=True, set="{not json"))
-    assert rc == 2
-
-
 def test_picker_status_reports_manager_availability(monkeypatch, capsys):
     """`picker status` reports whether the standalone Worktree Manager owns the
     picker seam now that the bundled copy is gone."""
@@ -741,32 +687,15 @@ def test_reap_sessions_is_project_scoped_not_no_project():
     assert "reap-sessions" not in m._NO_PROJECT_COMMANDS
 
 
-def test_terminal_fragment_is_no_project_command():
-    """terminal-fragment is machine-global: it reads EVERY registered project's
-    config and takes ``--machine``, so it must dispatch WITHOUT a resolvable
-    project. The installer's Deploy-Shortcuts invokes it as
-    ``terminal-fragment --machine <key>`` from a context with no project, so a
-    missing entry here makes fragment generation fail (regression: PR #771)."""
-    assert "terminal-fragment" in m._NO_PROJECT_COMMANDS
+def test_removed_terminal_profile_commands_not_registered():
+    parser = m.build_parser()
 
-
-def test_bare_terminal_fragment_without_project_dispatches(monkeypatch, capsys):
-    """`agent-worktrees terminal-fragment --machine <key>` runs even when no
-    project resolves from cwd/env -- it must NOT balk with the project-resolution
-    error the installer's Deploy-Shortcuts would surface as a fragment failure."""
-    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
-    monkeypatch.setattr(m, "_git_toplevel", lambda p: None)
-    monkeypatch.setattr(m.inst, "read_projects_registry", lambda: {"projects": {}})
-    # No project context -> cmd_terminal_fragment falls back to current=None and
-    # builds an (empty) fragment from zero collected projects.
-    from agent_worktrees import terminal_fragment as tf
-    monkeypatch.setattr(tf, "collect_local_projects", lambda current_project=None: [])
-
-    rc = m.main(["terminal-fragment", "--machine", "operator-machine"])
-    out = capsys.readouterr()
-    assert rc == 0
-    assert "Could not resolve a project" not in out.err
-    assert '"profiles"' in out.out          # emitted the fragment JSON
+    assert "profiles" not in m._LAZY_DISPATCH_TABLE
+    assert "terminal-fragment" not in m._LAZY_DISPATCH_TABLE
+    assert "profiles" not in m.COMMAND_MAP
+    assert "terminal-fragment" not in m.COMMAND_MAP
+    assert "profiles" not in parser._subparsers._group_actions[0].choices
+    assert "terminal-fragment" not in parser._subparsers._group_actions[0].choices
 
 
 def test_bare_reap_sessions_without_project_balks_not_crashes(monkeypatch, capsys):

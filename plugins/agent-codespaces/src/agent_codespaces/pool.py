@@ -40,6 +40,7 @@ from datetime import datetime
 from typing import Any
 
 from .config import _repo_matches_codespace
+from .driving_worktrees import codespace_claim_owner_worktrees
 from .lease import Lease, list_leases
 from .lifecycle import CodespaceInfo, classify_state, list_codespaces
 from .status import STATE_PRUNABLE, STATE_RECOVERED, list_status
@@ -1256,6 +1257,7 @@ def picker_payload(
     actionable missing-``codespace``-scope notice (#980).
     """
     entries: list[dict] = []
+    claim_owner_worktrees = codespace_claim_owner_worktrees(m.name for m in members if m.holder_effort and not m.holder_worktree)
     for m in sorted(members, key=lambda x: (x.repository, x.disposition, x.name)):
         if m.holder_effort:
             holder = f"{m.holder_effort}@{m.holder_host or '?'}"
@@ -1266,17 +1268,14 @@ def picker_payload(
             holder = _short_claim_ref(m.l2_holder)
         else:
             holder = ""
-        driving_worktree_id = _driving_worktree_id(m)
+        driving_worktree_id = _driving_worktree_id(m) or claim_owner_worktrees.get(m.name, "")
         has_driving_worktree = bool(driving_worktree_id)
         friendly = m.display_name or m.name
-        # The claiming worktree's short id: the cross-machine beacon (the 4-hex
-        # borrowing-worktree id) when held elsewhere, else the local lease's
-        # effort id, else a #897 claim's owner worktree dir name (3b -- so a
-        # claim-held box surfaces WHICH worktree locks it, not a blank). The
-        # Picker correlates this to the worktree's TASK title.
-        worktree = m.beacon or m.holder_effort or _worktree_dir_id(m.holder_worktree)
-        # A concise uppercase status for the compact table: RUNNING when live,
-        # STALE for an aged recycle candidate, else STOPPED.
+        worktree = (
+            m.beacon or driving_worktree_id or m.holder_effort
+            or _worktree_dir_id(m.holder_worktree)
+        )
+        # Compact status: RUNNING when live, STALE if an aged recycle candidate, else STOPPED.
         if m.running:
             status = "RUNNING"
         elif m.disposition == STALE:
@@ -1285,8 +1284,7 @@ def picker_payload(
             status = "STOPPED"
         # Grouping key: repo @ account (the account is a shared-pool axis).
         group = f"{_short_repo(m.repository)} @ {m.account or 'ambient'}"
-        # Second-line fallback (durable id + claim) kept for pivots that opt into
-        # a subtitle; the compact grouped layout uses columns instead.
+        # Second-line fallback (durable id + claim); the grouped layout uses columns.
         subtitle = m.name if friendly != m.name else ""
         if m.holder_effort:
             claim = f"claimed by {m.holder_effort}"
@@ -1335,12 +1333,12 @@ def picker_payload(
             "worktree_id": driving_worktree_id,  # full tracked id for drill-in
             "has_driving_worktree": "true" if has_driving_worktree else "false",
             "subtitle": subtitle,      # optional 2nd line (durable id + claim)
+            "activity": activity,      # worker's latest progress (worktree-row worker line)
+            "session_id": (live_session or {}).get("session_id") or "",  # Send message target
             "worktree_status": _worktree_status_for_worktree(driving_worktree_id),
-            # Phase 1 (picker-venue-pivots): the claiming worktree's own ranked
-            # claims-list (PR/bug/etc.), via the shared claims_rank module --
-            # "" when unclaimed, unresolvable, or agent-worktrees isn't
-            # installed alongside (see _claims_summary_for_worktree).
-            "claims_summary": _claims_summary_for_worktree(worktree),
+            # Phase 1 (picker-venue-pivots): the claiming worktree's ranked claims-list
+            # (via claims_rank) -- "" when unclaimed or agent-worktrees is absent.
+            "claims_summary": _claims_summary_for_worktree(driving_worktree_id or worktree),
             # Phase 1: the Worktrees pane's own compact sess/live column,
             # reused as-is -- LIVE/IDLE/blank (see _sess_column).
             "sess": _sess_column(live_session, worktree),
@@ -1353,6 +1351,7 @@ def picker_payload(
             "cores": str(m.cores) if m.cores_known else "?",
             "running": m.running,
             "holder": holder,
+            "effort": m.holder_effort or "",  # claim owner label (attach --effort)
             # health vs. use: two distinct axes (venue-pool Phase 3 / #709).
             "health": "running" if m.running else "stopped",
             "use": "in-use" if m.disposition == IN_USE else "free",

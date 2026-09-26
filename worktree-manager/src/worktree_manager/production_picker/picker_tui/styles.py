@@ -64,6 +64,11 @@ C_STATE = {
     "ORPHAN": "#af00ff",   # magenta (colour129)
     "ACTIVE": "#00afff",   # blue (colour039)
     "GONE": "grey35",      # dark grey (colour238)
+    # #3307 Phase 5: folded in from the retired "R" column's HANDOFF glyph --
+    # a worktree whose reciprocal_relation reports "handed-off" and has no
+    # live successor session yet.
+    "HANDOFF": "#8787ff",  # soft blue-violet (colour111) -- distinct from
+                           # ACTIVE's blue and WIP's amber
     "?": "grey35",
 }
 

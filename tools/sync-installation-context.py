@@ -87,7 +87,6 @@ def vendor_pairs() -> list[tuple[Path, Path]]:
             REPO / "plugins" / plugin / "scripts" / "installation-context" / name,
         )
         for plugin in ADOPTERS
-        if plugin != "agent-dispatch"
         for name in FILES
     ] + [
         (
@@ -98,7 +97,7 @@ def vendor_pairs() -> list[tuple[Path, Path]]:
         for plugin in ADOPTERS
         if plugin in {
             "agent-bridge", "agent-dispatch", "agent-codespaces", "agent-containers",
-            "agent-logger", "agent-index", "agent-machines",
+            "agent-logger", "agent-index", "agent-machines", "agent-worktrees",
         }
         for name in FILES
         if name.endswith(".py")

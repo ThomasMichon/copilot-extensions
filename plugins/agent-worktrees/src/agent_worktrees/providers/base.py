@@ -15,6 +15,7 @@ prints a token -- how the multi-machine system points at its vault), then ``pr.t
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -22,6 +23,38 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from ..pr_contract import PRSnapshot, ThreadsResult
+
+
+#: Matches a genuine ``@copilot`` mention (asking GitHub's Copilot cloud
+#: coding agent to act) but not a longer real handle like
+#: ``@copilot-extensions`` (excludes anything continued by a word char or
+#: hyphen). On GitHub, submitter-authored ``@copilot`` in a PR/issue
+#: comment or review does not nudge the review bot -- it delegates to the
+#: separate cloud coding agent, which pushes its own unreviewed commits to
+#: the PR branch. Asking that agent to act as the PR's own submitter is bad
+#: etiquette regardless of hook enforcement, so provider comment/review
+#: paths reject it directly rather than relying solely on the shell-level
+#: preToolUse guard (which cannot see text posted via a provider's own
+#: internal transport call).
+COPILOT_MENTION_RE = re.compile(r"@copilot(?![\w-])", re.I)
+
+
+def reject_copilot_mention(body: str, *, what: str = "comment") -> None:
+    """Raise ``ProviderError`` if ``body`` contains a genuine ``@copilot`` mention.
+
+    Called by any provider operation that publishes agent-authored text
+    (comment, review, reply) before it reaches the hosting service's
+    transport, so the block holds regardless of whether a shell-level hook
+    also inspects the invoking command.
+    """
+    if COPILOT_MENTION_RE.search(body):
+        raise ProviderError(
+            f"refusing to publish a {what} containing '@copilot': mentioning "
+            "the Copilot cloud coding agent as a PR/issue submitter invokes "
+            "it to push its own unreviewed commits, not a review request. "
+            "Remove the mention (or use plain text describing the request) "
+            "and try again."
+        )
 
 
 class ProviderError(RuntimeError):

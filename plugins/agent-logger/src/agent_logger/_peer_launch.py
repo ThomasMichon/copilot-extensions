@@ -20,11 +20,14 @@ CONTEXT_ENV = "COPILOT_EXTENSIONS_CONTEXT"
 PEERS = {
     "agent-worktrees": "agent_worktrees",
     "agent-bridge": "agent_bridge",
+    "agent-codespaces": "agent_codespaces",
+    "agent-containers": "agent_containers",
+    "agent-dispatch": "agent_dispatch",
     "agent-ssh": "agent_ssh",
 }
 OWNERS = {
     "agent-bridge", "agent-dispatch", "agent-codespaces", "agent-containers",
-    "agent-logger", "agent-index", "agent-machines",
+    "agent-logger", "agent-index", "agent-machines", "agent-worktrees",
 }
 
 
@@ -113,6 +116,36 @@ def peer_environment(context: dict[str, Any], inherited: dict[str, str]) -> dict
             "AGENT_BRIDGE_INSTALLATION_ID": f"{context['marketplaceId']}/{plugin}",
             "AGENT_BRIDGE_CONNECT_LOG": str(Path(context["logsRoot"]) / "connect.log"),
         })
+    elif plugin == "agent-codespaces":
+        environment["AGENT_CODESPACES_HOME"] = context["pluginRoot"]
+    elif plugin == "agent-containers":
+        environment.update({
+            "AGENT_CONTAINERS_HOME": context["pluginRoot"],
+            "AGENT_CONTAINERS_STATE_DIR": context["pluginRoot"],
+        })
+    elif plugin == "agent-dispatch":
+        environment.update({
+            "AGENT_DISPATCH_INSTALL_DIR": context["pluginRoot"],
+            "AGENT_DISPATCH_ROUTING_DIR": context["pluginRoot"],
+            "AGENT_DISPATCH_RUN_DIR": str(Path(context["pluginRoot"]) / "run"),
+        })
+        for key in (
+            "AGENT_DISPATCH_URL",
+            "AGENT_DISPATCH_TOKEN",
+            "AGENT_DISPATCH_CONTROL_TOKEN",
+            "AGENT_DISPATCH_SHARED_URL",
+            "AGENT_DISPATCH_SHARED_TOKEN",
+            "AGENT_DISPATCH_SHARED_TOKEN_COMMAND",
+            "AGENT_DISPATCH_SHARED_CONTROL_TOKEN_COMMAND",
+            "AGENT_DISPATCH_ENDPOINT",
+            "AGENT_DISPATCH_SUPERVISE_MACHINE",
+            "AGENT_DISPATCH_FAILOVER_MACHINE",
+            "AGENT_DISPATCH_WSL_WINDOWS_CLIENT",
+            "AGENT_DISPATCH_NO_AUTOSTART",
+        ):
+            value = inherited.get(key)
+            if value:
+                environment[key] = value
     return environment
 
 

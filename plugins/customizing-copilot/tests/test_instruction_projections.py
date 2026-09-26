@@ -1215,6 +1215,70 @@ def test_cli_sync_blocks_malformed_committed_settings(
     assert payload["findings"][0]["check"] == "projection-settings"
 
 
+def test_manager_forwards_agent_worktrees_path_to_discover_enabled_sources(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """`manage-instruction-projections.py`'s `--agent-worktrees-path` must
+    reach `discover_enabled_sources()` -- a second, independent CLI boundary
+    from `scan-customizations.py`'s own forwarding."""
+    import shutil
+    import subprocess
+
+    other_repo = tmp_path / "other-repo-checkout"
+    marketplace_root = other_repo / ".ai"
+    _write_plugin(marketplace_root, "other-marketplace", "cap")
+    (marketplace_root / ".claude-plugin" / "marketplace.json").parent.mkdir(
+        parents=True, exist_ok=True
+    )
+    (marketplace_root / ".claude-plugin" / "marketplace.json").write_text(
+        json.dumps({
+            "name": "other-marketplace",
+            "plugins": [{"name": "cap", "source": "cap"}],
+        }),
+        encoding="utf-8",
+    )
+
+    commands = []
+
+    def fake_which(name):
+        if name == "agent-worktrees":
+            return str(tmp_path / "wrong-cell" / "agent-worktrees")
+        return None
+
+    def fake_run(argv, **kwargs):
+        commands.append(argv)
+        return subprocess.CompletedProcess(
+            argv, 0, stdout=f"{other_repo}\n", stderr="",
+        )
+
+    monkeypatch.setattr(shutil, "which", fake_which)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    settings = repo / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({
+        "enabledPlugins": {"cap@other-marketplace": True},
+        "extraKnownMarketplaces": {
+            "other-marketplace": {
+                "source": {
+                    "source": "agent-worktrees-repo",
+                    "repo": "other-repo-alias",
+                },
+            },
+        },
+    }), encoding="utf-8")
+
+    resolved = str(tmp_path / "right-cell" / "agent-worktrees")
+    manager.main([
+        "sync", str(repo), "--json", "--agent-worktrees-path", resolved,
+    ])
+
+    assert commands, "agent-worktrees-repo resolution was never attempted"
+    assert all(c[0] == resolved for c in commands), commands
+
+
 def test_sync_skips_unavailable_enabled_plugin_payload_when_not_participating(
     tmp_path: Path,
 ) -> None:

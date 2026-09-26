@@ -389,6 +389,14 @@ set and brings each into scope:
 python3 <skill-dir>/scripts/scan-customizations.py <repo-root> --from-settings
 ```
 
+> **`agent-worktrees-repo` marketplace sources.** If any `extraKnownMarketplaces`
+> entry declares `{"source": "agent-worktrees-repo", "repo": "<name>"}`, add
+> `--agent-worktrees-path "<agent-worktrees catalog argv[0]>"` to either
+> `scan-customizations.py --from-settings` or `manage-instruction-projections.py
+> sync` (no flag needed) / `manage-instruction-projections.py scan
+> --from-settings` -- all share the same resolver, and ambient `PATH` could
+> otherwise select a different marketplace/cell's install.
+
 - An **in-repo `directory` marketplace** plugin (e.g. `./.ai`) is *owned* — it
   gets the full frontmatter / name-folder / trigger checks, closing the gap
   where a repo's own `.ai` skills were invisible to the scan.

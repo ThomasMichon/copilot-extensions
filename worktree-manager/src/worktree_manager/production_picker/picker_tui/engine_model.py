@@ -186,6 +186,22 @@ class PickerScreenModelMixin:
         machine = self._machine_key_map().get(display, display) if display else None
         return pivots_mod.find_claiming_task(
             self.pivots, self._pivot_runtimes, machine, wid, wid4)
+    def _worktree_supervised_workers(self, rec):
+        """Remote workers worktree ``rec`` supervises: cached venue-pivot rows
+        whose ``worker`` block names ``rec`` as their driving worktree (see
+        ``pivots.find_supervised_workers``). Scope resolution mirrors
+        ``_worktree_claiming_task``. Never fetches; ``[]`` until loaded."""
+        from . import pivots as pivots_mod
+
+        display = rec.get("machine")
+        machine = self._machine_key_map().get(display, display) if display else None
+        try:
+            return pivots_mod.find_supervised_workers(
+                getattr(self, "pivots", None) or [],
+                getattr(self, "_pivot_runtimes", None) or {},
+                machine, rec.get("id"))
+        except Exception:
+            return []
     def _task_groups(self):
         """Task rows grouped for display. Groups by the pivot's ``group`` entry
         field (``group_field``) when the manifest declares one -- e.g. the

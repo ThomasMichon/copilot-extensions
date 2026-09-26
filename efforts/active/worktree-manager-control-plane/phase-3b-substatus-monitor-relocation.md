@@ -15,7 +15,9 @@
   (b) Mux `set-option` status-bar writes out of `agent-worktrees` and into a
   new Worktree Manager companion daemon, while keeping `agent-worktrees`
   as the sole owner/accumulator of worktree status data.
-- **Status:** Planned — docs-only ordered plan; implementation not started.
+- **Status:** In progress — Step 1 (of 6) landed 2026-09-25, merged as
+  [#3650](https://github.com/ThomasMichon/copilot-extensions/pull/3650);
+  Steps 2-6 not yet implemented.
 
 ## Why this needs its own ordered plan
 
@@ -247,7 +249,7 @@ Payload:
   "values": {
     "@aw_updater": "12345",
     "@aw_updater_prefix": "C:\\Users\\...\\Python",
-    "@aw_ctx": "tmichon-book2 | repo:1c4f ",
+    "@aw_ctx": "example-machine | repo:1c4f ",
     "@aw_seg": "WIP ..."
   },
   "rendered_at": "2026-09-17T08:00:15Z",
@@ -322,8 +324,21 @@ Each step lands as its own PR. The sequence deliberately keeps earlier steps
 sessions, then deletes the redundant path. No step should leave a session in a
 state where two long-lived writers are both intended to own it.
 
-1. [ ] **Add the daemon-link contract and resident cache seam to
-       `agent-worktrees`, additive only.**
+1. [x] **Add the daemon-link contract and resident cache seam to
+       `agent-worktrees`, additive only.** Landed: `mux_link.py` (rendezvous-
+       parseable ``managed_mux_*`` fields in `status-monitor.lock`, mirroring
+       `hook_ipc`/`classify_daemon`/`worktree_status_daemon`), a thread-safe
+       `ManagedMuxCache` (monotonic `mapping_revision` guard rejects a
+       stale/out-of-order observation), and `InProcessRuntime` wired into
+       `cmd_status_monitor` (lock-extra publication, idle-strike
+       `has_active_demand()`, shutdown). `_monitor_sweep` merges the cache's
+       currently-live session names into its existing `catalog_observer` call
+       only -- never into `served`, never triggering a `set-option` write of
+       its own. Client-side `mux_live_via_daemon`/`mux_live_with_boot` push
+       helpers are pinned but not yet called by anything (Step 2's Worktree
+       Manager mux-companion daemon is the first real caller). No behavior
+       change to ordinary sessions: the cache starts (and stays) empty until
+       a Manager daemon exists to push into it.
    - Add a dedicated manager-observation IPC surface to `status-monitor.lock`
      (same loopback/token envelope as `HookIpcServer`).
    - Add a monitor-owned managed-mux cache abstraction that can store Manager

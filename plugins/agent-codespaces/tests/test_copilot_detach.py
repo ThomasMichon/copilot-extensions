@@ -49,6 +49,8 @@ def seams(monkeypatch):
         lambda: [types.SimpleNamespace(name="cs-1", repository="example/example-web-vessel")],
     )
     monkeypatch.setattr(copilot_venue, "claim_or_exit_code", lambda a: None)
+    # Hermetic: never read the developer's own ~/.copilot/settings.json model.
+    monkeypatch.setattr(detach, "model_copilot_args", lambda existing: [])
     monkeypatch.setattr(copilot_venue, "_ensure_agent_bridge_plugin", lambda n: None)
     monkeypatch.setattr(venue_copilot, "resolve_daemon_port", lambda *a, **k: 41234)
     monkeypatch.setattr(owner, "ensure_owner_running", lambda cfg: True)
@@ -231,6 +233,22 @@ def test_dry_run_has_no_side_effects(seams, capsys):
     out = json.loads(capsys.readouterr().out)
     assert out["dry_run"] is True and out["scope_id"] == "anchor-example-web@cs-1"
     assert seams.holds == [] and seams.ssh == [] and seams.reserve == []
+
+
+def test_detached_session_mirrors_the_callers_model(seams, monkeypatch, capsys):
+    seen = []
+
+    def _model_args(existing):
+        seen.append(list(existing))
+        return ["--model=example-model", "--reasoning-effort=high"]
+
+    monkeypatch.setattr(detach, "model_copilot_args", _model_args)
+    rc = detach.cmd_detach(_args(dry_run=True), ssh_session=_ssh(seams))
+    assert rc == 0
+    args = json.loads(capsys.readouterr().out)["copilot_args"]
+    assert seen == [["--no-ask-user"]]
+    assert args[:3] == ["--no-ask-user", "--model=example-model", "--reasoning-effort=high"]
+    assert args[3].startswith("--session-id=")
 
 
 def test_seed_file_from_stdin(seams, monkeypatch, capsys):

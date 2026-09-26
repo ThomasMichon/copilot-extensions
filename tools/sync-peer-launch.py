@@ -13,6 +13,7 @@ DESTINATIONS = (
     REPO / "plugins" / "agent-dispatch" / "src" / "agent_dispatch" / "peer_launch.py",
     REPO / "plugins" / "agent-codespaces" / "src" / "agent_codespaces" / "_peer_launch.py",
     REPO / "plugins" / "agent-containers" / "src" / "agent_containers" / "_peer_launch.py",
+    REPO / "plugins" / "agent-worktrees" / "src" / "agent_worktrees" / "_peer_launch.py",
     REPO / "plugins" / "agent-logger" / "src" / "agent_logger" / "_peer_launch.py",
     REPO / "plugins" / "agent-index" / "src" / "agent_index" / "_peer_launch.py",
     REPO / "plugins" / "agent-machines" / "src" / "agent_machines" / "_peer_launch.py",

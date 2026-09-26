@@ -468,6 +468,66 @@ def test_agent_worktrees_repo_marketplace_resolves_via_registry(
     )
     assert len(sources) == 1
     assert sources[0].payload_root == (other_repo / ".ai" / "cap").resolve()
+
+
+def test_agent_worktrees_repo_marketplace_prefers_explicit_command(
+    tmp_path: Path, monkeypatch,
+):
+    """A caller-supplied resolved command must win over `PATH` -- the whole
+    point is not selecting a different marketplace/cell's ambient install."""
+    other_repo = tmp_path / "other-repo-checkout"
+    (other_repo / ".ai" / "cap" / "skills").mkdir(parents=True)
+    _skill(other_repo / ".ai" / "cap" / "skills", "cap")
+    (other_repo / ".ai" / "cap" / "plugin.json").write_text(
+        json.dumps({"name": "cap", "version": "1.0.0"}), encoding="utf-8",
+    )
+    _marketplace(
+        other_repo / ".ai",
+        "other-marketplace",
+        entries=[{"name": "cap", "source": "cap"}],
+    )
+
+    commands = []
+
+    def fake_which(name):
+        if name == "agent-worktrees":
+            return str(tmp_path / "wrong-cell" / "agent-worktrees")
+        return None
+
+    def fake_run(argv, **kwargs):
+        commands.append(argv)
+        assert argv[1:3] == ["repos", "find"]
+        return scan.subprocess.CompletedProcess(
+            argv, 0, stdout=f"{other_repo}\n", stderr="",
+        )
+
+    monkeypatch.setattr(scan.shutil, "which", fake_which)
+    monkeypatch.setattr(scan.subprocess, "run", fake_run)
+
+    repo = tmp_path / "consuming-repo"
+    repo.mkdir()
+    _settings(
+        repo,
+        {"cap@other-marketplace": True},
+        {
+            "other-marketplace": {
+                "source": {
+                    "source": "agent-worktrees-repo",
+                    "repo": "other-repo-alias",
+                },
+            },
+        },
+    )
+
+    resolved = str(tmp_path / "right-cell" / "agent-worktrees")
+    sources = scan.assemble_enabled_plugins(
+        repo,
+        installed_root=tmp_path / "none",
+        home=tmp_path / "home",
+        agent_worktrees_command=resolved,
+    )
+    assert len(sources) == 1
+    assert commands and all(c[0] == resolved for c in commands)
     assert sources[0].origin == "other-marketplace/cap"
     # Cross-repo (repo dir isn't a parent of the resolved payload) -> external,
     # unlike an in-repo ./.ai directory marketplace which is "controlled".
@@ -526,6 +586,194 @@ def test_agent_worktrees_repo_marketplace_unresolvable_cases(
     # never raises.
     assert len(sources) == 1
     assert sources[0].payload_root == tmp_path / "none" / "other-marketplace" / "cap"
+
+
+def test_agent_worktrees_repo_explicit_unhostable_ps1_raises(
+    tmp_path: Path, monkeypatch,
+):
+    """An explicitly resolved .ps1 command with no PowerShell host must
+    raise -- unlike the ambient-resolution failures above, it must NOT
+    silently fall through to inspecting the unrelated installed-root
+    footprint (that would be a marketplace/cell provenance mismatch, not a
+    graceful degrade)."""
+    if os.name != "nt":
+        return
+    monkeypatch.setattr(scan.shutil, "which", lambda _name: None)
+
+    repo = tmp_path / "consuming-repo"
+    repo.mkdir()
+    _settings(
+        repo,
+        {"cap@other-marketplace": True},
+        {
+            "other-marketplace": {
+                "source": {
+                    "source": "agent-worktrees-repo",
+                    "repo": "some-repo",
+                },
+            },
+        },
+    )
+
+    with pytest.raises(ValueError, match="PowerShell"):
+        scan.assemble_enabled_plugins(
+            repo,
+            installed_root=tmp_path / "none",
+            home=tmp_path / "home",
+            agent_worktrees_command=r"C:\right-cell\agent-worktrees.ps1",
+        )
+
+
+@pytest.mark.parametrize(
+    "break_it",
+    ["launch_error", "cli_fails", "empty_output", "not_a_directory"],
+)
+def test_agent_worktrees_repo_explicit_command_failure_raises(
+    tmp_path: Path, monkeypatch, break_it: str,
+):
+    """Any failure of an *explicitly* supplied command must raise, not
+    silently fall through to inspecting the unrelated installed-root
+    footprint -- the same provenance-mismatch risk as the Windows .ps1
+    case above, just for every other failure mode (a stale/wrong path,
+    a CLI that errors, a timeout, ...)."""
+    explicit = str(tmp_path / "right-cell" / "agent-worktrees")
+
+    def fake_run(argv, **kwargs):
+        if break_it == "launch_error":
+            raise OSError("no such file or directory")
+        if break_it == "cli_fails":
+            return scan.subprocess.CompletedProcess(argv, 1, stdout="", stderr="boom")
+        if break_it == "empty_output":
+            return scan.subprocess.CompletedProcess(argv, 0, stdout="   \n", stderr="")
+        if break_it == "not_a_directory":
+            missing = tmp_path / "does-not-exist"
+            return scan.subprocess.CompletedProcess(argv, 0, stdout=f"{missing}\n", stderr="")
+        raise AssertionError("unreachable")
+
+    monkeypatch.setattr(scan.subprocess, "run", fake_run)
+
+    repo = tmp_path / "consuming-repo"
+    repo.mkdir()
+    _settings(
+        repo,
+        {"cap@other-marketplace": True},
+        {
+            "other-marketplace": {
+                "source": {
+                    "source": "agent-worktrees-repo",
+                    "repo": "some-repo",
+                },
+            },
+        },
+    )
+
+    with pytest.raises(ValueError, match="some-repo"):
+        scan.assemble_enabled_plugins(
+            repo,
+            installed_root=tmp_path / "none",
+            home=tmp_path / "home",
+            agent_worktrees_command=explicit,
+        )
+
+
+def test_agent_worktrees_repo_blank_explicit_command_raises(
+    tmp_path: Path, monkeypatch,
+):
+    """An explicitly supplied but blank command (e.g. `--agent-worktrees-path
+    ""`) must raise, not silently fall back to `shutil.which` -- `bool("")`
+    is `False`, so a naive truthiness check would wrongly treat this as
+    'no explicit command was given' and use ambient PATH."""
+    monkeypatch.setattr(
+        scan.shutil, "which", lambda _name: str(tmp_path / "wrong-cell" / "agent-worktrees")
+    )
+
+    repo = tmp_path / "consuming-repo"
+    repo.mkdir()
+    _settings(
+        repo,
+        {"cap@other-marketplace": True},
+        {
+            "other-marketplace": {
+                "source": {
+                    "source": "agent-worktrees-repo",
+                    "repo": "some-repo",
+                },
+            },
+        },
+    )
+
+    with pytest.raises(ValueError, match="blank"):
+        scan.assemble_enabled_plugins(
+            repo,
+            installed_root=tmp_path / "none",
+            home=tmp_path / "home",
+            agent_worktrees_command="",
+        )
+
+
+def test_main_forwards_agent_worktrees_path_with_from_settings(
+    tmp_path: Path, monkeypatch,
+):
+    """`--agent-worktrees-path` must reach the real scanner CLI boundary
+    (main()), not just the assembler function called directly -- a future
+    change could parse the flag yet drop it before the actual call."""
+    other_repo = tmp_path / "other-repo-checkout"
+    (other_repo / ".ai" / "cap" / "skills").mkdir(parents=True)
+    _skill(other_repo / ".ai" / "cap" / "skills", "cap")
+    (other_repo / ".ai" / "cap" / "plugin.json").write_text(
+        json.dumps({"name": "cap", "version": "1.0.0"}), encoding="utf-8",
+    )
+    _marketplace(
+        other_repo / ".ai",
+        "other-marketplace",
+        entries=[{"name": "cap", "source": "cap"}],
+    )
+
+    commands = []
+
+    def fake_which(name):
+        if name == "agent-worktrees":
+            return str(tmp_path / "wrong-cell" / "agent-worktrees")
+        return None
+
+    def fake_run(argv, **kwargs):
+        commands.append(argv)
+        return scan.subprocess.CompletedProcess(
+            argv, 0, stdout=f"{other_repo}\n", stderr="",
+        )
+
+    monkeypatch.setattr(scan.shutil, "which", fake_which)
+    monkeypatch.setattr(scan.subprocess, "run", fake_run)
+
+    repo = tmp_path / "consuming-repo"
+    repo.mkdir()
+    _settings(
+        repo,
+        {"cap@other-marketplace": True},
+        {
+            "other-marketplace": {
+                "source": {
+                    "source": "agent-worktrees-repo",
+                    "repo": "other-repo-alias",
+                },
+            },
+        },
+    )
+    home = tmp_path / "home"
+    copilot = home / ".copilot"
+    copilot.mkdir(parents=True, exist_ok=True)
+    (copilot / "config.json").write_text(
+        json.dumps({"trustedFolders": [str(repo)]}), encoding="utf-8",
+    )
+    monkeypatch.setattr(scan.Path, "home", lambda: home)
+
+    resolved = str(tmp_path / "right-cell" / "agent-worktrees")
+    assert scan.main([
+        str(repo), "--from-settings", "--agent-worktrees-path", resolved,
+    ]) == 0
+
+    assert commands, "agent-worktrees-repo resolution was never attempted"
+    assert all(c[0] == resolved for c in commands), commands
 
 
 def test_assemble_github_marketplace_is_external_with_source(tmp_path: Path):

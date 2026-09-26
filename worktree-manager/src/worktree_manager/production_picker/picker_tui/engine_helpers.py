@@ -196,28 +196,15 @@ VERSION = _resolve_version()
 
 PAD = "   "  # inter-column padding (3 spaces -> info breathes)
 
-# worktree-finality-and-obligations Phase 9 / iconify-relation: the RELATION
-# column's enum vocabulary (reciprocal.short_label's output) collapsed to one
-# scannable glyph each, so the column can shrink from 7 cells (still
-# truncated to "RELATI…" even at that width) to 2 -- the freed width goes to
-# the flex `title` column via `fit()`. The full word rides the row's second
-# (detail) line instead, so no information is actually lost.
-_RELATION_ICON = {
-    "BOUND": "●",
-    "CONTROL": "◐",
-    "HANDOFF": "⇒",
-    "TERM": "■",
-    "AMBIG": "?",
-    "": " ",
-}
-_RELATION_STYLE = {
-    "BOUND": C_STATE["ACTIVE"],
-    "CONTROL": "grey58",
-    "HANDOFF": C_STATE["WIP"],
-    "TERM": "grey35",
-    "AMBIG": C_WARN,
-    "": "",
-}
+# #3307 Phase 5: the standalone RELATION column (was: iconify-relation's
+# glyph-collapsed "R") is retired. Its three values are redistributed rather
+# than dropped wholesale: BOUND/CONTROL fold into the LIVE column as a CLI/ACP
+# interface-mode marker (see ``derive._sess()``), HANDOFF becomes a genuine
+# ``state`` value (see ``derive._state()``), and TERM/AMBIG are dropped as
+# redundant/low-value (TERM duplicates the state column's own FINAL/MERGED +
+# Completed section; AMBIG is a data-quality signal, not a routine display
+# concern). The full reciprocal_relation data and the "Go to controller"
+# navigation action it gates are UNCHANGED -- only this grid glyph goes away.
 
 # Named palettes for a registered pivot's declarative per-value cell colouring
 # (Column.palette). The ``state`` palette REUSES the Worktrees state vocabulary
@@ -323,8 +310,6 @@ def row_text(rec, cols, width, selected, indent=1, pulse=0, mark=None):
         if i:
             t.append(PAD)
         val = str(rec.get(k, ""))
-        if k == "relation":
-            val = _RELATION_ICON.get(val, "?" if val else " ")
         if k == "machine_env":
             if rec.get("source_kind") != "machine-ssh":
                 t.append(_clip(val, w, a))
@@ -343,13 +328,17 @@ def row_text(rec, cols, width, selected, indent=1, pulse=0, mark=None):
         style = ""
         if k == "state":
             style = C_STATE.get(rec.get("state", ""), "")
-        elif k == "relation":
-            style = _RELATION_STYLE.get(rec.get("relation", ""), "")
         elif k == "env":
             style = C_ENV.get(rec.get("env", ""), "")
         elif k == "dispo":
             style = C_DISPO.get(rec.get("dispo_level", ""), "")
         elif k == "pr" and rec.get("pr", "").endswith("✓"):
+            style = C_PR_MERGED
+        elif k == "claims_summary" and rec.get("pr", "").endswith("✓"):
+            # #3307 Phase 4: the Worktrees pivot's CLAIMS column shows the
+            # shared claims_rank summary text, but keeps the merged-PR
+            # green highlight keyed off the still-populated raw "pr" field
+            # (claims_rank's own formatting carries no merged marker).
             style = C_PR_MERGED
         elif k == "sess":
             if rec.get("sess", "").startswith("●") or rec.get("sess") == "PROC":
@@ -376,17 +365,22 @@ def header_text(cols, width, label_style=C_HEADER, indent=1):
 
 
 ACTIVE_SPECS = [
-    ("id4", "id", 4, "l", 2), ("state", "state", 6, "l", 4),
-    ("relation", "r", 1, "l", 6),
+    ("id4", "id", 4, "l", 2),
+    # #3307 Phase 5: widened 6 -> 8 to fit "HANDOFF" (folded in from the
+    # retired "R"/relation column) without truncation.
+    ("state", "state", 8, "l", 4),
     ("machine_env", "source", 19, "l", 5),
     ("age", "age", 4, "l", 7), ("sess", "live", 4, "l", 8),
-    ("pr", "pr", 8, "l", 3),
+    # #3307 Phase 4: standardized on "claims" (the shared claims_rank
+    # summary), replacing the single-PR-only "pr" column -- matching the
+    # Codespaces/Containers pivots' own column label.
+    ("claims_summary", "claims", 12, "l", 3),
 ]
 LIST_SPECS = [
-    ("id4", "id", 4, "l", 2), ("state", "state", 6, "l", 4),
-    ("relation", "r", 1, "l", 5),
+    ("id4", "id", 4, "l", 2), ("state", "state", 8, "l", 4),
     ("age", "age", 4, "l", 6), ("sess", "live", 4, "l", 7),
-    ("turns", "t", 3, "r", 8), ("pr", "pr", 8, "l", 3),
+    ("turns", "t", 3, "r", 8),
+    ("claims_summary", "claims", 12, "l", 3),
 ]
 #: The Worktrees list's own row title now lives entirely on the detail line
 #: (``WorktreesView._detail_line``, "Title: Activity") rather than as a

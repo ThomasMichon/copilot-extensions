@@ -35,11 +35,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from . import capture_cli
+from . import claim_provider_cli
 from . import pool as pool_mod
 from . import relay_launch
-from . import claim_provider_cli
-from .worktrees import ContextRefused, validate_context
 from .codespace_config import CodespaceSource
+from .worktrees import ContextRefused, validate_context
 from .config import (
     CANONICAL_CONFIG_REL,
     CONFIG_FILE_IN_DIR,
@@ -120,6 +121,7 @@ _ADO_AUTH_EXIT = 77
 _GH_REQUIRED_COMMANDS = frozenset({
     "ssh", "list", "delete", "finalize", "stop", "verify",
     "create", "prune", "wait", "pool", "allocate", "copilot",
+    "sync-sessions",
 })
 
 
@@ -364,6 +366,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     claim_provider_cli.add_claim_provider_parsers(sub)
+    capture_cli.add_capture_parser(sub)
     # --- finalize ---
     finalize_parser = sub.add_parser(
         "finalize",
@@ -3306,16 +3309,25 @@ def _cmd_delete(args: argparse.Namespace) -> int:
     """Delete a CodeSpace, recovering its Copilot sessions first (unless
     --no-sync). The recovery is best-effort: a failure warns but does not block
     deletion (use `finalize` for a sync-gated delete)."""
-    if not getattr(args, "no_sync", False):
-        res = sync_codespace_sessions(args.name, verbose=args.verbose)
-        if res.get("ok"):
-            print(f"[OK] Recovered {res.get('session_count', 0)} session(s) "
-                  f"before delete: {res.get('detail', '')}")
-        else:
-            print(f"[WARN] Pre-delete session recovery failed (continuing): "
-                  f"{res.get('detail')}", file=sys.stderr)
-    delete_codespace(args.name, force=args.force)
-    print(f"Deleted: {args.name}")
+    from ssh_manager import TargetBusyError
+
+    from .lifecycle_lock import lifecycle_lock
+
+    try:
+        with lifecycle_lock(args.name) as lock:
+            if not getattr(args, "no_sync", False):
+                res = sync_codespace_sessions(args.name, verbose=args.verbose, lock=lock)
+                if res.get("ok"):
+                    print(f"[OK] Recovered {res.get('session_count', 0)} session(s) "
+                          f"before delete: {res.get('detail', '')}")
+                else:
+                    print(f"[WARN] Pre-delete session recovery failed (continuing): "
+                          f"{res.get('detail')}", file=sys.stderr)
+            delete_codespace(args.name, force=args.force)
+            print(f"Deleted: {args.name}")
+    except TargetBusyError as busy:
+        print(f"[BUSY] {busy}", file=sys.stderr)
+        return 1
     _release_lease_quietly(args.name)
     return 0
 
@@ -3382,6 +3394,9 @@ def _cmd_finalize(args: argparse.Namespace) -> int:
     delete is additionally gated on the cleanliness beacon (off-box safety) unless
     ``--force`` (venue-pool Phase 3).
     """
+    from ssh_manager import TargetBusyError
+
+    from .lifecycle_lock import lifecycle_lock
     from .status import STATE_RECOVERED, set_status
 
     # venue-pool Phase 3: gate the destructive delete on off-box safety BEFORE any
@@ -3393,58 +3408,63 @@ def _cmd_finalize(args: argparse.Namespace) -> int:
             print(f"[blocked] {block}", file=sys.stderr)
             return 2
 
-    # Preserving path may skip booting a Shutdown box; the destructive --delete
-    # path must recover first (booting if needed) before the box is gone.
-    res = sync_codespace_sessions(
-        args.name, timeout=args.timeout, verbose=args.verbose,
-        skip_if_shutdown=not args.delete,
-    )
-    if res.get("ok"):
-        if res.get("skipped"):
-            print(f"[OK] {args.name}: {res.get('detail', '')}")
-        else:
-            print(f"[OK] Recovered {res.get('session_count', 0)} session(s) from "
-                  f"{args.name}: {res.get('detail', '')}")
-    else:
-        print(f"[WARN] Session recovery for {args.name} failed: "
-              f"{res.get('detail')}", file=sys.stderr)
-        if args.delete and not args.force:
-            print("Refusing to delete after a failed recovery. Diagnose and "
-                  "resolve the error above (often a still-booting CodeSpace or "
-                  "an SSH/relay issue), then re-run finalize so the sessions "
-                  "are captured. If the CodeSpace is genuinely unbootable (never "
-                  "reaches SSH), its session-state is unrecoverable -- retire it "
-                  "with `agent-codespaces finalize <name> --delete --force` (or "
-                  "`delete <name> --force --no-sync`) to skip recovery.",
-                  file=sys.stderr)
-            return 1
-
-    if args.delete:
-        delete_codespace(args.name, force=args.force)
-        print(f"Deleted: {args.name}")
-        _release_lease_quietly(args.name)
-        _clear_status_quietly(args.name)
-        return 0 if res.get("ok") else 1
-
-    # Default preserve path: stop (idempotent) then mark recovered.
     try:
-        stopped = stop_codespace(args.name)
-        print(f"Stopped: {args.name} (preserved -- boots on next connect)"
-              if stopped else f"Already stopped: {args.name}")
-    except RuntimeError as exc:
-        print(f"[WARN] Could not stop {args.name} (continuing): {exc}",
-              file=sys.stderr)
+        with lifecycle_lock(args.name) as lock:
+            # Preserving path may skip booting a Shutdown box; the destructive --delete
+            # path must recover first (booting if needed) before the box is gone.
+            res = sync_codespace_sessions(
+                args.name, timeout=args.timeout, verbose=args.verbose,
+                skip_if_shutdown=not args.delete, lock=lock,
+            )
+            if res.get("ok"):
+                if res.get("skipped"):
+                    print(f"[OK] {args.name}: {res.get('detail', '')}")
+                else:
+                    print(f"[OK] Recovered {res.get('session_count', 0)} session(s) from "
+                          f"{args.name}: {res.get('detail', '')}")
+            else:
+                print(f"[WARN] Session recovery for {args.name} failed: "
+                      f"{res.get('detail')}", file=sys.stderr)
+                if args.delete and not args.force:
+                    print("Refusing to delete after a failed recovery. Diagnose and "
+                          "resolve the error above (often a still-booting CodeSpace or "
+                          "an SSH/relay issue), then re-run finalize so the sessions "
+                          "are captured. If the CodeSpace is genuinely unbootable (never "
+                          "reaches SSH), its session-state is unrecoverable -- retire it "
+                          "with `agent-codespaces finalize <name> --delete --force` (or "
+                          "`delete <name> --force --no-sync`) to skip recovery.",
+                          file=sys.stderr)
+                    return 1
 
-    if res.get("ok"):
-        set_status(args.name, STATE_RECOVERED, reason="finalized")
-        print(f"[OK] {args.name} marked 'recovered' -- preserved & reusable; "
-              f"eligible for prune once its PR merges (reuse clears the mark)")
-        _release_lease_quietly(args.name)
-        return 0
+            if args.delete:
+                delete_codespace(args.name, force=args.force)
+                print(f"Deleted: {args.name}")
+                _release_lease_quietly(args.name)
+                _clear_status_quietly(args.name)
+                return 0 if res.get("ok") else 1
 
-    print(f"[WARN] Not marking {args.name} 'recovered' (recovery failed; the box "
-          f"is preserved, so retry `finalize {args.name}` later)", file=sys.stderr)
-    return 1
+            # Default preserve path: stop (idempotent) then mark recovered.
+            try:
+                stopped = stop_codespace(args.name)
+                print(f"Stopped: {args.name} (preserved -- boots on next connect)"
+                      if stopped else f"Already stopped: {args.name}")
+            except RuntimeError as exc:
+                print(f"[WARN] Could not stop {args.name} (continuing): {exc}",
+                      file=sys.stderr)
+
+            if res.get("ok"):
+                set_status(args.name, STATE_RECOVERED, reason="finalized")
+                print(f"[OK] {args.name} marked 'recovered' -- preserved & reusable; "
+                      f"eligible for prune once its PR merges (reuse clears the mark)")
+                _release_lease_quietly(args.name)
+                return 0
+
+            print(f"[WARN] Not marking {args.name} 'recovered' (recovery failed; the box "
+                  f"is preserved, so retry `finalize {args.name}` later)", file=sys.stderr)
+            return 1
+    except TargetBusyError as busy:
+        print(f"[BUSY] {busy}", file=sys.stderr)
+        return 1
 
 
 def _cmd_finalize_progress(args: argparse.Namespace) -> int:
@@ -3482,54 +3502,64 @@ def _cmd_finalize_progress(args: argparse.Namespace) -> int:
             if block is not None:
                 emit({"type": "error", "message": block})
                 return 2
-        emit({"type": "progress", "pct": 5.0,
-              "msg": f"Recovering Copilot sessions from {name}\u2026"})
-        res = sync_codespace_sessions(
-            name, timeout=args.timeout, verbose=args.verbose,
-            skip_if_shutdown=not args.delete,
-        )
-        if res.get("ok"):
-            if res.get("skipped"):
-                emit({"type": "progress", "pct": 45.0, "msg": res.get("detail", "")})
-            else:
-                emit({"type": "progress", "pct": 45.0,
-                      "msg": f"Recovered {res.get('session_count', 0)} session(s)"})
-        else:
-            if args.delete and not args.force:
-                emit({"type": "error",
-                      "message": f"Session recovery failed ({res.get('detail')}). "
-                                 "Not deleting -- diagnose first, or re-run with "
-                                 "--force to retire an unrecoverable box."})
-                return 1
-            emit({"type": "progress", "pct": 45.0,
-                  "msg": f"Recovery failed ({res.get('detail')}); continuing"})
 
-        if args.delete:
-            emit({"type": "progress", "pct": 70.0, "msg": f"Deleting {name}\u2026"})
-            delete_codespace(name, force=args.force)
-            _release_lease_quietly(name)
-            _clear_status_quietly(name)
-            emit({"type": "done",
-                  "message": f"Recycled {name} (recovered + deleted)"})
-            return 0 if res.get("ok") else 1
+        from ssh_manager import TargetBusyError
 
-        # Preserve path: stop (idempotent) then mark recovered.
-        emit({"type": "progress", "pct": 70.0,
-              "msg": f"Stopping {name} (preserving)\u2026"})
+        from .lifecycle_lock import lifecycle_lock
+
         try:
-            stop_codespace(name)
-        except RuntimeError as exc:
-            emit({"type": "progress", "pct": 80.0,
-                  "msg": f"stop warning: {exc}"})
-        if res.get("ok"):
-            set_status(name, STATE_RECOVERED, reason="finalized")
-            _release_lease_quietly(name)
-            emit({"type": "done",
-                  "message": f"{name} finalized -- preserved & reusable"})
-            return 0
-        emit({"type": "error",
-              "message": f"Recovery failed; {name} preserved -- retry later"})
-        return 1
+            with lifecycle_lock(name) as lock:
+                emit({"type": "progress", "pct": 5.0,
+                      "msg": f"Recovering Copilot sessions from {name}\u2026"})
+                res = sync_codespace_sessions(
+                    name, timeout=args.timeout, verbose=args.verbose,
+                    skip_if_shutdown=not args.delete, lock=lock,
+                )
+                if res.get("ok"):
+                    if res.get("skipped"):
+                        emit({"type": "progress", "pct": 45.0, "msg": res.get("detail", "")})
+                    else:
+                        emit({"type": "progress", "pct": 45.0,
+                              "msg": f"Recovered {res.get('session_count', 0)} session(s)"})
+                else:
+                    if args.delete and not args.force:
+                        emit({"type": "error",
+                              "message": f"Session recovery failed ({res.get('detail')}). "
+                                         "Not deleting -- diagnose first, or re-run with "
+                                         "--force to retire an unrecoverable box."})
+                        return 1
+                    emit({"type": "progress", "pct": 45.0,
+                          "msg": f"Recovery failed ({res.get('detail')}); continuing"})
+
+                if args.delete:
+                    emit({"type": "progress", "pct": 70.0, "msg": f"Deleting {name}\u2026"})
+                    delete_codespace(name, force=args.force)
+                    _release_lease_quietly(name)
+                    _clear_status_quietly(name)
+                    emit({"type": "done",
+                          "message": f"Recycled {name} (recovered + deleted)"})
+                    return 0 if res.get("ok") else 1
+
+                # Preserve path: stop (idempotent) then mark recovered.
+                emit({"type": "progress", "pct": 70.0,
+                      "msg": f"Stopping {name} (preserving)\u2026"})
+                try:
+                    stop_codespace(name)
+                except RuntimeError as exc:
+                    emit({"type": "progress", "pct": 80.0,
+                          "msg": f"stop warning: {exc}"})
+                if res.get("ok"):
+                    set_status(name, STATE_RECOVERED, reason="finalized")
+                    _release_lease_quietly(name)
+                    emit({"type": "done",
+                          "message": f"{name} finalized -- preserved & reusable"})
+                    return 0
+                emit({"type": "error",
+                      "message": f"Recovery failed; {name} preserved -- retry later"})
+                return 1
+        except TargetBusyError as busy:
+            emit({"type": "error", "message": str(busy)})
+            return 1
     except Exception as exc:  # never crash the modal reader
         emit({"type": "error", "message": str(exc)[:200]})
         return 1
@@ -3612,29 +3642,38 @@ def _cmd_stop(args: argparse.Namespace) -> int:
     -- it is the plain pause primitive; ``finalize`` is the mark-eligible "done"
     transition.
     """
-    if not getattr(args, "no_sync", False):
-        res = sync_codespace_sessions(
-            args.name, timeout=args.timeout, verbose=args.verbose,
-            skip_if_shutdown=True,
-        )
-        if res.get("ok"):
-            detail = res.get("detail", "")
-            if res.get("skipped"):
-                print(f"[OK] {args.name}: {detail}")
-            else:
-                print(f"[OK] Recovered {res.get('session_count', 0)} session(s) "
-                      f"before stop: {detail}")
-        else:
-            print(f"[WARN] Pre-stop session recovery failed (continuing -- the "
-                  f"CodeSpace is preserved, so sessions can be recovered "
-                  f"later): {res.get('detail')}", file=sys.stderr)
+    from ssh_manager import TargetBusyError
 
-    stopped = stop_codespace(args.name)
-    if stopped:
-        print(f"Stopped: {args.name} (preserved -- boots on next connect)")
-    else:
-        print(f"Already stopped: {args.name}")
-    return 0
+    from .lifecycle_lock import lifecycle_lock
+
+    try:
+        with lifecycle_lock(args.name) as lock:
+            if not getattr(args, "no_sync", False):
+                res = sync_codespace_sessions(
+                    args.name, timeout=args.timeout, verbose=args.verbose,
+                    skip_if_shutdown=True, lock=lock,
+                )
+                if res.get("ok"):
+                    detail = res.get("detail", "")
+                    if res.get("skipped"):
+                        print(f"[OK] {args.name}: {detail}")
+                    else:
+                        print(f"[OK] Recovered {res.get('session_count', 0)} session(s) "
+                              f"before stop: {detail}")
+                else:
+                    print(f"[WARN] Pre-stop session recovery failed (continuing -- the "
+                          f"CodeSpace is preserved, so sessions can be recovered "
+                          f"later): {res.get('detail')}", file=sys.stderr)
+
+            stopped = stop_codespace(args.name)
+            if stopped:
+                print(f"Stopped: {args.name} (preserved -- boots on next connect)")
+            else:
+                print(f"Already stopped: {args.name}")
+        return 0
+    except TargetBusyError as busy:
+        print(f"[BUSY] {busy}", file=sys.stderr)
+        return 1
 
 
 def _release_lease_quietly(codespace: str) -> None:
@@ -3733,16 +3772,25 @@ def _cmd_prune(args: argparse.Namespace) -> int:
             continue
 
         print(f"Pruning {name} ({rec.reason or 'prunable'})...")
-        # Destructive path: recover even a Shutdown box (boot if needed) first.
-        res = sync_codespace_sessions(name, skip_if_shutdown=False)
-        if not (res.get("ok") or res.get("skipped")):
-            print(f"[WARN] Final recovery failed for {name}; skipping delete "
-                  f"(diagnose): {res.get('detail')}", file=sys.stderr)
-            continue
+        from ssh_manager import TargetBusyError
+
+        from .lifecycle_lock import lifecycle_lock
+
         try:
-            delete_codespace(name, force=False)
-        except RuntimeError as exc:
-            print(f"[WARN] Delete failed for {name}: {exc}", file=sys.stderr)
+            with lifecycle_lock(name) as lock:
+                # Destructive path: recover even a Shutdown box (boot if needed) first.
+                res = sync_codespace_sessions(name, skip_if_shutdown=False, lock=lock)
+                if not (res.get("ok") or res.get("skipped")):
+                    print(f"[WARN] Final recovery failed for {name}; skipping delete "
+                          f"(diagnose): {res.get('detail')}", file=sys.stderr)
+                    continue
+                try:
+                    delete_codespace(name, force=False)
+                except RuntimeError as exc:
+                    print(f"[WARN] Delete failed for {name}: {exc}", file=sys.stderr)
+                    continue
+        except TargetBusyError as busy:
+            print(f"[WARN] {name} busy, skipping this pass: {busy}", file=sys.stderr)
             continue
         clear_status(name)
         _release_lease_quietly(name)
@@ -3785,12 +3833,20 @@ def _reclaim_for_quota(err: str) -> str | None:
     if total_limit:
         for rec in sorted(list_by_state(STATE_PRUNABLE), key=lambda s: s.state_at):
             name = rec.codespace
-            res = sync_codespace_sessions(name, skip_if_shutdown=False)
-            if not (res.get("ok") or res.get("skipped")):
-                continue
+            from ssh_manager import TargetBusyError
+
+            from .lifecycle_lock import lifecycle_lock
+
             try:
-                delete_codespace(name, force=False)
-            except RuntimeError:
+                with lifecycle_lock(name) as lock:
+                    res = sync_codespace_sessions(name, skip_if_shutdown=False, lock=lock)
+                    if not (res.get("ok") or res.get("skipped")):
+                        continue
+                    try:
+                        delete_codespace(name, force=False)
+                    except RuntimeError:
+                        continue
+            except TargetBusyError:
                 continue
             clear_status(name)
             _release_lease_quietly(name)

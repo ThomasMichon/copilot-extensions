@@ -741,7 +741,7 @@ def inspect_issue_routing(knowledge_path: str) -> dict[str, str]:
         }
     config = (
         Path(knowledge_path).resolve()
-        / ".agent-worktrees"
+        / ".agent-worktrees"  # marketplace-isolation: allow project-owned-config
         / "config.yaml"
     )
     try:
@@ -904,9 +904,7 @@ def bind(
     }
 
     # #955: assemble the harness's personal-plugin overlay from the knowledge
-    # repo's .ai local marketplace(s), so the operator's personal skills/agents
-    # load in the name-free harness. Best-effort: a missing/plugin-less knowledge
-    # checkout just yields no overlay; never fails the bind.
+    # repo's .ai marketplace(s); best-effort, never fails the bind.
     if assemble_plugins and harness_path and knowledge_path:
         try:
             from assemble_plugins import assemble
@@ -918,7 +916,9 @@ def bind(
             _spec.loader.exec_module(_mod)
             assemble = _mod.assemble
         try:
-            summary["plugins"] = assemble(harness_path, knowledge_path)
+            summary["plugins"] = assemble(
+                harness_path, knowledge_path,
+                agent_worktrees_command=agent_worktrees_path or None)
         except Exception as exc:  # noqa: BLE001 -- never fail the bind on plugin assembly
             summary["plugins_error"] = str(exc)
 

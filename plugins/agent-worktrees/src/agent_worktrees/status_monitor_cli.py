@@ -13,6 +13,13 @@ def _core():
     return core
 
 
+def _core_helper(name: str, local):
+    candidate = vars(_core()).get(name)
+    if callable(candidate) and candidate is not local:
+        return candidate
+    return local
+
+
 def add_parsers(sub) -> None:
     p = sub.add_parser(
         "status-monitor",
@@ -35,8 +42,9 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     import threading
     import time
 
-    from . import classify_daemon, loop_governance, monitor_roots, pane_reaper, registry_paths, session_catalog
+    from . import classify_daemon, loop_governance, monitor_roots, mux_link, pane_reaper, registry_paths, session_catalog
     from . import locks as _locks
+    from . import status_monitor_runtime, status_updater_cli
     from . import worktree_status_daemon
     from .hook_ipc import HookIpcServer, HookUnavailable
 
@@ -45,10 +53,15 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     mux_bin = (shutil.which(mux) or mux) if mux else None
     interval = args.interval if getattr(args, "interval", None) and args.interval >= 2 else 15
 
-    lock = core._monitor_lock_path()
+    # Stage D (agent-cli-lazy-dispatch): these six are owned by
+    # status_updater_cli/status_monitor_runtime (both already cluster-free);
+    # resolving them via `_core_helper` -- direct sibling import, falling back
+    # to a monkeypatched `__main__` override if one is present -- instead of
+    # `core.attr`, is what lets `status-monitor` stay cluster-free too.
+    lock = _core_helper("_monitor_lock_path", status_monitor_runtime._monitor_lock_path)()
     my_prefix = os.path.realpath(sys.prefix)
     token = str(os.getpid())
-    activate_project_for_path = core._activate_project_for_path
+    activate_project_for_path = _core_helper("_activate_project_for_path", status_updater_cli._activate_project_for_path)
     load_hook_client_module = core._load_hook_client_module
     status_segment_cache_type = core._StatusSegmentCache
     resident_hook_policy_type = core._ResidentHookPolicy
@@ -61,7 +74,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     wait_for_lifecycle_priority = core._wait_for_lifecycle_priority
     classify_daemon_compute = core._classify_daemon_compute
     worktree_status_compute = core._worktree_status_compute
-    runtime_superseded = core._runtime_superseded
+    runtime_superseded = _core_helper("_runtime_superseded", status_updater_cli._runtime_superseded)
 
     def _other_current_monitor() -> bool:
         """A *different*, live monitor on a non-superseded runtime owns the host."""
@@ -81,7 +94,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
 
     ctx_done: set[str] = set()
     reconciler = session_catalog.ResidentSessionReconciler(
-        register_monitor_session=core._register_session_for_monitor
+        register_monitor_session=_core_helper("_register_session_for_monitor", status_monitor_runtime._register_session_for_monitor)
     )
     pane_reconciler = pane_reaper.ResidentPaneReconciler(
         activate_project=activate_project_for_path
@@ -183,7 +196,13 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
 
     worktree_status_runtime = worktree_status_daemon.InProcessRuntime()
     worktree_status_runtime.start(
-        core._aw_runtime_home() / "worktree-status-cache.sqlite3", worktree_status_compute
+        _core_helper("_aw_runtime_home", status_monitor_runtime._aw_runtime_home)() / "worktree-status-cache.sqlite3",
+        worktree_status_compute,
+    )
+
+    managed_mux_runtime = mux_link.InProcessRuntime()
+    managed_mux_runtime.start(
+        _core_helper("_aw_runtime_home", status_monitor_runtime._aw_runtime_home)() / "managed-mux-cache.json"
     )
 
     def _lock_extra() -> dict:
@@ -201,6 +220,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         if classify_server is not None:
             extra.update(classify_daemon.rendezvous_fields(classify_server))
         extra.update(worktree_status_runtime.lock_extra())
+        extra.update(managed_mux_runtime.lock_extra())
         return extra
 
     _locks.write_lock(lock, extra=_lock_extra())
@@ -236,6 +256,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     project_lock=state_lock,
                     lifecycle_priority=lifecycle_priority,
                     governance=governance,
+                    managed_mux_cache=managed_mux_runtime.cache,
                 )
                 wait_for_lifecycle_priority(lifecycle_priority)
                 with state_lock:
@@ -270,10 +291,11 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 and not external_projects
                 and not reconciler.has_live_worktree_mux
                 and not worktree_status_runtime.has_active_demand()
+                and not managed_mux_runtime.has_active_demand()
             ):
                 empty_strikes += 1
                 if empty_strikes >= max_empty_strikes:
-                    retry_mux = core._monitor_list_sessions(mux_bin) if mux_bin else {}
+                    retry_mux = _core_helper("_monitor_list_sessions", status_monitor_runtime._monitor_list_sessions)(mux_bin) if mux_bin else {}
                     retry_wt = bool(
                         retry_mux is not None and any(name.startswith("wt-") for name in retry_mux)
                     )
@@ -284,6 +306,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         or monitor_roots.live_picker_projects()
                         or core.list_cache.recent_demand_projects()
                         or worktree_status_runtime.has_active_demand()
+                        or managed_mux_runtime.has_active_demand()
                     ):
                         empty_strikes = 0
                     else:
@@ -297,6 +320,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         if classify_server is not None:
             classify_server.close()
         worktree_status_runtime.shutdown()
+        managed_mux_runtime.shutdown()
         d = _locks.read_lock(lock)
         if isinstance(d, dict) and d.get("pid") == os.getpid():
             _locks.remove_lock(lock)

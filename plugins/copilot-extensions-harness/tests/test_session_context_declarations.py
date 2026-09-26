@@ -73,14 +73,29 @@ def test_every_output_free_declaration_is_complete() -> None:
 
 
 def test_static_projection_plugins_register_no_session_start_hook() -> None:
+    """These plugins are 'output-free' at session start by design (deferred
+    to native host composition, see copilot-extensions-harness's own README)
+    -- but a preToolUse guardrail has no such composition hazard (each
+    plugin's preToolUse hooks run independently; there's nothing to
+    compose), so it may register its own hooks.json as long as it declares
+    no sessionStart entry."""
     for plugin_name in NO_SESSION_HOOK:
         plugin = PLUGINS / plugin_name
         manifest = _json(plugin / "plugin.json")
-        assert "hooks" not in manifest
         assert "sessionContext" not in manifest
-        assert not (plugin / "hooks.json").exists()
         assert not (plugin / "session-context.json").exists()
         assert (plugin / "instruction-projections.json").is_file()
+        hooks_ref = manifest.get("hooks")
+        if hooks_ref is None:
+            assert not (plugin / "hooks.json").exists()
+            continue
+        assert isinstance(hooks_ref, str)
+        hooks_path = plugin / hooks_ref
+        assert hooks_path.is_file()
+        declared = _json(hooks_path).get("hooks", {})
+        assert isinstance(declared, dict)
+        assert "sessionStart" not in declared
+        assert "SessionStart" not in declared
 
 
 def test_owned_plugins_ship_no_custom_authority_adapters() -> None:

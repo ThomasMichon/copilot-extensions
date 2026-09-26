@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 
 import pytest
 from dropin_registry import EntryDecision, ScanAuthority
@@ -530,8 +531,10 @@ def test_resolve_claim_status_degrades_when_callback_exits_nonzero(tmp_path, mon
 def test_resolve_claim_reclaim_passes_apply_flag(tmp_path, monkeypatch):
     captured = {}
 
-    def fake_run_callback(command, *, timeout, required_bool_field):
-        captured["command"] = command
+    def fake_run_callback(provider, *, callback_args, legacy_command, timeout, required_bool_field, cwd=None):
+        captured["provider"] = provider.plugin
+        captured["callback_args"] = callback_args
+        captured["legacy_command"] = legacy_command
         return {"reclaimed": True}
 
     def fake_discover(_plugins_root):
@@ -547,7 +550,11 @@ def test_resolve_claim_reclaim_passes_apply_flag(tmp_path, monkeypatch):
     monkeypatch.setattr(cp, "_run_callback", fake_run_callback)
     result = cp.resolve_claim_reclaim("codespace:my-box-1", apply=True, plugins_root=tmp_path)
     assert result == {"available": True, "reclaimed": True}
-    assert captured["command"] == ("agent-codespaces", "claim-reclaim", "my-box-1", "--apply")
+    assert captured == {
+        "provider": "agent-codespaces@copilot-extensions",
+        "callback_args": ("claim-reclaim", "my-box-1", "--apply"),
+        "legacy_command": ("agent-codespaces", "claim-reclaim", "my-box-1", "--apply"),
+    }
 
 
 def test_resolve_claim_reclaim_rejects_a_leading_dash_identifier_in_dry_run(tmp_path, monkeypatch):
@@ -582,8 +589,10 @@ def test_resolve_claim_reclaim_rejects_a_leading_dash_identifier_in_dry_run(tmp_
 def test_resolve_claim_reclaim_omits_apply_flag_in_dry_run(tmp_path, monkeypatch):
     captured = {}
 
-    def fake_run_callback(command, *, timeout, required_bool_field):
-        captured["command"] = command
+    def fake_run_callback(provider, *, callback_args, legacy_command, timeout, required_bool_field, cwd=None):
+        captured["provider"] = provider.plugin
+        captured["callback_args"] = callback_args
+        captured["legacy_command"] = legacy_command
         return {"reclaimed": True, "detail": "would delete"}
 
     def fake_discover(_plugins_root):
@@ -599,7 +608,11 @@ def test_resolve_claim_reclaim_omits_apply_flag_in_dry_run(tmp_path, monkeypatch
     monkeypatch.setattr(cp, "_run_callback", fake_run_callback)
     result = cp.resolve_claim_reclaim("codespace:my-box-1", apply=False, plugins_root=tmp_path)
     assert result == {"available": True, "reclaimed": True, "detail": "would delete"}
-    assert captured["command"] == ("agent-codespaces", "claim-reclaim", "my-box-1")
+    assert captured == {
+        "provider": "agent-codespaces@copilot-extensions",
+        "callback_args": ("claim-reclaim", "my-box-1"),
+        "legacy_command": ("agent-codespaces", "claim-reclaim", "my-box-1"),
+    }
 
 
 def test_resolve_claim_reclaim_degrades_when_no_reclaim_command_declared(tmp_path, monkeypatch):
@@ -762,29 +775,122 @@ def test_peer_env_strips_whitespace_only_context(monkeypatch):
     assert "GH_TOKEN" not in env
 
 
-def test_resolve_claim_status_still_invokes_in_a_namespaced_cell(tmp_path, monkeypatch):
-    """Cross-plugin claim-provider invocation must still be attempted when
-    this process runs under an explicit marketplace-cell installation
-    context -- that's the ONLY way agent-worktrees ever runs (installation
-    Context: required) -- peer_env() carries the credential-stripping
-    mitigation instead of a feature-disabling refusal."""
+def test_resolve_claim_status_uses_peer_launch_for_registered_peer_with_marketplace_suffix(
+    tmp_path, monkeypatch,
+):
+    """A ``<plugin>@<marketplace>`` manifest must still select peer-launch."""
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "agent-worktrees@copilot-extensions")
+    monkeypatch.setattr(cp.peer_launch_adapter, "explicit_context", lambda: True)
+    captured = {}
+
+    def fake_run(peer, *args, **kwargs):
+        captured["peer"] = peer
+        captured["args"] = args
+        captured["timeout"] = kwargs["timeout"]
+        return subprocess.CompletedProcess(
+            ["same-cell"], 0, json.dumps({"exists": True, "state": "running"}), "",
+        )
 
     def fake_discover(_plugins_root):
         provider = cp.ClaimProviderManifest(
             namespace="codespace",
             plugin="agent-codespaces@copilot-extensions",
             plugin_root=str(tmp_path),
-            status_command=(
-                "python", "-c",
-                "import json,sys;print(json.dumps({'exists': True, 'state': 'running'}))",
-            ),
+            status_command=(r"C:\plugins\agent-codespaces\bin\agent-codespaces.cmd",),
         )
         return {"codespace": provider}, ()
 
+    monkeypatch.setattr(cp.peer_launch_adapter, "run", fake_run)
+    monkeypatch.setattr(cp.subprocess, "run", lambda *a, **k: pytest.fail("legacy fallback used"))
+    monkeypatch.setattr(cp, "discover_claim_providers", fake_discover)
+    monkeypatch.setattr(cp.os, "name", "nt")
+    monkeypatch.setenv("ComSpec", r"C:\Windows\System32\cmd.exe")
+    result = cp.resolve_claim_status("codespace:my-box-1", plugins_root=tmp_path)
+    assert result == {"available": True, "exists": True, "state": "running"}
+    assert captured == {
+        "peer": "agent-codespaces",
+        "args": ("claim-status", "my-box-1"),
+        "timeout": cp._CALLBACK_TIMEOUT_SECONDS,
+    }
+
+
+def test_resolve_claim_status_refusal_is_not_downgraded_to_legacy(tmp_path, monkeypatch):
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "explicit")
+    monkeypatch.setattr(cp.peer_launch_adapter, "explicit_context", lambda: True)
+
+    def fake_discover(_plugins_root):
+        provider = cp.ClaimProviderManifest(
+            namespace="codespace",
+            plugin="agent-codespaces@copilot-extensions",
+            plugin_root=str(tmp_path),
+            status_command=("agent-codespaces",),
+        )
+        return {"codespace": provider}, ()
+
+    monkeypatch.setattr(
+        cp.peer_launch_adapter,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(cp.peer_launch_adapter.ContextRefused("refused")),
+    )
+    monkeypatch.setattr(cp.subprocess, "run", lambda *a, **k: pytest.fail("legacy fallback used"))
+    monkeypatch.setattr(cp, "discover_claim_providers", fake_discover)
+    result = cp.resolve_claim_status("codespace:my-box-1", plugins_root=tmp_path)
+    assert result == {
+        "available": False,
+        "reason": "agent-codespaces@copilot-extensions claim-status callback failed",
+    }
+
+
+def test_resolve_claim_status_legacy_path_still_runs_without_explicit_context(tmp_path, monkeypatch):
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(cp.peer_launch_adapter, "explicit_context", lambda: False)
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["env"] = kwargs.get("env")
+        return subprocess.CompletedProcess(
+            cmd, 0, json.dumps({"exists": True, "state": "running"}), "",
+        )
+
+    def fake_discover(_plugins_root):
+        provider = cp.ClaimProviderManifest(
+            namespace="codespace",
+            plugin="agent-codespaces@copilot-extensions",
+            plugin_root=str(tmp_path),
+            status_command=("agent-codespaces",),
+        )
+        return {"codespace": provider}, ()
+
+    monkeypatch.setattr(cp.subprocess, "run", fake_run)
     monkeypatch.setattr(cp, "discover_claim_providers", fake_discover)
     result = cp.resolve_claim_status("codespace:my-box-1", plugins_root=tmp_path)
     assert result == {"available": True, "exists": True, "state": "running"}
+    assert captured["cmd"] == ["agent-codespaces", "claim-status", "my-box-1"]
+    assert captured["env"] is None
+
+
+def test_resolve_claim_status_degrades_when_registered_peer_is_absent(tmp_path, monkeypatch):
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "explicit")
+    monkeypatch.setattr(cp.peer_launch_adapter, "explicit_context", lambda: True)
+
+    def fake_discover(_plugins_root):
+        provider = cp.ClaimProviderManifest(
+            namespace="codespace",
+            plugin="agent-codespaces@copilot-extensions",
+            plugin_root=str(tmp_path),
+            status_command=("agent-codespaces",),
+        )
+        return {"codespace": provider}, ()
+
+    monkeypatch.setattr(cp.peer_launch_adapter, "run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(cp.subprocess, "run", lambda *a, **k: pytest.fail("legacy fallback used"))
+    monkeypatch.setattr(cp, "discover_claim_providers", fake_discover)
+    result = cp.resolve_claim_status("codespace:my-box-1", plugins_root=tmp_path)
+    assert result == {
+        "available": False,
+        "reason": "agent-codespaces@copilot-extensions claim-status callback failed",
+    }
 
 
 def test_resolve_provider_argv_degrades_when_no_provider_registered(tmp_path):
@@ -885,4 +991,3 @@ def test_build_provider_argv_degrades_when_no_provider_registered(tmp_path):
     result = cp.build_provider_argv(
         "codespace", ("delete", True), ("cs-a", False), plugins_root=tmp_path / "empty")
     assert result is None
-

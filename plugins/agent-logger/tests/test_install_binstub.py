@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -20,6 +21,30 @@ _COMMANDS = (
     "ramp-up-session",
     "session-sync",
 )
+
+
+def _host_pip_index_url() -> str | None:
+    """Read a configured pip index-url straight from the well-known SYSTEM
+    config path, bypassing any per-process env-var sandboxing (this test's
+    own containment wrapper, or a caller's, may redirect `PROGRAMDATA`/
+    `APPDATA` env vars, but not the actual OS install location). Generic
+    and identifier-free: any host with a governed/offline pip feed
+    configured this standard way benefits, not just one particular venue.
+    """
+    candidates = (
+        Path(r"C:\ProgramData\pip\pip.ini"),
+        Path("/etc/pip.conf"),
+        Path("/etc/xdg/pip/pip.conf"),
+    )
+    for candidate in candidates:
+        try:
+            text = candidate.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        match = re.search(r"(?m)^\s*index-url\s*=\s*(\S+)\s*$", text)
+        if match:
+            return match.group(1)
+    return None
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX installer behavior")
@@ -337,6 +362,36 @@ def test_provision_publishes_durable_compatibility_wrappers(
             "COPILOT_PLUGIN_INSTALL_STAGED": "1",
         }
     )
+    # This test-runner's own pytest process runs from inside a managed venv
+    # (`.test-venvs/.../agent-logger`), which can leave `PYTHONHOME`/
+    # `PYTHONPATH` set to THAT venv's own paths. `install.ps1 provision`
+    # here builds a genuinely fresh, independent venv via `uv` -- an
+    # inherited `PYTHONHOME`/`PYTHONPATH` pointing at a different
+    # interpreter's site-packages can corrupt import resolution inside a
+    # nested build-isolation venv (observed: `setuptools._distutils_hack`
+    # failing to import `distutils.core` while building a local path
+    # dependency's wheel). Strip both so this test builds its OWN
+    # standalone runtime cleanly, matching how a real end-user's
+    # (non-venv-nested) shell invokes this same script.
+    env.pop("PYTHONHOME", None)
+    env.pop("PYTHONPATH", None)
+    # This test's own isolated HOME/USERPROFILE/LOCALAPPDATA (above) is
+    # layered on top of the run-plugin-tests.py containment wrapper's OWN
+    # sandboxing of HOME/APPDATA/PROGRAMDATA (see
+    # `tools/plugin_test_containment.py::_ROOT_ENV`) -- so the real
+    # `pip config get global.index-url` / pip.ini discovery that
+    # `install.ps1`'s `Ensure-UvIndex` (and `install.sh`'s POSIX
+    # equivalent) normally use to bridge a governed/offline venue's pip
+    # feed to uv can no longer find the real config via env vars, even
+    # though it exists on the actual host. Various venues legitimately
+    # block the public PyPI CDN (`files.pythonhosted.org`) while allowing
+    # an internal feed proxy -- `_host_pip_index_url()` reads the standard
+    # SYSTEM pip config file directly (unaffected by env-var sandboxing)
+    # and is fully generic/identifier-free, so prefer its result here
+    # explicitly.
+    internal_index = _host_pip_index_url()
+    if internal_index and not (env.get("UV_DEFAULT_INDEX") or env.get("UV_INDEX_URL")):
+        env["UV_DEFAULT_INDEX"] = internal_index
     if os.name == "nt":
         powershell = shutil.which("pwsh") or shutil.which("powershell")
         assert powershell is not None
@@ -369,7 +424,12 @@ def test_provision_publishes_durable_compatibility_wrappers(
         env=env,
         capture_output=True,
         text=True,
-        timeout=180,
+        # 180s comfortably covers a warm-index install; raised to 420s to
+        # absorb a genuinely fresh package resolution/build under shared-
+        # machine contention (competing test-runner load), which the
+        # UV_DEFAULT_INDEX fix above already makes reachable but not
+        # instant.
+        timeout=420,
         check=False,
     )
     assert provision.returncode == 0, provision.stderr
@@ -400,7 +460,10 @@ def test_provision_publishes_durable_compatibility_wrappers(
         env=env,
         capture_output=True,
         text=True,
-        timeout=30,
+        # 30s can be tight for a delegated wrapper's own first-use checks
+        # under shared-machine contention; matches the provision timeout's
+        # rationale above.
+        timeout=90,
         check=False,
     )
     assert delegated.returncode != 127

@@ -160,8 +160,12 @@ def test_claim_reclaim_threads_the_exact_minted_token_through(monkeypatch, capsy
         "agent_codespaces.gh_account.token_for_account",
         lambda login: "exact-minted-token" if login == "acct-nonambient" else None)
     calls = []
-    monkeypatch.setattr(cpc, "sync_codespace_sessions",
-                        lambda name, account=None, token=None: calls.append(("sync", token)) or {"ok": True})
+
+    def _fake_sync(name, account=None, token=None, lock=None):
+        calls.append(("sync", token))
+        return {"ok": True}
+
+    monkeypatch.setattr(cpc, "sync_codespace_sessions", _fake_sync)
     monkeypatch.setattr(cpc, "delete_codespace",
                         lambda name, force=True, account=None, token=None: calls.append(("delete", token)))
     monkeypatch.setattr(cpc, "release_lease", lambda name: True)

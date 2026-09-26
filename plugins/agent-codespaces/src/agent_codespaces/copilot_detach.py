@@ -48,6 +48,8 @@ from venue_copilot import (
     with_new_session,
 )
 
+from .model_launch import model_copilot_args
+
 _BUSY_EXIT = 75
 _COORDINATION_EXIT = 78
 _RESERVATION_TTL = 900.0  # generous: venue prep + first-run provisioning + seed wait
@@ -359,7 +361,8 @@ def cmd_detach(
         seed = read_seed(args)
     except (OSError, ValueError) as exc:
         return _fail(str(exc), plan)
-    copilot_args = with_new_session(list(getattr(args, "copilot_args", None) or []))
+    requested = list(getattr(args, "copilot_args", None) or [])
+    copilot_args = with_new_session(requested + model_copilot_args(requested))
     try:
         reverse_forwards = parse_reverse_forwards(getattr(args, "reverse_forwards", None) or [])
         local_forwards = parse_local_forwards(getattr(args, "local_forwards", None) or [])

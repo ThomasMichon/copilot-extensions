@@ -263,14 +263,18 @@ rewrite is a separate, already-existing migration concern that moves with
      deploy. `--live` is now proven safe on this machine; `--live` still
      defaults to off everywhere else (CLI flags, other machines) until each
      is independently exercised the same way.
-6. [ ] **Delete agent-worktrees' `profiles`/`terminal-fragment` CLI verbs,
+6. [x] **Delete agent-worktrees' `profiles`/`terminal-fragment` CLI verbs,
    `picker_profiles_cli.py`'s terminal-mirroring code, and
    `picker_support/data_local.py`'s/`profiles_io.py`'s Profiles-grid path**
    (pending the bundled-Picker disposition question above) — the actual
    deletion commit, kept last and separate per the Mux/AHP precedent's
-   revertability discipline.
-7. [ ] Close out Phase 3d's `profiles` checkbox once worktree-manager's
-   Picker call sites import the relocated module directly.
+   revertability discipline. **Landed** — PR
+   [#3626](https://github.com/ThomasMichon/copilot-extensions/pull/3626).
+7. [x] Close out Phase 3d's `profiles` checkbox once worktree-manager's
+   Picker call sites import the relocated module directly. **Verified** —
+   Step 1's direct-import cutover already landed in PR #3398, and Step 6
+   removes the last agent-worktrees-side compatibility verbs/modules that
+   would have kept the old surface alive.
 
 ## Validation
 

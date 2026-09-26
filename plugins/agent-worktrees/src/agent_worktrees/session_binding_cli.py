@@ -10,12 +10,20 @@ import yaml
 
 from . import activity, output, profile_assignment, sessions, tracking
 from . import config as cfg, session_context as session_context_mod
+from . import session_tracking_cli, status_monitor_runtime, status_updater_cli
 
 
 def _core():
     from . import __main__ as core
 
     return core
+
+
+def _core_helper(name: str, local):
+    candidate = vars(_core()).get(name)
+    if callable(candidate) and candidate is not local:
+        return candidate
+    return local
 
 
 def _json_error(*args, **kwargs):
@@ -35,15 +43,15 @@ def _hook_event_timestamp(*args, **kwargs):
 
 
 def _status_monitor_enabled(*args, **kwargs):
-    return _core()._status_monitor_enabled(*args, **kwargs)
+    return _core_helper("_status_monitor_enabled", status_monitor_runtime._status_monitor_enabled)(*args, **kwargs)
 
 
 def _ensure_status_monitor(*args, **kwargs):
-    return _core()._ensure_status_monitor(*args, **kwargs)
+    return _core_helper("_ensure_status_monitor", status_monitor_runtime._ensure_status_monitor)(*args, **kwargs)
 
 
 def _activate_project_for_path(*args, **kwargs):
-    return _core()._activate_project_for_path(*args, **kwargs)
+    return _core_helper("_activate_project_for_path", status_updater_cli._activate_project_for_path)(*args, **kwargs)
 
 
 def _adopt_linked_worktree(*args, **kwargs):
@@ -51,11 +59,11 @@ def _adopt_linked_worktree(*args, **kwargs):
 
 
 def _resolve_mux_worktree_id(*args, **kwargs):
-    return _core()._resolve_mux_worktree_id(*args, **kwargs)
+    return _core_helper("_resolve_mux_worktree_id", status_updater_cli._resolve_mux_worktree_id)(*args, **kwargs)
 
 
 def _activate_project_for_worktree_id(*args, **kwargs):
-    return _core()._activate_project_for_worktree_id(*args, **kwargs)
+    return _core_helper("_activate_project_for_worktree_id", status_updater_cli._activate_project_for_worktree_id)(*args, **kwargs)
 
 
 def _emit_register_session_result(*args, **kwargs):
@@ -63,7 +71,7 @@ def _emit_register_session_result(*args, **kwargs):
 
 
 def _spawn_status_updater(*args, **kwargs):
-    return _core()._spawn_status_updater(*args, **kwargs)
+    return _core_helper("_spawn_status_updater", status_updater_cli._spawn_status_updater)(*args, **kwargs)
 
 
 def _maybe_emit_stage_13(*args, **kwargs):
@@ -79,7 +87,7 @@ def _resolve_active_project(*args, **kwargs):
 
 
 def _find_tracking_file_by_session(*args, **kwargs):
-    return _core()._find_tracking_file_by_session(*args, **kwargs)
+    return _core_helper("_find_tracking_file_by_session", session_tracking_cli._find_tracking_file_by_session)(*args, **kwargs)
 
 
 def _session_handoff_token() -> str:

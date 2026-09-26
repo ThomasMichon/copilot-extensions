@@ -6,13 +6,13 @@
 
    + New worktree…     ✕ Clean     ⟳ Sync     creates on anomalous-potato Win  (this host)
 
-  ID     STATE    R   AGE    LIVE   T     PR
+  ID     STATE      AGE    LIVE   T     CLAIMS
   ── Active ──────────────────────────────────────────────────────────────────────────────────────────────────────────
     (none)
   ── Recent ──────────────────────────────────────────────────────────────────────────────────────────────────────────
-☐ aaaa   WIP          1h     ·        4   —
+☐ aaaa   WIP        1h     ·        4
       Fix the thing: wip
-☐ bbbb   UNUSED       7d     ·        0   —
+☐ bbbb   UNUSED     7d     ·        0
       Old idle wt: unused
   ── Completed ───────────────────────────────────────────────────────────────────────────────────────────────────────
     (none)

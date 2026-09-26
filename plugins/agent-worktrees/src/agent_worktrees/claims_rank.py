@@ -210,3 +210,43 @@ def summarize_claims(
         format_claim(kind, ref, label_overrides=label_overrides) for kind, ref in top
     )
 
+
+def claims_summary_for_worktree(
+    resources: Iterable[Any],
+    active_pr: Mapping[str, Any] | None = None,
+    *,
+    limit: int = 2,
+    pecking_order: Mapping[str, int] | None = None,
+    label_overrides: Mapping[str, str] | None = None,
+) -> str:
+    """The Worktrees pivot's own ranked ``claims_summary`` (#3307
+    worktrees-pivot-ux-overhaul Phase 4) -- :func:`summarize_claims` over
+    ``resources`` (a worktree's claim ledger), with one addition:
+    ``active_pr`` (an optional ``{repo, number, state}`` mapping -- the
+    back-compat single active PR ``WorktreeRecord.active_pr()`` already
+    resolves) is backfilled as a synthetic live ``pr`` claim when
+    ``resources`` carries no live ``pr`` claim of its own yet. This covers a
+    worktree whose PR predates the ``create-pr``-time auto-claim
+    (``worktree_ops_cli._claim_from_run_output``) without needing a one-time
+    migration. Never backfills a merged/closed PR -- :func:`summarize_claims`
+    would filter it as non-live anyway (default ``live_only=True``).
+
+    Kept in this module (not the caller) so the backfill logic stays next to
+    the ranking it feeds, and so a caller need only pass already-extracted
+    plain data -- this module remains pure/I-O-free per its own docstring;
+    ``resources``/``active_pr`` may be real ``ResourceClaim``/``PRRecord``
+    objects or plain dicts, both duck-typed identically to every other
+    entry point here."""
+    claims = list(resources)
+    if (active_pr and active_pr.get("number")
+            and active_pr.get("state") not in ("merged", "closed")
+            and not any(_field(c, "kind") == "pr" and _is_live(c) for c in claims)):
+        repo = active_pr.get("repo")
+        number = active_pr["number"]
+        ref = f"{repo}#{number}" if repo else f"#{number}"
+        claims.append({"kind": "pr", "ref": ref, "state": "active"})
+    return summarize_claims(
+        claims, limit=limit, pecking_order=pecking_order,
+        label_overrides=label_overrides,
+    )
+
