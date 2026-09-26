@@ -92,7 +92,7 @@ already lives durably in its owning ``WorktreeRecord`` YAML -- the gap this
 instrumentation closes is *history* (an audit trail of who mutated what and
 when), not *truth* (which the YAML already guarantees survives past this
 log's 7-day rolling window). See
-efforts/active/worktree-finality-and-obligations/README.md Phase 7 and
+efforts/2026/08/28 worktree-finality-and-obligations/README.md Phase 7 and
 ThomasMichon/copilot-extensions#3113 for the full rationale.
 
 Every record carries ``worktree_id`` and (where known) ``session_id`` and

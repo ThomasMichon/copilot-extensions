@@ -326,7 +326,7 @@ def cleanup_disposition(
     held_claims = [c for c in rec.resources if c.is_live]
     if held_claims and (
         rec.status == "finalized" or info.state == S.COMPLETED
-        or v.category == "merged"
+        or v.category in ("merged", "empty", "conversation-only")
     ):
         return CleanupDisposition(
             False, "held-claims",
@@ -340,11 +340,13 @@ def cleanup_disposition(
     # there. worktree-finality-and-obligations Phase 3: counts the itemized
     # `follow_ups` ledger (open/pending-transfer items), falling back to the
     # legacy boolean when the ledger is empty -- see
-    # `tracking.effective_open_follow_up_count`.
+    # `tracking.effective_open_follow_up_count`. Validation Plan "Blocker
+    # precedence": also applies to UNUSED (``empty``)/CONVO
+    # (``conversation-only``), mirroring the held-claims override above.
     open_follow_ups = tracking.effective_open_follow_up_count(rec)
     if open_follow_ups and (
         rec.status == "finalized" or info.state == S.COMPLETED
-        or v.category == "merged"
+        or v.category in ("merged", "empty", "conversation-only")
     ):
         return CleanupDisposition(
             False, "follow-up",

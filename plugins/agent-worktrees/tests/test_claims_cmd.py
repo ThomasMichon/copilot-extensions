@@ -247,6 +247,24 @@ def test_claims_json_outbound_and_owner(monkeypatch, tmp_path, capfd):
     assert out["inbound"]["available"] is False
 
 
+def test_claims_show_includes_abandoned_resource(monkeypatch, tmp_path, capfd):
+    # Validation Plan "Claim-free": an abandoned claim (reclaimed by the
+    # never-wedge sweep) must remain visible in the ledger's audit detail --
+    # it is excluded from held-claims counting, not hidden from inspection.
+    claim = tracking.ResourceClaim(
+        kind="codespace", ref="anomalous-potato/copilot-extensions/cs-orphan",
+        created_at="2026-07-31T00:00:00", state="abandoned")
+    _seed(tmp_path, monkeypatch, resources=[claim])
+    rc = m.cmd_claims(argparse.Namespace(target=["wt-A"], json=True))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert len(out["outbound"]) == 1
+    assert out["outbound"][0]["state"] == "abandoned"
+    assert out["outbound"][0]["ref"] == (
+        "anomalous-potato/copilot-extensions/cs-orphan"
+    )
+
+
 def test_claims_empty_ledger_json(monkeypatch, tmp_path, capfd):
     _seed(tmp_path, monkeypatch)
     rc = m.cmd_claims(argparse.Namespace(target=[], json=True))
