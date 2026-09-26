@@ -18,8 +18,8 @@ $installer = Join-Path $scriptDir 'init.ps1'
 $legacyRoot = if ($env:AGENT_MCP_HOME) {
     $env:AGENT_MCP_HOME
 } else {
-    Join-Path $env:USERPROFILE '.agent-mcp'
-} # marketplace-isolation: allow legacy compatibility root
+    Join-Path $env:USERPROFILE '.agent-mcp' # marketplace-isolation: allow legacy compatibility root
+}
 if (
     -not (Test-Path -LiteralPath $modeRunner -PathType Leaf) -or
     -not (Test-Path -LiteralPath $runtimeResolver -PathType Leaf) -or

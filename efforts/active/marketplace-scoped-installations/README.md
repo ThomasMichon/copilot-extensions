@@ -386,6 +386,92 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-26 — Systemic `runtime-gate.ps1` marker-placement bug fixed across 5 more plugins
+
+- Fresh guard count for `dev` head (post `agent-logger` merge): 651.
+  Started investigating `agent-containers` (next size-tier candidate,
+  36 findings) as a fresh triage target, but before diving into its more
+  varied findings, checked `runtime-gate.ps1:21` first (per the
+  `agent-vault`/`agent-logger` precedent of finding the exact same
+  marker-placement bug in two prior legs) — confirmed present again.
+- **Instead of fixing just `agent-containers` and moving on, checked
+  every plugin's `runtime-gate.ps1` for the identical bug shape first**
+  (marker `# marketplace-isolation: allow legacy compatibility root` on
+  the closing `}` line of the `$legacyRoot = if (...) {...} else {...}`
+  expression, not the flagged `Join-Path $env:USERPROFILE '.agent-*'`
+  line above it). **First-pass mistake, caught by PR review**: the
+  initial `grep`-based sweep filtered to files where a marker was found
+  at all (`grep -n "allow legacy compatibility root" <file> | head -1`),
+  which silently skipped any plugin whose `runtime-gate.ps1` had **no**
+  marker whatsoever rather than a merely-misplaced one — missing
+  `agent-index`, an 8th plugin with its own `runtime-gate.ps1` (`Join-
+  Path $env:USERPROFILE '.agent-index'`, genuinely unmarked, not just
+  misplaced). Re-ran the check properly (`ls plugins/*/scripts/runtime-
+  gate.ps1` for the full file list, then individually inspecting each) and
+  confirmed the full population is **8** plugins, not 7:
+  `agent-bridge`, `agent-codespaces`, `agent-containers`, `agent-index`,
+  `agent-logger` [already fixed], `agent-mcp`, `agent-ssh` [already
+  correct — single-line marker], `agent-vault` [already fixed]. Found the
+  **same bug shape (misplaced or entirely missing) in 5 more plugins**:
+  `agent-bridge`, `agent-codespaces`, `agent-containers`, `agent-index`
+  (missing, not misplaced), `agent-mcp` — confirming this was a systemic
+  template/generator bug (7 of 8 plugins' `runtime-gate.ps1` were
+  affected in one of the two shapes; only `agent-ssh` was clean from the
+  start), not independent coincidences.
+- Fixed all 5: moved the marker onto the actual flagged `Join-Path` line
+  in the 4 misplaced-marker plugins, and added a fresh marker to
+  `agent-index`'s previously-unmarked `.ps1` line. Also annotated
+  `agent-index`'s `runtime-gate.sh` counterpart (`LEGACY_ROOT="${AGENT_
+  INDEX_HOME:-$HOME/.agent-index}"`) for parity, even though the guard
+  does not currently flag it — its exact shape (`.agent-index` immediately
+  followed by a closing `}` before the closing quote, not a `"`/`'`/`/`)
+  falls outside `_UNQUALIFIED_ROOT`'s regex, a narrow guard blind spot
+  distinct from the marker-placement bug this entry is otherwise about;
+  not pursued further here since it's out of this PR's scope, but noted
+  for a future guard-regex review. Verified
+  each file still parses (`pwsh -Command
+  "[System.Management.Automation.Language.Parser]::ParseFile(...)"`).
+  Ran the `payload_invocation`-selected test slice via `python tools/
+  run-plugin-tests.py <plugin> -k payload_invocation` (the canonical
+  turn-key runner) for the **4** misplaced-marker plugins — all passed
+  (`agent-bridge` 6 passed/3 skipped, `agent-codespaces` 9 passed,
+  `agent-containers` 2 passed, `agent-mcp` 12 passed/5 skipped).
+  `agent-index` has no `payload_invocation`-selected test covering this
+  specific line, so it was validated separately: syntax via the
+  PowerShell Parser API, and its own `test_runtime_gate.py` suite was
+  attempted but hits a pre-existing, unrelated temp-storage resource
+  limit (confirmed identical via `git stash`/`git stash pop` without this
+  change too — the suite creates real venvs per test) — validated by the
+  guard count drop alone instead.
+- Verified: `check-marketplace-isolation.py --json` dropped by exactly 5
+  overall across the two commits in this PR (651→647 for the first 4,
+  then 644→643 after adding `agent-index`'s changefile and fix — the
+  intervening 647→644 drop between those two checks is unrelated `dev`
+  activity landing concurrently, confirmed via `git stash`/`git stash
+  pop` at each step, not a validation error). `check-docs-consistency.py`
+  OK. `check-changefile-presence.py --base origin/dev` OK after adding a
+  shared `patch`-typed changefile naming all 5 plugins (per
+  `CONTRIBUTING.md`'s "one PR touching N plugins with one shared reason"
+  pattern). Manually confirmed the fix catches its own regression via
+  `git stash`/`git stash pop`.
+- **Note on process**: this leg's edits were made in a worktree that had
+  already been used (and merged/finalized) for the prior `agent-logger`
+  PR; continuing to edit in it produced a stale, diverged-from-remote
+  branch state when it came time to push. Saved the diff as a patch file,
+  created a genuinely fresh `copilot-extensions` worktree per the effort's
+  own established discipline, and re-applied it there via `git apply`
+  before committing — a reminder that "always create a fresh worktree
+  per increment" means literally every increment, not just the first one
+  in a session.
+- **`agent-containers`' own remaining 35 findings were NOT triaged this
+  leg** (only its `runtime-gate.ps1:21` marker bug was fixed, incidentally
+  discovered while checking for the systemic pattern) — its findings span
+  many more files with more varied shapes (a vendored `venue_copilot` lib,
+  remote-SSH-transport path construction, `__main__.py`/`_invoke.py`
+  mixed doc/code) than `agent-vault`/`agent-logger` had, and deserve their
+  own dedicated read-first pass rather than a rushed continuation. Left
+  for a future leg.
+
 ### 2026-09-26 — `agent-logger`'s 18 findings resolved (first-time triage of this plugin)
 
 - Fresh guard count for `dev` head (post guard-fix merge): 666, then 669

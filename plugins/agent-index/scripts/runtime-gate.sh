@@ -23,7 +23,7 @@ PLUGIN_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd -P)"
 PAYLOAD_ROOT="${AGENT_INDEX_PAYLOAD_ROOT:-$PLUGIN_DIR}"
 MODE_RUNNER="$SCRIPT_DIR/installation-context/installation-context.sh"
 JSON_QUERY="$SCRIPT_DIR/installation-context/json-query.awk"
-LEGACY_ROOT="${AGENT_INDEX_HOME:-$HOME/.agent-index}"
+LEGACY_ROOT="${AGENT_INDEX_HOME:-$HOME/.agent-index}" # marketplace-isolation: allow legacy compatibility root
 RESOLVER="$SCRIPT_DIR/resolve-runtime.sh"
 COMMAND="${1:-status}"
 # Retained hook entry points never bootstrap or start a runtime.
