@@ -72,7 +72,19 @@ class _Server(socketserver.ThreadingTCPServer):
         # `process_request_thread` below, only once the handler has fully
         # returned -- a strict superset of "inside `_Handler.handle()`".
         self.owner._on_request_accepted()
-        super().process_request(request, client_address)
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            # Copilot review finding: `ThreadingMixIn.process_request` only
+            # creates and starts the handler thread -- if that itself fails
+            # (e.g. `Thread.start()` raising under OS thread exhaustion),
+            # `process_request_thread` below never runs, so its own
+            # decrement would never fire, permanently inflating the count
+            # and blocking every future shutdown-drain wait. Decrement here
+            # before re-raising so a failed delegation is never counted as
+            # "still handling a request".
+            self.owner._on_request_finished()
+            raise
 
     def process_request_thread(self, request, client_address) -> None:
         try:
