@@ -15,9 +15,11 @@ maintained implementation of what a write means. This is
 copilot-extensions#3761's resolved Open Question 1 (operator, verbatim):
 "Internal import-based fallback to run the correct direct-write (reusing
 same code, no fork), with log." :func:`run_direct` always logs the bypass
-(worktree/verb/reason) -- never silent, never treated as an equally-preferred
-alternative to going through the daemon (see the vision's
-``no-writer-bypasses-the-daemon``).
+(verb name and reason, plus a best-effort worktree identifier when a
+verb's own ``args`` happen to carry one -- never a required contract, since
+this module's registry is deliberately verb-shape-agnostic) -- never
+silent, never treated as an equally-preferred alternative to going through
+the daemon (see the vision's ``no-writer-bypasses-the-daemon``).
 
 **The fallback only ever runs when nothing could have been sent.**
 :func:`run_direct` is reached automatically in exactly two cases: no daemon
@@ -337,17 +339,26 @@ def run_direct(verb: str, args: dict, *, reason: str) -> dict:
     function directly, in-process -- the identical implementation
     :func:`compute` would have called, never a forked second one.
 
-    Always logs the bypass (verb name + reason) before running it, so a
-    later reconciliation pass has a durable trail of every mutation that
-    happened outside the daemon's own mediation. Raises ``ValueError`` for an
+    Always logs the bypass (verb name + reason, plus ``args["worktree_id"]``
+    when a verb's own ``args`` happen to carry one under that key -- a
+    best-effort inclusion, not a contract every verb must satisfy: this
+    module's registry is deliberately verb-shape-agnostic, per the "Verb
+    granularity note" above, so it cannot *require* a worktree identifier
+    from an arbitrary verb's ``args``) before running it, so a later
+    reconciliation pass has a durable trail of every mutation that happened
+    outside the daemon's own mediation. Raises ``ValueError`` for an
     unregistered verb, mirroring :func:`compute`'s own validation.
     """
     _ensure_verb_modules_loaded()
     fn = _VERBS.get(verb)
     if fn is None:
         raise ValueError(f"tracking_write: unregistered verb {verb!r}")
+    worktree_id = args.get("worktree_id") if isinstance(args, dict) else None
     logger.warning(
-        "tracking_write: bypassing daemon for verb=%s reason=%s", verb, reason
+        "tracking_write: bypassing daemon for verb=%s worktree_id=%s reason=%s",
+        verb,
+        worktree_id if worktree_id is not None else "(unknown)",
+        reason,
     )
     return fn(args)
 

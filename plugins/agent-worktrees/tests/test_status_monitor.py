@@ -2636,3 +2636,65 @@ def test_headless_child_guard_respects_explicit_new_console():
     flags = _headless_creationflags(0x00000010)
     assert not (flags & 0x08000000)
     assert flags & 0x00000010
+
+
+class TestWaitForTrackingWriteIdle:
+    """2026-09-26 PR review round 4: the tracking_write server must not be
+    closed while a write is still executing, on *any* shutdown path (not
+    just the empty-strike idle-exit branch) -- extracted as its own
+    function specifically so this deadline/poll logic is directly
+    unit-testable without driving the full cmd_status_monitor lifecycle.
+    """
+
+    def test_returns_immediately_when_never_busy(self):
+        from agent_worktrees import status_monitor_cli
+
+        sleeps = []
+        status_monitor_cli._wait_for_tracking_write_idle(
+            lambda: False,
+            now=lambda: 100.0,
+            sleep=sleeps.append,
+        )
+        assert sleeps == []
+
+    def test_polls_until_busy_clears(self):
+        from agent_worktrees import status_monitor_cli
+
+        busy_calls = {"n": 0}
+
+        def _busy():
+            busy_calls["n"] += 1
+            return busy_calls["n"] < 3
+
+        sleeps = []
+        status_monitor_cli._wait_for_tracking_write_idle(
+            _busy,
+            grace_s=10.0,
+            poll_interval_s=0.1,
+            now=lambda: 100.0,  # deadline never reached at this fixed time
+            sleep=sleeps.append,
+        )
+        assert busy_calls["n"] == 3
+        assert sleeps == [0.1, 0.1]
+
+    def test_gives_up_at_the_grace_deadline_even_if_still_busy(self):
+        from agent_worktrees import status_monitor_cli
+
+        clock = {"t": 100.0}
+
+        def _now():
+            return clock["t"]
+
+        def _sleep(interval):
+            clock["t"] += interval
+
+        status_monitor_cli._wait_for_tracking_write_idle(
+            lambda: True,  # never clears on its own
+            grace_s=0.25,
+            poll_interval_s=0.1,
+            now=_now,
+            sleep=_sleep,
+        )
+        # Gave up once the deadline passed -- never spun forever on a
+        # permanently-busy/wedged compute.
+        assert clock["t"] >= 100.25

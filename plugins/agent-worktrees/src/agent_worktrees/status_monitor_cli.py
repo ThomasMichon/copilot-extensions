@@ -6,6 +6,41 @@ import argparse
 import os
 import sys
 
+#: Bounded grace period a shutdown/handoff (runtime superseded, a newer
+#: monitor taking ownership, or the empty-strike idle-exit path) waits for
+#: an in-flight tracking-write compute to finish before closing the
+#: tracking_write server anyway. Generous relative to a single verb
+#: transaction's own cost (a lock/load/mutate/save, comparable to one
+#: worktree_status fact), bounded so a genuinely wedged compute can never
+#: block a shutdown indefinitely (2026-09-26 PR review finding).
+_TRACKING_WRITE_SHUTDOWN_GRACE_S = 10.0
+
+
+def _wait_for_tracking_write_idle(
+    has_inflight_write,
+    *,
+    grace_s: float = _TRACKING_WRITE_SHUTDOWN_GRACE_S,
+    poll_interval_s: float = 0.1,
+    now=None,
+    sleep=None,
+) -> None:
+    """Block until ``has_inflight_write()`` is false or ``grace_s`` elapses.
+
+    Extracted as its own function (rather than inlined in the shutdown
+    ``finally`` block) so the wait/deadline logic itself is directly unit-
+    testable without needing to drive the full ``cmd_status_monitor``
+    lifecycle. ``now``/``sleep`` default to the real ``time`` module;
+    overridden by tests to make the deadline/poll behavior deterministic
+    without a real wall-clock wait.
+    """
+    import time as _time
+
+    now = now or _time.time
+    sleep = sleep or _time.sleep
+    deadline = now() + grace_s
+    while has_inflight_write() and now() < deadline:
+        sleep(poll_interval_s)
+
 
 def _core():
     from . import __main__ as core
@@ -356,6 +391,16 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         if classify_server is not None:
             classify_server.close()
         if tracking_write_server is not None:
+            # 2026-09-26 PR review: CoalescingServer.close() does not drain
+            # an already-dispatched handler thread -- closing while a write
+            # is still executing (runtime_superseded/_other_current_monitor
+            # can reach this `finally` regardless of the empty-strike path
+            # above) could terminate the process mid-transaction, leaving a
+            # non-idempotent write incomplete. Give an in-flight write a
+            # bounded window to finish before closing anyway -- a shutdown
+            # must still terminate eventually, never wait forever on a
+            # wedged compute.
+            _wait_for_tracking_write_idle(tracking_write.has_inflight_write)
             tracking_write_server.close()
         worktree_status_runtime.shutdown()
         managed_mux_runtime.shutdown()

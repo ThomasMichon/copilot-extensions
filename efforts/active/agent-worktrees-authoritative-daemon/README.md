@@ -338,10 +338,11 @@ survey above.
       quick, low-risk first proof to retrofit blind in one pass against a
       hot, widely-used facility path (`register_session` specifically backs
       the sessionStart hook). Deferred to Phase 3 rather than rushed here;
-      Phase 2's own infra is proven end-to-end instead via 14 new unit
-      tests (`test_tracking_write.py`) exercising the registry, dispatch,
-      logged fallback, and the unique-key-never-coalesces guarantee
-      directly, without touching a live production call site.
+      Phase 2's own infra is proven end-to-end instead via 27 unit tests
+      (`test_tracking_write.py`, after PR review rounds 2-4) exercising the
+      registry, dispatch, logged fallback, the unique-key-never-coalesces
+      guarantee, the ambiguous/safe outcome boundary, and in-flight-write
+      tracking, directly, without touching a live production call site.
 - [x] Tests: `test_tracking_write.py` (27 tests, after PR review rounds 2-3:
       rendezvous parsing + port-bounds validation, verb registration/
       dispatch, unregistered-verb/malformed-payload rejection, `run_direct`'s
@@ -410,6 +411,42 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-09-26 — PR #3779 review round 4: shutdown-safety gap, docstring overclaim, and a recurring stale count
+- **The busy check only protected one shutdown path.** Round 2's fix
+  guarded the empty-strike idle-exit branch, but `runtime_superseded()` /
+  `_other_current_monitor()` can reach the same `finally` block by a
+  different route (a runtime handoff, another monitor taking ownership) and
+  close `tracking_write_server` unconditionally, regardless of
+  `has_inflight_write()`. Fixed: extracted the wait/deadline logic into its
+  own `_wait_for_tracking_write_idle()` function (directly unit-testable
+  without driving the full monitor lifecycle) and call it, unconditionally,
+  right before `tracking_write_server.close()` in the `finally` block --
+  covering every shutdown path, not just one. Bounded at 10s
+  (`_TRACKING_WRITE_SHUTDOWN_GRACE_S`) so a genuinely wedged compute can
+  never block a shutdown/handoff forever.
+- **Docstring overclaimed what gets logged.** The module docstring promised
+  every direct-fallback log line carries "worktree/verb/reason," but
+  `run_direct`'s generic `(verb, args, reason)` API has no dedicated
+  worktree parameter -- verbs are deliberately shape-agnostic (see the
+  granularity note), so this was never actually enforceable. Fixed two
+  ways: revised the docstring to describe what's actually guaranteed
+  (verb + reason, always), and made `run_direct` opportunistically include
+  `args["worktree_id"]` in the log line when a verb's own args happen to
+  carry one under that key -- a best-effort inclusion, explicitly not a
+  contract every future verb must satisfy.
+- **The stale "14 tests" count recurred a third time** -- round 2 fixed the
+  Journal narrative, round 3 fixed one live checklist line but missed a
+  second one the reviewer found in the very next round. Fixed for real this
+  time (checked every remaining literal count in the Plan/Context sections,
+  not just the one flagged).
+- 3 new tests (`_wait_for_tracking_write_idle`, isolated from the full
+  monitor lifecycle: returns immediately when never busy, polls until busy
+  clears, gives up at the grace deadline). 30 tests total across
+  `test_tracking_write.py` (27) + the new `TestWaitForTrackingWriteIdle`
+  class in `test_status_monitor.py` (3). Full suite: 5576 passed, same 5
+  pre-existing failures. `ruff check`, `check-module-size`,
+  `check-install-contract`, `check-changefile-presence`: all clean.
 
 ### 2026-09-26 — PR #3779 review round 3: 5 more real findings, all fixed
 Round 3 caught five further genuine issues, all in the same "does the
