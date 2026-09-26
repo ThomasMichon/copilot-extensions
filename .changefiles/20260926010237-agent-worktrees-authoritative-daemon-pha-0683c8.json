@@ -1,9 +1,0 @@
-{
-  "comment": "agent-worktrees-authoritative-daemon Phase 2: add tracking_write mutation-verb daemon plumbing (wire kind, verb registry, logged same-code direct-write fallback), wired additively into cmd_status_monitor. No production write call site migrated yet -- infrastructure and tests only.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
