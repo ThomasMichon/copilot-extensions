@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "copilot-extensions-worktree-manager"
-version = "0.1.0-dev77"
+version = "0.1.0-dev78"
 description = "Standalone, out-of-plugin control plane (installer, configurator & worktree launcher) for the copilot-extensions harness."
 readme = "README.md"
 license = "MIT"
@@ -42,6 +42,12 @@ dependencies = [
     # ``plugin_activation``). Used by the production Picker's pivot-registry
     # scan/materialization (copilot-extensions#3359).
     "agent-plugin-activation",
+    # Coalesce/refcount/idle-exit daemon wire protocol + client (module
+    # ``work_coalescing_singleton``). Used by the Manager mux-companion
+    # daemon (``mux_daemon.py``, Phase 3b Sub-slice 3 Step 2) to serve
+    # ``mux-status-v1`` requests from agent-worktrees, mirroring
+    # ``agent_worktrees.mux_link``'s own use of the same shared library.
+    "agent-work-coalescing-singleton",
 ]
 
 [tool.uv.sources]
@@ -60,6 +66,9 @@ agent-dropin-registry = { path = "libs/dropin-registry" }
 # Effective global-or-adopted-project plugin eligibility and identity-verified
 # roots for attributed registry entries (module ``plugin_activation``).
 agent-plugin-activation = { path = "libs/plugin-activation" }
+# Coalesce/refcount/idle-exit daemon wire protocol + client (module
+# ``work_coalescing_singleton``).
+agent-work-coalescing-singleton = { path = "libs/work-coalescing-singleton" }
 
 [project.scripts]
 worktree-manager = "worktree_manager.__main__:console_entry"

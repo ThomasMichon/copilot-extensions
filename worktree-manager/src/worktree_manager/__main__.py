@@ -803,6 +803,86 @@ def _cmd_contracts(rest: list[str]) -> int:
     return 0
 
 
+def _cmd_mux_daemon(rest: list[str]) -> int:
+    """Manager mux-companion daemon internals (Phase 3b Sub-slice 3 Step 2).
+
+    Still off the main launch path -- no real launch/join/restore/remux
+    action calls any of this yet (see ``mux_daemon.py``'s own module
+    docstring). Exposed here only so the daemon's lifecycle, and the
+    mapping-registry register/remove operations Step 3 will eventually wire
+    in, are independently reachable/testable today.
+    """
+    from . import mux_daemon
+
+    args = list(rest)
+    if not args:
+        print("usage: worktree-manager mux-daemon <run|ensure|register|remove|show> [...]")
+        return 2
+    action = args.pop(0)
+    if action == "run":
+        return mux_daemon.run_daemon_foreground()
+    if action == "ensure":
+        ok = mux_daemon.ensure_daemon_running()
+        print(json.dumps({"running": ok}))
+        return 0 if ok else 1
+    if action == "register":
+        values: dict[str, str] = {}
+        for arg in args:
+            if arg.startswith("--") and "=" in arg:
+                key, _, value = arg[2:].partition("=")
+                values[key.replace("-", "_")] = value
+        payload: dict = dict(values)
+        for int_field in ("mapping_revision", "attached_clients"):
+            if int_field in payload:
+                try:
+                    payload[int_field] = int(payload[int_field])
+                except ValueError:
+                    print(f"error: --{int_field.replace('_', '-')} must be an integer")
+                    return 2
+        if "live" in payload:
+            payload["live"] = payload["live"].strip().lower() not in ("0", "false", "no")
+        try:
+            result = mux_daemon.register_mapping(payload)
+        except ValueError as exc:
+            print(f"error: {exc}")
+            return 2
+        print(json.dumps(result))
+        return 0 if result.get("applied") else 1
+    if action == "remove":
+        project = None
+        worktree_id = None
+        revision = None
+        for arg in args:
+            if arg.startswith("--project="):
+                project = arg.split("=", 1)[1]
+            elif arg.startswith("--worktree-id="):
+                worktree_id = arg.split("=", 1)[1]
+            elif arg.startswith("--mapping-revision="):
+                revision = int(arg.split("=", 1)[1])
+        if not project or not worktree_id:
+            print("error: remove needs --project=NAME --worktree-id=ID")
+            return 2
+        result = mux_daemon.remove_mapping(project, worktree_id, mapping_revision=revision)
+        print(json.dumps(result))
+        return 0 if result.get("applied") else 1
+    if action == "show":
+        project = None
+        worktree_id = None
+        for arg in args:
+            if arg.startswith("--project="):
+                project = arg.split("=", 1)[1]
+            elif arg.startswith("--worktree-id="):
+                worktree_id = arg.split("=", 1)[1]
+        if not project or not worktree_id:
+            print("error: show needs --project=NAME --worktree-id=ID")
+            return 2
+        entry = mux_daemon.get_mapping(project, worktree_id)
+        print(json.dumps(entry))
+        return 0 if entry is not None else 1
+    print(f"error: unknown mux-daemon action {action!r}")
+    return 2
+
+
 def _cmd_companion(rest: list[str]) -> int:
     """Launch the Mux Companion: a read-only status + session-lineage view
     for the CURRENT worktree, resolved from cwd (visions/mux-companion).
@@ -1686,6 +1766,9 @@ def main(argv: list[str] | None = None) -> int:
         print("                         real project identity, faked worktree/pivot data")
         print("                         (in the Picker: l launch/resume · b bare-resume · n new)")
         print("  companion              Mux Companion: read-only status + session lineage for the current worktree (visions/mux-companion)")
+        print("  mux-daemon <run|ensure|register|remove|show>")
+        print("                         Manager mux-companion daemon internals (Phase 3b Sub-slice 3 Step 2;")
+        print("                         not yet on any real launch path)")
         print()
         print("Phase 2 provisions prerequisites + drives the core install; Phase 3")
         print("adds the Manager state views (projects/repos/plugin enablement); later")
@@ -1709,6 +1792,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_picker(args[1:])
     if args and args[0] == "companion":
         return _cmd_companion(args[1:])
+    if args and args[0] == "mux-daemon":
+        return _cmd_mux_daemon(args[1:])
     if args and args[0] == "doctor":
         return _cmd_doctor()
     if args and args[0] == "setup":
