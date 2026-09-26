@@ -428,6 +428,7 @@ def _linux_exec_start(tier: str, *, home: Path | None = None) -> str:
 def render_linux_service_unit(tier: str, *, home: Path | None = None) -> str:
     base = home if home is not None else Path.home()
     local_bin = base / ".local" / "bin"
+    path_value = f"PATH={local_bin}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
     return (
         "[Unit]\n"
         f"Description={task_description(tier)}\n"
@@ -440,8 +441,10 @@ def render_linux_service_unit(tier: str, *, home: Path | None = None) -> str:
         # `worktree-manager` binstub this sweep invokes -- and anything
         # `worktree-manager update` itself shells out to by bare name --
         # actually lives (confirmed live via the sibling self-update sweep's
-        # own multi-day FileNotFoundError failure, same root cause).
-        f"Environment=PATH={local_bin}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n"
+        # own multi-day FileNotFoundError failure, same root cause). Quoted
+        # as one token so a home directory containing whitespace doesn't
+        # split PATH= into invalid tokens.
+        f"Environment={_systemd_quote(path_value)}\n"
         f"ExecStart={_linux_exec_start(tier, home=home)}\n"
     )
 

@@ -470,6 +470,7 @@ def render_linux_service_unit(
 ) -> str:
     base = home if home is not None else Path.home()
     local_bin = base / ".local" / "bin"
+    path_value = f"PATH={local_bin}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
     return (
         "[Unit]\n"
         f"Description={task_description(tier)}\n"
@@ -485,9 +486,12 @@ def render_linux_service_unit(
         # FileNotFoundError for days before a human noticed the timer never
         # actually converging anything. Prepending it here fixes every
         # subprocess call this service makes, not one call site at a time.
-        f"Environment=PATH={local_bin}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n"
+        # Quoted as one token (like ExecStart='s parts) so a home directory
+        # containing whitespace doesn't split PATH= into invalid tokens.
+        f"Environment={_systemd_quote(path_value)}\n"
         f"ExecStart={_linux_exec_start(tier, machine=machine, home=home)}\n"
     )
+
 
 
 def render_linux_timer_unit(tier: str) -> str:

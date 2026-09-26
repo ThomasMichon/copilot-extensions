@@ -565,8 +565,20 @@ def test_render_linux_service_unit_sets_path_environment_for_local_bin(tmp_path)
     the same systemd --user minimal-PATH gap affects this sibling sweep too
     (its `worktree-manager` binstub, and anything it shells out to, also
     lives only in `~/.local/bin`)."""
+    if sys.platform == "win32":
+        pytest.skip("Linux systemd unit rendering assumes a POSIX host")
     unit = fleet_update_tasks.render_linux_service_unit("sweep", home=tmp_path)
     assert f"Environment=PATH={tmp_path}/.local/bin:" in unit
+
+
+def test_render_linux_service_unit_quotes_path_for_home_with_whitespace(tmp_path):
+    """See the identical test in test_self_update.py -- same quoting fix,
+    same _systemd_quote helper (duplicated per-module by design)."""
+    if sys.platform == "win32":
+        pytest.skip("Linux systemd unit rendering assumes a POSIX host")
+    spacey_home = tmp_path / "Build User"
+    unit = fleet_update_tasks.render_linux_service_unit("sweep", home=spacey_home)
+    assert f'Environment="PATH={spacey_home}/.local/bin:' in unit
 
 
 def test_linux_systemd_user_available_false_without_binary():
