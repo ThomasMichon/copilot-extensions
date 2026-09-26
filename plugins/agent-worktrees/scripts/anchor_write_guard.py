@@ -45,21 +45,19 @@ Escape hatches / modes:
     write-routing guard family.
   * ``ANCHOR_WRITE_GUARD_MODE=deny|ask|warn|off`` (default ``deny``) picks the
     action on a hit.
-  * A plain ``git pull`` (and a bare ``git fetch`` alone, which never
-    mutates the working tree) is never blocked on an anchor. This guard's
-    invariant is "no agent-authored content" -- a stray edit/commit that
-    never lands through the PR flow. An anchor this guard has kept clean
-    (never merged/rebased/committed into) has no local commits to diverge
-    from upstream, so a pull against it can only ever fast-forward -- no new
-    commit is created either way. If the anchor *did* somehow drift (a
-    break-glass edit, manual work outside this guard), a plain pull's
-    default merge strategy WOULD create a genuine new local merge commit
-    (or, with ``pull.rebase`` configured, rewrite existing local commits) --
-    exactly the failure mode ``agent-worktrees repos sync <repo>`` exists to
-    avoid: it always fetches + ``merge --ff-only``, skipping (never forcing)
-    a dirty/diverged/detached checkout rather than ever creating a merge
-    commit. Prefer ``repos sync`` whenever that fast-forward-only guarantee
-    actually matters instead of trusting a plain pull's default behavior.
+  * ``git pull --ff-only`` (and a bare ``git fetch`` alone, which never
+    mutates the working tree) is never blocked on an anchor: git structurally
+    refuses to create a merge commit or apply a configured ``pull.rebase``
+    when a fast-forward isn't possible, so this exact form can never
+    introduce the agent-authored content ("no agent-authored content" is
+    this guard's whole invariant) that a stray edit/commit would. A bare
+    ``git pull`` (no ``--ff-only``) remains blocked like any other write-sub
+    verb -- on a diverged anchor its default merge WOULD create a genuine
+    new local merge commit, or a configured rebase would rewrite existing
+    ones. ``agent-worktrees repos sync <repo>`` is the always-available
+    equivalent (fetch + ``merge --ff-only``, skipping rather than forcing a
+    dirty/diverged/detached checkout) when a plain ``--ff-only`` pull isn't
+    convenient to type.
   * ``agent-worktrees repos allow-edits <repo> --reason "..."`` opens a
     time-boxed break-glass (``~/.agent-worktrees/allow-edits.json``) the guard
     honors.
@@ -96,9 +94,10 @@ CMD_ARG_KEYS = ("command", "cmd", "script", "commandLine", "commandline", "input
 
 # Write-ish verbs (PowerShell cmdlets + POSIX + git mutations); presence
 # alongside an anchor-path literal in a shell command flips a read into a
-# suspected write. Mirrors cross_repo_guard, EXCEPT this guard's own
-# rationale (never introduce agent-authored content into the anchor) does
-# not cover ``pull`` -- see the ``_GIT_WRITE_SUB`` comment below.
+# suspected write. Mirrors cross_repo_guard. ``pull`` stays in this cheap
+# early-out list -- an unsafe (non-``--ff-only``) pull must still reach the
+# precise per-segment analysis below, which is where the real ``--ff-only``
+# exemption lives (see ``_GIT_FF_ONLY_FLAG``).
 _WRITE_VERBS = re.compile(
     "|".join([
         "Set-Content", "Add-Content", "Out-File", "New-Item", "Remove-Item",
@@ -108,7 +107,7 @@ _WRITE_VERBS = re.compile(
         r"\btee\b", r"\bsed\b\s+-i", r"\bcp\b", r"\bmv\b", r"\brm\b",
         r"\btouch\b", r"\bmkdir\b", r"\bdd\b", r"\btruncate\b", r"\bpatch\b",
         r"git\s+(?:-C\s+\S+\s+)?(?:apply|commit|checkout|switch|reset|"
-        r"restore|clean|rm|mv|stash|merge|rebase|cherry-pick|revert|"
+        r"restore|clean|rm|mv|stash|merge|rebase|pull|cherry-pick|revert|"
         r"add|init)",
     ]),
     re.IGNORECASE,
@@ -145,23 +144,27 @@ _WRITE_CMD_START = re.compile(
 )
 # A git command at segment start, and the write subcommands that mutate a repo.
 _GIT_START = re.compile(r"^\s*[\"']?git\b", re.IGNORECASE)
-# ``pull`` is deliberately absent: this guard's invariant is "no agent-
-# authored content lands in the anchor" (a stray commit, an edit that never
-# goes through the worktree/PR flow). An anchor this guard has kept clean has
-# no local commits to diverge from upstream, so a pull against it can only
-# fast-forward. A DIVERGED anchor's pull could still create a genuine new
-# local merge commit (or rewrite commits under ``pull.rebase``) -- that risk
-# is accepted here in favor of `repos sync <repo>` (guaranteed
-# fast-forward-only, never forces) being the safer choice whenever that
-# guarantee actually matters, rather than blocking every pull outright and
-# forcing a clunkier detour for the common, harmless "catch up" case. Other
-# guards (``cross_repo_guard``) keep their own independent copy of this list
-# and are unaffected.
 _GIT_WRITE_SUB = re.compile(
     r"\b(?:add|commit|apply|checkout|switch|reset|restore|clean|rm|mv|stash|"
-    r"merge|rebase|cherry-pick|revert|init)\b",
+    r"merge|rebase|pull|cherry-pick|revert|init)\b",
     re.IGNORECASE,
 )
+# ``pull`` is the one write-sub verb with a narrow, precise exemption: this
+# guard's invariant is "no agent-authored content lands in the anchor" (a
+# stray commit, an edit that never goes through the worktree/PR flow) -- and
+# ``git pull --ff-only`` structurally CANNOT create one: git aborts instead
+# of ever creating a merge commit or invoking a configured ``pull.rebase``
+# when a fast-forward isn't possible. A bare ``git pull`` (no ``--ff-only``)
+# has no such guarantee -- on a diverged anchor its default merge creates a
+# genuine new local merge commit, or a configured rebase rewrites existing
+# ones -- so it remains blocked exactly like every other write-sub verb;
+# ``agent-worktrees repos sync <repo>`` (fetch + ``merge --ff-only``,
+# skipping rather than forcing a dirty/diverged/detached checkout) is the
+# always-available equivalent. ``cross_repo_guard`` keeps its own
+# independent copy of this list (different guard, different repo-delegation
+# reasoning) and is unaffected either way.
+_GIT_PULL_SUB = re.compile(r"\bpull\b", re.IGNORECASE)
+_GIT_FF_ONLY_FLAG = re.compile(r"--ff-only\b", re.IGNORECASE)
 # A ``-C`` (git change-directory) flag anywhere in a git segment.
 _GIT_DASH_C_FLAG = re.compile(r"(?:^|\s)-C\b", re.IGNORECASE)
 
@@ -496,6 +499,11 @@ def _shell_hit(cmd: str, cwd: str, anchors: list[dict]) -> dict | None:
         at_write_cmd = bool(_WRITE_CMD_START.match(eff))
         is_git = bool(_GIT_START.match(eff))
         git_write = is_git and bool(_GIT_WRITE_SUB.search(seg))
+        # A ``pull`` invocation is exempt from ``git_write`` ONLY when it
+        # explicitly carries ``--ff-only`` -- see ``_GIT_PULL_SUB``'s comment.
+        # Any other write-sub verb (or a pull lacking that flag) is untouched.
+        if git_write and _GIT_PULL_SUB.search(seg) and _GIT_FF_ONLY_FLAG.search(seg):
+            git_write = False
         has_dash_c = is_git and bool(_GIT_DASH_C_FLAG.search(seg))
         for a in anchors:
             gp = a.get("path")

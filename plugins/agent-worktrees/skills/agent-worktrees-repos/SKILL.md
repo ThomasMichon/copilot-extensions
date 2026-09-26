@@ -231,13 +231,14 @@ before flags): `--tag`'s value runs to the next `--`-flag (to keep an
 unquoted, multi-word tag like the `multi-machine system` example above
 working), so a name placed after `--tag` would be swallowed into its value
 instead. A named repo that isn't registered at all is reported as its own
-`not registered` result. `anchor_write_guard` never blocks a plain `git
-pull`/`git fetch` against an anchor either (only content an agent would
-actually author there -- `git commit`, `checkout`, `reset`, and the like),
-but a *divergent* `git pull` can still create a genuine new local merge
-commit (or rewrite commits under `pull.rebase`) -- `repos sync` is the
-guaranteed fast-forward-only alternative, worth preferring whenever that
-matters instead of trusting a plain pull's default behavior.
+`not registered` result. `anchor_write_guard` never blocks `git pull
+--ff-only` (or a bare `git fetch`, which never mutates the working tree)
+against an anchor -- `--ff-only` makes git structurally refuse instead of
+ever creating a merge commit or applying a configured `pull.rebase`. A bare
+`git pull` (no `--ff-only`) remains blocked like any other agent-authored
+mutation, since a diverged anchor's default merge WOULD create a genuine
+new local commit; `repos sync` is the always-available equivalent when
+typing `--ff-only` isn't convenient.
 
 ## Data File
 
