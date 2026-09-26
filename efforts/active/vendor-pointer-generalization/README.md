@@ -54,8 +54,13 @@ entry for why the Design Decision immediately below — the effort's
   importable `src/<pkg>/__init__.py` stub in a local
   `plugins/<plugin>/libs/<lib>/` (or `worktree-manager/libs/<lib>/`)
   directory, forwarding every import to canonical via the standard
-  "self-replacing module" technique at runtime, with zero content to keep
-  in sync. **Not** the npm-workspace-style `uv [tool.uv.sources]`
+  "self-replacing module" technique at runtime, so the importable `src/`
+  payload has zero content to keep in sync. The pointer copy still
+  physically carries a `pyproject.toml`, `README.md`, and (when the copy
+  opted in) a local `tests/` tree — the materialization tooling refreshes
+  those from canonical rather than forwarding them live, so they are
+  DRY-by-tooling, not DRY-by-construction the way `src/` is. **Not** the
+  npm-workspace-style `uv [tool.uv.sources]`
   `path`+`editable` live reference originally decided below — see the
   Course-correction Journal entry.
 - **The shared installer engine** (if `vendored-installer-engine` adopts
@@ -346,11 +351,14 @@ shape before committing to a design)_
       superseded 2026-09-26** (see Course-correction Journal entry) by
       `VENDOR_POINTER.json` `kind=src-passthrough` — a real, importable
       stub `src/<pkg>/__init__.py` in a local pointer directory, already
-      built, hardened across 20+ review rounds, and in production for 2
-      real libs (`lazy-cli-dispatch`, `work-coalescing-singleton`) before
-      this effort's own Phase 1 execution caught up to it. Every item
-      below this one that assumed the uv-editable form is struck through
-      and superseded by the matching src-passthrough item that follows it.
+      built, hardened across 20+ review rounds, and adopted on `dev` for 2
+      real libs (`lazy-cli-dispatch`, `work-coalescing-singleton` — a
+      `dev`-branch pointer only; `materialize_main.py` still expands it
+      into a self-contained real copy before it ever reaches a shipped
+      `main` release) before this effort's own Phase 1 execution caught
+      up to it. Every item below this one that assumed the uv-editable
+      form is struck through and superseded by the matching
+      src-passthrough item that follows it.
 - [x] ~~**Convert every real vendored lib to the canonical-reference
       form**: ... rewrite the consuming `pyproject.toml`'s
       `[tool.uv.sources]` entry ... `editable = true`~~ — **superseded**:
@@ -407,10 +415,16 @@ shape before committing to a design)_
       `materialize_main.py`) handles the converted real plugins correctly.
 - [ ] Confirm every consuming plugin's own test suite
       (`tools/run-plugin-tests.py <plugin>`) still passes post-conversion
-      (validated for `work-coalescing-singleton`'s two consumers in PR
-      #3810: full `agent-worktrees` suite 5627 passed; validated for
-      `lazy-cli-dispatch` in PR #3790 — confirm this holds for each future
-      conversion too).
+      (validated for `work-coalescing-singleton`'s two consumers: PR
+      #3810's own description cites the initial-commit figures (`agent-
+      worktrees` 771+540 across two invocations, `worktree-manager` 1437);
+      the FINAL merged state (after 23 review rounds added more coverage)
+      was last confirmed via `run-plugin-tests.py agent-worktrees
+      --reinstall` at 5627 passed, 26 skipped, and `worktree-manager`'s
+      `uv run pytest` at 1474 passed, 4 skipped — both counts grew across
+      rounds as fixes added regression tests, so the two figures
+      legitimately differ; also validated for `lazy-cli-dispatch` in PR
+      #3790 — confirm this holds for each future conversion too).
 
 ### Phase 2 — Canonical-reference form for the shared installer engine
 > **Note (2026-09-26):** libs' mechanism pivoted to `src-passthrough`
@@ -462,10 +476,12 @@ shape before committing to a design)_
 
 ### Phase 3 — Document the pattern; sweep for further "and more" candidates
 - [ ] Write `docs/patterns/vendor-pointer.md`: the file-pointer kind (docs,
-      unchanged) and the canonical-reference form (libs, and the shared
-      installer engine if Phase 2 lands) — their lifecycle (a live
-      relative-path reference in `dev` vs. a physical stub file, ->
-      `materialize_main.py` copy-and-rewrite/expansion -> shipped `main`
+      unchanged) and `src-passthrough` (libs — see the Course-correction
+      Journal entry; **not** the live relative-path reference form
+      originally planned here, superseded before this phase started) and
+      the shared installer engine if Phase 2 lands — their lifecycle (a
+      physical stub file in `dev` forwarding to canonical at runtime, ->
+      `materialize_main.py` expansion into a real copy -> shipped `main`
       content), which tool owns which invariant, and how a new plugin/
       lib/script opts in.
 - [ ] Revisit whether any other currently-duplicated construct surfaced in
@@ -475,23 +491,49 @@ shape before committing to a design)_
 
 ## Validation Plan
 
+> **Note (2026-09-26):** the two items below marked "superseded" describe
+> validation criteria for the uv-editable form (no local directory at
+> all), which this effort no longer pursues for libs — see the
+> Course-correction Journal entry. They are kept, struck through, as the
+> historical record of what the first resolution intended to prove; the
+> item immediately following each is the current, `src-passthrough`-
+> accurate replacement.
+
 - [ ] Every real lib copy converted in Phase 1 — every
       `plugins/<plugin>/libs/<lib>` copy **and every `worktree-manager/
       libs/*` copy** — round-trips losslessly: `materialize_main.py`'s
       promotion output is byte-identical to the pre-conversion copy for
       each (the same `git diff --no-index` check the isolated trial used,
-      run against the real repo this time).
-- [ ] A converted plugin's own test suite (`tools/run-plugin-tests.py
+      run against the real repo this time). Confirmed for
+      `work-coalescing-singleton` (PR #3810); remaining libs still need
+      this per-conversion.
+- [x] ~~A converted plugin's own test suite (`tools/run-plugin-tests.py
       <plugin>`) passes with **no local `libs/<lib>` directory present at
       all** in the `dev` checkout — proving the canonical reference alone
       (via `[tool.uv.sources]` `path` + `editable = true`) is sufficient
       for `uv pip install -e .` and subsequent test/static-analysis
-      resolution, matching the Design Decision's validated prototype.
+      resolution, matching the Design Decision's validated prototype.~~ —
+      **superseded**: `src-passthrough` keeps a real local pointer
+      directory (with a generated stub, not a full copy) — there is no
+      "no local directory at all" case to prove for this mechanism.
+      Current criterion instead: a converted plugin's own test suite
+      passes with the **local pointer directory present but its `src/`
+      replaced by the generated stub** — confirmed for
+      `work-coalescing-singleton`'s two consumers (PR #3810: `agent-
+      worktrees` 5627 passed/26 skipped, `worktree-manager` 1474
+      passed/4 skipped, both the FINAL post-review-cycle figures — see
+      the corrected Phase 1 test-count note above) and for
+      `lazy-cli-dispatch` (PR #3790).
 - [ ] Editing the canonical `libs/<lib>` source and re-running a
       converted plugin's tests **without reinstalling** picks up the edit
       — the "in-place test scripts in `dev`" / "call across folders"
       requirement, demonstrated against a real plugin (not just the
-      isolated prototype).
+      isolated prototype). Confirmed live-forwarding behavior exists for
+      `src-passthrough` via `tools/test_sync_vendored_libs.py::
+      test_pointerized_copy_forwards_imports_to_canonical_end_to_end`
+      (a real subprocess re-import after mutating canonical, no reinstall)
+      — still worth a direct real-plugin demonstration per future
+      conversion.
 - [ ] `tools/preview_release.py` ("preview-promo") correctly performs the
       copy-then-rewrite for a plugin using the canonical-reference form
       when building a scratch local-install preview.
@@ -784,7 +826,7 @@ _Pending._
 - **Decision, presented to the operator with both findings** (uv-editable
   demonstrably works when implemented correctly; `src-passthrough` is
   fully built, 23-review-round-hardened, and already has 2 real
-  production adopters): **formally adopt `src-passthrough` as this
+  `dev`-branch adopters): **formally adopt `src-passthrough` as this
   effort's actual Phase 1 mechanism**, rather than switch course to the
   uv-editable form despite the sunk cost of re-verifying it works.
   Rationale for the choice, not just the sunk cost: `src-passthrough`
