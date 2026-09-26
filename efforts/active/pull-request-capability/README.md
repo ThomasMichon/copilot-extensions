@@ -117,6 +117,20 @@ trace; not repeated here (public-artifact rule: keep this effort generic).
       provider, including `mock`.
 - [ ] Expose the new operations through the CLI alongside the existing
       `pr-*` family.
+- [ ] **Carry forward the `@copilot`-mention guard.** `GitHubProvider`
+      already hard-blocks a bare `@copilot` mention in `create_pull()`
+      (title/body) and `publish_source_marker()` via the shared
+      `reject_copilot_mention()` helper in `providers/base.py` (landed in
+      #3700, complementing the `copilot-extensions-harness` preToolUse hook
+      from #3663 — that hook can't see text posted through a provider's own
+      internal transport call). Every new comment/review/verdict-posting
+      operation this phase adds to `github.py` must call
+      `reject_copilot_mention()` on its caller-supplied text before
+      publishing, the same way the two existing operations do. Decide
+      per-provider whether `gitea`/`azure-devops` need an equivalent guard
+      (only do so if either forge grows a comparable
+      mention-invokes-an-autonomous-agent hazard — today `@copilot` has no
+      special meaning there, so this is GitHub-only unless that changes).
 
 ### Phase 4 — Validate and land
 - [ ] Full `plugins/agent-worktrees` test suite passes with all three
@@ -178,3 +192,15 @@ _Pending._
 - Landed via PR (see this worktree's PR) using `pr-self-merge` per the
   effort's working pattern. Next: open Phase 2's worktree (foreign-repo
   addressing).
+
+### 2026-09-25 — Forward note: @copilot-mention guard now load-bearing on GitHubProvider
+- Unrelated work (the `copilot-extensions-harness` preToolUse hook, #3663)
+  surfaced that a shell-level guard can't see text an `agent_worktrees`
+  provider posts through its own internal `gh` subprocess call. Landed
+  #3700 as a direct fix ahead of this effort: `GitHubProvider.create_pull()`
+  and `.publish_source_marker()` now hard-block a bare `@copilot` mention
+  via a shared `reject_copilot_mention()` helper in `providers/base.py`.
+- Added to Phase 3's plan above: every new comment/review/verdict-posting
+  operation this phase adds must call the same helper before publishing.
+  Not yet implemented (Phase 3 hasn't started) — this is a forward note so
+  the guard isn't dropped when that surface lands.
