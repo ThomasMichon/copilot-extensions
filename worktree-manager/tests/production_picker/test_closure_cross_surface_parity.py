@@ -142,6 +142,39 @@ def test_held_claim_and_open_follow_up_agree_on_merged_with_markers(
     assert picker_row["status_markers"] == "C1 F1"
 
 
+def test_style_metadata_agrees_between_list_json_and_picker(monkeypatch, capsys):
+    """Validation Plan "Parity": beyond the label/marker checks above, the
+    descriptor's semantic ``style`` (list JSON's `closure["style"]`) must
+    match the Picker's own `state_style` field for the SAME fixture -- not
+    just an equivalent-looking label."""
+    rec = _rec(
+        resources=[
+            tracking.ResourceClaim(kind="codespace", ref="cs-1", state="active"),
+        ],
+    )
+    info = git_ops.WorktreeStateInfo(
+        state=git_ops.WorktreeState.COMPLETED, fetch_requested=True)
+    row = m._worktree_to_dict(rec, state_info=info)
+    closure = row["closure"]
+    assert closure["label"] == "MERGED"
+    assert closure["style"] == "merged-blocked"
+
+    picker_row = _picker_row_for(closure)
+    assert picker_row["state"] == closure["label"]
+    assert picker_row["state_style"] == closure["style"]
+
+    # And the clean/FINAL fixture from the first test above: style "final"
+    # agrees too.
+    clean_rec = _rec()
+    clean_info = git_ops.WorktreeStateInfo(
+        state=git_ops.WorktreeState.COMPLETED, fetch_requested=True)
+    clean_row = m._worktree_to_dict(clean_rec, state_info=clean_info)
+    clean_closure = clean_row["closure"]
+    assert clean_closure["style"] == "final"
+    clean_picker_row = _picker_row_for(clean_closure)
+    assert clean_picker_row["state_style"] == clean_closure["style"]
+
+
 def test_cached_evidence_never_upgrades_to_final_on_any_surface(
     monkeypatch, capsys,
 ):
