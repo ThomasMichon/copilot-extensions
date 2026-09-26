@@ -399,7 +399,7 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   `global-plugin-binstub` + `path-sibling-launch`) and 1 in
   `skills/contributing-to-copilot-extensions/SKILL.md` (the "Payload vs
   runtime" concept paragraph's mention of a `~/.local/bin` binstub).
-- The diagnosing-skill's file already carries 6 existing
+- The diagnosing-skill's file already carries 8 existing
   `marketplace-isolation: allow deployed-runtime-diagnostics` markers on
   materially identical rows/commands in the same table and command block
   (documenting today's deployed, still-legacy-by-design runtime layout for
