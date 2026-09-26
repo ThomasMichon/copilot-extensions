@@ -50,6 +50,7 @@ def seams(monkeypatch):
     )
     monkeypatch.setattr(copilot_venue, "claim_or_exit_code", lambda a: None)
     # Hermetic: never read the developer's own ~/.copilot/settings.json model.
+    monkeypatch.setattr(detach, "with_supervisor", lambda venue, ref=None: dict(venue))
     monkeypatch.setattr(detach, "model_copilot_args", lambda existing: [])
     monkeypatch.setattr(copilot_venue, "_ensure_agent_bridge_plugin", lambda n: None)
     monkeypatch.setattr(venue_copilot, "resolve_daemon_port", lambda *a, **k: 41234)
@@ -703,3 +704,11 @@ def test_launch_does_not_retry_a_genuine_remote_failure(seams, monkeypatch, caps
     monkeypatch.setattr(detach.time, "sleep", lambda s: None)
     assert detach.cmd_detach(_args(), ssh_session=fake) == 1
     assert len(seams.ssh) == 1
+
+def test_detached_session_records_its_supervising_worktree(seams, monkeypatch, capsys):
+    monkeypatch.setattr(detach, "with_supervisor",
+                        lambda venue, ref=None: {**venue, "supervisor_ref": "host/example-harness/wt-1"})
+    rc = detach.cmd_detach(_args(dry_run=True), ssh_session=_ssh(seams))
+    assert rc == 0
+    venue = json.loads(capsys.readouterr().out)["venue"]
+    assert venue["kind"] == "codespace" and venue["supervisor_ref"] == "host/example-harness/wt-1"
