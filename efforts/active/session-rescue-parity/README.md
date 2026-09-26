@@ -378,7 +378,7 @@ clean on every touched/new file.
       required) and no real leased CodeSpace was available to validate
       against in this sandboxed environment -- unlike Phase 3's containers
       precedent (`#3574`), which had live Docker infra already in hand via
-      the aperture-labs `dampener-reviewer-containerization` effort. The
+      a downstream consuming effort. The
       full unit/CLI-dispatch test suite (1429 tests, Phase 3) validates
       every code path this item would exercise except the literal live
       round-trip against GitHub's own CodeSpace API/SSH transport. **Named
@@ -419,7 +419,7 @@ clean on every touched/new file.
 
 ## Validation Plan
 
-- [ ] Phase 2: `tools/check-vendored-libs-sync.py` passes with the new lib
+- [x] Phase 2: `tools/check-vendored-libs-sync.py` passes with the new lib
       listed in both consumers; agent-containers' full test suite
       (`python tools/run-plugin-tests.py agent-containers`) passes after
       the extraction -- with `test_replacement.py`'s direct
@@ -435,7 +435,14 @@ clean on every touched/new file.
       `run-plugin-tests.py`'s own `--reinstall`, or an equivalent explicit
       `uv sync`/install dry-run) and confirm the new import actually
       resolves in each, not only that the sync guard is green.
-- [ ] Phase 3: agent-codespaces' test suite
+
+      **Done** -- see Phase 2's own Journal/Plan entries: the thin
+      compatibility-wrapper seam was preserved (zero test edits), both
+      plugins' `--reinstall` full-suite runs passed (agent-containers 495
+      passed/4 skipped/1 pre-existing unrelated failure; agent-codespaces
+      1353 passed/13 skipped), and `check-vendored-libs-sync.py` confirmed
+      11 shared libs in sync.
+- [x] Phase 3: agent-codespaces' test suite
       (`python tools/run-plugin-tests.py agent-codespaces`) passes,
       including the new liveness-gate regression test, the
       non-`Available`-state regression test (no boot/connect attempt for a
@@ -455,6 +462,18 @@ clean on every touched/new file.
       succeeds pinned to that account; a binding-lookup failure defers;
       none of these fall through to ambient auth or an ambiguous
       first-match), and CLI-dispatch tests.
+
+      **Done** -- all of the above are covered by name in
+      `test_capture_sessions.py`/`test_capture_cli.py`/`test_cli.py`
+      (`test_capture_liveness_gate_defers_active_session`,
+      `test_capture_defers_on_non_available_state`, the four holder-shape
+      + orphaned-claim tests, `test_capture_accepts_acquire_then_release_within_pull_as_documented_residual`
+      (proves the accepted residual, per the exact carve-out above),
+      `test_capture_defers_while_a_destructive_caller_holds_the_widened_lock`
+      plus the real-`_cmd_delete`-dispatch lock-widening integration tests,
+      the three account-binding tests, and the CLI-dispatch tests). Full
+      suite (1429 tests) green via `tools/run-plugin-tests.py
+      agent-codespaces --reinstall`.
 - [ ] Phase 4: a real leased CodeSpace is captured and published
       end-to-end (mirroring the container-side end-to-end validation
       already proven for `rescue-capture`) — published session readable

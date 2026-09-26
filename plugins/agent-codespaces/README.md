@@ -204,22 +204,26 @@ agent-codespaces sync-sessions <name> --account <account> --json
 ```
 
 The verb is safe to invoke on any schedule: it never boots a non-`Available`
-CodeSpace, defers (busy exit code `75`) whenever the box is held by any
-holder or a session is mid-write, and is a no-op success when there are no
-sessions to capture. A consumer's timer only needs to treat `75` as
-"try again later," not as an error. Because account resolution is
-fail-closed (an explicit `--account` or an exact per-name binding only),
-a scheduled invocation should pass `--account` explicitly rather than rely
-on binding lookup succeeding unattended.
+CodeSpace, defers (exit code `75`) whenever the box is held/unbound/mid-write
+or its own preflight fails (not found, account unauthenticatable, etc.), and
+is a no-op success when there are no sessions to capture. `75` covers every
+`deferred` case, not only transient contention -- **a consumer's timer must
+not blindly retry forever on `75`; always read the JSON `detail` field**, since
+a permanent configuration/identity problem (e.g. a missing account binding, an
+unmintable `gh` token) also returns `75` and will never resolve itself on a
+retry. Because account resolution is fail-closed (an explicit `--account` or
+an exact per-name binding only), a scheduled invocation should pass
+`--account` explicitly rather than rely on binding lookup succeeding
+unattended.
 
 `sync-sessions --json`'s result is `{ok, deferred, session_count, detail}` --
-`ok` mirrors `agent-containers`' `captured`/`rescued` success signal,
-`deferred` is the busy/held/not-ready case (exit `75`), and `detail` always
-carries a human-readable reason. This is deliberately the same shape family
-as `rescue-capture`'s per-member result (`captured`/`rescues`/`deferred`,
-same busy exit code) scaled down to one target instead of a fleet, so a
-consumer already handling one provider's capture verb needs no new mental
-model for the other's.
+`deferred` is the busy/held/not-ready/misconfigured case (exit `75`, `detail`
+explains which), `ok` is the capture/no-op-success signal otherwise, and
+`detail` always carries a human-readable reason. This is deliberately the
+same shape family as `rescue-capture`'s per-member result (`captured`/
+`rescues`/`deferred`, same busy exit code) scaled down to one target instead
+of a fleet, so a consumer already handling one provider's capture verb needs
+no new mental model for the other's.
 
 ### `create` options
 
