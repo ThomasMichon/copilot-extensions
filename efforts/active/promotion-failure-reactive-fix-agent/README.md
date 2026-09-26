@@ -204,17 +204,21 @@ fixes."
             recurrence inside `#3830`'s 6h window (2026-09-26 12:10–18:10
             UTC) is plausible — continuing to monitor for it rather than
             declaring this closed.
-**Superseded — the sub-plan below is archived reference, not an active
-checklist.** A natural occurrence (run 36240803760, 2026-09-26 12:04 UTC)
-already confirmed `report-failure` correctly detects and files a new
-issue end-to-end after the PR #3815 fix (see Journal). Executing the
-probe purely to re-observe *that* part would only add risk (a real red
-`dev` window) for no additional signal. The steps below remain real,
-reviewed, and correct, and are kept (not deleted) in case a future need
-— most likely, still validating the dedup/rate-limit path specifically,
-see the open item just above — wants this exact design again; they are
-written as plain bullets, not `- [ ]` checkboxes, precisely so they never
-again render as active/actionable:
+**Reactivated 2026-09-26 (PR #3850) — for dedup/rate-limit validation
+specifically, not detection.** The sub-plan below was previously marked
+superseded/archived after run 36240803760 (2026-09-26 12:04 UTC)
+confirmed `report-failure` correctly detects and files a new issue
+end-to-end (see Journal) — that part of the probe genuinely is
+unnecessary to re-run. But the dedup/rate-limit sub-item (just above)
+remained open, and no natural in-window repeat of `#3830`'s signature
+occurred by this session's 4th monitoring tick (2026-09-26 ~14:30 UTC,
+well inside `#3830`'s own 6h window but with no further natural
+recurrence yet) — so, per this same Plan's own original design, the
+probe is now executed for that specific remaining gap. Steps below are
+followed as originally designed; the sub-bullets remain plain bullets
+(not `- [ ]` checkboxes) so this note reflects the same archived
+reference being actively walked through, not a re-opened live checklist
+duplicating the Plan structure above:
 
 * Hard stop, non-negotiable: the probe merge starts a clock.
   Maximum 2 hours from the probe PR's merge to the revert
