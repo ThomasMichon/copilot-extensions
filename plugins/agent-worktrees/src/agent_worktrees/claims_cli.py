@@ -542,7 +542,7 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
             return _json_error(msg)
         output.err(msg)
         return 1
-    if result.get("error") == "frozen":
+    if result.get("error") in ("frozen", "rejected"):
         if args.json:
             return _json_error(result["message"])
         output.err(result["message"])

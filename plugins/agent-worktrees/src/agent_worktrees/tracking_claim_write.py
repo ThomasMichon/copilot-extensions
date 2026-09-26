@@ -34,8 +34,13 @@ def apply_claim_add(args: dict) -> dict:
     ``claims_cli._claims_add`` transaction (the RecordLock body only -- the
     owner-ref cross-machine resolution/deferral and coordination-readiness
     gate stay in the CLI, resolved before a local ``yaml_path`` is even
-    known). Returns ``{"error": "frozen", ...}`` for an owner-frozen
-    rejection, never raising."""
+    known). Returns ``{"error": "frozen", ...}`` / ``{"error": "rejected",
+    ...}`` for an expected rejection -- never raises ``ValueError`` past
+    this function, which (2026-09-27 PR review finding) would otherwise be
+    swallowed by ``CoalescingServer`` when dispatched via the daemon and
+    surface to the CLI as an `AmbiguousWriteOutcome`, turning a
+    deterministic, non-mutating validation failure into an apparently
+    unknown write outcome."""
     worktree_id = args["worktree_id"]
     yaml_path = Path(args["yaml_path"])
     kind = args["kind"]
@@ -60,7 +65,15 @@ def apply_claim_add(args: dict) -> dict:
             state=obligations.ACTIVE,
             note=note,
         )
-        tracking.add_resource_claim(record, claim, save=False)
+        try:
+            tracking.add_resource_claim(record, claim, save=False)
+        except ValueError as exc:
+            # Covers every other rejection `add_resource_claim` itself
+            # enforces (e.g. a completed system/bridge record, or a ref
+            # collision with a reservation-held claim) -- caught generically
+            # rather than duplicating that predicate here, so this verb can
+            # never drift from the one place the invariant is enforced.
+            return {"error": "rejected", "message": str(exc)}
         reopened = was_finalized and record.status == "active"
         # worktree-finality-and-obligations Phase 2: on reopen, surface what
         # the earlier finalize's `release_all_resources` cascade let go --

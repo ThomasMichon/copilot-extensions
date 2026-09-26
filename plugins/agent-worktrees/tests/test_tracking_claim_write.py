@@ -76,6 +76,30 @@ def test_add_rejects_a_frozen_owner(record_path):
     assert tracking.load_record(record_path).resources == []
 
 
+def test_add_rejects_a_completed_managed_record(record_path):
+    """2026-09-27 PR review finding: `add_resource_claim` itself also
+    rejects a `system`/`bridge` record in a `complete`/`completed` state --
+    this must surface as a deterministic `{"error": ...}` result here, never
+    an uncaught `ValueError` a resident daemon's own `CoalescingServer`
+    would otherwise swallow (turning it into an `AmbiguousWriteOutcome`)."""
+    record = tracking.load_record(record_path)
+    record.kind = "system"
+    record.status = "complete"
+    tracking.save_record(record, record_path)
+
+    result = tracking_claim_write.apply_claim_add(
+        {
+            "worktree_id": "wt-claim",
+            "yaml_path": str(record_path),
+            "kind": "codespace",
+            "ref": "cs-1",
+        }
+    )
+    assert result["error"] == "rejected"
+    assert "frozen" in result["message"]
+    assert tracking.load_record(record_path).resources == []
+
+
 def test_add_reopens_a_finalized_owner(record_path):
     record = tracking.load_record(record_path)
     record.status = "finalized"
