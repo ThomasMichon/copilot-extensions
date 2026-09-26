@@ -1210,6 +1210,25 @@ class TestGitHubProvider:
         with pytest.raises(ProviderError, match="@copilot"):
             github.GitHubProvider().create_pull(scope, token=None)
 
+    def test_create_pull_allows_real_handle_mention(self, monkeypatch):
+        # "@copilot-extensions" is a real handle, not a mention of the
+        # cloud coding agent -- title/body referencing it must not be
+        # rejected.
+        from agent_worktrees.providers import github
+
+        monkeypatch.setattr(
+            github, "run_cli",
+            lambda args, **kw: _proc(stdout="https://github.com/o/r/pull/7\n"),
+        )
+        scope = PRScope(
+            repo="o/r", head="h", base="master",
+            title="Fix @copilot-extensions issue #1",
+            body="Filed against @copilot-extensions.",
+        )
+        res = github.GitHubProvider().create_pull(scope, token=None)
+        assert res.url == "https://github.com/o/r/pull/7"
+        assert res.number == 7
+
     def test_get_pull_merged_state_sets_flag(self, monkeypatch):
         # gh reports a merged PR as state MERGED.
         from agent_worktrees.providers import github
