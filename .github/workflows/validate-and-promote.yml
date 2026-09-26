@@ -199,12 +199,38 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     environment: main-promotion
-    # Admin-escalation gate: this job runs under the `main-promotion` GitHub
-    # Environment. That environment itself is NOT something this workflow
-    # file can configure -- a repo admin must add required reviewers to it
-    # (Settings > Environments > main-promotion) before this gate actually
-    # blocks anything unattended. Until that's done, the job runs without a
-    # human approval step (but every other guard below still applies).
+    # Environment gating (configured 2026-09-25, repo Settings, not this
+    # file): `main-promotion` restricts its deployment_branch_policy to
+    # protected branches only (`dev`/`main`) and deliberately carries NO
+    # required reviewer -- a required reviewer would pause every real,
+    # fully-unattended promotion run waiting on a manual click, which
+    # would defeat the whole point of this pipeline.
+    #
+    # **Not yet closed:** `APERTURE_RELEASE_TOKEN` below is still a plain
+    # REPOSITORY secret, not an environment secret -- an environment's
+    # branch policy cannot restrict a repository secret's visibility, so
+    # today a workflow on an unprotected scratch branch can still read it
+    # regardless of this job's `environment:` declaration. Migrating it to
+    # an environment-scoped secret under `main-promotion` (then deleting
+    # the repository-level copy) is the step that actually closes this —
+    # see the dev-branch-release-pipeline journal (2026-09-25 entry) for
+    # why that step needs the operator's own `gh secret set` and hasn't
+    # happened yet. Until it does, treat this environment's protection as
+    # configured-but-not-yet-effective for this specific secret.
+    #
+    # **Even after that migration, this only closes the scratch-branch
+    # variant of the risk, not the through-`dev` variant:** `dev` is
+    # itself one of the two branches this policy allows (it has to be --
+    # that's this job's own real ref), and `dev`'s ruleset requires zero
+    # approving reviews to merge. A Write collaborator could still merge
+    # an ordinary PR into `dev` adding a job that declares this same
+    # `environment:` and reach the secret that way. Closing that fully
+    # needs either a required reviewer here (ruled out -- breaks
+    # unattended promotion) or `require_code_owner_review` on `dev`
+    # itself (ruled out -- self-locks every workflow PR in this
+    # single-operator repo). See the dev-branch-release-pipeline journal
+    # for the full trade-off; this is a named, accepted residual risk,
+    # not an oversight.
     #
     # `main` carries a zero-bypass "pull request required" ruleset (a
     # personal GitHub account cannot grant the GitHub Actions app -- or any
