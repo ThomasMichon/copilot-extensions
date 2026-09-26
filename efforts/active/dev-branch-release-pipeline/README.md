@@ -1863,3 +1863,47 @@ efforts' own PRs).
   keeps recurring, at whether `agent-worktrees`' suite as a whole needs a
   systematic timeout-headroom pass rather than one-off fixes per flake.
 
+### 2026-09-26 — Real promotion-pipeline bug: `gh pr merge --auto` races an already-clean PR (found during promotion-failure-reactive-fix-agent's Phase 1.5 monitoring)
+- Run 36242397956 (2026-09-26 12:35 UTC) failed the `Promote dev -> main`
+  job — not a validation failure (`full - agent-worktrees` and every
+  other validation job passed cleanly this run), but the promotion job's
+  own **changefile-cleanup step**: `gh pr merge "$pr_number" --squash
+  --auto` failed with `GraphQL: Pull request is in clean status
+  (enablePullRequestAutoMerge)`.
+- Root cause: `dev`'s own ruleset requires zero approving reviews and
+  zero required status checks (`gh api repos/{repo}/rules/branches/
+  dev`), so a PR opened against `dev` (the changefile-cleanup PR is
+  base `dev`) can become fully mergeable the instant it's created —
+  `enablePullRequestAutoMerge` then races finding nothing left to wait
+  on and errors instead of just merging, rather than falling back to a
+  direct merge itself.
+- **Real, live consequence, not just a job-log annoyance:** this left
+  the changefile-cleanup PR (`#3836`) stuck open and unmerged. Its
+  changefile — already consumed by the real promotion that just
+  happened — stayed present on `dev`, meaning the *next* promotion would
+  have re-read and re-consumed the same changefile, re-bumping the same
+  plugin to the same already-shipped target version a second time
+  (exactly the duplicate-bump failure mode this cleanup step's own
+  docstring was written to prevent, and had already been observed once
+  before this session per that docstring).
+- **Immediate fix:** merged `#3836` directly (all its own checks had
+  already passed cleanly) to clear the risk before any further
+  promotion could run; confirmed the changefile is gone from `dev`
+  afterward.
+- **Root-cause fix (PR #3845, `Findings: None`):** both `gh pr merge
+  --auto` call sites in `validate-and-promote.yml`'s `Promote dev ->
+  main` job (the main-target promotion PR, and this dev-target
+  changefile-cleanup PR) now catch the specific `"is in clean status"`
+  error and retry as a direct squash merge — exactly what that error
+  means is safe to do. The main-target call site normally has a real
+  pending check (`main source gate`) for `--auto` to wait on, making
+  the race rare there, but not impossible, so the same defensive
+  fallback was applied to both rather than just the one that actually
+  failed live.
+- Found while doing Phase 1.5 (live validation) monitoring for the
+  `promotion-failure-reactive-fix-agent` effort — unrelated to that
+  effort's own watchdog script (this run's validation jobs all passed;
+  `report-failure` correctly skipped, since its own scope explicitly
+  excludes the `Promote dev -> main` job), but exactly the kind of real
+  bug that same monitoring discipline was well-positioned to catch.
+

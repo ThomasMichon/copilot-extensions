@@ -1032,3 +1032,17 @@ _Pending._
   Phase 1's detection path live and correct does not itself resolve that
   gate; it only removes the "we don't even know Phase 1 works yet"
   reason to defer looking at it.
+
+### 2026-09-26 — Monitoring tick found an unrelated real promotion-pipeline bug (logged in dev-branch-release-pipeline)
+- The same monitoring tick that checked for a Phase 1.5 natural
+  occurrence also turned up run 36242397956: `Promote dev -> main`
+  failed, but not from a validation failure this watchdog reports on —
+  every `full`/`worktree-manager`/`guards-full-sweep` job passed, and
+  `report-failure` correctly stayed `skipped` (its own scope explicitly
+  excludes the `Promote dev -> main` job). The failure was a real `gh
+  pr merge --auto` race in the promotion job's own changefile-cleanup
+  step. Fixed and fully journaled under the umbrella
+  `dev-branch-release-pipeline` effort (2026-09-26 entry), not
+  duplicated here — that effort owns the promotion pipeline itself,
+  this one owns only the reactive-detection watchdog. No dedup-relevant
+  Phase 1.5 signal from this occurrence; still watching for one.
