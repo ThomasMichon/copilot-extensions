@@ -147,9 +147,14 @@ if command -v uv >/dev/null 2>&1 \
     && [[ -n "$AW_PROJECT" && -n "$AW_WT" ]]; then
     WM_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P 2>/dev/null || true)"
     if [[ -n "$WM_ROOT" ]]; then
-        uv run --quiet --project "$WM_ROOT" -m worktree_manager mux-daemon remove \
+        # Dispatch detached (real-bug follow-up to #3825): this is
+        # teardown, not attach, but the pane process itself is exiting --
+        # blocking here on the same tens-of-seconds-worst-case CLI edge
+        # delays the pane's own exit for no benefit, mirroring the
+        # activity-log dispatch immediately above.
+        ( uv run --quiet --project "$WM_ROOT" -m worktree_manager mux-daemon remove \
             --project="$AW_PROJECT" \
-            --worktree-id="$AW_WT" >/dev/null 2>&1 || true
+            --worktree-id="$AW_WT" >/dev/null 2>&1 & ) || true
     fi
 fi
 

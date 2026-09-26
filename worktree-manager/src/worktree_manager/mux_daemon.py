@@ -186,12 +186,19 @@ def _ensure_status_monitor_running() -> bool:
     base = engine_client.engine_base_command()
     if not base:
         return False
+    # Scrub session credentials before spawning/restarting the resident
+    # status-monitor: this call can run from a launcher/pane-teardown
+    # process that carries `GH_TOKEN`/`GITHUB_TOKEN`/an AHP token, and the
+    # resident monitor is long-lived -- `_engine_environment()` only strips
+    # Python-parent env vars, not auth tokens, so it must not inherit them.
+    # Shares `_spawn_detached`'s own (case-insensitive) scrubbing helper.
+    env = _scrub_session_credentials(engine_client._engine_environment())
     kwargs: dict = {
         "capture_output": True,
         "text": True,
         "timeout": 30,
         "check": False,
-        "env": engine_client._engine_environment(),
+        "env": env,
         "stdin": subprocess.DEVNULL,
     }
     if os.name == "nt":
@@ -886,6 +893,25 @@ def ensure_daemon_running(
     return False
 
 
+_SESSION_CREDENTIAL_ENV_KEYS = {"GH_TOKEN", "GITHUB_TOKEN", "AGENT_WORKTREES_AHP_AUTH_TOKEN"}
+
+
+def _scrub_session_credentials(env: dict[str, str]) -> dict[str, str]:
+    """Environment for a long-lived spawned/restarted process, excluding
+    session credentials (Copilot review finding on PR #3839): Windows
+    environment-variable names are case-insensitive, so a parent carrying
+    ``gh_token``/``github_token``/a differently-cased AHP token must still
+    be scrubbed -- an exact-case set membership check silently misses those.
+    Shared by both the mux companion daemon's own spawn
+    (:func:`_spawn_detached`) and the resident status-monitor restart
+    (:func:`_ensure_status_monitor_running`)."""
+    return {
+        key: value
+        for key, value in env.items()
+        if key.upper() not in _SESSION_CREDENTIAL_ENV_KEYS
+    }
+
+
 def _spawn_detached(argv: list[str]) -> bool:
     """Spawn a survivable background daemon. Best-effort; never raises.
 
@@ -897,11 +923,7 @@ def _spawn_detached(argv: list[str]) -> bool:
     hook/classify servers' callers can) and is not yet on any production
     launch path (Step 2's own explicit scope). Revisit if/when Step 3 wires
     this into a UX-visible launch flow."""
-    env = {
-        key: value
-        for key, value in os.environ.items()
-        if key not in {"GH_TOKEN", "GITHUB_TOKEN", "AGENT_WORKTREES_AHP_AUTH_TOKEN"}
-    }
+    env = _scrub_session_credentials(dict(os.environ))
     kwargs: dict = {
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,

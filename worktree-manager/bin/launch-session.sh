@@ -1018,13 +1018,19 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
             local wm_root
             wm_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P 2>/dev/null || true)"
             [[ -n "$wm_root" ]] || return 0
-            uv run --quiet --project "$wm_root" -m worktree_manager mux-daemon register \
+            # Dispatch detached rather than blocking attach on this call
+            # (real-bug follow-up to #3825): the bundled register edge can
+            # spend tens of seconds (mux metadata probes, daemon boot-wait,
+            # status-monitor-restart) before it returns, plus `uv run`'s own
+            # resolve overhead -- never block create/join on it. Mirrors the
+            # existing background-subshell dispatch already used above for
+            # activity-log.
+            ( uv run --quiet --project "$wm_root" -m worktree_manager mux-daemon register \
                 --project="$LAUNCH_PROJECT" \
                 --worktree-id="$WORKTREE_ID" \
                 --worktree-path="$spath" \
                 --mux-session="$sess" \
-                --mux-bin=tmux >/dev/null 2>&1 \
-                || setup_log WARN "tmux: managed mux registration failed for $sess"
+                --mux-bin=tmux >/dev/null 2>&1 & ) || true
         }
 
         # If a tmux session already exists for this worktree, join it.

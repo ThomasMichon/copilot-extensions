@@ -1444,10 +1444,13 @@ function Invoke-ManagedMuxRegister {
             "--mux-session=$Session",
             '--mux-bin=psmux'
         )
-        & uv @registerArgs *> $null
-        if ($LASTEXITCODE -ne 0) {
-            Write-SetupLog "psmux: managed mux registration failed for $Session" 'WARN'
-        }
+        # Dispatch detached rather than blocking on `& uv @registerArgs`
+        # (real-bug follow-up to #3825): the bundled register edge can
+        # spend tens of seconds (mux metadata probes, daemon boot-wait,
+        # status-monitor-restart) before it returns, and this call sits on
+        # the launcher's own attach path -- never block create/join on it.
+        Start-Process -FilePath 'uv' -ArgumentList $registerArgs `
+            -WindowStyle Hidden -ErrorAction Stop | Out-Null
     } catch {
         Write-SetupLog "psmux: managed mux registration failed: $($_.Exception.Message)" 'WARN'
     }
