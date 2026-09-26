@@ -171,8 +171,23 @@ fixes."
 - [ ] **If no natural red run occurs within a reasonable observation
       window (a few hours), inject one deliberately, carefully, and
       revert promptly:**
+      - [ ] **Target `agent-worktrees` specifically, not just any
+            "low-traffic plugin"** (a real review finding on this Plan
+            itself): `ci.yml`'s smoke tier only *collects* (imports,
+            never executes) `agent-worktrees`' tests on push/PR --
+            `HEAVY_PLUGIN: agent-worktrees` / `--collect-only` -- while
+            every other plugin's tests actually *run* there. A deliberately
+            failing test added to any OTHER plugin would fail `ci.yml`
+            itself first; since `validate-and-promote.yml`'s own
+            `workflow_run` trigger only fires when the upstream `CI` run's
+            `conclusion == 'success'`, that would make `gate` never run at
+            all, and `report-failure` would never fire -- defeating the
+            entire probe. `agent-worktrees` is the one plugin whose smoke
+            pass can't catch this, so `ci.yml` stays green and
+            `validate-and-promote.yml` triggers normally, landing on the
+            real target: the `full - agent-worktrees` job.
       - [ ] Add ONE new, obviously-synthetic, clearly-commented failing
-            test to a single low-traffic plugin's suite (e.g.
+            test to `agent-worktrees`' suite (e.g.
             `assert False, "Deliberate Phase 1 validation probe for
             promotion-failure-reactive-fix-agent -- safe to delete, see
             efforts/active/promotion-failure-reactive-fix-agent"`) — never
@@ -182,8 +197,9 @@ fixes."
             (small, honest PR description naming this as a deliberate,
             temporary probe for this effort — never disguised as a real
             bug).
-      - [ ] Watch the resulting `full - <plugin>` failure and confirm
-            `report-failure` behaves exactly as in the natural-occurrence
+      - [ ] Watch the resulting `full - agent-worktrees` failure and
+            confirm `report-failure` behaves exactly as in the
+            natural-occurrence
             checklist above.
       - [ ] **Revert immediately once confirmed** (a follow-up PR deleting
             the probe test) — this deliberately jams every pending
@@ -690,3 +706,14 @@ _Pending._
 - Not yet executed — this is the durable plan for whichever session
   picks up the monitoring next (a recurring scheduled check, or a fresh
   session resuming this file).
+- **Copilot review caught a real design flaw in the probe plan itself:**
+  targeting "any low-traffic plugin" would have made the probe self-
+  defeating for most plugins — `ci.yml`'s smoke tier actually *executes*
+  every plugin's tests on push/PR except `agent-worktrees` (collect-only
+  there, per `HEAVY_PLUGIN`), and `validate-and-promote.yml`'s own
+  `workflow_run` trigger only fires when that upstream `CI` run concludes
+  `success`. A failing test in any other plugin would fail `ci.yml`
+  first, `gate` would never even run, and `report-failure` would never
+  fire. Corrected the plan to name `agent-worktrees` specifically as the
+  only plugin where the probe actually reaches the intended `full -
+  agent-worktrees` job.
