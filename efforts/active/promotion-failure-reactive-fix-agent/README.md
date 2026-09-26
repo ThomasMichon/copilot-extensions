@@ -189,15 +189,17 @@ fixes."
             executed on push/PR at all, only that neither existing path
             would catch a *new*, differently-named probe test.) A
             deliberately failing test added to any OTHER plugin's real
-            (non-filtered) suite would fail `ci.yml` itself first; since
-            `validate-and-promote.yml`'s own `workflow_run` trigger only
-            fires when the upstream `CI` run's `conclusion == 'success'`,
-            that would make `gate` never run at all, and `report-failure`
-            would never fire -- defeating the entire probe. `agent-
+            (non-filtered) suite would fail `ci.yml` itself first; the
+            `workflow_run` trigger itself still fires on that failed `CI`
+            run (`types: [completed]` fires for any conclusion), but
+            `gate`'s own `if:` requires `github.event.workflow_run.
+            conclusion == 'success'` before doing anything -- so `gate`
+            would produce `is_dev=false`/no-op and `report-failure` would
+            never fire -- defeating the entire probe. `agent-
             worktrees` is the one plugin where a new, distinctly-named
             test evades both of `ci.yml`'s existing execution paths, so
-            `ci.yml` stays green and `validate-and-promote.yml` triggers
-            normally, landing on the real target: the `full -
+            `ci.yml` stays green and `gate` proceeds normally, landing on
+            the real target: the `full -
             agent-worktrees` job.
       - [ ] Add ONE new, obviously-synthetic, clearly-commented failing
             test to `agent-worktrees`' suite (e.g.
@@ -728,11 +730,13 @@ _Pending._
   targeting "any low-traffic plugin" would have made the probe self-
   defeating for most plugins — `ci.yml`'s smoke tier actually *executes*
   every plugin's tests on push/PR except `agent-worktrees` (collect-only
-  there, per `HEAVY_PLUGIN`), and `validate-and-promote.yml`'s own
-  `workflow_run` trigger only fires when that upstream `CI` run concludes
-  `success`. A failing test in any other plugin would fail `ci.yml`
-  first, `gate` would never even run, and `report-failure` would never
-  fire. Corrected the plan to name `agent-worktrees` specifically as the
+  there, per `HEAVY_PLUGIN`), and `gate`'s own `if:` requires the
+  upstream `CI` run to have concluded `success` before it does anything
+  (the `workflow_run` trigger itself fires on any conclusion — it's
+  `gate` that no-ops on a failure, not the trigger declining to fire). A
+  failing test in any other plugin would fail `ci.yml` first, `gate`
+  would produce `is_dev=false`, and `report-failure` would never fire.
+  Corrected the plan to name `agent-worktrees` specifically as the
   only plugin where the probe actually reaches the intended `full -
   agent-worktrees` job.
 - **Second review pass caught three more real refinements, all fixed:**
@@ -750,3 +754,9 @@ _Pending._
   `agent-worktrees` changefile per this repo's changefile-presence guard
   — added as an explicit checklist item so "the normal PR flow" doesn't
   quietly omit it.
+- **Third review pass caught one wording nit, fixed in both places it
+  appeared:** `validate-and-promote.yml`'s `workflow_run` trigger itself
+  fires on ANY upstream `CI` conclusion (`types: [completed]`); it's
+  `gate`'s own `if:` that requires `success` before doing anything. The
+  earlier wording conflated "the trigger doesn't fire" with "gate no-ops"
+  — corrected both occurrences.
