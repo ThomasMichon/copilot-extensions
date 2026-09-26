@@ -1,0 +1,322 @@
+"""Regression tests for the CI-failure watchdog's pure decision logic
+(signature extraction, dedup lookup, rate-limiting) -- the `gh` issue-filing
+I/O itself is intentionally left untested here, mirroring
+`tools/test_module_health_watchdog.py`'s own convention.
+
+Run:  python -m pytest tools/test_ci_failure_watchdog.py
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import subprocess
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import pytest
+
+SCRIPT = Path(__file__).resolve().parent / "ci_failure_watchdog.py"
+
+SAMPLE_PYTEST_LOG = """
+2026-09-26T05:08:32Z tests/test_first_install_bootstrap.py::test_a PASSED
+2026-09-26T05:08:33Z tests/test_first_install_bootstrap.py::test_b FAILED
+=========================== short test summary info ============================
+FAILED tests/test_first_install_bootstrap.py::test_posix_lean_provision_installs_resolver_and_launchers_reenter_runtime - Failed: Timeout (>30.0s) from pytest-timeout.
+1 failed, 592 passed, 5 skipped in 64.97s (0:01:04)
+"""
+
+SAMPLE_NON_PYTEST_LOG = "\n".join(f"line {i}" for i in range(60)) + "\nERROR: module too large\nExit 1\n"
+
+
+def _load_watchdog():
+    spec = importlib.util.spec_from_file_location("ci_failure_watchdog", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture()
+def watchdog():
+    return _load_watchdog()
+
+
+def test_extract_failed_test_ids_finds_the_node_id(watchdog):
+    ids = watchdog.extract_failed_test_ids(SAMPLE_PYTEST_LOG)
+    assert ids == [
+        "tests/test_first_install_bootstrap.py::test_posix_lean_provision_installs_resolver_and_launchers_reenter_runtime"
+    ]
+
+
+def test_extract_failed_test_ids_dedupes_and_preserves_order(watchdog):
+    log = "FAILED a::x\nFAILED b::y\nFAILED a::x\n"
+    assert watchdog.extract_failed_test_ids(log) == ["a::x", "b::y"]
+
+
+def test_build_signatures_one_per_failing_test(watchdog):
+    sigs = watchdog.build_signatures("full - agent-worktrees", SAMPLE_PYTEST_LOG)
+    assert len(sigs) == 1
+    assert sigs[0].test_id.endswith("reenter_runtime")
+    assert sigs[0].title == f"CI failure: {sigs[0].test_id}"
+    assert "FAILED" in sigs[0].excerpt
+
+
+def test_build_signatures_falls_back_to_whole_job_when_no_test_id(watchdog):
+    sigs = watchdog.build_signatures("guards (full-tree, non-PR-scoped)", SAMPLE_NON_PYTEST_LOG)
+    assert len(sigs) == 1
+    assert sigs[0].test_id is None
+    assert sigs[0].title == "CI failure: guards (full-tree, non-PR-scoped)"
+    assert "module too large" in sigs[0].excerpt
+
+
+def test_signature_key_is_stable_for_the_same_test_id(watchdog):
+    a = watchdog.signature_key("job", "path::test")
+    b = watchdog.signature_key("job", "path::test")
+    assert a == b
+
+
+def test_signature_key_differs_for_different_test_ids(watchdog):
+    a = watchdog.signature_key("job", "path::test_a")
+    b = watchdog.signature_key("job", "path::test_b")
+    assert a != b
+
+
+def test_signature_key_whole_job_incorporates_job_name(watchdog):
+    a = watchdog.signature_key("job-a", None, "same tail")
+    b = watchdog.signature_key("job-b", None, "same tail")
+    assert a != b
+
+
+def test_is_rate_limited_true_within_the_window(watchdog):
+    now = datetime.now(timezone.utc)
+    issue = {"updatedAt": (now - timedelta(hours=1)).isoformat().replace("+00:00", "Z"), "comments": []}
+    assert watchdog.is_rate_limited(issue, now, hours=6) is True
+
+
+def test_is_rate_limited_false_outside_the_window(watchdog):
+    now = datetime.now(timezone.utc)
+    issue = {"updatedAt": (now - timedelta(hours=7)).isoformat().replace("+00:00", "Z"), "comments": []}
+    assert watchdog.is_rate_limited(issue, now, hours=6) is False
+
+
+def test_is_rate_limited_prefers_the_latest_comment_over_updated_at(watchdog):
+    now = datetime.now(timezone.utc)
+    issue = {
+        # Issue itself is old, but a recent comment (an occurrence) should
+        # still count as the rate-limit anchor.
+        "updatedAt": (now - timedelta(days=30)).isoformat().replace("+00:00", "Z"),
+        "comments": [
+            {"createdAt": (now - timedelta(hours=20)).isoformat().replace("+00:00", "Z")},
+            {"createdAt": (now - timedelta(hours=1)).isoformat().replace("+00:00", "Z")},
+        ],
+    }
+    assert watchdog.is_rate_limited(issue, now, hours=6) is True
+
+
+def test_existing_issue_raises_lookup_failed_on_a_nonzero_exit(watchdog, monkeypatch):
+    class _FailedRun:
+        returncode = 1
+        stdout = ""
+        stderr = "label 'ci-failure-signature' not found"
+
+    monkeypatch.setattr(watchdog.subprocess, "run", lambda *a, **k: _FailedRun())
+
+    with pytest.raises(watchdog.LookupFailed):
+        watchdog._existing_issue("owner/repo", "abc123")
+
+
+def test_existing_issue_returns_none_on_a_clean_no_match(watchdog, monkeypatch):
+    class _EmptyRun:
+        returncode = 0
+        stdout = "[]"
+        stderr = ""
+
+    monkeypatch.setattr(watchdog.subprocess, "run", lambda *a, **k: _EmptyRun())
+
+    assert watchdog._existing_issue("owner/repo", "abc123") is None
+
+
+def test_existing_issue_returns_the_match(watchdog, monkeypatch):
+    class _MatchRun:
+        returncode = 0
+        stdout = json.dumps([{"number": 42, "updatedAt": "2026-01-01T00:00:00Z", "comments": []}])
+        stderr = ""
+
+    monkeypatch.setattr(watchdog.subprocess, "run", lambda *a, **k: _MatchRun())
+
+    issue = watchdog._existing_issue("owner/repo", "abc123")
+    assert issue["number"] == 42
+
+
+def test_process_signature_dry_run_never_shells_out(watchdog, monkeypatch):
+    called = False
+
+    def _fail(*_a, **_k):
+        nonlocal called
+        called = True
+        raise AssertionError("should not shell out in dry-run mode")
+
+    monkeypatch.setattr(watchdog.subprocess, "run", _fail)
+    sig = watchdog.FailureSignature(job_name="j", test_id="t", key="k", excerpt="e")
+
+    rc = watchdog.process_signature("owner/repo", sig, "1", "sha", 6, file_issue=False)
+
+    assert rc == 0
+    assert called is False
+
+
+def test_process_signature_aborts_without_filing_when_lookup_fails(watchdog, monkeypatch, capsys):
+    def _raise_lookup_failed(*_a, **_k):
+        raise watchdog.LookupFailed("simulated transient failure")
+
+    called_file_issue = False
+
+    def _fake_file_issue(*_a, **_k):
+        nonlocal called_file_issue
+        called_file_issue = True
+        return True
+
+    monkeypatch.setattr(watchdog, "_existing_issue", _raise_lookup_failed)
+    monkeypatch.setattr(watchdog, "_file_issue", _fake_file_issue)
+    sig = watchdog.FailureSignature(job_name="j", test_id="t", key="k", excerpt="e")
+
+    rc = watchdog.process_signature("owner/repo", sig, "1", "sha", 6, file_issue=True)
+
+    assert rc == 0
+    assert called_file_issue is False
+    assert "aborting without filing" in capsys.readouterr().err
+
+
+def test_process_signature_files_when_no_existing_issue(watchdog, monkeypatch):
+    monkeypatch.setattr(watchdog, "_existing_issue", lambda *_a, **_k: None)
+    filed_with: dict = {}
+
+    def _fake_file_issue(repo, sig, run_id, sha):
+        filed_with["repo"] = repo
+        return True
+
+    monkeypatch.setattr(watchdog, "_file_issue", _fake_file_issue)
+    sig = watchdog.FailureSignature(job_name="j", test_id="t", key="k", excerpt="e")
+
+    rc = watchdog.process_signature("owner/repo", sig, "1", "sha", 6, file_issue=True)
+
+    assert rc == 0
+    assert filed_with["repo"] == "owner/repo"
+
+
+def test_process_signature_skips_comment_when_rate_limited(watchdog, monkeypatch):
+    now = datetime.now(timezone.utc)
+    existing = {
+        "number": 7,
+        "updatedAt": (now - timedelta(hours=1)).isoformat().replace("+00:00", "Z"),
+        "comments": [],
+    }
+    monkeypatch.setattr(watchdog, "_existing_issue", lambda *_a, **_k: existing)
+
+    called = False
+
+    def _fake_comment(*_a, **_k):
+        nonlocal called
+        called = True
+        return True
+
+    monkeypatch.setattr(watchdog, "_comment_occurrence", _fake_comment)
+    sig = watchdog.FailureSignature(job_name="j", test_id="t", key="k", excerpt="e")
+
+    rc = watchdog.process_signature("owner/repo", sig, "1", "sha", 6, file_issue=True)
+
+    assert rc == 0
+    assert called is False
+
+
+def test_process_signature_comments_when_outside_rate_limit(watchdog, monkeypatch):
+    now = datetime.now(timezone.utc)
+    existing = {
+        "number": 7,
+        "updatedAt": (now - timedelta(hours=30)).isoformat().replace("+00:00", "Z"),
+        "comments": [],
+    }
+    monkeypatch.setattr(watchdog, "_existing_issue", lambda *_a, **_k: existing)
+
+    commented_on = {}
+
+    def _fake_comment(repo, issue_number, sig, run_id, sha):
+        commented_on["number"] = issue_number
+        return True
+
+    monkeypatch.setattr(watchdog, "_comment_occurrence", _fake_comment)
+    sig = watchdog.FailureSignature(job_name="j", test_id="t", key="k", excerpt="e")
+
+    rc = watchdog.process_signature("owner/repo", sig, "1", "sha", 6, file_issue=True)
+
+    assert rc == 0
+    assert commented_on["number"] == 7
+
+
+def test_main_skips_control_jobs_and_reports_dry_run(watchdog, monkeypatch, capsys):
+    jobs_response = {
+        "jobs": [
+            {"id": 1, "name": "gate (confirm this is a dev commit)", "conclusion": "success"},
+            {"id": 2, "name": "full - agent-worktrees", "conclusion": "failure"},
+            {"id": 3, "name": "Promote dev -> main", "conclusion": "skipped"},
+        ]
+    }
+
+    class _JobsRun:
+        returncode = 0
+        stdout = json.dumps(jobs_response)
+        stderr = ""
+
+    def _fake_gh(args):
+        if args[:2] == ["api", "repos/owner/repo/actions/runs/1/jobs?per_page=100"]:
+            return _JobsRun()
+        raise AssertionError(f"unexpected gh call: {args}")
+
+    monkeypatch.setattr(watchdog, "_run_gh", _fake_gh)
+    monkeypatch.setattr(watchdog, "_fetch_job_log", lambda repo, job_id: SAMPLE_PYTEST_LOG)
+
+    rc = watchdog.main(["--repo", "owner/repo", "--run-id", "1", "--sha", "deadbeef"])
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "dry run" in out
+    assert "reenter_runtime" in out
+
+
+def test_main_returns_zero_when_nothing_failed(watchdog, monkeypatch, capsys):
+    jobs_response = {
+        "jobs": [
+            {"id": 1, "name": "gate (confirm this is a dev commit)", "conclusion": "success"},
+            {"id": 2, "name": "full - agent-worktrees", "conclusion": "success"},
+        ]
+    }
+
+    class _JobsRun:
+        returncode = 0
+        stdout = json.dumps(jobs_response)
+        stderr = ""
+
+    monkeypatch.setattr(watchdog, "_run_gh", lambda args: _JobsRun())
+
+    rc = watchdog.main(["--repo", "owner/repo", "--run-id", "1", "--sha", "deadbeef"])
+
+    assert rc == 0
+    assert "nothing to report" in capsys.readouterr().out
+
+
+def test_dry_run_cli_smoke():
+    # Runs the real script as a subprocess against whatever real `gh` is on
+    # PATH -- a nonexistent repo/run degrades gracefully (LookupFailed ->
+    # warn + exit 0) without needing a working fake `gh` shim, proving
+    # argument parsing and the graceful-abort path never crash.
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--repo", "owner/does-not-exist-repo", "--run-id", "1", "--sha", "deadbeef"],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "could not fetch run jobs" in result.stderr

@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice worktrees
 - **Created:** 2026-09-25
-- **Status:** Draft
+- **Status:** Active — Phase 1 implemented and landed; Phase 2 gated (see below)
 - **Vision:** none yet — this effort establishes the standing policy itself
   (safety envelope + trigger contract for a reactive fix agent); revisit
   once Phase 1 proves out whether it deserves its own harness-guidance
@@ -115,13 +115,14 @@ fixes."
 
 ## Plan
 
-### Phase 1 — Detection + dedup (no autonomous fix yet; report-only)
-- [ ] Add a step to `validate-and-promote.yml`'s `full`/`guards-full-sweep`/
+### Phase 1 — Detection + dedup (no autonomous fix yet; report-only) — Done
+- [x] Add a step to `validate-and-promote.yml`'s `full`/`guards-full-sweep`/
       `worktree-manager` jobs (or a new job gated on `if: failure()` after
       them) that, on any failure, extracts a compact failure signature: which
       job(s) failed, the specific failing test node id(s) (pytest's own
       `FAILED <path>::<test>` lines), and a short log excerpt.
-- [ ] **Carry a verified commit SHA, never trust `workflow_run.head_sha`
+      **Implemented:** a new `report-failure` job, `tools/ci_failure_watchdog.py`.
+- [x] **Carry a verified commit SHA, never trust `workflow_run.head_sha`
       alone.** `validate-and-promote.yml` is itself `workflow_run`-triggered,
       and this repo already had to stop trusting that event's own
       `head_sha` and instead carry a SHA independently verified via
@@ -131,16 +132,26 @@ fixes."
       the run ID) through to Phase 2 — never re-derive it naively from a
       `workflow_run` payload, or a diagnosis can attach to, and a fix PR
       can target, the wrong commit.
-- [ ] Dedup against existing open issues before filing anything new (search
+      **Implemented:** `report-failure` passes `needs.gate.outputs.sha`
+      directly as `--sha`; the script never re-derives it.
+- [x] Dedup against existing open issues before filing anything new (search
       by the test node id, not just the plugin name) — reuse the exact
       pattern `health-diagnosis-filer`/`reality-drift-filer` already use
       (VEI + Gitea-style search, adapted to `gh issue list --search`), so a
       persistently-flaky test gets ONE tracked issue that accumulates
       occurrences, never a new issue per red run.
-- [ ] File (or comment on) that issue, plain and factual: which run, which
+      **Implemented:** a hidden `Signature: <hash>` anchor line, searched
+      via `gh issue list --search`, mirroring
+      `module-health-watchdog.py`'s own `Module: <path>` pattern exactly.
+- [x] File (or comment on) that issue, plain and factual: which run, which
       test(s), the log excerpt, a link back to the run. No fix attempt yet.
-- [ ] Rate-limit: never file/comment more than once per N hours for the same
+      **Implemented**, with an explicit "no fix attempted" line in the
+      issue body.
+- [x] Rate-limit: never file/comment more than once per N hours for the same
       signature (open question: N — start conservative, e.g. 6h).
+      **Resolved: N = 6 hours** (`--rate-limit-hours`, default 6), anchored
+      on the latest occurrence comment (or the issue's own filing time if
+      none yet).
 
 ### Phase 2 — Wire the reactive fix attempt (the actual "attempt a fix")
 - [ ] **Gate (blocks the rest of this phase):** resolve the Vision
@@ -434,3 +445,26 @@ _Pending._
   detail, and this repo's Copilot review is explicitly non-blocking —
   merging now; any further hardening surfaces during actual Phase 1/2
   implementation instead.
+
+### 2026-09-26 — Way forward: execute Phase 1, defer the vision question
+- Operator: "let's work the effort and determine a way forward." Decided
+  **not** to force the vision-reconciliation gate now: the original Plan
+  always deferred that decision until *after* Phase 1 proved out (see the
+  Kickoff entry above), and the "gate" language a later review pass added
+  was about blocking Phase 2 specifically, not about blocking all forward
+  motion on this effort. Phase 1 was already explicitly noted as
+  unaffected. Forcing a premature vision decision with zero real operating
+  signal would be guessing; executing Phase 1 for real is what actually
+  generates the signal needed to answer it honestly later.
+- **Implemented and landed Phase 1 in full:** `tools/ci_failure_watchdog.py`
+  (signature extraction, dedup via a hidden `Signature: <hash>` anchor
+  mirroring `module-health-watchdog.py`'s own pattern, rate-limited
+  occurrence comments) plus a new `report-failure` job in
+  `validate-and-promote.yml`, gated on a genuine `dev`-commit failure and
+  carrying `needs.gate.outputs.sha` (never re-derived). 21 new tests, all
+  passing. Resolved the effort's own open question: rate-limit window =
+  6 hours.
+- Status moved Draft -> Active. Phase 2 remains explicitly gated on the
+  vision-reconciliation decision; that decision is deferred until Phase 1
+  has run for real against a genuine red build and its behavior (false
+  positives, dedup accuracy, issue quality) can be judged on evidence.
