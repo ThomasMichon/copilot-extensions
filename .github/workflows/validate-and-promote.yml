@@ -229,22 +229,37 @@ jobs:
       issues: write
     steps:
       - uses: actions/checkout@v4
+        # Deliberately NOT `ref: needs.gate.outputs.sha`: that's the
+        # dev commit being diagnosed -- the very thing that just failed
+        # validation -- and this job holds `issues: write` + `GH_TOKEN`.
+        # Executing `tools/ci_failure_watchdog.py` FROM that untrusted
+        # checkout would defeat the whole workflow_run trust boundary
+        # (the same class of mistake `trusted-ci.yml` was hardened
+        # against earlier this session): a compromised dev commit's own
+        # copy of this very script could exfiltrate the token or file
+        # arbitrary issues/comments. No `ref:` means actions/checkout
+        # resolves the workflow_run's own natural ref, which -- exactly
+        # like this workflow file itself -- is the repo's DEFAULT branch
+        # (trusted, reviewed code). The diagnosed SHA still reaches the
+        # script, but only as a `--sha` **data** argument, never as code
+        # that gets checked out and executed.
         with:
           fetch-depth: 1
-          ref: ${{ needs.gate.outputs.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Ensure the tracking label exists
         # `gh issue create --label` fails outright if the label is missing;
         # `label create --force` is idempotent, matching
-        # module-health-watchdog.yml's own pattern.
+        # module-health-watchdog.yml's own pattern. GitHub label
+        # descriptions are capped at 100 characters -- keep this one
+        # under that or the step (and everything after it) fails outright.
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
           gh label create ci-failure-signature
           --color 5319E7
-          --description "promotion-failure-reactive-fix-agent watchdog: a red dev validation run's failure signature (report-only, no fix attempted)"
+          --description "Red dev validation failure signature; report-only watchdog (no fix attempted)"
           --force
       - name: Detect + dedup + report
         env:

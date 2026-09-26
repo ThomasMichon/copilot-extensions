@@ -389,3 +389,59 @@ def test_main_reports_a_timed_out_job_not_just_failure(watchdog, monkeypatch, ca
     out = capsys.readouterr().out
     assert "nothing to report" not in out
     assert "dry run" in out
+
+
+def test_main_returns_nonzero_when_job_list_fetch_fails_in_file_issue_mode(watchdog, monkeypatch, capsys):
+    class _FailedRun:
+        returncode = 1
+        stdout = ""
+        stderr = "gh: Not Found (HTTP 404)"
+
+    monkeypatch.setattr(watchdog, "_run_gh", lambda args: _FailedRun())
+
+    rc = watchdog.main(["--repo", "owner/repo", "--run-id", "1", "--sha", "deadbeef", "--file-issue"])
+
+    assert rc == 1
+    assert "could not fetch run jobs" in capsys.readouterr().err
+
+
+def test_main_stays_zero_when_job_list_fetch_fails_in_dry_run_mode(watchdog, monkeypatch):
+    class _FailedRun:
+        returncode = 1
+        stdout = ""
+        stderr = "gh: Not Found (HTTP 404)"
+
+    monkeypatch.setattr(watchdog, "_run_gh", lambda args: _FailedRun())
+
+    rc = watchdog.main(["--repo", "owner/repo", "--run-id", "1", "--sha", "deadbeef"])
+
+    assert rc == 0
+
+
+def test_main_returns_nonzero_when_a_job_log_fetch_fails_in_file_issue_mode(watchdog, monkeypatch, capsys):
+    jobs_response = {
+        "jobs": [
+            {"id": 2, "name": "full - agent-worktrees", "conclusion": "failure"},
+        ]
+    }
+
+    class _JobsRun:
+        returncode = 0
+        stdout = json.dumps(jobs_response)
+        stderr = ""
+
+    def _fake_gh(args):
+        if args[:2] == ["api", "repos/owner/repo/actions/runs/1/jobs?per_page=100"]:
+            return _JobsRun()
+        raise AssertionError(f"unexpected gh call: {args}")
+
+    def _raise_log_fetch(repo, job_id):
+        raise watchdog.LookupFailed("simulated log fetch failure")
+
+    monkeypatch.setattr(watchdog, "_run_gh", _fake_gh)
+    monkeypatch.setattr(watchdog, "_fetch_job_log", _raise_log_fetch)
+
+    rc = watchdog.main(["--repo", "owner/repo", "--run-id", "1", "--sha", "deadbeef", "--file-issue"])
+
+    assert rc == 1
+    assert "could not fetch log" in capsys.readouterr().err

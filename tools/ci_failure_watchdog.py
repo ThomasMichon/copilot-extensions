@@ -24,10 +24,13 @@ Usage::
     python tools/ci_failure_watchdog.py --run-id 123 --sha abc123 --file-issue --rate-limit-hours 12
 
 Exit code is 0 for detection/reporting and a successful (or skipped/deduped)
-filing; nonzero only when `--file-issue` was asked to actually file/comment
-and the `gh` call itself failed -- mirroring `module-health-watchdog.py`'s
-own contract so a scheduled/CI run never reports success while silently
-doing nothing.
+filing; nonzero when `--file-issue` was asked to actually file/comment and
+either the `gh` call itself failed, or the run's own job list/logs could
+not even be fetched (both mean the watchdog detected nothing this run --
+reporting success there would silently mask a broken watchdog). Dry-run
+mode (no `--file-issue`) always exits 0 -- mirroring `module-health-
+watchdog.py`'s own contract so a scheduled/CI run never reports success
+while silently doing nothing.
 """
 
 from __future__ import annotations
@@ -354,7 +357,11 @@ def main(argv: list[str] | None = None) -> int:
         jobs = _fetch_run_jobs(args.repo, args.run_id)
     except LookupFailed as error:
         print(f"[WARN] could not fetch run jobs, aborting: {error}", file=sys.stderr)
-        return 0
+        # In --file-issue mode this means the watchdog detected NOTHING at
+        # all this run -- reporting success here would silently mask a
+        # broken watchdog behind a green step. Dry-run mode has nothing to
+        # "fail" filing, so it stays 0 regardless.
+        return 1 if args.file_issue else 0
 
     # A job that exceeds its own `timeout-minutes` gets conclusion
     # `timed_out`, not `failure` -- it still turns the run red (and is
@@ -374,6 +381,8 @@ def main(argv: list[str] | None = None) -> int:
             log_text = _fetch_job_log(args.repo, job["id"])
         except LookupFailed as error:
             print(f"[WARN] could not fetch log for job {job['name']!r}: {error}", file=sys.stderr)
+            if args.file_issue:
+                exit_code = 1
             continue
         for sig in build_signatures(job["name"], log_text):
             rc = process_signature(

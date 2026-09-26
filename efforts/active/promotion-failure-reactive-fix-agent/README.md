@@ -562,3 +562,27 @@ _Pending._
   so a timed-out validation job would make the run red but the watchdog
   would report "nothing to report." Now checks a `REPORTABLE_CONCLUSIONS`
   set (`failure`, `timed_out`). 28 tests now, all passing.
+- **Seventh review pass caught the most serious finding of the whole
+  Phase 1 build, plus two smaller real ones, all fixed:** (1) **security:**
+  `report-failure` checked out `needs.gate.outputs.sha` -- the just-failed
+  `dev` commit itself, i.e. the very thing being diagnosed -- and executed
+  `tools/ci_failure_watchdog.py` *from that checkout*, while the job held
+  `issues: write` and a live `GH_TOKEN`. A commit on `dev` could therefore
+  smuggle its own modified copy of this exact script to exfiltrate the
+  token or file arbitrary issues, defeating the entire `workflow_run`
+  trust boundary this pipeline depends on -- the same class of mistake
+  `trusted-ci.yml` was hardened against earlier this session. Fixed by
+  removing the explicit `ref:` override on this job's checkout entirely:
+  with no `ref:`, `actions/checkout` resolves the workflow_run's own
+  natural ref, which -- exactly like the workflow file itself -- is the
+  trusted default branch. The diagnosed SHA still reaches the script, but
+  only ever as a `--sha` **data** argument, never as code that gets
+  checked out and run; (2) the tracking label's description was 123
+  characters against GitHub's 100-character cap, which would have failed
+  the label-creation step outright before the watchdog ever ran -- much
+  shorter description now; (3) both `gh` failure paths (job-list fetch,
+  per-job log fetch) unconditionally returned/continued with exit 0 even
+  in `--file-issue` mode, meaning a completely broken watchdog could
+  report success while detecting and filing nothing — now returns 1 in
+  that mode specifically (dry-run stays 0 regardless, matching the
+  documented contract). 31 tests now, all passing.
