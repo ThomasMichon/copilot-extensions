@@ -1,0 +1,9 @@
+{
+  "comment": "Fix install.sh/install.ps1: install schema-v3's new plugin_activation/dropin_registry/plugin_resolve vendored dependencies before the main package (--no-deps), matching the existing config-migrate/agent-procutil pattern. Without this, a fresh install/reinstall raises ModuleNotFoundError: No module named 'plugin_activation' at runtime.",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}
