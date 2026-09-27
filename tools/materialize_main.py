@@ -491,6 +491,34 @@ def materialize_uv_editable_ref_into(
     return log
 
 
+def _uv_source_entry_pattern(name: str, raw_path: str) -> re.Pattern[str]:
+    """Compiled pattern matching a ``[tool.uv.sources]`` entry for ``name``
+    whose ``path`` is ``raw_path`` with ``editable = true`` -- tolerant of
+    the realistic TOML syntax variations ``find_uv_editable_refs()``'s own
+    real ``tomllib`` parse already accepts, so discovery and rewriting stay
+    in sync (a valid entry that parses correctly must never make the
+    rewrite silently fail to find it, which would make promotion emit an
+    unresolvable ``SKIP``): a bare or quoted key, a double-quoted (basic)
+    or single-quoted (literal) path string, either ``path``/``editable``
+    key order, and an optional trailing comment after the closing brace.
+    Does not attempt full arbitrary-TOML-formatting support (e.g. a
+    differently-escaped basic string encoding the same value) -- this
+    remains a surgical regex rewrite (this repo's own established
+    convention, preserving hand-authored comments) rather than a full
+    TOML-aware editor."""
+    escaped_name = re.escape(name)
+    escaped_path = re.escape(raw_path)
+    key = r'(?:"' + escaped_name + r'"|\'' + escaped_name + r"'|" + escaped_name + r')'
+    path_value = r'(?:"' + escaped_path + r'"|\'' + escaped_path + r"')"
+    return re.compile(
+        r'^([ \t]*' + key + r'\s*=\s*)\{\s*(?:'
+        r'path\s*=\s*' + path_value + r'\s*,\s*editable\s*=\s*true'
+        r'|editable\s*=\s*true\s*,\s*path\s*=\s*' + path_value +
+        r')\s*\}[ \t]*(?:#.*)?$',
+        re.MULTILINE,
+    )
+
+
 def _rewrite_uv_editable_source_entry(
     *, pyproject: Path, name: str, raw_path: str, lib: str
 ) -> str | None:
@@ -509,15 +537,7 @@ def _rewrite_uv_editable_source_entry(
     if span is None:
         return f"SKIP {pyproject}: no [tool.uv.sources] table found"
     start, end = span
-    escaped_name = re.escape(name)
-    escaped_path = re.escape(raw_path)
-    pattern = re.compile(
-        r'^([ \t]*' + escaped_name + r'\s*=\s*)\{\s*(?:'
-        r'path\s*=\s*"' + escaped_path + r'"\s*,\s*editable\s*=\s*true'
-        r'|editable\s*=\s*true\s*,\s*path\s*=\s*"' + escaped_path + r'"'
-        r')\s*\}[ \t]*$',
-        re.MULTILINE,
-    )
+    pattern = _uv_source_entry_pattern(name, raw_path)
     if pattern.search(text[start:end]) is None:
         return f"SKIP {pyproject}: could not find {name}'s uv-editable entry to rewrite"
     new_table_text, count = pattern.subn(
@@ -580,15 +600,7 @@ def _materialize_one_uv_editable_ref(
     if span is None:
         return f"SKIP {pyproject}: no [tool.uv.sources] table found"
     start, end = span
-    escaped_name = re.escape(name)
-    escaped_path = re.escape(raw_path)
-    pattern = re.compile(
-        r'^([ \t]*' + escaped_name + r'\s*=\s*)\{\s*(?:'
-        r'path\s*=\s*"' + escaped_path + r'"\s*,\s*editable\s*=\s*true'
-        r'|editable\s*=\s*true\s*,\s*path\s*=\s*"' + escaped_path + r'"'
-        r')\s*\}[ \t]*$',
-        re.MULTILINE,
-    )
+    pattern = _uv_source_entry_pattern(name, raw_path)
     if pattern.search(text[start:end]) is None:
         return f"SKIP {pyproject}: could not find {name}'s uv-editable entry to rewrite"
 

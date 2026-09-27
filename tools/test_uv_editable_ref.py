@@ -294,3 +294,79 @@ def test_uv_editable_problems_rejects_a_nested_symlink_in_canonical(tmp_path: Pa
     monkeypatch.setattr(uer, "LIBS_DIR", repo / "libs")
     problems = uer.uv_editable_problems("alpha", consumer)
     assert any("is a symlink" in p for p in problems)
+
+
+def test_uv_editable_problems_rejects_a_canonical_lib_missing_src(tmp_path: Path, monkeypatch):
+    repo = tmp_path / "repo"
+    (repo / "libs/shared-lib").mkdir(parents=True)  # exists, but no src/ at all
+    (repo / "libs/shared-lib/pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "0.1.0"\n', encoding="utf-8"
+    )
+    consumer = repo / "plugins/alpha"
+    consumer.mkdir(parents=True)
+    (consumer / "pyproject.toml").write_text(
+        '[project]\nname = "consumer"\nversion = "1.0.0"\n'
+        "[tool.uv.sources]\n"
+        'agent-shared-lib = { path = "../../libs/shared-lib", editable = true }\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(uer, "REPO", repo)
+    monkeypatch.setattr(uer, "LIBS_DIR", repo / "libs")
+    problems = uer.uv_editable_problems("alpha", consumer)
+    assert any("src does not exist" in p for p in problems)
+
+
+def test_uv_editable_problems_rejects_a_canonical_lib_missing_pyproject(
+    tmp_path: Path, monkeypatch,
+):
+    repo = tmp_path / "repo"
+    (repo / "libs/shared-lib/src/shared_lib").mkdir(parents=True)
+    (repo / "libs/shared-lib/src/shared_lib/__init__.py").write_text(
+        "x = 1\n", encoding="utf-8"
+    )
+    consumer = repo / "plugins/alpha"
+    consumer.mkdir(parents=True)
+    (consumer / "pyproject.toml").write_text(
+        '[project]\nname = "consumer"\nversion = "1.0.0"\n'
+        "[tool.uv.sources]\n"
+        'agent-shared-lib = { path = "../../libs/shared-lib", editable = true }\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(uer, "REPO", repo)
+    monkeypatch.setattr(uer, "LIBS_DIR", repo / "libs")
+    problems = uer.uv_editable_problems("alpha", consumer)
+    assert any("pyproject.toml is missing" in p for p in problems)
+
+
+def test_convert_to_uv_editable_uses_the_injected_libs_dir_for_the_relpath(tmp_path: Path):
+    # The replacement path must be computed from the SAME libs_dir the
+    # conversion validates and removes paths under -- using the module-
+    # global LIBS_DIR instead would delete the correct copy while writing
+    # a reference relative to a different checkout entirely.
+    alt_repo = tmp_path / "alt-repo"
+    alt_libs = alt_repo / "libs"
+    (alt_libs / "shared-lib/src/shared_lib").mkdir(parents=True)
+    (alt_libs / "shared-lib/src/shared_lib/__init__.py").write_text("x = 1\n", encoding="utf-8")
+    (alt_libs / "shared-lib/pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "0.1.0"\n', encoding="utf-8"
+    )
+    consumer_dir = alt_repo / "plugins/alpha"
+    consumer_dir.mkdir(parents=True)
+    (consumer_dir / "pyproject.toml").write_text(
+        '[project]\nname = "consumer"\nversion = "1.0.0"\n'
+        "[tool.uv.sources]\n"
+        'agent-shared-lib = { path = "libs/shared-lib" }\n',
+        encoding="utf-8",
+    )
+
+    copy_dir, relpath = uer.convert_to_uv_editable(
+        "alpha", "shared-lib",
+        repo=alt_repo, libs_dir=alt_libs,
+        consumer_dir_of=lambda c: consumer_dir,
+        find_symlinked_ancestor=lambda p, r: None,
+        remove_path=lambda p: None,
+        is_pointer_copy=lambda p: False,
+    )
+    assert relpath == "../../libs/shared-lib"
+    text = (consumer_dir / "pyproject.toml").read_text()
+    assert 'agent-shared-lib = { path = "../../libs/shared-lib", editable = true }' in text

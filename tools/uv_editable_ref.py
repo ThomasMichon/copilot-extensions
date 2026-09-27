@@ -259,6 +259,21 @@ def uv_editable_problems(consumer: str, consumer_dir: Path) -> list[str]:
                 f"{consumer}: {name} references {raw_path} (resolved "
                 f"{canonical}) which is not libs/{lib}"
             )
+        elif not (canonical / "src").is_dir():
+            # `--check` must not treat an existing-but-incomplete
+            # libs/<lib> as valid: `uv` can't install it, and both
+            # convert_to_uv_editable() and promotion already require this,
+            # so a canonical lib missing it should never silently pass the
+            # dev-time guard.
+            problems.append(
+                f"{consumer}: {name} references {raw_path} (resolved "
+                f"{canonical}), but libs/{lib}/src does not exist"
+            )
+        elif not (canonical / "pyproject.toml").is_file():
+            problems.append(
+                f"{consumer}: {name} references {raw_path} (resolved "
+                f"{canonical}), but libs/{lib}/pyproject.toml is missing"
+            )
         else:
             # A symlink NESTED somewhere below canonical (e.g.
             # libs/<lib>/src/foo.py -> /external/file) is a distinct
@@ -277,7 +292,7 @@ def uv_editable_problems(consumer: str, consumer_dir: Path) -> list[str]:
     return problems
 
 
-def uv_editable_relpath(consumer_dir: Path, lib: str) -> str:
+def uv_editable_relpath(consumer_dir: Path, lib: str, *, libs_dir: Path | None = None) -> str:
     """``libs/<lib>`` expressed relative to ``consumer_dir`` (the base every
     ``[tool.uv.sources]`` ``path`` is resolved against) -- e.g.
     ``../../libs/<lib>`` for a ``plugins/<plugin>`` consumer,
@@ -288,8 +303,16 @@ def uv_editable_relpath(consumer_dir: Path, lib: str) -> str:
     regardless of host OS, matching `uv`'s own portable path form (using
     ``Path(...).as_posix()`` would NOT work here: ``PurePosixPath`` never
     splits on a literal backslash, so it would pass a Windows-shaped path
-    through unchanged when running on a POSIX host)."""
-    return os.path.relpath(LIBS_DIR / lib, consumer_dir).replace("\\", "/")
+    through unchanged when running on a POSIX host).
+
+    ``libs_dir`` defaults to the module-level ``LIBS_DIR`` (the real repo's
+    own canonical root) -- ``convert_to_uv_editable()`` passes its own
+    INJECTED ``libs_dir`` explicitly instead, since it validates and
+    removes paths under that caller-provided root: computing the
+    replacement path from the global constant instead would let a caller
+    using an alternate repository root delete the correct copy while
+    writing a reference relative to a different checkout entirely."""
+    return os.path.relpath((libs_dir or LIBS_DIR) / lib, consumer_dir).replace("\\", "/")
 
 
 def uv_sources_table_span(text: str) -> tuple[int, int] | None:
@@ -515,7 +538,7 @@ def convert_to_uv_editable(
                 )
         remove_path(copy_dir)
 
-    relpath = uv_editable_relpath(consumer_dir, lib)
+    relpath = uv_editable_relpath(consumer_dir, lib, libs_dir=libs_dir)
     rewrite_uv_source_to_editable(pyproject, lib, relpath)
     return copy_dir, relpath
 

@@ -1347,3 +1347,57 @@ def test_materialize_uv_editable_ref_into_refuses_a_symlinked_canonical_root(tmp
     )
     assert any("is a symlink" in line for line in log)
     assert not (consumer / "libs/zdd").exists()
+
+
+def test_materialize_one_uv_editable_ref_accepts_a_quoted_key_and_trailing_comment(
+    tmp_path: Path,
+):
+    canonical = tmp_path / "libs/zdd"
+    (canonical / "src/zdd").mkdir(parents=True)
+    (canonical / "src/zdd/__init__.py").write_text("real\n", encoding="utf-8")
+    (canonical / "pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "0.1.0"\n', encoding="utf-8"
+    )
+    consumer = tmp_path / "plugins/agent-bridge"
+    consumer.mkdir(parents=True)
+    pyproject = consumer / "pyproject.toml"
+    pyproject.write_text(
+        "[tool.uv.sources]\n"
+        '"agent-zdd" = { path = "../../libs/zdd", editable = true }  # a comment\n',
+        encoding="utf-8",
+    )
+    dest_lib_dir = consumer / "libs/zdd"
+
+    result = mm._materialize_one_uv_editable_ref(
+        canonical=canonical, dest_lib_dir=dest_lib_dir, pyproject=pyproject,
+        name="agent-zdd", raw_path="../../libs/zdd", lib="zdd",
+    )
+    assert result.startswith("OK"), result
+    # The original quoted key form is preserved verbatim (group(1) captures
+    # the matched key text as-is); only the value is rewritten.
+    assert '"agent-zdd" = { path = "libs/zdd" }' in pyproject.read_text()
+
+
+def test_materialize_one_uv_editable_ref_accepts_a_single_quoted_path(tmp_path: Path):
+    canonical = tmp_path / "libs/zdd"
+    (canonical / "src/zdd").mkdir(parents=True)
+    (canonical / "src/zdd/__init__.py").write_text("real\n", encoding="utf-8")
+    (canonical / "pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "0.1.0"\n', encoding="utf-8"
+    )
+    consumer = tmp_path / "plugins/agent-bridge"
+    consumer.mkdir(parents=True)
+    pyproject = consumer / "pyproject.toml"
+    pyproject.write_text(
+        "[tool.uv.sources]\n"
+        "agent-zdd = { path = '../../libs/zdd', editable = true }\n",
+        encoding="utf-8",
+    )
+    dest_lib_dir = consumer / "libs/zdd"
+
+    result = mm._materialize_one_uv_editable_ref(
+        canonical=canonical, dest_lib_dir=dest_lib_dir, pyproject=pyproject,
+        name="agent-zdd", raw_path="../../libs/zdd", lib="zdd",
+    )
+    assert result.startswith("OK"), result
+    assert 'agent-zdd = { path = "libs/zdd" }' in pyproject.read_text()
