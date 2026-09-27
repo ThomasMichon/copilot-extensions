@@ -67,8 +67,13 @@ agent-dropin-registry = { path = "libs/dropin-registry" }
 # roots for attributed registry entries (module ``plugin_activation``).
 agent-plugin-activation = { path = "libs/plugin-activation" }
 # Coalesce/refcount/idle-exit daemon wire protocol + client (module
-# ``work_coalescing_singleton``).
-agent-work-coalescing-singleton = { path = "libs/work-coalescing-singleton" }
+# ``work_coalescing_singleton``). This is a `uv`-editable canonical reference
+# (vendor-pointer-generalization effort, Phase 1): `path` escapes this
+# project's own root and resolves live to `libs/work-coalescing-singleton`,
+# so this `dev`-branch checkout has nothing to keep manually in sync -- only
+# a real `main`-branch release (tools/materialize_main.py) ever gets a real
+# local copy.
+agent-work-coalescing-singleton = { path = "../libs/work-coalescing-singleton", editable = true }
 
 [project.scripts]
 worktree-manager = "worktree_manager.__main__:console_entry"

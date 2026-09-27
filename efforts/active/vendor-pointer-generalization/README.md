@@ -1314,3 +1314,41 @@ _Pending._
   rewriter) is now proven end-to-end and ready to apply directly to each
   remaining lib with no further tooling work expected -- only the
   re-conversion + validation cycle per lib.
+
+### 2026-09-27 — Phase 1: converted `work-coalescing-singleton` (2 consumers)
+
+- Applied the proven recipe from the `lazy-cli-dispatch` conversion (PR
+  #4245) to the next-smallest-blast-radius `src-passthrough` lib:
+  `tools/sync-vendored-libs.py --uv-editable` for both consumers
+  (`plugins/agent-worktrees`, `worktree-manager`), hand-updated each
+  consumer's `[tool.uv.sources]` prose comment to describe the new
+  `uv`-editable mechanism, then validated end-to-end: `sync-vendored-
+  libs.py --check`/`check-vendored-libs-sync.py`/`check-install-
+  contract.py` all green; `run-plugin-tests.py agent-worktrees
+  --reinstall`'s full suite passes (433 passed, 8 skipped -- the only 2
+  failures, `test_lazy_dispatch.py`'s dispatch-table/cluster-free-modules
+  drift checks, were confirmed pre-existing and unrelated by re-running
+  the identical suite against the unmodified `dev` tip via `git stash`);
+  `worktree-manager` has no `run-plugin-tests.py` suite of its own, so ran
+  its real test suite directly via `uv run --extra dev` (1532 passed, 4
+  skipped); a **non-editable** `uv pip install plugins/agent-worktrees` in
+  a fresh venv (no `-e`) still resolved `agent-work-coalescing-singleton`
+  live from canonical (`__file__` pointed at `libs/work-coalescing-
+  singleton`, not a copy); `materialize_main.py --dest` round-tripped
+  both consumers' pointers byte-for-byte (only `.ruff_cache`/`__pycache__`
+  diffs, both non-source cache artifacts).
+- **Caught and fixed a self-inflicted false alarm mid-validation**: the
+  non-editable-install probe's `uv pip install` build step left stray
+  `build/`/`*.egg-info` directories under `plugins/agent-worktrees/libs/
+  work-coalescing-singleton/` (untracked build cruft from building the
+  path-dependency sdist), which made the directory reappear on disk and
+  caused `materialize_main.py` to report a false `SKIP ... already exists
+  -- refusing to overwrite` for that one pointer. Removed the untracked
+  cruft and re-ran; the pointer materialized cleanly (`OK`) on the next
+  pass. Worth remembering for the remaining libs: re-check for stray
+  build artifacts after any non-editable-install probe, before trusting a
+  `materialize_main.py` `SKIP`/warning as a real regression.
+- Added a changefile per touched plugin (`agent-worktrees`,
+  `worktree-manager`).
+- **Next up**: `credential-relay` (4 consumers), per the effort's own
+  smallest-blast-radius-first ordering.
