@@ -386,6 +386,53 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-26 — `agent-mcp`'s doc/SKILL.md cluster: 15 more findings resolved, plugin now backlog-only (PR #4082)
+
+- Fresh guard count at merge time: 624 (down from 639). `agent-mcp` now
+  at 14 findings, all confirmed backlog (matching `agent-ssh`'s
+  end-state from earlier this session).
+- `agent-mcp/SKILL.md` (4) and `customizing-bridges/SKILL.md` (7 of its
+  original 8): the usual doc-shaped `allow deployed-runtime-diagnostics`
+  mentions -- prose, a markdown table, a fenced YAML example comment.
+- **`customizing-bridges/SKILL.md`'s 8th finding sat inside the
+  frontmatter `description:` YAML block scalar** -- the first time this
+  effort hit a marker placement that would actually corrupt user-facing
+  content (an HTML comment there becomes literal text in the description
+  shown by skill-matching/listing UI, and counted by `check-skills.py`'s
+  length guideline). Resolved by REPHRASING instead of annotating: the
+  sentence named the literal overlay path
+  (`~/.agent-mcp/overrides/<id>.yaml`); dropped it in favor of
+  "a machine-local override overlay file" since a description's job is a
+  high-level summary, not an implementation-detail reference -- the
+  skill body already spells out the exact path. Zero findings need a
+  marker when the offending detail didn't need to be in the description
+  at all. **Worth checking other plugins' frontmatter descriptions for
+  the same latent issue** -- this is likely not unique to agent-mcp.
+- **`reliable-agent.md`'s 3 findings live inside fenced, user-facing
+  example code blocks** (1 bash, 2 PowerShell) -- new territory for this
+  effort (prior doc fixes were all prose/tables, never inside an
+  actually-meant-to-be-copy-pasted code fence). The bash one took a
+  plain trailing `#` comment safely. Both PowerShell ones end their
+  flagged line with a backtick line-continuation, which cannot be
+  followed by a same-line comment without breaking the continuation --
+  restructured each into a `$stub = "..."` variable assignment (marker
+  goes on that line) then `& $stub` `-continued args, changing nothing
+  about what the example teaches or how it behaves. Confirmed via the
+  full `agent-mcp` suite (these blocks aren't test-executed themselves,
+  but this at least confirms nothing else broke).
+- Verified: `check-skills.py` (0 errors, no new warnings), `check-docs-
+  consistency.py`, and the full `agent-mcp` suite via `test-supervisor`
+  (609 passed, 7 skipped, 0 failures -- same clean run as the prior
+  slice). Merged via `pr-merge --now` after a clean (0-finding) advisory
+  review.
+- **`agent-mcp` is now backlog-only at 14 findings** (5 `init.ps1` + 2
+  `init.sh` Phase 2 launcher-contract InstallDir/LocalBin, 4
+  `installer-readiness.json`, 1 `payload-invocation.json`, 2 `config.py`
+  module-size-ceiling deferral) -- same end-state pattern as `agent-ssh`.
+  Move to the next plugin in the backlog order
+  (`agent-machines`/`agent-bridge`/`agent-index`/`agent-dispatch`/
+  `agent-codespaces`/`agent-worktrees`, none yet individually triaged).
+
 ### 2026-09-26 — `agent-mcp`'s core-package legacy-root cluster: 7 of 36 findings resolved (PR #4068)
 
 - Fresh guard count at merge time: 639 (down from 646). First slice into

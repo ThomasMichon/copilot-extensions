@@ -8,7 +8,14 @@ from pathlib import Path
 import pytest
 
 from agent_machines import __main__ as cli
-from agent_machines import self_update, self_update_lock, self_update_state, self_update_tasks
+from agent_machines import (
+    self_update,
+    self_update_dtssh,
+    self_update_lock,
+    self_update_state,
+    self_update_tasks,
+    self_update_types,
+)
 from agent_machines.manifest import ManifestError, load_package
 from agent_machines.reconcile import plan
 from agent_machines.resources import resolve_resources
@@ -276,7 +283,7 @@ def test_watchdog_starts_launcher_when_missing(monkeypatch):
         state["running"] = True
         return True
 
-    monkeypatch.setattr(self_update, "load_dtssh_config", lambda local_app_data=None: config)
+    monkeypatch.setattr(self_update_dtssh, "load_dtssh_config", lambda local_app_data=None: config)
     steps = self_update.ensure_watchdog(
         process_lister=process_lister,
         launcher_starter=starter,
@@ -295,7 +302,7 @@ def test_default_launcher_starter_does_not_pass_creationflags_to_conhost(monkeyp
     # own `--headless` flag already keeps a window from appearing, so no
     # extra Popen creationflags belong on this specific spawn.
     monkeypatch.setattr(self_update.sys, "platform", "win32")
-    monkeypatch.setattr(self_update, "shutil_which", lambda _name: r"C:\pwsh\pwsh.exe")
+    monkeypatch.setattr(self_update_dtssh, "shutil_which", lambda _name: r"C:\pwsh\pwsh.exe")
     monkeypatch.setattr(Path, "is_file", lambda self: True)
     captured: dict = {}
 
@@ -304,7 +311,7 @@ def test_default_launcher_starter_does_not_pass_creationflags_to_conhost(monkeyp
             captured["argv"] = argv
             captured["kwargs"] = kwargs
 
-    monkeypatch.setattr(self_update.subprocess, "Popen", _FakePopen)
+    monkeypatch.setattr(self_update_dtssh.subprocess, "Popen", _FakePopen)
     config = self_update.DtsshConfig(
         config_path=tmp_path / "config.json",
         install_root=tmp_path,
@@ -319,7 +326,7 @@ def test_default_launcher_starter_does_not_pass_creationflags_to_conhost(monkeyp
 
 
 def test_refresh_dtssh_mesh_skips_when_agent_ssh_missing(monkeypatch):
-    monkeypatch.setattr(self_update.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(self_update_dtssh.shutil, "which", lambda _name: None)
     step = self_update.refresh_dtssh_mesh(runner=lambda *a, **k: (_ for _ in ()).throw(
         AssertionError("must not run without agent-ssh")
     ))
@@ -328,7 +335,7 @@ def test_refresh_dtssh_mesh_skips_when_agent_ssh_missing(monkeypatch):
 
 
 def test_refresh_dtssh_mesh_skips_when_no_machines_yaml(monkeypatch):
-    monkeypatch.setattr(self_update.shutil, "which", lambda _name: "agent-ssh")
+    monkeypatch.setattr(self_update_dtssh.shutil, "which", lambda _name: "agent-ssh")
 
     def runner(argv, *, cwd=None, timeout=0):
         payload = json.dumps(
@@ -342,7 +349,7 @@ def test_refresh_dtssh_mesh_skips_when_no_machines_yaml(monkeypatch):
 
 
 def test_refresh_dtssh_mesh_ok_when_mesh_reachable(monkeypatch):
-    monkeypatch.setattr(self_update.shutil, "which", lambda _name: "agent-ssh")
+    monkeypatch.setattr(self_update_dtssh.shutil, "which", lambda _name: "agent-ssh")
 
     def runner(argv, *, cwd=None, timeout=0):
         payload = json.dumps(
@@ -364,7 +371,7 @@ def test_refresh_dtssh_mesh_ok_when_mesh_reachable(monkeypatch):
 
 
 def test_refresh_dtssh_mesh_error_when_alias_unreachable(monkeypatch):
-    monkeypatch.setattr(self_update.shutil, "which", lambda _name: "agent-ssh")
+    monkeypatch.setattr(self_update_dtssh.shutil, "which", lambda _name: "agent-ssh")
 
     def runner(argv, *, cwd=None, timeout=0):
         payload = json.dumps(
@@ -393,11 +400,11 @@ def test_refresh_dtssh_mesh_uses_same_cell_agent_ssh_prefix(monkeypatch, tmp_pat
     own = {"cellRoot": str(cell), "pluginRoot": str(root)}
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(root / "install.json"))
     monkeypatch.setenv("AGENT_RT_ROOT", str(root))
-    monkeypatch.setattr(self_update._peer_launch, "validate_owner", lambda *args: own)
+    monkeypatch.setattr(self_update_dtssh._peer_launch, "validate_owner", lambda *args: own)
     monkeypatch.setattr(
-        self_update.shutil, "which", lambda _: pytest.fail("ambient PATH selected"),
+        self_update_dtssh.shutil, "which", lambda _: pytest.fail("ambient PATH selected"),
     )
-    expected_prefix = self_update._peer_launch.launch_prefix(
+    expected_prefix = self_update_dtssh._peer_launch.launch_prefix(
         "agent-machines", Path(own["pluginRoot"]),
         str(Path(own["pluginRoot"]) / "install.json"), "agent-ssh",
     )
@@ -423,9 +430,9 @@ def test_refresh_dtssh_mesh_skips_without_same_cell_agent_ssh(monkeypatch, tmp_p
     own = {"cellRoot": str(cell), "pluginRoot": str(root)}
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(root / "install.json"))
     monkeypatch.setenv("AGENT_RT_ROOT", str(root))
-    monkeypatch.setattr(self_update._peer_launch, "validate_owner", lambda *args: own)
+    monkeypatch.setattr(self_update_dtssh._peer_launch, "validate_owner", lambda *args: own)
     monkeypatch.setattr(
-        self_update.shutil, "which", lambda _: pytest.fail("ambient PATH selected"),
+        self_update_dtssh.shutil, "which", lambda _: pytest.fail("ambient PATH selected"),
     )
 
     step = self_update.refresh_dtssh_mesh(
@@ -446,14 +453,296 @@ def test_refresh_dtssh_mesh_propagates_context_refusal(monkeypatch, tmp_path):
     def refuse(*_args):
         raise ValueError("malformed receipt")
 
-    monkeypatch.setattr(self_update._peer_launch, "validate_owner", refuse)
+    monkeypatch.setattr(self_update_dtssh._peer_launch, "validate_owner", refuse)
 
-    with pytest.raises(self_update._peer_launch.ContextRefused):
+    with pytest.raises(self_update_dtssh._peer_launch.ContextRefused):
         self_update.refresh_dtssh_mesh(
             runner=lambda *a, **k: (_ for _ in ()).throw(
                 AssertionError("must not run on a refused context")
             )
         )
+
+
+def test_ensure_dtssh_host_healthy_skips_when_agent_ssh_missing(monkeypatch):
+    monkeypatch.setattr(self_update_dtssh.shutil, "which", lambda _name: None)
+    step = self_update.ensure_dtssh_host_healthy(
+        runner=lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("must not run without agent-ssh")
+        )
+    )
+    assert step.status == "skipped"
+    assert "agent-ssh is not installed" in step.detail
+
+
+def test_ensure_dtssh_host_healthy_skips_when_config_missing(monkeypatch):
+    monkeypatch.setattr(self_update_dtssh.shutil, "which", lambda _name: "agent-ssh")
+
+    def raise_config(local_app_data=None):
+        raise RuntimeError("dtssh companion config is unreadable: not found")
+
+    monkeypatch.setattr(self_update_dtssh, "load_dtssh_config", raise_config)
+    step = self_update.ensure_dtssh_host_healthy(
+        runner=lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("must not run without a resolvable dtssh config")
+        )
+    )
+    assert step.status == "skipped"
+    assert "unreadable" in step.detail
+
+
+def test_ensure_dtssh_host_healthy_ok_when_already_healthy(monkeypatch, tmp_path):
+    monkeypatch.setattr(self_update_dtssh.shutil, "which", lambda _name: "agent-ssh")
+    config = self_update.DtsshConfig(
+        config_path=tmp_path / "config.json",
+        install_root=tmp_path,
+        launcher_path=tmp_path / "dtssh-host-launcher.ps1",
+        alias="box-1",
+        port=2222,
+    )
+    monkeypatch.setattr(self_update_dtssh, "load_dtssh_config", lambda local_app_data=None: config)
+    calls = []
+
+    def runner(argv, *, cwd=None, timeout=0):
+        calls.append(list(argv))
+        payload = json.dumps({"ok": True, "healthy": True, "would_change": False})
+        return self_update.CommandResult(list(argv), 0, payload, "")
+
+    step = self_update.ensure_dtssh_host_healthy(runner=runner)
+    assert step.status == "ok"
+    assert "healthy" in step.detail
+    # Only the status probe ran -- no apply for an already-healthy host.
+    assert len(calls) == 1
+    assert "--apply" not in calls[0]
+    assert calls[0][-1] == "--json"
+    assert calls[0][-3:-1] == ["--port", "2222"]
+    assert calls[0][-5:-3] == ["--alias", "box-1"]
+
+
+def test_ensure_dtssh_host_healthy_reports_error_without_apply_when_blocked(monkeypatch, tmp_path):
+    monkeypatch.setattr(self_update_dtssh.shutil, "which", lambda _name: "agent-ssh")
+    config = self_update.DtsshConfig(
+        config_path=tmp_path / "config.json",
+        install_root=tmp_path,
+        launcher_path=tmp_path / "dtssh-host-launcher.ps1",
+        alias="box-1",
+        port=2222,
+    )
+    monkeypatch.setattr(self_update_dtssh, "load_dtssh_config", lambda local_app_data=None: config)
+    calls = []
+
+    def runner(argv, *, cwd=None, timeout=0):
+        calls.append(list(argv))
+        payload = json.dumps(
+            {
+                "ok": False,
+                "healthy": False,
+                "would_change": False,
+                "blocked": "authentication",
+                "error": "cannot inspect Dev Tunnel login",
+            }
+        )
+        return self_update.CommandResult(list(argv), 1, payload, "")
+
+    step = self_update.ensure_dtssh_host_healthy(runner=runner)
+    assert step.status == "error"
+    assert "Dev Tunnel login" in step.detail
+    # would_change was false -- must not attempt a no-op apply.
+    assert len(calls) == 1
+
+
+def test_ensure_dtssh_host_healthy_applies_when_unhealthy_and_repairs(monkeypatch, tmp_path):
+    monkeypatch.setattr(self_update_dtssh.shutil, "which", lambda _name: "agent-ssh")
+    config = self_update.DtsshConfig(
+        config_path=tmp_path / "config.json",
+        install_root=tmp_path,
+        launcher_path=tmp_path / "dtssh-host-launcher.ps1",
+        alias="box-1",
+        port=2222,
+    )
+    monkeypatch.setattr(self_update_dtssh, "load_dtssh_config", lambda local_app_data=None: config)
+    calls = []
+
+    def runner(argv, *, cwd=None, timeout=0):
+        calls.append(list(argv))
+        if "--apply" in argv:
+            payload = json.dumps(
+                {
+                    "ok": True,
+                    "healthy": True,
+                    "would_change": False,
+                    "applied": True,
+                    "stdout": "dtssh: dtssh 0.2.2\nsshd serving: 127.0.0.1:2222 (SSH banner OK)\n",
+                }
+            )
+            return self_update.CommandResult(list(argv), 0, payload, "")
+        payload = json.dumps(
+            {
+                "ok": True,
+                "healthy": False,
+                "would_change": True,
+                "stdout": "WARNING: sshd NOT serving on :2222 -- no SSH banner\n",
+            }
+        )
+        return self_update.CommandResult(list(argv), 0, payload, "")
+
+    step = self_update.ensure_dtssh_host_healthy(runner=runner)
+    assert step.status == "changed"
+    assert "banner OK" in step.detail
+    assert len(calls) == 2
+    assert "--apply" in calls[1]
+    assert calls[1][:-2] == calls[0][:-1]  # same base argv, minus each call's trailing flag(s)
+
+
+def test_ensure_dtssh_host_healthy_apply_still_unhealthy_is_error(monkeypatch, tmp_path):
+    monkeypatch.setattr(self_update_dtssh.shutil, "which", lambda _name: "agent-ssh")
+    config = self_update.DtsshConfig(
+        config_path=tmp_path / "config.json",
+        install_root=tmp_path,
+        launcher_path=tmp_path / "dtssh-host-launcher.ps1",
+        alias="box-1",
+        port=2222,
+    )
+    monkeypatch.setattr(self_update_dtssh, "load_dtssh_config", lambda local_app_data=None: config)
+
+    def runner(argv, *, cwd=None, timeout=0):
+        if "--apply" in argv:
+            payload = json.dumps(
+                {
+                    "ok": False,
+                    "healthy": False,
+                    "applied": False,
+                    "error": "dtssh host remains unhealthy after installation",
+                }
+            )
+            return self_update.CommandResult(list(argv), 1, payload, "")
+        payload = json.dumps({"ok": True, "healthy": False, "would_change": True})
+        return self_update.CommandResult(list(argv), 0, payload, "")
+
+    step = self_update.ensure_dtssh_host_healthy(runner=runner)
+    assert step.status == "error"
+    assert "remains unhealthy" in step.detail
+
+
+def test_ensure_dtssh_host_healthy_verification_required_is_changed_not_error(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(self_update_dtssh.shutil, "which", lambda _name: "agent-ssh")
+    config = self_update.DtsshConfig(
+        config_path=tmp_path / "config.json",
+        install_root=tmp_path,
+        launcher_path=tmp_path / "dtssh-host-launcher.ps1",
+        alias="box-1",
+        port=2222,
+    )
+    monkeypatch.setattr(self_update_dtssh, "load_dtssh_config", lambda local_app_data=None: config)
+
+    def runner(argv, *, cwd=None, timeout=0):
+        if "--apply" in argv:
+            payload = json.dumps(
+                {
+                    "ok": True,
+                    "healthy": False,
+                    "applied": False,
+                    "detached": True,
+                    "verification_required": True,
+                }
+            )
+            return self_update.CommandResult(list(argv), 0, payload, "")
+        payload = json.dumps({"ok": True, "healthy": False, "would_change": True})
+        return self_update.CommandResult(list(argv), 0, payload, "")
+
+    step = self_update.ensure_dtssh_host_healthy(runner=runner)
+    assert step.status == "changed"
+    assert "verification pending" in step.detail
+
+
+def test_run_tier_watchdog_appends_host_health_step_before_mesh_refresh(monkeypatch, tmp_path):
+    monkeypatch.setattr(self_update.sys, "platform", "win32")
+    monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
+    monkeypatch.setattr(self_update_lock, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
+    monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
+    config = self_update.DtsshConfig(
+        config_path=tmp_path / "config.json",
+        install_root=tmp_path,
+        launcher_path=tmp_path / "dtssh-host-launcher.ps1",
+        alias="box-1",
+        port=2222,
+    )
+    monkeypatch.setattr(self_update_dtssh, "load_dtssh_config", lambda local_app_data=None: config)
+    monkeypatch.setattr(
+        self_update_dtssh,
+        "watchdog_running",
+        lambda _config, process_lister=None: True,
+    )
+    order = []
+
+    def host_healer():
+        order.append("host-health")
+        return self_update.StepResult("dtssh-host-health", "changed", "repaired the dtssh host")
+
+    def mesh_refresher():
+        order.append("mesh-refresh")
+        return self_update.StepResult("dtssh-mesh-refresh", "ok", "refreshed the dtssh mesh")
+
+    result = self_update.run_tier(
+        "watchdog",
+        opted_in=True,
+        mesh_refresher=mesh_refresher,
+        host_healer=host_healer,
+        home=tmp_path,
+    )
+    assert result.status == "ok"
+    assert order == ["host-health", "mesh-refresh"]
+    assert [step.name for step in result.steps] == [
+        "dtssh-launcher",
+        "dtssh-host-health",
+        "dtssh-mesh-refresh",
+    ]
+
+
+def test_run_tier_watchdog_fails_when_host_health_errors_and_skips_mesh_refresh(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(self_update.sys, "platform", "win32")
+    monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
+    monkeypatch.setattr(self_update_lock, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
+    monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
+    config = self_update.DtsshConfig(
+        config_path=tmp_path / "config.json",
+        install_root=tmp_path,
+        launcher_path=tmp_path / "dtssh-host-launcher.ps1",
+        alias="box-1",
+        port=2222,
+    )
+    monkeypatch.setattr(self_update_dtssh, "load_dtssh_config", lambda local_app_data=None: config)
+    monkeypatch.setattr(
+        self_update_dtssh,
+        "watchdog_running",
+        lambda _config, process_lister=None: True,
+    )
+
+    def host_healer():
+        return self_update.StepResult(
+            "dtssh-host-health", "error", "dtssh host remains unhealthy after apply"
+        )
+
+    mesh_calls = []
+
+    def mesh_refresher():
+        mesh_calls.append(True)
+        return self_update.StepResult("dtssh-mesh-refresh", "ok", "refreshed the dtssh mesh")
+
+    result = self_update.run_tier(
+        "watchdog",
+        opted_in=True,
+        mesh_refresher=mesh_refresher,
+        host_healer=host_healer,
+        home=tmp_path,
+    )
+    assert result.status == "error"
+    assert "remains unhealthy" in result.detail
+    assert mesh_calls == []
+    assert result.steps[-1].name == "dtssh-host-health"
 
 
 def test_run_tier_watchdog_appends_mesh_refresh_step(monkeypatch, tmp_path):
@@ -468,9 +757,9 @@ def test_run_tier_watchdog_appends_mesh_refresh_step(monkeypatch, tmp_path):
         alias="box-1",
         port=2222,
     )
-    monkeypatch.setattr(self_update, "load_dtssh_config", lambda local_app_data=None: config)
+    monkeypatch.setattr(self_update_dtssh, "load_dtssh_config", lambda local_app_data=None: config)
     monkeypatch.setattr(
-        self_update,
+        self_update_dtssh,
         "watchdog_running",
         lambda _config, process_lister=None: True,
     )
@@ -485,6 +774,7 @@ def test_run_tier_watchdog_appends_mesh_refresh_step(monkeypatch, tmp_path):
         "watchdog",
         opted_in=True,
         mesh_refresher=mesh_refresher,
+        host_healer=lambda: self_update.StepResult("dtssh-host-health", "ok", "healthy"),
         home=tmp_path,
     )
     assert result.status == "ok"
@@ -505,9 +795,9 @@ def test_run_tier_watchdog_fails_when_mesh_refresh_errors(monkeypatch, tmp_path)
         alias="box-1",
         port=2222,
     )
-    monkeypatch.setattr(self_update, "load_dtssh_config", lambda local_app_data=None: config)
+    monkeypatch.setattr(self_update_dtssh, "load_dtssh_config", lambda local_app_data=None: config)
     monkeypatch.setattr(
-        self_update,
+        self_update_dtssh,
         "watchdog_running",
         lambda _config, process_lister=None: True,
     )
@@ -521,6 +811,7 @@ def test_run_tier_watchdog_fails_when_mesh_refresh_errors(monkeypatch, tmp_path)
         "watchdog",
         opted_in=True,
         mesh_refresher=mesh_refresher,
+        host_healer=lambda: self_update.StepResult("dtssh-host-health", "ok", "healthy"),
         home=tmp_path,
     )
     assert result.status == "error"
@@ -1068,8 +1359,8 @@ def test_default_command_runner_resolves_pathext_shim(monkeypatch):
 
         return _Proc()
 
-    monkeypatch.setattr(self_update.shutil, "which", fake_which)
-    monkeypatch.setattr(self_update.subprocess, "run", fake_run)
+    monkeypatch.setattr(self_update_types.shutil, "which", fake_which)
+    monkeypatch.setattr(self_update_types.subprocess, "run", fake_run)
     result = self_update.default_command_runner(["agent-worktrees", "-p", "dotfiles", "list"])
     assert captured["argv"][0] == "C:\\Users\\operator\\.local\\bin\\agent-worktrees.cmd"
     # The reported CommandResult.argv still shows the original logical argv
@@ -1093,8 +1384,8 @@ def test_default_command_runner_leaves_unresolvable_argv0_unchanged(monkeypatch)
 
         return _Proc()
 
-    monkeypatch.setattr(self_update.shutil, "which", fake_which)
-    monkeypatch.setattr(self_update.subprocess, "run", fake_run)
+    monkeypatch.setattr(self_update_types.shutil, "which", fake_which)
+    monkeypatch.setattr(self_update_types.subprocess, "run", fake_run)
     self_update.default_command_runner(["totally-unknown-binary"])
     assert captured["argv"] == ["totally-unknown-binary"]
 

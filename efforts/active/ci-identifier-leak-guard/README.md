@@ -117,36 +117,38 @@ an untrusted findings artifact at all.
 
 ### Phase 2 - Add the trusted workflow-run scan/report path
 
-- [ ] Remove the structurally-broken secret-backed identifier scan attempt from
+- [x] Remove the structurally-broken secret-backed identifier scan attempt from
   the untrusted `pull_request` CI lane; keep that workflow only for fast
   no-secrets validation.
-- [ ] Extend `tools/check-no-internal-identifiers.py` so the trusted follow-up
+- [x] Extend `tools/check-no-internal-identifiers.py` so the trusted follow-up
   can scan a PR head's changed file contents as passive git data while still
   emitting the Phase 1 redacted JSON artifact shape.
-- [ ] Author a `workflow_run` follow-up that runs from the default branch's own
+- [x] Author a `workflow_run` follow-up that runs from the default branch's own
   workflow definition, never checks out or executes the PR head, resolves the
   triggering PR/head metadata, reads the changed file contents as inert data
   only, and runs the trusted scanner with the merged
   `FORBIDDEN_IDS_FACILITY`/`FORBIDDEN_IDS_WORK` secret-backed denylist.
-- [ ] Create a custom Check Run on the PR head SHA with a stable required-check
+- [x] Create a custom Check Run on the PR head SHA with a stable required-check
   name and a success/failure conclusion derived from the trusted scan.
-- [ ] Post failure feedback back to the PR via API-delivered text that may name
+- [x] Post failure feedback back to the PR via API-delivered text that may name
   the matched placeholder/identifier and reason, while keeping the workflow log
   itself free of raw matched values or denylist dumps.
 
 ### Phase 3 - Register the new required check and close the loop
 
-- [ ] Validate the merged trigger chain end-to-end on a scratch PR: CI runs
+- [x] Validate the merged trigger chain end-to-end on a scratch PR: CI runs
   first, then the trusted `workflow_run` workflow, then the custom Check Run
   appears on the PR head SHA.
 - [ ] If the repository secrets are present, validate the failure path with a
   fabricated placeholder test token; otherwise validate the success/plumbing
   path only and record that full failure-path validation remains blocked on
   Phase 4 secret provisioning.
-- [ ] Inspect the current branch-protection/ruleset configuration for `main`
+- [x] Inspect the current branch-protection/ruleset configuration for `main`
   and `dev`, prepare the exact before/after required-check diff for the new
   custom Check Run name, and stop for explicit operator confirmation before any
   mutating admin call.
+- [ ] After operator confirmation, add `identifier leak guard` to the required
+  status checks on `main` ruleset `18553911` and `dev` ruleset `23904550`.
 
 ### Phase 4 - Provision the secret-backed denylists
 
@@ -159,7 +161,7 @@ an untrusted findings artifact at all.
 
 ## Validation Plan
 
-- [ ] Open a clean scratch PR and confirm the ordinary `CI` workflow runs
+- [x] Open a clean scratch PR and confirm the ordinary `CI` workflow runs
   first, then the trusted `workflow_run` follow-up runs, and then a custom
   Check Run named `identifier leak guard` appears on the PR head SHA.
 - [ ] If `FORBIDDEN_IDS_FACILITY` / `FORBIDDEN_IDS_WORK` exist, open a scratch
@@ -168,9 +170,13 @@ an untrusted findings artifact at all.
   feedback naming the matched value and reason. If the secrets are absent,
   record that this failure-path validation remains blocked on Phase 4 secret
   provisioning.
-- [ ] Confirm a clean PR produces no raw matched values in the workflow log and
-  no failure feedback comment.
-- [ ] Inspect the branch-protection/ruleset configuration for `main` and `dev`
+- [x] Confirm the clean scratch PR's **misconfiguration** path produces no
+  identifier-feedback comment and logs only the configuration gap (not any raw
+  matched value).
+- [ ] Once the denylist secrets exist, confirm a genuinely clean denylist-backed
+  scan produces no raw matched values in the workflow log and no failure
+  feedback comment.
+- [x] Inspect the branch-protection/ruleset configuration for `main` and `dev`
   and prepare the exact before/after diff to require the custom Check Run name,
   without applying it yet.
 
@@ -203,3 +209,29 @@ _Pending._
   follow-up that loads its YAML from the default branch, reads the PR head only
   as inert data, runs the trusted scanner with the real denylist, and creates a
   custom Check Run on the PR head SHA for branch protection to require.
+
+### 2026-09-26 - Phase 2 shipped
+- PR #4002 landed the trusted `workflow_run` implementation:
+  `.github/workflows/identifier-leak-guard.yml` now reacts to `CI`
+  completions, reads the PR head only as passive data, runs the trusted
+  scanner, creates the custom `identifier leak guard` Check Run on the PR head
+  SHA, and posts PR feedback through the GitHub API when real findings exist.
+- The old secret-backed step was removed from `.github/workflows/ci.yml`, and
+  `tools/check-no-internal-identifiers.py` gained the passive-data scan path
+  (`--paths-file`, `--git-ref`, trusted-only details output) plus regression
+  coverage for the new modes and filename-whitespace preservation.
+
+### 2026-09-26 - Phase 3 validation
+- Scratch PR #4062 confirmed the trigger chain on an owner-authored PR path:
+  `CI` ran first, then the trusted `Identifier leak guard` workflow fired via
+  `workflow_run`, and a custom Check Run named `identifier leak guard` appeared
+  on the scratch PR head SHA.
+- `gh secret list --repo ThomasMichon/copilot-extensions` returned no
+  repository secrets, so the trusted workflow correctly failed closed with the
+  Check Run title `Identifier leak guard misconfigured` instead of silently
+  passing an unenforced scan. That proves the trigger/report plumbing but means
+  full failure-path validation with a fabricated placeholder token remains
+  blocked on Phase 4 secret provisioning.
+- No identifier-guard PR feedback comment was posted on the clean scratch PR,
+  and the check-run output named only the configuration gap -- no raw matched
+  values appeared because no denylist-backed scan actually ran.
