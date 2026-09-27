@@ -92,12 +92,13 @@ def apply_profile_column(machine, env, sels, *, mirror=True):
     return profiles_io.apply_column(machine, env, sels, mirror=mirror)
 
 
-def reconcile_local_batch(*, worktree_ids: list[str] | None = None):
+def reconcile_local_batch(*, worktree_ids: list[str] | None = None, runner=None):
     """Best-effort Group C reconcile batch for the current project."""
     try:
         return engine_group_c.picker_reconcile_local(
             context.project(),
             worktree_ids=worktree_ids,
+            runner=runner,
         )
     except (
         engine_client.EngineError,
@@ -144,8 +145,9 @@ def _overlay_reconcile_rows(
     rows: list[dict],
     *,
     worktree_ids: list[str] | None = None,
+    runner=None,
 ) -> list[dict]:
-    batch = reconcile_local_batch(worktree_ids=worktree_ids)
+    batch = reconcile_local_batch(worktree_ids=worktree_ids, runner=runner)
     if batch is None:
         return rows
     preserve_mux = not bool(batch.summary.get("mux_scan_ok", True))
@@ -238,7 +240,7 @@ def load(
         )
     )
     if classify:
-        rows = _overlay_reconcile_rows(rows)
+        rows = _overlay_reconcile_rows(rows, runner=runner)
     return [derive.norm(row, machine, env, **norm_source) for row in rows]
 
 
@@ -266,5 +268,5 @@ def refresh_one(worktree_id: str, machine: str | None = None,
     )
     if not rows:
         return None
-    rows = _overlay_reconcile_rows(rows, worktree_ids=[worktree_id])
+    rows = _overlay_reconcile_rows(rows, worktree_ids=[worktree_id], runner=runner)
     return derive.norm(rows[0], machine, env)

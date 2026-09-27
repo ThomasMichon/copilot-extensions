@@ -554,9 +554,9 @@ PR [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
       Group C engine call instead of `sessions.verify_worktree_active()` +
       `tracking.stamp_mux_live()`. Validation on the final tree: the full
       `worktree-manager/tests/production_picker/` suite passed twice back-to-
-      back at `698 passed, 2 skipped`; the full `worktree-manager` suite
+      back at `700 passed, 2 skipped`; the full `worktree-manager` suite
       (excluding the two standing hangs) matched the rebased machine baseline
-      at `1437 passed, 6 skipped, 11 failed`; the full `agent-worktrees` suite stayed in
+      at `1439 passed, 6 skipped, 11 failed`; the full `agent-worktrees` suite stayed in
       the established unrelated-failure envelope (final counts recorded in the
       Journal entry below); `ruff check --select F,E9` passed for both packages;
       `check-install-contract.py` and `check-version-consistency.py` passed; and
@@ -897,9 +897,9 @@ claiming discipline alone.
   behavior preservation, cache-first first paint skipping the batch, one
   reconcile batch per setup/reload epoch, and O(1) subprocess count across
   multi-row loads; full `worktree-manager/tests/production_picker/` passed
-  twice (`698 passed, 2 skipped` both runs); full `worktree-manager` suite
+  twice (`700 passed, 2 skipped` both runs); full `worktree-manager` suite
   excluding the two standing hangs matched the current machine baseline at
-  `1437 passed, 6 skipped, 11 failed` (the same symlink-privilege families plus
+  `1439 passed, 6 skipped, 11 failed` (the same symlink-privilege families plus
   the already-upstream `test_mux_daemon` failure on this Windows machine); full
   `agent-worktrees` suite remained in its existing
   unrelated-failure envelope (same families as Step 5; exact final count from

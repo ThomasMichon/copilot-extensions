@@ -141,10 +141,22 @@ def _active_project_info() -> harness_state.ProjectInfo | None:
     return None
 
 
+def _repo_registry_entry(project: str) -> dict:
+    repos = harness_state.repos_registry().get("repos") or {}
+    entry = repos.get(project)
+    return entry if isinstance(entry, dict) else {}
+
+
 def _active_anchor() -> str:
+    project = project_name()
     info = _active_project_info()
     if info is not None and info.anchor:
         return info.anchor
+    repo_entry = _repo_registry_entry(project)
+    for key in ("windows", "linux", "wsl"):
+        path = repo_entry.get(key)
+        if isinstance(path, str) and path:
+            return path
     return str(Path.cwd())
 
 
@@ -158,7 +170,10 @@ def _repo_settings(anchor: str | Path) -> dict:
 
 
 def _default_branch(anchor: str | Path) -> str:
+    project = project_name()
     branch = str(_repo_settings(anchor).get("default_branch") or "").strip()
+    if not branch:
+        branch = str(_repo_registry_entry(project).get("default_branch") or "").strip()
     return branch or _DEFAULT_BRANCH
 
 
@@ -191,7 +206,34 @@ def machines_yaml_path(repo_dir: str | Path) -> Path:
     legacy = root / _MACHINES_LEGACY
     if legacy.is_file():
         return legacy
+    overlay = _overlay_machines_yaml_path(root)
+    if overlay is not None:
+        return overlay
     return canonical
+
+
+def _overlay_machines_yaml_path(repo_dir: Path) -> Path | None:
+    project = project_name()
+    info = _active_project_info()
+    if info is None or not info.anchor:
+        return None
+    try:
+        if repo_dir.resolve() != Path(info.anchor).resolve():
+            return None
+    except OSError:
+        return None
+    knowledge_repo = str(harness_state.project_config(project).get("knowledge_repo") or "").strip()
+    if not knowledge_repo:
+        return None
+    for candidate in harness_state.build_projects():
+        if candidate.name != knowledge_repo or not candidate.anchor:
+            continue
+        knowledge_root = Path(candidate.anchor)
+        for rel in (_MACHINES_CANONICAL, _MACHINES_LEGACY):
+            overlay = knowledge_root / rel
+            if overlay.is_file():
+                return overlay
+    return None
 
 
 def _load_machines_yaml_uncached(repo_dir: str | Path) -> dict[str, MachineEntry]:

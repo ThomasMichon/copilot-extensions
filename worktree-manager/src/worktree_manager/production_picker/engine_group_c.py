@@ -13,9 +13,10 @@ def _run_group_c_json_verb(
     *,
     verb_name: str,
     timeout: int = engine_client._DEFAULT_TIMEOUT,
+    runner=None,
 ) -> dict:
     try:
-        return engine_client.run_json(project, args, timeout=timeout)
+        return engine_client.run_json(project, args, timeout=timeout, runner=runner)
     except engine_client.EngineError as error:
         detail = engine_client._engine_error_detail(error).casefold()
         unsupported = (
@@ -55,6 +56,7 @@ def picker_reconcile_local(
     *,
     worktree_ids: list[str] | None = None,
     timeout: int = engine_client._DEFAULT_TIMEOUT,
+    runner=None,
 ) -> PickerReconcileLocalBatch:
     args = ["picker-reconcile-local", "--json"]
     for worktree_id in worktree_ids or []:
@@ -64,5 +66,6 @@ def picker_reconcile_local(
         args,
         verb_name="picker-reconcile-local",
         timeout=timeout,
+        runner=runner,
     )
     return PickerReconcileLocalBatch.from_payload(payload)

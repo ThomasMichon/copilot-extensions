@@ -660,10 +660,10 @@ once every remaining caller is already off the import boundary.
        off-thread but no longer reaches the compatibility boundary.
      - Validation on the landed tree: the full
        `worktree-manager/tests/production_picker/` suite passed **twice**
-       back-to-back at `698 passed, 2 skipped` both runs; the full
+       back-to-back at `700 passed, 2 skipped` both runs; the full
        `worktree-manager` suite (excluding the two standing hangs
        `test_data_ssh_sources.py` / `test_launch_trace.py`) matched the rebased
-       machine baseline at `1437 passed, 6 skipped, 11 failed`; the full
+       machine baseline at `1439 passed, 6 skipped, 11 failed`; the full
        `agent-worktrees` suite remained within the established unrelated-failure
        envelope from Step 5 (same families, no new Group C failures); `ruff
        check --select F,E9` passed for both packages; `check-install-contract.py`

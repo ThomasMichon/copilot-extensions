@@ -148,19 +148,22 @@ def test_local_load_uses_cache_only_then_classified_provider_reads(monkeypatch):
 
 def test_local_classify_load_invokes_group_c_batch_once(monkeypatch):
     calls = []
+    runner = object()
     monkeypatch.setattr(data_local.context, "project", lambda: "example")
     monkeypatch.setattr(
         data_local.engine_client,
         "list_worktree_rows",
-        lambda *_args, **_kwargs: [
+        lambda *_args, **kwargs: (
+            calls.append(("list", kwargs.get("runner")))
+            or [
             {"id": "wt-a", "state": "wip"},
             {"id": "wt-b", "state": "completed"},
             {"id": "wt-c", "state": "unknown"},
-        ],
+        ]),
     )
 
-    def fake_batch(project, *, worktree_ids=None, timeout=None):
-        calls.append((project, tuple(worktree_ids or ())))
+    def fake_batch(project, *, worktree_ids=None, timeout=None, runner=None):
+        calls.append((project, tuple(worktree_ids or ()), runner))
         return type(
             "Batch",
             (),
@@ -176,9 +179,9 @@ def test_local_classify_load_invokes_group_c_batch_once(monkeypatch):
 
     monkeypatch.setattr(data_local.engine_group_c, "picker_reconcile_local", fake_batch)
 
-    rows = data_local.load("machine", "Win", classify=True)
+    rows = data_local.load("machine", "Win", classify=True, runner=runner)
 
-    assert calls == [("example", ())]
+    assert calls == [("list", runner), ("example", (), runner)]
     assert len(rows) == 3
     assert rows[0]["state"] == "ACTIVE"
     assert rows[0]["mux_live"] is True
