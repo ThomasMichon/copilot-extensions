@@ -386,6 +386,63 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-26 — `agent-bridge`'s src/ + extension.mjs cluster: 22 of 52 findings resolved (PR #4168)
+
+- Fresh guard count at merge time: 584 (down from 606). First slice into
+  `agent-bridge`, next plugin in the backlog order after `agent-machines`
+  reached backlog-only state.
+- Classified by shape, all matching precedent already established this
+  session: `shutil.which("agent-worktrees"/"agent-bridge")` sibling
+  launches (`allow legacy-compatibility`); 6 cross-plugin
+  `agent-worktrees` registry lookups spread across
+  `agent_registry_common.py`/`agent_registry_topology.py`/
+  `related_plugins.py`/`config.py` (`allow registry`); own-legacy-root
+  constants already named `LEGACY_*` by the plugin itself, in
+  `config.py`/`install_paths.py`/`extension.mjs` (`allow legacy-
+  compatibility`); descriptive error-message/help-text mentions of the
+  plugin's own paths in `service_process_cli.py`/`session_host_
+  connection.py`/`session_start.py` (`allow deployed-runtime-
+  diagnostics`).
+- **`install_paths.py`'s `systemd_unit_name()` already implements the
+  established `cell-derived-suffix` exemplar pattern correctly** (falls
+  back to the unqualified name only when no suffix is available) --
+  first time this session that pattern's OWN precedent (from
+  `runtime-gate.sh`/`.ps1`) showed up matched in a completely different
+  file, confirming it generalizes.
+- **`carrier.py` builds a remote-side `agent-bridge carrier --stdio`
+  command sent over SSH to a peer machine** -- same reasoning as
+  `agent-ssh`'s `allow remote-management` from earlier this session
+  (SSH-remote context, not local-cell), confirming that reason phrase's
+  first use wasn't a one-off.
+- **Found and fixed a second instance of last session's `lease`/
+  `InstallRelease` false-positive CLASS**: `session_manager.py` had a
+  local variable literally named `tasks` (a joined display string for an
+  error message) that coincidentally matched the `fixed-service-identity`
+  category's `task` keyword substring. Unlike the `agent-ssh` case
+  (a third-party pinned URL, annotated), this one was a trivial LOCAL
+  variable with no external meaning at all -- renamed to `summary`
+  instead of annotating a non-issue, since renaming genuinely eliminates
+  the false match at its root with zero behavior change. **Two false-
+  positive occurrences in two legs suggests this substring-collision
+  shape (short keywords like `task`/`lease`/`unit`/`pipe`/`socket`/
+  `mutex`/`endpoint`/`service` colliding with unrelated identifiers) may
+  be worth a systematic `grep` sweep across the whole repo rather than
+  waiting to trip over each one individually.**
+- Left deliberately untouched: `transport.py` (3) and `session_host/
+  spawner.py` (1) both hit the SAME module-size-ceiling wall as 4 other
+  files this session (baselines 1282/1028, both at exact current size --
+  see [aperture-labs#7672](https://gitea.michon.ski/tmichon/aperture-labs/issues/7672),
+  now a 5th and 6th occurrence). `install.sh`/`install.ps1` (9,
+  confirmed-genuine Phase 2 launcher-contract backlog),
+  `repair-scheduled-task.ps1` (2), `payload-invocation.json` (1), and 3
+  doc/SKILL.md files (14) -- not yet individually triaged.
+- Verified: `python -m py_compile` + `ruff --select E501` on every
+  touched file, `check-module-size.py`, `check-docs-consistency.py`, and
+  the full `agent-bridge` suite via `test-supervisor` (800 passed, 10
+  skipped, 0 failures). Merged via `pr-merge --now` after a clean
+  (0-finding) advisory review.
+- Guard count: 52 -> 30 findings for `agent-bridge`.
+
 ### 2026-09-26 — `agent-machines`'s SKILL.md docs resolved, plugin now backlog-only; a live CI blocker hit and cleared (PR #4165)
 
 - Fresh guard count at merge time: 606 (down from 609).
