@@ -784,6 +784,18 @@ class WorktreeRecord:
     follow_up: bool = False
     summary: str = ""
     status_note_at: str | None = None
+    # #3307 worktrees-pivot-ux-overhaul follow-up: the agent-asserted CURRENT
+    # sub-task -- distinct from ``summary`` (a broader, occasionally-folded
+    # recap) and ``title`` (the rare, intentional headline). Meant to be
+    # updated far more often than either -- every meaningfully different
+    # sub-task, not just when the overall focus shifts. Rendered as the
+    # Picker row's second-line "Activity" (falls back to the live pulse
+    # intent when present, this when not; never bare STATE -- see
+    # ``derive._detail_line``/``engine_views``). ``activity_at`` is its own
+    # freshness stamp, separate from ``status_note_at`` (which the nudge
+    # script watches across all three disposition fields together).
+    activity: str = ""
+    activity_at: str | None = None
     # worktree-finality-and-obligations: the most recent timestamp this record
     # was `finalized` before being atomically reopened (a new/reactivated held
     # claim arrived after finalize). Preserves the historical fact "this was
@@ -2129,6 +2141,9 @@ def load_record(path: Path) -> WorktreeRecord:
         title_asserted=bool(data.get("title_asserted", False)),
         status_note_at=(str(data["status_note_at"])
                         if data.get("status_note_at") else None),
+        activity=str(data.get("activity", "") or ""),
+        activity_at=(str(data["activity_at"])
+                     if data.get("activity_at") else None),
         last_finalized_at=(str(last_finalized_raw) if last_finalized_raw else None),
         mux_live=(bool(data["mux_live"])
                   if data.get("mux_live") is not None else None),
@@ -2642,6 +2657,11 @@ def _save_record_unlocked(
         content += "title_asserted: true\n"
     if record.status_note_at:
         content += f"status_note_at: {record.status_note_at}\n"
+    if record.activity:
+        safe_activity = record.activity.replace("'", "''")
+        content += f"activity: '{safe_activity}'\n"
+    if record.activity_at:
+        content += f"activity_at: '{record.activity_at}'\n"
     if record.last_finalized_at:
         content += f"last_finalized_at: {record.last_finalized_at}\n"
     if record.active_effort is not None:
@@ -3391,23 +3411,41 @@ def set_disposition(
     *,
     summary: str | None = None,
     title: str | None = None,
+    activity: str | None = None,
     follow_up: bool | None = None,
     session_id: str | None = None,
     kind: str = "status",
     save: bool = True,
     tracking_path: Path | None = None,
 ) -> None:
-    """Set the agent-asserted disposition overlay (summary / title / follow-up) and save.
+    """Set the agent-asserted disposition overlay (summary / title / activity /
+    follow-up) and save.
 
     Orthogonal to git/session state -- this records what only the agent knows:
     whether the worktree is genuinely *resolved* or still has *actionable
     follow-ups*, plus a one-line summary of what it is/left at and (optionally) a
-    fresh ``title`` when the worktree's focus changes. ``summary``, ``title`` and
-    ``follow_up`` are each applied only when not None, so a caller may update one
-    without disturbing the others. An asserted ``title`` is capped at
-    :data:`TITLE_MAX` (:func:`cap_title`) so it fits the status bar / Picker rows.
+    fresh ``title`` when the worktree's focus changes. ``summary``, ``title``,
+    ``activity`` and ``follow_up`` are each applied only when not None, so a
+    caller may update one without disturbing the others. An asserted ``title``
+    is capped at :data:`TITLE_MAX` (:func:`cap_title`) so it fits the status
+    bar / Picker rows.
+
+    The three text fields have deliberately DIFFERENT update cadences (see
+    ``status_cli``'s own per-flag help text for the guidance surfaced to a
+    calling agent):
+
+    - ``activity`` -- the CURRENT sub-task. Update this most often, every time
+      the immediate focus shifts within the same overall piece of work.
+    - ``summary`` -- a broader recap. Update occasionally, to fold newly
+      completed work into the existing summary -- not on every sub-task.
+    - ``title`` -- the rare, intentional headline. Update only when the
+      worktree's main theme genuinely changes.
+
     Stamps ``status_note_at`` (which the postToolUse nudge watches to reset its
-    drift counter) and appends a durable entry to the worktree's
+    drift counter) on ANY of the three changing, plus its own ``activity_at``
+    when ``activity`` specifically changes (a separate freshness signal the
+    Picker can grade independently, mirroring the live-pulse intent's own
+    fresh/stale distinction). Appends a durable entry to the worktree's
     disposition-history sidecar (see :mod:`agent_worktrees.disposition_history`).
     ``tracking_path`` scopes that sidecar write to an explicit project, not the
     ambient ``cfg.tracking_dir()`` -- for a caller (e.g. a daemon) serving several projects.
@@ -3422,6 +3460,10 @@ def set_disposition(
         # title re-enables auto-derivation from the session summary.
         record.title_asserted = record.title is not None
         changed.append("title")
+    if activity is not None:
+        record.activity = _strip_control_chars(activity).replace("\n", " ").strip()
+        record.activity_at = _now_iso()
+        changed.append("activity")
     if follow_up is not None:
         record.follow_up = follow_up
         changed.append("follow_up")
@@ -3441,6 +3483,7 @@ def set_disposition(
             title=record.title,
             follow_up=record.follow_up,
             changed=changed,
+            activity=record.activity,
             kind=kind,
             session_id=session_id,
             tracking_path=tracking_path,

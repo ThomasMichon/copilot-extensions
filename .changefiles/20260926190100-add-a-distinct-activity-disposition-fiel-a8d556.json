@@ -1,0 +1,9 @@
+{
+  "comment": "Add a distinct 'activity' disposition field (status --activity) for the CURRENT sub-task, separate from summary/title, with its own activity_at freshness stamp and nudge guidance.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "minor"
+    }
+  ]
+}

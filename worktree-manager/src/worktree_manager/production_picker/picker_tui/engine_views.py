@@ -330,22 +330,31 @@ class WorktreesView:
     def _detail_line(self, rec, width):
         """The worktree row's second (detail) line: ``Title: Activity`` --
         the full/untruncated title as the OVERALL identity, plus its current
-        ACTIVITY (a live pulse/intent when one is in flight, else the plain
-        state label) as the scannable CURRENT status, both on one line
-        (#6443 follow-up). Replaces the old raw ``status_markers``/
-        ``asset_hints`` breakdown -- an operator-opaque closure-descriptor
-        wire shorthand like ``C1 U* OC*`` rendered in red, which read as an
-        error rather than routine bookkeeping. Any open/held claim (a
-        non-empty ``status_markers`` or asset hint) now collapses to a single,
+        ACTIVITY as the scannable CURRENT status, both on one line (#6443
+        follow-up). Replaces the old raw ``status_markers``/``asset_hints``
+        breakdown -- an operator-opaque closure-descriptor wire shorthand
+        like ``C1 U* OC*`` rendered in red, which read as an error rather
+        than routine bookkeeping. Any open/held claim (a non-empty
+        ``status_markers`` or asset hint) now collapses to a single,
         neutrally-styled ``*`` at the end of the line -- the full claim/asset
         breakdown lives behind the Actions menu's "View details" card
         instead, so this line never has to fit an unbounded list.
 
+        Activity source, most-current first (#3307 worktrees-pivot-ux-
+        overhaul follow-up): the live pulse intent (``live_intent`` -- the
+        assistant.intent stream, when a session is actually running) beats
+        the agent-asserted ``activity`` disposition field (``agent-worktrees
+        status --activity``, updated whenever the sub-task shifts, live
+        session or not). Never falls back to bare STATE any more -- STATE is
+        its own column and duplicating it here read as noise, not activity.
+        A row with neither source simply shows its title alone.
+
         Also: a compact `` · <Phase>`` badge (see ``_worktree_claiming_task``,
-        Phase 4 REVERSE cross-link) follows the state text, before `` *``."""
+        Phase 4 REVERSE cross-link) follows the activity text, before `` *``."""
         title = str(rec.get("title") or "").strip() or "(untitled)"
         pulse = rec.get("live_pulse")
         intent = (rec.get("live_intent") or "").strip()
+        activity = (rec.get("activity") or "").strip()
         markers = (rec.get("status_markers") or "").strip()
         assets = rec.get("asset_hints") or {}
         has_claims = bool(markers) or bool(assets.get("hints"))
@@ -371,12 +380,10 @@ class WorktreesView:
             pline.append(glyph, style=pstyle)
             avail = max(1, width - pline.cell_len - reserve)
             pline.append(derive.truncate_text(intent, avail), style=pstyle)
-        else:
-            state_label = str(rec.get("state") or "").strip().lower()
-            if state_label:
-                pline.append(": ", style=C_DIM)
-                avail = max(1, width - pline.cell_len - reserve)
-                pline.append(derive.truncate_text(state_label, avail), style=C_DIM)
+        elif activity:
+            pline.append(": ", style=C_DIM)
+            avail = max(1, width - pline.cell_len - reserve)
+            pline.append(derive.truncate_text(activity, avail), style=C_DIM)
         if phase_label and pline.cell_len + 3 + len(phase_label) <= width:
             pline.append(" · ", style=C_DIM)
             pline.append(phase_label, style=_palette_style("task_phase", phase_label) or C_DIM)

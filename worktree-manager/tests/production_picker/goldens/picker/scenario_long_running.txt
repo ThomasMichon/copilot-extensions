@@ -6,14 +6,14 @@
 
    + New worktree…     ✕ Clean     ⟳ Sync     creates on anomalous-potato Win  (this host)
 
-  ID     STATE      AGE    LIVE   SESS/T    CLAIMS
+  ID     STATE      AGE    USED   LIVE   SESS/T    CLAIMS
   ── Active ──────────────────────────────────────────────────────────────────────────────────────────────────────────
     (none)
   ── Recent ──────────────────────────────────────────────────────────────────────────────────────────────────────────
-☐ l001   WIP        30d    ·         -/47
-      Long-haul migration: wip
-☐ l002   UNUSED     1d     ·          -/0
-      Created yesterday, untouched: unused
+☐ l001   WIP        30d    1h     ·         -/47
+      Long-haul migration
+☐ l002   UNUSED     1d     1d     ·          -/0
+      Created yesterday, untouched
   ── Completed ───────────────────────────────────────────────────────────────────────────────────────────────────────
     (none)
 

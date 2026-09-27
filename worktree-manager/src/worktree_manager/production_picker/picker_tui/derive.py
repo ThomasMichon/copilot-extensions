@@ -498,13 +498,9 @@ def _sess(w):
 
 
 def _sess_turns(w):
-    """Combined SESS/TURNS display (#3307 Phase 6): total session count the
-    worktree has ever had, over the current session's turn count -- e.g.
-    ``"3/47"``. ``session_count`` can be absent (a fixture, or a remote too
-    old to report it, #662) -- rendered as ``"-"`` rather than fabricating a
-    count; ``turn_count`` always renders (already defaulted to 0 by every
-    caller of this function, same as the standalone ``turns`` field it
-    augments)."""
+    """Combined SESS/TURNS display (#3307 Phase 6): ``"<session_count>/
+    <turn_count>"``, e.g. ``"3/47"``. ``session_count`` renders as ``"-"``
+    when absent (a fixture, or an old remote, #662) rather than fabricated."""
     sc = w.get("session_count")
     sc_display = sc if isinstance(sc, int) else "-"
     return f"{sc_display}/{w.get('turn_count', 0)}"
@@ -539,6 +535,20 @@ def _last_active_secs(w):
         return (NOW - _dt.datetime.fromisoformat(ts)).total_seconds()
     except ValueError:
         return w.get("age_secs", 1 << 40)
+
+
+def _last_active_display(w):
+    """Human-relative ``USED`` column string (#3307 follow-up): recency of
+    the worktree's last real interaction, distinct from AGE (how long the
+    worktree has EXISTED). Same signal sort order already prefers
+    (:func:`_last_active_secs`, Phase 3), now visible without opening the
+    row. Operates on the RAW dict, reaching ``started_at`` directly rather
+    than through the already-collapsed ``age_secs``."""
+    ts = w.get("last_resumed_at") or (
+        w.get("completed_at") if w.get("status") == "finalized"
+        else w.get("started_at")
+    )
+    return _age(ts)
 
 
 def _bucket_from_raw(w):
@@ -759,10 +769,11 @@ def norm(
     pair_kind = w.get("pair_kind")
     is_paired = bool(pair_id)
     summary = (w.get("summary") or "").strip()
-    disp_title = title
-    if summary:
-        disp_title = (summary if title == "(untitled)"
-                      else f"{title} — {summary}")
+    activity = (w.get("activity") or "").strip()
+    # #3307 follow-up: title no longer appends "-- summary" (duplicated the
+    # second line's activity/live-pulse intent, see engine_views); summary
+    # still backstops a genuinely untitled row only.
+    disp_title = summary if (title == "(untitled)" and summary) else title
     if follow_up:
         disp_title = f"✚ {disp_title}"
     # citadel pair marker: a link glyph (inner of the urgent ⚠/✚ markers) so a
@@ -811,6 +822,10 @@ def norm(
         "title": disp_title,
         "follow_up": follow_up,
         "summary": summary,
+        # #3307 follow-up: agent-asserted CURRENT sub-task, the second
+        # line's fallback when no live-pulse intent is present.
+        "activity": activity,
+        "activity_at": w.get("activity_at"),
         # worktree-status-core live pulse: the derived agent-intent line + its
         # freshness ('awaiting'/'fresh'/'stale'/None). Rendered dim by the
         # engine; never the durable disposition. copilot-extensions#228: the
@@ -833,6 +848,8 @@ def norm(
             else w.get("started_at")
         ),
         "age_secs": _age_secs(w),
+        # #3307 follow-up: recency of last interaction, distinct from AGE.
+        "used": _last_active_display(w),
         "sess": _sess(w),
         "turns": w.get("turn_count", 0),
         "session_count": w.get("session_count"),

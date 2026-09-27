@@ -1211,6 +1211,14 @@ def _worktree_to_dict(
         d["summary"] = effective_summary
     if rec.status_note_at:
         d["status_note_at"] = rec.status_note_at
+    # #3307 worktrees-pivot-ux-overhaul follow-up: the agent-asserted CURRENT
+    # sub-task, distinct from summary/title -- see ``tracking.set_disposition``'s
+    # own docstring for the cadence contract. Absent stays off the dict, same
+    # as summary above.
+    if rec.activity:
+        d["activity"] = rec.activity
+    if rec.activity_at:
+        d["activity_at"] = rec.activity_at
     # #2178: expose the bridge caller-worktree pointer so the Picker can offer
     # "Jump to caller" from a bridge worktree.
     if rec.caller_worktree:
@@ -2676,12 +2684,14 @@ def _cmd_status_write(
     *,
     summary: str | None,
     title: str | None = None,
+    activity: str | None = None,
     follow_up: bool | None = None,
 ) -> int:
     """Write mode of `status`: annotate THIS worktree's agent-asserted
-    disposition (summary / title / follow-up). Resolves the worktree from CWD (or
-    --worktree-id). Orthogonal to git/session state; see the worktree-status-core
-    effort and the agent-fabric vision (disposition-is-asserted-pulse-is-derived).
+    disposition (summary / title / activity / follow-up). Resolves the
+    worktree from CWD (or --worktree-id). Orthogonal to git/session state;
+    see the worktree-status-core effort and the agent-fabric vision
+    (disposition-is-asserted-pulse-is-derived).
     """
     config = cfg.load_config()
     worktree_id = _infer_worktree_id(getattr(args, "worktree_id", None), config)
@@ -2747,6 +2757,7 @@ def _cmd_status_write(
                 "yaml_path": str(yaml_path),
                 "summary": summary,
                 "title": title,
+                "activity": activity,
                 "follow_up": follow_up,
                 "session_id": session_id,
                 "project": project,
@@ -2772,6 +2783,8 @@ def _cmd_status_write(
     msg = f"[OK] Worktree {worktree_id[-4:]} disposition: {flag}"
     if title is not None and result["title"]:
         msg += f" -- title: {result['title']}"
+    if activity is not None and result.get("activity"):
+        msg += f" -- activity: {result['activity']}"
     if result["summary"]:
         msg += f" -- {result['summary']}"
     print(msg)

@@ -137,65 +137,115 @@ def _memo_rows() -> list[dict]:
         # SESS/TURNS column) -- roughly correlated with age/turn_count, never
         # exceeding it, so the demo render shows a believable session/turn
         # spread rather than every row reading the same ratio.
+        #
+        # ``claims_summary`` values below use ONLY kinds ``claims_cli`` can
+        # actually produce today (pr, worktree, container, bridge, ssh, task
+        # -- see ``claims_rank``'s own "kind-vocabulary gap" note: "bug"/
+        # "issue"/"effort" are not yet real claimable kinds, so this fixture
+        # doesn't fabricate them). Formatted to match ``claims_rank
+        # .format_claim`` exactly (``"PR #55"``, bare ``"container <name>"``
+        # for a kind with no ``#`` convention) -- note the real algorithm
+        # always DROPS a PR's repo prefix in the short summary (the number
+        # alone is enough given the row's own already-known repo context),
+        # so a literally cross-repo *name* only ever surfaces in a
+        # non-numeric claim kind (container/bridge/ssh/worktree), never in a
+        # "PR #N"/"bug #N" label -- illustrated below via named container/
+        # bridge/ssh/child-worktree claims rather than a fake "owner/repo#N"
+        # PR label the real column would never actually show.
+        #
+        # ``live_intent``/``live_rest``/``live_intent_at`` demonstrate the
+        # live-pulse detail line (``derive._pulse_level``): one of each
+        # graded state (fresh/awaiting/stale) so a --demo render exercises
+        # all three instead of every row falling back to the plain state
+        # label.
+        #
+        # ``last_resumed_at`` on a couple of otherwise-old rows demonstrates
+        # the new USED column diverging from AGE -- a worktree can be old
+        # (AGE) yet just touched (USED), which is the whole point of the
+        # column (and already what the Recent section sorts by, Phase 3).
         _wt("9578", "wip", 2, 0, False, "active", titles["active"][0],
             "feat/self-aware-stapler", started_at=_ago(minutes=27),
             mux_attached=True, mux_clients=1, follow_up=True, turn_count=6,
-            session_count=1),
+            session_count=1, live_intent="Running the retry-budget test suite",
+            live_rest="busy", live_intent_at=_ago(minutes=2)),
         _wt("cd0e", "wip", 1, 0, False, "active", titles["active"][1],
             "fix/printer-respect", started_at=_ago(hours=1),
-            mux_attached=True, mux_clients=1, turn_count=4, session_count=1),
+            mux_attached=True, mux_clients=1, turn_count=4, session_count=1,
+            claims_summary="task 41f2",
+            # No live-pulse intent here -- demonstrates the second line's
+            # OTHER activity source: the disposition-asserted `activity`
+            # field (`agent-worktrees status --activity`), not a fallback to
+            # bare STATE (which the second line no longer ever shows).
+            activity="Reprinting the apology memo in Comic Sans"),
         _wt("4acd", "dirty", 0, 1, True, "active", titles["active"][2],
             "feat/automate-screaming", started_at=_ago(hours=5),
-            mux_session=True, turn_count=9, session_count=2),
+            mux_session=True, turn_count=9, session_count=2,
+            claims_summary="container agent-containers-lab3"),
         _wt("4301", "wip", 4, 0, False, "active", titles["active"][3],
             "feat/lab-rats-to-management", started_at=_ago(hours=7),
             mux_attached=True, mux_clients=1, follow_up=True, turn_count=14,
-            pr={"number": 55, "state": "open"}, session_count=2),
+            pr={"number": 55, "state": "open"}, session_count=2,
+            claims_summary="PR #55",
+            live_intent="Waiting on your answer about the deploy window",
+            live_rest="awaiting-operator"),
         _wt("afb7", "wip", 2, 0, False, "active", titles["active"][4],
             "feat/bees-for-accounting", started_at=_ago(hours=7),
             mux_attached=True, mux_clients=1, follow_up=True, turn_count=11,
-            pr={"number": 44, "state": "open"}, session_count=1),
+            pr={"number": 44, "state": "open"}, session_count=1,
+            claims_summary="PR #44"),
         _wt("1d41", "wip", 1, 0, False, "active", titles["active"][5],
             "feat/weaponized-espresso", started_at=_ago(hours=22),
             session_bound_live=True, follow_up=True, turn_count=21,
-            pr={"number": 29, "state": "open"}, session_count=3),
+            pr={"number": 29, "state": "open"}, session_count=3,
+            claims_summary="PR #29",
+            live_intent="Investigating the flaky espresso sensor logs",
+            live_rest="idle", live_intent_at=_ago(hours=2)),
         _wt("4cbe", "wip", 3, 0, False, "active", titles["active"][6],
             "feat/antigravity-standing-desk", started_at=_ago(days=2),
             session_bound_live=True, follow_up=True, turn_count=33,
-            pr={"number": 95, "state": "open"}, session_count=4),
+            pr={"number": 95, "state": "open"}, session_count=4,
+            claims_summary="PR #95 \u00b7 container agent-containers-standing-desk"),
         _wt("7099", "wip", 2, 0, False, "active", titles["active"][7],
             "feat/combustion-morale", started_at=_ago(days=4),
             mux_attached=True, mux_clients=1, follow_up=True, turn_count=27,
-            pr={"number": 83, "state": "open"}, session_count=3),
+            pr={"number": 83, "state": "open"}, session_count=3,
+            claims_summary="PR #83", last_resumed_at=_ago(minutes=45)),
         _wt("0545", "wip", 1, 0, False, "active", titles["active"][8],
             "feat/vending-machine-neural-net", started_at=_ago(days=8),
             session_bound_live=True, follow_up=True, turn_count=52,
-            pr={"number": 98, "state": "merged"}, session_count=5),
+            pr={"number": 98, "state": "merged"}, session_count=5,
+            # Merged PR claims naturally roll off claims_summary (the real
+            # engine's summarize_claims filters non-live states) -- left
+            # unset here to match, even though the row still shows the
+            # merged PR badge elsewhere.
+            last_resumed_at=_ago(hours=3)),
         # -- Recent (UNUSED / CONVO -- a held conversation, no commits) --
         _wt("48f7", "unused", 0, 0, False, "active", titles["recent"][0],
             "spike/elevator-regret", started_at=_ago(days=1), turn_count=0,
             session_count=1),
         _wt("3941", "unused", 0, 0, False, "active", titles["recent"][1],
             "spike/clone-the-intern", started_at=_ago(days=1), turn_count=3,
-            session_count=1),
+            session_count=1, claims_summary="worktree spike-3941-child"),
         _wt("b753", "unused", 0, 0, False, "active", titles["recent"][2],
             "spike/sentient-thermostat", started_at=_ago(days=4), turn_count=2,
-            session_count=2),
+            session_count=2, claims_summary="bridge session-9f21",
+            last_resumed_at=_ago(hours=1)),
         # -- Completed (finalized; PR state drives MERGED vs. plain done) --
         _wt("7ac4", "", 0, 0, False, "finalized", titles["completed"][0],
             "feat/sentient-mop-phase-two", completed_at=_ago(hours=1),
-            pr={"number": 16, "state": "open"}),
+            pr={"number": 16, "state": "open"}, claims_summary="PR #16"),
         _wt("baa7", "", 0, 0, False, "finalized", titles["completed"][1],
             "chore/reverse-engineer-mondays", completed_at=_ago(days=2),
-            pr={"number": 65, "state": "open"}),
+            pr={"number": 65, "state": "open"}, claims_summary="PR #65"),
         _wt("6b68", "", 0, 0, False, "finalized", titles["completed"][2],
-            "fix/break-room-black-hole", completed_at=_ago(days=2)),
+            "fix/break-room-black-hole", completed_at=_ago(days=2),
+            claims_summary="ssh aperture-labs-bench2"),
         _wt("2d3d", "", 0, 0, False, "finalized", titles["completed"][3],
             "feat/help-desk-sarcasm-module", completed_at=_ago(days=8),
             pr={"number": 90, "state": "merged"}),
         _wt("f7e5", "", 0, 0, False, "finalized", titles["completed"][4],
             "feat/weaponized-optimism-v2", completed_at=_ago(days=9),
-            pr={"number": 49, "state": "open"}),
+            pr={"number": 49, "state": "open"}, claims_summary="PR #49"),
         _wt("1329", "", 0, 0, False, "finalized", titles["completed"][5],
             "feat/roomba-promotion", completed_at=_ago(days=13)),
     ]

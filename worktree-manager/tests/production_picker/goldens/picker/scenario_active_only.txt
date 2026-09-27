@@ -6,10 +6,10 @@
 
    + New worktree…     ✕ Clean     ⟳ Sync     creates on anomalous-potato Win  (this host)
 
-  ID     STATE      AGE    LIVE   SESS/T    CLAIMS
+  ID     STATE      AGE    USED   LIVE   SESS/T    CLAIMS
   ── Active ──────────────────────────────────────────────────────────────────────────────────────────────────────────
-☐ a001   ACTIVE     15m    ●1        -/12
-      Ship the release notes: active
+☐ a001   ACTIVE     15m    15m    ●1        -/12
+      Ship the release notes
   ── Recent ──────────────────────────────────────────────────────────────────────────────────────────────────────────
     (none)
   ── Completed ───────────────────────────────────────────────────────────────────────────────────────────────────────

@@ -462,6 +462,30 @@ parallelizable across worktrees.
 ### Phase 9 — Reconcile deferred backlog
 - [ ] Fold in further wishlist items raised after this effort's initial
       review (the operator flagged "I'll think of more").
+- [x] CLAIMS/activity mock-data enrichment + a real, distinct "Activity"
+      disposition field (`agent-worktrees status --activity`) replacing the
+      second line's old STATE-reuse fallback (2026-09-26).
+- [x] USED column: recency of last real interaction, distinct from AGE
+      (2026-09-26).
+- [ ] Sticky column-header + current-group band while scrolling, with
+      focus-top force-scrolling to the very top (operator feedback,
+      2026-09-26; not started).
+- [ ] CLAIMS abbreviation/hyperlink rework: WT last-4 / SESS first-8-hex
+      abbreviations, a short `repo#N` cross-repo PR form, whole-row-end-only
+      truncation (never mid-value), and a real terminal hyperlink to the
+      claim's URL. A WT claim on a DIFFERENT repo than the current worktree
+      additionally needs the `<repo>:<last4>` form (e.g.
+      `copilot-extensions:4b8a`), not a bare `<last4>` -- same-repo stays
+      bare (operator nit, 2026-09-26). Touches the shared `claims_rank.py`
+      (Worktrees/Tasks/Codespaces/Containers all consume it) -- needs its
+      own careful pass (operator feedback, 2026-09-26; not started).
+- [ ] Alternate-row background shading so a multi-line row's title + detail
+      lines read as one visual unit (operator feedback, 2026-09-26; not
+      started).
+- [ ] Riff on the `⚭` paired-worktree marker: name the link target inline
+      (e.g. `⚭dotfiles Implement Retry Logic`) vs. a plain `[paired]` text
+      form vs. the current bare icon (operator feedback, 2026-09-26; not
+      started -- operator explicitly invited exploring options here).
 
 ## Validation Plan
 
@@ -867,4 +891,89 @@ reviewed-plan PR per the standard effort review gate before Phase 1 begins._
 - No functional/engine code changed this slice -- fixture data + docs only.
   `tests/test_picker_preview_mode.py` + `tests/test_picker_app.py` (43
   tests, cover demo-fixture consumption) still pass unchanged.
+
+### 2026-09-26 — USED column, real Activity field, and populated CLAIMS mock (operator feedback)
+Operator feedback on the rendered pivot, addressed as a bundled follow-up
+(items tracked individually; not all addressed this slice -- see below):
+
+- **CLAIMS was empty in every mock render** despite the column's allocated
+  width -- the demo fixture never set `claims_summary` on any row (it's a
+  hermetic pass-through from the engine, never derived by the Picker; see
+  Phase 4). Added illustrative `claims_summary` values using ONLY kinds
+  `claims_cli` can actually produce today (`pr`, `worktree`, `container`,
+  `bridge`, `task`, `ssh` -- explicitly NOT `bug`/`issue`/`effort`, which
+  `claims_rank`'s own "kind-vocabulary gap" note says aren't real claimable
+  kinds yet). **Known gap surfaced by this render, not yet fixed**: a
+  claim whose formatted label overflows the 12-char CLAIMS column gets
+  ellipsis-truncated mid-value (e.g. `"container a…"`) -- the operator
+  flagged this exact behavior as wrong (truncate only at the row's end,
+  never mid-value) and asked for WT/SESS abbreviations, a short cross-repo
+  `repo#N` PR form, and a real terminal hyperlink -- all deferred to a
+  follow-up since `claims_rank.py` is shared by 4 pivots (Worktrees/Tasks/
+  Codespaces/Containers) and needs its own careful pass.
+- **USED column, distinct from AGE**: added (`derive._last_active_display`,
+  wired into `ACTIVE_SPECS`/`LIST_SPECS`) -- recency of the worktree's last
+  REAL interaction (prefers `last_resumed_at`, same signal Phase 3's Recent-
+  section sort already uses), now visible in the table itself rather than
+  only affecting sort order. Demo fixture seeded a few old-but-recently-
+  resumed rows (`7099`, `0545`, `b753`) to make the AGE-vs-USED divergence
+  visible in a render.
+- **Real "Activity" field, replacing the STATE-reuse on line 2**: found
+  that the agent-asserted disposition `summary` (`agent-worktrees status
+  --summary`) was already flowing into the Picker but only ever spliced
+  onto the TITLE line (`"{title} — {summary}"`) -- never used for the
+  second line, which instead fell back to bare STATE when no live-pulse
+  intent was present (the operator's core complaint: "don't reuse STATE
+  after title"). Root-caused and fixed as a genuine three-field redesign
+  rather than a narrow patch:
+  - `agent-worktrees status` gains a THIRD disposition flag, **`--activity`**
+    (`tracking.WorktreeRecord.activity`/`activity_at`, `set_disposition`,
+    `tracking_disposition_write`, `disposition_history`, `_worktree_to_dict`
+    -- all mirroring `summary`'s existing plumbing), with an explicit,
+    documented CADENCE contract distinct from the other two (operator's own
+    wording, captured verbatim in `status_cli`'s help text and
+    `set_disposition`'s docstring): **`--activity`** = the current sub-task,
+    update MOST often; **`--summary`** = a broader recap, update
+    OCCASIONALLY to fold in newly completed work; **`--title`** = the rare,
+    intentional headline, update only when the main theme genuinely changes.
+  - The nudge script (`scripts/nudge_status.py`) now teaches this same
+    cadence in its own reminder text (previously: "run `status --summary`
+    ... add `--title` if the focus changed").
+  - Picker side: `derive.py` no longer appends `summary` onto the title
+    (title is pure again, `summary` still exposed for a future detail
+    card); `engine_views._detail_line`'s fallback chain is now live-pulse
+    intent -> `activity` -> **nothing** (never bare STATE again).
+  - **Deferred, not built this slice** (operator's own call): a NEW
+    agent-bridge "report-intent" MCP tool so ACP/bridge-driven sessions
+    (which may miss the existing live-pulse extension the same way they
+    missed session registration, dotfiles#458/Phase 6) can report activity
+    directly. For now, ACP sessions get activity only via the disposition
+    `--activity` flag (already usable from any session shape) or the
+    existing live-pulse extension when it does fire.
+- **Still open from the operator's feedback (not started)**: (1) sticky
+  column-header + current-group band while scrolling, with focus-top
+  force-scrolling to the very top; (2) the CLAIMS abbreviation/hyperlink
+  rework above; (4) an alternate-row background shade so a multi-line row's
+  two lines read as one visual unit; (5) the `⚭` paired-worktree glyph
+  should name the link target (or read `[paired]`) instead of a bare icon
+  -- operator asked to "riff" on wording, not yet explored.
+- Tests: `agent-worktrees` -- `test_tracking.py` (+2: activity YAML
+  round-trip, absent-by-default), `test_disposition_history.py` (+1:
+  activity's independent freshness stamp), `test_status_write.py` (+1:
+  `--activity` end-to-end via `_cmd_status_write`), `test_tracking_
+  disposition_write.py` (existing test's expected-dict updated),
+  `test_nudge_status.py` (existing assertion updated for the new nudge
+  wording) -- all green (297/297, 45/45, 7/7 across the touched files).
+  `worktree-manager` -- new `test_sess_turns_combines_...` (Phase 6,
+  carried over) plus the full `tests/production_picker/` golden suite
+  regenerated and reviewed diff-by-diff (753 passed/1 skipped); `test_
+  picker_preview_mode.py`/`test_picker_app.py` (43) green. A real PyYAML
+  round-trip gotcha was caught and fixed in the same slice: an unquoted
+  ISO timestamp round-trips as a space-separated `datetime` `str()`, not
+  the original `T`-separated text -- `activity_at` is now quoted at
+  serialization (the pre-existing `status_note_at` has the same latent
+  quirk but was left untouched, out of this slice's scope).
+- **Next up**: continue Phase 7 (session/handoff-head mismatch + Sessions
+  sub-menu), or pick up the 4 still-open feedback items above -- operator's
+  call.
 
