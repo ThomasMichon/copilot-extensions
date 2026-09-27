@@ -1,13 +1,28 @@
-# VENDOR_POINTER: source=libs/lazy-cli-dispatch kind=src-passthrough
-"""Vendor-pointer passthrough stub for the ``lazy-cli-dispatch`` shared lib
+"""The generated `src-passthrough` vendor-pointer stub template.
+
+Split out of ``tools/sync-vendored-libs.py`` purely to keep that script
+under this repo's per-module line-count cap (see CONTRIBUTING.md § Code
+Style) -- this is a plain string constant with no logic of its own, so
+moving it carries none of the behavioral risk a function extraction would."""
+from __future__ import annotations
+
+# Generated verbatim into every src-passthrough pointer copy's
+# ``src/<pkg>/__init__.py`` -- see this module's own docstring for the
+# design rationale. Deliberately avoids f-strings in the GENERATED code's
+# own error messages (plain string concatenation instead) so this template
+# can use plain ``str.format()`` with only ``{lib}``/``{pkg}`` placeholders,
+# without escaping every other brace in the generated file.
+_PASSTHROUGH_TEMPLATE = '''\
+# VENDOR_POINTER: source=libs/{lib} kind=src-passthrough
+"""Vendor-pointer passthrough stub for the ``{lib}`` shared lib
 (agent-cli-lazy-dispatch Phase 2's dev-branch vendoring mechanism -- see
 tools/sync-vendored-libs.py's own module docstring for the full
 "src-passthrough" pointer design).
 
 Every import of this package resolves through ordinary Python import
-machinery straight to the canonical ``libs/lazy-cli-dispatch/src/lazy_cli_dispatch`` tree -- do NOT
+machinery straight to the canonical ``libs/{lib}/src/{pkg}`` tree -- do NOT
 hand-edit this file; regenerate it via
-``python tools/sync-vendored-libs.py --pointerize <consumer> lazy-cli-dispatch``.
+``python tools/sync-vendored-libs.py --pointerize <consumer> {lib}``.
 A production (main-branch) release never ships this stub:
 ``tools/materialize_main.py`` expands it into a real, byte-identical copy
 at promotion time.
@@ -43,7 +58,7 @@ if _repo_root is None:
         "must materialize it into a real copy first (tools/materialize_main.py)."
     )
 
-_canonical_pkg_dir = _repo_root / "libs" / "lazy-cli-dispatch" / "src" / "lazy_cli_dispatch"
+_canonical_pkg_dir = _repo_root / "libs" / "{lib}" / "src" / "{pkg}"
 _canonical_init = _canonical_pkg_dir / "__init__.py"
 if not _canonical_init.is_file():
     raise ImportError(
@@ -77,7 +92,7 @@ if not _canonical_init.is_file():
 # locked file) fails closed.
 #
 # A single top-level ``_canonical_pkg_dir / "__pycache__"`` clear misses a
-# NESTED sub-package's own cache directory (e.g. ``lazy_cli_dispatch/subpkg/__pycache__``
+# NESTED sub-package's own cache directory (e.g. ``{pkg}/subpkg/__pycache__``
 # for a canonical lib with real nested packages, not just flat sibling
 # modules) -- that sub-package's own ``.pyc`` files are just as eligible
 # for the same coarse-mtime stale hit, and this stub's
@@ -113,7 +128,7 @@ for _pycache in list(_canonical_pkg_dir.rglob("__pycache__")):
 # re-fetches ``sys.modules[name]`` AFTER this file's own exec finishes (see
 # ``importlib._bootstrap._load_unlocked``), so swapping the entry here mid-
 # init correctly hands the REAL, canonical module back to whatever
-# triggered this import (``import lazy_cli_dispatch`` and ``from lazy_cli_dispatch import x`` both
+# triggered this import (``import {pkg}`` and ``from {pkg} import x`` both
 # resolve to it) -- this stub's own module object is discarded.
 _spec = importlib.util.spec_from_file_location(
     __name__, _canonical_init, submodule_search_locations=[str(_canonical_pkg_dir)]
@@ -121,3 +136,4 @@ _spec = importlib.util.spec_from_file_location(
 _module = importlib.util.module_from_spec(_spec)
 sys.modules[__name__] = _module
 _spec.loader.exec_module(_module)
+'''

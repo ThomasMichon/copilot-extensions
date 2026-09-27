@@ -787,3 +787,113 @@ def test_main_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
     assert code == 0
     out = capsys.readouterr().out
     assert "Materialized 1 pointer(s)" in out
+
+
+def _uv_editable_consumer(
+    root: Path, consumer_rel: str, dist_name: str, raw_path: str,
+) -> Path:
+    """Write a consumer ``pyproject.toml`` carrying a `uv`-editable
+    canonical-reference entry (``path`` escapes the consumer's own root,
+    ``editable = true``)."""
+    d = root / consumer_rel
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "pyproject.toml").write_text(
+        '[project]\nname = "consumer"\nversion = "1.0.0"\n'
+        f'dependencies = ["{dist_name}"]\n'
+        "\n"
+        "[tool.uv.sources]\n"
+        f'{dist_name} = {{ path = "{raw_path}", editable = true }}\n',
+        encoding="utf-8",
+    )
+    return d
+
+
+def test_find_uv_editable_refs_only_returns_escaping_editable_entries(tmp_path: Path):
+    root = tmp_path / "repo"
+    consumer = _uv_editable_consumer(
+        root, "plugins/agent-bridge", "agent-zdd", "../../libs/zdd"
+    )
+    # An in-tree (non-escaping) entry must never be reported.
+    (consumer / "pyproject.toml").write_text(
+        (consumer / "pyproject.toml").read_text()
+        + 'agent-other = { path = "libs/other" }\n',
+        encoding="utf-8",
+    )
+    refs = mm.find_uv_editable_refs(consumer)
+    assert refs == [("agent-zdd", "../../libs/zdd", "zdd")]
+
+
+def test_materialize_uv_editable_ref_into_copies_full_tree_and_rewrites_entry(tmp_path: Path):
+    root = tmp_path / "repo"
+    _canonical_lib(root, "zdd", version="0.1.0-dev5", content="real = True\n")
+    (root / "libs/zdd/README.md").write_text("# zdd\n", encoding="utf-8")
+    (root / "libs/zdd/tests").mkdir(parents=True)
+    (root / "libs/zdd/tests/test_zdd.py").write_text("def test_it(): pass\n", encoding="utf-8")
+    consumer = _uv_editable_consumer(root, "plugins/agent-bridge", "agent-zdd", "../../libs/zdd")
+
+    log = mm.materialize_uv_editable_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
+    )
+
+    assert any(line.startswith("OK") for line in log), log
+    dest_lib = consumer / "libs/zdd"
+    assert (dest_lib / "src/zdd/__init__.py").read_text() == "real = True\n"
+    assert (dest_lib / "README.md").read_text() == "# zdd\n"
+    assert (dest_lib / "tests/test_zdd.py").exists()
+    assert '"0.1.0-dev5"' in (dest_lib / "pyproject.toml").read_text()
+
+    pp_text = (consumer / "pyproject.toml").read_text()
+    assert 'agent-zdd = { path = "libs/zdd" }' in pp_text
+    assert "editable" not in pp_text
+
+
+def test_materialize_uv_editable_ref_into_skips_missing_canonical(tmp_path: Path):
+    root = tmp_path / "repo"
+    consumer = _uv_editable_consumer(root, "plugins/agent-bridge", "agent-ghost", "../../libs/ghost")
+    log = mm.materialize_uv_editable_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
+    )
+    assert any("does not exist" in line for line in log)
+    assert not (consumer / "libs/ghost").exists()
+
+
+def test_materialize_uv_editable_ref_into_refuses_escaping_canonical_root(tmp_path: Path):
+    root = tmp_path / "repo"
+    outside = tmp_path / "outside" / "zdd"
+    (outside / "src" / "zdd").mkdir(parents=True)
+    (outside / "src" / "zdd" / "__init__.py").write_text("evil\n", encoding="utf-8")
+    consumer = _uv_editable_consumer(
+        root, "plugins/agent-bridge", "agent-zdd", "../../../outside/zdd"
+    )
+    log = mm.materialize_uv_editable_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
+    )
+    assert any("escapes the canonical root" in line for line in log)
+    assert not (consumer / "libs/zdd").exists()
+
+
+def test_materialize_uv_editable_refs_whole_repo(tmp_path: Path):
+    root = tmp_path / "repo"
+    _canonical_lib(root, "zdd", version="0.1.0-dev1", content="x\n")
+    _uv_editable_consumer(root, "plugins/agent-bridge", "agent-zdd", "../../libs/zdd")
+    _uv_editable_consumer(root, "worktree-manager", "agent-zdd", "../libs/zdd")
+
+    log = mm.materialize_uv_editable_refs(root, canonical_root=root)
+
+    assert (root / "plugins/agent-bridge/libs/zdd/src/zdd/__init__.py").exists()
+    assert (root / "worktree-manager/libs/zdd/src/zdd/__init__.py").exists()
+    assert sum(1 for line in log if line.startswith("OK")) == 2
+
+
+def test_materialize_whole_repo_also_expands_uv_editable_refs(tmp_path: Path):
+    source = tmp_path / "source"
+    _canonical_lib(source, "zdd", version="0.1.0-dev1", content="x\n")
+    _uv_editable_consumer(source, "plugins/agent-bridge", "agent-zdd", "../../libs/zdd")
+
+    dest_dir = tmp_path / "dest"
+    log = mm.build(dest_dir, source_root=source)
+
+    assert any(line.startswith("OK") for line in log)
+    assert (dest_dir / "plugins/agent-bridge/libs/zdd/src/zdd/__init__.py").exists()
+    pp_text = (dest_dir / "plugins/agent-bridge/pyproject.toml").read_text()
+    assert 'agent-zdd = { path = "libs/zdd" }' in pp_text

@@ -33,16 +33,28 @@ Two pointer kinds are expanded, generalized under the
   content in place with the canonical file's bytes.
 
 Both pointer kinds now check into real content in this repo, not just
-tests. Directory (lib) pointer adopters: `plugins/agent-worktrees/libs/
-lazy-cli-dispatch` and `work-coalescing-singleton` (also vendored via the
-extra top-level `worktree-manager/libs/work-coalescing-singleton`), each
-using the `src-passthrough` pointer kind (see
-`tools/sync-vendored-libs.py`'s own module docstring for that mechanism's
-full design). File-pointer adopters: `docs/patterns/entity-relationship-model.md`'s
+tests. File-pointer adopters: `docs/patterns/entity-relationship-model.md`'s
 three mirrors (`plugins/agent-worktrees/docs/`, `plugins/agent-bridge/docs/`,
 `plugins/agent-dispatch/docs/`) were converted to real file pointers in
 Phase 2 of vendored-doc-pointers, so this tool now expands real content on
 every real promotion run, not just in tests.
+
+A third, distinct form is expanded too (not a `VENDOR_POINTER.json` pointer
+at all): the **`uv`-editable canonical-reference** form
+(`vendor-pointer-generalization` effort, Phase 1) -- a consumer's
+`pyproject.toml` `[tool.uv.sources]` entry whose `path` escapes the
+consumer's own root (e.g. `{ path = "../../libs/<lib>", editable = true }`)
+instead of vendoring a local `libs/<lib>` copy at all. `dev` resolves this
+live via `uv`'s own dependency resolution; a shipped `main` release cannot
+(the referenced path won't exist on the end-user's machine), so promotion
+copies canonical's complete lib tree (`src/`, `README.md`, `tests/`, and
+`pyproject.toml` itself) into the consumer's own `libs/<lib>/` and
+surgically rewrites the entry to the local, non-editable
+`{ path = "libs/<lib>" }` form -- see `find_uv_editable_refs()` and
+`materialize_uv_editable_ref_into()` below. This is the mechanism that
+superseded `src-passthrough` (see `tools/sync-vendored-libs.py`'s own module
+docstring for that history); `sync-vendored-libs.py --uv-editable` performs
+the dev-time conversion this function's promotion-time expansion mirrors.
 
 Usage::
 
@@ -54,6 +66,7 @@ import argparse
 import json
 import re
 import shutil
+import tomllib
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -62,6 +75,10 @@ _VERSION_RE = re.compile(r'^(\s*version\s*=\s*")([^"]+)(")', re.MULTILINE)
 _FILE_POINTER_RE = re.compile(
     r'^<!--\s*VENDOR_POINTER:\s*source=(\S+)\s+kind=file\s*-->\s*$'
 )
+
+# Consumer trees that sit outside plugins/ but still reference shared libs
+# the same way -- mirrors sync-vendored-libs.py's own _EXTRA_CONSUMER_DIRS.
+_EXTRA_CONSUMER_DIRS = ("worktree-manager",)
 
 
 def find_pointers(root: Path) -> list[Path]:
@@ -292,6 +309,163 @@ def _materialize_one_pointer(pointer_path: Path, *, checkout_root: Path, canonic
     return f"OK   {lib_copy_dir} <- {source_rel}"
 
 
+def find_uv_editable_refs(consumer_dir: Path) -> list[tuple[str, str, str]]:
+    """Every ``[tool.uv.sources]`` entry in ``consumer_dir/pyproject.toml``
+    whose ``path`` escapes ``consumer_dir``'s own root, marked ``editable =
+    true`` -- the `uv`-editable canonical-reference form (vendor-pointer-
+    generalization effort, Phase 1). Returns ``(name, raw_path, lib)``
+    tuples: ``name`` is the ``[tool.uv.sources]`` key (the distribution
+    name), ``raw_path`` is its literal ``path`` value (as authored, relative
+    to ``consumer_dir``), and ``lib`` is that path's final component (the
+    lib name under ``libs/``). An entry whose path stays WITHIN
+    ``consumer_dir`` (the ordinary in-tree vendored-copy form) is out of
+    scope for this function entirely -- only an escaping entry is this
+    reference form."""
+    pyproject = consumer_dir / "pyproject.toml"
+    if not pyproject.is_file() or pyproject.is_symlink():
+        return []
+    try:
+        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return []
+    sources = data.get("tool", {}).get("uv", {}).get("sources", {})
+    consumer_root = consumer_dir.resolve()
+    out: list[tuple[str, str, str]] = []
+    for name, entry in sources.items():
+        if not isinstance(entry, dict) or "path" not in entry or not entry.get("editable"):
+            continue
+        raw_path = entry["path"]
+        if Path(raw_path).is_absolute():
+            continue
+        candidate = (consumer_dir / raw_path).resolve()
+        if _escapes_root(candidate, consumer_root):
+            out.append((name, raw_path, Path(raw_path).name))
+    return out
+
+
+def materialize_uv_editable_ref_into(
+    *, source_consumer_dir: Path, dest_consumer_dir: Path, canonical_root: Path
+) -> list[str]:
+    """Expand every `uv`-editable canonical-reference entry declared in
+    ``source_consumer_dir``'s ``pyproject.toml`` (the location the entry's
+    relative ``path`` was authored against -- the REAL, un-copied consumer
+    directory, since a copy such as ``preview_release.py``'s single-plugin
+    workdir tree can sit at a different nesting depth where the same
+    relative path would resolve somewhere else entirely) into
+    ``dest_consumer_dir``: copy canonical's complete lib tree (``src/``,
+    ``README.md``, ``tests/``, and ``pyproject.toml`` itself -- the local
+    copy has none of these until canonical's own are copied in) into
+    ``dest_consumer_dir/libs/<lib>/``, then surgically rewrite
+    ``dest_consumer_dir/pyproject.toml``'s entry to the local, non-editable
+    ``{ path = "libs/<lib>" }`` form -- restoring exactly what a real
+    vendored copy looks like today. This is the promotion-time inverse of
+    ``sync-vendored-libs.py``'s ``--uv-editable`` conversion, and the step
+    that makes the `uv`-editable form safe in production: a shipped
+    ``main`` release never carries a live reference to a path that won't
+    exist on the end-user's machine.
+
+    ``source_consumer_dir`` and ``dest_consumer_dir`` are the same
+    directory for a whole-repo snapshot (``materialize_main.py``'s own
+    ``materialize()`` -- the copytree preserved the same nesting depth as
+    the real checkout, so the authored relative path still resolves
+    correctly against the copy itself) but differ for
+    ``preview_release.py``'s single-plugin preview (source is the real
+    ``plugins/<plugin>``, dest is a bare ``workdir/<plugin>`` with no
+    monorepo ancestor of its own)."""
+    log: list[str] = []
+    for name, raw_path, lib in find_uv_editable_refs(source_consumer_dir):
+        canonical = (source_consumer_dir / raw_path).resolve()
+        canonical_root_r = canonical_root.resolve()
+        if _escapes_root(canonical, canonical_root_r):
+            log.append(
+                f"SKIP {dest_consumer_dir}: {name} references {raw_path} "
+                "which escapes the canonical root -- refusing"
+            )
+            continue
+        if not canonical.is_dir():
+            log.append(
+                f"SKIP {dest_consumer_dir}: {name} references {raw_path} "
+                f"(resolved {canonical}) which does not exist"
+            )
+            continue
+        bad_ancestor = _find_symlinked_ancestor(canonical, canonical_root_r)
+        if bad_ancestor is not None:
+            log.append(f"SKIP {dest_consumer_dir}: {bad_ancestor} is a symlink -- refusing")
+            continue
+        symlink_found = _find_symlink(canonical)
+        if symlink_found is not None:
+            where = str(canonical) if symlink_found == "." else f"{canonical}/{symlink_found}"
+            log.append(f"SKIP {dest_consumer_dir}: {where} is a symlink -- refusing")
+            continue
+
+        dest_lib_dir = dest_consumer_dir / "libs" / lib
+        bad_ancestor = _find_symlinked_ancestor(dest_lib_dir, dest_consumer_dir)
+        if bad_ancestor is not None:
+            log.append(f"SKIP {dest_lib_dir}: {bad_ancestor} is a symlink -- refusing")
+            continue
+        if dest_lib_dir.exists() or dest_lib_dir.is_symlink():
+            log.append(f"SKIP {dest_lib_dir}: already exists -- refusing to overwrite")
+            continue
+
+        dest_lib_dir.mkdir(parents=True)
+        for sub in ("src", "tests"):
+            src_sub = canonical / sub
+            if src_sub.is_dir():
+                shutil.copytree(src_sub, dest_lib_dir / sub)
+        for fname in ("pyproject.toml", "README.md"):
+            src_file = canonical / fname
+            if src_file.is_file():
+                shutil.copy2(src_file, dest_lib_dir / fname)
+
+        pyproject = dest_consumer_dir / "pyproject.toml"
+        text = pyproject.read_text(encoding="utf-8")
+        pattern = re.compile(
+            r'^([ \t]*' + re.escape(name) + r'\s*=\s*)\{\s*path\s*=\s*"'
+            + re.escape(raw_path) + r'"\s*,\s*editable\s*=\s*true\s*\}[ \t]*$',
+            re.MULTILINE,
+        )
+        new_text, count = pattern.subn(
+            lambda m: f'{m.group(1)}{{ path = "libs/{lib}" }}', text, count=1
+        )
+        if count != 1:
+            log.append(
+                f"SKIP {pyproject}: could not find {name}'s uv-editable "
+                "entry to rewrite"
+            )
+            continue
+        pyproject.write_text(new_text, encoding="utf-8")
+        log.append(f"OK   {dest_lib_dir} <- {raw_path}")
+    return log
+
+
+def materialize_uv_editable_refs(dest: Path, *, canonical_root: Path) -> list[str]:
+    """Expand every `uv`-editable canonical-reference entry found across
+    every consumer under ``dest`` (a whole-repo snapshot: every
+    ``plugins/*`` and the extra top-level ``worktree-manager`` tree) --
+    reads each entry's authored relative path against ``canonical_root``
+    (the real checkout the snapshot was copied from), same as the existing
+    directory/file pointer expansion above."""
+    log: list[str] = []
+    dest_plugins = dest / "plugins"
+    if dest_plugins.is_dir():
+        for dest_consumer_dir in sorted(p for p in dest_plugins.iterdir() if p.is_dir()):
+            source_consumer_dir = canonical_root / "plugins" / dest_consumer_dir.name
+            log.extend(materialize_uv_editable_ref_into(
+                source_consumer_dir=source_consumer_dir,
+                dest_consumer_dir=dest_consumer_dir,
+                canonical_root=canonical_root,
+            ))
+    for extra in _EXTRA_CONSUMER_DIRS:
+        dest_extra = dest / extra
+        if dest_extra.is_dir():
+            log.extend(materialize_uv_editable_ref_into(
+                source_consumer_dir=canonical_root / extra,
+                dest_consumer_dir=dest_extra,
+                canonical_root=canonical_root,
+            ))
+    return log
+
+
 def materialize(dest: Path, *, canonical_root: Path) -> list[str]:
     """Expand every pointer found under ``dest`` from ``canonical_root``.
 
@@ -302,6 +476,7 @@ def materialize(dest: Path, *, canonical_root: Path) -> list[str]:
         for pointer_path in find_pointers(dest)
     ]
     log.extend(materialize_file_pointers(dest, canonical_root=canonical_root))
+    log.extend(materialize_uv_editable_refs(dest, canonical_root=canonical_root))
     return log
 
 

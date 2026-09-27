@@ -1,0 +1,9 @@
+{
+  "comment": "Convert the lazy-cli-dispatch vendored lib to the uv-editable canonical-reference form (vendor-pointer-generalization effort, Phase 1)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -41,6 +41,13 @@ def repo(tmp_path: Path) -> Path:
     r = tmp_path / "repo"
     (r / "tools").mkdir(parents=True)
     (r / "tools" / SCRIPT.name).write_bytes(SCRIPT.read_bytes())
+    # sync-vendored-libs.py imports these two sibling modules (split out
+    # purely to keep it under this repo's per-module line-count cap) --
+    # an isolated tree carrying only the script itself would otherwise
+    # fail every subprocess invocation with ModuleNotFoundError.
+    for sibling in ("uv_editable_ref.py", "passthrough_pointer_template.py"):
+        src = SCRIPT.parent / sibling
+        (r / "tools" / sibling).write_bytes(src.read_bytes())
     return r
 
 
@@ -890,3 +897,134 @@ def test_materialize_expands_a_src_passthrough_copy_into_a_real_copy(repo: Path)
     copy_src = repo / "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py"
     assert copy_src.read_text() == "real content\n"
     assert not (repo / "plugins/alpha/libs/shared-lib/VENDOR_POINTER.json").exists()
+
+
+def _seed_consumer_pyproject(repo: Path, consumer_dir: str, lib: str, *, dist_name: str = "agent-shared-lib") -> Path:
+    """Write a minimal consumer pyproject.toml carrying the ordinary
+    in-tree ``[tool.uv.sources]`` entry a real vendored copy has today
+    (``{ path = "libs/<lib>" }``) -- the shape ``--uv-editable`` converts
+    away from."""
+    pp = repo / consumer_dir / "pyproject.toml"
+    pp.parent.mkdir(parents=True, exist_ok=True)
+    pp.write_text(
+        "[project]\n"
+        'name = "consumer"\n'
+        'version = "1.0.0"\n'
+        f'dependencies = ["{dist_name}"]\n'
+        "\n"
+        "[tool.uv.sources]\n"
+        f'{dist_name} = {{ path = "libs/{lib}" }}\n',
+        encoding="utf-8",
+    )
+    return pp
+
+
+def test_uv_editable_converts_a_real_copy_to_a_live_reference(repo: Path):
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
+    _write(repo, "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py", "value = 1\n")
+    _lib_pyproject(repo, "plugins/alpha/libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+    pp = _seed_consumer_pyproject(repo, "plugins/alpha", "shared-lib")
+
+    result = _run(repo, "--uv-editable", "alpha", "shared-lib")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "converted" in result.stdout
+
+    # No directory, no stub -- nothing remains at the vendored path.
+    assert not (repo / "plugins/alpha/libs/shared-lib").exists()
+    text = pp.read_text()
+    assert 'agent-shared-lib = { path = "../../libs/shared-lib", editable = true }' in text
+
+
+def test_uv_editable_converts_a_src_passthrough_pointer_copy(repo: Path):
+    # The reverse-direction conversion: an already-src-passthrough copy has
+    # nothing to lose (its src/ is never the verified truth), so no drift
+    # check should ever block this direction.
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
+    (repo / "plugins/alpha").mkdir(parents=True)
+    _run(repo, "--pointerize", "alpha", "shared-lib")
+    pp = _seed_consumer_pyproject(repo, "plugins/alpha", "shared-lib")
+
+    result = _run(repo, "--uv-editable", "alpha", "shared-lib")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    assert not (repo / "plugins/alpha/libs/shared-lib").exists()
+    assert 'editable = true' in pp.read_text()
+
+
+def test_uv_editable_refuses_a_drifted_real_copy(repo: Path):
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="canonical\n")
+    _write(repo, "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py", "locally modified\n")
+    _lib_pyproject(repo, "plugins/alpha/libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+    pp = _seed_consumer_pyproject(repo, "plugins/alpha", "shared-lib")
+
+    result = _run(repo, "--uv-editable", "alpha", "shared-lib")
+    assert result.returncode != 0
+    assert "differs from canonical" in (result.stdout + result.stderr)
+    # Nothing was discarded or rewritten.
+    assert (repo / "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py").read_text() == (
+        "locally modified\n"
+    )
+    assert 'editable = true' not in pp.read_text()
+
+
+def test_uv_editable_refuses_when_canonical_lib_missing(repo: Path):
+    (repo / "plugins/alpha").mkdir(parents=True)
+    _seed_consumer_pyproject(repo, "plugins/alpha", "ghost-lib", dist_name="agent-ghost-lib")
+    result = _run(repo, "--uv-editable", "alpha", "ghost-lib")
+    assert result.returncode != 0
+    assert "no canonical libs/ghost-lib" in (result.stdout + result.stderr)
+
+
+def test_uv_editable_supports_the_worktree_manager_extra_consumer_tree(repo: Path):
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
+    _write(repo, "worktree-manager/libs/shared-lib/src/shared_lib/__init__.py", "value = 1\n")
+    _lib_pyproject(repo, "worktree-manager/libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+    pp = _seed_consumer_pyproject(repo, "worktree-manager", "shared-lib")
+
+    result = _run(repo, "--uv-editable", "worktree-manager", "shared-lib")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (repo / "worktree-manager/libs/shared-lib").exists()
+    assert 'agent-shared-lib = { path = "../libs/shared-lib", editable = true }' in pp.read_text()
+
+
+def test_check_reports_invalid_uv_editable_entry_missing_editable_flag(repo: Path):
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
+    (repo / "plugins/alpha").mkdir(parents=True)
+    _write(
+        repo, "plugins/alpha/pyproject.toml",
+        '[project]\nname = "consumer"\nversion = "1.0.0"\n'
+        "[tool.uv.sources]\n"
+        'agent-shared-lib = { path = "../../libs/shared-lib" }\n',
+    )
+    result = _run(repo, "--check")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "INVALID uv-editable canonical reference" in result.stdout
+    assert "missing editable = true" in result.stdout
+
+
+def test_check_reports_invalid_uv_editable_entry_missing_canonical(repo: Path):
+    (repo / "plugins/alpha").mkdir(parents=True)
+    _write(
+        repo, "plugins/alpha/pyproject.toml",
+        '[project]\nname = "consumer"\nversion = "1.0.0"\n'
+        "[tool.uv.sources]\n"
+        'agent-ghost-lib = { path = "../../libs/ghost-lib", editable = true }\n',
+    )
+    result = _run(repo, "--check")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "INVALID uv-editable canonical reference" in result.stdout
+    assert "does not exist" in result.stdout
+
+
+def test_check_passes_a_valid_uv_editable_entry(repo: Path):
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
+    (repo / "plugins/alpha").mkdir(parents=True)
+    _write(
+        repo, "plugins/alpha/pyproject.toml",
+        '[project]\nname = "consumer"\nversion = "1.0.0"\n'
+        "[tool.uv.sources]\n"
+        'agent-shared-lib = { path = "../../libs/shared-lib", editable = true }\n',
+    )
+    result = _run(repo, "--check")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "INVALID" not in result.stdout
