@@ -473,7 +473,8 @@ PR [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
 - [ ] **Step 3 — reimplement Group B's Picker-owned lifecycle sweeps directly
       in worktree-manager, additive first.** Port the process-lifecycle logic
       that belongs to the Picker's own process boundary now that cross-repo
-      porting friction is lower. See
+      porting friction is lower, while explicitly coordinating the handoff so
+      engine sweepers do not keep mutating the same Manager-owned state. See
       [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
 - [ ] **Step 4 — cut `runner.py`, `pivot_manifest.py`, and `update_stage.py`
       over to the new seams.** After Steps 1-3, Groups A/B stop using
@@ -482,7 +483,9 @@ PR [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
       [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
 - [ ] **Step 5 — add Group C's batched reconcile-and-stamp `--json` verb in
       agent-worktrees, unused at first.** Keep the read/reconcile/write lock
-      scope with the engine that already owns `tracking.yaml`. See
+      scope with the engine that already owns `tracking.yaml`, but preserve the
+      current best-effort short-lock semantics rather than inventing a global
+      refresh transaction. See
       [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
 - [ ] **Step 6 — cut `data_local.py` over to the batched Group C verb via the
       now-landed Phase 3c worker path.** Preserve cache-first first paint and

@@ -311,6 +311,12 @@ once every remaining caller is already off the import boundary.
      2026-09-26 promotion-pipeline fixes remove the earlier "cross-repo porting
      is too painful" pressure, so a one-time code port is now acceptable where
      ownership is genuinely moving.
+   - Define the coordination boundary up front: once the Manager-owned sweeper
+     lane is enabled for production Picker sessions, agent-worktrees' generic
+     lifecycle sweepers must either skip those Manager-owned rows/session names
+     entirely or consume the Manager-produced view rather than mutating the same
+     tracking/worktree/session state in parallel. This step is not "copy the
+     code and hope"; it is "establish one owner for these sessions, then port."
    - Keep this step additive: the new local implementation exists and is tested,
      but `runner.py` still uses the current compatibility path until the next
      step performs the actual cutover.
@@ -342,10 +348,18 @@ once every remaining caller is already off the import boundary.
    format and file-lock semantics are already engine-owned and the correctness
    of this slice depends on keeping that lock scope with the format owner.
    - Add one batched `--json` verb that performs the current
-     `data_local.py` loop atomically inside agent-worktrees: list records,
-     reconcile active PR state, read bound/mux/session-lock liveness, stamp the
-     resulting cached state back under the existing file lock, and return the
-     normalized payload the Picker needs.
+     `data_local.py` loop inside agent-worktrees: list records, reconcile
+     active PR state, read bound/mux/session-lock liveness, stamp the resulting
+     cached state back through engine-owned helpers, and return the normalized
+     payload the Picker needs.
+   - Preserve today's **best-effort lock semantics** rather than inventing a new
+     "hold one global lock across the whole refresh" behavior. The record
+     enumeration remains lock-free, provider/network reconciliation continues to
+     happen outside exclusive tracking writes, and the new verb uses only the
+     same short-lived per-record or minimal-batch tracking lock windows the
+     existing reconcile/stamp helpers already rely on. "Atomic" here means one
+     process-boundary call and one engine-owned reconciliation authority, not a
+     cross-record transaction that can pin tracking while a provider call runs.
    - Keep the verb coarse-grained. The point is specifically to avoid
      re-expressing `tracking.list_records`, `tracking._pr_is_terminal`,
      `pr_ops._reconcile_active_pr`, `reclaim.resolve_bound_copilots`,
@@ -423,13 +437,17 @@ once every remaining caller is already off the import boundary.
    - Worktree Manager tests cover the local housekeeping thread, monitor-root
      setup/teardown, and the exit-time sweep behavior now that this logic lives
      under the Manager's ownership.
+   - Coordination coverage proves Manager-owned sessions are swept by exactly
+     one owner at a time: once cut over, agent-worktrees' generic sweepers no
+     longer mutate the same rows/session state in parallel.
    - No Group B call site reaches underscore-prefixed `agent_worktrees` helpers
      after Step 4.
 
 4. **Group C**
-   - The new batch verb has engine-side tests for lock ownership and
-     stale-vs-fresh reconciliation behavior, including the "read + reconcile +
-     stamp" atomicity the old in-process loop relied on.
+   - The new batch verb has engine-side tests for lock ownership, timeout, and
+     stale-vs-fresh reconciliation behavior, including the guarantee that
+     provider/network work does **not** hold tracking locks across the whole
+     batch.
    - Picker tests prove refresh/setup still stay off-thread with a deliberately
      blocked batch verb, matching Phase 3c's standing non-blocking contract.
    - A focused regression test proves the cutover did **not** become "one
