@@ -397,63 +397,67 @@ once every remaining caller is already off the import boundary.
      `repair` subcommand) so `_heal_stale_anchor_if_self_missing` no longer
      rides a private in-process import either.
 
-3. [ ] **Reimplement Group B's Picker-owned lifecycle sweeps directly in
-   worktree-manager, additive first.** Operator direction resolved this cluster:
+3. [x] **Reimplement Group B's Picker-owned lifecycle sweeps directly in
+   worktree-manager, additive first.** **Done in PR
+   [#4323](https://github.com/ThomasMichon/copilot-extensions/pull/4323).**
+   Operator direction resolved this cluster:
    `reap_orphan_mux_sessions`, `_sweep_managed_on_exit`,
    `_sweep_launcher_shells_on_exit`, `_sweep_finished_sessions_on_cadence`, and
    `_start_picker_monitor_root` become Worktree Manager-owned logic because they
    govern the Picker's own process lifetime, not agent-worktrees' state model.
-   - **Step 3 design (decided before coding).**
-     - **Module home:** the four sweep/cadence functions live in a new
-       `worktree_manager.production_picker.housekeeping` module, with the Picker
-       liveness root ported into sibling module
-       `worktree_manager.production_picker.monitor_roots`. This deliberately
-       does **not** extend the Phase 3b companion mux daemon itself: that daemon
-       is the resident cross-process mux/status writer, while these Group B
-       behaviors are synchronous Picker-launch / Picker-exit / session-end
-       housekeeping owned by the foreground Picker process. The new modules may
-       consult existing Manager-owned runtime files (especially the mux-mapping
-       registry) but do not become a second resident daemon.
-     - **Manager-owned identification rule:** when Step 4 cuts production Picker
-       launches over to this lane, Manager ownership is derived from Manager-
-       owned artifacts rather than ambient cwd heuristics:
-       1. **Mux session names** are Manager-owned when they are present in
-          Worktree Manager's `mux-mapping.json` live mapping registry (the same
-          Phase 3b Sub-slice 3 source that already names the Manager-owned
-          `worktree_id ⇄ mux_session` mapping).
-       2. **Tracking rows / worktree ids** are Manager-owned when their
-          `worktree_id` appears in that live mapping registry **or** their
-          resolved `execution_leg.provider` is `ahp` (the current Manager-owned
-          no-mux/session-host lane). Ordinary zero-provider bundled-Picker
-          sessions continue to belong to agent-worktrees' own generic sweepers.
-       3. **Launcher shells** are Manager-owned when the positive launcher
-          signature resolves to the relocated `worktree-manager/bin/launch-
-          session.*` / `pane-wrapper.*` path (source-tree or installed-slot),
-          rather than agent-worktrees' own launcher path.
-       4. **Picker monitor roots** intentionally reuse the existing
-          `status-monitor-roots.d/picker-*.json` schema so the resident
-          status-monitor can keep consuming Picker liveness without a second
-          protocol change; the ownership split here is about who writes the root
-          (Manager vs agent-worktrees), not about a divergent on-disk format.
-     - **Coordination boundary / skip design:** Step 3 stays additive and does
-       **not** change live agent-worktrees behavior yet. Step 4 will enable the
-       Manager-owned lane and, in the same cutover, teach agent-worktrees'
-       generic lifecycle sweepers to exclude Manager-owned targets by those
-       rules above (or equivalently consume the Manager-produced ownership view)
-       so only one side mutates a given mux session / tracking row / launcher
-       shell lane at a time. This PR therefore lands the ownership helpers and
-       tests now, but defers the actual skip-path activation to Step 4.
-   - Introduce a manager-owned housekeeping/runtime module that ports the
-     current behavior into worktree-manager under its own tests. Recent
-     2026-09-26 promotion-pipeline fixes remove the earlier "cross-repo porting
-     is too painful" pressure, so a one-time code port is now acceptable where
-     ownership is genuinely moving.
-   - Keep this step additive: the new local implementation exists and is tested,
-     but `runner.py` still uses the current compatibility path until the next
-     step performs the actual cutover.
-   - Preserve behavior, not private names: this step should carry over the
-     sweep/monitor semantics that matter to the Picker, while leaving
-     agent-worktrees' remaining internal helpers free to evolve independently.
+   - **Module home (landed):** the four sweep/cadence functions now live in
+     `worktree_manager.production_picker.housekeeping`, with the Picker
+     liveness root ported into sibling module
+     `worktree_manager.production_picker.monitor_roots`. This deliberately does
+     **not** extend the Phase 3b companion mux daemon itself: that daemon stays
+     the resident cross-process mux/status writer, while these Group B behaviors
+     are synchronous Picker-launch / Picker-exit / session-end housekeeping
+     owned by the foreground Picker process.
+   - **Manager-owned identification rule (recorded for Step 4's cutover):**
+     Manager-owned mux-session names come from Worktree Manager's live
+     `mux-mapping.json` registry; Manager-owned tracking rows/worktree ids are
+     that registry's ids plus rows whose resolved `execution_leg.provider` is
+     `ahp`; Manager-owned launcher shells are the orphan-shell candidates whose
+     positive launcher signature resolves to the relocated
+     `worktree-manager/bin/launch-session.*` / `pane-wrapper.*` path; Picker
+     monitor roots intentionally keep the existing
+     `status-monitor-roots.d/picker-*.json` schema so the resident monitor can
+     keep consuming Picker liveness with no second protocol change.
+   - **Coordination-boundary decision:** this step stays additive and does
+     **not** change live agent-worktrees behavior yet. Step 4 will enable the
+     Manager-owned lane and, in the same cutover, teach agent-worktrees'
+     generic lifecycle sweepers to exclude Manager-owned targets by the rules
+     above (or consume the Manager-produced ownership view) so only one side
+     mutates a given mux session / tracking row / launcher-shell lane at a
+     time.
+   - Landing details:
+     - Added `housekeeping.py` with a Manager-owned port of
+       `reap_orphan_mux_sessions` plus the three lifecycle-boundary sweep
+       wrappers, while keeping future ownership-cutover hooks explicit via
+       helper functions for Manager-owned mux-session / worktree / launcher
+       classification.
+     - Added `monitor_roots.py`, a Manager-owned port of
+       `agent_worktrees.monitor_roots`, preserving the engine-consumed on-disk
+       heartbeat schema while moving Picker-root creation under Worktree
+       Manager-owned code.
+     - Added Worktree Manager tests proving parity against the current engine
+       behavior for the new Group B module (`test_housekeeping.py`) and for the
+       monitor-root port (`test_monitor_roots.py`).
+     - Kept this step additive-only: `production_picker.runner` still uses the
+       current compatibility path, and this PR does **not** change
+       agent-worktrees' live sweeper behavior yet.
+     - Validation: targeted new Group B parity tests green; full
+       `worktree-manager` suite (excluding the two standing hangs
+       `tests/production_picker/test_data_ssh_sources.py` /
+       `tests/production_picker/test_launch_trace.py`) matched the current
+       unrelated baseline at `1274 passed, 2 skipped, 13 failed`; full
+       `agent-worktrees` suite matched the current unrelated baseline at `5733
+       passed, 50 skipped, 7 failed`; `ruff check --select F,E9` passed for
+       both packages; `python tools/check-install-contract.py` and
+       `python tools/check-version-consistency.py` passed; `python
+       tools/check-version-bump.py` still reports the same pre-existing
+       unrelated unbumped-plugin drift on `delegation-guidance`, `efforts`,
+       `harness-knowledge`, and `wsl-setup`.
 
 4. [ ] **Perform the remaining Group B cutover in one crisp PR.** Once Steps 2-3
    are landed, switch the remaining non-hot-path `runner.py` call sites off the
