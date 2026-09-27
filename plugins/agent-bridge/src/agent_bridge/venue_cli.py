@@ -13,7 +13,6 @@ import time
 import urllib.request
 from typing import Any
 
-from . import __version__
 from .parity_harness import (
     CONTAINER_RECREATE_FAULT,
     FAILED_ACP_HANDSHAKE_FAULT,
@@ -194,6 +193,7 @@ def _passive_daemon_stdio_kwargs() -> tuple[dict, list]:
 
 
 def _cmd_deploy(args: argparse.Namespace) -> None:
+    from . import __version__
     from .client import BridgeClient
     from .config import config_dir, load_config, load_or_create_auth_token
     from zdd import breadcrumb, routing

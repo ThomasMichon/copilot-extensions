@@ -23,7 +23,6 @@ from agent_procutil import (
 )
 
 from . import _peer_launch as _peer_launch_module
-from . import __version__
 from .install_paths import (
     effective_config_dir,
     install_dir as _install_dir,
@@ -445,9 +444,34 @@ from .venue_cli import (  # noqa: F401
 )
 
 
+class _LazyVersionAction(argparse.Action):
+    """Defer ``__version__`` resolution until ``--version`` is actually
+    passed, instead of eagerly formatting it into every parser build
+    (argparse's own ``action="version"`` requires the finished string up
+    front, forcing the ``importlib.metadata`` lookup on every invocation
+    regardless of subcommand)."""
+
+    def __init__(self, option_strings, dest=argparse.SUPPRESS,
+                 default=argparse.SUPPRESS, help=None):
+        super().__init__(
+            option_strings=option_strings, dest=dest, default=default,
+            nargs=0, help=help,
+        )
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        from . import __version__
+
+        parser._print_message(f"{parser.prog} {__version__}\n", sys.stdout)
+        parser.exit()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agent-bridge", description="Persistent inter-agent communication service")
-    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    parser.add_argument(
+        "--version",
+        action=_LazyVersionAction,
+        help="show program's version number and exit",
+    )
     parser.add_argument("--json", action="store_true", default=False, help="Output in JSON format")
     parser.add_argument(
         "--project",

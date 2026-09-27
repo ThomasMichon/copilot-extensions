@@ -14,8 +14,6 @@ from typing import Any
 
 import uvicorn
 
-from . import __version__
-
 
 def _core():
     from . import __main__ as core
@@ -357,6 +355,8 @@ def _ask_user_fields(schema: Any) -> str:
 
 
 def _cmd_version(_args: argparse.Namespace) -> None:
+    from . import __version__
+
     print(f"agent-bridge {__version__}")
 
 

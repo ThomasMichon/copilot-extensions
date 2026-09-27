@@ -1,0 +1,13 @@
+{
+  "comment": "Phase 3 (agent-cli-lazy-dispatch): defer eager importlib.metadata.version() resolution for __version__ until actually needed",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}
