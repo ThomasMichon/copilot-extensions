@@ -6,7 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
-from . import activity, claim_handoffs, claims_annotate, claims_owner, obligations, output, tracking
+from . import activity, claim_handoffs, claims_annotate, claims_find_cli, claims_owner, obligations, output, tracking
 from . import config as cfg, state_root as state_root_mod
 
 
@@ -58,7 +58,10 @@ def add_parsers(sub) -> None:
         "list obligations re-homed by an --abandon finalize (pending "
         "cleanup), OR 'cleanup [<ref-or-source-worktree> ...]' to "
         "reclaim matching re-homed obligations (no selector = all; "
-        "--apply to act), OR 'fleet-audit' for a read-only obligation inventory",
+        "--apply to act), OR 'fleet-audit' for a read-only obligation "
+        "inventory, OR 'find pr --repo <owner/name> [--state ...] "
+        "[--live]' to sweep every registered project's worktrees for "
+        "one holding a claim on a PR there",
     )
     p.add_argument(
         "--remove",
@@ -121,6 +124,26 @@ def add_parsers(sub) -> None:
     )
     p.add_argument("--reason", default="", help="with handoff decline/cancel: required explanation")
     p.add_argument("--all-states", action="store_true", help="with owner: include released claims")
+    p.add_argument(
+        "--repo",
+        default=None,
+        dest="claim_repo",
+        help="with find pr: the target repo (owner/name) to search PR claims for",
+    )
+    p.add_argument(
+        "--state",
+        default="open",
+        dest="claim_state",
+        choices=("open", "closed", "merged", "all"),
+        help="with find pr: locally-tracked PR state to match (default: open)",
+    )
+    p.add_argument(
+        "--live",
+        action="store_true",
+        dest="claim_live",
+        help="with find pr: cross-check each candidate against the "
+        "provider's live PR state instead of trusting local tracking",
+    )
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
 
 
@@ -240,6 +263,8 @@ def cmd_claims(args: argparse.Namespace) -> int:
     if target and target[0] == "fleet-audit":
         from . import fleet_audit_cli
         return fleet_audit_cli.cmd_fleet_audit(args)
+    if target and target[0] == "find":
+        return claims_find_cli.cmd_claims_find(args, target[1:])
     worktree_id = target[0] if target else None
     return _claims_show(args, worktree_id)
 

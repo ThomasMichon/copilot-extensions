@@ -1250,6 +1250,27 @@ class TestGitHubProvider:
         assert res.merged is False
         assert res.state == "closed"
 
+    def test_get_pull_honors_explicit_host(self, monkeypatch):
+        # #4086 review (agent-worktrees claims find --live): get_pull is now
+        # relied on for cross-project fleet scans, where a candidate's own
+        # project may target a GitHub Enterprise host different from the
+        # invoking project's ambient GH_HOST -- gh pr view has no --hostname
+        # flag (same as gh pr merge above), so GH_HOST is the only pin.
+        from agent_worktrees.providers import github
+        captured = {}
+        body = json.dumps({"url": "https://ghe.example.com/o/r/pull/7",
+                           "number": 7, "state": "OPEN"})
+        monkeypatch.setattr(
+            github, "run_cli",
+            lambda args, **kw: (captured.__setitem__("env", kw.get("env")), _proc(stdout=body))[1],
+        )
+        res = github.GitHubProvider().get_pull(
+            "o/r", 7, api_base="https://ghe.example.com/api/v3", token="tok",
+        )
+        assert captured["env"]["GH_HOST"] == "ghe.example.com"
+        assert captured["env"]["GH_TOKEN"] == "tok"
+        assert res.state == "open"
+
     def test_merge_pull_squash_admin_builds_args(self, monkeypatch):
         # pr-merge --now: a submitter self-merge is a squash merge, admin past
         # the non-blocking gate, and NEVER deletes the branch (so finalize can

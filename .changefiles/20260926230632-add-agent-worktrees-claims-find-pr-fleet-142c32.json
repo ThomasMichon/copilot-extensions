@@ -1,0 +1,9 @@
+{
+  "comment": "Add 'agent-worktrees claims find pr' -- fleet-wide lookup of which registered-project worktrees claim an open PR in a repo, with an optional --live cross-check against the provider's actual state",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
