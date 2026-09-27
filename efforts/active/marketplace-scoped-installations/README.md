@@ -386,6 +386,85 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-27 — `agent-dispatch` resolved to backlog-only (PRs #4287, #4288); `agent-index` now fully backlog-only
+
+- `agent-index`: with #4272/#4276 merged, re-verified the plugin's full
+  finding set is now confirmed Phase 2/module-size/cross-plugin backlog
+  only (46 remaining: `cell-runtime.py` 7 + `resolve_effective_config.py`
+  3, module-size ceiling; `install.sh`/`install.ps1` 20, `payload-
+  invocation.json` 7, `installer-readiness.json` 3, Phase 2/cross-plugin
+  JSON questions) -- no further action needed, matching every prior
+  plugin's end state.
+- `agent-dispatch` core src/ cluster (PR #4287, 25/90 findings): annotated
+  `src/agent_dispatch/`'s genuine exceptions -- `allow remote-management`
+  (SSH-remote agent-bridge/agent-dispatch peer invocations, generalizing
+  cleanly to a 3rd plugin), `allow registry` (cross-plugin agent-bridge
+  config-dir default lookups), `allow legacy-compatibility` (fixed env-var
+  names, legacy `.agent-dispatch` fallback paths/dirnames, and the
+  single-global-coordinator zdd routing identity -- confirmed this reason
+  covers "intentionally non-cell-scoped by design," not just literal
+  legacy paths, per `agent-bridge/lifecycle_hooks.py`'s prior
+  `_SERVICE = "agent-bridge"` precedent).
+  - **Two new guard false-positive classes**: `allow query-column-list`
+    (`queue_common.py`'s `_TASK_SELECT`/`_TASK_BULK_SELECT` SQL
+    column-list construction via `", ".join(...)` coincidentally matches
+    the guard's `task...= "<quoted string>"` identity-assignment shape,
+    since the join separator `", "` is itself a quoted string
+    immediately after `=`); `allow release-verb` (`queue_lifecycle.py`,
+    `task_state_machine.py`: the business verb "release" -- as in "task
+    released from suspension" -- contains "lease" as a substring,
+    coincidentally matching the guard's lease/mutex keyword scan; same
+    underlying shape as agent-ssh's prior `third-party-installer-url`
+    class (`InstallRelease` matching `lease`), confirming this
+    "short-keyword-as-substring" false-positive shape recurs across
+    plugins and is worth checking for early when a "for a name/reason
+    that seems too load-bearing to be a real hit" finding appears).
+  - Several fixes required restructuring beyond a same-line append: ruff's
+    99-char limit combined with the marker text forced extracting short
+    module-level constants (`_legacy_dirname`, `svc`, `_BULK_HAS_RESULT_COL`,
+    `_RELEASED_FROM_SUSPENSION`) so the marker could sit on the same
+    physical line as the (now shorter) flagged pattern -- reconfirms the
+    session's established technique, and that the marker-placement rule
+    (same physical line as the flagged pattern, not merely "nearby") has
+    no exception even for multi-line function calls or preceding
+    comments; a marker one line above or below the flagged text does not
+    suppress the finding.
+  - Found (not caused by this work) a pre-existing, reproducibly-failing
+    test: `tests/test_supervisor.py::test_idle_headless_fleet_nudge_includes_remote_host`
+    fails identically with and without this session's changes (confirmed
+    via `git stash`/`git stash pop` isolation). Filed
+    [aperture-labs#7719](https://gitea.michon.ski/tmichon/aperture-labs/issues/7719).
+    Oddly, the equivalent CI job on both PRs (#4287, #4288) reported the
+    full suite passing -- possibly timing-sensitive/order-dependent;
+    left as filed rather than chased further, consistent with the
+    session's "don't diagnose a flaky/queued check as if it were a
+    confirmed failure" discipline.
+- `agent-dispatch` SKILL.md docs (PR #4288, 4/90 findings): the usual
+  `allow deployed-runtime-diagnostics` doc-shaped mentions of the
+  plugin's own runtime paths and legacy default port.
+- `agent-dispatch` now at confirmed backlog-only state (47 remaining:
+  `install.sh`/`install.ps1` 38 -- Phase 2 launcher-contract inventory,
+  same shape as every prior plugin's own-root/binstub/systemd-unit
+  identity constants -- plus `installer-readiness.json` 3,
+  `payload-invocation.json` 1, `bin/` shims 2, `focus-guidance.{sh,ps1}` 2,
+  `register-bridge-provider.ps1` 1, all confirmed Phase 2/cross-plugin
+  categories).
+- Also ran a **git base-branch gotcha**: `gh pr create` without `--base
+  dev` silently targeted this repo's GitHub-default `main` branch instead
+  of the actual integration branch `dev`, producing a stale-looking
+  `CONFLICTING` mergeability that a rebase against `dev` alone couldn't
+  fix (since the PR was never comparing against `dev` in the first
+  place). Fixed via `gh pr edit <#> --base dev`, which also required an
+  empty retrigger commit to get GitHub Actions to actually run against
+  the corrected base (the first pass after `--base dev` reused a stale
+  cached check run). Future PRs in this effort should pass `--base dev`
+  explicitly on `gh pr create` to avoid this.
+- Verified: `check-marketplace-isolation.py`, `check-module-size.py`,
+  `check-docs-consistency.py`, `check-skills.py`, ruff (no new
+  violations), and the `agent-dispatch` suite via `test-supervisor`
+  (3511 passed, 11 skipped, 1 pre-existing failure noted above). Both
+  PRs merged via `pr-merge --now` after a clean advisory review.
+
 ### 2026-09-27 — Fixed the `agent-index` fresh-install bug found by the clean-room checkpoint (PR #4272, fixes aperture-labs#7702)
 
 - Root cause confirmed (see the prior entry below): `install.sh`'s/
