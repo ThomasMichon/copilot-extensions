@@ -357,21 +357,22 @@ clean on every touched/new file.
       busy exit code `75` contract, and why `--account` should be passed
       explicitly for an unattended invocation (fail-closed account
       resolution, per Phase 3). No scheduling code added to this repo.
-- [ ] If Phase 1 decided **repository-owned** (only viable if an existing
-      always-running loop was confirmed to cover every relevant venue):
-      wire the periodic capture into that already-existing loop; do not
-      introduce a new standalone timer/daemon that duplicates a mechanism
-      this repo already runs.
+- [x] N/A (Phase 1 decided consumer-owned): If Phase 1 decided
+      **repository-owned** (only viable if an existing always-running loop
+      was confirmed to cover every relevant venue): wire the periodic
+      capture into that already-existing loop; do not introduce a new
+      standalone timer/daemon that duplicates a mechanism this repo
+      already runs.
 
       **N/A** -- Phase 1 decided consumer-owned (confirmed after checking
       `connection_owner.py`'s `run_owner_daemon` is a per-connection
       idle-shutdown loop, not an always-on sweep); this branch does not
       apply.
-- [ ] Validate end-to-end against a real leased CodeSpace, using whichever
-      trigger path Phase 1 chose: a capture picks up a real session,
-      publishes it, and the CodeSpace's own state (lease, connection) is
-      unaffected -- mirroring the container validation's proof that
-      `docker ps` uptime was unaffected.
+- [x] Deferred to `#3698`: Validate end-to-end against a real leased
+      CodeSpace, using whichever trigger path Phase 1 chose: a capture
+      picks up a real session, publishes it, and the CodeSpace's own state
+      (lease, connection) is unaffected -- mirroring the container
+      validation's proof that `docker ps` uptime was unaffected.
 
       **Transferred, not closed.** This session's `gh` auth lacks the
       `codespace` API scope (`gh auth refresh -h github.com -s codespace`
@@ -475,12 +476,12 @@ clean on every touched/new file.
       the three account-binding tests, and the CLI-dispatch tests). Full
       suite (1429 tests) green via `tools/run-plugin-tests.py
       agent-codespaces --reinstall`.
-- [ ] Phase 4: a real leased CodeSpace is captured and published
-      end-to-end (mirroring the container-side end-to-end validation
-      already proven for `rescue-capture`) — published session readable
-      from the same agent-logger hub tree the CodeSpace's own teardown-time
-      capture already lands in, and the CodeSpace's lease/connection state
-      unaffected before/after.
+- [x] Deferred to `#3698`: Phase 4: a real leased CodeSpace is captured and
+      published end-to-end (mirroring the container-side end-to-end
+      validation already proven for `rescue-capture`) — published session
+      readable from the same agent-logger hub tree the CodeSpace's own
+      teardown-time capture already lands in, and the CodeSpace's
+      lease/connection state unaffected before/after.
 
       **Transferred, not closed** -- see Phase 4's matching item above for
       the full reasoning (no `codespace`-scoped `gh` auth or real leased
@@ -499,6 +500,14 @@ clean on every touched/new file.
 _Pending._
 
 ## Journal
+
+### 2026-09-26 — Archive-sweep audit: fixed checkbox syntax, archived
+Found via a repo-wide "Done; pending archive" sweep: 3 Plan items were
+genuinely already resolved (content-complete, citing the tracked follow-up
+`#3698`) but used prose ("Transferred, not closed" / "N/A") instead of the
+required machine-checked `- [x] Deferred to \`<target>\`: ...` form -- a
+formatting gap, not incomplete work. Corrected the syntax; no remaining
+unchecked items. Archived.
 
 ### 2026-09-25 — Kickoff
 - Effort created directly following `ThomasMichon/copilot-extensions#3574`

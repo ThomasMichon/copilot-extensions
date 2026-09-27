@@ -285,6 +285,10 @@ comparison and `tools/test_materialize_main.py` /
 
 ## Journal
 
+### 2026-09-26 — Archived
+Every Plan and Validation Plan item is resolved. Moved to the dated archive
+path as part of a batch archive sweep of completed efforts.
+
 ### 2026-09-24 — Kickoff
 - Effort created while working on PR #3554
   (`docs/patterns/entity-relationship-model.md`, still open at the time)

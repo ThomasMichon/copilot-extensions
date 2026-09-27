@@ -413,6 +413,28 @@ survey above.
       cluster's three events are stage-mapped in
       `activity.HANDOFF_STAGE_MAP`, so unlike `status_disposition_write`
       there was no cross-project durable-trace scoping fix needed here.
+- [x] Migrated the third call-site cluster: the outbound resource-claim
+      ledger's three single-worktree write transactions (`claims add`/
+      `release`/`settle` — `claim_add`/`claim_release`/`claim_settle`
+      verbs, a new `tracking_claim_write.py` module), mirroring
+      `tracking_followup_write.py`'s own shape. Landed in PR
+      [#3876](https://github.com/ThomasMichon/copilot-extensions/pull/3876)
+      — deliberately excludes `claims sweep`/`claims reconcile-at-rest`
+      (multi-worktree batch operations) and the cross-machine `owner_ref`
+      resolution/deferral path (a CLI-level concern resolved before a
+      local `yaml_path` is even known). One real finding this round: the
+      verb's own frozen-state pre-check only covered
+      `finalizing`/`orphaned`, missing that `tracking.add_resource_claim`
+      itself also rejects a completed `system`/`bridge` record (and a
+      reservation-conflict) via `ValueError` — uncaught, that exception
+      would have been silently swallowed by `CoalescingServer` when
+      dispatched via the daemon, surfacing as `AmbiguousWriteOutcome`
+      instead of a deterministic rejection. Fixed by catching `ValueError`
+      generically around the call (never duplicating
+      `add_resource_claim`'s own guard predicate) — a lesson worth
+      carrying into every future verb: prefer catching the wrapped
+      function's own validation exceptions generically over re-deriving
+      which cases it covers.
 - [ ] One call site (or a closely related cluster) at a time, each its own
       reviewable PR, per this repo's serial-single-writer convention —
       across whichever of `tracking.py` / `tracking_claims.py` /
@@ -464,6 +486,56 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-09-26 — PR #3876: Phase 3's third migrated call-site cluster, the resource-claim ledger
+Migrated the outbound resource-claim ledger's three single-worktree write
+transactions (`claims add`/`release`/`settle`) as a `tracking_claim_write.py`
+module, mirroring `tracking_followup_write.py`'s own shape exactly. Also
+deliberately scoped OUT two things that stay call-site-level: `claims
+sweep`/`claims reconcile-at-rest` (multi-worktree batch operations
+iterating every local ledger, not a single-worktree transaction the verb
+shape fits) and the cross-machine `owner_ref` resolution/deferral path (a
+CLI-level concern resolved BEFORE a local `yaml_path` is even known — there
+is nothing to migrate when the answer is "deferred to the lease mirror, no
+local write").
+
+One real review finding: `apply_claim_add`'s own frozen-state pre-check
+only covered `finalizing`/`orphaned` (mirroring what the CLI transaction
+checked before migration), but `tracking.add_resource_claim` itself ALSO
+rejects a completed `system`/`bridge` record, and separately a ref
+collision with a reservation-held claim, both via `ValueError`. Uncaught,
+either would have been silently swallowed by `CoalescingServer` when
+dispatched via the daemon and surfaced to the CLI as `AmbiguousWriteOutcome`
+— turning a deterministic, non-mutating validation failure into an
+apparently unknown write outcome. Fixed by catching `ValueError` generically
+around the `add_resource_claim` call rather than duplicating its internal
+guard predicate (the reviewer's own suggestion was a narrower "mirror the
+guard" fix; catching generically is strictly more robust and can never drift
+from the one place the invariant lives). **General lesson for every future
+verb migration:** when a verb wraps an existing `tracking_claims.py`/
+`tracking_lifecycle.py`/`tracking_session_registry.py` function that raises
+`ValueError` for more cases than the call site's own pre-checks already
+cover, catch it generically at the verb boundary rather than assuming the
+call site's historical pre-checks were exhaustive.
+
+Tests: new `test_tracking_claim_write.py` (verb registration, both the
+finalizing/orphaned AND the completed-managed-record rejections, the
+reopen-on-add path, both not-found rejections, one live-daemon end-to-end
+proof), plus a `test_claims_cmd.py` case proving `AmbiguousWriteOutcome` is
+reported not swallowed. All 65 existing `test_claims_cmd.py` tests plus 156
+tests across 8 related claim test files continue passing unchanged. Full
+suite: 5651 passed, same pre-existing failures. All gates clean.
+
+**Next Phase 3 slice:** the remaining single-worktree candidates in
+`tracking_lifecycle.py` (`open_handoff`/`link_handoff`/`conclude_session`/
+`link_succession`) and `tracking_session_registry.py`, still avoiding
+`register_session` (sessionStart-hook-critical) and `mark_resumed`
+(embedded in a bigger resume flow) per the effort's own original guidance.
+Three call-site clusters now migrated (disposition, follow-ups, claims) —
+the pattern is well-proven; each subsequent PR should mainly need to watch
+for (a) cross-project ambient-context reads becoming explicit args and (b)
+any wrapped function's OWN validation-exception surface being fully caught,
+not just the call site's historical pre-checks.
 
 ### 2026-09-26 — PR #3868: Phase 3's second migrated call-site cluster, the follow-up ledger
 Picked the itemized follow-up ledger's three write transactions

@@ -15,7 +15,6 @@ that pattern to this repository.
 | [Picker Creature Comforts](active/picker-creature-comforts/README.md) | Draft | #3586 |
 | [Dev/Main Release Pipeline](active/dev-branch-release-pipeline/README.md) | Draft | #3336 |
 | [Promotion-Failure Reactive Fix Agent](active/promotion-failure-reactive-fix-agent/README.md) | Active | _TBD_ |
-| [Vendored Doc Pointers](active/vendored-doc-pointers/README.md) | Done; pending archive | #3565 |
 | [Vendor Pointer Generalization](active/vendor-pointer-generalization/README.md) | Draft | See effort |
 | [Ambient Guidance Navigability](active/ambient-guidance-navigability/README.md) | Active | #3033 |
 | [Unified Skill Review](active/unified-skill-review/README.md) | Draft | #2847 |
@@ -24,20 +23,17 @@ that pattern to this repository.
 | [Handoff Cutover Reload Robustness](active/handoff-cutover-reload-robustness/README.md) | Active | #5250† |
 | [Context-Handoff Overhaul](active/context-handoff-overhaul/README.md) | Draft | #2594 |
 | [Custom Context Aggregator Retirement](active/custom-context-aggregator-retirement/README.md) | Draft | #2173 |
-| [Role-Aware Fork PR Flow](active/role-aware-fork-pr-flow/README.md) | Active | See effort |
 | [SessionStart Static/Dynamic Content Conformance](active/sessionstart-static-dynamic-conformance/README.md) | Active | #2256 |
 | [agent-logger Aggregate Configuration](active/agent-logger-aggregate-configuration/README.md) | Active | #1817 |
 | [Balanced Profile Assignment](active/balanced-profile-assignment/README.md) | Active | #1564 |
 | [Budget-Aware Model Routing](active/budget-aware-model-routing/README.md) | Draft | #2137 |
 | [Evidence-Calibrated Model Routing](active/evidence-calibrated-model-routing/README.md) | Active | #2014 |
 | [agent-bridge Contract Evolution](active/agent-bridge-contract-evolution/README.md) | Draft | #1460 |
-| [agent-bridge Contract Baseline](active/agent-bridge-contract-baseline/README.md) | Draft | #1468 |
 | [agent-bridge AHP Convergence](active/agent-bridge-ahp-convergence/README.md) | Draft | #1266, #1308 |
 | [agent-bridge Delegation Convergence](active/agent-bridge-delegation-convergence/README.md) | Active | #1448 |
 | [agent-bridge Attention Waits](active/agent-bridge-attention-waits/README.md) | Draft | #1450 |
 | [agent-bridge Session Discovery](active/agent-bridge-session-discovery/README.md) | Draft | #2530 |
 | [agent-bridge CLI-Mode Sessions](active/agent-bridge-cli-mode-sessions/README.md) | Active | See effort |
-| [agent-bridge Delegation Contract](active/agent-bridge-delegation-contract/README.md) | Done; pending archive | #1449 |
 | [Migration Intake](active/migration-intake/README.md) | Draft | See effort |
 | [Account-Aware Operations](active/account-aware-operations/README.md) | Draft | See effort |
 | [Agent Machines Declarative Control Plane](active/agent-machines-declarative-control-plane/README.md) | Active | #1418 (closed; historical, no live umbrella) |
@@ -54,17 +50,11 @@ that pattern to this repository.
 | [Venue Parity](active/venue-parity/README.md) | Active | #954 |
 | [Windows Launch Hardening](active/windows-launch-hardening/README.md) | Active | #786 |
 | [Worktree Manager Control Plane](active/worktree-manager-control-plane/README.md) | Active | #352 |
-| [agent-index Engine Daemon](active/agent-index-engine-daemon/README.md) | Done; pending archive | See effort |
-| [Uniform Runtime Resolution](active/uniform-runtime-resolution/README.md) | Done; pending archive | #765 |
+| [agent-index Engine Daemon](active/agent-index-engine-daemon/README.md) | Active | See effort |
 | [Vendored Installer Engine](active/vendored-installer-engine/README.md) | Draft | See effort |
-| [Session-Rescue Parity (Containers <-> CodeSpaces)](active/session-rescue-parity/README.md) | Done; pending archive | #3642 |
 | [Pull-Request Capability](active/pull-request-capability/README.md) | Draft | #2691, #2699, #2700 |
 | [Module Componentization Discipline](active/module-componentization-discipline/README.md) | Active | #2805 |
 | [Componentization Campaign Auto-Worker](active/componentization-campaign-auto-worker/README.md) | Draft | #3372 |
-| [PR Attribution Codenames](active/pr-attribution-codenames/README.md) | Done; pending archive | #2838 |
-| [Codename Attribution By Default](active/codename-attribution-by-default/README.md) | Done; pending archive | #2977 |
-| [AGENTS.md vs .github/instructions Split](active/agents-md-vs-instructions-split/README.md) | Done; pending archive | #2825 |
-| [Claim Provider Pattern](active/claim-provider-pattern/README.md) | Done; pending archive | #3295, #3461 |
 | [Authoritative Write-Through Daemon](active/agent-worktrees-authoritative-daemon/README.md) | Active | #3761 |
 
 

@@ -387,6 +387,10 @@ _Pending review._
 
 ## Journal
 
+### 2026-09-26 — Archived
+Every Plan and Validation Plan item is resolved. Moved to the dated archive
+path as part of a batch archive sweep of completed efforts.
+
 ### 2026-09-17 — Kickoff
 - Effort created from a sweep of stalled PRs on this repo: none carried any
   attribution marker, and one leaked a raw `worktree/<id>` branch name as its

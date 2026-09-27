@@ -721,6 +721,29 @@ def test_claims_add_missing_operands(monkeypatch, tmp_path):
     assert rc == 2
 
 
+def test_claims_add_ambiguous_write_outcome_is_reported_not_swallowed(
+    monkeypatch, tmp_path, capfd
+):
+    """agent-worktrees-authoritative-daemon Phase 3: a write whose daemon
+    request was sent and then failed is genuinely ambiguous -- the command
+    must surface `AmbiguousWriteOutcome` as a reported failure, never
+    silently retry or swallow it."""
+    from agent_worktrees import tracking_write
+
+    tdir = _seed(tmp_path, monkeypatch)
+
+    def _raise(*_args, **_kwargs):
+        raise tracking_write.AmbiguousWriteOutcome("request sent, no response")
+
+    monkeypatch.setattr(tracking_write, "dispatch", _raise)
+    rc = m.cmd_claims(_add_args("codespace", "cs-x"))
+    assert rc == 1
+    out = json.loads(capfd.readouterr().out)
+    assert "unknown state" in out["error"]
+    # Refused before any mutation -- the record must be untouched.
+    assert tracking.load_record(tdir / "wt-A.yaml").resources == []
+
+
 # --- claims add --owner-ref (cross-project resolution, 3b-wiring/2) ----------
 
 def _add_ownerref_args(kind, ref, owner_ref, *, note="", json_=True):

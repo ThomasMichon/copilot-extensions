@@ -1337,6 +1337,10 @@ _Pending._
 
 ## Journal
 
+### 2026-09-26 — Archived
+Every Plan and Validation Plan item is resolved. Moved to the dated archive
+path as part of a batch archive sweep of completed efforts.
+
 > Dated, append-only running log of the effort. Full round-6 through
 > round-38 history lives in **[journal.md](journal.md)** to keep this
 > README a navigable map.

@@ -4,7 +4,9 @@
 - **Repo:** copilot-extensions (plugin home; direct-push `main`)
 - **Branch(es):** `agent-index-engine-daemon` (batched) → landed to `main`
 - **Created:** 2026-08-03
-- **Status:** Done <!-- Draft | Active | Blocked | Done -->
+- **Status:** Active <!-- Draft | Active | Blocked | Done --> (all implementation
+  phases landed to `main`; one Validation Plan item -- a rollback-path
+  live-validation -- is not yet proven, see Validation Plan)
 - **Vision:** extends [`visions/plugins/agent-index`](../../../visions/plugins/agent-index/README.md)
   (§*The embedding engine*, §self-contained-service, §local-first-standalone) —
   **vision-extending**: the durable-daemon intent is new and must be written into
@@ -45,6 +47,13 @@ Locked design decisions (operator):
   repo's `<repo>/.agent-index/config.yaml`; the plugin ships no machine list.
 - **torch only on the host** — client-role installs carry no embedding stack.
 
+## Request
+
+Operator-directed: make the embedding engine a durable, persistent daemon
+decoupled from the versioned service runtime, per the locked design
+decisions above (all embedding via the daemon; role resolved from config,
+never hardcoded machine names; torch confined to the host role).
+
 ## Plan
 
 ### Phase 1 — Intent (vision + patterns)
@@ -74,11 +83,12 @@ Locked design decisions (operator):
       now **only** torch + transformers + sentence-transformers. `pip install
       agent-index` is a functional torch-free service; `[engine]` adds the heavy
       stack for the durable engine venv.
-- [ ] Default query embedding to the daemon (`AGENT_INDEX_SEARCH_IN_PROCESS=0`);
+- [x] Default query embedding to the daemon (`AGENT_INDEX_SEARCH_IN_PROCESS=0`);
       confirm search stays responsive-when-cold via the daemon path. **Moved to
       Phase 5** — flipping this default only makes sense once a standing engine
       daemon exists (external mode); flipping it before the daemon lands would
-      regress a single-venv install. Kept default `1` until Phase 5.
+      regress a single-venv install. Kept default `1` until Phase 5, which
+      delivers this exact flip (see Phase 5's first item, done).
 
 ### Phase 3 — Durable engine runtime + persistent daemon
 - [x] **3a — daemon manager:** `agent_index/engine/daemon.py` — cross-platform
@@ -216,19 +226,48 @@ Locked design decisions (operator):
 
 ## Validation Plan
 
-- [ ] A routine plugin `update` swaps the service runtime **without rebuilding
+- [x] A routine plugin `update` swaps the service runtime **without rebuilding
       torch or restarting the engine daemon** — the engine stays warm (model loaded)
-      across the update.
-- [ ] The versioned **service venv contains no torch**, yet indexing **and** query
-      both succeed through the daemon.
-- [ ] A **client-role** install carries no embedding stack and reaches the service
-      over the trusted transport.
-- [ ] The **durable engine venv survives** a service update/rollback; the engine
-      runtime changes only via its explicit update path.
+      across the update. Delivered by Phase 3b: "`update` calls neither" install
+      action touches the engine; only `engine-update` restarts it (once, by
+      design). Live-validated on Borealis (Phase 5 journal).
+- [x] The versioned **service venv contains no torch**, yet indexing **and** query
+      both succeed through the daemon. Delivered by Phase 2 (dependency split)
+      + Phase 5 (both flips to `external`/daemon-routed embedding). Live-validated
+      on Borealis: "torch-free service embedded a query through the daemon."
+- [x] A **client-role** install carries no embedding stack and reaches the service
+      over the trusted transport. Delivered by Phase 4 (role-gated install) +
+      Phase 8 (client routing over the SSH port-forward transport, with
+      lexical-first degradation when unreachable). Live-validated on Borealis
+      (client skips engine; a different machine's `setup` inherited the
+      published endpoint).
+- [x] The **durable engine venv survives** a service update/rollback; the engine
+      runtime changes only via its explicit update path. Delivered by Phase 3b:
+      the durable venv lives outside the versioned-runtime junction entirely and
+      is rebuilt only by the explicit `engine-update` action.
 - [ ] Recover/rollback leaves both runtimes consistent; the durable index is
-      untouched by either runtime swap.
+      untouched by either runtime swap. **Not explicitly validated** -- no
+      journal entry exercises a versioned-runtime rollback specifically (only
+      forward `update`/`engine-update` paths are live-validated above). Plausible
+      by construction (the durable engine venv/index live entirely outside the
+      versioned-runtime junction a rollback swaps), but not proven. Left
+      unchecked rather than assumed; needs an explicit rollback-path
+      live-validation pass before this item, and this effort's archival, can
+      close.
 
 ## Journal
+
+### 2026-09-26 — Archive-sweep audit: corrected Status from Done to Active
+Found via a repo-wide "Done; pending archive" sweep: the Plan's Phase 2 item
+was a stale duplicate of Phase 5's identical (done) flip -- resolved with a
+cross-reference. Of the 5 Validation Plan bullets, 4 are directly supported
+by existing phase journal evidence and are now checked; the 5th
+(recover/rollback leaving both runtimes consistent) has no journal entry
+exercising a rollback path specifically -- plausible by construction, not
+proven. Corrected Status from `Done` to `Active` and left this effort
+un-archived rather than rubber-stamping an unproven item. Next actionable
+step: a rollback-path live-validation pass (this plugin lives on `main`,
+direct-push, outside the `dev` branch this worktree tracks).
 
 ### 2026-08-03 — Phase 9: docs pattern, version bump, land
 - Added `docs/patterns/durable-vs-versioned-runtime.md` (exemplar: the agent-index
