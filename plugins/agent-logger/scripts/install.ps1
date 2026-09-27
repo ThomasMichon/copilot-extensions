@@ -655,9 +655,22 @@ function Get-SignedBasePython {
     if ($env:OS -ne 'Windows_NT') { return $null }
     $cands = @()
     if (Get-Command py -ErrorAction SilentlyContinue) {
-        foreach ($v in '3.13', '3.12', '3.11', '3.10') {
-            $p = (& py "-$v" -c "import sys;print(sys.executable)" 2>$null | Out-String).Trim()
-            if ($LASTEXITCODE -eq 0 -and $p) { $cands += $p }
+        # The `py` launcher writes "No suitable Python runtime found" to stderr
+        # for any version it doesn't have installed; under the script-wide
+        # $ErrorActionPreference='Stop' that becomes a terminating error even
+        # with a 2>$null redirect (same gotcha as Ensure-UvIndex above), so
+        # relax it for the duration of these probes -- otherwise the first
+        # missing minor version (commonly 3.13, rarely pre-installed) aborts
+        # the whole provisioning run instead of just skipping that candidate.
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            foreach ($v in '3.13', '3.12', '3.11', '3.10') {
+                $p = (& py "-$v" -c "import sys;print(sys.executable)" 2>$null | Out-String).Trim()
+                if ($LASTEXITCODE -eq 0 -and $p) { $cands += $p }
+            }
+        } finally {
+            $ErrorActionPreference = $prevEAP
         }
     }
     foreach ($c in ($cands | Select-Object -Unique)) {

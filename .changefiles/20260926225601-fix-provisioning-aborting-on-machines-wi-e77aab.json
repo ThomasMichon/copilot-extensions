@@ -1,0 +1,9 @@
+{
+  "comment": "Fix provisioning aborting on machines without Python 3.13: relax ErrorActionPreference around the Get-SignedBasePython version probe so a missing candidate is skipped instead of throwing.",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}
