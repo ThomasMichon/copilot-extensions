@@ -1,0 +1,9 @@
+{
+  "comment": "New operating-procedures charter (agent-dispatch charter show operating-procedures); fixed fleet duplicate-check lane scoping; loud warning on the bridge-fallback spawn's dropped guardrails; untrusted-content framing propagated into webhook/evaluator default prompts.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "minor"
+    }
+  ]
+}

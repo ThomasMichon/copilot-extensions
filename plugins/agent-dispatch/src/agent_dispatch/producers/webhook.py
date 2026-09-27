@@ -53,6 +53,7 @@ from typing import Any
 
 from ..client import DispatchClient
 from ..identity import canonicalize_remote
+from . import UNTRUSTED_EXTERNAL_CONTENT_NOTE
 
 ClientFactory = Callable[[], DispatchClient]
 
@@ -132,12 +133,13 @@ def _iter_alerts(payload: dict[str, Any]):
 _DEFAULT_PR_TITLE = "Follow up on merged PR #{number}: {pr_title}"
 _DEFAULT_PR_PROMPT = (
     "Pull request #{number} ({url}) was merged into {base}. Do the follow-up "
-    "work this merge implies (deploy verification, changelog, downstream bumps)."
+    "work this merge implies (deploy verification, changelog, downstream bumps). "
+    + UNTRUSTED_EXTERNAL_CONTENT_NOTE
 )
 _DEFAULT_ALERT_TITLE = "Investigate alert: {name}"
 _DEFAULT_ALERT_PROMPT = (
     "Alert {name} is {status} (severity {severity}) on {target}. Investigate "
-    "and remediate."
+    "and remediate. " + UNTRUSTED_EXTERNAL_CONTENT_NOTE
 )
 
 

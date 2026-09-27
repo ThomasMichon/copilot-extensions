@@ -29,6 +29,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from . import UNTRUSTED_EXTERNAL_CONTENT_NOTE
+
 # Lifecycle event types the coordinator publishes (see coordinator._emit).
 EVENT_QUEUED = "task.queued"
 EVENT_COMPLETED = "task.completed"
@@ -126,7 +128,14 @@ def _emit_from_rule(rule: dict, event: dict) -> Emit:
         raise EvaluatorError("an emit rule requires a 'title_template'")
     fields: dict[str, Any] = {}
     if spec.get("prompt_template"):
-        fields["prompt"] = _safe_fmt(spec["prompt_template"], ctx)
+        # The event context is the originating task's own fields (title,
+        # labels, source, ...); that task may itself trace back to an
+        # untrusted external source (a webhook, an issue title). Append the
+        # shared framing regardless of what the rule author's own template
+        # says, so this guardrail doesn't depend on every rule remembering it.
+        fields["prompt"] = (
+            _safe_fmt(spec["prompt_template"], ctx) + " " + UNTRUSTED_EXTERNAL_CONTENT_NOTE
+        )
     if spec.get("goal_template"):
         fields["goal"] = _safe_fmt(spec["goal_template"], ctx)
     if spec.get("origin_ref_template"):

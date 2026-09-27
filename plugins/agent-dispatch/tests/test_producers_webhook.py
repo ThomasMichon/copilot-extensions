@@ -58,6 +58,27 @@ def test_pr_merged_creates_task():
     assert len(sink) == 1
 
 
+def test_default_pr_prompt_frames_event_fields_as_untrusted():
+    tc, sink = _client()
+    r = tc.post("/webhook/pr", json=_MERGED_PR)
+    assert r.status_code == 200
+    prompt = sink[0]["prompt"]
+    assert "untrusted subject data" in prompt
+    # the PR's own attacker-influenceable title never appears unframed
+    assert "Add feature" not in prompt or "untrusted subject data" in prompt
+
+
+def test_default_telemetry_prompt_frames_event_fields_as_untrusted():
+    tc, sink = _client({"default_repo": "example.com/acme/widget"})
+    r = tc.post(
+        "/webhook/telemetry",
+        json={"name": "disk-full", "status": "firing", "severity": "critical", "target": "host-1"},
+    )
+    assert r.status_code == 200
+    prompt = sink[0]["prompt"]
+    assert "untrusted subject data" in prompt
+
+
 def test_pr_unmerged_is_skipped():
     tc, sink = _client()
     body = {**_MERGED_PR, "pull_request": {**_MERGED_PR["pull_request"], "merged": False}}
