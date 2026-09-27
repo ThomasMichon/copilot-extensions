@@ -266,7 +266,10 @@ once every remaining caller is already off the import boundary.
      a new import seam), `state_root_module.resolve_state_root(...)` via the
      existing `state-root --json` family (pin the subset the Picker consumes, or
      add a thin JSON wrapper if the current output shape is too broad), and a
-     new tiny `update-stage --json` verb for the indicator glyph.
+     new tiny **read-only** `update-indicator --json` verb for the glyph. Keep
+     it explicitly distinct from the existing `stage-update --json` command,
+     which performs the marketplace staging work rather than merely reporting
+     the cheap status `indicator_state()` reads.
    - Add Worktree Manager-side `engine_client` wrappers for those reads, but
      leave `pivot_manifest.py` / `update_stage.py` on the compatibility shim in
      this step.
@@ -403,7 +406,7 @@ once every remaining caller is already off the import boundary.
 ### Group-specific validation
 
 1. **Group A**
-   - Contract tests for the new scalar/path reads and `update-stage --json`
+   - Contract tests for the new scalar/path reads and `update-indicator --json`
      response shape.
    - Targeted `pivot_manifest.py` / update-indicator tests prove the Picker
      still degrades cleanly when those verbs are unavailable or return empty

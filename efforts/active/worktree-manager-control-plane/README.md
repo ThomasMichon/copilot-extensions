@@ -462,8 +462,8 @@ PR [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
       PR [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
 - [ ] **Step 1 — pin Group A's low-frequency public read surface, additive
       only.** Add/pin the picker-supported `get <key>` / `state-root --json` /
-      `update-stage --json` contract and Manager-side client wrappers before any
-      caller cutover. See
+      read-only `update-indicator --json` contract and Manager-side client
+      wrappers before any caller cutover. See
       [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
 - [ ] **Step 2 — add Group B's narrow public CLI seam for project/config/ssh
       decisions.** Promote runner-scoped `--json` verbs (and reuse the existing
