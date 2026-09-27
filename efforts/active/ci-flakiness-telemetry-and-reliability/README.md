@@ -345,9 +345,9 @@ determine whether this section needs anything beyond the Plan above._
   many *different* PR authors independently trip during their own
   in-progress doc edits, always fixed before merge -- not standing code
   bugs, and not this effort's to fix. See the Phase 3 Plan item above for
-  the full reasoning and the resulting real remaining candidate
-  (`test_install_signed_python_probe.py`'s Windows probe-script test,
-  genuinely unrelated to PR doc content, not yet investigated).
+  the full reasoning; the `test_install_signed_python_probe.py` signature
+  was investigated separately (see the later dated entry above) and is
+  very likely historical, not a confirmed open Phase 3 item.
 
 ### 2026-09-27 — Phase 3 first item: aperture-labs#7715 fixed
 - Reproduced the flake directly (read-only diagnostic sub-agents, WSL,
@@ -404,6 +404,9 @@ determine whether this section needs anything beyond the Plan above._
   blocking impact `tests/test_install_signed_python_probe.py::
   test_missing_newest_candidate_does_not_abort_probe[pwsh]` (122 `dev`-push
   runs stalled). Both are strong Phase 3 candidates alongside #7715.
+  _(See later entries below for how this assessment was revised: #7715 is
+  fixed, and the other two signatures turned out not to be confirmed open
+  Phase 3 items after further investigation.)_
 - Next: Phase 3 — fix aperture-labs#7715, then work down the ranking.
 
 ### 2026-09-27 — Phase 0 reconciliation resolved
