@@ -482,26 +482,40 @@ correction inline, per the effort's own journal discipline)._
   #3305 has no new findings as of this check; both remain open, awaiting
   review.
 
-  ### 2026-09-27 — PR #4129's third review round addressed; both PRs mergeable, awaiting review decision
+### 2026-09-27 — PR #4129's third review round addressed; both PRs mergeable, awaiting review decision
 
-  - Resumed via handoff; both PRs confirmed `MERGEABLE` with no review
-    decision yet. PR #4129 had picked up a further review pass (5 open
-    threads: 3 re-listing the already-fixed findings from the prior journal
-    entry as still-unresolved threads, plus 2 genuinely new medium-severity
-    findings). Fixed the 2 new ones: `bootstrap-check.ps1` now checks
-    `$LASTEXITCODE` after the synchronous `stamp-binstub` call and skips
-    backgrounding the full `stamp` on failure (previously discarded via
-    `*> $null`, silently breaking the launcher-before-return guarantee on any
-    probe/lock/write failure); POSIX `init.sh` now publishes `payload-dir`
-    through a same-directory temp file + `mv -f` instead of a direct `>`
-    redirection, closing a truncation window a concurrent binstub-reader
-    could observe (matching `deploy_binstub`'s own atomic-replace pattern).
-    Verified via `bash -n`/PowerShell AST parse and the `stamp`-tagged
-    regression suite (2 passed, 2 skipped). Rebased onto latest `dev`,
-    force-pushed with-lease, then resolved all 5 open review threads via the
-    GraphQL API and posted a summary comment on the PR citing the fixing
-    commit and the verification performed, since the 3 stale threads needed
-    explicit resolution rather than a code re-fix. PR #3305 (the effort plan
-    itself) has no new findings as of this check. Both PRs remain open,
-    awaiting a review decision -- watching per the standard `pr-watch`
-    discipline rather than diagnosing the reviewer.
+- Resumed via handoff; both PRs confirmed `MERGEABLE` with no review
+  decision yet. PR #4129 had picked up a further review pass (5 open
+  threads: 3 re-listing the already-fixed findings from the prior journal
+  entry as still-unresolved threads, plus 2 genuinely new medium-severity
+  findings). Fixed the 2 new ones: `bootstrap-check.ps1` now checks
+  `$LASTEXITCODE` after the synchronous `stamp-binstub` call and skips
+  backgrounding the full `stamp` on failure (previously discarded via
+  `*> $null`, silently breaking the launcher-before-return guarantee on any
+  probe/lock/write failure); POSIX `init.sh` now publishes `payload-dir`
+  through a same-directory temp file + `mv -f` instead of a direct `>`
+  redirection, closing a truncation window a concurrent binstub-reader
+  could observe (matching `deploy_binstub`'s own atomic-replace pattern).
+  Verified via `bash -n`/PowerShell AST parse and the `stamp`-tagged
+  regression suite (2 passed, 2 skipped). Rebased onto latest `dev`,
+  force-pushed with-lease, then resolved all 5 open review threads via the
+  GraphQL API and posted a summary comment on the PR citing the fixing
+  commit and the verification performed, since the 3 stale threads needed
+  explicit resolution rather than a code re-fix. Immediately afterward,
+  PR #3305 (the effort plan itself) also picked up its own fresh review
+  pass (6 open threads: 2 stale "Documentation impact statement" threads
+  already satisfied by the PR description, plus 4 genuinely new/unresolved
+  findings). Fixed the 4: corrected the still-open PR #4129's Journal entry
+  from "Landed the corrected fix" to "Opened the corrected fix"; Phase 1's
+  plan now derives the benchmark/expected plugin roster from
+  `.github/plugin/marketplace.json` directly (the hand-copied list was
+  already missing 3 plugins with their own `sessionStart` hooks); added an
+  explicit CLI-version pin/record step to Phase 1 to keep the 20-attempt
+  baseline reproducible against the CLI's own noted self-update confound;
+  and the Validation Plan's exit-code=1 criterion now distinguishes a
+  during-turn failure from the identical post-turn shutdown signature this
+  effort's own Context evidence already reproduces. Rebased, force-pushed
+  with-lease, resolved all 6 threads, and posted a summary comment citing
+  the fixing commit — same discipline as #4129 above. Both PRs remain
+  open, `MERGEABLE`, `REVIEW_REQUIRED`; watching both via `pr-watch` in the
+  background rather than polling, per standard discipline.
