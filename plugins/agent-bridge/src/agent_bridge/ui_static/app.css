@@ -286,6 +286,30 @@ table.grid td button { margin-left: 6px; }
 .modal h2 { margin: 0 0 4px; font-size: 17px; }
 .modal label { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; font-weight: 500; font-size: 13px; }
 .modal textarea { resize: vertical; min-height: 120px; }
+.modes { border: 0; padding: 0; margin: 14px 0 0; min-width: 0; }
+.modes legend { font-weight: 500; font-size: 13px; padding: 0; margin-bottom: 6px; }
+.mode-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px; }
+.modal label.mode {
+  flex-direction: row; align-items: flex-start; gap: 10px; margin: 0; padding: 10px 12px; cursor: pointer;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); font-weight: 400;
+}
+.modal label.mode:has(input:checked) { border-color: var(--accent); background: var(--accent-bg); }
+.mode input { margin: 3px 0 0; flex: none; }
+.mode-text { display: flex; flex-direction: column; gap: 3px; line-height: 1.4; }
+.nt-where { display: flex; align-items: center; gap: 4px 12px; flex-wrap: wrap; margin-top: 14px; }
+.modal label.inline { flex-direction: row; align-items: center; gap: 8px; margin: 0; }
+.nt-where select { width: auto; min-width: 180px; }
+.nt-where .muted { flex: 1 1 260px; }
+.d-history { margin: 0 0 18px; }
+.d-history > .d-h { margin-top: 4px; }
+.d-transcript .viewer {
+  height: min(64vh, 760px); border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg);
+}
+.d-transcript .v-head { padding-top: 8px; }
+.d-commits { margin-top: 10px; }
+.commit-list { list-style: none; margin: 4px 0 0; padding: 0; font-size: 13px; }
+.commit-list li { display: flex; gap: 10px; align-items: baseline; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.commit-list li > span:nth-of-type(1) { flex: 1; min-width: 0; }
 .row { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
 .d-body { overflow: auto; padding: 0 20px 20px; }
 .d-body .d-progress { margin: 0 0 12px; }
@@ -325,12 +349,15 @@ table.facts td button { margin-left: 6px; }
   .d-slot-info { grid-area: info; overflow: auto; }
   .d-slot-progress .d-progress { margin: 0 20px 10px 0; }
   .d-slot-info .d-info { margin: 0 20px 12px 0; }
-  .d-slot-info .d-info td code { word-break: break-all; }
-  .d-body:not(.starting) { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 24px; align-content: start; }
-  .d-body > .d-progress, .d-body > .d-resume, .d-body > p { grid-column: 1; }
-  .d-body > .d-h:not(.in), .d-body > table.facts { grid-column: 2; }
-  .d-body > .d-h:not(.in) { grid-row: 1; margin-top: 0; }
-  .d-body > table.facts { grid-row: 2 / span 3; align-self: start; }
+  .d-slot-info .d-info td code {
+    display: inline-block; max-width: calc(100% - 56px); overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; vertical-align: middle;
+  }
+  .d-body:not(.starting) {
+    display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(320px, 1fr); column-gap: 28px; align-content: start;
+  }
+  .d-body > * { grid-column: 2; }
+  .d-body > .d-history { grid-column: 1; grid-row: 1 / span 8; }
 }
 /* -- monitoring, stale milestones, rail details -------------------------------------- */
 :root { --mon: #3cc6c0; --mon-bg: #12302f; }
@@ -347,6 +374,10 @@ table.facts td button { margin-left: 6px; }
   .d-slot-info .d-info tr { margin-bottom: 8px; }
   .d-slot-info .d-info th { font-size: 11px; padding: 0 0 2px; }
   .d-slot-info .d-info td { padding: 0; }
-  .d-slot-info .d-info td code { word-break: break-all; }
   .d-slot-info .d-info td button { margin-left: 4px; padding: 0 6px; font-size: 11px; }
 }
+.b-user.clamped .md {
+  max-height: 7.6em; overflow: hidden;
+  -webkit-mask-image: linear-gradient(#000 55%, transparent); mask-image: linear-gradient(#000 55%, transparent);
+}
+.b-more { margin-top: 4px; padding: 2px 8px; font-size: 12px; color: var(--accent); }

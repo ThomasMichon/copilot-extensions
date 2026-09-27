@@ -328,7 +328,14 @@ dependency-free task board for the sessions registered with this bridge: each
 worktree task with its orchestrator and supervised venue workers, a session
 viewer that collapses tool calls, new/resume/rename task verbs over the
 `agent-worktrees` CLI (`/api/v1/ui/workspaces`, `/api/v1/ui/tasks`), and the
-ACP agent/session URLs to paste into acp-ui. The page, scripts, and stylesheet
+ACP agent/session URLs to paste into acp-ui. New task offers the task modes a
+repository declares in `.copilot-extensions/agent-bridge/task-modes.yaml`
+(`ui_task_modes.py`: an id, label, description, and first-message template the
+bridge fills in; the page never sends a template). An earlier task shows its
+last session's transcript read back through the cold-store provider seam
+(`/api/v1/ui/sessions/{id}/history`, mapped to the live stream's kinds and
+bounded) and its branch's own commits (`/api/v1/ui/tasks/{id}/commits`).
+The page, scripts, and stylesheet
 ship as package data (`ui_static/`) served from a fixed allowlist under a CSP
 with no inline code; they carry no data. Data comes only from the
 token-protected `/api/v1` routes, and the task-launching verbs additionally

@@ -246,3 +246,24 @@ def test_markdown_links_are_http_only(tmp_path) -> None:
     """)
     assert ["link", "https://example.com/a"] in out and ["link", "https://b.c/d"] in out
     assert not any(t == "link" and h and not h.startswith("https://") for t, h in out)
+
+
+def test_a_mapped_transcript_folds_into_the_viewers_blocks(tmp_path) -> None:
+    """An ended session's history (the bridge maps a Copilot log to stream
+    kinds) renders like a live one: prompt, one work block, the reply."""
+    from agent_bridge.routes.ui_history import to_stream_events
+
+    from test_ui_history import COPILOT_LOG
+
+    events = to_stream_events(COPILOT_LOG)
+    out = _run(tmp_path, f"""
+      const model = new m.SessionModel();
+      for (const ev of {json.dumps(events)}) model.apply(ev.event, ev.data, ev.ts, null);
+      return model.blocks.map((b) => [b.type, b.text || "", (b.steps || []).map((s) => [s.name, s.status])]);
+    """)
+    assert out == [
+        ["user", "Fix the login page", []],
+        ["work", "", [["view", "completed"], ["powershell", "failed"]]],
+        ["agent", "Fixed the redirect.", []],
+        ["note", "Context compacted: 1,200 tokens freed", []],
+    ]

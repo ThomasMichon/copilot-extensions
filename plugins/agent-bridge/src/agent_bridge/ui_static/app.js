@@ -16,7 +16,7 @@ const $ = (s) => document.querySelector(s);
 
 let token = localStorage.getItem(TOKEN_KEY) || "";
 const state = {
-  live: [], workspaces: [], projects: [], errors: {}, tasks: [], loaded: false, lastOk: 0, inflight: false,
+  live: [], workspaces: [], projects: [], projectInfo: {}, errors: {}, tasks: [], loaded: false, lastOk: 0, inflight: false,
   wsLoaded: false, wsInflight: false, showAllEarlier: false,
   pending: JSON.parse(sessionStorage.getItem(PENDING_KEY) || "{}"),
   route: { view: "tasks", key: null, sid: null, q: "", venue: "all", repo: "all" },
@@ -128,7 +128,6 @@ function onRoute() {
   }
   $("#tasks-view").hidden = state.route.view !== "tasks";
   $("#venues").hidden = state.route.view !== "tasks";
-  $("#repos").hidden = state.route.view !== "tasks";
   $("#sessions-view").hidden = state.route.view !== "sessions";
   $("#acp-view").hidden = state.route.view !== "acp";
   if (state.route.view === "acp" && prev.view !== "acp") loadAcp();
@@ -165,6 +164,7 @@ async function refreshWorkspaces(force = false) {
     const d = await api("/api/v1/ui/workspaces" + (force ? "?refresh=true" : ""));
     state.workspaces = d.workspaces || [];
     state.projects = d.projects || [];
+    state.projectInfo = d.project_info || {};
     state.wsLoaded = true;
     const errs = Object.entries(d.errors || {});
     if (errs.length) state.errors.workspaces = errs.map(([k, v]) => `${k}: ${v}`).join("; ");
@@ -181,7 +181,8 @@ async function refreshWorkspaces(force = false) {
 function saveCache() {
   try {
     sessionStorage.setItem(CACHE_KEY, JSON.stringify({
-      live: state.live, workspaces: state.workspaces, projects: state.projects, at: state.lastOk,
+      live: state.live, workspaces: state.workspaces, projects: state.projects,
+      projectInfo: state.projectInfo, at: state.lastOk,
     }));
   } catch (e) { /* storage full; the cache is only a paint accelerator */ }
 }
@@ -207,6 +208,7 @@ function paintFromCache() {
     state.live = c.live || [];
     state.workspaces = c.workspaces || [];
     state.projects = c.projects || [];
+    state.projectInfo = c.projectInfo || {};
     state.wsLoaded = state.workspaces.length > 0;
     state.loaded = true;
     state.lastOk = c.at || 0;
@@ -275,26 +277,21 @@ function renderSummary() {
 
 function renderVenueChips() {
   const present = new Set(["all"]);
-  const repos = new Set();
   for (const t of state.tasks) {
-    for (const r of t.repos || [t.repo]) if (r) repos.add(r);
     if (!t.live) continue;
     if (!t.venues.length) present.add("local");
     for (const v of t.venues) present.add(v);
   }
   if (state.route.venue !== "all") present.add(state.route.venue);
+  // A venue filter only earns its space once some task runs somewhere other
+  // than this machine; repos are matched by the text filter instead.
+  const remote = [...present].some((v) => v !== "all" && v !== "local");
   const order = ["all", "codespace", "container", "ssh", "local"];
-  replaceChildren($("#venues"), order.filter((v) => present.has(v)).map((v) =>
+  replaceChildren($("#venues"), !remote ? [] : order.filter((v) => present.has(v)).map((v) =>
     h("button", {
       class: "fchip" + (state.route.venue === v ? " on" : ""), "aria-pressed": state.route.venue === v ? "true" : "false",
       onclick: () => navigate({ venue: v }, { replace: true }),
     }, v === "all" ? "All" : VENUE_LABEL[v] || v)));
-  const repoChips = repos.size > 1 ? [h("span", { class: "fsep" }), ["all", ...[...repos].sort()].map((r) =>
-    h("button", {
-      class: "fchip" + (state.route.repo === r ? " on" : ""), "aria-pressed": state.route.repo === r ? "true" : "false",
-      onclick: () => navigate({ repo: r }, { replace: true }),
-    }, r === "all" ? "All repos" : r))] : [];
-  replaceChildren($("#repos"), repoChips);
 }
 
 // Board cards are keyed and only rebuilt when their visible content changes,
@@ -437,6 +434,66 @@ function renderBoard() {
 // -- task detail --------------------------------------------------------------
 
 const viewer = new SessionViewer({ api, request });
+// Ended sessions are read back into a second, read-only viewer.
+const archive = new SessionViewer({ api, request });
+const history = new Map();  // session id / "commits:"+task key -> {state, data | detail}
+
+async function loadHistory(key, path) {
+  const hit = history.get(key);
+  if (hit && hit.state !== "error") return hit;
+  const entry = { state: "loading" };
+  history.set(key, entry);
+  try {
+    const r = await request(path);
+    const d = await r.json().catch(() => ({}));
+    Object.assign(entry, r.ok ? { state: "ok", data: d } : { state: "missing", detail: d.detail || String(r.status) });
+  } catch (e) {
+    Object.assign(entry, { state: "error", detail: e.message });
+  }
+  return entry;
+}
+
+function historySection(task) {
+  const w = task.worktree || {};
+  const sid = w.last_session_id;
+  const transcript = h("div", { class: "d-transcript" });
+  const commits = h("div", { class: "d-commits" });
+  const section = h("section", { class: "d-history" },
+    h("h3", { class: "d-h", text: "What happened" }), transcript, commits);
+  const showCommits = async () => {
+    replaceChildren(commits, h("p", { class: "muted small", text: "Loading the branch's commits…" }));
+    const e = await loadHistory("commits:" + task.key, `/api/v1/ui/tasks/${encodeURIComponent(task.key)}/commits`);
+    if (!section.isConnected) return;
+    const list = e.state === "ok" ? e.data.commits || [] : [];
+    replaceChildren(commits, list.length ? [
+      h("p", { class: "muted small", text: `Commits on ${w.branch || "this branch"}` +
+        (e.data.base ? ` (not on ${e.data.base})` : "") }),
+      h("ol", { class: "commit-list" }, list.map((c) =>
+        h("li", null, h("code", { text: c.sha }), h("span", { text: c.subject }),
+          h("span", { class: "muted small", text: ago(c.ts) })))),
+    ] : [h("p", { class: "muted small", text: e.state === "ok" ? "No commits of its own on this branch."
+      : "Couldn\u2019t read the branch's commits." })]);
+  };
+  if (!sid) {
+    replaceChildren(transcript, h("p", { class: "muted", text: w.session_count ? "Its sessions aren\u2019t on record here."
+      : "No Copilot session ran in this worktree; it was worked on from another session." }));
+  } else {
+    replaceChildren(transcript, h("p", { class: "muted small" }, h("span", { class: "spin" }), " Reading the last session…"));
+    loadHistory(sid, `/api/v1/ui/sessions/${encodeURIComponent(sid)}/history`).then((e) => {
+      if (!section.isConnected) return;
+      if (e.state === "ok") {
+        replaceChildren(transcript, archive.el);
+        archive.openArchive({ session_id: sid, truncated_before: e.data.truncated_before }, e.data.events);
+      } else {
+        replaceChildren(transcript, h("div", { class: "d-progress stale" },
+          h("p", { class: "muted", text: "The last session\u2019s transcript isn\u2019t available." }),
+          h("p", { class: "muted small", text: e.detail || "" })));
+      }
+    });
+  }
+  showCommits();
+  return section;
+}
 let detailKey = null;
 let detailSig = "";
 const live = { slots: null, sigs: {} };  // the live-task pane's in-place parts
@@ -558,12 +615,18 @@ function detailHead(task) {
   const editBtn = editable ? h("button", { class: "ghost icon small edit", title: "Rename this task", "aria-label": "Rename",
                                            onclick: edit }, "✎") : null;
   if (editable) titleEl.addEventListener("dblclick", edit);
+  const w = task.worktree || {};
+  const ask = task.live && w.follow_up && w.summary;
+  // The line under the title never repeats a summary shown in full nearby: the
+  // "Waiting on you" note of a live task, or the summary card of an earlier one.
+  const fromSummary = task.fullTitle && w.summary && w.summary.startsWith(task.fullTitle.replace(/[…;.]+$/, ""));
+  const full = task.fullTitle && !(fromSummary && (ask || !task.live)) ? task.fullTitle : "";
   return h("header", { class: "d-head" },
     h("button", { class: "ghost icon", title: "Back to tasks (Esc)", "aria-label": "Back",
                   onclick: () => navigate({ key: null, sid: null }) }, "←"),
     h("div", { class: "d-title" },
       h("div", { class: "d-title-row" }, titleEl, editBtn),
-      task.fullTitle ? h("p", { class: "d-full muted", text: task.fullTitle }) : null,
+      full ? h("p", { class: "d-full muted", text: full }) : null,
       h("div", { class: "d-sub muted small" },
         h("span", { class: "chip c-" + task.bucket }, h("span", { class: "dot" }), BUCKET_LABEL[task.bucket]),
         task.pr ? prChip(task.pr, true) : null,
@@ -591,20 +654,28 @@ function detailProgress(task) {
 }
 
 function detailMilestone(task, p) {
+  const summary = prettyMarker(p.summary);
   if (p.stale) {
     return h("div", { class: "d-progress stale" },
       h("p", { class: "muted small", text: `Last milestone, reported ${ago(p.ts)} — the session has kept working since:` }),
       p.blocker ? h("p", { class: "muted", text: p.blocker }) : null,
-      p.summary ? h("p", { class: "mono small muted", text: p.summary }) : null);
+      summary ? h("p", { class: "muted", text: summary }) : null);
   }
   const monitoring = task.bucket === "monitoring";
   return h("div", { class: "d-progress" + (p.blocker && !monitoring ? " blocked" : monitoring ? " monitoring" : "") },
     monitoring ? h("p", null, h("strong", { text: "Monitoring its PR. " }),
       "The PR's builds are still running; nothing needs you yet.") : null,
     p.blocker ? h("p", null, h("strong", { text: monitoring ? "Latest note: " : "Blocked: " }), p.blocker) : null,
-    p.summary ? h("p", { class: "mono small", text: p.summary }) : null,
-    h("p", { class: "muted small", text: [p.phase && "phase " + p.phase, p.ts && "reported " + ago(p.ts)]
+    summary ? h("p", { text: summary }) : null,
+    h("p", { class: "muted small", text: ["Latest milestone", p.ts && "reported " + ago(p.ts)]
       .filter(Boolean).join(" · ") }));
+}
+
+/** A milestone as a person reads it: `PROGRESS ado-auth=ok` becomes "ado-auth: ok". */
+function prettyMarker(text) {
+  const t = String(text || "").trim().replace(/^[`'"]+|[`'"]+$/g, "");
+  const m = /^([\w.-]+)=(.+)$/.exec(t);
+  return m ? `${m[1]}: ${m[2].replace(/^[`'"]+|[`'"]+$/g, "")}` : t;
 }
 function detailTabs(task, entry) {
   return h("nav", { class: "d-tabs", "aria-label": "Sessions in this task" }, task.sessions.map((x) => {
@@ -661,6 +732,7 @@ function detailEarlier(task) {
   return h("div", { class: "d-body" },
     w.summary ? h("div", { class: "d-progress" }, h("p", { text: w.summary }),
       w.status_note_at ? h("p", { class: "muted small", text: "noted " + ago(parseStamp(w.status_note_at)) }) : null) : null,
+    historySection(task),
     active ? h("section", { class: "d-resume" },
       h("h3", { class: "d-h", text: "Pick this task back up" }),
       h("p", { class: "muted small", text: "Starts a new Copilot session in this worktree. It runs in the " +
@@ -685,7 +757,7 @@ function detailEarlier(task) {
 function row(label, value, copy) {
   if (!value) return null;
   return h("tr", null, h("th", { text: label }),
-    h("td", null, h("code", { text: value }),
+    h("td", null, h("code", { text: value, title: value }),
       copy ? h("button", { class: "ghost small", onclick: (e) => copyText(e.currentTarget, value) }, "Copy") : null));
 }
 
@@ -705,7 +777,8 @@ function detailInfo(task, entry) {
       (task.paired || []).map((p) => row("Paired " + (p.pair_role || "worktree"), p.path, true)),
       row("Repo / branch", [s.repo, s.branch].filter(Boolean).join(" @ ")),
       row("Directory", s.cwd),
-      row("State", [s.status, s.liveness, s.turn_state, s.cli_mode ? "cli-mode" : ""].filter(Boolean).join(" · ")),
+      row("State", [...new Set([s.status, s.liveness, s.turn_state])].filter(Boolean)
+        .concat(s.cli_mode ? ["cli-mode"] : []).join(" · ")),
       row("Driven by", s.driven_by),
       row("Message from a terminal", `agent-bridge send ${s.session_id} "…" --no-wait --steer`, true))),
     dead ? h("button", { class: "danger", onclick: (e) => removeLive(e.currentTarget, s.session_id) },
@@ -830,20 +903,59 @@ function acpSessions(list) {
 
 // -- new task --------------------------------------------------------------------
 
+const MODE_KEY = "agent-bridge-ui-mode:";
+
+/** Repos a task can start in: a bound knowledge repo only ever hosts paired worktrees. */
+function taskProjects() {
+  return state.projects.filter((p) => !(state.projectInfo[p] || {}).knowledge_for);
+}
+
 function defaultProject() {
+  const projects = taskProjects();
   const saved = localStorage.getItem(PROJECT_KEY);
-  if (saved && state.projects.includes(saved)) return saved;
-  const recent = state.tasks.filter((t) => state.projects.includes(t.repo)).sort((a, b) => b.updated - a.updated)[0];
-  return (recent && recent.repo) || state.projects[0] || "";
+  if (saved && projects.includes(saved)) return saved;
+  const recent = state.tasks.filter((t) => projects.includes(t.repo)).sort((a, b) => b.updated - a.updated)[0];
+  return (recent && recent.repo) || projects[0] || "";
 }
 
 function fillProjects() {
   const sel = $("#nt-project");
+  const projects = taskProjects();
   const cur = sel.value || defaultProject();
-  replaceChildren(sel, state.projects.length ? state.projects.map((p) => h("option", { value: p }, p))
+  replaceChildren(sel, projects.length ? projects.map((p) => h("option", { value: p }, p))
     : [h("option", { value: "" }, state.wsLoaded ? "No repos registered" : "Loading repos…")]);
-  sel.value = state.projects.includes(cur) ? cur : defaultProject();
-  sel.disabled = !state.projects.length;
+  sel.value = projects.includes(cur) ? cur : defaultProject();
+  sel.disabled = projects.length < 2;
+  $("#nt-where-hint").textContent = "The repo whose Copilot session runs the task. Work in other repos " +
+    "(a product repo, for example) is reached from that session.";
+  fillModes();
+}
+
+function modesOf(project) {
+  return ((state.projectInfo[project] || {}).modes || []).filter((m) => m && m.id);
+}
+
+function fillModes() {
+  const project = $("#nt-project").value;
+  const modes = modesOf(project);
+  const box = $("#nt-modes");
+  box.hidden = modes.length < 2;
+  const saved = localStorage.getItem(MODE_KEY + project);
+  const chosen = modes.some((m) => m.id === saved) ? saved : (modes[0] || {}).id;
+  replaceChildren($("#nt-mode-list"), modes.map((m) => {
+    const input = h("input", { type: "radio", name: "nt-mode", value: m.id });
+    input.checked = m.id === chosen;
+    return h("label", { class: "mode" }, input,
+      h("span", { class: "mode-text" }, h("strong", { text: m.label }),
+        m.description ? h("span", { class: "muted small", text: m.description }) : null));
+  }));
+}
+
+function chosenMode() {
+  const on = document.querySelector('#nt-mode-list input[name="nt-mode"]:checked');
+  if (on) return on.value;
+  const modes = modesOf($("#nt-project").value);
+  return modes.length ? modes[0].id : "";
 }
 
 function openNewTask() {
@@ -859,19 +971,21 @@ async function startTask() {
   const project = $("#nt-project").value;
   const prompt = $("#nt-prompt").value.trim();
   const title = $("#nt-title").value.trim();
+  const mode = chosenMode();
   const status = $("#nt-status");
-  if (!project) { status.textContent = "Choose a repo."; return; }
+  if (!project) { status.textContent = "Choose where it runs."; return; }
   if (!prompt) { status.textContent = "Describe the task first."; $("#nt-prompt").focus(); return; }
   $("#nt-start").disabled = true;
   status.textContent = "Creating a worktree and starting Copilot — this takes about 20 seconds…";
   try {
     const r = await request("/api/v1/ui/tasks", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project, prompt, title }),
+      body: JSON.stringify({ project, prompt, title, mode }),
     });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(d.detail || `${r.status} ${r.statusText}`);
     localStorage.setItem(PROJECT_KEY, project);
+    if (mode) localStorage.setItem(MODE_KEY + project, mode);
     state.pending[d.worktree_id] = { title, project, prompt, at: Date.now() / 1000 };
     savePending();
     $("#nt-prompt").value = "";
@@ -933,6 +1047,7 @@ function wire() {
   $("#signout").addEventListener("click", () => signOut("Signed out."));
   $("#new").addEventListener("click", openNewTask);
   $("#nt-cancel").addEventListener("click", () => $("#newtask").close());
+  $("#nt-project").addEventListener("change", fillModes);
   $("#nt-start").addEventListener("click", startTask);
   $("#nt-prompt").addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); startTask(); }
