@@ -4,17 +4,34 @@ Back to the [Marketplace-Scoped Installations effort](README.md).
 
 ## Purpose
 
-Phase 2 made agent-facing calls payload-local and made global project commands
-attributable. The remaining `global-plugin-binstub` findings are not one
-mechanical cleanup: they mix payload-owned calls that can move now, durable
-external launch records that need installation context, legacy wrapper
-publication that can retire only after migration, and descriptive text that is
-not itself a launcher.
+**Scope corrected 2026-09-27** (operator directive, recorded in the main
+README's Journal): this inventory's completion criterion is **not** removing
+every plugin's own global-binstub placement. Placement retires only on a host
+that actually configures a marketplace-cell install; a legacy host keeps it
+permanently, by design. The real gate is **universal consumer-side
+resolution**: every call that crosses a plugin boundary, or runs outside an
+LLM-mediated skill turn, must resolve its target through the already-built
+Phase 3 `runtimeRoot` resolver
+([install-contract.md](../../../docs/install-contract.md#resolver-result-and-precedence))
+or the session command catalog, and must treat a legacy-fallback `runtimeRoot`
+exactly like a marketplace-cell root — never special-cased.
 
-This inventory preserves the literal Phase 2 completion criterion: generic
-global plugin wrappers do not count as retired while any real external caller
-still depends on them. The 86 findings are the guard-visible baseline, not proof
-that the guard currently sees every caller.
+Every finding below now sorts into one of two dispositions:
+
+- **Own-payload placement (accepted, conditional on marketplace-cell — not
+  Phase 6 retirement work)**: a plugin's own installer declaring where *it*
+  writes *its own* global binstub/PATH guidance, or `agent-worktrees`'s
+  permanent project-command surface. This is most of the "Generic wrapper
+  publication" family below.
+- **Cross-boundary consumption (genuine remaining work)**: a caller invoking a
+  *different* plugin's command, or any `agent-*` invocation outside an
+  LLM-mediated skill turn (installers, hooks, generated non-interactive
+  helpers like `vault-askpass`, remote/transport boundaries). These must
+  convert to the `runtimeRoot` resolver or session catalog.
+
+The reclassification of all 70 current findings against this two-way split is
+only partially done (see the family table below); finishing it is the next
+concrete slice, not another guess-based sample.
 
 ## Baseline (historical snapshot, superseded by the 2026-09-25 re-audit below)
 
@@ -145,17 +162,28 @@ confirming two things the prior partial audits could only guess at:
 - **`copilot-extensions-harness` dropped to 0** (was 3) — fully converted,
   drops out of the per-plugin table entirely.
 
-| Contract family (2026-09-27, clean-checkout re-derivation) | Findings | Phase | Plugins |
-|-----------------|---------:|-------|---------|
-| Generic wrapper publication and plugin-specific PATH guidance | 45 | Phase 6 retirement | all 13 plugins below except `agent-worktrees`'s own project-command lines |
-| Mixed project-command directory and PATH use | 11 | Permanent project surface plus Phase 6 generic cleanup | `agent-worktrees` only |
-| Operator, bootstrap, and nudge launchers | 4 | Phase 3 contract, Phase 6 fallback retirement | `agent-machines` (`bootstrap-check.{sh,ps1}`, 2), `agent-worktrees` (`register-nudge.{sh,ps1}`, 2) |
-| Readiness legacy fallback | 3 | Phase 6 retirement | `agent-codespaces` (`readiness-context.{sh,ps1}`, 3) |
-| `payload-invocation.json` legacy-footprint declarations | 2 | Accepted (Phase 6 retirement, not Phase 2 gate) | `agent-index` (line 22, already accepted precedent), `agent-machines` (line 20, confirmed this pass — same shape, no code change needed) |
-| Remote transport selection | 2 | Phase 3 (`agent-index` done; `agent-ssh` remains) | `agent-ssh` `dtssh` `install-{client,host}.sh` |
-| Credential and askpass integration | 2 | Phase 3 contract, Phase 6 fallback retirement | `agent-vault` `install.sh` (askpash exec + `SUDO_ASKPASS` guidance) |
-| Descriptive skills, help, and generated package metadata | 1 | Cleanup with the owning slice | `agent-vault-setup/SKILL.md` |
-| **Total** | **70** | | |
+| Contract family (2026-09-27, clean-checkout re-derivation) | Findings | Phase | Disposition under the corrected framework | Plugins |
+|-----------------|---------:|-------|---------|---------|
+| Generic wrapper publication and plugin-specific PATH guidance | 45 | n/a | **Own-payload placement — accepted, conditional on marketplace-cell.** Each plugin's own installer declaring where *it* writes *its own* global binstub/PATH. Not Phase 6 retirement work; not this item's gate. | all 13 plugins below except `agent-worktrees`'s own project-command lines |
+| Mixed project-command directory and PATH use | 11 | n/a | **Own-payload placement — permanent, accepted.** `agent-worktrees`'s attributable project-command surface. | `agent-worktrees` only |
+| Operator, bootstrap, and nudge launchers | 4 | Cross-boundary — needs `runtimeRoot`/session-catalog conversion | `agent-machines`'s `bootstrap-check.{sh,ps1}` probes its own legacy footprint (leans own-payload, needs a closer read) and `agent-worktrees`'s `register-nudge.{sh,ps1}` invokes a target session from a hook, outside any LLM turn (cross-boundary) — **not yet split apart; treat as needing verification, not settled.** | `agent-machines` (2), `agent-worktrees` (2) |
+| Readiness legacy fallback | 3 | Cross-boundary — needs verification | `agent-codespaces` probes the legacy binstub's presence from a hook context; likely cross-boundary (non-session) but not yet confirmed against the corrected framework. | `agent-codespaces` (`readiness-context.{sh,ps1}`, 3) |
+| `payload-invocation.json` legacy-footprint declarations | 2 | n/a | **Own-payload placement — accepted, no code change.** Declares each plugin's own historical legacy paths; metadata, not a live call. | `agent-index` (line 22), `agent-machines` (line 20) |
+| Remote transport selection | 2 | Cross-boundary — needs conversion | `agent-ssh` `dtssh` install scripts export a remote PATH across a machine/shell boundary — the clearest cross-boundary case in this table; `agent-index`'s equivalent already converted (`allow remote-management`). | `agent-ssh` `dtssh` `install-{client,host}.sh` |
+| Credential and askpass integration | 2 | Cross-boundary — needs conversion | The generated `vault-askpass` helper runs non-interactively via `sudo -A`, entirely outside any Copilot session — must resolve `runtimeRoot` rather than hardcode `$HOME/.local/bin/agent-vault`. | `agent-vault` `install.sh` (askpash exec + `SUDO_ASKPASS` guidance) |
+| Descriptive skills, help, and generated package metadata | 1 | n/a | Documentation only; revise with the owning slice, not a separate gate. | `agent-vault-setup/SKILL.md` |
+| **Total** | **70** | | | |
+
+**Disposition summary**: of 70 findings, **58 are own-payload placement**
+(45 + 11 + 2), already correctly out of scope for this item under the
+corrected framework — no further action needed on those. The remaining
+**12** (operator/bootstrap/nudge 4, readiness-legacy-fallback 3,
+remote-transport 2, credential-askpass 2, descriptive 1) are the actual
+candidate cross-boundary conversion set, and only the remote-transport and
+credential-askpass findings (4 of the 12) are confirmed cross-boundary with
+confidence this pass — the other 8 need a closer per-line read before
+converting anything, to avoid mis-converting a genuinely own-payload probe.
+
 
 **Current per-plugin counts (2026-09-27, clean checkout, 70 total):**
 
@@ -367,7 +395,21 @@ forms is a prerequisite for making it blocking in Phase 6.
 
 ## Completion rule
 
+**Corrected 2026-09-27** (supersedes the wording below, kept for history):
+Phase 2 issue #1103 and this item's checkbox stay open until every
+cross-boundary consumer (a caller invoking a *different* plugin's command, or
+any `agent-*` invocation outside an LLM-mediated skill turn) resolves its
+target through the `runtimeRoot` resolver or session command catalog, treating
+a legacy-fallback root exactly like a marketplace-cell root. Own-payload
+global-binstub *placement* is explicitly **not** part of this gate — it is
+accepted, permanent on non-marketplace-cell hosts, and never itself "removed."
+
+<details>
+<summary>Original wording (historical, no longer the completion criterion)</summary>
+
 Phase 2 issue #1103 remains open and the effort checkbox remains unchecked until
 the generic global wrappers can be removed without stranding any service,
 provider, MCP, remote, credential, askpass, deployment, generated, or operator
 caller. Finishing the six immediate findings is progress, not closure.
+
+</details>

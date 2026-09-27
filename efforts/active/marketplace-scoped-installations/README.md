@@ -148,15 +148,29 @@ because they provide tools or services.
   canonical templates.
 - [x] Add session-start command-catalog context so skills and agents receive the
   exact payload-owned invocation path; convert operative bare command examples.
-- [ ] Stop installing generic `agent-*` commands into `~/.local/bin`; retained
-  service, provider, remote, scheduled, startup, and deployment boundaries still
-  require attributable external-launch contracts before their compatibility
-  wrappers can be retired. The
-  [Phase 2 launcher contract inventory](phase-2-launcher-contracts.md) accounts
-  for the 86 guard-visible findings at its 2026-08-26 baseline (83 as of the
-  2026-09-25 re-audit, with a full family re-derivation still pending),
-  records known guard-invisible callers, and
-  maps their Phase 2, Phase 3, Phase 4, and Phase 6 dependencies.
+- [ ] **Scope corrected 2026-09-27 (operator directive — see Journal):** this
+  item is **not** "stop installing generic `agent-*` commands into
+  `~/.local/bin`" unconditionally. A plugin's own global-binstub *placement*
+  retires only for a host that actually configures a marketplace-cell
+  install; a legacy/non-cell host keeps it, permanently. The real gate is
+  **universal consumer-side resolution**: every caller that invokes a
+  *different* plugin's command, or invokes any `agent-*` command outside an
+  LLM-mediated skill turn (installers, hooks, cross-plugin script calls,
+  generated helpers like `vault-askpass` that run non-interactively), must
+  resolve the target through the already-built Phase 3 mechanisms —
+  the [installation-resolution `runtimeRoot` resolver](../../../docs/install-contract.md#resolver-result-and-precedence)
+  for non-session callers, and the session command catalog
+  (`emit-command-catalog.{sh,ps1}` → `write_session_guidance.py`) for
+  LLM-mediated skill turns — **and must treat the legacy-fallback
+  `runtimeRoot` exactly like a marketplace-cell root, never special-cased.**
+  Own-payload placement (a plugin's own installer declaring where *it*
+  writes *its own* global binstub, and `agent-worktrees`'s permanent
+  project-command surface) is accepted and out of this item's scope. The
+  [Phase 2 launcher contract inventory](phase-2-launcher-contracts.md) tracks
+  which of the current 70 guard-visible findings are accepted own-placement
+  vs. genuine cross-boundary consumption still needing conversion under this
+  corrected framework — that reclassification is itself the next actionable
+  slice, only partially done so far (see the doc's own 2026-09-27 entry).
   - [x] Preserve complete default-legacy fallback coverage while migration is
     incomplete: every runtime `agent-*` stamp publishes every declared payload
     command, and agent-logger's multi-command family delegates through durable
@@ -329,6 +343,14 @@ because they provide tools or services.
 - [x] Migrate or retire legacy services and global generic binstubs only after
   ownership is proven and the new cell passes health checks.
 - [ ] Turn the report-only guards blocking after all runtime plugins conform.
+  **Scope corrected 2026-09-27**: "conform" means every cross-boundary
+  consumer resolves through `runtimeRoot`/session-catalog, not that
+  own-payload global-binstub placement lines disappear — those are permanent
+  on non-marketplace-cell hosts (see the corrected Phase 2 item above and
+  [phase-2-launcher-contracts.md](phase-2-launcher-contracts.md)). The guard
+  itself will need an explicit, durable allowance for accepted own-payload
+  placement patterns before it can ever go blocking, since those lines
+  legitimately never disappear — not yet added.
 - [x] Document rollback and retention of legacy state and inactive cells.
 
 ### Phase 7 — Reconcile deferred backlog
@@ -421,6 +443,54 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 [`phase-6-lifecycle.md`](phase-6-lifecycle.md).
 
 ## Journal
+
+### 2026-09-27 — Operator scope correction: Phase 2/6 completion criterion is universal consumer-side resolution, not global-binstub removal
+
+- **Operator directive (verbatim intent, this session)**: "we're only going
+  to retire 'global binstub' *placement* if the host machine configures
+  marketplace-cell install. But what we will do is prepare all consumption
+  for that eventuality. All skills and tools which call into `agent-*`
+  commands will need to resolve the marketplace path based on the active
+  session's provided information (agent-* plugins's sessionStart hooks
+  write the note to session-state, other consumers pick it up from there),
+  and then use the marketplace-install root as their binstub base path.
+  When marketplace-cell is not enabled, the pointers will be to the
+  user-global install, but all callers will still treat it like it's the
+  marketplace-cell."
+- Mapped this onto mechanisms already built in Phase 3, confirmed with the
+  operator before writing it in as canonical: the installation-resolution
+  `runtimeRoot` resolver
+  ([install-contract.md](../../../docs/install-contract.md#resolver-result-and-precedence))
+  for non-session callers, and the session command catalog
+  (`emit-command-catalog.{sh,ps1}` → `write_session_guidance.py`) for
+  LLM-mediated skill turns. Both already exist; neither needed inventing.
+- **This changes the Phase 2/Phase 6 completion criterion materially**:
+  own-payload global-binstub placement (a plugin's own installer declaring
+  where *it* writes *its own* binstub) is now explicitly accepted and
+  permanent on non-marketplace-cell hosts — **not** something Phase 6
+  retires. The actual remaining gate is universal cross-boundary consumer
+  resolution: any call crossing a plugin boundary, or running outside an
+  LLM-mediated skill turn, must resolve via `runtimeRoot`/session-catalog
+  and treat the legacy-fallback root exactly like a marketplace-cell root.
+- Reclassified the Phase 2 launcher-contract inventory's 70 findings against
+  this corrected two-way split (own-payload placement vs. cross-boundary
+  consumption) in
+  [phase-2-launcher-contracts.md](phase-2-launcher-contracts.md): **58 of 70
+  are own-payload placement, now out of scope entirely.** Of the remaining
+  12 candidate cross-boundary findings, only 4 (remote-transport 2,
+  credential-askpass 2) are confirmed cross-boundary with confidence this
+  pass; the other 8 (operator/bootstrap/nudge, readiness-legacy-fallback)
+  need a closer per-line read before converting anything, flagged as such
+  rather than guessed.
+- Also corrected the Phase 6 blocking-guard item: the guard itself needs a
+  durable, explicit allowance for accepted own-payload placement before it
+  can ever go blocking, since those lines are now permanent by design — not
+  yet added.
+- **No code converted this pass** — this was a scope/documentation
+  correction, upstream of any further conversion work, to prevent the next
+  session from converting (or worse, removing) own-payload placement lines
+  that were never meant to go away.
+- Verified: `check-docs-consistency.py` clean (doc-only change).
 
 ### 2026-09-27 — Phase 2 launcher-contract inventory: full family re-derivation (70 findings, all classified); 3 stale entries corrected
 
