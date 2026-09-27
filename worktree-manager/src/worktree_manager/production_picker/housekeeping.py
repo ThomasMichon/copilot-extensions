@@ -32,7 +32,6 @@ _MANAGER_OWNED_LAUNCHER_MARKERS = (
     "worktree-manager/bin/launch-session",
     r"worktree-manager\bin\pane-wrapper",
     "worktree-manager/bin/pane-wrapper",
-    "worktree_manager",
 )
 
 
@@ -69,7 +68,7 @@ def _status_monitor_runtime():
 
 
 def _output_ok(message: str) -> None:
-    print(message)
+    print(f"  ✓ {message}")
 
 
 def _tracking_path() -> Path:
