@@ -156,11 +156,10 @@ def _default_nudge(worktree: str, machine: str | None, task: dict) -> bool:
     tid = task.get("id")
     goal = task.get("goal") or task.get("title") or "your dispatched task"
     message = (
-        f"[agent-dispatch] You appear stalled on task {tid} -- no progress "
-        f"recorded recently. Goal: {goal}. Continue toward it and record a "
-        f"progress beat (agent-dispatch progress {tid} --phase <p> --summary "
-        f"<line>), or record a blocker (--blocker <why>); if it is already done, "
-        f"complete it; if it is not yours, yield it."
+        f"[agent-dispatch] Task {tid} has not recorded progress recently while "
+        f"your session is still live. Goal: {goal}. Re-read it, continue if it "
+        f"is still active, record a progress beat or blocker, and close it out "
+        f"honestly if it is already done or no longer yours."
     )
     return bridge.send_nudge(worktree, message)
 

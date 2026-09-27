@@ -626,7 +626,9 @@ def test_resume_steered_owner_queues_work_prompt(monkeypatch):
     ]
     assert cmd[8:10] == ["--expected-session-id", "session-42"]
     assert cmd[10:] == ["worktree-1", "--prompt-file", "-"]
+    assert "Task task-42 received steering while you were working." in calls["kwargs"]["input"]
     assert "agent-dispatch steer take task-42 --all" in calls["kwargs"]["input"]
+    assert "re-read the task" in calls["kwargs"]["input"]
 
 
 def test_resume_steered_headless_owner_uses_exact_session(monkeypatch):

@@ -1,0 +1,9 @@
+{
+  "comment": "Shrink agent-dispatch live nudge messages to event descriptors",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

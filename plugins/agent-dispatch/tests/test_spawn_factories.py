@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from agent_dispatch.spawn_factories import (
     SpawnPreparationRetained,
+    _default_nudge,
     _parse_fleet_body_handle,
     _parse_local_body_handle,
     _parse_script_body_handle,
@@ -86,6 +87,27 @@ def test_make_label_routed_spawn_is_directly_importable():
 def test_make_redrive_sender_is_directly_importable():
     redrive = make_redrive_sender()
     assert callable(redrive)
+
+
+def test_default_nudge_is_a_short_event_descriptor(monkeypatch):
+    sent = {}
+
+    monkeypatch.setattr(
+        "agent_dispatch.bridge.send_nudge",
+        lambda worktree, message: sent.update(worktree=worktree, message=message)
+        or True,
+    )
+
+    assert _default_nudge(
+        "wt-1",
+        None,
+        {"id": "task-7", "goal": "Ship the fix"},
+    )
+    assert sent["worktree"] == "wt-1"
+    assert "Task task-7 has not recorded progress recently" in sent["message"]
+    assert "Goal: Ship the fix." in sent["message"]
+    assert "record a progress beat or blocker" in sent["message"]
+    assert "close it out honestly" in sent["message"]
 
 
 def test_spawn_preparation_retained_is_directly_importable():
