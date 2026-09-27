@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 PLUGIN = Path(__file__).resolve().parents[1]
 _INSTALL_SH = PLUGIN / "scripts" / "install.sh"
@@ -238,32 +239,26 @@ def test_write_units_sets_repo_config_env_when_config_repo_adopted(
     unit_text = (unit_dir / "agent-logger-sync.service").read_text(encoding="utf-8")
     expected = f'Environment="AGENT_LOGGER_REPO_CONFIG={repo_dir}/.agent-logger.yaml"'
     assert expected in unit_text
-    # The scheduled unit's own process never inherits the installer's
-    # AGENT_WORKTREES_REPOS_YAML / AGENT_LOGGER_TRUST_REPO_CONFIG context,
-    # so find_repo_config() at runtime must be able to re-derive the SAME
-    # trust verdict from the unit's own environment alone -- see
-    # test_write_units_generated_env_resolves_under_clean_environment for
-    # the actual end-to-end proof.
-    expected_trust = f'Environment="AGENT_LOGGER_TRUST_REPO_CONFIG={repo_dir}"'
-    assert expected_trust in unit_text
 
 
 @pytest.mark.skipif(
     _BASH is None or os.name == "nt",
     reason="a POSIX bash environment is not available",
 )
-@pytest.mark.no_autotrust
 def test_write_units_generated_env_resolves_under_clean_environment(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path,
 ) -> None:
     """The generated unit's own Environment= lines, applied to a process
-    with NONE of the installer's own context (no AGENT_WORKTREES_REPOS_YAML,
-    no ambient AGENT_LOGGER_TRUST_REPO_CONFIG), must be sufficient for
+    with NONE of the installer's own AGENT_WORKTREES_REPOS_YAML context (a
+    non-default registry location, in this test), must be sufficient for
     find_repo_config() to resolve the same file the installer validated --
     the actual failure mode a scheduled systemd/task run hits: it inherits
     only what install.sh/install.ps1 wrote into the unit, never the
-    installer process's own environment."""
-    from agent_logger import config as agent_logger_config
+    installer process's own environment. Uses a REAL git checkout with a
+    registered remote (no AGENT_LOGGER_TRUST_REPO_CONFIG override anywhere)
+    so trust is re-derived honestly from live git remotes + the propagated
+    registry file, never bypassed."""
+    from .conftest import init_git_repo
 
     install_dir = tmp_path / "install"
     unit_dir = tmp_path / "units"
@@ -272,8 +267,23 @@ def test_write_units_generated_env_resolves_under_clean_environment(
     (install_dir / "config.yaml").write_text("config_repo: demo\n", encoding="utf-8")
 
     repo_dir = tmp_path / "demo-repo"
-    repo_dir.mkdir()
+    init_git_repo(repo_dir, remote="https://example.test/example-owner/demo.git", branch="main")
     (repo_dir / ".agent-logger.yaml").write_text("schema_version: 3\n", encoding="utf-8")
+
+    registry = tmp_path / "custom-repos.yaml"
+    registry.write_text(
+        yaml.safe_dump(
+            {
+                "repos": {
+                    "demo": {
+                        "remote": "https://example.test/example-owner/demo.git",
+                        "default_branch": "main",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
 
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
@@ -300,13 +310,13 @@ def test_write_units_generated_env_resolves_under_clean_environment(
         encoding="utf-8",
     )
     harness.chmod(0o755)
-    # AGENT_LOGGER_TRUST_REPO_CONFIG here is deliberately only the
+    # The custom AGENT_WORKTREES_REPOS_YAML here is deliberately only the
     # INSTALLER process's context -- the whole point is to prove the
-    # generated unit doesn't need it again at runtime.
+    # generated unit carries it forward on its own.
     install_env = {
         **os.environ,
         "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
-        "AGENT_LOGGER_TRUST_REPO_CONFIG": str(repo_dir),
+        "AGENT_WORKTREES_REPOS_YAML": str(registry),
     }
     subprocess.run(
         [_BASH, str(harness)],
@@ -321,21 +331,36 @@ def test_write_units_generated_env_resolves_under_clean_environment(
     repo_config_match = re.search(
         r'Environment="AGENT_LOGGER_REPO_CONFIG=(.*)"$', unit_text, re.MULTILINE
     )
-    trust_match = re.search(
-        r'Environment="AGENT_LOGGER_TRUST_REPO_CONFIG=(.*)"$', unit_text, re.MULTILINE
+    repos_yaml_match = re.search(
+        r'Environment="AGENT_WORKTREES_REPOS_YAML=(.*)"$', unit_text, re.MULTILINE
     )
     assert repo_config_match is not None
-    assert trust_match is not None
+    assert repos_yaml_match is not None
+    assert repos_yaml_match.group(1) == str(registry)
 
-    # A clean environment: no AGENT_WORKTREES_REPOS_YAML, no ambient trust
-    # override beyond what the unit itself carries.
-    monkeypatch.delenv("AGENT_WORKTREES_REPOS_YAML", raising=False)
-    monkeypatch.setenv("AGENT_LOGGER_REPO_CONFIG", repo_config_match.group(1))
-    monkeypatch.setenv("AGENT_LOGGER_TRUST_REPO_CONFIG", trust_match.group(1))
+    # A clean environment: no ambient AGENT_LOGGER_TRUST_REPO_CONFIG
+    # anywhere, no default-location registry file, no inherited process
+    # environment at all -- ONLY the unit's own AGENT_LOGGER_REPO_CONFIG
+    # and the propagated AGENT_WORKTREES_REPOS_YAML.
+    proc = subprocess.run(
+        [
+            str(_venv_python_path(_real_venv_with_python())),
+            "-c",
+            "from agent_logger.config import find_repo_config; print(find_repo_config())",
+        ],
+        capture_output=True,
+        text=True,
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "AGENT_LOGGER_REPO_CONFIG": repo_config_match.group(1),
+            "AGENT_WORKTREES_REPOS_YAML": repos_yaml_match.group(1),
+        },
+        cwd=str(tmp_path),
+        timeout=20,
+        check=True,
+    )
 
-    resolved = agent_logger_config.find_repo_config()
-
-    assert resolved == repo_dir / ".agent-logger.yaml"
+    assert proc.stdout.strip() == str(repo_dir / ".agent-logger.yaml")
 
 
 @pytest.mark.skipif(
@@ -784,10 +809,6 @@ Write-SyncTaskLauncher
     launcher_text = task_launcher.read_text(encoding="utf-8")
     assert "AGENT_LOGGER_REPO_CONFIG" in launcher_text
     assert str(repo_dir) in launcher_text
-    # The Scheduled Task's own process never inherits the installer's own
-    # AGENT_WORKTREES_REPOS_YAML / override context, so the launcher must
-    # also carry an explicit trust grant for this resolved path.
-    assert "AGENT_LOGGER_TRUST_REPO_CONFIG" in launcher_text
 
 
 @pytest.mark.parametrize("shell", ["powershell.exe", "pwsh"])

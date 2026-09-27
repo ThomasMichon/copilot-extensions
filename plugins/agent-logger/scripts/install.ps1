@@ -1080,13 +1080,21 @@ sys.exit(1)
                     continue
                 }
             }
-            # Returned alongside $dir (the resolved, already-trusted
-            # checkout root) -- the scheduled task's process re-runs
-            # repo_config_is_trusted() independently at every run with
-            # none of the installer's own AGENT_WORKTREES_REPOS_YAML /
-            # override context, so the caller must also carry an explicit
-            # trust grant for THIS resolved path into the launcher.
-            return [PSCustomObject]@{ ConfigPath = $configPath; TrustDir = $dir }
+            # Returned alongside the config path: AGENT_WORKTREES_REPOS_YAML
+            # (if the installer's own process has it set) so the caller can
+            # carry forward WHICH registry file to re-check against --
+            # never a trust bypass. The scheduled task's process doesn't
+            # inherit the installer's own env, so without this a non-default
+            # registry location would make the runtime
+            # repo_config_is_trusted() re-check (still driven by the LIVE
+            # git remotes/default branch, never skipped) look in the wrong
+            # place and reject a genuinely registered repo. The default
+            # registry location needs no propagation -- both processes read
+            # the same well-known on-disk path already.
+            return [PSCustomObject]@{
+                ConfigPath = $configPath
+                ReposYaml = $env:AGENT_WORKTREES_REPOS_YAML
+            }
         }
         return $null
     } catch {
@@ -1104,9 +1112,11 @@ function Write-SyncTaskLauncher {
     $repoConfigLine = ''
     if ($repoConfig) {
         $escapedConfigPath = $repoConfig.ConfigPath -replace "'", "''"
-        $escapedTrustDir = $repoConfig.TrustDir -replace "'", "''"
-        $repoConfigLine = "`$env:AGENT_LOGGER_REPO_CONFIG = '$escapedConfigPath'`n" +
-            "`$env:AGENT_LOGGER_TRUST_REPO_CONFIG = '$escapedTrustDir'"
+        $repoConfigLine = "`$env:AGENT_LOGGER_REPO_CONFIG = '$escapedConfigPath'"
+        if ($repoConfig.ReposYaml) {
+            $escapedReposYaml = $repoConfig.ReposYaml -replace "'", "''"
+            $repoConfigLine += "`n`$env:AGENT_WORKTREES_REPOS_YAML = '$escapedReposYaml'"
+        }
     }
     $launcherContent = @'
 $ErrorActionPreference = 'Stop'

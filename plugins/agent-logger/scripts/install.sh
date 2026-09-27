@@ -1046,7 +1046,6 @@ PYEOF
         # only manipulates a string, importing no plugin code, so there is
         # nothing for an ambient PYTHONPATH/CWD package to shadow.
         local repo_config_value=""
-        local trust_config_value=""
         if [ -x "${VENV}/bin/python" ]; then
           repo_config_value="$("${VENV}/bin/python" - "AGENT_LOGGER_REPO_CONFIG=${candidate_path}" <<'PYEOF' 2>/dev/null
 import sys
@@ -1060,18 +1059,28 @@ value = value.replace("\r", "\\r")
 sys.stdout.write(value)
 PYEOF
           )"
-          # The install-time trust decision (above) may have depended on
-          # this machine's own AGENT_WORKTREES_REPOS_YAML / registry state
-          # or an operator AGENT_LOGGER_TRUST_REPO_CONFIG override -- none
-          # of which the scheduled unit inherits. Without also carrying
-          # forward an explicit trust grant for THIS EXACT resolved path,
-          # find_repo_config() re-runs repo_config_is_trusted() at every
-          # scheduled run with none of that context, silently dropping the
-          # config again despite the installer having just validated it.
-          # The override is scoped to a single path (never a wildcard), so
-          # this can only ever narrow a rejection into an acceptance for
-          # the one checkout this installer itself just approved.
-          trust_config_value="$("${VENV}/bin/python" - "AGENT_LOGGER_TRUST_REPO_CONFIG=${config_repo_dir}" <<'PYEOF' 2>/dev/null
+        fi
+        if [ -z "${repo_config_value}" ]; then
+          continue
+        fi
+        repo_config_env="Environment=\"${repo_config_value}\""
+        # Preserve REGISTRY LOCATION context, never a trust bypass: the
+        # scheduled unit doesn't inherit the installer process's own
+        # AGENT_WORKTREES_REPOS_YAML, so if the operator pointed this
+        # install at a non-default registry file, the runtime
+        # repo_config_is_trusted() re-check (every scheduled run, from the
+        # checkout's LIVE git remotes/default branch -- never bypassed
+        # here) would look in the wrong place and reject a genuinely
+        # registered repo. This is safe to carry forward unconditionally:
+        # unlike an AGENT_LOGGER_TRUST_REPO_CONFIG override, it never
+        # short-circuits the remote/default-branch match itself, only
+        # which registry file that match is read from. The default
+        # registry location needs no propagation -- both processes read
+        # the same well-known on-disk path already.
+        if [ -n "${AGENT_WORKTREES_REPOS_YAML:-}" ]; then
+          local repos_yaml_value=""
+          if [ -x "${VENV}/bin/python" ]; then
+            repos_yaml_value="$("${VENV}/bin/python" - "AGENT_WORKTREES_REPOS_YAML=${AGENT_WORKTREES_REPOS_YAML}" <<'PYEOF' 2>/dev/null
 import sys
 value = sys.argv[1]
 value = value.replace("\\", "\\\\")
@@ -1082,13 +1091,13 @@ value = value.replace("\n", "\\n")
 value = value.replace("\r", "\\r")
 sys.stdout.write(value)
 PYEOF
-          )"
+            )"
+          fi
+          if [ -n "${repos_yaml_value}" ]; then
+            repo_config_env="${repo_config_env}
+Environment=\"${repos_yaml_value}\""
+          fi
         fi
-        if [ -z "${repo_config_value}" ] || [ -z "${trust_config_value}" ]; then
-          continue
-        fi
-        repo_config_env="Environment=\"${repo_config_value}\"
-Environment=\"${trust_config_value}\""
         break
       done
     fi
