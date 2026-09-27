@@ -363,6 +363,18 @@ narrow, single-worktree `--force` exception -- the policy above tells you
 *what* to do; that reference has the *exact commands* so you don't improvise
 syntax.
 
+**Investigating a whole backlog of worktrees stuck `active` with no clear
+owner** (e.g. after a mux/daemon crash left status caches stale, or a
+standing audit) is a different task from resolving one known-dirty
+worktree -- read
+[references/fleet-sweep.md](references/fleet-sweep.md) for the full
+procedure: baseline health checks, releasing the claims-ledger backlog
+first (mechanical and safe), and -- critically -- verifying each session's
+actual *content* (directly for small sessions, via the `session-rampup`
+sub-agent for large ones) before trusting a clean git tree and an empty
+claims ledger to mean the work is done. Git-clean and claims-clear only
+prove nothing was lost; they don't prove the story resolved.
+
 ## Worktree States
 
 | Status | Meaning |
@@ -434,5 +446,6 @@ Copilot CLI session
 - [references/pr-attribution.md](references/pr-attribution.md) -- identifying a PR's source worktree from the marker (reviewer/maintainer perspective, not the author's)
 - [references/obligations.md](references/obligations.md) -- finalize's outbound-resource obligation gate
 - [references/cleanup-details.md](references/cleanup-details.md) -- per-worktree dirty resolution and cleanup safety guarantees
+- [references/fleet-sweep.md](references/fleet-sweep.md) -- investigating a fleet-wide backlog of stale/`active` worktrees (claims release + session-content verification)
 - [references/leases.md](references/leases.md) -- the resource-lease primitive
 - [references/reference.md](references/reference.md) -- payload-command resolution, cross-machine inspection, finalization merge mechanics, session detection, titles
