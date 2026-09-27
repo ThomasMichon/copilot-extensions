@@ -56,15 +56,71 @@ def _sandbox_env(tmp_path: Path, *, extra: dict[str, str] | None = None) -> dict
     return env
 
 
+def _assert_binstub_resolves_marker(binstub: Path, env: dict[str, str], tmp_path: Path) -> None:
+    """Invoke the real generated binstub and prove it resolves `payload-dir`
+    into genuine (slow) provisioning rather than the fast ":_noinst" exit-127
+    path -- the exact regression this two-stage split exists to avoid.
+
+    Real self-provisioning can run for 30-120s and shells out to further
+    processes (pwsh -File init.ps1 provision), so this deliberately does NOT
+    wait for it to finish: it polls stderr for either the "cannot
+    self-provision" (bad) or "provisioning on first use" (good, marker
+    resolved) line for a few seconds, then kills the whole process tree via
+    `taskkill /T /F` (a bare `Popen.terminate()`/`subprocess.run(timeout=...)`
+    only signals the top-level `cmd.exe`, leaving a nested `pwsh` running).
+    """
+    import time
+
+    proc = subprocess.Popen(
+        [str(binstub)], env=env, cwd=tmp_path,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    saw_noinst = False
+    saw_provisioning = False
+    try:
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            line = proc.stderr.readline()
+            if line:
+                if "cannot self-provision" in line:
+                    saw_noinst = True
+                    break
+                if "provisioning on first use" in line:
+                    saw_provisioning = True
+                    break
+            elif proc.poll() is not None:
+                break
+        if proc.poll() is not None and not saw_noinst and not saw_provisioning:
+            # Exited fast without either signature line -- only acceptable if
+            # it's a genuinely different (non-127) failure, e.g. AGENT_MACHINES
+            # env quirks in the sandbox; the 127/no-installer signature is the
+            # one regression this test must catch.
+            assert proc.returncode != 127, (
+                "binstub exited 127 without the expected diagnostic line"
+            )
+    finally:
+        subprocess.run(
+            ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+            capture_output=True, text=True,
+        )
+        proc.wait(timeout=15)
+    assert not saw_noinst, "binstub hit the fast exit-127 self-provision-missing path"
+
+
 @pytest.mark.skipif(not WINDOWS_HOSTS, reason="Windows PowerShell required")
 @pytest.mark.parametrize("host", WINDOWS_HOSTS, ids=lambda h: h.stem)
 def test_windows_stamp_binstub_leaves_a_usable_payload_dir_marker(tmp_path, host):
     """A first-turn invocation right after `stamp-binstub` must not 127."""
-    install_dir = tmp_path / "install"
     env = _sandbox_env(tmp_path)
+    # No -InstallDir override here: the generated .cmd hardcodes
+    # `_ROOT=%USERPROFILE%\.agent-machines` (matching bootstrap-check.ps1's
+    # own real hook invocation, which never passes -InstallDir either), so
+    # the install dir under test must be the same default the binstub reads
+    # from, not an arbitrary one.
+    install_dir = tmp_path / "userprofile" / ".agent-machines"
     result = subprocess.run(
         [str(host), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(INIT_PS1),
-         "-Action", "stamp-binstub", "-InstallDir", str(install_dir)],
+         "-Action", "stamp-binstub"],
         env=env, cwd=tmp_path, capture_output=True, text=True, timeout=60,
     )
     assert result.returncode == 0, result.stderr
@@ -80,6 +136,40 @@ def test_windows_stamp_binstub_leaves_a_usable_payload_dir_marker(tmp_path, host
 
     binstub = tmp_path / "userprofile" / ".local" / "bin" / "agent-machines.cmd"
     assert binstub.is_file()
+
+    # Review finding (round 4): the marker-file check above proves the marker
+    # is *readable*, but never proved the generated .cmd can actually consume
+    # it without hitting the fast ":_noinst" exit-127 path. Invoke the real
+    # binstub and confirm it does.
+    _assert_binstub_resolves_marker(binstub, env, tmp_path)
+
+
+@pytest.mark.skipif(not WINDOWS_HOSTS, reason="Windows PowerShell required")
+@pytest.mark.parametrize("host", WINDOWS_HOSTS, ids=lambda h: h.stem)
+def test_windows_binstub_is_usable_while_background_stamp_still_runs(tmp_path, host):
+    """The exact handoff window this split exists for: a first-turn command
+    racing the SLOWER backgrounded `stamp` (the operation that later
+    overwrites the marker with the real snapshot path) must still resolve
+    a usable marker, not the fast ":_noinst" exit-127 path."""
+    env = _sandbox_env(tmp_path)
+    result = subprocess.run(
+        [str(host), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(INIT_PS1),
+         "-Action", "stamp-binstub"],
+        env=env, cwd=tmp_path, capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    binstub = tmp_path / "userprofile" / ".local" / "bin" / "agent-machines.cmd"
+    assert binstub.is_file()
+
+    stamp_proc = subprocess.Popen(
+        [str(host), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(INIT_PS1),
+         "-Action", "stamp"],
+        env=env, cwd=tmp_path, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        _assert_binstub_resolves_marker(binstub, env, tmp_path)
+    finally:
+        stamp_proc.communicate(timeout=60)
 
 
 @pytest.mark.skipif(not WINDOWS_HOSTS, reason="Windows PowerShell required")

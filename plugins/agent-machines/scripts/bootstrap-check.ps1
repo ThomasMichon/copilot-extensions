@@ -217,11 +217,23 @@ if (-not (Test-Path $Manifest)) {
         # top-level dispatch (every $Action except the cell-/slot- family)
         # already re-runs the SAME legacy-entrypoint-probe with equivalent
         # -PayloadRoot/-LegacyRoot values before 'stamp-binstub' or 'stamp'
-        # ever executes. Pre-checking here spawned a SECOND, fully redundant
-        # child PowerShell process per hook invocation for no additional
-        # safety -- confirmed by reading both call sites; init.ps1 exits
+        # ever executes, so a separate pre-check here would only re-validate
+        # what each call already validates on its own; init.ps1 exits
         # non-zero on its own if the probe disallows the mutation, which this
         # hook already discards output/exit code for either way.
+        # Review finding (round 4): removing the pre-check does NOT reduce
+        # the probe cost to one spawn per hook invocation the way an earlier
+        # version of this comment claimed -- the two-stage split itself now
+        # makes TWO separate init.ps1 invocations ('stamp-binstub' then
+        # 'stamp'), and EACH one re-runs its own probe subprocess via its own
+        # top-level dispatch. Net probe-process count here is therefore
+        # unchanged from before this split (removing the old single explicit
+        # pre-check saves one spawn; the new second init.ps1 invocation's own
+        # embedded probe adds one back). The synchronous 'stamp-binstub' path
+        # still pays this probe's cost every time. Carrying a validated
+        # result across the two stages to actually cut this would need a
+        # short-lived trust token between the two init.ps1 invocations --
+        # real future work, out of scope for this short-PR-cycle round.
         & $exe -NoProfile -ExecutionPolicy Bypass -File $payloadInit stamp-binstub *> $null
         # Review finding: the launcher-before-return guarantee this split
         # exists for does not hold if the synchronous stage itself failed

@@ -1799,8 +1799,17 @@ function Invoke-StampBinstubOnly {
         # path once its copy completes, same as before.
         $payloadDirMarker = Join-Path $InstallDir 'payload-dir'
         $payloadOriginMarker = Join-Path $InstallDir 'payload-origin'
-        [System.IO.File]::WriteAllText($payloadDirMarker, $PluginDir, $utf8NoBom)
-        [System.IO.File]::WriteAllText($payloadOriginMarker, $probePayload, $utf8NoBom)
+        # Publish atomically (same-directory temp file + rename), matching
+        # Deploy-SelfProvisioningBinstub's own atomic-replace pattern: a
+        # generated binstub reads payload-dir OUTSIDE this stamp mutex, so a
+        # direct truncating write here could hand a concurrent reader an
+        # empty/partial marker and a spurious exit 127.
+        $payloadDirTmp = "$payloadDirMarker.tmp-$PID"
+        $payloadOriginTmp = "$payloadOriginMarker.tmp-$PID"
+        [System.IO.File]::WriteAllText($payloadDirTmp, $PluginDir, $utf8NoBom)
+        [System.IO.File]::WriteAllText($payloadOriginTmp, $probePayload, $utf8NoBom)
+        Move-Item -LiteralPath $payloadDirTmp -Destination $payloadDirMarker -Force
+        Move-Item -LiteralPath $payloadOriginTmp -Destination $payloadOriginMarker -Force
         Deploy-SelfProvisioningBinstub
     } finally {
         [void]$mutex.ReleaseMutex()
@@ -1835,8 +1844,14 @@ function Invoke-Stamp {
     }
     if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
     Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
-    [System.IO.File]::WriteAllText($payloadOriginMarker, $probePayload, $utf8NoBom)
-    [System.IO.File]::WriteAllText($payloadDirMarker, $snapDir, $utf8NoBom)
+    # Same atomic-publish rationale as Invoke-StampBinstubOnly above: a
+    # generated binstub reads payload-dir outside this stamp mutex.
+    $payloadOriginTmp = "$payloadOriginMarker.tmp-$PID"
+    $payloadDirTmp = "$payloadDirMarker.tmp-$PID"
+    [System.IO.File]::WriteAllText($payloadOriginTmp, $probePayload, $utf8NoBom)
+    [System.IO.File]::WriteAllText($payloadDirTmp, $snapDir, $utf8NoBom)
+    Move-Item -LiteralPath $payloadOriginTmp -Destination $payloadOriginMarker -Force
+    Move-Item -LiteralPath $payloadDirTmp -Destination $payloadDirMarker -Force
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
     Write-Ok "Snapshot: $snapDir"
     Deploy-SelfProvisioningBinstub
