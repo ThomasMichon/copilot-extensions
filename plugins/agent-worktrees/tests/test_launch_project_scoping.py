@@ -25,6 +25,9 @@ _MAIN = (
 _RESOLVE_LAUNCH = (
     Path(__file__).resolve().parents[1] / "src" / "agent_worktrees" / "resolve_launch_cli.py"
 )
+_WORKTREE_CREATION = (
+    Path(__file__).resolve().parents[1] / "src" / "agent_worktrees" / "worktree_creation.py"
+)
 
 
 def _source(path: Path = _MAIN) -> str:
@@ -36,7 +39,9 @@ def test_create_worktree_core_scopes_plan_project_to_repo_name():
     must key its `project` off `config.repo_name` -- the project that was
     actually resolved for this specific creation -- not the ambient,
     process-wide `cfg.active_project()`."""
-    src = _source()
+    # `_create_worktree_core` is componentized into worktree_creation.py
+    # (module-componentization-discipline); __main__.py just re-exports it.
+    src = _source(_WORKTREE_CREATION)
     assert '"project": config.repo_name,' in src
     # The old, ambient-global-sourced assignment must be gone from the
     # launch-plan construction.

@@ -8,18 +8,13 @@
   live-validated (Phase 1.5 Done: detection, filing, and dedup/rate-
   limiting all confirmed against real production data); Phase 2 gated
   (see below)
-- **Vision:** none yet — this effort establishes the standing policy itself
-  (safety envelope + trigger contract for a reactive fix agent); revisit
-  once Phase 1 proves out whether it deserves its own harness-guidance
-  vision entry. **Reconciliation gate (added after review, see Journal):**
-  choosing `gh-aw` as the Phase 2 mechanism is a material architecture
-  decision made ahead of that vision reconciliation. It is a research
-  finding and a provisional design choice, not a settled standing pattern —
-  Phase 2 must not begin until this is either folded into an existing
-  vision (`harness-guidance` was checked and does not fit — it covers
-  ambient guidance delivery, not automated-fix mechanism selection) or
-  captured in a new one. Phase 1 (detection+dedup, no fix-attempt
-  mechanism yet) is unaffected and can proceed independently.
+- **Vision:** [`visions/ci-failure-remediation`](../../../visions/ci-failure-remediation/README.md)
+  (authored 2026-09-26 to resolve the reconciliation gate below). **Gate
+  resolved:** the vision states the standing intent (detection+dedup,
+  bounded/reviewed fix attempts, intent-preserving triage, guardrails,
+  escalation) this effort realizes; Phase 2 is no longer blocked on "does
+  this deserve its own vision" — only on actually building it, per the
+  Plan below.
 - **Umbrella issue:** _TBD — file once this effort's plan clears review_
 
 ## Guiding Intent
@@ -308,10 +303,14 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
   **Done — see the completion note above and the Journal.**
 
 ### Phase 2 — Wire the reactive fix attempt (the actual "attempt a fix")
-- [ ] **Gate (blocks the rest of this phase):** resolve the Vision
+- [x] **Gate (blocks the rest of this phase):** resolve the Vision
       reconciliation noted in the header above — decide whether this
       mechanism choice belongs under an existing vision or needs its own,
       and record that decision before any `gh-aw` workflow file is merged.
+      **Resolved 2026-09-26: authored
+      [`visions/ci-failure-remediation`](../../../visions/ci-failure-remediation/README.md)**
+      (operator confirmed: a new vision, not folding into an existing
+      one). Phase 2 may now proceed to the remaining items below.
 - [ ] **Charter — diagnosis and intent-preservation discipline (this
       governs the prompt itself, independent of which mechanism below
       carries it out):** the agent's job is never "make the failing test
@@ -1217,3 +1216,28 @@ _Pending._
   genuine flaky/overreaching test, and a genuine implementation
   regression against a still-correct test) to prove the agent actually
   triages rather than reflexively weakening every red test.
+
+### 2026-09-26 — Resolved the vision-reconciliation gate: authored `visions/ci-failure-remediation`
+- Asked the operator directly whether to author a new vision, fold into
+  an existing one, or defer Phase 2. Operator chose: **author a new
+  vision.**
+- Authored `visions/ci-failure-remediation/README.md` as a standalone
+  top-level leaf (no existing branch vision to nest it under yet — the
+  umbrella `dev-branch-release-pipeline` effort's own header already
+  anticipated a possible future `visions/release-pipeline` branch; this
+  leaf can be adopted as its child later without disruption, since
+  visions are revised in place). Kept it intent-level and generalized
+  (public-repo artifact rule): detection+dedup, bounded/reviewed fix
+  attempts, the intent-preserving triage discipline and its "deliberate
+  is not the same as correct" nuance, guardrails (never a privileged
+  merge path, never touches its own guardrails), and escalation as a
+  first-class designed behavior, not a fallback of last resort. Mined
+  directly from this session's operator guidance and from Phase 2's own
+  already-drafted charter/guardrail language (kept in sync, not
+  duplicated ad hoc).
+- Updated this effort's header: Vision now cites the new leaf; the
+  Reconciliation gate note is resolved and replaced with a pointer.
+  Marked Phase 2's own gate checklist item `[x]`.
+- **Phase 2 may now proceed** to its remaining items (author the `gh-aw`
+  workflow itself, wire it into `validate-and-promote.yml`, its security
+  hardening checklist, etc.) — none of which have been started yet.

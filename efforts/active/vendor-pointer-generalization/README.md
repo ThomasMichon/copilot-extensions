@@ -17,6 +17,19 @@
   invariant plus the (new) pointer-kind mechanics once they exist.
 - **Umbrella issue:** _TBD — file once this effort's plan clears review_
 - **Sub-issues:** _TBD_
+- **Mechanism status (2026-09-26, corrected):** the "npm-workspace-style
+  live reference" decision below was **superseded** the same day it was
+  written, by a **different, unrelated effort** (`agent-cli-lazy-dispatch`)
+  that independently hit the same dev-time-resolver problem, drew a
+  different conclusion from an incomplete trial, and shipped a working
+  alternative (`VENDOR_POINTER.json` `kind=src-passthrough`) before this
+  effort's own Phase 1 execution caught up to it. **Phase 1 has now
+  formally adopted `src-passthrough`, not the `uv`-editable-reference
+  form**, for the libs surface — see the 2026-09-26 "Course correction"
+  Journal entry for the full investigation and rationale. The Design
+  Decision section immediately below is preserved as the **historical
+  record of that first (superseded) resolution**, not the effort's current
+  plan — read the Journal's course-correction entry first.
 
 ## Guiding Intent
 
@@ -32,27 +45,48 @@ shared-lib copies (`plugins/*/libs/*`, `worktree-manager/libs/*`) and,
 if `vendored-installer-engine` adopts it, the shared installer-engine
 surface.
 
-**The concrete mechanism differs by construct, resolved by the Design
-Decision immediately below** (superseding an earlier plan sketched before
-that decision — see the Journal's 2026-09-26 "Resolver decision" entry for
-the full history of how this effort arrived here):
+**The concrete mechanism differs by construct** (see the header's
+"Mechanism status" note and the Journal's 2026-09-26 "Course correction"
+entry for why the Design Decision immediately below — the effort's
+*first* resolution — was superseded before Phase 1 execution reached it):
 
-- **Libs**: an npm-workspace-style **live relative-path reference** (`uv`'s
-  `[tool.uv.sources]` `path` + `editable = true`, pointed directly at the
-  canonical `libs/<lib>` — no local directory of any kind in `dev`), not a
-  `VENDOR_POINTER.json` stub. Promotion copies canonical in and rewrites
-  the reference to the local, non-editable form real shipped installs
-  already use today.
-- **The shared installer engine** (if that effort adopts this pattern):
-  the same live-reference idea, expressed as a plugin's installer wrapper
-  directly dot-sourcing the canonical engine file via a relative path in
-  `dev` — no new marker/pointer format needed at all, since a shell
-  `source`/PowerShell `.` already does this natively.
+- **Libs**: `VENDOR_POINTER.json` `kind=src-passthrough` — a real,
+  importable `src/<pkg>/__init__.py` stub in a local
+  `plugins/<plugin>/libs/<lib>/` (or `worktree-manager/libs/<lib>/`)
+  directory, forwarding every import to canonical via the standard
+  "self-replacing module" technique at runtime, so the importable `src/`
+  payload has zero content to keep in sync. The pointer copy still
+  physically carries a `pyproject.toml`, `README.md`, and (when the copy
+  opted in) a local `tests/` tree — `--pointerize` copies all three from
+  canonical **once, at conversion time**; only `src/`, an
+  already-present `tests/`, and `pyproject.toml`'s declared version are
+  refreshed again at promotion/materialization time (`materialize_main
+  .py`) — `README.md` is copied once and never re-synced afterward, so a
+  canonical README change after pointerizing does not automatically
+  propagate. None of this is DRY-by-construction the way `src/` is.
+  **Not** the npm-workspace-style `uv [tool.uv.sources]`
+  `path`+`editable` live reference originally decided below — see the
+  Course-correction Journal entry.
+- **The shared installer engine** (if `vendored-installer-engine` adopts
+  this pattern): still an open question for that effort to resolve on its
+  own terms; the live-reference idea sketched in the Design Decision below
+  remains a candidate, but Phase 2 hasn't reached this yet.
 - **Docs** (`vendored-doc-pointers`, already shipped): unchanged — a
-  Markdown file has no package-manager equivalent of a live reference, so
-  it still needs a physical stub file expanded at promotion.
+  physical stub file (`kind=file`, or now `kind=src-passthrough`'s sibling
+  convention) expanded at promotion, same as always.
 
-## Design decision — npm-workspace-style live reference over a `VENDOR_POINTER.json` stub (resolved 2026-09-26)
+## Design decision (SUPERSEDED — see 2026-09-26 "Course correction" Journal entry) — npm-workspace-style live reference over a `VENDOR_POINTER.json` stub (originally "resolved" 2026-09-26)
+
+> **This section is preserved as historical record only.** It documents
+> the effort's *first* resolution of the dev-time-resolver question. That
+> resolution was superseded the same day, before Phase 1 execution ever
+> implemented it, by a different effort's independently-shipped
+> alternative (`src-passthrough`) — see the Journal's course-correction
+> entry for the full investigation, including empirical proof (a live
+> trial) that the mechanism described below *does* actually work when
+> implemented correctly, and why `src-passthrough` was adopted anyway.
+> Do not implement anything in this section; it does not reflect this
+> effort's current Plan.
 
 Operator directive, captured verbatim in a later Request round below:
 
@@ -290,7 +324,9 @@ fail-closed hardening, still blocked on the dev-time resolver decision):
 > via relative path, and after the vendoring, C, would be copied into A
 > and B's node_modules folders directly.
 
-See the Design Decision above for the resolution.
+See the 2026-09-26 "Course correction" Journal entry for the resolution
+actually adopted (the Design Decision above documents the original,
+since-superseded resolution).
 
 ## Plan
 
@@ -313,86 +349,96 @@ shape before committing to a design)_
 
 ### Phase 1 — Convert real shared-lib copies to canonical-reference form
 - [x] **Define the dev-time resolver before converting anything** —
-      **Resolved via the Design Decision above.** `uv`'s
-      `[tool.uv.sources]` `path` + `editable = true`, referencing the
-      canonical `libs/<lib>` directly (no local directory in `dev` at
-      all), validated with a real prototype (see Journal). Supersedes the
-      `VENDOR_POINTER.json` directory-pointer options (a)/(b) originally
-      considered here.
-- [ ] **Convert every real vendored lib to the canonical-reference form**:
-      for every `plugins/<plugin>/libs/<lib>` (and `worktree-manager/
-      libs/<lib>`) copy that is byte-identical to its canonical
-      `libs/<lib>` source, (1) delete the local copy entirely (no
-      directory, no stub — nothing remains at that path in `dev`), (2)
-      rewrite the consuming `pyproject.toml`'s `[tool.uv.sources]` entry
-      from `{ path = "libs/<lib>" }` to `{ path =
-      "<relative-to-repo-root>/libs/<lib>", editable = true }` (the
-      relative depth depends on the consumer's own location — two levels
-      up from `plugins/<plugin>/`, one level up from `worktree-manager/`).
-      Covers both trees (`sync-vendored-libs.py`/`check-vendored-libs-
-      sync.py` already scan both today).
-- [ ] **Build the conversion tool**: a script performing the rewrite above
-      across every real consumer of a given lib in one pass (a new tool,
-      or a new mode on `sync-vendored-libs.py` — this repo currently has
-      no "convert a real copy to a pointer/reference" tool at all, only
-      `--check`/`--restore-canonical`/`--materialize`, confirmed while
-      investigating this phase). Must refuse to convert a lib whose real
-      copies have already drifted from canonical (reuse
-      `_materialize_blocked()`'s existing drift check) — converting a
-      drifted copy would silently discard whatever the copy had that
-      canonical didn't.
-- [ ] **Build the new drift/consistency guard for the reference form**:
-      `check-vendored-libs-sync.py` has no concept of this new reference
-      form at all (it hashes whatever `src/` exists locally and compares
-      copies against each other) — a `dev`-tree with no local copy
-      shouldn't read as "missing"/"drifted." Extend it (or build a
-      dedicated new guard) to recognize a `[tool.uv.sources]` entry whose
-      `path` escapes the plugin's own directory as a valid, intentional
-      reference form, confirm `editable = true` is present (a forgotten
-      `editable` would silently produce the frozen-copy bug found in the
-      prototype), and confirm the referenced canonical `libs/<lib>`
-      actually exists.
-- [ ] **Extend `materialize_main.py`/`promote_release.py` for the
-      reference-rewrite promotion step**: for every `[tool.uv.sources]`
-      entry whose `path` escapes the plugin's own directory (reuse
-      `_escapes_root()`), copy canonical's `src/` (+ sync the
-      `pyproject.toml` version, exactly as the old directory-pointer
-      expansion already did) into a freshly-created local
-      `plugins/<plugin>/libs/<lib>/`, then surgically rewrite the
-      `pyproject.toml` line to the local, non-editable form (see Design
-      Decision for the exact rewrite and why `editable = true` must never
-      reach a real shipped install). Reuse `promote_release.py`'s existing
-      fail-closed-on-`SKIP` behavior (PR #3752) for an unresolvable
-      reference.
-- [ ] **Retire the now-superseded directory/lib `VENDOR_POINTER.json`
-      pointer kind** (deliberate, reviewed removal — not a silent
-      deletion, per this repo's subtractive-change convention): no real
-      plugin ever adopted it (confirmed before and after PR #3752), and
-      the new canonical-reference form replaces its purpose entirely.
-      Remove the directory-pointer loop from `materialize()`, its
-      containment tests (`_find_symlink`'s directory-pointer call site,
-      the destination-`_escapes_root` check's directory-pointer test
-      cases), and `sync-vendored-libs.py`'s pointer-aware code added for
-      it in the earlier standalone trial — keep `_resolve_within()`/
-      `_escapes_root()`/`_find_symlink()` themselves, since the file-
-      pointer kind and the new reference-rewrite step both still need
-      them. Note the removal's rationale in this effort's Journal (not
-      just the commit message) so a future reader doesn't wonder why a
-      "generalized" pointer kind never got used.
-- [ ] Update `tools/preview_release.py` ("preview-promo") to perform the
-      same copy-then-rewrite operation into its scratch preview copy
-      (never the real tree) for a plugin using the reference form — its
-      current `_materialize_into_preview()` has no concept of this form
-      at all yet (it was written against the directory-pointer design).
+      **Resolved twice; the second resolution is current.** First
+      resolved via the (now-superseded) Design Decision above: `uv`'s
+      `[tool.uv.sources]` `path` + `editable = true`. **Formally
+      superseded 2026-09-26** (see Course-correction Journal entry) by
+      `VENDOR_POINTER.json` `kind=src-passthrough` — a real, importable
+      stub `src/<pkg>/__init__.py` in a local pointer directory, already
+      built, hardened across 20+ review rounds, and adopted on `dev` for 2
+      real libs (`lazy-cli-dispatch`, `work-coalescing-singleton` — a
+      `dev`-branch pointer only; `materialize_main.py` still expands it
+      into a self-contained real copy before it ever reaches a shipped
+      `main` release) before this effort's own Phase 1 execution caught
+      up to it. Every item below this one that assumed the uv-editable
+      form is struck through and superseded by the matching
+      src-passthrough item that follows it.
+- [x] ~~**Convert every real vendored lib to the canonical-reference
+      form**: ... rewrite the consuming `pyproject.toml`'s
+      `[tool.uv.sources]` entry ... `editable = true`~~ — **superseded**:
+      converting a real lib copy now means running
+      `python tools/sync-vendored-libs.py --pointerize <consumer> <lib>`
+      (already built, in `tools/sync-vendored-libs.py`), which leaves the
+      consumer's `pyproject.toml` **unchanged** (still `{ path =
+      "libs/<lib>" }`, still resolving to the local pointer directory —
+      now a stub, not a full copy) and writes the `VENDOR_POINTER.json`
+      marker + generated stub in place of the real `src/`. No
+      `pyproject.toml` rewriting, no relative-depth computation, needed at
+      all.
+      - [x] `lazy-cli-dispatch` converted (agent-cli-lazy-dispatch Phase 2,
+            PR #3790 — the effort that discovered/shipped src-passthrough).
+      - [x] `work-coalescing-singleton` converted, both consumers
+            (`plugins/agent-worktrees`, `worktree-manager`) — PR #3810.
+      - [ ] Remaining real lib copies (`agent-procutil`, `config-migrate`,
+            `credential-relay`, `dropin-registry`, `plugin-activation`,
+            `plugin-resolve`, `session-liveness-probe`, `single-instance-
+            lease`, `ssh-manager`, `venue-copilot`, `zdd`) not yet
+            converted — future bounded-slice PRs, one (or a few related)
+            lib(s) at a time, per this effort's own established pattern.
+- [x] ~~**Build the conversion tool**: a script performing the [TOML]
+      rewrite ...~~ — **superseded, and already built**: `--pointerize`
+      already exists in `tools/sync-vendored-libs.py` (built for
+      `lazy-cli-dispatch`, PR #3790, extended/hardened by PR #3810). No
+      new TOML-rewrite tool is needed.
+- [x] ~~**Build the new drift/consistency guard for the reference
+      form**...~~ — **superseded, and already built**: `--check` already
+      recognizes a `src-passthrough` pointer copy (excludes it from the
+      byte-agreement check, reports it distinctly) — no new TOML-source
+      drift guard is needed, since the pointer form still uses the
+      existing `VENDOR_POINTER.json` marker-file convention the tooling
+      already understands.
+- [x] ~~**Extend `materialize_main.py`/`promote_release.py` for the
+      reference-rewrite promotion step**...~~ — **superseded, and already
+      built**: `materialize_main.py`'s existing pointer-expansion loop
+      (originally built for the file-pointer/docs kind, extended for
+      `src-passthrough` by PR #3790/#3810) already expands a
+      `src-passthrough` pointer into a real, byte-identical copy at
+      promotion — no TOML-rewrite promotion step is needed.
+- [x] ~~**Retire the now-superseded directory/lib `VENDOR_POINTER.json`
+      pointer kind**...~~ — **superseded**: the directory/lib pointer kind
+      is not retired; `src-passthrough` **is** a directory/lib pointer
+      kind (a third kind alongside the original bare directory-pointer and
+      the file-pointer/docs kind) and is now this effort's actual, active
+      mechanism. Nothing to remove.
+- [x] Update `tools/preview_release.py` ("preview-promo") to perform the
+      same pointer-expansion/materialization into its scratch preview copy
+      (never the real tree) for a plugin using the `src-passthrough` form
+      (**not** a TOML "copy-then-rewrite" — that described the superseded
+      uv-editable form; `src-passthrough` never rewrites a consumer's
+      `pyproject.toml` reference at all): `_materialize_into_preview()`
+      already handles it (PR #3803, hardened further by #3810).
 - [ ] Confirm the live promotion pipeline (`promote_release.py` ->
       `materialize_main.py`) handles the converted real plugins correctly.
 - [ ] Confirm every consuming plugin's own test suite
       (`tools/run-plugin-tests.py <plugin>`) still passes post-conversion
-      against the live canonical reference (no local copy, no reinstall
-      needed to pick up canonical edits — validated in the prototype;
-      confirm it holds for the real venv-caching/fingerprint logic too).
+      (validated for `work-coalescing-singleton`'s two consumers: PR
+      #3810's own description cites the initial-commit figures (`agent-
+      worktrees` 771+540 across two invocations, `worktree-manager` 1437);
+      the FINAL merged state (after 23 review rounds added more coverage)
+      was last confirmed via `run-plugin-tests.py agent-worktrees
+      --reinstall` at 5627 passed, 26 skipped, and `worktree-manager`'s
+      `uv run pytest` at 1474 passed, 4 skipped — both counts grew across
+      rounds as fixes added regression tests, so the two figures
+      legitimately differ; also validated for `lazy-cli-dispatch` in PR
+      #3790 — confirm this holds for each future conversion too).
 
 ### Phase 2 — Canonical-reference form for the shared installer engine
+> **Note (2026-09-26):** libs' mechanism pivoted to `src-passthrough`
+> (Phase 1); this phase's live-reference idea was designed as a libs-
+> mechanism corollary and has NOT been re-evaluated against that pivot.
+> Revisit whether a `src-passthrough`-style stub (or the still-viable
+> shell `source`/PowerShell `.` idea below) fits the installer-engine
+> surface better before executing this phase.
 - [x] **Scope correction (from review, still holds): this applies only to
       `vendored-installer-engine`'s shared engine files**
       (`scripts/installer-engine.{sh,ps1}`), never to a whole plugin's
@@ -400,18 +446,19 @@ shape before committing to a design)_
       a per-service wrapper/config (launch command, capability flags,
       sibling installs) that must keep varying by plugin, per that effort's
       own design.
-- [x] **No new pointer kind needed — superseded by the same Design
+- [x] ~~**No new pointer kind needed — superseded by the same Design
       Decision above.** A plugin's own `install.sh`/`install.ps1` directly
       `source`s/dot-sources the canonical `scripts/installer-engine.sh`/
-      `.ps1` via a relative path in `dev` — this needs no `uv`/Python
-      mechanism, no marker file format, and no new "pointer kind" at all:
-      a shell `source`/PowerShell `.` with a relative path argument
-      already works natively and preserves the dot-source contract (the
-      engine's functions land in the calling wrapper's own scope) by
-      construction, since it *is* a real dot-source, not a stub simulating
-      one. This resolves the original Plan's dot-source-preservation
-      concern by making it structurally unavoidable rather than a
-      requirement to test for.
+      `.ps1` via a relative path in `dev` ...~~ — **historical, not
+      currently resolved**: this checklist item marked the live-reference
+      idea "resolved" by the (now-superseded) Design Decision above. Per
+      the note just above, Phase 2's mechanism has NOT been re-evaluated
+      since libs pivoted to `src-passthrough` — this design is a
+      candidate, not a settled decision, until that re-evaluation happens.
+      Left `[x]` (not reopened as `[ ]`) only because the underlying
+      dot-source-preservation ANALYSIS still holds regardless of which
+      pointer mechanism Phase 2 ultimately adopts; the "no new pointer
+      kind needed" CONCLUSION is what's now open again.
 - [ ] At promotion, `materialize_main.py` (extended the same way as the
       libs case) rewrites that `source`/`.` line to reference (or fully
       inline) a freshly-copied-in local `scripts/installer-engine.{sh,ps1}`
@@ -436,10 +483,12 @@ shape before committing to a design)_
 
 ### Phase 3 — Document the pattern; sweep for further "and more" candidates
 - [ ] Write `docs/patterns/vendor-pointer.md`: the file-pointer kind (docs,
-      unchanged) and the canonical-reference form (libs, and the shared
-      installer engine if Phase 2 lands) — their lifecycle (a live
-      relative-path reference in `dev` vs. a physical stub file, ->
-      `materialize_main.py` copy-and-rewrite/expansion -> shipped `main`
+      unchanged) and `src-passthrough` (libs — see the Course-correction
+      Journal entry; **not** the live relative-path reference form
+      originally planned here, superseded before this phase started) and
+      the shared installer engine if Phase 2 lands — their lifecycle (a
+      physical stub file in `dev` forwarding to canonical at runtime, ->
+      `materialize_main.py` expansion into a real copy -> shipped `main`
       content), which tool owns which invariant, and how a new plugin/
       lib/script opts in.
 - [ ] Revisit whether any other currently-duplicated construct surfaced in
@@ -449,34 +498,64 @@ shape before committing to a design)_
 
 ## Validation Plan
 
+> **Note (2026-09-26):** the two items below marked "superseded" describe
+> validation criteria for the uv-editable form (no local directory at
+> all), which this effort no longer pursues for libs — see the
+> Course-correction Journal entry. They are kept, struck through, as the
+> historical record of what the first resolution intended to prove; the
+> item immediately following each is the current, `src-passthrough`-
+> accurate replacement.
+
 - [ ] Every real lib copy converted in Phase 1 — every
       `plugins/<plugin>/libs/<lib>` copy **and every `worktree-manager/
       libs/*` copy** — round-trips losslessly: `materialize_main.py`'s
       promotion output is byte-identical to the pre-conversion copy for
       each (the same `git diff --no-index` check the isolated trial used,
-      run against the real repo this time).
-- [ ] A converted plugin's own test suite (`tools/run-plugin-tests.py
+      run against the real repo this time). Confirmed for
+      `work-coalescing-singleton` (PR #3810); remaining libs still need
+      this per-conversion.
+- [x] ~~A converted plugin's own test suite (`tools/run-plugin-tests.py
       <plugin>`) passes with **no local `libs/<lib>` directory present at
       all** in the `dev` checkout — proving the canonical reference alone
       (via `[tool.uv.sources]` `path` + `editable = true`) is sufficient
       for `uv pip install -e .` and subsequent test/static-analysis
-      resolution, matching the Design Decision's validated prototype.
+      resolution, matching the Design Decision's validated prototype.~~ —
+      **superseded**: `src-passthrough` keeps a real local pointer
+      directory (with a generated stub, not a full copy) — there is no
+      "no local directory at all" case to prove for this mechanism.
+      Current criterion instead: a converted plugin's own test suite
+      passes with the **local pointer directory present but its `src/`
+      replaced by the generated stub** — confirmed for
+      `work-coalescing-singleton`'s two consumers (PR #3810: `agent-
+      worktrees` 5627 passed/26 skipped, `worktree-manager` 1474
+      passed/4 skipped, both the FINAL post-review-cycle figures — see
+      the corrected Phase 1 test-count note above) and for
+      `lazy-cli-dispatch` (PR #3790).
 - [ ] Editing the canonical `libs/<lib>` source and re-running a
       converted plugin's tests **without reinstalling** picks up the edit
       — the "in-place test scripts in `dev`" / "call across folders"
       requirement, demonstrated against a real plugin (not just the
-      isolated prototype).
-- [ ] `tools/preview_release.py` ("preview-promo") correctly performs the
-      copy-then-rewrite for a plugin using the canonical-reference form
-      when building a scratch local-install preview.
+      isolated prototype). Confirmed live-forwarding behavior exists for
+      `src-passthrough` via `tools/test_sync_vendored_libs.py::
+      test_pointerized_copy_forwards_imports_to_canonical_end_to_end`
+      (a real subprocess re-import after mutating canonical, no reinstall)
+      — still worth a direct real-plugin demonstration per future
+      conversion.
+- [x] `tools/preview_release.py` ("preview-promo") correctly performs
+      pointer expansion/materialization (not a TOML rewrite — see the
+      note above) for a plugin using the `src-passthrough` form
+      when building a scratch local-install preview. **Done, PR #3803/
+      #3810** (`_materialize_into_preview()`).
 - [x] `materialize_main.py`'s directory-pointer path refuses a `source`
       that escapes `canonical_root` (the same containment guarantee the
       file-pointer path already has via `_resolve_within()`). **Done, PR
       #3752** — also extended to reject a symlink inside/as the canonical
-      `src/` tree and a destination pointer path escaping `dest`. Reused
-      directly by the reference-rewrite containment check (`_escapes_root`)
-      once Phase 1's conversion tool lands; the directory-pointer *loop*
-      itself is retired per Phase 1's own retirement item.
+      `src/` tree and a destination pointer path escaping `dest`. Under
+      the adopted `src-passthrough` design this directory-pointer path
+      IS the active, permanent materialization mechanism for libs (not a
+      stepping stone to a future TOML reference-rewrite check, and not
+      slated for retirement) — `_escapes_root()` continues protecting it
+      directly, alongside the file-pointer kind, indefinitely.
 - [x] A promotion run against a deliberately malformed/unresolvable pointer
       aborts the promotion rather than producing a `main` snapshot
       containing an unexpanded stub. **Done, PR #3752** — covered for a
@@ -707,3 +786,88 @@ _Pending._
   share the rewrite logic), proven against exactly one real plugin/lib
   before converting the rest, per this effort's own established pattern
   of landing one bounded, testable slice at a time.
+
+### 2026-09-26 — Course correction: `src-passthrough` formally adopted, superseding the resolver decision above
+
+- **How this was caught**: after driving PR #3810 (this effort's own
+  Phase 1 execution — converting `work-coalescing-singleton` — through 23
+  automated review rounds and merging it) and going to update this
+  README's Plan/Journal to reflect that merge, the merged PR turned out to
+  use `VENDOR_POINTER.json` `kind=src-passthrough` (a real local stub
+  directory) — the *opposite* of the "Resolver decision" entry directly
+  above, which explicitly retires the directory/lib pointer kind in favor
+  of a `uv [tool.uv.sources]` `path`+`editable` live reference with NO
+  local directory at all. This effort's own README had never been updated
+  to record the pivot; it was flagged to the operator as a genuine
+  design-crossroads blocker rather than silently reconciled either way.
+- **Root cause traced**: `src-passthrough` was invented by a *different*,
+  unrelated effort — `agent-cli-lazy-dispatch` (PR #3790, commit
+  `106bc125c`) — which independently hit the same "how does a lib under
+  active dev-time development resolve without a real local copy" problem
+  a bit later the same day, and drew a different conclusion: its own
+  commit message states a "scratch trial converting agent-worktrees' own
+  agent-procutil copy to a bare pointer and running its real `uv pip
+  install -e .` failed outright -- `does not appear to be a Python
+  project`." That trial converted the LOCAL pointer directory to a bare
+  marker with no `src/`, while leaving `pyproject.toml`'s
+  `[tool.uv.sources]` entry **unchanged** — still pointing at that
+  now-empty local directory, never rewritten to reference canonical
+  directly. That is a different (and incomplete) thing than this effort's
+  actual "Resolver decision": rewrite the reference itself to point
+  straight at canonical, with no local directory of any kind, not even an
+  empty marker.
+- **Empirically re-tested the ACTUAL documented mechanism** (not the
+  incomplete variant `agent-cli-lazy-dispatch` tried) in an isolated
+  scratch copy (`/tmp/uv-editable-trial`, not committed): copied a real
+  consumer (`plugins/agent-mcp`) plus its 4 canonical libs, deleted the
+  consumer's local `libs/` copies entirely, rewrote `pyproject.toml`'s
+  `[tool.uv.sources]` entries to `{ path = "../../libs/<lib>", editable =
+  true }` pointing directly at canonical, then ran the EXACT command
+  `tools/run-plugin-tests.py` uses (`uv pip install --python <py> -e
+  <spec>`). **Result: it works.** Install succeeded, `agent_procutil
+  .__file__` resolved directly to the canonical path (no local copy
+  anywhere), editing canonical was picked up on the next import with no
+  reinstall, and 414 of agent-mcp's real tests passed (all 195 failures
+  were an unrelated missing `pytest-asyncio` in the minimal scratch venv,
+  confirmed by inspecting one failure's traceback — nothing to do with
+  the reference mechanism). This confirms the original "Resolver decision"
+  above was sound and would have worked; `agent-cli-lazy-dispatch`'s
+  rejection was based on an incomplete trial, not a real flaw in the
+  design.
+- **Decision, presented to the operator with both findings** (uv-editable
+  demonstrably works when implemented correctly; `src-passthrough` is
+  fully built, 23-review-round-hardened, and already has 2 real
+  `dev`-branch adopters): **formally adopt `src-passthrough` as this
+  effort's actual Phase 1 mechanism**, rather than switch course to the
+  uv-editable form despite the sunk cost of re-verifying it works.
+  Rationale for the choice, not just the sunk cost: `src-passthrough`
+  reuses the *already-existing* `VENDOR_POINTER.json` marker/materialize/
+  self-install machinery as-is (one generated stub file per conversion),
+  where uv-editable would require *net-new* tooling this repo doesn't have
+  yet — a TOML-aware drift/consistency guard, a promotion-time reference-
+  rewriter, and per-lib edits to every consuming `pyproject.toml` (not
+  just one file). Operator confirmed: adopt `src-passthrough`.
+- **What this changes in the Plan above**: the Design Decision section is
+  kept verbatim as the historical record of the first (superseded)
+  resolution — struck through nowhere, just flagged at its own heading —
+  so a future reader can see exactly what was decided and why it changed,
+  rather than have it silently vanish. Phase 1's checklist items that
+  assumed the uv-editable form (the conversion tool, the TOML drift guard,
+  the materialize/promote reference-rewrite, the directory-pointer
+  retirement) are marked `[x]` with a `~~struck-through~~` superseded
+  description and a plain-text note pointing at what's ALREADY built and
+  used instead (`--pointerize`, the existing `--check`/`materialize_main
+  .py`/`preview_release.py` src-passthrough support) — none of that
+  tooling needs building; it already exists. Real conversion progress
+  (`lazy-cli-dispatch`, `work-coalescing-singleton`) is now tracked
+  directly under the "convert every real vendored lib" item as sub-
+  checkboxes. Phase 2 (installer engine) got a note flagging that its own
+  live-reference design was a libs-mechanism corollary never
+  re-evaluated against this pivot — still an open question for that
+  phase, not resolved here.
+- **Not yet done**: the remaining ~11 real lib copies still need
+  conversion to `src-passthrough` (one bounded PR at a time, per this
+  effort's own established pattern); Phase 2's installer-engine mechanism
+  question is still open; Phase 3's pattern doc
+  (`docs/patterns/vendor-pointer.md`) still needs writing, and must now
+  describe `src-passthrough`, not the uv-editable form.

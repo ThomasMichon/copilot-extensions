@@ -623,6 +623,30 @@ def cmd_worktree_status_bundle(args: argparse.Namespace) -> int:
     return 0
 
 
+def _dispatch_session_lifecycle(verb: str, verb_args: dict):
+    """Dispatch one of the session-lifecycle verbs (``session_conclude``/
+    ``session_link_succession``, see ``tracking_session_lifecycle_write.py``)
+    through the daemon's write path when reachable, falling back to the
+    identical in-process code (logged) when not. Raises
+    ``tracking_write.AmbiguousWriteOutcome`` for the one unsafe case (a
+    request that reached the daemon and then failed) -- callers must
+    handle it, never silently retry.
+    """
+    from . import locks as _locks
+    from . import tracking_write
+
+    return tracking_write.dispatch(
+        verb,
+        verb_args,
+        read_lock_data=lambda: _locks.read_lock(status_monitor_runtime._monitor_lock_path()),
+        ensure_monitor=(
+            status_monitor_runtime._ensure_status_monitor
+            if status_monitor_runtime._status_monitor_enabled()
+            else None
+        ),
+    )
+
+
 def cmd_conclude_session(args: argparse.Namespace) -> int:
     """Assert a session's conclusion (``handed-off`` | ``concluded``) -- JSON out.
 
@@ -643,35 +667,33 @@ def cmd_conclude_session(args: argparse.Namespace) -> int:
     if yaml_path is None:
         return _core()._json_error(f"Worktree not found: {raw}")
     state = getattr(args, "state", "handed-off")
-    with tracking._RecordLock(yaml_path):
-        record = tracking.load_record(yaml_path)
-        try:
-            tracking.conclude_session(
-                record,
-                args.session_id,
-                state=state,
-                handoff_token=getattr(args, "handoff_token", None),
-                save=False,
-            )
-        except tracking.SessionLifecycleError as e:
-            return _core()._json_error(str(e))
-        # Persist to the RESOLVED path, not ``record.yaml_path`` -- this verb is
-        # project-agnostic (``_find_tracking_file`` searches every project), and
-        # runs with no active project, so a bare ``save_record`` would recompute
-        # the wrong (or an unresolvable) path.
-        tracking.save_record(record, yaml_path)
-    record = tracking.load_record(yaml_path)
-    entry = record.session_entry(args.session_id)
+    from . import tracking_write
+
+    try:
+        result = _dispatch_session_lifecycle(
+            "session_conclude",
+            {
+                "worktree_id": raw,
+                "yaml_path": str(yaml_path),
+                "session_id": args.session_id,
+                "state": state,
+                "handoff_token": getattr(args, "handoff_token", None),
+            },
+        )
+    except tracking_write.AmbiguousWriteOutcome as exc:
+        return _core()._json_error(
+            f"conclude-session: write to {raw} is in an unknown state: {exc}"
+        )
+    if result.get("error") == "lifecycle":
+        return _core()._json_error(result["message"])
     _core()._json_output(
         {
-            "worktree_id": record.worktree_id or raw,
-            "session": args.session_id,
-            "state": (entry.state if entry is not None else None),
-            "head_session": record.resolved_head_session,
-            "head_revision": record.head_revision,
-            "pending_handoffs": [
-                dataclasses.asdict(handoff) for handoff in record.pending_handoffs
-            ],
+            "worktree_id": result["worktree_id"],
+            "session": result["session"],
+            "state": result["state"],
+            "head_session": result["head_session"],
+            "head_revision": result["head_revision"],
+            "pending_handoffs": result["pending_handoffs"],
         }
     )
     return 0
@@ -875,32 +897,34 @@ def cmd_link_succession(args: argparse.Namespace) -> int:
     yaml_path = _find_tracking_file(raw)
     if yaml_path is None:
         return _core()._json_error(f"Worktree not found: {raw}")
-    with tracking._RecordLock(yaml_path):
-        record = tracking.load_record(yaml_path)
-        try:
-            tracking.link_succession(
-                record,
-                args.predecessor,
-                args.successor,
-                predecessor_state=getattr(args, "predecessor_state", "handed-off"),
-                handoff_token=getattr(args, "handoff_token", None),
-                save=False,
-            )
-        except tracking.SessionLifecycleError as e:
-            return _core()._json_error(str(e))
-        # Persist to the RESOLVED path (see cmd_conclude_session): this verb is
-        # project-agnostic and runs with no active project.
-        tracking.save_record(record, yaml_path)
-    record = tracking.load_record(yaml_path)
-    pred = record.session_entry(args.predecessor)
+    from . import tracking_write
+
+    try:
+        result = _dispatch_session_lifecycle(
+            "session_link_succession",
+            {
+                "worktree_id": raw,
+                "yaml_path": str(yaml_path),
+                "predecessor": args.predecessor,
+                "successor": args.successor,
+                "predecessor_state": getattr(args, "predecessor_state", "handed-off"),
+                "handoff_token": getattr(args, "handoff_token", None),
+            },
+        )
+    except tracking_write.AmbiguousWriteOutcome as exc:
+        return _core()._json_error(
+            f"link-succession: write to {raw} is in an unknown state: {exc}"
+        )
+    if result.get("error") == "lifecycle":
+        return _core()._json_error(result["message"])
     _core()._json_output(
         {
-            "worktree_id": record.worktree_id or raw,
-            "predecessor": args.predecessor,
-            "successor": args.successor,
-            "predecessor_state": (pred.state if pred is not None else None),
-            "head_session": record.resolved_head_session,
-            "head_revision": record.head_revision,
+            "worktree_id": result["worktree_id"],
+            "predecessor": result["predecessor"],
+            "successor": result["successor"],
+            "predecessor_state": result["predecessor_state"],
+            "head_session": result["head_session"],
+            "head_revision": result["head_revision"],
         }
     )
     return 0

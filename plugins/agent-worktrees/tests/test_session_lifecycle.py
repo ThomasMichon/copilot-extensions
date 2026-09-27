@@ -792,6 +792,29 @@ class TestConcludeAndLinkCommands:
         )
         assert out["_rc"] != 0
 
+    def test_conclude_session_ambiguous_write_outcome_is_reported_not_swallowed(
+        self, tmp_tracking_dir: Path, monkeypatch
+    ):
+        """agent-worktrees-authoritative-daemon Phase 3: a write whose
+        daemon request was sent and then failed is genuinely ambiguous --
+        the command must surface `AmbiguousWriteOutcome` as a reported
+        failure, never silently retry or swallow it."""
+        from agent_worktrees import tracking_write
+
+        _rec(tmp_tracking_dir, sessions=[SessionEntry("solo", "t")])
+
+        def _raise(*_args, **_kwargs):
+            raise tracking_write.AmbiguousWriteOutcome("request sent, no response")
+
+        monkeypatch.setattr(tracking_write, "dispatch", _raise)
+        out = self._run(
+            monkeypatch, tmp_tracking_dir, "cmd_conclude_session",
+            worktree_id="wt-1", session_id="solo", state="handed-off",
+        )
+        assert out["_rc"] != 0
+        # Refused before any mutation -- the record must be untouched.
+        assert load_record(tmp_tracking_dir / "wt-1.yaml").session_entry("solo").state == "active"
+
 
 class TestListSessionsEnvelopeHead:
     """``list-sessions --worktree`` puts the asserted head on the envelope so a
