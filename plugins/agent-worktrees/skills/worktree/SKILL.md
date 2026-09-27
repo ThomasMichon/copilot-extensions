@@ -40,6 +40,10 @@ description: >
   - 'submit PR'
   - 'submit for review'
   - 'pull request'
+  - 'trace this PR'
+  - 'who opened this PR'
+  - 'resolve a codename'
+  - 'PR attribution'
 ---
 
 # Worktree Skill
@@ -415,6 +419,7 @@ Copilot CLI session
 
 - [docs/entity-relationship-model.md](../../docs/entity-relationship-model.md) -- the suite-wide diagnostic playbook: given a session/worktree/task, which command resolves the rest (assigned worktree, sessions, bridge state, handoff chain)
 - [references/pr-workflow.md](references/pr-workflow.md) -- full PR-mode reference
+- [references/pr-attribution.md](references/pr-attribution.md) -- identifying a PR's source worktree from the marker (reviewer/maintainer perspective, not the author's)
 - [references/obligations.md](references/obligations.md) -- finalize's outbound-resource obligation gate
 - [references/cleanup-details.md](references/cleanup-details.md) -- per-worktree dirty resolution and cleanup safety guarantees
 - [references/leases.md](references/leases.md) -- the resource-lease primitive

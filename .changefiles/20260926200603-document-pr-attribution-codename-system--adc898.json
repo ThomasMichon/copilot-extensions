@@ -1,0 +1,9 @@
+{
+  "comment": "Document PR attribution & codename system (repo-level architecture.md/README.md and consumer-facing worktree skill docs)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}
