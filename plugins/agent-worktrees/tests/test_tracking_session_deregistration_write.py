@@ -16,6 +16,7 @@ fsmonitor-stop-runs-after-the-lock-releases fix.
 
 from __future__ import annotations
 
+import threading
 import time
 from pathlib import Path
 
@@ -70,23 +71,33 @@ def test_apply_session_deregister_is_a_noop_for_an_unknown_session(record_path):
     assert record.session_entry("sess-1").ended_at is None
 
 
-def test_apply_session_deregister_stops_fsmonitor_after_the_lock_releases(
+def test_stop_fsmonitor_daemon_runs_while_the_lock_is_still_held(
     record_path, monkeypatch,
 ):
-    """The incidental fix this migration makes (2026-09-27): the
-    pre-migration inline transaction called ``stop_fsmonitor_daemon`` (a
-    git subprocess) from INSIDE the ``_RecordLock`` block -- a real
-    violation of the class's own documented scope discipline ("never hold
-    the lock across ... git I/O"). Proves the call now happens with the
-    lock already released, by having the fake ``stop_fsmonitor_daemon``
-    itself attempt (and fail fast on) a real, independent lock acquisition
-    on the SAME path -- which would deadlock/time out if the verb's own
-    lock were still held."""
-    calls = []
+    """(2026-09-27 PR #4238 review finding) A first migration attempt
+    moved ``stop_fsmonitor_daemon`` outside the lock as a claimed
+    scope-discipline improvement, but review correctly found the in-lock
+    ordering is load-bearing, not incidental: holding the same lock
+    ``register_session`` needs is what prevents a concurrent session
+    start from adding a new open session in the window between this
+    transaction's "no open sessions" check and the actual stop. Proves
+    the call still runs while THIS verb's own lock is held, via a
+    cross-THREAD probe (the in-process lock is per-thread reentrant, so a
+    same-thread nested acquisition would trivially succeed and prove
+    nothing) that attempts a separate, non-blocking ``_RecordLock`` on the
+    same path from inside the fake ``stop_fsmonitor_daemon`` -- it must
+    fail to acquire."""
+    probe_result: dict = {}
+
+    def _probe() -> None:
+        with tracking._RecordLock(record_path, blocking=False) as lock:
+            probe_result["acquired"] = lock.acquired
 
     def _fake_stop(worktree_path):
-        with tracking._RecordLock(record_path, timeout=2):
-            calls.append(worktree_path)
+        probe_result["worktree_path"] = worktree_path
+        probe_thread = threading.Thread(target=_probe)
+        probe_thread.start()
+        probe_thread.join(timeout=2)
 
     monkeypatch.setattr(
         tracking_session_deregistration_write, "stop_fsmonitor_daemon", _fake_stop,
@@ -95,7 +106,8 @@ def test_apply_session_deregister_stops_fsmonitor_after_the_lock_releases(
         {"worktree_id": "wt-dereg", "yaml_path": str(record_path), "session_id": "sess-1"}
     )
     assert result == {"ok": True}
-    assert calls == ["/tmp/wt-dereg"]
+    assert probe_result["worktree_path"] == "/tmp/wt-dereg"
+    assert probe_result["acquired"] is False
 
 
 def test_deregister_session_reaches_a_live_daemon(record_path, monkeypatch, monkeypatch_config):

@@ -22,17 +22,18 @@ not something to rediscover per cluster:
   (``rendezvous_fields``/``endpoint_from_rendezvous``'s ``verb=`` check,
   landed in PR #4159) -- no call-site-specific work needed for this half.
 
-**One incidental fix while migrating** (2026-09-27): the pre-migration
-inline transaction called ``stop_fsmonitor_daemon`` (a ``git
-fsmonitor--daemon stop`` subprocess, best-effort with its own 5s timeout)
-from INSIDE the ``_RecordLock`` block -- a real, if minor, violation of
-``_RecordLock``'s own documented scope discipline ("never hold the lock
-across network or git I/O"). This verb moves that call to AFTER the lock
-releases (using the record snapshot the lock's own transaction already
-produced), a behavior-preserving fix, not a new mutation: the resource
-mutations, the decision of whether to stop the fsmonitor daemon, and the
-final acknowledgement are all unchanged; only WHEN the git subprocess runs
-relative to the lock moves.
+``stop_fsmonitor_daemon`` (a ``git fsmonitor--daemon stop`` subprocess,
+best-effort with its own 5s timeout) runs INSIDE this same
+``_RecordLock``, exactly matching the pre-migration transaction -- a
+first attempt at this migration moved it outside the lock as a claimed
+scope-discipline improvement (``_RecordLock``'s own docstring discourages
+holding it across git I/O), but PR #4238 review correctly found that the
+in-lock ordering is load-bearing, not incidental: holding the SAME lock
+``register_session`` needs is what prevents a concurrent session start
+from adding a new open session in the window between this transaction's
+"no open sessions" check and the actual stop -- without it, a session
+that starts moments after this one ends could have its own fsmonitor
+killed out from under it. Kept in-lock, matching old behavior exactly.
 """
 
 from __future__ import annotations
@@ -50,17 +51,15 @@ from .tracking_session_registry import (
 def apply_session_deregister(args: dict) -> dict:
     """Registered as the ``session_deregister`` verb. Mirrors the former
     ``tracking_session_registry.deregister_session`` transaction exactly
-    -- same lock, same mutation order, same no-op conditions -- except
-    ``stop_fsmonitor_daemon`` (a git subprocess call) now runs AFTER the
-    lock releases rather than inside it (see this module's own docstring).
-    """
+    -- same lock, same mutation order, same no-op conditions, including
+    ``stop_fsmonitor_daemon`` running inside the lock (see this module's
+    own docstring for why that's load-bearing, not incidental)."""
     yaml_path = Path(args["yaml_path"])
     session_id = args["session_id"]
     ended_at = args.get("ended_at")
     source = args.get("source", "hook")
     recorded_at = args.get("recorded_at")
 
-    stop_fsmonitor_path: str | None = None
     with tracking._RecordLock(yaml_path):
         record = tracking.load_record(yaml_path)
         if record.sessions is None:
@@ -83,11 +82,8 @@ def apply_session_deregister(args: dict) -> dict:
                 tracking.release_resource_claim(record, self_session_ref, save=False)
                 tracking.save_record(record, yaml_path)
                 if not _record_has_open_session(record):
-                    stop_fsmonitor_path = record.worktree_path
+                    stop_fsmonitor_daemon(record.worktree_path)
             break
-
-    if stop_fsmonitor_path:
-        stop_fsmonitor_daemon(stop_fsmonitor_path)
     return {"ok": True}
 
 
