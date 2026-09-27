@@ -1351,7 +1351,9 @@ _Pending._
   build artifacts after any non-editable-install probe, before trusting a
   `materialize_main.py` `SKIP`/warning as a real regression.
 - Added a changefile per touched plugin (`agent-worktrees`,
-  `worktree-manager`).
+  `worktree-manager`) -- later reduced to just `agent-worktrees` (see
+  below): the `worktree-manager` changefiles were removed once identified
+  as dead weight for a standalone-versioned, non-marketplace payload.
 - **Filed as PR #4331**, targeting `dev`. The GitHub-native automated
   reviewer's first pass surfaced a real, previously-unrecognized gap in
   this conversion recipe (2 High findings), fixed in the same PR:
@@ -1434,5 +1436,22 @@ _Pending._
       changefile); all other guards (`sync-vendored-libs.py --check`/
       `check-vendored-libs-sync.py`/`check-install-contract.py`/`check-
       version-consistency.py`) still green.
+  - **Third review round**: the reviewer's own "Resolved since last
+    review" list confirmed both Medium findings above (the dead
+    changefiles, the missing self-install-level tests) as fixed. It also
+    re-listed the two prior High findings (self-install materializer,
+    self-install parity tests) as still "Open" despite both already
+    being addressed by the prior commit -- re-verified against the
+    current file state (`self_install.py`'s `_materialize_payload_
+    pointers` still calls `materializer.find_uv_editable_refs`/
+    `materialize_uv_editable_ref_into`; both new tests still present and
+    passing in `test_self_install.py`) and treated as the SAME documented
+    reviewer lag (stale round-over-round carry-over), not a real
+    regression -- no code change made for those two. One genuinely NEW
+    finding: this journal's own "Added a changefile per touched plugin
+    (agent-worktrees, worktree-manager)" bullet (and the PR description's
+    matching claim) were left stale after the `worktree-manager`
+    changefiles were removed two commits later. Reworded the journal
+    bullet in place; updated the PR description on GitHub to match.
 - **Next up**: `credential-relay` (4 consumers), per the effort's own
   smallest-blast-radius-first ordering.
