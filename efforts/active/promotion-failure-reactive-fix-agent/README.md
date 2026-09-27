@@ -1603,11 +1603,20 @@ _Pending._
   risk this can't close (injection content that was already present in
   the watchdog's own genuine log excerpt), and `threat-detection` remains
   the backstop for exactly that.
-- **Six rounds deep now; #1, #3, #4, #6 have stayed resolved since round
-  1 with zero further findings across 5 subsequent review passes** — a
+- **A SEVENTH review pass found 1 more, since fixed:** the round-6 decode
+  fix used a FIXED `$GITHUB_OUTPUT` multiline delimiter string — but the
+  body is untrusted log content that can legitimately (or deliberately)
+  contain a line matching a fixed, guessable string, terminating the
+  multiline value early and silently truncating/corrupting what the agent
+  actually receives. Fixed by generating the delimiter at runtime and
+  confirming it does not literally occur anywhere in the body first,
+  retrying with fresh randomness on any collision.
+- **Seven rounds deep now; #1, #3, #4, #6 have stayed resolved since round
+  1 with zero further findings across 6 subsequent review passes** — a
   reasonable signal those are genuinely settled, even without a live
   compile. #2 and #5 turned out to be genuinely entangled (the TOCTOU fix
   that finally closed #5 for real also closed a gap #2's own checks left
-  open) and needed the full 6 rounds between them. Still outstanding
-  regardless: `gh aw compile` verification (SSO-blocked, unresolved this
-  session).
+  open) and needed the full 7 rounds between them, down to a real
+  delimiter-collision bug in round 6's own output-passing mechanism.
+  Still outstanding regardless: `gh aw compile` verification (SSO-blocked,
+  unresolved this session).

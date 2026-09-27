@@ -85,24 +85,28 @@
      the same "machine-enforced, not prompt-text-alone" principle `report-failure`
      already established.
   5. UNTRUSTED ISSUE BODY INTERPOLATED WITHOUT ISOLATION -- RESOLVED, in its final
-     form after two intermediate attempts real review moved past (see the round
+     form after three intermediate attempts real review moved past (see the round
      history under #2 above and PR #3916 itself). The agent no longer re-fetches
      the issue body live via `issue_read` -- that both failed to isolate the model
      from untrusted content AND opened a TOCTOU window past `verify-issue`'s own
      checks (see #2). Instead, `verify-issue`'s own already-authenticated body is
      captured once and passed forward as an immutable job output; a
-     `pre-agent-steps` entry decodes it inside the agent job itself, and the
-     markdown prompt embeds that decoded value directly. This is provably the
-     exact, unaltered, authenticated record `verify-issue` confirmed -- not a
-     live, re-editable fetch of whatever the issue says *now*. It does NOT, and
-     cannot, isolate the agent from injection content that was ALREADY present in
-     the watchdog's own genuine log excerpt (a real failing test's real output
-     can itself contain arbitrary text) -- that residual risk is explicitly named
-     in the prompt itself, and gh-aw's own built-in `threat-detection` stage
-     (confirmed via its dedicated reference page) remains the machine-enforced
-     backstop: because `safe-outputs` is configured at all, a separate AI-powered
-     detection job automatically runs AFTER the agent job and BEFORE any safe
-     output is applied, specifically to
+     `pre-agent-steps` entry decodes it inside the agent job itself using a
+     runtime-generated, collision-checked `$GITHUB_OUTPUT` delimiter (a FIXED
+     delimiter is itself attacker-reachable, since the body is untrusted log
+     content that could legitimately contain a line matching it, truncating the
+     value early -- a real review finding, since fixed), and the markdown prompt
+     embeds that decoded value directly. This is provably the exact, unaltered,
+     authenticated record `verify-issue` confirmed -- not a live, re-editable
+     fetch of whatever the issue says *now*, and not truncatable by content
+     collision either. It does NOT, and cannot, isolate the agent from injection
+     content that was ALREADY present in the watchdog's own genuine log excerpt
+     (a real failing test's real output can itself contain arbitrary text) --
+     that residual risk is explicitly named in the prompt itself, and gh-aw's own
+     built-in `threat-detection` stage (confirmed via its dedicated reference
+     page) remains the machine-enforced backstop: because `safe-outputs` is
+     configured at all, a separate AI-powered detection job automatically runs
+     AFTER the agent job and BEFORE any safe output is applied, specifically to
      catch prompt injection, secret leaks, and malicious patches. Made explicit
      (rather than left implicit/default) with a workflow-specific `threat-
      detection.prompt:` addendum below, and set `continue-on-error: false`
@@ -171,10 +175,17 @@
   window and defeat every check above; fixed by capturing the exact verified
   body IN `verify-issue` itself and passing it to the agent job as an
   immutable output (via `pre-agent-steps`, decoded once inside that same
-  job), rather than letting the agent re-fetch it. See the `verify-issue`
-  job's own inline comments, the `pre-agent-steps` block, the
-  `safe-outputs.threat-detection` block, and `validate-and-promote.yml`'s
-  dispatch step for detail.
+  job), rather than letting the agent re-fetch it. A SEVENTH review pass
+  found 1 more, since fixed: (k) round 6's (j) fix decoded the body using a
+  FIXED `$GITHUB_OUTPUT` multiline delimiter -- but the body is untrusted
+  log content that can legitimately (or deliberately) contain a line
+  matching a fixed, guessable string, terminating the value early and
+  corrupting/truncating what the agent actually receives; fixed by
+  generating the delimiter at runtime and confirming it does not literally
+  occur anywhere in the body first, retrying with fresh randomness on
+  collision. See the `verify-issue` job's own inline comments, the
+  `pre-agent-steps` block, the `safe-outputs.threat-detection` block, and
+  `validate-and-promote.yml`'s dispatch step for detail.
 -->
 ---
 description: "Attempts a scoped, reviewed fix for one tracked dev CI-failure signature (promotion-failure-reactive-fix-agent effort, Phase 2)."
@@ -387,11 +398,23 @@ pre-agent-steps:
       BODY_B64: ${{ needs.verify-issue.outputs.body-b64 }}
     run: |
       set -euo pipefail
+      BODY=$(printf '%s' "$BODY_B64" | base64 -d)
+      # Real review finding (PR #3916): a FIXED delimiter string for the
+      # multiline `$GITHUB_OUTPUT` syntax is itself attacker-reachable --
+      # the body is untrusted log content, and a failing test can
+      # legitimately (or deliberately) print a line matching the delimiter,
+      # terminating the value early and corrupting/truncating what the
+      # agent receives. Generate a delimiter at runtime and confirm it does
+      # not literally occur anywhere in the body before using it, retrying
+      # with fresh randomness until it's collision-free.
+      DELIM="GH_AW_VERIFIED_BODY_$$_${RANDOM}${RANDOM}${RANDOM}_EOF"
+      while printf '%s' "$BODY" | grep -qF "$DELIM"; do
+        DELIM="GH_AW_VERIFIED_BODY_$$_${RANDOM}${RANDOM}${RANDOM}_EOF"
+      done
       {
-        echo 'body<<GH_AW_VERIFIED_BODY_EOF'
-        printf '%s' "$BODY_B64" | base64 -d
-        echo
-        echo 'GH_AW_VERIFIED_BODY_EOF'
+        echo "body<<$DELIM"
+        printf '%s\n' "$BODY"
+        echo "$DELIM"
       } >> "$GITHUB_OUTPUT"
 
 # `edit:` (gh-aw's real file-editing tool -- blocking issue #3) joins the
