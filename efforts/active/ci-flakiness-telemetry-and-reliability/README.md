@@ -263,8 +263,13 @@ find the noisiest and blocking issues, and fix them"
   green -- this one does NOT reproduce readily on a quiet, uncontended local
   machine the way #7715 did (consistent with it being a real CI-runner
   resource-contention issue, not a pure logic race). Pulled a real historical
-  failure excerpt directly from `dev`-push run 36302713272 (commit
-  `60a62be1`, 2026-09-27) instead of guessing:
+  failure excerpt directly from PR-triggered `ci.yml` run 36302713272
+  (event `pull_request`, head branch
+  `pr/agent-logger-make-schema-v3-s-sync-local-1212`, commit `60a62be1`,
+  2026-09-27) instead of guessing -- **not** a `dev`-push run, so this
+  particular occurrence does not itself carry blocking impact by this
+  effort's own definition; it's cited purely for its failure content
+  (the exact assertion), not as a blocking-queue data point:
   ```
   AssertionError: assert 'RESULT:' == 'RESULT:/tmp/...python312.exe'
   - RESULT:/tmp/ce-agent-logger-okc7q77h/pytest/group-1/test_missing_newest_candidate_1/python312.exe
@@ -367,10 +372,15 @@ determine whether this section needs anything beyond the Plan above._
   its own tracked, non-mined section. Full Phase 2 ranked report:
   noisiest by frequency `tools/test_check_marketplace_isolation.py::
   test_payload_catalog_adopter_capabilities_avoid_bare_global_commands` (23
-  occurrences, 0% recovery — a persisting issue, not a flake); highest
+  occurrences, 0% recovery); highest
   blocking impact `tests/test_install_signed_python_probe.py::
   test_missing_newest_candidate_does_not_abort_probe[pwsh]` (122 `dev`-push
-  runs stalled). Both are strong Phase 3 candidates alongside #7715.
+  runs stalled). **Superseded by the 2026-09-27 Phase 2 refinement entry
+  below:** the marketplace-isolation signature turned out NOT to be a
+  persisting standing bug (0% recovery there means "many different PR
+  authors independently tripped a working check," not "stuck and never
+  clears") -- only the signed-python-probe signature remains a genuine
+  Phase 3 candidate; #7715 is now fixed.
 - Next: Phase 3 — fix aperture-labs#7715, then work down the ranking.
 
 ### 2026-09-27 — Phase 0 reconciliation resolved
