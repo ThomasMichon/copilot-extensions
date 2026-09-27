@@ -138,11 +138,12 @@ every registered project, on every platform, which ones are behind a
 There is no `claims find` (or similar fleet-wide query) command today. Every
 step above is a hand-rolled loop over `list --json` output piped through
 `jq`/a script, repeated per platform/cell, plus a separate live-PR-state
-fetch and manual intersection. This is real, repeated toil -- an
-`agent-worktrees claims find --resource-kind pr --repo <owner/repo> --state
-open [--include-other-platforms] [--all-cells]` (or equivalent) that did
-steps 1-3 itself, across every registered project's tracking store, would
-turn a several-tool-call investigation into one call. No such command
+fetch and manual intersection. This is real, repeated toil -- a hypothetical
+`<agent-worktrees catalog argv[0]> claims find --resource-kind pr --repo
+<owner/repo> --state open [--include-other-platforms] [--all-cells]` (or
+equivalent, naming still open to bikeshedding -- see the tracked issue) that
+did steps 1-3 itself, across every registered project's tracking store,
+would turn a several-tool-call investigation into one call. No such command
 exists as of this writing; if you build one, update this section to point at
 it instead of the manual recipe. Tracked as
 [ThomasMichon/copilot-extensions#4086](https://github.com/ThomasMichon/copilot-extensions/issues/4086).
