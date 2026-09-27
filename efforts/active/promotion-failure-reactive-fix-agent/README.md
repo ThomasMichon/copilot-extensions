@@ -4,10 +4,12 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice worktrees
 - **Created:** 2026-09-25
-- **Status:** Active — Phase 1 implemented, landed, and now fully
-  live-validated (Phase 1.5 Done: detection, filing, and dedup/rate-
-  limiting all confirmed against real production data); Phase 2 gated
-  (see below)
+- **Status:** Active — Phase 1 live-validated (Phase 1.5 Done); Phase 2
+  in progress: vision-reconciliation gate resolved, real research done,
+  a draft `gh-aw` workflow authored
+  (`.github/workflows/ci-failure-fix-attempt.md`, not yet compiled —
+  see the 2026-09-26 Journal entry for a real local-install blocker and
+  open decisions)
 - **Vision:** [`visions/ci-failure-remediation`](../../../visions/ci-failure-remediation/README.md)
   (authored 2026-09-26 to resolve the reconciliation gate below). **Gate
   resolved:** the vision states the standing intent (detection+dedup,
@@ -311,13 +313,15 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
       [`visions/ci-failure-remediation`](../../../visions/ci-failure-remediation/README.md)**
       (operator confirmed: a new vision, not folding into an existing
       one). Phase 2 may now proceed to the remaining items below.
-- [ ] **Charter — diagnosis and intent-preservation discipline (this
+- [x] **Charter — diagnosis and intent-preservation discipline (this
       governs the prompt itself, independent of which mechanism below
       carries it out):** the agent's job is never "make the failing test
       green." Its job is to **preserve the *intent* of whatever change is
       judged responsible** for the failure — the test's intent, the
       implementation's intent, or both — never to erase the disagreement
-      between them by force.
+      between them by force. **Encoded verbatim into the actual draft
+      prompt — see `.github/workflows/ci-failure-fix-attempt.md`
+      (2026-09-26 Journal entry).**
   - [ ] **Default expectation, stated explicitly in the prompt: most
         failures are flaky tests, not real regressions.** A test is
         "flaky" here specifically when it over-specifies its environment
@@ -377,26 +381,39 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
         If the "obvious" fix would require a genuinely new design decision
         (not just correcting a test or restoring prior behavior), that is
         itself a signal to escalate rather than decide unilaterally.
-- [ ] Once Phase 1's detection+dedup is proven reliable (no false positives,
-      no duplicate-issue spam) over a real observation window, author a
-      `gh-aw` agentic workflow (Markdown + YAML frontmatter, compiled via
-      `gh aw compile` into a checked-in `.lock.yml`). **`gh aw compile`
-      owns that `.lock.yml` as its own generated output — do not hand-edit
-      it into `validate-and-promote.yml`'s existing job list; compilation
-      will overwrite it.** Instead, give the agentic workflow explicit
-      `workflow_call` inputs and invoke the compiled lock workflow **as a
-      reusable-workflow job** from `validate-and-promote.yml`, passing
-      Phase 1's detection job outputs (the already-verified SHA, the
-      failure signature, the dedup decision) as explicit `with:` inputs —
-      the same `needs.<job>.outputs` → next-job-input wiring
-      `validate-and-promote.yml` already proves works between its own
-      `gate`/`full`/`promote` jobs, just crossing a reusable-workflow
-      boundary instead of a same-workflow job boundary. This preserves the
-      same-run data flow without a second, independently-triggered
-      workflow to keep in sync. Prompt it with exactly the compact
-      signature Phase 1 already extracts (which job(s) failed, the failing
-      test node id(s), and the log excerpt) **plus the diagnosis/intent-
-      preservation charter above, in full** — not a vague "go fix CI."
+- [ ] Phase 1.5 has now proven Phase 1's detection+dedup reliable over a
+      real observation window (see the 2026-09-26 Journal entries above) —
+      author a `gh-aw` agentic workflow (Markdown + YAML frontmatter,
+      compiled via `gh aw compile` into a checked-in `.lock.yml`).
+      **`gh aw compile` owns that `.lock.yml` as its own generated
+      output — do not hand-edit it.**
+      **Design pivot from this bullet's original plan (2026-09-26, see
+      Journal): the originally preferred `workflow_call`
+      reusable-workflow-job shape is NOT confirmed as a supported
+      `on:` trigger in gh-aw's documented trigger surface** (Trigger
+      Events reference covers issues/pull_request/schedule/
+      workflow_dispatch/etc., not `workflow_call`). Rather than gamble on
+      an unconfirmed shape, the draft below uses this same bullet's own
+      documented **fallback** instead — see the next sub-bullet — with a
+      further refinement: an `issues: labeled` trigger gated on the exact
+      `ci-failure-signature` label `tools/ci_failure_watchdog.py` already
+      applies, since the filed issue already carries every diagnostic
+      fact Phase 1 extracted directly in its body. This sidesteps the
+      entire `workflow_run`/dev-branch-filter footgun class below
+      (it doesn't apply to an issue-triggered workflow at all) rather
+      than needing to re-solve it a second time. **A real, though
+      not-yet-compile-verified, draft now exists:
+      `.github/workflows/ci-failure-fix-attempt.md`** — see the
+      2026-09-26 Journal entry for what's confirmed vs. still open
+      (auth path decision, bash tool allowlist, protected-files schema
+      verification, and the `gh aw compile` blocker itself). Confirm the
+      `workflow_call` reasoning above once `gh aw compile` is actually
+      runnable somewhere; revisit the trigger shape only if that changes.
+      Prompt it with exactly the compact signature Phase 1 already
+      extracts (which job(s) failed, the failing test node id(s), and the
+      log excerpt — carried via the issue body itself, not `with:`
+      inputs) **plus the diagnosis/intent-preservation charter above, in
+      full** — not a vague "go fix CI." **Done in the draft file.**
   - [ ] **If a separate `workflow_run`-triggered workflow is used instead
         (not the preferred shape above): never filter it on
         `branches: [dev]`.** This repo already documents that
@@ -407,7 +424,9 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
         is the known **dead-trigger pattern**: it can silently prevent
         every run from firing at all. Gate on the carried, independently
         verified SHA/merge-base ancestry check instead of any branch-name
-        filter.
+        filter. **N/A for the current draft (issue-triggered, not
+        `workflow_run`-triggered) — kept for reference in case the
+        trigger shape is revisited.**
   - [ ] **Bootstrap gotcha (this session already hit the identical bug
         once — see `ci.yml:71-74` and the dev-branch-release-pipeline
         journal):** a `workflow_run`-triggered workflow is read from the
@@ -1241,3 +1260,80 @@ _Pending._
 - **Phase 2 may now proceed** to its remaining items (author the `gh-aw`
   workflow itself, wire it into `validate-and-promote.yml`, its security
   hardening checklist, etc.) — none of which have been started yet.
+
+### 2026-09-26 — Phase 2 kicked off: real research, a real draft, and one real blocker
+- Operator: "Start it in a handoff." Began substantive Phase 2 work this
+  session rather than only planning it, per the continuity contract —
+  handing off mid-slice with real progress, not a bare restart.
+- **Attempted to install `gh aw` locally and hit a real blocker:**
+  `gh extension install github/gh-aw` fails with `HTTP 403: Resource
+  protected by organization SAML enforcement` — the `github` org (which
+  owns the `gh-aw` extension repo) enforces SAML SSO on API access to its
+  release metadata, and this session's `gh` account (a personal account,
+  not a member of that org) cannot grant that authorization. The repo
+  itself is publicly readable over plain HTTPS (confirmed via
+  `web_fetch`), so this is specifically an API-authorization wall on `gh
+  extension install`'s own release-check call, not a repo-visibility
+  issue. **This means `gh aw compile` could not be run or verified this
+  session.** Everything below is researched against gh-aw's public docs
+  (`github.github.com/gh-aw/reference/...`) and reasoned carefully, but
+  is **not** confirmed against the real compiler. A GitHub Actions
+  hosted runner's own ambient auth is unrelated to this personal-account
+  SSO restriction and should install fine there — this blocker is
+  specific to authoring/testing locally with this account, not to the
+  mechanism working in CI once shipped.
+- **Real design finding, not just an install problem:** researched
+  gh-aw's actual `on:` trigger surface (Trigger Events reference) and
+  found no documented `workflow_call` trigger for an agentic-workflow
+  source file — the originally-preferred reusable-workflow-job shape
+  (Phase 2's own first Plan bullet) is not confirmed supported. Rather
+  than gamble on it, pivoted to the Plan's own documented fallback
+  shape, refined further: **an `issues: labeled` trigger gated on the
+  exact `ci-failure-signature` label**, since the issue
+  `tools/ci_failure_watchdog.py` files already carries every diagnostic
+  fact (signature, run link, commit SHA, log excerpt) directly in its
+  body — no `workflow_run` re-triggering, no dev-branch-filter
+  footgun class, no re-deriving anything Phase 1 already extracted.
+  Recorded this reasoning directly in the draft file's own leading
+  comment block so it survives independent of this journal entry.
+- **Also researched gh-aw's `safe-outputs` model in real depth**
+  (`create-pull-request` specifically): confirmed it structurally
+  enforces exactly the guardrails Phase 3 already called for —
+  buffered writes via a separate permission-controlled job (the agent
+  itself stays read-only), `draft: true` as a non-overridable policy,
+  and a `protected-files` mechanism for code-writing safe outputs. Did
+  **not** get far enough to confirm the exact protected-file manifest/
+  schema live (page fetches were long; stopped once the actionable
+  shape was clear) — flagged as an explicit TODO in the draft file
+  rather than guessed at.
+- **Authored a real draft: `.github/workflows/ci-failure-fix-attempt.md`**
+  (not yet compiled/verified). Contains: `description`/`intent`
+  frontmatter (gh-aw's own `intent` field is a natural home for staying
+  vision-anchored — cited `visions/ci-failure-remediation` directly),
+  the `issues: labeled` trigger + label gate, explicit read-only
+  `permissions:`, a `tools.bash` allowlist scoped to inspection +
+  running the specific failing test, and a `safe-outputs.create-pull-
+  request` block (draft PR against `dev`, `max: 1`,
+  `protected-files: fallback-to-issue`). The markdown body carries the
+  **full diagnosis/intent-preservation charter** from the Plan above,
+  verbatim in spirit, plus explicit instructions to actually run the
+  failing test before opening a PR, and to comment-and-stop rather than
+  guess when triage can't be resolved confidently.
+- **Left as explicit `TODO(successor)` comments directly in the draft
+  file** (so they travel with the file, not just this journal): (1) the
+  Copilot engine auth path decision (org-billing vs. `COPILOT_GITHUB_TOKEN`
+  PAT) — drafted assuming the PAT path but this is **not** a made
+  decision; (2) the exact `bash` tool allowlist needed once the real
+  test-running command is confirmed; (3) verifying the `protected-files`
+  config schema against a real `gh aw compile` run.
+- **Not yet done, in order:** get `gh aw compile` runnable somewhere
+  (try a different machine/account without this org's SSO restriction,
+  or ask the operator to resolve access) and actually compile this
+  draft; resolve the two TODOs above; wire the bootstrap-onto-main
+  pattern (same gotcha as Phase 1's `report-failure`, confirmed still
+  applicable to an issue-triggered workflow too — GitHub reads a
+  non-branch-scoped trigger's workflow definition from the default
+  branch); complete Phase 2's remaining security-hardening checklist
+  items (pin the `gh-aw` extension version, verify job-level
+  `permissions:` don't inherit anything broader); then Phase 3's
+  Validation Plan trials (the two-sided triage trial specifically).
