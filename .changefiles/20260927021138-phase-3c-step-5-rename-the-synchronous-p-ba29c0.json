@@ -1,9 +1,0 @@
-{
-  "comment": "Phase 3c Step 5: rename the synchronous picker setup helper, keep setup/reload entrypoints on the async worker path, and document the final non-blocking shape",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}
