@@ -284,6 +284,20 @@ jobs:
   agent:
     needs: [verify-issue]
     if: needs.verify-issue.outputs.authorized == 'true'
+  # Real review finding (PR #4155, round 5): the generated `safe_outputs`
+  # job's own `if:` only required `needs.agent.result != 'skipped'` --
+  # NOT `== 'success'` -- so a scope-gate failure in `post-steps` (which
+  # runs INSIDE the `agent` job and fails it) did not, by itself, block
+  # `safe_outputs` from still applying the agent's patch, as long as the
+  # separate `detection` (threat-detection) job happened to find nothing.
+  # `jobs.<built-in-job>.if` is gh-aw's own documented additive-gating
+  # mechanism (already used above for `agent`) -- it combines with the
+  # compiler's own generated condition via logical `&&`, so this makes
+  # the scope gate's failure an ACTUAL hard stop for the safe-output
+  # patch, not merely a same-run job-status footnote a human reviewer
+  # would have to notice on their own.
+  safe_outputs:
+    if: needs.agent.result == 'success'
 
 # Real review finding (PR #3916): the agent job must not re-fetch the issue
 # body live via `issue_read` (a TOCTOU window past `verify-issue`'s own
@@ -761,6 +775,20 @@ safe-outputs:
       PROSE -- RESOLVED: the prompt's description of `.verify-issue/body.txt`'s
       contents had a dropped clause ("the failing [...] one was parseable)"
       -- missing "test node id (when"). Restored the full sentence.
+  20. (Found by real review, fifth pass, PR #4155 -- new, no prior issue)
+      SAFE-OUTPUTS COULD STILL APPLY THE PATCH AFTER A SCOPE-GATE FAILURE --
+      RESOLVED: the compiler's own generated `safe_outputs` job `if:` only
+      required `needs.agent.result != 'skipped'`, NOT `== 'success'` -- the
+      `post-steps` scope gate (issue #8/#14) runs INSIDE the `agent` job and
+      fails it on a violation, but that alone did not stop `safe_outputs`
+      from still applying the agent's patch, as long as the separate
+      `detection` (threat-detection) job happened to find nothing. Fixed
+      with `jobs.safe_outputs.if: needs.agent.result == 'success'` in
+      frontmatter -- gh-aw's own documented additive-gating mechanism
+      (already used for `jobs.agent.if` above) ANDs this into the
+      compiler's own generated condition; compile-verified the generated
+      `if:` now reads `(<original condition>) && (needs.agent.result ==
+      'success')`.
 
   A first pass at resolving #1/#2 (PR #3916) introduced two NEW, real issues real
   review caught before merge, both since fixed in this same file: (a) the

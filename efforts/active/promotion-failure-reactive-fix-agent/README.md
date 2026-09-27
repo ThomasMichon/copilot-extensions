@@ -1974,3 +1974,33 @@ _Pending._
   review's own recorded `commit_id` against `git log --all`, and by
   waiting for the next review pass to land against the correct,
   already-pushed head, which showed all four fixes as genuinely resolved.
+- **Fifth real review pass found a genuine safe-outputs bypass, its own
+  1 recap-repeat item resolved, 5 others still recap-repeated:** the new
+  finding -- **HIGH, issue #20** -- the compiler's own generated
+  `safe_outputs` job `if:` only required `needs.agent.result !=
+  'skipped'`, NOT `== 'success'`. The `post-steps` scope gate (issue
+  #8/#14) runs INSIDE the `agent` job and fails it on a violation, but
+  that alone did not stop `safe_outputs` from still applying the agent's
+  patch, as long as the separate `detection` (threat-detection) job
+  happened to find nothing -- a real, if narrow, path for a scope
+  violation to reach a merged PR undetected. Fixed with
+  `jobs.safe_outputs.if: needs.agent.result == 'success'` in frontmatter
+  -- gh-aw's own documented additive-gating mechanism (already used for
+  `jobs.agent.if`) ANDs this into the compiler's own generated condition;
+  compile-verified the generated `if:` now reads `(<original condition>)
+  && (needs.agent.result == 'success')`. Recompiled clean; guard scripts
+  and the full 75-test suite still pass. This same review pass again
+  re-cited the round-3/4 action-tag-guard fixes and the round-1/2
+  membership-gate/dispatch-fallback/env-drop fixes as still "Open" with
+  byte-identical wording and, per GitHub's own GraphQL thread-resolution
+  API, `isResolved: false` on every one of those 5 threads DESPITE each
+  one carrying an author "Fixed" reply describing concrete, independently
+  verified evidence -- confirming this is a structural limitation of this
+  review bot's "Lite effort" recap mode (it re-lists prior threads by
+  their thread-open/closed state rather than re-diffing content against
+  the current head) and not a genuine unresolved defect for any of those
+  5. Continuing to treat each NEW inline comment on its own merits while
+  not chasing the recap's own stale "Open" count to zero, since nothing
+  in this repo's `pr-self-merge` flow or branch protection is actually
+  gated on that count -- only genuinely failing required checks and an
+  unaddressed `CHANGES_REQUESTED`/unresolved thread would be.
