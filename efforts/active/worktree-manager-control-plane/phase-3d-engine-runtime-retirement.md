@@ -487,10 +487,14 @@ once every remaining caller is already off the import boundary.
      preserved the exact boundary violation this phase is removing. Older
      engines now fail clearly with `EngineFeatureUnavailable` instead of
      silently importing `agent_worktrees.__main__`.
-   - `_engine_runtime.py`'s remaining live surface is now down to **5**
-     modules: `config`, `pr_ops`, `reclaim`, `sessions`, and `tracking`.
-     `production_picker.__main__` is deleted and no production Group A/B path
-     imports `agent_worktrees` in-process anymore.
+   - `production_picker.__main__` is deleted and the direct Group A/B
+     `runner.py` / `pivot_manifest.py` / `update_stage.py` call sites no longer
+     import `agent_worktrees` in-process. The remaining `_engine_runtime.py`
+     surface is **9** engine modules total: the **5** legacy proxy/shim
+     modules (`config`, `pr_ops`, `reclaim`, `sessions`, `tracking`) plus the
+     **4** explicit Step 3 housekeeping-owned imports
+     (`activity`, `gc`, `reap_cli`, `status_monitor_runtime`) that still ride
+     the compatibility boundary until the later cleanup work.
    - Validation: targeted Group B seam + cutover regressions passed (`7
      passed` across `test_context_resolution.py`'s bootstrap/repair coverage,
      `test_engine_group_b.py`, `test_housekeeping.py`, and

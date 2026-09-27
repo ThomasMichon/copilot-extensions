@@ -415,8 +415,11 @@ covered 9 `agent_worktrees.*` submodules; after Phase 3e retired the
 [#4322](https://github.com/ThomasMichon/copilot-extensions/pull/4322),
 [#4323](https://github.com/ThomasMichon/copilot-extensions/pull/4323), and
 [#4324](https://github.com/ThomasMichon/copilot-extensions/pull/4324) cut
-Groups A/B over to subprocess or Manager-owned seams, 5 remain live here
-(`config`, `pr_ops`, `reclaim`, `sessions`, `tracking`), still
+the direct Group A/B runner/pivot/update call sites over to subprocess or
+Manager-owned seams, 9 engine modules still remain live here (`activity`,
+`config`, `gc`, `pr_ops`, `reap_cli`, `reclaim`, `sessions`,
+`status_monitor_runtime`, `tracking`) — including 5 legacy proxy/shim modules
+and 4 explicit housekeeping-owned imports — still
 imported **in-process** via whole-module `__getattr__` proxies or inline
 `engine_module(name)` calls, sharing agent-worktrees' own venv/sys.path
 instead of going through the `--json` engine boundary every other Picker
@@ -505,10 +508,12 @@ PR [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
       `runner.py` now consumes the Step 2 bootstrap/repair verbs and the Step 3
       Manager-owned housekeeping/monitor modules, while
       `worktree_manager.__main__` retires the old private remote-plan fallback
-      in favor of an explicit "engine too old" failure. Groups A/B no longer
-      use `engine_module(...)`, underscore-prefixed engine helpers, or any
-      in-process `agent_worktrees` import for production Picker behavior; only
-      Group C remains before `_engine_runtime.py` can be deleted. See
+      in favor of an explicit "engine too old" failure. The direct Group A/B
+      `runner.py` / `pivot_manifest.py` / `update_stage.py` call sites no
+      longer use `engine_module(...)` or underscore-prefixed engine helpers; the
+      remaining live `_engine_runtime.py` surface is the Step 3
+      housekeeping-owned engine imports plus Group C. Only Group C remains
+      before `_engine_runtime.py` can be deleted. See
       [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
 - [ ] **Step 5 — add Group C's batched reconcile-and-stamp `--json` verb in
       agent-worktrees, unused at first.** Keep the read/reconcile/write lock
@@ -820,11 +825,14 @@ claiming discipline alone.
   silently importing private engine helpers. The parent-side bootstrap binding
   is now the authoritative project identity read by downstream
   `context.project()` / `context.project_bootstrap()` consumers, so Group B is
-  fully done and only Group C remains in Phase 3d. Real boundary shrink:
-  `_engine_runtime.py` is down from the post-Group-A 6-module surface to 5 live
-  modules (`config`, `pr_ops`, `reclaim`, `sessions`, `tracking`) and
-  `production_picker.__main__` is deleted. Validation: targeted Group B seam +
-  cutover regressions passed (`7 passed` across agent-worktrees'
+  fully done and only Group C remains in Phase 3d. Real boundary shrink: the
+  post-Group-A 6-module proxy/shim surface is down to 5
+  (`config`, `pr_ops`, `reclaim`, `sessions`, `tracking`) because
+  `production_picker.__main__` is deleted, while the total remaining live
+  in-process engine-module surface is 9 once the Step 3 housekeeping-owned
+  imports (`activity`, `gc`, `reap_cli`, `status_monitor_runtime`) are counted
+  too. Validation: targeted Group B seam + cutover regressions passed (`7
+  passed` across agent-worktrees'
   `test_context_resolution.py` bootstrap/repair coverage plus
   worktree-manager's `test_engine_group_b.py`, `test_housekeeping.py`, and
   `test_production_picker_transplant.py`); the broader Worktree Manager Group B
