@@ -22,9 +22,11 @@ compatibility boundary to the active agent-worktrees runtime."** It resolves
 the active agent-worktrees install (namespaced-then-legacy slot, or a local
 checkout fallback), injects its `src/` plus several of its vendored
 `libs/*/src` onto `sys.path`, and lets the Picker `importlib.import_module()`
-9 `agent_worktrees.*` submodules directly, in-process — a different plugin's
-own private CLI implementation, not a shared library. This already caused two
-live production bugs this session (#3319, #3327): a lazily-populated
+historically 9 `agent_worktrees.*` submodules directly, in-process — now down
+to 8 live runtime/root consumers after Phase 3e retired the `profiles` proxy,
+but still a different plugin's own private CLI implementation rather than a
+shared library. This already caused two live production bugs this session
+(#3319, #3327): a lazily-populated
 `agent_worktrees.__main__` attribute silently missing because importing the
 module directly bypasses agent-worktrees' own CLI dispatch that would
 normally populate it.
@@ -229,12 +231,15 @@ agent-worktrees entirely.
 One cleanup wrinkle the table above does not spell out: the generic
 `production_picker.config` proxy is still imported by
 `picker_tui/data_local.py`, `data_ssh.py`, `engine_loading.py`,
-`profiles_io.py`, `roster.py`, and `picker_tui/__init__.py`. Those do **not**
-form a fourth design group with a new disposition question, but they **do**
-mean Step 7 cannot delete the `config` shim merely because `runner.py`,
-`pivot_manifest.py`, and `update_stage.py` are done. The ordered steps below
-therefore treat those remaining `config`-proxy consumers as part of the Group C
-/ final-cleanup work that must be drained before the last shim deletion lands.
+`profiles_io.py`, `roster.py`, `picker_tui/__init__.py`, and
+`engine_worktree_actions.py`'s authoritative liveness check (which also still
+imports the `sessions` and `tracking` proxies). Those do **not** form a fourth
+design group with a new disposition question, but they **do** mean Step 7
+cannot delete the `config` shim — or the remaining `sessions` / `tracking`
+shims — merely because `runner.py`, `pivot_manifest.py`, and `update_stage.py`
+are done. The ordered steps below therefore treat those remaining proxy
+consumers as part of the Group C / final-cleanup work that must be drained
+before the last shim deletion lands.
 
 ## Ordered implementation steps
 
@@ -356,9 +361,11 @@ once every remaining caller is already off the import boundary.
    - Drain the remaining `production_picker.config` proxy consumers that are
      coupled to the same local-data/config-cache flow (`data_local.py`,
      `data_ssh.py`, `engine_loading.py`, `profiles_io.py`, `roster.py`,
-     `picker_tui/__init__.py`) by moving each one onto its final direct file
-     reader or explicit engine-client call, so Step 7 can delete the shim for
-     real instead of leaving a hidden tail.
+     `picker_tui/__init__.py`) plus `engine_worktree_actions.py`'s last
+     authoritative liveness check over the `config` / `sessions` / `tracking`
+     shims, by moving each one onto its final direct file reader or explicit
+     engine-client call, so Step 7 can delete those proxies for real instead of
+     leaving a hidden tail.
    - Keep the subprocess invocation off the render thread by reusing the
      epoch-guarded setup/reload infrastructure landed in Phase 3c. The
      dependency here is now **satisfied**, not speculative: Step 6 should build

@@ -409,10 +409,11 @@ themselves are operator-filed.)_
 
 `production_picker/_engine_runtime.py` — its own docstring calls it a
 "temporary compatibility boundary" — is the last major violation of the
-picker vision's process-boundary-only Non-Goal: 9 `agent_worktrees.*`
-submodules (`config`, `profiles`, `pr_ops`, `reclaim`, `sessions`,
-`tracking`, `__main__`, `update_stage`, `state_root`) are imported
-**in-process** via whole-module `__getattr__` proxies or inline
+picker vision's process-boundary-only Non-Goal. Historically this boundary
+covered 9 `agent_worktrees.*` submodules; after Phase 3e retired the
+`profiles` proxy, 8 remain live here (`config`, `pr_ops`, `reclaim`,
+`sessions`, `tracking`, `__main__`, `update_stage`, `state_root`), still
+imported **in-process** via whole-module `__getattr__` proxies or inline
 `engine_module(name)` calls, sharing agent-worktrees' own venv/sys.path
 instead of going through the `--json` engine boundary every other Picker
 read path uses. This directly caused two live production bugs already fixed
