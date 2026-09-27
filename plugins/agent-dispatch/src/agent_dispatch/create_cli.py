@@ -512,6 +512,15 @@ def _do_spawn(args: argparse.Namespace, task: dict, *, route: str = ""):
             "PATH); falling back to the bridge backend",
             file=sys.stderr,
         )
+        print(
+            "agent-dispatch: WARNING -- the bridge fallback's seed is a thinner "
+            "contract than the embody backend's: no contract-net evaluation "
+            "window, no duplicate/feasibility check, and no goal/progress "
+            "loop. The spawned worker will claim, start, and complete "
+            "mechanically, but it will not evaluate whether the task is "
+            "genuinely a duplicate or actually fits it before committing.",
+            file=sys.stderr,
+        )
 
     from . import bridge, embody
 

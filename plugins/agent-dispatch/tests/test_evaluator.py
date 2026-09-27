@@ -51,6 +51,19 @@ def test_rule_matches_on_event_type_and_labels():
     assert emit.fields["source"] == "evaluator"
 
 
+def test_emit_prompt_is_appended_with_the_untrusted_content_note():
+    # The event context (task title/labels/etc.) may trace back to an
+    # untrusted external source (a webhook, an issue title); the rule
+    # author's own prompt_template should not need to remember this itself.
+    spec = ev.SpecEvaluator({"rules": [{
+        "on": "task.completed",
+        "emit": {"title_template": "x", "prompt_template": "do the thing for {task_id}"},
+    }]})
+    emit = spec.evaluate(_completed_event())[0]
+    assert "do the thing for t-1" in emit.fields["prompt"]
+    assert "untrusted subject data" in emit.fields["prompt"]
+
+
 def test_rule_skipped_on_wrong_event_type():
     spec = ev.SpecEvaluator({"rules": [{"on": "task.abandoned",
                                         "emit": {"title_template": "x"}}]})

@@ -285,6 +285,29 @@ def test_fleet_seed_carries_explicit_all_repos_claim_mode():
     ) in seed
 
 
+def test_fleet_seed_duplicate_check_sweep_shares_the_claim_lane_scope():
+    # dev-cycle regression: the duplicate-check `list` sweep must respect the
+    # same repo scoping as the claim step, not silently sweep every lane on
+    # the origin (or default to whatever lane the origin happens to be in).
+    seed = embody.fleet_autopilot_worker_prompt(
+        "t42",
+        origin="brain",
+        owner="fleet-t42-abc123",
+        worker_id="fleet-t42-abc123",
+        repo="github.com/o/n",
+    )
+    assert "ssh brain agent-dispatch list --repo github.com/o/n" in seed
+
+    all_repos_seed = embody.fleet_autopilot_worker_prompt(
+        "t42",
+        origin="brain",
+        owner="fleet-t42-abc123",
+        worker_id="fleet-t42-abc123",
+        all_repos=True,
+    )
+    assert "ssh brain agent-dispatch list --all-repos" in all_repos_seed
+
+
 def test_spawn_fleet_embodied_worker_builds_ssh_embody_argv(monkeypatch):
     captured = {}
 

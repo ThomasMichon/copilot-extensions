@@ -57,6 +57,7 @@ def test_worker_prompt_mentions_task_and_verbs():
     assert "http://" not in prompt
     assert "agent-dispatch claim abc123 --worker w9" in prompt
     assert "agent-dispatch steer take abc123 w9 --all" in prompt
+    assert "agent-dispatch charter show operating-procedures" in prompt
 
 
 def test_worker_prompt_threads_shared_moniker_route():

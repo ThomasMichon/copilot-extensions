@@ -964,7 +964,7 @@ def test_spawn_worker_for_uses_embody_backend(monkeypatch):
     assert calls["route"] == ""  # default local discovery, no baked endpoint
 
 
-def test_spawn_worker_for_embody_degrades_to_bridge(monkeypatch):
+def test_spawn_worker_for_embody_degrades_to_bridge(monkeypatch, capsys):
     """When agent-worktrees is absent, the embody backend falls back to bridge."""
     from agent_dispatch import __main__ as m
     from agent_dispatch import bridge
@@ -986,6 +986,11 @@ def test_spawn_worker_for_embody_degrades_to_bridge(monkeypatch):
     )
     m._do_spawn(args, {"id": "T8"})
     assert bridge_calls["task_id"] == "T8"
+    # The degraded fallback must be loud about what it drops (WARNING), never
+    # a silent downgrade of the evaluation/duplicate-check guardrails.
+    err = capsys.readouterr().err
+    assert "WARNING" in err
+    assert "contract-net evaluation" in err
 
 
 # -- remote registered-agent probe (fleet preflight) -------------------------

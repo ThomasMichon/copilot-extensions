@@ -117,6 +117,14 @@ def worker_prompt(task_id: str, *, worker_id: str, route: str = "") -> str:
     zero-downtime port cutover. A raw ``--url`` endpoint is never baked into a
     worker (the caller rejects that combination); routing is by discovery or a
     stable moniker only.
+
+    This is a **thinner** seed than :func:`agent_dispatch.embody_prompts.
+    autopilot_worker_prompt`: no contract-net evaluation window, no
+    duplicate/feasibility check, no goal/progress loop. It still points the
+    worker at the universal ``operating-procedures`` charter so it at least
+    picks up the tool-calls-not-prose / fail-fast / every-turn-ends contract;
+    see ``create_cli.py``'s embody-unavailable fallback for the loud warning
+    this gap prints when this thinner seed is actually the one used.
     """
     ad = f"agent-dispatch{route}"
     if route:
@@ -128,7 +136,9 @@ def worker_prompt(task_id: str, *, worker_id: str, route: str = "") -> str:
         )
     return (
         f"You are an agent-dispatch task worker (worker id: {worker_id}). "
-        f"A task has been queued for you. {discover}for each command. "
+        f"A task has been queued for you. {discover}for each command. If you "
+        f"have not already read this session's operating procedures, run "
+        f"`{ad} charter show operating-procedures` first. "
         f"Steps: (1) read it with `{ad} show {task_id}`; "
         f"(2) claim it with `{ad} claim {task_id} --worker {worker_id}` "
         f"(add `--capability <cap>` for each capability the task requires); "
@@ -344,10 +354,10 @@ def spawn_worker(
     single worktree. That leaves ``caller_worktree`` unset on the spawned target,
     so agent-worktrees' ``resolved_origin`` falls through to ``"user"`` (Picker-
     visible, freely drivable) instead of ``"delegate"`` (Picker-hidden) -- every
-    autopilot worker this function spawns looked exactly like a worktree the
-    operator created themselves, inviting accidental manual takeover of a live,
-    task-owning worker. A stable, task-attempt-scoped synthetic identity here
-    (it need not resolve to a real worktree; the origin check is presence-only)
+    autopilot-style worker this function spawns looked exactly like a worktree
+    the operator created themselves, inviting accidental manual takeover of a
+    live, task-owning worker. A stable, task-attempt-scoped synthetic identity
+    here (it need not resolve to a real worktree; the origin check is presence-only)
     fixes that regardless of the daemon's own execution context.
     """
     exe = _agent_bridge_launch_prefix()

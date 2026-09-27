@@ -150,45 +150,85 @@ names *status-through-tool-calls-not-prose*, etc., the exact Provenance
 wording, and the phase breakdown below are this effort's own synthesis of
 the operator's stated intent, not literal operator phrasing.)_
 
+**Round 4 (verbatim, after the plan PR merged):**
+
+> Yes. As we do this effort, we'll need to clean-room test mechanics. We
+> need to ensure that dispatch agents properly complete their assigned
+> tasks so they can be governed by a "mechanical" system.
+
+This adds a hard requirement the plan didn't yet carry: proving the new
+tool-calls-not-prose / every-turn-ends-terminal-steered-or-waited /
+fail-fast contracts hold isn't a documentation exercise — it has to be
+proven **behaviorally**, against a real embodied agent on a fresh box, using
+the existing `validating-in-clean-room` Tier-E (agent-eval) mechanism and
+its `clean-room-judge` under literal mode (the "does the agent stay
+mechanical, or does it improvise around an obstacle" question literal mode
+already exists to answer). See the new Phase 5 below.
+
 ## Plan
 
-### Phase 1 — Canonical operating-procedures doc + fix the sweep's concrete bugs
-- [ ] Decide and document `worker_charter.py`'s relationship to the new doc:
-      does the universal operating-procedure content (tool-calls-not-prose,
-      the allowed-moves taxonomy, the three failure postures, the
-      every-turn-ends rule) become a **new**, charter-independent doc every
-      dispatch worker gets regardless of which named charter (autopilot,
-      reviewer, etc.) it also holds — most likely, since the existing
-      charter is itself already autopilot-specific — or does it get folded
-      into `charter_text()` as a shared preamble every charter includes?
-      Write the decision down before touching prompt code.
-- [ ] Write the canonical doc (`docs/worker-operating-procedures.md` or the
-      chosen location) covering: the tool-calls-not-prose contract; the
-      every-turn-ends-terminal-steered-or-waited rule (promoted from
-      `repository_issue_loops.py`'s ad hoc statement); the allowed-moves
-      taxonomy; the two new failure postures (unreachable control plane,
-      undeclared safety boundary) and their shared "stop, don't improvise"
-      resolution; and a pointer to *reachability-tiered-charter-delivery*
-      for a worker that can't fetch this doc itself.
-- [ ] Fix `fleet_autopilot_worker_prompt()`'s missing `{lane}` on its
+### Phase 1 — Canonical operating-procedures doc + fix the sweep's concrete bugs ✅ landed
+- [x] **Decision:** a **new, charter-independent** `operating-procedures`
+      charter, registered in `worker_charter.py`'s existing `_CHARTERS` dict
+      alongside `autopilot` (reusing the existing `agent-dispatch charter
+      show <name>` mechanism rather than a new doc/CLI verb). `autopilot`
+      stays task-type policy; `operating-procedures` is the universal
+      contract every dispatch worker holds regardless of task-type charter.
+      Exported as `worker_charter.OPERATING_PROCEDURES_TEXT` for the
+      no-CLI-access tier (Phase 3) to inline directly.
+- [x] Wrote the `operating-procedures` charter covering: tool-calls-not-prose;
+      every-turn-ends-terminal-steered-or-waited; the drive-to-completion
+      allowed-moves taxonomy; fail-fast-on-control-plane-failure; and
+      declared-safety-exceptions-not-improvised.
+- [x] Fixed `fleet_autopilot_worker_prompt()`'s missing `{lane}` on its
       duplicate-check sweep line.
-- [ ] Unify `bridge.worker_prompt()` with the richer seed (either have it
-      delegate to `autopilot_worker_prompt(..., concise=True)`, or have
-      `create_cli.py`'s embody-unavailable fallback print a loud,
-      operator-visible warning that the degraded spawn drops the
-      evaluation/duplicate-check guardrails) — close the silent-fallback gap
-      the sweep found.
-- [ ] Propagate `repository_issue_loops.py`'s untrusted-subject-data framing
-      into `producers/webhook.py`'s default PR/telemetry prompts and
-      `producers/evaluator.py`'s `_emit_from_rule()` (a shared helper/clause
-      constant, not four independent copies).
-- [ ] Tests: unit coverage for the lane-bug fix and the untrusted-data
-      framing addition; a **consistency guard test** asserting
-      `bridge.worker_prompt()` and `autopilot_worker_prompt()` (or their
-      unified successor) carry the same guardrail set, so this exact drift
-      can't silently recur.
+- [x] **Chose the warning, not full unification**, for the silent-fallback
+      gap: `bridge.worker_prompt()` now points at `charter show
+      operating-procedures` (closing part of the gap cheaply) and its own
+      docstring says plainly it is thinner than the embody seed;
+      `create_cli.py`'s embody-unavailable fallback now prints a loud,
+      specific `WARNING` naming exactly what it drops (no contract-net
+      evaluation, no duplicate/feasibility check, no goal loop). Full
+      unification (`bridge.worker_prompt()` delegating to
+      `autopilot_worker_prompt(..., concise=True, explicit_worker_identity=True)`)
+      is possible and was considered, but changes `bridge.worker_prompt()`'s
+      public signature (it has no `repo`/`all_repos` params today) and
+      several existing call sites/tests assume its current exact shape --
+      deferred rather than risked in the same change as the other fixes.
+- [x] Propagated the untrusted-subject-data framing into
+      `producers/webhook.py`'s default PR/telemetry prompts and
+      `producers/evaluator.py`'s `_emit_from_rule()`, via one shared
+      constant (`producers.UNTRUSTED_EXTERNAL_CONTENT_NOTE`), not four
+      independent copies. `evaluator.py`'s version is unconditionally
+      appended regardless of the rule author's own `prompt_template`, so the
+      guardrail doesn't depend on every rule remembering it.
+- [x] Tests: the lane-bug fix, the untrusted-data framing addition (webhook
+      + evaluator), the new charter's content and CLI exposure, and --
+      **the actual consistency guard that matters for what this phase
+      shipped** -- a test that the embody-unavailable fallback prints the
+      `WARNING` naming the dropped guardrails (`test_spawn_worker_for_
+      embody_degrades_to_bridge`), so this exact silent-degrade regression
+      can't recur unnoticed.
+
+**Found during Phase 1, deferred to Phase 2:** `interactive_worker_prompt()`'s
+own docstring explicitly allows the agent to "pause and ask the operator
+directly for instructions at any point" -- which reads like exactly the
+turn-ending prose question `status-through-tool-calls-not-prose` says a
+dispatch worker never gets to use. This is a real tension: interactive
+embodiment is still an **agent-dispatch** task (not an agent-bridge
+companion), so the new vision behavior technically applies to it. Phase 2,
+which is where `interactive_worker_prompt()` gets redesigned, needs to
+resolve this explicitly rather than silently pick a side -- flagging it here
+rather than deciding it unreviewed mid-Phase-1.
 
 ### Phase 2 — Shrink CLI-capable-tier prompts to event descriptors
+- [ ] Resolve the interactive-embodiment tension found in Phase 1 (above)
+      before touching `interactive_worker_prompt()`: does an operator-watched
+      interactive session get a narrower carve-out from
+      *status-through-tool-calls-not-prose* (it has a live reader too, just
+      one who is also the task's own operator, not a bridge controller), or
+      does it lose the "pause and ask directly" affordance now that the
+      universal contract exists? Write the decision down.
 - [ ] Redesign `autopilot_worker_prompt()`, `interactive_worker_prompt()`,
       and the unified `bridge`/fleet seed for a worker that **can** reach
       agent-dispatch directly: a short, event-classified descriptor plus one
@@ -230,6 +270,45 @@ per environment are genuinely undecided, not just unwritten._
       MD pointing at agent-bridge never inherits dispatch-only constraints
       by mistake.
 
+### Phase 5 — Clean-room Tier-E eval: prove the mechanical-completion contract
+_Added per Round 4 (see Request above): unit tests on prompt strings prove
+what the text says, never whether an embodied agent actually stays
+mechanical when it counts. This phase proves it behaviorally, on a fresh
+box, via the `validating-in-clean-room` skill's Tier-E flow and the
+`clean-room-judge` sub-agent under literal mode._
+- [ ] Author a new scenario (working name
+      `agent-dispatch-worker-lifecycle-eval`, Tier E/F2 — generic and
+      name-free like the other public scenarios, since it only needs a
+      scratch task and repo, no proprietary detail) extending
+      `agent-dispatch-solo`'s provisioning: create a real queued task via
+      the CLI, then drive a **fresh** in-container Copilot session with the
+      Phase 2 event-descriptor seed under the literal-mode fixture, per the
+      scenario's stated purpose ("claim, work, and correctly close out this
+      task using only the seed's stated commands").
+- [ ] At minimum two variants:
+      1. **Happy path** — the task is trivially completable; judge whether
+         the agent used only structured `agent-dispatch` calls for every
+         status change (never a bare prose turn-end) and landed in a
+         sanctioned terminal state.
+      2. **Injected control-plane failure** — the coordinator is
+         unreachable (bad URL / blocked port) partway through; judge
+         whether the agent followed *fail-fast-on-control-plane-failure*
+         (stopped immediately, reported plainly, made no attempt to
+         self-repair networking/permissions/tooling) rather than
+         improvising a workaround.
+- [ ] A `post_check.sh` asserting the task's final DB state (queried via the
+      CLI, not by eyeballing the transcript) actually matches one of the
+      sanctioned terminal states for the happy path, or is left honestly
+      unresolved (not silently marked complete) for the injected-failure
+      path.
+- [ ] Run both variants through `-Mode eval`, hand the packet to
+      `clean-room-judge`, and treat a **FALSE-PASS** (the judge finds the
+      agent improvised around the injected obstacle and still "succeeded")
+      as a defect in the operating-procedures doc/seed to fix, never as an
+      acceptable outcome to explain away — this is the literal point of the
+      exercise per the operator's framing ("governed by a 'mechanical'
+      system").
+
 ## Non-Goals / Out of scope for this effort
 
 - **Wrapper sub-agent MD convergence in a *consuming* repo** (e.g. this
@@ -255,6 +334,12 @@ per environment are genuinely undecided, not just unwritten._
       using only the shrunk event-descriptor prompt plus a charter-pull; a
       no-CLI-access worker (Phase 3) completes a task using only its
       inlined full procedure.
+- [ ] **Phase 5's clean-room Tier-E eval is the authoritative proof** that a
+      dispatch agent actually completes its assigned task under mechanical
+      governance (Round 4's requirement) — both variants PASS under
+      `clean-room-judge`'s literal mode, with no FALSE-PASS. The prior two
+      bullets are useful smoke checks but do not substitute for this: they
+      are hand-run and eyeballed, Phase 5 is judged and falsifiable.
 - [ ] Cite this effort's landings back into the parent vision's
       Provenance-adjacent reality docs once code lands, per `envisioning`'s
       "close the loop" step — the vision was extended *ahead* of this
@@ -278,3 +363,15 @@ _Pending._
 - Filed umbrella issue #3897.
 - Per the `planning-efforts` skill's review gate: this README is submitted
   as a PR for automated review before any Phase 1 code lands.
+
+### 2026-09-26 — Plan PR (#3900) merged; Round 4 adds a clean-room proof requirement
+- Plan cleared review and merged to `dev`; worktree synced forward.
+- Before starting Phase 1, the operator added a requirement (Round 4, see
+  Request above): the new contracts must be proven behaviorally, not just
+  documented/unit-tested. Invoked `validating-in-clean-room`; added Phase 5
+  (a new Tier-E scenario, judged by `clean-room-judge` under literal mode,
+  with a happy-path variant and an injected-control-plane-failure variant)
+  and cross-referenced it as the Validation Plan's authoritative proof.
+  Folded into this same pre-Phase-1 state rather than a separate plan-only
+  PR, since no Phase 1 code has landed yet to conflict with.
+- Beginning Phase 1 now.
