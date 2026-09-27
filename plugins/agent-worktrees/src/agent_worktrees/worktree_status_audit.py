@@ -383,36 +383,57 @@ def _check_freshness(
             check="cache_freshness_bounds",
             detail=(
                 f"cached entry is {age:.0f}s old, exceeding the {bound:.0f}s "
-                "bound (TTL + sweep interval + slack) while still within "
-                "its demand window -- the sweep may not be keeping this "
-                "actively-demanded entry warm"
+                "bound (TTL + sweep interval + slack, plus any cap-driven "
+                "extra ticks and their own refresh-batch compute time when "
+                "demand exceeds the per-tick refresh cap) while still "
+                "within its demand window -- the sweep may not be keeping "
+                "this actively-demanded entry warm"
             ),
         )]
     return []
 
 
-def _count_actively_demanded(cache_rows: list[dict], *, now: float) -> int:
-    """Count only rows the sweep would actually consider refreshing --
-    i.e. whose demand has not yet aged past ``DEMAND_TTL_SECONDS``.
+def _count_due_and_demanded(cache_rows: list[dict], *, now: float) -> int:
+    """Count only rows the sweep would actually compete for a cap slot on
+    right now -- i.e. within their demand window AND already TTL-expired.
 
     ``_check_freshness``'s cap-aware bound needs the same population
-    ``WorktreeStatusCache.sweep_due`` competes for a refresh slot among
-    (Copilot review, PR #3348): a bare ``len(cache_rows)`` also counts
-    dormant rows whose demand has already aged out -- ``sweep_due`` never
-    refreshes those (it evicts them instead), so including them would
-    inflate the bound for every genuinely active entry, and enough
-    abandoned rows could let a real stuck sweep slip past this check
-    entirely. Tolerates a malformed/missing ``demanded_at`` by counting
-    that row as active (the conservative direction -- it never WIDENS the
-    bound incorrectly, only risks under-widening, which degrades to the
-    prior, already-reviewed behavior rather than masking a real stall).
+    :meth:`WorktreeStatusCache.sweep_due` samples into its own ``sampled``
+    dict (Copilot review, PR #3348): a bare count of every actively-
+    demanded row -- not just the due ones -- systematically OVER-widens
+    the bound whenever most demanded rows are still fresh and only a
+    handful are actually due. With (say) 20 actively-demanded rows but
+    only 2 genuinely due at any tick, the cap (4) never needs more than
+    one tick to serve them, so `extra_ticks` should be 0 -- but counting
+    all 20 demanded rows inflates it to several extra ticks, tolerating a
+    multi-tick grace window a real stuck/chronically-failing entry could
+    hide inside, exactly the "confuse a real caller's own tolerated
+    resting state for an outage" mistake this whole check exists to
+    avoid, just inverted (now it can mask a real stall instead of
+    false-positiving on a healthy one). Mirrors `sweep_due`'s own
+    ``sampled`` predicate exactly: within `DEMAND_TTL_SECONDS` of last
+    demand AND at least `DEFAULT_TTL_SECONDS` past its last compute.
+    Tolerates a malformed/missing `computed_at`/`demanded_at` by counting
+    that row as due-and-demanded (the conservative direction -- it never
+    NARROWS the bound incorrectly, only risks over-widening for that one
+    row, which degrades to the prior, already-reviewed behavior rather
+    than masking a real stall).
     """
     from .worktree_status_cache import DEMAND_TTL_SECONDS
 
     count = 0
     for row in cache_rows:
         demanded_at = row.get("demanded_at")
-        if isinstance(demanded_at, (int, float)) and now - demanded_at > DEMAND_TTL_SECONDS:
+        computed_at = row.get("computed_at")
+        if (
+            isinstance(demanded_at, (int, float))
+            and now - demanded_at > DEMAND_TTL_SECONDS
+        ):
+            continue
+        if (
+            isinstance(computed_at, (int, float))
+            and now - computed_at < DEFAULT_TTL_SECONDS
+        ):
             continue
         count += 1
     return count
@@ -436,11 +457,11 @@ def audit_one(
 ) -> WorktreeAudit:
     """Audit one ``(project, worktree_id)`` against its cache entry (if any).
 
-    ``demanded_count`` -- the total number of currently-tracked cache rows
-    at audit time -- is forwarded to :func:`_check_freshness` so its
-    freshness bound can account for the sweep's own per-tick refresh cap
-    (see that function's own docstring); it does not affect any other
-    check.
+    ``demanded_count`` -- the number of currently-demanded, TTL-due cache
+    rows at audit time (see :func:`_count_due_and_demanded`) -- is
+    forwarded to :func:`_check_freshness` so its freshness bound can
+    account for the sweep's own per-tick refresh cap (see that function's
+    own docstring); it does not affect any other check.
 
     Always recomputes ground truth via :func:`worktree_status_compute
     .compute` -- the exact same fact-assembly a cache miss would run,
@@ -666,7 +687,7 @@ def run_audit(
     now = time.time()
     cache_rows = read_cache_snapshot(cache_db_path(runtime_home))
     sample = select_sample(cache_rows, sample_size=sample_size, rng=rng)
-    demanded_count = _count_actively_demanded(cache_rows, now=now)
+    demanded_count = _count_due_and_demanded(cache_rows, now=now)
     audits = [
         audit_one(project, wt_id, entry, now=now, demanded_count=demanded_count)
         for project, wt_id, entry in sample
