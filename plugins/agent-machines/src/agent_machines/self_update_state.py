@@ -59,7 +59,8 @@ class TierStatus:
 
 def state_root(home: Path | None = None) -> Path:
     base = home if home is not None else Path.home()
-    return base / ".agent-machines" / "self-update"
+    _legacy = ".agent-machines"  # marketplace-isolation: allow legacy-compatibility
+    return base / _legacy / "self-update"
 
 
 def status_path(home: Path | None = None) -> Path:

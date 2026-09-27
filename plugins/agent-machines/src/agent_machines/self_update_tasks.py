@@ -86,7 +86,7 @@ class ScheduledTaskStatus:
 
 def runtime_root(home: Path | None = None) -> Path:
     base = home if home is not None else Path.home()
-    return base / ".agent-machines"
+    return base / ".agent-machines"  # marketplace-isolation: allow legacy-compatibility
 
 
 def task_binstub_path(home: Path | None = None) -> str:

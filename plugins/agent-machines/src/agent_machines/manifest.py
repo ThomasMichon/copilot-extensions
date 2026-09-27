@@ -186,10 +186,11 @@ class RequirementPackage:
         """Derive the repo root from a canonical or legacy package path."""
         if self.source_path is None:
             return None
+        _legacy = ".agent-machines"  # marketplace-isolation: allow legacy-compatibility
         for parent in self.source_path.absolute().parents:
             if parent.name == "agent-machines" and parent.parent.name == ".copilot-extensions":
                 return parent.parent.parent
-            if parent.name == ".agent-machines":
+            if parent.name == _legacy:
                 return parent.parent
             if parent.name == "machine-state" and parent.parent.name == ".github":
                 return parent.parent.parent

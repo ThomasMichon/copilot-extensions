@@ -32,14 +32,15 @@ import yaml
 from .manifest import ManifestError, RequirementPackage, load_package
 
 CANONICAL_MACHINE_STATE_ROOT = Path(".copilot-extensions") / "agent-machines"
-LEGACY_MACHINE_STATE_ROOT = ".agent-machines"
+LEGACY_MACHINE_STATE_ROOT = ".agent-machines"  # marketplace-isolation: allow legacy-compatibility
 MACHINE_STATE_ROOT = str(CANONICAL_MACHINE_STATE_ROOT)
 ALL_PACKAGES_DIR = "all"
 MACHINES_PACKAGES_DIR = "machines"
 LEGACY_MACHINE_STATE_DIR = ".github/machine-state"
 MARKETPLACE_OVERLAYS_DIR = CANONICAL_MACHINE_STATE_ROOT / "marketplaces"
 PROJECT_CONFIG_FILE = "config.yaml"
-REPO_CONFIG_FILE = Path(".agent-worktrees") / "config.yaml"
+_AWT = ".agent-worktrees"  # marketplace-isolation: allow registry
+REPO_CONFIG_FILE = Path(_AWT) / "config.yaml"
 
 
 def home() -> Path:
@@ -62,15 +63,15 @@ def current_platform() -> str:
 
 
 def registry_path(home_dir: Path | None = None) -> Path:
-    return (home_dir or home()) / ".agent-worktrees" / "repos.yaml"
+    return (home_dir or home()) / _AWT / "repos.yaml"
 
 
 def projects_path(home_dir: Path | None = None) -> Path:
-    return (home_dir or home()) / ".agent-worktrees" / "projects.yaml"
+    return (home_dir or home()) / _AWT / "projects.yaml"
 
 
 def global_config_path(home_dir: Path | None = None) -> Path:
-    return (home_dir or home()) / ".agent-worktrees" / PROJECT_CONFIG_FILE
+    return (home_dir or home()) / _AWT / PROJECT_CONFIG_FILE
 
 
 @dataclass

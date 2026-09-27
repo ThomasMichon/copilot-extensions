@@ -1,0 +1,9 @@
+{
+  "comment": "Annotate 13 marketplace-isolation guard findings (legacy-root fallback across 7 files, agent-worktrees registry lookups in discover.py/identity.py)",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}
