@@ -386,6 +386,70 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-26 — `agent-ssh`'s `transports/dtssh`/registrar cluster: 6 more findings resolved (PR #4060)
+
+- Fresh guard count at merge time: 646 (down from 652, unrelated
+  concurrent `dev` activity as usual). `agent-ssh` now at 14 findings
+  (was 30 at the start of this leg, was 20 after the prior slice).
+- Second half of the sub-slicing plan from the prior leg's handoff:
+  `register-dispatch-companion.{ps1,py}` (same env-var-fallback shape as
+  `register-bridge-provider.ps1`, `allow legacy compatibility root`) and
+  the `transports/dtssh/*` cluster.
+- **Two more genuinely novel shapes, neither seen before in this
+  effort**:
+  - `dtssh-host-launcher.ps1`'s Windows named mutex is qualified by
+    `$Alias` (the SSH host being launched), not by marketplace-cell --
+    correct, since two cells launching a host process for the SAME alias
+    need to share the SAME mutex to actually enforce single-instance
+    (cell-scoping would defeat the point, identical reasoning to
+    `ssh_profile.py`'s `allow shared-config-lock` from the prior leg,
+    just for a mutex instead of a lock file). New reason: **`allow
+    shared-instance-mutex`**.
+  - `install-host.ps1`'s `Resolve-DurableHostIdentityRoot` OneDriveCommercial
+    fallback stores the dtssh host's SSH identity in shared/roaming
+    storage ON PURPOSE, so it survives reinstalls and follows the user
+    across machines (the function's own name says "Durable"). Cell-
+    qualifying it would break the exact durability guarantee it exists
+    for. New reason: **`allow durable-host-identity-backup`**.
+- **Found a genuine guard-regex false positive, not an intentional
+  compatibility seam at all**: `install-client.ps1`/`install-host.ps1`
+  both declare `$InstallRelease = 'https://raw.githubusercontent.com/
+  bmiddha/devtunnel-ssh/main/scripts/install-release.ps1'` -- a pinned
+  URL to a THIRD-PARTY project's own installer script, unrelated to this
+  plugin's identity in any way. The `fixed-service-identity` category's
+  keyword list includes `lease`, which matches as a bare substring of
+  the variable name `InstallRelease` -- an accidental collision, not a
+  real service/lease/endpoint identity. Annotated rather than filed as a
+  guard-regex bug, since the guard's own design intentionally favors
+  over-inclusion (report-only, never blocking) over a narrower regex that
+  might miss a real case; new reason: **`allow third-party-installer-
+  url`** (worth keeping in mind if this substring-collision shape turns
+  up again -- `lease`/`unit`/`task`/`pipe`/`socket`/`mutex`/`endpoint`/
+  `service` are all short enough to collide with unrelated identifiers).
+- Left deliberately untouched, same confirmed-genuine Phase 2 launcher-
+  contract backlog shape as `install.ps1`/`install.sh`: `bootstrap-
+  check.ps1`/`.sh`'s `InstallDir` (2, verified byte-for-byte identical
+  shape via direct comparison) and `install-client.sh`/`install-host.sh`'s
+  `$HOME/.dtssh/bin` PATH export (2). `payload-invocation.json` (1) and
+  `fragment_registry.py` (1, module-size deferral) carried over unchanged
+  from the prior leg.
+- Verified: PowerShell Parser API syntax check on every touched `.ps1`
+  file, `python -m py_compile` + `ruff --select E501` on the one touched
+  `.py` file, `check-module-size.py`, `check-docs-consistency.py`, and
+  the full `agent-ssh` suite via `test-supervisor` (171 passed, 7
+  skipped, the same 1 pre-existing failure as every other leg touching
+  this plugin). Merged via `pr-merge --now` after a clean (0-finding)
+  advisory review.
+- **`agent-ssh` is now down to 14 findings, all confirmed backlog** (8
+  Phase 2 launcher-contract, 1 cross-plugin `payload-invocation.json`
+  question, 1 `fragment_registry.py` module-size deferral, PKG-INFO build
+  noise not counted) -- no further individual triage possible here
+  without either the Phase 2 launcher-contract conversion pattern or a
+  `fragment_registry.py` split/shrink. Move to the next plugin in the
+  backlog order (`agent-machines`/`agent-mcp`/`agent-bridge`/`agent-index`/
+  `agent-dispatch`/`agent-codespaces`/`agent-worktrees`, none yet
+  individually triaged).
+
 ### 2026-09-26 — `agent-ssh`'s core-package cluster: 10 of 30 findings resolved (PR #4003)
 
 - Fresh guard count at merge time: 652 (drifted down slightly from the

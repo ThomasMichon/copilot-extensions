@@ -578,18 +578,41 @@ def _windowless_python() -> str:
     return windowless_python(sys.executable)
 
 
+_DAEMON_SESSION_SCOPED_ENV_KEYS = ("COPILOT_AGENT_SESSION_ID",)
+
+
+def _daemon_environment() -> dict[str, str]:
+    """Env for the resident daemon: no ephemeral session id beyond the
+    existing credential scrub. Deliberately keeps
+    ``COPILOT_EXTENSIONS_CONTEXT``/``COPILOT_PLUGIN_ROOT``: the daemon calls
+    ``cfg.install_dir()``, and ``registry_paths.registry_root()`` treats an
+    absent context as legacy mode -- stripping it would resolve a
+    cell-spawned daemon's own state under the legacy root. Case-insensitive
+    (Windows env names are case-insensitive)."""
+    env = _core_helper("_background_environment", status_updater_cli._background_environment)()
+    scoped = {key.upper() for key in _DAEMON_SESSION_SCOPED_ENV_KEYS}
+    return {key: value for key, value in env.items() if key.upper() not in scoped}
+
+
+def _daemon_cwd() -> str:
+    """The daemon's own install root (cell root, or legacy
+    ``~/.agent-worktrees``), not the caller's cwd; degrades to HOME if
+    unresolved or not yet materialized."""
+    try:
+        root = cfg.install_dir()
+        if root.is_dir():
+            return str(root)
+    except Exception:
+        pass
+    return os.path.expanduser("~")
+
 def _spawn_detached(argv: list[str]) -> bool:
-    """Spawn a survivable, windowless daemon rooted at HOME.
-
-    Rooted at HOME (never the plugin payload dir): a detached child that keeps
-    the payload dir as its cwd holds an open handle that blocks
-    ``copilot plugin update`` on Windows.  Never raises.
-
-    On Windows the console-subsystem interpreter is intentionally retained and
-    launched under ``CREATE_NO_WINDOW``. Its periodic console children then
-    inherit one hidden console tree instead of each allocating a Default
-    Terminal host from a consoleless ``pythonw`` parent.
-    """
+    """Spawn a survivable, windowless daemon rooted at its own install dir
+    (not the caller's cwd -- see ``_daemon_cwd``). Never raises. On Windows
+    the console-subsystem interpreter is intentionally retained and launched
+    under ``CREATE_NO_WINDOW``: its periodic console children then inherit
+    one hidden console tree instead of each allocating a Default Terminal
+    host from a consoleless ``pythonw`` parent."""
     override = _core_helper("_spawn_detached", _spawn_detached)
     if override is not _spawn_detached:
         return override(argv)
@@ -598,8 +621,8 @@ def _spawn_detached(argv: list[str]) -> bool:
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,
         "stderr": subprocess.DEVNULL,
-        "cwd": os.path.expanduser("~"),
-        "env": _core_helper("_background_environment", status_updater_cli._background_environment)(),
+        "cwd": _daemon_cwd(),
+        "env": _daemon_environment(),
     }
     kwargs.update(_core().windowless_daemon_kwargs(breakaway=True))
     try:
@@ -607,6 +630,7 @@ def _spawn_detached(argv: list[str]) -> bool:
         return True
     except Exception:
         return False
+
 
 
 def _ensure_status_monitor() -> bool:

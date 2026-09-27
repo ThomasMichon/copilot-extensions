@@ -7766,6 +7766,53 @@ def test_row_and_detail_line_alt_shading_skips_focused_or_selected():
     assert C_ALT_BG not in {span.style for span in detail_no_alt.spans}
 
 
+def test_claims_cell_never_mid_value_truncates():
+    """#3307 follow-up (operator feedback): a claims_summary value longer
+    than the column's declared width is never ellipsis-clipped mid-value --
+    only the WHOLE row is truncated, and only if it doesn't fit the
+    terminal at all."""
+    from worktree_manager.production_picker.picker_tui.engine_helpers import row_text
+
+    long_claim = "container agent-containers-standing-desk"
+    rec = {"id4": "abcd", "claims_summary": long_claim}
+    cols = [("id4", "id", 4, "l"), ("claims_summary", "claims", 12, "l")]
+
+    # Plenty of room: the full value renders, not "container a…".
+    t = row_text(rec, cols, 80, False)
+    assert long_claim in t.plain
+    assert "…" not in t.plain
+
+    # No room at all: the WHOLE ROW truncates at the very end (never
+    # mid-value -- the claim's own text is never itself sliced with "…"
+    # somewhere in its middle).
+    narrow = row_text(rec, cols, 20, False)
+    assert narrow.cell_len <= 20
+    assert narrow.plain.endswith("…")
+
+
+def test_claims_cell_renders_real_hyperlinks_from_claims_links():
+    """#3307 follow-up: claims_links (engine-computed [{label,url}]) builds
+    a real per-claim hyperlink span, falling back to the plain
+    claims_summary string when absent (an older engine or another pivot)."""
+    from worktree_manager.production_picker.picker_tui.engine_helpers import row_text
+
+    cols = [("id4", "id", 4, "l"), ("claims_summary", "claims", 20, "l")]
+    with_links = {
+        "id4": "abcd",
+        "claims_summary": "PR #83",
+        "claims_links": [{"label": "PR #83",
+                           "url": "https://github.com/acme/sample/pull/83"}],
+    }
+    t = row_text(with_links, cols, 80, False)
+    link_styles = [span.style for span in t.spans if "link " in str(span.style)]
+    assert any("https://github.com/acme/sample/pull/83" in s for s in link_styles)
+
+    without_links = {"id4": "abcd", "claims_summary": "PR #83"}
+    t2 = row_text(without_links, cols, 80, False)
+    assert "PR #83" in t2.plain
+    assert not any("link " in str(span.style) for span in t2.spans)
+
+
 def test_fitted_columns_reserves_room_for_drop_indicator():
     """Regression: the flex (``title``) column absorbs 100% of any remaining
     width by design, so a caller that simply computed

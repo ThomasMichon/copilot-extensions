@@ -94,6 +94,8 @@ Set-AwPaneKillOnCloseJob
 $rest = @($args)
 $awWt = ''
 $awProject = ''
+$awMuxSession = ''
+$awPsmuxBin = ''
 $initialPromptB64 = ''
 $initialPromptReceiptB64 = ''
 $ahpTokenFile = ''
@@ -103,6 +105,10 @@ while ($rest.Count -ge 2) {
         $awWt = [string]$rest[1]
     } elseif ($key -eq '-AwProject') {
         $awProject = [string]$rest[1]
+    } elseif ($key -eq '-AwMuxSession') {
+        $awMuxSession = [string]$rest[1]
+    } elseif ($key -eq '-AwPsmuxBin') {
+        $awPsmuxBin = [string]$rest[1]
     } elseif ($key -eq '--aw-prompt-b64') {
         $initialPromptB64 = [string]$rest[1]
     } elseif ($key -eq '--aw-prompt-receipt-b64') {
@@ -293,15 +299,44 @@ if (
 ) {
     try {
         $managerRoot = Split-Path -Parent $PSScriptRoot
+        $removeArgs = @(
+            'run', '--quiet', '--project', $managerRoot,
+            '-m', 'worktree_manager', 'mux-daemon', 'remove',
+            "--project=$awProject", "--worktree-id=$awWt"
+        )
+        # `--mux-session`, when known (#3838 fix): lets the daemon-side
+        # registry reject this removal as a stale no-op if a newer
+        # session already superseded this one for the same
+        # (project, worktree_id) -- an old pane's delayed teardown must
+        # never tombstone a newer, still-live session's mapping.
+        if (-not [string]::IsNullOrWhiteSpace($awMuxSession)) {
+            $removeArgs += "--mux-session=$awMuxSession"
+        }
+        # The real mux session's own stable identity (Copilot review
+        # finding on PR #3906): the display session name alone is NOT
+        # unique per launch incarnation -- both launchers derive the same
+        # deterministic `wt-<worktree_id>`-shaped name for the same
+        # worktree. psmux's own #{session_id}:#{session_created} IS unique
+        # per real session object and stays identical across repeated joins
+        # of the same still-live session -- query it live from inside this
+        # same pane rather than trusting a threaded value. Use the
+        # launcher's ALREADY-resolved binary when known (Copilot review
+        # finding): a bare `psmux` on PATH can silently resolve to a
+        # different/missing binary, making this probe fail silently and
+        # disabling the guard without any visible error.
+        $psmuxBin = if (-not [string]::IsNullOrWhiteSpace($awPsmuxBin)) { $awPsmuxBin } else { 'psmux' }
+        try {
+            $incarnation = (& $psmuxBin display-message -p '#{session_id}:#{session_created}' 2>$null)
+            if (-not [string]::IsNullOrWhiteSpace([string]$incarnation)) {
+                $removeArgs += "--session-incarnation=$incarnation"
+            }
+        } catch {}
         # Dispatch detached (real-bug follow-up to #3825): this is
         # teardown, not attach, but blocking the pane's own exit on the
         # same tens-of-seconds-worst-case CLI edge delays it for no
         # benefit.
-        Start-Process -FilePath 'uv' -ArgumentList @(
-            'run', '--quiet', '--project', $managerRoot,
-            '-m', 'worktree_manager', 'mux-daemon', 'remove',
-            "--project=$awProject", "--worktree-id=$awWt"
-        ) -WindowStyle Hidden -ErrorAction Stop | Out-Null
+        Start-Process -FilePath 'uv' -ArgumentList $removeArgs `
+            -WindowStyle Hidden -ErrorAction Stop | Out-Null
     } catch {}
 }
 

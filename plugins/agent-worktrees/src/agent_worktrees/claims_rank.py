@@ -45,6 +45,7 @@ plain ``{kind: priority}`` mapping via ``pecking_order=``.
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -154,32 +155,144 @@ DEFAULT_LABEL_PREFIX: dict[str, str] = {
     "pr": "PR",
     "bug": "bug",
     "issue": "bug",
+    "worktree": "WT",
 }
+
+#: Kinds whose ``ref`` is a GitHub PR/issue reference -- either the
+#: ``"owner/repo#N"`` shape ``claims_cli``/the create-pr auto-claim writes, or
+#: a full GitHub URL (e.g. a hand-added claim, or a ref recovered from an
+#: external system). :func:`_parse_pr_like_ref` accepts both.
+_PR_LIKE_KINDS = frozenset({"pr", "bug", "issue"})
+
+_GITHUB_PR_URL_RE = re.compile(
+    r"^https?://github\.com/([^/\s]+/[^/\s]+)/(?:pull|issues)/(\d+)(?:[/?#].*)?$"
+)
+
+
+def _repo_short_name(repo: str | None) -> str | None:
+    """The trailing ``repo`` segment of an ``"owner/repo"`` (or bare
+    ``"repo"``) string, or ``None`` for empty input -- ``WorktreeRecord.repo``
+    and :func:`tracking_claims.format_claim_ref`'s ``project`` are bare repo
+    names (no owner), while a PR's own ``repo`` field is full ``"owner/repo"``
+    (per ``PRRecord.repo``'s own doc comment) -- this normalizes both to the
+    same bare form so the two can be compared for the cross-repo check."""
+    if not repo:
+        return None
+    return repo.rsplit("/", 1)[-1] or None
+
+
+def _is_cross_repo(own_repo: str | None, candidate_repo: str | None) -> bool:
+    """True only when BOTH repos are known and their short names differ --
+    an unknown side (``own_repo`` not passed by an older caller, or a claim
+    whose ref carries no repo segment) never asserts cross-repo, since that
+    would be a guess, not a fact."""
+    own = _repo_short_name(own_repo)
+    cand = _repo_short_name(candidate_repo)
+    return bool(own and cand and own != cand)
+
+
+def _parse_pr_like_ref(ref: str) -> tuple[str | None, str | None]:
+    """``(owner_repo, number)`` from a PR/bug/issue ``ref`` -- either the
+    ``"owner/repo#N"`` shape (repo optional: a bare ``"#N"`` is valid too) or
+    a full GitHub PR/issue URL. ``(None, None)`` when neither shape matches
+    (never raises on a malformed/foreign ref)."""
+    if not ref:
+        return None, None
+    m = _GITHUB_PR_URL_RE.match(ref.strip())
+    if m:
+        return m.group(1), m.group(2)
+    if "#" in ref:
+        owner_repo, _, number = ref.rpartition("#")
+        number = number.strip()
+        if number.isdigit():
+            return (owner_repo.strip() or None), number
+    return None, None
+
+
+def claim_url(kind: str, ref: str) -> str | None:
+    """The fully-qualified URL a claim's short label can hyperlink to, or
+    ``None`` when this claim kind/ref carries no independently-resolvable
+    URL (a CodeSpace name, a dispatch task id, an unqualified ``"#N"`` PR ref
+    with no repo to build a URL from). GitHub PR/bug/issue refs are the only
+    kind resolved today; a raw URL ref (any kind) is passed through as-is."""
+    if kind in _PR_LIKE_KINDS:
+        owner_repo, number = _parse_pr_like_ref(ref)
+        if owner_repo and number:
+            path = "pull" if kind == "pr" else "issues"
+            return f"https://github.com/{owner_repo}/{path}/{number}"
+        return None
+    if ref and (ref.startswith("http://") or ref.startswith("https://")):
+        return ref
+    return None
+
+
+def _parse_worktree_ref(ref: str) -> tuple[str | None, str | None]:
+    """``(project, worktree_id)`` from a ``"worktree"``-kind claim ref.
+
+    Mirrors ``tracking_claims.format_claim_ref``'s ``"machine/project/
+    worktree_id[#session]"`` convention structurally (module docstring: this
+    file stays import-free of siblings so it works against a plain dict
+    ledger too) -- duplicated here as a tiny local parse rather than an
+    import. ``(None, None)`` for a ref with fewer than 3 ``/``-segments (an
+    older or hand-added ref with no embedded project)."""
+    if not ref:
+        return None, None
+    body = ref.partition("#")[0]
+    parts = body.split("/")
+    if len(parts) >= 3:
+        return parts[1] or None, "/".join(parts[2:]) or None
+    return None, None
 
 
 def format_claim(
     kind: str,
     ref: str,
     *,
+    own_repo: str | None = None,
     label_overrides: Mapping[str, str] | None = None,
 ) -> str:
-    """A short, human-readable label for one ``(kind, ref)`` claim, e.g.
-    ``"PR #2481"`` from ``kind="pr", ref="acme-org/sample-repo#2481"``.
+    """A short, human-readable label for one ``(kind, ref)`` claim.
 
-    Prefers a trailing ``#<number>`` already present in ``ref`` (the common
-    PR/issue reference shape); falls back to the bare ``ref`` for a claim
-    kind with no such convention (a CodeSpace name, a worktree id).
+    Cross-repo-aware (#3307 worktrees-pivot-ux-overhaul follow-up, operator
+    feedback): ``own_repo`` (the CLAIMING worktree's own repo) is compared
+    against the claim's own repo, when the claim's ref carries one, via
+    :func:`_is_cross_repo` -- a repo that can't be determined on either side
+    never asserts cross-repo (never a guess).
 
-    ``label_overrides`` (e.g.
-    ``claim_kinds_registry.effective_label_overrides()``) takes precedence
-    over :data:`DEFAULT_LABEL_PREFIX` for a kind it names; a kind in
-    neither falls back to its own bare name as the prefix.
+    * ``pr``/``bug``/``issue`` -- ``"PR #2481"`` same-repo (or repo
+      unknown); ``"sample-repo#2481"`` cross-repo (short repo name, no
+      owner -- the number alone is the point, the repo name is the only
+      NEW information cross-repo actually adds). Parses a full GitHub URL
+      ref the same as the ``"owner/repo#N"`` shape (:func:`_parse_pr_like_ref`).
+    * ``worktree`` -- ``"<last4>"`` same-repo, ``"<repo>:<last4>"``
+      cross-repo (operator's own example: ``"copilot-extensions:4b8a"``),
+      reading the sibling's project from the ``tracking_claims
+      .format_claim_ref`` ref convention (see :func:`_parse_worktree_ref`).
+      Falls through to the generic ``#N``/bare-ref rule below when the ref
+      doesn't parse that way (an older or hand-added ref with no embedded
+      project).
+    * every other kind (bridge/codespace/container/ssh/task) -- unchanged:
+      prefers a trailing ``#<number>`` already in ``ref``, else the bare
+      ``ref``, prefixed by ``label_overrides``/:data:`DEFAULT_LABEL_PREFIX`.
     """
     prefix = (
         label_overrides[kind]
         if label_overrides and kind in label_overrides
         else DEFAULT_LABEL_PREFIX.get(kind, kind)
     )
+    if kind == "worktree":
+        project, worktree_id = _parse_worktree_ref(ref)
+        if worktree_id:
+            last4 = worktree_id[-4:]
+            if project and _is_cross_repo(own_repo, project):
+                return f"{project}:{last4}"
+            return last4
+    if kind in _PR_LIKE_KINDS:
+        owner_repo, number = _parse_pr_like_ref(ref)
+        if number:
+            if owner_repo and _is_cross_repo(own_repo, owner_repo):
+                return f"{_repo_short_name(owner_repo)}#{number}"
+            return f"{prefix} #{number}"
     if "#" in ref:
         _, _, number = ref.rpartition("#")
         number = number.strip()
@@ -195,6 +308,7 @@ def summarize_claims(
     sep: str = " \u00b7 ",
     live_only: bool = True,
     pecking_order: Mapping[str, int] | None = None,
+    own_repo: str | None = None,
     label_overrides: Mapping[str, str] | None = None,
 ) -> str:
     """The row-ready ``claims_summary`` string a Codespaces/Containers/Tasks
@@ -202,13 +316,62 @@ def summarize_claims(
     ``"PR #2481 \u00b7 bug #2410"``) -- ``rank_claims`` + ``format_claim``,
     joined. ``""`` for an empty/all-non-live ledger (graceful-absence, never
     a placeholder). See :func:`rank_claims` for ``pecking_order`` and
-    :func:`format_claim` for ``label_overrides``."""
+    :func:`format_claim` for ``own_repo``/``label_overrides``."""
     top = rank_claims(
         claims, limit=limit, live_only=live_only, pecking_order=pecking_order
     )
     return sep.join(
-        format_claim(kind, ref, label_overrides=label_overrides) for kind, ref in top
+        format_claim(kind, ref, own_repo=own_repo, label_overrides=label_overrides)
+        for kind, ref in top
     )
+
+
+def claim_entries_for_worktree(
+    resources: Iterable[Any],
+    active_pr: Mapping[str, Any] | None = None,
+    *,
+    limit: int = 2,
+    pecking_order: Mapping[str, int] | None = None,
+    own_repo: str | None = None,
+    label_overrides: Mapping[str, str] | None = None,
+) -> list[dict[str, str | None]]:
+    """Like :func:`claims_summary_for_worktree`, but returns the ranked
+    ``[{"label": ..., "url": ...}]`` list instead of one joined string --
+    for a consumer (the Worktrees pivot's CLAIMS column) that renders each
+    claim as its own hyperlinked segment rather than a single flat string.
+    ``url`` is ``None`` when the claim kind/ref has no resolvable URL (see
+    :func:`claim_url`). Shares the PR-backfill logic with
+    :func:`claims_summary_for_worktree` via :func:`_claims_with_pr_backfill`
+    so the two never drift apart on which claims they consider."""
+    claims = _claims_with_pr_backfill(resources, active_pr)
+    top = rank_claims(claims, limit=limit, pecking_order=pecking_order)
+    return [
+        {
+            "label": format_claim(kind, ref, own_repo=own_repo,
+                                   label_overrides=label_overrides),
+            "url": claim_url(kind, ref),
+        }
+        for kind, ref in top
+    ]
+
+
+def _claims_with_pr_backfill(
+    resources: Iterable[Any], active_pr: Mapping[str, Any] | None,
+) -> list[Any]:
+    """The shared backfill step :func:`claims_summary_for_worktree` and
+    :func:`claim_entries_for_worktree` both need -- factored out so the two
+    can never drift on which claims they rank. See
+    :func:`claims_summary_for_worktree`'s own docstring for the backfill
+    rationale."""
+    claims = list(resources)
+    if (active_pr and active_pr.get("number")
+            and active_pr.get("state") not in ("merged", "closed")
+            and not any(_field(c, "kind") == "pr" and _is_live(c) for c in claims)):
+        repo = active_pr.get("repo")
+        number = active_pr["number"]
+        ref = f"{repo}#{number}" if repo else f"#{number}"
+        claims.append({"kind": "pr", "ref": ref, "state": "active"})
+    return claims
 
 
 def claims_summary_for_worktree(
@@ -217,6 +380,7 @@ def claims_summary_for_worktree(
     *,
     limit: int = 2,
     pecking_order: Mapping[str, int] | None = None,
+    own_repo: str | None = None,
     label_overrides: Mapping[str, str] | None = None,
 ) -> str:
     """The Worktrees pivot's own ranked ``claims_summary`` (#3307
@@ -237,15 +401,8 @@ def claims_summary_for_worktree(
     ``resources``/``active_pr`` may be real ``ResourceClaim``/``PRRecord``
     objects or plain dicts, both duck-typed identically to every other
     entry point here."""
-    claims = list(resources)
-    if (active_pr and active_pr.get("number")
-            and active_pr.get("state") not in ("merged", "closed")
-            and not any(_field(c, "kind") == "pr" and _is_live(c) for c in claims)):
-        repo = active_pr.get("repo")
-        number = active_pr["number"]
-        ref = f"{repo}#{number}" if repo else f"#{number}"
-        claims.append({"kind": "pr", "ref": ref, "state": "active"})
+    claims = _claims_with_pr_backfill(resources, active_pr)
     return summarize_claims(
-        claims, limit=limit, pecking_order=pecking_order,
+        claims, limit=limit, pecking_order=pecking_order, own_repo=own_repo,
         label_overrides=label_overrides,
     )

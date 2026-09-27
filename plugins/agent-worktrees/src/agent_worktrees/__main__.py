@@ -1405,8 +1405,12 @@ def _worktree_to_dict(
     # computed HERE (not by the Picker) since this is the one process that
     # can import ``claims_rank`` directly rather than crossing the
     # Manager/engine subprocess boundary. See
-    # ``claims_rank.claims_summary_for_worktree``'s own docstring for the
-    # ranking + PR-backfill details.
+    # ``claims_rank.claim_entries_for_worktree``'s own docstring for the
+    # ranking + PR-backfill details. #3307 follow-up: also emits the
+    # structured ``claims_links`` list (label + resolvable URL per claim,
+    # cross-repo-aware) the Picker uses to render a real hyperlink and to
+    # avoid mid-value truncation; ``claims_summary`` (a flat joined string)
+    # stays for pivots that only want plain text.
     try:
         pecking_order = claim_kinds_registry.effective_pecking_order()
         label_overrides = claim_kinds_registry.effective_label_overrides()
@@ -1416,14 +1420,16 @@ def _worktree_to_dict(
     active_pr = ({"repo": active.repo, "number": active.number, "state": active.state}
                  if active is not None else None)
     try:
-        summary = claims_rank.claims_summary_for_worktree(
-            rec.resources, active_pr,
+        entries = claims_rank.claim_entries_for_worktree(
+            rec.resources, active_pr, own_repo=rec.repo,
             pecking_order=pecking_order, label_overrides=label_overrides,
         )
     except Exception:
-        summary = ""
+        entries = []
+    summary = " \u00b7 ".join(e["label"] for e in entries)
     if summary:
         d["claims_summary"] = summary
+        d["claims_links"] = entries
     # #93: mark a worktree hosting a bare (un-muxed) bound Copilot so the picker
     # can annotate its row with an orphan marker (a Copilot the mux fleet view
     # cannot see). Set only when true, to keep the dict lean.

@@ -3554,6 +3554,20 @@ class TestWorktreeToDictClaimsSummary:
         d = _worktree_to_dict(rec)
         assert d["claims_summary"] == "PR #9 \u00b7 codespace cs-1"
 
+    def test_claims_links_pairs_label_with_url_own_repo_aware(self):
+        """#3307 follow-up: claims_links carries the same ranked claims as
+        claims_summary, each with a resolvable URL where available --
+        own_repo is threaded from rec.repo, so a same-repo PR never asserts
+        cross-repo even though the ref happens to carry a repo segment."""
+        from agent_worktrees.__main__ import _worktree_to_dict
+        rec = self._rec(resources=[
+            tracking.ResourceClaim(kind="pr", ref="acme/sample#9", state="active"),
+        ])
+        d = _worktree_to_dict(rec)
+        assert d["claims_links"] == [
+            {"label": "PR #9", "url": "https://github.com/acme/sample/pull/9"},
+        ]
+
 
 # ---------------------------------------------------------------------------
 # _worktree_to_dict state exposure (list --json --classify, test-chamber #1290)

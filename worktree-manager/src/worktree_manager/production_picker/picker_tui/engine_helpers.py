@@ -298,6 +298,33 @@ def _clip(s, w, align):
     return s.rjust(w) if align == "r" else s.ljust(w)
 
 
+def _claims_cell(rec, w):
+    """The CLAIMS column cell (#3307 worktrees-pivot-ux-overhaul follow-up):
+    never mid-value ellipsis-truncated here -- unlike every other column,
+    the whole ROW is truncated (once, at the very end) only if it doesn't
+    fit the terminal at all (see ``row_text``'s own tail guard), so a claim
+    label overflowing its declared column width just spills into the row's
+    own trailing padding/dead space instead of losing characters mid-label.
+    Builds real per-claim hyperlink spans from ``claims_links`` (a
+    ``[{"label", "url"}]`` list, engine-computed) when present; falls back
+    to the plain ``claims_summary`` string (still unclipped) for an older
+    engine or a sibling pivot that hasn't adopted ``claims_links`` yet."""
+    links = rec.get("claims_links")
+    if links:
+        seg = Text()
+        for i, entry in enumerate(links):
+            if i:
+                seg.append(" \u00b7 ", style=C_DIM)
+            label = str(entry.get("label") or "")
+            url = entry.get("url")
+            seg.append(label, style=f"link {url}" if url else "")
+    else:
+        seg = Text(str(rec.get("claims_summary", "") or ""))
+    if seg.cell_len < w:
+        seg.append(" " * (w - seg.cell_len))
+    return seg
+
+
 def row_text(rec, cols, width, selected, indent=1, pulse=0, mark=None):
     if mark is not None:
         # A left-side selection gutter (#2228): a checkbox glyph + one margin
@@ -326,6 +353,15 @@ def row_text(rec, cols, width, selected, indent=1, pulse=0, mark=None):
                 seg.append(" " * (w - seg.cell_len))
             t.append_text(seg)
             continue
+        if k == "claims_summary":
+            seg = _claims_cell(rec, w)
+            if rec.get("pr", "").endswith("✓"):
+                # #3307 Phase 4: keeps the merged-PR green highlight keyed
+                # off the still-populated raw "pr" field (claims_rank's own
+                # formatting carries no merged marker).
+                seg.stylize(C_PR_MERGED)
+            t.append_text(seg)
+            continue
         cell = _clip(val, w, a)
         style = ""
         if k == "state":
@@ -336,12 +372,6 @@ def row_text(rec, cols, width, selected, indent=1, pulse=0, mark=None):
             style = C_DISPO.get(rec.get("dispo_level", ""), "")
         elif k == "pr" and rec.get("pr", "").endswith("✓"):
             style = C_PR_MERGED
-        elif k == "claims_summary" and rec.get("pr", "").endswith("✓"):
-            # #3307 Phase 4: the Worktrees pivot's CLAIMS column shows the
-            # shared claims_rank summary text, but keeps the merged-PR
-            # green highlight keyed off the still-populated raw "pr" field
-            # (claims_rank's own formatting carries no merged marker).
-            style = C_PR_MERGED
         elif k == "sess":
             if rec.get("sess", "").startswith("●") or rec.get("sess") == "PROC":
                 style = C_PULSE[pulse]
@@ -350,6 +380,11 @@ def row_text(rec, cols, width, selected, indent=1, pulse=0, mark=None):
         t.append(cell, style=style)
     if t.cell_len < width:
         t.append(" " * (width - t.cell_len))
+    elif t.cell_len > width:
+        # The CLAIMS cell above is the one column allowed to overflow its
+        # own declared width -- if that pushes the WHOLE row past the
+        # terminal, truncate once here, at the very end (never mid-value).
+        t.truncate(width, overflow="ellipsis")
     if selected:
         t.stylize(C_SEL)
     return t

@@ -1018,6 +1018,15 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
             local wm_root
             wm_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P 2>/dev/null || true)"
             [[ -n "$wm_root" ]] || return 0
+            # The real mux session's own stable identity (Copilot review
+            # finding on PR #3906): stored so a later teardown's own live
+            # probe of the SAME tmux session (pane-wrapper.sh) can be
+            # compared against it -- the display session name alone is not
+            # unique per launch incarnation. Cheap/local/synchronous (a
+            # single tmux IPC call), unlike the detached register dispatch
+            # below.
+            local incarnation=""
+            incarnation="$(tmux display-message -t "$sess" -p '#{session_id}:#{session_created}' 2>/dev/null || true)"
             # Dispatch detached rather than blocking attach on this call
             # (real-bug follow-up to #3825): the bundled register edge can
             # spend tens of seconds (mux metadata probes, daemon boot-wait,
@@ -1030,7 +1039,9 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
                 --worktree-id="$WORKTREE_ID" \
                 --worktree-path="$spath" \
                 --mux-session="$sess" \
-                --mux-bin=tmux >/dev/null 2>&1 & ) || true
+                --mux-bin=tmux \
+                ${incarnation:+--session-incarnation="$incarnation"} \
+                >/dev/null 2>&1 & ) || true
         }
 
         # If a tmux session already exists for this worktree, join it.
@@ -1138,6 +1149,9 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
             PANE_CONTROL=(--aw-wt "${WORKTREE_ID:-}")
             if [[ -n "${LAUNCH_PROJECT:-}" ]]; then
                 PANE_CONTROL+=(--aw-project "$LAUNCH_PROJECT")
+            fi
+            if [[ -n "${TMUX_SESS:-}" ]]; then
+                PANE_CONTROL+=(--aw-mux-session "$TMUX_SESS")
             fi
             if [[ -n "$AHP_TOKEN_FILE" ]]; then
                 PANE_CONTROL+=(--aw-ahp-token-file "$AHP_TOKEN_FILE")

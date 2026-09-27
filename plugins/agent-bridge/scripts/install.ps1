@@ -406,17 +406,59 @@ function Invoke-UvPipInstallResilient {
        before. A single 3s retry proved insufficient when many plugins hammer
        the shared interpreter at once during a full `agent-worktrees update
        --force` sweep (observed in deployment after the first fix landed) --
-       the backoff schedule gives the race more room to clear. #>
-    param([Parameter(Mandatory)][string[]]$Arguments)
+       the backoff schedule gives the race more room to clear.
+
+       Installing FROM the pristine payload directory ($PluginDir) leaves
+       setuptools' own build/ + *.egg-info staging behind IN that tree --
+       pip's build isolation covers the *environment* the build runs in, not
+       where the legacy build_meta backend writes intermediate files. Left in
+       place, a stale build/ (or src/*.egg-info, one level deeper than a
+       root-level glob reaches) can silently shadow fresh src/ on a later
+       install if setuptools' incremental-build mtime check decides nothing
+       "changed" -- confirmed live (copilot-extensions#3444): a truncated
+       recipes_cli.py shipped this way on POSIX and crash-looped a
+       production daemon for ~8h. Scrub before every attempt (first call AND
+       each retry, since a failed attempt or a concurrent installer racing
+       the retry delay can recreate residue) and after a successful install,
+       so the payload directory stays the pristine clone it's supposed to
+       be -- mirrors the POSIX installer's `_scrub_payload_build_artifacts`.
+
+       ``SourceDir`` (optional): an additional local source directory to
+       scrub, for a vendored dependency (ssh-manager, credential-relay,
+       zdd, ...) installed from its OWN source tree rather than
+       ``$PluginDir`` -- that tree uses the same setuptools src-layout and
+       accumulates the identical stale build/egg-info residue, which
+       ``$PluginDir``-only scrubbing never reaches
+       (copilot-extensions#3456 review). #>
+    param(
+        [Parameter(Mandatory)][string[]]$Arguments,
+        [string]$SourceDir = ''
+    )
+    $scrubArtifacts = {
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
+            (Join-Path $PluginDir 'build'), `
+            (Join-Path $PluginDir '*.egg-info'), `
+            (Join-Path (Join-Path $PluginDir 'src') '*.egg-info')
+        if ($SourceDir -and $SourceDir -ne $PluginDir) {
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
+                (Join-Path $SourceDir 'build'), `
+                (Join-Path $SourceDir '*.egg-info'), `
+                (Join-Path (Join-Path $SourceDir 'src') '*.egg-info')
+        }
+    }
     $delays = @(3, 6, 10)
+    & $scrubArtifacts
     $out = & uv pip install @Arguments 2>&1
     $exit = $LASTEXITCODE
+    if ($exit -eq 0) { & $scrubArtifacts }
     foreach ($delay in $delays) {
         if ($exit -eq 0 -or -not (Test-IsSreModuleMismatch ($out | Out-String))) { break }
         Write-Warn "uv build hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying in ${delay}s"
         Start-Sleep -Seconds $delay
+        & $scrubArtifacts
         $out = & uv pip install @Arguments 2>&1
         $exit = $LASTEXITCODE
+        if ($exit -eq 0) { & $scrubArtifacts }
     }
     return [pscustomobject]@{ Output = $out; ExitCode = $exit }
 }
@@ -1932,7 +1974,7 @@ function Invoke-Install {
         # cached wheel for the same version and new modules never land -- the
         # #186 CodespaceConfigSource regression). Both selectors must name the
         # `agent-ssh-manager` distribution declared by the vendored pyproject.
-        $sshResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, "$SshManagerDir", '--reinstall-package', 'agent-ssh-manager', '--refresh-package', 'agent-ssh-manager', '--quiet')
+        $sshResult = Invoke-UvPipInstallResilient -SourceDir $SshManagerDir @('--python', $VenvPython, "$SshManagerDir", '--reinstall-package', 'agent-ssh-manager', '--refresh-package', 'agent-ssh-manager', '--quiet')
         $sshOut = $sshResult.Output
         if ($sshResult.ExitCode -ne 0) {
             $ErrorActionPreference = $prevEAP
@@ -1948,7 +1990,7 @@ function Invoke-Install {
     # credential-relay (the relay framework agent-bridge runs in its daemon).
     $CredRelayDir = Resolve-CredentialRelay
     if ($CredRelayDir) {
-        $crResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, "$CredRelayDir", '--reinstall-package', 'agent-credential-relay', '--refresh-package', 'agent-credential-relay', '--quiet')
+        $crResult = Invoke-UvPipInstallResilient -SourceDir $CredRelayDir @('--python', $VenvPython, "$CredRelayDir", '--reinstall-package', 'agent-credential-relay', '--refresh-package', 'agent-credential-relay', '--quiet')
         $crOut = $crResult.Output
         if ($crResult.ExitCode -ne 0) {
             $ErrorActionPreference = $prevEAP
@@ -1964,7 +2006,7 @@ function Invoke-Install {
     # zdd (zero-downtime cutover primitives: routing table + orchestrator).
     $ZddDir = Resolve-Zdd
     if ($ZddDir) {
-        $zddResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, "$ZddDir", '--reinstall-package', 'agent-zdd', '--refresh-package', 'agent-zdd', '--quiet')
+        $zddResult = Invoke-UvPipInstallResilient -SourceDir $ZddDir @('--python', $VenvPython, "$ZddDir", '--reinstall-package', 'agent-zdd', '--refresh-package', 'agent-zdd', '--quiet')
         $zddOut = $zddResult.Output
         if ($zddResult.ExitCode -ne 0) {
             $ErrorActionPreference = $prevEAP
@@ -1980,7 +2022,7 @@ function Invoke-Install {
     # single-instance-lease (one active daemon per host: lease + self-retire + reaper).
     $SilDir = Resolve-SingleInstanceLease
     if ($SilDir) {
-        $silResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, "$SilDir", '--reinstall-package', 'agent-single-instance-lease', '--refresh-package', 'agent-single-instance-lease', '--quiet')
+        $silResult = Invoke-UvPipInstallResilient -SourceDir $SilDir @('--python', $VenvPython, "$SilDir", '--reinstall-package', 'agent-single-instance-lease', '--refresh-package', 'agent-single-instance-lease', '--quiet')
         $silOut = $silResult.Output
         if ($silResult.ExitCode -ne 0) {
             $ErrorActionPreference = $prevEAP
@@ -1996,7 +2038,7 @@ function Invoke-Install {
     # config-migrate (config schema versioning + migration).
     $CfgMigrateDir = Resolve-ConfigMigrate
     if ($CfgMigrateDir) {
-        $cmResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, "$CfgMigrateDir", '--reinstall-package', 'agent-config-migrate', '--refresh-package', 'agent-config-migrate', '--quiet')
+        $cmResult = Invoke-UvPipInstallResilient -SourceDir $CfgMigrateDir @('--python', $VenvPython, "$CfgMigrateDir", '--reinstall-package', 'agent-config-migrate', '--refresh-package', 'agent-config-migrate', '--quiet')
         $cmOut = $cmResult.Output
         if ($cmResult.ExitCode -ne 0) {
             $ErrorActionPreference = $prevEAP
@@ -2638,7 +2680,7 @@ function Invoke-Update {
         if ($SshManagerDir) {
             # Refresh the vendored agent-ssh-manager distribution's build cache
             # so a same-version source change lands (#186).
-            $sshResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--reinstall-package', 'agent-ssh-manager', '--refresh-package', 'agent-ssh-manager', "$SshManagerDir", '--quiet')
+            $sshResult = Invoke-UvPipInstallResilient -SourceDir $SshManagerDir @('--python', $VenvPython, '--reinstall-package', 'agent-ssh-manager', '--refresh-package', 'agent-ssh-manager', "$SshManagerDir", '--quiet')
             $sshOut = $sshResult.Output
             if ($sshResult.ExitCode -ne 0) {
                 $ErrorActionPreference = $prevEAP
@@ -2654,7 +2696,7 @@ function Invoke-Update {
         # without a version bump (uv otherwise skips a same-version path dep).
         $CredRelayDir = Resolve-CredentialRelay
         if ($CredRelayDir) {
-            $crResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--reinstall-package', 'agent-credential-relay', '--refresh-package', 'agent-credential-relay', "$CredRelayDir", '--quiet')
+            $crResult = Invoke-UvPipInstallResilient -SourceDir $CredRelayDir @('--python', $VenvPython, '--reinstall-package', 'agent-credential-relay', '--refresh-package', 'agent-credential-relay', "$CredRelayDir", '--quiet')
             $crOut = $crResult.Output
             if ($crResult.ExitCode -ne 0) {
                 $ErrorActionPreference = $prevEAP
@@ -2670,7 +2712,7 @@ function Invoke-Update {
         # version bump (uv otherwise skips a same-version path dep).
         $ZddDir = Resolve-Zdd
         if ($ZddDir) {
-            $zddResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--reinstall-package', 'agent-zdd', '--refresh-package', 'agent-zdd', "$ZddDir", '--quiet')
+            $zddResult = Invoke-UvPipInstallResilient -SourceDir $ZddDir @('--python', $VenvPython, '--reinstall-package', 'agent-zdd', '--refresh-package', 'agent-zdd', "$ZddDir", '--quiet')
             $zddOut = $zddResult.Output
             if ($zddResult.ExitCode -ne 0) {
                 $ErrorActionPreference = $prevEAP
@@ -2685,7 +2727,7 @@ function Invoke-Update {
         # single-instance-lease: force-reinstall so a local code change propagates.
         $SilDir = Resolve-SingleInstanceLease
         if ($SilDir) {
-            $silResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--reinstall-package', 'agent-single-instance-lease', '--refresh-package', 'agent-single-instance-lease', "$SilDir", '--quiet')
+            $silResult = Invoke-UvPipInstallResilient -SourceDir $SilDir @('--python', $VenvPython, '--reinstall-package', 'agent-single-instance-lease', '--refresh-package', 'agent-single-instance-lease', "$SilDir", '--quiet')
             $silOut = $silResult.Output
             if ($silResult.ExitCode -ne 0) {
                 $ErrorActionPreference = $prevEAP
@@ -2700,7 +2742,7 @@ function Invoke-Update {
         # config-migrate: force-reinstall so a local code change propagates.
         $CfgMigrateDir = Resolve-ConfigMigrate
         if ($CfgMigrateDir) {
-            $cmResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--reinstall-package', 'agent-config-migrate', '--refresh-package', 'agent-config-migrate', "$CfgMigrateDir", '--quiet')
+            $cmResult = Invoke-UvPipInstallResilient -SourceDir $CfgMigrateDir @('--python', $VenvPython, '--reinstall-package', 'agent-config-migrate', '--refresh-package', 'agent-config-migrate', "$CfgMigrateDir", '--quiet')
             $cmOut = $cmResult.Output
             if ($cmResult.ExitCode -ne 0) {
                 $ErrorActionPreference = $prevEAP

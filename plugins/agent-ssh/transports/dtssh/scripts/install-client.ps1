@@ -34,7 +34,7 @@ function Set-CopilotPersistentEnvironmentVariable {
     [Environment]::SetEnvironmentVariable($Name, $Value, $effectiveTarget)
 }
 # === end install-contract:test-persistent-environment ===
-$InstallRelease = 'https://raw.githubusercontent.com/bmiddha/devtunnel-ssh/main/scripts/install-release.ps1'
+$InstallRelease = 'https://raw.githubusercontent.com/bmiddha/devtunnel-ssh/main/scripts/install-release.ps1' # marketplace-isolation: allow third-party-installer-url
 $DtsshDir = Join-Path $env:LOCALAPPDATA 'dtssh\bin'
 $DtsshExe = Join-Path $DtsshDir 'dtssh.exe'
 

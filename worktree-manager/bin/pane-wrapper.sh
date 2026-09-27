@@ -22,6 +22,7 @@ PROMPT_STARTUP_GRACE="${WORKTREE_PROMPT_STARTUP_GRACE:-3}"
 # mark. Consumed here so it is never forwarded to the wrapped command.
 AW_WT=""
 AW_PROJECT=""
+AW_MUX_SESSION=""
 INITIAL_PROMPT_B64=""
 INITIAL_PROMPT_RECEIPT_B64=""
 AHP_TOKEN_FILE=""
@@ -29,6 +30,7 @@ while [[ $# -ge 2 ]]; do
     case "$1" in
         --aw-wt) AW_WT="$2" ;;
         --aw-project) AW_PROJECT="$2" ;;
+        --aw-mux-session) AW_MUX_SESSION="$2" ;;
         --aw-prompt-b64) INITIAL_PROMPT_B64="$2" ;;
         --aw-prompt-receipt-b64) INITIAL_PROMPT_RECEIPT_B64="$2" ;;
         --aw-ahp-token-file) AHP_TOKEN_FILE="$2" ;;
@@ -147,14 +149,39 @@ if command -v uv >/dev/null 2>&1 \
     && [[ -n "$AW_PROJECT" && -n "$AW_WT" ]]; then
     WM_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P 2>/dev/null || true)"
     if [[ -n "$WM_ROOT" ]]; then
+        # Derive the real mux session's own stable identity (Copilot review
+        # finding on PR #3906): the display session name alone is NOT
+        # unique per launch incarnation -- both launchers derive the same
+        # deterministic `wt-<worktree_id>`-shaped name for the same
+        # worktree, so an old pane wrapper and a newer live mapping compare
+        # equal by name alone and a stale teardown can still tombstone the
+        # replacement. tmux's own #{session_id}:#{session_created} IS
+        # unique per real session object and stays IDENTICAL across
+        # repeated joins of the same still-live session (unlike a
+        # freshly-generated per-call token, which would falsely look
+        # "stale" after every join re-registers a new one) -- query it live
+        # from inside this same pane rather than threading a value from the
+        # launcher.
+        AW_SESSION_INCARNATION=""
+        if command -v tmux >/dev/null 2>&1; then
+            AW_SESSION_INCARNATION="$(tmux display-message -p '#{session_id}:#{session_created}' 2>/dev/null || true)"
+        fi
         # Dispatch detached (real-bug follow-up to #3825): this is
         # teardown, not attach, but the pane process itself is exiting --
         # blocking here on the same tens-of-seconds-worst-case CLI edge
         # delays the pane's own exit for no benefit, mirroring the
         # activity-log dispatch immediately above.
+        # `--mux-session`, when known (#3838 fix): lets the daemon-side
+        # registry reject this removal as a stale no-op if a newer
+        # session already superseded this one for the same
+        # (project, worktree_id) -- an old pane's delayed teardown must
+        # never tombstone a newer, still-live session's mapping.
         ( uv run --quiet --project "$WM_ROOT" -m worktree_manager mux-daemon remove \
             --project="$AW_PROJECT" \
-            --worktree-id="$AW_WT" >/dev/null 2>&1 & ) || true
+            --worktree-id="$AW_WT" \
+            ${AW_MUX_SESSION:+--mux-session="$AW_MUX_SESSION"} \
+            ${AW_SESSION_INCARNATION:+--session-incarnation="$AW_SESSION_INCARNATION"} \
+            >/dev/null 2>&1 & ) || true
     fi
 fi
 

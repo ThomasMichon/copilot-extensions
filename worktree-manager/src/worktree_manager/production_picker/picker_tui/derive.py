@@ -865,6 +865,10 @@ def norm(
         # boundary this module deliberately never crosses). A hermetic
         # string pass-through; "" when unclaimed/unresolvable.
         "claims_summary": w.get("claims_summary") or "",
+        # #3307 follow-up: structured [{"label","url"}] list (same engine
+        # call site) for real hyperlink spans; None falls back to the plain
+        # string above.
+        "claims_links": w.get("claims_links"),
         # #3307 Phase 3: raw pass-through of the worktree's last real resume
         "last_resumed_at": w.get("last_resumed_at"),
         "cleanup_bucket": _bucket_from_raw(w),

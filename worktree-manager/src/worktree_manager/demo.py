@@ -209,7 +209,16 @@ def _memo_rows() -> list[dict]:
             "feat/combustion-morale", started_at=_ago(days=4),
             mux_attached=True, mux_clients=1, follow_up=True, turn_count=27,
             pr={"number": 83, "state": "open"}, session_count=3,
-            claims_summary="PR #83", last_resumed_at=_ago(minutes=45)),
+            claims_summary="PR #83", last_resumed_at=_ago(minutes=45),
+            # #3307 follow-up: claims_links demonstrates the real terminal
+            # hyperlink the CLAIMS column now supports -- the label matches
+            # claims_summary above; a --demo/--preview render exercises the
+            # real production_picker code path, so this shows the link
+            # style actually applied, not just the plain string.
+            claims_links=[{
+                "label": "PR #83",
+                "url": "https://github.com/aperture-labs/testchambers/pull/83",
+            }]),
         _wt("0545", "wip", 1, 0, False, "active", titles["active"][8],
             "feat/vending-machine-neural-net", started_at=_ago(days=8),
             session_bound_live=True, follow_up=True, turn_count=52,

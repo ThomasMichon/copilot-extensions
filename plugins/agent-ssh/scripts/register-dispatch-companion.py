@@ -15,9 +15,10 @@ def main() -> int:
         registrar = plugin_root / "references" / "agent-dispatch" / "registrar"
         if not registrar.is_dir():
             return 0
+        _legacy = ".agent-dispatch"  # marketplace-isolation: allow legacy compatibility root
         target_dir = Path(
             os.environ.get("AGENT_DISPATCH_REGISTRAR_DROPINS_DIR")
-            or Path.home() / ".agent-dispatch" / "registrar.d"
+            or Path.home() / _legacy / "registrar.d"
         ).expanduser()
         target_dir.mkdir(parents=True, exist_ok=True)
         target = target_dir / "agent-ssh-copilot-extensions.json"

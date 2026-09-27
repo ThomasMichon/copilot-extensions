@@ -359,9 +359,18 @@ def remove_managed_mapping(
     worktree_id: str,
     *,
     mapping_revision: int | None = None,
+    mux_session: str | None = None,
+    session_incarnation: str | None = None,
     root: Path | None = None,
 ) -> dict:
-    result = remove_mapping(project, worktree_id, mapping_revision=mapping_revision, root=root)
+    result = remove_mapping(
+        project,
+        worktree_id,
+        mapping_revision=mapping_revision,
+        mux_session=mux_session,
+        session_incarnation=session_incarnation,
+        root=root,
+    )
     if result.get("applied"):
         entry = get_mapping(project, worktree_id, root=root)
         if entry is not None:
@@ -635,25 +644,31 @@ def build_compute(
             # invalidates the mapping so a later lookup does not repeat the
             # same probe forever.
             if not _mux_session_alive(entry["mux_bin"], entry["mux_session"]):
-                registry.remove(project, worktree_id, mapping_revision=entry["mapping_revision"])
+                # Guard with session identity too: a concurrent register()
+                # can replace this mapping at the same revision between the
+                # snapshot above and this call.
+                registry.remove(
+                    project, worktree_id,
+                    mapping_revision=entry["mapping_revision"], mux_session=entry["mux_session"],
+                    session_incarnation=entry.get("session_incarnation"),
+                )
                 tombstone = registry.get(project, worktree_id)
                 if tombstone is not None:
                     publish_live_observation(tombstone, ensure_monitor=False)
                 return {"applied": False, "reason": "not-live"}
 
             # Recheck immediately before the actual write (Copilot review
-            # finding): the interprocess lock above is only held for each
-            # individual registry operation, not across this whole
-            # probe-then-apply sequence, so a concurrent CLI
-            # register/remove could still have superseded this mapping in
-            # the gap between the fetch above and now. A changed
-            # mapping_revision (or the mapping going missing/not-live)
-            # means this entry is no longer the current target.
+            # finding): a concurrent CLI register/remove could still have
+            # superseded this mapping in the gap between the fetch above and
+            # now -- compare identity too (not just revision), since
+            # register() permits an equal-revision live refresh.
             current = registry.get(project, worktree_id)
             if (
                 current is None
                 or not current["live"]
                 or current["mapping_revision"] != entry["mapping_revision"]
+                or current["mux_session"] != entry["mux_session"]
+                or current.get("session_incarnation") != entry.get("session_incarnation")
             ):
                 return {"applied": False, "reason": "not-live"}
 

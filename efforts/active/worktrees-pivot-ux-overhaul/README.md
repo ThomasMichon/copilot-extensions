@@ -470,15 +470,28 @@ parallelizable across worktrees.
 - [ ] Sticky column-header + current-group band while scrolling, with
       focus-top force-scrolling to the very top (operator feedback,
       2026-09-26; not started).
-- [ ] CLAIMS abbreviation/hyperlink rework: WT last-4 / SESS first-8-hex
-      abbreviations, a short `repo#N` cross-repo PR form, whole-row-end-only
-      truncation (never mid-value), and a real terminal hyperlink to the
-      claim's URL. A WT claim on a DIFFERENT repo than the current worktree
-      additionally needs the `<repo>:<last4>` form (e.g.
-      `copilot-extensions:4b8a`), not a bare `<last4>` -- same-repo stays
-      bare (operator nit, 2026-09-26). Touches the shared `claims_rank.py`
-      (Worktrees/Tasks/Codespaces/Containers all consume it) -- needs its
-      own careful pass (operator feedback, 2026-09-26; not started).
+- [x] CLAIMS abbreviation/hyperlink rework, in `claims_rank.py` (shared by
+      Worktrees/Tasks/Codespaces/Containers): `format_claim()` is now
+      cross-repo-aware via a new `own_repo=` parameter -- a `pr`/`bug`/
+      `issue` claim shows `"PR #N"` same-repo, `"<short-repo>#N"` cross-repo
+      (also now parses a full GitHub URL ref, fixing the real
+      "PR https://..." bug this surfaced); a `worktree` claim shows
+      `"<last4>"` same-repo, `"<repo>:<last4>"` cross-repo (operator's own
+      example and nit, reading the sibling's project from the existing
+      `machine/project/worktree_id` ref convention). New `claim_url()` +
+      `claim_entries_for_worktree()` (a `[{"label","url"}]` list alongside
+      the existing flat `claims_summary` string) let the Picker render a
+      REAL terminal hyperlink (OSC 8, verified in an ANSI capture) per
+      claim. The Picker's CLAIMS cell no longer mid-value ellipsis-clips
+      (`_claims_cell` in `engine_helpers.py`) -- only the whole ROW
+      truncates, once, at the very end, if it doesn't fit the terminal at
+      all. **"SESS" (first-8-hex) abbreviation intentionally NOT
+      implemented**: investigation found `bridge` (the closest matching
+      pecking-order kind) is not actually a claimable kind yet -- no code
+      path creates a `ResourceClaim` with that kind, so there is no real
+      data to abbreviate; fabricating the format for a kind that can't
+      exist yet was rejected in favor of being honest about the gap
+      (2026-09-27).
 - [x] Alternate-row background shading so a multi-line row's title + detail
       lines read as one visual unit (operator feedback, 2026-09-26; shipped
       2026-09-27, PR #3952).

@@ -1432,6 +1432,16 @@ function Invoke-ManagedMuxRegister {
     ) { return }
     try {
         $managerRoot = Split-Path -Parent $PSScriptRoot
+        # The real mux session's own stable identity (Copilot review finding
+        # on PR #3906): stored so a later teardown's own live probe of the
+        # SAME psmux session (pane-wrapper.ps1) can be compared against it --
+        # the display session name alone is not unique per launch
+        # incarnation. Cheap/local/synchronous, unlike the detached register
+        # dispatch below.
+        $incarnation = $null
+        try {
+            $incarnation = (& $script:AwPsmuxBin display-message -t $Session -p '#{session_id}:#{session_created}' 2>$null)
+        } catch {}
         $registerArgs = @(
             'run',
             '--quiet',
@@ -1444,6 +1454,9 @@ function Invoke-ManagedMuxRegister {
             "--mux-session=$Session",
             '--mux-bin=psmux'
         )
+        if (-not [string]::IsNullOrWhiteSpace([string]$incarnation)) {
+            $registerArgs += "--session-incarnation=$incarnation"
+        }
         # Dispatch detached rather than blocking on `& uv @registerArgs`
         # (real-bug follow-up to #3825): the bundled register edge can
         # spend tens of seconds (mux metadata probes, daemon boot-wait,
@@ -1637,6 +1650,19 @@ if (-not $noMux) {
         }
         if (-not [string]::IsNullOrWhiteSpace($script:LaunchProject)) {
             $wrapperArgs += @('-AwProject', [string]$script:LaunchProject)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($sessName)) {
+            $wrapperArgs += @('-AwMuxSession', [string]$sessName)
+        }
+        if (-not [string]::IsNullOrWhiteSpace([string]$script:AwPsmuxBin)) {
+            # Thread the ALREADY-resolved binary (Copilot review finding on
+            # PR #3906): pane-wrapper.ps1 has no access to
+            # Resolve-AwPsmuxBin's own WinGet-reparse-stub detection, and a
+            # bare `psmux` on PATH can silently resolve to a different (or
+            # missing) binary than this launcher used -- which would make
+            # its later session_incarnation probe fail silently, disabling
+            # the #3838 stale-teardown guard without any visible error.
+            $wrapperArgs += @('-AwPsmuxBin', [string]$script:AwPsmuxBin)
         }
         if ($ahpTokenFile) {
             $wrapperArgs += @('-AwAhpTokenFile', $ahpTokenFile)
