@@ -841,4 +841,30 @@ reviewed-plan PR per the standard effort review gate before Phase 1 begins._
 - **Next up: Phase 7** — session/handoff-head mismatch warning + Sessions
   sub-menu. Not yet started.
 
+### 2026-09-26 — Post-Phase-6 renders + pivot-development render guidance
+- Rendered the current Worktrees pivot against `--demo` (text, SVG, and a
+  rasterized PNG via `scripts/picker-snapshot`) to verify Phase 6's
+  SESS/TURNS column reads correctly end-to-end, not just in golden-text
+  diffs. Found the demo fixture (`src/worktree_manager/demo.py`) never set
+  `session_count` on any row, so every render showed `-/N` -- honest, but
+  not a useful demonstration of the column's actual point. Added
+  illustrative `session_count` values to the "management memo" roster
+  (roughly correlated with age/turn_count, never exceeding it), so the
+  demo render now shows a believable spread (`1/6`, `2/14`, `5/52`, etc.).
+  Filed the resulting SVG+PNG to the operator's OneDrive in a new dated
+  folder (`2026/09.26 Worktrees Pivot UX Overhaul Phase 6/`, per their
+  organization profile's `MM.DD Topic Name` convention), alongside a short
+  README index, distinct from the Phase 1 baseline set.
+- Added a **"Developing a pivot: render early, render often"** section to
+  `worktree-manager/README.md`'s Production Picker transplant docs (per
+  operator request): any pivot change touching columns/derived fields/
+  section ordering should be rendered before/after and at each milestone,
+  not verified by test-passing alone -- column width/truncation/drop-
+  priority regressions are exactly what a string assertion can miss while
+  still green. Documents the `--demo`/SVG/PNG render commands already used
+  above, and explicitly calls out extending `demo.py` with representative
+  values first when a render target field the fixture doesn't yet populate.
+- No functional/engine code changed this slice -- fixture data + docs only.
+  `tests/test_picker_preview_mode.py` + `tests/test_picker_app.py` (43
+  tests, cover demo-fixture consumption) still pass unchanged.
 

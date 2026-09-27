@@ -176,6 +176,40 @@ to direct launch. An AHP-owned row exposes **Dispose hosted session** as an
 explicit action. It disposes and terminally marks the hosted binding so a later
 normal Finalize can proceed; terminal exit never performs that destruction.
 
+### Developing a pivot: render early, render often
+
+Any change touching a pivot's columns, derived fields, row grouping, or
+section ordering (Worktrees or a plugin-contributed pivot alike) should be
+verified **visually**, not just by reading a diff or trusting a passing test
+— column widths, truncation, and drop-priority under narrow terminals are
+exactly the kind of regression a unit test's string assertion can miss while
+still "passing". Produce a render **before and after** the change, and again
+at each meaningful milestone while the change is in progress, not only once
+at the end:
+
+```bash
+# Fast, no dependencies -- read directly in a terminal or paste into a PR:
+uv run python -m worktree_manager picker screenshot --demo --format text
+
+# Shareable PNG (once, to install the Node dependency + cache the font):
+cd scripts/picker-snapshot && npm install
+uv run python -m worktree_manager picker screenshot --demo --format svg --out /tmp/pivot.svg
+node svg2png.mjs /tmp/pivot.svg /tmp/pivot.png 3
+```
+
+`--demo` needs no live engine or real worktrees -- it renders the real
+production Picker against the deterministic fixture in
+[`src/worktree_manager/demo.py`](src/worktree_manager/demo.py) (see the
+`--demo`/`--preview` paragraph below). If the fixture doesn't yet exercise
+the field you're adding (a new derived column, a new state, a new claim
+shape), extend `demo.py` with representative values first -- a render against
+data that never populates the field you're changing verifies nothing. Compare
+the before/after renders side by side (or via the `tests/production_picker/`
+golden-screenshot harness, `AGENT_WORKTREES_UPDATE_GOLDENS=1` to
+intentionally accept a diff) before considering the change done, and keep
+each phase's render as evidence in the tracking effort/PR rather than only a
+prose description of what changed.
+
 `picker mock` renders real-shaped state but simulates mutations. The screenshot
 command exports the production character grid, ANSI grid, or SVG through the
 same compositor used by the live app. `scripts/picker-shot.py` adds

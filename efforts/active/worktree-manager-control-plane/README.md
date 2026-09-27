@@ -193,7 +193,7 @@ realized in `main`; unchecked items are the remaining delta.
       §`explicit-launch-target`, §`render-derive-not-own`, and
       §`programmatic-parity`.
 
-### Phase 3b — Relocate Mux + AHP execution mechanics out of agent-worktrees (In progress — #2062)
+### Phase 3b — Relocate Mux + AHP execution mechanics out of agent-worktrees (Done — #2062)
 - [x] **Slice 1 (AHP):** move the AHP session backend
       (`agent_worktrees/ahp_backend.py`, the `session_backend`/`is_ahp` config
       schema, and the branches it threads through `__main__.py`,
@@ -217,7 +217,7 @@ realized in `main`; unchecked items are the remaining delta.
             launch/resume/create cutover for exact engine-created worktrees.
       - [x] Steps 5-6: delete the legacy agent-worktrees AHP backend/config path
             and complete the remaining launcher-contract test migration.
-- [ ] **Slice 2 (Mux):** relocate Mux launch/reattach/remux mechanics
+- [x] **Slice 2 (Mux):** relocate Mux launch/reattach/remux mechanics
       (`launch-session.{sh,ps1,cmd}`, `pane-wrapper.{sh,ps1}`, `cmd_remux`)
       from `agent-worktrees` to the Worktree Manager, consistent with the same
       vision. agent-worktrees keeps mux **liveness observation**
@@ -232,7 +232,11 @@ realized in `main`; unchecked items are the remaining delta.
       prototype); absent Worktree Manager, `cmd_launch` falls back to a small,
       new direct non-mux invocation, not a retained copy of the launcher
       scripts. Reviewed, ordered plan:
-      [`phase-3b-mux-relocation.md`](phase-3b-mux-relocation.md).
+      [`phase-3b-mux-relocation.md`](phase-3b-mux-relocation.md). **Done** —
+      the relocation itself finished in the earlier sub-slices, and PR
+      [#3891](https://github.com/ThomasMichon/copilot-extensions/pull/3891)
+      closes the last Picker-independence / legacy-compatibility follow-ons
+      tracked immediately below this slice.
       - [x] Sub-slice 2a Step 1: copied `launch-session.{sh,ps1,cmd}` +
             `pane-wrapper.{sh,ps1}` verbatim (hash-verified) into
             `worktree-manager/bin/`; proved the existing `_copy_payload`
@@ -323,13 +327,31 @@ realized in `main`; unchecked items are the remaining delta.
               requires peer-launch's stronger activation-generation
               revalidation-at-execution-time guarantees (which this read-only
               discovery boundary does not attempt to provide).
-- [ ] Update the Worktree Manager Picker to select Mux presentation and/or the
+- [x] Update the Worktree Manager Picker to select Mux presentation and/or the
       AHP backend independently per launch/resume/create action, rather than
-      assuming exactly one of them.
-- [ ] Keep both mechanics fully functional through the relocation — this is a
+      assuming exactly one of them. **Verified** — the Picker already carried
+      independent `No Mux` (presentation) and `AHP` (backend) toggles for the
+      local Open/Resume submenu and the New Worktree options dialog; PR
+      [#3891](https://github.com/ThomasMichon/copilot-extensions/pull/3891)
+      adds the missing combined-toggle regressions and the specific
+      `AHP+no-mux` launch-path regression; together with the existing
+      `direct+mux`, `direct+no-mux`, and `AHP+mux` coverage, the four-way
+      matrix is now explicit rather than inferred indirectly from separate
+      tests.
+- [x] Keep both mechanics fully functional through the relocation — this is a
       location and ownership change, not a behavior regression; existing
       worktrees with a recorded `session_backend` binding must keep resolving
-      correctly against the relocated code.
+      correctly against the relocated code. **Verified** — the legacy
+      `session_backend:` → `derive_execution_leg()` compatibility view, the
+      generic `execution-leg get` CLI, and the Manager-side resume path all
+      continue to honor an old-shaped persisted AHP binding; PR
+      [#3891](https://github.com/ThomasMichon/copilot-extensions/pull/3891)
+      revalidated that contract while closing the Picker-independence follow-on.
+
+Phase 3b is complete: the AHP backend now lives in Worktree Manager, mux
+launch/monitor ownership has moved out of `agent-worktrees`, the Picker treats
+backend vs. presentation as independent axes, and legacy `session_backend`
+bindings still resolve correctly through the compatibility view.
 
 ### Phase 3c — Picker non-blocking I/O (Planned — ordered migration plan authored, implementation not started)
 - [ ] Make every I/O-touching Picker surface — pivot loads (built-in and
@@ -690,6 +712,31 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-09-26** — Closed the final two Phase 3b follow-on checkboxes, PR
+  [#3891](https://github.com/ThomasMichon/copilot-extensions/pull/3891).
+  Investigation found the functional work was already in place: the
+  production Picker's local Open/Resume submenu and New Worktree options
+  already modelled `No Mux` and `AHP` as independent toggles, and
+  agent-worktrees already kept a reader-side `session_backend:` compatibility
+  path through `derive_execution_leg()` / `execution-leg get`. The gap was
+  proof, not implementation. Added the missing combined-toggle regressions in
+  `worktree-manager`, plus the specific `AHP+no-mux` launch-path regression
+  that completes the explicit four-combination matrix alongside the pre-
+  existing `direct+mux`, `direct+no-mux`, and `AHP+mux` tests, and
+  revalidated the legacy binding contract against the current
+  `agent-worktrees` tests. Marked Phase 3b **Done** in the plan: both
+  remaining explicit bullets are now checked, and there is no further open
+  item in the Phase 3b section itself.
+  Validation: focused `worktree-manager` Picker/launch toggle tests green;
+  focused `agent-worktrees` legacy-execution-leg compatibility tests green;
+  `python tools/check-install-contract.py` green; full `agent-worktrees`
+  suite green (`5605 passed, 50 skipped, 1 warning`); full
+  `worktree-manager` suite still matches the repo's unrelated failure class
+  in `tests/production_picker/test_data_ssh_sources.py` and, on this
+  Windows machine without symlink-creation privilege, additionally hits 10
+  symlink-fixture failures before any changed-code regression (`1464 passed,
+  7 skipped, 13 failed` total).
 
 - **2026-09-26** — Re-authored the Phase 3c planning doc to match the
   Phase 3b/3e ordered-slice discipline and renamed it to

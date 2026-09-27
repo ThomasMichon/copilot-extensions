@@ -852,6 +852,65 @@ def test_run_launch_selects_ahp_after_plan_resolution(monkeypatch, tmp_path):
     assert calls == [(hosted, True)]
 
 
+def test_run_launch_selects_ahp_without_mux_when_both_requested(
+    monkeypatch, tmp_path
+):
+    """AHP (backend) and mux (presentation) stay independent: selecting the
+    hosted backend while also requesting No Mux must still use AHP, but pass
+    ``want_mux=False`` to the launcher."""
+    from worktree_manager import ahp_provider, engine_client, launcher
+
+    plan = type(
+        "Plan",
+        (),
+        {
+            "action": "exec",
+            "exit_code": 0,
+            "worktree_id": "demo-1234",
+            "work_dir": str(tmp_path),
+        },
+    )()
+    hosted = object()
+    attachment = object()
+    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (plan, 0))
+    monkeypatch.setattr(
+        engine_client,
+        "execution_leg_get",
+        lambda *_args, **_kwargs: {"execution_leg": None},
+    )
+    monkeypatch.setattr(
+        ahp_provider,
+        "ensure_session",
+        lambda project, worktree_id, work_dir: (
+            attachment
+            if (project, worktree_id, work_dir)
+            == ("demo", "demo-1234", str(tmp_path))
+            else None
+        ),
+    )
+    monkeypatch.setattr(ahp_provider, "attach_plan", lambda value, found: hosted)
+    calls = []
+    monkeypatch.setattr(
+        launcher,
+        "launch",
+        lambda resolved, *, want_mux: calls.append((resolved, want_mux)) or 0,
+    )
+    request = type(
+        "Request",
+        (),
+        {
+            "project": "demo",
+            "mode": "resume",
+            "machine": None,
+            "no_mux": True,
+            "ahp": True,
+        },
+    )()
+
+    assert entrypoint._run_launch(request) == 0
+    assert calls == [(hosted, False)]
+
+
 def test_run_launch_delegates_to_relocated_script_on_windows(monkeypatch, tmp_path):
     """The relocated launch-session script is the canonical mux implementation
     (DQ9); when present, _run_launch delegates the whole local, non-AHP

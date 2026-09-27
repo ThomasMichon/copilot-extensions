@@ -435,6 +435,30 @@ survey above.
       carrying into every future verb: prefer catching the wrapped
       function's own validation exceptions generically over re-deriving
       which cases it covers.
+- [x] Migrated the fourth call-site cluster: the two dedicated ground-layer
+      session-lifecycle write commands (`conclude-session`/
+      `link-succession` — `session_conclude`/`session_link_succession`
+      verbs, a new `tracking_session_lifecycle_write.py` module). Landed
+      in PR [#3886](https://github.com/ThomasMichon/copilot-extensions/pull/3886)
+      with zero findings — the simplest cluster yet (single-lock,
+      project-agnostic, no `activity.log_event`). A design survey (done
+      BEFORE implementation, per this session's approach) found most of
+      `tracking_lifecycle.py`'s remaining write functions are NOT
+      standalone call sites and stay deliberately deferred:
+      - `open_handoff`/`link_handoff` are invoked from inside
+        `register_session`'s own sessionStart-hook-critical path — the
+        same risk class this effort's original guidance told it to avoid
+        for an early verb.
+      - `handoff_cutover.py`'s confirmed-retire repairs
+        (`_conclude_retired_predecessor`/`_settle_predecessor_session_claim`)
+        are best-effort, silently-swallowed-exception call sites reachable
+        from the live handoff-cutover choreography — could plausibly
+        REUSE the now-landed `session_conclude`/`claim_settle` verbs
+        rather than inventing new ones, but need care around their
+        existing silent-no-op contract before wiring that in.
+      - `terminal_conclusion.py`'s `_save_session_conclusion` is one step
+        inside the disposable-worktree conclusion cascade's own single
+        lock, not a standalone transaction of its own.
 - [ ] One call site (or a closely related cluster) at a time, each its own
       reviewable PR, per this repo's serial-single-writer convention —
       across whichever of `tracking.py` / `tracking_claims.py` /
@@ -445,7 +469,13 @@ survey above.
       handles `AmbiguousWriteOutcome`; any ambient-context read inside the
       transaction — project, tracking dir, env vars — must be resolved by
       the CALLER and passed as an explicit arg, never read inside the verb
-      itself).
+      itself). **Do design-survey-before-implementation** for any
+      remaining candidate touching `tracking_lifecycle.py`/
+      `tracking_session_registry.py` — several of their write functions
+      are embedded in bigger orchestrated flows or hot hook paths, not
+      standalone CLI transactions; confirm a call site is genuinely
+      self-contained (one dedicated CLI command, one lock, no shared
+      choreography) before wrapping it as a verb.
 
 ### Phase 4 — Sibling-plugin guard + audit _(not started)_
 - [ ] Add the CI guard described above.
@@ -486,6 +516,76 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-09-27 — PR #3886: Phase 3's fourth migrated call-site cluster, session-lifecycle writes (design-survey-first)
+Per operator direction, did a design survey of `tracking_lifecycle.py`'s
+remaining write functions BEFORE writing any verb code this round, rather
+than picking a candidate and discovering complexity mid-implementation.
+
+**Survey findings** (why most of `tracking_lifecycle.py` stays deferred):
+- `open_handoff`/`link_handoff` are called from inside
+  `register_session`'s own body (`tracking_session_registry.py:186`) --
+  the sessionStart-hook-critical path this effort's Phase 3 planning
+  already named as too risky for an early verb. Not migrated.
+- `handoff_cutover.py`'s `_conclude_retired_predecessor`/
+  `_settle_predecessor_session_claim` are standalone single-lock
+  transactions in SHAPE, but both are best-effort repairs
+  (`contextlib.suppress(Exception)`-wrapped) reachable from the live
+  handoff-cutover choreography -- migrating them needs to decide how
+  `AmbiguousWriteOutcome` interacts with an existing "silently swallow
+  and no-op" contract, which deserves its own focused look rather than
+  folding into this cluster. Interesting followup idea: these could
+  plausibly just REUSE the now-landed `session_conclude`/`claim_settle`
+  verbs (they wrap the identical `conclude_session`/`settle_resource_claim`
+  calls) instead of inventing new ones -- worth trying next.
+- `terminal_conclusion.py`'s `_save_session_conclusion` calls
+  `tracking.save_record` directly with no `_RecordLock` of its own -- it's
+  one step inside a bigger caller's already-open lock (the disposable-
+  worktree conclusion cascade), not a standalone transaction. Not a verb
+  candidate on its own; the whole cascade would need to become one verb,
+  a materially bigger and riskier slice.
+
+**What was actually clean:** `session_tracking_cli.cmd_conclude_session`
+and `cmd_link_succession` -- both dedicated ground-layer write CLI commands
+("the ground-layer WRITE that context-handoff's live cutover shells to",
+per their own docstrings), each a single-worktree, single-lock,
+project-agnostic transaction (`_find_tracking_file` already resolves the
+correct path regardless of ambient project -- confirmed no cross-project
+scoping concern, unlike PR #3807's disposition-history fix) with no
+`activity.log_event` call at all. New `tracking_session_lifecycle_write.py`
+registers `session_conclude`/`session_link_succession` verbs wrapping each
+transaction exactly (including the original post-save reload, kept for
+behavior parity). Landed in PR #3886 with **zero review findings** -- the
+first Phase 3 PR to get a clean first-round review (Copilot's own
+automated verdict is recorded as `COMMENTED`, with an approval
+recommendation, never a formal `APPROVED` state), likely because the
+design survey caught the risk upfront instead of a reviewer catching it
+after the fact.
+
+Tests: new `test_tracking_session_lifecycle_write.py` (verb registration,
+both lifecycle-error rejections, the head-clearing/moving behavior, one
+live-daemon end-to-end proof), plus a `test_session_lifecycle.py` case
+proving `AmbiguousWriteOutcome` is reported not swallowed. All 58 existing
+`test_session_lifecycle.py` tests continue passing unchanged. Full suite:
+5658 passed, same pre-existing failures. All gates clean.
+
+**Process lesson worth keeping:** design-survey-before-implementation paid
+off concretely this round (zero findings vs. 1-8 findings on every prior
+Phase 3 PR) -- for any future call site touching `tracking_lifecycle.py`/
+`tracking_session_registry.py` specifically (both have write functions
+embedded in bigger flows or hot paths, unlike `tracking_claims.py`'s
+mostly-standalone shape), survey every real call site FIRST and confirm
+genuine single-lock/no-choreography self-containment before writing verb
+code, rather than assuming a function's OWN shape (`save=False` + an
+external caller lock) guarantees the call site is simple.
+
+**Next Phase 3 slice:** try reusing `session_conclude`/`claim_settle` from
+`handoff_cutover.py`'s confirmed-retire repairs (a design question: how do
+their existing best-effort/silent-no-op semantics compose with
+`AmbiguousWriteOutcome`?), or continue surveying
+`tracking_session_registry.py` for a genuinely standalone remaining
+candidate (still avoiding `register_session`/`deregister_session`, both
+hot per-session hook paths of the same risk class as `register_session`).
 
 ### 2026-09-26 — PR #3876: Phase 3's third migrated call-site cluster, the resource-claim ledger
 Migrated the outbound resource-claim ledger's three single-worktree write

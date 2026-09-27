@@ -3817,6 +3817,46 @@ def test_open_submenu_ahp_toggle_is_arrow_reachable():
     asyncio.run(run())
 
 
+def test_open_submenu_modifiers_can_be_combined():
+    """Phase 3b's backend/presentation split is real in the picker: the
+    local Resume/Open submenu can enable BOTH No Mux and AHP before launching,
+    proving the toggles are independent rather than a single exclusive mode."""
+    src = _verb_fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            recs = scr.list_records()
+            by_id4 = {w["id4"]: i for i, w in enumerate(recs)}
+            scr.sel = ("L", by_id4["stop"])
+            scr._open_submenu()
+            await pilot.pause()
+            menu = _sub_menu(scr)
+            assert menu is not None
+            assert menu._actions[0] == "Resume"
+            assert menu._nomux_index is not None
+            assert menu._ahp_index is not None
+            for _ in range(menu._nomux_index):
+                await pilot.press("down")
+            await pilot.press("space")
+            assert menu.no_mux is True
+            await pilot.press("down")
+            await pilot.press("space")
+            assert menu.ahp is True
+            for _ in range(menu._ahp_index):
+                await pilot.press("up")
+            await pilot.press("enter")
+            await pilot.pause()
+        assert app.result["action"] == "resume"
+        assert app.result["options"]["no_mux"] is True
+        assert app.result["options"]["ahp"] is True
+
+    asyncio.run(run())
+
+
 def test_open_submenu_no_mux_toggle_on_resume():
     """#4043: a STOPPED worktree (verb = Resume, no live mux) now offers the
     arrow-reachable No Mux row, and toggling it threads ``no_mux`` into the
@@ -4123,6 +4163,40 @@ def test_new_worktree_ahp_option_defaults_off_and_toggles():
             await pilot.pause()
         assert app.result["options"]["ahp"] is True
         assert app.result["options"]["no_mux"] is False
+
+    asyncio.run(run())
+
+
+def test_new_worktree_modifiers_can_be_combined():
+    """Create-options AHP and No Mux are independent axes, so a new worktree
+    can request the hosted backend without the mux presentation."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.htab = 0
+            scr.btn_idx = 0
+            scr.sel = ("BTN", 0)
+            scr._activate()
+            await pilot.pause()
+            dlg = _scope_dlg(scr)
+            labels = [o["label"] for o in dlg._dlg["opts"]]
+            no_mux = labels.index("No Mux")
+            ahp = labels.index("AHP")
+            await pilot.press("tab")
+            for _ in range(no_mux):
+                await pilot.press("down")
+            await pilot.press("space")
+            for _ in range(ahp - no_mux):
+                await pilot.press("down")
+            await pilot.press("space")
+            await pilot.press("tab")
+            await pilot.press("enter")
+            await pilot.pause()
+        assert app.result["options"]["no_mux"] is True
+        assert app.result["options"]["ahp"] is True
 
     asyncio.run(run())
 
