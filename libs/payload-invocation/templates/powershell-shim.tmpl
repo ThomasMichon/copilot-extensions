@@ -5,20 +5,129 @@ $_plugin = '@@PLUGIN@@'
 $_command = '@@COMMAND@@'
 $_module = '@@MODULE@@'
 $_payloadRoot = (Resolve-Path (Join-Path $PSScriptRoot '@@PAYLOAD_UP_PS@@')).Path
+$_runtimeRoot = Join-Path $env:USERPROFILE '@@RUNTIME_ROOT@@'
+$_bootTraceLogPath = Join-Path $_runtimeRoot '@@BOOT_TRACE_LOG_FILE_PS@@'
 
 function Get-BootTraceTimestamp {
     return [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 }
 
-function Write-BootTrace([string]$Phase, [string]$Extra = '') {
+function Get-BootTraceIsoTimestamp {
+    return [DateTimeOffset]::UtcNow.ToString('yyyy-MM-ddTHH:mm:sszzz')
+}
+
+function Escape-BootTraceJson([string]$Value) {
+    if ($null -eq $Value) { return '' }
+    return $Value.Replace('\', '\\').Replace('"', '\"')
+}
+
+function Write-BootTraceRecord(
+    [string]$Phase,
+    [long]$TimestampMs,
+    [string]$Emitter,
+    [string]$ResolutionSource = '',
+    [string]$Result = '',
+    [string]$Version = '',
+    [string]$DispatchPath = ''
+) {
+    if (-not $_bootTraceLogPath) { return }
+    try {
+        # Never create the RUNTIME ROOT purely to log a phase: an ordinary
+        # read-only invocation (e.g. `--version` against an already-
+        # resolved runtime, or an installer-readiness probe with self-
+        # provisioning disabled) must stay side-effect-free -- an
+        # invariant this repo tests extensively (Copilot review, PR
+        # #3310). Creating just the `logs` subdirectory under an
+        # ALREADY-EXISTING runtime root is always safe and unconditional
+        # (the common case: a resolved runtime's root exists but hasn't
+        # logged before) -- only bypass this guard for a genuinely
+        # missing root once self-provisioning is committed to
+        # (`$script:_bootTraceWillProvision`, set right before this
+        # function is first called on that path), so the earlier
+        # `resolver-loaded`/`dispatch` phases -- which fire before the
+        # provisioning block's own `New-Item` -- are still captured on a
+        # genuine first-ever launch.
+        if (-not (Test-Path -LiteralPath $_runtimeRoot -PathType Container)) {
+            if (-not $script:_bootTraceWillProvision) { return }
+        }
+        [IO.Directory]::CreateDirectory((Split-Path -Parent $_bootTraceLogPath)) | Out-Null
+        $parts = [System.Collections.Generic.List[string]]::new()
+        [void]$parts.Add('"ts":"' + (Escape-BootTraceJson (Get-BootTraceIsoTimestamp)) + '"')
+        [void]$parts.Add('"event":"boot_trace"')
+        [void]$parts.Add('"plugin":"' + (Escape-BootTraceJson $_plugin) + '"')
+        [void]$parts.Add('"phase":"' + (Escape-BootTraceJson $Phase) + '"')
+        [void]$parts.Add('"t_ms":' + $TimestampMs)
+        [void]$parts.Add('"pid":' + $PID)
+        $hostName = [Environment]::MachineName
+        if ($hostName) {
+            [void]$parts.Add('"host":"' + (Escape-BootTraceJson $hostName) + '"')
+        }
+        [void]$parts.Add('"source":"' + (Escape-BootTraceJson $Emitter) + '"')
+        if ($ResolutionSource) {
+            [void]$parts.Add('"resolution_source":"' + (Escape-BootTraceJson $ResolutionSource) + '"')
+        }
+        if ($Result) {
+            [void]$parts.Add('"result":"' + (Escape-BootTraceJson $Result) + '"')
+        }
+        if ($Version) {
+            [void]$parts.Add('"version":"' + (Escape-BootTraceJson $Version) + '"')
+        }
+        if ($DispatchPath) {
+            [void]$parts.Add('"path":"' + (Escape-BootTraceJson $DispatchPath) + '"')
+        }
+        $line = '{' + ($parts -join ',') + '}'
+        # `AppendAllText` is synchronous: on a healthy local disk this is a
+        # single small write (microseconds), but on a slow or contended
+        # filesystem (a network-mapped home directory, heavy antivirus
+        # scanning, another process holding a lock) it can add real,
+        # unbounded latency to every phase logged before the actual
+        # dispatch -- this is a real, documented tradeoff, not a
+        # fire-and-forget guarantee (Copilot review, PR #3310). Exceptions
+        # are swallowed (never raises, never blocks dispatch on failure)
+        # but a slow write still stalls this call until it returns or
+        # throws. Left synchronous rather than backgrounded (a PowerShell
+        # runspace/job per phase would itself add measurable startup
+        # overhead to every launch, likely exceeding the write it's meant
+        # to hide behind, for a cost class -- a handful of tiny local
+        # appends per launch -- that rarely needs it in practice).
+        [IO.File]::AppendAllText(
+            $_bootTraceLogPath,
+            $line + [Environment]::NewLine,
+            [Text.UTF8Encoding]::new($false)
+        )
+    } catch {}
+}
+
+function Write-BootTrace(
+    [string]$Phase,
+    [string]$Emitter = 'shim',
+    [string]$ResolutionSource = '',
+    [string]$Result = '',
+    [string]$Version = '',
+    [string]$DispatchPath = ''
+) {
+    $timestampMs = Get-BootTraceTimestamp
+    Write-BootTraceRecord `
+        -Phase $Phase `
+        -TimestampMs $timestampMs `
+        -Emitter $Emitter `
+        -ResolutionSource $ResolutionSource `
+        -Result $Result `
+        -Version $Version `
+        -DispatchPath $DispatchPath
     if (-not $env:COPILOT_EXTENSIONS_BOOT_TRACE) { return }
     $plugin = if ($env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN) {
         $env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN
     } else {
         $_plugin
     }
-    $line = "::boot-trace:: plugin=$plugin phase=$Phase t=$(Get-BootTraceTimestamp)"
-    if ($Extra) { $line += " $Extra" }
+    $extras = [System.Collections.Generic.List[string]]::new()
+    if ($ResolutionSource) { [void]$extras.Add("source=$ResolutionSource") }
+    if ($Result) { [void]$extras.Add("result=$Result") }
+    if ($Version) { [void]$extras.Add("version=$Version") }
+    if ($DispatchPath) { [void]$extras.Add("path=$DispatchPath") }
+    $line = "::boot-trace:: plugin=$plugin phase=$Phase t=$timestampMs"
+    if ($extras.Count) { $line += " " + ($extras -join ' ') }
     [Console]::Error.WriteLine($line)
 }
 
@@ -45,13 +154,11 @@ if (
     [IO.Directory]::SetCurrentDirectory($_outside)
 }
 
-$_runtimeRoot = Join-Path $env:USERPROFILE '@@RUNTIME_ROOT@@'
 $_resolver = Join-Path $_payloadRoot 'scripts\resolve-runtime.ps1'
 function Resolve-PayloadRuntime {
     $AgentRtPy = $null
-    if ($env:COPILOT_EXTENSIONS_BOOT_TRACE) {
-        $env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN = $_plugin
-    }
+    $env:COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN = $_plugin
+    $env:COPILOT_EXTENSIONS_BOOT_TRACE_LOG_PATH = $_bootTraceLogPath
     if (Test-Path -LiteralPath $_resolver) {
         $env:AGENT_RT_ROOT = $_runtimeRoot
         . $_resolver
@@ -60,9 +167,18 @@ function Resolve-PayloadRuntime {
 }
 
 $_py = Resolve-PayloadRuntime
+# Commit to self-provisioning (and, in doing so, permit
+# Write-BootTraceRecord to eagerly create a not-yet-existing runtime
+# root) as soon as we actually know provisioning will happen -- i.e. no
+# runtime resolved AND self-provisioning isn't disabled -- so
+# `resolver-loaded`/`dispatch` are captured on a genuine first-ever
+# launch instead of silently dropped, while a read-only probe (no
+# runtime, self-provisioning disabled) never creates anything (Copilot
+# review, PR #3310).
+$script:_bootTraceWillProvision = (-not $_py) -and (-not (Test-Path "env:@@NO_SELFPROVISION_ENV@@"))
 Write-BootTrace 'resolver-loaded'
 if ($_py) {
-    Write-BootTrace 'dispatch' 'path=fast'
+    Write-BootTrace 'dispatch' 'shim' '' '' '' 'fast'
 @@PAYLOAD_ROOT_ENV_POWERSHELL_BEFORE@@    & $_py -m $_module @args
 @@PAYLOAD_ROOT_ENV_POWERSHELL_AFTER@@    exit @@PAYLOAD_ROOT_ENV_POWERSHELL_EXIT_CODE@@
 }
@@ -136,7 +252,7 @@ if (-not $_hostExe) {
 }
 if ($_provisionRc -ne 0) { exit $_provisionRc }
 if ($_provisionedPy) {
-    Write-BootTrace 'dispatch' 'path=provisioned'
+    Write-BootTrace 'dispatch' 'shim' '' '' '' 'provisioned'
 @@PAYLOAD_ROOT_ENV_POWERSHELL_BEFORE@@    & $_provisionedPy -m $_module @args
 @@PAYLOAD_ROOT_ENV_POWERSHELL_AFTER@@    exit @@PAYLOAD_ROOT_ENV_POWERSHELL_EXIT_CODE@@
 }
