@@ -784,6 +784,52 @@ def test_unrelated_similarly_named_helper_call_is_not_flagged(tmp_path):
     assert guard.find_violations(tmp_path) == []
 
 
+def test_tracking_lazy_helper_result_reassigned_is_still_caught(tmp_path):
+    # tracking = _tracking(); tracking.save_record(...) -- the helper's
+    # RETURN VALUE reassigned to a new name before use.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees.tracking_lifecycle import _tracking\n"
+        "tracking = _tracking()\n"
+        "\n"
+        "def write(record, path):\n"
+        "    tracking.save_record(record, path)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "save_record" in violations[0].detail
+
+
+def test_getattr_package_to_module_hop_is_caught(tmp_path):
+    # import agent_worktrees as aw; getattr(aw, "tracking").save_record(...)
+    # -- a single reflective CALL doing the package-to-module hop that
+    # the plain `aw.tracking` Attribute chain already catches.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "import agent_worktrees as aw\n"
+        "\n"
+        "def write(record, path):\n"
+        "    getattr(aw, \"tracking\").save_record(record, path)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "save_record" in violations[0].detail
+
+
+def test_getattr_package_to_module_hop_reassigned_is_still_caught(tmp_path):
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "import agent_worktrees as aw\n"
+        "tracking = getattr(aw, \"tracking\")\n"
+        "\n"
+        "def write(record, path):\n"
+        "    tracking.save_record(record, path)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "save_record" in violations[0].detail
+
+
 def test_aliased_importlib_module_is_still_caught(tmp_path):
     # `import importlib as il; il.import_module(...)` -- an aliased
     # `importlib` module binding, not the literal identifier.

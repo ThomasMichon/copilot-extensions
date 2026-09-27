@@ -642,7 +642,7 @@ survey above.
       `tracking_lifecycle.py` / `tracking_claims.py` /
       `tracking_session_registry.py` / `tracking_controller_relations.py`
       / `tracking_write.py` / the 6 `tracking_*_write.py` verb-handler
-      modules). Eighteen review rounds found real gaps each time (see Journal
+      modules). Nineteen review rounds found real gaps each time (see Journal
       for the full blow-by-blow: a missing re-export module, a
       package-root-alias attribute chain never tracked at all, an
       incomplete denylist, a wildcard-import escape hatch, the daemon's
@@ -758,7 +758,7 @@ writes.py`, an AST-based scan of every sibling `plugins/*` (excluding
 denylist covering every tracking-record write function -- derived by
 AST-walking each protected module for functions whose body calls
 `save_record`/`_save_record_unlocked`/the async stamp queue, then
-hand-verified against the remainder (the final denylist, after eighteen
+hand-verified against the remainder (the final denylist, after nineteen
 review rounds below, covers 55 functions across 12 modules:
 `tracking.py`/`tracking_lifecycle.py`/`tracking_claims.py`/
 `tracking_session_registry.py`/`tracking_controller_relations.py`/
@@ -769,7 +769,7 @@ wording -- NOT extended to cover `worktree-manager/`'s own already-tracked
 exception (see above), since that scope decision belongs to a
 coordinated cross-effort call, not something to fold in unilaterally here.
 
-**Eighteen review rounds found real gaps, none assumed away:**
+**Nineteen review rounds found real gaps, none assumed away:**
 (1) `tracking_controller_relations.py`'s own thin
 `save_record`/`_save_record_unlocked` re-export wrappers were absent from
 the protected module set, so a sibling could route through that module
@@ -1025,10 +1025,25 @@ actual round count -- a leftover artifact of numbering individual
 FINDINGS rather than ROUNDS, which diverge once a round contains more
 than one lettered finding. Fixed by dropping the redundant numeric
 prefixes entirely, keeping only the spelled-out round ordinals (which
-were themselves always accurate) as the source of truth. Every fix
-across all eighteen rounds has a dedicated regression test.
+were themselves always accurate) as the source of truth. A NINETEENTH
+review round then found two more real gaps, both the SAME shape as
+earlier fixes -- an already-established recognized expression
+reassigned to a new name before use, one level further out than
+previously covered: **(a)** the `_tracking()` lazy-helper recognition
+only matched the helper call as the IMMEDIATE receiver
+(`_tracking().save_record(...)`), missing
+`tracking = _tracking(); tracking.save_record(...)` -- fixed by
+extending the reassignment-propagation loop to recognize a bare,
+no-argument call to a tracked `_tracking` name as a module-resolving RHS,
+alongside the Name/Attribute/dynamic-import forms it already handled.
+**(b)** `getattr(aw, "tracking")` (a single reflective CALL doing the
+package-to-module hop the plain `aw.tracking` Attribute chain already
+caught) was unrecognized entirely as a receiver expression, and -- once
+added -- also needed the same reassignment coverage
+(`tracking = getattr(aw, "tracking")`). Every fix across all nineteen
+rounds has a dedicated regression test.
 
-66 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
+69 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
 tree, the sanctioned read-only accessors staying unflagged, three
 single-level import/call shapes (module attribute call, direct
 `from agent_worktrees import <fn>`, `from agent_worktrees.tracking_claims

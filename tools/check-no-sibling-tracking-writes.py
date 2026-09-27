@@ -574,6 +574,19 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
                 else _string_arg_value(expr.value.args[0])
             )
             return f"{base}.{expr.attr}"
+        if (
+            isinstance(expr, ast.Call)
+            and isinstance(expr.func, ast.Name)
+            and expr.func.id == "getattr"
+            and len(expr.args) >= 2
+            and _is_package_expr(expr.args[0])
+            and isinstance(expr.args[1], ast.Constant)
+            and expr.args[1].value in TRACKING_MODULES
+        ):
+            # `getattr(aw, "tracking")` -- a reflective single-CALL
+            # package-to-module hop, the `getattr` equivalent of the
+            # `aw.tracking` Attribute chain just above.
+            return f"getattr(..., {expr.args[1].value!r})"
         dynamic = _dynamic_import_alias_kind(expr)
         if dynamic is not None:
             return _string_arg_value(expr.args[0])
@@ -650,6 +663,36 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
                     elif kind == "module" and target not in module_aliases:
                         module_aliases[target] = lineno
                         changed = True
+                elif (
+                    isinstance(value, ast.Call)
+                    and not value.args
+                    and not value.keywords
+                    and isinstance(value.func, ast.Name)
+                    and value.func.id in tracking_helper_aliases
+                    and target not in module_aliases
+                ):
+                    # `tracking = _tracking(); tracking.save_record(...)`
+                    # -- the lazy-import helper's RETURN VALUE reassigned
+                    # to a new name, resolving to the `tracking` module
+                    # exactly like an ordinary `from agent_worktrees
+                    # import tracking` would.
+                    module_aliases[target] = lineno
+                    changed = True
+                elif (
+                    isinstance(value, ast.Call)
+                    and isinstance(value.func, ast.Name)
+                    and value.func.id == "getattr"
+                    and len(value.args) >= 2
+                    and _is_package_expr(value.args[0])
+                    and isinstance(value.args[1], ast.Constant)
+                    and value.args[1].value in TRACKING_MODULES
+                    and target not in module_aliases
+                ):
+                    # `tracking = getattr(aw, "tracking")` -- the
+                    # reflective package-to-module hop reassigned to a
+                    # new name.
+                    module_aliases[target] = lineno
+                    changed = True
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Attribute) and node.attr in WRITE_FUNCTIONS:
