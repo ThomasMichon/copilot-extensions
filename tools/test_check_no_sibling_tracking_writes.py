@@ -452,6 +452,49 @@ def test_getattr_with_a_non_literal_name_is_not_claimed_safe(tmp_path):
     assert guard.find_violations(tmp_path) == []
 
 
+def test_getattr_with_a_constant_string_alias_name_is_caught(tmp_path):
+    # fn = "save_record"; getattr(tracking, fn)(...) -- the fetched name
+    # is a NAME, but one previously assigned a plain string literal, so
+    # it resolves the same as an inline literal would (the same
+    # constant-string resolution the dynamic-import checks already use).
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking\n"
+        "fn = \"save_record\"\n"
+        "\n"
+        "def write(record, path):\n"
+        "    getattr(tracking, fn)(record, path)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "save_record" in violations[0].detail
+
+
+def test_dunder_dict_subscript_with_a_constant_string_alias_key_is_caught(tmp_path):
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking\n"
+        "key = \"_STAMP_QUEUE\"\n"
+        "\n"
+        "def read():\n"
+        "    return tracking.__dict__[key]\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "_STAMP_QUEUE" in violations[0].detail
+
+
+def test_dunder_dict_subscript_with_a_non_literal_key_is_not_claimed_safe(tmp_path):
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking\n"
+        "\n"
+        "def read(key):\n"
+        "    return tracking.__dict__[key]\n",
+    )
+    assert guard.find_violations(tmp_path) == []
+
+
 def test_dunder_dict_subscript_with_a_literal_write_function_name_is_caught(
     tmp_path,
 ):

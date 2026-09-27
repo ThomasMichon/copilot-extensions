@@ -642,7 +642,7 @@ survey above.
       `tracking_lifecycle.py` / `tracking_claims.py` /
       `tracking_session_registry.py` / `tracking_controller_relations.py`
       / `tracking_write.py` / the 6 `tracking_*_write.py` verb-handler
-      modules). Nineteen review rounds found real gaps each time (see Journal
+      modules). Twenty review rounds found real gaps each time (see Journal
       for the full blow-by-blow: a missing re-export module, a
       package-root-alias attribute chain never tracked at all, an
       incomplete denylist, a wildcard-import escape hatch, the daemon's
@@ -758,7 +758,7 @@ writes.py`, an AST-based scan of every sibling `plugins/*` (excluding
 denylist covering every tracking-record write function -- derived by
 AST-walking each protected module for functions whose body calls
 `save_record`/`_save_record_unlocked`/the async stamp queue, then
-hand-verified against the remainder (the final denylist, after nineteen
+hand-verified against the remainder (the final denylist, after twenty
 review rounds below, covers 55 functions across 12 modules:
 `tracking.py`/`tracking_lifecycle.py`/`tracking_claims.py`/
 `tracking_session_registry.py`/`tracking_controller_relations.py`/
@@ -769,7 +769,7 @@ wording -- NOT extended to cover `worktree-manager/`'s own already-tracked
 exception (see above), since that scope decision belongs to a
 coordinated cross-effort call, not something to fold in unilaterally here.
 
-**Nineteen review rounds found real gaps, none assumed away:**
+**Twenty review rounds found real gaps, none assumed away:**
 (1) `tracking_controller_relations.py`'s own thin
 `save_record`/`_save_record_unlocked` re-export wrappers were absent from
 the protected module set, so a sibling could route through that module
@@ -1040,10 +1040,22 @@ alongside the Name/Attribute/dynamic-import forms it already handled.
 package-to-module hop the plain `aw.tracking` Attribute chain already
 caught) was unrecognized entirely as a receiver expression, and -- once
 added -- also needed the same reassignment coverage
-(`tracking = getattr(aw, "tracking")`). Every fix across all nineteen
-rounds has a dedicated regression test.
+(`tracking = getattr(aw, "tracking")`). A TWENTIETH review round found
+one more real gap, converging quickly this time (a single finding, not
+several): the reflective checks (`getattr`/`__dict__`) still only
+accepted an INLINE string literal for the fetched name itself, so
+`fn = "save_record"; getattr(tracking, fn)(...)` and
+`key = "_STAMP_QUEUE"; tracking.__dict__[key]` both evaded them even
+though the value is exactly as statically resolvable as the
+dynamic-import target already handles via `_string_arg_value`/
+`constant_string_aliases`. Fixed by reusing that SAME resolution for
+the reflective name/key argument across all four reflective branches
+(write-function `getattr`, queue-method `getattr`, write-function
+`__dict__`, queue-method `__dict__`), rather than requiring an inline
+literal at each site independently. Every fix across all twenty rounds
+has a dedicated regression test.
 
-69 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
+72 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
 tree, the sanctioned read-only accessors staying unflagged, three
 single-level import/call shapes (module attribute call, direct
 `from agent_worktrees import <fn>`, `from agent_worktrees.tracking_claims

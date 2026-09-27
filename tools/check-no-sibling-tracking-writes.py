@@ -748,26 +748,30 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
         # `tracking.__dict__["_STAMP_QUEUE"]` reflectively fetch the SAME
         # queue object the plain-attribute `_STAMP_QUEUE` check already
         # flags outright, regardless of what's done with it afterward.
-        # This is deliberately NOT a general reflection-proof analysis (a
-        # non-literal name, e.g. `getattr(tracking, some_variable)`, is
-        # undecidable statically and is not attempted) -- it closes the
-        # specific, easy, literal-string bypass of the ast.Attribute
-        # check above.
+        # The fetched NAME may be an inline literal or a plain local name
+        # previously assigned one (`_string_arg_value`, the same
+        # constant-string resolution the dynamic-import checks use) --
+        # `fn = "save_record"; getattr(tracking, fn)(...)` resolves the
+        # same way an inline literal would. This is deliberately NOT a
+        # general reflection-proof analysis (a genuinely non-literal,
+        # non-traceable name, e.g. a parameter, is undecidable statically
+        # and is not attempted) -- it closes the specific, real,
+        # statically-resolvable bypasses of the ast.Attribute check
+        # above.
         elif (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
             and node.func.id == "getattr"
             and len(node.args) >= 2
-            and isinstance(node.args[1], ast.Constant)
-            and isinstance(node.args[1].value, str)
-            and node.args[1].value in (WRITE_FUNCTIONS | {STAMP_QUEUE_ATTR})
+            and _string_arg_value(node.args[1]) in (WRITE_FUNCTIONS | {STAMP_QUEUE_ATTR})
         ):
+            fetched = _string_arg_value(node.args[1])
             label = _module_expr_label(node.args[0])
             if label is not None:
                 violations.append(Violation(
                     path, node.lineno,
                     f"reflectively accesses write function "
-                    f"`getattr({label}, {node.args[1].value!r})`",
+                    f"`getattr({label}, {fetched!r})`",
                     repo_root=repo_root,
                 ))
         elif (
@@ -775,53 +779,50 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
             and isinstance(node.func, ast.Name)
             and node.func.id == "getattr"
             and len(node.args) >= 2
-            and isinstance(node.args[1], ast.Constant)
-            and isinstance(node.args[1].value, str)
-            and node.args[1].value in STAMP_QUEUE_WRITE_METHODS
+            and _string_arg_value(node.args[1]) in STAMP_QUEUE_WRITE_METHODS
         ):
             # `getattr(<queue-expr>, "submit")` -- reflectively fetching a
             # write-triggering QUEUE METHOD off an already-resolved queue
             # expression (`tracking._STAMP_QUEUE`, a queue alias, ...),
             # distinct from `getattr(<module>, "_STAMP_QUEUE")` above
             # (which reflectively fetches the QUEUE OBJECT itself).
+            fetched = _string_arg_value(node.args[1])
             label = _queue_expr_label(node.args[0])
             if label is not None:
                 violations.append(Violation(
                     path, node.lineno,
                     f"reflectively accesses write-triggering queue method "
-                    f"`getattr({label}, {node.args[1].value!r})`",
+                    f"`getattr({label}, {fetched!r})`",
                     repo_root=repo_root,
                 ))
         elif (
             isinstance(node, ast.Subscript)
             and isinstance(node.value, ast.Attribute)
             and node.value.attr == "__dict__"
-            and isinstance(node.slice, ast.Constant)
-            and isinstance(node.slice.value, str)
-            and node.slice.value in (WRITE_FUNCTIONS | {STAMP_QUEUE_ATTR})
+            and _string_arg_value(node.slice) in (WRITE_FUNCTIONS | {STAMP_QUEUE_ATTR})
         ):
+            fetched = _string_arg_value(node.slice)
             label = _module_expr_label(node.value.value)
             if label is not None:
                 violations.append(Violation(
                     path, node.lineno,
                     f"reflectively accesses write function "
-                    f"`{label}.__dict__[{node.slice.value!r}]`",
+                    f"`{label}.__dict__[{fetched!r}]`",
                     repo_root=repo_root,
                 ))
         elif (
             isinstance(node, ast.Subscript)
             and isinstance(node.value, ast.Attribute)
             and node.value.attr == "__dict__"
-            and isinstance(node.slice, ast.Constant)
-            and isinstance(node.slice.value, str)
-            and node.slice.value in STAMP_QUEUE_WRITE_METHODS
+            and _string_arg_value(node.slice) in STAMP_QUEUE_WRITE_METHODS
         ):
+            fetched = _string_arg_value(node.slice)
             label = _queue_expr_label(node.value.value)
             if label is not None:
                 violations.append(Violation(
                     path, node.lineno,
                     f"reflectively accesses write-triggering queue method "
-                    f"`{label}.__dict__[{node.slice.value!r}]`",
+                    f"`{label}.__dict__[{fetched!r}]`",
                     repo_root=repo_root,
                 ))
     return violations
