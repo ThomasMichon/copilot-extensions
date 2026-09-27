@@ -296,6 +296,69 @@ def test_private_liveness_writers_are_denylisted(tmp_path):
     assert any("_apply_session_state_stamp" in d for d in details)
 
 
+def test_tracking_write_direct_execution_apis_are_denylisted(tmp_path):
+    # tracking_write.run_direct(verb, args, reason=...) and
+    # tracking_write.compute(kind, payload) both load and invoke a
+    # registered verb's handler IN-PROCESS -- the same bypass as importing
+    # the handler (e.g. apply_claim_add) itself, just without ever naming
+    # it. dispatch/write_with_boot are the sanctioned daemon-mediated API
+    # and must NOT be flagged.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking_write\n"
+        "\n"
+        "def write(args):\n"
+        "    tracking_write.run_direct(\"claim_add\", args, reason=\"x\")\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "run_direct" in violations[0].detail
+
+
+def test_tracking_write_dispatch_is_not_flagged(tmp_path):
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking_write\n"
+        "\n"
+        "def write(args):\n"
+        "    tracking_write.dispatch(\"claim_add\", args)\n"
+        "    tracking_write.write_with_boot(\"claim_add\", args)\n",
+    )
+    assert guard.find_violations(tmp_path) == []
+
+
+def test_reassignment_of_a_module_alias_is_still_caught(tmp_path):
+    # A trivial rename (`writer_module = tracking`) must not evade the
+    # alias tracking above -- the reassignment propagation pass exists
+    # exactly to close this.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking\n"
+        "writer_module = tracking\n"
+        "\n"
+        "def write(record, path):\n"
+        "    writer_module.save_record(record, path)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "save_record" in violations[0].detail
+
+
+def test_chained_reassignment_of_a_package_alias_is_still_caught(tmp_path):
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "import agent_worktrees as aw\n"
+        "a = aw\n"
+        "b = a\n"
+        "\n"
+        "def write(record, path):\n"
+        "    b.tracking.save_record(record, path)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "save_record" in violations[0].detail
+
+
 def test_unreadable_file_fails_closed_not_silently_skipped(tmp_path, monkeypatch):
     # A file the guard cannot even read must be reported, not silently
     # treated as clean -- otherwise an unreadable/undecodable file is a

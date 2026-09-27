@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Guard: no sibling ``agent-*`` plugin may import an ``agent_worktrees``
-tracking-record WRITE function directly.
+"""Guard: no sibling plugin may import an ``agent_worktrees`` tracking-record
+WRITE function directly.
 
 ``agent-worktrees-authoritative-daemon`` effort, Phase 4: the resident
 daemon (via ``tracking_write.py``'s verb registry) is meant to become the
@@ -15,22 +15,29 @@ violations across every existing sibling plugin at the time. This guard
 makes that finding an enforced invariant instead of a point-in-time grep
 that could go stale silently as new call sites are added.
 
-**Scope: sibling ``agent-*`` PLUGINS only** (``plugins/*`` other than
-``agent-worktrees`` itself) -- this mirrors the effort's own surveyed scope
-and Plan language exactly ("any sibling plugin imports a tracking.py write
-function"). It deliberately does NOT cover ``worktree-manager/`` (a
-separate, non-plugin, out-of-plugin control-plane app under
-``worktree-manager-control-plane``): that app's Picker (``data_local.py``,
-via its own in-process ``_engine_runtime`` bridge) already calls several of
-these same write functions directly today (``stamp_bound_live``,
-``stamp_mux_live``, ``stamp_session_state``) -- a KNOWN, already-tracked
-architectural gap, not an oversight this guard should silently flag or
-block. See `efforts/active/worktree-manager-control-plane/README.md`
-Phase 3d ("Design the `data_local.py` hot path -- needs a new batched
-verb") for its own tracked resolution, explicitly sequenced after that
-effort's Phase 3c. Extending this guard's scope to cover that app is a
-deliberate, separate, cross-effort decision -- not something to fold in
-here without that coordination.
+**Scope: every ``plugins/*`` directory except ``agent-worktrees`` itself**
+-- NOT filtered by an ``agent-*`` name prefix (this repo ships several
+non-``agent-*``-named plugins too, e.g. ``visions``,
+``customizing-copilot``); the invariant this guard enforces has nothing to
+do with a plugin's naming convention, so scanning by name would create a
+blind spot for exactly the plugins that don't happen to match it. This
+mirrors the effort's own surveyed scope and Plan language in spirit ("any
+sibling plugin imports a tracking.py write function") even though that
+prose used "sibling plugin" loosely; the actual enforced scope is
+everything under ``plugins/`` but the owning plugin. It deliberately does
+NOT cover ``worktree-manager/`` (a separate, non-plugin, out-of-plugin
+control-plane app under ``worktree-manager-control-plane``, outside
+``plugins/`` entirely): that app's Picker (``data_local.py``, via its own
+in-process ``_engine_runtime`` bridge) already calls several of these same
+write functions directly today (``stamp_bound_live``, ``stamp_mux_live``,
+``stamp_session_state``) -- a KNOWN, already-tracked architectural gap, not
+an oversight this guard should silently flag or block. See
+`efforts/active/worktree-manager-control-plane/README.md` Phase 3d ("Design
+the `data_local.py` hot path -- needs a new batched verb") for its own
+tracked resolution, explicitly sequenced after that effort's Phase 3c.
+Extending this guard's scope to cover that app is a deliberate, separate,
+cross-effort decision -- not something to fold in here without that
+coordination.
 
 The read-only accessors this guard does NOT flag
 (``load_record_by_id``, ``find_worktree_id_by_cwd``,
@@ -126,6 +133,20 @@ WRITE_FUNCTIONS = frozenset({
     "apply_session_conclude",
     "apply_session_link_succession",
     "apply_session_register",
+    # tracking_write.py -- its own DIRECT-EXECUTION entry points.
+    # `run_direct(verb, args, reason=...)` and `compute(kind, payload)`
+    # both load and invoke a registered verb's handler (one of the
+    # apply_* functions above) IN-PROCESS, bypassing the daemon exactly
+    # as directly as importing the handler itself would -- a sibling
+    # calling `tracking_write.run_direct("claim_add", {...}, reason=...)`
+    # never needs to name `apply_claim_add` at all. `dispatch` and
+    # `write_with_boot` are deliberately NOT here: those two ARE the
+    # sanctioned daemon-mediated API (they try the resident daemon first
+    # and only fall back to `run_direct` when it's unreachable) -- the
+    # thing a sibling plugin SHOULD call if it ever needs to trigger a
+    # verb at all.
+    "run_direct",
+    "compute",
 })
 
 #: The module names a write function could be imported from -- all of these
@@ -136,6 +157,7 @@ TRACKING_MODULES = frozenset({
     "tracking_claims",
     "tracking_session_registry",
     "tracking_controller_relations",
+    "tracking_write",
     # The daemon's own verb-handler modules (see the WRITE_FUNCTIONS
     # comment above for why these belong here too).
     "tracking_claim_write",
@@ -280,6 +302,32 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
                         # i.e. the two-level package-alias chain below.
                         package_aliases.add("agent_worktrees")
 
+    # Propagate through simple reassignment (`writer_module = tracking`,
+    # `wt = agent_worktrees`) so a trivial rename can't evade the alias
+    # tracking above. A single bare-Name-to-bare-Name `Assign` (single
+    # target, no augmented/annotated/tuple/starred assignment) copies its
+    # RHS's own alias membership onto its LHS name. Iterated to a fixed
+    # point since a chain (`a = tracking; b = a; c = b`) needs more than
+    # one pass to fully propagate.
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Assign)
+                and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and isinstance(node.value, ast.Name)
+            ):
+                target = node.targets[0].id
+                source = node.value.id
+                if source in module_aliases and target not in module_aliases:
+                    module_aliases[target] = node.lineno
+                    changed = True
+                if source in package_aliases and target not in package_aliases:
+                    package_aliases.add(target)
+                    changed = True
+
     for node in ast.walk(tree):
         if not isinstance(node, ast.Attribute) or node.attr not in WRITE_FUNCTIONS:
             continue
@@ -324,7 +372,7 @@ def main() -> int:
         )
         return 0
     print(
-        "check-no-sibling-tracking-writes: FAILED -- a sibling agent-* plugin "
+        "check-no-sibling-tracking-writes: FAILED -- a sibling plugin "
         "imports an agent_worktrees tracking-record WRITE function directly:"
     )
     for v in violations:

@@ -638,21 +638,25 @@ survey above.
       an AST-based scan of every `plugins/*` sibling plugin (excluding
       `agent-worktrees` itself) for a direct import/call of a
       hand-curated denylist covering every tracking-record write function
-      across 11 modules (49 functions total: `tracking.py` /
+      across 12 modules (51 functions total: `tracking.py` /
       `tracking_lifecycle.py` / `tracking_claims.py` /
       `tracking_session_registry.py` / `tracking_controller_relations.py`
-      / the 6 `tracking_*_write.py` verb-handler modules). Five review
-      rounds found real gaps each time (see Journal for the full
-      blow-by-blow: a missing re-export module, a package-root-alias
-      attribute chain never tracked at all, an incomplete denylist, a
-      wildcard-import escape hatch, the daemon's own verb handlers being
-      an equally-importable write surface, a fail-open exception path on
-      unreadable/unparseable files, and two private read-modify-write
-      helpers) -- every one fixed with a dedicated regression test, none
-      assumed away. Wired into CI alongside
-      `test_check_no_sibling_tracking_writes.py` (21 tests).
-      **Scoped to sibling `plugins/*` only** (matching this effort's own
-      original survey and Plan wording) -- deliberately does NOT cover
+      / `tracking_write.py` / the 6 `tracking_*_write.py` verb-handler
+      modules). Six review rounds found real gaps each time (see Journal
+      for the full blow-by-blow: a missing re-export module, a
+      package-root-alias attribute chain never tracked at all, an
+      incomplete denylist, a wildcard-import escape hatch, the daemon's
+      own verb handlers being an equally-importable write surface, a
+      fail-open exception path on unreadable/unparseable files, two
+      private read-modify-write helpers, `tracking_write`'s own
+      generic direct-execution APIs, a trivial-reassignment alias
+      evasion, and two documentation-accuracy findings) -- every one
+      fixed with a dedicated regression test, none assumed away. Wired
+      into CI alongside `test_check_no_sibling_tracking_writes.py` (25
+      tests). **Scoped to every `plugins/*` directory except
+      `agent-worktrees` itself** (not filtered by an `agent-*` name
+      prefix -- this repo ships several non-`agent-*`-named plugins too)
+      -- deliberately does NOT cover
       `worktree-manager/` (a separate, non-plugin, out-of-plugin
       control-plane app), which already imports several of these same
       write functions directly today via its own in-process
@@ -750,19 +754,21 @@ already has an ordered plan for.
 
 Landed the Phase 4 CI guard proper: `tools/check-no-sibling-tracking-
 writes.py`, an AST-based scan of every sibling `plugins/*` (excluding
-`agent-worktrees` itself) for a direct import/call of a hand-curated,
-36-function denylist covering every tracking-record write function across
-`tracking.py`/`tracking_lifecycle.py`/`tracking_claims.py`/
-`tracking_session_registry.py`/`tracking_controller_relations.py` --
-derived by AST-walking each module for functions whose body calls
+`agent-worktrees` itself) for a direct import/call of a hand-curated
+denylist covering every tracking-record write function -- derived by
+AST-walking each protected module for functions whose body calls
 `save_record`/`_save_record_unlocked`/the async stamp queue, then
-hand-verified against the remainder. Scoped deliberately to sibling
-PLUGINS only, matching this effort's own original survey/Plan wording --
-NOT extended to cover `worktree-manager/`'s own already-tracked exception
-(see above), since that scope decision belongs to a coordinated
-cross-effort call, not something to fold in unilaterally here.
+hand-verified against the remainder (the final denylist, after five
+review rounds below, covers 51 functions across 12 modules:
+`tracking.py`/`tracking_lifecycle.py`/`tracking_claims.py`/
+`tracking_session_registry.py`/`tracking_controller_relations.py`/the 6
+`tracking_*_write.py` verb-handler modules). Scoped deliberately to
+sibling PLUGINS only, matching this effort's own original survey/Plan
+wording -- NOT extended to cover `worktree-manager/`'s own already-tracked
+exception (see above), since that scope decision belongs to a
+coordinated cross-effort call, not something to fold in unilaterally here.
 
-**Two review rounds found four real gaps, none assumed away:**
+**Six review rounds found real gaps, none assumed away:**
 (1) `tracking_controller_relations.py`'s own thin
 `save_record`/`_save_record_unlocked` re-export wrappers were absent from
 the protected module set, so a sibling could route through that module
@@ -822,10 +828,34 @@ gap this way (`_apply_session_state_stamp`, backing
 pass surfaced but manual inspection ruled out
 (`reopen_finalized_owner` calls `tracking.update_status(...,
 save=False)` -- mutates in-memory only, never itself persists, so it
-does not belong on the denylist). Every fix across all five rounds has a
-dedicated regression test.
+does not belong on the denylist). (9) A SIXTH review round found four
+more real findings: **(a)** `tracking_write.py`'s own generic
+direct-execution APIs -- `run_direct(verb, args, reason=...)` and
+`compute(kind, payload)` -- can load and invoke ANY registered verb's
+handler in-process without ever naming the handler function itself
+(e.g. `tracking_write.run_direct("claim_add", {...}, reason=...)` never
+mentions `apply_claim_add`), a bypass shape entirely outside the
+name-matching model; fixed by adding `tracking_write` to the protected
+modules and `run_direct`/`compute` to the denylist, while deliberately
+leaving `dispatch`/`write_with_boot` unprotected -- those two ARE the
+sanctioned daemon-mediated API. **(b)** A trivial reassignment
+(`writer_module = tracking`) evaded every alias check, since aliases
+were only ever populated from import nodes; fixed with a fixed-point
+propagation pass over simple `Name = Name` assignments (handling
+multi-hop chains like `a = tracking; b = a; c = b`). **(c)** The
+docstring claimed this guard scoped to `agent-*`-named plugins, but the
+scan itself has always covered every directory under `plugins/`
+(including non-`agent-*`-named ones, e.g. `visions`,
+`customizing-copilot`) except `agent-worktrees` -- fixed by correcting
+the docstring (and the `main()` output text) to describe the actual,
+broader, name-prefix-independent scope rather than narrowing the scan
+to match a now-inaccurate claim. **(d)** This very Journal entry still
+quoted an earlier round's stale function/module counts after two later
+rounds had already changed them -- fixed by updating every remaining
+count in this entry, not just the one flagged. Every fix across all six
+rounds has a dedicated regression test.
 
-21 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
+25 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
 tree, the sanctioned read-only accessors staying unflagged, three
 single-level import/call shapes (module attribute call, direct
 `from agent_worktrees import <fn>`, `from agent_worktrees.tracking_claims
@@ -835,7 +865,10 @@ dotted), the `tracking_controller_relations` re-export case, the four
 added controller-relation functions, `load_or_create_anchor_record`, two
 wildcard-import rejection cases, two verb-handler-module cases, two
 fail-closed file-scan-error cases (unreadable, syntactically invalid),
-the two private liveness-writer helpers, the owning-plugin's own
+the two private liveness-writer helpers, `tracking_write`'s own
+direct-execution APIs (one denylisted case, one confirming
+`dispatch`/`write_with_boot` stay unflagged), two reassignment-evasion
+cases (single-hop and multi-hop chained), the owning-plugin's own
 exemption, and a live-repo smoke test (confirmed clean: zero violations
 today, matching the original survey's own finding). Wired into
 `.github/workflows/ci.yml` alongside the existing
