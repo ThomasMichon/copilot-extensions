@@ -142,11 +142,9 @@ win, it defers to a human rather than defaulting to either "fix the test" or
 ## Provenance
 
 - **2026-09-26** — Authored to resolve the `promotion-failure-reactive-fix-agent`
-  effort's own reconciliation gate: that effort's Phase 1 (detection+dedup)
-  and its live validation (Phase 1.5) were already built and proven before
-  this vision existed, and Phase 2 (the actual fix-attempt mechanism)
-  deliberately would not proceed until this material architecture decision
-  was reconciled with standing intent rather than assumed. The intent-
-  triage discipline (Features/intent-preserving-triage, Behaviors/an-
-  unresolved-judgment-escalates-rather-than-guesses) was mined directly from
-  operator guidance given in that same session.
+  effort's own reconciliation gate: that effort's design deliberately would
+  not proceed to its fix-attempt mechanism until this material architecture
+  decision was reconciled with standing intent rather than assumed. The
+  intent-triage discipline (Features/intent-preserving-triage, Behaviors/
+  an-unresolved-judgment-escalates-rather-than-guesses) was mined directly
+  from operator guidance given in that same session.
