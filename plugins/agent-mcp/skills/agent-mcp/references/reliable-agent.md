@@ -100,7 +100,7 @@ ROOT="$(git rev-parse --show-toplevel)"
 
 cd "$ROOT"
 printf '%s' '{}' |
-  "$HOME/.agent-mcp/materialized/service/bin/service_read" --no-serve
+  "$HOME/.agent-mcp/materialized/service/bin/service_read" --no-serve  # marketplace-isolation: allow deployed-runtime-diagnostics
 ```
 
 PowerShell:
@@ -118,7 +118,8 @@ $request = Join-Path ([IO.Path]::GetTempPath()) (
 )
 try {
   Set-Content -LiteralPath $request -Value '{}' -NoNewline
-  & "$HOME\.agent-mcp\materialized\service\bin\service_read.ps1" `
+  $stub = "$HOME\.agent-mcp\materialized\service\bin\service_read.ps1"  # marketplace-isolation: allow deployed-runtime-diagnostics
+  & $stub `
     --no-serve `
     --request-file $request
 } finally {
@@ -129,7 +130,8 @@ try {
 Use a request file outside the repository for **all** Windows stub calls:
 
 ```powershell
-& "$HOME\.agent-mcp\materialized\service\bin\service_write.ps1" `
+$stub = "$HOME\.agent-mcp\materialized\service\bin\service_write.ps1"  # marketplace-isolation: allow deployed-runtime-diagnostics
+& $stub `
   --no-serve `
   --request-file $requestPath
 ```

@@ -67,11 +67,11 @@ A bridge config can be referenced two ways:
 | Form | Reference | Lives in | Use for |
 |------|-----------|----------|---------|
 | **In-repo `--config`** (preferred) | `bridge --config <path>` | the repo (e.g. `.github/agents/<name>.mcp.yaml`) | **repo-scoped agents** -- config is version-controlled, travels with the repo, needs no deploy |
-| **Named bridge** | `bridge <name>` | `~/.agent-mcp/bridges/<name>.{yaml,yml,json}` | **personal / cross-repo** MCPs not tied to one repo |
+| **Named bridge** | `bridge <name>` | `~/.agent-mcp/bridges/<name>.{yaml,yml,json}` | **personal / cross-repo** MCPs not tied to one repo <!-- marketplace-isolation: allow deployed-runtime-diagnostics --> |
 | **Plugin-shipped bridge** | `bridge <name>` | installed plugin `agents/` or `mcp/` directory | a plugin ships its own sub-agent + bridge config; user-space bridge file is not required |
 
 > **Prefer the in-repo `--config` form for any agent that ships inside a repo.**
-> Reserve named bridges (user-global `~/.agent-mcp/bridges/`) for MCPs you use
+> Reserve named bridges (user-global `~/.agent-mcp/bridges/`) for MCPs you use <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 > across many repos or that do not belong to a checkout. Both forms read the
 > same config schema; only the lookup differs.
 
@@ -79,7 +79,7 @@ A bridge config can be referenced two ways:
 > plugin-shipped bridge (which tools it exposes, its decorators, headers, auth)
 > for *this host only*, without editing the shared file, use the
 > **`customizing-bridges`** skill: it writes a deep-merged overlay at
-> `~/.agent-mcp/overrides/<id>.yaml`.
+> `~/.agent-mcp/overrides/<id>.yaml`. <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 
 ## Wire an existing repo-scoped agent (the common case)
 
@@ -404,7 +404,7 @@ of speaking JSON-RPC.
   provide it on stdin or with `--request-file` at a simple temporary path.
 
 - **`materialize`** projects the whole `tools/list` catalog into a discoverable,
-  pipeable command fleet under `~/.agent-mcp/materialized/<server>/`:
+  pipeable command fleet under `~/.agent-mcp/materialized/<server>/`: <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 
   ```
   bin/    one short-named stub per tool (POSIX: symlinks to one dispatcher;
