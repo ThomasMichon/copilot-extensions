@@ -371,6 +371,43 @@ def test_explicit_repo_config_env_still_requires_trust(
 
 
 @pytest.mark.no_autotrust
+def test_explicit_repo_config_env_rejects_non_git_directory(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """An explicit path with NO git root at all -- e.g. one resolved from an
+    agent-worktrees ``reference``-class registration, which is not
+    guaranteed to be a git checkout -- must not be unconditionally trusted
+    just because there's no git context to evaluate. Falling back to
+    "no git root means trusted" would let a non-git reference path (a
+    read-only mirror, never an operator-reviewed checkout) bypass the gate
+    entirely."""
+    plain_dir = tmp_path / "not-a-git-repo"
+    plain_dir.mkdir()
+    config_file = plain_dir / ".agent-logger.yaml"
+    config_file.write_text("log:\n  path_template: logs/{title}.md\n", encoding="utf-8")
+    monkeypatch.setenv("AGENT_LOGGER_REPO_CONFIG", str(config_file))
+
+    assert find_repo_config() is None
+
+
+@pytest.mark.no_autotrust
+def test_explicit_repo_config_env_honors_override_for_non_git_directory(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The same non-git directory IS honored once the operator explicitly
+    confirms it via AGENT_LOGGER_TRUST_REPO_CONFIG -- the override applies
+    regardless of whether the path is a git checkout at all."""
+    plain_dir = tmp_path / "not-a-git-repo"
+    plain_dir.mkdir()
+    config_file = plain_dir / ".agent-logger.yaml"
+    config_file.write_text("log:\n  path_template: logs/{title}.md\n", encoding="utf-8")
+    monkeypatch.setenv("AGENT_LOGGER_REPO_CONFIG", str(config_file))
+    monkeypatch.setenv("AGENT_LOGGER_TRUST_REPO_CONFIG", str(plain_dir.resolve()))
+
+    assert find_repo_config() == config_file
+
+
+@pytest.mark.no_autotrust
 def test_repo_config_rejects_symlinked_candidate(tmp_path: Path, monkeypatch) -> None:
     """A committed/local symlink standing in for .agent-logger.yaml must be
     rejected outright -- discovery must never follow a link out of the
