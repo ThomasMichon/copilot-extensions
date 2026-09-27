@@ -476,14 +476,25 @@ shape before committing to a design)_
       against each other) — a `dev`-tree with no local copy shouldn't read
       as "missing"/"drifted." Extend it (or build a dedicated new guard)
       to recognize a `[tool.uv.sources]` entry whose `path` escapes the
-      plugin's own directory as a valid, intentional reference form,
-      confirm `editable = true` is present (a forgotten `editable` would
-      silently produce a frozen, non-live copy), and confirm the
+      **consuming project's own root** (not just "the plugin's own
+      directory" — Phase 1 explicitly includes `worktree-manager`
+      consumers too, a top-level tree whose `../libs/<lib>` reference
+      escapes `worktree-manager/` the same way a plugin's `../../libs
+      /<lib>` escapes `plugins/<plugin>/`; a check scoped only to
+      "plugin directory" would misreport a valid `worktree-manager`
+      reference as missing/drifted) as a valid, intentional reference
+      form, confirm `editable = true` is present (a forgotten `editable`
+      would silently produce a frozen, non-live copy), and confirm the
       referenced canonical `libs/<lib>` actually exists.
 - [ ] **Extend `materialize_main.py`/`promote_release.py` for the
       reference-rewrite promotion step**: for every `[tool.uv.sources]`
-      entry whose `path` escapes the plugin's own directory (reuse
-      `_escapes_root()` from the existing containment work), copy
+      entry whose `path` escapes the **consuming project's own root**
+      (same predicate as the drift guard above, not "the plugin's own
+      directory" alone — a trigger condition scoped only to plugins would
+      leave a `worktree-manager/pyproject.toml`'s `../libs/<lib>`
+      reference untouched at promotion, shipping it with no materialized
+      `worktree-manager/libs/<lib>` copy at all; reuse `_escapes_root()`
+      from the existing containment work), copy
       canonical's **complete lib tree** — `src/`, `README.md`, and
       `tests/` (when the shipped payload is expected to carry one; not
       just `src/` + a version-string sync) — into a freshly-created local
