@@ -1,0 +1,9 @@
+{
+  "comment": "Migrate the ground-layer session-lifecycle write commands (conclude-session/link-succession) onto the tracking_write daemon-mediated verb path (agent-worktrees-authoritative-daemon Phase 3).",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
