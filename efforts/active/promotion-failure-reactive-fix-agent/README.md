@@ -7,10 +7,10 @@
 - **Status:** Active — Phase 1 live-validated (Phase 1.5 Done); Phase 2
   in progress: vision-reconciliation gate resolved, a draft `gh-aw`
   workflow authored (`.github/workflows/ci-failure-fix-attempt.md`) but
-  **not functional yet** — early review (PR #3893) found 5 real
+  **not functional yet** — two review passes (PR #3893) found 6 real
   blocking issues (trigger can't fire, no edit tool, auth signal gap,
-  protected-files gap, prompt-injection gap), none resolved; see the
-  2026-09-26 Journal entry
+  protected-files gap, prompt-injection gap, no changefile path), none
+  resolved; see the 2026-09-26 Journal entry
 - **Vision:** [`visions/ci-failure-remediation`](../../../visions/ci-failure-remediation/README.md)
   (authored 2026-09-26 to resolve the reconciliation gate below). **Gate
   resolved:** the vision states the standing intent (detection+dedup,
@@ -1379,14 +1379,21 @@ _Pending._
      diagnostic-input charter item. Needs whichever real isolation
      mechanism gh-aw provides (not yet identified) plus the same
      machine-enforced scope backstop.
+  6. **A second review pass (after documenting 1-5) found a genuinely
+     new sixth issue**, not a repeat: nothing requires or enables the
+     agent to add a pending changefile for `plugins/**` content it
+     legitimately touches. A successful, correct fix targeting a plugin
+     would still fail this repo's own `Changefile presence` guard and
+     could never be promoted. Needs an explicit instruction (and a
+     `bash` allowlist entry for `python tools/changefile.py add ...`).
 - None of these are fixed yet — this PR lands as an honestly-labeled,
   fully inert WIP artifact (no `.lock.yml` exists, so nothing in this
   file does anything until compiled) specifically so a successor
   resumes from a documented, review-vetted starting point rather than
-  re-discovering the same five problems from scratch.
+  re-discovering the same problems from scratch.
 - **This is the immediate next slice for whoever picks up the
-  handoff:** resolve all five (in roughly this priority order: #1 and
+  handoff:** resolve all six (in roughly this priority order: #1 and
   #3 first, since the workflow is structurally non-functional without
-  them; then #2, #4, #5 as the security-hardening pass before this ever
-  runs for real), then finally get `gh aw compile` runnable somewhere
-  to verify the result.
+  them; then #2, #4, #5, #6 as the security/completeness hardening pass
+  before this ever runs for real), then finally get `gh aw compile`
+  runnable somewhere to verify the result.

@@ -87,6 +87,17 @@
      raw interpolation, and add the same machine-enforced scope check
      Phase 2's own Plan already calls for as a backstop independent of
      prompt wording.
+  6. NO CHANGEFILE PATH FOR A PLUGIN FIX (found on the second review pass
+     after documenting 1-5): the agent is told never to hand-edit a
+     version field, but nothing requires or enables it to add a pending
+     changefile for other `plugins/**` content it legitimately touches.
+     A successful fix targeting a plugin would open a PR that fails this
+     repo's own `Changefile presence` guard (`.github/workflows/ci.yml`)
+     and could never be promoted even if the fix itself were correct.
+     Add an explicit instruction (and, if needed, a `bash` allowlist
+     entry for `python tools/changefile.py add ...`) requiring a
+     changefile for every touched plugin, mirroring how every other
+     contributor -- human or agent -- already must.
 -->
 ---
 description: "Attempts a scoped, reviewed fix for one tracked dev CI-failure signature (promotion-failure-reactive-fix-agent effort, Phase 2)."
