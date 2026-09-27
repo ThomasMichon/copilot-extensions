@@ -9,6 +9,13 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from . import tracking
 
+#: A short deadline for the ``session_register`` verb's own daemon request
+#: (default ``tracking_write.REQUEST_DEADLINE_S`` is 8s -- fine for an
+#: explicit CLI command, never for a sessionStart hook, which must bound
+#: worst-case added latency even when a resident daemon is technically
+#: reachable but stalled/wedged; see ``register_session``'s own docstring).
+_SESSION_REGISTER_REQUEST_DEADLINE_S = 1.5
+
 
 def _tracking():
     from . import tracking as tracking_mod
@@ -148,15 +155,24 @@ def register_session(
     fallback -- ``agent-worktrees-authoritative-daemon`` effort, Phase 3;
     see ``tracking_session_registration_write.py``'s own module docstring
     for the full design rationale). Called from the sessionStart hook, so
-    ``boot_wait_s=0``: never spin-wait for a cold daemon boot (that would
-    add latency to every session launch) -- an already-warm daemon is
-    dialed immediately; a cold/unreachable one falls straight through to
-    the same code with no added wait, matching this function's
-    pre-migration latency exactly. Re-raises ``tracking.SessionLifecycleError``
+    this bounds latency two ways rather than one (2026-09-27 PR review
+    finding): ``boot_wait_s=0`` never spin-waits for a cold daemon boot (an
+    already-warm daemon is dialed immediately; a cold/unreachable one falls
+    straight through to the same code with no added wait, matching this
+    function's pre-migration latency exactly) -- but that alone does not
+    bound a *reachable-but-stalled* daemon, which would otherwise still
+    block for the module's default ``REQUEST_DEADLINE_S`` (8s, ~9s
+    including the socket timeout) before raising. ``_SESSION_REGISTER_REQUEST_DEADLINE_S``
+    caps that same case at a small fraction of that, since this verb's own
+    work is simple file I/O expected to complete in milliseconds, not
+    seconds, on a healthy daemon. Re-raises ``tracking.SessionLifecycleError``
     for a lifecycle rejection, matching the pre-migration contract of
     letting it propagate synchronously to every existing caller's own
     broad exception handling; ``tracking_write.AmbiguousWriteOutcome`` is
-    left to propagate the same way.
+    left to propagate the same way -- a genuinely stalled/wedged daemon
+    now surfaces as a bounded, fast registration failure instead of a
+    ~9-second hang, rather than being silently retried (unsafe -- see
+    ``AmbiguousWriteOutcome``'s own docstring).
     """
     tracking = _tracking()
     yaml_path = tracking._owning_tracking_dir(worktree_id) / f"{worktree_id}.yaml"
@@ -186,6 +202,7 @@ def register_session(
             _smr._ensure_status_monitor if _smr._status_monitor_enabled() else None
         ),
         boot_wait_s=0.0,
+        request_deadline_s=_SESSION_REGISTER_REQUEST_DEADLINE_S,
     )
     if result.get("error") == "lifecycle":
         raise tracking.SessionLifecycleError(result["message"])

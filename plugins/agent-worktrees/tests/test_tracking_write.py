@@ -117,11 +117,16 @@ class TestVerbRegistryAndCompute:
         )
         assert result == {"args": {}}
 
-    def test_compute_rejects_unregistered_verb(self):
-        with pytest.raises(ValueError, match="unregistered verb"):
-            tracking_write.compute(
-                tracking_write.KIND, {"verb": "does-not-exist"}
-            )
+    def test_compute_returns_unsupported_verb_marker_for_an_unregistered_verb(self):
+        """Never raises (copilot-extensions#3812): a rolling-upgrade window
+        where a resident daemon's own ``_VERB_MODULES`` registration
+        predates a client's verb must be a safe, JSON-safe result
+        ``write_with_boot`` can fall back on -- never an exception
+        indistinguishable from "the request may have already run"."""
+        result = tracking_write.compute(
+            tracking_write.KIND, {"verb": "does-not-exist"}
+        )
+        assert result == {"unsupported_verb": True}
 
     def test_compute_rejects_missing_verb_name(self):
         with pytest.raises(ValueError, match="missing a verb name"):
@@ -290,6 +295,43 @@ class TestDispatch:
             ensure_monitor=None,
             request_deadline_s=0.3,
         )
+        assert result == {"via": "fallback"}
+        assert calls == [{}]
+
+    def test_dispatch_falls_back_when_a_live_daemon_reports_unsupported_verb(self):
+        """The third safe case (copilot-extensions#3812): a connection DOES
+        succeed and the daemon DOES respond, but reports
+        ``unsupported_verb`` -- a rolling-upgrade window where the resident
+        daemon process's own ``_VERB_MODULES`` registration predates this
+        verb. Nothing ever executed server-side in that case either, so it
+        must degrade to the identical in-process fallback rather than raise
+        AmbiguousWriteOutcome for a request that never actually ran.
+        Simulates the old-daemon side with a server whose own compute
+        callback always reports ``unsupported_verb`` (exactly what an old
+        process's real ``compute()`` would return for a verb it never
+        heard of), while the CLIENT-side ``_VERBS`` registry (used by the
+        in-process fallback) has the verb -- reproducing the asymmetry a
+        genuine rolling upgrade produces between two separate processes."""
+        calls = []
+        tracking_write.register_verb(
+            "test-known-to-client-only",
+            lambda args: calls.append(args) or {"via": "fallback"},
+        )
+        def _old_daemon_compute(kind, payload):
+            return {"unsupported_verb": True}
+
+        server = tracking_write.start_server(_old_daemon_compute)
+        server.start()
+        try:
+            lock_data = tracking_write.rendezvous_fields(server)
+            result = tracking_write.dispatch(
+                "test-known-to-client-only",
+                {},
+                read_lock_data=lambda: lock_data,
+                ensure_monitor=None,
+            )
+        finally:
+            server.close()
         assert result == {"via": "fallback"}
         assert calls == [{}]
 

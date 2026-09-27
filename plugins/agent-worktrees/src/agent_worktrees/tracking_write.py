@@ -257,9 +257,25 @@ def compute(kind: str, payload: dict) -> dict:
     ``payload`` must carry ``verb`` (a name registered via
     :func:`register_verb`, directly or via :data:`_VERB_MODULES`) and may
     carry ``args`` (a dict passed to that verb's function). Raises
-    ``ValueError`` for a wrong ``kind``, an unregistered verb, or a
-    malformed payload -- surfaced to the caller exactly like
-    ``_classify_daemon_compute``'s own validation errors.
+    ``ValueError`` for a wrong ``kind`` or a malformed payload -- surfaced
+    to the caller exactly like ``_classify_daemon_compute``'s own
+    validation errors. An unregistered verb is deliberately NOT one of
+    these: it returns ``{"unsupported_verb": True}`` instead of raising
+    (copilot-extensions#3812) -- ``work_coalescing_singleton``'s own
+    handler catches any exception ``compute()`` raises with a bare
+    ``except Exception: return`` (closing the connection with no response
+    bytes), which the client reads as an empty response and treats
+    identically to "the request may have already run" -- indistinguishable
+    from a request that genuinely started executing before failing. A
+    version-skew rolling-upgrade window (a post-upgrade client dispatching
+    a new verb to a still-running pre-upgrade daemon process, whose own
+    ``_VERB_MODULES`` registration never heard of it) hits this exact path
+    on every request until that daemon process itself restarts -- nothing
+    ever ran server-side in that case, so it is always safe to fall back,
+    but the empty-response signal alone can't tell the two apart. Returning
+    a real, JSON-safe result instead lets :func:`write_with_boot` make that
+    distinction explicitly and safely fall back rather than raising
+    :class:`AmbiguousWriteOutcome` for a request that never executed.
 
     Counts itself in :data:`_inflight_writes` for the whole verb call (see
     :func:`has_inflight_write` -- 2026-09-26 PR review finding: a client
@@ -278,7 +294,10 @@ def compute(kind: str, payload: dict) -> dict:
         raise ValueError("tracking_write request missing a verb name")
     fn = _VERBS.get(verb)
     if fn is None:
-        raise ValueError(f"tracking_write: unregistered verb {verb!r}")
+        # Never raise here (copilot-extensions#3812) -- see this function's
+        # own docstring for why an unregistered verb must be a real,
+        # JSON-safe result rather than an exception.
+        return {"unsupported_verb": True}
     args = payload.get("args")
     if args is None:
         args = {}
@@ -488,9 +507,15 @@ def write_with_boot(
     was discoverable at all (even after the boot-wait), or the endpoint was
     found but the connection itself could never be established (a stale
     rendezvous entry left by a since-exited daemon) -- in both, nothing was
-    ever sent anywhere. Anything that fails *after* a connection was
-    established raises :class:`AmbiguousWriteOutcome` instead of silently
-    retrying (2026-09-26 PR review finding).
+    ever sent anywhere. A THIRD case joins these (copilot-extensions#3812):
+    a connection that DID succeed, but whose response reports
+    ``unsupported_verb`` (a resident daemon process whose own
+    ``_VERB_MODULES`` registration predates this verb, e.g. mid a rolling
+    upgrade) -- ``compute()`` never actually executed anything in that
+    case either, so it is exactly as safe as a pre-dial miss. Anything else
+    that fails *after* a connection was established raises
+    :class:`AmbiguousWriteOutcome` instead of silently retrying
+    (2026-09-26 PR review finding).
 
     Always mints its own fresh, unique coalescing key (``uuid4().hex``) --
     never accepts one from a caller -- so every entry point through this
@@ -515,7 +540,7 @@ def write_with_boot(
     key = uuid.uuid4().hex
     client_id = wcs_client.new_client_id()
     try:
-        return _send_tracking_write_request(
+        result = _send_tracking_write_request(
             host,
             port,
             token,
@@ -524,6 +549,9 @@ def write_with_boot(
             request_deadline_s=request_deadline_s,
             client_id=client_id,
         )
+        if isinstance(result, dict) and result.get("unsupported_verb"):
+            return fallback()
+        return result
     except _PreSendFailure:
         return fallback()
     finally:
@@ -542,9 +570,9 @@ def dispatch(
     """The public entry point a migrated call site uses in place of calling
     its verb's function directly: try the resident daemon first (booting one
     on demand if none is reachable), falling back to :func:`run_direct`
-    (same code, logged) only when nothing could ever have been sent to a
-    daemon (see :func:`write_with_boot`'s own docstring for the exact two
-    safe cases).
+    (same code, logged) only when nothing could ever have run server-side
+    (see :func:`write_with_boot`'s own docstring for the exact three safe
+    cases).
 
     Raises :class:`AmbiguousWriteOutcome` when a request *was* sent and then
     failed -- that state is never safe to auto-retry. This is a genuine
