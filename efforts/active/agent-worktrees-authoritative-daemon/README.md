@@ -537,6 +537,37 @@ survey above.
          treated identically to "no endpoint found," which safely
          triggers the normal boot-wait/fallback path instead of a doomed
          connection attempt.
+- [x] Migrated the eighth call-site cluster: `deregister_session` itself
+      — the symmetric sessionEnd counterpart, second cluster taken from a
+      hot hook path. Much simpler than its sibling: a single
+      find-the-matching-entry loop, no handoff-token/candidate-token
+      branching. Landed in PR
+      [#4238](https://github.com/ThomasMichon/copilot-extensions/pull/4238)
+      applying the exact latency checklist PR #4159 established
+      (`boot_wait_s=0` + a short request deadline); rolling-upgrade safety
+      came for free from `tracking_write.py`'s own capability-aware
+      endpoint selection. **2 review rounds on the SAME real finding**,
+      worth recording as its own lesson: a first attempt moved
+      `stop_fsmonitor_daemon` (a `git fsmonitor--daemon stop` subprocess)
+      OUTSIDE the `_RecordLock`, reasoning it was a scope-discipline
+      improvement (`_RecordLock`'s own docstring discourages holding it
+      across git I/O) — review correctly found this ordering was
+      load-bearing, not incidental: holding the SAME lock
+      `register_session` also needs is what prevents a concurrent session
+      start from adding a new open session in the window between the
+      "no open sessions" check and the actual stop; without it, a session
+      starting moments later could have its own fsmonitor killed out from
+      under it. Reverted to the exact pre-migration in-lock ordering,
+      with the module's own docstring now recording why. **Lesson for
+      future migrations touching a lock-scope "improvement": an
+      established `_RecordLock` scope-discipline guideline is a strong
+      default, not an absolute rule — verify what invariant the EXISTING
+      ordering protects (often by asking "what runs concurrently against
+      the SAME lock this call site also uses?") before assuming a
+      textbook scope reduction is safe.** (Directly parallel to PR #3911's
+      own `require_sidecar` lesson: trace what an existing pattern's *net*
+      effect actually guarantees before changing it, not just what its
+      stated policy/guideline suggests.)
 - [ ] One call site (or a closely related cluster) at a time, each its own
       reviewable PR, per this repo's serial-single-writer convention —
       across whichever of `tracking.py` / `tracking_claims.py` /
@@ -554,17 +585,17 @@ survey above.
       standalone CLI transactions; confirm a call site is genuinely
       self-contained (one dedicated CLI command, one lock, no shared
       choreography) before wrapping it as a verb, UNLESS the whole
-      enclosing transaction is verb-ified together (as `register_session`
-      now demonstrates) -- narrower extraction from inside a bigger
-      transaction is the actual hazard, not verb-ifying a hot path per se.
-      Remaining candidates: `deregister_session` (the symmetric
-      session-end hook, same risk class `register_session` was, now with
-      a proven template to follow) and the two still-deferred EMBEDDED
-      call sites (`terminal_conclusion.py`'s `_save_session_conclusion`,
-      one step inside a bigger single-lock cascade with two separate
-      `save_record` calls around it; `register_session`'s own internal
-      `link_handoff` call is now moot -- it moved into the
-      `session_register` verb itself, per the option above).
+      enclosing transaction is verb-ified together (as `register_session`/
+      `deregister_session` now demonstrate) -- narrower extraction from
+      inside a bigger transaction is the actual hazard, not verb-ifying a
+      hot path per se, and don't assume a lock-scope "improvement" is
+      free without checking what the existing ordering protects.
+      Remaining candidates: the one still-deferred EMBEDDED call site
+      (`terminal_conclusion.py`'s `_save_session_conclusion`, one step
+      inside a bigger single-lock cascade with two separate `save_record`
+      calls around it; `register_session`'s own internal `link_handoff`
+      call is now moot -- it moved into the `session_register` verb
+      itself, per the option above).
 
 ### Phase 4 — Sibling-plugin guard + audit _(not started)_
 - [ ] Add the CI guard described above.
@@ -605,6 +636,69 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-09-27 — PR #4238: Phase 3's eighth migrated call-site cluster, deregister_session itself -- a lock-scope 'fix' tried and reverted twice in one review
+Migrated `deregister_session` (the symmetric sessionEnd counterpart to
+`register_session`, PR #4159) onto a new `session_deregister` verb.
+Much simpler transaction than its sibling: a single find-the-matching-
+entry loop, no handoff-token/candidate-token branching, no return value
+beyond acknowledgement. Applied PR #4159's own established checklist for
+a hot-hook-path verb without rediscovering it: `boot_wait_s=0` + a short
+1.5s request deadline; rolling-upgrade safety came for free from
+`tracking_write.py`'s own capability-aware endpoint selection (already
+landed, no call-site-specific work needed).
+
+While migrating, moved `stop_fsmonitor_daemon` (a `git fsmonitor--daemon
+stop` subprocess call, best-effort with its own 5s timeout) to run AFTER
+the `_RecordLock` released, reasoning it was a straightforward
+scope-discipline improvement -- `_RecordLock`'s own class docstring
+explicitly discourages holding the lock across git I/O, and this looked
+like exactly that violation. GitHub's Copilot code review caught this
+immediately, and correctly: the in-lock ordering was load-bearing, not
+incidental. Holding the SAME lock `register_session` also needs for the
+whole stop duration is what prevents a concurrent session start from
+adding a new open session in the window between this transaction's own
+"no open sessions" check and the actual stop -- without it, a session
+that starts moments after this one ends could have its own fsmonitor
+killed out from under it by a stale decision. Reverted to the exact
+pre-migration in-lock ordering; a second review round (on a stale PR
+description that still claimed the moved-outside-the-lock behavior)
+caught that the PR's own narrative hadn't been updated to match the
+revert -- fixed by rewriting the PR description, no further code change
+needed. The module's own docstring now documents explicitly why the
+ordering is intentional, so a future session doesn't rediscover the same
+false "improvement."
+
+**This is the SECOND time this exact shape of mistake has landed in this
+effort** (the first: PR #3911's `require_sidecar` detour, where a
+"restore the old degrade behavior" instinct was applied to the wrong
+layer and had to be traced back to the transaction's *real* net
+contention behavior before landing on the correct, simpler fix). The
+generalizable lesson, now recorded twice: **an established scope/lock
+guideline (or any stated best practice) is a strong default, not an
+absolute rule for every call site** -- before applying a textbook
+reduction (shrink a lock's scope, restore a degrading lock policy, etc.),
+verify what invariant the EXISTING code's ordering/policy actually
+protects, typically by asking "what else runs concurrently against the
+SAME lock/resource this call site also touches?" A change that looks
+like unambiguous hygiene at the function's own scope can silently remove
+protection the function was never documented as providing, because the
+guarantee lived in an interaction with a SIBLING call site, not in this
+one's own visible logic.
+
+Added `test_tracking_session_deregistration_write.py`: verb registration,
+faithful-behavior unit tests, a live-`CoalescingServer` dispatch proof,
+the same boot-latency guarantee test as `register_session`'s own suite,
+and -- after the revert -- a test proving `stop_fsmonitor_daemon` still
+runs WHILE the lock is held, via a cross-THREAD probe (the in-process
+lock is per-thread reentrant, so a same-thread nested acquisition would
+trivially succeed and prove nothing) attempting a separate, non-blocking
+`_RecordLock` on the same path from inside the fake
+`stop_fsmonitor_daemon` -- it correctly fails to acquire.
+
+Full `plugins/agent-worktrees` suite throughout: 5728 passed, 26 skipped,
+1 failed, 1 error -- the same 2 pre-existing/environment-dependent
+failures this effort's Journal has noted every round.
 
 ### 2026-09-27 — PR #4159: Phase 3's seventh migrated call-site cluster, register_session itself (the first sessionStart-hook-critical verb)
 After PR #4064 landed and its own design survey found no further
