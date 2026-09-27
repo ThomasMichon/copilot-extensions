@@ -530,6 +530,17 @@ correction inline, per the effort's own journal discipline)._
   during-turn failure from the identical post-turn shutdown signature this
   effort's own Context evidence already reproduces. Rebased, force-pushed
   with-lease, resolved all 6 threads, and posted a summary comment citing
-  the fixing commit — same discipline as #4129 above. Both PRs remain
-  open, `MERGEABLE`, `REVIEW_REQUIRED`; watching both via `pr-watch` in the
+  the fixing commit — same discipline as #4129 above. PR #3305 then picked
+  up one more review pass with 2 new findings on the round-3 fix itself:
+  deriving the roster from every manifest entry regardless of
+  `defaultEnabled` would let a normal install pass without ever exercising
+  a not-default-enabled plugin's hook (e.g. `agent-pull-requests`), and
+  `/env` cannot serve as a complete oracle for hooks or skills (its Skills
+  panel is known to omit plugin-sourced skills). Fixed both: Phase 1 now
+  tracks a default-enabled roster for the standard 20/20 run plus one
+  explicit all-plugins run; the Validation Plan's `/env` criterion is now
+  scoped to extensions only, with hooks validated via process-log evidence
+  and skills against each plugin's own manifest. Rebased, force-pushed,
+  resolved both threads, posted a summary comment. Both PRs remain open,
+  `MERGEABLE`, `REVIEW_REQUIRED`; watching both via `pr-watch` in the
   background rather than polling, per standard discipline.
