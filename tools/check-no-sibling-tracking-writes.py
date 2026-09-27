@@ -153,6 +153,24 @@ WRITE_FUNCTIONS = frozenset({
     "compute",
 })
 
+#: `tracking.py`'s module-level ``_STAMP_QUEUE`` singleton (a
+#: ``_StampWriteQueue`` instance) exposes these write-triggering methods:
+#: ``submit``/``submit_mux`` enqueue a real persisted write (applied via
+#: `_apply_session_state_stamp`/`_stamp_liveness` on a background writer
+#: thread), and ``_apply`` is the same queue's own direct, synchronous
+#: apply path (normally only called by the queue's internal worker/
+#: `flush`). `tracking.stamp_mux_live`/`stamp_bound_live`/
+#: `stamp_session_state` already funnel through this queue and are
+#: themselves denylisted above; a sibling reaching straight for
+#: `tracking._STAMP_QUEUE.submit(...)` (or `._apply(...)` directly)
+#: bypasses those wrappers (and their own best-effort/throttle semantics)
+#: while still triggering the SAME persisted write, so the queue object's
+#: own write-triggering methods need their own three-level attribute-chain
+#: check (module -> `_STAMP_QUEUE` -> method), distinct from the plain
+#: module -> function chains above.
+STAMP_QUEUE_ATTR = "_STAMP_QUEUE"
+STAMP_QUEUE_WRITE_METHODS = frozenset({"submit", "submit_mux", "_apply"})
+
 #: The module names a write function could be imported from -- all of these
 #: re-export (or ARE) the same underlying write surface this guard protects.
 TRACKING_MODULES = frozenset({
@@ -240,6 +258,27 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
     # attribute chain off one of these (`aw.tracking.save_record(...)`) is
     # the same violation as a module alias's own single-level access.
     package_aliases: set[str] = set()
+    # Local names bound to the `importlib` MODULE itself -- the plain
+    # literal name `importlib` is included unconditionally (the common,
+    # unaliased form), and `import importlib as il` adds its own alias.
+    # Used to recognize `il.import_module(...)` alongside the literal
+    # `importlib.import_module(...)` form. Local names bound to
+    # `import_module` ITSELF (`from importlib import import_module`,
+    # optionally `as X`) let a sibling call it completely bare.
+    importlib_aliases: set[str] = {"importlib"}
+    import_module_aliases: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "importlib":
+                    importlib_aliases.add(alias.asname or "importlib")
+        elif (
+            isinstance(node, ast.ImportFrom)
+            and node.module == "importlib"
+        ):
+            for alias in node.names:
+                if alias.name == "import_module":
+                    import_module_aliases.add(alias.asname or alias.name)
 
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
@@ -307,24 +346,34 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
                         package_aliases.add("agent_worktrees")
 
     # A literal dynamic import (`importlib.import_module("agent_worktrees
-    # .tracking")` or `__import__("agent_worktrees.tracking")`) resolves
-    # to a tracked module or the package itself just as statically as an
-    # ordinary `import` statement does, provided the argument is a plain
-    # string constant -- so it gets the SAME alias treatment via the
-    # reassignment-propagation pass below (a non-literal argument, e.g. a
-    # variable or an f-string, is undecidable statically and is not
-    # attempted, mirroring the getattr/`__dict__` boundary documented
-    # further down).
+    # .tracking")`, `__import__("agent_worktrees.tracking")`, or either
+    # via an aliased `importlib`/`import_module` binding -- `import
+    # importlib as il; il.import_module(...)` or `from importlib import
+    # import_module; import_module(...)`) resolves to a tracked module or
+    # the package itself just as statically as an ordinary `import`
+    # statement does, provided the argument is a plain string constant --
+    # so it gets the SAME alias treatment via the reassignment-propagation
+    # pass below (a non-literal argument, e.g. a variable or an f-string,
+    # is undecidable statically and is not attempted, mirroring the
+    # getattr/`__dict__` boundary documented further down).
     def _dynamic_import_alias_kind(expr: ast.expr) -> tuple[str, str] | None:
         """Returns ``("module", "<submodule-name>")`` or
         ``("package", "agent_worktrees")`` if ``expr`` is a literal-string
         dynamic import of a tracked target; otherwise ``None``."""
         is_import_module_call = (
             isinstance(expr, ast.Call)
-            and isinstance(expr.func, ast.Attribute)
-            and expr.func.attr == "import_module"
-            and isinstance(expr.func.value, ast.Name)
-            and expr.func.value.id == "importlib"
+            and (
+                (
+                    isinstance(expr.func, ast.Attribute)
+                    and expr.func.attr == "import_module"
+                    and isinstance(expr.func.value, ast.Name)
+                    and expr.func.value.id in importlib_aliases
+                )
+                or (
+                    isinstance(expr.func, ast.Name)
+                    and expr.func.id in import_module_aliases
+                )
+            )
             and expr.args
             and isinstance(expr.args[0], ast.Constant)
             and isinstance(expr.args[0].value, str)
@@ -435,6 +484,24 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
                 violations.append(Violation(
                     path, node.lineno,
                     f"calls write function `{label}.{node.attr}` directly",
+                    repo_root=repo_root,
+                ))
+        # `<module>._STAMP_QUEUE.submit(...)` (or `.submit_mux`/`._apply`)
+        # -- a three-level chain bypassing stamp_mux_live/stamp_bound_live/
+        # stamp_session_state's own wrappers while triggering the exact
+        # same persisted write. See STAMP_QUEUE_WRITE_METHODS' own comment.
+        elif (
+            isinstance(node, ast.Attribute)
+            and node.attr in STAMP_QUEUE_WRITE_METHODS
+            and isinstance(node.value, ast.Attribute)
+            and node.value.attr == STAMP_QUEUE_ATTR
+        ):
+            label = _module_expr_label(node.value.value)
+            if label is not None:
+                violations.append(Violation(
+                    path, node.lineno,
+                    f"calls write-triggering queue method "
+                    f"`{label}.{STAMP_QUEUE_ATTR}.{node.attr}` directly",
                     repo_root=repo_root,
                 ))
         # Reflective access with a literal write-function name still

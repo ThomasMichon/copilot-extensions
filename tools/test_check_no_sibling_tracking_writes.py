@@ -551,6 +551,93 @@ def test_dynamic_import_of_an_unrelated_module_is_not_flagged(tmp_path):
     assert guard.find_violations(tmp_path) == []
 
 
+def test_aliased_importlib_module_is_still_caught(tmp_path):
+    # `import importlib as il; il.import_module(...)` -- an aliased
+    # `importlib` module binding, not the literal identifier.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "import importlib as il\n"
+        "\n"
+        "def write(record, path):\n"
+        "    tracking = il.import_module(\"agent_worktrees.tracking\")\n"
+        "    tracking.save_record(record, path)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "save_record" in violations[0].detail
+
+
+def test_bare_import_module_name_is_still_caught(tmp_path):
+    # `from importlib import import_module` -- calling it with no
+    # `importlib.` prefix at all.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from importlib import import_module\n"
+        "\n"
+        "def write(record, path):\n"
+        "    tracking = import_module(\"agent_worktrees.tracking\")\n"
+        "    tracking.save_record(record, path)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "save_record" in violations[0].detail
+
+
+def test_stamp_queue_submit_is_caught(tmp_path):
+    # tracking._STAMP_QUEUE.submit(...) bypasses stamp_session_state's
+    # own wrapper while triggering the exact same persisted write.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking\n"
+        "\n"
+        "def write(wt_id):\n"
+        "    tracking._STAMP_QUEUE.submit(wt_id, turns=1)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "_STAMP_QUEUE.submit" in violations[0].detail
+
+
+def test_stamp_queue_submit_mux_via_package_alias_is_caught(tmp_path):
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "import agent_worktrees as aw\n"
+        "\n"
+        "def write(wt_id):\n"
+        "    aw.tracking._STAMP_QUEUE.submit_mux(\n"
+        "        wt_id, True, refresh=False, throttle_secs=60.0)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "_STAMP_QUEUE.submit_mux" in violations[0].detail
+
+
+def test_stamp_queue_apply_is_caught(tmp_path):
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking\n"
+        "\n"
+        "def write(wt_id):\n"
+        "    tracking._STAMP_QUEUE._apply(wt_id)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "_STAMP_QUEUE._apply" in violations[0].detail
+
+
+def test_stamp_queue_read_only_attribute_is_not_flagged(tmp_path):
+    # An unrelated attribute access on the queue object (not one of its
+    # write-triggering methods) must never be flagged.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking\n"
+        "\n"
+        "def inspect(wt_id):\n"
+        "    return tracking._STAMP_QUEUE._pending\n",
+    )
+    assert guard.find_violations(tmp_path) == []
+
+
 def test_unreadable_file_fails_closed_not_silently_skipped(tmp_path, monkeypatch):
     # A file the guard cannot even read must be reported, not silently
     # treated as clean -- otherwise an unreadable/undecodable file is a

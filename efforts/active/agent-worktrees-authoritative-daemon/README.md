@@ -642,7 +642,7 @@ survey above.
       `tracking_lifecycle.py` / `tracking_claims.py` /
       `tracking_session_registry.py` / `tracking_controller_relations.py`
       / `tracking_write.py` / the 6 `tracking_*_write.py` verb-handler
-      modules). Eleven review rounds found real gaps each time (see Journal
+      modules). Twelve review rounds found real gaps each time (see Journal
       for the full blow-by-blow: a missing re-export module, a
       package-root-alias attribute chain never tracked at all, an
       incomplete denylist, a wildcard-import escape hatch, the daemon's
@@ -758,7 +758,7 @@ writes.py`, an AST-based scan of every sibling `plugins/*` (excluding
 denylist covering every tracking-record write function -- derived by
 AST-walking each protected module for functions whose body calls
 `save_record`/`_save_record_unlocked`/the async stamp queue, then
-hand-verified against the remainder (the final denylist, after eleven
+hand-verified against the remainder (the final denylist, after twelve
 review rounds below, covers 51 functions across 12 modules:
 `tracking.py`/`tracking_lifecycle.py`/`tracking_claims.py`/
 `tracking_session_registry.py`/`tracking_controller_relations.py`/
@@ -769,7 +769,7 @@ wording -- NOT extended to cover `worktree-manager/`'s own already-tracked
 exception (see above), since that scope decision belongs to a
 coordinated cross-effort call, not something to fold in unilaterally here.
 
-**Eleven review rounds found real gaps, none assumed away:**
+**Twelve review rounds found real gaps, none assumed away:**
 (1) `tracking_controller_relations.py`'s own thin
 `save_record`/`_save_record_unlocked` re-export wrappers were absent from
 the protected module set, so a sibling could route through that module
@@ -912,10 +912,26 @@ argument only, matching the same non-literal boundary already accepted
 for `getattr`/`__dict__`) and feeding their resolved target into the
 SAME alias-propagation machinery an ordinary import already populates --
 both as an assignment RHS and as an inline, unassigned call whose result
-is used directly. Every fix across all eleven rounds has a dedicated
-regression test.
+is used directly. (15) A TWELFTH review round found two more real gaps:
+**(a)** the denylist protected `tracking.stamp_mux_live`/
+`stamp_bound_live`/`stamp_session_state` but not the shared
+`_STAMP_QUEUE` singleton those wrappers themselves funnel through --
+`tracking._STAMP_QUEUE.submit(...)`/`.submit_mux(...)` (and its own
+direct `._apply(...)` path) trigger the exact same persisted write while
+bypassing those wrappers' own best-effort/throttle semantics entirely,
+a THREE-level attribute chain (module -> `_STAMP_QUEUE` -> method) the
+existing two-level matcher never modeled. Fixed by adding a dedicated
+`STAMP_QUEUE_WRITE_METHODS` check reusing the same module/package-alias
+resolution the rest of the guard already has. **(b)** The dynamic-import
+detector from round 11 only recognized the literal identifier
+`importlib` as the receiver, missing `import importlib as il` and
+`from importlib import import_module` (calling it completely bare) --
+fixed by tracking `importlib`'s own aliases and `import_module`'s own
+direct bindings the same way every other name in this guard is tracked,
+rather than hardcoding one spelling. Every fix across all twelve rounds
+has a dedicated regression test.
 
-38 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
+44 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
 tree, the sanctioned read-only accessors staying unflagged, three
 single-level import/call shapes (module attribute call, direct
 `from agent_worktrees import <fn>`, `from agent_worktrees.tracking_claims
@@ -938,10 +954,13 @@ module alias, `getattr` via a package-alias chain, a non-literal
 (`importlib.import_module` assigned then used, `__import__` of the bare
 package assigned then used, an inline unassigned call, a non-literal
 import-target boundary confirmation, and an unrelated module's dynamic
-import never flagged), the owning-plugin's own exemption, and a
-live-repo smoke test (confirmed clean: zero violations today, matching
-the original survey's own finding). Wired into
-`.github/workflows/ci.yml` alongside the existing
+import never flagged), an aliased-`importlib`-module case, a bare
+`import_module`-name case, four `_STAMP_QUEUE` cases (`submit`,
+`submit_mux` via a package-alias chain, `_apply`, and a confirmation
+that an unrelated queue attribute is never flagged), the owning-plugin's
+own exemption, and a live-repo smoke test (confirmed clean: zero
+violations today, matching the original survey's own finding). Wired
+into `.github/workflows/ci.yml` alongside the existing
 `check-no-agent-machines-packages.py` guard.
 
 ### 2026-09-27 — PR #4265: daemon writes push straight into record_cache -- the read-consistency companion to Phase 3's write migration, plus two real bugs review caught
