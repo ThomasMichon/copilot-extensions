@@ -1,0 +1,9 @@
+{
+  "comment": "Componentize worktree-creation core (_create_worktree_core + paired-knowledge carve) out of __main__.py into worktree_creation.py",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

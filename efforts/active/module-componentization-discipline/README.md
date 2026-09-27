@@ -2310,3 +2310,65 @@ the Phase 0 runbook, picked up as capacity allows.
   intertwined with the still-resident launch helpers than the handoff-cutover
   band was, and deserves its own dedicated design pass rather than being
   folded into this slice's scope.
+
+### 2026-09-26 — Phase 2 continued: `agent-worktrees/__main__.py` worktree-creation-core slice
+- Picked up the next launch-core seam flagged by the previous slice: the
+  worktree-creation band -- the paired citadel knowledge-repo carve (#957)
+  and `_create_worktree_core` itself, the side-effect sequence every
+  `create`/`run`/`embody`-new-worktree path and the registrar/pool
+  declaration flow goes through (codename allocation, owner-claim
+  journaling, the git worktree/branch/tracking-record write, and the
+  paired-knowledge carve/stamp). Confirmed test coverage first
+  (`test_paired_carve.py`, `test_owner_reciprocal_claim.py`,
+  `test_launch_preflight.py`, `test_embody.py`, `test_owner_inheritance.py`,
+  `test_launch_project_scoping.py` -- 114 tests baseline) and that
+  `_create_worktree_core`/`_prepare_worktree_source` are already
+  monkeypatched directly on `m` by several of them, confirming this band
+  needed the same `_core()` reverse-import treatment as the handoff-cutover
+  slice, not a blind mechanical move.
+- Extracted `_paired_knowledge_allocation_preflight`, `_carve_paired_knowledge`,
+  `_stamp_and_compose_paired_knowledge`, `_journal_owner_reciprocal_claim`,
+  `_prepare_worktree_source`, `_creation_parent_session`, and
+  `_create_worktree_core` (~810 lines) into a new `worktree_creation.py`.
+  Every cross-call within the band -- and every call out to a helper that
+  stays resident in `__main__.py` (`_preflight_launch`, `_build_launch_cmd`,
+  `_build_env`, `_repo_session_env`, `_worktree_to_dict`,
+  `LaunchPreflightError`) -- goes through `_core()` rather than a bare local
+  name, matching the handoff-cutover slice's own idiom exactly. Two sibling
+  modules (`resolve_launch_cli.py`, `worktree_ops_cli.py`) already called
+  `_create_worktree_core` via their own `_core()` proxy, confirming this
+  function was already treated as a cross-module "core" API before this
+  slice, not something this split invented.
+- One regression test needed updating, not just re-exporting:
+  `test_launch_project_scoping.py::test_create_worktree_core_scopes_plan_project_to_repo_name`
+  asserts a literal source string (`'"project": config.repo_name,'`) is
+  present in `__main__.py`'s own file text -- a source-string guard, not a
+  monkeypatch/behavior test. Since the literal moved to `worktree_creation.py`
+  verbatim, the test now reads that file instead of `__main__.py`; the
+  guard's actual intent (the create-path plan must key off
+  `config.repo_name`, never the ambient `cfg.active_project()`) is
+  unchanged and still enforced, just against the code's new home.
+- Net result: `plugins/agent-worktrees/src/agent_worktrees/__main__.py`
+  dropped from **7,840** lines at slice start to **7,043** (the new
+  `worktree_creation.py` lands at **866** lines, well under the 1,000-line
+  cap) -- as with the handoff-cutover slice, treat `check-module-size.py`
+  against the checked-in files as the live count, not a number pinned here,
+  since this PR rebases onto the fast-moving `dev` branch too.
+  `python tools/run-plugin-tests.py agent-worktrees` passed all nine
+  sub-suites green (735+605+... passed across sub-suites, 0 unexpected
+  failures). `ruff check --select F,E9` clean on both touched files.
+  `tools/check-module-size.py` passed, and `--refresh-baseline` lowered the
+  `__main__.py` entry accordingly. Changefile added: `agent-worktrees`
+  patch, "Componentize worktree-creation core (`_create_worktree_core` +
+  paired-knowledge carve) out of `__main__.py` into `worktree_creation.py`".
+- Remaining launch-core bulk is now narrower still: `cmd_launch`
+  (~790 lines) and `cmd_execution_leg` (~1,300 lines, mostly the
+  execution-leg reservation/binding machinery and the actual launch-command
+  construction dispatch) plus the shared `_build_launch_cmd`/
+  `_preflight_launch`/`_build_env`/`_repo_session_env` launch-plan builders.
+  `cmd_execution_leg` remains the single largest function in the file and
+  the natural next candidate, but it is the most tightly-coupled piece left
+  (the execution-leg reservation protocol, hosted-launch backend dispatch,
+  and the handoff-cutover/worktree-creation helpers this and the prior
+  slice already extracted) -- still deserving its own dedicated design pass
+  before committing to a split shape.
