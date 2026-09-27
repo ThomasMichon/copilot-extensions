@@ -459,6 +459,29 @@ survey above.
       - `terminal_conclusion.py`'s `_save_session_conclusion` is one step
         inside the disposable-worktree conclusion cascade's own single
         lock, not a standalone transaction of its own.
+- [x] Migrated the fifth call-site cluster: `handoff_cutover.py`'s two
+      confirmed-retire repairs (`_settle_predecessor_session_claim`/
+      `_conclude_retired_predecessor`) — reusing the already-landed
+      `claim_settle`/`session_conclude` verbs via new opt-in no-op guard
+      args (`skip_if_released`/`only_if_active`, checked inside the verb's
+      own locked transaction) rather than inventing new verbs. Landed in
+      PR [#3911](https://github.com/ThomasMichon/copilot-extensions/pull/3911)
+      — 4 review rounds, the last three all on the same underlying
+      question (what lock policy the repair's write should use): a
+      `require_sidecar=False` guard was added, then found incomplete
+      (`tracking.save_record`'s own nested lock still hardcoded
+      `require_sidecar=True`), then found unsafe once fully threaded
+      through (writing without cross-process exclusion on contention could
+      resurrect an already-released claim from a stale snapshot) — deeper
+      analysis showed the pre-migration transaction's own net effect on
+      contention was ALREADY to fail closed (its outer lock degraded, but
+      `save_record` always hard-required the sidecar), so the correct fix
+      was reverting to `apply_claim_settle`'s original `require_sidecar=True`
+      throughout, matching old behavior exactly rather than genuinely
+      degrading. A lesson for future verb migrations: tracing a
+      pre-migration transaction's own *net* lock-contention behavior
+      (not just its outermost lock's stated policy) before assuming what
+      "faithful to the old code" requires.
 - [ ] One call site (or a closely related cluster) at a time, each its own
       reviewable PR, per this repo's serial-single-writer convention —
       across whichever of `tracking.py` / `tracking_claims.py` /
@@ -516,6 +539,66 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-09-27 — PR #3911: Phase 3's fifth migrated call-site cluster, handoff-cutover repairs (a lock-policy detour and its revert)
+Migrated `handoff_cutover.py`'s two confirmed-retire best-effort repairs
+(`_settle_predecessor_session_claim`/`_conclude_retired_predecessor`) onto
+the daemon write path, reusing the already-landed `claim_settle`/
+`session_conclude` verbs (per the prior session's own naming of this as
+the next slice) rather than registering new ones — each repair passes a
+new opt-in no-op guard arg (`skip_if_released`/`only_if_active`, checked
+inside the verb's own locked transaction, never at the caller) that
+reproduces the exact guard the old inline transaction had.
+
+GitHub's Copilot code review ran this PR through 4 rounds, all genuinely
+useful:
+1. A stale docstring wording ("a later PR" when this PR itself lands the
+   reuse).
+2. A real ordering bug: `skip_if_released`'s no-op check was placed AFTER
+   the reservation check, so a released claim with a stale reservation
+   would surface `{"error": "reserved"}` instead of silently no-op'ing —
+   the old repair never even reached a reservation check once a claim was
+   released. Fixed by moving the guard first.
+3-4. The deepest finding, across two rounds: preserving the repair's
+   old best-effort *lock* semantics under contention. The old code's OUTER
+   `_RecordLock(yaml_path)` degraded (proceeded on the in-process lock
+   alone) if the cross-process sidecar was contended — so an initial fix
+   added a `require_sidecar=False` arg threaded into `apply_claim_settle`
+   to preserve that degrade. Round 4 correctly found this incomplete:
+   `tracking.save_record()`'s own NESTED lock call still hardcoded
+   `require_sidecar=True` internally, and the reentrancy fast path in
+   `_RecordLock.__enter__` only treats a nested acquisition as free when
+   the OUTER lock's own attempt actually succeeded -- a genuinely degraded
+   outer lock left the nested `save_record` to hard-require the sidecar
+   anyway, unaffected by the new arg. Threading the flag through
+   `save_record` too (an added `require_sidecar` parameter, default
+   `True`, every other caller unchanged) closed that gap syntactically —
+   but a closer trace of what the OLD code's OUTER-degrade +
+   NESTED-hard-require combination actually did on contention revealed the
+   real answer: the net effect was ALWAYS to raise inside the nested lock
+   and let the repair's own `contextlib.suppress(Exception)` swallow it,
+   NEVER to write a stale snapshot without cross-process exclusion. Fully
+   threading `require_sidecar=False` through, as the fix attempted, would
+   have let the write proceed *without* exclusion on contention — risking
+   exactly the "resurrect an already-released claim" bug the guard exists
+   to prevent, if a concurrent `deregister_session` released the claim
+   mid-transaction. Reverted to `apply_claim_settle`'s original
+   `require_sidecar=True` throughout (no new parameter on `save_record`
+   either), which matches the old code's real behavior on contention
+   exactly: fail this one settlement attempt, safe for a later
+   handoff-cutover cycle or sweep to retry.
+
+**Lesson for the next verb migration touching a lock-policy question:**
+trace a pre-migration transaction's *net* behavior across every nested
+lock acquisition it makes, not just its outermost lock's stated
+`blocking`/`require_sidecar` policy — an inner call can silently override
+what the outer call's parameters suggest.
+
+Full `plugins/agent-worktrees` suite: 5666 passed, 26 skipped, 1 failed, 1
+error throughout every round — the 2 failures are the same
+pre-existing/environment-dependent ones this effort's Journal has noted
+before (`test_doctor.py::test_no_drift_when_consistent`,
+`test_registration_home.py`), unrelated to this change.
 
 ### 2026-09-27 — PR #3886: Phase 3's fourth migrated call-site cluster, session-lifecycle writes (design-survey-first)
 Per operator direction, did a design survey of `tracking_lifecycle.py`'s
