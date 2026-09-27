@@ -122,6 +122,8 @@ class TestMergeOne:
 
         assert row["action"] == "skip"
         assert "changed while merge consent was being prepared" in row["reason"]
+        assert row["verdict"] == ""
+        assert row["occupancy"] == "needs-review"
         assert prov.added == []
 
     def test_approval_withdrawal_before_consent_blocks_application(self):
@@ -151,6 +153,7 @@ class TestMergeOne:
 
         assert row["action"] == "skip"
         assert row["reason"] == "not yet approved"
+        assert row["occupancy"] == "needs-review"
         assert prov.added == []
 
     def test_dry_run_does_not_apply(self):

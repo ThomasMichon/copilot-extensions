@@ -1777,8 +1777,8 @@ def _live_pr_state(
     provider_name = active.provider or prcfg.provider
     target_repo = active.repo or ((record.repo if record else "") or "")
     try:
-        from . import pr_contract as pc
-        from . import providers
+        from . import pr_contract as pc, providers
+        from .pr_occupancy import occupancy_from_state
 
         provider = providers.get_provider(provider_name)
         authority_endpoint = provider.authority_endpoint(
@@ -1831,7 +1831,7 @@ def _live_pr_state(
         "consent_action": st.consent_action,
         "eligible": st.eligible,
         "held": list(st.held),
-        "wip": st.wip,
+        "wip": st.wip, "occupancy": occupancy_from_state(st),
         "reviews": len(snap.reviews),
         "reason": st.reason,
     }
