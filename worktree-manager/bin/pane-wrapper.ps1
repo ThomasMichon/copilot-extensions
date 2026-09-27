@@ -309,6 +309,20 @@ if (
         if (-not [string]::IsNullOrWhiteSpace($awMuxSession)) {
             $removeArgs += "--mux-session=$awMuxSession"
         }
+        # The real mux session's own stable identity (Copilot review
+        # finding on PR #3906): the display session name alone is NOT
+        # unique per launch incarnation -- both launchers derive the same
+        # deterministic `wt-<worktree_id>`-shaped name for the same
+        # worktree. psmux's own #{session_id}:#{session_created} IS unique
+        # per real session object and stays identical across repeated joins
+        # of the same still-live session -- query it live from inside this
+        # same pane rather than trusting a threaded value.
+        try {
+            $incarnation = (& psmux display-message -p '#{session_id}:#{session_created}' 2>$null)
+            if (-not [string]::IsNullOrWhiteSpace([string]$incarnation)) {
+                $removeArgs += "--session-incarnation=$incarnation"
+            }
+        } catch {}
         # Dispatch detached (real-bug follow-up to #3825): this is
         # teardown, not attach, but blocking the pane's own exit on the
         # same tens-of-seconds-worst-case CLI edge delays it for no

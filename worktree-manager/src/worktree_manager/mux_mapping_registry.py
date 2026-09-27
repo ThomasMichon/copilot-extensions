@@ -314,6 +314,7 @@ class MuxMappingRegistry:
         *,
         mapping_revision: int | None = None,
         mux_session: str | None = None,
+        session_incarnation: str | None = None,
     ) -> dict:
         """Tombstone (``live: false``) rather than delete a mapping entry
         (Copilot review finding): deleting it outright loses the
@@ -342,35 +343,49 @@ class MuxMappingRegistry:
           would otherwise still be accepted, resurrecting the mapping this
           call just removed.
 
-        ``mux_session``, when given, guards against a *stale teardown
-        race* (#3838): an old launcher's teardown
-        for session A can race behind a newer launcher's activation for
-        session B on the same ``(project, worktree_id)`` -- neither carries
-        a revision the other necessarily knows to fence against (A's
-        teardown may be entirely unversioned). A mismatch against a
-        *currently live* entry is therefore treated as a stale no-op rather
-        than tombstoned, regardless of ``mapping_revision``: unconditionally
-        tombstoning whatever is currently mapped would silently kill B's
-        live status updates even though B is the session that should still
-        be live. A missing ``mux_session`` (an older caller that doesn't
-        know its own session name yet) preserves the prior, unguarded
-        behavior -- this parameter is additive and optional.
+        ``mux_session``/``session_incarnation``, when given, guard against a
+        *stale teardown race* (#3838): an old launcher's teardown for
+        session A can race behind a newer launcher's activation for session
+        B on the same ``(project, worktree_id)`` -- neither necessarily
+        carries a revision the other knows to fence against. A mismatch
+        against a *currently live* entry is treated as a stale no-op rather
+        than tombstoned: unconditionally tombstoning whatever is currently
+        mapped would silently kill B's live status updates even though B is
+        the session that should still be live.
+
+        ``mux_session`` (the display session name) is NOT unique per launch
+        incarnation -- both launchers derive the same deterministic
+        ``wt-<worktree_id>``-shaped name for the same worktree, so a session
+        recreated for the same worktree reuses the exact string and an
+        old/new pair compares equal by name alone (a Copilot review
+        finding). ``session_incarnation`` (a per-launch-attempt token the
+        launcher generates and threads through both its own register call
+        and the paired teardown call) is therefore the authoritative check
+        when both the caller and the current entry carry one; ``mux_session``
+        is only a fallback for callers that don't (older callers, or a
+        generic CLI invocation with no incarnation token available). Missing
+        both (``mux_session=None`` and ``session_incarnation=None``)
+        preserves the prior, fully unguarded behavior -- these parameters
+        are additive and optional.
         """
         key = (project, worktree_id)
         with self._interprocess_lock():
             entries = self._read_all()
             current = entries.get(key)
-            if (
-                current is not None
-                and current["live"]
-                and mux_session is not None
-                and current["mux_session"] != mux_session
-            ):
-                return {
-                    "applied": False,
-                    "reason": "session_mismatch",
-                    "current_revision": current["mapping_revision"],
-                }
+            if current is not None and current["live"]:
+                current_incarnation = current.get("session_incarnation") or None
+                if session_incarnation is not None and current_incarnation is not None:
+                    mismatch = current_incarnation != session_incarnation
+                elif mux_session is not None:
+                    mismatch = current["mux_session"] != mux_session
+                else:
+                    mismatch = False
+                if mismatch:
+                    return {
+                        "applied": False,
+                        "reason": "session_mismatch",
+                        "current_revision": current["mapping_revision"],
+                    }
             if current is None:
                 if mapping_revision is None:
                     return {"applied": True, "reason": "absent"}
@@ -468,11 +483,18 @@ def remove_mapping(
     *,
     mapping_revision: int | None = None,
     mux_session: str | None = None,
+    session_incarnation: str | None = None,
     root: Path | None = None,
 ) -> dict:
     """Remove one worktree's mux mapping (see :meth:`MuxMappingRegistry.remove`)."""
     registry = MuxMappingRegistry(registry_path(root))
-    return registry.remove(project, worktree_id, mapping_revision=mapping_revision, mux_session=mux_session)
+    return registry.remove(
+        project,
+        worktree_id,
+        mapping_revision=mapping_revision,
+        mux_session=mux_session,
+        session_incarnation=session_incarnation,
+    )
 
 
 def get_mapping(project: str, worktree_id: str, root: Path | None = None) -> dict | None:

@@ -284,6 +284,41 @@ def test_registry_remove_without_mux_session_preserves_prior_unguarded_behavior(
     assert stored["live"] is False
 
 
+def test_registry_remove_uses_session_incarnation_over_reused_display_name(tmp_path):
+    """Copilot review finding on PR #3906: ``mux_session`` (the display
+    name) is NOT unique per launch incarnation -- both launchers derive the
+    same deterministic ``wt-<worktree_id>``-shaped name for the same
+    worktree, so a session recreated for the same worktree reuses the exact
+    string. A stale teardown carrying the reused name but the OLD
+    incarnation token must still be rejected, even though the name matches."""
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(
+        _entry(mux_session="wt-1", session_incarnation="tmux-session-id-1:100", mapping_revision=1)
+    )
+    # Same reused display name, but a genuinely NEW real tmux session
+    # (recreated after the old one was destroyed).
+    registry.register(
+        _entry(mux_session="wt-1", session_incarnation="tmux-session-id-2:200", mapping_revision=2)
+    )
+
+    stale_teardown = registry.remove(
+        "proj", "wt-1", mux_session="wt-1", session_incarnation="tmux-session-id-1:100"
+    )
+
+    assert stale_teardown["applied"] is False
+    assert stale_teardown["reason"] == "session_mismatch"
+    stored = registry.get("proj", "wt-1")
+    assert stored["live"] is True
+    assert stored["session_incarnation"] == "tmux-session-id-2:200"
+
+    # The CURRENT incarnation's own teardown must still succeed.
+    current_teardown = registry.remove(
+        "proj", "wt-1", mux_session="wt-1", session_incarnation="tmux-session-id-2:200"
+    )
+    assert current_teardown == {"applied": True}
+    assert registry.get("proj", "wt-1")["live"] is False
+
+
 def test_registry_ignores_a_corrupt_snapshot_file(tmp_path):
     path = tmp_path / "mux-mapping.json"
     path.write_text("not json at all {{{", encoding="utf-8")
@@ -592,20 +627,25 @@ def test_compute_dead_session_cleanup_does_not_tombstone_a_racing_newer_session(
 ):
     """Copilot review finding on PR #3906: the dead-mux-session cleanup path
     inside ``build_compute`` called ``registry.remove()`` directly with only
-    a ``mapping_revision`` guard, bypassing the new ``mux_session`` identity
-    guard -- a concurrent CLI ``register()`` replacing this mapping with a
-    NEWER live session at the same revision (an equal-revision live
-    replacement ``register()`` itself accepts as a benign refresh) could
-    still be tombstoned by this cleanup path."""
+    a ``mapping_revision`` guard, bypassing the new session-identity guard --
+    a concurrent CLI ``register()`` replacing this mapping with a NEWER live
+    session at the same revision (an equal-revision live replacement
+    ``register()`` itself accepts as a benign refresh) could still be
+    tombstoned by this cleanup path. Uses distinct ``session_incarnation``
+    values (a live tmux session_id:created probe in production), since the
+    display session name alone is reused deterministically across launch
+    incarnations for the same worktree and cannot distinguish them."""
     registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
-    registry.register(_entry(mux_session="session-a", mapping_revision=1))
+    registry.register(_entry(mux_session="session-a", session_incarnation="incarn-a", mapping_revision=1))
 
     def _fake_alive(mux_bin, session):
         # Simulate the race: between build_compute's own ``entry =
         # registry.get(...)`` snapshot (still session-a) and this liveness
         # probe, a concurrent CLI call replaces the mapping with session-b
         # at the SAME revision.
-        registry.register(_entry(mux_session="session-b", mapping_revision=1))
+        registry.register(
+            _entry(mux_session="session-b", session_incarnation="incarn-b", mapping_revision=1)
+        )
         return False
 
     monkeypatch.setattr(mux_daemon, "_mux_session_alive", _fake_alive)
@@ -626,6 +666,7 @@ def test_compute_dead_session_cleanup_does_not_tombstone_a_racing_newer_session(
     assert stored is not None
     assert stored["live"] is True
     assert stored["mux_session"] == "session-b"
+    assert stored["session_incarnation"] == "incarn-b"
 
 
 def test_compute_rejects_missing_rendered_at(tmp_path):

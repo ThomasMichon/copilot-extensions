@@ -149,6 +149,23 @@ if command -v uv >/dev/null 2>&1 \
     && [[ -n "$AW_PROJECT" && -n "$AW_WT" ]]; then
     WM_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P 2>/dev/null || true)"
     if [[ -n "$WM_ROOT" ]]; then
+        # Derive the real mux session's own stable identity (Copilot review
+        # finding on PR #3906): the display session name alone is NOT
+        # unique per launch incarnation -- both launchers derive the same
+        # deterministic `wt-<worktree_id>`-shaped name for the same
+        # worktree, so an old pane wrapper and a newer live mapping compare
+        # equal by name alone and a stale teardown can still tombstone the
+        # replacement. tmux's own #{session_id}:#{session_created} IS
+        # unique per real session object and stays IDENTICAL across
+        # repeated joins of the same still-live session (unlike a
+        # freshly-generated per-call token, which would falsely look
+        # "stale" after every join re-registers a new one) -- query it live
+        # from inside this same pane rather than threading a value from the
+        # launcher.
+        AW_SESSION_INCARNATION=""
+        if command -v tmux >/dev/null 2>&1; then
+            AW_SESSION_INCARNATION="$(tmux display-message -p '#{session_id}:#{session_created}' 2>/dev/null || true)"
+        fi
         # Dispatch detached (real-bug follow-up to #3825): this is
         # teardown, not attach, but the pane process itself is exiting --
         # blocking here on the same tens-of-seconds-worst-case CLI edge
@@ -162,7 +179,9 @@ if command -v uv >/dev/null 2>&1 \
         ( uv run --quiet --project "$WM_ROOT" -m worktree_manager mux-daemon remove \
             --project="$AW_PROJECT" \
             --worktree-id="$AW_WT" \
-            ${AW_MUX_SESSION:+--mux-session="$AW_MUX_SESSION"} >/dev/null 2>&1 & ) || true
+            ${AW_MUX_SESSION:+--mux-session="$AW_MUX_SESSION"} \
+            ${AW_SESSION_INCARNATION:+--session-incarnation="$AW_SESSION_INCARNATION"} \
+            >/dev/null 2>&1 & ) || true
     fi
 fi
 

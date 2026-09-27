@@ -847,10 +847,7 @@ def _cmd_mux_daemon(rest: list[str]) -> int:
         print(json.dumps(result))
         return 0 if result.get("applied") else 1
     if action == "remove":
-        project = None
-        worktree_id = None
-        revision = None
-        mux_session = None
+        project = worktree_id = mux_session = session_incarnation = revision = None
         for arg in args:
             if arg.startswith("--project="):
                 project = arg.split("=", 1)[1]
@@ -858,10 +855,11 @@ def _cmd_mux_daemon(rest: list[str]) -> int:
                 worktree_id = arg.split("=", 1)[1]
             elif arg.startswith("--mux-session="):
                 mux_session = arg.split("=", 1)[1]
+            elif arg.startswith("--session-incarnation="):
+                session_incarnation = arg.split("=", 1)[1]
             elif arg.startswith("--mapping-revision="):
-                revision_raw = arg.split("=", 1)[1]
                 try:
-                    revision = int(revision_raw)
+                    revision = int(arg.split("=", 1)[1])
                 except ValueError:
                     print("error: --mapping-revision must be an integer")
                     return 2
@@ -869,7 +867,10 @@ def _cmd_mux_daemon(rest: list[str]) -> int:
             print("error: remove needs --project=NAME --worktree-id=ID")
             return 2
         try:
-            result = mux_daemon.remove_managed_mapping(project, worktree_id, mapping_revision=revision, mux_session=mux_session)
+            result = mux_daemon.remove_managed_mapping(
+                project, worktree_id, mapping_revision=revision,
+                mux_session=mux_session, session_incarnation=session_incarnation,
+            )
         except ValueError as exc:
             print(f"error: {exc}")
             return 2
