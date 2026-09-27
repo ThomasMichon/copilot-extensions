@@ -1,0 +1,9 @@
+{
+  "comment": "Annotate 2 more marketplace-isolation guard findings in cell_lifecycle.py (legacy-footprint recognition), net-line-neutral to respect its exact module-size ceiling",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}
