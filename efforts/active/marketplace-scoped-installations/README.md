@@ -386,6 +386,75 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-26 — `agent-ssh`'s core-package cluster: 10 of 30 findings resolved (PR #4003)
+
+- Fresh guard count at merge time: 652 (drifted down slightly from the
+  prior leg's 663, unrelated concurrent `dev` activity).
+- Per the prior handoff's own caution ("19 files, lower file-concentration,
+  bigger per-PR undertaking -- consider breaking into sub-slices by file
+  cluster"), took the `src/agent_ssh/*.py` + `SKILL.md` cluster only (10
+  of 30 findings) and left `scripts/`/`transports/dtssh/*` (10, not yet
+  individually triaged) for a future slice, alongside the already-known
+  Phase 2 launcher-contract backlog (`install.ps1`/`.sh`, 8) and the
+  cross-plugin `payload-invocation.json` open question (1).
+- Classified by shape: `copilot_detach.py`'s own legacy-root fallback (no
+  env override existed, unlike the pattern elsewhere) and a `command -v`
+  remote-tooling presence check run over SSH via its own `_remote()`
+  helper; `explore.py`'s POSIX-sh probe script -- its own docstring says
+  "streamed to the target on stdin" -- reads the REMOTE machine's own
+  `.agent-worktrees/related.yaml`, not this host's runtime root. Both got
+  **`allow remote-management`** (an existing repo phrase, previously only
+  used in `agent-dispatch`'s `SKILL.md` for `ssh <machine> agent-bridge
+  …`-style docs -- first use annotating actual Python source, same
+  reasoning: SSH-remote operations are a genuinely different context than
+  local-cell qualification, whether the remote thing is a container
+  (`agent-containers`' `allow remote-container-path` last leg) or a whole
+  machine).
+- `fragment_registry.py`/`host_restore.py`'s own legacy-root fallbacks
+  (`allow legacy compatibility root`, same as always).
+- **`ssh_profile.py` produced a genuinely NEW finding shape not yet seen
+  in this effort**: `.agent-ssh-locks`/`.agent-ssh-root-config-`/
+  `.agent-ssh-fragment-` are lock-directory and `tempfile.mkstemp` prefix
+  names, not runtime roots at all -- they coordinate exclusive, atomic
+  writes to the ONE real, shared `~/.ssh/config`/`config.d` (an external
+  resource every cell of this plugin, or a hypothetical future fork, must
+  serialize access to). Cell-qualifying these names would be actively
+  WRONG: two writers racing on the same real file need the SAME lock
+  namespace to actually coordinate, not different ones. Coined a new
+  reason phrase for this shape: **`allow shared-config-lock`** (does not
+  yet appear anywhere else in the repo -- worth checking for the same
+  pattern in other plugins that manage a shared external config file,
+  e.g. anything else touching `~/.ssh/config` or an equivalent
+  single-shared-resource lock).
+- **`agent-ssh/SKILL.md`'s 1 finding** (a doc mention of `agent-bridge`'s
+  own `~/.agent-bridge/refs/<batch>/`) got the usual `allow deployed-
+  runtime-diagnostics`.
+- **Deferred one finding for the same module-size reason as
+  `agent-containers/__main__.py` last leg**: `fragment_registry.py`'s
+  OTHER own-legacy-root fallback (the one with no preceding env-var
+  check) sits in a file whose module-size baseline is exactly 1195 lines
+  with zero headroom, and even the shortest possible marker doesn't fit
+  the existing line (69 chars of code + a 34-char *minimal* marker still
+  exceeds the 99-char limit by 4 -- computed precisely this time, not
+  guessed, learning from the `__main__.py` trial-and-error last leg).
+  Left unannotated rather than bust the ceiling.
+- Verified: `python -m py_compile` + `ruff --select E501` on every
+  touched file, `check-module-size.py`, `check-docs-consistency.py`,
+  `check-skills.py`, and the full `agent-ssh` suite via `test-supervisor`
+  (171 passed, 7 skipped, 1 pre-existing failure --
+  `test_dtssh_apply_updates_existing_binary_without_login`, confirmed
+  identical in a prior leg via `git stash`/`git stash pop`, not caused by
+  this change). Hit repeated shared-host test-slot contention this leg
+  (another session's own heavy multi-plugin `--reinstall` run held the
+  lock for 9+ minutes) -- resolved by a plain retry once the other run's
+  process actually finished, no `test-supervisor` misconfiguration
+  involved.
+- Merged directly via `pr-merge --now` once the advisory Copilot review
+  came back clean (0 findings) -- this repo's PR review is genuinely
+  advisory-only with no gating "approved" state to wait for; see the
+  entry above (PR #3877) for the full note on not conflating this with
+  `aperture-labs`'s Dampener-gated flow.
+
 ### 2026-09-26 — `agent-containers`' 27 of 39 findings resolved (PR #3877)
 
 - Fresh guard count at merge time: 663 (`{bare-agent-command: 2, fixed-
