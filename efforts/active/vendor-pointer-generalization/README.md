@@ -201,12 +201,18 @@ committing to it:**
   toward the shared canonical root — reuse `_escapes_root()` from the
   existing containment work to detect this):
   1. Physically copy the canonical `libs/<lib>` directory's **complete
-     tree** — `src/`, `README.md`, and `tests/` (when the shipped payload
-     is expected to carry one) — and sync the `pyproject.toml` version,
-     exactly as the now-superseded directory-pointer expansion already
-     did, into a freshly-created local `<consumer-root>/libs/<lib>/`
-     (computed from the consuming project's own root — `plugins/<plugin>/`
-     or `worktree-manager/`, not hardcoded to one layout).
+     tree** — `src/`, `README.md`, `tests/` (when the shipped payload is
+     expected to carry one), AND `pyproject.toml` itself — into a
+     freshly-created local `<consumer-root>/libs/<lib>/` (computed from
+     the consuming project's own root — `plugins/<plugin>/` or
+     `worktree-manager/`, not hardcoded to one layout). This must copy
+     `pyproject.toml` explicitly, not merely "sync its version": the
+     conversion step deletes the consumer's local `libs/<lib>/` directory
+     entirely (no local directory of any kind remains in `dev`), so at
+     promotion time there is no local `pyproject.toml` for a version-sync
+     to update in the first place — the file has to be copied in from
+     canonical before its version can be synced (or copied already
+     carrying the right version, skipping a separate sync step).
   2. Rewrite the `pyproject.toml` line: `path` becomes the new local
      relative path (`libs/<lib>`), and `editable = true` is dropped —
      restoring exactly today's real shipped form (`{ path =
@@ -505,14 +511,18 @@ shape before committing to a design)_
       reference untouched at promotion, shipping it with no materialized
       `worktree-manager/libs/<lib>` copy at all; reuse `_escapes_root()`
       from the existing containment work), copy
-      canonical's **complete lib tree** — `src/`, `README.md`, and
-      `tests/` (when the shipped payload is expected to carry one; not
-      just `src/` + a version-string sync) — into a freshly-created local
+      canonical's **complete lib tree** — `src/`, `README.md`, `tests/`
+      (when the shipped payload is expected to carry one), AND
+      `pyproject.toml` itself — into a freshly-created local
       `<consumer-root>/libs/<lib>/`, so the materialized copy is a
       genuinely complete, byte-identical restoration of what a real
       vendored copy looks like today (the Validation Plan below requires
-      a lossless round-trip; copying only `src/`+version would silently
-      drop `README.md`/`tests/` from every promoted payload). Compute the
+      a lossless round-trip; copying only `src/` + a version sync would
+      silently drop `README.md`/`tests/` from every promoted payload,
+      AND leave nothing to sync a version into in the first place — the
+      conversion step deletes the consumer's local `libs/<lib>/`
+      entirely, so no local `pyproject.toml` exists at promotion time
+      until canonical's own is copied in). Compute the
       destination from the CONSUMING project's own root, not hardcoded to
       `plugins/<plugin>/`: Phase 1 explicitly includes `worktree-manager`
       consumers too (a top-level tree, not under `plugins/`), and a
