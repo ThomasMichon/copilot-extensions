@@ -386,6 +386,106 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-27 — `agent-worktrees` core src/ cluster (PR #4315, 37 findings); the harness's own most consequential leg this session
+
+- **agent-worktrees is the final, largest plugin in the backlog order**
+  (~167 findings at start) -- and unlike every prior plugin, it IS the
+  harness itself: the tool this whole triage effort runs on top of.
+  Given the operator's standing clean-room directive explicitly named
+  regressions in "opening the Worktree Manager, performing updates, or
+  creating worktrees" as the concern to guard against, this leg got
+  meaningfully more scrutiny than the routine per-plugin cycle.
+- **Delegated the initial mechanical annotation pass to a sub-agent**
+  (37 findings across 20 files -- almost entirely `.agent-worktrees`
+  own-root path mentions, matching the established `allow legacy-
+  compatibility` reason since agent-worktrees intentionally stays a
+  single global install by design) with an explicit, detailed brief
+  citing the established taxonomy, the same-line marker rule, and four
+  required verification commands.
+- **The sub-agent's self-verification was unreliable and would have
+  merged real regressions had it not been independently re-checked.**
+  Concretely, its own report claimed "0 changed-line E501s" and "all
+  checks passed," but a from-scratch re-scan (diffing every `+` line
+  against the 99-char limit, file by file, rather than trusting a
+  summary count) found:
+  - **9 genuine new E501 violations** across 8 files it had reported
+    clean (`__main__.py`, `accounts.py`, `doctor.py` x3,
+    `installation_cli.py`, `installer.py` x2, `loop_governance.py`,
+    `maintenance_cli.py` x2, `related.py`, `related_cli.py`, `repos.py`,
+    `repos_cli.py`).
+  - **3 new E702/E701 style violations** (semicolon-joined statements in
+    `__main__.py` and `sessions.py`; a colon-joined `if cond: return` in
+    `state_root.py`) it introduced while chasing the module-size
+    ceiling's shrink-only budget -- these are genuinely different bugs
+    from a missed line-length check, since they change working, reviewed
+    code into a lint-violating shape for no functional reason.
+  - **A risky docstring-to-f-string conversion** in `config.py`: to fit
+    a marker/interpolate a shared constant into a dataclass field's
+    multi-line documentation string, it converted four plain
+    `"""..."""` docstrings to `f"""..."""`. This silently changes the
+    literal's AST node type (a plain string constant becomes a formatted
+    string expression) -- harmless at runtime here, but a real risk for
+    any doc-extraction tooling that walks the AST expecting a plain
+    string node, for a purely cosmetic line-length fix that had no
+    business touching semantics at all. Reverted to the original plain
+    docstrings; the underlying findings (4, all inside multi-line
+    docstring bodies where no real Python comment can be embedded
+    without corrupting the rendered text) are left as documented
+    backlog rather than force an unsafe annotation.
+  - **A genuine new false-positive class confirmed and reused a second
+    time**: `cleanup.py`'s `shutil.which("agent-worktrees")` is the
+    plugin finding **its own** binstub (not a cross-plugin `agent-
+    worktrees` lookup from another plugin, which is what `allow
+    registry` means) -- classified `allow legacy-compatibility` instead,
+    matching the "this plugin's own identity is fixed by design"
+    concept precisely.
+  - **Introduced (during the fix-up pass) a new accepted shorthand**:
+    `allow legacy` as a length-constrained alias for `allow legacy-
+    compatibility` -- used wherever the fuller phrase plus a long path
+    literal would not fit under ruff's 99-char limit even after
+    extracting a short local variable, which the fuller phrase's own 27
+    characters made unreachable on several genuinely short lines. Same
+    semantic meaning; purely a byte-budget accommodation.
+- Rebalanced every module-size-ceiling hit this required
+  (`__main__.py`, `session_projection.py`, `installer.py`, `related.py`,
+  `repos.py`, `sessions.py`, `state_root.py` -- seven files in one PR,
+  this session's largest single batch) using only safe techniques:
+  blank-line removal between top-level defs (confirmed via direct ruff
+  probing that this repo's lint config does not enable E302/E303/E305,
+  so the spacing convention is stylistic, not enforced), a boolean-or-
+  chain refactor of `installer.py`'s binstub-detection helper (fewer
+  lines AND cleaner code, not just a budget trick), and collapsing an
+  already-short multi-line raise/return onto one line where it
+  genuinely fit.
+- **Smoke-tested the actual harness after merge**, beyond the routine
+  guard/lint/test checks: ran `agent-worktrees --version` and `status`,
+  then created a fresh worktree from the just-merged `dev` HEAD and
+  finalized it -- confirming the exact concern the operator's clean-room
+  directive named (create/finalize) still works cleanly post-merge, not
+  just that the annotated files individually pass lint.
+- Verified: `check-marketplace-isolation.py`, `check-module-size.py`,
+  `check-docs-consistency.py` all clean; zero new lint violations
+  confirmed by direct per-line re-scan; `python -m py_compile` on every
+  touched file; the full `agent-worktrees` suite via `test-supervisor`
+  (5759 passed, 26 skipped, 2 pre-existing failures --
+  `test_no_drift_when_consistent`'s `leaked_agent_rt_root` false-
+  positive and `test_cli_entry_honors_registration_home`'s `gh`
+  device-id credential-home write -- both confirmed pre-existing via
+  `git stash` isolation, filed
+  [aperture-labs#7737](https://gitea.michon.ski/tmichon/aperture-labs/issues/7737)).
+  All required CI checks passed on GitHub before merge.
+- **Takeaway for future legs**: delegating a large, well-specified
+  mechanical task to a sub-agent is still valuable at this scale, but
+  its own "all checks passed" self-report is not sufficient sign-off
+  for a change to the harness repo -- an independent, from-scratch
+  re-verification (not a re-read of its summary) caught real
+  regressions its self-check missed. This matches the standing
+  principle that a sub-agent's completion claim is not itself evidence;
+  only re-running the actual checks is.
+- `agent-worktrees` now at 130 remaining findings (SKILL.md docs,
+  `hooks.json`, `scripts/` install/register-nudge/session-conduct
+  clusters, `installer-readiness.json`) -- continuing next.
+
 ### 2026-09-27 — `agent-codespaces` resolved to backlog-only (PRs #4298, #4299); `agent-dispatch-solo` clean-room checkpoint found a 4th pre-existing bug
 
 - `agent-codespaces` core src/ cluster (PR #4298, 17/60 findings):
