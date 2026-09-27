@@ -266,3 +266,11 @@ def test_find_uv_editable_refs_raises_manifest_unreadable_for_a_non_table_source
     )
     with pytest.raises(uer.ManifestUnreadable, match="is not a table"):
         uer.find_uv_editable_refs(consumer)
+
+
+def test_find_uv_editable_refs_raises_manifest_unreadable_for_invalid_utf8(tmp_path: Path):
+    consumer = tmp_path / "plugins/alpha"
+    consumer.mkdir(parents=True)
+    (consumer / "pyproject.toml").write_bytes(b"\xff\xfe not valid utf-8")
+    with pytest.raises(uer.ManifestUnreadable):
+        uer.find_uv_editable_refs(consumer)

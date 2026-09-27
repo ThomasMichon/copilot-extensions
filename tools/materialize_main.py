@@ -349,6 +349,7 @@ def materialize_uv_editable_ref_into(
     ``plugins/<plugin>``, dest is a bare ``workdir/<plugin>`` with no
     monorepo ancestor of its own)."""
     log: list[str] = []
+    materialized_libs: set[str] = set()  # libs already copied THIS call (alias tracking)
     source_pyproject = source_consumer_dir / "pyproject.toml"
     if source_pyproject.is_symlink():
         # find_uv_editable_refs() fails closed on a symlinked pyproject.toml
@@ -430,9 +431,6 @@ def materialize_uv_editable_ref_into(
         if bad_ancestor is not None:
             log.append(f"SKIP {dest_lib_dir}: {bad_ancestor} is a symlink -- refusing")
             continue
-        if dest_lib_dir.exists() or dest_lib_dir.is_symlink():
-            log.append(f"SKIP {dest_lib_dir}: already exists -- refusing to overwrite")
-            continue
 
         pyproject = dest_consumer_dir / "pyproject.toml"
         if pyproject.is_symlink():
@@ -442,11 +440,68 @@ def materialize_uv_editable_ref_into(
             # already close, applied to the destination MANIFEST itself.
             log.append(f"SKIP {pyproject}: is a symlink -- refusing to rewrite it blindly")
             continue
-        log.append(_materialize_one_uv_editable_ref(
+
+        if lib in materialized_libs:
+            # A second [tool.uv.sources] name pointing at the SAME
+            # canonical lib another entry already copied this run (an
+            # alias) -- rewrite this entry too, without recopying a tree
+            # that's already there. Treating this as "already exists --
+            # refusing to overwrite" would leave the second alias's
+            # escaping reference un-rewritten in the promoted snapshot.
+            error = _rewrite_uv_editable_source_entry(
+                pyproject=pyproject, name=name, raw_path=raw_path, lib=lib
+            )
+            log.append(error if error is not None else f"OK   {dest_lib_dir} <- {raw_path} (alias)")
+            continue
+        if dest_lib_dir.exists() or dest_lib_dir.is_symlink():
+            log.append(f"SKIP {dest_lib_dir}: already exists -- refusing to overwrite")
+            continue
+
+        result = _materialize_one_uv_editable_ref(
             canonical=canonical, dest_lib_dir=dest_lib_dir, pyproject=pyproject,
             name=name, raw_path=raw_path, lib=lib,
-        ))
+        )
+        log.append(result)
+        if result.startswith("OK"):
+            materialized_libs.add(lib)
     return log
+
+
+def _rewrite_uv_editable_source_entry(
+    *, pyproject: Path, name: str, raw_path: str, lib: str
+) -> str | None:
+    """Rewrite ``pyproject``'s ``[tool.uv.sources]`` entry named ``name``
+    (whose ``path`` is ``raw_path``, ``editable = true``) to the local,
+    non-editable ``{ path = "libs/<lib>" }`` form -- the manifest-only half
+    of ``_materialize_one_uv_editable_ref()``'s work, split out so an alias
+    entry (a second ``[tool.uv.sources]`` name pointing at the same
+    canonical lib another entry already materialized) can be rewritten
+    without recopying a tree that is already there. Scoped to the
+    ``[tool.uv.sources]`` table's own span (never the whole file) and
+    accepts either key order, same as the full materializer. Returns an
+    error string on failure, or ``None`` on success."""
+    text = pyproject.read_text(encoding="utf-8")
+    span = uer.uv_sources_table_span(text)
+    if span is None:
+        return f"SKIP {pyproject}: no [tool.uv.sources] table found"
+    start, end = span
+    escaped_name = re.escape(name)
+    escaped_path = re.escape(raw_path)
+    pattern = re.compile(
+        r'^([ \t]*' + escaped_name + r'\s*=\s*)\{\s*(?:'
+        r'path\s*=\s*"' + escaped_path + r'"\s*,\s*editable\s*=\s*true'
+        r'|editable\s*=\s*true\s*,\s*path\s*=\s*"' + escaped_path + r'"'
+        r')\s*\}[ \t]*$',
+        re.MULTILINE,
+    )
+    if pattern.search(text[start:end]) is None:
+        return f"SKIP {pyproject}: could not find {name}'s uv-editable entry to rewrite"
+    new_table_text, count = pattern.subn(
+        lambda m: f'{m.group(1)}{{ path = "libs/{lib}" }}', text[start:end], count=1
+    )
+    assert count == 1  # already confirmed via the preflight search() above
+    pyproject.write_text(text[:start] + new_table_text + text[end:], encoding="utf-8")
+    return None
 
 
 def _materialize_one_uv_editable_ref(
@@ -491,6 +546,11 @@ def _materialize_one_uv_editable_ref(
         where = str(canonical) if stray == "." else f"{canonical}/{stray}"
         return f"SKIP {dest_lib_dir}: {where} is a symlink -- refusing"
 
+    # Preflight the rewrite BEFORE copying anything, same as before --
+    # _rewrite_uv_editable_source_entry() itself would happily run after
+    # the copy, but a preflight-only dry check first keeps the "never
+    # partially copy, then fail the rewrite" guarantee intact without
+    # duplicating the whole regex here.
     text = pyproject.read_text(encoding="utf-8")
     span = uer.uv_sources_table_span(text)
     if span is None:
@@ -509,12 +569,11 @@ def _materialize_one_uv_editable_ref(
         return f"SKIP {pyproject}: could not find {name}'s uv-editable entry to rewrite"
 
     shutil.copytree(canonical, dest_lib_dir, ignore=_ignore)
-
-    new_table_text, count = pattern.subn(
-        lambda m: f'{m.group(1)}{{ path = "libs/{lib}" }}', text[start:end], count=1
+    error = _rewrite_uv_editable_source_entry(
+        pyproject=pyproject, name=name, raw_path=raw_path, lib=lib
     )
-    assert count == 1  # already confirmed via the preflight search() above
-    pyproject.write_text(text[:start] + new_table_text + text[end:], encoding="utf-8")
+    if error is not None:
+        return error
     return f"OK   {dest_lib_dir} <- {raw_path}"
 
 

@@ -117,7 +117,7 @@ def find_uv_editable_refs(consumer_dir: Path) -> list[tuple[str, str, str, bool]
         return []
     try:
         data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-    except (OSError, tomllib.TOMLDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
         raise ManifestUnreadable(f"{pyproject}: could not read/parse: {exc}") from exc
     tool = data.get("tool", {})
     if not isinstance(tool, dict):

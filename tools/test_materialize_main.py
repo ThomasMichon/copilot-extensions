@@ -1248,3 +1248,31 @@ def test_materialize_one_uv_editable_ref_refuses_a_symlink_anywhere_in_canonical
     )
     assert "is a symlink" in result
     assert not dest_lib_dir.exists()
+
+
+def test_materialize_uv_editable_ref_into_rewrites_all_aliases_of_the_same_lib(tmp_path: Path):
+    # Two different [tool.uv.sources] distribution names pointing at the
+    # SAME canonical lib -- the second must be rewritten too, not treated
+    # as an "already exists" overwrite conflict (which would leave its
+    # escaping reference un-rewritten in the promoted snapshot).
+    root = tmp_path / "repo"
+    _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
+    consumer = root / "plugins/agent-bridge"
+    consumer.mkdir(parents=True)
+    (consumer / "pyproject.toml").write_text(
+        '[project]\nname = "consumer"\nversion = "1.0.0"\n'
+        "[tool.uv.sources]\n"
+        'agent-zdd = { path = "../../libs/zdd", editable = true }\n'
+        'agent-zdd-alias = { path = "../../libs/zdd", editable = true }\n',
+        encoding="utf-8",
+    )
+
+    log = mm.materialize_uv_editable_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
+    )
+    assert sum(1 for line in log if line.startswith("OK")) == 2
+    text = (consumer / "pyproject.toml").read_text()
+    assert 'agent-zdd = { path = "libs/zdd" }' in text
+    assert 'agent-zdd-alias = { path = "libs/zdd" }' in text
+    # Only copied once -- the second entry reused the existing dest_lib_dir.
+    assert (consumer / "libs/zdd/src/zdd/__init__.py").read_text() == "real\n"
