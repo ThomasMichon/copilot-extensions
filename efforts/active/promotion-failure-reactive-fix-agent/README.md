@@ -5,15 +5,27 @@
 - **Branch(es):** independent per-slice worktrees
 - **Created:** 2026-09-25
 - **Status:** Active — Phase 1 live-validated (Phase 1.5 Done); Phase 2
-  in progress: vision-reconciliation gate resolved, a draft `gh-aw`
+  in progress: vision-reconciliation gate resolved, a `gh-aw`
   workflow authored (`.github/workflows/ci-failure-fix-attempt.md`) --
   two review passes (PR #3893) found 6 real blocking issues (trigger
   can't fire, no edit tool, auth signal gap, protected-files gap,
   prompt-injection gap, no changefile path); a successor session
-  resolved all 6 through a 9-round iterative real-review cycle (PR
-  #3916), converging on a materially hardened design (still **not
-  compile-verified** -- `gh aw compile` remains blocked by the same
-  SAML-SSO wall, not re-attempted); see the 2026-09-26 Journal entry
+  resolved all 6 (plus 3 more found along the way) through an 11-round
+  iterative real-review cycle (PR #3916, merged) — **and this session
+  finally got `gh aw compile` running** (the "SSO wall" only ever gated
+  metadata lookups, not asset downloads or `copilot-extensions` itself;
+  worked around by registering a manually-downloaded binary as a local
+  `gh` extension) and used it to find and fix 3 more genuine issues a
+  real compiler catches that doc-research alone couldn't: frontmatter
+  must be the file's literal first bytes, a step output referenced in
+  the prompt before it exists (fixed via a file-based handoff), and
+  direct `github.event.*`/`github.repository` interpolation in shell
+  (CTR-006 template-injection). **`.github/workflows/
+  ci-failure-fix-attempt.lock.yml` now exists, compiled and committed**
+  — Phase 2's mechanism is compile-verified for the first time. Still
+  not wired live: the Copilot engine auth path is undecided, and the
+  main-branch bootstrap gotcha is unaddressed; see the 2026-09-26
+  Journal entry
 - **Vision:** [`visions/ci-failure-remediation`](../../../visions/ci-failure-remediation/README.md)
   (authored 2026-09-26 to resolve the reconciliation gate below). **Gate
   resolved:** the vision states the standing intent (detection+dedup,
@@ -1716,3 +1728,76 @@ _Pending._
   rearchitecture (or accepting that "auto-fix a failing test" inherently
   requires reading untrusted test output). Still outstanding regardless:
   `gh aw compile` verification (SSO-blocked, unresolved this session).
+
+### 2026-09-26 — `gh aw compile` finally unblocked, and it found 3 more real issues doc-research couldn't
+- Operator pushed back directly on the prior handoff's own premise:
+  "I shouldn't need an SAML-SSO for this; this repo isn't part of an
+  org." Correct, and the literal error had always said so: the SSO wall
+  is specifically for the `github` org (owner of `github/gh-aw`, the
+  extension's SOURCE repo) — nothing to do with `copilot-extensions`,
+  which isn't in an SSO-enforcing org at all. Retried the literal `gh
+  extension install github/gh-aw` command directly (per error-response
+  discipline, rather than trusting the prior session's diagnosis) and
+  confirmed this precisely.
+- **Root-caused further, then worked around entirely:** the SSO
+  enforcement gates only `api.github.com`'s release-metadata lookup
+  (confirmed: an anonymous `curl` to that exact endpoint returns HTTP
+  200) — it does NOT gate the actual `github.com/.../releases/
+  download/...` asset URLs (confirmed anonymously downloadable too, no
+  auth at all). `gh extension install`'s own binary-extension flow
+  insists on the gated metadata call first, but nothing requires using
+  that flow: fetched the release JSON and the correct platform binary
+  directly, then registered it as a LOCAL `gh` extension (`gh extension
+  install <local-dir-containing-gh-aw.exe>`) — no SSO authorization
+  needed at all, and no interactive browser step for the operator
+  either. `gh aw` now works permanently on this machine.
+- **Real compilation surfaced 3 more genuine issues** no amount of
+  doc-research could have caught, all fixed (numbered #10/#11/#12 in the
+  draft's own leading comment block, alongside #1-#9):
+  1. **Frontmatter must be the file's literal first bytes** — `gh aw
+     compile` rejected the file outright ("no frontmatter found")
+     because the leading HTML comment (documenting the file's own
+     history) preceded the opening `---`. Moved the whole comment block
+     to immediately after the closing `---` instead.
+  2. **A step output referenced in the prompt before it exists** — the
+     markdown prompt referenced `steps.decode.outputs.body`, but gh-aw's
+     own `steps-output-in-prompt` validation caught a genuinely wrong
+     design assumption: the prompt is rendered by the ACTIVATION job,
+     which runs BEFORE the agent job — and therefore before
+     `pre-agent-steps`, which only runs inside the agent job — ever
+     executes. The referenced output was simply never going to be
+     populated. Fixed per the compiler's own suggested remedy: decode
+     straight to a workspace FILE (`.verify-issue/body.txt`, added to
+     `excluded-files`) instead of a step output, and have the prompt
+     instruct the agent to read that file. This also let the round-7
+     collision-checked `$GITHUB_OUTPUT` delimiter dance be deleted
+     entirely — a plain file write has no delimiter to collide with.
+  3. **Direct `github.event.*`/`github.repository` interpolation inside
+     `run:` shell text** — gh-aw's own CTR-006 scanner flags this
+     unconditionally as a template-injection risk, regardless of
+     whether that specific field is attacker-controlled. Routed every
+     occurrence through `env:` instead (`verify-issue`'s `check` step,
+     the `post-steps` scope gate).
+- **A genuinely funny meta-finding:** fixing issue #2 above (moving
+  prose into an HTML comment) initially broke compilation AGAIN — gh-aw's
+  expression-safety scanner validates the ENTIRE markdown body text for
+  `${{ ... }}`-shaped tokens, comments included, so illustrative prose
+  quoting example expressions (`${{ steps.decode.outputs.* }}`,
+  `${{ github.event.* }}`) tripped the exact same "unauthorized
+  expression" validator as real code. Fixed by stripping the `${{`/`}}`
+  wrapper from every prose mention, keeping just the dotted path text.
+- **`.github/workflows/ci-failure-fix-attempt.lock.yml` now exists,
+  committed alongside the source** — Phase 2's mechanism is
+  compile-verified for the first time, not merely doc-researched. One
+  non-blocking warning remains (a `workflow_dispatch` concurrency-
+  discriminator note on a gh-aw-generated "conclusion" job, not
+  something this file's own content controls) — left as-is; it doesn't
+  block compilation or `--strict` mode.
+- **Not yet done:** the Copilot engine auth path decision (org-billing
+  vs. `COPILOT_GITHUB_TOKEN` PAT) is still an open `TODO(successor)` in
+  the draft — ask the operator before wiring this live. The main-branch
+  bootstrap companion PR (same gotcha Phase 1's `report-failure` already
+  hit) is still unaddressed. Phase 2's remaining security-hardening
+  checklist (pin the `gh-aw` extension version, verify job-level
+  `permissions:` don't inherit anything broader) is still open. Phase
+  3's Validation Plan trials haven't started.
