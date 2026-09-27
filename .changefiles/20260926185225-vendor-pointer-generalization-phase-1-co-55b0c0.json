@@ -1,0 +1,21 @@
+{
+  "comment": "Vendor-pointer-generalization Phase 1: convert ssh-manager to a src-passthrough vendor pointer (dev-branch authoring change only; materialize_main.py still expands it into a real, byte-identical copy at promotion, so no user-visible behavior changes). Also corrects canonical libs/ssh-manager/pyproject.toml's name/build-system/test-runner-constraint fields, which had drifted from what every real copy already established (a pre-existing gap: no tool previously synced these fields between canonical and copies).",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "dev"
+    }
+  ]
+}

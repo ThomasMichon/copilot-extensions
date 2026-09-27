@@ -379,12 +379,24 @@ shape before committing to a design)_
             PR #3790 — the effort that discovered/shipped src-passthrough).
       - [x] `work-coalescing-singleton` converted, both consumers
             (`plugins/agent-worktrees`, `worktree-manager`) — PR #3810.
+      - [x] `credential-relay` converted, all 4 consumers
+            (`plugins/agent-containers`, `agent-mcp`, `agent-bridge`,
+            `agent-codespaces`) — PR #3904. Round 1 review found a real,
+            empirically-reproduced (but pre-existing, shared by all 3
+            adopters, not introduced here) non-editable-install gap;
+            tracked in #3905 rather than fixed ad-hoc in this PR.
       - [ ] Remaining real lib copies (`agent-procutil`, `config-migrate`,
-            `credential-relay`, `dropin-registry`, `plugin-activation`,
-            `plugin-resolve`, `session-liveness-probe`, `single-instance-
-            lease`, `ssh-manager`, `venue-copilot`, `zdd`) not yet
-            converted — future bounded-slice PRs, one (or a few related)
-            lib(s) at a time, per this effort's own established pattern.
+            `dropin-registry`, `plugin-activation`, `plugin-resolve`,
+            `session-liveness-probe`, `single-instance-lease`,
+            `ssh-manager`, `venue-copilot`, `zdd`) not yet converted —
+            future bounded-slice PRs, one (or a few related) lib(s) at a
+            time, per this effort's own established pattern.
+            `session-liveness-probe`/`venue-copilot` have no top-level
+            canonical `libs/<lib>/` yet (confirmed via `sync-vendored-libs
+            .py --check`'s advisory drift note) — `--pointerize` requires
+            canonical to exist first, so those two need a canonical-
+            promotion step before they're eligible for this conversion at
+            all.
 - [x] ~~**Build the conversion tool**: a script performing the [TOML]
       rewrite ...~~ — **superseded, and already built**: `--pointerize`
       already exists in `tools/sync-vendored-libs.py` (built for
@@ -871,3 +883,45 @@ _Pending._
   question is still open; Phase 3's pattern doc
   (`docs/patterns/vendor-pointer.md`) still needs writing, and must now
   describe `src-passthrough`, not the uv-editable form.
+
+### 2026-09-26 — Phase 1: converted `credential-relay` (PR #3904)
+
+- Picked `credential-relay` as the next bounded slice: 4 consumers
+  (`agent-containers`, `agent-mcp`, `agent-bridge`, `agent-codespaces`) —
+  tied with `ssh-manager` for the smallest remaining blast radius.
+  Confirmed byte-identical across all 4 copies beforehand via
+  `sync-vendored-libs.py --check` (no local per-plugin diffs to lose).
+  Converted all 4 atomically in one commit via `--pointerize` (a partial
+  conversion breaks `--check`'s copy-agreement comparison, per PR #3810's
+  own earlier finding).
+- Validated: `--check` reports all 4 as DRY pointer copies (clean); full
+  `run-plugin-tests.py --reinstall` for all 4 affected plugins.
+  `agent-containers` showed 1 failure — confirmed via `git stash`/rerun to
+  fail IDENTICALLY with or without this conversion (a pre-existing,
+  already-tracked flake, issue #3570, unrelated). `agent-bridge` appeared
+  to hang under `--reinstall` on the first attempt; re-tested with more
+  patience and confirmed it was just a slow venv rebuild, not a real hang
+  (passed cleanly, twice, once without `--reinstall` and once with).
+- **Round-1 review found a real, new-to-this-effort concern**: a plain
+  non-editable `uv pip install <plugin-dir>` run directly against a live
+  `dev` checkout raises `ImportError` for a src-passthrough-vendored lib
+  (the installed copy is disconnected from the monorepo root the stub's
+  `_find_repo_root()` walk needs). Reproduced empirically. Also reproduced
+  the IDENTICAL failure for `lazy_cli_dispatch` (already-merged, PR #3790)
+  — confirming this is a pre-existing gap in the mechanism itself, not
+  something this PR introduced, and not something a single-lib conversion
+  PR should fix ad-hoc. Filed **issue #3905** to track the real fix
+  (teach `install.sh`/`install.ps1` to detect/refuse-or-materialize an
+  unmaterialized pointer, or document it as a permanent dev-branch-install
+  limitation) across all 3 current adopters uniformly. Confirmed this
+  risk is currently DORMANT (no CI workflow does a non-editable plugin
+  install today; `run-plugin-tests.py` always uses `-e`) — real exposure
+  is a contributor manually running `install.sh` against their own `dev`
+  checkout, a plausible but not currently-exercised workflow.
+- Marked `credential-relay` `[x]` in Phase 1's conversion sub-checklist;
+  noted `session-liveness-probe`/`venue-copilot` are NOT eligible for this
+  conversion yet (no top-level canonical `libs/<lib>/` exists for either
+  — `--pointerize` requires canonical first).
+- **Not yet done**: ~10 remaining real lib copies (`ssh-manager` next,
+  tied for smallest blast radius); issue #3905's actual fix; Phase 2;
+  Phase 3's pattern doc.
