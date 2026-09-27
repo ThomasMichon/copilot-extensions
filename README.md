@@ -69,9 +69,9 @@ curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/mai
 | [wsl-setup](plugins/wsl-setup/) | Environment setup | Set up and troubleshoot WSL2 as a reachable, persistent service host — pick the networking mode (NAT + localhostForwarding vs mirrored), diagnose corp-network egress + host↔WSL loopback failures, and keep a distro alive for a hosted listener (e.g. sshd behind a Dev Tunnel). Ships a windowless keepalive helper. |
 | [harness-knowledge](plugins/harness-knowledge/) | Binding skill | Bind a stateless control harness to its private **knowledge** repo, harness-first — ask for (or create) the knowledge repo, write the machine-local `knowledge_repo` pointer, and assemble a machine-local instructions fragment labeling the concrete harness/knowledge/product paths. Keeps the shareable harness tree generic + name-free. Payload-only. |
 | [ai-attribution](plugins/ai-attribution/) | Ambient policy + skills | Keep publication and AI-attribution safety active through a concise payload-cwd-gated session-start kernel, host-qualified operator policy, an idempotent static-fallback setup skill, and an on-demand publication workflow. Payload-only; no runtime, network call, or authentication. |
-| [delegation-guidance](plugins/delegation-guidance/) | Ambient policy + skill | Route broad separable research, comparisons, evaluations, domain-tool calls, and disjoint bulk edits into bounded sub-agent contexts while the coordinator retains synthesis, integration, cohesive implementation, and completion. Payload-only; no runtime or configuration. |
+| [delegation-guidance](plugins/delegation-guidance/) | **Deprecated** — no-op pointer | Migrated into `agent-conduct-guidance`'s delegation module. Kept installable so the name keeps resolving for existing adopters; ships no skills or projections of its own. |
 | [budget-guidance](plugins/budget-guidance/) | Budget posture CLI | Resolve strict offline allowance, consumption, reset, freshness, rate, and ceiling readings into one attributable posture with JSON and concise human status. |
-| [agent-conduct-guidance](plugins/agent-conduct-guidance/) | Ambient policy + skill | Consolidated, generally-good agent conduct guidance: one plugin hosting multiple independent ambient modules (instruction projection + paired skill). First module — process-spawn hygiene — reminds an agent to spawn every ad hoc CMD/PowerShell/Python/Node/etc. child process headlessly, especially on Windows, where a naive spawn allocates a visible, focus-stealing console window per invocation. Payload-only; no runtime or configuration. |
+| [agent-conduct-guidance](plugins/agent-conduct-guidance/) | Ambient policy + skills | Consolidated, generally-good agent conduct guidance: one plugin hosting multiple independent ambient modules (instruction projection + paired skill each). Modules: process-spawn hygiene (spawn every ad hoc CMD/PowerShell/Python/Node/etc. child process headlessly, especially on Windows) and coordinator-first delegation (route broad separable work into bounded sub-agent contexts while the coordinator retains synthesis and completion). Payload-only; no runtime. |
 
 All support **Windows** and **Linux/WSL** (macOS planned).
 
@@ -107,7 +107,7 @@ flowchart TB
       AI["agent-index<br/>index/search service"]
       AK["agent-machines<br/>machine-state reconciler CLI"]
       AV["agent-vault<br/>secret store CLI + service"]
-      PO["efforts · visions · context-handoff · customizing-copilot<br/>copilot-extensions-harness · wsl-setup · harness-knowledge · ai-attribution · delegation-guidance<br/>(payload-only: skills / hooks / extension)"]
+      PO["efforts · visions · context-handoff · customizing-copilot<br/>copilot-extensions-harness · wsl-setup · harness-knowledge · ai-attribution · delegation-guidance (deprecated) · agent-conduct-guidance<br/>(payload-only: skills / hooks / extension)"]
     end
     subgraph RT["Local runtimes — ~/.* + ~/.local/bin"]
       RW["~/.agent-worktrees<br/>agent-worktrees"]
@@ -220,14 +220,14 @@ copilot plugin install efforts@copilot-extensions        # optional — planning
 copilot plugin install context-handoff@copilot-extensions # optional — context-window handoff (no runtime)
 copilot plugin install customizing-copilot@copilot-extensions # optional — how to customize the CLI (no runtime)
 copilot plugin install ai-attribution@copilot-extensions # optional — ambient publication safety (no runtime)
-copilot plugin install delegation-guidance@copilot-extensions # optional — coordinator-first task routing (no runtime)
+copilot plugin install agent-conduct-guidance@copilot-extensions # optional — consolidated agent conduct guidance (no runtime)
 ```
 
 Each `copilot plugin install` only vendors the plugin's **payload** (source,
 skills, hooks, extensions). The thirteen runtime plugins (every plugin except the
 payload-only `efforts`, `visions`, `context-handoff`, `customizing-copilot`,
 `copilot-extensions-harness`, `wsl-setup`, `harness-knowledge`, and
-`ai-attribution` and `delegation-guidance`) then need their runtime deployed once — that's Step 2,
+`ai-attribution`, `delegation-guidance`, and `agent-conduct-guidance`) then need their runtime deployed once — that's Step 2,
 which runs each installer to build a `uv` venv under its plugin-owned home and drop a
 binstub in `~/.local/bin`.
 

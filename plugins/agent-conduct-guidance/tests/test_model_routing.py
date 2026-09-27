@@ -186,7 +186,7 @@ def test_invalid_layer_fails_open_with_diagnostic(tmp_path: Path) -> None:
     assert payload["sources"]["repository"] == "invalid"
     assert payload["purposes"] == {}
     assert payload["diagnostics"]
-    assert "[delegation-guidance]" in result.stderr
+    assert "[agent-conduct-guidance]" in result.stderr
 
 
 def test_invalid_operator_suppresses_repository_choices(tmp_path: Path) -> None:

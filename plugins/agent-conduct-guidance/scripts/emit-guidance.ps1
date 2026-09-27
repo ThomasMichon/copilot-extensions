@@ -18,7 +18,7 @@ try {
         throw 'invalid plugin version'
     }
     $Context = @(
-        "[owner: delegation-guidance@$Version]"
+        "[owner: agent-conduct-guidance@$Version]"
         'Treat the main agent as coordinator and task-master. Before broad code/file research, comparisons, evaluations, or separable bulk edits, estimate context cost and separability. Hard rule: when a comparison or evaluation has three or more independent implementation/subsystem tracks and each needs multiple source bodies, launch one bounded evidence agent per track before reading those bodies; a reviewer is not an evidence-track substitute. Delegate other broad work early when independent source bodies or tool payloads would materially consume coordinator context; keep small bounded lookups, small comparisons, and one genuinely continuous trace direct. Give each delegate one bounded, non-overlapping scope, required evidence, compact cited output, and exclusive edit ownership. Do not duplicate delegated investigation or ingest its full sources without a concrete verification reason. Keep decomposition, synthesis, integration, final decisions, cohesive implementation, and completion judgment with the coordinator. Prefer domain sub-agents for domain MCP/service calls so verbose catalogs and payloads remain in their context; compact shared research and orchestration tools may stay with the coordinator. If you were invoked as a sub-agent, execute only your assigned scope directly and do not create child agents unless your prompt explicitly authorizes it. Run each required independent review role once per unchanged artifact; repeat only after a defect or material change. Before delegating, use the `delegating-work` skill to load model routing: select a demonstrated model for the purpose and execution surface; candidates require explicit trials.'
     ) -join "`n"
     if ([Text.Encoding]::UTF8.GetByteCount($Context) -ge $MaxContextBytes) {
@@ -28,7 +28,7 @@ try {
         (@{ additionalContext = $Context } | ConvertTo-Json -Compress)
     )
 } catch {
-    [Console]::Error.WriteLine('[delegation-guidance] no guidance context emitted')
+    [Console]::Error.WriteLine('[agent-conduct-guidance] no guidance context emitted')
     [Console]::Out.Write('{}')
 }
 exit 0

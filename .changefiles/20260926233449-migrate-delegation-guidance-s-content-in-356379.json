@@ -1,0 +1,13 @@
+{
+  "comment": "Migrate delegation-guidance's content into agent-conduct-guidance as its second module; delegation-guidance becomes a deprecated no-op pointer",
+  "changes": [
+    {
+      "plugin": "agent-conduct-guidance",
+      "type": "patch"
+    },
+    {
+      "plugin": "delegation-guidance",
+      "type": "patch"
+    }
+  ]
+}

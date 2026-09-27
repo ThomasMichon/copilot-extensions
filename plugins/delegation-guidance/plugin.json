@@ -1,6 +1,6 @@
 {
   "name": "delegation-guidance",
-  "description": "Coordinator-first task routing for Copilot CLI. A concise session-start kernel encourages early delegation of broad separable research, comparisons, evaluations, domain-tool work, and disjoint bulk edits while keeping synthesis, integration, cohesive implementation, and completion with the coordinating agent. Ships the delegating-work skill.",
+  "description": "DEPRECATED -- migrated into agent-conduct-guidance@copilot-extensions (the coordinator-first delegation module, plus the delegating-work skill). This plugin remains installable as a no-op placeholder so its name keeps resolving for existing adopters; it ships no skills or instruction projections of its own. Enable agent-conduct-guidance instead and disable this one.",
   "version": "0.1.0-dev14",
   "runtimeScope": "none",
   "author": {
@@ -10,11 +10,8 @@
   "repository": "https://github.com/ThomasMichon/copilot-extensions",
   "license": "MIT",
   "keywords": [
+    "deprecated",
     "delegation",
-    "sub-agents",
-    "coordination",
-    "context-management",
     "copilot-extension"
-  ],
-  "skills": "skills/"
+  ]
 }

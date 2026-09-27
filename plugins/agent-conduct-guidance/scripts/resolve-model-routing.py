@@ -580,7 +580,7 @@ def main() -> int:
         )
     print(json.dumps(result, indent=2, sort_keys=True))
     for diagnostic in diagnostics:
-        print(f"[delegation-guidance] {diagnostic}", file=sys.stderr)
+        print(f"[agent-conduct-guidance] {diagnostic}", file=sys.stderr)
     return 0
 
 

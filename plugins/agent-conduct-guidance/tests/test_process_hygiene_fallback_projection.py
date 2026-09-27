@@ -13,10 +13,11 @@ _TEMPLATE = _PLUGIN / "instructions" / "process-hygiene-fallback.instructions.md
 def test_projection_declaration_shape():
     declaration = json.loads(_DECLARATION.read_text(encoding="utf-8"))
     assert declaration["schema"] == "copilot-extensions.instruction-projections"
-    projections = declaration["projections"]
+    projections = [
+        p for p in declaration["projections"] if p["id"] == "process-hygiene-fallback"
+    ]
     assert len(projections) == 1
     projection = projections[0]
-    assert projection["id"] == "process-hygiene-fallback"
     assert projection["template"] == (
         "instructions/process-hygiene-fallback.instructions.md"
     )

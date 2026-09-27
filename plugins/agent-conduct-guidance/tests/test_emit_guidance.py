@@ -82,7 +82,7 @@ def test_manifest_uses_static_projection_without_hook() -> None:
 def test_powershell_emits_owned_bounded_guidance() -> None:
     version = json.loads(MANIFEST.read_text(encoding="utf-8"))["version"]
     context = _context(_run_powershell())
-    assert context.startswith(f"[owner: delegation-guidance@{version}]\n")
+    assert context.startswith(f"[owner: agent-conduct-guidance@{version}]\n")
     assert "Before broad code/file research" in context
     assert "three or more independent implementation/subsystem tracks" in context
     assert "reviewer is not an evidence-track substitute" in context
@@ -100,7 +100,7 @@ def test_powershell_emits_owned_bounded_guidance() -> None:
 @pytest.mark.skipif(_powershell() is None, reason="PowerShell is not installed")
 def test_powershell_falls_back_to_script_location() -> None:
     assert _context(_run_powershell(plugin_root=None)).startswith(
-        "[owner: delegation-guidance@"
+        "[owner: agent-conduct-guidance@"
     )
 
 
@@ -118,7 +118,7 @@ def test_bash_matches_powershell_guidance() -> None:
 )
 def test_bash_falls_back_to_script_location() -> None:
     assert _context(_run_bash(plugin_root=None)).startswith(
-        "[owner: delegation-guidance@"
+        "[owner: agent-conduct-guidance@"
     )
 
 
@@ -127,7 +127,7 @@ def test_producers_fail_open_for_incomplete_payload(
     tmp_path: Path,
     failure: str,
 ) -> None:
-    payload = tmp_path / "delegation-guidance"
+    payload = tmp_path / "agent-conduct-guidance"
     shutil.copytree(PLUGIN, payload)
     if failure == "missing-skill":
         (payload / "skills" / "delegating-work" / "SKILL.md").unlink()
