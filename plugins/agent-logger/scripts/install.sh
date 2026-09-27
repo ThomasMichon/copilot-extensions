@@ -916,6 +916,24 @@ install_package() {
 
 write_units() {
   mkdir -p "${UNIT_DIR}"
+  # Discover the facility's multi-machine config repo (aperture-labs) via the
+  # agent-worktrees registry, if this machine has one adopted -- so the
+  # scheduled sync (invoked with no useful working directory of its own)
+  # still discovers that repo's schema v3 sync.local_path declaration.
+  # AGENT_LOGGER_REPO_CONFIG's explicit-file path still goes through the
+  # same registered-project + default-branch trust gate as normal discovery
+  # (see agent_logger.repo_trust) -- this only tells it WHERE to look, never
+  # bypasses WHETHER to trust it. Never hardcoded: absent agent-worktrees, or
+  # aperture-labs not adopted here, this is silently a no-op (today's
+  # behavior, unaffected).
+  local repo_config_env=""
+  if command -v agent-worktrees >/dev/null 2>&1; then
+    local aperture_labs_dir
+    aperture_labs_dir="$(agent-worktrees repos find aperture-labs 2>/dev/null || true)"
+    if [ -n "${aperture_labs_dir}" ] && [ -f "${aperture_labs_dir}/.agent-logger.yaml" ]; then
+      repo_config_env="Environment=AGENT_LOGGER_REPO_CONFIG=${aperture_labs_dir}/.agent-logger.yaml"
+    fi
+  fi
   cat > "${UNIT_DIR}/${TIMER_NAME}.service" <<EOF
 [Unit]
 Description=Agent Logger session-sync -- push Copilot session data to the configured target
@@ -925,6 +943,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 Environment=AGENT_LOGGER_HOME=${INSTALL_DIR}
+${repo_config_env}
 ExecStart=${VENV}/bin/session-sync run --prune
 # Generous start timeout: the FIRST sync cold-copies the entire session
 # history (potentially thousands of sessions over a CIFS mount) and can take

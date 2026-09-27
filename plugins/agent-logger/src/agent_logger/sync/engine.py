@@ -632,7 +632,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    cfg = load_config(include_repo=False)
+    # Repo-local config now legitimately affects sync -- schema v3's
+    # sync.local_path (see agent_logger.config._load_repo_config) is the
+    # one facility-wide-constant sync destination a repo may declare. Using
+    # the default (include_repo=True) here is what actually delivers that
+    # value to the running sync engine; excluding it would silently keep
+    # every machine on whatever stale/absent machine-local sync path it had
+    # before the repo declared the correct one.
+    cfg = load_config()
 
     try:
         if args.command == "run":

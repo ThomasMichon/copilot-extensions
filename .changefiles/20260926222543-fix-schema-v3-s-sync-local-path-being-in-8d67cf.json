@@ -1,0 +1,9 @@
+{
+  "comment": "Fix schema v3's sync.local_path being inert for the real sync engine/CLI and the session-fetch cold-store resolver (both hardcoded load_config(include_repo=False), a pre-v3 boundary never updated when sync.local_path was added), and have install.sh/install.ps1 discover the facility's config repo (via agent-worktrees) to set AGENT_LOGGER_REPO_CONFIG on the scheduled sync's service/task so it can find that repo's config with no useful working directory of its own.",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}

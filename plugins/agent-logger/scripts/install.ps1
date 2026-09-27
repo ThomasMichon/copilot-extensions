@@ -955,12 +955,41 @@ function Deploy-ResolverHelpers {
     }
 }
 
+function Get-ApertureLabsRepoConfigPath {
+    # Discover the facility's multi-machine config repo (aperture-labs) via
+    # the agent-worktrees registry, if this machine has one adopted -- so
+    # the scheduled task (with no useful working directory of its own)
+    # still discovers that repo's schema v3 sync.local_path declaration.
+    # AGENT_LOGGER_REPO_CONFIG's explicit-file path still goes through the
+    # same registered-project + default-branch trust gate as normal
+    # discovery (see agent_logger.repo_trust) -- this only tells it WHERE to
+    # look, never bypasses WHETHER to trust it. Never hardcoded: absent
+    # agent-worktrees, or aperture-labs not adopted here, this is silently a
+    # no-op (today's behavior, unaffected).
+    try {
+        if (-not (Get-Command agent-worktrees -ErrorAction SilentlyContinue)) { return $null }
+        $dir = (& agent-worktrees repos find aperture-labs 2>$null | Select-Object -First 1)
+        if (-not $dir) { return $null }
+        $configPath = Join-Path $dir '.agent-logger.yaml'
+        if (Test-Path -LiteralPath $configPath) { return $configPath }
+        return $null
+    } catch {
+        return $null
+    }
+}
+
 function Write-SyncTaskLauncher {
     $launcherDir = Split-Path -Parent $TaskLauncher
     if (-not (Test-Path $launcherDir)) {
         New-Item -ItemType Directory -Path $launcherDir -Force | Out-Null
     }
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $repoConfigPath = Get-ApertureLabsRepoConfigPath
+    $repoConfigLine = ''
+    if ($repoConfigPath) {
+        $escaped = $repoConfigPath -replace "'", "''"
+        $repoConfigLine = "`$env:AGENT_LOGGER_REPO_CONFIG = '$escaped'"
+    }
     $launcherContent = @'
 $ErrorActionPreference = 'Stop'
 $env:PYTHONUTF8 = '1'
@@ -975,11 +1004,12 @@ function Resolve-RuntimePython {
     return $AgentRtPy
 }
 $env:AGENT_LOGGER_HOME = $_root
+__REPO_CONFIG_LINE__
 $_py = Resolve-RuntimePython
 if (-not $_py) { exit 1 }
 & $_py -m agent_logger.sync.engine run --prune
 exit $LASTEXITCODE
-'@.Replace('__INSTALL_DIR__', ($InstallDir -replace "'", "''"))
+'@.Replace('__INSTALL_DIR__', ($InstallDir -replace "'", "''")).Replace('__REPO_CONFIG_LINE__', $repoConfigLine)
     [System.IO.File]::WriteAllText($TaskLauncher, $launcherContent, $utf8NoBom)
 }
 

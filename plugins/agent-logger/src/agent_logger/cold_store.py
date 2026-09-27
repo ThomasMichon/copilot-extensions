@@ -159,7 +159,12 @@ def resolve_session(session_id: str, cfg: Config | None = None) -> SessionRef | 
         if ref is not None and _is_safe_ref(ref):
             return ref
     try:
-        cfg = cfg or load_config(include_repo=False)
+        # Repo-local config may declare sync.local_path (schema v3) --
+        # honoring it (the load_config default) is what lets this tier
+        # actually find the synced corpus at the facility's declared
+        # location rather than whatever machine-local path (or absence of
+        # one) predates that declaration.
+        cfg = cfg or load_config()
     except Exception:
         return None
     return _resolve_from_synced_corpus(session_id, cfg.sync_path)
@@ -194,7 +199,11 @@ def query_reviewer_sessions(
     from agent_logger.catalog import ReviewCatalogIndex
 
     try:
-        cfg = cfg or load_config(include_repo=False)
+        # This cfg is also threaded into each resolve_session() call below,
+        # whose synced-corpus tier depends on sync_path resolving repo-local
+        # config (schema v3's sync.local_path) -- see resolve_session's own
+        # comment.
+        cfg = cfg or load_config()
     except Exception:
         return []
     index = ReviewCatalogIndex(cfg.catalog_db_path)
