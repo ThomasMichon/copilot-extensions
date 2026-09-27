@@ -483,7 +483,7 @@ _Pending._
   (`test_idle_headless_fleet_nudge_includes_remote_host` and
   `test_namespaced_peer_from_windowless_parent`).
 
-### 2026-09-27 — Phase 3 partial landing (#PR)
+### 2026-09-27 — Phase 3 partial landing (#4292)
 - Investigated the actual no-CLI reach-back primitives before adding code:
   CodeSpace/container peer launches already propagate `AGENT_DISPATCH_*`
   and shared-coordinator environment into remote venues, a different machine
