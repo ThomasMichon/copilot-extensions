@@ -815,9 +815,9 @@ def resume_steered_owner(
         return False
     machine, separator, worktree = owner.partition("/")
     prompt = message or (
-        f"Task {task_id} received steering while you were working. Resume, run "
-        f"`agent-dispatch steer take {task_id} --all`, re-read the task for any "
-        f"direction or ambient-state changes, and continue."
+        f"Task {task_id} received steering. Resume, run `agent-dispatch steer "
+        f"take {task_id} --all`, re-read the task for any direction or "
+        f"ambient-state changes, and continue."
     )
     if not separator or not machine or not worktree:
         return resume_worker(owner_session_id, prompt, timeout=timeout)

@@ -825,9 +825,9 @@ def register_task_routes(
     @app.post("/tasks/{task_id}/steer")
     def steer(task_id: str, body: SteerBody) -> dict:
         message = body.message or (
-            f"Task {task_id} received steering while you were working. Resume, "
-            f"run `agent-dispatch steer take {task_id} --all`, re-read the task "
-            "for any direction or ambient-state changes, and continue."
+            f"Task {task_id} received steering. Resume, run `agent-dispatch "
+            f"steer take {task_id} --all`, re-read the task for any direction "
+            "or ambient-state changes, and continue."
         )
         task = _guard(
             lambda: queue.submit_steer(
