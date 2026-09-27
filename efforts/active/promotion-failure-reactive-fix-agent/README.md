@@ -2271,7 +2271,35 @@ _Pending._
   lock's own `validate_multi_secret.sh COPILOT_GITHUB_TOKEN` check).
   Recompiled clean; all guards and the full 75-test suite still pass.
   **This resolves the last blocking item from PR #4155's original
-  handoff note.** Still open, unrelated: pinning the `gh-aw` CLI
-  extension binary version itself (distinct from the already-SHA-pinned
-  `github/gh-aw` action references), and Phase 2's remaining bootstrap/
-  prompt-injection-boundary items plus all of Phase 3's guardrails.
+  handoff note.**
+- **Plan/checklist reconciliation pass (2026-09-27, PR #4340):** with the
+  mechanism fully wired, went through the Plan's remaining unchecked
+  items to confirm what was already implemented vs. genuinely still
+  open. Confirmed done: the prompt-injection boundary, all 5 charter
+  sub-items, never-touch-workflow-files, never-auto-merge, and
+  explicitly-out-of-scope (all already present in the compiled prompt/
+  permissions from PR #4155's own work, just not yet reflected in the
+  checklist).
+  **Landed the main-branch bootstrap** (PR #4338, workflow-file-only,
+  targeting `main` directly) — confirmed `ci-failure-fix-attempt.md`/
+  `.lock.yml` are now genuinely live on `main` via `git show`, closing
+  the last item that made the trigger inert in production.
+  **Investigated "cap attempts per signature" and found it's NOT
+  actually resolved** (a real review finding on this PR corrected an
+  initial overclaim): `ci_failure_watchdog.py`'s dedup is scoped to
+  `--state open` only, so a closed tracking issue's signature can
+  re-dispatch on recurrence, AND a genuine TOCTOU race between two
+  concurrent watchdog runs can file/dispatch twice for the same
+  signature — the only guarantee that actually holds is narrower (a
+  sequential recurrence against the same still-open issue is correctly
+  deduped). Left this explicitly open rather than resolved.
+  **Defined the walk-back/expansion criterion:** 10 genuinely
+  agent-authored fix-attempt PRs merged with zero reverts/incidents over
+  at least 4 weeks, before any scope widening is discussed — unmet
+  today (zero live runs so far).
+  Still open after this pass: pinning the `gh-aw` CLI extension binary
+  version itself, the cap-attempts/closed-issue/concurrent-race findings
+  above, and — the biggest remaining gap — **no live end-to-end run has
+  occurred yet**; every Validation Plan item below stays unchecked until
+  a real trigger fires and an actual issue-to-draft-PR execution is
+  observed.
