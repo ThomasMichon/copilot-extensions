@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import replace
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -15,12 +16,21 @@ from worktree_manager.production_picker.picker_tui.engine_helpers import (
     _DEFAULT_HOST_COLS,
     _DEFAULT_TARGET_ENVS,
 )
+from worktree_manager.production_picker.picker_tui.engine_input import (
+    PickerScreenInputMixin,
+)
 from worktree_manager.production_picker.picker_tui.engine_loading import (
     PickerScreenLoadingMixin,
+)
+from worktree_manager.production_picker.picker_tui.engine_pivot_actions import (
+    PickerScreenPivotActionsMixin,
 )
 from worktree_manager.production_picker.picker_tui.engine_runtime import (
     PickerScreenRuntimeMixin,
     _SetupPayload,
+)
+from worktree_manager.production_picker.picker_tui.engine_worktree_actions import (
+    PickerScreenWorktreeActionsMixin,
 )
 
 
@@ -123,6 +133,114 @@ async def _settle_threads(*events: threading.Event) -> None:
             return
         await asyncio.sleep(0.01)
     raise AssertionError("timed out waiting for setup workers to finish")
+
+
+def _wait_for_current_setup_epoch_applied_sync(
+    screen,
+    *,
+    timeout: float = 5.0,
+) -> int:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        current = getattr(screen, "_setup_epoch", 0)
+        if current != 0 and getattr(screen, "_setup_applied_epoch", 0) == current:
+            return current
+        time.sleep(0.01)
+    current = getattr(screen, "_setup_epoch", 0)
+    applied = getattr(screen, "_setup_applied_epoch", 0)
+    raise AssertionError(
+        f"timed out waiting for setup epoch {current} to apply (applied={applied})"
+    )
+
+
+class _ImmediateApp:
+    def call_from_thread(self, fn):
+        fn()
+
+
+class _SetupRaceScreen(
+    PickerScreenInputMixin,
+    PickerScreenPivotActionsMixin,
+    PickerScreenWorktreeActionsMixin,
+    PickerScreenRuntimeMixin,
+):
+    def __init__(self):
+        self.app = _ImmediateApp()
+        self.src = SimpleNamespace(REPO="repo")
+        self._bg_cancel = threading.Event()
+        self._bg_threads = set()
+        self._setup_epoch = 0
+        self._setup_applied_epoch = 0
+        self._setup_failed_epoch = 0
+        self._pending_setup_payloads = {}
+        self._setup_payloads_lock = threading.Lock()
+        self._busy_label = None
+        self.debug = ""
+        self.sel = ("L", 0)
+        self.last_l = 0
+        self.last_pr = 0
+        self.cmd_mode = False
+        self.data = []
+        self.htabs = []
+        self.applied_titles = []
+
+    def default_sel(self):
+        return ("L", 0)
+
+    def stops(self):
+        return [("L", 0)]
+
+    def _prime_setup_reload(self):
+        return None
+
+    def _invalidate_setup_reload_caches(self):
+        return None
+
+    def _apply_setup_payload(self, payload):
+        self.htabs = [item["label"] for item in payload.pivot_payload[1]]
+        self.data = list(payload.data)
+        self.applied_titles.append(payload.data[0]["title"])
+
+    def refresh(self):
+        return None
+
+    def _run_bg(self, label, work, done=None, *, quiet=False):
+        if done is not None:
+            done((True, "done"))
+
+    def _pivot_machine_id(self):
+        return "host"
+
+
+def _install_setup_race(screen, *, first_tag: str, second_tag: str) -> dict[str, object]:
+    first_release = threading.Event()
+    first_started = threading.Event()
+    second_release = threading.Event()
+    first_done = threading.Event()
+    second_done = threading.Event()
+    call_index = 0
+
+    def _collect():
+        nonlocal call_index
+        call = call_index
+        call_index += 1
+        if call == 0:
+            first_started.set()
+            first_release.wait(timeout=5)
+            first_done.set()
+            return _payload(first_tag)
+        second_release.wait(timeout=5)
+        second_done.set()
+        return _payload(second_tag)
+
+    screen._collect_setup_payload = _collect
+    return {
+        "first_release": first_release,
+        "first_started": first_started,
+        "second_release": second_release,
+        "first_done": first_done,
+        "second_done": second_done,
+    }
 
 
 def test_setup_reload_disposes_payload_when_marshal_back_to_ui_fails():
@@ -699,3 +817,160 @@ def test_non_live_mount_eventually_matches_sync_setup_result(
             assert screen._busy_label is None
 
     asyncio.run(run())
+
+
+def test_manual_reload_key_prefers_newer_epoch():
+    screen = _SetupRaceScreen()
+    race = _install_setup_race(screen, first_tag="stale", second_tag="fresh")
+
+    started = time.monotonic()
+    screen._dispatch_key("r")
+    elapsed_first = time.monotonic() - started
+    assert race["first_started"].wait(timeout=5)
+
+    started = time.monotonic()
+    screen._dispatch_key("r")
+    elapsed_second = time.monotonic() - started
+
+    assert elapsed_first < 1.0
+    assert elapsed_second < 1.0
+    assert screen._setup_epoch == 2
+    assert screen._setup_applied_epoch == 0
+    assert screen.sel == ("L", 0)
+    assert screen.debug == "refreshed · reloaded worktrees"
+
+    race["second_release"].set()
+    _wait_for_current_setup_epoch_applied_sync(screen)
+    assert screen.applied_titles == ["fresh"]
+
+    race["first_release"].set()
+    assert race["first_done"].wait(timeout=5)
+    assert race["second_done"].wait(timeout=5)
+    time.sleep(0.05)
+
+    assert screen._setup_epoch == 2
+    assert screen._setup_applied_epoch == 2
+    assert screen.applied_titles == ["fresh"]
+    assert tuple(screen.htabs) == ("fresh Tasks",)
+    assert screen.data[0]["title"] == "fresh"
+
+
+@pytest.mark.parametrize(
+    ("order", "expected_title"),
+    [
+        ("rescan-then-reload", "manual-reload"),
+        ("reload-then-rescan", "config-rescan"),
+    ],
+)
+def test_config_section_rescan_race_prefers_newer_epoch(order, expected_title):
+    screen = _SetupRaceScreen()
+    race = _install_setup_race(
+        screen,
+        first_tag="config-rescan" if order == "rescan-then-reload" else "manual-reload",
+        second_tag=expected_title,
+    )
+    section = SimpleNamespace(label="Config", source="plugin")
+
+    if order == "rescan-then-reload":
+        started = time.monotonic()
+        screen._run_config_section(section)
+        elapsed_first = time.monotonic() - started
+        assert race["first_started"].wait(timeout=5)
+        started = time.monotonic()
+        screen._dispatch_key("r")
+        elapsed_second = time.monotonic() - started
+        assert screen.debug == "refreshed · reloaded worktrees"
+    else:
+        started = time.monotonic()
+        screen._dispatch_key("r")
+        elapsed_first = time.monotonic() - started
+        assert race["first_started"].wait(timeout=5)
+        started = time.monotonic()
+        screen._run_config_section(section)
+        elapsed_second = time.monotonic() - started
+        assert screen.debug == "Config (plugin): done"
+
+    assert elapsed_first < 1.0
+    assert elapsed_second < 1.0
+    assert screen._setup_epoch == 2
+    assert screen._setup_applied_epoch == 0
+    assert screen.sel == ("L", 0)
+
+    race["second_release"].set()
+    _wait_for_current_setup_epoch_applied_sync(screen)
+    assert screen.applied_titles == [expected_title]
+
+    race["first_release"].set()
+    assert race["first_done"].wait(timeout=5)
+    assert race["second_done"].wait(timeout=5)
+    time.sleep(0.05)
+
+    assert screen._setup_epoch == 2
+    assert screen._setup_applied_epoch == 2
+    assert screen.applied_titles == [expected_title]
+    assert tuple(screen.htabs) == (f"{expected_title} Tasks",)
+    assert screen.data[0]["title"] == expected_title
+
+
+@pytest.mark.parametrize(
+    ("order", "expected_title"),
+    [
+        ("rescan-then-reload", "manual-reload"),
+        ("reload-then-rescan", "wt-rescan"),
+    ],
+)
+def test_worktree_action_rescan_race_prefers_newer_epoch(order, expected_title):
+    screen = _SetupRaceScreen()
+    race = _install_setup_race(
+        screen,
+        first_tag="wt-rescan" if order == "rescan-then-reload" else "manual-reload",
+        second_tag=expected_title,
+    )
+    action = SimpleNamespace(label="Action", source="plugin")
+    rec = {
+        "id4": "wt-id",
+        "machine": "host",
+        "env": "Win",
+        "title": "Example worktree",
+        "raw": {"id": "wt-id", "machine": "host"},
+    }
+
+    if order == "rescan-then-reload":
+        started = time.monotonic()
+        screen._run_wt_action(action, rec)
+        elapsed_first = time.monotonic() - started
+        assert race["first_started"].wait(timeout=5)
+        started = time.monotonic()
+        screen._dispatch_key("r")
+        elapsed_second = time.monotonic() - started
+        assert screen.debug == "refreshed · reloaded worktrees"
+    else:
+        started = time.monotonic()
+        screen._dispatch_key("r")
+        elapsed_first = time.monotonic() - started
+        assert race["first_started"].wait(timeout=5)
+        started = time.monotonic()
+        screen._run_wt_action(action, rec)
+        elapsed_second = time.monotonic() - started
+        assert screen.debug == "Action (plugin): done"
+
+    assert elapsed_first < 1.0
+    assert elapsed_second < 1.0
+    assert screen._setup_epoch == 2
+    assert screen._setup_applied_epoch == 0
+    assert screen.sel == ("L", 0)
+
+    race["second_release"].set()
+    _wait_for_current_setup_epoch_applied_sync(screen)
+    assert screen.applied_titles == [expected_title]
+
+    race["first_release"].set()
+    assert race["first_done"].wait(timeout=5)
+    assert race["second_done"].wait(timeout=5)
+    time.sleep(0.05)
+
+    assert screen._setup_epoch == 2
+    assert screen._setup_applied_epoch == 2
+    assert screen.applied_titles == [expected_title]
+    assert tuple(screen.htabs) == (f"{expected_title} Tasks",)
+    assert screen.data[0]["title"] == expected_title

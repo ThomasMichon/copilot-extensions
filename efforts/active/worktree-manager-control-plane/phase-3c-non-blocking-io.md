@@ -7,7 +7,9 @@
 - **Status:** In progress — Steps 1-2 merged 2026-09-26 as
   [#3903](https://github.com/ThomasMichon/copilot-extensions/pull/3903) and
   [#4007](https://github.com/ThomasMichon/copilot-extensions/pull/4007);
-  Steps 3-5 remain open.
+  Step 3 lands in
+  [#4144](https://github.com/ThomasMichon/copilot-extensions/pull/4144);
+  Steps 4-5 remain open.
 - **Governing visions:**
   - [`visions/picker`](../../../visions/picker/README.md):
     §Features/`decision-support-before-cost`, `programmatic-parity`;
@@ -223,8 +225,23 @@ then tightens regression coverage and cleanup.
    - Prove the cold mount path paints before a blocked `_scan_pivot_payload()` /
      `src.load()` completes.
 
-3. **Cut over the remaining three current callers: manual `r` reload and both
-   post-action rescans.**
+[x] **Step 3 — cut over the remaining three current callers: manual `r`
+      reload and both post-action rescans.** Landed in
+      [#4144](https://github.com/ThomasMichon/copilot-extensions/pull/4144):
+      replaced the three remaining render-thread `self.setup()` callers in
+      `engine_input.py`, `engine_pivot_actions.py`, and
+      `engine_worktree_actions.py` with the shared
+      `_start_setup_reload_worker()` epoch launcher, so every UI-triggered
+      setup/reload path now supersedes older work instead of re-entering the
+      synchronous setup hot path inline. Added deterministic Step 3 race
+      coverage in `test_setup_reload_epoch.py` for rapid repeated `r`
+      reloads plus both rescan-vs-manual-reload orderings for config-section
+      completions and contributed worktree actions, asserting only the newer
+      epoch ever applies. Validation: targeted
+      `test_setup_reload_epoch.py` green; full `worktree-manager` suite
+      matched the Windows baseline at `1493 passed, 7 skipped, 13 failed`
+      (unchanged known failures: the same 3 provider-source failures plus 10
+      symlink-privilege failures on this machine).
    - Replace direct `self.setup()` calls in `engine_input.py`,
      `engine_pivot_actions.py`, and `engine_worktree_actions.py` with the same
      epoch-guarded launcher introduced in Step 2.

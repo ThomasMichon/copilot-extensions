@@ -159,7 +159,7 @@ def _legacy_path_items(profile: Path) -> tuple[Path, list[dict[str, str]]]:
             "path": str(Path(os.path.abspath(os.fspath(absolute)))),
         }
         items.append(record)
-        if entry == ".agent-machines":
+        if entry == ".agent-machines":  # marketplace-isolation: allow legacy-compatibility
             legacy_root = Path(record["path"])
     if legacy_root is None:
         ic._fail("payload-invocation.json must declare .agent-machines in legacyFootprint.paths.")
@@ -290,9 +290,8 @@ def _deactivate(arguments: argparse.Namespace) -> dict[str, Any]:
 
 def _legacy_binstub_items(profile: Path) -> tuple[Path, list[dict[str, str]]]:
     legacy_root, items = _legacy_path_items(profile)
-    binstubs = [
-        item for item in items if item["identity"].startswith(".local/bin/agent-machines")
-    ]
+    _prefix = ".local/bin/agent-machines"  # marketplace-isolation: allow legacy-compatibility
+    binstubs = [item for item in items if item["identity"].startswith(_prefix)]
     if not binstubs:
         ic._fail("payload-invocation.json must declare agent-machines global binstubs.")
     return legacy_root, binstubs
