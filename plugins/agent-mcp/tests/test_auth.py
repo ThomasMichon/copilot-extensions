@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 
 from agent_mcp.auth import (
@@ -179,6 +180,53 @@ async def test_entra_injector_falls_back_when_helper_returns_no_token(monkeypatc
 
     inj._source = FakeSource()
     assert await inj.acquire_secret() == "FALLBACK"
+
+
+class _HangingProc:
+    """A fake process whose ``communicate()`` never returns on its own."""
+
+    def __init__(self) -> None:
+        self.returncode: int | None = None
+        self.killed = False
+        self.waited = False
+
+    async def communicate(self):
+        await asyncio.sleep(10)
+        return b"", b""  # pragma: no cover -- cancelled by wait_for before this
+
+    def kill(self):
+        self.killed = True
+        self.returncode = -9
+
+    async def wait(self):
+        self.waited = True
+        return self.returncode
+
+
+async def test_entra_injector_reaps_hung_helper_on_timeout(monkeypatch):
+    proc = _HangingProc()
+    monkeypatch.setattr(
+        "agent_mcp.auth.injectors.shutil.which",
+        lambda name: "/fake/ado-auth-helper" if name == "ado-auth-helper" else None,
+    )
+
+    async def fake_exec(*argv, **kwargs):
+        return proc
+
+    monkeypatch.setattr("agent_mcp.auth.injectors.asyncio.create_subprocess_exec", fake_exec)
+
+    inj = build_injector(_cfg({"kind": "entra", "resource": "res"}))
+    inj._timeout = 0.05
+
+    class FakeSource:
+        async def resolve(self, action, fields, *, timeout=30.0):
+            return "protocol=https\nhost=h\ntoken=FALLBACK\n\n"
+
+    inj._source = FakeSource()
+
+    assert await inj.acquire_secret() == "FALLBACK"
+    assert proc.killed
+    assert proc.waited
 
 
 def test_build_git_credential_derives_host():

@@ -16,7 +16,7 @@ import os
 import shutil
 from urllib.parse import urlsplit
 
-from .._exec import resolve_argv
+from .._exec import no_window_creationflags, resolve_argv
 from ..config import AuthSpec, BridgeConfig
 from .base import AuthInjector, CompositeInjector, NoneInjector, TokenInjector
 
@@ -40,6 +40,17 @@ def parse_response(text: str | None) -> dict[str, str]:
 def _token_from(text: str | None) -> str | None:
     fields = parse_response(text)
     return fields.get("token") or fields.get("password")
+
+
+async def _terminate_proc(proc: asyncio.subprocess.Process | None) -> None:
+    """Kill and reap a child process (no-op if already gone)."""
+    if proc is None or proc.returncode is not None:
+        return
+    try:
+        proc.kill()
+        await proc.wait()
+    except ProcessLookupError:
+        pass
 
 
 class EnvInjector(TokenInjector):
@@ -104,18 +115,23 @@ class EntraInjector(TokenInjector):
         if not scope:
             return None
         argv = resolve_argv([helper, "get-access-token", "--scope", scope])
+        proc: asyncio.subprocess.Process | None = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 *argv,
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                creationflags=no_window_creationflags(),
             )
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(), timeout=self._timeout,
             )
         except (TimeoutError, asyncio.TimeoutError):
             log.error("%s get-access-token timed out (%.0fs)", helper, self._timeout)
+            # wait_for cancelled communicate() but left the child running -- reap
+            # it so a hung helper doesn't leak a process per acquisition/retry.
+            await _terminate_proc(proc)
             return None
         except OSError as exc:
             log.error("%s get-access-token failed to launch: %s", helper, exc)
