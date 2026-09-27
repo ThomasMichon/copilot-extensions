@@ -500,6 +500,43 @@ survey above.
       added a live-`CoalescingServer` dispatch test and a
       dispatch-failure-keeps-the-stale-record test to cover the daemon
       path and the `except Exception: pass` contract explicitly.
+- [x] Migrated the seventh call-site cluster: `register_session` itself —
+      the sessionStart-hook-critical transaction Phase 2's own plan and
+      Phase 3's fourth-cluster design survey both deliberately avoided.
+      Operator-directed (2026-09-27): rather than extracting only the
+      internal `link_handoff` call (one conditional branch inside a
+      single, deeply interdependent transaction — pulling it out alone
+      would split one atomic write into two, a real regression, not a
+      simplification), verb-ified the WHOLE transaction as one atomic
+      `session_register` verb, keeping the atomicity guarantee intact.
+      Landed in PR
+      [#4159](https://github.com/ThomasMichon/copilot-extensions/pull/4159)
+      — 3 review rounds, all correctly focused on this cluster's unique
+      stakes (a sessionStart hook blocks the interactive session, unlike
+      every prior CLI-command cluster):
+      1. **Latency mitigation** (operator-anticipated in the same
+         direction that authorized this cluster): `register_session`'s
+         own dispatch passes `boot_wait_s=0` (never spin-wait for a cold
+         daemon boot -- `ensure_monitor()` still fires the non-blocking
+         spawn, warming the daemon for the NEXT session, but this one
+         falls straight through with no added wait) and a short
+         `_SESSION_REGISTER_REQUEST_DEADLINE_S` (1.5s, vs the module's
+         default 8s) bounding even a reachable-but-stalled daemon.
+      2. **Rolling-upgrade version skew, fixed at the source**
+         (copilot-extensions#3812, previously deferred as narrow/rare for
+         a lower-stakes verb -- now genuinely fixed, since it is far
+         higher-stakes on this hot path): `compute()` now returns
+         `{"unsupported_verb": True}` instead of raising for an
+         unregistered verb (defense-in-depth), but the REAL fix is
+         capability-aware endpoint selection -- `rendezvous_fields()`
+         publishes this process's own registered verb names, and
+         `endpoint_from_rendezvous()`/`write_with_boot()` refuse to even
+         dial an endpoint whose own published capability list doesn't
+         cover the requested verb (including data with no such field at
+         all, i.e. a daemon process that predates the whole concept) --
+         treated identically to "no endpoint found," which safely
+         triggers the normal boot-wait/fallback path instead of a doomed
+         connection attempt.
 - [ ] One call site (or a closely related cluster) at a time, each its own
       reviewable PR, per this repo's serial-single-writer convention —
       across whichever of `tracking.py` / `tracking_claims.py` /
@@ -516,23 +553,18 @@ survey above.
       are embedded in bigger orchestrated flows or hot hook paths, not
       standalone CLI transactions; confirm a call site is genuinely
       self-contained (one dedicated CLI command, one lock, no shared
-      choreography) before wrapping it as a verb. A design survey this
-      session (2026-09-27, no code landed) found NO further standalone
-      candidate in `tracking_session_registry.py` (`register_session`/
-      `deregister_session` remain hot-path-excluded; `seal_worktree_identity`
-      is embedded in `finalize.py`'s own cascade; `record_repo_fetch_confirmed`
-      writes an entirely different file, a shared repo-freshness registry
-      cache, not a per-worktree `WorktreeRecord` YAML — out of this
-      effort's scope) or in `tracking_claims.py` (`load_or_create_anchor_record`
-      is a helper inside a bigger claim-journaling flow, not standalone;
-      the remaining exported functions are all multi-worktree batch
-      operations, already explicitly excluded). The genuinely remaining
-      Phase 3 work is now the three still-deferred EMBEDDED call sites
-      (`terminal_conclusion.py`'s `_save_session_conclusion`,
-      `register_session`'s own internal `link_handoff` call) — each needs
-      fresh design thinking on how to safely peel a verb out of a bigger
-      orchestrated flow without duplicating its surrounding choreography,
-      not a search for more standalone leaves.
+      choreography) before wrapping it as a verb, UNLESS the whole
+      enclosing transaction is verb-ified together (as `register_session`
+      now demonstrates) -- narrower extraction from inside a bigger
+      transaction is the actual hazard, not verb-ifying a hot path per se.
+      Remaining candidates: `deregister_session` (the symmetric
+      session-end hook, same risk class `register_session` was, now with
+      a proven template to follow) and the two still-deferred EMBEDDED
+      call sites (`terminal_conclusion.py`'s `_save_session_conclusion`,
+      one step inside a bigger single-lock cascade with two separate
+      `save_record` calls around it; `register_session`'s own internal
+      `link_handoff` call is now moot -- it moved into the
+      `session_register` verb itself, per the option above).
 
 ### Phase 4 — Sibling-plugin guard + audit _(not started)_
 - [ ] Add the CI guard described above.
@@ -573,6 +605,81 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-09-27 — PR #4159: Phase 3's seventh migrated call-site cluster, register_session itself (the first sessionStart-hook-critical verb)
+After PR #4064 landed and its own design survey found no further
+standalone Phase 3 candidates, reported the finding back to the operator
+as a genuine crossroads: tackle the harder EMBEDDED call sites (needing
+real redesign), or call Phase 3 done at 6 clusters and move to Phase 4.
+The operator's actual direction reframed the problem instead of choosing
+between those two options: rather than extracting only `register_session`'s
+internal `link_handoff` call (the embedded fragment this effort's own
+guidance had been avoiding), verb-ify the WHOLE `register_session`
+transaction as one atomic unit -- since agent-worktrees is meant to fully
+own this transaction anyway, and splitting one atomic write into two
+(the narrower extraction) doesn't reduce risk, it *adds* a real one.
+
+New `tracking_session_registration_write.py`: `apply_session_register`
+mirrors the former `register_session` transaction exactly -- every
+branch, in the same order, under the same single `_RecordLock` -- so
+behavior is unchanged; only the wire shape differs. The extensive
+existing `register_session` test suites (743 tests across 10 files) pass
+unchanged through the new dispatch path, proving branch-for-branch parity.
+
+The operator also flagged, unprompted, the exact risk this cluster
+uniquely carries: "we have to watch out for end-to-end time which
+includes venv boot and daemon connection" -- a sessionStart hook runs
+synchronously in the path of every session launch, unlike every prior
+cluster's explicit CLI command. `register_session`'s own dispatch call
+passes `boot_wait_s=0` (never spin-wait for a cold daemon boot) from the
+first commit, anticipating exactly the review round that followed.
+
+GitHub's Copilot code review then found two further gaps this cluster's
+stakes make unignorable, both of which had lower priority as long as
+verb dispatch was reserved for explicit CLI commands:
+
+1. **Reachable-but-stalled latency**: `boot_wait_s=0` only bounds the
+   cold-boot case; a reachable-but-stalled daemon would still block for
+   the module's default 8s `REQUEST_DEADLINE_S` (~9s including the
+   socket timeout). Fixed with `_SESSION_REGISTER_REQUEST_DEADLINE_S`
+   (1.5s) -- this verb's own work is simple file I/O expected to complete
+   in milliseconds on a healthy daemon.
+2. **Rolling-upgrade version skew** (copilot-extensions#3812, filed and
+   *deliberately deferred* back in PR #3807 for `status_disposition_write`
+   as "narrow, real-but-rare... not fixed inline... deserves its own
+   focused design"): fixed for real this time, since the stakes on this
+   hot path make the same deferral irresponsible. First attempt
+   (`compute()` returns `{"unsupported_verb": True}` instead of raising)
+   was correctly found incomplete by a second review round: it only
+   protects once BOTH sides already run the fix, never a daemon process
+   that predates it entirely. The real fix: `rendezvous_fields()` now
+   publishes this process's own registered verb names
+   (`tracking_write_verbs`), and `endpoint_from_rendezvous()`/
+   `write_with_boot()` refuse to dial an endpoint whose own published
+   capability list doesn't cover the requested verb -- including data
+   with no such field at all -- treating it identically to "no endpoint
+   found," which safely triggers the boot-wait/fallback path (and prompts
+   a fresh daemon spawn via `ensure_monitor()`) instead of a doomed
+   connection. This closes #3812 for every future verb, not just this
+   one, going forward from whenever a daemon process first runs this fix.
+   The `unsupported_verb` marker stays as defense-in-depth for the
+   residual read-then-connect race (the daemon could restart in between).
+
+Third review round found nothing new -- confirmed via `git show` against
+each finding's own line before resolving. Full `plugins/agent-worktrees`
+suite throughout: 5697 passed, 26 skipped, 1 failed, 1 error -- the same
+2 pre-existing/environment-dependent failures this effort's Journal has
+noted every round.
+
+**Lesson for `deregister_session`** (the symmetric session-end hook, the
+next natural candidate now that `register_session` has a proven
+template): expect the identical review focus -- latency bounds AND
+rolling-upgrade safety are now a checklist for ANY sessionStart/
+sessionEnd-hook verb, not something to rediscover per cluster. The
+capability-aware endpoint selection landed here protects it automatically
+(it's in `tracking_write.py` itself), but the `boot_wait_s=0` +
+short-deadline pattern is call-site-specific and must be repeated
+deliberately.
 
 ### 2026-09-27 — PR #4064: Phase 3's sixth migrated call-site cluster, finalize.py's own-session claim settlement; design survey found no further standalone candidates
 Migrated `finalize.py`'s `_settle_current_session_claim` onto the shared
