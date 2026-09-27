@@ -631,7 +631,11 @@ def test_card_and_steer_roundtrip_over_http(api, monkeypatch):
     _wait_for_wake_status(api, tid, "delivered")
     assert len(wake_calls) == 1
     assert wake_calls[0][:2] == ("w1", tid)
+    assert wake_calls[0][2].startswith(
+        f"Task {tid} received steering while you were working."
+    )
     assert f"steer take {tid}" in wake_calls[0][2]
+    assert "re-read the task for any direction or ambient-state changes" in wake_calls[0][2]
     [wake] = api.get(f"/tasks/{tid}/wakes").json()
     assert wake["status"] == "delivered"
     assert wake["attempts"] == 1
