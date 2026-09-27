@@ -178,6 +178,18 @@ jobs:
         run: python tools/check-no-agent-machines-packages.py
       - name: No agent-machines consuming-side packages guard tests
         run: python -m pytest -q tools/test_check_no_agent_machines_packages.py
+      - name: No sibling plugin writes tracking YAML directly
+        # agent-worktrees-authoritative-daemon effort, Phase 4: only
+        # agent-worktrees itself may mutate a worktree's tracking record --
+        # a sibling agent-* plugin importing one of its write functions
+        # directly would bypass the resident daemon's own lock/cache/verb
+        # machinery, reintroducing the cross-process atomicity hazard that
+        # effort exists to close. See the guard's own docstring for scope
+        # (sibling PLUGINS only; worktree-manager's own known, separately-
+        # tracked exception is documented there, not silently exempted).
+        run: python tools/check-no-sibling-tracking-writes.py
+      - name: No sibling tracking-writes guard tests
+        run: python -m pytest -q tools/test_check_no_sibling_tracking_writes.py
       - name: Module health watchdog tests
         run: python -m pytest -q tools/test_module_health_watchdog.py
       - name: CI failure watchdog tests

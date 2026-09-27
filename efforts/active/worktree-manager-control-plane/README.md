@@ -503,6 +503,23 @@ PR [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
       regression guard that production Picker code no longer imports
       `agent_worktrees` in-process. See
       [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
+      **Cross-linked 2026-09-27** (`agent-worktrees-authoritative-daemon`
+      effort, Phase 4): Step 5's batched verb should register against that
+      effort's `tracking_write.py` verb registry
+      (`register_verb`/`dispatch`/`write_with_boot`, plus capability-aware
+      endpoint selection and the `AmbiguousWriteOutcome` contract) rather
+      than inventing a second wire shape. That effort's own Phase 4 also
+      documents this call site's CURRENT direct in-process
+      `tracking.stamp_bound_live`/`stamp_mux_live`/`stamp_session_state`
+      usage (`data_local.py`, via `_engine_runtime.py`) as a KNOWN,
+      deliberately-out-of-scope exception to its sibling-plugin write guard
+      (`tools/check-no-sibling-tracking-writes.py`) -- Step 6/7 above
+      should REMOVE this direct call site entirely once the batched verb
+      lands, not add it to that guard's protected surface; that guard also
+      deliberately scans only `plugins/*` (`worktree-manager/` sits
+      outside it entirely). Any future decision to widen the guard's scope
+      to cover `worktree-manager/` too is separate from this migration and
+      would need its own coordination.
 
 ### Phase 3e — Relocate terminal-profile handling out of agent-worktrees (Done — #3390)
 

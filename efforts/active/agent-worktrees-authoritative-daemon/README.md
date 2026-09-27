@@ -631,8 +631,31 @@ survey above.
       universal at `_save_record_unlocked` regardless of which caller
       reaches it, verb-mediated or still-direct.
 
-### Phase 4 — Sibling-plugin guard + audit _(not started)_
-- [ ] Add the CI guard described above.
+### Phase 4 — Sibling-plugin guard + audit _(in progress)_
+- [x] Add the CI guard described above:
+      `tools/check-no-sibling-tracking-writes.py` (mirrors
+      `check-no-agent-machines-packages.py`'s structural-invariant style),
+      an AST-based scan of every `plugins/*` sibling plugin (excluding
+      `agent-worktrees` itself) for a direct import/call of a
+      hand-curated, commented denylist of every tracking-record WRITE
+      function across `tracking.py` / `tracking_lifecycle.py` /
+      `tracking_claims.py` / `tracking_session_registry.py` (27 functions).
+      Wired into CI alongside `test_check_no_sibling_tracking_writes.py`
+      (8 tests: clean tree, read-only-accessor non-flagging, three import
+      shapes, an aliased-module-import evasion case, the owning-plugin
+      exemption, and a live-repo smoke test). **Scoped to sibling
+      `plugins/*` only** (matching this effort's own original survey and
+      Plan wording) -- deliberately does NOT cover `worktree-manager/` (a
+      separate, non-plugin, out-of-plugin control-plane app), which
+      already imports several of these same write functions directly
+      today via its own in-process `_engine_runtime` bridge
+      (`stamp_bound_live`/`stamp_mux_live`/`stamp_session_state` in
+      `production_picker/picker_tui/data_local.py`) -- a KNOWN,
+      already-tracked gap (see `efforts/active/worktree-manager-control-
+      plane/README.md` Phase 3d's own "Design the `data_local.py` hot
+      path" TODO, explicitly sequenced after that effort's Phase 3c), not
+      an oversight this guard should silently flag or fold in without that
+      separate effort's own coordination.
 - [ ] Re-run the cross-plugin survey from this effort's Context to confirm
       it still finds zero direct writers, now backed by an enforced check
       instead of only a point-in-time grep.
@@ -670,6 +693,73 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-09-27 — Phase 4 CI guard landed; process-consolidation cross-link confirmed with worktree-manager-control-plane
+Operator directed continuing this effort "as you go" while explicitly
+checking alignment with process consolidation -- reducing rogue process
+spawns from `launch_session`, the mux monitor's status sweep, and Worktree
+Manager reads/refreshes/writes. A live-host process census
+(`status-monitor`, `mux-daemon`) found both resident singletons healthy
+(exactly one of each, no duplicates) -- the accelerator effort's
+single-instance lease is holding as designed; no rogue spawn observed
+right now.
+
+Investigating the three named sources traced each to an already-tracked,
+in-progress owner, none of them this effort:
+- `launch_session` (`worktree-manager/bin/launch-session.{sh,ps1}`) and the
+  mux monitor's own sweep are `worktree-manager-control-plane`'s Phase 3b
+  (Mux status-monitor consolidation -- Done) and Phase 3d's still-open
+  "design the `runner.py` process-lifecycle call sites" TODO
+  (`reap_orphan_mux_sessions`/`_sweep_finished_sessions_on_cadence`/etc.).
+- Worktree Manager's own reads/refreshes/writes is that same effort's
+  Phase 3d "design the `data_local.py` hot path" TODO -- its Picker's
+  refresh loop (`tracking.list_records`/`stamp_bound_live`/`stamp_mux_live`/
+  `stamp_session_state`) already runs in-process today (an in-process
+  import of agent-worktrees' own `tracking.py` via `_engine_runtime.py`,
+  not yet even a subprocess), and that TODO explicitly names "one new
+  atomic, batched `--json` verb (read + reconcile + stamp in a single
+  agent-worktrees-owned call)" as its own prerequisite, sequenced after
+  that effort's Phase 3c. This effort's `tracking_write.py` verb registry
+  (dispatch/`AmbiguousWriteOutcome`/capability-aware endpoint selection) is
+  exactly the substrate that future batched verb will need -- direct,
+  concrete alignment, not incidental.
+
+This also surfaced a real, previously-unsurveyed gap this effort's own
+Context section's cross-plugin survey (2026-09-26) did not cover: that
+survey scoped to `agent-*` PLUGINS only and found zero direct writers, but
+`worktree-manager/` (a separate, non-plugin, out-of-plugin control-plane
+app) already calls `tracking.stamp_bound_live`/`stamp_mux_live`/
+`stamp_session_state` directly today via its own in-process bridge --
+exactly the write-surface exposure this effort's `no-writer-bypasses-the-
+daemon` behavior means to close, just not yet caught because it isn't a
+"plugin." Confirmed this is a KNOWN gap (Phase 3d's own TODO already
+names it and gates its resolution behind that effort's own Phase 3c), not
+a new incident -- filing a duplicate fix here would fork ownership of one
+call site across two efforts. Cross-linked instead: this effort's Phase 4
+now explicitly documents the gap and points at Phase 3d/3c rather than
+silently missing it or unilaterally rewriting a hot path another effort
+already has an ordered plan for.
+
+Landed the Phase 4 CI guard proper: `tools/check-no-sibling-tracking-
+writes.py`, an AST-based scan of every sibling `plugins/*` (excluding
+`agent-worktrees` itself) for a direct import/call of a hand-curated,
+27-function denylist covering every tracking-record write function across
+`tracking.py`/`tracking_lifecycle.py`/`tracking_claims.py`/
+`tracking_session_registry.py` -- derived by AST-walking each module for
+functions whose body calls `save_record`/`_save_record_unlocked`/the async
+stamp queue, then hand-verified against the remainder. Scoped deliberately
+to sibling PLUGINS only, matching this effort's own original survey/Plan
+wording -- NOT extended to cover `worktree-manager/`'s own already-tracked
+exception (see above), since that scope decision belongs to a
+coordinated cross-effort call, not something to fold in unilaterally here.
+8 new tests (`test_check_no_sibling_tracking_writes.py`): a clean tree, the
+sanctioned read-only accessors staying unflagged, three distinct
+import/call shapes (module attribute call, direct `from agent_worktrees
+import <fn>`, `from agent_worktrees.tracking_claims import <fn>`), an
+aliased-module-import evasion case, the owning-plugin's own exemption, and
+a live-repo smoke test (confirmed clean: zero violations today, matching
+the original survey's own finding). Wired into `.github/workflows/ci.yml`
+alongside the existing `check-no-agent-machines-packages.py` guard.
 
 ### 2026-09-27 — PR #4265: daemon writes push straight into record_cache -- the read-consistency companion to Phase 3's write migration, plus two real bugs review caught
 Operator redirected scope mid-session, away from an initially-discussed
