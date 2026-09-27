@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** isolated worktree branch for the reviewed plan PR; follow-on implementation slices via PRs
 - **Created:** 2026-09-26
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** Below altitude relative to the standing publication-safety / public-artifact-hygiene intent; this effort closes a known enforcement gap in existing tooling. _(agent-recommended)_
 - **Umbrella issue:** #3923
 
@@ -106,14 +106,14 @@ comment spam.
 
 ### Phase 1 - Extend the local guard for CI artifact output
 
-- [ ] Refactor `tools/check-no-internal-identifiers.py` so the existing scan
+- [x] Refactor `tools/check-no-internal-identifiers.py` so the existing scan
   logic can power both the local guard path and the CI path without duplicating
   matching behavior.
-- [ ] Add structured findings output (for example `--json-out <path>`) carrying
+- [x] Add structured findings output (for example `--json-out <path>`) carrying
   the location data the trusted workflow needs.
-- [ ] Add a `token|reason` loader for secret-backed CI inputs while preserving
+- [x] Add a `token|reason` loader for secret-backed CI inputs while preserving
   the existing local single-identifier convention and private config path.
-- [ ] Keep CI-mode stdout/log output count-only so matched values never appear
+- [x] Keep CI-mode stdout/log output count-only so matched values never appear
   in workflow logs.
 
 ### Phase 2 - Add the untrusted pull-request scan and required-check registration
@@ -178,3 +178,12 @@ _Pending._
 ### 2026-09-26 - Kickoff
 - Effort created to capture the settled fork-safe CI backstop design before any
   workflow or scanner implementation begins.
+
+### 2026-09-26 - Phase 1 shipped
+- PR TBD extends `tools/check-no-internal-identifiers.py` with reusable scan
+  helpers, `--json-out`, and `--ci`, plus secret-backed
+  `COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI` parsing for `token|reason` entries
+  without emitting raw tokens or reasons in CI-mode stdout/JSON artifacts.
+- Test coverage now exercises legacy default output behavior, merged identifier
+  loading, JSON artifact redaction, CI-mode count-only output, and first-match
+  column tracking.

@@ -8,7 +8,9 @@ A denylist that *named* those strings would itself leak them, so the list is
 
   1. env ``COPILOT_EXTENSIONS_FORBIDDEN_IDS`` (comma-separated), and
   2. ``~/.agent-codespaces/forbidden-identifiers.txt`` (one per line; blank
-     lines and ``#`` comments ignored).
+     lines and ``#`` comments ignored), and
+  3. env ``COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI`` (newline- or ``;``-separated
+     ``token|reason`` entries for CI/trusted-workflow use).
 
 With neither configured (a fresh clone / CI) there is nothing to enforce and
 the check is a no-op (exit 0) -- so it is safe to ship in the public repo. On
@@ -35,13 +37,17 @@ The same two private sources drive the agent-codespaces scaffold guard
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 HOME_LIST = Path.home() / ".agent-codespaces" / "forbidden-identifiers.txt"
+CI_LIST_ENV = "COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI"
 
 # Files this guard must not flag for merely *implementing* the mechanism.
 SELF = {
@@ -64,6 +70,15 @@ ALLOW: dict[str, tuple[str, ...]] = {
 }
 
 
+@dataclass(frozen=True)
+class Violation:
+    path: str
+    line: int
+    col: int
+    identifier: str
+    reason: str | None = None
+
+
 def _allowed(ident: str, rel: str) -> bool:
     """True when *ident* is an allowlisted product/generic term in *rel*."""
     prefixes = ALLOW.get(ident.lower())
@@ -73,7 +88,22 @@ def _allowed(ident: str, rel: str) -> bool:
     return any(low.startswith(p) for p in prefixes)
 
 
-def _load_identifiers() -> list[str]:
+def _load_ci_identifiers(raw: str) -> list[tuple[str, str | None]]:
+    pairs: list[tuple[str, str | None]] = []
+    for chunk in raw.replace(";", "\n").splitlines():
+        entry = chunk.strip()
+        if not entry:
+            continue
+        token, sep, reason = entry.partition("|")
+        low = token.strip().lower()
+        if not low:
+            continue
+        parsed_reason = reason.strip() if sep and reason.strip() else None
+        pairs.append((low, parsed_reason))
+    return pairs
+
+
+def _load_identifier_data() -> tuple[list[str], dict[str, str | None]]:
     ids: list[str] = []
     env = os.environ.get("COPILOT_EXTENSIONS_FORBIDDEN_IDS", "")
     ids += [s for s in (part.strip() for part in env.split(",")) if s]
@@ -84,13 +114,22 @@ def _load_identifiers() -> list[str]:
                 ids.append(line)
     except OSError:
         pass
+    ci_reasons: dict[str, str | None] = {}
+    for ident, reason in _load_ci_identifiers(os.environ.get(CI_LIST_ENV, "")):
+        ids.append(ident)
+        ci_reasons.setdefault(ident, reason)
     # De-dupe, drop empties, lowercase for case-insensitive matching.
     seen: dict[str, None] = {}
     for i in ids:
         low = i.lower()
         if low:
             seen.setdefault(low, None)
-    return list(seen)
+    return list(seen), ci_reasons
+
+
+def _load_identifiers() -> list[str]:
+    identifiers, _ = _load_identifier_data()
+    return identifiers
 
 
 def _tracked_files() -> list[str]:
@@ -148,6 +187,57 @@ def _files_to_scan(scan_all: bool, base: str) -> list[str]:
     return changed
 
 
+def _scan(files: list[str], identifiers: list[str], reasons: dict[str, str | None]) -> list[Violation]:
+    violations: list[Violation] = []
+    for rel in files:
+        if rel in SELF:
+            continue
+        path = REPO / rel
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        lower = text.lower()
+        if not any(ident in lower for ident in identifiers if not _allowed(ident, rel)):
+            continue
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            ll = line.lower()
+            for ident in identifiers:
+                if _allowed(ident, rel):
+                    continue
+                col = ll.find(ident)
+                if col == -1:
+                    continue
+                violations.append(
+                    Violation(
+                        path=rel,
+                        line=lineno,
+                        col=col + 1,
+                        identifier=ident,
+                        reason=reasons.get(ident),
+                    )
+                )
+    return violations
+
+
+def _identifier_hash(identifier: str) -> str:
+    return hashlib.sha256(identifier.lower().encode("utf-8")).hexdigest()
+
+
+def _write_json(path: Path, violations: list[Violation]) -> None:
+    payload = [
+        {
+            "file": violation.path,
+            "line": violation.line,
+            "col": violation.col,
+            "identifier_hash": _identifier_hash(violation.identifier),
+            "has_reason": violation.reason is not None,
+        }
+        for violation in violations
+    ]
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Fail if a forbidden internal identifier appears in the "
@@ -165,42 +255,47 @@ def main(argv: list[str] | None = None) -> int:
         help=f"Base ref for the push-diff scope (default {DEFAULT_BASE!r}; "
         "override via COPILOT_EXTENSIONS_GUARD_BASE).",
     )
+    parser.add_argument(
+        "--json-out",
+        metavar="PATH",
+        help="Write structured findings JSON to PATH.",
+    )
+    parser.add_argument(
+        "--ci",
+        action="store_true",
+        help="Suppress per-finding stdout and print only a count summary.",
+    )
     args = parser.parse_args(argv)
 
-    identifiers = _load_identifiers()
+    identifiers, reasons = _load_identifier_data()
     if not identifiers:
         print(
             "no forbidden identifiers configured "
             "(set COPILOT_EXTENSIONS_FORBIDDEN_IDS or write "
             "~/.agent-codespaces/forbidden-identifiers.txt) -- skipping.",
         )
+        if args.json_out:
+            _write_json(Path(args.json_out), [])
         return 0
 
-    violations: list[str] = []
-    for rel in _files_to_scan(args.all, args.base):
-        if rel in SELF:
-            continue
-        path = REPO / rel
-        try:
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            continue  # binary, deleted, or unreadable -- skip
-        lower = text.lower()
-        if not any(ident in lower for ident in identifiers
-                   if not _allowed(ident, rel)):
-            continue
-        for lineno, line in enumerate(text.splitlines(), start=1):
-            ll = line.lower()
-            for ident in identifiers:
-                if ident in ll and not _allowed(ident, rel):
-                    violations.append(f"{rel}:{lineno}: forbidden identifier "
-                                      f"'{ident}'")
+    violations = _scan(_files_to_scan(args.all, args.base), identifiers, reasons)
+    if args.json_out:
+        _write_json(Path(args.json_out), violations)
 
     if violations:
-        print("Internal-identifier guard FAILED -- remove these before pushing:")
-        for v in violations:
-            print(f"  {v}")
-        print(f"\n{len(violations)} occurrence(s) in the scanned files.")
+        if args.ci:
+            print(
+                f"{len(violations)} forbidden identifier(s) found -- "
+                "see PR review comments for details."
+            )
+        else:
+            print("Internal-identifier guard FAILED -- remove these before pushing:")
+            for violation in violations:
+                print(
+                    f"  {violation.path}:{violation.line}: forbidden identifier "
+                    f"'{violation.identifier}'"
+                )
+            print(f"\n{len(violations)} occurrence(s) in the scanned files.")
         return 1
 
     print(f"Internal-identifier guard OK ({len(identifiers)} identifier(s) checked).")
