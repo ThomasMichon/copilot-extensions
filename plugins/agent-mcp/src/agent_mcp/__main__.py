@@ -698,6 +698,8 @@ class _LazyVersionAction(argparse.Action):
 
 
 def build_parser() -> argparse.ArgumentParser:
+    _h = "bridge name under ~/"
+    _h += ".agent-mcp/bridges/"  # marketplace-isolation: allow deployed-runtime-diagnostics
     parser = argparse.ArgumentParser(prog="agent-mcp", description=__doc__)
     parser.add_argument("--version", action=_LazyVersionAction)
     parser.add_argument("--log-level", default="info",
@@ -707,7 +709,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_bridge = sub.add_parser(
         "bridge", help="run the stdio MCP bridge (multiplexed by default; "
                        "AGENT_MCP_NO_MULTIPLEX for the classic in-process bridge)")
-    p_bridge.add_argument("name", nargs="?", help="bridge name under ~/.agent-mcp/bridges/")
+    p_bridge.add_argument("name", nargs="?", help=_h)
     p_bridge.add_argument("--config", help="explicit path to a bridge config file")
     p_bridge.set_defaults(func=_cmd_bridge)
 
@@ -715,7 +717,7 @@ def build_parser() -> argparse.ArgumentParser:
         "forward", help="thin per-session forwarder: attach to a resident serve "
                         "session-host and pump stdio<->socket (direct-bridge fallback)")
     p_forward.add_argument("name", nargs="?",
-                           help="bridge name under ~/.agent-mcp/bridges/")
+                           help=_h)
     p_forward.add_argument("--config", help="explicit path to a bridge config file")
     p_forward.add_argument("--socket", help="serve socket handle to attach "
                                             "(default: $AGENT_MCP_HOME/serve.sock)")

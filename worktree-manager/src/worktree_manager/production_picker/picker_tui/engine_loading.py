@@ -21,13 +21,12 @@ _CONFIG_CACHE_TTL_SECS = 60.0
 
 class PickerScreenLoadingMixin:
     def on_mount(self):
-        if self.live:
-            # Chrome first: paint built-in tabs + empty lists, then run the
-            # roster/pivot/worktree fill off the UI thread.
-            self._setup_skeleton()
-        else:
-            self.setup()
+        # Chrome first in every mode: paint built-in tabs + empty lists, then
+        # let the real roster/pivot/worktree load happen off the UI thread.
+        self._setup_skeleton()
         self._finish_mount()
+        if not self.live:
+            self._start_setup_reload_worker()
         # Record the completed first refresh in every Picker mode. Live data
         # startup also waits for this boundary so it cannot contend with paint.
         self.call_after_refresh(self._after_first_refresh)

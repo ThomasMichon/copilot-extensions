@@ -180,6 +180,80 @@ def test_settle_current_session_claim_no_record_is_noop(tmp_tracking_dir: Path):
     assert result_ref is None
 
 
+def test_settle_current_session_claim_reaches_a_live_daemon(
+    tmp_tracking_dir: Path, monkeypatch_config, monkeypatch,
+):
+    """End-to-end: proves ``_settle_current_session_claim`` reaches the
+    ``claim_settle`` verb via an actual ``CoalescingServer`` (the
+    two-process-shaped path real production traffic will use), not just
+    the direct in-process fallback the rest of this file's autouse fixture
+    otherwise forces (2026-09-27 PR #4064 review finding)."""
+    from agent_worktrees import locks as _locks
+    from agent_worktrees import status_monitor_runtime as _smr
+    from agent_worktrees import tracking_write
+
+    ref = "m/p/wt-settle-daemon#sess-1"
+    rec = _tracking_record(
+        tmp_tracking_dir,
+        worktree_id="wt-settle-daemon",
+        resources=[ResourceClaim(kind="session", ref=ref, state="active")],
+    )
+    yaml_path = tmp_tracking_dir / "wt-settle-daemon.yaml"
+
+    server = tracking_write.start_server(tracking_write.compute)
+    server.start()
+    try:
+        lock_data = tracking_write.rendezvous_fields(server)
+        monkeypatch.setattr(_locks, "read_lock", lambda path: lock_data)
+        monkeypatch.setattr(_smr, "_status_monitor_enabled", lambda: False)
+
+        result_record, result_ref = _settle_current_session_claim(
+            yaml_path, rec, "sess-1",
+        )
+    finally:
+        server.close()
+
+    assert result_ref == ref
+    claim = next(c for c in result_record.resources if c.ref == ref)
+    assert claim.state == "at-rest"
+    on_disk = tracking.load_record(yaml_path)
+    assert on_disk.resources[0].state == "at-rest"
+
+
+def test_settle_current_session_claim_keeps_stale_record_on_dispatch_failure(
+    tmp_tracking_dir: Path, monkeypatch_config, monkeypatch,
+):
+    """When the dispatch itself raises (unreachable daemon AND a broken
+    in-process fallback, or any other exception), ``record`` must come
+    back exactly as passed in -- never a partially-applied or reloaded
+    snapshot -- matching the pre-migration transaction's own
+    ``except Exception: pass`` contract (2026-09-27 PR #4064 review
+    finding)."""
+    from agent_worktrees import tracking_write
+
+    ref = "m/p/wt-settle-fail#sess-1"
+    rec = _tracking_record(
+        tmp_tracking_dir,
+        worktree_id="wt-settle-fail",
+        resources=[ResourceClaim(kind="session", ref=ref, state="active")],
+    )
+    yaml_path = tmp_tracking_dir / "wt-settle-fail.yaml"
+
+    def _boom(*_args, **_kwargs):
+        raise tracking_write.AmbiguousWriteOutcome("simulated")
+
+    monkeypatch.setattr(tracking_write, "dispatch", _boom)
+
+    result_record, result_ref = _settle_current_session_claim(
+        yaml_path, rec, "sess-1",
+    )
+
+    assert result_ref == ref
+    assert result_record is rec
+    claim = next(c for c in result_record.resources if c.ref == ref)
+    assert claim.state == "active"
+
+
 def test_off_mode_cannot_bypass_creator_ownership(monkeypatch):
     _gate(monkeypatch, "off")
     rec = _record("active")

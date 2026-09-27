@@ -4,9 +4,10 @@
 - **Scope of this doc:** the ordered implementation plan for making the
   Picker's remaining I/O-touching setup/reload path consistently non-blocking,
   plus landed-step notes as each ordered slice merges.
-- **Status:** In progress — Step 1 merged 2026-09-26 as
-  [#3903](https://github.com/ThomasMichon/copilot-extensions/pull/3903);
-  Steps 2-5 remain open.
+- **Status:** In progress — Steps 1-2 merged 2026-09-26 as
+  [#3903](https://github.com/ThomasMichon/copilot-extensions/pull/3903) and
+  [#4007](https://github.com/ThomasMichon/copilot-extensions/pull/4007);
+  Steps 3-5 remain open.
 - **Governing visions:**
   - [`visions/picker`](../../../visions/picker/README.md):
     §Features/`decision-support-before-cost`, `programmatic-parity`;
@@ -193,7 +194,28 @@ then tightens regression coverage and cleanup.
    - No behavior change: the four callers still use the current synchronous
      path in this PR.
 
-2. **Cut over the initial non-live mount to the new primitive.**
+[x] **Step 2 — cut over the initial non-live mount to the new primitive.**
+      Landed in
+      [#4007](https://github.com/ThomasMichon/copilot-extensions/pull/4007):
+      `engine_loading.on_mount()` now paints the existing `_setup_skeleton()`
+      placeholder in non-live mode and immediately launches the Step 1
+      epoch-guarded `_start_setup_reload_worker()` off-thread instead of
+      calling synchronous `setup()`. `_after_first_refresh()` and the live
+      `_setup_live_async()` / `_setup_live_pivots()` path stay structurally
+      unchanged aside from shared "wait for async mount readiness" helpers in
+      capture/TUI tests. `_apply_setup_payload()` now clears the initial
+      loading footer/debug state once the async mount result applies, so the
+      eventual screen matches the old synchronous mount output instead of
+      staying stuck on "loading". Scope discipline was re-verified before
+      merge: the only production call-site cut over in this step is
+      `engine_loading.on_mount`; `engine_input.py`, `engine_pivot_actions.py`,
+      and `engine_worktree_actions.py` still call synchronous `setup()` and
+      remain Step 3 work. Validation: targeted
+      `test_setup_reload_epoch.py` + `test_picker_first_paint.py` green; full
+      `worktree-manager` suite matched the updated Windows baseline at
+      `1478 passed, 7 skipped, 13 failed` (unchanged known failures: the same
+      3 unrelated provider-source failures plus 10 symlink-privilege failures
+      on this machine).
    - Replace `on_mount`'s `self.setup()` call with an immediate skeleton/setup
      launcher that schedules the real payload collection off-thread.
    - Keep the already-good live path (`_setup_skeleton()` /
