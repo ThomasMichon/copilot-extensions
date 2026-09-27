@@ -740,11 +740,17 @@ claiming discipline alone.
   it supersedes any older worker), discarded live payloads cancel their
   unowned `LiveLoader` before returning, and the supersession tests now
   serialize the first worker's start before launching the second so the
-  contract is deterministic instead of scheduler-dependent. Validation:
+  contract is deterministic instead of scheduler-dependent. A later review
+  round found one more real teardown race: a live setup payload whose
+  callback had already been marshalled to the UI thread could still leak its
+  `LiveLoader` if the picker unmounted before that callback ever ran, so the
+  final tree now tracks pending setup payloads explicitly, disposes them from
+  `on_unmount`, and covers both the marshal-failed and callback-dropped
+  disposal paths in the new test file. Validation:
   targeted
   `tests/production_picker/test_setup_reload_epoch.py` +
   `test_picker_first_paint.py` green; full `worktree-manager` suite matched
-  the machine's known baseline at `1469 passed, 7 skipped, 13 failed`
+  the machine's known baseline at `1470 passed, 7 skipped, 13 failed`
   (unchanged: 3 unrelated `test_data_ssh_sources.py` failures plus 10
   Windows symlink-privilege failures).
 

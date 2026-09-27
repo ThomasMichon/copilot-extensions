@@ -316,6 +316,23 @@ class PickerScreenRuntimeMixin:
             except Exception:
                 pass
 
+    def _track_setup_payload(self, epoch: int, payload: _SetupPayload | None) -> None:
+        if payload is None:
+            return
+        with self._setup_payloads_lock:
+            self._pending_setup_payloads[epoch] = payload
+
+    def _release_setup_payload(self, epoch: int) -> _SetupPayload | None:
+        with self._setup_payloads_lock:
+            return self._pending_setup_payloads.pop(epoch, None)
+
+    def _dispose_pending_setup_payloads(self) -> None:
+        with self._setup_payloads_lock:
+            pending = list(self._pending_setup_payloads.values())
+            self._pending_setup_payloads.clear()
+        for payload in pending:
+            self._dispose_setup_payload(payload)
+
     def _collect_setup_payload(self) -> _SetupPayload:
         """Collect the synchronous setup/reload inputs with no widget mutation."""
         loader = None
@@ -535,30 +552,33 @@ class PickerScreenRuntimeMixin:
                 payload = self._collect_setup_payload()
             except Exception as exc:
                 err = exc
+            self._track_setup_payload(epoch, payload)
             if cancel.is_set() or epoch != self._setup_epoch:
-                self._dispose_setup_payload(payload)
+                self._dispose_setup_payload(self._release_setup_payload(epoch))
                 return
 
             def _apply():
                 if cancel.is_set() or epoch != self._setup_epoch:
-                    self._dispose_setup_payload(payload)
+                    self._dispose_setup_payload(self._release_setup_payload(epoch))
                     return
                 if err is not None:
+                    self._dispose_setup_payload(self._release_setup_payload(epoch))
                     self._apply_setup_failure(epoch, err)
                     self.refresh()
                     return
+                payload_to_apply = self._release_setup_payload(epoch) or payload
                 self._invalidate_setup_reload_caches()
-                self._apply_setup_payload(payload)
+                self._apply_setup_payload(payload_to_apply)
                 self._setup_applied_epoch = epoch
                 self.refresh()
 
             if app is None:
-                self._dispose_setup_payload(payload)
+                self._dispose_setup_payload(self._release_setup_payload(epoch))
                 return
             try:
                 app.call_from_thread(_apply)
             except Exception:
-                self._dispose_setup_payload(payload)
+                self._dispose_setup_payload(self._release_setup_payload(epoch))
 
         threading.Thread(
             target=_worker, name=f"picker-setup-reload:{epoch}", daemon=True

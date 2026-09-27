@@ -14,6 +14,9 @@ from worktree_manager.production_picker.picker_tui.engine_helpers import (
     _DEFAULT_HOST_COLS,
     _DEFAULT_TARGET_ENVS,
 )
+from worktree_manager.production_picker.picker_tui.engine_loading import (
+    PickerScreenLoadingMixin,
+)
 from worktree_manager.production_picker.picker_tui.engine_runtime import (
     PickerScreenRuntimeMixin,
     _SetupPayload,
@@ -120,6 +123,8 @@ def test_setup_reload_disposes_payload_when_marshal_back_to_ui_fails():
             self._setup_epoch = 0
             self._setup_applied_epoch = 0
             self._setup_failed_epoch = 0
+            self._pending_setup_payloads = {}
+            self._setup_payloads_lock = threading.Lock()
             self.applied = []
 
         def _prime_setup_reload(self):
@@ -147,6 +152,66 @@ def test_setup_reload_disposes_payload_when_marshal_back_to_ui_fails():
 
     screen = _Screen()
     screen._start_setup_reload_worker()
+    assert disposed.wait(timeout=5)
+    assert screen.applied == []
+
+
+def test_setup_reload_unmount_disposes_payload_if_marshalled_callback_never_runs():
+    disposed = threading.Event()
+    marshalled = threading.Event()
+
+    class _Loader:
+        def cancel(self):
+            disposed.set()
+
+    class _App:
+        def call_from_thread(self, fn):
+            marshalled.set()
+
+    class _Screen(PickerScreenLoadingMixin, PickerScreenRuntimeMixin):
+        def __init__(self):
+            self.app = _App()
+            self._bg_cancel = threading.Event()
+            self._setup_epoch = 0
+            self._setup_applied_epoch = 0
+            self._setup_failed_epoch = 0
+            self._pending_setup_payloads = {}
+            self._setup_payloads_lock = threading.Lock()
+            self.loader = None
+            self._provider_loader_lock = threading.Lock()
+            self._provider_loader = None
+            self._provider_cancelled = False
+            self._frame_health = None
+            self._pivot_runtimes = {}
+            self.applied = []
+
+        def _prime_setup_reload(self):
+            return None
+
+        def _collect_setup_payload(self):
+            return _payload("live").__class__(
+                **{
+                    **_payload("live").__dict__,
+                    "loader": _Loader(),
+                }
+            )
+
+        def _invalidate_setup_reload_caches(self):
+            return None
+
+        def _apply_setup_payload(self, payload):
+            self.applied.append(payload)
+
+        def _apply_setup_failure(self, epoch, err):
+            raise AssertionError(f"unexpected failure path: {epoch} {err}")
+
+        def refresh(self):
+            return None
+
+    screen = _Screen()
+    screen._start_setup_reload_worker()
+    assert marshalled.wait(timeout=5)
+    screen.on_unmount()
     assert disposed.wait(timeout=5)
     assert screen.applied == []
 
