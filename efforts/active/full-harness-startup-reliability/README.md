@@ -330,6 +330,25 @@ correction inline, per the effort's own journal discipline)._
   but out of this round's scope (and this PR's) given the short-PR-cycle
   norm and the blast radius of touching shared infrastructure. Logged here
   so a future round picks it up deliberately rather than it being lost.
+- **Round 2 follow-up (2026-09-27):** PR #4129's own review caught two real
+  bugs in the fix above, both since corrected in the same PR (still open,
+  not yet merged): (1) HIGH — `stamp-binstub` deployed the launcher but
+  never wrote a usable `payload-dir` marker (only the slower backgrounded
+  `stamp` wrote it, after its snapshot copy finished), so a first-turn
+  command run in the gap between the two would hit the generated binstub's
+  `:_noinst` path and exit 127 even though the binstub itself existed —
+  fixed by having `stamp-binstub` write the marker immediately, pointed at
+  the already-self-staged plugin dir (the exact same source the full
+  `stamp`'s snapshot copy reads from) as a correct immediate fallback. (2)
+  MEDIUM — POSIX's lock was a no-op whenever `flock` was unavailable
+  (silently discarding a nonzero `flock` result), which is exactly the
+  situation on macOS (no `flock` by default) — fixed by reusing the same
+  PID-symlink lock fallback `cell_provision` already uses elsewhere in
+  `init.sh`, verified directly via `COPILOT_EXT_NO_FLOCK=1`. Also added
+  real subprocess regression tests (`test_stamp_binstub_two_stage.py`)
+  covering both the payload-dir-marker race and concurrent-invocation
+  atomicity on both platforms, addressing the review's third finding
+  (missing test coverage for this exact code path).
 
 ### Round 0 — Kickoff (pre-effort evidence)
 
@@ -407,3 +426,18 @@ correction inline, per the effort's own journal discipline)._
   details; a Round/Phase numbering collision; a stray private machine
   alias; the premature "landed" ledger language) — all revised in this same
   pass, see the current README content rather than restating each fix here.
+
+### 2026-09-27 — PR #4129's own review findings addressed
+
+- Resumed via handoff; PR #4129 had picked up its own fresh review (1 high,
+  1 medium, 1 medium/low severity) since the prior session ended. Fixed all
+  three: the payload-dir-marker race (HIGH — a real command-not-found
+  window), the POSIX flock-unavailable no-op lock (MEDIUM), and missing
+  test coverage for this exact two-stage path (added
+  `test_stamp_binstub_two_stage.py`, 4 tests covering both the marker race
+  and concurrent-invocation atomicity on both platforms). Verified the
+  POSIX no-flock fallback path directly via WSL with
+  `COPILOT_EXT_NO_FLOCK=1` since the automated test host always has a real
+  `flock`. Pushed as a follow-up commit on the same PR #4129 branch. PR
+  #3305 has no new findings as of this check; both remain open, awaiting
+  review.
