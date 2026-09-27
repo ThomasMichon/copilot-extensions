@@ -226,6 +226,16 @@ verb exists for "is an update available."
 converted, been reclassified, or (Group D) moved out from under
 agent-worktrees entirely.
 
+One cleanup wrinkle the table above does not spell out: the generic
+`production_picker.config` proxy is still imported by
+`picker_tui/data_local.py`, `data_ssh.py`, `engine_loading.py`,
+`profiles_io.py`, `roster.py`, and `picker_tui/__init__.py`. Those do **not**
+form a fourth design group with a new disposition question, but they **do**
+mean Step 7 cannot delete the `config` shim merely because `runner.py`,
+`pivot_manifest.py`, and `update_stage.py` are done. The ordered steps below
+therefore treat those remaining `config`-proxy consumers as part of the Group C
+/ final-cleanup work that must be drained before the last shim deletion lands.
+
 ## Ordered implementation steps
 
 Group D needs no further work here: the `profiles` branch of this inventory
@@ -308,7 +318,13 @@ once every remaining caller is already off the import boundary.
    - `runner.py` switches to the Step 2 public verbs for bootstrap,
      stale-anchor repair, and remote planning, while its housekeeping/monitor
      lifecycle moves to the Step 3 manager-owned implementation.
-   - At the end of this step, Groups A and B no longer rely on
+   - Include the old-engine remote fallback in `worktree_manager.__main__`:
+     either `runner.compatibility_remote_plan()` is cut over to the same public
+     seam in this step, or the fallback is explicitly version-gated/retired
+     here so an older engine cannot silently keep exercising the private import
+     path after the main runner flow is clean.
+   - At the end of this step, Groups A and B's **runner/pivot/update** paths no
+     longer rely on
      `engine_module(...)`, underscore-prefixed `agent_worktrees` helpers, or
      any in-process `agent_worktrees` import for production Picker behavior.
 
@@ -337,6 +353,12 @@ once every remaining caller is already off the import boundary.
      `reconcile_bound_live()`, `_overlay_cached_state()`, and
      `_stamp_from_raw()` behavior that today depends on in-process access to
      `tracking` / `pr_ops` / `reclaim` / `sessions`.
+   - Drain the remaining `production_picker.config` proxy consumers that are
+     coupled to the same local-data/config-cache flow (`data_local.py`,
+     `data_ssh.py`, `engine_loading.py`, `profiles_io.py`, `roster.py`,
+     `picker_tui/__init__.py`) by moving each one onto its final direct file
+     reader or explicit engine-client call, so Step 7 can delete the shim for
+     real instead of leaving a hidden tail.
    - Keep the subprocess invocation off the render thread by reusing the
      epoch-guarded setup/reload infrastructure landed in Phase 3c. The
      dependency here is now **satisfied**, not speculative: Step 6 should build

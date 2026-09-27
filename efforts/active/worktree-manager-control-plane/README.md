@@ -476,8 +476,8 @@ PR [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
       [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
 - [ ] **Step 4 — cut `runner.py`, `pivot_manifest.py`, and `update_stage.py`
       over to the new seams.** After Steps 1-3, Groups A/B stop using
-      `engine_module(...)` and underscore-prefixed engine helpers in production.
-      See
+      `engine_module(...)` and underscore-prefixed engine helpers in production,
+      including the old-engine remote-plan fallback. See
       [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
 - [ ] **Step 5 — add Group C's batched reconcile-and-stamp `--json` verb in
       agent-worktrees, unused at first.** Keep the read/reconcile/write lock
@@ -485,7 +485,8 @@ PR [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
       [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
 - [ ] **Step 6 — cut `data_local.py` over to the batched Group C verb via the
       now-landed Phase 3c worker path.** Preserve cache-first first paint and
-      keep the refresh hot path off the render thread. See
+      keep the refresh hot path off the render thread while draining the last
+      live `production_picker.config` proxy consumers. See
       [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
 - [ ] **Step 7 — retire `_engine_runtime.py` and its remaining proxy shims.**
       Cleanup lands only after Groups A/B/C are fully cut over, with a focused
