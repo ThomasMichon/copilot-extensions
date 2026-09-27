@@ -91,28 +91,34 @@ surface — see both the 2026-09-26 "Course correction" and the 2026-09-27
 
 ## Design decision — npm-workspace-style live reference over a `VENDOR_POINTER.json` stub (resolved 2026-09-26, superseded 2026-09-26, RE-ADOPTED 2026-09-27)
 
-> **Status: current again.** This section was briefly marked superseded
-> (see the historical "Course correction" Journal entry below) in favor
-> of `VENDOR_POINTER.json` `kind=src-passthrough`, which 7 real libs were
-> converted to. That decision has itself been superseded — see the
-> 2026-09-27 "Second course correction" Journal entry: `src-passthrough`
-> has a real structural weakness (breaks on any non-editable install,
-> confirmed 7 times as issue #3905) that this mechanism does not share.
-> The design below is the effort's current, active plan again.
-
-> **This section is preserved as historical record only.** It documents
-> the effort's *first* resolution of the dev-time-resolver question. That
-> resolution was superseded the same day, before Phase 1 execution ever
-> implemented it, by a different effort's independently-shipped
-> alternative (`src-passthrough`) — see the Journal's course-correction
-> entry for the full investigation, including empirical proof (a live
-> trial) that the mechanism described below *does* actually work when
-> implemented correctly, and why `src-passthrough` was adopted anyway.
-> **This note is itself now stale — see the status block immediately
-> above.** This design IS the effort's current Plan again as of
-> 2026-09-27; the rest of this section's content (the mechanism, the
-> promotion-time rewrite requirement, the symlink-rejection rationale)
-> is accurate and actionable, not merely historical.
+> **Status: current and actionable again**, after two reversals — read
+> this note in full before the section below, since the section itself
+> still contains phrases from when it was marked historical.
+>
+> This design was the effort's *first* resolution of the dev-time-resolver
+> question (2026-09-26). It was superseded the SAME DAY, before Phase 1
+> execution ever implemented it, by a different effort's independently-
+> shipped alternative (`VENDOR_POINTER.json` `kind=src-passthrough`) — see
+> the "Course correction" Journal entry for that investigation, which
+> included empirical proof (a live trial) that the mechanism described
+> below *does* actually work when implemented correctly, even though
+> `src-passthrough` was adopted anyway. 7 real libs were then converted to
+> `src-passthrough`.
+>
+> **That second decision has ITSELF now been superseded** (2026-09-27) —
+> see the "Second course correction" Journal entry: a deeper, properly-
+> verified test found `src-passthrough` has a real structural weakness
+> (breaks on any non-editable install, confirmed 7 times as issue #3905)
+> that this `uv`-editable mechanism does not share.
+>
+> **Net result: this design IS the effort's current, active Plan again.**
+> Every part of the section below — the mechanism, the promotion-time
+> rewrite requirement, the symlink-rejection rationale — is accurate and
+> actionable, not merely historical, DESPITE any "superseded"/"historical
+> record only" phrasing that may still appear below this note (an
+> artifact of the double-reversal that individual sentences further down
+> were not all re-swept for) — this status block is the authoritative,
+> up-to-date summary.
 
 Operator directive, captured verbatim in a later Request round below:
 
@@ -420,6 +426,26 @@ shape before committing to a design)_
             re-conversion also closes out its own instance of issue #3905
             (the non-editable-install gap no longer applies once that lib
             is back on the `uv`-editable form).
+            - [ ] **`plugin-activation`'s re-conversion needs an explicit
+                  consumer-side follow-up, not just a pointer-directory
+                  swap** (found in review): `plugins/customizing-copilot/
+                  skills/installing-plugins/scripts/plugin-activation.py`'s
+                  `_resolve_state_py()` (added during the forward
+                  `src-passthrough` conversion, PR #4004) loads `state.py`
+                  by filesystem path and reaches canonical ONLY by reading
+                  a local `VENDOR_POINTER.json` marker's `source` field.
+                  The `uv`-editable form deletes that local directory
+                  entirely and leaves NO marker of any kind — this script
+                  would resolve a nonexistent `<plugin>/libs/
+                  plugin-activation/src/plugin_activation/state.py` and
+                  break outright. Must be updated ALONGSIDE this specific
+                  re-conversion (not treated as a trailing cleanup) to
+                  resolve `state.py` via the `[tool.uv.sources]` entry in
+                  the consumer's own `pyproject.toml` instead (parse the
+                  TOML, find the `agent-plugin-activation` entry's `path`,
+                  resolve `state.py` under it) — still never importing the
+                  `plugin_activation` package itself, preserving the
+                  original PyYAML-avoidance design.
       - [ ] Remaining real lib copies never yet converted at all
             (`agent-procutil`, `dropin-registry`, `plugin-resolve`,
             `session-liveness-probe`, `venue-copilot`, `zdd`) — convert
@@ -453,9 +479,15 @@ shape before committing to a design)_
       reference-rewrite promotion step**: for every `[tool.uv.sources]`
       entry whose `path` escapes the plugin's own directory (reuse
       `_escapes_root()` from the existing containment work), copy
-      canonical's `src/` (+ sync the `pyproject.toml` version) into a
-      freshly-created local `<consumer-root>/libs/<lib>/` — computed from
-      the CONSUMING project's own root, not hardcoded to
+      canonical's **complete lib tree** — `src/`, `README.md`, and
+      `tests/` (when the shipped payload is expected to carry one; not
+      just `src/` + a version-string sync) — into a freshly-created local
+      `<consumer-root>/libs/<lib>/`, so the materialized copy is a
+      genuinely complete, byte-identical restoration of what a real
+      vendored copy looks like today (the Validation Plan below requires
+      a lossless round-trip; copying only `src/`+version would silently
+      drop `README.md`/`tests/` from every promoted payload). Compute the
+      destination from the CONSUMING project's own root, not hardcoded to
       `plugins/<plugin>/`: Phase 1 explicitly includes `worktree-manager`
       consumers too (a top-level tree, not under `plugins/`), and a
       promotion step that only ever writes to `plugins/<plugin>/libs/<lib>`
