@@ -152,22 +152,30 @@ merging.** A `Comment` review is not a pass and is not merge-ready on its
 own; treat it the same way regardless of who authored the PR:
 
 1. Open (or update) the PR, then wait **~5 minutes** (order of minutes, not
-   hours) for Copilot's review to land.
+   hours) for Copilot's review to land (`pr-watch wait <owner>/<repo> <PR>
+   --since r0 --until approved,commented,changes_requested --timeout 300`
+   — scope `--until` to actual review transitions; `--until any` also wakes
+   on unrelated transitions like checks or conflicts, which is not itself a
+   review result).
 2. **`Approve` landed:** proceed to merge (subject to the separate
    required-approving-review gate for a non-maintainer's PR — see "Review"
    above; Copilot's own `Approve` never substitutes for that).
-3. **`Comment` landed:** address the genuinely valuable findings (or
-   explicitly dismiss/resolve the rest with reasoning in a reply), then push
-   the update, then continue to step 4.
-   **Nothing landed yet (no review at all after the wait):** there's
-   nothing to address or push — skip straight to explicitly re-requesting a
-   review (step 4's action), then wait ~5 minutes and return to step 2. Do
-   not invent an unrelated commit just to have something to push.
-4. Wait **~5 minutes** for the automatic review that follows a push. If it
-   comes back `Approve`, merge. If it's still `Comment`, **explicitly
-   re-request a review** — see "Requesting a fresh review" below; do not
-   just keep pushing small commits hoping the next automatic pass flips to
-   `Approve` on its own.
+3. **`Comment` landed, and addressing it requires an actual change:**
+   address the genuinely valuable findings, push the update, then continue
+   to step 4.
+   **`Comment` landed, but every finding is dismissed/explained with no
+   actual change needed:** there's nothing new for a re-review to see —
+   skip the push and go straight to step 4's re-request action.
+   **Nothing landed yet (no review at all after the wait — a timeout, not
+   a review event):** there's nothing to address or push either — skip
+   straight to explicitly re-requesting a review (step 4's action), then
+   wait ~5 minutes and return to step 2. Do not invent an unrelated commit
+   just to have something to push in either no-push case.
+4. Wait **~5 minutes** for the automatic review that follows a push (when
+   one happened). If it comes back `Approve`, merge. If it's still
+   `Comment`, **explicitly re-request a review** — see "Requesting a fresh
+   review" below; do not just keep pushing small commits hoping the next
+   automatic pass flips to `Approve` on its own.
 5. Wait **~5 minutes** for the re-requested review, then repeat from step 2.
 6. **Maintainer bypass, narrowly:** as `ThomasMichon`, if the loop above has
    run at least once and the *current* `Comment` review's remaining

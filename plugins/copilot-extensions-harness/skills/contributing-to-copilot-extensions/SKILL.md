@@ -175,24 +175,30 @@ installer. Know which kind you are changing.
      only ever render `Approve` or `Comment` (no "Request changes"
      capability exists in the product); Approvals are enabled in this repo,
      so a genuinely ready PR should come back `Approve`. Use `pr-watch wait
-     <owner>/<repo> <PR> --since r0 --until any --timeout 300` (a bounded
-     ~5-minute window per attempt, not `--timeout 0`) to wait for the
-     initial review. **No review landed after that window:** skip straight
-     to explicitly re-requesting a review (see below) and wait ~5 minutes
-     again -- there's nothing to address or push yet, so don't invent a
-     commit just to have something to push. On `Approve`, merge. On
-     `Comment`: address genuinely valuable findings (explain/dismiss the
-     rest), push, wait another ~5 minutes for the automatic post-push
-     review. Still not `Approve`? Explicitly re-request review via the API
-     (`POST .../pulls/<PR>/requested_reviewers` with
+     <owner>/<repo> <PR> --since r0 --until approved,commented,changes_requested
+     --timeout 300` (a bounded ~5-minute window per attempt scoped to actual
+     review transitions only -- `--until any` also wakes on unrelated
+     transitions like checks or conflicts, which is not itself a review
+     result) to wait for the initial review. **No review landed after that
+     window (a timeout, not a review event):** skip straight to explicitly
+     re-requesting a review (`POST .../pulls/<PR>/requested_reviewers` with
      `reviewers[]=copilot-pull-request-reviewer[bot]` -- see
-     `CONTRIBUTING.md` § "Requesting a fresh review") and wait ~5 minutes
-     again -- do not just push another commit hoping the next automatic
-     pass flips on its own. **Narrow bypass:** after at least one full loop,
-     if the maintainer is merging and the *current* `Comment` review's
-     remaining findings are all Low severity, self-merge is permitted
-     (state what was dismissed and why); any Medium/High finding blocks
-     self-merge regardless of who authored the PR.
+     `CONTRIBUTING.md` § "Requesting a fresh review" for the exact call)
+     and wait ~5 minutes again -- there's
+     nothing to address or push yet, so don't invent a commit just to have
+     something to push. On `Approve`, merge. On `Comment`: address
+     genuinely valuable findings; if that requires a real change, push it
+     and wait another ~5 minutes for the automatic post-push review. **If
+     every finding is dismissed/explained with no actual change needed,**
+     skip the push (there's nothing new for a re-review to see) and go
+     straight to re-requesting. Still not `Approve` after a re-request?
+     Repeat the re-request-and-wait step -- do not just push another commit
+     hoping the next automatic pass flips on its own. **Narrow bypass:**
+     after at least one full loop, if the maintainer is merging and the
+     *current* `Comment` review's remaining findings are all Low severity,
+     self-merge is permitted (state what was dismissed and why); any
+     Medium/High finding blocks self-merge regardless of who authored the
+     PR.
    - **This is agent discipline, not yet tool-enforced.** `pr-merge --now`
      itself does not check Copilot's verdict before merging --
      `.agent-worktrees/config.yaml`'s `review_blocking: false` makes every
