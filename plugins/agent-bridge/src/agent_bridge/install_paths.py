@@ -8,7 +8,7 @@ from pathlib import Path
 
 INSTALL_DIR_ENV = "AGENT_BRIDGE_INSTALL_DIR"
 CONFIG_DIR_ENV = "AGENT_BRIDGE_CONFIG_DIR"
-LEGACY_INSTALL_DIRNAME = ".agent-bridge"
+LEGACY_INSTALL_DIRNAME = ".agent-bridge"  # marketplace-isolation: allow legacy-compatibility
 ELEVATED_SUBDIR = "elevated"
 SCOPED_SERVICE_HASH_LENGTH = 12
 
@@ -73,7 +73,8 @@ def scheduled_task_name(path: Path | None = None) -> str:
 def systemd_unit_name(path: Path | None = None) -> str:
     """POSIX systemd user-unit identity for the primary daemon."""
     suffix = installation_suffix(path)
-    return "agent-bridge.service" if not suffix else f"agent-bridge-{suffix}.service"
+    _base = "agent-bridge.service"  # marketplace-isolation: allow cell-derived-suffix
+    return _base if not suffix else f"agent-bridge-{suffix}.service"
 
 
 def elevated_task_name(path: Path | None = None) -> str:

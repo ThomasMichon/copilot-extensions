@@ -1,0 +1,9 @@
+{
+  "comment": "Annotate 22 marketplace-isolation guard findings across the src/agent_bridge/*.py cluster + extension.mjs",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

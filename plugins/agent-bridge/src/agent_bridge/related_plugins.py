@@ -26,8 +26,9 @@ from .transport import PluginRef
 
 log = logging.getLogger("agent-bridge")
 
-_RELATED_REL = Path(".agent-worktrees") / "related.yaml"
-_REPOS_YAML = Path("~/.agent-worktrees/repos.yaml").expanduser()
+_AWT = ".agent-worktrees"  # marketplace-isolation: allow registry
+_RELATED_REL = Path(_AWT) / "related.yaml"
+_REPOS_YAML = Path(f"~/{_AWT}/repos.yaml").expanduser()
 
 
 def _platform_keys() -> tuple[str, ...]:

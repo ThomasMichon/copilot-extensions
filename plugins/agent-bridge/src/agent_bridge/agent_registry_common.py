@@ -5,8 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-_PROJECTS_YAML_DEFAULT = "~/.agent-worktrees/projects.yaml"
-_REPOS_YAML_DEFAULT = "~/.agent-worktrees/repos.yaml"
+_PROJECTS_YAML_DEFAULT = (
+    "~/.agent-worktrees/projects.yaml"  # marketplace-isolation: allow registry
+)
+_REPOS_YAML_DEFAULT = "~/.agent-worktrees/repos.yaml"  # marketplace-isolation: allow registry
 
 _NAMESPACE_LIST_TTL_ENV = "AGENT_BRIDGE_NAMESPACE_LIST_TTL"
 _NAMESPACE_LIST_DEFAULT_TTL = 12.0

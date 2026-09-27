@@ -225,7 +225,9 @@ class _SessionHostConnectionMixin:
                     f"session/new {self._timeouts.session_new}s). A cold "
                     f"session/new on a large workspace may need a larger "
                     f"budget -- raise timeouts.session_new in "
-                    f"~/.agent-bridge/config.yaml and restart the daemon.",
+                    f"~/"
+                    f".agent-bridge/"  # marketplace-isolation: allow deployed-runtime-diagnostics
+                    f"config.yaml and restart the daemon.",
                     retryable=False,
                     cause=exc,
                 ) from exc

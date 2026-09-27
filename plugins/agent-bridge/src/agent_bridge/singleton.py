@@ -33,7 +33,7 @@ log = logging.getLogger("agent-bridge")
 # Historical service name -> lock filenames ``agent-bridge.lock`` /
 # ``agent-bridge.<port>.lock``. Unchanged across the extraction so a running
 # daemon's lock and every ``_read_holder_pid`` reader keep working.
-_SERVICE = "agent-bridge"
+_SERVICE = "agent-bridge"  # marketplace-isolation: allow legacy-compatibility
 
 # Preserve the historical private name imported by ``__main__`` and the tests.
 _read_holder_pid = read_owner_pid

@@ -14,7 +14,7 @@ import os
 
 log = logging.getLogger("agent-bridge.lifecycle")
 
-_SERVICE = "agent-bridge"
+_SERVICE = "agent-bridge"  # marketplace-isolation: allow legacy-compatibility
 
 
 def startup_sweep(config_dir: str | os.PathLike[str]) -> None:

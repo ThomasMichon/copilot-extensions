@@ -457,9 +457,9 @@ class SessionBusyError(Exception):
     def __init__(self, session_id: str, active_background_tasks: list[str]) -> None:
         self.session_id = session_id
         self.active_background_tasks = active_background_tasks
-        tasks = ", ".join(active_background_tasks) or "(unknown)"
+        summary = ", ".join(active_background_tasks) or "(unknown)"
         super().__init__(
-            f"Session {session_id} has active background tasks [{tasks}]; "
+            f"Session {session_id} has active background tasks [{summary}]; "
             "tearing it down would kill them. Wait for them to finish, then "
             "end the session."
         )

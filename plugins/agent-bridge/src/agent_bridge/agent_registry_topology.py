@@ -296,7 +296,8 @@ def _split_repo_venue(agent_name: str) -> tuple[str | None, str]:
 
 def _load_related_entries(repo_root: Path) -> list[tuple[str, list[str], str]]:
     """Parse ``<repo>/.agent-worktrees/related.yaml`` minimally."""
-    related_path = repo_root / ".agent-worktrees" / "related.yaml"
+    _awt = ".agent-worktrees"  # marketplace-isolation: allow registry
+    related_path = repo_root / _awt / "related.yaml"
     if not related_path.exists():
         return []
     try:
