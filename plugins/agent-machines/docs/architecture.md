@@ -44,11 +44,24 @@ Discovery is implemented in `src\agent_machines\discover.py`:
    `.copilot-extensions/agent-machines/all/` plus
    `.copilot-extensions/agent-machines/machines/<machine>/`; package gates
    then apply as an additional filter.
+5. `user_scoped_packages()` additionally, always, scans the home-relative
+   `user_package_root()` (`~/.agent-machines/config/`, same `all/`/
+   `machines/<machine>/` shape) and folds any matching packages into the
+   result as a synthetic `DiscoveredRepo` named `USER_SCOPE_NAME` (`"user"`).
+   This source requires no registry, adoption, or repository at all -- it is
+   the standalone fallback for a machine with no bound knowledge/control repo,
+   and is scanned unconditionally (not only when the registries are absent),
+   so a repo-adopted machine can still layer a purely local, unversioned
+   override on top.
 
-If the registries are missing or unreadable, discovery returns an empty set; the
-CLI still runs. `repo_enables_agent_machines()` annotates whether the repo has an
+If the registries are missing or unreadable, discovery still additionally
+scans the user-scoped source (step 5), so it need not return an empty set even
+with `agent-worktrees` entirely absent; the CLI still runs either way.
+`repo_enables_agent_machines()` annotates whether the repo has an
 enabled `agent-machines` plugin, but `discover()` does not require enablement
-unless called with `require_enable=True`.
+unless called with `require_enable=True`; the user-scoped source is always
+reported `enabled=True` since it has no per-repo plugin-activation concept of
+its own.
 
 Machine-directory and gate matching are case-insensitive. Files in `all/` and
 the matching machine directory are independent complete packages and must carry

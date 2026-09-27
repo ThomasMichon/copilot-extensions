@@ -30,6 +30,7 @@ requirement for the cache to function this session.
 
 from __future__ import annotations
 
+import heapq
 import json
 import sqlite3
 import threading
@@ -38,15 +39,55 @@ from collections.abc import Callable
 from pathlib import Path
 
 #: How long a cached bundle is trusted before an ordinary (non-forced) read
-#: triggers a recompute. Short enough that a card reflects genuinely recent
-#: state, long enough that a burst of renders (e.g. scrolling the Tasks
-#: board) shares one warm answer instead of each re-running ~5 git calls.
-DEFAULT_TTL_SECONDS = 20.0
+#: triggers a recompute. Originally set assuming a cheap ~5 git-call bundle;
+#: live measurement (2026-09-22, machine CPU-saturation investigation) found
+#: the daemon's status-monitor process sustaining ~83-99% CPU continuously
+#: for hours with as few as 7 demanded worktrees. Root cause: a real
+#: compute() call costs ~5-6s (the unavoidable `git fetch` in
+#: `classify_worktree`, not a cheap local read), so the prior 20s TTL asked
+#: the single-threaded sweep loop to refresh every demanded worktree
+#: roughly every 20-30s regardless of that ~5-6s real cost -- with N
+#: demanded worktrees the sweep needs N * ~6s of CPU-bound work per TTL
+#: window, which already exceeds one CPU core's capacity at N >= ~4,
+#: guaranteeing the sweep thread runs almost continuously back-to-back
+#: rather than mostly idling between ticks. An initial raise to 90s (live-
+#: verified) only brought steady-state utilization down to ~60% for a
+#: real N=7 -- the theoretical floor (N * ~6s / TTL) at that TTL is still
+#: ~47%, too high for a background accelerator. Raised further to 180s
+#: (theoretical floor ~23% for the same N=7), live-verified over a 10+
+#: minute settled window. Safe to raise on its own: `worktree_status_audit
+#: .py`'s own freshness bound is computed as `DEFAULT_TTL_SECONDS +
+#: SWEEP_INTERVAL_SECONDS + FRESHNESS_SLACK_SECONDS` (see that module), so
+#: it moves with this constant rather than being a fixed ceiling this
+#: change could violate.
+DEFAULT_TTL_SECONDS = 180.0
 
 #: A demanded worktree not read again within this window is no longer swept
 #: -- an operator who closed the card / moved on stops paying the sweep cost
 #: for it. Generous relative to a single render session.
 DEMAND_TTL_SECONDS = 300.0
+
+#: Defense-in-depth cap on how many entries one `sweep_due` call will
+#: recompute, regardless of how many are due. Even after raising
+#: DEFAULT_TTL_SECONDS to reflect real compute cost, an operator whose
+#: demanded-worktree count grows well past what one CPU core can refresh
+#: within a TTL window would otherwise reproduce the same continuous-CPU
+#: symptom at a higher N. Capping bounds worst-case *recompute* cost (the
+#: expensive per-entry work -- an unavoidable `git fetch` -- that this
+#: whole cap exists to bound) to `max_refresh_per_sweep * (per-entry
+#: compute cost)` every sweep tick, independent of N -- excess due entries
+#: are simply picked up on a later tick (prioritizing the stalest first,
+#: see `sweep_due`), trading a wider worst-case staleness for a hard
+#: recompute-CPU ceiling rather than the reverse. The due/expired
+#: bookkeeping around that cap (scanning `self._entries` to find what's
+#: due, then selecting the cap-many stalest via `heapq.nsmallest`) is
+#: still O(N) in the demanded-worktree count -- but N cheap dict/heap
+#: operations, several orders of magnitude below one recompute's ~5-6s
+#: `git fetch`, is a different cost class from the thing this cap actually
+#: protects against (Copilot review, PR #3348); a persistent priority
+#: index would remove even that O(N) scan if it's ever needed at a much
+#: larger N than this accelerator currently targets.
+DEFAULT_MAX_REFRESH_PER_SWEEP = 4
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS worktree_status_cache (
@@ -96,15 +137,34 @@ class WorktreeStatusCache:
         *,
         ttl_seconds: float = DEFAULT_TTL_SECONDS,
         demand_ttl_seconds: float = DEMAND_TTL_SECONDS,
+        max_refresh_per_sweep: int = DEFAULT_MAX_REFRESH_PER_SWEEP,
         now: Callable[[], float] = time.time,
     ) -> None:
+        # Copilot review, PR #3348: an unvalidated negative
+        # max_refresh_per_sweep silently defeats the cap's own purpose.
+        # `stalest[:-1]` (a negative slice bound) refreshes every due entry
+        # except one -- the CPU-saturation guard this parameter exists to
+        # provide becomes effectively unbounded as demand grows, exactly
+        # the failure mode this whole mechanism was added to prevent.
+        if not isinstance(max_refresh_per_sweep, int) or max_refresh_per_sweep < 0:
+            raise ValueError(
+                "max_refresh_per_sweep must be a non-negative int, got "
+                f"{max_refresh_per_sweep!r}"
+            )
         self._db_path = db_path
         self._ttl = ttl_seconds
         self._demand_ttl = demand_ttl_seconds
+        self._max_refresh_per_sweep = max_refresh_per_sweep
         self._now = now
         self._lock = threading.Lock()
         # key -> (bundle, computed_at, demanded_at)
         self._entries: dict[tuple[str, str], tuple[dict, float, float]] = {}
+        # key -> last sweep-attempt timestamp (success OR failure). Separate
+        # from `computed_at` (which only advances on success) so a
+        # persistently-failing entry still rotates out of "stalest first"
+        # priority after being attempted, instead of monopolizing every
+        # `max_refresh_per_sweep` slot forever (Copilot review, PR #3348).
+        self._last_attempted: dict[tuple[str, str], float] = {}
         self._conn: sqlite3.Connection | None = None
         # Set by `close()`. Checked by `_open()` so a request-handler thread
         # still in flight when the monitor shuts down (`CoalescingServer
@@ -319,6 +379,7 @@ class WorktreeStatusCache:
                     self._entries[key] = (bundle, computed_at, now)
                     return bundle
                 self._entries.pop(key, None)
+                self._last_attempted.pop(key, None)
                 # Delete the durable row while still holding the lock --
                 # this is an infrequent, exceptional path (not the hot
                 # cache-hit path this cache otherwise deliberately avoids
@@ -351,10 +412,33 @@ class WorktreeStatusCache:
         return bundle
 
     def sweep_due(self, *, refresh: Callable[[str, str], dict]) -> int:
-        """Refresh every demanded, TTL-expired entry; drop entries whose
-        demand has aged out (``DEMAND_TTL_SECONDS``). Returns the count
-        refreshed. Never raises: a per-entry refresh failure is skipped,
-        leaving that entry's last-known value in place rather than losing it.
+        """Refresh up to ``max_refresh_per_sweep`` demanded, TTL-expired
+        entries (stalest-attempted first); drop entries whose demand has
+        aged out (``DEMAND_TTL_SECONDS``). Returns the count refreshed.
+        Never raises: a per-entry refresh failure is skipped, leaving that
+        entry's last-known value in place rather than losing it.
+
+        The cap is defense-in-depth against the exact CPU-saturation bug
+        found live (2026-09-22): a real per-entry recompute costs several
+        seconds (an unavoidable git fetch), so refreshing an unbounded
+        number of due entries every sweep tick can demand more CPU than one
+        core provides, leaving the sweep thread running back-to-back with
+        no idle gaps. Prioritizing the stalest-attempted entries first means
+        an operator with more demanded worktrees than the cap can serve per
+        tick sees some entries age further past their nominal TTL rather
+        than the daemon's CPU cost growing unbounded with demand -- a
+        graceful, self-limiting degradation instead of the reverse.
+
+        Priority is by ``_last_attempted`` (updated on every attempt,
+        success OR failure), not bare ``computed_at`` (Copilot review,
+        PR #3348): ``computed_at`` only advances on a successful refresh, so
+        a persistently-failing entry would otherwise remain "the stalest"
+        forever and monopolize every cap slot, starving every other due
+        entry from ever being attempted. Recording the attempt time
+        regardless of outcome rotates a failing entry to the back of the
+        queue exactly like a succeeding one, so demand beyond capacity is
+        served round-robin across attempts rather than jamming on one
+        chronically-broken worktree.
 
         Each entry is sampled, then recomputed **outside** the lock (the same
         reason ``get_or_refresh`` computes outside it) -- so a concurrent
@@ -379,6 +463,21 @@ class WorktreeStatusCache:
                 for key, (_, _computed_at, demanded_at) in self._entries.items()
                 if now - demanded_at > self._demand_ttl
             ]
+            last_attempted_snapshot = dict(self._last_attempted)
+        if len(sampled) > self._max_refresh_per_sweep:
+            # Stalest-ATTEMPTED (smallest last_attempted, falling back to
+            # computed_at for an entry never yet attempted by a sweep) first
+            # -- see the cap's own rationale in the docstring above.
+            # `heapq.nsmallest` instead of `sorted(...)`: selecting only the
+            # `max_refresh_per_sweep` smallest items is O(N log cap), not
+            # O(N log N) -- a real difference once the demanded set grows
+            # much larger than the cap (Copilot review, PR #3348).
+            stalest = heapq.nsmallest(
+                self._max_refresh_per_sweep,
+                sampled.items(),
+                key=lambda item: last_attempted_snapshot.get(item[0], item[1]),
+            )
+            sampled = dict(stalest)
         for project, worktree_id in expired:
             with self._lock:
                 # Re-check at pop time, not just at sampling time: a
@@ -392,6 +491,7 @@ class WorktreeStatusCache:
                     continue
                 stale_demanded_at = current[2]
                 self._entries.pop((project, worktree_id), None)
+                self._last_attempted.pop((project, worktree_id), None)
                 # Delete the durable row while still holding the lock (this
                 # is an infrequent prune, not the hot read path
                 # `get_or_refresh` deliberately avoids blocking on SQLite
@@ -406,9 +506,16 @@ class WorktreeStatusCache:
             try:
                 bundle = refresh(project, worktree_id)
             except Exception:
+                # Record the attempt even on failure -- see the docstring's
+                # `_last_attempted` rationale: this is what lets a
+                # persistently-failing entry rotate out of "stalest first"
+                # rather than monopolizing every cap slot forever.
+                with self._lock:
+                    self._last_attempted[(project, worktree_id)] = self._now()
                 continue
             ts = self._now()
             with self._lock:
+                self._last_attempted[(project, worktree_id)] = ts
                 existing = self._entries.get((project, worktree_id))
                 if existing is not None and existing[1] != sampled_computed_at:
                     # Someone else (a request-driven refresh) already

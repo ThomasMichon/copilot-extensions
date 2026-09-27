@@ -13,8 +13,12 @@ facts, so the discovery set is never state ``agent-machines`` itself manages (no
 recursion).
 
 À la carte independence: if the registry is absent (agent-worktrees not
-installed), discovery degrades to an empty set. Discovery never *requires* a
-sibling plugin.
+installed), the adopted-project source degrades to an empty set. Discovery
+never *requires* a sibling plugin -- see ``user_scoped_packages()``/
+``user_package_root()`` below for the repo-free, registry-free source
+``discover()`` always additionally scans, so a machine with no bound
+knowledge/control repo (or agent-worktrees entirely absent) can still declare
+desired state, most commonly opting into the ``self-update`` schedule.
 """
 
 from __future__ import annotations
@@ -634,17 +638,31 @@ def packages_in_repo(
     accepted_machines: tuple[str, ...] | None = None,
 ) -> list[RequirementPackage]:
     """Load and gate-filter the requirement packages carried by ``repo_path``."""
+    return _load_packages_from_layers(
+        _package_file_layers_in_repo(repo_path, machine, accepted_machines),
+        repo_name,
+        machine,
+        source_anchor or repo_path,
+        accepted_machines,
+    )
+
+
+def _load_packages_from_layers(
+    layers: list[tuple[str, list[Path]]],
+    repo_name: str,
+    machine: str,
+    source_anchor: Path,
+    accepted_machines: tuple[str, ...] | None = None,
+) -> list[RequirementPackage]:
     out: list[RequirementPackage] = []
     selected: dict[str, int] = {}
-    for layout_kind, layer_files in _package_file_layers_in_repo(
-        repo_path, machine, accepted_machines
-    ):
+    for layout_kind, layer_files in layers:
         layer_names: dict[str, Path] = {}
         for pkg_file in layer_files:
             pkg = load_package(
                 pkg_file,
                 source_repo=repo_name,
-                source_anchor=source_anchor or repo_path,
+                source_anchor=source_anchor,
             )
             machine_scoped = (
                 layout_kind == "structured"
@@ -677,6 +695,45 @@ def packages_in_repo(
     return out
 
 
+#: Name reported for the synthetic, non-repo package source below (never a
+#: real adopted project, so it can't collide with one).
+USER_SCOPE_NAME = "user"
+
+
+def user_package_root(home_dir: Path | None = None) -> Path:
+    """Home-relative requirement-package root usable with **no adopted repo**.
+
+    A machine with no bound knowledge/control repo (or none reachable) still
+    needs somewhere to declare desired state -- most commonly, opting itself
+    into the ``self-update`` watchdog/sweep schedule. This root is structured
+    exactly like a repo's canonical ``.copilot-extensions/agent-machines/``
+    (``all/`` + ``machines/<machine>/``), but requires no adoption, registry,
+    or repository at all. Always scanned by :func:`discover`, alongside every
+    adopted repo's own packages -- not only as a no-repo fallback -- so it also
+    works standalone (agent-worktrees entirely absent).
+    """
+    return (home_dir or home()) / ".agent-machines" / "config"
+
+
+def user_scoped_packages(
+    machine: str,
+    accepted_machines: tuple[str, ...] | None = None,
+    home_dir: Path | None = None,
+) -> list[RequirementPackage]:
+    """Load and gate-filter requirement packages from :func:`user_package_root`.
+
+    Returns ``[]`` when the root does not exist -- this source is always
+    optional, never required.
+    """
+    root = user_package_root(home_dir)
+    if not root.is_dir():
+        return []
+    files = _structured_package_files(root, machine, accepted_machines)
+    return _load_packages_from_layers(
+        [("structured", files)], USER_SCOPE_NAME, machine, root, accepted_machines
+    )
+
+
 def discover(
     machine: str | None = None,
     registry: dict | None = None,
@@ -695,7 +752,8 @@ def discover(
     ``require_enable`` to also require the project to enable
     ``agent-machines``. Legacy ``.agent-machines/`` and
     ``.github/machine-state/`` locations are used only when the canonical root
-    is absent.
+    is absent. A home-relative :func:`user_package_root` (no adopted repo
+    required) is always additionally scanned -- see its docstring.
     """
     machine = machine or current_machine()
     found: list[DiscoveredRepo] = []
@@ -720,6 +778,19 @@ def discover(
         if require_enable and not enabled:
             continue
         found.append(DiscoveredRepo(name=name, path=path, enabled=enabled, packages=pkgs))
+    user_pkgs = user_scoped_packages(machine, accepted_machines=accepted_machines)
+    if user_pkgs:
+        # No repo settings to check enablement against -- this source has no
+        # plugin-activation concept of its own; it is inert unless the
+        # currently-running agent-machines itself already applies it.
+        found.append(
+            DiscoveredRepo(
+                name=USER_SCOPE_NAME,
+                path=user_package_root(),
+                enabled=True,
+                packages=user_pkgs,
+            )
+        )
     return found
 
 

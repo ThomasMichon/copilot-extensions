@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import threading
 
+import pytest
+
 from agent_worktrees.worktree_status_cache import WorktreeStatusCache
 
 
@@ -313,6 +315,141 @@ def test_sweep_due_refreshes_only_ttl_expired_demanded_entries(tmp_path):
         "proj", "fresh", force=False, compute=lambda: {"v": "should-not-run"}
     )
     assert result == {"v": "fresh-2"}
+
+
+def test_sweep_caps_per_tick_refreshes_prioritizing_the_stalest_entries(tmp_path):
+    """Regression (2026-09-22 live CPU-saturation investigation): an
+    unbounded sweep asks for N * (real per-entry compute cost, ~5-6s of git
+    fetch in production) of CPU-bound work every TTL window -- with enough
+    demanded worktrees this exceeds one core's capacity and the sweep
+    thread runs almost continuously rather than mostly idling. The cap
+    bounds worst-case per-tick cost to `max_refresh_per_sweep` entries,
+    always picking the STALEST (oldest computed_at) ones first so demand
+    beyond capacity degrades as wider staleness, never as unbounded CPU."""
+    clock = {"t": 1000.0}
+    cache = WorktreeStatusCache(
+        tmp_path / "cache.sqlite3",
+        ttl_seconds=5.0,
+        max_refresh_per_sweep=2,
+        now=lambda: clock["t"],
+    )
+    # Demand five entries, each becoming due at a distinct, known time so
+    # staleness order is unambiguous: "wt0" is demanded first (oldest/
+    # stalest once all are past TTL), "wt4" last (freshest).
+    for i in range(5):
+        cache.get_or_refresh("proj", f"wt{i}", force=False, compute=lambda i=i: {"v": i})
+        clock["t"] += 1.0  # stagger computed_at so ordering is deterministic
+    clock["t"] += 5.0  # now every entry is comfortably past the 5s TTL
+
+    refresh_calls = []
+    refreshed_count = cache.sweep_due(
+        refresh=lambda p, w: refresh_calls.append(w) or {"v": "swept"}
+    )
+
+    assert refreshed_count == 2
+    # The two stalest (earliest-demanded/computed) entries were prioritized.
+    assert set(refresh_calls) == {"wt0", "wt1"}
+
+    # A second sweep tick (still past TTL for the remaining three) picks up
+    # the next-stalest ones -- demand beyond capacity is served over
+    # successive ticks, not starved forever nor bursted all at once.
+    refresh_calls.clear()
+    refreshed_count = cache.sweep_due(
+        refresh=lambda p, w: refresh_calls.append(w) or {"v": "swept-2"}
+    )
+    assert refreshed_count == 2
+    assert set(refresh_calls) == {"wt2", "wt3"}
+
+
+def test_sweep_does_not_cap_when_due_entries_are_within_the_limit(tmp_path):
+    """The cap must never fire below its own threshold -- confirms the
+    prior (uncapped) sweep behavior is fully preserved for the common case
+    of a small number of demanded worktrees."""
+    clock = {"t": 1000.0}
+    cache = WorktreeStatusCache(
+        tmp_path / "cache.sqlite3",
+        ttl_seconds=5.0,
+        max_refresh_per_sweep=4,
+        now=lambda: clock["t"],
+    )
+    for i in range(4):
+        cache.get_or_refresh("proj", f"wt{i}", force=False, compute=lambda i=i: {"v": i})
+    clock["t"] += 6.0
+
+    refreshed_count = cache.sweep_due(refresh=lambda p, w: {"v": "swept"})
+    assert refreshed_count == 4
+
+
+def test_negative_max_refresh_per_sweep_is_rejected(tmp_path):
+    """Regression (Copilot review, PR #3348): an unvalidated negative
+    max_refresh_per_sweep silently defeats the cap's own purpose --
+    `stalest[:-1]` (a negative slice bound) refreshes every due entry
+    except one, making the CPU-saturation guard effectively unbounded as
+    demand grows."""
+    with pytest.raises(ValueError):
+        WorktreeStatusCache(tmp_path / "cache.sqlite3", max_refresh_per_sweep=-1)
+
+
+def test_non_int_max_refresh_per_sweep_is_rejected(tmp_path):
+    with pytest.raises(ValueError):
+        WorktreeStatusCache(tmp_path / "cache.sqlite3", max_refresh_per_sweep=2.5)
+
+
+def test_zero_max_refresh_per_sweep_is_accepted_as_a_valid_boundary(tmp_path):
+    """0 is a legitimate (if extreme) configuration -- pause all sweeping --
+    and must not be rejected by the same guard that rejects negative
+    values."""
+    cache = WorktreeStatusCache(tmp_path / "cache.sqlite3", max_refresh_per_sweep=0)
+    assert cache is not None
+
+
+def test_sweep_cap_does_not_let_a_persistently_failing_entry_starve_others(tmp_path):
+    """Regression (Copilot review, PR #3348): a failed refresh previously
+    left `computed_at` unchanged, so a chronically-broken worktree would
+    remain "the stalest" on every subsequent sweep and monopolize every
+    `max_refresh_per_sweep` slot forever -- starving every other due entry
+    from ever being attempted, contradicting the cap's own claim that
+    excess demand is served on later ticks. `_last_attempted` (updated on
+    every attempt, success OR failure) must rotate a failing entry to the
+    back of the priority queue exactly like a succeeding one."""
+    clock = {"t": 1000.0}
+    cache = WorktreeStatusCache(
+        tmp_path / "cache.sqlite3",
+        ttl_seconds=5.0,
+        max_refresh_per_sweep=1,
+        now=lambda: clock["t"],
+    )
+    # "broken" is demanded first (so it would be the stalest by computed_at
+    # alone) and always fails; "ok0"/"ok1" are demanded after and always
+    # succeed.
+    cache.get_or_refresh("proj", "broken", force=False, compute=lambda: {"v": 0})
+    clock["t"] += 1.0
+    cache.get_or_refresh("proj", "ok0", force=False, compute=lambda: {"v": 0})
+    clock["t"] += 1.0
+    cache.get_or_refresh("proj", "ok1", force=False, compute=lambda: {"v": 0})
+    clock["t"] += 5.0  # all three now past the 5s TTL
+
+    def refresh(project, worktree_id):
+        if worktree_id == "broken":
+            raise RuntimeError("simulated persistent failure")
+        return {"v": "swept"}
+
+    attempted = []
+    for _ in range(3):
+        before = set(attempted)
+        # Wrap refresh to record which key was actually attempted this tick.
+        def _tracking_refresh(p, w, _before=before):
+            attempted.append(w)
+            return refresh(p, w)
+
+        cache.sweep_due(refresh=_tracking_refresh)
+        clock["t"] += 0.001  # break exact-tie ordering between ticks
+
+    # With a starvation bug, "broken" would be re-selected every tick
+    # (still the stalest by computed_at, which never advances on failure)
+    # and "ok0"/"ok1" would never be attempted at all. The fix must let
+    # every due entry get a turn across these 3 ticks (cap=1/tick).
+    assert set(attempted) == {"broken", "ok0", "ok1"}
 
 
 def test_sweep_drops_entries_whose_demand_has_aged_out(tmp_path):

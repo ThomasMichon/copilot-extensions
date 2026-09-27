@@ -221,7 +221,13 @@ always declarations of desired AC/DC indexes.
 
 Declare machine-local opt-in for one unattended `agent-machines self-update`
 tier. Identity is `tier`, so `watchdog` and `sweep` are independent resources
-with independent authority and locking.
+with independent authority and locking. The declaring package can live in any
+adopted repo -- most commonly your own knowledge/control repo, since this is
+never authored in `copilot-extensions` itself -- or, when no such repo is
+bound/reachable, in the home-relative user-scoped root
+`~/.agent-machines/config/` (`all/` or `machines/<machine>/`), which needs no
+adoption or registry at all. See the `agent-machines-setup` skill's *Enable a
+regular unattended maintenance schedule* section for the resolution order.
 
 | Field | Required | Meaning |
 | --- | --- | --- |

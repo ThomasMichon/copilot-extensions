@@ -29,6 +29,10 @@ actions) and per-machine data stay in the consuming repo.
   conventional checkout is not accepted. A repo does not have to enable this
   plugin to contribute packages;
   `discover` annotates enablement, but the CLI does not require it by default.
+  Discovery also always scans a home-relative **user-scoped** root
+  (`~/.agent-machines/config/`, same `all/`/`machines/<machine>/` shape) that
+  needs no adopted repo, registry, or `agent-worktrees` at all -- the fallback
+  destination when no knowledge/control repo is bound or reachable.
 - **Restore is relationship-aware.** Bare `plan`, `validate`, and `restore`
   reconcile the adopted project containing CWD plus its directly bound required
   supplemental repository. This keeps a stateless harness and its knowledge
