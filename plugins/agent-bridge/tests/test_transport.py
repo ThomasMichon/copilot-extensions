@@ -1510,3 +1510,58 @@ class TestReresolveStaleInterpreter:
 
     def test_empty_args(self):
         assert _reresolve_stale_interpreter([]) == []
+
+
+class TestAgentProcessKillGracefulWindows:
+    """AgentProcess.kill() delegates the Windows tree-kill to the shared
+    procgroup.terminate_windows_tree (graceful stdin-close before a forceful
+    taskkill -- see #4031); POSIX is unaffected."""
+
+    def _target(self) -> SpawnTarget:
+        return SpawnTarget(type="ssh", cwd=".", host="myhost")
+
+    def _fake_proc(self, pid: int = 4242) -> MagicMock:
+        proc = MagicMock()
+        proc.pid = pid
+        proc.returncode = None
+        return proc
+
+    @pytest.mark.asyncio
+    async def test_delegates_to_windows_helper_on_win32(self):
+        proc = self._fake_proc()
+        proc.wait = AsyncMock(return_value=0)
+        agent_proc = AgentProcess(proc, self._target())
+
+        with patch("agent_bridge.transport.sys") as mock_sys, \
+             patch("agent_bridge.transport.terminate_windows_tree", AsyncMock()) as mock_win:
+            mock_sys.platform = "win32"
+            await agent_proc.kill()
+
+        mock_win.assert_awaited_once_with(proc)
+
+    @pytest.mark.asyncio
+    async def test_posix_unchanged(self):
+        proc = self._fake_proc()
+        proc.wait = AsyncMock(return_value=0)
+        agent_proc = AgentProcess(proc, self._target())
+
+        with patch("agent_bridge.transport.sys") as mock_sys, \
+             patch("agent_bridge.transport.safe_killpg", return_value=True) as mock_killpg, \
+             patch("agent_bridge.transport.terminate_windows_tree", AsyncMock()) as mock_win:
+            mock_sys.platform = "linux"
+            await agent_proc.kill()
+
+        mock_killpg.assert_called_once()
+        mock_win.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_noop_when_already_dead(self):
+        proc = self._fake_proc()
+        proc.returncode = 0
+        agent_proc = AgentProcess(proc, self._target())
+
+        with patch("agent_bridge.transport.terminate_windows_tree", AsyncMock()) as mock_win:
+            await agent_proc.kill()
+
+        mock_win.assert_not_awaited()
+
