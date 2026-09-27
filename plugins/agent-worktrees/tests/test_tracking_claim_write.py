@@ -255,6 +255,41 @@ def test_settle_without_skip_if_released_still_resettles_a_released_claim(record
     assert match.state == obligations.AT_REST
 
 
+def test_settle_skip_if_released_wins_over_a_stale_reservation(record_path):
+    """The ``skip_if_released`` no-op must run BEFORE the reservation check
+    (2026-09-27 PR #3911 review finding): a released claim that still
+    carries a stale ``handoff_bundle`` reservation must still silently
+    no-op, exactly like the old inline repair (which never even reached a
+    reservation check once a claim was already ``released``) -- not
+    surface as ``{"error": "reserved"}``."""
+    tracking_claim_write.apply_claim_add(
+        {
+            "worktree_id": "wt-claim",
+            "yaml_path": str(record_path),
+            "kind": "codespace",
+            "ref": "cs-1",
+        }
+    )
+    tracking_claim_write.apply_claim_release(
+        {"worktree_id": "wt-claim", "yaml_path": str(record_path), "ref": "cs-1"}
+    )
+    record = tracking.load_record(record_path)
+    match = next(c for c in record.resources if c.ref == "cs-1")
+    match.handoff_bundle = "stale-bundle"
+    tracking.save_record(record, record_path)
+
+    result = tracking_claim_write.apply_claim_settle(
+        {
+            "worktree_id": "wt-claim",
+            "yaml_path": str(record_path),
+            "ref": "cs-1",
+            "disposition": obligations.AT_REST,
+            "skip_if_released": True,
+        }
+    )
+    assert result == {"ok": True, "skipped": "released"}
+
+
 def test_dispatch_reaches_claim_add_through_a_live_daemon(record_path):
     """End-to-end: proves ``tracking_write.dispatch`` reaches
     ``apply_claim_add`` via an actual ``CoalescingServer``, the

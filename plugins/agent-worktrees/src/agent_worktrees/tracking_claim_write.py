@@ -155,7 +155,12 @@ def apply_claim_settle(args: dict) -> dict:
     "released"}`` no-op instead of settling it, so a ``deregister_session``
     that raced ahead and released the claim first is never resurrected back
     to another disposition (mirrors ``finalize.py``'s
-    ``_settle_current_session_claim`` guard). Must run inside this same
+    ``_settle_current_session_claim`` guard). Checked BEFORE the
+    reservation check below (2026-09-27 PR review finding) so a released
+    claim that still carries a stale reservation still silently no-ops --
+    the old inline repair never reached a reservation check once a claim
+    was already released, and reordering this after it would surface a
+    spurious ``{"error": "reserved"}`` instead. Must run inside this same
     locked transaction, not at the caller -- checking then dispatching as
     two separate steps would reopen exactly the race this guards against.
     """
@@ -168,6 +173,8 @@ def apply_claim_settle(args: dict) -> dict:
     with tracking._RecordLock(yaml_path, require_sidecar=True):
         record = tracking.load_record(yaml_path)
         match = next((c for c in record.resources if c.ref == ref), None)
+        if skip_if_released and match is not None and match.state == "released":
+            return {"ok": True, "skipped": "released"}
         reservation = (
             tracking.claim_handoff_reservation(record, match) if match is not None else ""
         )
@@ -179,8 +186,6 @@ def apply_claim_settle(args: dict) -> dict:
                     f"{reservation}; accept, decline, or cancel it first"
                 ),
             }
-        if skip_if_released and match is not None and match.state == "released":
-            return {"ok": True, "skipped": "released"}
         settled = tracking.settle_resource_claim(record, ref, disposition, save=False)
         if settled is None:
             return {"error": "not_found"}
