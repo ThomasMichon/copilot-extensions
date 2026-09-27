@@ -353,7 +353,7 @@ launch/monitor ownership has moved out of `agent-worktrees`, the Picker treats
 backend vs. presentation as independent axes, and legacy `session_backend`
 bindings still resolve correctly through the compatibility view.
 
-### Phase 3c — Picker non-blocking I/O (In progress — Step 1 landed, Steps 2-5 open)
+### Phase 3c — Picker non-blocking I/O (In progress — Steps 1-2 landed, Steps 3-5 open)
 - [ ] Make every I/O-touching Picker surface — pivot loads (built-in and
       plugin-contributed), menu opens, and action execution with progress
       reporting — consistently non-blocking, closing the gap found while
@@ -376,7 +376,14 @@ bindings still resolve correctly through the compatibility view.
       extracted `_collect_setup_payload()` / `_apply_setup_payload()`, reusable
       `wait_for_current_setup_epoch_applied` test helper, and isolated contract
       tests; the four production call sites still use synchronous `setup()`
-      exactly as before.
+      exactly as before. **Step 2 landed in PR
+      [#4007](https://github.com/ThomasMichon/copilot-extensions/pull/4007)**:
+      the initial non-live mount now paints `_setup_skeleton()` first and
+      launches `_start_setup_reload_worker()` off-thread from `on_mount`,
+      preserving the live path while leaving the other three synchronous
+      `setup()` callers untouched for Step 3; the new blocking-gate mount
+      coverage and updated capture/TUI readiness helpers keep the async mount
+      contract deterministic across the suite.
 
 ### Phase 3d — Retire the Picker's in-process engine-module boundary (Planned — #3359, #3360)
 
@@ -718,6 +725,26 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-09-26** — Landed Phase 3c Step 2, PR
+  [#4007](https://github.com/ThomasMichon/copilot-extensions/pull/4007).
+  Cut the initial non-live picker mount over to the Step 1 epoch-guarded
+  worker: `engine_loading.on_mount()` now paints `_setup_skeleton()` and
+  launches `_start_setup_reload_worker()` off-thread instead of calling
+  synchronous `setup()`, while the existing live path stays structurally
+  unchanged. Added Step 2 regression coverage proving the cold non-live mount
+  paints before a blocked `src.load()` returns and that the eventual applied
+  state exactly matches the old synchronous `setup()` result, then taught the
+  capture/TUI test harnesses to wait for the async non-live mount result
+  where they had previously assumed a synchronous ready screen. Explicitly
+  re-verified scope before merge: the remaining direct `setup()` callers are
+  still only the `r` reload handler plus the two post-action rescans, so Step
+  3 stays isolated. Validation: targeted
+  `tests/production_picker/test_setup_reload_epoch.py` +
+  `test_picker_first_paint.py` green; full `worktree-manager` suite matched
+  the rebased machine baseline at `1478 passed, 7 skipped, 13 failed`
+  (unchanged known failures: 3 unrelated provider-source failures plus 10
+  Windows symlink-privilege failures).
 
 - **2026-09-26** — Landed Phase 3c Step 1, PR
   [#3903](https://github.com/ThomasMichon/copilot-extensions/pull/3903).
