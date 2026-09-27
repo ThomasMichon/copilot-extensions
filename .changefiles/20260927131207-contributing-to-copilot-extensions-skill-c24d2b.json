@@ -1,0 +1,9 @@
+{
+  "comment": "contributing-to-copilot-extensions skill: fix PR-review-wait guidance to match the new wait-for-a-verdict protocol",
+  "changes": [
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "patch"
+    }
+  ]
+}
