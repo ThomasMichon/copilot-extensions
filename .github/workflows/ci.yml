@@ -555,3 +555,56 @@ jobs:
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Full suite - ${{ matrix.plugin }}
         run: python tools/run-plugin-tests.py ${{ matrix.plugin }}
+
+  pr-gate:
+    name: PR gate (required check)
+    # The single, fixed-name aggregate this repo's branch protection points
+    # at. Every job this depends on either uses dynamic matrix names (smoke's
+    # own per-plugin job name changes per PR) or conditionally no-ops
+    # (worktrees-smoke/worktrees-windows-launch skip unless the heavy plugin
+    # is in scope) -- neither shape can be named directly as a GitHub
+    # required status check without risking a PR that never triggers a given
+    # dynamic/conditional name getting stuck forever on "Expected -- waiting
+    # for status to be reported." This job is unconditional (`if: always()`)
+    # and always reports exactly one of success/failure, so it is always
+    # itself observable regardless of what its dependencies did.
+    #
+    # Exists because neither of #4151 nor #4166 (the regressions that stalled
+    # dev's CI for hours) was actually invisible: #4151's own PR-time
+    # `agent-logger` check WAS red, and still merged, because this repo had
+    # no required-status-checks branch protection on dev/main at all --
+    # nothing technically blocked it. This job is the anchor that lets that
+    # protection finally exist without brittleness.
+    if: always() && github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'main'
+    needs:
+      - checks
+      - windows-hooks
+      - worktree-manager
+      - test-runner-linux
+      - test-runner-windows
+      - discover
+      - smoke
+      - worktrees-smoke
+      - worktrees-windows-launch
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Confirm every required job succeeded or was legitimately skipped
+        env:
+          NEEDS_JSON: ${{ toJson(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          results = json.loads(os.environ["NEEDS_JSON"])
+          bad = {name: info["result"] for name, info in results.items()
+                 if info["result"] not in ("success", "skipped")}
+          if bad:
+              print("Failing/cancelled required job(s):", bad)
+              sys.exit(1)
+          print("All required jobs succeeded or were legitimately skipped:")
+          for name, info in results.items():
+              print(f"  {name}: {info['result']}")
+          PY
