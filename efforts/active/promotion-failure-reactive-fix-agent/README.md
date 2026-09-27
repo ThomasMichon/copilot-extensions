@@ -458,9 +458,11 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
         trigger shape is revisited.**
   - [x] **Bootstrap gotcha (this session already hit the identical bug
         once — see `ci.yml:71-74` and the dev-branch-release-pipeline
-        journal):** a `workflow_run`-triggered workflow is read from the
-        repo's **default branch (`main`)**, not the `dev` commit that adds
-        it. Merging the compiled `.lock.yml` to `dev` alone leaves the
+        journal):** a workflow triggered by an event OTHER than `push`/
+        `pull_request` (`workflow_run`, `issues: labeled`,
+        `workflow_dispatch`, etc.) is read from the repo's **default
+        branch (`main`)**, not the `dev` commit that adds it. Merging the
+        compiled `.lock.yml` to `dev` alone leaves the
         trigger inert until `main` also has it. Ship it with the same
         main-bootstrap companion PR pattern this repo already uses for
         every other workflow-file change, and verify the compiled lock
@@ -2040,6 +2042,9 @@ _Pending._
   and `ubuntu-slim` are accepted for a sibling workflow. This fix is
   repo-wide, not specific to this one draft — it unblocks every future
   `gh-aw` workflow this repo might compile.
+
+### 2026-09-27 — Seven more review rounds on PR #4155/#4326/#4334/#4340: 18 further issues found and fixed, engine auth resolved, main-branch bootstrap landed
+
 - **First real Copilot review pass on PR #4155 found 4 more issues, all
   fixed and recompile-verified:**
   - **HIGH — mutable action tag.** `--action-tag` compiled
