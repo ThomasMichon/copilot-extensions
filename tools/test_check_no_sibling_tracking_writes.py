@@ -114,6 +114,54 @@ def test_aliased_module_import_is_still_caught(tmp_path):
     assert "stamp_mux_live" in violations[0].detail
 
 
+def test_package_root_aliased_import_is_caught(tmp_path):
+    # `import agent_worktrees as aw; aw.tracking.save_record(...)` --
+    # a two-level attribute chain off a package-root alias, not a module
+    # alias -- must be caught just like the single-level module-alias form.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "import agent_worktrees as aw\n"
+        "\n"
+        "def write(record, path):\n"
+        "    aw.tracking.save_record(record, path)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "save_record" in violations[0].detail
+
+
+def test_unaliased_package_root_import_is_caught(tmp_path):
+    # The unaliased equivalent: `import agent_worktrees;
+    # agent_worktrees.tracking.save_record(...)`.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "import agent_worktrees\n"
+        "\n"
+        "def write(record, path):\n"
+        "    agent_worktrees.tracking.save_record(record, path)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "save_record" in violations[0].detail
+
+
+def test_tracking_controller_relations_reexport_is_caught(tmp_path):
+    # tracking_controller_relations.py re-exports save_record (a thin
+    # `from .tracking import save_record as impl; impl(...)` wrapper) --
+    # importing that module's own copy must be caught identically to
+    # importing tracking.py's directly.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking_controller_relations\n"
+        "\n"
+        "def write(record, path):\n"
+        "    tracking_controller_relations.save_record(record, path)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "save_record" in violations[0].detail
+
+
 def test_real_repo_checkout_is_clean():
     """End-to-end smoke test: the real, live repo tree must never trip this
     guard -- confirms the script (not just find_violations()) exits 0

@@ -639,16 +639,27 @@ survey above.
       `agent-worktrees` itself) for a direct import/call of a
       hand-curated, commented denylist of every tracking-record WRITE
       function across `tracking.py` / `tracking_lifecycle.py` /
-      `tracking_claims.py` / `tracking_session_registry.py` (27 functions).
-      Wired into CI alongside `test_check_no_sibling_tracking_writes.py`
-      (8 tests: clean tree, read-only-accessor non-flagging, three import
-      shapes, an aliased-module-import evasion case, the owning-plugin
-      exemption, and a live-repo smoke test). **Scoped to sibling
-      `plugins/*` only** (matching this effort's own original survey and
-      Plan wording) -- deliberately does NOT cover `worktree-manager/` (a
-      separate, non-plugin, out-of-plugin control-plane app), which
-      already imports several of these same write functions directly
-      today via its own in-process `_engine_runtime` bridge
+      `tracking_claims.py` / `tracking_session_registry.py` /
+      `tracking_controller_relations.py` (31 functions). Review caught two
+      real gaps before merge: `tracking_controller_relations.py`'s own
+      thin `save_record`/`_save_record_unlocked` re-export wrappers were
+      missing from the protected module set, and the attribute-chain
+      matcher only handled a single-level module alias
+      (`tracking.save_record(...)`), missing the two-level
+      `import agent_worktrees as aw; aw.tracking.save_record(...)` form
+      (and its unaliased equivalent) -- both fixed, with a regression test
+      each. Wired into CI alongside
+      `test_check_no_sibling_tracking_writes.py` (11 tests: clean tree,
+      read-only-accessor non-flagging, three single-level import shapes,
+      an aliased-module-import evasion case, two package-root-alias
+      evasion cases, the `tracking_controller_relations` re-export case,
+      the owning-plugin exemption, and a live-repo smoke test). **Scoped
+      to sibling `plugins/*` only** (matching this effort's own original
+      survey and Plan wording) -- deliberately does NOT cover
+      `worktree-manager/` (a separate, non-plugin, out-of-plugin
+      control-plane app), which already imports several of these same
+      write functions directly today via its own in-process
+      `_engine_runtime` bridge
       (`stamp_bound_live`/`stamp_mux_live`/`stamp_session_state` in
       `production_picker/picker_tui/data_local.py`) -- a KNOWN,
       already-tracked gap (see `efforts/active/worktree-manager-control-
@@ -743,23 +754,40 @@ already has an ordered plan for.
 Landed the Phase 4 CI guard proper: `tools/check-no-sibling-tracking-
 writes.py`, an AST-based scan of every sibling `plugins/*` (excluding
 `agent-worktrees` itself) for a direct import/call of a hand-curated,
-27-function denylist covering every tracking-record write function across
+31-function denylist covering every tracking-record write function across
 `tracking.py`/`tracking_lifecycle.py`/`tracking_claims.py`/
-`tracking_session_registry.py` -- derived by AST-walking each module for
-functions whose body calls `save_record`/`_save_record_unlocked`/the async
-stamp queue, then hand-verified against the remainder. Scoped deliberately
-to sibling PLUGINS only, matching this effort's own original survey/Plan
-wording -- NOT extended to cover `worktree-manager/`'s own already-tracked
-exception (see above), since that scope decision belongs to a
-coordinated cross-effort call, not something to fold in unilaterally here.
-8 new tests (`test_check_no_sibling_tracking_writes.py`): a clean tree, the
-sanctioned read-only accessors staying unflagged, three distinct
-import/call shapes (module attribute call, direct `from agent_worktrees
-import <fn>`, `from agent_worktrees.tracking_claims import <fn>`), an
-aliased-module-import evasion case, the owning-plugin's own exemption, and
-a live-repo smoke test (confirmed clean: zero violations today, matching
-the original survey's own finding). Wired into `.github/workflows/ci.yml`
-alongside the existing `check-no-agent-machines-packages.py` guard.
+`tracking_session_registry.py`/`tracking_controller_relations.py` --
+derived by AST-walking each module for functions whose body calls
+`save_record`/`_save_record_unlocked`/the async stamp queue, then
+hand-verified against the remainder. Scoped deliberately to sibling
+PLUGINS only, matching this effort's own original survey/Plan wording --
+NOT extended to cover `worktree-manager/`'s own already-tracked exception
+(see above), since that scope decision belongs to a coordinated
+cross-effort call, not something to fold in unilaterally here.
+
+**First review round found two real evasions the initial version missed,
+both fixed:** (1) `tracking_controller_relations.py`'s own thin
+`save_record`/`_save_record_unlocked` re-export wrappers were absent from
+the protected module set, so a sibling could route through that module
+instead and pass clean; (2) the attribute-chain matcher only handled a
+single-level module alias (`tracking.save_record(...)`), missing the
+two-level `import agent_worktrees as aw; aw.tracking.save_record(...)`
+form (and its unaliased `import agent_worktrees;
+agent_worktrees.tracking.save_record(...)` equivalent) -- a package-root
+alias was never tracked at all. Both fixed with a dedicated regression
+test each.
+
+11 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
+tree, the sanctioned read-only accessors staying unflagged, three
+single-level import/call shapes (module attribute call, direct
+`from agent_worktrees import <fn>`, `from agent_worktrees.tracking_claims
+import <fn>`), an aliased-module-import evasion case, the two
+package-root-alias evasion cases above, the
+`tracking_controller_relations` re-export case, the owning-plugin's own
+exemption, and a live-repo smoke test (confirmed clean: zero violations
+today, matching the original survey's own finding). Wired into
+`.github/workflows/ci.yml` alongside the existing
+`check-no-agent-machines-packages.py` guard.
 
 ### 2026-09-27 — PR #4265: daemon writes push straight into record_cache -- the read-consistency companion to Phase 3's write migration, plus two real bugs review caught
 Operator redirected scope mid-session, away from an initially-discussed

@@ -66,6 +66,7 @@ OWNING_PLUGIN = "agent-worktrees"
 WRITE_FUNCTIONS = frozenset({
     # tracking.py
     "save_record",
+    "_save_record_unlocked",
     "retire_record",
     "update_status",
     "set_disposition",
@@ -107,6 +108,7 @@ TRACKING_MODULES = frozenset({
     "tracking_lifecycle",
     "tracking_claims",
     "tracking_session_registry",
+    "tracking_controller_relations",
 })
 
 
@@ -152,6 +154,11 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
     # as tracking`) -- any attribute access on one of these matching
     # WRITE_FUNCTIONS is a violation.
     module_aliases: dict[str, int] = {}
+    # Local names bound to the WHOLE `agent_worktrees` package (`import
+    # agent_worktrees` or `import agent_worktrees as aw`) -- a two-level
+    # attribute chain off one of these (`aw.tracking.save_record(...)`) is
+    # the same violation as a module alias's own single-level access.
+    package_aliases: set[str] = set()
 
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
@@ -182,19 +189,36 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
         elif isinstance(node, ast.Import):
             for alias in node.names:
                 parts = alias.name.split(".")
-                if len(parts) == 2 and parts[0] == "agent_worktrees" and parts[1] in TRACKING_MODULES:
+                if parts[0] != "agent_worktrees":
+                    continue
+                if len(parts) == 1:
+                    package_aliases.add(alias.asname or parts[0])
+                elif len(parts) == 2 and parts[1] in TRACKING_MODULES:
                     module_aliases[alias.asname or parts[1]] = node.lineno
 
     for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Attribute)
-            and isinstance(node.value, ast.Name)
-            and node.value.id in module_aliases
-            and node.attr in WRITE_FUNCTIONS
-        ):
+        if not isinstance(node, ast.Attribute) or node.attr not in WRITE_FUNCTIONS:
+            continue
+        # Single-level: `tracking.save_record(...)` via a module alias.
+        if isinstance(node.value, ast.Name) and node.value.id in module_aliases:
             violations.append(Violation(
                 path, node.lineno,
                 f"calls write function `{node.value.id}.{node.attr}` directly",
+                repo_root=repo_root,
+            ))
+        # Two-level: `aw.tracking.save_record(...)` via a package alias
+        # (covers both `import agent_worktrees` and `import agent_worktrees
+        # as aw`, including the unaliased `agent_worktrees.tracking...` form).
+        elif (
+            isinstance(node.value, ast.Attribute)
+            and isinstance(node.value.value, ast.Name)
+            and node.value.value.id in package_aliases
+            and node.value.attr in TRACKING_MODULES
+        ):
+            violations.append(Violation(
+                path, node.lineno,
+                f"calls write function `{node.value.value.id}.{node.value.attr}."
+                f"{node.attr}` directly",
                 repo_root=repo_root,
             ))
     return violations
