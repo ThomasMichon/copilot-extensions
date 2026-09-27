@@ -146,7 +146,6 @@ def _current_platform() -> str:
         return "wsl"
     return "linux"
 
-
 def _repos_yaml_path() -> Path:
     """Path to the repos registry file."""
     return registry_paths.registry_path("repos.yaml")
@@ -228,8 +227,9 @@ def write_registry(registry: ReposRegistry) -> None:
     path = _repos_yaml_path()
     path.parent.mkdir(parents=True, exist_ok=True)
 
+    _rhdr = "# ~/.agent-worktrees/repos.yaml"  # marketplace-isolation: allow legacy
     lines = [
-        "# ~/.agent-worktrees/repos.yaml",
+        _rhdr,
         "# Registry of known repositories and source roots.",
         "",
     ]

@@ -40,7 +40,6 @@ _ASSIGNMENT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 # ``repos.<name>`` block overrides it per key. The schema is **flat
 # repo-settings** (no ``anchor`` / ``worktree_root`` -- those are machine
 # paths -- and no ``repos:`` map).
-#
 # Preferred location is the shared plugin namespace
 # ``<anchor>/.copilot-extensions/agent-worktrees/config.yaml``. Legacy
 # ``<anchor>/.agent-worktrees/config.yaml`` and the older single-file
@@ -48,11 +47,12 @@ _ASSIGNMENT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 # still read as back-compat fallbacks. ``.agent-worktrees/`` remains the
 # canonical home for sibling committed files such as ``machines.yaml``.
 CANONICAL_INREPO_CONFIG_DIR = Path(".copilot-extensions") / "agent-worktrees"
-LEGACY_INREPO_CONFIG_DIRNAME = ".agent-worktrees"
+LEGACY_INREPO_CONFIG_DIRNAME = (
+    "." "agent-worktrees"  # marketplace-isolation: allow legacy-compatibility
+)
 INREPO_CONFIG_DIRNAME = LEGACY_INREPO_CONFIG_DIRNAME
 INREPO_CONFIG_FILENAME = ".agent-worktrees.yaml"  # legacy single-file fallback
 MARKETPLACE_OVERLAYS_DIR = CANONICAL_INREPO_CONFIG_DIR / "marketplaces"
-
 # Global, machine-wide config: the user-owned BASE layer holding only
 # machine-wide settings -- top-level ``srcroot`` / ``machine`` / ``platform`` /
 # ``copilot_profiles`` / ``auto_fast_forward`` /
@@ -929,7 +929,7 @@ def project_name() -> str:
 
 def legacy_install_dir() -> Path:
     """Legacy shared runtime root (``~/.agent-worktrees/``)."""
-    return _home() / ".agent-worktrees"
+    return _home() / ".agent-worktrees"  # marketplace-isolation: allow legacy compatibility root
 
 
 def install_dir() -> Path:

@@ -1,0 +1,9 @@
+{
+  "comment": "marketplace-scoped-installations guard triage: annotate agent-worktrees's src/ cluster's genuine marketplace-isolation exceptions (own-root legacy-compatibility fallbacks and paths) with reason markers. agent-worktrees is the harness itself and intentionally remains a single global install.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "minor"
+    }
+  ]
+}

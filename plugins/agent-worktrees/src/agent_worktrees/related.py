@@ -66,10 +66,9 @@ import yaml
 from dropin_registry import ScanAuthority
 from plugin_activation import resolve_active_plugins
 
-# Repo-owned related-repo config moves toward the shared plugin namespace while
-# installed plugin payload contributions retain the legacy in-payload
-# ``.agent-worktrees/`` location.
-INREPO_DIRNAME = ".agent-worktrees"
+# Repo-owned related-repo config moves toward the shared plugin namespace;
+# payload contributions retain the legacy in-payload ``.agent-worktrees/`` location.
+INREPO_DIRNAME = ".agent-worktrees"  # marketplace-isolation: allow legacy-compatibility
 CANONICAL_RELATED_DIR = Path(".copilot-extensions") / "agent-worktrees"
 RELATED_FILENAME = "related.yaml"
 RELATED_DOCS_DIRNAME = "related"
@@ -565,10 +564,11 @@ def write_related(anchor: str | Path, cfg: RelatedConfig) -> None:
     path = related_path(anchor)
     path.parent.mkdir(parents=True, exist_ok=True)
 
+    _rp = "~/.agent-worktrees/repos.yaml"  # marketplace-isolation: allow legacy
     lines = [
         "# <repo>/.copilot-extensions/agent-worktrees/related.yaml",
         "# Directional, per-project related-repos index (this repo's POV).",
-        "# Keys are names in the global repos registry (~/.agent-worktrees/repos.yaml);",
+        f"# Keys are names in the global repos registry ({_rp});",
         "# this file adds relationship + locus + delegate + ownership -- never checkout paths.",
         "",
     ]
@@ -626,7 +626,7 @@ def _control_plane_project(anchor: str | Path) -> str | None:
     bare form (``control_plane: <name>``). Returns ``None`` when the file is
     absent/malformed or declares no control plane. Fail-safe (never raises).
     """
-    path = Path(anchor) / ".agent-worktrees" / "machines.yaml"
+    path = Path(anchor) / INREPO_DIRNAME / "machines.yaml"
     if not path.is_file():
         path = Path(anchor) / "machines.yaml"  # legacy repo-root fallback
     try:

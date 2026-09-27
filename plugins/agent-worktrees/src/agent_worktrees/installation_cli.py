@@ -346,7 +346,7 @@ def cmd_install(args: argparse.Namespace) -> int:
             return 1
 
     # Create shared runtime directories
-    runtime_dir = cfg._home() / ".agent-worktrees"
+    runtime_dir = cfg._home() / ".agent-worktrees"  # marketplace-isolation: allow legacy
     for d in [runtime_dir, runtime_dir / "bin", inst.local_bin()]:
         d.mkdir(parents=True, exist_ok=True)
 
@@ -821,4 +821,3 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
 
     output.ok("Uninstall complete")
     return 0
-

@@ -821,8 +821,8 @@ def _classify_records_lease_guarded(
         return _classify_records_live(records, session_ctx)
 
     from single_instance_lease import AlreadyRunningError, SingleInstance
-
-    lease = SingleInstance(lock_dir, service="classify")
+    service = "classify"  # marketplace-isolation: allow legacy-compatibility
+    lease = SingleInstance(lock_dir, service=service)
     try:
         lease.acquire()
     except AlreadyRunningError:
@@ -4019,7 +4019,7 @@ def _start_provisioning_if_needed(
         return diagnostic + (f"[agent-worktrees] Runtime provisioning preview failed: {exc}\n")
     if plan.get("action") != "reconcile":
         return diagnostic
-    services = ", ".join(
+    services = ", ".join(  # marketplace-isolation: allow query-column-list
         dict.fromkeys(
             str(item.get("service"))
             for item in plan.get("updates", [])
@@ -5379,7 +5379,8 @@ def _write_global_config(
     if path.exists():
         output.skipped(f"Global config exists at {path} (user-owned, left as-is)")
         return
-    content = f"""# ~/.agent-worktrees/config.yaml
+    _p = "~/.agent-worktrees/config.yaml"  # marketplace-isolation: allow legacy-compatibility
+    content = f"""# {_p}
 # GLOBAL machine-wide agent-worktrees config (lowest precedence tier).
 #
 # Machine-wide defaults shared across every project on this machine. Per-repo
@@ -5565,18 +5566,17 @@ def build_parser() -> argparse.ArgumentParser:
     git_cli.add_parsers(sub)
 
     pr_cli.add_parsers(sub)
-
     # stage-update (background marketplace download; #1430 stage-then-join)
     sp = sub.add_parser(
         "stage-update", help="Background-stage the plugin marketplace update (JSON status)"
     )
+    _sh_path = "~/.agent-worktrees/updater-status.json"  # marketplace-isolation: allow legacy
     sp.add_argument(
         "--status",
         default=None,
-        help="Status file path (defaults to ~/.agent-worktrees/updater-status.json)",
+        help=f"Status file path (defaults to {_sh_path})",
     )
     sp.add_argument("--json", action="store_true", help="Echo the status dict to stdout")
-
     # reconcile-marketplaces -- retired (#2722); kept as a no-op compatibility
     # shim so a caller still running pre-upgrade script content (an in-flight
     # launch, or a stale deployed marketplace-overrides.ps1/.sh) doesn't

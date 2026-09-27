@@ -42,7 +42,11 @@ def _now_ms() -> int:
 
 def _grants_path() -> Path:
     """Path to the break-glass grant store."""
-    return Path.home() / ".agent-worktrees" / "allow-edits.json"
+    return (
+        Path.home()
+        / ".agent-worktrees"  # marketplace-isolation: allow legacy-compatibility
+        / "allow-edits.json"
+    )
 
 
 def clamp_minutes(minutes: float | int | None) -> int:

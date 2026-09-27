@@ -1667,18 +1667,18 @@ _IDENTITY_ENV_VARS = ("WORKTREE_PROJECT", "WORKTREE_ID")
 # the real argument before declaring the successor seeded.
 _INITIAL_PROMPT_B64_FLAG = "--aw-prompt-b64"
 _INITIAL_PROMPT_RECEIPT_B64_FLAG = "--aw-prompt-receipt-b64"
-
+_LEGACY_RUNTIME_DIR = ".agent-worktrees"  # marketplace-isolation: allow legacy-compatibility
+_LEGACY_BIN_DIR = "~/.agent-worktrees/bin"  # marketplace-isolation: allow legacy-compatibility
 
 def _initial_prompt_receipt_path(token: str) -> Path:
     """Return the wrapper receipt path for one generated prompt token."""
-    return Path.home() / ".agent-worktrees" / "handoff-prompt-receipts" / token
+    return Path.home() / _LEGACY_RUNTIME_DIR / "handoff-prompt-receipts" / token
 
 
 def _mux_session_target(worktree_id: str, mux_bin: str) -> str:
     """Session target string. tmux uses the ``=`` exact-match prefix; psmux
     does not support it (rejected as an unknown session)."""
     return _mux_named_session_target(mux_session_name(worktree_id), mux_bin)
-
 
 def _mux_named_session_target(session_name: str, mux_bin: str) -> str:
     """Return an exact mux target for an already-known session name."""
@@ -1772,7 +1772,7 @@ def _mux_pane_cmd(
     wrapper = pane_wrapper
     if wrapper is None:
         name = "pane-wrapper.sh" if is_tmux else "pane-wrapper.ps1"
-        wrapper = os.path.expanduser(f"~/.agent-worktrees/bin/{name}")
+        wrapper = os.path.expanduser(f"{_LEGACY_BIN_DIR}/{name}")
     if wrapper and os.path.isfile(wrapper) and os.access(wrapper, os.R_OK):
         if is_tmux:
             clean: list[str] = ["env"]

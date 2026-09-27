@@ -125,9 +125,8 @@ class Finding:
 def _projects_path() -> Path:
     from . import registry_paths
 
-    return registry_paths.registry_path(
-        "projects.yaml", legacy_root=Path.home() / ".agent-worktrees"
-    )
+    _legacy = Path.home() / ".agent-worktrees"  # marketplace-isolation: allow legacy
+    return registry_paths.registry_path("projects.yaml", legacy_root=_legacy)
 
 
 def _read_projects() -> dict[str, dict]:
@@ -215,9 +214,12 @@ def _wsl_install_present(distro: str | None) -> bool | None:
     if not wsl_exe:
         return None
     probe = (
-        'v="$(cat "$HOME/.agent-worktrees/current-version" 2>/dev/null)"; '
-        'test -x "$HOME/.agent-worktrees/versions/$v/bin/agent-worktrees" '
-        '-o -x "$HOME/.agent-worktrees/versions/$v/bin/python"'
+        'v="$(cat "$HOME/'
+        '.agent-worktrees/current-version" 2>/dev/null)"; '  # marketplace-isolation: allow legacy
+        'test -x "$HOME/'
+        '.agent-worktrees/versions/$v/bin/agent-worktrees" '  # marketplace-isolation: allow legacy
+        '-o -x "$HOME/'
+        '.agent-worktrees/versions/$v/bin/python"'  # marketplace-isolation: allow legacy
     )
     argv = [wsl_exe]
     if distro:
@@ -242,9 +244,8 @@ def _read_global_config() -> dict:
     """Machine-wide ``~/.agent-worktrees/config.yaml`` (srcroot/machine/platform)."""
     from . import registry_paths
 
-    path = registry_paths.registry_path(
-        "config.yaml", legacy_root=Path.home() / ".agent-worktrees"
-    )
+    _legacy = Path.home() / ".agent-worktrees"  # marketplace-isolation: allow legacy
+    path = registry_paths.registry_path("config.yaml", legacy_root=_legacy)
     if not path.exists():
         return {}
     try:

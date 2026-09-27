@@ -30,7 +30,7 @@ def _launch_trace_path() -> Path | None:
     if raw.lower() in ("1", "true", "yes", "on"):
         return (
             Path.home()
-            / ".agent-worktrees"
+            / ".agent-worktrees"  # marketplace-isolation: allow legacy-compatibility
             / "logs"
             / "picker-launches.jsonl"
         )

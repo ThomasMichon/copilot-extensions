@@ -35,11 +35,9 @@ def install_dir() -> Path:
     """~/.agent-worktrees (shared runtime)"""
     return cfg.install_dir()
 
-
 def lib_dir() -> Path:
     """~/.agent-worktrees/lib -- deployed Python package source."""
     return install_dir() / "lib"
-
 
 def venv_dir() -> Path:
     """~/.agent-worktrees/.venv"""
@@ -745,13 +743,13 @@ def _binstub_lock(project: str):
 # remains detection-only so reconciliation can migrate old stubs; generated
 # stubs never emit it. Foreign stubs from other tools lack both signatures.
 def _is_project_binstub(text: str) -> bool:
-    if "agent-worktrees project binstub" in text:
-        return True
-    if "bin/payload/agent-worktrees" in text.replace("\\", "/"):
-        return True
-    if "agent_worktrees --project" in text:
-        return True
-    return "WORKTREE_PROJECT" in text and ".agent-worktrees" in text
+    legacy_dir = ".agent-worktrees"  # marketplace-isolation: allow legacy-compatibility
+    return (
+        "agent-worktrees project binstub" in text
+        or "bin/payload/agent-worktrees" in text.replace("\\", "/")
+        or "agent_worktrees --project" in text
+        or ("WORKTREE_PROJECT" in text and legacy_dir in text)
+    )
 
 
 def _is_legacy_project_binstub_for(text: str, project: str) -> bool:
@@ -772,7 +770,8 @@ def _is_legacy_project_binstub_for(text: str, project: str) -> bool:
             flags=re.IGNORECASE | re.MULTILINE,
         )
     )
-    has_launcher = ".agent-worktrees/bin/launch-session." in normalized
+    legacy_launcher = ".agent-worktrees/bin/launch-session."  # marketplace-isolation: allow legacy
+    has_launcher = legacy_launcher in normalized
     has_payload_route = (
         "bin/payload/agent-worktrees" in normalized
         or "python -m agent_worktrees" in normalized
@@ -1612,8 +1611,9 @@ def write_projects_registry(registry: dict, path: Path | None = None) -> None:
         path = projects_yaml_path()
     path.parent.mkdir(parents=True, exist_ok=True)
 
+    _phdr = "# ~/.agent-worktrees/projects.yaml"  # marketplace-isolation: allow legacy
     lines = [
-        "# ~/.agent-worktrees/projects.yaml",
+        _phdr,
         "# Adoption/launch registry: lean, name-keyed to repos.yaml (the single",
         "# owning store of anchor/path/branch). Carries only harness/adoption-",
         "# runtime facts (config_dir, wsl, base_repo, elevated, expose_agent,",
