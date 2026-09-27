@@ -59,12 +59,28 @@ on:
   reaction: none
   status-comment: false
 
-# TODO(successor): confirm engine auth path with the operator -- effort's own Plan
-# names two options (org-billing `copilot-requests: write` vs. a `COPILOT_GITHUB_TOKEN`
-# PAT under Account permissions -> Copilot Requests: Read). Neither is wired yet.
-# Draft below assumes the PAT path (more likely to work without an org Copilot
-# subscription with centralized billing) but this is NOT a made decision -- ask
-# before merging.
+# Engine auth path: RESOLVED (operator decision, 2026-09-27) -- the PAT path.
+# A fine-grained PAT (`Aperture Science/GitHub: Copilot Extensions Agent
+# Worker` in the facility vault) scoped to ONLY `ThomasMichon/copilot-extensions`
+# with ONLY the `Copilot Requests: Read` Account permission -- no Repository
+# permissions at all -- is stored as this repo's `COPILOT_GITHUB_TOKEN` secret.
+# Deliberately NOT the org-billing `copilot-requests: write` path (no org
+# Copilot subscription with centralized billing here), and deliberately NOT
+# reused from any other existing PAT: gh-aw's own compiled lock file already
+# excludes `COPILOT_GITHUB_TOKEN` from the agent job's own sandboxed
+# container environment (`--exclude-env COPILOT_GITHUB_TOKEN`) and uses it
+# only to authenticate the earlier, non-sandboxed inference call -- but a
+# token that ALSO held repo write permissions (e.g. an existing
+# release-management PAT for this same repo) would still be a real
+# injection-blast-radius risk if it were ever reused here, since PR
+# creation itself happens in the separate `safe_outputs` job via the
+# workflow's own standard `GITHUB_TOKEN`, never via this PAT at all -- this
+# PAT structurally cannot write to the repo even if a prompt-injection
+# attempt somehow reached it. `gh aw compile`'s own default `engine: copilot`
+# behavior auto-detects and uses `secrets.COPILOT_GITHUB_TOKEN` when present
+# (confirmed: no additional frontmatter is needed to select this path over
+# the org-billing one -- gh-aw's own auth docs confirm both credential
+# shapes are accepted for the same `engine: copilot` value).
 engine: copilot
 
 # Read-only baseline for the AGENT job specifically (this file's own

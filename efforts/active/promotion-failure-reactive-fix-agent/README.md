@@ -516,6 +516,35 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
         them or assume one satisfies the other. Whichever path is chosen,
         follow this repo's normal `secrets`-skill vaulting discipline for
         any token involved, never hardcode it.
+        **Auth-path decision: RESOLVED 2026-09-27 (operator decision) — the
+        PAT path.** A dedicated fine-grained PAT (`Aperture Science/GitHub:
+        Copilot Extensions Agent Worker` in the facility vault), scoped to
+        ONLY `ThomasMichon/copilot-extensions` with ONLY `Copilot Requests:
+        Read` (no Repository permissions at all), stored as this repo's
+        `COPILOT_GITHUB_TOKEN` secret. Deliberately NOT reused from an
+        existing broader-scoped PAT (this repo's own release-management PAT
+        also holds `Contents: Read and write`/`Pull requests: Read and
+        write` on this same repo) — reusing it would have exposed a
+        write-capable credential to the same workflow whose whole threat
+        model assumes its agent job processes attacker-reachable content,
+        even though gh-aw's own compiled lock already excludes
+        `COPILOT_GITHUB_TOKEN` from the agent's sandboxed container
+        environment and PR creation happens via the separate `safe_outputs`
+        job's own standard `GITHUB_TOKEN`, never this PAT — a
+        single-purpose, minimally-scoped token closes that risk
+        structurally rather than relying on gh-aw's own isolation alone.
+        `engine: copilot` needed no frontmatter change: gh-aw's compiler
+        auto-detects and uses `secrets.COPILOT_GITHUB_TOKEN` when present,
+        confirmed via the compiled lock's own
+        `validate_multi_secret.sh COPILOT_GITHUB_TOKEN` check — only the
+        stale "not yet decided" comment in the `.md` source needed removing.
+        **Still open, separately:** pinning the `gh-aw` CLI *extension*
+        binary version itself (as opposed to the already-SHA-pinned
+        `github/gh-aw` action references, enforced by
+        `tools/check-gh-aw-action-pins.py`) — this machine's local
+        extension install currently floats on whatever release was
+        downloaded during this session's SSO workaround; a durable pin
+        (and how to re-verify/update it) is unresolved.
   - [x] Give the agent job read-only repo access by default (its baseline
         posture) — only the `safe-outputs` PR-creation stage should hold
         any write credential at all **(narrowly: the attacker-facing
@@ -2068,3 +2097,28 @@ _Pending._
   fixed by updating the PR description's Changes and Validation sections
   to match the actual diff. Recompiled clean; all guards and the full
   75-test suite still pass.
+- **Engine auth path decided (2026-09-27, operator decision): the PAT
+  path.** Considered reusing an existing broader-scoped release-management
+  PAT for this same repo, but declined it: that PAT holds `Contents: Read
+  and write`/`Pull requests: Read and write` on `copilot-extensions`, and
+  exposing it (even nominally, even though gh-aw's own compiled lock
+  already excludes `COPILOT_GITHUB_TOKEN` from the agent's sandboxed
+  container and routes PR creation through the separate `safe_outputs`
+  job's own `GITHUB_TOKEN` instead) to a workflow whose whole threat model
+  assumes its agent job processes attacker-reachable log-excerpt content
+  would have been an avoidable risk. Minted a dedicated, minimally-scoped
+  fine-grained PAT instead (`Aperture Science/GitHub: Copilot Extensions
+  Agent Worker`) — repo-scoped to only `copilot-extensions`, with ONLY
+  `Copilot Requests: Read` under Account permissions, no Repository
+  permissions at all — stored as the `COPILOT_GITHUB_TOKEN` repo secret.
+  Removed the stale "not yet decided" TODO comment from the workflow
+  source; no other frontmatter change was needed, since `gh aw compile`'s
+  default `engine: copilot` behavior auto-detects and uses
+  `secrets.COPILOT_GITHUB_TOKEN` when present (confirmed via the compiled
+  lock's own `validate_multi_secret.sh COPILOT_GITHUB_TOKEN` check).
+  Recompiled clean; all guards and the full 75-test suite still pass.
+  **This resolves the last blocking item from PR #4155's original
+  handoff note.** Still open, unrelated: pinning the `gh-aw` CLI
+  extension binary version itself (distinct from the already-SHA-pinned
+  `github/gh-aw` action references), and Phase 2's remaining bootstrap/
+  prompt-injection-boundary items plus all of Phase 3's guardrails.
