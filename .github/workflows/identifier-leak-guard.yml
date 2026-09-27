@@ -199,10 +199,16 @@ jobs:
               .map(([label]) => label);
 
             if (!configured) {
-              conclusion = "failure";
-              title = "Identifier leak guard misconfigured";
+              // Deliberately non-blocking (not "failure"): the denylist secrets
+              // are operator/agent-provisioned out-of-band (efforts/active/
+              // ci-identifier-leak-guard Phase 4) and this check was never
+              // added to either branch's required checks, so a red X here
+              // would only be a misleading, unactionable alarm on every PR
+              // while provisioning is in progress -- never a real gate.
+              conclusion = "neutral";
+              title = "Identifier leak guard not yet armed";
               summary =
-                "FORBIDDEN_IDS_FACILITY / FORBIDDEN_IDS_WORK repository secrets are not configured, so the trusted scan cannot enforce the identifier denylist yet.";
+                "FORBIDDEN_IDS_FACILITY / FORBIDDEN_IDS_WORK repository secrets are not configured yet, so the trusted scan cannot enforce the identifier denylist. This is expected during provisioning and does not block merges.";
             } else if (details.length > 0) {
               conclusion = "failure";
               title = `${details.length} forbidden identifier(s) found`;

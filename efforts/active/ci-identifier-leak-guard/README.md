@@ -19,7 +19,9 @@ contributors who do not have the private denylist configured on their machine.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | effort host | Owns the reviewed plan PR and follow-on implementation slices | isolated worktree |
-| repository operator | Provisions the secret-backed denylist values without routing the raw values through an agent | GitHub repository settings / `gh secret set` |
+| aperture-labs agent | Assembles the facility-context denylist (`FORBIDDEN_IDS_FACILITY`) -- not secret from within aperture-labs, only from the public repo -- and pushes it to the repository secret via `gh secret set` | aperture-labs facility session |
+| operator's work-context harness agent | Assembles the separate work-context denylist (`FORBIDDEN_IDS_WORK`) from a list the operator keeps on their work OneDrive, and pushes it to the repository secret via `gh secret set` | cross-repo/cross-harness collaboration (private-context harness; not named here) |
+| repository operator | Confirmed (2026-09-27) the denylists are not secret *from* either agent -- only from the public repo -- so both are agent-assembled/pushed rather than operator-typed; keeps the source lists in personal OneDrive locations (facility list does not need Vault, no credential material) | — |
 
 ## Coordination
 
@@ -149,13 +151,26 @@ an untrusted findings artifact at all.
   mutating admin call.
 - [ ] After operator confirmation, add `identifier leak guard` to the required
   status checks on `main` ruleset `18553911` and `dev` ruleset `23904550`.
+- [x] **Operator correction (2026-09-27):** the unconfigured-denylist path now
+  reports `neutral` ("not yet armed") instead of `failure` -- it was never
+  actually a required check (confirmed against both rulesets), so the red X
+  was a misleading, unactionable alarm on every PR while Phase 4 provisioning
+  is in progress. See the Journal entry below.
 
 ### Phase 4 - Provision the secret-backed denylists
 
-- [ ] Operator only: add `FORBIDDEN_IDS_FACILITY` and the separate work-context
-  secret (for example `FORBIDDEN_IDS_WORK`) through the GitHub UI or
-  `gh secret set`; the raw values must not be originated, transited, or stored
-  by an agent.
+_(Revised 2026-09-27: the operator will not personally type these secrets --
+see the Journal entry below. Both are agent-assembled/pushed instead of
+"operator only.")_
+
+- [ ] An **aperture-labs agent** assembles the `FORBIDDEN_IDS_FACILITY` list
+  (facility-context identifiers -- machine names, internal hosts, personal
+  names, etc.; not secret from within aperture-labs, only from the public
+  repo) and pushes it to the `ThomasMichon/copilot-extensions` repository
+  secret via `gh secret set`.
+- [ ] Collaborate with the operator's **private-context harness agent** to assemble the separate
+  `FORBIDDEN_IDS_WORK` list from a source list the operator keeps on their
+  work OneDrive, and push it to the repository secret via `gh secret set`.
 - [ ] Document the expected secret format and repository-administration step
   near the workflow/tooling docs touched by the implementation.
 
@@ -173,6 +188,9 @@ an untrusted findings artifact at all.
 - [x] Confirm the clean scratch PR's **misconfiguration** path produces no
   identifier-feedback comment and logs only the configuration gap (not any raw
   matched value).
+- [ ] **Revised (2026-09-27):** confirm the misconfiguration path now reports
+  `neutral` (title "Identifier leak guard not yet armed"), not `failure` --
+  to be confirmed once this change's own PR's `workflow_run` check completes.
 - [ ] Once the denylist secrets exist, confirm a genuinely clean denylist-backed
   scan produces no raw matched values in the workflow log and no failure
   feedback comment.
@@ -185,6 +203,35 @@ an untrusted findings artifact at all.
 _Pending._
 
 ## Journal
+
+### 2026-09-27 - Neutral misconfiguration conclusion, and secret provisioning delegated to agents
+
+- A separate consuming-repo session flagged the "misconfigured -> failure"
+  Check Run as alarming and asked to disable it. Investigation confirmed it
+  was never actually gating a merge: Phase 3's last item (adding it to either
+  ruleset's required checks) was deliberately left unchecked pending operator
+  confirmation, and neither `main` ruleset `18553911` nor `dev` ruleset
+  `23904550` lists it today. So the red X was a non-blocking but misleading
+  alarm, not a live gate.
+- Operator decision: change the conclusion to `neutral` ("Identifier leak
+  guard not yet armed") while Phase 4 secret provisioning is outstanding,
+  instead of `failure`. The scan/report logic for a real denylist match is
+  untouched.
+- Operator also corrected the original Phase 4 "operator only" plan: they
+  will not personally originate/type these secrets. Both denylists are
+  **agent-assembled and agent-pushed** instead, because the content is not
+  secret from within either source context -- only from the public repo:
+  - `FORBIDDEN_IDS_FACILITY` -- an aperture-labs agent assembles this list and
+    pushes it via `gh secret set`. Storage doesn't need Vault (no credential
+    material, just names/identifiers), and can live in the operator's
+    personal OneDrive.
+  - `FORBIDDEN_IDS_WORK` -- needs collaboration with the operator's
+    private-context work harness agent, sourced from a separate list the
+    operator keeps on their **work** OneDrive, then pushed the same way.
+  See Participants and the revised Phase 4 above. Exact list contents,
+  OneDrive paths, and which agent actually runs `gh secret set` are not yet
+  settled -- this entry captures the operator's stated approach, not a
+  completed plan.
 
 ### 2026-09-26 - Kickoff
 - Effort created to capture the settled fork-safe CI backstop design before any
