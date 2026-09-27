@@ -31,8 +31,8 @@ binding only when one effective repository configuration is active. The session
 hook never stamps a runtime, installs packages, or starts a service.
 - **Self-supervised host lifecycle**: the light host runtime is installed into
 its own versioned slot, and the plugin's installer/runtime commands supervise
-it directly. `install`/`update` rebuild only the light `[store]` service slot,
-then cut traffic over with zdd; the durable engine remains on its separate
+it directly. `install`/`update` rebuild only the light `[store,server]` service
+slot, then cut traffic over with zdd; the durable engine remains on its separate
 explicit lifecycle and is never rebuilt by a routine service update.
 
 ## Minimal setup

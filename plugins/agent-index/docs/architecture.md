@@ -11,7 +11,7 @@ The current plugin includes:
 - a Python package and `agent-index` CLI;
 - a loopback FastAPI service with zdd routing and legacy rendezvous discovery;
 - lightweight client runtime slots under `~/.agent-index/versions/<version>`;
-- versioned host `[store]` slots selected by the plugin's own installer/cutover;
+- versioned host `[store,server]` slots selected by the plugin's own installer/cutover;
 - durable service data under `~/.agent-index/data/`;
 - a durable embedding-engine venv/daemon under `~/.agent-index/engine`;
 - source connectors for local git, GitHub issues/PRs, and Azure DevOps work

@@ -22,6 +22,15 @@ dependencies = [
     # agent-zdd/agent-procutil before a plain `pip install` would try (and fail) to
     # resolve them from PyPI.
     "agent-index",
+    # This program's own tiny HTTP RPC shim (app.py) -- distinct from agent-index's
+    # own [server] extra (agent-index-server-venv-split), which is the version-
+    # coupled index/query HTTP service, not this durable embedding daemon. Declared
+    # directly here (rather than depending on agent-index[server]) so this program
+    # stays a genuinely self-contained, independently-installable dependency
+    # footprint -- agent-index's own base no longer carries this triplet.
+    "fastapi>=0.110",
+    "uvicorn>=0.52.3",
+    "pydantic>=2.0",
     # The heavy embedding stack -- the durable, persistent ENGINE runtime only,
     # provisioned on the engine host (in a durable venv outside the versioned
     # service runtime). Never installed alongside the light service (effort

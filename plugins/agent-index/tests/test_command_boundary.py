@@ -53,17 +53,18 @@ def test_restart_delegates_to_graceful_deploy(monkeypatch):
 def test_installers_are_base_only_and_never_implicitly_start_engine():
     """The [store] extra (numpy/pyarrow/lancedb/tree-sitter*) is the light,
     torch-free vector-store stack a HOST's own versioned service runtime
-    needs to search/index locally -- distinct from the durable, heavy
-    [engine] (torch) extra, which is provisioned exclusively by the
-    `engine`/`engine-update` verbs (durable-vs-versioned-runtime.md). The
-    installers may select [store] for a host role, but must never pull in
-    [engine] or implicitly start the engine daemon as a side effect of a
-    routine install/update.
+    needs to search/index locally, and [server] is the FastAPI/uvicorn/
+    pydantic HTTP service shell it also runs -- both distinct from the
+    durable, heavy [engine] (torch) extra, which is provisioned exclusively
+    by the `engine`/`engine-update` verbs (durable-vs-versioned-runtime.md).
+    The installers may select [store,server] for a host role, but must never
+    pull in [engine] or implicitly start the engine daemon as a side effect
+    of a routine install/update.
     """
     ps = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
     sh = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
-    assert '"$PluginDir[store]"' in ps
-    assert '"${PLUGIN_DIR}[store]"' in sh
+    assert '"$PluginDir[store,server]"' in ps
+    assert '"${PLUGIN_DIR}[store,server]"' in sh
     assert '[store,engine]' not in ps.split("function Install-Runtime {", 1)[1].split(
         "function Install-Engine {", 1
     )[0]
@@ -115,12 +116,12 @@ def test_installers_preserve_two_step_cuda_engine_swap():
 
     assert 'AGENT_INDEX_TORCH_INDEX' in ps
     assert '--no-deps --reinstall-package torch torch' in ps
-    assert '"$PluginDir[store,engine]"' in ps
+    assert '"$PluginDir[store,engine,server]"' in ps
     assert "'engine-update' { if (Install-Engine -Upgrade) { Restart-EngineDaemon } }" in ps
 
     assert 'AGENT_INDEX_TORCH_INDEX' in sh
     assert '--no-deps --reinstall-package torch torch' in sh
-    assert '"$PLUGIN_DIR[store,engine]"' in sh
+    assert '"$PLUGIN_DIR[store,engine,server]"' in sh
     assert 'engine-update)                                                  # rebuild durable engine venv + restart daemon (decoupled from service update)' in sh
 
 

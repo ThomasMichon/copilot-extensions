@@ -3519,7 +3519,7 @@ def test_selected_completed_runtime_requires_successful_import(
 @pytest.mark.parametrize(
     ("role", "expected_target"),
     [
-        ("host", "payload[store]"),
+        ("host", "payload[store,server]"),
         ("client", "payload"),
         (None, "payload"),
     ],
