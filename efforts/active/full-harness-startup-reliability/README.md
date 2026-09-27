@@ -349,6 +349,28 @@ correction inline, per the effort's own journal discipline)._
   covering both the payload-dir-marker race and concurrent-invocation
   atomicity on both platforms, addressing the review's third finding
   (missing test coverage for this exact code path).
+- **Round 2, second follow-up (2026-09-27):** a further review pass on the
+  same PR (still open) surfaced 2 new findings on top of the 3 above (which
+  it re-listed as still-open threads even though already fixed in code —
+  resolved as stale threads, not re-fixed): (1) MEDIUM —
+  `bootstrap-check.ps1`'s synchronous `stamp-binstub` call discarded its own
+  exit code (`*> $null`), so a probe denial, lock timeout, or write failure
+  still backgrounded the full `stamp` and returned success with no launcher
+  actually published, silently breaking the very guarantee the two-stage
+  split exists for — fixed by checking `$LASTEXITCODE` immediately after
+  the call and skipping the background `stamp` when the fast stage failed.
+  (2) MEDIUM — the POSIX stamp lock (added in the immediately-prior
+  follow-up) serialized writers against each other but not against the
+  generated binstub's *reader*, which reads `payload-dir` without taking
+  the lock; a plain `>` redirection truncates the file before `printf`
+  writes it, so a reader racing a later/concurrent stamp could observe an
+  empty path and exit 127 despite the binstub itself being atomically
+  replaced — fixed by publishing the marker through a same-directory temp
+  file + `mv -f`, the same pattern `deploy_binstub` already uses for the
+  binstub. Verified via `bash -n`/PowerShell AST parse and the `stamp`-
+  tagged regression suite (2 passed, 2 skipped — POSIX cases skip on the
+  Windows validation host), pushed, and all 5 open review threads (3 stale
+  + 2 new) resolved with a summary comment citing the fixing commit.
 
 ### Round 0 — Kickoff (pre-effort evidence)
 
@@ -441,3 +463,27 @@ correction inline, per the effort's own journal discipline)._
   `flock`. Pushed as a follow-up commit on the same PR #4129 branch. PR
   #3305 has no new findings as of this check; both remain open, awaiting
   review.
+
+  ### 2026-09-27 — PR #4129's third review round addressed; both PRs mergeable, awaiting review decision
+
+  - Resumed via handoff; both PRs confirmed `MERGEABLE` with no review
+    decision yet. PR #4129 had picked up a further review pass (5 open
+    threads: 3 re-listing the already-fixed findings from the prior journal
+    entry as still-unresolved threads, plus 2 genuinely new medium-severity
+    findings). Fixed the 2 new ones: `bootstrap-check.ps1` now checks
+    `$LASTEXITCODE` after the synchronous `stamp-binstub` call and skips
+    backgrounding the full `stamp` on failure (previously discarded via
+    `*> $null`, silently breaking the launcher-before-return guarantee on any
+    probe/lock/write failure); POSIX `init.sh` now publishes `payload-dir`
+    through a same-directory temp file + `mv -f` instead of a direct `>`
+    redirection, closing a truncation window a concurrent binstub-reader
+    could observe (matching `deploy_binstub`'s own atomic-replace pattern).
+    Verified via `bash -n`/PowerShell AST parse and the `stamp`-tagged
+    regression suite (2 passed, 2 skipped). Rebased onto latest `dev`,
+    force-pushed with-lease, then resolved all 5 open review threads via the
+    GraphQL API and posted a summary comment on the PR citing the fixing
+    commit and the verification performed, since the 3 stale threads needed
+    explicit resolution rather than a code re-fix. PR #3305 (the effort plan
+    itself) has no new findings as of this check. Both PRs remain open,
+    awaiting a review decision -- watching per the standard `pr-watch`
+    discipline rather than diagnosing the reviewer.
