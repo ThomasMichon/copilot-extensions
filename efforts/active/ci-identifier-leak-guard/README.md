@@ -235,3 +235,24 @@ _Pending._
 - No identifier-guard PR feedback comment was posted on the clean scratch PR,
   and the check-run output named only the configuration gap -- no raw matched
   values appeared because no denylist-backed scan actually ran.
+
+### 2026-09-27 - Interim non-blocking fix: misconfigured reports neutral, not failure
+- Neither `main` (ruleset `18553911`) nor `dev` (rulesets `23904550`/`24069919`)
+  currently list `identifier leak guard` as a required status check -- Phase 3's
+  last checkbox (adding it to required checks) is correctly still unchecked --
+  but the misconfigured-secrets path reported `conclusion: "failure"` on every
+  PR's check-run regardless, which downstream tooling (and PR authors) reading
+  the status-check rollup were reasonably treating as a real red X across
+  essentially every open PR while Phase 4 (secret provisioning) remains
+  outstanding.
+- Changed `identifier-leak-guard.yml`'s misconfigured branch from `failure` to
+  `neutral` ("Identifier leak guard not yet configured (in development)") so
+  the check surfaces as non-blocking while it's genuinely incomplete, instead
+  of looking like a real enforcement failure. Real scan failures (forbidden
+  identifiers found, or a genuine step error) still report `failure` and post
+  PR feedback exactly as before -- only the "not configured yet" case changed.
+- This is a stopgap for the development window only. Once Phase 4 provisions
+  `FORBIDDEN_IDS_FACILITY`/`FORBIDDEN_IDS_WORK`, `configured` becomes true and
+  this neutral branch never fires again; the check should still not be added
+  to required status checks until Phase 3's validation-with-a-real-secret step
+  is complete.

@@ -199,10 +199,18 @@ jobs:
               .map(([label]) => label);
 
             if (!configured) {
-              conclusion = "failure";
-              title = "Identifier leak guard misconfigured";
+              // Phase 4 (efforts/active/ci-identifier-leak-guard) provisions
+              // FORBIDDEN_IDS_FACILITY / FORBIDDEN_IDS_WORK as an
+              // operator-only step and hasn't landed yet. Report this as
+              // `neutral` (non-blocking) rather than `failure` while the
+              // feature is still in development, so PRs aren't gated on an
+              // enforcement layer that isn't provisioned yet. Once the
+              // secrets exist, `configured` is true and this branch never
+              // fires again -- real scan failures below still fail closed.
+              conclusion = "neutral";
+              title = "Identifier leak guard not yet configured (in development)";
               summary =
-                "FORBIDDEN_IDS_FACILITY / FORBIDDEN_IDS_WORK repository secrets are not configured, so the trusted scan cannot enforce the identifier denylist yet.";
+                "FORBIDDEN_IDS_FACILITY / FORBIDDEN_IDS_WORK repository secrets are not configured yet (Phase 4 of ci-identifier-leak-guard is pending), so this check is reported neutral instead of blocking PRs.";
             } else if (details.length > 0) {
               conclusion = "failure";
               title = `${details.length} forbidden identifier(s) found`;
