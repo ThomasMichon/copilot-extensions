@@ -333,14 +333,14 @@ equivalence. An agent **fails** review if any applicable box is unchecked:
       redundant with the bridge's own decorators. A bridge's `decorators:`
       (`filter`/`transform`/`gate`) run inside **agent-mcp's own bridge
       runtime**, not the invocation transport -- they are enforced identically
-      whether a call arrives via the native attached catalog, `agent-mcp call`,
-      or a materialized stub. A conditional/argument-dependent `gate` therefore
-      does **not** justify disabling the fallback (the now-obsolete
-      `Materialized CLI fallback: disabled (conditional authorization gate)`
-      marker); it is exactly the case the fallback must keep working for.
-      Review only that shape-only decorators (a static `filter`/`transform`
-      with no runtime branching) yield a wider raw catalog than intended, which
-      the agent should document.
+      no matter which surface calls them: the native attached catalog, the
+      one-shot `call` subcommand, or a materialized stub. A conditional/
+      argument-dependent `gate` therefore does **not** justify disabling the
+      fallback (the now-obsolete `Materialized CLI fallback: disabled
+      (conditional authorization gate)` marker); it is exactly the case the
+      fallback must keep working for. Review only that shape-only decorators
+      (a static `filter`/`transform` with no runtime branching) yield a wider
+      raw catalog than intended, which the agent should document.
 - [ ] **MCP anti-self-delegation line present.** The section contains an explicit
       "Do NOT … (task tool / spawn / delegate) …" directive — canonically the
       literal line "Do NOT use the task tool to spawn another `<agent-name>`
