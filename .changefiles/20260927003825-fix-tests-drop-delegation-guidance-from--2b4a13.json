@@ -1,0 +1,9 @@
+{
+  "comment": "fix(tests): drop delegation-guidance from NO_SESSION_HOOK -- it is a deprecated no-op placeholder (#4166) with no instruction projections, matching that PR's own documented intent",
+  "changes": [
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "dev"
+    }
+  ]
+}
