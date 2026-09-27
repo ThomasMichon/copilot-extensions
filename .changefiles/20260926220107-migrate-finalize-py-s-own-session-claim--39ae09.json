@@ -1,0 +1,9 @@
+{
+  "comment": "Migrate finalize.py's own-session claim settlement onto the tracking_write claim_settle verb",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

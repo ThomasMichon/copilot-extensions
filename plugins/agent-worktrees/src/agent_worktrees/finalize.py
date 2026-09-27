@@ -1329,41 +1329,47 @@ def _settle_current_session_claim(
     current_session_id: str | None,
 ) -> tuple[tracking.WorktreeRecord | None, str | None]:
     """Settle the invoking session's own claim to ``at-rest``, lock-safe.
+    Dispatches through the shared ``claim_settle`` verb's own
+    ``skip_if_released`` guard (daemon write path when reachable, else the
+    identical logged in-process fallback -- ``agent-worktrees-authoritative-
+    daemon`` effort, Phase 3; reuses the same guard
+    ``handoff_cutover.py``'s ``_settle_predecessor_session_claim`` relies
+    on) rather than a bespoke locked transaction: an interleaving
+    ``register_session``/``deregister_session`` can never be overwritten by
+    this settlement, and an already-``released`` claim (a ``sessionEnd``
+    that raced ahead of a retried/late finalize for the SAME session id) is
+    never resurrected back to ``at-rest``.
 
-    Reloads + settles inside a fresh ``_RecordLock`` transaction (rather than
-    mutating a stale pre-lock snapshot) so an interleaving
-    ``register_session``/``deregister_session`` -- each its own locked
-    read-modify-write -- can never be overwritten by this settlement. Never
-    resurrects an already-``released`` claim: a ``sessionEnd`` can race ahead
-    of a retried/late finalize for the SAME session id, and settling
-    unconditionally would flip a genuinely-torn-down claim back to
-    ``at-rest`` (held).
-
-    Returns ``(record, current_session_ref)`` -- ``record`` is the freshly
-    reloaded record when settlement ran, else the ``record`` passed in
-    unchanged; ``current_session_ref`` is ``None`` when no session id was
-    resolvable (a silent, best-effort no-op, not a failure).
-    """
+    Returns ``(record, current_session_ref)`` -- ``record`` is freshly
+    reloaded when the dispatch ran without raising, else the ``record``
+    passed in unchanged; ``current_session_ref`` is ``None`` when no
+    session id was resolvable (a silent, best-effort no-op)."""
     if record is None or not current_session_id:
         return record, None
     current_session_ref = tracking.format_claim_ref(
         record.machine, record.repo, record.worktree_id,
         session=current_session_id,
     )
+    from . import locks as _locks
+    from . import status_monitor_runtime as _smr
+    from . import tracking_write
+
     try:
-        with tracking._RecordLock(yaml_path, require_sidecar=True):
-            fresh_record = tracking.load_record(yaml_path)
-            existing_claim = next(
-                (c for c in fresh_record.resources
-                 if c.ref == current_session_ref),
-                None,
-            )
-            if existing_claim is None or existing_claim.state != "released":
-                tracking.settle_resource_claim(
-                    fresh_record, current_session_ref,
-                    disposition=obligations.AT_REST,
-                )
-            record = fresh_record
+        tracking_write.dispatch(
+            "claim_settle",
+            {
+                "worktree_id": record.worktree_id,
+                "yaml_path": str(yaml_path),
+                "ref": current_session_ref,
+                "disposition": obligations.AT_REST,
+                "skip_if_released": True,
+            },
+            read_lock_data=lambda: _locks.read_lock(_smr._monitor_lock_path()),
+            ensure_monitor=(
+                _smr._ensure_status_monitor if _smr._status_monitor_enabled() else None
+            ),
+        )
+        record = tracking.load_record(yaml_path)
     except Exception:
         pass
     return record, current_session_ref
@@ -1696,23 +1702,20 @@ def validate_and_finalize(
     except Exception:
         pass
 
-    # Session-claim lifecycle (Phase 8, worktree-finality-and-obligations):
-    # settle the invoking session's own outbound claim BEFORE the hard
-    # obligation gate runs, so finalize never leaves the operator to settle
-    # it by hand -- and it never blocks the gate either way (see the
-    # `kind != "session"` exclusion in `_assert_obligations_settled`).
+    # Session-claim lifecycle (Phase 8, worktree-finality-and-obligations): settle the invoking
+    # session's own outbound claim BEFORE the hard obligation gate runs, so finalize never leaves
+    # the operator to settle it by hand -- and it never blocks the gate either way (see the `kind
+    # != "session"` exclusion in `_assert_obligations_settled`).
     #
-    # Scoping note: this reads ``COPILOT_AGENT_SESSION_ID`` from the CURRENT
-    # process's own environment, so it settles the invoking (interactive)
-    # session's claim. ``_post_exit_gate``'s backstop call (after the child
-    # Copilot process exits) runs in the *launcher's* environment, which
-    # never carries the exited child's session id -- so if that child's own
-    # `sessionEnd` hook was itself missed (a crash, not a clean exit), this
-    # step is a no-op and the orphaned claim is left `active`. That claim
-    # never blocks finalize (the `kind != "session"` exclusion above) and is
-    # exactly the still-deferred "sweep `claim_gone`/`claim_safe` session
-    # branch" Plan bullet's job to reclaim -- not solved here, to keep this
-    # slice's scope to the register/deregister/finalize wiring itself.
+    # Scoping note: this reads ``COPILOT_AGENT_SESSION_ID`` from the CURRENT process's own
+    # environment, so it settles the invoking (interactive) session's claim. `_post_exit_gate`'s
+    # backstop call (after the child Copilot process exits) runs in the *launcher's* environment,
+    # which never carries the exited child's session id -- so if that child's own `sessionEnd` hook
+    # was itself missed (a crash, not a clean exit), this step is a no-op and the orphaned claim is
+    # left `active`. That claim never blocks finalize (the `kind != "session"` exclusion above) and
+    # is exactly the still-deferred "sweep `claim_gone`/`claim_safe` session branch" Plan bullet's
+    # job to reclaim -- not solved here, to keep this slice's scope to the
+    # register/deregister/finalize wiring itself.
     current_session_id = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
     record, current_session_ref = _settle_current_session_claim(
         yaml_path, record, current_session_id,
@@ -2010,16 +2013,13 @@ def validate_and_finalize(
             # orphans governed by their own prune safety.
             released = tracking.release_all_resources(record, save=False)
             tracking.update_status(record, "finalized")
-            # Warn about (never auto-release) any real CodeSpace claim(s)
-            # this worktree still holds in agent-codespaces' own lease
-            # store -- distinct from (and a necessary complement to) the
-            # bookkeeping-only ledger release just above, which only clears
-            # THIS repo's own claim records and never even queries the venue
-            # plugin that actually enforces exclusivity. Only the CURRENT
-            # session and an ACTIVE HANDOFF are entitled to self-release a
-            # claim at finalize time; any other still-live claim is
-            # surfaced here, with the exact release command, for the
-            # calling agent to confirm and run explicitly.
+            # Warn about (never auto-release) any real CodeSpace claim(s) this worktree still holds
+            # in agent-codespaces' own lease store -- distinct from (and a necessary complement to)
+            # the bookkeeping-only ledger release just above, which only clears THIS repo's own
+            # claim records and never even queries the venue plugin that actually enforces
+            # exclusivity. Only the CURRENT session and an ACTIVE HANDOFF are entitled to
+            # self-release a claim at finalize time; any other still-live claim is surfaced here,
+            # with the exact release command, for the calling agent to confirm and run explicitly.
             _warn_of_codespace_claims_for_worktree(worktree_id)
             # Same posture, for the mutable-dev-slot pattern (see
             # libs/versioned-runtime): a worktree that claimed dev mode for
