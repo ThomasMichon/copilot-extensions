@@ -353,7 +353,7 @@ launch/monitor ownership has moved out of `agent-worktrees`, the Picker treats
 backend vs. presentation as independent axes, and legacy `session_backend`
 bindings still resolve correctly through the compatibility view.
 
-### Phase 3c — Picker non-blocking I/O (In progress — Steps 1-3 landed, Steps 4-5 open)
+### Phase 3c — Picker non-blocking I/O (In progress — Steps 1-4 landed, Step 5 open)
 - [ ] Make every I/O-touching Picker surface — pivot loads (built-in and
       plugin-contributed), menu opens, and action execution with progress
       reporting — consistently non-blocking, closing the gap found while
@@ -732,6 +732,29 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-09-27** — Landed Phase 3c Step 4, PR
+  [#4164](https://github.com/ThomasMichon/copilot-extensions/pull/4164).
+  Promoted the standing "no blocking I/O on the render thread" contract from
+  an implicit test pattern into an explicit Phase 3c boundary: added
+  blocking-gate tests in
+  `worktree-manager/tests/production_picker/test_setup_reload_epoch.py` for
+  the manual `r` reload handler plus the config-section and contributed
+  worktree-action rescan callbacks, all instrumented so a direct synchronous
+  `setup()` / `_collect_setup_payload()` call would block the test and fail
+  with a call-site-specific message. Reused the already-landed blocked-mount
+  regression from Step 2 as the fourth setup/reload call-site guard, and
+  updated the existing Actions-menu liveness and steer-submit offload tests to
+  say explicitly that they are part of the same Phase 3c UI-thread boundary.
+  Evaluated the plan's "default-on broad fixture" option and rejected it on
+  purpose: the interactive picker suite still contains many intentional direct
+  `screen.setup()` tests covering lower-level synchronous seams, so a suite-
+  wide autouse guard would destabilize unrelated tests and obscure the actual
+  regression surface. Validation: targeted Phase 3c boundary tests green; full
+  `worktree-manager` suite matched the Windows baseline at `1498 passed,
+  7 skipped, 13 failed` (unchanged known failures: the same 3 unrelated
+  provider-source failures in `test_data_ssh_sources.py` plus 10 Windows
+  symlink-privilege failures).
+
 - **2026-09-26** — Landed Phase 3c Step 3, PR
   [#4144](https://github.com/ThomasMichon/copilot-extensions/pull/4144).
   Cut the last three render-thread setup callers over to the Step 1/2
@@ -772,6 +795,25 @@ claiming discipline alone.
   the rebased machine baseline at `1478 passed, 7 skipped, 13 failed`
   (unchanged known failures: 3 unrelated provider-source failures plus 10
   Windows symlink-privilege failures).
+  **Step 4 lands in PR
+  [#4164](https://github.com/ThomasMichon/copilot-extensions/pull/4164)**:
+  added explicit blocking-gate coverage for the three remaining UI-thread
+  setup/reload callbacks (`engine_input.py`'s `r` handler plus the config-
+  section and worktree-action rescan callbacks), all with
+  `_collect_setup_payload()` deliberately blocked so the tests fail if any
+  callback is rewired back to synchronous `setup()` or another direct-I/O
+  path. Kept Step 2's blocked-mount regression as the fourth call-site
+  guard and explicitly marked the existing Actions-menu liveness and
+  steer-submit offload tests as part of the same standing Phase 3c
+  non-blocking boundary. Deliberately did **not** make this a default-on
+  autouse fixture for the whole interactive-picker suite: many existing
+  tests intentionally call `screen.setup()` directly to exercise lower-
+  level synchronous seams, so a broad fixture would destabilize unrelated
+  tests instead of guarding just the UI-thread boundary. Validation:
+  targeted boundary tests green; full `worktree-manager` suite matched the
+  updated Windows baseline at `1498 passed, 7 skipped, 13 failed`
+  (unchanged known failures: the same 3 provider-source failures plus 10
+  symlink-privilege failures on this machine).
 
 - **2026-09-26** — Landed Phase 3c Step 1, PR
   [#3903](https://github.com/ThomasMichon/copilot-extensions/pull/3903).

@@ -169,8 +169,9 @@ def _write_instance_receipt(app: FastAPI, state: str) -> None:
     if path is None:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
+    _s = "copilot-extensions.agent-index.service-instance"  # marketplace-isolation: allow schema
     record = {
-        "schema": "copilot-extensions.agent-index.service-instance",
+        "schema": _s,
         "version": 1,
         "installationId": app.state.installation_id,
         "runtimeVersion": app.state.runtime_version,

@@ -69,6 +69,12 @@ PORTFOLIO_PLUGIN = "pytest_portfolio_guard"
 RUNNER_DEPENDENCIES = ("pytest-timeout>=2.3,<3",)
 LEASE_LIB = REPO / "libs" / "single-instance-lease" / "src"
 
+# Plugins whose OWN test suites assert properties about OTHER plugins (a
+# repo-wide contract, not something scoped to their own diff) -- see
+# ``changed_plugins``'s own docstring for why these must always be scheduled
+# alongside any change, not merely when their own files are touched.
+_CROSS_PLUGIN_CONTRACT_TESTERS = {"copilot-extensions-harness"}
+
 # The runner is a repository tool, so consume the canonical shared source
 # directly rather than growing another lock implementation.
 sys.path.insert(0, str(LEASE_LIB))
@@ -137,7 +143,26 @@ def all_plugins_with_suites() -> list[str]:
 
 
 def changed_plugins(base: str) -> list[str]:
-    """Plugins whose files changed vs ``base`` (default origin/main)."""
+    """Plugins whose files changed vs ``base`` (default origin/main), plus any
+    cross-plugin contract-testing plugin (``_CROSS_PLUGIN_CONTRACT_TESTERS``)
+    whenever anything changed at all.
+
+    Some plugins' own test suites assert properties about OTHER plugins --
+    e.g. ``copilot-extensions-harness``'s ``test_session_context_declarations.py``
+    walks every marketplace plugin's manifest and hooks. A PR touching only
+    that OTHER plugin never appears in this function's own diff-based
+    detection, so on a PR (which schedules only the ``--changed`` set,
+    unlike a push to dev/main which uses ``--all``) the cross-plugin
+    contract test never runs at all -- not merely skipped for lack of a
+    relevant change, but never scheduled, so a real regression it would have
+    caught can merge with no red check anywhere
+    (ThomasMichon/copilot-extensions#4166 -- delegation-guidance's migration
+    broke copilot-extensions-harness's own contract test, invisible until
+    the next push-triggered --all run on dev days later, by which point it
+    had stalled the whole promotion pipeline for every unrelated PR).
+    Always including these testers keeps that class of contract test in the
+    loop for any real change, at the cost of one extra (currently cheap,
+    ~30-40s) job per PR."""
     try:
         out = subprocess.run(
             ["git", "-C", str(REPO), "diff", "--name-only", f"{base}...HEAD"],
@@ -158,6 +183,8 @@ def changed_plugins(base: str) -> list[str]:
             parts = path.split("/")
             if len(parts) >= 2 and parts[0] == "plugins":
                 names.add(parts[1])
+        if names:
+            names |= _CROSS_PLUGIN_CONTRACT_TESTERS
     except OSError:
         return []
     return sorted(n for n in names if _has_suite(n))

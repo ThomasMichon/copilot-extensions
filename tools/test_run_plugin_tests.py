@@ -196,3 +196,41 @@ def test_host_state_requires_explicit_tier_opt_in(capsys) -> None:
         runner.main(["--allow-host-state"])
     assert exc.value.code == 2
     assert "--allow-host-state requires --allow-explicit-tiers" in capsys.readouterr().err
+
+
+class _FakeCompletedProcess:
+    def __init__(self, stdout: str) -> None:
+        self.stdout = stdout
+
+
+def test_changed_plugins_always_includes_cross_plugin_contract_testers(monkeypatch) -> None:
+    """A PR touching only plugin 'foo' must still schedule any registered
+    cross-plugin contract tester (regression: ThomasMichon/copilot-extensions
+    #4166 broke copilot-extensions-harness's own marketplace-wide contract
+    test without touching a single file under that plugin, so the PR's own
+    --changed-scoped CI never ran it)."""
+    calls = iter([
+        _FakeCompletedProcess("plugins/foo/src/foo.py\n"),
+        _FakeCompletedProcess(""),
+    ])
+    monkeypatch.setattr(runner.subprocess, "run", lambda *a, **k: next(calls))
+    monkeypatch.setattr(
+        runner, "_has_suite",
+        lambda name: name in {"foo", "copilot-extensions-harness"},
+    )
+    result = runner.changed_plugins("origin/main")
+    assert result == sorted({"foo", "copilot-extensions-harness"})
+
+
+def test_changed_plugins_empty_diff_schedules_nothing(monkeypatch) -> None:
+    """No real change (e.g. a docs-only or non-plugin diff) must not force
+    the contract testers to run either -- only an actual plugin change
+    should pull them in."""
+    calls = iter([
+        _FakeCompletedProcess(""),
+        _FakeCompletedProcess(""),
+    ])
+    monkeypatch.setattr(runner.subprocess, "run", lambda *a, **k: next(calls))
+    monkeypatch.setattr(runner, "_has_suite", lambda name: True)
+    assert runner.changed_plugins("origin/main") == []
+

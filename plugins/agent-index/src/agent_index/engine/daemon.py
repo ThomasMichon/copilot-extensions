@@ -34,8 +34,9 @@ from .generation import current_engine_generation
 
 def engine_home() -> Path:
     """Durable engine root (holds the heavy venv), outside the versioned runtime."""
+    _default = "~/.agent-index/engine"  # marketplace-isolation: allow legacy-compatibility
     return Path(
-        os.environ.get("AGENT_INDEX_ENGINE_HOME", "~/.agent-index/engine")
+        os.environ.get("AGENT_INDEX_ENGINE_HOME", _default)
     ).expanduser()
 
 

@@ -159,10 +159,11 @@ def _build_inner(
     machine = str(indexer["machine"])
     if shell == "bash":
         quoted = " ".join(shlex.quote(a) for a in argv)
+        _bin = '"$HOME/.local/bin/agent-index"'  # marketplace-isolation: allow remote-management
         return (
             f"AGENT_INDEX_CONFIG_DATA_B64={shlex.quote(routing)} "
             f"AGENT_INDEX_MACHINE={shlex.quote(machine)} "
-            f'"$HOME/.local/bin/agent-index" {quoted}'
+            f"{_bin} {quoted}"
         )
     # pwsh (default)
     quoted = " ".join(_q_pwsh(a) for a in argv)

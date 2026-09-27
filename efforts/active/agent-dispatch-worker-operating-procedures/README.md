@@ -250,20 +250,20 @@ rather than deciding it unreviewed mid-Phase-1.
       only *then* does the agent pause in the pane. Implemented in
       `interactive_worker_prompt()` ahead of the rest of this phase, since it
       was small and well-scoped enough not to hold for the full redesign.
-- [ ] Redesign `autopilot_worker_prompt()`'s full/concise modes and the
+- [x] Redesign `autopilot_worker_prompt()`'s full/concise modes and the
       unified `bridge`/fleet seed for a worker that **can** reach
       agent-dispatch directly: a short, event-classified descriptor plus one
       pointer command to the Phase 1 doc (and the task's own charter, if
       any) — generalizing `autopilot_worker_prompt(concise=True)`'s existing
       shape rather than inventing a new one. (`interactive_worker_prompt()`
       itself is done, above.)
-- [ ] Apply the same shrink to the live-nudge sites: `idle_confirm_message()`,
+- [x] Apply the same shrink to the live-nudge sites: `idle_confirm_message()`,
       `spawn_factories._default_nudge()`, `resume_steered_owner()`'s default
       message, and `queue_suspend.reconcile_cooldowns()`'s wake message —
       each becomes an event descriptor ("Task `<id>` received an update
       while you were working; re-read it...") rather than restating
       procedure inline.
-- [ ] Tests: seed/nudge content assertions updated for the new shape;
+- [x] Tests: seed/nudge content assertions updated for the new shape;
       confirm no test currently pins the *old* verbose text as if it were
       the contract (a smell the sweep should also flag if found).
 
@@ -414,3 +414,21 @@ _Pending._
   autopilot/bridge/fleet seeds and the live-nudge sites to event
   descriptors).
 
+### 2026-09-27 — Phase 2 completes (#4065, #4152)
+- PR #4065 merged: `autopilot_worker_prompt()`'s full + concise modes, the
+  thinner `bridge.worker_prompt()` fallback, and the fleet SSH seed now all
+  use short event descriptors that point at the universal
+  `operating-procedures` charter (and the `autopilot` task charter where
+  relevant) while keeping route/lane/owner-specific mechanics inline. Full
+  local suite: 3476 passed, 19 skipped, plus one confirmed pre-existing
+  unrelated failure (`test_idle_headless_fleet_nudge_includes_remote_host`);
+  the other documented Windows visible-window probe flake did not recur on
+  that run.
+- PR #4152 merged: the idle-confirm, stalled-worker, steer-resume (bridge
+  fallback + HTTP `/tasks/{id}/steer` route), and cooldown-resume nudges all
+  shrank to short event descriptors, and direct tests were added where those
+  message paths previously had no literal coverage. Final local full-suite
+  rerun for this slice: 3480 passed, 21 skipped, and exactly the two
+  confirmed pre-existing unrelated flakes recurred
+  (`test_idle_headless_fleet_nudge_includes_remote_host` and
+  `test_namespaced_peer_from_windowless_parent`).

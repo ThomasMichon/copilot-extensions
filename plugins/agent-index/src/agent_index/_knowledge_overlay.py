@@ -15,7 +15,8 @@ import subprocess
 from pathlib import Path
 from typing import Any, Callable
 
-WORKTREES_CONFIG_RELATIVE = Path(".agent-worktrees") / "config.yaml"
+_AWT = ".agent-worktrees"  # marketplace-isolation: allow registry
+WORKTREES_CONFIG_RELATIVE = Path(_AWT) / "config.yaml"
 INSTALLATION_CONTEXT_ENV = "COPILOT_EXTENSIONS_CONTEXT"
 WORKTREES_COMMAND_ENV = "AGENT_WORKTREES_COMMAND"
 MAX_CONFIG_BYTES = 256 * 1024
@@ -110,7 +111,7 @@ def _worktrees_command() -> str | None:
     if explicit is not None:
         value = explicit.strip()
         return value or None
-    return shutil.which("agent-worktrees")
+    return shutil.which("agent-worktrees")  # marketplace-isolation: allow legacy-compatibility
 
 
 def _load_peer_launch() -> Any:

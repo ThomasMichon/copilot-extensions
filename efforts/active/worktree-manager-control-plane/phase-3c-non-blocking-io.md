@@ -7,9 +7,11 @@
 - **Status:** In progress — Steps 1-2 merged 2026-09-26 as
   [#3903](https://github.com/ThomasMichon/copilot-extensions/pull/3903) and
   [#4007](https://github.com/ThomasMichon/copilot-extensions/pull/4007);
-  Step 3 lands in
+  Step 3 landed in
   [#4144](https://github.com/ThomasMichon/copilot-extensions/pull/4144);
-  Steps 4-5 remain open.
+  Step 4 lands in
+  [#4164](https://github.com/ThomasMichon/copilot-extensions/pull/4164);
+  Step 5 remains open.
 - **Governing visions:**
   - [`visions/picker`](../../../visions/picker/README.md):
     §Features/`decision-support-before-cost`, `programmatic-parity`;
@@ -251,14 +253,37 @@ then tightens regression coverage and cleanup.
      completion rescan races a manual reload" both deterministically resolve to
      the newer epoch.
 
-4. **Land the regression guards for menu opens and UI-thread setup I/O.**
+[x] **Step 4 — land the regression guards for menu opens and UI-thread
+      setup I/O.** Lands in
+      [#4164](https://github.com/ThomasMichon/copilot-extensions/pull/4164):
+      added explicit Phase 3c UI-thread boundary coverage in
+      `tests/production_picker/test_setup_reload_epoch.py` for the three
+      remaining setup/reload callbacks (`engine_input.py`'s `r` handler,
+      `_run_config_section()`'s rescan callback, and `_run_wt_action()`'s
+      rescan callback), all with `_collect_setup_payload()` blocked behind a
+      gate so the test fails immediately if any callback is changed back to
+      synchronous `setup()` or another direct-I/O path. Kept Step 2's blocked
+      mount test as the fourth call-site guard and explicitly marked the
+      existing Actions-menu liveness and steer-submit offload tests as part of
+      the same standing Phase 3c non-blocking boundary. Deliberately did **not**
+      install a broad default-on autouse fixture for every interactive picker
+      test: the suite still contains many intentional direct `screen.setup()`
+      unit tests (`test_picker_first_paint.py`, `test_picker_tui.py`, and this
+      module's own synchronous baseline checks), so a suite-wide guard would
+      either false-positive or force unrelated tests onto the async path just to
+      satisfy the fixture. Validation: targeted boundary tests green; full
+      `worktree-manager` suite matched the Windows baseline at `1498 passed,
+      7 skipped, 13 failed` (unchanged known failures: the same 3
+      provider-source failures plus 10 symlink-privilege failures on this
+      machine).
    - Promote the existing offload tests for Actions-menu verification and
      progress/reporting flows into the standing Phase 3c boundary.
    - Add the blocking-gate tests described above for setup/mount/reload.
-   - If a broad fixture is practical without destabilizing unrelated tests,
-     make it default-on for the interactive picker tests; otherwise keep the
-     explicit tests but treat them as required coverage for any future setup or
-     menu-touching PR.
+   - Deliberately keep the guard as explicit tests rather than a default-on
+     autouse fixture: the current interactive-picker corpus still carries many
+     intentional direct `screen.setup()`/baseline tests whose job is to
+     exercise synchronous helper seams, so a suite-wide guard would destabilize
+     unrelated coverage instead of protecting just the UI-thread boundary.
 
 5. **Cleanup, rename, and document the final shape.**
    - Remove or rename the now-misleading synchronous `setup()` UI entrypoint so
