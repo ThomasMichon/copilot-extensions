@@ -1,0 +1,9 @@
+{
+  "comment": "Fix pre-existing marketplace-isolation guard finding: annotate two narrative (non-operative) mentions of agent-mcp materialize/call in defining-subagents SKILL.md.",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}
