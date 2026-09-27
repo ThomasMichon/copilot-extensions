@@ -164,28 +164,26 @@ def apply_claim_settle(args: dict) -> dict:
     locked transaction, not at the caller -- checking then dispatching as
     two separate steps would reopen exactly the race this guards against.
 
-    ``require_sidecar`` (default ``True``, preserving the public ``claims
-    add``/``release``/``settle`` commands' existing behavior unchanged)
-    controls whether a cross-process sidecar-lock timeout raises (the
-    normal foreground-CLI contract) or gracefully degrades to the
-    in-process lock alone. The best-effort repair caller above passes
-    ``False`` -- its pre-migration inline transaction used a plain,
-    degrading ``_RecordLock``. Threaded through to the ``tracking.save_record``
-    call below too (2026-09-27 PR review finding): the reentrancy fast path
-    in ``_RecordLock.__enter__`` only skips re-acquiring the sidecar when
-    the OUTER lock's own attempt actually succeeded -- if this outer lock
-    degraded (sidecar contended), a nested ``save_record`` hard-requiring
-    the sidecar by default would still raise, silently reintroducing the
-    exact failure this guard exists to avoid.
+    Always hard-requires the sidecar (2026-09-27 PR review findings): the
+    pre-migration inline repair's own OUTER ``_RecordLock`` degraded on
+    contention, but its final ``tracking.save_record`` call already
+    hard-required the sidecar internally (``save_record`` never accepted a
+    softer policy) -- so on real contention the old code's net effect was
+    ALWAYS to fail the write and let it fall through to this repair's own
+    best-effort ``contextlib.suppress(Exception)``, never to persist a
+    stale in-memory snapshot without cross-process exclusion. Matching
+    that net effect here (rather than genuinely degrading) avoids silently
+    resurrecting an already-``released`` claim if a concurrent
+    ``deregister_session`` released it between this verb's own load and
+    save.
     """
     worktree_id = args["worktree_id"]
     yaml_path = Path(args["yaml_path"])
     ref = args["ref"]
     disposition = args["disposition"]
     skip_if_released = bool(args.get("skip_if_released"))
-    require_sidecar = args.get("require_sidecar", True)
 
-    with tracking._RecordLock(yaml_path, require_sidecar=require_sidecar):
+    with tracking._RecordLock(yaml_path, require_sidecar=True):
         record = tracking.load_record(yaml_path)
         match = next((c for c in record.resources if c.ref == ref), None)
         if skip_if_released and match is not None and match.state == "released":
@@ -204,7 +202,7 @@ def apply_claim_settle(args: dict) -> dict:
         settled = tracking.settle_resource_claim(record, ref, disposition, save=False)
         if settled is None:
             return {"error": "not_found"}
-        tracking.save_record(record, yaml_path, require_sidecar=require_sidecar)
+        tracking.save_record(record, yaml_path)
 
     activity.log_event(
         "claim_settled", worktree_id=worktree_id, kind=settled.kind, ref=ref,

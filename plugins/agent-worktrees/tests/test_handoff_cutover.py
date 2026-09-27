@@ -2706,15 +2706,17 @@ class TestHandoffRepairDispatchArgs:
     -- distinct from the end-to-end ``cmd_handoff_cutover`` tests above,
     which prove the resulting record state but not the wire-level args."""
 
-    def test_settle_predecessor_session_claim_requests_no_sidecar_requirement(
+    def test_settle_predecessor_session_claim_requests_skip_if_released(
         self, monkeypatch, tmp_tracking_dir, monkeypatch_config,
     ):
-        """Must pass ``require_sidecar=False``: the pre-migration inline
-        transaction used a plain, degrading ``_RecordLock`` (never
-        ``require_sidecar=True``); hard-requiring the sidecar would turn a
-        transient contention timeout into a ``TimeoutError`` this repair's
-        own best-effort ``contextlib.suppress(Exception)`` would silently
-        swallow, losing the cleanup instead of completing it."""
+        """Must pass ``skip_if_released=True`` so the shared ``claim_settle``
+        verb reproduces this repair's own long-standing guard against
+        resurrecting an already-``released`` claim. Does NOT request a
+        softer lock policy (2026-09-27 PR #3911 review findings): the
+        pre-migration inline transaction's own OUTER ``_RecordLock``
+        degraded on contention, but its final ``save_record`` call already
+        hard-required the sidecar internally, so the verb's own hard
+        requirement matches that net effect exactly."""
         from agent_worktrees import tracking as _tracking
 
         rec = _tracking.WorktreeRecord(
@@ -2738,7 +2740,7 @@ class TestHandoffRepairDispatchArgs:
 
         assert captured["verb"] == "claim_settle"
         assert captured["args"]["skip_if_released"] is True
-        assert captured["args"]["require_sidecar"] is False
+        assert "require_sidecar" not in captured["args"]
 
     def test_conclude_retired_predecessor_requests_only_if_active(
         self, monkeypatch, tmp_tracking_dir, monkeypatch_config,

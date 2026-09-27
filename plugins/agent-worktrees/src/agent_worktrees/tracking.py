@@ -3020,21 +3020,11 @@ def save_record(
     path: Path | None = None,
     *,
     preserve_handoff_reservations: bool = True,
-    require_sidecar: bool = True,
 ) -> None:
-    """Locked cross-process CAS for one complete worktree record.
-
-    ``require_sidecar`` (default ``True``, every existing caller unchanged)
-    mirrors :class:`_RecordLock`'s own flag -- pass ``False`` only when
-    nested inside an already-open, deliberately degrading outer
-    ``_RecordLock(require_sidecar=False)``: the reentrancy fast path only
-    skips re-acquiring the sidecar when the outer lock's own attempt
-    actually succeeded, so a degraded outer lock would otherwise still
-    hard-require the sidecar here regardless of the caller's own choice
-    (2026-09-27 PR review finding)."""
+    """Locked cross-process CAS for one complete worktree record."""
     if path is None:
         path = record.yaml_path
-    with _RecordLock(path, require_sidecar=require_sidecar):
+    with _RecordLock(path, require_sidecar=True):
         _save_record_unlocked(
             record,
             path,

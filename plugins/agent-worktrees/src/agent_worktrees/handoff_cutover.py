@@ -754,12 +754,13 @@ def _settle_predecessor_session_claim(wt_id: str | None, session_id: str) -> Non
     retire. Uses the shared ``claim_settle`` verb's ``skip_if_released``
     guard, which never resurrects an already-``released`` claim (mirrors
     ``finalize.py``'s ``_settle_current_session_claim`` guard) -- a
-    ``deregister_session`` that raced ahead is left alone. Passes
-    ``require_sidecar=False``: the pre-migration transaction used a plain,
-    degrading ``_RecordLock`` (never ``require_sidecar=True``), and this
-    repair's own suppressed exception would otherwise turn a transient
-    sidecar-contention timeout into a silently lost cleanup. Best-effort:
-    unknown worktree/session or a missing claim is a silent no-op."""
+    ``deregister_session`` that raced ahead is left alone. On sidecar
+    contention the verb's own ``require_sidecar=True`` raises, caught by
+    this repair's best-effort ``contextlib.suppress(Exception)`` (matching
+    the pre-migration transaction's own net effect -- its outer lock
+    degraded, but its final ``save_record`` call already hard-required the
+    sidecar). Best-effort: unknown worktree/session or a missing claim is a
+    silent no-op."""
     if not wt_id or not session_id:
         return
     with contextlib.suppress(Exception):
@@ -775,7 +776,6 @@ def _settle_predecessor_session_claim(wt_id: str | None, session_id: str) -> Non
             {
                 "worktree_id": wt_id, "yaml_path": str(yaml_path), "ref": predecessor_ref,
                 "disposition": obligations.AT_REST, "skip_if_released": True,
-                "require_sidecar": False,
             },
         )
 
