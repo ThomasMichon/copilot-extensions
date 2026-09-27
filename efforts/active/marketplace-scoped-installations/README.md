@@ -173,8 +173,11 @@ because they provide tools or services.
   (`agent-vault` credential-askpass) are verified currently-correct and
   explicitly deferred pending that plugin's own future cell-awareness, and
   exactly **2 remain genuine open work** (`agent-worktrees`'s
-  `register-nudge.{sh,ps1}`, fix pattern already proven in
-  `agent-machines/scripts/bootstrap-check.sh`).
+  `register-nudge.{sh,ps1}` — **corrected 2026-09-27**: not a quick
+  pattern-reuse from `bootstrap-check.sh`, which turns out to depend on the
+  same heavy resolver `register-nudge.sh` deliberately avoids for its
+  "tools-half box" bootstrap guarantee; needs new lightweight-detection
+  design first).
   - [x] Preserve complete default-legacy fallback coverage while migration is
     incomplete: every runtime `agent-*` stamp publishes every declared payload
     command, and agent-logger's multi-command family delegates through durable
@@ -447,6 +450,45 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 [`phase-6-lifecycle.md`](phase-6-lifecycle.md).
 
 ## Journal
+
+### 2026-09-27 — Correction: `register-nudge.sh`'s fix is NOT a `bootstrap-check.sh` pattern reuse — it needs new resolver-free design
+
+- Immediately after the previous entry's PR merged, went to actually
+  implement the "last genuine open item" (`agent-worktrees`'s
+  `register-nudge.{sh,ps1}`) using the pattern that entry claimed was
+  "already proven" in `bootstrap-check.sh`. Reading `register-nudge.sh` in
+  full first (not just its guard-flagged line) caught the claim being wrong
+  before any code was written.
+- `register-nudge.sh`'s own header states it is deliberately **"resolver-
+  free"** so it still runs on a "tools-half box" (a session-start hook that
+  must work before full runtime provisioning). Tracing `bootstrap-check.sh`'s
+  `legacy_mutation_allowed` -> `legacy-entrypoint-probe.sh` -> the full
+  `installation-context.sh` resolver (bash 4.4+, `awk` JSON parsing) shows
+  that path is **not actually resolver-free** — copying it here would
+  silently break the exact guarantee `register-nudge.sh` exists to preserve.
+- Also re-read `register-nudge.sh`'s actual behavior end to end: it never
+  *invokes* `agent-worktrees` at the flagged path at all — it only checks
+  availability as a precondition before emitting a plain-text onboarding
+  nudge telling the *user* to type `agent-worktrees register <name>`
+  themselves. The real gap is narrower than "cross-boundary consumption"
+  implied: the availability heuristic doesn't recognize a marketplace-cell
+  install that isn't on PATH and isn't at the legacy path, so the nudge could
+  wrongly suppress itself for cell-only hosts.
+- Corrected `phase-2-launcher-contracts.md` and the main README's Phase 2
+  item: this is genuine unconverted work, but the next step is **new,
+  genuinely lightweight (no `awk`/bash-4.4) marketplace-cell detection**
+  (e.g. a raw grep/sed read of the durable `installation-mode.json` policy
+  file's `enabled` field) — a design question, not an implementation task
+  ready to execute today. Left the code untouched.
+- **Pattern worth naming for future sessions on this effort**: every one of
+  this leg's "confirmed, ready-to-convert" classifications turned out to need
+  correction once the actual source was read line-by-line (`dtssh` was a
+  false positive; `agent-vault` was premature; `register-nudge` needs new
+  design, not reuse). Filename/family-based classification is not a
+  substitute for reading the code before committing to a fix plan in this
+  inventory.
+- No code changed this pass — documentation correction only.
+  `check-docs-consistency.py` clean.
 
 ### 2026-09-27 — Read the actual source for all 12 candidate cross-boundary findings: 1 dtssh false positive fixed, 9 verified accepted/deferred, exactly 2 genuine open items remain
 
