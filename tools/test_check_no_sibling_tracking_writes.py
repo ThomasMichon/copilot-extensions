@@ -638,6 +638,36 @@ def test_stamp_queue_read_only_attribute_is_not_flagged(tmp_path):
     assert guard.find_violations(tmp_path) == []
 
 
+def test_stamp_queue_reassigned_to_a_new_name_is_still_caught(tmp_path):
+    # `queue = tracking._STAMP_QUEUE; queue.submit(...)` -- the queue
+    # OBJECT itself is bound to a new name, not the module, so the
+    # inline three-level chain check alone would miss this.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking\n"
+        "queue = tracking._STAMP_QUEUE\n"
+        "\n"
+        "def write(wt_id):\n"
+        "    queue.submit(wt_id, turns=1)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "queue.submit" in violations[0].detail
+
+
+def test_stamp_queue_imported_directly_is_still_caught(tmp_path):
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees.tracking import _STAMP_QUEUE\n"
+        "\n"
+        "def write(wt_id):\n"
+        "    _STAMP_QUEUE.submit(wt_id, turns=1)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "_STAMP_QUEUE.submit" in violations[0].detail
+
+
 def test_unreadable_file_fails_closed_not_silently_skipped(tmp_path, monkeypatch):
     # A file the guard cannot even read must be reported, not silently
     # treated as clean -- otherwise an unreadable/undecodable file is a

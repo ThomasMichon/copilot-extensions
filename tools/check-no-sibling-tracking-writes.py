@@ -258,6 +258,12 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
     # attribute chain off one of these (`aw.tracking.save_record(...)`) is
     # the same violation as a module alias's own single-level access.
     package_aliases: set[str] = set()
+    # Local names bound directly to the `_STAMP_QUEUE` singleton itself
+    # (`queue = tracking._STAMP_QUEUE`, or a direct
+    # `from agent_worktrees.tracking import _STAMP_QUEUE`) -- calling a
+    # write-triggering method on one of these is the same violation as
+    # the inline `<module>._STAMP_QUEUE.<method>(...)` chain.
+    queue_aliases: dict[str, int] = {}
     # Local names bound to the `importlib` MODULE itself -- the plain
     # literal name `importlib` is included unconditionally (the common,
     # unaliased form), and `import importlib as il` adds its own alias.
@@ -317,6 +323,8 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
                             "write denylist and is rejected outright",
                             repo_root=repo_root,
                         ))
+                    elif alias.name == STAMP_QUEUE_ATTR:
+                        queue_aliases[alias.asname or alias.name] = node.lineno
                     elif alias.name in WRITE_FUNCTIONS:
                         violations.append(Violation(
                             path, node.lineno,
@@ -426,38 +434,6 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
             ):
                 yield node.target.id, node.value, node.lineno
 
-    changed = True
-    while changed:
-        changed = False
-        for target, value, lineno in _simple_assignments():
-            if isinstance(value, ast.Name):
-                source = value.id
-                if source in module_aliases and target not in module_aliases:
-                    module_aliases[target] = lineno
-                    changed = True
-                if source in package_aliases and target not in package_aliases:
-                    package_aliases.add(target)
-                    changed = True
-            elif (
-                isinstance(value, ast.Attribute)
-                and isinstance(value.value, ast.Name)
-                and value.value.id in package_aliases
-                and value.attr in TRACKING_MODULES
-                and target not in module_aliases
-            ):
-                module_aliases[target] = lineno
-                changed = True
-            else:
-                dynamic = _dynamic_import_alias_kind(value)
-                if dynamic is not None:
-                    kind, name = dynamic
-                    if kind == "package" and target not in package_aliases:
-                        package_aliases.add(target)
-                        changed = True
-                    elif kind == "module" and target not in module_aliases:
-                        module_aliases[target] = lineno
-                        changed = True
-
     def _module_expr_label(expr: ast.expr) -> str | None:
         """If ``expr`` resolves to a tracked module (a module alias, a
         two-level package-alias chain like ``aw.tracking``, or an inline
@@ -476,6 +452,53 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
         if dynamic is not None:
             return expr.args[0].value
         return None
+
+    changed = True
+    while changed:
+        changed = False
+        for target, value, lineno in _simple_assignments():
+            if isinstance(value, ast.Name):
+                source = value.id
+                if source in module_aliases and target not in module_aliases:
+                    module_aliases[target] = lineno
+                    changed = True
+                if source in package_aliases and target not in package_aliases:
+                    package_aliases.add(target)
+                    changed = True
+                if source in queue_aliases and target not in queue_aliases:
+                    queue_aliases[target] = lineno
+                    changed = True
+            elif (
+                isinstance(value, ast.Attribute)
+                and isinstance(value.value, ast.Name)
+                and value.value.id in package_aliases
+                and value.attr in TRACKING_MODULES
+                and target not in module_aliases
+            ):
+                module_aliases[target] = lineno
+                changed = True
+            elif (
+                isinstance(value, ast.Attribute)
+                and value.attr == STAMP_QUEUE_ATTR
+                and _module_expr_label(value.value) is not None
+                and target not in queue_aliases
+            ):
+                # `queue = tracking._STAMP_QUEUE` (or `aw.tracking.
+                # _STAMP_QUEUE`) -- binds the QUEUE OBJECT itself to
+                # `target`, not a module, so it goes into `queue_aliases`
+                # rather than `module_aliases`.
+                queue_aliases[target] = lineno
+                changed = True
+            else:
+                dynamic = _dynamic_import_alias_kind(value)
+                if dynamic is not None:
+                    kind, name = dynamic
+                    if kind == "package" and target not in package_aliases:
+                        package_aliases.add(target)
+                        changed = True
+                    elif kind == "module" and target not in module_aliases:
+                        module_aliases[target] = lineno
+                        changed = True
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Attribute) and node.attr in WRITE_FUNCTIONS:
@@ -504,6 +527,24 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
                     f"`{label}.{STAMP_QUEUE_ATTR}.{node.attr}` directly",
                     repo_root=repo_root,
                 ))
+        # `queue.submit(...)` (or `.submit_mux`/`._apply`) via a name
+        # already bound directly to the `_STAMP_QUEUE` object itself
+        # (`queue = tracking._STAMP_QUEUE`, or a direct
+        # `from agent_worktrees.tracking import _STAMP_QUEUE`) -- the
+        # same violation as the inline three-level chain above, just
+        # through an intermediate alias.
+        elif (
+            isinstance(node, ast.Attribute)
+            and node.attr in STAMP_QUEUE_WRITE_METHODS
+            and isinstance(node.value, ast.Name)
+            and node.value.id in queue_aliases
+        ):
+            violations.append(Violation(
+                path, node.lineno,
+                f"calls write-triggering queue method "
+                f"`{node.value.id}.{node.attr}` directly",
+                repo_root=repo_root,
+            ))
         # Reflective access with a literal write-function name still
         # resolves statically even though it isn't an ast.Attribute:
         # `getattr(tracking, "save_record")` and

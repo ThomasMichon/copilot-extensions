@@ -642,7 +642,7 @@ survey above.
       `tracking_lifecycle.py` / `tracking_claims.py` /
       `tracking_session_registry.py` / `tracking_controller_relations.py`
       / `tracking_write.py` / the 6 `tracking_*_write.py` verb-handler
-      modules). Twelve review rounds found real gaps each time (see Journal
+      modules). Thirteen review rounds found real gaps each time (see Journal
       for the full blow-by-blow: a missing re-export module, a
       package-root-alias attribute chain never tracked at all, an
       incomplete denylist, a wildcard-import escape hatch, the daemon's
@@ -758,7 +758,7 @@ writes.py`, an AST-based scan of every sibling `plugins/*` (excluding
 denylist covering every tracking-record write function -- derived by
 AST-walking each protected module for functions whose body calls
 `save_record`/`_save_record_unlocked`/the async stamp queue, then
-hand-verified against the remainder (the final denylist, after twelve
+hand-verified against the remainder (the final denylist, after thirteen
 review rounds below, covers 51 functions across 12 modules:
 `tracking.py`/`tracking_lifecycle.py`/`tracking_claims.py`/
 `tracking_session_registry.py`/`tracking_controller_relations.py`/
@@ -769,7 +769,7 @@ wording -- NOT extended to cover `worktree-manager/`'s own already-tracked
 exception (see above), since that scope decision belongs to a
 coordinated cross-effort call, not something to fold in unilaterally here.
 
-**Twelve review rounds found real gaps, none assumed away:**
+**Thirteen review rounds found real gaps, none assumed away:**
 (1) `tracking_controller_relations.py`'s own thin
 `save_record`/`_save_record_unlocked` re-export wrappers were absent from
 the protected module set, so a sibling could route through that module
@@ -928,10 +928,20 @@ detector from round 11 only recognized the literal identifier
 `from importlib import import_module` (calling it completely bare) --
 fixed by tracking `importlib`'s own aliases and `import_module`'s own
 direct bindings the same way every other name in this guard is tracked,
-rather than hardcoding one spelling. Every fix across all twelve rounds
-has a dedicated regression test.
+rather than hardcoding one spelling. (16) A THIRTEENTH review round
+found the queue-specific matcher from round 12 only recognized the
+INLINE `<module>._STAMP_QUEUE.<method>` chain in one expression -- a
+sibling reassigning the queue object itself first
+(`queue = tracking._STAMP_QUEUE; queue.submit(...)`, or a direct
+`from agent_worktrees.tracking import _STAMP_QUEUE`) evaded it entirely.
+Fixed by adding a `queue_aliases` set populated the same way
+`module_aliases`/`package_aliases` already are (a direct import of
+`_STAMP_QUEUE` itself, or an assignment whose RHS resolves to
+`<tracked-module>._STAMP_QUEUE`), then matching `<queue-alias>.<method>`
+alongside the existing inline chain. Every fix across all thirteen
+rounds has a dedicated regression test.
 
-44 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
+46 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
 tree, the sanctioned read-only accessors staying unflagged, three
 single-level import/call shapes (module attribute call, direct
 `from agent_worktrees import <fn>`, `from agent_worktrees.tracking_claims
@@ -955,9 +965,10 @@ module alias, `getattr` via a package-alias chain, a non-literal
 package assigned then used, an inline unassigned call, a non-literal
 import-target boundary confirmation, and an unrelated module's dynamic
 import never flagged), an aliased-`importlib`-module case, a bare
-`import_module`-name case, four `_STAMP_QUEUE` cases (`submit`,
-`submit_mux` via a package-alias chain, `_apply`, and a confirmation
-that an unrelated queue attribute is never flagged), the owning-plugin's
+`import_module`-name case, six `_STAMP_QUEUE` cases (`submit`,
+`submit_mux` via a package-alias chain, `_apply`, a confirmation that an
+unrelated queue attribute is never flagged, the queue object reassigned
+to a new name, and a direct `_STAMP_QUEUE` import), the owning-plugin's
 own exemption, and a live-repo smoke test (confirmed clean: zero
 violations today, matching the original survey's own finding). Wired
 into `.github/workflows/ci.yml` alongside the existing
