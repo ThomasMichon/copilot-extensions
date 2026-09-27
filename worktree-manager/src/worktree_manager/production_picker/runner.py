@@ -3,63 +3,47 @@
 from __future__ import annotations
 
 import os
-import re
 import threading
 from collections.abc import Mapping
-from typing import Any
 
+from .. import engine_client
 from . import context
-from ._engine_runtime import engine_module
+from . import engine_group_b
+from . import housekeeping
 from .picker_tui import run_tui_picker
 
-_SAFE_REMOTE_TOKEN = re.compile(r"^[A-Za-z0-9._:/@+-]+$")
-
-
-def _remote_command(tokens: list[str]) -> str:
-    """Join cross-shell-safe SSH command tokens without interpretation."""
-    unsafe = [token for token in tokens if not _SAFE_REMOTE_TOKEN.fullmatch(token)]
-    if unsafe:
-        raise RuntimeError(f"unsafe remote launch token: {unsafe[0]!r}")
-    return " ".join(tokens)
-
-
-def _prepare(project: str, *, heal: bool = True) -> tuple[Any, bool]:
-    """Activate ``project`` and return the engine CLI plus default live mode."""
+def _prepare(project: str, *, heal: bool = True) -> bool:
+    """Activate ``project`` and return the engine-owned default live mode."""
     context.set_project(project)
-    config_module = engine_module("config")
-    cli = engine_module("__main__")
-    resolved, assumed = cli._resolve_active_project(project)
-    if not resolved:
-        raise RuntimeError(f"unknown project {project!r}")
-    config_module.set_active_project(resolved)
-    if assumed is not None and not cli._cwd_is_inside_project(assumed):
-        os.chdir(assumed)
+    try:
+        bootstrap = context.bind_project_bootstrap(
+            engine_group_b.picker_bootstrap(project)
+        )
+    except engine_client.EngineFeatureUnavailable as error:
+        raise RuntimeError(
+            "the installed agent-worktrees engine predates "
+            "`picker-bootstrap --json`; update agent-worktrees before "
+            "using the production Picker"
+        ) from error
+    if bootstrap.should_switch_cwd and bootstrap.cwd is not None:
+        os.chdir(bootstrap.cwd)
     if heal:
-        _start_anchor_heal_check(config_module, cli)
-    return cli, not cli._in_ssh_session()
+        _start_anchor_heal_check(bootstrap.project)
+    return bootstrap.default_live
 
 
-def _start_anchor_heal_check(config_module: Any, cli: Any) -> None:
+def _start_anchor_heal_check(project: str) -> None:
     """Best-effort stale-anchor self-heal, entirely off the render path.
 
-    ``_heal_stale_anchor_if_self_missing`` is already designed to be
-    non-fatal (any failure just skips the heal -- see its own docstring),
-    and its common case (this machine's self-entry already present in
-    ``machines.yaml``) is a cheap no-op check. But *reaching* that check
-    requires a full ``config_module.load_config()`` first, which walks the
-    control-plane's related-PR discovery across every registered anchor --
-    measured at several real seconds on a machine with many repos. Blocking
-    the Picker's first paint on that, before the Textual app has even
-    mounted, was the actual cause of a many-second blank screen at launch
-    (a separate, upstream-of-the-UI call site from the ``_machine_key_map``
-    prewarm fix already applied inside the engine). Run it fire-and-forget
-    on a background thread instead, fully decoupled from render; nothing
-    downstream reads its result."""
+    ``repair-stale-anchor --json`` is already a best-effort, background-safe
+    repair seam and its common case (this machine's self-entry is already
+    present) is a cheap no-op. Run it fire-and-forget off the render path so
+    first paint never waits on control-plane discovery or machine-roster
+    inspection; nothing downstream reads its result."""
 
     def _worker() -> None:
         try:
-            config = config_module.load_config()
-            cli._heal_stale_anchor_if_self_missing(config)
+            engine_group_b.repair_stale_anchor(project)
         except Exception:
             pass
 
@@ -70,17 +54,17 @@ def _start_anchor_heal_check(config_module: Any, cli: Any) -> None:
     ).start()
 
 
-def _start_housekeeping(cli: Any) -> None:
+def _start_housekeeping() -> None:
     """Run the production pre-Picker sweeps without delaying first paint."""
 
     def reap_background() -> None:
         try:
-            cli.reap_orphan_mux_sessions()
+            housekeeping.reap_orphan_mux_sessions(only_owned=True)
         except Exception:
             pass
-        cli._sweep_managed_on_exit()
-        cli._sweep_launcher_shells_on_exit()
-        cli._sweep_finished_sessions_on_cadence()
+        housekeeping.sweep_managed_on_exit()
+        housekeeping.sweep_launcher_shells_on_exit()
+        housekeeping.sweep_finished_sessions_on_cadence()
 
     threading.Thread(
         target=reap_background,
@@ -103,10 +87,10 @@ def run(
     from .picker_tui.engine import _resolve_mock_mode
 
     resolved_mock = _resolve_mock_mode(mock_mode)
-    cli, default_live = _prepare(project, heal=not resolved_mock)
+    default_live = _prepare(project, heal=not resolved_mock)
     if not resolved_mock:
-        _start_housekeeping(cli)
-    picker_root = None if resolved_mock else cli._start_picker_monitor_root()
+        _start_housekeeping()
+    picker_root = None if resolved_mock else housekeeping.start_picker_monitor_root()
     live = False if local else default_live
     try:
         if not resolved_mock and mock_mode is None:
@@ -138,81 +122,3 @@ def capture(
         pivot=pivot,
         wait_pivot=wait_pivot,
     )
-
-
-def compatibility_remote_plan(
-    project: str,
-    *,
-    machine: str,
-    environment: str | None,
-    worktree_id: str | None,
-    mode: str,
-    no_mux: bool,
-) -> dict[str, object]:
-    """Build a remote handoff for engines predating the JSON remote seam."""
-    config_module = engine_module("config")
-    cli = engine_module("__main__")
-    config = config_module.load_config()
-    entries = config_module.load_machines_yaml(config.default_repo.anchor)
-    key = cli._machine_key_for_display(config, machine)
-    entry = entries.get(key)
-    if entry is None:
-        normalized = machine.casefold()
-        entry = next(
-            (
-                candidate
-                for candidate in entries.values()
-                if normalized
-                in {
-                    candidate.key.casefold(),
-                    candidate.display_name.casefold(),
-                    (candidate.alias or "").casefold(),
-                }
-            ),
-            None,
-        )
-    if entry is None or not entry.ssh_environments:
-        raise RuntimeError(f"unknown or unreachable remote machine: {machine}")
-
-    labels = {"win": "windows", "wsl": "wsl", "linux": "linux"}
-    requested = (environment or "").strip().casefold()
-    environment_name = labels.get(requested)
-    if requested and environment_name is None:
-        raise RuntimeError(f"unknown remote environment: {environment}")
-    if environment_name:
-        ssh_alias = next(
-            (
-                candidate.alias
-                for candidate in entry.ssh_environments
-                if candidate.name == environment_name and candidate.alias
-            ),
-            "",
-        )
-        if not ssh_alias:
-            raise RuntimeError(
-                f"remote environment is unavailable: {machine} {environment}"
-            )
-    else:
-        ssh_alias = cli._resolve_ssh_alias(entry)
-
-    remote_args: list[str]
-    if mode == "base":
-        remote_args = ["--base"]
-    elif mode == "new":
-        remote_args = ["--new"]
-    else:
-        if not worktree_id:
-            raise RuntimeError("remote resume requires a worktree id")
-        remote_args = ["--worktree-id", worktree_id]
-        if mode == "bare-resume":
-            remote_args.append("--bare-resume")
-    if no_mux:
-        remote_args.append("--no-mux")
-    remote_command = _remote_command([project, *remote_args])
-    return {
-        "action": "remote",
-        "ssh_alias": ssh_alias,
-        "remote_command": remote_command,
-        "machine": entry.key,
-        "display_name": f"{entry.display_name} {environment or ''}".strip(),
-    }

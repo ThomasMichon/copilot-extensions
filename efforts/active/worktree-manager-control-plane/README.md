@@ -795,6 +795,16 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-09-27** — Claiming Phase 3d Step 4 ("Perform the remaining Group B
+  cutover in one crisp PR" — switching `runner.py`'s bootstrap, stale-anchor
+  repair, remote planning, and housekeeping/monitor lifecycle over to the
+  Step 2/3 seams, plus resolving `worktree_manager.__main__`'s old-engine
+  remote fallback) per
+  [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md)'s
+  ordered implementation plan. Working solo per standing operator directive;
+  recorded here per this effort's own Coordination-section claiming
+  discipline since #352 is closed.
+
 - **2026-09-27** — Landed Phase 3d Step 3, PR
   [#4323](https://github.com/ThomasMichon/copilot-extensions/pull/4323).
   Ported Group B's Picker-owned lifecycle housekeeping into Worktree Manager
