@@ -1412,16 +1412,46 @@ STUBEOF
 # copy -- genuinely fast, unlike the Windows sibling (which also copies the
 # whole plugin payload into a snapshots/ slot); this stays a synchronous
 # sessionStart-hook call on POSIX (see bootstrap-check.sh) rather than being
-# backgrounded. flock-serialized against a concurrent stamp from another
-# session so two writers can never interleave their binstub/marker writes.
+# backgrounded. Lock-serialized against a concurrent stamp from another
+# session so two writers can never interleave their binstub/marker writes --
+# flock when available, else the same PID-symlink fallback
+# cell_provision's own lock uses (init.sh:662-675) so macOS (no flock by
+# default) and COPILOT_EXT_NO_FLOCK=1 still get real mutual exclusion, not a
+# best-effort no-op.
 if [[ "$ACTION" == "stamp" ]]; then
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
-    _stamp_lock="$INSTALL_DIR/.stamp.lock"
-    exec 9>"$_stamp_lock"
-    command -v flock >/dev/null 2>&1 && flock 9 2>/dev/null
+    _stamp_lock_link=""
+    _unlock_stamp() {
+        if [[ -n "$_stamp_lock_link" ]]; then
+            local owner
+            owner="$(readlink "$_stamp_lock_link" 2>/dev/null || true)"
+            [[ "$owner" != "$$" ]] || rm -f "$_stamp_lock_link"
+            _stamp_lock_link=""
+        else
+            flock -u 9 2>/dev/null || true
+            exec 9>&-
+        fi
+    }
+    if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
+        exec 9>"$INSTALL_DIR/.stamp.lock"
+        flock 9
+    else
+        _stamp_lock_link="$INSTALL_DIR/.stamp.lock.pid"
+        until ln -s "$$" "$_stamp_lock_link" 2>/dev/null; do
+            owner="$(readlink "$_stamp_lock_link" 2>/dev/null || true)"
+            if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
+                sleep 1
+            elif [[ "$(readlink "$_stamp_lock_link" 2>/dev/null || true)" == "$owner" ]]; then
+                rm -f "$_stamp_lock_link"
+            fi
+        done
+    fi
+    trap _unlock_stamp EXIT INT TERM
     printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
     deploy_binstub
     _ok "Stamped: binstub on PATH; runtime provisions on first use."
+    _unlock_stamp
+    trap - EXIT INT TERM
     exit 0
 fi
 

@@ -1789,6 +1789,18 @@ function Invoke-StampBinstubOnly {
         foreach ($dir in @($InstallDir, $LocalBin)) {
             if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
         }
+        # Review finding: without a usable payload-dir marker, the generated
+        # binstub's self-provisioning path (":_prov" in the .cmd) reads an
+        # empty %_ROOT%\payload-dir, finds no installer, and exits 127 --
+        # even though the binstub itself now exists. Point the marker at the
+        # already-self-staged $PluginDir (the SAME source Invoke-Stamp's own
+        # snapshot copy reads from) as an immediate, correct fallback; the
+        # background `stamp` overwrites both markers with the real snapshot
+        # path once its copy completes, same as before.
+        $payloadDirMarker = Join-Path $InstallDir 'payload-dir'
+        $payloadOriginMarker = Join-Path $InstallDir 'payload-origin'
+        [System.IO.File]::WriteAllText($payloadDirMarker, $PluginDir, $utf8NoBom)
+        [System.IO.File]::WriteAllText($payloadOriginMarker, $probePayload, $utf8NoBom)
         Deploy-SelfProvisioningBinstub
     } finally {
         [void]$mutex.ReleaseMutex()
