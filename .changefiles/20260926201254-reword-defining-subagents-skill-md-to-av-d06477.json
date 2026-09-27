@@ -1,0 +1,9 @@
+{
+  "comment": "Reword defining-subagents SKILL.md to avoid tripping the marketplace-isolation bare-agent-command guard (prose referencing agent-mcp's materialize/call subcommands, not an operative instruction)",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}
