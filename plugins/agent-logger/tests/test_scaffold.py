@@ -408,6 +408,46 @@ def test_explicit_repo_config_env_honors_override_for_non_git_directory(
 
 
 @pytest.mark.no_autotrust
+def test_explicit_repo_config_env_rejects_symlinked_ancestor(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """AGENT_LOGGER_REPO_CONFIG naming a path under a symlinked ancestor
+    directory (e.g. install.sh/install.ps1's config-repo discovery pointing
+    at a .config/agent-logger.yaml alias whose .config is a symlink) must
+    be rejected -- the leaf-only is_symlink() check misses this, exactly
+    like normal discovery's own has_symlink_ancestor guard exists for."""
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, remote="https://example.test/example-owner/demo.git", branch="main")
+    outside_dir = tmp_path / "outside-config"
+    outside_dir.mkdir()
+    (outside_dir / "agent-logger.yaml").write_text(
+        "log:\n  path_template: logs/{title}.md\n", encoding="utf-8"
+    )
+    (repo / ".config").symlink_to(outside_dir)
+
+    registry = tmp_path / "repos.yaml"
+    registry.write_text(
+        yaml.safe_dump(
+            {
+                "repos": {
+                    "demo": {
+                        "remote": "https://example.test/example-owner/demo.git",
+                        "default_branch": "main",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_WORKTREES_REPOS_YAML", str(registry))
+    monkeypatch.setenv(
+        "AGENT_LOGGER_REPO_CONFIG", str(repo / ".config" / "agent-logger.yaml")
+    )
+
+    assert find_repo_config() is None
+
+
+@pytest.mark.no_autotrust
 def test_repo_config_rejects_symlinked_candidate(tmp_path: Path, monkeypatch) -> None:
     """A committed/local symlink standing in for .agent-logger.yaml must be
     rejected outright -- discovery must never follow a link out of the

@@ -434,9 +434,12 @@ def find_repo_config(start: Path | None = None) -> Path | None:
     to "no git root means unconditionally trusted" would let a non-git
     reference path bypass the gate entirely, which is exactly what a
     ``reference`` entry is (a read-only mirror, not an operator-reviewed
-    checkout). A candidate that is a symlink (committed or otherwise) is
-    rejected outright -- discovery must never follow a link out of the
-    checkout to read arbitrary machine-local YAML.
+    checkout). A candidate that is a symlink (committed or otherwise), or
+    reached through a symlinked ancestor directory such as ``.config``
+    (some :data:`REPO_CONFIG_FILENAMES` aliases nest under it, and this
+    override can point at any of them via install.sh/install.ps1's
+    config-repo discovery), is rejected outright -- discovery must never
+    follow a link out of the checkout to read arbitrary machine-local YAML.
     """
     env = os.environ.get("AGENT_LOGGER_REPO_CONFIG")
     if env:
@@ -451,6 +454,8 @@ def find_repo_config(start: Path | None = None) -> Path | None:
             return None
         explicit_root = _find_repo_root(explicit.parent) or explicit.parent
         if not repo_config_is_trusted(explicit_root):
+            return None
+        if has_symlink_ancestor(explicit_root, explicit):
             return None
         return explicit
 
