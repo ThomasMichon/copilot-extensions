@@ -1003,3 +1003,58 @@ _Pending._
   pattern doc. Next session should continue with `plugin-activation` or
   `plugin-resolve` (tied smallest), one bounded PR at a time, per this
   effort's own established pattern.
+
+### 2026-09-27 — Phase 1: plugin-activation (PR #4004)
+
+- Converted all 8 real consumers (`customizing-copilot`, `agent-worktrees`,
+  `agent-dispatch`, `agent-logger`, `agent-bridge`, `agent-machines`,
+  `agent-codespaces`, `worktree-manager`). Found and fixed a THIRD real,
+  pre-existing bug this effort has now surfaced: `customizing-copilot`'s
+  `installing-plugins` skill script (`plugin-activation.py`) loaded
+  `plugin_activation/state.py` by hardcoded file path, deliberately
+  bypassing the package's own `__init__.py` to avoid a PyYAML dependency
+  (`state.py` itself is stdlib-only, used standalone outside any plugin's
+  installed venv) -- broke once the local copy became a pointer stub with
+  no physical `state.py`. Fixed by teaching the loader to check for the
+  local copy's own `VENDOR_POINTER.json` and resolve `state.py` through
+  its `source` field when present, still never importing the package
+  itself (preserving the original yaml-avoidance design). Verified via a
+  repo-wide grep that no OTHER script has this same hardcoded-path-load
+  pattern for any of this effort's converted libs.
+- Review re-surfaced the same non-editable-install gap (issue #3905) for
+  6 new consumer instances, several with specific `install.sh`/`init.sh`
+  line citations from the reviewer -- extended that issue again rather
+  than fixing ad-hoc; the accumulating line citations are useful grounding
+  for whoever eventually picks up the real cross-adopter fix.
+- **Running total, this whole session**: 5 more real libs converted
+  (`credential-relay`, `ssh-manager`, `config-migrate`,
+  `single-instance-lease`, `plugin-activation`), on top of
+  `lazy-cli-dispatch` and `work-coalescing-singleton` from earlier --
+  **7 of 13 total real libs now converted, just over half**. Three
+  genuine pre-existing bugs found and fixed along the way (two canonical/
+  tool bugs: PR #3810's nested-`__pycache__` fix and this session's
+  `ssh-manager` canonical-drift fix; one consumer-side bug: this entry's
+  `plugin-activation.py` hardcoded-path fix). Also resolved a genuine
+  design-decision conflict discovered mid-session (this effort's README
+  had documented a superseded `uv`-editable mechanism; formally adopted
+  `src-passthrough` instead, per the "Course correction" entry above).
+- **Not yet done**: 4 real lib copies remain eligible for conversion
+  (`agent-procutil` — 11 consumers, the largest remaining; `dropin-
+  registry` — 9; `plugin-resolve` — 7, now the smallest remaining; `zdd`
+  — 8); `session-liveness-probe`/`venue-copilot` still need a canonical-
+  promotion step first; issue #3905's actual cross-adopter fix (now
+  spanning 7 adopters' worth of evidence); Phase 2 (installer engine,
+  still an open design question, unrelated to libs' pivot); Phase 3's
+  pattern doc (`docs/patterns/vendor-pointer.md`, still unwritten and
+  must describe `src-passthrough`). Next session should continue with
+  `plugin-resolve` (now smallest remaining at 7 consumers), one bounded
+  PR at a time, per this effort's own established pattern -- the
+  workflow is now well-proven: pick smallest remaining consumer count,
+  confirm `--check` shows no drift, `--pointerize` every consumer
+  atomically, validate with `run-plugin-tests.py` per affected plugin
+  (watch for pre-existing flakes via `git stash`/rerun before assuming a
+  failure is caused by the conversion), fix any real regressions found
+  (usually a hardcoded direct-file-path load bypassing the package
+  `__init__.py`, per this session's two tool/consumer-side bugs), journal,
+  commit, open PR, address review (expect the same non-editable-install
+  finding every time -- defer to #3905), merge.
