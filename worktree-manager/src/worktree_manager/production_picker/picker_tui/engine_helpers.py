@@ -23,6 +23,7 @@ from .styles import (
     C_META, C_MUTED, C_PR_MERGED, C_PULSE, C_PULSE_AWAIT, C_READY, C_SECTION,
     C_SEL, C_SEL_BG, C_SEL_ON, C_SPIN, C_STATE, C_TAB_ACTIVE,
     C_TAB_FOCUS_ON, C_TABOFF, C_WARN, DISPO_MARK, SPINNER,
+    C_ALT_BG,
     canonical_key,
 )
 
@@ -63,6 +64,7 @@ __all__ = [
     "C_TAB_FOCUS_ON",
     "C_TABOFF",
     "C_WARN",
+    "C_ALT_BG",
     "DISPO_MARK",
     "HTABS",
     "IDLE_TIMEOUT_SECS",

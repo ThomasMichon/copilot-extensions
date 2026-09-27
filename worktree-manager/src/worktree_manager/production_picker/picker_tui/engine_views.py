@@ -19,6 +19,7 @@ from .engine_helpers import (
     C_SEL_ON,
     C_META,
     C_WARN,
+    C_ALT_BG,
     CLEAN_SPECS,
     MAINT_GROUP_ORDER,
     PAD,
@@ -292,21 +293,26 @@ class WorktreesView:
             add(sec, kind="section", new_section=label)
             if not rows:
                 add(Text("    (none)", style=C_DIM))
-            for rec in rows:
+            for i, rec in enumerate(rows):
+                # #3307 follow-up: alternate shading per WORKTREE (not per
+                # raw line), so a multi-line row's title + detail/worker
+                # lines all read as one visual unit against their neighbor.
+                alt = bool(i % 2)
                 add(self._row_text(rec, li, sel, width, lcols,
-                                   preview, preview_ids),
+                                   preview, preview_ids, alt=alt),
                     stop=("L", li), data=rec)
-                add(self._detail_line(rec, width))
-                for worker_line in self._worker_lines(rec, width):
+                add(self._detail_line(rec, width, alt=alt))
+                for worker_line in self._worker_lines(rec, width, alt=alt):
                     add(worker_line)
                 li += 1
 
-    def _worker_lines(self, rec, width, limit=2):
+    def _worker_lines(self, rec, width, limit=2, alt=False):
         """One dim ``→ <venue> LIVE|IDLE <activity>`` line per remote worker
         this worktree supervises (venue-pivots-ux: supervised workers, seen
         from the worktree row), at most ``limit`` inline plus a ``+N more``
         tail. The activity is the transient half, so it is what gets clipped.
-        Empty until a venue pivot has loaded (graceful absence)."""
+        Empty until a venue pivot has loaded (graceful absence). ``alt`` --
+        see ``_row_text``'s own docstring."""
         workers = self._eng._worktree_supervised_workers(rec)
         lines = []
         for worker in workers[:limit]:
@@ -322,12 +328,21 @@ class WorktreesView:
                             style=C_DIM)
             if line.cell_len > width:
                 line.truncate(width, overflow="ellipsis")
+            if alt:
+                if line.cell_len < width:
+                    line.append(" " * (width - line.cell_len))
+                line.stylize(C_ALT_BG)
             lines.append(line)
         if len(workers) > limit:
-            lines.append(Text(f"      → +{len(workers) - limit} more", style=C_DIM))
+            tail = Text(f"      → +{len(workers) - limit} more", style=C_DIM)
+            if alt:
+                if tail.cell_len < width:
+                    tail.append(" " * (width - tail.cell_len))
+                tail.stylize(C_ALT_BG)
+            lines.append(tail)
         return lines
 
-    def _detail_line(self, rec, width):
+    def _detail_line(self, rec, width, alt=False):
         """The worktree row's second (detail) line: ``Title: Activity`` --
         the full/untruncated title as the OVERALL identity, plus its current
         ACTIVITY as the scannable CURRENT status, both on one line (#6443
@@ -393,14 +408,24 @@ class WorktreesView:
         # the end so a pathological combination can never overflow the row.
         if pline.cell_len > width:
             pline.truncate(width, overflow="ellipsis")
+        if alt:
+            # Pad to the full row width first -- otherwise the alternating
+            # background would only paint behind the actual text, not read
+            # as a full row stripe matching the title line above it.
+            if pline.cell_len < width:
+                pline.append(" " * (width - pline.cell_len))
+            pline.stylize(C_ALT_BG)
         return pline
 
-    def _row_text(self, rec, li, sel, width, lcols, preview, preview_ids):
+    def _row_text(self, rec, li, sel, width, lcols, preview, preview_ids, alt=False):
         """Render one worktree row's fully-styled Text. Extracted from
         ``build_data`` so the native list's incremental checkbox repaint (#171)
         renders a single row through the SAME path as a full rebuild -- keeping
         the two byte-identical. ``sel`` drives the focus/selection highlight; the
-        native list passes a sentinel (focus is the amber cursor, not baked in)."""
+        native list passes a sentinel (focus is the amber cursor, not baked in).
+        ``alt`` applies the subtle alternating-row background (#3307
+        follow-up) -- always overridden by any focus/selection/dim style
+        below, since those already carry their own background."""
         eng = self._eng
         focused = sel == ("L", li)
         is_sel = eng._row_key(rec) in eng.wt_sel
@@ -409,6 +434,8 @@ class WorktreesView:
         # renders at rest rather than only when a set is already held.
         box = eng._checkbox(is_sel)
         txt = row_text(rec, lcols, width, False, pulse=eng.pulse, mark=box)
+        if alt and not focused and not is_sel:
+            txt.stylize(C_ALT_BG)
         if rec.get("hidden") and not focused:
             # Revealed bridge/system worktree -> dim it (#1422).
             txt.stylize("grey42")
