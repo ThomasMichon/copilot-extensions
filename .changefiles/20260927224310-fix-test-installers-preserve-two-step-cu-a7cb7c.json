@@ -1,0 +1,9 @@
+{
+  "comment": "Fix test_installers_preserve_two_step_cuda_engine_swap, stale since #4297 changed the durable engine venv's own install sequence (agent-index-engine as a separate package, not the [store,engine] extras string)",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
