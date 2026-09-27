@@ -10,7 +10,7 @@
   two review passes (PR #3893) found 6 real blocking issues (trigger
   can't fire, no edit tool, auth signal gap, protected-files gap,
   prompt-injection gap, no changefile path); a successor session
-  resolved all 6 through an 8-round iterative real-review cycle (PR
+  resolved all 6 through a 9-round iterative real-review cycle (PR
   #3916), converging on a materially hardened design (still **not
   compile-verified** -- `gh aw compile` remains blocked by the same
   SAML-SSO wall, not re-attempted); see the 2026-09-26 Journal entry
