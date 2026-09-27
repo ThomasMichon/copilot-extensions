@@ -109,6 +109,23 @@ def ensure_engine_runtime() -> Path:
         "lazy-cli-dispatch",
     ):
         lib_source = libs_root / lib / "src"
+        if not lib_source.is_dir():
+            # A lib converted to the `uv`-editable canonical-reference form
+            # (vendor-pointer-generalization effort, Phase 1) has no local
+            # copy under the plugin's own libs/ at all in a `dev` checkout
+            # -- fall back to the monorepo's own canonical libs/<lib>/src,
+            # the same live source `uv`'s own [tool.uv.sources] `path` +
+            # `editable = true` reference already resolves to. Only
+            # attempted when plugin_root's own grandparent looks like a
+            # real monorepo root (carries both libs/ and plugins/) -- an
+            # installed runtime (site-packages slot) has no such ancestor,
+            # and always carries a real local copy anyway (materialized at
+            # promotion time), so this fallback never applies there.
+            repo_root = plugin_root.parent.parent
+            if (repo_root / "libs").is_dir() and (repo_root / "plugins").is_dir():
+                canonical_source = repo_root / "libs" / lib / "src"
+                if canonical_source.is_dir():
+                    lib_source = canonical_source
         if lib_source.is_dir() and str(lib_source) not in sys.path:
             sys.path.insert(0, str(lib_source))
     return source
