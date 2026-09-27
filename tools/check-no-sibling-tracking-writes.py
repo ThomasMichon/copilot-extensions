@@ -76,6 +76,8 @@ WRITE_FUNCTIONS = frozenset({
     "stamp_bound_live",
     "stamp_session_state",
     "flush_stamp_writes",
+    "_stamp_liveness",
+    "_apply_session_state_stamp",
     # tracking_lifecycle.py
     "open_handoff",
     "link_handoff",

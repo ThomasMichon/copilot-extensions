@@ -638,18 +638,19 @@ survey above.
       an AST-based scan of every `plugins/*` sibling plugin (excluding
       `agent-worktrees` itself) for a direct import/call of a
       hand-curated denylist covering every tracking-record write function
-      across 11 modules (47 functions total: `tracking.py` /
+      across 11 modules (49 functions total: `tracking.py` /
       `tracking_lifecycle.py` / `tracking_claims.py` /
       `tracking_session_registry.py` / `tracking_controller_relations.py`
-      / the 6 `tracking_*_write.py` verb-handler modules). Four review
+      / the 6 `tracking_*_write.py` verb-handler modules). Five review
       rounds found real gaps each time (see Journal for the full
       blow-by-blow: a missing re-export module, a package-root-alias
       attribute chain never tracked at all, an incomplete denylist, a
       wildcard-import escape hatch, the daemon's own verb handlers being
-      an equally-importable write surface, and a fail-open exception path
-      on unreadable/unparseable files) -- every one fixed with a
-      dedicated regression test, none assumed away. Wired into CI
-      alongside `test_check_no_sibling_tracking_writes.py` (20 tests).
+      an equally-importable write surface, a fail-open exception path on
+      unreadable/unparseable files, and two private read-modify-write
+      helpers) -- every one fixed with a dedicated regression test, none
+      assumed away. Wired into CI alongside
+      `test_check_no_sibling_tracking_writes.py` (21 tests).
       **Scoped to sibling `plugins/*` only** (matching this effort's own
       original survey and Plan wording) -- deliberately does NOT cover
       `worktree-manager/` (a separate, non-plugin, out-of-plugin
@@ -808,10 +809,23 @@ treated as clean, so a file the guard simply couldn't parse was a
 guaranteed way to smuggle a forbidden import past CI. Fixed by adding
 the verb-handler modules/functions to the protected sets, and by turning
 every file-scan failure into a reported `Violation` instead of a silent
-empty list. Every fix across all four rounds has a dedicated regression
-test.
+empty list. (8) A FIFTH review round found one more private
+read-modify-write helper absent: `_stamp_liveness` (backs
+`stamp_mux_live`/`stamp_bound_live`) -- underscore-prefixed, but nothing
+in Python actually prevents a sibling from importing a private name
+directly. Re-ran a comprehensive AST scan (every top-level function
+across all 11 modules whose body calls a known writer, plus a
+transitive-closure pass over the growing denylist itself) to catch any
+further stragglers before a sixth round could -- found one more genuine
+gap this way (`_apply_session_state_stamp`, backing
+`stamp_session_state`) and one false-positive candidate the transitive
+pass surfaced but manual inspection ruled out
+(`reopen_finalized_owner` calls `tracking.update_status(...,
+save=False)` -- mutates in-memory only, never itself persists, so it
+does not belong on the denylist). Every fix across all five rounds has a
+dedicated regression test.
 
-20 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
+21 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
 tree, the sanctioned read-only accessors staying unflagged, three
 single-level import/call shapes (module attribute call, direct
 `from agent_worktrees import <fn>`, `from agent_worktrees.tracking_claims
@@ -821,9 +835,10 @@ dotted), the `tracking_controller_relations` re-export case, the four
 added controller-relation functions, `load_or_create_anchor_record`, two
 wildcard-import rejection cases, two verb-handler-module cases, two
 fail-closed file-scan-error cases (unreadable, syntactically invalid),
-the owning-plugin's own exemption, and a live-repo smoke test (confirmed
-clean: zero violations today, matching the original survey's own
-finding). Wired into `.github/workflows/ci.yml` alongside the existing
+the two private liveness-writer helpers, the owning-plugin's own
+exemption, and a live-repo smoke test (confirmed clean: zero violations
+today, matching the original survey's own finding). Wired into
+`.github/workflows/ci.yml` alongside the existing
 `check-no-agent-machines-packages.py` guard.
 
 ### 2026-09-27 — PR #4265: daemon writes push straight into record_cache -- the read-consistency companion to Phase 3's write migration, plus two real bugs review caught

@@ -274,6 +274,28 @@ def test_verb_handler_direct_from_import_is_caught(tmp_path):
     assert "apply_session_register" in violations[0].detail
 
 
+def test_private_liveness_writers_are_denylisted(tmp_path):
+    # _stamp_liveness (backing stamp_mux_live/stamp_bound_live) and
+    # _apply_session_state_stamp (backing stamp_session_state) are private
+    # but nothing in Python actually prevents importing them directly --
+    # both persist a record and must be caught identically to their public
+    # wrappers.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking\n"
+        "\n"
+        "def write(wt_id):\n"
+        "    tracking._stamp_liveness(wt_id, True, live_attr=\"mux_live\", "
+        "at_attr=\"mux_live_at\", refresh=False, throttle_secs=60.0)\n"
+        "    tracking._apply_session_state_stamp(wt_id)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 2
+    details = {v.detail for v in violations}
+    assert any("_stamp_liveness" in d for d in details)
+    assert any("_apply_session_state_stamp" in d for d in details)
+
+
 def test_unreadable_file_fails_closed_not_silently_skipped(tmp_path, monkeypatch):
     # A file the guard cannot even read must be reported, not silently
     # treated as clean -- otherwise an unreadable/undecodable file is a
