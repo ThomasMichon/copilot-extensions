@@ -313,7 +313,8 @@ def _materialize_one_pointer(pointer_path: Path, *, checkout_root: Path, canonic
 
 
 def materialize_uv_editable_ref_into(
-    *, source_consumer_dir: Path, dest_consumer_dir: Path, canonical_root: Path
+    *, source_consumer_dir: Path, dest_consumer_dir: Path, canonical_root: Path,
+    dest_root: Path | None = None,
 ) -> list[str]:
     """Expand every `uv`-editable canonical-reference entry declared in
     ``source_consumer_dir``'s ``pyproject.toml`` (the location the entry's
@@ -347,8 +348,23 @@ def materialize_uv_editable_ref_into(
     correctly against the copy itself) but differ for
     ``preview_release.py``'s single-plugin preview (source is the real
     ``plugins/<plugin>``, dest is a bare ``workdir/<plugin>`` with no
-    monorepo ancestor of its own)."""
+    monorepo ancestor of its own).
+
+    ``dest_root`` is the actual snapshot root every destination-side
+    ancestor check is bounded against (default: ``dest_consumer_dir``
+    itself, for ``preview_release.py``'s single-consumer caller, which has
+    no deeper "dest/plugins/<plugin>" structure of its own). For a
+    whole-repo snapshot, ``materialize_uv_editable_refs()`` passes the real
+    ``dest`` tree root -- checking only up to ``dest_consumer_dir`` would
+    miss a symlinked ``dest/plugins`` itself (``build()`` preserves tracked
+    symlinks, and this function's caller discovers consumer dirs via a
+    symlink-following ``is_dir()``), letting it redirect the lib copy and
+    manifest rewrite outside the intended snapshot entirely."""
     log: list[str] = []
+    dest_root_r = (dest_root or dest_consumer_dir).resolve()
+    bad_ancestor = _find_symlinked_ancestor(dest_consumer_dir, dest_root_r)
+    if bad_ancestor is not None:
+        return [f"SKIP {dest_consumer_dir}: {bad_ancestor} is a symlink -- refusing"]
     materialized_libs: set[str] = set()  # libs already copied THIS call (alias tracking)
     source_pyproject = source_consumer_dir / "pyproject.toml"
     if source_pyproject.is_symlink():
@@ -427,7 +443,7 @@ def materialize_uv_editable_ref_into(
             continue
 
         dest_lib_dir = dest_consumer_dir / "libs" / lib
-        bad_ancestor = _find_symlinked_ancestor(dest_lib_dir, dest_consumer_dir)
+        bad_ancestor = _find_symlinked_ancestor(dest_lib_dir, dest_root_r)
         if bad_ancestor is not None:
             log.append(f"SKIP {dest_lib_dir}: {bad_ancestor} is a symlink -- refusing")
             continue
@@ -593,6 +609,7 @@ def materialize_uv_editable_refs(dest: Path, *, canonical_root: Path) -> list[st
                 source_consumer_dir=source_consumer_dir,
                 dest_consumer_dir=dest_consumer_dir,
                 canonical_root=canonical_root,
+                dest_root=dest,
             ))
     for extra in _EXTRA_CONSUMER_DIRS:
         dest_extra = dest / extra
@@ -601,6 +618,7 @@ def materialize_uv_editable_refs(dest: Path, *, canonical_root: Path) -> list[st
                 source_consumer_dir=canonical_root / extra,
                 dest_consumer_dir=dest_extra,
                 canonical_root=canonical_root,
+                dest_root=dest,
             ))
     return log
 

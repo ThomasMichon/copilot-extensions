@@ -1276,3 +1276,55 @@ def test_materialize_uv_editable_ref_into_rewrites_all_aliases_of_the_same_lib(t
     assert 'agent-zdd-alias = { path = "libs/zdd" }' in text
     # Only copied once -- the second entry reused the existing dest_lib_dir.
     assert (consumer / "libs/zdd/src/zdd/__init__.py").read_text() == "real\n"
+
+
+def test_materialize_uv_editable_ref_into_refuses_a_symlinked_dest_consumer_ancestor(
+    tmp_path: Path,
+):
+    # dest_root bounds the destination-side ancestor check all the way to
+    # the real snapshot root -- checking only up to dest_consumer_dir
+    # itself would miss a symlinked dest/plugins (or dest_consumer_dir
+    # itself), which materialize_uv_editable_refs()'s own symlink-
+    # following is_dir() discovery could otherwise be redirected through.
+    root = tmp_path / "repo"
+    _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
+    dest = tmp_path / "dest"
+    outside = tmp_path / "outside-plugins"
+    consumer = outside / "agent-bridge"
+    consumer.mkdir(parents=True)
+    (consumer / "pyproject.toml").write_text(
+        "[tool.uv.sources]\n"
+        'agent-zdd = { path = "../../libs/zdd", editable = true }\n',
+        encoding="utf-8",
+    )
+    dest.mkdir(parents=True)
+    dest_plugins = dest / "plugins"
+    dest_plugins.symlink_to(outside, target_is_directory=True)
+    dest_consumer_dir = dest_plugins / "agent-bridge"
+
+    log = mm.materialize_uv_editable_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=dest_consumer_dir,
+        canonical_root=root, dest_root=dest,
+    )
+    assert any("is a symlink" in line for line in log)
+    assert not (consumer / "libs/zdd").exists()
+
+
+def test_materialize_uv_editable_refs_passes_dest_root_for_the_ancestor_check(tmp_path: Path):
+    root = tmp_path / "repo"
+    _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
+    dest = tmp_path / "dest"
+    outside = tmp_path / "outside-plugins"
+    consumer = outside / "agent-bridge"
+    consumer.mkdir(parents=True)
+    (consumer / "pyproject.toml").write_text(
+        "[tool.uv.sources]\n"
+        'agent-zdd = { path = "../../libs/zdd", editable = true }\n',
+        encoding="utf-8",
+    )
+    dest.mkdir(parents=True)
+    (dest / "plugins").symlink_to(outside, target_is_directory=True)
+
+    log = mm.materialize_uv_editable_refs(dest, canonical_root=root)
+    assert any("is a symlink" in line for line in log)
+    assert not (consumer / "libs/zdd").exists()

@@ -84,12 +84,31 @@ Two pointer *kinds* exist, both identified purely by ``VENDOR_POINTER.json``:
   like the bare kind -- a marketplace-installed plugin ships alone, with no
   sibling `libs/` directory for the stub to forward into.
 
+A THIRD, distinct mechanism -- not a `VENDOR_POINTER.json` pointer at all --
+also exists: the **`uv`-editable canonical-reference form**
+(`vendor-pointer-generalization` effort, Phase 1), the current, active
+mechanism for real vendored libs (superseding `src-passthrough` above --
+see this module's own Journal history for why). ``--uv-editable CONSUMER
+LIB`` converts a copy (real or `src-passthrough`) into this form: the local
+`plugins/<plugin>/libs/<lib>` (or `worktree-manager/libs/<lib>`) copy is
+deleted entirely -- no directory, no stub -- and the consuming
+`pyproject.toml`'s `[tool.uv.sources]` entry is rewritten from
+`{ path = "libs/<lib>" }` to `{ path = "<relative-to-repo-root>/libs/<lib>",
+editable = true }`, which `uv` resolves live to canonical on `dev`
+independent of the top-level package's own editable-ness. `--check` also
+validates every such reference (missing `editable = true`, a missing/
+symlinked canonical target). `tools/uv_editable_ref.py` holds the shared
+implementation (used by this script and by `tools/materialize_main.py`'s
+promotion-time expansion back into a real copy); see its own module
+docstring for the full design.
+
 Usage::
 
     python tools/sync-vendored-libs.py                    # --check (default)
     python tools/sync-vendored-libs.py --restore-canonical # copies -> canonical
     python tools/sync-vendored-libs.py --materialize        # canonical -> copies
     python tools/sync-vendored-libs.py --pointerize agent-worktrees lazy-cli-dispatch
+    python tools/sync-vendored-libs.py --uv-editable agent-worktrees lazy-cli-dispatch
 """
 from __future__ import annotations
 
