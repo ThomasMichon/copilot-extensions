@@ -4892,9 +4892,7 @@ def reap_orphan_mux_sessions(
     - Worktree Manager already owns the mux session via ``mux-mapping.json``,
     - its worktree record is ``kind: system`` (daemon-owned), or
     - its worktree is still **active** (tracked, dir present), or
-    - it has been **active within the grace window** (fresh pane activity => the
-      Copilot inside is busy), or the activity signal is **unknown** (never risk
-      killing a session we can't prove is idle).
+    - it has been **active within the grace window** (fresh pane activity => the Copilot inside is busy), or the activity signal is **unknown** (never risk killing a session we can't prove is idle).
 
     Returns a JSON-ready dict::
 
