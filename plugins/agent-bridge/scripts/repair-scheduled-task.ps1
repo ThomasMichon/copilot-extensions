@@ -52,7 +52,7 @@ $TaskName = 'Agent Bridge'
 $InstallDir = if ($env:AGENT_BRIDGE_CONFIG_DIR) {
     $env:AGENT_BRIDGE_CONFIG_DIR
 } else {
-    Join-Path $env:USERPROFILE '.agent-bridge'
+    Join-Path $env:USERPROFILE '.agent-bridge' # marketplace-isolation: allow legacy-compatibility
 }
 $Supervisor = Join-Path $InstallDir 'start-agent-bridge.ps1'
 

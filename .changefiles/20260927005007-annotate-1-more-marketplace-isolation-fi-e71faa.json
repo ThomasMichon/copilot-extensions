@@ -1,0 +1,9 @@
+{
+  "comment": "Annotate 1 more marketplace-isolation finding in repair-scheduled-task.ps1",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
