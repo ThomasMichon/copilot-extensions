@@ -973,9 +973,12 @@ _Pending._
   `work-coalescing-singleton` from earlier -- **6 of 13 total real libs
   now converted**. Two genuine pre-existing tool/canonical bugs found and
   fixed along the way (this entry's `ssh-manager` note, plus PR #3810's
-  nested-`__pycache__` fix). Three pre-existing test flakes confirmed
-  unrelated and tracked (issues #3570 [pre-existing, already tracked],
-  #3915 [newly filed]) or resolved upstream (#3967).
+  nested-`__pycache__` fix). Two pre-existing test flakes confirmed
+  unrelated and tracked (issue #3570, already tracked; issue #3915,
+  newly filed). Separately, an unrelated `dev`-wide `guards + lint` CI
+  failure (issue #3967 -- a `check-marketplace-isolation.py` false
+  positive, not a test flake) briefly blocked #3971's merge; resolved
+  upstream by another session during that PR's review window.
 - **Not yet done**: 5 real lib copies remain eligible for conversion
   (`agent-procutil` — 11 consumers, the largest; `dropin-registry` — 9;
   `plugin-activation`/`plugin-resolve` — 7 each, tied smallest remaining;
