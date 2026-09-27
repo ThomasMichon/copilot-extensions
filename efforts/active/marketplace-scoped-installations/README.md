@@ -386,6 +386,50 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-27 — `agent-index`'s SKILL.md docs resolved (PR #4264); clean-room checkpoint found a HIGH-severity first-install bug
+
+- Fresh guard count at merge time: not re-checked before the next
+  slice began (docs-only PR, minimal drift expected).
+- `setting-up-agent-index/SKILL.md`'s 6 findings: doc-shaped mentions
+  of the plugin's own config path (in-repo, knowledge-overlay,
+  machine-role), the usual `allow deployed-runtime-diagnostics`.
+- **Clean-room checkpoint (`agent-index-solo`, per the operator's
+  periodic-validation directive) found a genuine HIGH-severity, first-
+  install-breaking defect on the published `main` marketplace release,
+  unrelated to this session's `dev`-branch work**: 18 of 24 scenario
+  assertions failed, reproducibly (2/2 runs). Root-caused via direct
+  `docker exec`: `hooks.json`'s `sessionStart` hook calls `bash
+  scripts/install.sh ensure` (stdout/stderr to `/dev/null`, so
+  failures are silent) -- but `install.sh`'s `ensure` action ONLY runs
+  `_ensure_running` + `_install_logon_autostart`; it does **no
+  provisioning** (no venv, no package install, no binstub stamping) on
+  a machine with zero prior `~/.agent-index` state. Manually confirmed
+  `bash scripts/install.sh install` (a DIFFERENT action) correctly
+  builds the venv, installs the package, and stamps `~/.local/bin/
+  agent-index` -- `ensure` is simply the wrong action for a fresh
+  install, and since sessionStart always calls it, agent-index NEVER
+  self-provisions on a genuinely fresh machine; the binstub never
+  appears, so every subsequent command cascades to "command not
+  found." No existing tracking issue found (checked #4808/#4807/#7686,
+  all different plugins or different root causes); filed
+  [aperture-labs#7702](https://gitea.michon.ski/tmichon/aperture-labs/issues/7702),
+  flagged as possibly warranting priority above the routine guard-
+  triage backlog given the severity (agent-index is completely
+  non-functional on a fresh install until someone manually runs
+  `install.sh install`).
+- This is now the **third** clean-room checkpoint this session and the
+  **second** genuine pre-existing defect found this way (after
+  `agent-bridge`'s `--version` race, aperture-labs#7688) -- the
+  operator's periodic-validation directive is earning its keep: neither
+  defect would have surfaced from guard-triage work alone, since guard
+  annotations never exercise the actual install/provision flow.
+- Verified: `check-skills.py` (0 errors, no new warnings), `check-docs-
+  consistency.py`, and the `agent-index` suite via `test-supervisor`
+  (562 passed, 1 skipped, 71 deselected -- same known
+  `test_runtime_gate.py` exclusion). Merged via `pr-merge --now` after
+  a clean advisory review.
+- Guard count: 46 -> 40 findings for `agent-index`.
+
 ### 2026-09-27 — `agent-index`'s core-package cluster: 14 of 60 findings resolved (PR #4257)
 
 - Fresh guard count at merge time: 558 (down from 569). First slice
