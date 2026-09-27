@@ -201,15 +201,34 @@ find the noisiest and blocking issues, and fix them"
   confirmation the pipeline's own logic (not just its plumbing) is correct.
 
 ### Phase 3 — Fix the top offenders
-- [ ] Fix aperture-labs#7715 (tighten the lock-serialization test/harness so
+- [x] Fix aperture-labs#7715 (tighten the lock-serialization test/harness so
   the race is deterministic under CI load, per that issue's own body).
+  **Fixed, 2026-09-27:** root-caused via direct instrumented reproduction
+  (not guesswork) to a genuine TOCTOU in `posix-shim.tmpl`'s flock-less
+  fallback lock: a stale lock's "owner is dead" verdict was checked, then
+  the lock destroyed unconditionally by path -- letting one racer destroy
+  a FRESH lock a different racer had already recreated in the gap. Fixed
+  by serializing the reap decision-and-destroy behind a `mkdir`-based
+  mutex, re-verifying staleness fresh immediately before the actual
+  destroy. Also fixed the identical, independently-duplicated lock in
+  `plugins/agent-machines/scripts/invoke-payload-runtime.sh`. Validated
+  300/300 clean runs (vs. a real, reproduced ~5-10% failure rate on the
+  unfixed code, confirmed twice across two different intermediate fix
+  attempts before the final one held). See that PR for the full
+  reproduction methodology and trace evidence.
 - [ ] Resolve the `identifier leak guard` noise **by driving the existing
   `efforts/active/ci-identifier-leak-guard/` effort (#3923) to completion**,
   not by re-planning it here — that effort already owns the
   `FORBIDDEN_IDS_FACILITY`/`FORBIDDEN_IDS_WORK` secret setup.
 - [ ] Work down the Phase 2 ranking, opening one PR per fix (or a small
   batch when fixes are trivially related), closing/updating aperture-labs
-  issues as each lands.
+  issues as each lands. Next candidates from the live Phase 2 ranking:
+  `tools/test_check_marketplace_isolation.py::
+  test_payload_catalog_adopter_capabilities_avoid_bare_global_commands`
+  (noisiest by frequency) and
+  `tests/test_install_signed_python_probe.py::
+  test_missing_newest_candidate_does_not_abort_probe[pwsh]` (highest
+  blocking impact).
 
 ## Validation Plan
 
@@ -237,6 +256,29 @@ _Pending — Phase 3 findings (which fixes land, and in what order) will
 determine whether this section needs anything beyond the Plan above._
 
 ## Journal
+
+### 2026-09-27 — Phase 3 first item: aperture-labs#7715 fixed
+- Reproduced the flake directly (read-only diagnostic sub-agents, WSL,
+  ~5-10% failure rate observed across repeated runs) rather than guessing
+  from the shell logic alone -- pure code-reading had suggested the
+  existing lock SHOULD have been race-free, which turned out to be wrong.
+- Root cause, found via instrumented tracing of the actual interleaving:
+  a genuine TOCTOU in `posix-shim.tmpl`'s flock-less fallback lock's
+  stale-lock reap step. A first fix attempt (atomic `mv`-based claim
+  instead of blind `rm -f`) reduced but did not eliminate the race (5/100)
+  -- a second instrumented reproduction showed the staleness *decision*
+  itself (made before the destroy) could still go stale by the time the
+  destroy ran. Final fix: serialize the reap decision-and-destroy behind a
+  `mkdir`-based mutex, re-verifying staleness fresh inside it. Validated
+  300/300 clean runs after the final fix.
+- Also fixed the identical, independently-duplicated lock pattern in
+  `plugins/agent-machines/scripts/invoke-payload-runtime.sh` (same bug),
+  and regenerated all checked-in shims that embed the shared template
+  (`agent-dispatch`, `agent-pull-requests`, `budget-guidance`) to stay in
+  sync.
+- Next: work down the Phase 2 ranking (identifier-leak-guard noise is
+  already owned by #3923; the marketplace-isolation test and the
+  signed-python-probe test are the next concrete Phase 3 candidates).
 
 ### 2026-09-27 — Phases 1/2 built and validated live
 - Landed `tools/ci_telemetry.py` (`refresh`/`report`) + 21 new unit tests

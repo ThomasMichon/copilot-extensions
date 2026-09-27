@@ -188,17 +188,43 @@ if command -v flock >/dev/null 2>&1 && [ "${COPILOT_EXT_NO_FLOCK:-}" != "1" ]; t
     flock 9
 else
     _lock_link="$_runtime_root/.provision.lock.pid"
+    _reap_mutex="$_runtime_root/.provision.reap.mutex"
     until ln -s "$$" "$_lock_link" 2>/dev/null; do
         _owner="$(readlink "$_lock_link" 2>/dev/null || true)"
         case "$_owner" in
             *[!0-9]*|"") _live=0 ;;
             *) if kill -0 "$_owner" 2>/dev/null; then _live=1; else _live=0; fi ;;
         esac
-        if [ "$_live" = "0" ] && [ "$(readlink "$_lock_link" 2>/dev/null || true)" = "$_owner" ]; then
-            rm -f "$_lock_link"
-        else
+        if [ "$_live" = "1" ]; then
             sleep 1
+            continue
         fi
+        # A plain check-then-destroy (whether `rm -f` directly, or via an
+        # atomic `mv` claim of the CURRENT lock) is still a real TOCTOU: the
+        # staleness verdict above was read a moment ago, and destroying
+        # "whatever is at $_lock_link now" can hit a FRESH, live lock a
+        # different racer already recreated in the interim -- confirmed via
+        # direct reproduction, twice (aperture-labs#7715): first with a
+        # blind `rm -f`, then again after switching to an atomic `mv`
+        # claim, which only moved the same gap one step later. The fix is
+        # to serialize the *decision-and-destroy* itself, not just the
+        # destroy: `mkdir` is atomic create-if-absent exactly like `ln -s`,
+        # so at most one racer at a time can ever be inside this reap
+        # critical section, and re-reading staleness there (rather than
+        # trusting the outer read above) is what actually closes the gap --
+        # no racer can place a fresh lock at `_lock_link` without going
+        # through `ln -s` first, and that can only succeed once this
+        # section has actually removed the stale one.
+        if ! mkdir "$_reap_mutex" 2>/dev/null; then
+            sleep 1
+            continue
+        fi
+        _owner2="$(readlink "$_lock_link" 2>/dev/null || true)"
+        case "$_owner2" in
+            *[!0-9]*|"") rm -f "$_lock_link" ;;
+            *) kill -0 "$_owner2" 2>/dev/null || rm -f "$_lock_link" ;;
+        esac
+        rmdir "$_reap_mutex" 2>/dev/null || true
     done
 fi
 trap '_unlock_provision' EXIT INT TERM
