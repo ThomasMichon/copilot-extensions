@@ -22,7 +22,7 @@ stay call-site-level, migrated (if ever) in a later, narrower slice.
 ``handoff_trace.append_event`` for any of them.
 
 ``agent-worktrees-authoritative-daemon`` effort, Phase 3's fifth cluster
-(a later PR) reuses ``apply_claim_settle`` for ``handoff_cutover.py``'s
+(this same PR) reuses ``apply_claim_settle`` for ``handoff_cutover.py``'s
 ``_settle_predecessor_session_claim`` repair via the ``skip_if_released``
 guard above, rather than registering a new verb for it -- both wrap the
 identical ``tracking.settle_resource_claim`` transaction, only differing
