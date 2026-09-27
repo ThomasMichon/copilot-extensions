@@ -177,11 +177,14 @@ installer. Know which kind you are changing.
      so a genuinely ready PR should come back `Approve`. Use `pr-watch wait
      <owner>/<repo> <PR> --since r0 --until any --timeout 300` (a bounded
      ~5-minute window per attempt, not `--timeout 0`) to wait for the
-     initial review. On `Approve`, merge. On `Comment`: address genuinely
-     valuable findings (explain/dismiss the rest), push, wait another ~5
-     minutes for the automatic post-push review. Still not `Approve`?
-     Explicitly re-request review via the API (`POST
-     .../pulls/<PR>/requested_reviewers` with
+     initial review. **No review landed after that window:** skip straight
+     to explicitly re-requesting a review (see below) and wait ~5 minutes
+     again -- there's nothing to address or push yet, so don't invent a
+     commit just to have something to push. On `Approve`, merge. On
+     `Comment`: address genuinely valuable findings (explain/dismiss the
+     rest), push, wait another ~5 minutes for the automatic post-push
+     review. Still not `Approve`? Explicitly re-request review via the API
+     (`POST .../pulls/<PR>/requested_reviewers` with
      `reviewers[]=copilot-pull-request-reviewer[bot]` -- see
      `CONTRIBUTING.md` § "Requesting a fresh review") and wait ~5 minutes
      again -- do not just push another commit hoping the next automatic
@@ -190,6 +193,14 @@ installer. Know which kind you are changing.
      remaining findings are all Low severity, self-merge is permitted
      (state what was dismissed and why); any Medium/High finding blocks
      self-merge regardless of who authored the PR.
+   - **This is agent discipline, not yet tool-enforced.** `pr-merge --now`
+     itself does not check Copilot's verdict before merging --
+     `.agent-worktrees/config.yaml`'s `review_blocking: false` makes every
+     `pr-merge` call pass `--admin` (bypassing GitHub's own review-gate
+     check unconditionally), so nothing currently stops a driving agent
+     from merging before this loop is actually satisfied. Follow the loop
+     above deliberately; do not rely on the tooling to refuse a premature
+     merge on your behalf.
    - Keep the branch current and mergeable. If `dev` moves or conflicts appear,
      reconcile with the supported worktree PR verbs, re-run the required gates,
      and update the PR with `push-changes`.

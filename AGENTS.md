@@ -211,7 +211,12 @@ findings remain -- it is not a pass:
    maintainer may self-merge, stating what was dismissed and why. Any
    Medium/High finding blocks self-merge regardless of who authored the PR.
 Full mechanics, the re-request API call, and the non-maintainer approval gate
-this doesn't override: CONTRIBUTING.md § "Waiting for a verdict".
+this doesn't override: CONTRIBUTING.md § "Waiting for a verdict". **This is
+agent discipline, not yet tool-enforced** -- `pr-merge --now` does not itself
+check Copilot's verdict before merging (`.agent-worktrees/config.yaml`'s
+`review_blocking: false` makes it pass `--admin` unconditionally); follow
+the loop deliberately rather than relying on the tooling to refuse a
+premature merge.
 
 **Never post an `@copilot review` (or any `@copilot` mention) comment to
 request a fresh pass.** GitHub's automatic review already fires on every push

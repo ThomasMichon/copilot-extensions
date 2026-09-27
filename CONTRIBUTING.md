@@ -181,6 +181,19 @@ own; treat it the same way regardless of who authored the PR:
    This bypass does not extend to a non-maintainer's PR: the maintainer's
    own approving review remains that PR's separate, always-required gate
    regardless of Copilot's verdict.
+- **This is agent discipline, not yet tool-enforced.** `pr-merge --now`
+  itself does not check Copilot's verdict before merging --
+  `.agent-worktrees/config.yaml`'s `review_blocking: false` makes every
+  `pr-merge` call pass `--admin` to the provider (bypassing GitHub's own
+  review-gate check unconditionally), so nothing currently stops a driving
+  agent from merging before this loop is actually satisfied. Follow the
+  loop above deliberately; do not rely on the tooling to refuse a premature
+  merge on your behalf. (Flipping `review_blocking` to `true` is a real
+  lever for closing this gap, but is a separate decision with its own
+  behavior-change risk -- e.g. this repo's own ruleset already exempts the
+  maintainer from any required approving review count, so the practical
+  effect for the maintainer's own PRs needs its own validation, not an
+  assumption -- and is out of scope for this documentation change.)
 - **`pr-status`/`pr-watch`'s `eligible: false` / `reason: "not yet
   approved"` fields still refer only to the codeowner/review-count gate**
   (see "Review" above), not to Copilot's own verdict — for the maintainer's
