@@ -386,6 +386,62 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-27 — `agent-index`'s core-package cluster: 14 of 60 findings resolved (PR #4257)
+
+- Fresh guard count at merge time: 558 (down from 569). First slice
+  into `agent-index`, next plugin in the backlog order after
+  `agent-bridge` reached backlog-only state. Also ran a clean-room
+  checkpoint (`agent-mcp-solo`, 13/13 PASS) between the two plugins per
+  the operator's periodic-validation directive.
+- Classified by shape, all matching precedent already established this
+  session: own-legacy-root fallbacks across `config.py` (5, one of
+  which reused an already-marked `SHAREABLE_CONFIG_DIR` constant rather
+  than re-annotating the same literal twice), `index_config.py` (2),
+  `engine/daemon.py` (1); cross-plugin `agent-worktrees` registry
+  lookups in `config.py`/`_knowledge_overlay.py`; an env-var-name-
+  declaration (`ENDPOINT_ENV`, `allow env-var-name-declaration`).
+- `transport.py`'s `_build_inner()` builds a shell command that runs
+  `agent-index` on a REMOTE host over a non-interactive SSH logon --
+  its own docstring says so explicitly. `allow remote-management`, a
+  third confirmation this session that reason phrase generalizes
+  (after `agent-ssh`'s and `agent-bridge`'s `carrier.py`).
+- `indexing/runner.py`: a dict key already named exactly `"legacy_root"`
+  -- extracted the value into a small `_legacy_root()` helper purely to
+  fit the marked literal within the 99-char line limit.
+- **`server.py` produced a SECOND occurrence of the "short-keyword-
+  substring-collision" false-positive class first seen in `agent-ssh`'s
+  `InstallRelease`/`lease` and `agent-bridge`'s `tasks` variable**: a
+  JSON receipt's schema-identifier string
+  `"copilot-extensions.agent-index.service-instance"` is a namespaced
+  message-type tag, not an OS service name, but its `agent-index.
+  service` substring coincidentally matches the `fixed-service-identity`
+  category's `agent-<name>.service` regex alternative. New reason:
+  `allow schema` (the shortest form that fits once the 54-char schema
+  string itself eats most of the 99-char budget). **`cell-runtime.py`
+  has 4 MORE instances of this exact same shape** (its `INSTANCE_
+  SCHEMA`/`ENSURE_WORKER_SCHEMA`/`ENSURE_WORKER_COMPLETION_SCHEMA`
+  constants and one inline `"schema":` key) -- left for a follow-up
+  slice on that file specifically, since it also sits at its exact
+  module-size ceiling.
+- Left deliberately untouched: `cell-runtime.py` (7, module-size
+  ceiling -- baseline 5145, 7th file this session at zero headroom) and
+  `resolve_effective_config.py` (3, baseline 1136, 8th file) -- both
+  tracked in
+  [aperture-labs#7672](https://gitea.michon.ski/tmichon/aperture-labs/issues/7672).
+  `install.sh`/`install.ps1` (20, confirmed-genuine Phase 2 launcher-
+  contract backlog), `payload-invocation.json` (7), `installer-
+  readiness.json` (3), `setting-up-agent-index/SKILL.md` (6) -- not yet
+  individually triaged.
+- Verified: `python -m py_compile` + `ruff --select E501` on every
+  touched file, `check-module-size.py`, `check-docs-consistency.py`, and
+  the `agent-index` suite via `test-supervisor` (562 passed, 1 skipped,
+  71 deselected -- `test_runtime_gate.py` excluded, the SAME pre-
+  existing test-supervisor temp-storage-limit failure this exact plugin
+  hit in an earlier leg's handoff, confirmed identical again via `git
+  stash`/`git stash pop`). Merged via `pr-merge --now` after a clean
+  (0-finding) advisory review.
+- Guard count: 60 -> 46 findings for `agent-index`.
+
 ### 2026-09-27 — `agent-bridge` now backlog-only at 15 findings (PR #4246)
 
 - Fresh guard count at merge time: 569 (down from 570).
