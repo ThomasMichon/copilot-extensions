@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import httpx
 
 from agent_index import __main__ as cli
+from agent_index import __version__
 from agent_index import server
 
 
@@ -244,4 +245,4 @@ def test_status_payload_without_role_is_setup_required(monkeypatch, tmp_path) ->
     assert payload["role"] is None
     assert payload["running"] is False
     assert payload["schema_version"] == 1
-    assert payload["version"] == cli.__version__
+    assert payload["version"] == __version__

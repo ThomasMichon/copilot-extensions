@@ -8,7 +8,6 @@ from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import __version__
 from .config import install_dir
 
 RUNNING_VERSION_FILE = "running-version.json"
@@ -17,6 +16,8 @@ RUNTIME_VERSION_ENV = "AGENT_INDEX_RUNTIME_VERSION"
 
 def current_runtime_version() -> str:
     """Return the immutable slot identity, falling back to the package version."""
+    from . import __version__
+
     return os.environ.get(RUNTIME_VERSION_ENV, "").strip() or __version__
 
 

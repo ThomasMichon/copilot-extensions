@@ -1,0 +1,9 @@
+{
+  "comment": "Phase 3 (agent-cli-lazy-dispatch): defer eager importlib.metadata.version() resolution + FastAPI server import until actually needed",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
