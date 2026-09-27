@@ -1,9 +1,11 @@
 """Regression tests for tools/check-gh-aw-action-pins.py.
 
-Covers the real defect this guard exists to catch (PR #4155, round 4):
+Covers the real defects this guard exists to catch (PR #4155, rounds 3-4):
 `gh aw compile` silently reverts to a mutable version-tag action reference
-unless `--action-tag <sha>` is passed on every recompile, and nothing in the
-committed source would otherwise flag the regression.
+unless `--action-tag <sha>` is passed on every recompile, and a naive
+line-oriented matcher can miss that reference across the several valid YAML
+scalar forms it can be written in (bare, quoted, nested path, or a multiline
+block scalar) unless the YAML is actually parsed.
 """
 
 import importlib.util
@@ -128,6 +130,34 @@ def test_nested_action_path_sha_pin_is_accepted(workflows_dir):
         "  setup:\n"
         "    steps:\n"
         f"      - uses: github/gh-aw/actions/foo/bar@{SHA}\n",
+        encoding="utf-8",
+    )
+    assert check_gh_aw_action_pins.find_unpinned_refs() == []
+
+
+def test_multiline_folded_scalar_mutable_tag_is_rejected(workflows_dir):
+    lock_file = workflows_dir / "example.lock.yml"
+    lock_file.write_text(
+        "jobs:\n"
+        "  setup:\n"
+        "    steps:\n"
+        "      - uses: >-\n"
+        "          github/gh-aw/actions/setup@main\n",
+        encoding="utf-8",
+    )
+    violations = check_gh_aw_action_pins.find_unpinned_refs()
+    assert len(violations) == 1
+    assert "main" in violations[0]
+
+
+def test_multiline_folded_scalar_sha_pin_is_accepted(workflows_dir):
+    lock_file = workflows_dir / "example.lock.yml"
+    lock_file.write_text(
+        "jobs:\n"
+        "  setup:\n"
+        "    steps:\n"
+        "      - uses: >-\n"
+        f"          github/gh-aw/actions/setup@{SHA}\n",
         encoding="utf-8",
     )
     assert check_gh_aw_action_pins.find_unpinned_refs() == []

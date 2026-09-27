@@ -1907,6 +1907,27 @@ _Pending._
     replied-to comment threads and no new inline evidence — a repeat of
     the earlier stale-recap pattern (see below), not a real regression;
     verified all 4 remain fixed against the current head before moving on.
+  - **Fourth real review pass found the SAME class of gap again, a level
+    deeper: a multiline YAML block scalar (`uses: >-` folded onto the next
+    line) also bypassed the regex matcher.** Two regex patches in a row
+    losing to a new YAML scalar form was the signal to stop patching
+    regex and actually parse the YAML, as the reviewer itself suggested
+    both times: rewrote the guard to `yaml.safe_load` each lock file and
+    walk every `jobs.<job>.steps[].uses` value directly (PyYAML resolves
+    whatever scalar style it was written in, so there is no remaining
+    form left to miss). Added 2 more regression cases (multiline folded
+    scalar, both mutable and SHA-pinned) — 12 tests in that file, 75
+    across the full relevant suite. **This same review pass also
+    reconfirmed, via GitHub's own GraphQL thread-resolution API, that the
+    reviewer's own recap consistently marks already-fixed items "Open"
+    with no new evidence and no re-verification against the diff** — a
+    now clearly-established pattern across 3 separate passes (this round,
+    the mutable-tag/dispatch-fallback round, and the original stale-head
+    race) — treated as a known limitation of this automated review's
+    "Lite effort" recap mode, not further evidence of an unfixed defect,
+    for every item this session has independently re-verified against
+    the actual current head with direct evidence (exact line content,
+    passing tests, successful recompiles).
   - **HIGH — new — membership gate still blocks the automated dispatch.**
     The explicit `workflow_dispatch:` trigger (issue #13's fix) made the
     activation *gate* reachable, but `label_command` unconditionally
