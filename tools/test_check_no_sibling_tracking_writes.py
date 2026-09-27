@@ -668,6 +668,23 @@ def test_stamp_queue_imported_directly_is_still_caught(tmp_path):
     assert "_STAMP_QUEUE.submit" in violations[0].detail
 
 
+def test_atomic_write_is_denylisted(tmp_path):
+    # tracking._atomic_write is the low-level function save_record itself
+    # calls to actually emit the serialized YAML -- a sibling could use
+    # it to write raw content straight to a tracking.yaml path, bypassing
+    # every validation/locking layer above it.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking\n"
+        "\n"
+        "def write(path, content):\n"
+        "    tracking._atomic_write(path, content)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "_atomic_write" in violations[0].detail
+
+
 def test_unreadable_file_fails_closed_not_silently_skipped(tmp_path, monkeypatch):
     # A file the guard cannot even read must be reported, not silently
     # treated as clean -- otherwise an unreadable/undecodable file is a

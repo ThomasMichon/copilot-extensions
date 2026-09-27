@@ -78,6 +78,7 @@ WRITE_FUNCTIONS = frozenset({
     # tracking.py
     "save_record",
     "_save_record_unlocked",
+    "_atomic_write",
     "retire_record",
     "update_status",
     "set_disposition",
