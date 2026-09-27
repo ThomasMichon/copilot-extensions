@@ -1,0 +1,9 @@
+{
+  "comment": "reviewing-customizations: assert enabled agent-mcp materialized fallback (retire the obsolete 'disabled by authorization gate' marker) and require shell/execute tool access when a fallback is documented",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "dev"
+    }
+  ]
+}
