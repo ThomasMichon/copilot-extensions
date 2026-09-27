@@ -119,7 +119,20 @@ def find_uv_editable_refs(consumer_dir: Path) -> list[tuple[str, str, str, bool]
         data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise ManifestUnreadable(f"{pyproject}: could not read/parse: {exc}") from exc
-    sources = data.get("tool", {}).get("uv", {}).get("sources", {})
+    tool = data.get("tool", {})
+    if not isinstance(tool, dict):
+        raise ManifestUnreadable(f"{pyproject}: [tool] is not a table")
+    uv_table = tool.get("uv", {})
+    if not isinstance(uv_table, dict):
+        raise ManifestUnreadable(f"{pyproject}: [tool.uv] is not a table")
+    sources = uv_table.get("sources", {})
+    if not isinstance(sources, dict):
+        # A TOML-valid but structurally malformed manifest (e.g.
+        # `[tool.uv] sources = []`) must never crash both --check and
+        # promotion with a raw AttributeError from sources.items() below
+        # -- fail closed through the same explicit diagnostic every other
+        # malformed-manifest case already uses.
+        raise ManifestUnreadable(f"{pyproject}: [tool.uv.sources] is not a table")
     consumer_root = consumer_dir.resolve()
     out: list[tuple[str, str, str, bool]] = []
     for name, entry in sources.items():

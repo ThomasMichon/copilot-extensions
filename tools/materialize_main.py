@@ -476,6 +476,20 @@ def _materialize_one_uv_editable_ref(
         return f"SKIP {dest_lib_dir}: {canonical}/src not found -- refusing (canonical lib source must exist)"
     if not (canonical / "pyproject.toml").is_file():
         return f"SKIP {dest_lib_dir}: {canonical}/pyproject.toml missing -- refusing"
+    # lib_tree_matches() (the dev-time conversion's drift gate) compares
+    # canonical's COMPLETE tree, not a fixed allowlist of subpaths -- the
+    # copy performed here must match that promise exactly, or a canonical
+    # lib carrying any extra file (a root-level LICENSE, package data, or
+    # anything else) would silently disappear from the promoted snapshot
+    # even though the dev-time side treats it as real, load-bearing
+    # content. Refuse any symlink anywhere in canonical up front (the
+    # existing directory/file pointer materializer's own safeguard,
+    # applied here too) rather than letting shutil.copytree silently
+    # follow one.
+    stray = _find_symlink(canonical)
+    if stray is not None:
+        where = str(canonical) if stray == "." else f"{canonical}/{stray}"
+        return f"SKIP {dest_lib_dir}: {where} is a symlink -- refusing"
 
     text = pyproject.read_text(encoding="utf-8")
     span = uer.uv_sources_table_span(text)
@@ -494,15 +508,7 @@ def _materialize_one_uv_editable_ref(
     if pattern.search(text[start:end]) is None:
         return f"SKIP {pyproject}: could not find {name}'s uv-editable entry to rewrite"
 
-    dest_lib_dir.mkdir(parents=True)
-    for sub in ("src", "tests"):
-        src_sub = canonical / sub
-        if src_sub.is_dir():
-            shutil.copytree(src_sub, dest_lib_dir / sub)
-    for fname in ("pyproject.toml", "README.md"):
-        src_file = canonical / fname
-        if src_file.is_file():
-            shutil.copy2(src_file, dest_lib_dir / fname)
+    shutil.copytree(canonical, dest_lib_dir, ignore=_ignore)
 
     new_table_text, count = pattern.subn(
         lambda m: f'{m.group(1)}{{ path = "libs/{lib}" }}', text[start:end], count=1
