@@ -5,11 +5,12 @@
 - **Branch(es):** independent per-slice worktrees
 - **Created:** 2026-09-25
 - **Status:** Active — Phase 1 live-validated (Phase 1.5 Done); Phase 2
-  in progress: vision-reconciliation gate resolved, real research done,
-  a draft `gh-aw` workflow authored
-  (`.github/workflows/ci-failure-fix-attempt.md`, not yet compiled —
-  see the 2026-09-26 Journal entry for a real local-install blocker and
-  open decisions)
+  in progress: vision-reconciliation gate resolved, a draft `gh-aw`
+  workflow authored (`.github/workflows/ci-failure-fix-attempt.md`) but
+  **not functional yet** — early review (PR #3893) found 5 real
+  blocking issues (trigger can't fire, no edit tool, auth signal gap,
+  protected-files gap, prompt-injection gap), none resolved; see the
+  2026-09-26 Journal entry
 - **Vision:** [`visions/ci-failure-remediation`](../../../visions/ci-failure-remediation/README.md)
   (authored 2026-09-26 to resolve the reconciliation gate below). **Gate
   resolved:** the vision states the standing intent (detection+dedup,
@@ -1337,3 +1338,55 @@ _Pending._
   items (pin the `gh-aw` extension version, verify job-level
   `permissions:` don't inherit anything broader); then Phase 3's
   Validation Plan trials (the two-sided triage trial specifically).
+
+### 2026-09-26 — Real review on the draft (PR #3893) found 5 genuine blocking issues, not yet resolved
+- Opened the draft as a WIP PR specifically for early feedback before
+  investing further in a design that might be structurally wrong.
+  That bet paid off: review found real, substantive problems, not
+  nitpicks — recorded in full (with technical detail and candidate
+  fixes) directly in the draft file's own leading comment block so they
+  travel with the file, and summarized here for durability:
+  1. **The trigger cannot fire at all as drafted.** Confirmed against
+     the live workflow: `report-failure` runs the watchdog with
+     `GH_TOKEN: ${{ github.token }}` — the default token — and GitHub
+     suppresses new workflow-triggering events for content created by
+     the default `GITHUB_TOKEN` (the same anti-recursion class already
+     documented elsewhere in this file for the `promote` job). An
+     `issues: labeled` trigger built on an issue the watchdog files
+     with that token will never fire. Two candidate fixes, neither
+     decided: switch the watchdog to a PAT (new secret), or have
+     `report-failure` explicitly fire a `workflow_dispatch` after
+     filing the issue (needs `actions: write` added to that job).
+  2. **The label alone isn't an authenticated signal** — any
+     collaborator who can label an issue can invoke the agent with
+     arbitrary content; needs a real check (the hidden `Signature:`
+     anchor and/or issue-author identity) before the agent job runs.
+  3. **No edit tool was granted** — `tools:` only listed `bash`; gh-aw's
+     real file-editing tool was never enabled, so the agent could never
+     have produced an actual patch. An embarrassing but easy miss once
+     caught.
+  4. **`protected-files: fallback-to-issue` alone doesn't encode this
+     repo's specific protected paths** (version fields in
+     `plugin.json`/`pyproject.toml`/`marketplace.json`) — gh-aw's
+     built-in default set is unconfirmed to cover these; needs an
+     explicit path policy or an independent required-check job,
+     mirroring `report-failure`'s own "machine-enforced, not prompt-
+     text-alone" principle.
+  5. **The untrusted issue body was interpolated directly inside a
+     fenced code block** in the agent's own instructions — a code
+     fence is not an isolation boundary against prompt injection, and
+     this directly conflicts with this effort's own untrusted-
+     diagnostic-input charter item. Needs whichever real isolation
+     mechanism gh-aw provides (not yet identified) plus the same
+     machine-enforced scope backstop.
+- None of these are fixed yet — this PR lands as an honestly-labeled,
+  fully inert WIP artifact (no `.lock.yml` exists, so nothing in this
+  file does anything until compiled) specifically so a successor
+  resumes from a documented, review-vetted starting point rather than
+  re-discovering the same five problems from scratch.
+- **This is the immediate next slice for whoever picks up the
+  handoff:** resolve all five (in roughly this priority order: #1 and
+  #3 first, since the workflow is structurally non-functional without
+  them; then #2, #4, #5 as the security-hardening pass before this ever
+  runs for real), then finally get `gh aw compile` runnable somewhere
+  to verify the result.

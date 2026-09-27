@@ -23,6 +23,70 @@
   run link, commit SHA, log excerpt) directly in its body -- no re-derivation needed.
   Confirm this reasoning holds once `gh aw compile` is actually runnable; if
   `workflow_call` turns out to be supported after all, revisit which shape to use.
+
+  ============================================================================
+  KNOWN BLOCKING ISSUES (real, review-confirmed 2026-09-26, PR #3893) --
+  NOT YET RESOLVED. Do not attempt to compile/wire this live until all five
+  are fixed. Full detail in the effort's 2026-09-26 Journal entry.
+  ============================================================================
+
+  1. TRIGGER CANNOT FIRE AS DRAFTED (confirmed against the live workflow, not
+     hypothetical): `validate-and-promote.yml`'s `report-failure` job runs
+     `tools/ci_failure_watchdog.py` with `GH_TOKEN: ${{ github.token }}` (the
+     default GITHUB_TOKEN) -- confirmed live at that job's `env:` block.
+     GitHub suppresses new workflow-triggering events (including `issues:
+     labeled`) for content created/labeled by the default GITHUB_TOKEN, the
+     exact anti-recursion safeguard this repo's own `promote` job comment
+     already documents for a different case. This `issues: labeled` trigger
+     will NEVER fire as drafted. Two real fix paths, neither yet decided:
+       (a) switch the watchdog's issue-filing call to a PAT (mirroring the
+           `APERTURE_RELEASE_TOKEN` pattern) -- needs a new vaulted secret;
+       (b) have `report-failure`'s own step (which already runs under a
+           working, if default, token) explicitly fire a `workflow_dispatch`
+           against this workflow's compiled `.lock.yml` after filing the
+           issue (`gh workflow run ... -f issue_number=<N>`) -- needs
+           `actions: write` added to that job specifically (currently only
+           `actions: read` at the workflow level), a narrower, more legible
+           change than provisioning a new secret. Leaning (b); not decided.
+  2. LABEL ALONE IS NOT AN AUTHENTICATED SIGNAL: any collaborator who can
+     apply the `ci-failure-signature` label to a hand-authored issue can
+     invoke this agent with arbitrary attacker-controlled content -- the
+     label by itself proves nothing about who/what created the issue. Must
+     verify the issue was genuinely filed by the watchdog (check for its
+     hidden `Signature: <hash>` anchor line and/or the issue author identity)
+     in an `if:` gate or an early deterministic step, before the agent job
+     is allowed to run at all.
+  3. NO EDIT TOOL: the `tools:` block below grants only `bash` -- gh-aw's
+     actual file-editing tool is not enabled, so the agent has no mechanism
+     to modify the checkout; `create-pull-request` would always have an
+     empty patch to publish. Add gh-aw's real edit/file-write tool (name
+     TBD -- confirm the exact `tools:` key against gh-aw's Tools reference
+     once compile access exists) before this can function as a fix-attempt
+     workflow at all.
+  4. PROTECTED-FILES DEFAULT MAY NOT COVER THIS REPO'S SPECIFIC PROTECTED
+     PATHS: `protected-files: fallback-to-issue` only delegates to gh-aw's
+     own built-in protected-path policy, which is NOT confirmed to know
+     about this repo's own specific prohibitions (`plugin.json` /
+     `pyproject.toml` / `marketplace.json` version fields). Until that
+     default set is verified (requires live compile output) to already
+     cover these paths, add an explicit `excluded-files`/allowed-path
+     policy here, or an independent required-status-check job on the
+     resulting PR (mirroring Phase 2's own "machine-enforced, not prompt-
+     text-alone" principle already established for the analogous
+     `report-failure` design).
+  5. UNTRUSTED ISSUE BODY INTERPOLATED WITHOUT ISOLATION: the markdown body
+     below embeds `${{ github.event.issue.body }}` directly inside a
+     fenced code block in the agent's own instructions. A code fence is
+     NOT an isolation boundary against prompt injection -- the body
+     contains the watchdog's own untrusted log excerpt, which can itself
+     carry fence-breaking sequences or imperative text from a failing
+     test/dependency, exactly the risk this effort's own untrusted-
+     diagnostic-input charter item exists to guard against. Route this
+     through whichever mechanism gh-aw actually provides for untrusted
+     content isolation (needs research -- not yet identified) rather than
+     raw interpolation, and add the same machine-enforced scope check
+     Phase 2's own Plan already calls for as a backstop independent of
+     prompt wording.
 -->
 ---
 description: "Attempts a scoped, reviewed fix for one tracked dev CI-failure signature (promotion-failure-reactive-fix-agent effort, Phase 2)."
