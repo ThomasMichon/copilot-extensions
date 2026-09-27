@@ -1,0 +1,9 @@
+{
+  "comment": "Annotate 6 more marketplace-isolation guard findings (dispatch registrar, dtssh transport: shared mutex, third-party URL, durable identity backup)",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

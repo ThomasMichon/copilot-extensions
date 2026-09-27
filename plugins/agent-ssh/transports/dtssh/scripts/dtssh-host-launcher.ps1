@@ -659,7 +659,7 @@ if ($NoMonitor) {
 
 # ── Single-instance (named mutex) ────────────────────────────────────────
 
-$mutexName = "Global\DtsshHostLauncher_$Alias"
+$mutexName = "Global\DtsshHostLauncher_$Alias" # marketplace-isolation: allow shared-instance-mutex
 $mutex = $null
 try {
     $created = $false

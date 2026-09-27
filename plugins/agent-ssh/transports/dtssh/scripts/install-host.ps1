@@ -46,7 +46,7 @@ function Set-CopilotPersistentEnvironmentVariable {
     [Environment]::SetEnvironmentVariable($Name, $Value, $effectiveTarget)
 }
 # === end install-contract:test-persistent-environment ===
-$InstallRelease = 'https://raw.githubusercontent.com/bmiddha/devtunnel-ssh/main/scripts/install-release.ps1'
+$InstallRelease = 'https://raw.githubusercontent.com/bmiddha/devtunnel-ssh/main/scripts/install-release.ps1' # marketplace-isolation: allow third-party-installer-url
 $InstallDir = Join-Path $env:LOCALAPPDATA 'agent-ssh-dtssh'
 $DtsshDir = Join-Path $env:LOCALAPPDATA 'dtssh\bin'
 $DtsshExe = Join-Path $DtsshDir 'dtssh.exe'
@@ -74,7 +74,7 @@ function Resolve-DurableHostIdentityRoot {
         )
     }
     if ($env:OneDriveCommercial -and (Test-Path -LiteralPath $env:OneDriveCommercial)) {
-        return Join-Path $env:OneDriveCommercial '.agent-ssh\dtssh-host-identities'
+        return Join-Path $env:OneDriveCommercial '.agent-ssh\dtssh-host-identities' # marketplace-isolation: allow durable-host-identity-backup
     }
     return Join-Path $InstallDir 'host-identities'
 }

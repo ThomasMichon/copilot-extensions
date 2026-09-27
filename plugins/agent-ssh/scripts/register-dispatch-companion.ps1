@@ -17,7 +17,7 @@ try {
     $directory = if ($env:AGENT_DISPATCH_REGISTRAR_DROPINS_DIR) {
         $env:AGENT_DISPATCH_REGISTRAR_DROPINS_DIR
     } else {
-        Join-Path $env:USERPROFILE '.agent-dispatch\registrar.d'
+        Join-Path $env:USERPROFILE '.agent-dispatch\registrar.d' # marketplace-isolation: allow legacy compatibility root
     }
     New-Item -ItemType Directory -Force -Path $directory | Out-Null
     $payload = [ordered]@{
