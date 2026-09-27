@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from agent_index.index_config import IndexConfig
-    from agent_index.embedding.query_embedder import InProcessQueryEmbedder
+    from agent_index_engine.query_embedder import InProcessQueryEmbedder
     from agent_index.engine.client import EngineClient
     from agent_index.store.multi_model_store import MultiModelStore
     from agent_index.store.store import SearchResult
@@ -146,7 +146,6 @@ def create_search_engine(config: IndexConfig | None = None) -> SearchEngine:
 
         config = IndexConfig()
 
-    from agent_index.embedding.query_embedder import InProcessQueryEmbedder
     from agent_index.engine.client import EngineClient
     from agent_index.store.multi_model_store import MultiModelStore
 
@@ -157,6 +156,16 @@ def create_search_engine(config: IndexConfig | None = None) -> SearchEngine:
     for profile in config.model_profiles.values():
         multi_store.register_model(profile)
         if config.search_in_process:
+            try:
+                from agent_index_engine.query_embedder import InProcessQueryEmbedder
+            except ImportError as exc:
+                raise RuntimeError(
+                    "AGENT_INDEX_SEARCH_IN_PROCESS=1 requires the agent-index-engine "
+                    "package (torch/sentence-transformers) installed in this venv "
+                    "-- see efforts/active/agent-index-server-package-split. Unset "
+                    "it (or leave it 0) to embed queries via the durable engine "
+                    "daemon instead."
+                ) from exc
             engine_clients[profile.model_id] = InProcessQueryEmbedder(
                 profile, device=config.query_device, config=config,
             )

@@ -1408,9 +1408,9 @@ function Install-Runtime {
     # A host runs the local indexing/vector-store stack and needs the [store]
     # extra (numpy, pyarrow, lancedb, tree-sitter*, mcp); a client stays on the
     # light base deps only. This is distinct from -- and must never pull in --
-    # the durable [engine] (torch) extra, which is provisioned exclusively by
-    # `engine`/`engine-update` (see durable-vs-versioned-runtime.md). Resolve
-    # role BEFORE the package install so a host's versioned venv actually
+    # the durable agent-index-engine program (torch), which is provisioned
+    # exclusively by `engine`/`engine-update` (see durable-vs-versioned-runtime.md).
+    # Resolve role BEFORE the package install so a host's versioned venv actually
     # carries what its own service/search/index code imports -- Get-ActivationRole
     # falls back to Get-MachineRole, so this is correct even before any
     # per-repo role config exists.
@@ -1586,7 +1586,7 @@ function Test-EnginePort {
 }
 
 function Install-Engine {
-    # Provision the DURABLE engine venv (agent-index[engine], the torch stack) at
+    # Provision the DURABLE engine venv (agent-index-engine, the torch stack) at
     # AGENT_INDEX_ENGINE_HOME. Built ONCE and skipped if present (idempotent);
     # never rebuilt by a service `update`. Non-fatal -- a failure here leaves the
     # light, torch-free service fully functional. With -Upgrade, an existing venv
@@ -1646,11 +1646,16 @@ function Install-Engine {
         }
     }
 
-    # agent-index[engine] -- the heavy embedding stack into the DURABLE venv only.
+    # agent-index-engine (plugins/agent-index/server/) -- a SEPARATE, independently
+    # installable program that owns the heavy embedding stack, into the DURABLE
+    # venv only. It depends on the light `agent-index` base package (index_config,
+    # engine.generation, engine.client) -- installed first, exactly like the zdd
+    # pre-install above, since neither is on PyPI and a plain `pip install
+    # agent-index-engine` cannot resolve "agent-index" on its own.
     #
     # Torch install is TWO STEPS so a GPU host works even behind a managed/CFS
     # package feed:
-    #   1. Install agent-index[engine] from the DEFAULT feed (governed mirror or
+    #   1. Install agent-index-engine from the DEFAULT feed (governed mirror or
     #      public PyPI). This pulls the CPU torch wheel plus ALL of torch's
     #      pure-python deps (sympy, networkx, jinja2, ...) and the rest of the
     #      engine stack (transformers, sentence-transformers, numpy).
@@ -1665,26 +1670,38 @@ function Install-Engine {
     #      blocked host.
     $torchIdx = $env:AGENT_INDEX_TORCH_INDEX
     if (Get-Command uv -ErrorAction SilentlyContinue) {
-        $pipArgs = @('pip', 'install', '--python', $EngineVenvPython, "$PluginDir[store,engine]")
-        if ($Upgrade) { $pipArgs += '--upgrade' }
-        $engOut = & uv @pipArgs 2>&1
+        $baseOut = & uv pip install --python $EngineVenvPython "$PluginDir" 2>&1
         $engRc = $LASTEXITCODE
+        $engOut = @($baseOut)
+        if ($engRc -eq 0) {
+            $pipArgs = @('pip', 'install', '--python', $EngineVenvPython, "$PluginDir\server")
+            if ($Upgrade) { $pipArgs += '--upgrade' }
+            $srvOut = & uv @pipArgs 2>&1
+            $engRc = $LASTEXITCODE
+            $engOut += @($srvOut)
+        }
         if ($engRc -eq 0 -and $torchIdx) {
             Write-Host "  ...    Swapping in CUDA torch from the configured CUDA wheel index (wheel only, --no-deps)" -ForegroundColor DarkGray
             $torchOut = & uv pip install --python $EngineVenvPython --index-url $torchIdx --no-deps --reinstall-package torch torch 2>&1
             $engRc = $LASTEXITCODE
-            $engOut = @($engOut) + @($torchOut)
+            $engOut += @($torchOut)
         }
     } else {
-        $pipArgs = @('-m', 'pip', 'install', "$PluginDir[store,engine]")
-        if ($Upgrade) { $pipArgs += '--upgrade' }
-        $engOut = & $EngineVenvPython @pipArgs 2>&1
+        $baseOut = & $EngineVenvPython -m pip install "$PluginDir" 2>&1
         $engRc = $LASTEXITCODE
+        $engOut = @($baseOut)
+        if ($engRc -eq 0) {
+            $pipArgs = @('-m', 'pip', 'install', "$PluginDir\server")
+            if ($Upgrade) { $pipArgs += '--upgrade' }
+            $srvOut = & $EngineVenvPython @pipArgs 2>&1
+            $engRc = $LASTEXITCODE
+            $engOut += @($srvOut)
+        }
         if ($engRc -eq 0 -and $torchIdx) {
             Write-Host "  ...    Swapping in CUDA torch from the configured CUDA wheel index (wheel only, --no-deps)" -ForegroundColor DarkGray
             $torchOut = & $EngineVenvPython -m pip install --index-url $torchIdx --no-deps --force-reinstall torch 2>&1
             $engRc = $LASTEXITCODE
-            $engOut = @($engOut) + @($torchOut)
+            $engOut += @($torchOut)
         }
     }
     $ErrorActionPreference = $prevEAP

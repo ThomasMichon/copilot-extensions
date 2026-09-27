@@ -1147,9 +1147,9 @@ _ensure_runtime() {
         # A host runs the local indexing/vector-store stack and needs the
         # [store] extra (numpy, pyarrow, lancedb, tree-sitter*, mcp); a client
         # stays on the light base deps only. This is distinct from -- and
-        # must never pull in -- the durable [engine] (torch) extra, which is
-        # provisioned exclusively by `engine`/`engine-update` (see
-        # durable-vs-versioned-runtime.md). Resolve role BEFORE the package
+        # must never pull in -- the durable agent-index-engine program
+        # (torch), which is provisioned exclusively by `engine`/`engine-update`
+        # (see durable-vs-versioned-runtime.md). Resolve role BEFORE the package
         # install so a host's versioned venv actually carries what its own
         # service/search/index code imports. _activation_role falls back to
         # _machine_role, so this is correct even before any per-repo role
@@ -1297,7 +1297,7 @@ _activation_role() {
 }
 
 _install_engine() {
-    # Provision the DURABLE engine venv (agent-index[engine], the torch stack) at
+    # Provision the DURABLE engine venv (agent-index-engine, the torch stack) at
     # AGENT_INDEX_ENGINE_HOME. Built ONCE and skipped if present (idempotent);
     # never rebuilt by a service `update`. Non-fatal -- a failure here leaves the
     # light, torch-free service fully functional. With arg "upgrade", an existing
@@ -1341,11 +1341,16 @@ _install_engine() {
         fi
     fi
 
-    # agent-index[engine] -- the heavy embedding stack into the DURABLE venv only.
+    # agent-index-engine (plugins/agent-index/server/) -- a SEPARATE, independently
+    # installable program that owns the heavy embedding stack, into the DURABLE
+    # venv only. It depends on the light `agent-index` base package (index_config,
+    # engine.generation, engine.client) -- installed first, exactly like the zdd
+    # pre-install above, since neither is on PyPI and a plain `pip install
+    # agent-index-engine` cannot resolve "agent-index" on its own.
     #
     # Torch install is TWO STEPS so a GPU host works even behind a managed/CFS
     # package feed:
-    #   1. Install agent-index[engine] from the DEFAULT feed (governed mirror or
+    #   1. Install agent-index-engine from the DEFAULT feed (governed mirror or
     #      public PyPI) -- CPU torch wheel + ALL of torch's pure-python deps
     #      (sympy, networkx, ...) + the rest of the engine stack.
     #   2. If AGENT_INDEX_TORCH_INDEX is set (a CUDA wheel index), SWAP the torch
@@ -1357,17 +1362,23 @@ _install_engine() {
     local rc=0
     local torch_idx="${AGENT_INDEX_TORCH_INDEX:-}"
     if [[ "$have_uv" -eq 1 ]]; then
-        local uv_args=(pip install --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR[store,engine]")
-        [[ "$upgrade" -eq 1 ]] && uv_args+=(--upgrade)
-        uv "${uv_args[@]}" || rc=$?
+        uv pip install --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR" || rc=$?
+        if [[ "$rc" -eq 0 ]]; then
+            local uv_args=(pip install --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR/server")
+            [[ "$upgrade" -eq 1 ]] && uv_args+=(--upgrade)
+            uv "${uv_args[@]}" || rc=$?
+        fi
         if [[ "$rc" -eq 0 && -n "$torch_idx" ]]; then
             _step "Swapping in CUDA torch from the configured CUDA wheel index (wheel only, --no-deps)"
             uv pip install --python "$ENGINE_VENV_PYTHON" --index-url "$torch_idx" --no-deps --reinstall-package torch torch || rc=$?
         fi
     else
-        local pip_args=(-m pip install "$PLUGIN_DIR[store,engine]")
-        [[ "$upgrade" -eq 1 ]] && pip_args+=(--upgrade)
-        "$ENGINE_VENV_PYTHON" "${pip_args[@]}" || rc=$?
+        "$ENGINE_VENV_PYTHON" -m pip install "$PLUGIN_DIR" || rc=$?
+        if [[ "$rc" -eq 0 ]]; then
+            local pip_args=(-m pip install "$PLUGIN_DIR/server")
+            [[ "$upgrade" -eq 1 ]] && pip_args+=(--upgrade)
+            "$ENGINE_VENV_PYTHON" "${pip_args[@]}" || rc=$?
+        fi
         if [[ "$rc" -eq 0 && -n "$torch_idx" ]]; then
             _step "Swapping in CUDA torch from the configured CUDA wheel index (wheel only, --no-deps)"
             "$ENGINE_VENV_PYTHON" -m pip install --index-url "$torch_idx" --no-deps --force-reinstall torch || rc=$?

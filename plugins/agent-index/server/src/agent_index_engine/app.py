@@ -110,7 +110,7 @@ def _get_pipeline():
         )
 
     from agent_index.index_config import IndexConfig
-    from agent_index.embedding.pipeline import EmbeddingPipeline
+    from agent_index_engine.pipeline import EmbeddingPipeline
 
     if _config is None:
         _config = IndexConfig()
@@ -378,7 +378,7 @@ def _build_parser():
     """Build the engine worker command-line parser."""
     import argparse
 
-    parser = argparse.ArgumentParser(prog="python -m agent_index.engine.app")
+    parser = argparse.ArgumentParser(prog="python -m agent_index_engine.app")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8421)
     return parser

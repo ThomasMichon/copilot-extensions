@@ -51,7 +51,9 @@ store = [
     # and these have no Windows-ARM64 wheels (an ARM64 client that pulled them
     # backtracked to pylance==0.0.2/pyarrow==8.0.0 and failed to build). The
     # search/indexing modules import them LAZILY, so the light base loads fine
-    # without them. The heavy embedding stack is the separate [engine] extra.
+    # without them. The heavy embedding stack is the separate agent-index-engine
+    # package (plugins/agent-index/server/) -- see efforts/active/
+    # agent-index-server-package-split.
     "numpy>=2.2.6",
     "pyarrow>=25.0.1",
     "lancedb",
@@ -75,22 +77,6 @@ dev = [
     # The test suite exercises the store/indexing/search modules, so dev pulls
     # the [store] extra (self-reference) even though a client runtime does not.
     "agent-index[store]",
-]
-engine = [
-    # The heavy embedding stack -- the durable, persistent ENGINE runtime only,
-    # provisioned on the engine host (in a durable venv outside the versioned
-    # service runtime). Kept OUT of the service deps so a routine service version
-    # cutover never rebuilds torch or reloads the model (effort
-    # agent-index-engine-daemon; §warm-durable-engine).
-    "torch",
-    # jina-v2-base-code loads via trust_remote_code; transformers 5.x broke that
-    # custom modeling path (#114). Pin below 5 so every host gets the newest
-    # working 4.x -- a compat ceiling, not a capability downgrade. (Dependabot
-    # regressed this to >=5.14.1,<6 in #163; the <5 ceiling is enforced in
-    # .github/dependabot.yml so it cannot be lifted again while the default model
-    # is jina-v2-base-code.)
-    "transformers>=4.40,<6",
-    "sentence-transformers",
 ]
 
 [project.scripts]
