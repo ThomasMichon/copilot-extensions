@@ -192,10 +192,13 @@ committing to it:**
   entry whose `path` escapes the plugin's own directory** (i.e. resolves
   outside it, up toward the shared canonical root — reuse `_escapes_root()`
   from the existing containment work to detect this):
-  1. Physically copy the canonical `libs/<lib>` directory's `src/` (and
-     sync the `pyproject.toml` version, exactly as the now-superseded
-     directory-pointer expansion already did) into a freshly-created local
-     `plugins/<plugin>/libs/<lib>/`.
+  1. Physically copy the canonical `libs/<lib>` directory's **complete
+     tree** — `src/`, `README.md`, and `tests/` (when the shipped payload
+     is expected to carry one) — and sync the `pyproject.toml` version,
+     exactly as the now-superseded directory-pointer expansion already
+     did, into a freshly-created local `<consumer-root>/libs/<lib>/`
+     (computed from the consuming project's own root — `plugins/<plugin>/`
+     or `worktree-manager/`, not hardcoded to one layout).
   2. Rewrite the `pyproject.toml` line: `path` becomes the new local
      relative path (`libs/<lib>`), and `editable = true` is dropped —
      restoring exactly today's real shipped form (`{ path =
