@@ -189,15 +189,28 @@ periodically fast-forwarding one branch from another, or squash-promoting a
 `dev` branch to `main` on a schedule), a componentization PR's base can move
 out from under it mid-review — expect this, don't treat it as an anomaly:
 
-- **Rebase right before your final push, not just once at the start.** A
-  `git rebase origin/<base>` that replays many unrelated intervening commits
-  is slow and conflict-prone when the branches have diverged far (version
-  bump files, shared changelogs, and any other file BOTH branches touch for
-  unrelated reasons all become potential conflicts on every intervening
-  commit). Prefer `git checkout -B <branch> origin/<base>; git cherry-pick
-  <your one commit>` — it replays only your actual change against the
-  current tip, not the full commit-by-commit history between your old base
-  and the new one.
+- **Refresh onto the current base right before your final push, not just
+  once at the start — and prefer cherry-pick over a full rebase as the
+  mechanism.** A `git rebase origin/<base>` that replays many unrelated
+  intervening commits is slow and conflict-prone when the branches have
+  diverged far (version bump files, shared changelogs, and any other file
+  BOTH branches touch for unrelated reasons all become potential conflicts
+  on every intervening commit). Prefer resetting your branch onto the
+  current tip and cherry-picking your own commit(s) back on top instead:
+
+  ```bash
+  git fetch origin <base>                       # get the CURRENT tip, not a stale tracking ref
+  git branch backup-$(git rev-parse HEAD) HEAD   # cheap safety net before any reset
+  git checkout -B <branch> origin/<base>         # move the branch pointer, don't just merge
+  git cherry-pick <your commit(s)>               # replay only your actual change
+  ```
+
+  This replays only your actual change against the current tip, not the full
+  commit-by-commit history between your old base and the new one. Always
+  `fetch` immediately before the `checkout -B` — resetting onto a stale local
+  `origin/<base>` silently defeats the entire point. The backup branch costs
+  nothing and means a botched cherry-pick/reset is trivially recoverable
+  (`git checkout -B <branch> backup-<sha>` undoes it).
 - **Re-run `--refresh-baseline` (or your project's equivalent generated-file
   refresh) against the POST-rebase tree, every time, not the value you
   computed before rebasing.** A baseline/lockfile snapshot taken before a
