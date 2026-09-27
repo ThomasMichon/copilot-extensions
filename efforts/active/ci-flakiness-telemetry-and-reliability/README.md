@@ -382,6 +382,9 @@ determine whether this section needs anything beyond the Plan above._
   clears") -- only the signed-python-probe signature remains a genuine
   Phase 3 candidate; #7715 is now fixed.
 - Next: Phase 3 — fix aperture-labs#7715, then work down the ranking.
+  **Superseded (2026-09-27):** #7715 is now fixed (see the later Journal
+  entry below); the next actionable item is the signed-python-probe
+  investigation (also below), not #7715.
 
 ### 2026-09-27 — Phase 0 reconciliation resolved
 - Read `promotion-failure-reactive-fix-agent`'s README in full and the
