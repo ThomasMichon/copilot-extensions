@@ -5058,3 +5058,145 @@ class TestCodespaceClaimKey:
 
         t = SpawnTarget(type="local", cwd="/tmp", caller_worktree="/wt/a")
         assert sm._codespace_claim_key(t) is None
+
+
+class TestClaimContainerHelper:
+    """``_claim_container`` shells ``agent-containers borrow`` and maps its
+    exit code the same way ``_claim_codespace`` does: 75 -> conflict
+    (bounce), 0/other -> proceed (degrade-safe). No coordination-rejected
+    leg exists here (containers have no cross-machine coordination)."""
+
+    def test_conflict_on_busy_exit(self, monkeypatch) -> None:
+        from agent_bridge import session_manager as sm
+
+        monkeypatch.delenv("AGENT_CONTAINERS_DISABLE_CLAIM", raising=False)
+        monkeypatch.setattr(sm.shutil, "which", lambda _: "/usr/bin/agent-containers")
+        monkeypatch.setattr(
+            sm.subprocess, "run",
+            lambda *a, **k: SimpleNamespace(returncode=75, stdout="", stderr="[BUSY] x"),
+        )
+        status, detail = sm._claim_container("box", "/wt/a")
+        assert status == "conflict"
+        assert "BUSY" in detail
+
+    def test_success_on_zero_exit(self, monkeypatch) -> None:
+        from agent_bridge import session_manager as sm
+
+        monkeypatch.delenv("AGENT_CONTAINERS_DISABLE_CLAIM", raising=False)
+        monkeypatch.setattr(sm.shutil, "which", lambda _: "/usr/bin/agent-containers")
+        seen = {}
+
+        def run(command, **kwargs):
+            seen["command"] = command
+            return SimpleNamespace(returncode=0, stdout="box", stderr="")
+
+        monkeypatch.setattr(sm.subprocess, "run", run)
+        assert sm._claim_container("box", "/wt/a") == ("ok", "")
+        assert seen["command"] == [
+            "/usr/bin/agent-containers", "borrow", "/wt/a",
+            "--container", "box",
+        ]
+
+    def test_other_nonzero_is_degrade_safe(self, monkeypatch) -> None:
+        from agent_bridge import session_manager as sm
+
+        monkeypatch.delenv("AGENT_CONTAINERS_DISABLE_CLAIM", raising=False)
+        monkeypatch.setattr(sm.shutil, "which", lambda _: "/usr/bin/agent-containers")
+        monkeypatch.setattr(
+            sm.subprocess, "run",
+            lambda *a, **k: SimpleNamespace(returncode=2, stdout="", stderr="boom"),
+        )
+        assert sm._claim_container("box", "/wt/a") == ("ok", "")
+
+    def test_no_owner_is_skip(self, monkeypatch) -> None:
+        from agent_bridge import session_manager as sm
+
+        called = {"ran": False}
+
+        def _run(*a, **k):
+            called["ran"] = True
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(sm.subprocess, "run", _run)
+        assert sm._claim_container("box", "") == ("ok", "")
+        assert called["ran"] is False
+
+    def test_missing_binstub_is_skip(self, monkeypatch) -> None:
+        from agent_bridge import session_manager as sm
+
+        monkeypatch.delenv("AGENT_CONTAINERS_DISABLE_CLAIM", raising=False)
+        monkeypatch.setattr(sm.shutil, "which", lambda _: None)
+        assert sm._claim_container("box", "/wt/a") == ("ok", "")
+
+    def test_disabled_env_is_skip(self, monkeypatch) -> None:
+        from agent_bridge import session_manager as sm
+
+        monkeypatch.setenv("AGENT_CONTAINERS_DISABLE_CLAIM", "1")
+        called = {"ran": False}
+
+        def _run(*a, **k):
+            called["ran"] = True
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(sm.subprocess, "run", _run)
+        assert sm._claim_container("box", "/wt/a") == ("ok", "")
+        assert called["ran"] is False
+
+
+class TestReleaseContainerClaimHelper:
+    def test_missing_binstub_is_not_confirmed(self, monkeypatch) -> None:
+        from agent_bridge import session_manager as sm
+
+        monkeypatch.delenv("AGENT_CONTAINERS_DISABLE_CLAIM", raising=False)
+        monkeypatch.setattr(sm.shutil, "which", lambda _: None)
+        assert sm._release_container_claim("box", "/wt/a") is False
+
+    def test_disabled_claim_needs_no_release(self, monkeypatch) -> None:
+        from agent_bridge import session_manager as sm
+
+        monkeypatch.setenv("AGENT_CONTAINERS_DISABLE_CLAIM", "1")
+        assert sm._release_container_claim("box", "/wt/a") is True
+
+    def test_success_shells_release(self, monkeypatch) -> None:
+        from agent_bridge import session_manager as sm
+
+        monkeypatch.delenv("AGENT_CONTAINERS_DISABLE_CLAIM", raising=False)
+        monkeypatch.setattr(sm.shutil, "which", lambda _: "/usr/bin/agent-containers")
+        seen = {}
+
+        def run(command, **kwargs):
+            seen["command"] = command
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(sm.subprocess, "run", run)
+        assert sm._release_container_claim("box", "/wt/a") is True
+        assert seen["command"] == ["/usr/bin/agent-containers", "release", "box"]
+
+
+class TestContainerClaimKey:
+    """``_container_claim_key`` resolves (name, owner) from a target for the
+    end-session release -- the container counterpart to
+    ``_codespace_claim_key``."""
+
+    def test_structured_container_dict(self) -> None:
+        from agent_bridge import session_manager as sm
+
+        t = SpawnTarget(
+            type="command", cwd="/workspaces/x", caller_worktree="/wt/a",
+            container={"name": "box-1"},
+        )
+        assert sm._container_claim_key(t) == ("box-1", "/wt/a")
+
+    def test_no_owner_returns_none(self) -> None:
+        from agent_bridge import session_manager as sm
+
+        t = SpawnTarget(
+            type="command", cwd="/workspaces/x", container={"name": "box-1"},
+        )
+        assert sm._container_claim_key(t) is None
+
+    def test_non_container_returns_none(self) -> None:
+        from agent_bridge import session_manager as sm
+
+        t = SpawnTarget(type="local", cwd="/tmp", caller_worktree="/wt/a")
+        assert sm._container_claim_key(t) is None

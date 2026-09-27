@@ -14,6 +14,7 @@ from .session_manager import (
     SessionBusyError,
     _cleanup_worktree,
     _codespace_claim_key,
+    _container_claim_key,
     log,
 )
 
@@ -414,6 +415,12 @@ class _SessionLifecycleMixin:
             if claim_key is not None:
                 core = _core()
                 core._release_codespace_claim(*claim_key)
+        # codespace-venue-pool Phase 2b: same release, container-keyed.
+        with contextlib.suppress(Exception):
+            claim_key = _container_claim_key(session.target)
+            if claim_key is not None:
+                core = _core()
+                core._release_container_claim(*claim_key)
         # Same-machine mirror of the container lock release above (claim-
         # consistency sweep, agent-bridge-cli-mode-sessions Phase 4
         # follow-up): idempotent no-op if this session never held one.

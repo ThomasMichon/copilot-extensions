@@ -841,8 +841,14 @@ def _cmd_fleet_op(args: argparse.Namespace) -> int:
 
 def _cmd_borrow(args: argparse.Namespace) -> int:
     from .lease import borrow
-    lease = borrow(load_config(), args.effort, container=args.container,
-                    fleet=args.fleet, force=getattr(args, "force", False))
+    try:
+        lease = borrow(load_config(), args.effort, container=args.container,
+                        fleet=args.fleet, force=getattr(args, "force", False))
+    except RuntimeError as exc:
+        if not args.container:  # not a specific-target conflict; bookkeeping
+            raise
+        print(f"[BUSY] {exc} Use --force to take over.", file=sys.stderr)
+        return _BUSY_EXIT
     print(lease.container)
     return 0
 

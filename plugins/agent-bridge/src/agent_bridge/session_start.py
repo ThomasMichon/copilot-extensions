@@ -19,6 +19,7 @@ from .session_manager import (
     _AcpLaunchTiming,
     _REQUEST_OVERRIDES_KEY,
     _append_plugin_dirs,
+    _container_claim_key,
     _container_remote_child_argv,
     _codespace_claim_key,
     _default_cwd,
@@ -28,6 +29,7 @@ from .session_manager import (
     _workspace_key,
     CodespaceClaimConflictError,
     CodespaceCoordinationRejectedError,
+    ContainerClaimConflictError,
     DaemonDrainingError,
     Session,
     SessionConflictError,
@@ -353,6 +355,24 @@ class _SessionStartMixin:
                 )
                 from .session_host.spawner import RemoteSpawnCleanupPendingError
 
+                # codespace-venue-pool Phase 2b: acquire the exclusive,
+                # worktree-keyed container lease BEFORE establishing the
+                # Session-Host transport -- the container counterpart to the
+                # CodeSpace claim above. Degrade-safe: no owner / disabled /
+                # binstub absent -> proceed unclaimed, today's behavior.
+                container_claim_owner = (
+                    getattr(target, "caller_worktree", None) or caller_id
+                )
+                core = _core()
+                _claim_status, _claim_detail = core._claim_container(
+                    container_target["name"], container_claim_owner or "",
+                )
+                if _claim_status == "conflict":
+                    raise ContainerClaimConflictError(
+                        container_target["name"],
+                        container_claim_owner or "", _claim_detail,
+                    )
+
                 if replace_session_id:
                     self._transfer_container_lock(
                         replace_session_id,
@@ -454,6 +474,9 @@ class _SessionStartMixin:
                         not parity_fault
                         and not retain_container_lock_on_failure
                     ):
+                        claim_key = _container_claim_key(session.target)
+                        if claim_key is not None:
+                            core._release_container_claim(*claim_key)
                         self._release_container_lock(session_id)
                     raise
                 finally:
@@ -878,7 +901,9 @@ class _SessionStartMixin:
             )
         )
         if not cleanup_confirmed:
-            claim_key = _codespace_claim_key(session.target)
+            claim_key = _codespace_claim_key(
+                session.target
+            ) or _container_claim_key(session.target)
             ownership_retained = (
                 session.session_id in self._container_lock_sessions
                 or session.session_id in self._codespace_lock_sessions

@@ -1,0 +1,9 @@
+{
+  "comment": "Container Session-Host dispatch now shells out to agent-containers' claim seam (borrow --container) before establishing the transport, mirroring the CodeSpace claim path (#897) -- parity gap closed for codespace-venue-pool Phase 2b. Shared subprocess/exit-code plumbing factored into _run_venue_claim.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "minor"
+    }
+  ]
+}
