@@ -642,7 +642,7 @@ survey above.
       `tracking_lifecycle.py` / `tracking_claims.py` /
       `tracking_session_registry.py` / `tracking_controller_relations.py`
       / `tracking_write.py` / the 6 `tracking_*_write.py` verb-handler
-      modules). Ten review rounds found real gaps each time (see Journal
+      modules). Eleven review rounds found real gaps each time (see Journal
       for the full blow-by-blow: a missing re-export module, a
       package-root-alias attribute chain never tracked at all, an
       incomplete denylist, a wildcard-import escape hatch, the daemon's
@@ -758,7 +758,7 @@ writes.py`, an AST-based scan of every sibling `plugins/*` (excluding
 denylist covering every tracking-record write function -- derived by
 AST-walking each protected module for functions whose body calls
 `save_record`/`_save_record_unlocked`/the async stamp queue, then
-hand-verified against the remainder (the final denylist, after ten
+hand-verified against the remainder (the final denylist, after eleven
 review rounds below, covers 51 functions across 12 modules:
 `tracking.py`/`tracking_lifecycle.py`/`tracking_claims.py`/
 `tracking_session_registry.py`/`tracking_controller_relations.py`/
@@ -769,7 +769,7 @@ wording -- NOT extended to cover `worktree-manager/`'s own already-tracked
 exception (see above), since that scope decision belongs to a
 coordinated cross-effort call, not something to fold in unilaterally here.
 
-**Ten review rounds found real gaps, none assumed away:**
+**Eleven review rounds found real gaps, none assumed away:**
 (1) `tracking_controller_relations.py`'s own thin
 `save_record`/`_save_record_unlocked` re-export wrappers were absent from
 the protected module set, so a sibling could route through that module
@@ -901,10 +901,21 @@ named only the original four modules (missing
 `tracking_controller_relations`/`tracking_write`/the six
 `tracking_*_write.py` modules added in later rounds), and this Journal
 entry's own "(26 tests)"/"five review rounds" phrasing had gone stale
-again after round 9's edits. Every fix across all ten rounds has a
-dedicated regression test.
+again after round 9's edits. (14) An ELEVENTH review round found the
+final escape hatch this static model had left open: a literal-string
+dynamic import (`importlib.import_module("agent_worktrees.tracking")`
+or `__import__("agent_worktrees.tracking")`) resolves a tracked module
+just as statically as an ordinary `import` statement, but produced
+neither an `Import` nor `ImportFrom` node, so it bypassed every alias
+check entirely. Fixed by recognizing both call forms (literal-string
+argument only, matching the same non-literal boundary already accepted
+for `getattr`/`__dict__`) and feeding their resolved target into the
+SAME alias-propagation machinery an ordinary import already populates --
+both as an assignment RHS and as an inline, unassigned call whose result
+is used directly. Every fix across all eleven rounds has a dedicated
+regression test.
 
-33 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
+38 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
 tree, the sanctioned read-only accessors staying unflagged, three
 single-level import/call shapes (module attribute call, direct
 `from agent_worktrees import <fn>`, `from agent_worktrees.tracking_claims
@@ -923,7 +934,11 @@ package-attribute RHS), four reflective-access cases (`getattr` via a
 module alias, `getattr` via a package-alias chain, a non-literal
 `getattr` name confirming that boundary is not claimed safe, and the
 `__dict__` subscript form), a confirmation that an unrelated module's
-`getattr` is never flagged, the owning-plugin's own exemption, and a
+`getattr` is never flagged, five literal-dynamic-import cases
+(`importlib.import_module` assigned then used, `__import__` of the bare
+package assigned then used, an inline unassigned call, a non-literal
+import-target boundary confirmation, and an unrelated module's dynamic
+import never flagged), the owning-plugin's own exemption, and a
 live-repo smoke test (confirmed clean: zero violations today, matching
 the original survey's own finding). Wired into
 `.github/workflows/ci.yml` alongside the existing

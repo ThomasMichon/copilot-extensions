@@ -306,9 +306,50 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
                         # i.e. the two-level package-alias chain below.
                         package_aliases.add("agent_worktrees")
 
+    # A literal dynamic import (`importlib.import_module("agent_worktrees
+    # .tracking")` or `__import__("agent_worktrees.tracking")`) resolves
+    # to a tracked module or the package itself just as statically as an
+    # ordinary `import` statement does, provided the argument is a plain
+    # string constant -- so it gets the SAME alias treatment via the
+    # reassignment-propagation pass below (a non-literal argument, e.g. a
+    # variable or an f-string, is undecidable statically and is not
+    # attempted, mirroring the getattr/`__dict__` boundary documented
+    # further down).
+    def _dynamic_import_alias_kind(expr: ast.expr) -> tuple[str, str] | None:
+        """Returns ``("module", "<submodule-name>")`` or
+        ``("package", "agent_worktrees")`` if ``expr`` is a literal-string
+        dynamic import of a tracked target; otherwise ``None``."""
+        is_import_module_call = (
+            isinstance(expr, ast.Call)
+            and isinstance(expr.func, ast.Attribute)
+            and expr.func.attr == "import_module"
+            and isinstance(expr.func.value, ast.Name)
+            and expr.func.value.id == "importlib"
+            and expr.args
+            and isinstance(expr.args[0], ast.Constant)
+            and isinstance(expr.args[0].value, str)
+        )
+        is_dunder_import_call = (
+            isinstance(expr, ast.Call)
+            and isinstance(expr.func, ast.Name)
+            and expr.func.id == "__import__"
+            and expr.args
+            and isinstance(expr.args[0], ast.Constant)
+            and isinstance(expr.args[0].value, str)
+        )
+        if not (is_import_module_call or is_dunder_import_call):
+            return None
+        target = expr.args[0].value
+        if target == "agent_worktrees":
+            return ("package", "agent_worktrees")
+        prefix = "agent_worktrees."
+        if target.startswith(prefix) and target[len(prefix):] in TRACKING_MODULES:
+            return ("module", target[len(prefix):])
+        return None
+
     # Propagate through simple reassignment so a trivial rename can't
-    # evade the alias tracking above. Two RHS shapes are recognized on a
-    # single-target plain `Assign` OR a single-target `AnnAssign` (e.g.
+    # evade the alias tracking above. Three RHS shapes are recognized on
+    # a single-target plain `Assign` OR a single-target `AnnAssign` (e.g.
     # `writer_module: object = tracking` -- an annotation adds no actual
     # indirection, so it must be treated identically to the plain form):
     # a bare Name (`writer_module = tracking`, `wt = agent_worktrees`)
@@ -316,10 +357,11 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
     # Attribute off a package alias (`tracking_module = aw.tracking`)
     # resolves to the SAME thing a `tracking_module.save_record(...)`
     # call already catches, so it's folded into `module_aliases` too
-    # rather than needing its own parallel check downstream. Iterated to
-    # a fixed point since a chain (`a = tracking; b = a; c = b`, or
-    # `x = aw.tracking; y = x`) needs more than one pass to fully
-    # propagate.
+    # rather than needing its own parallel check downstream; and a
+    # literal-string dynamic import (see above) resolves the same way an
+    # ordinary `import` statement would. Iterated to a fixed point since
+    # a chain (`a = tracking; b = a; c = b`, or `x = aw.tracking; y = x`)
+    # needs more than one pass to fully propagate.
     def _simple_assignments():
         for node in ast.walk(tree):
             if (
@@ -356,11 +398,22 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
             ):
                 module_aliases[target] = lineno
                 changed = True
+            else:
+                dynamic = _dynamic_import_alias_kind(value)
+                if dynamic is not None:
+                    kind, name = dynamic
+                    if kind == "package" and target not in package_aliases:
+                        package_aliases.add(target)
+                        changed = True
+                    elif kind == "module" and target not in module_aliases:
+                        module_aliases[target] = lineno
+                        changed = True
 
     def _module_expr_label(expr: ast.expr) -> str | None:
-        """If ``expr`` resolves to a tracked module (a module alias, or a
-        two-level package-alias chain like ``aw.tracking``), return a
-        human-readable label for it; otherwise ``None``."""
+        """If ``expr`` resolves to a tracked module (a module alias, a
+        two-level package-alias chain like ``aw.tracking``, or an inline
+        literal-string dynamic import), return a human-readable label
+        for it; otherwise ``None``."""
         if isinstance(expr, ast.Name) and expr.id in module_aliases:
             return expr.id
         if (
@@ -370,6 +423,9 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
             and expr.attr in TRACKING_MODULES
         ):
             return f"{expr.value.id}.{expr.attr}"
+        dynamic = _dynamic_import_alias_kind(expr)
+        if dynamic is not None:
+            return expr.args[0].value
         return None
 
     for node in ast.walk(tree):

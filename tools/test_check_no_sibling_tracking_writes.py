@@ -480,6 +480,77 @@ def test_getattr_of_an_unrelated_module_is_not_flagged(tmp_path):
     assert guard.find_violations(tmp_path) == []
 
 
+def test_literal_importlib_import_module_is_caught(tmp_path):
+    # importlib.import_module("agent_worktrees.tracking") never produces
+    # an Import/ImportFrom node, so it evades ordinary alias tracking --
+    # but the literal string target still resolves statically.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "import importlib\n"
+        "\n"
+        "def write(record, path):\n"
+        "    tracking = importlib.import_module(\"agent_worktrees.tracking\")\n"
+        "    tracking.save_record(record, path)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "save_record" in violations[0].detail
+
+
+def test_literal_dunder_import_of_the_bare_package_is_caught(tmp_path):
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "def write(record, path):\n"
+        "    aw = __import__(\"agent_worktrees\")\n"
+        "    aw.tracking.save_record(record, path)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "save_record" in violations[0].detail
+
+
+def test_inline_literal_dynamic_import_call_is_caught(tmp_path):
+    # No assignment at all -- the call result is used directly.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "import importlib\n"
+        "\n"
+        "def write(record, path):\n"
+        "    importlib.import_module(\"agent_worktrees.tracking\")"
+        ".save_record(record, path)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "save_record" in violations[0].detail
+
+
+def test_dynamic_import_with_a_non_literal_target_is_not_claimed_safe(tmp_path):
+    # A non-literal import target (a variable) is genuinely undecidable
+    # statically -- documents the boundary rather than asserting false
+    # safety, mirroring the getattr non-literal test.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "import importlib\n"
+        "\n"
+        "def write(record, path, module_name):\n"
+        "    tracking = importlib.import_module(module_name)\n"
+        "    tracking.save_record(record, path)\n",
+    )
+    assert guard.find_violations(tmp_path) == []
+
+
+def test_dynamic_import_of_an_unrelated_module_is_not_flagged(tmp_path):
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "import importlib\n"
+        "\n"
+        "def read():\n"
+        "    os_mod = importlib.import_module(\"os\")\n"
+        "    return os_mod.save_record\n",
+    )
+    assert guard.find_violations(tmp_path) == []
+
+
 def test_unreadable_file_fails_closed_not_silently_skipped(tmp_path, monkeypatch):
     # A file the guard cannot even read must be reported, not silently
     # treated as clean -- otherwise an unreadable/undecodable file is a
