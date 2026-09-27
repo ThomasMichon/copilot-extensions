@@ -319,7 +319,17 @@ jobs:
         # `FILED_ISSUE_NUMBERS` list enforces this), so a recurring
         # in-window failure never re-triggers a fix attempt that may
         # already be in flight against the same issue.
-        if: steps.watchdog.outputs.filed_issue_numbers != ''
+        #
+        # `always()` is REQUIRED here (real review finding, PR #3916): this
+        # step's own default `if:` would otherwise implicitly AND in
+        # `success()`, skipping the dispatch whenever the watchdog step
+        # itself exits nonzero -- which `main()` can do for reasons
+        # unrelated to the signature this step cares about (e.g. a LATER
+        # failed job's log fetch failing) even after an EARLIER signature
+        # was genuinely filed and its number already written to
+        # `GITHUB_OUTPUT`. Losing the dispatch in that case would silently
+        # strand a real new issue with no fix attempt.
+        if: always() && steps.watchdog.outputs.filed_issue_numbers != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

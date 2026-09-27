@@ -1509,3 +1509,38 @@ _Pending._
   silently disabling the agent job forever. Fixed. Both are now
   recorded in the draft's own leading comment block and the
   `verify-issue` job's inline comments, not just here.
+- **A second review pass on that same fix (still PR #3916) came back
+  with 3 more real findings, all fixed before merge:** (a) the
+  author+signature-format checks were correctly identified as NOT real
+  authentication — a write-access collaborator could edit a genuine
+  `github-actions[bot]` watchdog issue's body while its author and
+  `Signature:` line both stayed intact, then dispatch the agent against
+  the tampered content via `workflow_dispatch` (which also bypasses the
+  label filter entirely). Fixed with an additional GraphQL `lastEditedAt`
+  check — null only when a body has never been edited since creation
+  (distinct from `updatedAt`, which also bumps on every comment) —
+  rejecting any issue ever edited. (b) Moving the issue body behind
+  `issue_read` (#5's fix) was correctly flagged as narrowing, not
+  eliminating, the injection surface — the tool result still reaches the
+  agent as context, and the agent holds `edit`/`bash` and can propose a
+  PR. Researched gh-aw's own `threat-detection` reference and confirmed
+  it already runs automatically whenever `safe-outputs` is configured (a
+  separate AI-powered job, after the agent, before any safe output is
+  applied, specifically for prompt injection/secret leaks/malicious
+  patches) — made it explicit with a workflow-specific `prompt:`
+  addendum rather than leaving it implicit, since this workflow's entire
+  diagnostic record is attacker-reachable log-excerpt text by design.
+  (c) The fix-attempt dispatch step in `validate-and-promote.yml` was
+  missing `always()`, so it silently skipped whenever the watchdog step
+  itself exited nonzero for a reason unrelated to a given signature
+  (e.g. a later failed job's log fetch failing) even after an earlier
+  issue had genuinely been filed — fixed.
+- **This working pattern (draft → real review → fix → re-review) is now
+  3 rounds deep on this one file and has converged**: round 2 found
+  fixes to round-1 fixes introduced 2 new issues; round 3 found the
+  round-2 fixes still had 1 residual gap each on #2 and #5, plus 1
+  unrelated dispatch-robustness gap — but found ZERO issues in the round-1
+  resolutions of #1, #3, #4, #6, suggesting those are genuinely settled.
+  Still true regardless: none of this is compile-verified (`gh aw compile`
+  remains SSO-blocked), so a live compile pass is still the outstanding
+  verification step once available.
