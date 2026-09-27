@@ -692,6 +692,14 @@ async def start_session(req: StartSessionRequest, request: Request):
             raise HTTPException(status_code=404, detail=str(exc))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+        except RuntimeError as exc:
+            # A namespace provider (e.g. agent-containers) refused readiness --
+            # "not ready", a stale/mismatched image, a missing fleet config,
+            # etc. This is a real, actionable client-facing condition, not an
+            # unexpected server fault -- previously fell through the bare
+            # `except Exception: raise` below and surfaced as an opaque,
+            # untraceable 500 (#7708).
+            raise HTTPException(status_code=409, detail=str(exc))
         except Exception as exc:
             # Ambiguous bare name (collision across namespaces): balk with the
             # enumerated candidates so the caller can disambiguate (#50).

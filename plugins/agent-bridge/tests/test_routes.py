@@ -356,6 +356,33 @@ class TestSessionRoutes:
         resp = client.get("/api/v1/sessions/nonexistent")
         assert resp.status_code == 404
 
+    def test_create_session_maps_namespace_provider_runtimeerror_to_409(
+        self, client, app
+    ) -> None:
+        """A namespace provider (e.g. agent-containers) refusing readiness --
+        "not ready", a stale image, a missing fleet config, etc. -- raises a
+        bare RuntimeError from ``resolve_async``. Previously this fell through
+        to the bare ``except Exception: raise`` and surfaced as an opaque,
+        untraceable 500 instead of a clean, actionable client error (#7708)."""
+        resolver = app.state.resolver
+        with patch.object(
+            resolver,
+            "resolve_async",
+            AsyncMock(
+                side_effect=RuntimeError(
+                    "Container 'copilot-extensions-workers-1' has no "
+                    "matching fleet configuration"
+                )
+            ),
+        ):
+            resp = client.post(
+                "/api/v1/sessions",
+                json={"agent": "container:copilot-extensions-workers-1"},
+            )
+
+        assert resp.status_code == 409
+        assert "no matching fleet configuration" in resp.json()["detail"]
+
     def test_get_session_falls_through_to_cold_store_provider(
         self, client, app
     ) -> None:
