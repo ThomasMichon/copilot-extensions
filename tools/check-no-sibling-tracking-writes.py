@@ -172,7 +172,16 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
         if isinstance(node, ast.ImportFrom):
             if node.module == "agent_worktrees":
                 for alias in node.names:
-                    if alias.name in TRACKING_MODULES:
+                    if alias.name == "*":
+                        violations.append(Violation(
+                            path, node.lineno,
+                            "wildcard-imports `agent_worktrees` "
+                            "(`from agent_worktrees import *`) -- this "
+                            "cannot be verified safe against the write "
+                            "denylist and is rejected outright",
+                            repo_root=repo_root,
+                        ))
+                    elif alias.name in TRACKING_MODULES:
                         module_aliases[alias.asname or alias.name] = node.lineno
                     elif alias.name in WRITE_FUNCTIONS:
                         violations.append(Violation(
@@ -187,7 +196,16 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
             }:
                 owning = node.module.rsplit(".", 1)[-1]
                 for alias in node.names:
-                    if alias.name in WRITE_FUNCTIONS:
+                    if alias.name == "*":
+                        violations.append(Violation(
+                            path, node.lineno,
+                            f"wildcard-imports `agent_worktrees.{owning}` "
+                            f"(`from agent_worktrees.{owning} import *`) -- "
+                            "this cannot be verified safe against the "
+                            "write denylist and is rejected outright",
+                            repo_root=repo_root,
+                        ))
+                    elif alias.name in WRITE_FUNCTIONS:
                         violations.append(Violation(
                             path, node.lineno,
                             f"imports write function `{alias.name}` directly "

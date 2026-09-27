@@ -212,6 +212,37 @@ def test_load_or_create_anchor_record_is_denylisted(tmp_path):
     assert "load_or_create_anchor_record" in violations[0].detail
 
 
+def test_wildcard_import_of_agent_worktrees_is_rejected_outright(tmp_path):
+    # `from agent_worktrees import *` then a bare `save_record(...)` call
+    # produces an ImportFrom alias literally named "*" -- neither the
+    # module-alias nor the direct-write-function branch ever matches it,
+    # so the bare call is never inspected. Reject the wildcard import
+    # itself outright rather than trying to resolve its exported names.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import *\n"
+        "\n"
+        "def write(record, path):\n"
+        "    save_record(record, path)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "wildcard" in violations[0].detail
+
+
+def test_wildcard_import_of_tracking_submodule_is_rejected_outright(tmp_path):
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees.tracking import *\n"
+        "\n"
+        "def write(record, path):\n"
+        "    save_record(record, path)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "wildcard" in violations[0].detail
+
+
 def test_real_repo_checkout_is_clean():
     """End-to-end smoke test: the real, live repo tree must never trip this
     guard -- confirms the script (not just find_violations()) exits 0

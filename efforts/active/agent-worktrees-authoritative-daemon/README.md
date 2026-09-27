@@ -662,14 +662,22 @@ survey above.
       mis-caught an unrelated bare `tracking.save_record(...)` name
       collision and MISSED this actual valid import shape -- fixed by
       routing the unaliased dotted-import case into the package-alias
-      tracking instead. Wired into CI alongside
-      `test_check_no_sibling_tracking_writes.py` (14 tests: clean tree,
-      read-only-accessor non-flagging, three single-level import shapes,
-      an aliased-module-import evasion case, three package-root-alias
-      evasion cases (aliased, unaliased bare, and unaliased dotted), the
-      `tracking_controller_relations` re-export case, the four added
-      controller-relation functions, `load_or_create_anchor_record`, the
-      owning-plugin exemption, and a live-repo smoke test). **Scoped
+      tracking instead; (5) a THIRD round then found a wildcard-import
+      escape hatch entirely outside the alias-tracking model: `from
+      agent_worktrees import *` (or `from agent_worktrees.tracking import
+      *`) followed by a bare `save_record(...)` call produces an
+      `ImportFrom` alias literally named `*`, which neither existing
+      branch ever matches -- fixed by rejecting the wildcard import
+      itself outright (unresolvable safely, so treated as a violation on
+      sight) rather than trying to resolve its exported names. Wired into
+      CI alongside `test_check_no_sibling_tracking_writes.py` (16 tests:
+      clean tree, read-only-accessor non-flagging, three single-level
+      import shapes, an aliased-module-import evasion case, three
+      package-root-alias evasion cases (aliased, unaliased bare, and
+      unaliased dotted), the `tracking_controller_relations` re-export
+      case, the four added controller-relation functions,
+      `load_or_create_anchor_record`, two wildcard-import rejection cases,
+      the owning-plugin exemption, and a live-repo smoke test). **Scoped
       to sibling `plugins/*` only** (matching this effort's own original
       survey and Plan wording) -- deliberately does NOT cover
       `worktree-manager/` (a separate, non-plugin, out-of-plugin
@@ -804,21 +812,27 @@ only the top-level `agent_worktrees` name (Python's own import semantics
 import AND missed the actual valid `agent_worktrees.tracking.save_record
 (...)` shape this import produces -- fixed by routing the unaliased
 dotted-import case into the package-alias tracking instead, matching
-`import agent_worktrees`'s own already-correct handling. Every fix has a
-dedicated regression test.
+`import agent_worktrees`'s own already-correct handling. (5) A THIRD
+review round then found a wildcard-import escape hatch entirely outside
+the alias-tracking model: `from agent_worktrees import *` (or `from
+agent_worktrees.tracking import *`) followed by a bare `save_record(...)`
+call produces an `ImportFrom` alias literally named `*`, which neither
+existing branch ever matches -- fixed by rejecting the wildcard import
+itself outright (unresolvable safely against the denylist, so treated as
+a violation on sight). Every fix has a dedicated regression test.
 
-14 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
+16 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
 tree, the sanctioned read-only accessors staying unflagged, three
 single-level import/call shapes (module attribute call, direct
 `from agent_worktrees import <fn>`, `from agent_worktrees.tracking_claims
 import <fn>`), an aliased-module-import evasion case, three
 package-root-alias evasion cases (aliased, unaliased bare, and unaliased
 dotted), the `tracking_controller_relations` re-export case, the four
-added controller-relation functions, `load_or_create_anchor_record`, the
-owning-plugin's own exemption, and a live-repo smoke test (confirmed
-clean: zero violations today, matching the original survey's own
-finding). Wired into `.github/workflows/ci.yml` alongside the existing
-`check-no-agent-machines-packages.py` guard.
+added controller-relation functions, `load_or_create_anchor_record`, two
+wildcard-import rejection cases, the owning-plugin's own exemption, and a
+live-repo smoke test (confirmed clean: zero violations today, matching
+the original survey's own finding). Wired into `.github/workflows/ci.yml`
+alongside the existing `check-no-agent-machines-packages.py` guard.
 
 ### 2026-09-27 — PR #4265: daemon writes push straight into record_cache -- the read-consistency companion to Phase 3's write migration, plus two real bugs review caught
 Operator redirected scope mid-session, away from an initially-discussed
