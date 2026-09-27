@@ -386,6 +386,80 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-27 — `agent-codespaces` resolved to backlog-only (PRs #4298, #4299); `agent-dispatch-solo` clean-room checkpoint found a 4th pre-existing bug
+
+- `agent-codespaces` core src/ cluster (PR #4298, 17/60 findings):
+  annotated `src/agent_codespaces/`'s genuine exceptions --
+  `allow legacy compatibility root`/`allow legacy-compatibility` (own-root
+  fallback paths, `LEGACY_CONFIG_DIR_NAME`, and the remote-codespace-
+  deployed auth-helper assets' fixed instructions-root/backup/staging
+  filenames -- the whole `codespace_assets/` tree runs on an EPHEMERAL
+  remote CodeSpace, where "exactly one install" is the actual invariant,
+  not a bug), `allow registry` (cross-plugin `agent-bridge` relay-port/
+  token-cache/log lookups and cross-plugin `agent-worktrees` binstub/
+  state lookups -- both patterns now confirmed across a 4th/5th plugin),
+  and `allow shared-instance-mutex` (`fence.py`'s `FENCE_PATH =
+  "~/.agent-lease"`, a deliberately shared, not cell-scoped, home-dir
+  lockfile -- and a **genuine** lease-keyword match this time, not the
+  release/lease false-positive class from the prior entry).
+  - Hit the **module-size ceiling a 10th time** (aperture-labs#7672):
+    `config.py` was at its exact 2583-line baseline. Resolved without any
+    net line growth by keeping the marker on the *existing* return-
+    statement line (fits at 98/99 chars) instead of extracting a new
+    local-variable line -- cheaper than the net-line-neutral restructuring
+    technique used earlier in `agent-machines/cell_lifecycle.py` when a
+    same-line append alone is enough to close the gap.
+  - Two embedded-shell-script gotchas surfaced while shortening lines:
+    (1) splitting a Python string-literal concatenation across two
+    physical lines moves the guard's flagged line to whichever half now
+    contains the pattern -- confirmed by re-running the guard after each
+    split rather than assuming the "obvious" half; (2) a bash line-
+    continuation backslash (`\` at end of line) cannot be followed by a
+    trailing comment even in a *different* physical line's continuation
+    -- same class of gotcha as the already-documented PowerShell backtick
+    case, just the POSIX-shell side of the same coincidence, resolved the
+    same way (extract the flagged literal into a small local variable
+    referenced from both continuation halves).
+- `agent-codespaces` SKILL.md docs (PR #4299, 7/60 findings): the usual
+  `allow deployed-runtime-diagnostics` doc-shaped mentions, this time
+  spanning three different SKILL.md files (borrowing-codespaces,
+  codespaces-lifecycle, codespaces-setup) since the plugin's docs are
+  split across several skills rather than one.
+- `agent-codespaces` now at confirmed backlog-only state (34 remaining:
+  `install.sh`/`install.ps1` 18, `service.yaml` 4, `installer-
+  readiness.json` 3, `readiness-context.{sh,ps1}` 3,
+  `emit-codespace-map.{sh,ps1}` 2, `write-config-dropin.{sh,ps1}` 2,
+  `register-bridge-provider.ps1` 1, `payload-invocation.json` 1 -- all
+  confirmed Phase 2/cross-plugin categories, same shape as every prior
+  plugin's end state).
+- **Clean-room checkpoint** (`agent-dispatch-solo`, per the operator's
+  periodic-validation directive, run against the published `main`
+  marketplace release): 11/13 assertions passed. Two related failures
+  traced to one root cause: `agent-dispatch inbox --machine
+  <own-hostname>` (a same-machine self-browse, not an actual remote
+  connection) unconditionally shells out over SSH, so it fails outright
+  on a box with no `ssh` client -- and because `inbox` crashing prevents
+  the coordinator's expected autostart, a subsequent `agent-dispatch
+  health` call then also fails (`Connection refused`) as a knock-on
+  effect, not a separate defect. Filed
+  [aperture-labs#7722](https://gitea.michon.ski/tmichon/aperture-labs/issues/7722).
+  This is the **fourth** clean-room-checkpoint-found defect this session
+  (after agent-bridge's `--version` race #7688, agent-index's fresh-
+  install bug #7702 which was fixed inline, and agent-dispatch's flaky
+  test #7719 found via local test-suite isolation rather than clean-
+  room) -- the periodic-validation directive continues to catch real
+  gaps that guard-triage alone would never exercise.
+- Verified: `check-marketplace-isolation.py`, `check-module-size.py`,
+  `check-docs-consistency.py`, `check-skills.py`, ruff (no new
+  violations across 9 edited Python files plus 2 remote-deployed asset
+  scripts), `node --check` and `bash -n` syntax-checks on the two
+  `codespace_assets/` scripts. Both PRs merged via `pr-merge --now`
+  after a clean advisory review; GitHub Actions ran the full
+  `agent-codespaces` suite on each PR (fast, ~50s) rather than needing
+  a local run, since shared-host `test-supervisor` slot contention from
+  concurrent sessions (confirmed via `ps aux`, not this session's own
+  work) made three consecutive local `uv sync` attempts defer.
+
 ### 2026-09-27 — `agent-dispatch` resolved to backlog-only (PRs #4287, #4288); `agent-index` now fully backlog-only
 
 - `agent-index`: with #4272/#4276 merged, re-verified the plugin's full
