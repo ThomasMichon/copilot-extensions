@@ -2009,6 +2009,7 @@ def test_engine_no_notify_without_url(monkeypatch, tmp_path):
     assert calls == []
 
 
+@pytest.mark.no_autotrust
 def test_main_honors_repo_local_sync_local_path(monkeypatch, tmp_path):
     """engine.main() -- the actual session-sync CLI entry point every
     scheduled sync invokes -- must resolve schema v3's repo-local

@@ -938,10 +938,24 @@ write_units() {
   if [ -n "${config_repo_name}" ] && command -v agent-worktrees >/dev/null 2>&1; then
     local config_repo_dir
     config_repo_dir="$(agent-worktrees repos find "${config_repo_name}" 2>/dev/null || true)"
-    if [ -n "${config_repo_dir}" ] && [ -f "${config_repo_dir}/.agent-logger.yaml" ]; then
-      # Quote the whole assignment (systemd.exec(5) Environment=) so a path
-      # containing whitespace is not split into multiple words.
-      repo_config_env="Environment=\"AGENT_LOGGER_REPO_CONFIG=${config_repo_dir}/.agent-logger.yaml\""
+    if [ -n "${config_repo_dir}" ]; then
+      # Mirrors agent_logger.config.REPO_CONFIG_FILENAMES's alias set and
+      # precedence order -- a config repo may use any of these filenames,
+      # not just the root .agent-logger.yaml.
+      local candidate
+      for candidate in \
+        ".agent-logger.yaml" \
+        ".agent-logger.yml" \
+        ".config/agent-logger.yaml" \
+        ".config/agent-logger.yml"
+      do
+        if [ -f "${config_repo_dir}/${candidate}" ]; then
+          # Quote the whole assignment (systemd.exec(5) Environment=) so a
+          # path containing whitespace is not split into multiple words.
+          repo_config_env="Environment=\"AGENT_LOGGER_REPO_CONFIG=${config_repo_dir}/${candidate}\""
+          break
+        fi
+      done
     fi
   fi
   cat > "${UNIT_DIR}/${TIMER_NAME}.service" <<EOF

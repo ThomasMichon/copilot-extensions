@@ -410,6 +410,7 @@ def test_query_reviewer_sessions_dedupes_by_session_id(
     assert len(refs) == 1
 
 
+@pytest.mark.no_autotrust
 def test_resolve_session_honors_repo_local_sync_local_path(monkeypatch, tmp_path):
     """resolve_session()'s synced-corpus tier must resolve schema v3's
     repo-local sync.local_path when no cfg is passed in (the real fallback

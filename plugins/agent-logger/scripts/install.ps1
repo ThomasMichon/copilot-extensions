@@ -980,8 +980,18 @@ function Get-ConfigRepoRegistrationPath {
         if (-not (Get-Command agent-worktrees -ErrorAction SilentlyContinue)) { return $null }
         $dir = (& agent-worktrees repos find $repoName 2>$null | Select-Object -First 1)
         if (-not $dir) { return $null }
-        $configPath = Join-Path $dir '.agent-logger.yaml'
-        if (Test-Path -LiteralPath $configPath) { return $configPath }
+        # Mirrors agent_logger.config.REPO_CONFIG_FILENAMES's alias set and
+        # precedence order -- a config repo may use any of these filenames,
+        # not just the root .agent-logger.yaml.
+        foreach ($candidate in @(
+            '.agent-logger.yaml',
+            '.agent-logger.yml',
+            '.config/agent-logger.yaml',
+            '.config/agent-logger.yml'
+        )) {
+            $configPath = Join-Path $dir $candidate
+            if (Test-Path -LiteralPath $configPath) { return $configPath }
+        }
         return $null
     } catch {
         return $null
