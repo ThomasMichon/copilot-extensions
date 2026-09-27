@@ -1638,6 +1638,9 @@ if (-not $noMux) {
         if (-not [string]::IsNullOrWhiteSpace($script:LaunchProject)) {
             $wrapperArgs += @('-AwProject', [string]$script:LaunchProject)
         }
+        if (-not [string]::IsNullOrWhiteSpace($sessName)) {
+            $wrapperArgs += @('-AwMuxSession', [string]$sessName)
+        }
         if ($ahpTokenFile) {
             $wrapperArgs += @('-AwAhpTokenFile', $ahpTokenFile)
         }

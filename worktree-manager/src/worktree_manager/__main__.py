@@ -850,11 +850,14 @@ def _cmd_mux_daemon(rest: list[str]) -> int:
         project = None
         worktree_id = None
         revision = None
+        mux_session = None
         for arg in args:
             if arg.startswith("--project="):
                 project = arg.split("=", 1)[1]
             elif arg.startswith("--worktree-id="):
                 worktree_id = arg.split("=", 1)[1]
+            elif arg.startswith("--mux-session="):
+                mux_session = arg.split("=", 1)[1]
             elif arg.startswith("--mapping-revision="):
                 revision_raw = arg.split("=", 1)[1]
                 try:
@@ -866,11 +869,7 @@ def _cmd_mux_daemon(rest: list[str]) -> int:
             print("error: remove needs --project=NAME --worktree-id=ID")
             return 2
         try:
-            result = mux_daemon.remove_managed_mapping(
-                project,
-                worktree_id,
-                mapping_revision=revision,
-            )
+            result = mux_daemon.remove_managed_mapping(project, worktree_id, mapping_revision=revision, mux_session=mux_session)
         except ValueError as exc:
             print(f"error: {exc}")
             return 2

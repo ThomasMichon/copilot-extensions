@@ -578,13 +578,36 @@ def _windowless_python() -> str:
     return windowless_python(sys.executable)
 
 
+_DAEMON_SESSION_SCOPED_ENV_KEYS = (
+    "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "COPILOT_AGENT_SESSION_ID",
+)
+
+
+def _daemon_environment() -> dict[str, str]:
+    """Env for the resident daemon: no ephemeral caller identity (a
+    cell/session/plugin-instance id) beyond the existing credential scrub."""
+    env = _core_helper("_background_environment", status_updater_cli._background_environment)()
+    for key in _DAEMON_SESSION_SCOPED_ENV_KEYS:
+        env.pop(key, None)
+    return env
+
+
+def _daemon_cwd() -> str:
+    """The daemon's own install root (marketplace-cell root, or legacy
+    ``~/.agent-worktrees``) -- not the caller's cwd; a stable, canonical
+    location. Degrades to HOME if unresolved or not yet materialized."""
+    try:
+        root = cfg.install_dir()
+        if root.is_dir():
+            return str(root)
+    except Exception:
+        pass
+    return os.path.expanduser("~")
+
+
 def _spawn_detached(argv: list[str]) -> bool:
-    """Spawn a survivable, windowless daemon rooted at HOME.
-
-    Rooted at HOME (never the plugin payload dir): a detached child that keeps
-    the payload dir as its cwd holds an open handle that blocks
-    ``copilot plugin update`` on Windows.  Never raises.
-
+    """Spawn a survivable, windowless daemon rooted at its own install dir
+    (not the caller's cwd -- see ``_daemon_cwd``). Never raises.
     On Windows the console-subsystem interpreter is intentionally retained and
     launched under ``CREATE_NO_WINDOW``. Its periodic console children then
     inherit one hidden console tree instead of each allocating a Default
@@ -598,8 +621,8 @@ def _spawn_detached(argv: list[str]) -> bool:
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,
         "stderr": subprocess.DEVNULL,
-        "cwd": os.path.expanduser("~"),
-        "env": _core_helper("_background_environment", status_updater_cli._background_environment)(),
+        "cwd": _daemon_cwd(),
+        "env": _daemon_environment(),
     }
     kwargs.update(_core().windowless_daemon_kwargs(breakaway=True))
     try:
@@ -607,6 +630,7 @@ def _spawn_detached(argv: list[str]) -> bool:
         return True
     except Exception:
         return False
+
 
 
 def _ensure_status_monitor() -> bool:

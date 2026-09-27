@@ -359,9 +359,16 @@ def remove_managed_mapping(
     worktree_id: str,
     *,
     mapping_revision: int | None = None,
+    mux_session: str | None = None,
     root: Path | None = None,
 ) -> dict:
-    result = remove_mapping(project, worktree_id, mapping_revision=mapping_revision, root=root)
+    result = remove_mapping(
+        project,
+        worktree_id,
+        mapping_revision=mapping_revision,
+        mux_session=mux_session,
+        root=root,
+    )
     if result.get("applied"):
         entry = get_mapping(project, worktree_id, root=root)
         if entry is not None:

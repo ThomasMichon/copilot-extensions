@@ -22,6 +22,7 @@ PROMPT_STARTUP_GRACE="${WORKTREE_PROMPT_STARTUP_GRACE:-3}"
 # mark. Consumed here so it is never forwarded to the wrapped command.
 AW_WT=""
 AW_PROJECT=""
+AW_MUX_SESSION=""
 INITIAL_PROMPT_B64=""
 INITIAL_PROMPT_RECEIPT_B64=""
 AHP_TOKEN_FILE=""
@@ -29,6 +30,7 @@ while [[ $# -ge 2 ]]; do
     case "$1" in
         --aw-wt) AW_WT="$2" ;;
         --aw-project) AW_PROJECT="$2" ;;
+        --aw-mux-session) AW_MUX_SESSION="$2" ;;
         --aw-prompt-b64) INITIAL_PROMPT_B64="$2" ;;
         --aw-prompt-receipt-b64) INITIAL_PROMPT_RECEIPT_B64="$2" ;;
         --aw-ahp-token-file) AHP_TOKEN_FILE="$2" ;;
@@ -152,9 +154,15 @@ if command -v uv >/dev/null 2>&1 \
         # blocking here on the same tens-of-seconds-worst-case CLI edge
         # delays the pane's own exit for no benefit, mirroring the
         # activity-log dispatch immediately above.
+        # `--mux-session`, when known (#3838 fix): lets the daemon-side
+        # registry reject this removal as a stale no-op if a newer
+        # session already superseded this one for the same
+        # (project, worktree_id) -- an old pane's delayed teardown must
+        # never tombstone a newer, still-live session's mapping.
         ( uv run --quiet --project "$WM_ROOT" -m worktree_manager mux-daemon remove \
             --project="$AW_PROJECT" \
-            --worktree-id="$AW_WT" >/dev/null 2>&1 & ) || true
+            --worktree-id="$AW_WT" \
+            ${AW_MUX_SESSION:+--mux-session="$AW_MUX_SESSION"} >/dev/null 2>&1 & ) || true
     fi
 fi
 

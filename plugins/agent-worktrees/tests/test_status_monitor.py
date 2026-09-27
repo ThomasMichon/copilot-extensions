@@ -3055,6 +3055,56 @@ def test_spawn_detached_uses_console_python_windowless_daemon(monkeypatch):
     assert "AGENT_WORKTREES_AHP_AUTH_TOKEN" not in seen["env"]
 
 
+def test_spawn_detached_scrubs_session_scoped_identity_and_roots_cwd_at_install_dir(
+    monkeypatch, tmp_path
+):
+    """A resident, host-wide daemon must not inherit the ephemeral identity
+    (cell context, plugin-instance path, session id) or cwd of whichever
+    CLI invocation happened to ensure it -- it outlives all of them. Its
+    cwd is the stable install root (marketplace-cell root, or legacy
+    ``~/.agent-worktrees``), not a version slot that churns on every
+    update."""
+    seen: dict = {}
+
+    def _fake_popen(argv, **kwargs):
+        seen["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "some-cell")
+    monkeypatch.setenv("COPILOT_PLUGIN_ROOT", "/some/installed-plugin/path")
+    monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "some-session-id")
+    monkeypatch.setenv("SAFE_VALUE", "kept")
+    monkeypatch.setattr(m.subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(m, "windowless_daemon_kwargs", lambda **_kw: {})
+
+    install_root = tmp_path / "cell-root"
+    install_root.mkdir(parents=True)
+    monkeypatch.setattr(m.cfg, "install_dir", lambda: install_root)
+
+    assert m._spawn_detached([m.sys.executable, "-m", "agent_worktrees", "status-monitor"]) is True
+    env = seen["kwargs"]["env"]
+    assert "COPILOT_EXTENSIONS_CONTEXT" not in env
+    assert "COPILOT_PLUGIN_ROOT" not in env
+    assert "COPILOT_AGENT_SESSION_ID" not in env
+    assert env["SAFE_VALUE"] == "kept"
+    assert seen["kwargs"]["cwd"] == str(install_root)
+
+
+def test_daemon_cwd_degrades_to_home_when_install_dir_is_unresolved(monkeypatch):
+    from agent_worktrees import status_monitor_runtime as smr
+
+    monkeypatch.setattr(m.cfg, "install_dir", lambda: (_ for _ in ()).throw(Exception("boom")))
+    assert smr._daemon_cwd() == os.path.expanduser("~")
+
+
+def test_daemon_cwd_degrades_to_home_when_install_dir_does_not_exist(monkeypatch, tmp_path):
+    from agent_worktrees import status_monitor_runtime as smr
+
+    missing = tmp_path / "not-installed"
+    monkeypatch.setattr(m.cfg, "install_dir", lambda: missing)
+    assert smr._daemon_cwd() == os.path.expanduser("~")
+
+
 def test_headless_child_guard_ors_no_window():
     from conftest import _headless_creationflags
 

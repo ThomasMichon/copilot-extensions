@@ -115,6 +115,60 @@ def test_mux_daemon_remove_rejects_non_integer_revision(capsys):
     assert "must be an integer" in capsys.readouterr().out
 
 
+def test_mux_daemon_remove_with_mux_session_rejects_a_stale_teardown(capsys):
+    """#3838, exercised through the real CLI
+    surface: an old session's unversioned ``remove --mux-session=<old>``
+    must not tombstone a newer session's live mapping for the same
+    worktree."""
+    rc = main(
+        [
+            "mux-daemon",
+            "register",
+            "--project=proj",
+            "--worktree-id=wt-1",
+            "--mux-session=session-a",
+            "--mux-bin=psmux",
+            "--mapping-revision=1",
+        ]
+    )
+    assert rc == 0
+    capsys.readouterr()
+
+    rc = main(
+        [
+            "mux-daemon",
+            "register",
+            "--project=proj",
+            "--worktree-id=wt-1",
+            "--mux-session=session-b",
+            "--mux-bin=psmux",
+            "--mapping-revision=2",
+        ]
+    )
+    assert rc == 0
+    capsys.readouterr()
+
+    rc = main(
+        [
+            "mux-daemon",
+            "remove",
+            "--project=proj",
+            "--worktree-id=wt-1",
+            "--mux-session=session-a",
+        ]
+    )
+    assert rc == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["applied"] is False
+    assert result["reason"] == "session_mismatch"
+
+    rc = main(["mux-daemon", "show", "--project=proj", "--worktree-id=wt-1"])
+    assert rc == 0
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["live"] is True
+    assert shown["mux_session"] == "session-b"
+
+
 def test_mux_daemon_remove_rejects_negative_revision_for_never_registered_key(capsys):
     """Copilot review finding: a negative revision parses successfully, but
     when the key is absent remove_mapping() builds a tombstone and

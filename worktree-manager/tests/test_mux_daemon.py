@@ -234,6 +234,56 @@ def test_registry_remove_respects_revision_guard(tmp_path):
     assert registry.get("proj", "wt-1") is not None
 
 
+def test_registry_remove_is_stale_noop_when_mux_session_mismatches_a_live_entry(tmp_path):
+    """#3838: an old launcher's teardown for
+    session A racing behind a newer launcher's activation for session B on
+    the same (project, worktree_id) must not tombstone B's live mapping --
+    even when A's teardown carries no ``mapping_revision`` at all (the
+    common real-world shape: `pane-wrapper.sh`/`.ps1` don't always know a
+    revision, only their own session name)."""
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry(mux_session="session-a", mapping_revision=1))
+    registry.register(_entry(mux_session="session-b", mapping_revision=2))
+
+    result = registry.remove("proj", "wt-1", mux_session="session-a")
+
+    assert result["applied"] is False
+    assert result["reason"] == "session_mismatch"
+    stored = registry.get("proj", "wt-1")
+    assert stored["live"] is True
+    assert stored["mux_session"] == "session-b"
+    assert stored["mapping_revision"] == 2
+
+
+def test_registry_remove_with_matching_mux_session_still_tombstones(tmp_path):
+    """The new guard must not block a normal, correctly-ordered removal --
+    only a genuine session-identity mismatch against a still-live entry."""
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry(mux_session="session-a", mapping_revision=1))
+
+    result = registry.remove("proj", "wt-1", mux_session="session-a")
+
+    assert result == {"applied": True}
+    stored = registry.get("proj", "wt-1")
+    assert stored["live"] is False
+    assert stored["mapping_revision"] == 2
+
+
+def test_registry_remove_without_mux_session_preserves_prior_unguarded_behavior(tmp_path):
+    """A caller that doesn't know its own session name (older launcher, or
+    a generic CLI invocation) must keep the pre-#3838-fix behavior --
+    ``mux_session=None`` is opt-out, not a forced guard."""
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry(mux_session="session-a", mapping_revision=1))
+    registry.register(_entry(mux_session="session-b", mapping_revision=2))
+
+    result = registry.remove("proj", "wt-1")
+
+    assert result == {"applied": True}
+    stored = registry.get("proj", "wt-1")
+    assert stored["live"] is False
+
+
 def test_registry_ignores_a_corrupt_snapshot_file(tmp_path):
     path = tmp_path / "mux-mapping.json"
     path.write_text("not json at all {{{", encoding="utf-8")

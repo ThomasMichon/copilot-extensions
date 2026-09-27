@@ -94,6 +94,7 @@ Set-AwPaneKillOnCloseJob
 $rest = @($args)
 $awWt = ''
 $awProject = ''
+$awMuxSession = ''
 $initialPromptB64 = ''
 $initialPromptReceiptB64 = ''
 $ahpTokenFile = ''
@@ -103,6 +104,8 @@ while ($rest.Count -ge 2) {
         $awWt = [string]$rest[1]
     } elseif ($key -eq '-AwProject') {
         $awProject = [string]$rest[1]
+    } elseif ($key -eq '-AwMuxSession') {
+        $awMuxSession = [string]$rest[1]
     } elseif ($key -eq '--aw-prompt-b64') {
         $initialPromptB64 = [string]$rest[1]
     } elseif ($key -eq '--aw-prompt-receipt-b64') {
@@ -293,15 +296,25 @@ if (
 ) {
     try {
         $managerRoot = Split-Path -Parent $PSScriptRoot
+        $removeArgs = @(
+            'run', '--quiet', '--project', $managerRoot,
+            '-m', 'worktree_manager', 'mux-daemon', 'remove',
+            "--project=$awProject", "--worktree-id=$awWt"
+        )
+        # `--mux-session`, when known (#3838 fix): lets the daemon-side
+        # registry reject this removal as a stale no-op if a newer
+        # session already superseded this one for the same
+        # (project, worktree_id) -- an old pane's delayed teardown must
+        # never tombstone a newer, still-live session's mapping.
+        if (-not [string]::IsNullOrWhiteSpace($awMuxSession)) {
+            $removeArgs += "--mux-session=$awMuxSession"
+        }
         # Dispatch detached (real-bug follow-up to #3825): this is
         # teardown, not attach, but blocking the pane's own exit on the
         # same tens-of-seconds-worst-case CLI edge delays it for no
         # benefit.
-        Start-Process -FilePath 'uv' -ArgumentList @(
-            'run', '--quiet', '--project', $managerRoot,
-            '-m', 'worktree_manager', 'mux-daemon', 'remove',
-            "--project=$awProject", "--worktree-id=$awWt"
-        ) -WindowStyle Hidden -ErrorAction Stop | Out-Null
+        Start-Process -FilePath 'uv' -ArgumentList $removeArgs `
+            -WindowStyle Hidden -ErrorAction Stop | Out-Null
     } catch {}
 }
 

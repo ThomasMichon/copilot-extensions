@@ -1139,6 +1139,9 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
             if [[ -n "${LAUNCH_PROJECT:-}" ]]; then
                 PANE_CONTROL+=(--aw-project "$LAUNCH_PROJECT")
             fi
+            if [[ -n "${TMUX_SESS:-}" ]]; then
+                PANE_CONTROL+=(--aw-mux-session "$TMUX_SESS")
+            fi
             if [[ -n "$AHP_TOKEN_FILE" ]]; then
                 PANE_CONTROL+=(--aw-ahp-token-file "$AHP_TOKEN_FILE")
             fi

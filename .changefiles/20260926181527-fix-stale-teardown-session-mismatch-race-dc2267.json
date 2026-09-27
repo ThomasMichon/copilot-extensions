@@ -1,0 +1,9 @@
+{
+  "comment": "Fix stale-teardown session-mismatch race in mux_mapping_registry.remove() (#3838); root the resident status-monitor daemon's cwd at its own install dir (marketplace-cell root, not the caller's cwd) and scrub session-scoped identity vars from its environment.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
