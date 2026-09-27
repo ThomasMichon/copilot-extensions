@@ -97,8 +97,9 @@ comment spam.
 
 ### Phase 0 - Land the reviewed effort plan
 
-- [ ] Create and cross-link the public umbrella issue. _(agent-recommended as an
-  explicit planning/review-gate phase before implementation starts.)_
+- [ ] Update and cross-link the public umbrella issue after this plan PR
+  merges. _(agent-recommended as an explicit planning/review-gate phase before
+  implementation starts.)_
 - [ ] Author this effort README and add it to the active-effort index.
 - [ ] Submit the effort itself as a PR, give the advisory Copilot review a
   bounded window, address anything substantively useful, and self-merge.
@@ -131,12 +132,18 @@ comment spam.
 
 - [ ] Author the `workflow_run` follow-up that runs from the base-branch
   workflow definition and never executes fork code.
+- [ ] Treat the untrusted artifact as a hint, not authority: independently
+  validate each reported location against the PR content/diff from the trusted
+  side before posting any review comment. _(agent-recommended)_
 - [ ] Download the structured findings artifact and re-derive the matched token
   and reason from the secret-backed denylist held by the trusted workflow.
 - [ ] Post review comment feedback that names the actual matched value, explains
   why it is forbidden, and instructs the contributor to replace it with a
   generic equivalent.
-- [ ] Keep trusted-workflow logging free of raw secret/delist dumps even though
+- [ ] Validate the triggering run/PR metadata and effective workflow definition
+  source against GitHub's actual `workflow_run` semantics before relying on the
+  trust boundary. _(agent-recommended)_
+- [ ] Keep trusted-workflow logging free of raw secret/denylist dumps even though
   the API-posted review text intentionally names the matched value on the PR.
 
 ### Phase 4 - Provision the secret-backed denylists
