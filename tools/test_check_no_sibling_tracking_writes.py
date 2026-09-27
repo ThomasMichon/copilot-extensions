@@ -551,6 +551,116 @@ def test_dynamic_import_of_an_unrelated_module_is_not_flagged(tmp_path):
     assert guard.find_violations(tmp_path) == []
 
 
+def test_dynamic_import_target_via_a_constant_string_alias_is_caught(tmp_path):
+    # mod_name = "agent_worktrees.tracking"; importlib.import_module(mod_name)
+    # -- the target is a NAME, but one previously assigned a plain string
+    # literal, so it resolves the same as an inline literal would.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "import importlib\n"
+        "mod_name = \"agent_worktrees.tracking\"\n"
+        "\n"
+        "def write(record, path):\n"
+        "    tracking = importlib.import_module(mod_name)\n"
+        "    tracking.save_record(record, path)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "save_record" in violations[0].detail
+
+
+def test_dunder_import_without_fromlist_resolves_to_the_package(tmp_path):
+    # __import__("agent_worktrees.tracking") with NO fromlist returns the
+    # TOP-LEVEL agent_worktrees package (CPython's own __import__
+    # semantics), not the tracking submodule directly -- the submodule is
+    # only reachable via a further `.tracking` access, exactly like the
+    # package-alias chain from an ordinary `import agent_worktrees`.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "def write(record, path):\n"
+        "    aw = __import__(\"agent_worktrees.tracking\")\n"
+        "    aw.tracking.save_record(record, path)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "save_record" in violations[0].detail
+
+
+def test_dunder_import_without_fromlist_is_not_the_submodule_directly(tmp_path):
+    # The WRONG (pre-fix) resolution would have treated `aw` itself as a
+    # tracking-module alias, so `aw.save_record(...)` (skipping the
+    # `.tracking` hop entirely) must NOT be flagged -- that's not what
+    # __import__ without fromlist actually returns.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "def write(record, path):\n"
+        "    aw = __import__(\"agent_worktrees.tracking\")\n"
+        "    aw.save_record(record, path)\n",
+    )
+    assert guard.find_violations(tmp_path) == []
+
+
+def test_dunder_import_with_fromlist_resolves_to_the_submodule(tmp_path):
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "def write(record, path):\n"
+        "    tracking = __import__(\"agent_worktrees.tracking\", "
+        "fromlist=[\"tracking\"])\n"
+        "    tracking.save_record(record, path)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "save_record" in violations[0].detail
+
+
+def test_stamp_write_queue_class_is_denylisted(tmp_path):
+    # Importing the _StampWriteQueue CLASS directly and instantiating a
+    # fresh queue reaches the exact same YAML-writing helpers as the
+    # resident singleton, just via a separate instance.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking\n"
+        "\n"
+        "def write():\n"
+        "    return tracking._StampWriteQueue()\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "_StampWriteQueue" in violations[0].detail
+
+
+def test_tracking_lazy_helper_call_is_caught(tmp_path):
+    # from agent_worktrees.tracking_lifecycle import _tracking;
+    # _tracking().save_record(...) -- an internal lazy-import helper
+    # (used across several agent_worktrees modules to dodge circular
+    # imports) that always returns the `tracking` submodule itself.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees.tracking_lifecycle import _tracking\n"
+        "\n"
+        "def write(record, path):\n"
+        "    _tracking().save_record(record, path)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "save_record" in violations[0].detail
+
+
+def test_unrelated_similarly_named_helper_call_is_not_flagged(tmp_path):
+    # A LOCAL function merely named `_tracking` (never imported from any
+    # agent_worktrees module) must never be flagged -- only a `_tracking`
+    # name actually imported from a protected module is recognized.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "def _tracking():\n"
+        "    return object()\n"
+        "\n"
+        "def write():\n"
+        "    return _tracking().save_record\n",
+    )
+    assert guard.find_violations(tmp_path) == []
+
+
 def test_aliased_importlib_module_is_still_caught(tmp_path):
     # `import importlib as il; il.import_module(...)` -- an aliased
     # `importlib` module binding, not the literal identifier.

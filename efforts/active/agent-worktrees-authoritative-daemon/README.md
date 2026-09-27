@@ -638,11 +638,11 @@ survey above.
       an AST-based scan of every `plugins/*` sibling plugin (excluding
       `agent-worktrees` itself) for a direct import/call of a
       hand-curated denylist covering every tracking-record write function
-      across 12 modules (54 functions total: `tracking.py` /
+      across 12 modules (55 functions total: `tracking.py` /
       `tracking_lifecycle.py` / `tracking_claims.py` /
       `tracking_session_registry.py` / `tracking_controller_relations.py`
       / `tracking_write.py` / the 6 `tracking_*_write.py` verb-handler
-      modules). Fifteen review rounds found real gaps each time (see Journal
+      modules). Sixteen review rounds found real gaps each time (see Journal
       for the full blow-by-blow: a missing re-export module, a
       package-root-alias attribute chain never tracked at all, an
       incomplete denylist, a wildcard-import escape hatch, the daemon's
@@ -758,8 +758,8 @@ writes.py`, an AST-based scan of every sibling `plugins/*` (excluding
 denylist covering every tracking-record write function -- derived by
 AST-walking each protected module for functions whose body calls
 `save_record`/`_save_record_unlocked`/the async stamp queue, then
-hand-verified against the remainder (the final denylist, after fifteen
-review rounds below, covers 54 functions across 12 modules:
+hand-verified against the remainder (the final denylist, after sixteen
+review rounds below, covers 55 functions across 12 modules:
 `tracking.py`/`tracking_lifecycle.py`/`tracking_claims.py`/
 `tracking_session_registry.py`/`tracking_controller_relations.py`/
 `tracking_write.py`/the 6 `tracking_*_write.py` verb-handler modules).
@@ -769,7 +769,7 @@ wording -- NOT extended to cover `worktree-manager/`'s own already-tracked
 exception (see above), since that scope decision belongs to a
 coordinated cross-effort call, not something to fold in unilaterally here.
 
-**Fifteen review rounds found real gaps, none assumed away:**
+**Sixteen review rounds found real gaps, none assumed away:**
 (1) `tracking_controller_relations.py`'s own thin
 `save_record`/`_save_record_unlocked` re-export wrappers were absent from
 the protected module set, so a sibling could route through that module
@@ -956,10 +956,40 @@ without ever naming `run_direct`, `compute`, or any `apply_*` function.
 Fixed by adding `_replace_with_retry` to the denylist, and by
 denylisting the `_VERBS` ATTRIBUTE NAME itself (not a specific key) so
 any access to it -- subscripted immediately or bound to a variable
-first -- is caught the moment `._VERBS` is touched at all. Every fix
-across all fifteen rounds has a dedicated regression test.
+first -- is caught the moment `._VERBS` is touched at all. (19) A
+SIXTEENTH review round -- the checks turning green for the first time --
+found four more real gaps: **(a)** `_StampWriteQueue`, the CLASS behind
+`_STAMP_QUEUE`, was itself importable/instantiable separately from the
+resident singleton, reaching the exact same writers via a fresh
+instance; denylisted the class name itself. **(b)** The dynamic-import
+detector's non-literal-target boundary was too conservative in one
+specific, real-but-bounded case: `mod = "agent_worktrees.tracking";
+importlib.import_module(mod)` is STATICALLY resolvable (the target is a
+plain local name previously assigned a string literal), unlike a
+genuinely dynamic value (a parameter, an f-string) -- resolving this
+narrow shape (not every non-literal dynamic import, which would be far
+too broad and noisy against the whole codebase) closed a real,
+bounded gap without widening the guard's blast radius. **(c)**
+`__import__` without a `fromlist` argument returns CPython's own
+TOP-LEVEL package, not the deepest submodule (a real semantics bug in
+round 11's original fix, which had modeled every dotted `__import__`
+target as resolving straight to the submodule) -- fixed by only
+treating a dotted `__import__` target as a `module` resolution when a
+non-empty `fromlist` is actually present, defaulting to `package`
+otherwise, matching Python's own real import machinery. **(d)** The
+existing internal `_tracking()` lazy-import helper (a pattern repeated
+across several `agent_worktrees` modules to dodge circular imports,
+always returning the `tracking` submodule) was entirely unmodeled --
+`_tracking().save_record(...)` never matched any existing receiver
+shape. Fixed by tracking which local names were actually imported (by
+that exact name) from one of the protected modules, and recognizing a
+bare, no-argument call to one of those specific names as resolving to
+`tracking` -- deliberately NOT a blanket "any function named `_tracking`
+anywhere" rule, which would risk flagging an unrelated sibling's own
+identically-named local helper. Every fix across all sixteen rounds has
+a dedicated regression test.
 
-50 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
+57 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
 tree, the sanctioned read-only accessors staying unflagged, three
 single-level import/call shapes (module attribute call, direct
 `from agent_worktrees import <fn>`, `from agent_worktrees.tracking_claims
@@ -988,10 +1018,16 @@ import never flagged), an aliased-`importlib`-module case, a bare
 unrelated queue attribute is never flagged, the queue object reassigned
 to a new name, and a direct `_STAMP_QUEUE` import), an `_atomic_write`
 denylist case, a `_replace_with_retry` denylist case, two `_VERBS`
-registry cases (subscripted directly, and bound to a variable first),
-the owning-plugin's own exemption, and a live-repo smoke test (confirmed
-clean: zero violations today, matching the original survey's own
-finding). Wired into `.github/workflows/ci.yml` alongside the existing
+registry cases (subscripted directly, and bound to a variable first), a
+constant-string-alias dynamic-import case, three `__import__`-fromlist
+semantics cases (no fromlist resolving to the package, the WRONG
+submodule-direct resolution confirmed NOT flagged, and a fromlist
+present resolving to the submodule), a `_StampWriteQueue` class case, a
+`_tracking()` lazy-helper case, a confirmation that an unrelated
+identically-named local `_tracking` is never flagged, the owning-plugin's
+own exemption, and a live-repo smoke test (confirmed clean: zero
+violations today, matching the original survey's own finding). Wired
+into `.github/workflows/ci.yml` alongside the existing
 `check-no-agent-machines-packages.py` guard.
 
 ### 2026-09-27 — PR #4265: daemon writes push straight into record_cache -- the read-consistency companion to Phase 3's write migration, plus two real bugs review caught

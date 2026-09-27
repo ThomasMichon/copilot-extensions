@@ -91,6 +91,17 @@ WRITE_FUNCTIONS = frozenset({
     "flush_stamp_writes",
     "_stamp_liveness",
     "_apply_session_state_stamp",
+    # The `_StampWriteQueue` CLASS itself, not only the module-level
+    # `_STAMP_QUEUE` singleton instance -- a sibling could import the
+    # class, instantiate its own separate queue, and call
+    # `submit`/`submit_mux` on it: a fresh instance's own lock/pending
+    # state doesn't conflict with the resident singleton's, but
+    # `._apply` still calls the exact same
+    # `_apply_session_state_stamp`/`_stamp_liveness` writers regardless
+    # of which instance drives it. Denylisting the class NAME itself
+    # (not a specific instance method) catches the class import/
+    # instantiation the moment it happens.
+    "_StampWriteQueue",
     # tracking_lifecycle.py
     "open_handoff",
     "link_handoff",
@@ -274,6 +285,29 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
     # write-triggering method on one of these is the same violation as
     # the inline `<module>._STAMP_QUEUE.<method>(...)` chain.
     queue_aliases: dict[str, int] = {}
+    # Local names assigned a plain string LITERAL (`mod_name =
+    # "agent_worktrees.tracking"`) -- resolved so a dynamic import whose
+    # target argument is one of these names (rather than the literal
+    # inline) still counts as a literal-string dynamic import, closing a
+    # narrow but real gap without flagging every non-literal dynamic
+    # import in the codebase (which would be far too broad/noisy).
+    constant_string_aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ):
+            constant_string_aliases[node.targets[0].id] = node.value.value
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ):
+            constant_string_aliases[node.target.id] = node.value.value
     # Local names bound to the `importlib` MODULE itself -- the plain
     # literal name `importlib` is included unconditionally (the common,
     # unaliased form), and `import importlib as il` adds its own alias.
@@ -295,6 +329,24 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
             for alias in node.names:
                 if alias.name == "import_module":
                     import_module_aliases.add(alias.asname or alias.name)
+
+    # Local names bound to the `_tracking()` LAZY-IMPORT HELPER --
+    # `def _tracking(): ... return the tracking module` is an established
+    # internal pattern (used to dodge circular imports) repeated across
+    # several agent_worktrees modules (tracking_claims.py,
+    # tracking_lifecycle.py, ...), always returning the `tracking`
+    # submodule specifically. Nothing stops a sibling from importing it
+    # by name and calling it directly to reach `tracking.save_record`
+    # without ever writing `tracking.save_record` itself.
+    tracking_helper_aliases: set[str] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.module in {f"agent_worktrees.{m}" for m in TRACKING_MODULES}
+        ):
+            for alias in node.names:
+                if alias.name == "_tracking":
+                    tracking_helper_aliases.add(alias.asname or "_tracking")
 
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
@@ -363,56 +415,85 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
                         # i.e. the two-level package-alias chain below.
                         package_aliases.add("agent_worktrees")
 
-    # A literal dynamic import (`importlib.import_module("agent_worktrees
-    # .tracking")`, `__import__("agent_worktrees.tracking")`, or either
-    # via an aliased `importlib`/`import_module` binding -- `import
-    # importlib as il; il.import_module(...)` or `from importlib import
-    # import_module; import_module(...)`) resolves to a tracked module or
-    # the package itself just as statically as an ordinary `import`
-    # statement does, provided the argument is a plain string constant --
-    # so it gets the SAME alias treatment via the reassignment-propagation
-    # pass below (a non-literal argument, e.g. a variable or an f-string,
-    # is undecidable statically and is not attempted, mirroring the
-    # getattr/`__dict__` boundary documented further down).
+    # A literal-string dynamic import (`importlib.import_module(
+    # "agent_worktrees.tracking")`, `__import__("agent_worktrees.tracking")`,
+    # or either via an aliased `importlib`/`import_module` binding --
+    # `import importlib as il; il.import_module(...)` or `from importlib
+    # import import_module; import_module(...)`) resolves to a tracked
+    # module or the package itself just as statically as an ordinary
+    # `import` statement does -- so it gets the SAME alias treatment via
+    # the reassignment-propagation pass below. The target argument may
+    # be an inline string constant OR a plain local name previously
+    # assigned one (`constant_string_aliases`, resolved above) -- e.g.
+    # `mod = "agent_worktrees.tracking"; importlib.import_module(mod)`.
+    # A genuinely non-literal, non-traceable target (an f-string, a
+    # concatenation, a parameter) is still undecidable statically and is
+    # not attempted, mirroring the getattr/`__dict__` boundary documented
+    # further down.
+    def _string_arg_value(node: ast.expr) -> str | None:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        if isinstance(node, ast.Name) and node.id in constant_string_aliases:
+            return constant_string_aliases[node.id]
+        return None
+
+    def _has_fromlist(call: ast.Call) -> bool:
+        """Whether ``call`` (a literal ``__import__(...)``) supplies a
+        non-empty ``fromlist`` -- either the 4th positional argument or a
+        ``fromlist=`` keyword -- which is what makes CPython's own
+        ``__import__`` return the DEEPEST submodule instead of the
+        top-level package. A non-list/non-literal fromlist (e.g. a
+        variable) is conservatively treated as "present" -- safer to
+        assume module-level resolution might apply than to silently
+        default to package-level and possibly miss a real submodule
+        access chain, mirroring this guard's general fail-toward-
+        flagging posture."""
+        if len(call.args) >= 4:
+            return True
+        return any(kw.arg == "fromlist" and kw.value is not None for kw in call.keywords)
+
     def _dynamic_import_alias_kind(expr: ast.expr) -> tuple[str, str] | None:
         """Returns ``("module", "<submodule-name>")`` or
-        ``("package", "agent_worktrees")`` if ``expr`` is a literal-string
-        dynamic import of a tracked target; otherwise ``None``."""
+        ``("package", "agent_worktrees")`` if ``expr`` is a
+        statically-resolvable dynamic import of a tracked target;
+        otherwise ``None``."""
+        if not isinstance(expr, ast.Call) or not expr.args:
+            return None
         is_import_module_call = (
-            isinstance(expr, ast.Call)
-            and (
-                (
-                    isinstance(expr.func, ast.Attribute)
-                    and expr.func.attr == "import_module"
-                    and isinstance(expr.func.value, ast.Name)
-                    and expr.func.value.id in importlib_aliases
-                )
-                or (
-                    isinstance(expr.func, ast.Name)
-                    and expr.func.id in import_module_aliases
-                )
-            )
-            and expr.args
-            and isinstance(expr.args[0], ast.Constant)
-            and isinstance(expr.args[0].value, str)
+            isinstance(expr.func, ast.Attribute)
+            and expr.func.attr == "import_module"
+            and isinstance(expr.func.value, ast.Name)
+            and expr.func.value.id in importlib_aliases
+        ) or (
+            isinstance(expr.func, ast.Name)
+            and expr.func.id in import_module_aliases
         )
         is_dunder_import_call = (
-            isinstance(expr, ast.Call)
-            and isinstance(expr.func, ast.Name)
-            and expr.func.id == "__import__"
-            and expr.args
-            and isinstance(expr.args[0], ast.Constant)
-            and isinstance(expr.args[0].value, str)
+            isinstance(expr.func, ast.Name) and expr.func.id == "__import__"
         )
         if not (is_import_module_call or is_dunder_import_call):
             return None
-        target = expr.args[0].value
+        target = _string_arg_value(expr.args[0])
+        if target is None:
+            return None
         if target == "agent_worktrees":
             return ("package", "agent_worktrees")
         prefix = "agent_worktrees."
-        if target.startswith(prefix) and target[len(prefix):] in TRACKING_MODULES:
-            return ("module", target[len(prefix):])
-        return None
+        if not (target.startswith(prefix) and target[len(prefix):] in TRACKING_MODULES):
+            return None
+        submodule = target[len(prefix):]
+        if is_dunder_import_call and not _has_fromlist(expr):
+            # CPython's own `__import__` semantics: with NO fromlist,
+            # `__import__("agent_worktrees.tracking")` returns the
+            # TOP-LEVEL `agent_worktrees` package object, not the
+            # `tracking` submodule -- the submodule is only reachable by
+            # then doing `.tracking` on that result (the package-alias
+            # chain the rest of this guard already models). Only WITH a
+            # fromlist does `__import__` return the deepest submodule
+            # directly.
+            return ("package", "agent_worktrees")
+        return ("module", submodule)
+
 
     # Propagate through simple reassignment so a trivial rename can't
     # evade the alias tracking above. Three RHS shapes are recognized on
@@ -446,9 +527,10 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
 
     def _module_expr_label(expr: ast.expr) -> str | None:
         """If ``expr`` resolves to a tracked module (a module alias, a
-        two-level package-alias chain like ``aw.tracking``, or an inline
-        literal-string dynamic import), return a human-readable label
-        for it; otherwise ``None``."""
+        two-level package-alias chain like ``aw.tracking``, an inline
+        dynamic import, or a call to the internal `_tracking()` lazy-
+        import helper), return a human-readable label for it; otherwise
+        ``None``."""
         if isinstance(expr, ast.Name) and expr.id in module_aliases:
             return expr.id
         if (
@@ -460,7 +542,15 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
             return f"{expr.value.id}.{expr.attr}"
         dynamic = _dynamic_import_alias_kind(expr)
         if dynamic is not None:
-            return expr.args[0].value
+            return _string_arg_value(expr.args[0])
+        if (
+            isinstance(expr, ast.Call)
+            and not expr.args
+            and not expr.keywords
+            and isinstance(expr.func, ast.Name)
+            and expr.func.id in tracking_helper_aliases
+        ):
+            return f"{expr.func.id}()"
         return None
 
     changed = True
