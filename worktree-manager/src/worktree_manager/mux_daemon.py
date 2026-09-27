@@ -51,7 +51,9 @@ from .mux_mapping_registry import (
     MuxMappingRegistry,
     _try_lock_file_once,
     _unlock_file,
+    LIVE_MAPPING_BACKSTOP_INTERVAL_S,
     get_mapping,
+    live_mapping_republish_due,
     registry_path,
     register_mapping,
     register_next_mapping,
@@ -785,6 +787,7 @@ def run_daemon_foreground(
     idle_after_s: float = IDLE_LINGER_S,
     poll_interval_s: float = 1.0,
     max_iterations: int | None = None,
+    backstop_interval_s: float = LIVE_MAPPING_BACKSTOP_INTERVAL_S,
 ) -> int:
     """The resident daemon's own loop: acquire this daemon's single-
     instance lease, start the server, publish the lock file, then
@@ -792,22 +795,17 @@ def run_daemon_foreground(
     active subscriber. ``max_iterations`` is test-only (bounds the loop
     instead of relying on the idle timer alone).
 
-    Acquiring :data:`_spawn_lock_path` as a lease held for this daemon's
-    ENTIRE lifetime (not merely at startup) is a deliberate design choice
-    (Copilot review finding): a briefly-held "check, then spawn" lock (as
-    an earlier revision of this function used) only protects callers that
-    go through it -- a direct ``mux-daemon run`` invocation (manual, or a
-    second supervisor) bypasses that check-then-spawn dance entirely, and
-    even between two lock-protected operations (an old daemon's cleanup
-    and a new one's startup publish) there is still a gap where both could
-    believe the lock file is theirs to write. Holding the SAME lease
-    continuously instead makes mutual exclusion structural rather than
-    timing-dependent: only one process can ever hold it, so a second
-    ``run_daemon_foreground`` call (via any path) sees it already held and
-    stands down immediately without ever starting a server or touching the
-    rendezvous file -- and this process's own exit-time cleanup can remove
-    the rendezvous unconditionally, since holding the lease the whole time
-    already proves no other daemon could have published one.
+    Acquiring :data:`_spawn_lock_path` as a lease held for this daemon's ENTIRE lifetime (not
+    merely at startup) is a deliberate design choice (Copilot review finding): a briefly-held
+    "check, then spawn" lock (as an earlier revision used) only protects callers that go
+    through it -- a direct ``mux-daemon run`` invocation (manual, or a second supervisor)
+    bypasses that dance entirely, and even between two lock-protected operations there is still
+    a gap where both could believe the lock file is theirs. Holding the SAME lease continuously
+    instead makes mutual exclusion structural rather than timing-dependent: only one process
+    can ever hold it, so a second ``run_daemon_foreground`` call sees it already held and
+    stands down immediately without starting a server or touching the rendezvous file -- and
+    this process's own exit-time cleanup can remove the rendezvous unconditionally, since
+    holding the lease the whole time already proves no other daemon could have published one.
     """
     resolved_root = root if root is not None else default_root()
     lease = _acquire_daemon_lease(resolved_root)
@@ -824,6 +822,7 @@ def run_daemon_foreground(
         idle_since: float | None = None
         iterations = 0
         published_monitor_generation: str | None = None
+        last_live_republish_at: float | None = None
         try:
             while True:
                 write_lock_data(lock, runtime.lock_extra())
@@ -834,15 +833,16 @@ def run_daemon_foreground(
                     else None
                 )
                 status_monitor_generation = _status_monitor_generation(status_monitor_data)
+                now = time.time()
                 if (
-                    status_monitor_generation is not None
-                    and status_monitor_generation != published_monitor_generation
-                    and runtime.registry.has_any_live()
-                    and _republish_live_mappings(
-                        runtime.registry,
-                        ensure_monitor=False,
+                    live_mapping_republish_due(
+                        status_monitor_generation, published_monitor_generation,
+                        last_live_republish_at, now, backstop_interval_s,
                     )
+                    and runtime.registry.has_any_live()
+                    and _republish_live_mappings(runtime.registry, ensure_monitor=False)
                 ):
+                    last_live_republish_at = now
                     published_monitor_generation = status_monitor_generation
                 if runtime.has_active_demand():
                     idle_since = None

@@ -1309,6 +1309,74 @@ def test_resident_monitor_restart_republishes_live_mapping_to_new_generation(tmp
     assert daemon_result["rc"] == 0
 
 
+def test_live_mapping_republished_on_a_backstop_cadence_without_a_restart(
+    tmp_path, monkeypatch
+):
+    """Real-bug regression: before this fix, a live mapping was only ever
+    republished when the resident monitor's own lock *generation* changed --
+    i.e. only right after a monitor restart. With no restart, the mapping
+    aged out of the monitor's cache 45s after the last push and every
+    managed session's status went silently, permanently blank. The daemon
+    must also republish on a bounded backstop cadence, independent of any
+    generation change, so a long-lived session with no monitor restart never
+    goes stale."""
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry())
+    lock = tmp_path / "status-monitor.lock"
+    observed: list[dict] = []
+    server = _start_observation_server(observed)
+    monkeypatch.setattr(mux_daemon, "_status_monitor_lock_path", lambda: lock)
+    _write_status_monitor_lock(lock, server)
+    daemon_result: dict = {}
+
+    def _run():
+        daemon_result["rc"] = mux_daemon.run_daemon_foreground(
+            tmp_path,
+            poll_interval_s=0.01,
+            max_iterations=300,
+            # Same lock/generation the whole run -- only the backstop cadence
+            # (never a generation change) can explain a second observation.
+            backstop_interval_s=0.05,
+        )
+
+    thread = threading.Thread(target=_run)
+    thread.start()
+    try:
+        _wait_for(lambda: len(observed) >= 1, timeout=5.0)
+        first_count = len(observed)
+        # No generation change ever happens (same server/lock for the whole
+        # run) -- a second (and further) republish can only come from the
+        # backstop timer. Generous timeout: under a loaded full-suite run the
+        # daemon thread's 400 iterations can take noticeably longer than
+        # wall-clock ``poll_interval_s * max_iterations`` would suggest.
+        _wait_for(lambda: len(observed) > first_count, timeout=10.0)
+    finally:
+        server.close()
+        thread.join(timeout=15)
+
+    assert daemon_result.get("rc") == 0
+    assert len(observed) >= 2
+
+
+def test_live_mapping_republish_due_generation_change_or_backstop_cadence():
+    """Unit coverage for the extracted pure decision helper: due on a fresh
+    generation, on the backstop cadence elapsing with an unchanged
+    generation, and not due otherwise."""
+    due = mux_mapping_registry.live_mapping_republish_due
+    # No monitor observed at all -> never due.
+    assert due(None, None, None, now=100.0, backstop_interval_s=20.0) is False
+    # First observation of a generation -> due immediately.
+    assert due("gen-1", None, None, now=100.0, backstop_interval_s=20.0) is True
+    # Same generation, never republished yet -> due.
+    assert due("gen-1", "gen-1", None, now=100.0, backstop_interval_s=20.0) is True
+    # Same generation, republished recently -> not due yet.
+    assert due("gen-1", "gen-1", 95.0, now=100.0, backstop_interval_s=20.0) is False
+    # Same generation, backstop interval elapsed -> due again.
+    assert due("gen-1", "gen-1", 79.0, now=100.0, backstop_interval_s=20.0) is True
+    # New generation, even if the backstop just fired -> due (restart path).
+    assert due("gen-2", "gen-1", 99.9, now=100.0, backstop_interval_s=20.0) is True
+
+
 def test_ensure_status_monitor_running_scrubs_session_credentials(monkeypatch):
     """This call can run from a launcher/pane-teardown process carrying
     ``GH_TOKEN``/``GITHUB_TOKEN``/an AHP token, and the resident status-

@@ -500,3 +500,28 @@ def remove_mapping(
 def get_mapping(project: str, worktree_id: str, root: Path | None = None) -> dict | None:
     registry = MuxMappingRegistry(registry_path(root))
     return registry.get(project, worktree_id)
+
+
+#: Live-mapping keep-alive cadence: republish was restart-only (generation
+#: change), aging a mapping out of the monitor's 45s-stale cache forever
+#: absent a restart. Kept well under (no in-process import -- see
+#: mux_daemon's own docstring) ``mux_link.MAPPING_STALE_AFTER_SECONDS`` (45.0).
+LIVE_MAPPING_BACKSTOP_INTERVAL_S = 20.0
+
+
+def live_mapping_republish_due(
+    status_monitor_generation: str | None,
+    published_monitor_generation: str | None,
+    last_live_republish_at: float | None,
+    now: float,
+    backstop_interval_s: float = LIVE_MAPPING_BACKSTOP_INTERVAL_S,
+) -> bool:
+    """Whether the resident daemon should republish every live mapping now:
+    on a status-monitor generation change (restart recovery), or -- since
+    that alone once left a mapping stale forever between restarts -- on
+    this keep-alive backstop cadence."""
+    return status_monitor_generation is not None and (
+        status_monitor_generation != published_monitor_generation
+        or last_live_republish_at is None
+        or now - last_live_republish_at >= backstop_interval_s
+    )

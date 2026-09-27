@@ -817,6 +817,30 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-09-27** — Fixed a real production regression discovered live during
+  facility diagnosis: since Phase 3b Sub-slice 3 (#3865), the companion
+  `mux-daemon` only republished a live mux mapping to the resident
+  status-monitor on a status-monitor lock **generation change** (i.e. only
+  right after a monitor restart) -- never on an ongoing cadence. Because the
+  monitor's own managed-mux cache treats a pushed mapping as stale after
+  `mux_link.MAPPING_STALE_AFTER_SECONDS` (45s), every managed session's mux
+  status bar silently went blank 45s after the last monitor restart and
+  stayed blank until the next one -- for hours, facility-wide, with no error
+  anywhere. Root-caused live (process census, `py-spy dump`, direct
+  `register`/`publish_live_observation` replay) rather than assumed from the
+  symptom; confirmed by reproducing the exact "renders once after a restart,
+  then never again" signature the operator reported. Fix: `mux_daemon.py`'s
+  resident loop now also republishes on an independent
+  `LIVE_MAPPING_BACKSTOP_INTERVAL_S` (20s, safely under the 45s staleness
+  window) keep-alive cadence, regardless of generation. The decision itself
+  (`live_mapping_republish_due`) is a new pure helper in the sibling
+  `mux_mapping_registry` module -- extracted there, not inlined in
+  `mux_daemon.py`, purely to keep that already-999-line module under this
+  repo's shrink-only module-size ceiling. New regression tests: an
+  integration test proving a second republish fires with no generation
+  change at all, and unit coverage of the extracted helper's six decision
+  branches. Full `worktree-manager` suite: 1562 passed, 4 skipped, same
+  pre-existing unrelated simulated-failure warning.
 - **2026-09-27** — Landed Phase 3d Step 5, PR
   [#4327](https://github.com/ThomasMichon/copilot-extensions/pull/4327).
   Added Group C's additive, unused-at-first engine seam instead of cutting the
