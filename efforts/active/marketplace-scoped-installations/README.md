@@ -422,6 +422,51 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-27 — Phase 2 launcher-contract inventory: full family re-derivation (70 findings, all classified); 3 stale entries corrected
+
+- Next slice after the Plan/Phase 7 reconciliation (below): actually drove
+  the "fresh pass still needed" the 2026-09-25 partial re-audit called out
+  in [phase-2-launcher-contracts.md](phase-2-launcher-contracts.md), rather
+  than deferring it again.
+- **Re-ran the guard in a clean checkout, not the long-lived anchor**: 70
+  `global-plugin-binstub` findings, down from the 2026-09-25 snapshot's 83.
+  Diffing anchor vs. clean-checkout output found the anchor's extra 4
+  findings were `*.egg-info/PKG-INFO` build artifacts from a prior local
+  `pip install -e .`, never committed — a real methodology fix: this guard
+  must be read from a clean checkout, never a long-lived anchor that may
+  carry stale local build state.
+- **Classified all 70 findings into families** (not a sample): generic
+  wrapper publication (45), `agent-worktrees` project-command mixing (11),
+  operator/bootstrap/nudge (4), readiness legacy fallback (3),
+  `payload-invocation.json` legacy-footprint declarations (2),
+  remote-transport (2), credential/askpass (2), descriptive (1). No plugin
+  or finding is untraced any more.
+- **Corrected 3 stale doc claims found during classification** (all verified
+  against current source, not assumed):
+  1. `agent-machines`'s 2 "unresolved, needs a fresh slice" `cell_lifecycle.py`
+     findings the 2026-09-25 note flagged were already resolved in
+     [#4154](https://github.com/ThomasMichon/copilot-extensions/pull/4154)
+     (`allow legacy-compatibility`), which predates that note. Only the
+     `payload-invocation.json` declaration remains, and it needs no
+     resolution — same accepted shape as `agent-index`'s equivalent.
+  2. `agent-index`'s `transport.py` remote-transport finding already
+     converted (`allow remote-management`) — Phase 3 remote-transport is
+     done for `agent-index`; only `agent-ssh`'s `dtssh` scripts remain in
+     that family.
+  3. Two of four "Known guard-invisible callers"
+     (`agent-codespaces`/`agent-containers` `_invoke.py`) were already
+     resolved by PRs already recorded elsewhere in this Journal (#4298,
+     #3877) — both now resolve a payload-local binstub via `_payload_root()`
+     instead of the global path. Removed from the guard-invisible list;
+     `agent-bridge/agent_registry.py` and `transport.py`'s PowerShell branch
+     remain genuinely unconverted.
+- **No code changed this pass** — this was inventory correction, not
+  conversion. The generic-wrapper-publication family (45 findings, Phase 6
+  retirement) is the actual bulk of remaining work and still needs its
+  per-plugin conversion slices; nothing in this pass reduces that count.
+- Verified: `check-marketplace-isolation.py`, `check-docs-consistency.py`
+  both clean (doc-only change). Merged via `pr-merge --now`.
+
 ### 2026-09-27 — Plan/Validation Plan reconciled against the completed 8-plugin backlog order; Phase 7 bug sweep triaged
 
 - Picked up the relay handoff whose next slice was explicitly **not** another

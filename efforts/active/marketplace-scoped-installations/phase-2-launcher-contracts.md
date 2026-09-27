@@ -105,12 +105,85 @@ own fresh family pass" note further down):
 This table is the current count per plugin; it is not yet split by contract
 family the way the 2026-08-26 table below is — that per-finding family
 re-derivation (which of the 83 belongs to which retirement-dependency
-bucket) is the fresh pass still needed.
+bucket) was the fresh pass still needed. It is done below, superseded by the
+2026-09-27 re-derivation.
+
+### 2026-09-27 — Full family re-derivation (supersedes the 2026-09-25 count)
+
+`python tools/check-marketplace-isolation.py --json` in a **clean checkout**
+(a fresh `copilot-extensions create` worktree, not a long-lived anchor) now
+reports **70** `global-plugin-binstub` findings — down from 83. Running the
+same guard against the long-lived `/home/tmichon/src/copilot-extensions`
+anchor at the identical commit reported 74; the 4-finding gap is confirmed
+build-time noise (`*.egg-info/PKG-INFO` files a prior local `pip install -e
+.` generated in that anchor, never committed, absent from a fresh checkout)
+— **use a clean checkout as the source of truth for this guard**, not the
+anchor.
+
+Every one of the 70 current findings was re-classified this pass (not
+sampled) into the retirement-dependency families the 2026-08-26 table used,
+confirming two things the prior partial audits could only guess at:
+
+- **`agent-machines`'s two flagged-but-unresolved findings from the
+  2026-09-25 note are already resolved.** `cell_lifecycle.py`'s two
+  `.local/bin/agent-machines` identity checks (lines ~162 and ~294) both
+  carry `# marketplace-isolation: allow legacy-compatibility` — landed in
+  [#4154](https://github.com/ThomasMichon/copilot-extensions/pull/4154)
+  ("resolve 2 of `cell_lifecycle.py`'s 3 findings"), which the 2026-09-25
+  note predates. Only `payload-invocation.json`'s `legacyFootprint.paths`
+  entry (line 20) remains, and it needs no further resolution here: it is
+  the same intentional, accepted `legacyFootprint.paths` declaration shape
+  `agent-index/payload-invocation.json` already carries (line 22) — JSON
+  cannot take an inline guard-suppression comment, so this family stays
+  documented-and-accepted rather than annotated, identically to
+  `agent-index`'s.
+- **`agent-index`'s remote-transport finding (`transport.py`) already
+  converted.** It now carries `# marketplace-isolation: allow
+  remote-management` — the Phase 3 remote-transport-selection item for
+  `agent-index` specifically is done; only `agent-ssh`'s `dtssh`
+  install-client/install-host PATH exports remain in this family.
+- **`copilot-extensions-harness` dropped to 0** (was 3) — fully converted,
+  drops out of the per-plugin table entirely.
+
+| Contract family (2026-09-27, clean-checkout re-derivation) | Findings | Phase | Plugins |
+|-----------------|---------:|-------|---------|
+| Generic wrapper publication and plugin-specific PATH guidance | 45 | Phase 6 retirement | all 13 plugins below except `agent-worktrees`'s own project-command lines |
+| Mixed project-command directory and PATH use | 11 | Permanent project surface plus Phase 6 generic cleanup | `agent-worktrees` only |
+| Operator, bootstrap, and nudge launchers | 4 | Phase 3 contract, Phase 6 fallback retirement | `agent-machines` (`bootstrap-check.{sh,ps1}`, 2), `agent-worktrees` (`register-nudge.{sh,ps1}`, 2) |
+| Readiness legacy fallback | 3 | Phase 6 retirement | `agent-codespaces` (`readiness-context.{sh,ps1}`, 3) |
+| `payload-invocation.json` legacy-footprint declarations | 2 | Accepted (Phase 6 retirement, not Phase 2 gate) | `agent-index` (line 22, already accepted precedent), `agent-machines` (line 20, confirmed this pass — same shape, no code change needed) |
+| Remote transport selection | 2 | Phase 3 (`agent-index` done; `agent-ssh` remains) | `agent-ssh` `dtssh` `install-{client,host}.sh` |
+| Credential and askpass integration | 2 | Phase 3 contract, Phase 6 fallback retirement | `agent-vault` `install.sh` (askpash exec + `SUDO_ASKPASS` guidance) |
+| Descriptive skills, help, and generated package metadata | 1 | Cleanup with the owning slice | `agent-vault-setup/SKILL.md` |
+| **Total** | **70** | | |
+
+**Current per-plugin counts (2026-09-27, clean checkout, 70 total):**
+
+| Plugin | Findings |
+|--------|---------:|
+| `agent-worktrees` | 13 |
+| `agent-codespaces` | 7 |
+| `agent-vault` | 7 |
+| `agent-machines` | 6 |
+| `agent-ssh` | 6 |
+| `agent-dispatch` | 5 |
+| `agent-index` | 5 |
+| `agent-containers` | 4 |
+| `agent-logger` | 4 |
+| `agent-pull-requests` | 4 |
+| `budget-guidance` | 4 |
+| `agent-mcp` | 3 |
+| `agent-bridge` | 2 |
+
+No plugin's count is untraced or unclassified as of this pass — every
+finding above maps to exactly one family and phase. The Durable provider
+manifests family (Phase 3, 4 findings in the 2026-08-26 baseline) has fully
+converted and no longer appears at all, matching the main README's Phase 3
+being fully checked off.
 
 The table below is retained as the historical 2026-08-26 record (do not
-edit it to match the current count) — the accurate, current per-plugin
-breakdown is the table immediately above, and a family re-derivation for it
-is still a fresh pass needed.
+edit it to match the current count) — the accurate, current per-plugin and
+per-family breakdown is the two tables immediately above.
 
 | Contract family (2026-08-26 snapshot) | Findings | Phase | Reason |
 |-----------------|---------:|-------|--------|
@@ -245,19 +318,27 @@ equivalent paths assembled from components or strings whose source escaping
 does not match its regular expression. The caller inventory therefore also
 includes:
 
-- `agent-codespaces/src/agent_codespaces/_invoke.py`, whose persisted spawn
-  command selects the version-stable global binstub.
-- `agent-containers/src/agent_containers/_invoke.py`, which carries the same
-  persisted-spawn requirement.
-- `agent-bridge/src/agent_bridge/agent_registry.py`, where the service resolves
-  the global `agent-worktrees` management command.
-- the PowerShell remote branch in `agent-index/src/agent_index/transport.py`,
-  alongside the one Bash branch already counted.
+- `agent-bridge/src/agent_bridge/agent_registry.py:258`
+  (`_agent_worktrees_bin()`), which still resolves the global `agent-worktrees`
+  management command via `Path.home() / ".local" / "bin"` (component-built,
+  guard-invisible). Confirmed still live 2026-09-27 — unconverted.
+- the PowerShell remote branch in `agent-index/src/agent_index/transport.py`
+  (line 173, `\.local\bin\agent-index.ps1`, escaped-form guard-invisible).
+  Confirmed still live 2026-09-27 — unconverted; the Bash branch in the same
+  file (line 162) already converted and carries `# marketplace-isolation:
+  allow remote-management`.
+- ~~`agent-codespaces/src/agent_codespaces/_invoke.py`~~ and
+  ~~`agent-containers/src/agent_containers/_invoke.py`~~ — **resolved**,
+  confirmed 2026-09-27. Both now expose a `binstub()`/`payload_binstub()`
+  resolver pinned to `_payload_root()` (each file's own package directory),
+  and `dispatch_argv()`/the persisted-spawn helper prefers that payload-local
+  binstub over any global path. Neither references `.local/bin` in any form
+  any more. Removed from this list.
 
-These callers reinforce the Phase 3 dependency: each needs a durable canonical
-launcher or explicit management context, not a replaceable payload path.
-Broadening the guard to recognize component-built and escaped path forms is a
-prerequisite for making it blocking in Phase 6.
+These remaining callers reinforce the Phase 3 dependency: each needs a durable
+canonical launcher or explicit management context, not a replaceable payload
+path. Broadening the guard to recognize component-built and escaped path
+forms is a prerequisite for making it blocking in Phase 6.
 
 ## Serial execution
 
