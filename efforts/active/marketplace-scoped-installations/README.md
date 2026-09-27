@@ -386,6 +386,31 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-27 — `agent-bridge` now backlog-only at 15 findings (PR #4246)
+
+- Fresh guard count at merge time: 569 (down from 570).
+- `repair-scheduled-task.ps1`'s `InstallDir` env-var fallback matched
+  the same own-legacy-root shape already fixed across the rest of this
+  plugin (`allow legacy-compatibility`). Its sibling finding on the SAME
+  file (`$TaskName = 'Agent Bridge'`) stays deliberately deferred -- its
+  own doc comment explicitly says the task's action/contract is owned
+  by `install.ps1`'s `Register-ScheduledTask_`, coupling it to that
+  file's not-yet-converted Phase 2 launcher-contract backlog rather than
+  being independently resolvable.
+- **`agent-bridge` is now backlog-only at 15 findings**: `install.sh`/
+  `install.ps1`/`repair-scheduled-task.ps1`'s `TaskName` (10, confirmed
+  Phase 2 launcher-contract backlog), `payload-invocation.json` (1,
+  cross-plugin open question), `transport.py` + `session_host/spawner.py`
+  (4, module-size-ceiling deferral, tracked in
+  [aperture-labs#7672](https://gitea.michon.ski/tmichon/aperture-labs/issues/7672)).
+  Same end-state pattern as `agent-ssh`/`agent-mcp`/`agent-machines` this
+  session -- five plugins now fully triaged to confirmed-backlog-only.
+- Verified: PowerShell Parser API syntax check, `check-docs-
+  consistency.py`, and the full `agent-bridge` suite via
+  `test-supervisor` (800 passed, 10 skipped, 0 failures). Merged via
+  `pr-merge --now` after a clean advisory review.
+- Guard count: 16 -> 15 findings for `agent-bridge`.
+
 ### 2026-09-27 — `agent-bridge`'s doc/SKILL.md cluster resolved (PR #4240); first clean-room validation checkpoint of this session
 
 - Fresh guard count at merge time: 570 (down from 584).
