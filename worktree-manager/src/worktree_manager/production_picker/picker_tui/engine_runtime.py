@@ -484,7 +484,15 @@ class PickerScreenRuntimeMixin:
         # available.
         self._last_poll = time.monotonic()   # first background poll is POLL_SECS out
         self._last_pivot_poll = time.monotonic()  # registered-pivot repoll (#staleness)
+        previous_loader = getattr(self, "loader", None)
         self.loader = payload.loader
+        if previous_loader is not None and previous_loader is not self.loader:
+            cancel = getattr(previous_loader, "cancel", None)
+            if callable(cancel):
+                try:
+                    cancel()
+                except Exception:
+                    pass
         self.data = payload.data
         if self.live:
             self.load_delay = {}

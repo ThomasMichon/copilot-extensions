@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 import threading
 import time
 
@@ -214,6 +215,28 @@ def test_setup_reload_unmount_disposes_payload_if_marshalled_callback_never_runs
     screen.on_unmount()
     assert disposed.wait(timeout=5)
     assert screen.applied == []
+
+
+def test_apply_setup_payload_cancels_replaced_loader():
+    disposed = threading.Event()
+
+    class _Loader:
+        def __init__(self, on_cancel=None):
+            self._on_cancel = on_cancel
+
+        def cancel(self):
+            if self._on_cancel is not None:
+                self._on_cancel.set()
+
+    screen = PickerScreen(_fixture_source(), live=False)
+    screen._reconcile_wt_sel = lambda: None
+    screen.loader = _Loader(disposed)
+    payload = replace(_payload("replacement"), loader=_Loader())
+
+    screen._apply_setup_payload(payload)
+
+    assert disposed.is_set()
+    assert screen.loader is payload.loader
 
 
 def test_setup_reload_supersession_discards_stale_success(

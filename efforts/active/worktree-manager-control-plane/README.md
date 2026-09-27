@@ -746,11 +746,14 @@ claiming discipline alone.
   `LiveLoader` if the picker unmounted before that callback ever ran, so the
   final tree now tracks pending setup payloads explicitly, disposes them from
   `on_unmount`, and covers both the marshal-failed and callback-dropped
-  disposal paths in the new test file. Validation:
+  disposal paths in the new test file. The last follow-up was ownership
+  transfer itself: applying a newer live payload now cancels the previously
+  owned loader before replacing `self.loader`, with a dedicated regression
+  test so repeated live reloads cannot accumulate orphaned loaders. Validation:
   targeted
   `tests/production_picker/test_setup_reload_epoch.py` +
   `test_picker_first_paint.py` green; full `worktree-manager` suite matched
-  the machine's known baseline at `1470 passed, 7 skipped, 13 failed`
+  the machine's known baseline at `1471 passed, 7 skipped, 13 failed`
   (unchanged: 3 unrelated `test_data_ssh_sources.py` failures plus 10
   Windows symlink-privilege failures).
 
