@@ -1,0 +1,9 @@
+{
+  "comment": "Resident status-monitor: push status updates immediately instead of waiting up to --interval seconds. A successful 'status' write (and any postToolUse mutation) now wakes the sweep loop right away via a new resident_push bridge module + an interruptible wake-event, with the periodic interval retained as an unconditional backstop for staleness sources with no explicit push of their own.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -41,7 +41,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import activity, tracking, tracking_write
+from . import activity, resident_push, tracking, tracking_write
 
 
 def apply_status_disposition(args: dict) -> dict:
@@ -102,6 +102,14 @@ def apply_status_disposition(args: dict) -> dict:
                 session_id=session_id,
                 project=project,
             )
+
+    # Push the change to the resident monitor's own live segment cache (if
+    # this transaction is in fact running inside that process, serving this
+    # request over `tracking_write`) so OTHER sessions watching this
+    # worktree's status bar refresh on the very next sweep instead of
+    # waiting out the full periodic interval. Best-effort/no-op otherwise
+    # (in-process fallback path, or a bare unit test) -- see resident_push.
+    resident_push.notify(record.worktree_path)
 
     return {
         "ok": True,
