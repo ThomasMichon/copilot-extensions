@@ -642,7 +642,7 @@ survey above.
       `tracking_lifecycle.py` / `tracking_claims.py` /
       `tracking_session_registry.py` / `tracking_controller_relations.py`
       / `tracking_write.py` / the 6 `tracking_*_write.py` verb-handler
-      modules). Seven review rounds found real gaps each time (see Journal
+      modules). Nine review rounds found real gaps each time (see Journal
       for the full blow-by-blow: a missing re-export module, a
       package-root-alias attribute chain never tracked at all, an
       incomplete denylist, a wildcard-import escape hatch, the daemon's
@@ -768,7 +768,7 @@ wording -- NOT extended to cover `worktree-manager/`'s own already-tracked
 exception (see above), since that scope decision belongs to a
 coordinated cross-effort call, not something to fold in unilaterally here.
 
-**Seven review rounds found real gaps, none assumed away:**
+**Nine review rounds found real gaps, none assumed away:**
 (1) `tracking_controller_relations.py`'s own thin
 `save_record`/`_save_record_unlocked` re-export wrappers were absent from
 the protected module set, so a sibling could route through that module
@@ -859,10 +859,32 @@ equally simple `tracking_module = aw.tracking` (a two-level `Attribute`
 RHS off a package alias) -- fixed by resolving that shape into the same
 `module_aliases` set a direct `aw.tracking.save_record(...)` call
 already populates, rather than adding a second parallel check
-downstream. Every fix across all seven rounds has a dedicated
+downstream. (11) An EIGHTH review round found three lingering
+documentation-accuracy stragglers from fix (c) above -- the CI step's
+own comment in `.github/workflows/ci.yml`, the test file's own module
+docstring, and this Journal's own "(25 tests)" count -- all still said
+"agent-*" or a stale count after the code and the main docstring had
+already been corrected; fixed by sweeping every remaining mention, not
+just the one flagged each time. One of round 8's own CI runs also hit a
+genuinely unrelated, pre-existing flaky test
+(`test_first_use_provision_is_serialized` in
+`libs/payload-invocation`/`agent-index`, nothing to do with this guard)
+-- confirmed unrelated and cleared with a CI rerun, not a code change.
+(12) A NINTH review round found the round-6/7 reassignment-propagation
+fix was STILL incomplete: it only handled plain `ast.Assign`, missing
+the equally simple annotated form (`writer_module: object = tracking`)
+-- an annotation adds no actual indirection, so `ast.AnnAssign` needed
+the identical treatment; fixed by unifying both assignment forms into
+one shared propagation pass rather than a third parallel branch. This
+round also caught the PR description's own stale test count ("adds 8
+tests") and a logically backwards claim in the
+`worktree-manager-control-plane` cross-link (implying the guard would
+need the `worktree-manager` call site added once it converts to the
+batched verb, when conversion should REMOVE that call site entirely) --
+both corrected. Every fix across all nine rounds has a dedicated
 regression test.
 
-26 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
+28 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
 tree, the sanctioned read-only accessors staying unflagged, three
 single-level import/call shapes (module attribute call, direct
 `from agent_worktrees import <fn>`, `from agent_worktrees.tracking_claims
@@ -876,7 +898,8 @@ the two private liveness-writer helpers, `tracking_write`'s own
 direct-execution APIs (one denylisted case, one confirming
 `dispatch`/`write_with_boot` stay unflagged), three reassignment-evasion
 cases (single-hop Name, multi-hop chained Name, and the
-package-attribute RHS form), the owning-plugin's own exemption, and a
+package-attribute RHS form), two annotated-assignment cases (plain and
+package-attribute RHS), the owning-plugin's own exemption, and a
 live-repo smoke test (confirmed clean: zero violations today, matching
 the original survey's own finding). Wired into
 `.github/workflows/ci.yml` alongside the existing

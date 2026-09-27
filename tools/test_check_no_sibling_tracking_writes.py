@@ -378,6 +378,37 @@ def test_attribute_reassignment_off_a_package_alias_is_still_caught(tmp_path):
     assert "save_record" in violations[0].detail
 
 
+def test_annotated_assignment_alias_is_still_caught(tmp_path):
+    # `writer_module: object = tracking` -- a type annotation adds no
+    # actual indirection, so this AnnAssign form must be treated
+    # identically to the plain `writer_module = tracking` form.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking\n"
+        "writer_module: object = tracking\n"
+        "\n"
+        "def write(record, path):\n"
+        "    writer_module.save_record(record, path)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "save_record" in violations[0].detail
+
+
+def test_annotated_attribute_assignment_alias_is_still_caught(tmp_path):
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "import agent_worktrees as aw\n"
+        "tracking_module: object = aw.tracking\n"
+        "\n"
+        "def write(record, path):\n"
+        "    tracking_module.save_record(record, path)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "save_record" in violations[0].detail
+
+
 def test_unreadable_file_fails_closed_not_silently_skipped(tmp_path, monkeypatch):
     # A file the guard cannot even read must be reported, not silently
     # treated as clean -- otherwise an unreadable/undecodable file is a

@@ -304,43 +304,53 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
 
     # Propagate through simple reassignment so a trivial rename can't
     # evade the alias tracking above. Two RHS shapes are recognized on a
-    # single-target `Assign` (no augmented/annotated/tuple/starred
-    # assignment): a bare Name (`writer_module = tracking`,
-    # `wt = agent_worktrees`) copies that name's own alias membership
-    # onto the LHS; a two-level Attribute off a package alias
-    # (`tracking_module = aw.tracking`) resolves to the SAME thing a
-    # `tracking_module.save_record(...)` call already catches, so it's
-    # folded into `module_aliases` too rather than needing its own parallel
-    # check downstream. Iterated to a fixed point since a chain
-    # (`a = tracking; b = a; c = b`, or `x = aw.tracking; y = x`) needs
-    # more than one pass to fully propagate.
-    changed = True
-    while changed:
-        changed = False
+    # single-target plain `Assign` OR a single-target `AnnAssign` (e.g.
+    # `writer_module: object = tracking` -- an annotation adds no actual
+    # indirection, so it must be treated identically to the plain form):
+    # a bare Name (`writer_module = tracking`, `wt = agent_worktrees`)
+    # copies that name's own alias membership onto the LHS; a two-level
+    # Attribute off a package alias (`tracking_module = aw.tracking`)
+    # resolves to the SAME thing a `tracking_module.save_record(...)`
+    # call already catches, so it's folded into `module_aliases` too
+    # rather than needing its own parallel check downstream. Iterated to
+    # a fixed point since a chain (`a = tracking; b = a; c = b`, or
+    # `x = aw.tracking; y = x`) needs more than one pass to fully
+    # propagate.
+    def _simple_assignments():
         for node in ast.walk(tree):
-            if not (
+            if (
                 isinstance(node, ast.Assign)
                 and len(node.targets) == 1
                 and isinstance(node.targets[0], ast.Name)
             ):
-                continue
-            target = node.targets[0].id
-            if isinstance(node.value, ast.Name):
-                source = node.value.id
+                yield node.targets[0].id, node.value, node.lineno
+            elif (
+                isinstance(node, ast.AnnAssign)
+                and isinstance(node.target, ast.Name)
+                and node.value is not None
+            ):
+                yield node.target.id, node.value, node.lineno
+
+    changed = True
+    while changed:
+        changed = False
+        for target, value, lineno in _simple_assignments():
+            if isinstance(value, ast.Name):
+                source = value.id
                 if source in module_aliases and target not in module_aliases:
-                    module_aliases[target] = node.lineno
+                    module_aliases[target] = lineno
                     changed = True
                 if source in package_aliases and target not in package_aliases:
                     package_aliases.add(target)
                     changed = True
             elif (
-                isinstance(node.value, ast.Attribute)
-                and isinstance(node.value.value, ast.Name)
-                and node.value.value.id in package_aliases
-                and node.value.attr in TRACKING_MODULES
+                isinstance(value, ast.Attribute)
+                and isinstance(value.value, ast.Name)
+                and value.value.id in package_aliases
+                and value.attr in TRACKING_MODULES
                 and target not in module_aliases
             ):
-                module_aliases[target] = node.lineno
+                module_aliases[target] = lineno
                 changed = True
 
     for node in ast.walk(tree):
