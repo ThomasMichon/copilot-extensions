@@ -1289,10 +1289,28 @@ _Pending._
 - **Filed as PR #4245**, targeting `dev`. Journaled here per this effort's
   own "even for pure documentation" convention, but this entry is itself
   part of that same PR (not a separate follow-up commit).
+- **Merged 2026-09-27 (admin-merge, operator-authorized)**. The automated
+  reviewer drove the PR through 13 review rounds, surfacing (and this
+  session fixing) 29 distinct findings -- fail-closed promotion gaps,
+  TOML-table-scoping, several nested/ancestor/early-resolve symlink
+  hardenings, path-traversal via an unsafe lib name, alias-materialization,
+  Python 3.10 `tomllib` compatibility, and more (see the individual commits
+  on the merged PR for the full list; each was replied-to inline with the
+  fixing commit). The last two review rounds both reported "Findings:
+  None," but the automated reviewer's own review state never flipped to a
+  formal GitHub "Approved" (stayed "COMMENTED") even after a manual re-ping
+  -- the operator judged the PR clean given zero remaining findings across
+  two consecutive rounds and authorized an admin-merge (bypassing the
+  stuck required-review gate) rather than waiting further on a reviewer
+  quirk outside this effort's own scope to fix.
 - **Still open for the next session**: re-convert the remaining 6
   `src-passthrough` libs (`work-coalescing-singleton` next by blast-radius,
   then the tied pairs), convert the 4 never-yet-`src-passthrough` real
   libs directly, retire the `src-passthrough` pointer kind once all 7 are
   re-converted, then Phase 2 (installer engine) and Phase 3 (pattern doc)
   -- see the Plan section above for the full ordering, unchanged by this
-  session.
+  session. The tooling built and hardened in PR #4245
+  (`--uv-editable`, the `--check` drift guard, and the promotion-time
+  rewriter) is now proven end-to-end and ready to apply directly to each
+  remaining lib with no further tooling work expected -- only the
+  re-conversion + validation cycle per lib.
