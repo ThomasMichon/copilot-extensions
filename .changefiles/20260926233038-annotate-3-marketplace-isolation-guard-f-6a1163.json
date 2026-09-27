@@ -1,0 +1,9 @@
+{
+  "comment": "Annotate 3 marketplace-isolation guard findings in SKILL.md docs",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}
