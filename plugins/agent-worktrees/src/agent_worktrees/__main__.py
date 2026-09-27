@@ -4889,6 +4889,7 @@ def reap_orphan_mux_sessions(
     **Conservative by design** -- a session is never reaped when:
 
     - a terminal client is **attached** (a human is using it),
+    - Worktree Manager already owns the mux session via ``mux-mapping.json``,
     - its worktree record is ``kind: system`` (daemon-owned), or
     - its worktree is still **active** (tracked, dir present), or
     - it has been **active within the grace window** (fresh pane activity => the
@@ -4899,7 +4900,7 @@ def reap_orphan_mux_sessions(
 
         {"available": bool,                  # False when no mux is installed
          "reaped": ["<id>", ...],
-         "skipped": [{"id": "<id>", "reason": "attached|system|active|busy|activity-unknown"}, ...],
+         "skipped": [{"id": "<id>", "reason": "attached|system|active|busy|activity-unknown|manager-owned"}, ...],
          "errors":  [{"id": "<id>", "reason": "..."}, ...]}
     """
     all_sessions = sessions._list_mux_sessions()
