@@ -282,7 +282,9 @@ realized in `main`; unchecked items are the remaining delta.
             Final state: Manager-owned sessions never repopulate
             `status-monitor.d`, never fall back to resident direct
             `_monitor_mux_set()` writes, and recover monitor/daemon restarts via
-            Worktree Manager live-mapping republication instead. Unmanaged /
+            Worktree Manager live-mapping republication instead (2026-09-27
+            follow-on: also republished on an independent keep-alive cadence,
+            not restart-only -- see Journal and the plan doc). Unmanaged /
             zero-provider sessions keep the existing direct/status-updater
             fallback lane unchanged.
       - [x] **Sub-slice 4 (landed 2026-09-14): same-config marketplace-cell

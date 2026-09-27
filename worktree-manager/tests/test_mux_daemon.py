@@ -1347,7 +1347,7 @@ def test_live_mapping_republished_on_a_backstop_cadence_without_a_restart(
         # No generation change ever happens (same server/lock for the whole
         # run) -- a second (and further) republish can only come from the
         # backstop timer. Generous timeout: under a loaded full-suite run the
-        # daemon thread's 400 iterations can take noticeably longer than
+        # daemon thread's 300 iterations can take noticeably longer than
         # wall-clock ``poll_interval_s * max_iterations`` would suggest.
         _wait_for(lambda: len(observed) > first_count, timeout=10.0)
     finally:

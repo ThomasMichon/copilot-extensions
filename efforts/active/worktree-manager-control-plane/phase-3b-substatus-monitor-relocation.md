@@ -532,6 +532,15 @@ first, one crisp ownership cutover, then cleanup/deletion — never an indefinit
 - **Zero-provider fallback:** create/observe a non-Manager-owned session and
   confirm the existing direct/status-updater path still works.
 
+**2026-09-27 follow-on (real-bug fix, not a plan change):** the scenarios
+above proved restart-triggered republication but left a gap the plan never
+named: with *no* restart at all, a pushed mapping still aged out of the
+resident monitor's cache after `mux_link.MAPPING_STALE_AFTER_SECONDS` (45s)
+and stayed blank indefinitely. `mux_daemon.py`'s resident loop now also
+republishes on an independent `LIVE_MAPPING_BACKSTOP_INTERVAL_S` (20s)
+keep-alive cadence, regardless of generation -- see the effort README's
+Journal entry for the live diagnosis and fix.
+
 ## Non-Goals of this slice
 
 - **Not moving status-data authority.** Git disposition, PR state, session

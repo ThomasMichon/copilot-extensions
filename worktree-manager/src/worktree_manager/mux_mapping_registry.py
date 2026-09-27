@@ -519,7 +519,9 @@ def live_mapping_republish_due(
     """Whether the resident daemon should republish every live mapping now:
     on a status-monitor generation change (restart recovery), or -- since
     that alone once left a mapping stale forever between restarts -- on
-    this keep-alive backstop cadence."""
+    this keep-alive backstop cadence. ``now``/``last_live_republish_at`` are
+    ``time.monotonic()`` readings (elapsed-duration math only), never
+    wall-clock timestamps."""
     return status_monitor_generation is not None and (
         status_monitor_generation != published_monitor_generation
         or last_live_republish_at is None

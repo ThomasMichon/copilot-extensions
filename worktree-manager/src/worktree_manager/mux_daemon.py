@@ -833,7 +833,7 @@ def run_daemon_foreground(
                     else None
                 )
                 status_monitor_generation = _status_monitor_generation(status_monitor_data)
-                now = time.time()
+                now = time.monotonic()  # immune to clock steps; diffed only against itself
                 if (
                     live_mapping_republish_due(
                         status_monitor_generation, published_monitor_generation,
