@@ -15,8 +15,20 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 
-from . import demo
+try:
+    from . import demo
+except ImportError:  # pragma: no cover - direct-script fallback
+    src_root = Path(__file__).resolve().parents[1]
+    if str(src_root) not in sys.path:
+        sys.path.insert(0, str(src_root))
+    from worktree_manager import demo
+
+
+def command_argv() -> list[str]:
+    """Run the bundled fake engine without depending on ambient PYTHONPATH."""
+    return [sys.executable, str(Path(__file__).resolve())]
 
 
 def main(argv: list[str] | None = None) -> int:

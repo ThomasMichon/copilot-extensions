@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 
@@ -24,7 +23,7 @@ from textual.app import App, ComposeResult
 from textual.events import Key
 from textual.widgets import DataTable, Footer, Header, Static, Tab, Tabs
 
-from . import demo
+from . import demo, demo_engine
 from . import engine_client as ec
 from .engine_client import EngineError, Worktree
 from .pivot_runtime import PivotLoadError, PivotPayload, load_pivot
@@ -657,7 +656,7 @@ def demo_source() -> Source:
     demo exercises the exact render path (spawn → JSON → dataclass) the real
     engine uses — the process boundary is never bypassed.
     """
-    ec.set_engine_command([sys.executable, "-m", "worktree_manager.demo_engine"])
+    ec.set_engine_command(demo_engine.command_argv())
     return lambda: ec.list_worktrees(demo.DEMO_PROJECT)
 
 

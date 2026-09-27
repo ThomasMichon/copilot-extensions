@@ -13,6 +13,7 @@ import sys
 import pytest
 
 from worktree_manager import __main__ as cli
+from worktree_manager import demo_engine
 from worktree_manager import preview as preview_mod
 
 
@@ -112,6 +113,48 @@ class TestPickerPreviewDispatch:
         assert rc == 0
         assert seen["project"] == preview_mod.DEMO_PROJECT
 
+    def test_preview_engine_supports_real_runner_bootstrap(self, monkeypatch):
+        """The fake engine must satisfy the runner's Group B bootstrap seam."""
+        from worktree_manager.production_picker import runner
+
+        preview_mod.enable_preview_mode()
+        monkeypatch.setattr(runner, "_start_housekeeping", lambda: None)
+        monkeypatch.setattr(runner.housekeeping, "start_picker_monitor_root", lambda: None)
+        monkeypatch.setattr(
+            runner,
+            "run_tui_picker",
+            lambda *, live: {"action": "new", "live": live, "project": runner.context.project()},
+        )
+
+        try:
+            decision = runner.run(preview_mod.DEMO_PROJECT)
+            assert decision == {
+                "action": "new",
+                "live": False,
+                "project": preview_mod.DEMO_PROJECT,
+            }
+        finally:
+            runner.context.reset()
+
+    def test_preview_engine_supports_real_capture_bootstrap(self, monkeypatch):
+        """The fake engine must also satisfy screenshot/capture bootstrap."""
+        from worktree_manager.production_picker import runner
+        from worktree_manager.production_picker.picker_tui import capture as picker_capture
+
+        preview_mod.enable_preview_mode()
+        monkeypatch.setattr(
+            picker_capture,
+            "capture",
+            lambda source, **kwargs: {"svg": "<svg/>", "text": "text", "ansi": "ansi"},
+        )
+
+        try:
+            payload = runner.capture(preview_mod.DEMO_PROJECT)
+            assert payload["svg"] == "<svg/>"
+            assert runner.context.project() == preview_mod.DEMO_PROJECT
+        finally:
+            runner.context.reset()
+
 
 class TestEnablePreviewMode:
     """Unit coverage of the two injections themselves, independent of the
@@ -124,7 +167,7 @@ class TestEnablePreviewMode:
 
         preview_mod.enable_preview_mode()
 
-        assert captured["cmd"] == [sys.executable, "-m", "worktree_manager.demo_engine"]
+        assert captured["cmd"] == demo_engine.command_argv()
 
     def test_materializes_a_schema_less_operator_manifest(self, monkeypatch):
         preview_mod.enable_preview_mode()

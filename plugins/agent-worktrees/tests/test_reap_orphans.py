@@ -35,7 +35,7 @@ def _rec(wt_id, *, status="active", path="/tmp/wt", kind="session"):
 
 
 def _run(sessions_map, records, *, dry_run=False, only_id=None,
-         activity=None, now=None):
+         activity=None, now=None, manager_owned_sessions=None):
     """Invoke the reaper with patched mux + tracking, capturing killed ids.
 
     ``activity`` maps session_name -> last-activity epoch (defaults every session
@@ -56,6 +56,14 @@ def _run(sessions_map, records, *, dry_run=False, only_id=None,
          patch("agent_worktrees.sessions._mux_session_activity",
                return_value=act), \
          patch("agent_worktrees.sessions.kill_tmux_session", side_effect=_kill), \
+         patch(
+             "agent_worktrees.managed_mux_registry.live_mapping_for_session",
+             side_effect=lambda name: (
+                 {"mux_session": name}
+                 if name in (manager_owned_sessions or set())
+                 else None
+             ),
+         ), \
          patch("agent_worktrees.tracking.list_records", return_value=records), \
          patch("agent_worktrees.config.tracking_dir", return_value=Path("/tmp")):
         result = cli.reap_orphan_mux_sessions(
@@ -110,6 +118,16 @@ class TestReapOrphans:
         result, killed = _run({"wt-brg": 0}, [rec])
         assert killed == []
         assert {"id": "brg", "reason": "bridge"} in result["skipped"]
+
+    def test_manager_owned_session_is_spared_for_manager_lane(self, tmp_path):
+        rec = _rec("mgr", status="finalized", path=str(tmp_path))
+        result, killed = _run(
+            {"wt-mgr": 0},
+            [rec],
+            manager_owned_sessions={"wt-mgr"},
+        )
+        assert killed == []
+        assert {"id": "mgr", "reason": "manager-owned"} in result["skipped"]
 
     def test_non_wt_sessions_ignored(self):
         result, killed = _run({"misc": 0, "scratch": 0}, [])

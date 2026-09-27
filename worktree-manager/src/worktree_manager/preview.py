@@ -41,7 +41,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from . import demo
+from . import demo, demo_engine
 from .engine_client import set_engine_command
 from .production_picker.picker_tui.pivot_manifest import PIVOTS_DIR_ENV
 
@@ -92,7 +92,7 @@ def enable_preview_mode() -> None:
     environment and ``engine_client``'s module-level override, never a
     persisted file outside the temp directory this function owns.
     """
-    set_engine_command([sys.executable, "-m", "worktree_manager.demo_engine"])
+    set_engine_command(demo_engine.command_argv())
     pivots_dir = _materialize_demo_pivot()
     os.environ[PIVOTS_DIR_ENV] = str(pivots_dir)
     os.environ[_NO_MATERIALIZE_ENV] = "1"

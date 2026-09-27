@@ -4907,6 +4907,8 @@ def reap_orphan_mux_sessions(
     if all_sessions is None:
         return {"available": False, "reaped": [], "skipped": [], "errors": []}
 
+    from . import managed_mux_registry
+
     now = time.time() if now is None else now
     activity_by_name = sessions._mux_session_activity()
     tracking_path = cfg.tracking_dir()
@@ -4929,6 +4931,9 @@ def reap_orphan_mux_sessions(
         # "untracked" below -- which reaps a live, tracked session.
         wt_id = sessions.worktree_id_from_mux_session(name, index=by_session)
         if only_id is not None and wt_id != only_id:
+            continue
+        if managed_mux_registry.live_mapping_for_session(name):
+            skipped.append({"id": wt_id, "reason": "manager-owned"})
             continue
         if attached and attached > 0:
             skipped.append({"id": wt_id, "reason": "attached"})
