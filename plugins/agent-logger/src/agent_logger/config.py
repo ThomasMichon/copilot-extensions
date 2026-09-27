@@ -466,7 +466,28 @@ def find_repo_config(start: Path | None = None) -> Path | None:
             )
         if explicit.is_symlink():
             return None
-        explicit_root = _find_repo_root(explicit.parent) or explicit.parent
+        found_root = _find_repo_root(explicit.parent)
+        explicit_root = found_root if found_root is not None else explicit.parent
+        if found_root is None:
+            # No git root was found at all -- the explicit path may not
+            # even be inside a git checkout (e.g. an agent-worktrees
+            # `reference`-class registration, a read-only mirror pointed
+            # at through a symlink). Unlike a discovered git root (whose
+            # own descent from `explicit_root` down to `explicit` the
+            # has_symlink_ancestor() check below inspects), this fallback
+            # root has never itself been checked for a symlinked ANCESTOR
+            # -- has_symlink_ancestor() only walks components BETWEEN
+            # `root` and `candidate`, so a symlinked root (or an ancestor
+            # the root sits under) would silently pass unexamined and
+            # still load the file at the far end of that link. Reject
+            # outright if physically resolving the fallback root at all
+            # changes it -- that means some component of it, at any
+            # depth, is a symlink.
+            try:
+                if explicit_root.resolve() != explicit_root:
+                    return None
+            except OSError:
+                return None
         if not repo_config_is_trusted(explicit_root):
             return None
         if has_symlink_ancestor(explicit_root, explicit):
