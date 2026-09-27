@@ -1,0 +1,9 @@
+{
+  "comment": "Daemon writes push straight into record_cache so readers see fresh state without a re-parse: record_cache.store() runs inside tracking._save_record_unlocked (the true universal write chokepoint, not only save_record), tracking.load_record() routes through record_cache.cached_load(), and store() stamps its own copy's _loaded_from to avoid a stale-path resave bug",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -1529,7 +1529,15 @@ def _yaml_safe_load(raw: str) -> object:
 
 
 def load_record(path: Path) -> WorktreeRecord:
-    """Load a worktree tracking record from a YAML file."""
+    """Load a worktree tracking record from a YAML file.
+    Routed through :mod:`record_cache` (2026-09-27) -- self-invalidating on
+    the file's own ``(mtime_ns, size)``."""
+    return record_cache.cached_load(path, _load_record_uncached)
+
+
+def _load_record_uncached(path: Path) -> WorktreeRecord:
+    """The parse :func:`load_record` memoizes via :mod:`record_cache` --
+    call :func:`load_record` instead of this directly."""
     raw = _read_text_with_retry(path)
     try:
         data = _yaml_safe_load(raw)
@@ -2283,15 +2291,13 @@ def _merge_pr_attribution_state(
        snapshot was taken), append ``current``'s entry into
        ``record.prs`` unchanged.
     """
-    # Round-5 review finding: the legacy branch/number fallback in
-    # `_pr_identity_match` can match MORE than one on-disk `current_pr` to
-    # the SAME in-memory `record.prs` entry when legacy tracking reuses one
-    # branch across sequential PRs (a terminal PR followed by a fresh one
-    # on the same branch, both still lacking `pr_id`). Track which
-    # `record.prs` entries this call has already claimed so matching stays
-    # one-to-one; a `current_pr` that can only find an already-claimed
-    # candidate is treated as unmatched (appended as its own entry) rather
-    # than silently overwriting/dropping the earlier match's frozen state.
+    # Round-5 review finding: the legacy branch/number fallback in `_pr_identity_match` can match
+    # MORE than one on-disk `current_pr` to the SAME in-memory `record.prs` entry when legacy
+    # tracking reuses one branch across sequential PRs (a terminal PR followed by a fresh one on
+    # the same branch, both still lacking `pr_id`). Track which `record.prs` entries this call has
+    # already claimed so matching stays one-to-one; a `current_pr` that can only find an
+    # already-claimed candidate is treated as unmatched (appended as its own entry) rather than
+    # silently overwriting/dropping the earlier match's frozen state.
     claimed_match_ids: set[int] = set()
     for current_pr in current.prs:
         match = next(
@@ -2329,16 +2335,14 @@ def _merge_pr_attribution_state(
             fresh_id = secrets.token_hex(16)
             match.pr_id = fresh_id
             current_pr.pr_id = fresh_id
-        # An EQUAL on-disk revision is also authoritative, not only a
-        # strictly greater one (fix-PR-#3037-review finding): two
-        # concurrent first-touch freezes of the same legacy PR can each
-        # independently bump their own copy from 0 to 1, so a strict `>`
-        # would let whichever stale in-memory snapshot happens to save
-        # SECOND silently overwrite the already-persisted first decision
-        # merely because the revisions tie. The frozen pair is meant to be
-        # decided ONCE; on a tie, the value already durably on disk (this
-        # save's own lock-serialized predecessor) wins over an in-memory
-        # value that has not yet been persisted.
+        # An EQUAL on-disk revision is also authoritative, not only a strictly greater one
+        # (fix-PR-#3037-review finding): two concurrent first-touch freezes of the same legacy PR
+        # can each independently bump their own copy from 0 to 1, so a strict `>` would let
+        # whichever stale in-memory snapshot happens to save SECOND silently overwrite the
+        # already-persisted first decision merely because the revisions tie. The frozen pair is
+        # meant to be decided ONCE; on a tie, the value already durably on disk (this save's own
+        # lock-serialized predecessor) wins over an in-memory value that has not yet been
+        # persisted.
         if current_pr.pr_revision >= match.pr_revision:
             match.attribution_mode = current_pr.attribution_mode
             match.attribution_explicit = current_pr.attribution_explicit
@@ -2360,6 +2364,11 @@ def _save_record_unlocked(
     or mutate the offered bundle. The claim-handoff transaction alone passes
     ``preserve_handoff_reservations=False`` while setting/clearing reservations
     under the required record lock.
+
+    The ACTUAL universal write chokepoint (2026-09-27): not only
+    ``save_record``, but also several already-locked direct callers (e.g.
+    the execution-leg CLI). Refreshing :mod:`record_cache` HERE, not only in
+    ``save_record``, reaches every one of them.
     """
     if path is None:
         path = record.yaml_path
@@ -2492,15 +2501,13 @@ def _save_record_unlocked(
             if fu_id not in seen_follow_up_ids:
                 merged_follow_ups.append(on_disk)
         record.follow_ups = merged_follow_ups
-        # codename-attribution-by-default (round-11 finding): a codename is
-        # assigned AT MOST ONCE and never reassigned afterward, unlike the
-        # revision-tracked fields above -- so the merge rule is simply
-        # "never let a stale in-memory record with no codename yet overwrite
-        # an on-disk record that a concurrent lazy-backfill already
-        # assigned one to." Never the reverse (an in-memory codename always
-        # wins over a current on-disk absence): a writer that itself just
-        # allocated the codename in this same call chain must not have its
-        # own fresh assignment discarded.
+        # codename-attribution-by-default (round-11 finding): a codename is assigned AT MOST ONCE
+        # and never reassigned afterward, unlike the revision-tracked fields above -- so the merge
+        # rule is simply "never let a stale in-memory record with no codename yet overwrite an
+        # on-disk record that a concurrent lazy-backfill already assigned one to." Never the
+        # reverse (an in-memory codename always wins over a current on-disk absence): a writer that
+        # itself just allocated the codename in this same call chain must not have its own fresh
+        # assignment discarded.
         if not record.codename and current.codename:
             record.codename = current.codename
             record.codename_source = current.codename_source
@@ -2972,6 +2979,7 @@ def _save_record_unlocked(
         )
 
     _atomic_write(path, content)
+    record_cache.store(path, record)
 
 
 def _flush_session_projections(record: WorktreeRecord) -> None:
@@ -3021,7 +3029,11 @@ def save_record(
     *,
     preserve_handoff_reservations: bool = True,
 ) -> None:
-    """Locked cross-process CAS for one complete worktree record."""
+    """Locked cross-process CAS for one complete worktree record.
+
+    :func:`_save_record_unlocked` refreshes :mod:`record_cache` itself
+    (2026-09-27), still inside this call's ``_RecordLock``, so any reader
+    in THIS process sees the fresh state without a redundant re-parse."""
     if path is None:
         path = record.yaml_path
     with _RecordLock(path, require_sidecar=True):
@@ -3247,15 +3259,13 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
             for lock_path in lock_paths:
                 stack.enter_context(_RecordLock(lock_path, require_sidecar=True))
 
-            # A concurrent retire_record on the SAME pair's other half may
-            # already have hard-deleted this exact record (its own
-            # both-reaped branch unlinks both files) between our pre-lock
-            # sibling read above (used only to pick which paths to lock)
-            # and this point -- re-checking now, under the lock(s), avoids
-            # racing that decision. Nothing to do once our own file is
-            # already gone; falling through to the tombstone branch below
-            # would wrongly RECREATE a file a concurrent hard-delete had
-            # already, correctly, removed (copilot-extensions#3749).
+            # A concurrent retire_record on the SAME pair's other half may already have
+            # hard-deleted this exact record (its own both-reaped branch unlinks both files)
+            # between our pre-lock sibling read above (used only to pick which paths to lock) and
+            # this point -- re-checking now, under the lock(s), avoids racing that decision.
+            # Nothing to do once our own file is already gone; falling through to the tombstone
+            # branch below would wrongly RECREATE a file a concurrent hard-delete had already,
+            # correctly, removed (copilot-extensions#3749).
             if not path.exists():
                 return True
 
