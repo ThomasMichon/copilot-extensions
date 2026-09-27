@@ -1654,6 +1654,16 @@ if (-not $noMux) {
         if (-not [string]::IsNullOrWhiteSpace($sessName)) {
             $wrapperArgs += @('-AwMuxSession', [string]$sessName)
         }
+        if (-not [string]::IsNullOrWhiteSpace([string]$script:AwPsmuxBin)) {
+            # Thread the ALREADY-resolved binary (Copilot review finding on
+            # PR #3906): pane-wrapper.ps1 has no access to
+            # Resolve-AwPsmuxBin's own WinGet-reparse-stub detection, and a
+            # bare `psmux` on PATH can silently resolve to a different (or
+            # missing) binary than this launcher used -- which would make
+            # its later session_incarnation probe fail silently, disabling
+            # the #3838 stale-teardown guard without any visible error.
+            $wrapperArgs += @('-AwPsmuxBin', [string]$script:AwPsmuxBin)
+        }
         if ($ahpTokenFile) {
             $wrapperArgs += @('-AwAhpTokenFile', $ahpTokenFile)
         }

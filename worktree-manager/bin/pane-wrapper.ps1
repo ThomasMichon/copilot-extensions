@@ -95,6 +95,7 @@ $rest = @($args)
 $awWt = ''
 $awProject = ''
 $awMuxSession = ''
+$awPsmuxBin = ''
 $initialPromptB64 = ''
 $initialPromptReceiptB64 = ''
 $ahpTokenFile = ''
@@ -106,6 +107,8 @@ while ($rest.Count -ge 2) {
         $awProject = [string]$rest[1]
     } elseif ($key -eq '-AwMuxSession') {
         $awMuxSession = [string]$rest[1]
+    } elseif ($key -eq '-AwPsmuxBin') {
+        $awPsmuxBin = [string]$rest[1]
     } elseif ($key -eq '--aw-prompt-b64') {
         $initialPromptB64 = [string]$rest[1]
     } elseif ($key -eq '--aw-prompt-receipt-b64') {
@@ -316,9 +319,14 @@ if (
         # worktree. psmux's own #{session_id}:#{session_created} IS unique
         # per real session object and stays identical across repeated joins
         # of the same still-live session -- query it live from inside this
-        # same pane rather than trusting a threaded value.
+        # same pane rather than trusting a threaded value. Use the
+        # launcher's ALREADY-resolved binary when known (Copilot review
+        # finding): a bare `psmux` on PATH can silently resolve to a
+        # different/missing binary, making this probe fail silently and
+        # disabling the guard without any visible error.
+        $psmuxBin = if (-not [string]::IsNullOrWhiteSpace($awPsmuxBin)) { $awPsmuxBin } else { 'psmux' }
         try {
-            $incarnation = (& psmux display-message -p '#{session_id}:#{session_created}' 2>$null)
+            $incarnation = (& $psmuxBin display-message -p '#{session_id}:#{session_created}' 2>$null)
             if (-not [string]::IsNullOrWhiteSpace([string]$incarnation)) {
                 $removeArgs += "--session-incarnation=$incarnation"
             }
