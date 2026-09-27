@@ -1122,7 +1122,9 @@ def _worktree_to_dict(
     (existence and attached client count).
 
     If ``session_ctx`` is provided, includes session-derived metrics
-    (turn_count, session_count, latest_summary).
+    (turn_count, session_count, latest_summary), plus
+    ``session_head_mismatch``/``_scanned_id`` (#3307 Phase 7) when the head
+    disagrees with the session most-recently touched on disk.
 
     If ``bare_orphan_wts`` is provided (the set of worktree ids that host a
     **bare**/un-muxed bound Copilot, from :func:`reclaim.bare_orphan_worktree_ids`),
@@ -1339,6 +1341,17 @@ def _worktree_to_dict(
         # directory is temporarily unavailable.
         if registered_sessions is None:
             d["session_count"] = session_ctx.session_count.get(norm, 0)
+        # #3307 Phase 7 (dotfiles#1298): the asserted head ALWAYS wins for
+        # resumability (unchanged above); a worktree whose head disagrees
+        # with the session actually most-recently touched on disk
+        # (``session_ctx.last_session_id``, GH #198's scan) is a real
+        # inconsistency worth surfacing (e.g. a resumed session landing on
+        # a stale predecessor). Purely additive -- never changes which
+        # session ``last_session_id`` resolves to.
+        scanned_sid = session_ctx.last_session_id.get(norm)
+        if head_session and scanned_sid and scanned_sid != head_session:
+            d["session_head_mismatch"] = True
+            d["session_head_mismatch_scanned_id"] = scanned_sid
         # two-step-restore: the session id(s) currently held by a live
         # ``inuse.<pid>.lock`` (a bound Copilot process -- mux OR bare), and the
         # current durable head for this worktree. The Picker shows the head id

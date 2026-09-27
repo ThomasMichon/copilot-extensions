@@ -404,6 +404,17 @@ class WorktreesView:
             pline.append(phase_label, style=_palette_style("task_phase", phase_label) or C_DIM)
         if has_claims and pline.cell_len + 2 <= width:
             pline.append(" *", style=C_LABEL)
+        # #3307 Phase 7 (dotfiles#1298): surface the head/scanned-session
+        # mismatch flag (see ``_worktree_to_dict``/``derive.norm``) so the
+        # operator notices without opening "View details". The asserted head
+        # still wins for resumability -- this is purely a visible nudge to
+        # investigate (e.g. via the "Sessions" sub-menu).
+        if rec.get("session_head_mismatch"):
+            label = " \u26a0 head mismatch"
+            if pline.cell_len + len(label) <= width:
+                pline.append(label, style=C_WARN)
+            elif pline.cell_len + 2 <= width:
+                pline.append(" \u26a0", style=C_WARN)
         # Hard width guarantee: even with the reserve above, truncate once at
         # the end so a pathological combination can never overflow the row.
         if pline.cell_len > width:

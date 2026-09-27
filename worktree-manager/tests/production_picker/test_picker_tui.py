@@ -66,6 +66,20 @@ def _task_menu_open(scr):
     return _task_menu(scr) is not None
 
 
+async def _open_task_menu_and_wait(scr, pilot):
+    """Open the task action sub-menu, then poll briefly for the modal to
+    actually mount. A single ``pilot.pause()`` right after ``push_screen`` is
+    occasionally not enough to observe the new screen on the stack under
+    system load -- a pre-existing, load-sensitive flake independent of any
+    particular test's own content (reproduces identically on an unmodified
+    checkout); poll instead of assuming one pump always suffices."""
+    scr._open_task_menu()
+    for _ in range(50):
+        await pilot.pause()
+        if _task_menu(scr) is not None:
+            return
+
+
 def _cfg_menu(scr):
     """The F4 CfgMenuScreen instance on the app's screen stack, or None."""
     from worktree_manager.production_picker.picker_tui.engine import CfgMenuScreen
@@ -148,6 +162,20 @@ def _msgview_screen(scr):
 def _msgview_open(scr):
     """True when the F4 MsgViewScreen (recent-messages viewer) is stacked."""
     return _msgview_screen(scr) is not None
+
+
+def _sessionsview_screen(scr):
+    """The SessionsViewScreen instance on the app's screen stack, or None."""
+    from worktree_manager.production_picker.picker_tui.engine import SessionsViewScreen
+    for s in scr.app.screen_stack:
+        if isinstance(s, SessionsViewScreen):
+            return s
+    return None
+
+
+def _sessionsview_open(scr):
+    """True when the "Sessions" sub-menu (SessionsViewScreen) is stacked."""
+    return _sessionsview_screen(scr) is not None
 
 
 def _fixture_source():
@@ -4067,6 +4095,109 @@ def test_msgview_local_load_populates_and_closes(monkeypatch):
     asyncio.run(run())
 
 
+def test_sessions_verb_gated_on_registered_session_count():
+    """#3307 Phase 7: the "Sessions" sub-menu verb is offered whenever a
+    worktree has at least one registered session (``session_count``),
+    independent of current liveness -- unlike "Messages" (gated off
+    ``sessionless``), a stopped worktree's session HISTORY is still worth
+    browsing. The cold-start ("none", session_count=0) row never offers it."""
+    src = _verb_fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            recs = scr.list_records()
+            by_id4 = {w["id4"]: i for i, w in enumerate(recs)}
+
+            for key in ("live", "stop"):
+                scr.sel = ("L", by_id4[key])
+                scr._open_submenu()
+                await pilot.pause()
+                menu = _sub_menu(scr)
+                assert menu is not None
+                assert "Sessions" in menu._actions, key
+                scr.app.pop_screen()
+                await pilot.pause()
+
+            scr.sel = ("L", by_id4["none"])
+            scr._open_submenu()
+            await pilot.pause()
+            menu = _sub_menu(scr)
+            assert menu is not None
+            assert "Sessions" not in menu._actions
+
+    asyncio.run(run())
+
+
+def test_sessionsview_local_load_populates_and_closes(monkeypatch):
+    """Enter on 'Sessions' loads the worktree's full session registry through
+    the provider CLI and renders id/state/started/ended/turns/head -- the
+    #3307 Phase 7 dedicated history browse, distinct from Messages' abbreviated
+    per-session list."""
+    from worktree_manager import engine_client
+    from worktree_manager.production_picker import context
+
+    monkeypatch.setattr(context, "project", lambda: "example")
+    monkeypatch.setattr(
+        engine_client,
+        "list_worktree_sessions",
+        lambda *_a, **_k: [
+            {"id": "sess-head-0001", "is_head": True, "state": "active",
+             "turn_count": 7, "started_at_marker": "2026-06-27T17:00:00",
+             "ended_at_marker": None},
+            {"id": "sess-pred-0002", "is_head": False, "state": "handed-off",
+             "turn_count": 3, "started_at_marker": "2026-06-27T16:00:00",
+             "ended_at_marker": "2026-06-27T17:00:00"},
+        ],
+    )
+
+    src = _verb_fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            by_id4 = {w["id4"]: i for i, w in enumerate(scr.list_records())}
+            scr.sel = ("L", by_id4["stop"])
+            scr._open_submenu()
+            await pilot.pause()
+            menu = _sub_menu(scr)
+            assert menu is not None
+            for _ in range(menu._actions.index("Sessions")):
+                await pilot.press("down")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert not _sub_menu_open(scr)
+            assert scr.sessionsview is not None
+            assert _sessionsview_open(scr)
+            for _ in range(200):
+                if scr.sessionsview and not scr.sessionsview["loading"]:
+                    break
+                await pilot.pause()
+                time.sleep(0.01)
+            assert scr.sessionsview["loading"] is False
+            assert scr.sessionsview["error"] is None
+            ids = [s["id"] for s in scr.sessionsview["sessions"]]
+            assert ids == ["sess-head-0001", "sess-pred-0002"]
+            await pilot.pause()
+            out = _sessionsview_screen(scr)._panel().renderable.plain
+            assert "sess-head" in out
+            assert "sess-pred" in out
+            assert "\u25cf" in out          # head marker rendered
+            # Esc through the real keyboard pipeline closes it.
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not _sessionsview_open(scr)
+            assert scr.sessionsview is None
+
+    asyncio.run(run())
+
+
 def test_wrap_text_wraps_and_hard_splits():
     """Word-wrap respects width, keeps whole words, and hard-splits a word
     longer than the width."""
@@ -7866,6 +7997,29 @@ def test_detail_line_never_falls_back_to_bare_state():
     assert line.plain.strip() == "Fix the thing"
 
 
+def test_detail_line_shows_session_head_mismatch_warning():
+    """#3307 Phase 7 (dotfiles#1298): a worktree flagged
+    ``session_head_mismatch`` (the asserted head disagrees with the session
+    most-recently touched on disk) shows a visible "head mismatch" warning
+    on the detail line -- an unflagged row shows nothing extra."""
+    import worktree_manager.production_picker.picker_tui.engine as eng_mod
+
+    class _Eng:
+        def _worktree_claiming_task(self, _rec):
+            return None
+
+    view = eng_mod.WorktreesView(_Eng())
+    flagged = {"title": "Fix the thing", "state": "wip",
+               "session_head_mismatch": True}
+    line = view._detail_line(flagged, 80)
+    assert "head mismatch" in line.plain
+    assert "\u26a0" in line.plain
+
+    unflagged = {"title": "Fix the thing", "state": "wip",
+                 "session_head_mismatch": False}
+    assert "head mismatch" not in view._detail_line(unflagged, 80).plain
+
+
 def test_detail_line_prefers_live_intent_then_activity():
     """Fallback order: live-pulse intent (fresh session) beats the
     disposition-asserted ``activity`` field, which is shown when no live
@@ -8180,8 +8334,7 @@ def test_registered_pivot_action_menu_runs_and_invalidates(tmp_path, monkeypatch
 
             # Enter opens the action sub-menu (ModalScreen) with the manifest's
             # actions.
-            scr._open_task_menu()
-            await pilot.pause()
+            await _open_task_menu_and_wait(scr, pilot)
             menu = _task_menu(scr)
             assert menu is not None
             assert [a.label for a in menu._actions] == [
@@ -8346,8 +8499,7 @@ def test_registered_pivot_conditional_actions_filter_by_when(tmp_path, monkeypat
             # Row 0 (in-use): Details + Release, NOT Recycle.
             scr.sel = ("T", 0)
             await pilot.pause()
-            scr._open_task_menu()
-            await pilot.pause()
+            await _open_task_menu_and_wait(scr, pilot)
             menu = _task_menu(scr)
             assert menu is not None
             assert [a.label for a in menu._actions] == ["Details", "Release"]
@@ -8357,8 +8509,7 @@ def test_registered_pivot_conditional_actions_filter_by_when(tmp_path, monkeypat
             # Row 1 (stale): Details + Recycle, NOT Release.
             scr.sel = ("T", 1)
             await pilot.pause()
-            scr._open_task_menu()
-            await pilot.pause()
+            await _open_task_menu_and_wait(scr, pilot)
             menu = _task_menu(scr)
             assert menu is not None
             assert [a.label for a in menu._actions] == ["Details", "Recycle"]
@@ -8432,8 +8583,7 @@ def test_steering_card_and_form_actions_gate_and_drive(tmp_path, monkeypatch):
             # Awaiting-steer row: Card + Steer are shown (plus Abandon).
             scr.sel = ("T", 0)
             await pilot.pause()
-            scr._open_task_menu()
-            await pilot.pause()
+            await _open_task_menu_and_wait(scr, pilot)
             menu = _task_menu(scr)
             assert [a.label for a in menu._actions] == ["View card", "Steer", "Abandon"]
             await pilot.press("escape")
@@ -8442,8 +8592,7 @@ def test_steering_card_and_form_actions_gate_and_drive(tmp_path, monkeypatch):
             # Non-awaiting row: only Abandon (card/steer gated out).
             scr.sel = ("T", 1)
             await pilot.pause()
-            scr._open_task_menu()
-            await pilot.pause()
+            await _open_task_menu_and_wait(scr, pilot)
             menu = _task_menu(scr)
             assert [a.label for a in menu._actions] == ["Abandon"]
             await pilot.press("escape")

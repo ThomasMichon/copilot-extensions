@@ -68,7 +68,7 @@ from .engine_helpers import (
     target_rows,
 )
 from .engine_input import PickerScreenInputMixin
-from .engine_live_screens import MsgViewScreen, ProgressScreen
+from .engine_live_screens import MsgViewScreen, ProgressScreen, SessionsViewScreen
 from .engine_loading import PickerScreenLoadingMixin
 from .engine_maintenance_actions import PickerScreenMaintenanceActionsMixin
 from .engine_model import PickerScreenModelMixin
@@ -87,6 +87,7 @@ from .engine_regions import (
 from .engine_rendering import PickerScreenRenderingMixin
 from .engine_runtime import PickerScreenRuntimeMixin
 from .engine_selection import PickerScreenSelectionMixin
+from .engine_sessions_actions import PickerScreenSessionsActionsMixin
 from .engine_views import MaintenanceView, TasksView, WorktreesView
 from .engine_worker_actions import PickerScreenWorkerActionsMixin
 from .engine_worktree_actions import PickerScreenWorktreeActionsMixin
@@ -133,6 +134,7 @@ __all__ = [
     "QuitConfirmScreen",
     "ResetConfirmScreen",
     "ScopeDlgScreen",
+    "SessionsViewScreen",
     "SteerButtonRow",
     "SubMenuScreen",
     "SubmitErrorScreen",
@@ -182,6 +184,7 @@ class PickerScreen(
     PickerScreenInputMixin,
     PickerScreenMaintenanceActionsMixin,
     PickerScreenWorktreeActionsMixin,
+    PickerScreenSessionsActionsMixin,
     PickerScreenWorkerActionsMixin,
     PickerScreenPivotActionsMixin,
     Widget,
@@ -313,6 +316,8 @@ class PickerScreen(
         # _open_submenu. (The overlay left the manual registry entirely.)
         self.msgview = None           # recent-messages viewer overlay (#session-viewer)
         self._msgview_lock = threading.Lock()
+        self.sessionsview = None      # Sessions sub-menu overlay (#3307 Phase 7)
+        self._sessionsview_lock = threading.Lock()
         self._provider_loader = None
         self._provider_loader_lock = threading.Lock()
         self._provider_cancelled = False

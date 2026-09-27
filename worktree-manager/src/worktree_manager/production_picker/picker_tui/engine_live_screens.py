@@ -363,3 +363,129 @@ class MsgViewScreen(ModalScreen[None]):
             self.dismiss(None)
         else:
             self._refresh()
+
+class SessionsViewScreen(ModalScreen[None]):
+    """Native modal "Sessions" sub-menu (#3307 Phase 7): a dedicated,
+    read-only browse of EVERY session recorded against a worktree -- id,
+    started/ended, turn count, and the head marker -- distinct from
+    ``MsgViewScreen``'s abbreviated session list (which exists only as a
+    copy-an-id aid alongside the recent-messages tail for the CURRENT
+    session). Mirrors ``MsgViewScreen``'s live-load/scroll/close shape
+    exactly: the payload loads on a daemon thread (``_sessionsview_worker``)
+    that populates the engine-owned ``self.sessionsview`` dict under a lock,
+    and an ``on_mount`` interval repaints while ``loading``.
+    """
+
+    CSS = """
+    SessionsViewScreen { align: center middle; background: $background 55%; }
+    SessionsViewScreen > #sessionsview { width: auto; height: auto; max-height: 90%; }
+    """
+
+    def __init__(self, eng) -> None:
+        super().__init__()
+        self._eng = eng
+        self._loading_last = True
+
+    def compose(self) -> ComposeResult:
+        yield Static(self._panel(), id="sessionsview")
+
+    def on_mount(self) -> None:
+        self.set_interval(0.1, self._on_tick)
+
+    def _on_tick(self) -> None:
+        sv = self._eng.sessionsview
+        if sv is None:
+            if self.app.screen is self:
+                self.dismiss(None)
+            return
+        loading = bool(sv.get("loading"))
+        if loading or self._loading_last:
+            self._refresh()
+        self._loading_last = loading
+
+    def _refresh(self) -> None:
+        if self._eng.sessionsview is not None:
+            self.query_one("#sessionsview", Static).update(self._panel())
+
+    def _panel(self) -> Panel:
+        eng = self._eng
+        sv = eng.sessionsview
+        if sv is None:
+            return Panel(Text(""), border_style=C_DIM, width=92)
+        rec = sv["rec"]
+        title = f" {rec.get('title', '')}"
+        meta = (f" {rec.get('id4')} \u00b7 {rec.get('machine')} \u00b7 {rec.get('env')}")
+
+        body: list[Text] = []
+        if sv.get("loading"):
+            spin = "\u280b\u2819\u2839\u2838\u283c\u2834\u2826\u2827\u2807\u280f"[
+                (eng.frame // 2) % 10]
+            body.append(Text(f" {spin} Loading sessions\u2026", style=C_FAINT))
+        elif sv.get("error"):
+            body.append(Text(f" \u26a0 {sv['error']}", style=C_CAUTION))
+        elif not sv.get("sessions"):
+            body.append(Text(" (no registered sessions for this worktree)",
+                             style=C_FAINT))
+        else:
+            hdr = Text(
+                f"  {'':1} {'ID':13} {'STATE':10} {'STARTED':20} "
+                f"{'ENDED':20} {'TURNS':>5}",
+                style=C_HEADER,
+            )
+            body.append(hdr)
+            for s in sv["sessions"]:
+                sid = str(s.get("id", ""))
+                short_id = sid if len(sid) <= 12 else f"{sid[:10]}\u2026"
+                is_head = bool(s.get("is_head"))
+                marker = "\u25cf" if is_head else " "
+                mark_style = "bold #7ee787" if is_head else C_DIM
+                state = str(s.get("state", "") or "active")
+                started = str(
+                    s.get("started_at_marker") or s.get("created_at") or ""
+                )[:19]
+                ended_raw = s.get("ended_at_marker") or s.get("ended_at")
+                ended = str(ended_raw)[:19] if ended_raw else (
+                    "(active)" if is_head or state == "active" else "\u2014"
+                )
+                turns = s.get("turn_count", 0)
+                row = Text("  ", style=C_DIM)
+                row.append(f"{marker} ", style=mark_style)
+                row.append(f"{short_id:13} ", style="white")
+                row.append(f"{state:10} ", style=C_DIM)
+                row.append(f"{started:20} ", style=C_DIM)
+                row.append(f"{ended:20} ", style=C_DIM)
+                row.append(f"{turns:>5}", style="white")
+                body.append(row)
+            body.append(Text(""))
+            body.append(Text(" \u25cf marks the current head", style=C_FAINT))
+
+        avail = 18
+        total = len(body)
+        max_scroll = max(0, total - avail)
+        scroll = min(sv.get("scroll", 0), max_scroll)
+        sv["scroll"] = scroll
+        window = body[scroll:scroll + avail]
+
+        out = Text()
+        out.append(title + "\n", style=C_HEADER)
+        out.append(meta + "\n\n", style=C_DIM)
+        for ln in window:
+            out.append_text(ln)
+            out.append("\n")
+        if total > avail:
+            more = total - avail - scroll
+            out.append("   \u2026 %d more line(s) below" % more if more > 0
+                       else "   (end)", style=C_DIM)
+            out.append("\n")
+        out.append("\n")
+        out.append(" Esc close \u00b7 \u2191/\u2193 scroll", style=C_FAINT)
+        return Panel(out, title="Sessions", border_style=C_BAND, width=92)
+
+    def on_key(self, event) -> None:
+        event.stop()
+        eng = self._eng
+        eng._key_sessionsview(canonical_key(event.key))
+        if eng.sessionsview is None:
+            self.dismiss(None)
+        else:
+            self._refresh()

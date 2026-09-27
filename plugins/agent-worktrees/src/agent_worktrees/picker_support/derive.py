@@ -471,6 +471,12 @@ def norm(
         # sub-menu so the operator can ``/resume`` it), and whether a live
         # ``inuse.<pid>.lock`` binds a Copilot process right now (gates Reclaim).
         "last_session_id": w.get("last_session_id"),
+        # #3307 Phase 7 (dotfiles#1298): the asserted head disagrees with the
+        # session actually most-recently touched on disk. The head still
+        # wins for resumability (``last_session_id`` above, unchanged) --
+        # this is purely a surfaced warning for the operator to investigate.
+        "session_head_mismatch": bool(w.get("session_head_mismatch")),
+        "session_head_mismatch_scanned_id": w.get("session_head_mismatch_scanned_id"),
         "session_lock_live": bool(w.get("session_lock_live")),
         # Stale-lock residue: an ``inuse.<pid>.lock`` file whose pid is no longer
         # a live Copilot (crashed/killed without cleanup). NOT a live binding, so

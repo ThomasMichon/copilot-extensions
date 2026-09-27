@@ -158,6 +158,15 @@ class PickerScreenWorktreeActionsMixin:
         # of the lifecycle group above (live, resumable, or residual all peek).
         if not warning and not rec.get("sessionless"):
             acts.append("Messages")
+        # #3307 Phase 7: read-only "Sessions" sub-menu -- every session EVER
+        # registered against this worktree (id, started/ended, turn count,
+        # head marker), independent of current liveness/warning state (a
+        # gone/warning/reclaimable worktree's session HISTORY is still worth
+        # browsing, e.g. exactly when diagnosing the mismatch this phase's
+        # other half warns about). Offered whenever at least one session is
+        # registered.
+        if rec.get("session_count"):
+            acts.append("Sessions")
         # FF-sync / cleanup / finalize -- offered only in the non-broken,
         # non-residue lifecycle states (never beside Reclaim/Repair, where a
         # Cleanup/Sync would race the residue). A gone worktree still offers
@@ -392,6 +401,9 @@ class PickerScreenWorktreeActionsMixin:
         elif cur == "Messages":
             # Read-only peek at the worktree's latest session messages.
             self._open_msgview(rec)
+        elif cur == "Sessions":
+            # Read-only browse of the worktree's FULL session history.
+            self._open_sessions_menu(rec)
         elif cur == "Jump to host":
             # Internal navigation -- stay in the picker (#1424).
             self._jump_to_worktree((rec.get("raw") or {}).get("id"))
