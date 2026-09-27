@@ -1,9 +1,0 @@
-{
-  "comment": "Add regression coverage for independent mux/AHP picker selection",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}
