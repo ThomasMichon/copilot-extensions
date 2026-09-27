@@ -1,0 +1,9 @@
+{
+  "comment": "Add host_workspace_path/host_home_path (real, host-backed persistence) and systemd_capable (CAP_SYS_ADMIN + cgroup remount for a working systemd --user) for trusted, image-backed fleets",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

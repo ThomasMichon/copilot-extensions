@@ -199,6 +199,76 @@ def test_restricted_image_run_applies_boundary_flags(monkeypatch):
     assert RESTRICTED_POLICY_VERSION == 2
 
 
+def test_trusted_image_run_wires_host_mounts_and_systemd_capability(monkeypatch):
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        fleet_mod,
+        "_docker",
+        lambda args, timeout=30: calls.append(args) or _ok("container-id\n"),
+    )
+    fleet = FleetConfig(
+        image="example/agent:latest",
+        security_profile="trusted",
+        host_workspace_path="/mnt/data/workspaces/example-1",
+        host_home_path="/mnt/data/home/example-1",
+        home_folder="/home/node",
+        systemd_capable=True,
+    )
+
+    name = fleet_mod._image_run(
+        "example",
+        fleet,
+        "example-1",
+        workspace_folder="/workspace/example",
+        exec_user="node",
+    )
+
+    assert name == "example-1"
+    run = calls[0]
+    assert "-v" in run
+    mounts = [run[i + 1] for i, value in enumerate(run) if value == "-v"]
+    assert "/mnt/data/workspaces/example-1:/workspace/example" in mounts
+    assert "/mnt/data/home/example-1:/home/node" in mounts
+    assert run[run.index("--cap-add") + 1] == "SYS_ADMIN"
+    tmpfs = [run[i + 1] for i, value in enumerate(run) if value == "--tmpfs"]
+    assert "/run:rw,exec" in tmpfs
+    assert "/run/lock:rw,exec" in tmpfs
+    assert "-t" in run
+    assert "container=docker" in run
+    # The launched command remounts /sys/fs/cgroup rw before exec'ing
+    # systemd -- NOT the historical `sleep infinity` placeholder.
+    assert run[-4:] == [
+        "example/agent:latest",
+        "bash", "-c",
+        "mount -o remount,rw /sys/fs/cgroup && exec /lib/systemd/systemd",
+    ]
+    assert "--cap-drop=ALL" not in run
+    assert "--read-only" not in run
+
+
+def test_trusted_image_run_without_systemd_capable_keeps_sleep_infinity(monkeypatch):
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        fleet_mod,
+        "_docker",
+        lambda args, timeout=30: calls.append(args) or _ok("container-id\n"),
+    )
+    fleet = FleetConfig(image="example/agent:latest", security_profile="trusted")
+
+    fleet_mod._image_run(
+        "example",
+        fleet,
+        "example-1",
+        workspace_folder="/workspace/example",
+        exec_user="node",
+    )
+
+    run = calls[0]
+    assert run[-3:] == ["example/agent:latest", "sleep", "infinity"]
+    assert "-v" not in run
+    assert "--cap-add" not in run
+
+
 def test_restricted_network_defaults_to_none(monkeypatch):
     calls: list[list[str]] = []
     monkeypatch.setattr(

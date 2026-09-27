@@ -422,9 +422,44 @@ def _image_run(
             args += ["--cpus", str(fleet.effective_cpus())]
         if fleet.effective_pids_limit() is not None:
             args += ["--pids-limit", str(fleet.effective_pids_limit())]
+        # Optional real, host-backed persistence for full-harness-projection
+        # (see visions/plugins/agent-containers's full-harness-projection-trusted):
+        # an image-backed trusted fleet otherwise has no persistence mechanism
+        # at all (code_model's "mount" variant remains unimplemented).
+        if fleet.host_workspace_path:
+            args += ["-v", f"{fleet.host_workspace_path}:{workspace_folder}"]
+        if fleet.host_home_path and fleet.home_folder:
+            args += ["-v", f"{fleet.host_home_path}:{fleet.home_folder}"]
+        if fleet.systemd_capable:
+            # A working `systemd --user` (for the venue's own maintenance
+            # timers) needs CAP_SYS_ADMIN + a writable /sys/fs/cgroup +
+            # writable/executable /run + a container marker + (for visible
+            # PID1 boot logging) an allocated tty. Docker's default
+            # /sys/fs/cgroup mount is read-only even under `trusted`; a raw
+            # host bind-mount of it does NOT work (cgroup-namespace path
+            # mismatch) -- an in-container remount at startup is the fix.
+            # Validated live against a real, unprivileged container -- see
+            # the effort/issue this landed from.
+            args += [
+                "--cap-add", "SYS_ADMIN",
+                "--tmpfs", "/run:rw,exec",
+                "--tmpfs", "/run/lock:rw,exec",
+                "-t",
+                "--env", "container=docker",
+            ]
     for key, value in sorted(fleet.environment.items()):
         args += ["--env", f"{key}={value}"]
-    args += [fleet.image, "sleep", "infinity"]
+    if fleet.systemd_capable:
+        # The image must provide `systemd`/`systemd-sysv`/`dbus-user-session`
+        # itself -- this plugin only wires the launch, it does not install
+        # systemd into the image.
+        cmd = [
+            "bash", "-c",
+            "mount -o remount,rw /sys/fs/cgroup && exec /lib/systemd/systemd",
+        ]
+    else:
+        cmd = ["sleep", "infinity"]
+    args += [fleet.image, *cmd]
     res = _docker(args, timeout=120)
     if res.returncode != 0:
         raise RuntimeError(f"docker run failed for {name}: {res.stderr.strip()}")

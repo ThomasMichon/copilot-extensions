@@ -114,6 +114,14 @@ discover other devcontainers, but they never inherit global credential or launch
 defaults. Restricted venues are re-inspected before start/exec; a stale image or
 weakened Docker posture is refused.
 
+For an `image:`-backed **trusted** fleet that needs real, host-backed
+persistence and/or a working `systemd --user` (for its own maintenance
+timers), opt into `host_workspace_path`/`host_home_path`+`home_folder` and
+`systemd_capable: true` -- see the plugin `README.md`'s "Host-backed
+persistence and systemd for trusted, image-backed fleets" section for the
+full shape and the launch mechanics. Both are rejected on a `restricted`
+fleet.
+
 Use `environment` only for explicit **non-secret** model/harness settings.
 Credential-shaped names are refused at config load and again if an image
 contains them; machine-readable output reports names only.
