@@ -10,10 +10,10 @@
   two review passes (PR #3893) found 6 real blocking issues (trigger
   can't fire, no edit tool, auth signal gap, protected-files gap,
   prompt-injection gap, no changefile path); a successor session
-  resolved all 6 against gh-aw's own docs (still **not compile-
-  verified** -- `gh aw compile` remains blocked by the same SAML-SSO
-  wall, not re-attempted), landing as a new PR; see the 2026-09-26
-  Journal entry
+  resolved all 6 through an 8-round iterative real-review cycle (PR
+  #3916), converging on a materially hardened design (still **not
+  compile-verified** -- `gh aw compile` remains blocked by the same
+  SAML-SSO wall, not re-attempted); see the 2026-09-26 Journal entry
 - **Vision:** [`visions/ci-failure-remediation`](../../../visions/ci-failure-remediation/README.md)
   (authored 2026-09-26 to resolve the reconciliation gate below). **Gate
   resolved:** the vision states the standing intent (detection+dedup,
@@ -1618,5 +1618,32 @@ _Pending._
   that finally closed #5 for real also closed a gap #2's own checks left
   open) and needed the full 7 rounds between them, down to a real
   delimiter-collision bug in round 6's own output-passing mechanism.
-  Still outstanding regardless: `gh aw compile` verification (SSO-blocked,
-  unresolved this session).
+- **An EIGHTH review pass found a genuinely different, structural finding
+  — not another bug in a prior fix, a NEW class of risk on the original
+  #1 trigger design: the `label_command`-generated `workflow_dispatch`
+  trigger inherits the same "loads the entire YAML from the dispatched
+  ref" risk `validate-and-promote.yml` already documents for a different
+  job.** A write-access collaborator could dispatch a modified copy of
+  the fix-attempt workflow itself from their own branch, bypassing every
+  check the file defines (since those checks live in the same file an
+  attacker fully controls in that scenario) — structurally, no check
+  *inside* this file can close that specific case. Added an explicit ref
+  check (`workflow_dispatch` must target the default branch) as a
+  best-effort, code-level mitigation for the well-behaved/accidental
+  path — `report-failure`'s own automated dispatch never specifies
+  `--ref` and already only ever targets the default branch — while
+  documenting explicitly, in both the draft's own comment block and this
+  entry, that the fully-attacker-modified-copy case remains structurally
+  unclosable from within the file and is bounded only by who holds write
+  access to the repository at all (the same outer trust boundary this
+  effort's own charter already treats as given, not something a workflow
+  file's own content can further restrict).
+- **Eight rounds deep now. #1, #3, #4, #6 have stayed resolved since round
+  1 with zero further findings across 7 subsequent review passes** — a
+  reasonable signal those are genuinely settled, even without a live
+  compile. #2 and #5 needed 7 rounds to reach a defensible, TOCTOU-safe,
+  delimiter-safe state. Round 8's finding is a different, honestly-named
+  exception: a documented, structural limitation of `workflow_dispatch`
+  itself, mitigated rather than fully closed, with the residual risk
+  stated explicitly rather than hidden. Still outstanding regardless:
+  `gh aw compile` verification (SSO-blocked, unresolved this session).

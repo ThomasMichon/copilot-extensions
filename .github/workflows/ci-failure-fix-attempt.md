@@ -119,6 +119,13 @@
   6. NO CHANGEFILE PATH FOR A PLUGIN FIX -- RESOLVED: added an explicit markdown
      instruction requiring `python tools/changefile.py add ...` for any touched
      `plugins/**` content, plus a matching `tools.bash` allowlist entry.
+  7. (Found on round 8, resolving #1/#2 -- not one of the original 6, but the same
+     severity class) UNRESTRICTED `workflow_dispatch` REF -- MITIGATED, not fully
+     closed; see `verify-issue`'s own `if:` and its inline comment for the full
+     reasoning and the explicit statement of what remains structurally
+     unclosable (a fully attacker-modified copy of this file dispatched from the
+     attacker's own branch, a known `workflow_dispatch` limitation this repo's
+     own `validate-and-promote.yml` already documents for a different job).
 
   A first pass at resolving #1/#2 (PR #3916) introduced two NEW, real issues real
   review caught before merge, both since fixed in this same file: (a) the
@@ -183,9 +190,20 @@
   corrupting/truncating what the agent actually receives; fixed by
   generating the delimiter at runtime and confirming it does not literally
   occur anywhere in the body first, retrying with fresh randomness on
-  collision. See the `verify-issue` job's own inline comments, the
-  `pre-agent-steps` block, the `safe-outputs.threat-detection` block, and
-  `validate-and-promote.yml`'s dispatch step for detail.
+  collision. An EIGHTH review pass found 1 more, this time NOT fully
+  resolved (see finding #7 above and `verify-issue`'s own `if:`): (l) the
+  `label_command`-generated `workflow_dispatch` trigger inherits the same
+  "loads the entire YAML from the dispatched ref" risk this file's own
+  `validate-and-promote.yml` already documents for a different job -- a
+  write-access collaborator could dispatch a modified copy of THIS file
+  from their own branch, bypassing every check it defines (since those
+  checks live in the same file an attacker fully controls in that
+  scenario). Mitigated with an explicit ref check (best-effort for the
+  well-behaved copy; structurally incapable of closing the fully-modified-
+  copy case) rather than left unaddressed. See the `verify-issue` job's own
+  inline comments, the `pre-agent-steps` block, the
+  `safe-outputs.threat-detection` block, and `validate-and-promote.yml`'s
+  dispatch step for detail.
 -->
 ---
 description: "Attempts a scoped, reviewed fix for one tracked dev CI-failure signature (promotion-failure-reactive-fix-agent effort, Phase 2)."
@@ -231,6 +249,31 @@ permissions:
 jobs:
   verify-issue:
     runs-on: ubuntu-latest
+    # Real review finding (PR #3916): `label_command`'s auto-generated
+    # `workflow_dispatch` trigger is a structural risk this repo's own
+    # `validate-and-promote.yml` (lines 208-210) already documents for a
+    # different job: `workflow_dispatch` loads the ENTIRE workflow YAML
+    # from whichever ref is dispatched against, unlike `workflow_run` or
+    # `issues: labeled`, which always resolve from the default branch. A
+    # write-access collaborator could dispatch this workflow against their
+    # OWN branch's modified copy -- one that removes this very job, or the
+    # scope restrictions below -- and no check *this file defines* can
+    # protect against a wholesale-replaced copy of itself running instead.
+    # This `if:` is a best-effort, code-level mitigation for the well-
+    # behaved (unmodified) copy specifically: `report-failure`'s own
+    # automated dispatch never passes `--ref` (so it always resolves to
+    # the default branch already), and this check additionally REFUSES to
+    # proceed if a `workflow_dispatch` was made against any other ref --
+    # closing the honest/accidental case. It does NOT, and structurally
+    # cannot, close the case of a fully attacker-modified copy dispatched
+    # from the attacker's own branch -- that residual risk is inherent to
+    # `workflow_dispatch` itself (as this repo's own precedent already
+    # documents) and is bounded only by who holds write access to this
+    # repository at all, same as every other risk this effort's own
+    # charter already treats as the outer trust boundary.
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     permissions:
       issues: read
       actions: read
