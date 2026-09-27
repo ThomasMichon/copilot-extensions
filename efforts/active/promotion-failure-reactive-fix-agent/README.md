@@ -1490,3 +1490,22 @@ _Pending._
   checklist (pin the `gh-aw` extension version, verify job-level
   `permissions:` don't inherit anything broader), before Phase 3's
   Validation Plan trials.
+- **That review pass came back immediately (PR #3916) and found exactly
+  what this working pattern exists to find: 2 new, real HIGH-severity
+  issues in the just-written fix itself, both fixed before merge.** (a)
+  The `verify-issue` job's first step interpolated the user-controlled
+  `workflow_dispatch` `item_number` input directly into `run:` shell
+  source rather than routing it through `env:` — a real command-
+  injection hole (`$(...)` in the input would execute before the
+  script's own first line) in a job whose entire purpose is
+  authorization. Fixed: the raw input now flows through `env:` (never
+  re-parsed as shell) and is validated digits-only before being written
+  onward. (b) The author-identity check (#2's fix) compared against the
+  bare string `github-actions` — the real login GitHub records for
+  issues filed via `github.token` is `github-actions[bot]` (confirmed
+  against this same workflow file's own `promote` job, which already
+  configures that exact identity for its commits). As drafted, the
+  check would have permanently rejected every genuine watchdog issue,
+  silently disabling the agent job forever. Fixed. Both are now
+  recorded in the draft's own leading comment block and the
+  `verify-issue` job's inline comments, not just here.

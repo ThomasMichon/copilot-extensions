@@ -42,9 +42,12 @@
      custom job below (gh-aw's documented `jobs.<id>` + `jobs.agent.needs`/
      `jobs.agent.if` gating mechanism). It resolves the target issue number from
      either trigger shape, then verifies (a) the issue's author is the watchdog's own
-     `github-actions` token identity and (b) the body carries a `Signature: <hash>`
-     anchor line, before the agent job is allowed to run at all. A hand-authored
-     issue that merely re-uses the label satisfies neither check.
+     `github-actions[bot]` token identity and (b) the body carries a `Signature:
+     <hash>` anchor line, before the agent job is allowed to run at all. A
+     hand-authored issue that merely re-uses the label satisfies neither check.
+     (A first attempt at this compared against the bare string `github-actions`
+     rather than the real bot login `github-actions[bot]` -- caught by real review
+     on PR #3916, since fixed; see that PR's own history.)
   3. NO EDIT TOOL -- RESOLVED: `tools.edit:` added (confirmed via gh-aw's own Tools
      reference: "Allows file editing in the GitHub Actions workspace").
   4. PROTECTED-FILES DEFAULT MAY NOT COVER THIS REPO'S SPECIFIC PATHS -- RESOLVED,
@@ -72,6 +75,15 @@
   6. NO CHANGEFILE PATH FOR A PLUGIN FIX -- RESOLVED: added an explicit markdown
      instruction requiring `python tools/changefile.py add ...` for any touched
      `plugins/**` content, plus a matching `tools.bash` allowlist entry.
+
+  A first pass at resolving #1/#2 (PR #3916) introduced two NEW, real issues real
+  review caught before merge, both since fixed in this same file: (a) the
+  `item_number` `workflow_dispatch` input was interpolated directly into `run:`
+  shell source rather than passed through `env:` -- a real command-injection hole
+  in the `verify-issue` job's own first step; (b) the author check above compared
+  against the bare string `github-actions` instead of the real bot login
+  `github-actions[bot]`, which would have permanently rejected every genuine
+  watchdog issue. See the `verify-issue` job's own inline comments for detail.
 -->
 ---
 description: "Attempts a scoped, reviewed fix for one tracked dev CI-failure signature (promotion-failure-reactive-fix-agent effort, Phase 2)."
@@ -125,8 +137,25 @@ jobs:
     steps:
       - name: Resolve the target issue number
         id: resolve
+        # Real review finding (PR #3916): `item_number` is a user-controlled
+        # `workflow_dispatch` input -- interpolating it directly into `run:`
+        # shell source (`${{ github.event.inputs.item_number }}` inline in
+        # the script text, not via `env:`) lets a value like `$(...)` be
+        # evaluated by the runner BEFORE this step's own shell even starts,
+        # a real command-injection hole in a read-permission job. Route the
+        # raw input through `env:` (safe: env values are never re-parsed as
+        # shell) and validate it is digits-only before writing it onward --
+        # never trust it merely because it came from `workflow_dispatch`.
+        env:
+          RAW_ITEM_NUMBER: ${{ github.event.inputs.item_number }}
+          RAW_ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
-          NUM="${{ github.event.inputs.item_number || github.event.issue.number }}"
+          set -euo pipefail
+          NUM="${RAW_ITEM_NUMBER:-$RAW_ISSUE_NUMBER}"
+          if ! printf '%s' "$NUM" | grep -qE '^[0-9]+$'; then
+            echo "::error::Resolved issue/item number '$NUM' is not a plain positive integer -- refusing to proceed."
+            exit 1
+          fi
           echo "number=$NUM" >> "$GITHUB_OUTPUT"
       - name: Verify the issue was genuinely filed by the watchdog
         id: check
@@ -137,8 +166,15 @@ jobs:
           NUM="${{ steps.resolve.outputs.number }}"
           AUTHOR=$(gh issue view "$NUM" --repo "${{ github.repository }}" --json author -q .author.login)
           BODY=$(gh issue view "$NUM" --repo "${{ github.repository }}" --json body -q .body)
-          if [ "$AUTHOR" != "github-actions" ]; then
-            echo "::warning::Issue #$NUM was authored by '$AUTHOR', not the watchdog's own github-actions token identity -- refusing to run the agent (a hand-authored issue re-using this label is not an authenticated diagnostic)."
+          # Real review finding (PR #3916): `report-failure`'s `gh issue
+          # create` runs authenticated with `github.token`, so GitHub
+          # records the author as `github-actions[bot]` (the same bot
+          # identity `validate-and-promote.yml`'s `promote` job configures
+          # for its own commits) -- NOT the bare string `github-actions`.
+          # The prior comparison would have rejected every genuine watchdog
+          # issue and permanently disabled the agent job.
+          if [ "$AUTHOR" != "github-actions[bot]" ]; then
+            echo "::warning::Issue #$NUM was authored by '$AUTHOR', not the watchdog's own github-actions[bot] token identity -- refusing to run the agent (a hand-authored issue re-using this label is not an authenticated diagnostic)."
             echo "authorized=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
