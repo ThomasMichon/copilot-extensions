@@ -197,3 +197,103 @@ def test_parity_refreshes_a_stale_canonical_tests_directory(tmp_path: Path, cano
     got_trusted, got_canonical = _run_scenario(tmp_path, canonical, name="stale-tests", build=build)
     assert got_trusted == got_canonical == "ok"
 
+
+# ── `uv`-editable canonical-reference parity ─────────────────────────────
+#
+# Mirrors the directory-pointer scenarios above, but exercises
+# ``materialize_uv_editable_ref_into()`` -- the mechanism that superseded
+# the directory-pointer form (vendor-pointer-generalization effort, second
+# course correction) and is what self_install.py's own
+# ``_materialize_payload_pointers`` now relies on for a consumer whose
+# vendored dependency is a `uv`-editable reference, not a
+# ``VENDOR_POINTER.json`` copy.
+
+
+def _uv_editable_consumer(root: Path, *, lib: str, raw_path: str) -> Path:
+    """A single-consumer tree at ``root / "consumer"`` whose
+    ``pyproject.toml`` declares an escaping `uv`-editable
+    ``[tool.uv.sources]`` entry for ``lib`` via ``raw_path``."""
+    consumer_dir = root / "consumer"
+    consumer_dir.mkdir(parents=True)
+    (consumer_dir / "pyproject.toml").write_text(
+        '[project]\nname = "consumer"\nversion = "0.0.0"\n'
+        "\n[tool.uv.sources]\n"
+        f'agent-{lib} = {{ path = "{raw_path}", editable = true }}\n',
+        encoding="utf-8",
+    )
+    return consumer_dir
+
+
+def _run_uv_editable_scenario(tmp_path: Path, canonical_mod, *, name: str, build) -> tuple[str, str]:
+    """``build(root)`` populates one scenario's canonical lib + consumer
+    manifest under a fresh root; returns the (trusted, canonical) outcome
+    categories for identical inputs, both run through
+    ``materialize_uv_editable_ref_into`` with a fresh ``dest`` copy of the
+    consumer (mirroring self_install.py's own payload/slot split)."""
+    trusted_root = tmp_path / f"{name}-trusted" / "repo"
+    build(trusted_root)
+    trusted_dest = tmp_path / f"{name}-trusted" / "slot"
+    shutil.copytree(trusted_root / "consumer", trusted_dest)
+    trusted_log = trusted.materialize_uv_editable_ref_into(
+        source_consumer_dir=trusted_root / "consumer", dest_consumer_dir=trusted_dest,
+        canonical_root=trusted_root, dest_root=trusted_dest,
+    )
+
+    canonical_root = tmp_path / f"{name}-canonical" / "repo"
+    build(canonical_root)
+    canonical_dest = tmp_path / f"{name}-canonical" / "slot"
+    shutil.copytree(canonical_root / "consumer", canonical_dest)
+    canonical_log = canonical_mod.materialize_uv_editable_ref_into(
+        source_consumer_dir=canonical_root / "consumer", dest_consumer_dir=canonical_dest,
+        canonical_root=canonical_root, dest_root=canonical_dest,
+    )
+
+    return _outcome(trusted_log), _outcome(canonical_log)
+
+
+def test_uv_editable_parity_expands_a_clean_reference_from_canonical(tmp_path: Path, canonical):
+    def build(root: Path) -> None:
+        _canonical_lib(root, "zdd", version="0.1.0-dev5", content="real = True\n")
+        _uv_editable_consumer(root, lib="zdd", raw_path="../libs/zdd")
+
+    got_trusted, got_canonical = _run_uv_editable_scenario(
+        tmp_path, canonical, name="uv-clean", build=build
+    )
+    assert got_trusted == got_canonical == "ok"
+
+
+def test_uv_editable_parity_refuses_a_reference_missing_editable_true(tmp_path: Path, canonical):
+    def build(root: Path) -> None:
+        _canonical_lib(root, "zdd", version="0.1.0-dev5", content="real = True\n")
+        consumer_dir = root / "consumer"
+        consumer_dir.mkdir(parents=True)
+        (consumer_dir / "pyproject.toml").write_text(
+            '[project]\nname = "consumer"\nversion = "0.0.0"\n'
+            "\n[tool.uv.sources]\n"
+            'agent-zdd = { path = "../libs/zdd" }\n',
+            encoding="utf-8",
+        )
+
+    got_trusted, got_canonical = _run_uv_editable_scenario(
+        tmp_path, canonical, name="uv-missing-editable", build=build
+    )
+    assert got_trusted == got_canonical
+    assert "missing editable" in got_trusted
+
+
+def test_uv_editable_parity_refuses_a_symlinked_canonical(tmp_path: Path, canonical):
+    def build(root: Path) -> None:
+        canon = _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
+        outside = root.parent / "uv-outside-target"
+        (outside / "zdd").mkdir(parents=True)
+        (outside / "zdd" / "__init__.py").write_text("smuggled = True\n", encoding="utf-8")
+        shutil.rmtree(canon)
+        canon.symlink_to(outside / "zdd", target_is_directory=True)
+        _uv_editable_consumer(root, lib="zdd", raw_path="../libs/zdd")
+
+    got_trusted, got_canonical = _run_uv_editable_scenario(
+        tmp_path, canonical, name="uv-symlinked-canonical", build=build
+    )
+    assert got_trusted == got_canonical
+    assert got_trusted == "skip: is a symlink"
+

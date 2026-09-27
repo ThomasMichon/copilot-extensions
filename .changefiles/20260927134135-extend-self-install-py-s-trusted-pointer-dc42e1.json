@@ -1,0 +1,9 @@
+{
+  "comment": "Extend self_install.py's trusted pointer materializer to also expand uv-editable canonical-reference dependencies, so standalone self-install/self-update slots no longer ship an unresolvable escaping path reference (found in review of the work-coalescing-singleton conversion).",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

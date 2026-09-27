@@ -1325,13 +1325,15 @@ _Pending._
   `uv`-editable mechanism, then validated end-to-end: `sync-vendored-
   libs.py --check`/`check-vendored-libs-sync.py`/`check-install-
   contract.py` all green; `run-plugin-tests.py agent-worktrees
-  --reinstall`'s full suite passes (433 passed, 8 skipped -- the only 2
-  failures, `test_lazy_dispatch.py`'s dispatch-table/cluster-free-modules
-  drift checks, were confirmed pre-existing and unrelated by re-running
-  the identical suite against the unmodified `dev` tip via `git stash`);
+  --reinstall`'s full suite completed with 433 passed, 8 skipped, and 2
+  pre-existing failures (`test_lazy_dispatch.py`'s dispatch-table/cluster-
+  free-modules drift checks, confirmed pre-existing and unrelated by
+  re-running the identical suite against the unmodified `dev` tip via
+  `git stash`);
   `worktree-manager` has no `run-plugin-tests.py` suite of its own, so ran
   its real test suite directly via `uv run --extra dev` (1532 passed, 4
-  skipped); a **non-editable** `uv pip install plugins/agent-worktrees` in
+  skipped, before the review-round additions below); a **non-editable**
+  `uv pip install plugins/agent-worktrees` in
   a fresh venv (no `-e`) still resolved `agent-work-coalescing-singleton`
   live from canonical (`__file__` pointed at `libs/work-coalescing-
   singleton`, not a copy); `materialize_main.py --dest` round-tripped
@@ -1350,5 +1352,52 @@ _Pending._
   `materialize_main.py` `SKIP`/warning as a real regression.
 - Added a changefile per touched plugin (`agent-worktrees`,
   `worktree-manager`).
+- **Filed as PR #4331**, targeting `dev`. The GitHub-native automated
+  reviewer's first pass surfaced a real, previously-unrecognized gap in
+  this conversion recipe (2 High findings), fixed in the same PR:
+  - **`worktree-manager`'s own standalone self-install/self-update path
+    had no way to expand a `uv`-editable canonical reference.**
+    `worktree_manager/self_install.py`'s `_materialize_payload_pointers()`
+    (and its hand-maintained, statically-shipped
+    `_trusted_pointer_materializer.py` -- kept separate from
+    `tools/materialize_main.py` on purpose; see that module's own
+    docstring for the trusted-vs-untrusted-fetch rationale) only ever knew
+    how to expand the OLDER `VENDOR_POINTER.json` directory-pointer form.
+    A `uv`-editable consumer manifest entry (this conversion's own output)
+    was invisible to it -- a self-installed or self-updated Manager slot
+    would ship an escaping `path = "../libs/work-coalescing-singleton"`
+    reference that can never resolve outside a monorepo checkout, breaking
+    every deployed Manager on next self-update. Ported
+    `materialize_uv_editable_ref_into()` and the `find_uv_editable_refs()`/
+    `uv_sources_table_span()` helpers it depends on (mirroring
+    `tools/materialize_main.py`/`tools/uv_editable_ref.py`) into the
+    trusted module, wired `_materialize_payload_pointers()` to discover
+    and expand escaping `[tool.uv.sources]` entries alongside the existing
+    directory-pointer discovery (failing closed the same way: no canonical
+    `libs/` reachable from the fetched payload is a hard error, not a
+    silent skip), and added 3 new parity tests to
+    `test_trusted_materializer_parity.py` (clean expansion, missing
+    `editable = true` refusal, symlinked-canonical refusal) alongside the
+    existing 6 directory-pointer scenarios.
+  - **`worktree-manager` is a standalone-versioned payload, not a
+    marketplace plugin** -- a plugin changefile alone never bumps
+    `worktree_manager/__init__.py`'s own `__version__`
+    (`self_install()`'s actual publication gate), so an already-installed
+    machine would never pick up this fix. Bumped `__version__` (and the
+    matching `worktree-manager/pyproject.toml` `version`)
+    `0.1.0-dev93` -> `0.1.0-dev94`, confirmed via
+    `tools/check-version-consistency.py`, per this repo's own established
+    per-fix version-bump convention (see the `self_install.py` git history
+    cited in this same review round).
+  - Also tightened this journal's own wording per a Low finding: the
+    validation bullet above previously read as an unqualified "passes"
+    despite reporting 2 failures in the same sentence -- reworded to state
+    the pass/skip/pre-existing-failure counts unambiguously.
+  - Re-ran the full validation battery after these fixes:
+    `run-plugin-tests.py agent-worktrees --reinstall` still 433 passed, 8
+    skipped, the same 2 pre-existing failures; `worktree-manager`'s own
+    suite now 1535 passed (+3 new parity tests), 4 skipped;
+    `sync-vendored-libs.py --check`/`check-vendored-libs-sync.py`/`check-
+    install-contract.py`/`check-version-consistency.py` all green.
 - **Next up**: `credential-relay` (4 consumers), per the effort's own
   smallest-blast-radius-first ordering.
