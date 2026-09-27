@@ -422,6 +422,22 @@ the event-specific charter is fetched per embodiment (*concise-event-then-charte
 Domain-specific policy still lives in the identity's own instructions, layered
 on top of the shared supplement rather than duplicating it.
 
+### reachability-tiered-charter-delivery
+*concise-event-then-charter-pull* assumes the worker can run the pull command
+itself. A worker without direct reach to agent-dispatch — a Codespace, a
+container, a genuinely different machine, or a cross-repo agent with no prior
+knowledge of this layer at all — cannot fetch a charter it cannot request, so
+the same short-event-plus-pull default silently fails for it. Such a worker
+instead needs its full operating procedure delivered inline (never assumed
+pre-known) **and** an explicit, concrete channel for issuing the structured
+status/lifecycle calls this layer requires (*status-through-tool-calls-not-prose*)
+without local CLI access — the existing SSH-to-origin relay a fleet body
+already uses (*cross-machine-federation*) is one instance of this, not the
+only one. Which tier a given worker falls into is a property of its
+reachability, not its role: a supervised headless worker and a supervised
+interactive one may each be in either tier depending on where they actually
+run.
+
 ### side-load-through-an-emitter
 A **registered emitter can be triggered on demand**, not only by its native event
 source. Handing it a specific request — "review this pull request," "unstick this
@@ -777,6 +793,54 @@ a named next act: keep working, **complete** (splitting remaining scope into a
 follow-up task if needed), **suspend** against a stated, monitored wait, or
 **abandon**. Falling silent with none of those is never a fourth option.
 
+### status-through-tool-calls-not-prose
+agent-dispatch is a **programmatic controller**, not a conversational partner:
+it acts on structured `agent-dispatch` commands, never on unstructured
+turn-ending prose. Every routine status change a worker reports — progress, a
+decline, a completion, a blocker — goes through the matching command
+(`progress`, `yield`, `complete`, a steering card), never a bare-prose turn end
+the layer has no way to read. This is the hard line between a dispatch-owned
+worker and an **agent-bridge-steered companion**: a companion's controlling
+agent is a live reader, so ending a turn on an open question is a legitimate
+answer *to that agent*; a dispatch worker has no such reader, so its only
+sanctioned way to ask something is a steering card, never a prose question
+nobody is watching for.
+
+### every-turn-ends-terminal-steered-or-waited
+A worker's turn never simply stops. It ends in exactly one of three states: a
+**terminal or lifecycle transition** (complete, abandon, yield, suspend
+against a monitor), a **steering card** that durably marks the task
+`awaiting_steer` (a card with no `--request-input` form never blocks the task
+and silently drops out of tracking — this is required, not optional), or an
+established **task-aware waiter/resume contract** a cold headless body can
+continue from (never a bare worktree-only nudge). Falling silent with none of
+those is never a fourth option — the same rule *suspension-requires-a-monitor*
+states for an unmonitored idle applies identically to a plain unstructured
+stop.
+
+### fail-fast-on-control-plane-failure
+A worker that cannot reach agent-dispatch — every status/lifecycle command
+failing, or the connection lost outright — does not treat that as its own
+problem to diagnose. It does not reinstall tooling, repair permissions, or
+debug the network on its own initiative **unless doing exactly that is the
+literal charter of the task at hand**. It stops immediately and fails loud: a
+single, clear, turn-ending statement of exactly what failed and what it was
+doing — the one sanctioned exception to *status-through-tool-calls-not-prose*,
+because there is no command left to make. This is the worker-side half of the
+crash-recovery contract; the layer's own honest acknowledgment of a
+control-plane death it caused is the coordinator-side half.
+
+### declared-safety-exceptions-not-improvised
+A task likely to run into a safety boundary its worker's normal
+fully-autonomous charter does not already cover — elevated permissions,
+production access, an irreversible action — states that exception **up
+front**, in its own prompt/goal, so a steering card raised there is a
+sanctioned pause the worker recognizes, not an improvisation. Without that
+upfront declaration, an unexpected safety boundary gets the same posture as
+*fail-fast-on-control-plane-failure*: stop, do not attempt to route around it
+or resolve it unilaterally, and say so plainly — never open a card the task
+never invited.
+
 ### repo-lane-isolation
 Every task belongs to the **repo lane** of the agent that produced it, and the
 queue is scoped to that lane by default — an agent sees and claims **its own
@@ -972,6 +1036,28 @@ does **not** quietly undo it.
 
 ## Provenance
 
+- **2026-09-26** — Added *status-through-tool-calls-not-prose*,
+  *every-turn-ends-terminal-steered-or-waited*,
+  *fail-fast-on-control-plane-failure*, *declared-safety-exceptions-not-improvised*,
+  and *reachability-tiered-charter-delivery*. Mined from a prompt-sweep
+  rubber-duck review that found the layer's initial/follow-up/nudge prompts
+  had drifted into two incompatible seed-builders (a thin one silently
+  missing the evaluation/goal-loop guardrails, reached whenever the rich
+  path's dependency was unavailable) with no single canonical statement of
+  *why* those guardrails exist. Clarifies the hard line between a
+  dispatch-owned worker (programmatic controller; status only through
+  structured commands) and an agent-bridge-steered companion (a live reader;
+  ordinary turn-ending prose is a legitimate answer) that *Not the
+  live-conversation layer* already implied but never stated from the
+  worker's side; canonicalizes the "every turn ends terminal, steered, or
+  waited" rule a single recipe prompt already enforced ad hoc; and names two
+  previously-undeclared failure postures (an unreachable control plane, an
+  undeclared safety boundary) that both resolve to the same "stop, don't
+  improvise, say so plainly" posture. *reachability-tiered-charter-delivery*
+  extends *concise-event-then-charter-pull*/*preloaded-dispatch-supplement*
+  to a worker that cannot run the pull command at all. Implementation
+  (the actual prompt/charter-doc restructuring) is carried by a tracked
+  effort, not this revision.
 - **2026-09-25** — Added **the monitor** (a suspend's companion resolution
   handler, paired with the evaluator) and **confirmed** as the true lifecycle
   terminal beyond a provisional **completed** (*verify-the-completion-claim*
