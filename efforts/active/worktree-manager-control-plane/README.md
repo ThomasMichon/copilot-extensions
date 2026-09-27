@@ -532,7 +532,9 @@ PR [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
       the additive seam landed. See
       [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
 - [x] **Step 6 — cut `data_local.py` over to the batched Group C verb via the
-      now-landed Phase 3c worker path.** Landed in PR **TBD**: the production
+      now-landed Phase 3c worker path.** Landed in PR
+      [#4350](https://github.com/ThomasMichon/copilot-extensions/pull/4350):
+      the production
       Picker's local classify load and per-row Refresh now call
       `production_picker.engine_group_c.picker_reconcile_local(...)` once per
       refresh epoch (or once per targeted row refresh) and merge the returned
@@ -871,7 +873,8 @@ claiming discipline alone.
   change at all, and unit coverage of the extracted helper's six decision
   branches. Full `worktree-manager` suite: 1562 passed, 4 skipped, same
   pre-existing unrelated simulated-failure warning.
-- **2026-09-27** — Landed Phase 3d Step 6, PR **TBD**.
+- **2026-09-27** — Landed Phase 3d Step 6, PR
+  [#4350](https://github.com/ThomasMichon/copilot-extensions/pull/4350).
   Cut `worktree_manager.production_picker.picker_tui.data_local` over to the
   Step 5 `picker-reconcile-local --json` seam: the authoritative local classify
   load and per-row Refresh now make one batched `engine_group_c` call and map

@@ -595,7 +595,9 @@ once every remaining caller is already off the import boundary.
      `delegation-guidance`, `efforts`, `harness-knowledge`, and `wsl-setup`.
 
 6. [x] **Cut `data_local.py` over to the Group C batched verb, using Phase 3c's
-   now-landed worker path.** **Landed in PR TBD.** This is the Group C cutover PR.
+   now-landed worker path.** **Landed in PR
+   [#4350](https://github.com/ThomasMichon/copilot-extensions/pull/4350).**
+   This is the Group C cutover PR.
    - Route the refresh-time reconciliation path through the new batched verb
      instead of the current direct imports, including the `reconcile_prs()`,
      `reconcile_bound_live()`, `_overlay_cached_state()`, and
