@@ -1,11 +1,7 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","customizationKind":"instructions","destination":".github/instructions/copilot-extensions-harness/commented-review-verdict.instructions.md","plugin":"copilot-extensions-harness@copilot-extensions","pluginVersion":"0.1.0-dev46","renderedBytes":1424,"schema":"copilot-extensions.instruction-projection","sourceId":"commented-review-verdict","template":"instructions/commented-review-verdict.instructions.md","templateBytes":835,"templateSha256":"c1fcb6814822bc490735ee8a275b55f192d5a748bbd0f5c1f82d80943b73533b","version":1} -->
-<!-- NOTE: template content edited without a live projection-reflect sync
-     (see PR fixing the PR-review-wait protocol); the metadata above is
-     stale pending the next real sync pass, but the body below matches
-     the current template source. -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","customizationKind":"instructions","destination":".github/instructions/copilot-extensions-harness/commented-review-verdict.instructions.md","plugin":"copilot-extensions-harness@copilot-extensions","pluginVersion":"0.1.0-dev47","renderedBytes":1568,"schema":"copilot-extensions.instruction-projection","sourceId":"commented-review-verdict","template":"instructions/commented-review-verdict.instructions.md","templateBytes":979,"templateSha256":"47d412d829f41c67d21f30e1d8acfd72a512d6ae1197ff4e8afa7ec93a6601c6","version":1} -->
 
 # Commented-verdict review fallback
 
