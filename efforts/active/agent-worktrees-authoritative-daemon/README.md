@@ -642,7 +642,7 @@ survey above.
       `tracking_lifecycle.py` / `tracking_claims.py` /
       `tracking_session_registry.py` / `tracking_controller_relations.py`
       / `tracking_write.py` / the 6 `tracking_*_write.py` verb-handler
-      modules). Sixteen review rounds found real gaps each time (see Journal
+      modules). Seventeen review rounds found real gaps each time (see Journal
       for the full blow-by-blow: a missing re-export module, a
       package-root-alias attribute chain never tracked at all, an
       incomplete denylist, a wildcard-import escape hatch, the daemon's
@@ -758,7 +758,7 @@ writes.py`, an AST-based scan of every sibling `plugins/*` (excluding
 denylist covering every tracking-record write function -- derived by
 AST-walking each protected module for functions whose body calls
 `save_record`/`_save_record_unlocked`/the async stamp queue, then
-hand-verified against the remainder (the final denylist, after sixteen
+hand-verified against the remainder (the final denylist, after seventeen
 review rounds below, covers 55 functions across 12 modules:
 `tracking.py`/`tracking_lifecycle.py`/`tracking_claims.py`/
 `tracking_session_registry.py`/`tracking_controller_relations.py`/
@@ -769,7 +769,7 @@ wording -- NOT extended to cover `worktree-manager/`'s own already-tracked
 exception (see above), since that scope decision belongs to a
 coordinated cross-effort call, not something to fold in unilaterally here.
 
-**Sixteen review rounds found real gaps, none assumed away:**
+**Seventeen review rounds found real gaps, none assumed away:**
 (1) `tracking_controller_relations.py`'s own thin
 `save_record`/`_save_record_unlocked` re-export wrappers were absent from
 the protected module set, so a sibling could route through that module
@@ -986,10 +986,26 @@ that exact name) from one of the protected modules, and recognizing a
 bare, no-argument call to one of those specific names as resolving to
 `tracking` -- deliberately NOT a blanket "any function named `_tracking`
 anywhere" rule, which would risk flagging an unrelated sibling's own
-identically-named local helper. Every fix across all sixteen rounds has
-a dedicated regression test.
+identically-named local helper. (20) A SEVENTEENTH review round found
+two more real gaps, both refinements of round 16's own fixes: **(a)**
+`_has_fromlist` treated ANY supplied fourth-argument/keyword as
+non-empty, but `fromlist=[]` and `fromlist=None` are exactly equivalent
+to omitting the argument entirely (CPython still returns the top-level
+package) -- the previous version reported a false violation for
+`__import__("agent_worktrees.tracking", fromlist=[])` used as a bare
+package. Fixed by recognizing a literal empty list/tuple or `None`
+fromlist as "absent," while still conservatively treating anything else
+non-literal as "present." **(b)** The reflective-access checks
+(`getattr`/`__dict__`) only recognized names in `WRITE_FUNCTIONS`, but
+`_STAMP_QUEUE` is tracked separately (via `STAMP_QUEUE_ATTR`), so
+`getattr(tracking, "_STAMP_QUEUE")` and
+`tracking.__dict__["_STAMP_QUEUE"]` both reflectively fetched the same
+queue object the plain-attribute check already flags outright, while
+evading both reflective checks entirely. Fixed by extending both checks
+to also recognize `STAMP_QUEUE_ATTR` alongside `WRITE_FUNCTIONS`. Every
+fix across all seventeen rounds has a dedicated regression test.
 
-57 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
+62 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
 tree, the sanctioned read-only accessors staying unflagged, three
 single-level import/call shapes (module attribute call, direct
 `from agent_worktrees import <fn>`, `from agent_worktrees.tracking_claims

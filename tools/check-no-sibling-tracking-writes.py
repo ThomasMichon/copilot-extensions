@@ -437,20 +437,39 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
             return constant_string_aliases[node.id]
         return None
 
+    def _is_definitely_empty_fromlist(value: ast.expr) -> bool:
+        """Whether ``value`` is a literal empty/absent fromlist
+        (``[]``, ``()``, or ``None``) -- these are the values CPython's
+        own ``__import__`` treats as "no fromlist" (returns the
+        top-level package), same as omitting the argument entirely."""
+        if isinstance(value, ast.Constant) and value.value is None:
+            return True
+        if isinstance(value, (ast.List, ast.Tuple)) and not value.elts:
+            return True
+        return False
+
     def _has_fromlist(call: ast.Call) -> bool:
         """Whether ``call`` (a literal ``__import__(...)``) supplies a
-        non-empty ``fromlist`` -- either the 4th positional argument or a
+        NON-EMPTY ``fromlist`` -- either the 4th positional argument or a
         ``fromlist=`` keyword -- which is what makes CPython's own
         ``__import__`` return the DEEPEST submodule instead of the
-        top-level package. A non-list/non-literal fromlist (e.g. a
-        variable) is conservatively treated as "present" -- safer to
-        assume module-level resolution might apply than to silently
-        default to package-level and possibly miss a real submodule
-        access chain, mirroring this guard's general fail-toward-
-        flagging posture."""
+        top-level package. A literal empty/`None` fromlist
+        (`fromlist=[]`/`fromlist=None`) is exactly equivalent to omitting
+        the argument (still `package`); anything else non-literal (a
+        variable, an unpacked expression) is conservatively treated as
+        "present" -- safer to assume module-level resolution might apply
+        than to silently default to package-level and possibly miss a
+        real submodule access chain, mirroring this guard's general
+        fail-toward-flagging posture."""
         if len(call.args) >= 4:
-            return True
-        return any(kw.arg == "fromlist" and kw.value is not None for kw in call.keywords)
+            return not _is_definitely_empty_fromlist(call.args[3])
+        for kw in call.keywords:
+            if kw.arg == "fromlist":
+                return not (
+                    kw.value is not None
+                    and _is_definitely_empty_fromlist(kw.value)
+                )
+        return False
 
     def _dynamic_import_alias_kind(expr: ast.expr) -> tuple[str, str] | None:
         """Returns ``("module", "<submodule-name>")`` or
@@ -645,15 +664,20 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
                 f"`{node.value.id}.{node.attr}` directly",
                 repo_root=repo_root,
             ))
-        # Reflective access with a literal write-function name still
-        # resolves statically even though it isn't an ast.Attribute:
-        # `getattr(tracking, "save_record")` and
+        # Reflective access with a literal write-function (or `_STAMP_QUEUE`
+        # attribute) name still resolves statically even though it isn't
+        # an ast.Attribute: `getattr(tracking, "save_record")` and
         # `tracking.__dict__["save_record"]` both name the exact function
-        # being fetched in a plain string constant. This is deliberately
-        # NOT a general reflection-proof analysis (a non-literal name,
-        # e.g. `getattr(tracking, some_variable)`, is undecidable
-        # statically and is not attempted) -- it closes the specific,
-        # easy, literal-string bypass of the ast.Attribute check above.
+        # being fetched in a plain string constant -- and
+        # `getattr(tracking, "_STAMP_QUEUE")`/
+        # `tracking.__dict__["_STAMP_QUEUE"]` reflectively fetch the SAME
+        # queue object the plain-attribute `_STAMP_QUEUE` check already
+        # flags outright, regardless of what's done with it afterward.
+        # This is deliberately NOT a general reflection-proof analysis (a
+        # non-literal name, e.g. `getattr(tracking, some_variable)`, is
+        # undecidable statically and is not attempted) -- it closes the
+        # specific, easy, literal-string bypass of the ast.Attribute
+        # check above.
         elif (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
@@ -661,7 +685,7 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
             and len(node.args) >= 2
             and isinstance(node.args[1], ast.Constant)
             and isinstance(node.args[1].value, str)
-            and node.args[1].value in WRITE_FUNCTIONS
+            and node.args[1].value in (WRITE_FUNCTIONS | {STAMP_QUEUE_ATTR})
         ):
             label = _module_expr_label(node.args[0])
             if label is not None:
@@ -677,7 +701,7 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
             and node.value.attr == "__dict__"
             and isinstance(node.slice, ast.Constant)
             and isinstance(node.slice.value, str)
-            and node.slice.value in WRITE_FUNCTIONS
+            and node.slice.value in (WRITE_FUNCTIONS | {STAMP_QUEUE_ATTR})
         ):
             label = _module_expr_label(node.value.value)
             if label is not None:

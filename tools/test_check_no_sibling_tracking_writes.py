@@ -613,6 +613,70 @@ def test_dunder_import_with_fromlist_resolves_to_the_submodule(tmp_path):
     assert "save_record" in violations[0].detail
 
 
+def test_dunder_import_with_empty_fromlist_list_resolves_to_the_package(tmp_path):
+    # fromlist=[] is exactly equivalent to omitting the argument --
+    # CPython still returns the top-level package, not the submodule.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "def write(record, path):\n"
+        "    aw = __import__(\"agent_worktrees.tracking\", fromlist=[])\n"
+        "    aw.save_record(record, path)\n",
+    )
+    assert guard.find_violations(tmp_path) == []
+
+
+def test_dunder_import_with_empty_fromlist_still_caught_via_package_chain(tmp_path):
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "def write(record, path):\n"
+        "    aw = __import__(\"agent_worktrees.tracking\", fromlist=[])\n"
+        "    aw.tracking.save_record(record, path)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "save_record" in violations[0].detail
+
+
+def test_dunder_import_with_none_fromlist_resolves_to_the_package(tmp_path):
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "def write(record, path):\n"
+        "    aw = __import__(\"agent_worktrees.tracking\", fromlist=None)\n"
+        "    aw.save_record(record, path)\n",
+    )
+    assert guard.find_violations(tmp_path) == []
+
+
+def test_getattr_of_stamp_queue_attribute_is_caught(tmp_path):
+    # getattr(tracking, "_STAMP_QUEUE") reflectively fetches the exact
+    # same object the plain `tracking._STAMP_QUEUE` attribute check
+    # already flags -- caught the moment the queue is reflectively
+    # reached, regardless of what's chained onto the result afterward.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking\n"
+        "\n"
+        "def write():\n"
+        "    return getattr(tracking, \"_STAMP_QUEUE\")\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "_STAMP_QUEUE" in violations[0].detail
+
+
+def test_dunder_dict_subscript_of_stamp_queue_attribute_is_caught(tmp_path):
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking\n"
+        "\n"
+        "def write():\n"
+        "    return tracking.__dict__[\"_STAMP_QUEUE\"]\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "_STAMP_QUEUE" in violations[0].detail
+
+
 def test_stamp_write_queue_class_is_denylisted(tmp_path):
     # Importing the _StampWriteQueue CLASS directly and instantiating a
     # fresh queue reaches the exact same YAML-writing helpers as the
