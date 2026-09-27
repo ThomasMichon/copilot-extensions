@@ -74,7 +74,10 @@ def find_uv_editable_refs(consumer_dir: Path) -> list[tuple[str, str, str, bool]
     absolute ``path`` is included too: joining an absolute path onto
     ``consumer_dir`` yields the absolute path itself, which almost always
     resolves outside ``consumer_dir`` and must be caught the same way a
-    relative escaping path is, not silently treated as in-tree."""
+    relative escaping path is, not silently treated as in-tree. ``editable``
+    is exactly ``entry.get("editable") is True`` -- a truthy-but-non-boolean
+    TOML value (``"false"``, ``1``) is never treated as the real, required
+    ``editable = true``."""
     pyproject = consumer_dir / "pyproject.toml"
     if pyproject.is_symlink():
         return []
@@ -91,16 +94,39 @@ def find_uv_editable_refs(consumer_dir: Path) -> list[tuple[str, str, str, bool]
         raw_path = entry["path"]
         candidate = (consumer_dir / raw_path).resolve()
         if escapes_root(candidate, consumer_root):
-            out.append((name, raw_path, Path(raw_path).name, bool(entry.get("editable"))))
+            out.append((name, raw_path, Path(raw_path).name, entry.get("editable") is True))
     return out
+
+
+def _find_symlinked_ancestor(path: Path, root: Path) -> Path | None:
+    """The first symlink among ``path`` itself and every ancestor directory
+    up to and including ``root`` -- mirrors ``sync-vendored-libs.py``'s and
+    ``materialize_main.py``'s own copies (kept separate for the same
+    hyphenated-filename reason those two already duplicate small helpers
+    between themselves). Used to catch a canonical ``libs/<lib>`` that IS a
+    symlink even when its resolved target happens to equal the referenced
+    path's own resolved target -- comparing only resolved paths would
+    accept that case instead of rejecting the symlink outright, the same
+    real-directory invariant ``convert_to_uv_editable()`` already enforces
+    on the dev-time conversion side."""
+    root_r = root.resolve()
+    current = path
+    while True:
+        if current.is_symlink():
+            return current
+        if current.resolve() == root_r or current.parent == current:
+            return None
+        current = current.parent
 
 
 def uv_editable_problems(consumer: str, consumer_dir: Path) -> list[str]:
     """Validity problems in ``consumer``'s `uv`-editable canonical-reference
     entries: a missing ``editable = true`` (would silently resolve to a
     frozen, non-live copy on `dev` -- the exact hazard the second course
-    correction exists to avoid) or a referenced canonical ``libs/<lib>``
-    that does not exist."""
+    correction exists to avoid), a referenced canonical ``libs/<lib>`` that
+    does not exist, or one that IS a symlink (accepting a symlinked
+    canonical lib root would let it point at an external tree instead of a
+    real directory)."""
     problems: list[str] = []
     for name, raw_path, lib, editable in find_uv_editable_refs(consumer_dir):
         if not editable:
@@ -109,13 +135,21 @@ def uv_editable_problems(consumer: str, consumer_dir: Path) -> list[str]:
                 "root but is missing editable = true (would resolve to a "
                 "frozen, non-live copy)"
             )
+        canonical_unresolved = LIBS_DIR / lib
+        bad_ancestor = _find_symlinked_ancestor(canonical_unresolved, REPO)
         canonical = (consumer_dir / raw_path).resolve()
-        if not canonical.is_dir():
+        if bad_ancestor is not None:
+            problems.append(
+                f"{consumer}: {name} references {raw_path}, but "
+                f"{bad_ancestor} is a symlink -- refusing (a canonical lib "
+                "root must be a real directory)"
+            )
+        elif not canonical.is_dir():
             problems.append(
                 f"{consumer}: {name} references {raw_path} (resolved "
                 f"{canonical}) which does not exist"
             )
-        elif (LIBS_DIR / lib).resolve() != canonical:
+        elif canonical_unresolved.resolve() != canonical:
             problems.append(
                 f"{consumer}: {name} references {raw_path} (resolved "
                 f"{canonical}) which is not libs/{lib}"

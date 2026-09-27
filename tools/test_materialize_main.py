@@ -988,3 +988,35 @@ def test_materialize_uv_editable_ref_into_preflights_rewrite_before_copying(tmp_
     )
     assert "could not find" in log_line
     assert not dest_lib_dir.exists()
+
+
+def test_materialize_uv_editable_ref_into_refuses_a_malformed_canonical_lib(tmp_path: Path):
+    # A canonical directory that exists but has no src/ (or no
+    # pyproject.toml) must be refused BEFORE anything is copied -- matching
+    # the existing directory/file pointer materializer's own fail-closed
+    # behavior for an incomplete canonical lib.
+    root = tmp_path / "repo"
+    (root / "libs/zdd").mkdir(parents=True)  # exists, but no src/ at all
+    consumer = _uv_editable_consumer(root, "plugins/agent-bridge", "agent-zdd", "../../libs/zdd")
+
+    log = mm.materialize_uv_editable_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
+    )
+    assert any("src not found" in line for line in log)
+    assert not (consumer / "libs/zdd").exists()
+
+
+def test_materialize_uv_editable_ref_into_refuses_a_canonical_lib_missing_pyproject(
+    tmp_path: Path,
+):
+    root = tmp_path / "repo"
+    (root / "libs/zdd/src/zdd").mkdir(parents=True)
+    (root / "libs/zdd/src/zdd/__init__.py").write_text("x = 1\n", encoding="utf-8")
+    # No pyproject.toml under canonical.
+    consumer = _uv_editable_consumer(root, "plugins/agent-bridge", "agent-zdd", "../../libs/zdd")
+
+    log = mm.materialize_uv_editable_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
+    )
+    assert any("pyproject.toml missing" in line for line in log)
+    assert not (consumer / "libs/zdd").exists()

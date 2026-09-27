@@ -114,3 +114,42 @@ def test_lib_tree_matches_false_when_only_copy_has_tests(tmp_path: Path):
     (b / "tests").mkdir()
     (b / "tests/test_it.py").write_text("def test_it(): pass\n", encoding="utf-8")
     assert uer.lib_tree_matches(a, b) is False
+
+
+def test_uv_editable_problems_rejects_a_symlinked_canonical_lib_root(tmp_path: Path, monkeypatch):
+    # A symlinked libs/<lib> that happens to resolve to the SAME target the
+    # referenced path also resolves to must still be rejected -- comparing
+    # only resolved paths would accept it instead of catching the symlink.
+    repo = tmp_path / "repo"
+    real_lib = tmp_path / "outside-lib"
+    (real_lib / "src/shared_lib").mkdir(parents=True)
+    (real_lib / "src/shared_lib/__init__.py").write_text("x = 1\n", encoding="utf-8")
+    (repo / "libs").mkdir(parents=True)
+    (repo / "libs/shared-lib").symlink_to(real_lib, target_is_directory=True)
+    consumer = repo / "plugins/alpha"
+    consumer.mkdir(parents=True)
+    (consumer / "pyproject.toml").write_text(
+        '[project]\nname = "consumer"\nversion = "1.0.0"\n'
+        "[tool.uv.sources]\n"
+        'agent-shared-lib = { path = "../../libs/shared-lib", editable = true }\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(uer, "REPO", repo)
+    monkeypatch.setattr(uer, "LIBS_DIR", repo / "libs")
+    problems = uer.uv_editable_problems("alpha", consumer)
+    assert any("is a symlink" in p for p in problems)
+
+
+def test_find_uv_editable_refs_editable_requires_exact_true(tmp_path: Path):
+    consumer = tmp_path / "plugins/alpha"
+    consumer.mkdir(parents=True)
+    (consumer / "pyproject.toml").write_text(
+        '[project]\nname = "consumer"\nversion = "1.0.0"\n'
+        "[tool.uv.sources]\n"
+        'agent-a = { path = "../../libs/a", editable = "false" }\n'
+        'agent-b = { path = "../../libs/b", editable = 1 }\n'
+        'agent-c = { path = "../../libs/c", editable = true }\n',
+        encoding="utf-8",
+    )
+    refs = {name: editable for name, _raw, _lib, editable in uer.find_uv_editable_refs(consumer)}
+    assert refs == {"agent-a": False, "agent-b": False, "agent-c": True}

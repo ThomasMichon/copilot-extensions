@@ -410,9 +410,18 @@ def _materialize_one_uv_editable_ref(
 ) -> str:
     """Copy ``canonical``'s complete lib tree into ``dest_lib_dir`` and
     rewrite ``pyproject``'s entry to the local non-editable form --
-    preflighted (via the same regex the rewrite itself uses) BEFORE any
-    file is copied, so a rewrite failure never happens only after the
-    canonical tree has already been copied in."""
+    preflighted (via the same regex the rewrite itself uses, AND a check
+    that canonical actually has the required ``src/`` + ``pyproject.toml``)
+    BEFORE any file is copied, so a rewrite failure -- or a malformed
+    canonical lib -- never happens only after the canonical tree has
+    already been (partially) copied in. Mirrors the existing directory/
+    file pointer materializer's own fail-closed behavior for an incomplete
+    canonical lib (missing ``src/``)."""
+    if not (canonical / "src").is_dir():
+        return f"SKIP {dest_lib_dir}: {canonical}/src not found -- refusing (canonical lib source must exist)"
+    if not (canonical / "pyproject.toml").is_file():
+        return f"SKIP {dest_lib_dir}: {canonical}/pyproject.toml missing -- refusing"
+
     text = pyproject.read_text(encoding="utf-8")
     pattern = re.compile(
         r'^([ \t]*' + re.escape(name) + r'\s*=\s*)\{\s*path\s*=\s*"'
