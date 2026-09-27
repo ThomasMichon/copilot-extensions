@@ -40,6 +40,19 @@ its warm daemon untouched** — no heavy rebuild, no model reload. Re-registerin
   (e.g. `engine-update`) rebuilds/upgrades the durable venv **and** restarts its
   daemon — the *one* place a restart is intended — decoupled from the service
   `update`.
+- **The durable runtime is its own installable program, not an extra of the light
+  one.** A venv boundary alone is not enough if both runtimes still ship from the
+  *same* package with the heavy stack behind an optional extra (e.g.
+  `<plugin>[engine]`) — the client and the daemon are then still one distribution
+  with two dependency profiles, which couples their releases and lets a routine
+  packaging change (a version bump, a lint rule, a new base dependency) touch code
+  neither runtime actually needs. Ship the durable runtime as a **separate
+  package** (its own `pyproject.toml`, own version) that *depends on* the light
+  package for the shared, torch-free identity/config surface (agent-index:
+  `agent-index-engine` depends on `agent-index` for `IndexConfig`/
+  `engine.generation`/`engine.client`) — never the reverse, and never duplicated.
+  The light package's own client wrapper still talks to the daemon exactly as
+  before (its stable local HTTP API); only what gets *installed together* changes.
 - **The light runtime is a pure client of the durable one.** All heavy work routes
   to the daemon over its stable local API (the versioned service defaults to an
   `external` engine mode and embeds nothing in-process), so the service venv stays
@@ -57,6 +70,12 @@ its warm daemon untouched** — no heavy rebuild, no model reload. Re-registerin
   env must target the durable venv explicitly; installing the heavy extra into the
   swappable venv (even once) re-couples the lifecycles and is the exact mistake this
   pattern exists to prevent.
+- **A pre-install step is often needed for the durable runtime's own light
+  dependency**, exactly as for the versioned venv's vendored libs: if the durable
+  package depends on the light package by name and neither is on a public index,
+  install the light package into the durable venv *first* (a local-path install)
+  so the durable package's own install can resolve it, rather than reaching for a
+  `[tool.uv.sources]` path override that only `uv` (not plain `pip`) understands.
 - **`uv venv` has no pip.** Provision the durable venv with `uv pip install --python
   <durable>` (or `python -m venv` + `-m pip`), not `python -m pip` against a
   `uv`-created venv.
@@ -81,4 +100,6 @@ stateful *process*: the durable thing survives the swap of the disposable thing.
 - Related: [`service-lifecycle-supervision`](service-lifecycle-supervision.md) ·
   [`install-vs-adopt-boundary`](install-vs-adopt-boundary.md) ·
   the deploy contract [`install-contract.md`](../install-contract.md)
+- Exemplar of the separate-package refinement: `efforts/active/
+  agent-index-server-package-split` (agent-index-engine as its own program)
 - Hub: [`docs/patterns/`](README.md)

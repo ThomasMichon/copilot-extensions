@@ -3,7 +3,9 @@
 - **Slug:** `agent-index-server-package-split`
 - **Repo:** copilot-extensions (plugin home; direct-push `main`)
 - **Created:** 2026-09-27
-- **Status:** Active
+- **Status:** Active (implementation landed + locally live-validated; the
+  remaining open items are GPU-host validation and a version-bump-tooling
+  decision, both non-blocking)
 - **Vision:** extends [`visions/plugins/agent-index`](../../../visions/plugins/agent-index/README.md)
   (§*The embedding engine*, §warm-durable-engine) — refines the durable engine
   runtime built by `efforts/active/agent-index-engine-daemon` from an extra
@@ -105,23 +107,35 @@ only based on being configured to do so."
 - [x] Update `test_engine_daemon.py`'s spawn-command assertions.
 - [x] Base test suite green (577 passed, 57 skipped — pre-existing GPU/platform
       skips — in a fresh venv built from the edited `pyproject.toml`).
-- [ ] **Live-validate** on a real host: durable-venv provisioning installs both
-      packages cleanly, `agent-index engine start` brings up the daemon from
-      the new module path, and a torch-free service embeds a query through it
-      (mirrors the Validation Plan `agent-index-engine-daemon` already proved
-      for the single-distribution shape).
+- [x] **Live-validate** locally (CPU-only, this machine): built a durable-
+      home-shaped venv, pre-installed the vendored libs, installed base
+      `agent-index` then `agent-index-engine` (torch 2.14/transformers
+      5.17/sentence-transformers 6.1 resolved cleanly), and drove the real
+      lifecycle via the base package's own CLI: `agent-index engine start`
+      brought up `agent_index_engine.app` (the new module path) as a detached
+      process bound to :8421; `agent-index engine status` reported
+      `gpu_deps_installed: true`, `healthy: true`, the correct durable-venv
+      `python_executable`; `/health` confirmed `device: cpu`,
+      `cuda_available: false` (no GPU here, expected); `agent-index engine
+      stop` cleanly tore it down (port released). A GPU host and the
+      SSH-fan-in/rollback legs of the parent effort's own Validation Plan
+      remain the only pieces this local run can't reach.
 - [ ] Decide whether `agent-index-engine` should get its own version-bump
       convention/CI entry (today it free-rides on agent-index's plugin
       version bump tooling, which doesn't know about a second pyproject.toml
       under one plugin).
-- [ ] Docs: extend `docs/patterns/durable-vs-versioned-runtime.md` with a note
-      that "durable" now also means "separately packaged", once live-validated.
+- [x] Docs: extended `docs/patterns/durable-vs-versioned-runtime.md` with a
+      note that "durable" now also means "separately packaged" (a new
+      Standard-approach bullet + a pre-install-order Gotcha + a See Also
+      pointer back to this effort).
 
 ## Validation Plan
 
-- [ ] A durable-venv `engine`/`engine-update` install action provisions
-      **both** `agent-index` and `agent-index-engine` and `agent-index engine
+- [x] A durable-venv `engine`/`engine-update` install action provisions
+      **both** `agent-index` and `agent-index-engine`, and `agent-index engine
       start` successfully launches `agent_index_engine.app` from that venv.
+      Proven locally (see Plan, above) with the exact two-package install
+      order `Install-Engine`/`_install_engine` now perform.
 - [ ] A torch-free service (no `agent-index-engine` installed) still serves
       search/index normally against the external daemon (default path,
       unaffected by this change).
@@ -138,7 +152,25 @@ only based on being configured to do so."
   in-process import conditional, updated both installer scripts' `Install-
   Engine`/`_install_engine`, updated `test_engine_daemon.py`. Base test suite
   green (577 passed / 57 skipped) in a fresh `uv`-built venv from the edited
-  `pyproject.toml`. Live-validation on a real host (durable venv provisioning
-  both packages, daemon start from the new module path) and the docs/version-
-  bump-tooling follow-ups remain open.
+  `pyproject.toml`. Landed as PR ThomasMichon/copilot-extensions#4297
+  (squash-merged to `dev`).
+- **2026-09-27 (same day, follow-up)** — Locally live-validated the packaging
+  end to end (CPU-only, no GPU host available this session): built a
+  durable-home-shaped venv, installed base `agent-index` then
+  `agent-index-engine` (pulled real torch/transformers/sentence-transformers),
+  and drove the actual lifecycle through the base package's own CLI —
+  `agent-index engine start` launched `agent_index_engine.app` as a detached
+  process; `agent-index engine status`/`/health` reported the correct
+  `python_executable` (the durable venv), `gpu_deps_installed: true`,
+  `device: cpu`; `agent-index engine stop` cleanly tore it down. An actual
+  `/embed` call hit a **pre-existing, already-tracked** `transformers` 5.x
+  incompatibility with `jina-v2-base-code`'s `trust_remote_code` path
+  (copilot-extensions#114/#163 — the `<5` ceiling is enforced only via
+  `.github/dependabot.yml`, not the `pyproject.toml` version spec, so a direct
+  `pip`/`uv` install can still resolve 5.x) — unrelated to this split, not a
+  regression it introduced. Extended
+  `docs/patterns/durable-vs-versioned-runtime.md` with the separate-package
+  refinement. Remaining open items (GPU-host validation, version-bump-tooling
+  decision) are non-blocking follow-ups, not gates on this effort's core
+  claim.
 
