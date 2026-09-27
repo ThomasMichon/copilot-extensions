@@ -932,13 +932,13 @@ write_units() {
   # behavior, unaffected).
   local repo_config_env=""
   local config_repo_name=""
-  if [ -f "${INSTALL_DIR}/config.yaml" ] && [ -x "${VENV}/bin/python3" ]; then
+  if [ -f "${INSTALL_DIR}/config.yaml" ] && [ -x "${VENV}/bin/python" ]; then
     # Parsed with real YAML semantics (the venv's own pyyaml, the same
     # library agent_logger.config uses) rather than a line-oriented sed/tr
     # extraction -- a bare regex/tr pass mishandles a trailing "# comment"
     # or a quoted scalar containing '#'/'"', silently yielding the wrong
     # (or no) repo name.
-    config_repo_name="$("${VENV}/bin/python3" - "${INSTALL_DIR}/config.yaml" <<'PYEOF' 2>/dev/null || true
+    config_repo_name="$("${VENV}/bin/python" - "${INSTALL_DIR}/config.yaml" <<'PYEOF' 2>/dev/null || true
 import sys
 try:
     import yaml
@@ -983,9 +983,9 @@ PYEOF
     #     the installer's current directory could shadow the real
     #     `repo_trust` module and forge a trusted verdict.
     local config_repo_trusted=0
-    if [ -n "${config_repo_dir}" ] && [ -x "${VENV}/bin/python3" ]; then
+    if [ -n "${config_repo_dir}" ] && [ -x "${VENV}/bin/python" ]; then
       local resolved_config_repo_dir
-      if resolved_config_repo_dir="$("${VENV}/bin/python3" -I - "${config_repo_dir}" <<'PYEOF' 2>/dev/null
+      if resolved_config_repo_dir="$("${VENV}/bin/python" -I - "${config_repo_dir}" <<'PYEOF' 2>/dev/null
 import sys
 from pathlib import Path
 try:
@@ -1046,8 +1046,8 @@ PYEOF
         # only manipulates a string, importing no plugin code, so there is
         # nothing for an ambient PYTHONPATH/CWD package to shadow.
         local repo_config_value=""
-        if [ -x "${VENV}/bin/python3" ]; then
-          repo_config_value="$("${VENV}/bin/python3" - "AGENT_LOGGER_REPO_CONFIG=${candidate_path}" <<'PYEOF' 2>/dev/null
+        if [ -x "${VENV}/bin/python" ]; then
+          repo_config_value="$("${VENV}/bin/python" - "AGENT_LOGGER_REPO_CONFIG=${candidate_path}" <<'PYEOF' 2>/dev/null
 import sys
 value = sys.argv[1]
 value = value.replace("\\", "\\\\")

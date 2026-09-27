@@ -61,11 +61,13 @@ def _venv_python_path(root: Path) -> Path:
     """The platform-specific interpreter path inside a venv rooted at
     ``root`` -- mirrors ``tools/run-plugin-tests.py``'s own
     ``_venv_python()`` exactly (``Scripts/python.exe`` on Windows,
-    ``bin/python3`` elsewhere), since the two must agree on where a venv's
-    interpreter lives for the ``.test-venvs`` fallback below to find it."""
+    ``bin/python`` elsewhere -- NOT ``bin/python3``, which the installer's
+    own venv-health check (``_venv_healthy()``) never guarantees), since
+    the two must agree on where a venv's interpreter lives for the
+    ``.test-venvs`` fallback below to find it."""
     if sys.platform == "win32":
         return root / "Scripts" / "python.exe"
-    return root / "bin" / "python3"
+    return root / "bin" / "python"
 
 
 def _resolve_test_venv_root() -> Path:
