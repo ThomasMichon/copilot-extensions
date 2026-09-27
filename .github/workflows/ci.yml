@@ -273,9 +273,8 @@ jobs:
         # (vendor-pointer-generalization, Phase 1), so no consumer checkout
         # carries a pointer copy whose tests a consumer's own pytest run would
         # collect. Run the canonical suites here so their wire/server coverage
-        # stays enforced.
-        env:
-          PYTHONPATH: libs/work-coalescing-singleton/src:libs/lazy-cli-dispatch/src
+        # stays enforced. Each suite puts its own lib on `sys.path` from its
+        # `tests/conftest.py`, as the sibling canonical-lib suites do.
         run: >-
           python -m pytest -q
           libs/work-coalescing-singleton/tests
