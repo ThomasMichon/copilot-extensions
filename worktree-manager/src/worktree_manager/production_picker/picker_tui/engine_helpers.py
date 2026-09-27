@@ -370,11 +370,17 @@ ACTIVE_SPECS = [
     # retired "R"/relation column) without truncation.
     ("state", "state", 8, "l", 4),
     ("machine_env", "source", 19, "l", 5),
-    ("age", "age", 4, "l", 7), ("sess", "live", 4, "l", 8),
+    ("age", "age", 4, "l", 7),
+    # #3307 follow-up: recency of last real interaction (resume/activity),
+    # distinct from AGE (creation/status-transition age) -- see
+    # ``derive._last_active_display``. Dropped before LIVE/SESS-TURNS under
+    # width pressure since AGE alone still gives a rough proxy.
+    ("used", "used", 4, "l", 8),
+    ("sess", "live", 4, "l", 9),
     # #3307 Phase 6: combined SESS/TURNS column ("3/47" -- total session
-    # count over the current session's turn count). Dropped first (prio 9)
+    # count over the current session's turn count). Dropped first (prio 10)
     # under width pressure -- the least essential of the LIVE-row columns.
-    ("sess_turns", "sess/t", 7, "r", 9),
+    ("sess_turns", "sess/t", 7, "r", 10),
     # #3307 Phase 4: standardized on "claims" (the shared claims_rank
     # summary), replacing the single-PR-only "pr" column -- matching the
     # Codespaces/Containers pivots' own column label.
@@ -382,10 +388,12 @@ ACTIVE_SPECS = [
 ]
 LIST_SPECS = [
     ("id4", "id", 4, "l", 2), ("state", "state", 8, "l", 4),
-    ("age", "age", 4, "l", 6), ("sess", "live", 4, "l", 7),
+    ("age", "age", 4, "l", 6),
+    ("used", "used", 4, "l", 7),
+    ("sess", "live", 4, "l", 8),
     # #3307 Phase 6: replaces the standalone "t" turns-only column with the
     # combined SESS/TURNS display (see ``derive._sess_turns``).
-    ("sess_turns", "sess/t", 7, "r", 8),
+    ("sess_turns", "sess/t", 7, "r", 9),
     ("claims_summary", "claims", 12, "l", 3),
 ]
 #: The Worktrees list's own row title now lives entirely on the detail line

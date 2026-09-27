@@ -161,6 +161,28 @@ def test_set_disposition_history_entry_matches_record_state(_tracking_dir):
     assert entry["follow_up"] == rec.follow_up
 
 
+def test_set_disposition_activity_has_its_own_freshness_stamp(_tracking_dir):
+    """#3307 worktrees-pivot-ux-overhaul follow-up: ``activity`` is applied
+    independently of summary/title/follow_up, stamps its own ``activity_at``
+    (distinct from the shared ``status_note_at``), and is recorded in the
+    history entry only when it was the field actually written."""
+    rec = _rec()
+    set_disposition(rec, activity="running the retry-budget tests")
+    assert rec.activity == "running the retry-budget tests"
+    assert rec.activity_at == rec.status_note_at
+    hist = dh.read(rec.worktree_id)
+    assert hist[-1]["changed"] == ["activity"]
+    assert hist[-1]["activity"] == "running the retry-budget tests"
+
+    # A later summary-only write leaves activity (and its stamp) untouched,
+    # and the entry omits "activity" from `changed` for that write.
+    prior_activity_at = rec.activity_at
+    set_disposition(rec, summary="folded the retry-budget work in")
+    assert rec.activity == "running the retry-budget tests"
+    assert rec.activity_at == prior_activity_at
+    assert dh.read(rec.worktree_id)[-1]["changed"] == ["summary"]
+
+
 # --- session-tag + kind + recovery digest (Phase 2) -----------------------
 
 def test_append_records_kind_and_session(_tracking_dir):

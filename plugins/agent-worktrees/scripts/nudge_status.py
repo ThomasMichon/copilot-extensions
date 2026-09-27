@@ -129,11 +129,13 @@ def _nudge_text(calls: int, minutes: int) -> str:
     return (
         f"[agent-worktrees] It's been {calls} tool call(s) / ~{minutes} min since "
         "this worktree's Picker disposition was last written, and the focus or "
-        "state may have moved. If so, refresh the highest-signal status the "
-        "Picker has: run `agent-worktrees status --summary \"<where things "
-        "stand>\"` -- add `--title \"<short headline>\"` if the focus changed, and "
-        "keep `--follow-up`/`--resolved` accurate. If nothing consequential "
-        "changed, ignore this."
+        "state may have moved. If so, refresh it: `agent-worktrees status "
+        "--activity \"<current sub-task>\"` most often (pass this whenever the "
+        "immediate focus shifts); add `--summary \"<updated recap>\"` only "
+        "occasionally, to fold newly completed work into the existing summary; "
+        "add `--title \"<short headline>\"` only rarely, when the worktree's "
+        "main theme genuinely changed. Keep `--follow-up`/`--resolved` "
+        "accurate. If nothing consequential changed, ignore this."
     )
 
 

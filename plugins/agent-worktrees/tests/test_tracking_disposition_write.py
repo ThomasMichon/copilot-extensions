@@ -67,6 +67,7 @@ def test_reactivates_finalized_worktree_on_follow_up(record_path):
         "follow_up": True,
         "title": None,
         "summary": "Begin the next change",
+        "activity": "",
     }
     record = tracking.load_record(record_path)
     assert record.status == "active"

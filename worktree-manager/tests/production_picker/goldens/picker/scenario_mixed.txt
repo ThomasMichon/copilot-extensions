@@ -6,17 +6,17 @@
 
    + New worktree…     ✕ Clean     ⟳ Sync     creates on anomalous-potato Win  (this host)
 
-  ID     STATE      AGE    LIVE   SESS/T    CLAIMS
+  ID     STATE      AGE    USED   LIVE   SESS/T    CLAIMS
   ── Active ──────────────────────────────────────────────────────────────────────────────────────────────────────────
-☐ m001   ACTIVE     15m    ●1        -/12
-      Ship the release notes: active
+☐ m001   ACTIVE     15m    15m    ●1        -/12
+      Ship the release notes
   ── Recent ──────────────────────────────────────────────────────────────────────────────────────────────────────────
-☐ m002   DIRTY      2h     ·          -/3
-      Fix the flaky test: dirty
-☐ m003   UNUSED     1d     ·          -/0
-      Old idle wt: unused
-☐ m004   CLEAN      2d     ·          -/6
-      Docs pass: clean
+☐ m002   DIRTY      2h     2h     ·          -/3
+      Fix the flaky test
+☐ m003   UNUSED     1d     1d     ·          -/0
+      Old idle wt
+☐ m004   CLEAN      2d     2d     ·          -/6
+      Docs pass
   ── Completed ───────────────────────────────────────────────────────────────────────────────────────────────────────
     (none)
 

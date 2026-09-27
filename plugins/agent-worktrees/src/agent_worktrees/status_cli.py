@@ -29,13 +29,28 @@ def add_parsers(sub) -> None:
     p.add_argument(
         "--summary",
         default=None,
-        help="Set this worktree's one-line disposition summary (write mode)",
+        help="Set this worktree's one-line disposition summary (write mode). "
+        "A broader recap -- update it OCCASIONALLY, to fold newly completed "
+        "work into the existing summary, not on every sub-task (use "
+        "--activity for that).",
+    )
+    p.add_argument(
+        "--activity",
+        default=None,
+        help="Set this worktree's CURRENT sub-task (write mode). The most "
+        "frequently-updated of the three disposition fields -- pass this "
+        "every time the immediate focus shifts, even within the same "
+        "overall summary/title. Rendered as the Picker row's live "
+        "second-line activity when no fresher live-pulse intent is "
+        "available.",
     )
     p.add_argument(
         "--title",
         default=None,
         help="Set this worktree's title -- the Picker's headline label "
-        "(write mode). Use when the worktree's focus changes. Keep "
+        "(write mode). Use RARELY and INTENTIONALLY -- only when the "
+        "worktree's main theme genuinely changes, not for routine "
+        "progress (use --activity/--summary for that). Keep "
         "it short (<=30 chars; longer is truncated) so it fits the "
         "status bar / Picker rows -- put detail in --summary.",
     )
@@ -75,14 +90,17 @@ def cmd_status(args: argparse.Namespace) -> int:
     # read path (`status` / `status --json`, no write flags) untouched.
     _summary = getattr(args, "summary", None)
     _title = getattr(args, "title", None)
+    _activity = getattr(args, "activity", None)
     _fu = getattr(args, "follow_up", False)
     _res = getattr(args, "resolved", False)
     if _fu and _res:
         output.err("Pass only one of --follow-up / --resolved.")
         return 1
     _follow = True if _fu else (False if _res else None)
-    if _summary is not None or _title is not None or _follow is not None:
-        return _core()._cmd_status_write(args, summary=_summary, title=_title, follow_up=_follow)
+    if _summary is not None or _title is not None or _activity is not None or _follow is not None:
+        return _core()._cmd_status_write(
+            args, summary=_summary, title=_title, activity=_activity, follow_up=_follow
+        )
 
     # worktree-status-core: history read mode (per-worktree), orthogonal to the
     # fleet read below.

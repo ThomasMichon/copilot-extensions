@@ -65,7 +65,7 @@
   "plugins/agent-vault/src/agent_vault/service.py": 1399,
   "plugins/agent-worktrees/libs/plugin-activation/src/plugin_activation/resolver.py": 1270,
   "plugins/agent-worktrees/scripts/versioned_runtime.py": 1415,
-  "plugins/agent-worktrees/src/agent_worktrees/__main__.py": 7043,
+  "plugins/agent-worktrees/src/agent_worktrees/__main__.py": 7056,
   "plugins/agent-worktrees/src/agent_worktrees/claims_cli.py": 1017,
   "plugins/agent-worktrees/src/agent_worktrees/config.py": 2147,
   "plugins/agent-worktrees/src/agent_worktrees/finalize.py": 2161,
@@ -80,7 +80,7 @@
   "plugins/agent-worktrees/src/agent_worktrees/sessions.py": 2704,
   "plugins/agent-worktrees/src/agent_worktrees/state_root.py": 1051,
   "plugins/agent-worktrees/src/agent_worktrees/terminal_fragment.py": 1016,
-  "plugins/agent-worktrees/src/agent_worktrees/tracking.py": 4035,
+  "plugins/agent-worktrees/src/agent_worktrees/tracking.py": 4078,
   "plugins/budget-guidance/scripts/versioned_runtime.py": 1415,
   "plugins/customizing-copilot/libs/plugin-activation/src/plugin_activation/resolver.py": 1270,
   "plugins/customizing-copilot/skills/reviewing-customizations/scripts/instruction_projections.py": 1806,
@@ -91,5 +91,6 @@
   "worktree-manager/libs/plugin-activation/src/plugin_activation/resolver.py": 1270,
   "worktree-manager/src/worktree_manager/__main__.py": 1841,
   "worktree-manager/src/worktree_manager/production_picker/picker_tui/data_ssh.py": 2196,
+  "worktree-manager/src/worktree_manager/production_picker/picker_tui/derive.py": 1017,
   "worktree-manager/src/worktree_manager/terminal_fragment.py": 1256
 }

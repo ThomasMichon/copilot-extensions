@@ -70,6 +70,31 @@ def test_summary_only_preserves_finalized_status(status_env):
     assert record.completed_at == "2026-08-28T01:00:00"
 
 
+def test_activity_write_is_independent_of_summary_and_title(status_env):
+    """#3307 worktrees-pivot-ux-overhaul follow-up: --activity writes the
+    current-sub-task field without disturbing summary/title, and stamps its
+    own activity_at."""
+    args = argparse.Namespace(worktree_id=None)
+
+    assert main._cmd_status_write(
+        args,
+        summary="Overall recap",
+        activity=None,
+        follow_up=None,
+    ) == 0
+    assert main._cmd_status_write(
+        args,
+        summary=None,
+        activity="Running the retry-budget tests",
+        follow_up=None,
+    ) == 0
+
+    record = tracking.load_record(status_env)
+    assert record.summary == "Overall recap"
+    assert record.activity == "Running the retry-budget tests"
+    assert record.activity_at is not None
+
+
 def test_first_write_in_session_emits_stage_5_status_reported(status_env, monkeypatch):
     """Stage 5 (status_reported): the first status-report write in a session
     marks "Copilot did something here"."""

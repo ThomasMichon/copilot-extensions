@@ -207,6 +207,28 @@ class TestSaveLoadRoundTrip:
         loaded = load_record(path)
         assert loaded.title == "Fix: handle edge case #42 & more"
 
+    def test_activity_round_trip(self, tmp_path: Path):
+        """#3307 worktrees-pivot-ux-overhaul follow-up: activity/activity_at
+        round-trip through YAML save/load, same as summary/status_note_at."""
+        rec = self._make_record(
+            activity="running the retry-budget tests",
+            activity_at="2026-09-26T10:00:00",
+        )
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        loaded = load_record(path)
+        assert loaded.activity == "running the retry-budget tests"
+        assert loaded.activity_at == "2026-09-26T10:00:00"
+
+    def test_activity_absent_by_default(self, tmp_path: Path):
+        rec = self._make_record()
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        assert "activity:" not in path.read_text("utf-8")
+        loaded = load_record(path)
+        assert loaded.activity == ""
+        assert loaded.activity_at is None
+
     @pytest.mark.parametrize(
         ("serialized", "expected"),
         [

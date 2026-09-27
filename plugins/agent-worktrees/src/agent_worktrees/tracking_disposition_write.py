@@ -62,6 +62,7 @@ def apply_status_disposition(args: dict) -> dict:
     yaml_path = Path(args["yaml_path"])
     summary = args.get("summary")
     title = args.get("title")
+    activity_text = args.get("activity")
     follow_up = args.get("follow_up")
     session_id = args.get("session_id")
     project = args.get("project")
@@ -80,6 +81,7 @@ def apply_status_disposition(args: dict) -> dict:
             record,
             summary=summary,
             title=title,
+            activity=activity_text,
             follow_up=follow_up,
             session_id=session_id,
             save=False,
@@ -106,6 +108,7 @@ def apply_status_disposition(args: dict) -> dict:
         "follow_up": record.follow_up,
         "title": record.title,
         "summary": record.summary,
+        "activity": record.activity,
     }
 
 

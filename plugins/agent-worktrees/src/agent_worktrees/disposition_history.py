@@ -56,7 +56,7 @@ DIGEST_SESSION_SUFFIX_CHARS = 6
 DIGEST_OMITTED = "- ... older entries omitted ..."
 
 #: The disposition fields a history entry snapshots / can mark as changed.
-_FIELDS = ("summary", "title", "follow_up")
+_FIELDS = ("summary", "title", "activity", "follow_up")
 
 
 def history_path(worktree_id: str, *, tracking_path: Path | None = None) -> Path:
@@ -82,6 +82,7 @@ def append(
     title: str | None,
     follow_up: bool,
     changed: list[str],
+    activity: str = "",
     kind: str = "status",
     session_id: str | None = None,
     tracking_path: Path | None = None,
@@ -91,6 +92,11 @@ def append(
 
     ``changed`` names the fields THIS write touched (a subset of :data:`_FIELDS`);
     the snapshot carries the resulting values so each line is self-contained.
+    ``activity`` is the agent-asserted CURRENT sub-task (distinct from
+    ``summary``'s broader recap and ``title``'s rare headline -- see
+    ``tracking.set_disposition``'s own docstring for the cadence contract);
+    omitted from the line when empty, same as every other neutral-default
+    field below.
 
     ``kind`` classifies the entry -- ``"status"`` (a disposition write; the
     default so every existing caller is unchanged), ``"bind"`` (a session
@@ -116,6 +122,8 @@ def append(
             "summary": summary,
             "follow_up": bool(follow_up),
         }
+        if activity:
+            entry["activity"] = activity
         if kind and kind != "status":
             entry["kind"] = kind
         if session_id:
