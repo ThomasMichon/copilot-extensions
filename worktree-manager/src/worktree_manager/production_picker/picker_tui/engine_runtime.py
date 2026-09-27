@@ -605,8 +605,12 @@ class PickerScreenRuntimeMixin:
         except Exception:
             self._setup_failed_epoch = epoch
             raise
-        self._invalidate_setup_reload_caches()
-        self._apply_setup_payload(payload)
+        try:
+            self._invalidate_setup_reload_caches()
+            self._apply_setup_payload(payload)
+        except Exception:
+            self._dispose_setup_payload(payload)
+            raise
         self._setup_applied_epoch = epoch
     def _start_pr_reconcile(self, rec_fn):
         """Reconcile stale local PR states off the UI thread, then reload (#1423).

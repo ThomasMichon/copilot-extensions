@@ -266,6 +266,39 @@ def test_setup_reload_disposes_payload_when_apply_raises():
     assert disposed.wait(timeout=5)
 
 
+def test_sync_setup_disposes_payload_when_apply_raises():
+    disposed = threading.Event()
+
+    class _Loader:
+        def cancel(self):
+            disposed.set()
+
+    class _Screen(PickerScreenRuntimeMixin):
+        def __init__(self):
+            self._bg_cancel = threading.Event()
+            self._setup_epoch = 0
+            self._setup_applied_epoch = 0
+            self._setup_failed_epoch = 0
+
+        def _prime_setup_reload(self):
+            return None
+
+        def _collect_setup_payload(self):
+            return replace(_payload("live"), loader=_Loader())
+
+        def _invalidate_setup_reload_caches(self):
+            return None
+
+        def _apply_setup_payload(self, payload):
+            raise RuntimeError("apply blew up")
+
+    screen = _Screen()
+    with pytest.raises(RuntimeError, match="apply blew up"):
+        screen.setup()
+
+    assert disposed.is_set()
+
+
 def test_apply_setup_payload_cancels_replaced_loader():
     disposed = threading.Event()
 

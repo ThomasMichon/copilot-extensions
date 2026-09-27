@@ -181,7 +181,7 @@ then tightens regression coverage and cleanup.
       `_run_wt_action()`'s `_done` still call synchronous `setup()` exactly as
       before). Validation: targeted `test_setup_reload_epoch.py` +
       `test_picker_first_paint.py` green; full `worktree-manager` suite
-      matched the known Windows baseline at `1472 passed, 7 skipped, 13 failed`
+      matched the known Windows baseline at `1473 passed, 7 skipped, 13 failed`
       (the same 3 unrelated `test_data_ssh_sources.py` failures plus 10
       symlink-privilege failures on this machine).
    - Add the screen-owned setup epoch and a dedicated helper for scheduling a
