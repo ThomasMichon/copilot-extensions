@@ -953,12 +953,11 @@ Three properties define it:
 
 By default a fleet body is a **CLI/mux embody** on the pool host
 (`agent-worktrees embody`). A seeded CLI session historically could *race the
-input caret and never deliver its startup seed* (the documented "Loading…"
-hang, github/copilot-agent-runtime#13492, **fixed permanently upstream in
-#13494** — a kicked fleet body no longer risks that specific race). Independent
-of that fix, `--headless` (fleet-wide) still has its own standing benefits: it
-embodies each fleet body as a **headless agent-bridge ACP session** on the pool
-host — `ssh <host> agent-bridge create <agent> "<fleet
+input caret and never deliver its startup seed* on a since-fixed CLI startup
+bug -- a kicked fleet body no longer risks that specific race on an up-to-date
+CLI. Independent of that history, `--headless` (fleet-wide) still has its own
+standing benefits: it embodies each fleet body as a **headless agent-bridge
+ACP session** on the pool host — `ssh <host> agent-bridge create <agent> "<fleet
 seed>" --no-wait` (`fleet.py` → `embody.spawn_fleet_headless_worker`) — spawning
 the body in that host's own persistent agent-bridge daemon, which owns it
 independently of the launching SSH invocation. It sidesteps the
