@@ -167,20 +167,29 @@ installer. Know which kind you are changing.
    milestone, not a handoff or completion condition.
 7. **Steward the PR through self-merge and finalization.** This repo's effective profile is
    **`pr-self-merge`**: the GitHub ruleset blocks direct pushes and requests a
-   non-blocking Copilot review, but the submitter is authorized to merge.
+   Copilot review, but the submitter is authorized to merge once that review
+   yields a real verdict.
    The submitting agent remains responsible until the PR is merged and its
    worktree is finalized:
-   - Assess Copilot comments as advisory findings; address valid ones and
-     explain or dismiss invalid ones. Never wait for Copilot to approve --
-     its review is always a non-blocking comment, never a required approval,
-     no matter how many rounds you go through or how it's worded (a "changes
-     recommended" banner is not a gate). Use `pr-watch wait <owner>/<repo> <PR>
-     --since r0 --until any --timeout 600` (a bounded ~10-minute window, not
-     `--timeout 0`) rather than waiting indefinitely, then act on whatever
-     review guidance has appeared by the time it returns -- address anything
-     genuinely worth addressing, or proceed straight to merge if nothing has
-     landed yet. Do not loop indefinitely re-requesting a review chasing a
-     zero-finding pass that may never come.
+   - **Wait for `Approve`, not merely `Comment`.** Copilot code review can
+     only ever render `Approve` or `Comment` (no "Request changes"
+     capability exists in the product); Approvals are enabled in this repo,
+     so a genuinely ready PR should come back `Approve`. Use `pr-watch wait
+     <owner>/<repo> <PR> --since r0 --until any --timeout 300` (a bounded
+     ~5-minute window per attempt, not `--timeout 0`) to wait for the
+     initial review. On `Approve`, merge. On `Comment`: address genuinely
+     valuable findings (explain/dismiss the rest), push, wait another ~5
+     minutes for the automatic post-push review. Still not `Approve`?
+     Explicitly re-request review via the API (`POST
+     .../pulls/<PR>/requested_reviewers` with
+     `reviewers[]=copilot-pull-request-reviewer[bot]` -- see
+     `CONTRIBUTING.md` § "Requesting a fresh review") and wait ~5 minutes
+     again -- do not just push another commit hoping the next automatic
+     pass flips on its own. **Narrow bypass:** after at least one full loop,
+     if the maintainer is merging and the *current* `Comment` review's
+     remaining findings are all Low severity, self-merge is permitted
+     (state what was dismissed and why); any Medium/High finding blocks
+     self-merge regardless of who authored the PR.
    - Keep the branch current and mergeable. If `dev` moves or conflicts appear,
      reconcile with the supported worktree PR verbs, re-run the required gates,
      and update the PR with `push-changes`.

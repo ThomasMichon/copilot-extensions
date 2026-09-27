@@ -156,9 +156,13 @@ own; treat it the same way regardless of who authored the PR:
 2. **`Approve` landed:** proceed to merge (subject to the separate
    required-approving-review gate for a non-maintainer's PR — see "Review"
    above; Copilot's own `Approve` never substitutes for that).
-3. **`Comment` landed (or nothing landed yet):** address the genuinely
-   valuable findings (or explicitly dismiss/resolve the rest with reasoning
-   in a reply), then push the update.
+3. **`Comment` landed:** address the genuinely valuable findings (or
+   explicitly dismiss/resolve the rest with reasoning in a reply), then push
+   the update, then continue to step 4.
+   **Nothing landed yet (no review at all after the wait):** there's
+   nothing to address or push — skip straight to explicitly re-requesting a
+   review (step 4's action), then wait ~5 minutes and return to step 2. Do
+   not invent an unrelated commit just to have something to push.
 4. Wait **~5 minutes** for the automatic review that follows a push. If it
    comes back `Approve`, merge. If it's still `Comment`, **explicitly
    re-request a review** — see "Requesting a fresh review" below; do not
@@ -199,7 +203,7 @@ list, done via the API instead of clicking:
 
 ```bash
 gh api repos/ThomasMichon/copilot-extensions/pulls/<PR>/requested_reviewers \
-  -X POST -f reviewers[]=copilot-pull-request-reviewer[bot]
+  -X POST -f "reviewers[]=copilot-pull-request-reviewer[bot]"
 ```
 
 (Confirmed live and current: GitHub's own docs cite this exact call —

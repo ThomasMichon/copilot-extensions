@@ -184,25 +184,34 @@ across at least two periodic cycles.
 ### Branch and Publication
 
 This repo is **PR-required** and uses the `pr-self-merge` profile. Work in an
-isolated worktree, publish with `copilot-extensions create-pr`, give the
-non-blocking Copilot review a bounded window (order of minutes, not hours) to
-report, then merge with `copilot-extensions pr-merge <PR> --now` and finalize.
-Direct pushes to `dev` are blocked by tooling and repository policy; `main`
-accepts pushes only from the CI promotion pipeline (or explicit admin
-escalation) -- see Release & Versioning in CONTRIBUTING.md.
+isolated worktree, publish with `copilot-extensions create-pr`, then follow
+the wait-for-a-verdict loop below before merging with
+`copilot-extensions pr-merge <PR> --now` and finalizing. Direct pushes to
+`dev` are blocked by tooling and repository policy; `main` accepts pushes
+only from the CI promotion pipeline (or explicit admin escalation) -- see
+Release & Versioning in CONTRIBUTING.md.
 
-**Copilot's review never gates the merge and never issues a final "verdict" or
-approval to wait for** -- the ruleset requires zero approving reviews, and
-Copilot's own review state is always a non-blocking comment, never an
-approval. Assess its findings as advisory: address genuinely valuable ones
-(don't block on stylistic nitpicks), explain or dismiss the rest, then
-self-merge -- with open low/medium-severity findings still on the PR if
-they're not worth a further round. Re-requesting a review after addressing
-feedback is fine, but do not loop indefinitely chasing a zero-finding pass;
-there is no clean-review requirement to satisfy, and one may never arrive
-since review tone/severity can vary run to run. A PR sitting untouched after
-a review lands, waiting for some further signal from Copilot, is a stuck PR --
-merge it or explicitly abandon it instead.
+**Wait for a real verdict before merging -- contributor and maintainer PRs
+alike.** Copilot code review can only ever render `Approve` or `Comment`
+(there is no "Request changes" capability in the product at all); Approvals
+are enabled in this repo, so a genuinely ready PR should come back `Approve`,
+not merely `Comment` (see `REVIEW.md`). A `Comment`-only verdict means real
+findings remain -- it is not a pass:
+1. Open/update the PR, wait ~5 minutes for a review.
+2. `Approve` landed: merge (subject to the separate maintainer-approval gate
+   on a non-maintainer's PR).
+3. `Comment` landed: address genuinely valuable findings (explain/dismiss
+   the rest), push, wait ~5 minutes for the automatic post-push review.
+4. Still not `Approve`: explicitly re-request review via the API (see
+   CONTRIBUTING.md § "Requesting a fresh review" for the exact call) and wait
+   ~5 minutes again -- do not just keep pushing small commits hoping the next
+   automatic pass flips on its own.
+5. **Narrow maintainer bypass:** after at least one full loop, if the
+   *current* `Comment` review's remaining findings are all Low severity, the
+   maintainer may self-merge, stating what was dismissed and why. Any
+   Medium/High finding blocks self-merge regardless of who authored the PR.
+Full mechanics, the re-request API call, and the non-maintainer approval gate
+this doesn't override: CONTRIBUTING.md § "Waiting for a verdict".
 
 **Never post an `@copilot review` (or any `@copilot` mention) comment to
 request a fresh pass.** GitHub's automatic review already fires on every push
