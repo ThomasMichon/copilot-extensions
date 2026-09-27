@@ -171,7 +171,7 @@ agent-bridge's `latest_progress` (the one source that exists today); the
 PR-auto-claim capability below is the first non-agent-bridge source, and the
 row should be built so a future snagged signal slots in the same way.
 
-### Auto-claiming a PR from its own pushed branch (odsp-web / ADO)
+### Auto-claiming a PR from its own pushed branch (workspace repo / ADO)
 
 `agent-worktrees` already has a general claim ledger keyed by worktree
 (`claims_cli.py`'s `claims add <kind> <ref>`, with `pr` and `codespace`/
@@ -179,14 +179,14 @@ row should be built so a future snagged signal slots in the same way.
 store this vision invents**; the row's claims-list is the *same* ledger a
 Task or Worktree row already reads, joined through whichever worktree is
 currently driving the venue (derive-never-duplicate, same as the
-title/activity cross-links). What is genuinely new: for odsp-web, most
+title/activity cross-links). What is genuinely new: for a workspace repo, most
 Codespaces exist to push ADO topic branches that become PRs. Detecting that
 a venue's own activity just produced a new PR from a pushed branch, and
 auto-journaling it (`claims add pr <ref>`) on the driving worktree, means
 the PR shows up in the claims-list **without** the operator or a registrar
 manually claiming it — the natural, expected outcome of "I pushed a branch
 from this box" becoming visible with no extra step. This is scoped to
-odsp-web's ADO-backed flow to start; the detection mechanism (watching for
+an ADO-backed workspace flow to start; the detection mechanism (watching for
 a push→PR transition) is new work, but the claim it produces rides the
 existing ledger unchanged.
 
@@ -338,7 +338,7 @@ against the real claim-kind vocabulary while building it:
 "issue", "effort", and "bridge" are **not yet claimable kinds** at all. The
 module ranks whatever kind is actually present in a ledger (so it degrades
 gracefully today, showing only PR/CodeSpace/container/worktree/task
-claims); adding a "bug"/"issue" claim kind is the odsp-web PR auto-claim
+claims); adding a "bug"/"issue" claim kind is the workspace-PR auto-claim
 concept's own prerequisite, not something this module does on its own.
 
 ### Claim-kind extensibility — a `.d/` drop-in registry, mirroring pivots
@@ -365,7 +365,7 @@ materialized-runtime-directory step — because a claim-kind declaration
 carries no executable command to spoof; that machinery's entire reason to
 exist doesn't apply to a bare priority integer and an optional label.
 
-The practical payoff: when a future plugin (or this vision's own odsp-web
+The practical payoff: when a future plugin (or this vision's own workspace
 PR auto-claim work) needs a `bug`/`issue` claim kind to actually exist, it
 does not touch `claims_rank.py` at all — it ships its own
 `claim-kinds/bug.json` declaring the kind, its priority, and how it should
@@ -467,7 +467,7 @@ column reads `LIVE` or `IDLE` — new on both pivots, mirroring
 agent-dispatch's own Tasks→Worktree drill-in direction.
 
 ### codespace-pr-auto-claim
-For odsp-web's ADO-backed flow, a CodeSpace's own pushed topic branch that
+For an ADO-backed workspace flow, a CodeSpace's own pushed topic branch that
 becomes a PR is auto-journaled (`agent-worktrees claims add pr <ref>`) onto
 the driving worktree's existing claim ledger — no manual claim step, no new
 claim store, just a new producer feeding the ledger the claims-list column
@@ -591,9 +591,9 @@ window or tab, rather than replacing the Picker's own terminal.
 - **Not a new claim store or claim-rendering surface.** The claims-list
   reads `agent-worktrees`' existing per-worktree claim ledger through the
   driving-worktree cross-link; this vision adds one new *producer* (the
-  odsp-web PR auto-claim) but no new storage or rendering path.
+  workspace-repo PR auto-claim) but no new storage or rendering path.
 - **Not a general ADO/CI event pipeline.** PR auto-claiming is scoped to
-  the specific push→PR transition odsp-web's ADO flow produces; this vision
+  the specific push→PR transition an ADO-backed workspace flow produces; this vision
   does not attempt to generalize to every possible externally-observable
   signal a venue could produce.
 - **Not sole authority over the claims pecking order elsewhere.** This
@@ -672,7 +672,7 @@ window or tab, rather than replacing the Picker's own terminal.
   `<title>` is a declared checkout intent, distinct from the venue's own
   repo/spec identity (already line one); `<activity>` is an accumulating
   "snagged" signal stream, not limited to agent-bridge. Added the
-  odsp-web PR auto-claim capability (a CodeSpace's own pushed ADO branch
+  workspace-repo PR auto-claim capability (a CodeSpace's own pushed ADO branch
   auto-journals its resulting PR onto the driving worktree's existing
   claim ledger — clarified that claims are that same existing
   `agent-worktrees` ledger, not a new store) and a reserved

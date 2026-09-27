@@ -31,7 +31,7 @@ itself never reads a plugin drop-in (stays pure/I/O-free; see below).
 "issue", "effort", and "bridge" are **not yet claimable kinds**. This module
 ranks whatever kind is actually present in a ledger; a kind this repo cannot
 yet produce a claim for simply never appears here (no fabrication). Adding a
-"bug"/"issue" claim kind is a prerequisite of the vision's own odsp-web PR
+"bug"/"issue" claim kind is a prerequisite of the vision's own workspace-PR
 auto-claim work, not something this module does.
 
 **Deliberately pure, no I/O.** This module never scans a filesystem, reads
@@ -249,4 +249,3 @@ def claims_summary_for_worktree(
         claims, limit=limit, pecking_order=pecking_order,
         label_overrides=label_overrides,
     )
-

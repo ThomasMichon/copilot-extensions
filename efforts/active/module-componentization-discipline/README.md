@@ -3,7 +3,7 @@
 - **Slug:** `module-componentization-discipline`
 - **Repo:** copilot-extensions (repo-wide: every plugin, `libs/`,
   `worktree-manager/`, and `tools/`)
-- **Branch(es):** `worktree/tmichon-cloud1-win-20260916-140121-80aa` (Phase 0)
+- **Branch(es):** `worktree/operator-cloud1-win-20260916-140121-80aa` (Phase 0)
 - **Created:** 2026-09-16
 - **Status:** Active
 - **Vision:** none dedicated — this effort establishes the standing
@@ -49,7 +49,7 @@ to test modules via behavioral-contract splitting with filterable attribution.
 ## Context
 
 Triggered by reviewing `namankanakiya/copilot-extensions#2785` on the
-`odsp-web-harness` side: its `guards + lint` CI check was failing on
+private downstream repo's side: its `guards + lint` CI check was failing on
 `worktree-manager/.../engine.py` exceeding its own grandfathered ceiling by 48
 lines — a regression introduced by an unrelated, already-merged PR (#2788/
 #2794). That a single feature PR could push a baselined file further over its

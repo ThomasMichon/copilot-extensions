@@ -858,7 +858,7 @@ manager, or session-host implementation.
   [`pull-requests`](pull-requests/README.md), that generalizes the PR concept
   beyond "a claimed resource on the worktree's ledger" into its own
   provider-neutral capability (author+reviewer symmetric, foreign-repo
-  addressable, mock-provider verifiable). Mined from a live odsp-web-harness
+  addressable, mock-provider verifiable). Mined from a live private-downstream
   clean-room finding: a scenario-eval correctly reported BLOCKED for "no PR
   available" rather than fabricate a review, surfacing that reviewer-side PR
   operations, foreign-repo addressing, and a conformance-verified mock

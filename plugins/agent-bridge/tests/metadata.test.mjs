@@ -96,7 +96,7 @@ test("resolveMetadataAsync runs its four spawns concurrently, not sequentially",
 test("resolveMetadataAsync passes an anchor session-scope-id through verbatim", async (t) => {
   const { dir, write } = makeFakeBinDir();
   write("git", 0, "main");
-  write("agent-worktrees", 0, "anchor-odsp-web");
+  write("agent-worktrees", 0, "anchor-example-web");
 
   const originalPath = process.env.PATH;
   process.env.PATH = `${dir}${process.platform === "win32" ? ";" : ":"}${originalPath}`;
@@ -104,7 +104,7 @@ test("resolveMetadataAsync passes an anchor session-scope-id through verbatim", 
 
   const meta = await resolveMetadataAsync({ cwd: dir, env: {} });
 
-  assert.equal(meta.worktree_id, "anchor-odsp-web");
+  assert.equal(meta.worktree_id, "anchor-example-web");
 });
 
 // Venue CLI-mode detached launch: several CodeSpaces of the same repo all
@@ -136,4 +136,3 @@ test("fake bin harness sanity: the stub script really does sleep", () => {
   const out = execFileSync(bin, [], { cwd: dir, encoding: "utf-8", shell: process.platform === "win32" }).trim();
   assert.equal(out, "ok");
 });
-

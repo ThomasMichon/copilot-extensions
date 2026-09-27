@@ -680,7 +680,7 @@ installs, no service-specific config needed for this class of plugin.
   .instructions.md` template had grown to 4380 bytes, past
   `customizing-copilot`'s `MAX_TEMPLATE_BYTES = 4096` projection budget —
   the exact same bug class as the earlier `context-handoff` fix
-  (gim-home/odsp-web-harness#404 -> upstream #3250), this time hitting
+  (private downstream repo #404 -> upstream #3250), this time hitting
   `agent-worktrees` and hard-blocking `push-changes`/finalize validation in
   *every* repo that resolves this projection (discovered when it blocked a
   routine knowledge-repo effort-doc push, unrelated to this effort). Trimmed
@@ -724,7 +724,7 @@ required check.
 Resumed via context handoff (again worked around a broken `consume_handoff`
 MCP tool — `Extension disconnected before responding to tool call`, three
 consecutive attempts — by reading the file-backed handoff JSON directly
-from `~/.odsp-web-harness/worktrees/<id>/handoff/handoff-<id>.json` and
+from a private repo state-root `worktrees/<id>/handoff/handoff-<id>.json` path and
 `bind-session`ing manually; this is now the *second* distinct
 `consume_handoff` failure mode hit across two sessions and still not
 reported upstream).
@@ -758,7 +758,7 @@ appropriately larger/riskier for one sitting):
 - Landed as `ThomasMichon/copilot-extensions#3363` (squash-merged): 15/15
   plugin tests passing, `check-version-consistency.py` /
   `check-docs-consistency.py` / `check-install-contract.py` all clean, a
-  live `status` call against `gim-home/odsp-web-harness#491` still correct
+  live `status` call against the private downstream repo's PR #491 still correct
   through the module (unchanged transport), full CI green (one prior
   unrelated `worktree-manager` drift failure not present this run).
 - **Genuinely still open**: `agent-bridge`'s Phase 1 installer-engine
@@ -823,4 +823,3 @@ appropriately larger/riskier for one sitting):
   --check`, a drift detector) — not forking the design unilaterally. No
   mechanism change is proposed or made here; this is a forward pointer only,
   so this effort's own driver sees it on next resume.
-

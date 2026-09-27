@@ -500,7 +500,7 @@ class TestCmdEmbody:
 
 
 # -- cmd_embody --anchor: deliver directly in the anchor, no worktree ------
-def _stub_anchor_config(monkeypatch, *, repo_name="odsp-web", anchor="/w/anchor"):
+def _stub_anchor_config(monkeypatch, *, repo_name="example-web", anchor="/w/anchor"):
     class _Cfg:
         repos = {}
         default_repo = type("Repo", (), {"anchor": anchor})()
@@ -535,7 +535,7 @@ class TestCmdEmbodyAnchor:
     def test_anchor_creates_session_at_the_anchor_path_no_worktree_record(
         self, monkeypatch, capfd,
     ):
-        _stub_anchor_config(monkeypatch, repo_name="odsp-web", anchor="/w/odsp-web")
+        _stub_anchor_config(monkeypatch, repo_name="example-web", anchor="/w/example-web")
         monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)
         spawned = {}
 
@@ -554,12 +554,12 @@ class TestCmdEmbodyAnchor:
         out = json.loads(capfd.readouterr().out)
         assert out["ok"] is True
         assert out["anchor"] is True
-        assert out["worktree_id"] == "anchor-odsp-web"
-        assert out["session"] == "wt-anchor-odsp-web"
-        assert out["work_dir"] == "/w/odsp-web"
+        assert out["worktree_id"] == "anchor-example-web"
+        assert out["session"] == "wt-anchor-example-web"
+        assert out["work_dir"] == "/w/example-web"
         assert out["created"] is True and out["resumed"] is False
         assert spawned == {
-            "wt": "anchor-odsp-web", "wd": "/w/odsp-web", "cmd": ["copilot"],
+            "wt": "anchor-example-web", "wd": "/w/example-web", "cmd": ["copilot"],
         }
 
     def test_anchor_resumes_an_already_live_session(self, monkeypatch, capfd):
@@ -619,14 +619,14 @@ class TestCmdEmbodyAnchor:
         assert out["dry_run"] is True
         assert out["anchor"] is True
         assert out["would"] == "create"
-        assert out["worktree_id"] == "anchor-odsp-web"
+        assert out["worktree_id"] == "anchor-example-web"
 
     def test_anchor_spawn_failure_exits_4(self, monkeypatch, capfd):
         _stub_anchor_config(monkeypatch)
         monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)
         monkeypatch.setattr(
             sessions, "mux_new_session",
-            lambda *a, **k: {"ok": False, "session": "wt-anchor-odsp-web",
+            lambda *a, **k: {"ok": False, "session": "wt-anchor-example-web",
                              "new_pane": None, "error": "boom"},
         )
 
@@ -678,8 +678,8 @@ class TestEmbodyLaunchPassthrough:
 
         assert rc == 0
         out = json.loads(capfd.readouterr().out)
-        assert out["session"] == "wt-anchor-odsp-web"
-        assert spawned["wt"] == "anchor-odsp-web"
+        assert out["session"] == "wt-anchor-example-web"
+        assert spawned["wt"] == "anchor-example-web"
         assert spawned["env"]["AGENT_BRIDGE_SCOPE_ID"] == "anchor-example-web@cs-1"
 
     def test_no_scope_means_no_env_override(self, monkeypatch, capfd):

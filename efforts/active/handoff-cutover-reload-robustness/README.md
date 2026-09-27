@@ -223,13 +223,13 @@ to the runtime fix (#5253† / upstream #13494). Findings:
 - [x] Opened, landed, and deployed: copilot-extensions
       [#3011](https://github.com/ThomasMichon/copilot-extensions/pull/3011)
       (squash-merged, agent-worktrees `1.5.5-dev178`); rolled out via
-      `odsp-web-harness update` on the affected machine (tmichon-cloud1).
+      the private downstream repo's `update` flow on the affected secondary workstation.
 - [x] **Live validation, not just clean-room:** immediately after diagnosis
       (before the PR existed), hand-patched the *installed* `1.5.5-dev177`
       payload with the same fix and restarted the status-monitor — worktree
       b431 held at a single mux pane with no further spawn/claim activity for
-      the affected token. After the real PR merged and `odsp-web-harness
-      update` deployed `1.5.5-dev178` (superseding the hand-patch), the
+      the affected token. After the real PR merged and the same downstream
+      `update` flow deployed `1.5.5-dev178` (superseding the hand-patch), the
       status-monitor was cleanly reaped/respawned on the new build and b431
       remained at a single pane. This is stronger evidence than a synthetic
       clean-room reproduction: it is the actual box, the actual daemon, and
@@ -271,7 +271,7 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
       logic's success/failure/durable-trace-backstop branches; the deployed
       daemon was confirmed honoring it end-to-end on the actual incident
       machine/worktree, both via the pre-PR hand-patch and the post-merge
-      `odsp-web-harness update` deploy). A synthetic Docker clean-room replay
+      downstream `update` deploy). A synthetic Docker clean-room replay
       of this specific scenario remains an open, non-blocking follow-up.
 
 ## Journal
@@ -282,7 +282,7 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
   "Loading…/Resuming… hang" advisory text tied to #13492/#13494 from
   `agent-worktrees`' `repairing-worktrees` skill, `agent-bridge`'s
   troubleshooting skill, `agent-dispatch`'s spawn-supervisor doc, and the
-  `odsp-web-harness-backlog` dispatch identity.
+  private-downstream backlog dispatch identity.
 - **New, distinct incident diagnosed on worktree b431** (not a #13492/#13494
   recurrence -- the successor hang there never even reached the pre-launch
   banner, let alone a `consume_handoff` call): the resident monitor's

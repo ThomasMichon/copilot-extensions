@@ -37,7 +37,7 @@ This module supplies:
   perform; everything else here stays read-only.
 
 **Machine identity is the roster key (full name).** A selection target's
-``machine`` matches on the machines.yaml **key** (e.g. ``tmichon-book2``), and
+``machine`` matches on the machines.yaml **key** (e.g. ``operator-book2``), and
 every emitted machine/SSH profile is *labelled* by that full name too. A legacy
 display-name column is still accepted at match time (dual acceptance) so old
 configs keep working until ``--migrate-selections`` rewrites them.
@@ -312,7 +312,7 @@ def default_selection_keys(
     single-sourced with the Picker.
 
     The selection vocabulary is the machine's **roster key** (its canonical full
-    name, e.g. ``tmichon-book2``) -- never the cosmetic ``display_name`` -- so a
+    name, e.g. ``operator-book2``) -- never the cosmetic ``display_name`` -- so a
     column's meaning is stable regardless of how a machine is labelled in the
     dropdown.
     """

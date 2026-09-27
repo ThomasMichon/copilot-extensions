@@ -695,7 +695,7 @@ def test_windows_batch_argv_is_a_noop_off_windows(monkeypatch):
 # --- is_safe_argument / resolve_provider_argv / build_provider_argv --------
 
 
-@pytest.mark.parametrize("value", ["cs-a", "wt-abc", "tmichon-book2", "a.b_c/d", "123"])
+@pytest.mark.parametrize("value", ["cs-a", "wt-abc", "operator-book2", "a.b_c/d", "123"])
 def test_is_safe_argument_accepts_ordinary_identifiers(value):
     assert cp.is_safe_argument(value) is True
 

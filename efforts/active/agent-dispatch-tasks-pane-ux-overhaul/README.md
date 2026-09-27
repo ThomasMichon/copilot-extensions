@@ -2,7 +2,7 @@
 
 - **Slug:** `agent-dispatch-tasks-pane-ux-overhaul`
 - **Repo:** copilot-extensions
-- **Branch(es):** `worktree/tmichon-cloud1-win-20260917-003059-332c` (design +
+- **Branch(es):** `worktree/operator-cloud1-win-20260917-003059-332c` (design +
   preview tooling); implementation phases land on their own per-phase
   worktrees once the design below is approved.
 - **Created:** 2026-09-17
@@ -38,7 +38,7 @@ agent-chat-driven flow).
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| tmichon-cloud1 (this session) | Design, grounding against real code, preview-rendering tooling, effort/vision authoring, Phase 1 implementation | `copilot-extensions.worktrees/tmichon-cloud1-win-20260917-003059-332c` |
+| operator-cloud1 (this session) | Design, grounding against real code, preview-rendering tooling, effort/vision authoring, Phase 1 implementation | `copilot-extensions.worktrees/operator-cloud1-win-20260917-003059-332c` |
 
 ## Coordination
 
