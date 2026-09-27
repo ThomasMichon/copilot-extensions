@@ -7,11 +7,17 @@ from scan_plugin_sources import PluginSource, _plugin_declares_agents, _plugin_m
 from scan_skills import (
     get_field,
     get_field_block,
+    has_disabled_mcp_fallback_marker,
     has_mcp_fallback,
     has_mcp_troubleshooting_skill,
     readme_documents_dependencies,
     split_frontmatter,
 )
+
+# Built-in Copilot CLI tool name that grants shell/PowerShell execution --
+# the materialized-CLI-fallback recipe (invoking a materialized stub via
+# `.ps1`/`.cmd`) is unusable without it.
+SHELL_EXECUTION_TOOL = "execute"
 
 BLOCKING = "blocking"
 WARNING = "warning"
@@ -50,6 +56,18 @@ def agent_can_invoke_task(frontmatter: str) -> bool:
     """Whether an agent's declared tool surface includes the Task/agent tool."""
     tools = frontmatter_tool_names(frontmatter)
     return tools is None or bool({"*", "agent", "task"} & tools)
+
+
+def agent_can_invoke_shell(frontmatter: str) -> bool:
+    """Whether an agent's declared tool surface can run shell/PowerShell.
+
+    Unrestricted tools (`None`) always can. A restricted `tools:` allow-list
+    must name `execute` (or a wildcard) explicitly -- the materialized-CLI-
+    fallback recipe shells out to a `.ps1`/`.cmd` stub and is unusable
+    otherwise, no matter how thoroughly the agent body documents it.
+    """
+    tools = frontmatter_tool_names(frontmatter)
+    return tools is None or bool({"*", SHELL_EXECUTION_TOOL} & tools)
 
 
 def has_anti_self_delegation(text: str, agent_name: str) -> bool:
@@ -272,9 +290,40 @@ def scan_agents(
                 frontmatter,
             )
         )
-        if uses_agent_mcp and not has_mcp_fallback(readiness):
+        if uses_agent_mcp and has_disabled_mcp_fallback_marker(readiness):
+            add(
+                "mcp-fallback-disabled",
+                "carries the obsolete 'materialized cli fallback: disabled "
+                "by the authorization/conditional gate' marker -- an "
+                "agent-mcp bridge's own decorators (filter/transform/gate) "
+                "run inside agent-mcp's bridge runtime and are enforced "
+                "identically no matter which surface calls them (the native "
+                "attached catalog, `agent-mcp call`, or a materialized "
+                "stub), so disabling the fallback buys no additional safety "
+                "-- it only leaves the agent with zero recourse when the "
+                "native catalog fails to register in-session (a Copilot "
+                "CLI-side extension/session-registration gap with no "
+                "in-session repair). Replace it with the enabled "
+                "materialize/call recipe from `defining-subagents`'s MCP "
+                "Readiness section.",
+            )
+        elif uses_agent_mcp and not has_mcp_fallback(readiness):
             add(
                 "mcp-fallback",
                 "uses agent-mcp but has no equivalent materialized CLI "
                 "fallback over the same bridge config",
+            )
+
+        if (
+            uses_agent_mcp
+            and has_mcp_fallback(readiness)
+            and not agent_can_invoke_shell(frontmatter)
+        ):
+            add(
+                "mcp-fallback-needs-shell-tool",
+                "documents a materialized CLI fallback, but the frontmatter's "
+                f"restricted `tools:` list has no `{SHELL_EXECUTION_TOOL}` (or "
+                "`*`) entry -- the fallback shells out to a `.ps1`/`.cmd` "
+                "stub and is unusable without shell/PowerShell execution, no "
+                "matter how thoroughly the body documents it",
             )

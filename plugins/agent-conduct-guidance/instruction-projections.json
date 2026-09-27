@@ -9,6 +9,15 @@
       "customizationKind": "instructions",
       "applyTo": "**",
       "legacyMarkers": []
+    },
+    {
+      "id": "delegation-fallback",
+      "template": "instructions/delegation-fallback.instructions.md",
+      "destination": ".github/instructions/agent-conduct-guidance/delegation-fallback.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": []
     }
   ]
 }
+

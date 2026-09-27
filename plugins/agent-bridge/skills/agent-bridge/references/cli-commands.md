@@ -384,7 +384,7 @@ rather than taking it over. Use a dedicated target with no existing session.
 ### Graceful Redeploy (routing table + drain + installer-driven cutover)
 
 A redeploy no longer has to hard-kill live work. Clients resolve the daemon
-through a **routing table** (`~/.agent-bridge/active.json`) instead of the
+through a **routing table** (`~/.agent-bridge/active.json`) instead of the <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 static config port: `BridgeClient.from_config()` reads the table first and falls
 back to `config.yaml` when it is absent (so the table is inert until a daemon
 publishes it). This lets a new daemon come up on a fresh port, the table flip to
@@ -495,7 +495,7 @@ agent-bridge elevated stop --deregister # marketplace-isolation: allow elevated-
 These commands modify **user-level bridge state**, not repository content.
 First edit and publish topology through the repository's normal worktree and
 contribution flow; then adopt from the canonical checkout to project that
-published state into `~/.agent-bridge/config.yaml`.
+published state into `~/.agent-bridge/config.yaml`. <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 
 ```bash
 # Show current config
@@ -516,7 +516,7 @@ Explicit `--machines-yaml` and `--agents-config` arguments remain exact even
 when `--repo` itself is canonicalized to the anchor. If such a path names a
 temporary worktree, removing that worktree strands the profile; `config
 validate` reports the missing file. Before re-adopting from canonical source
-paths, back up the profile stanza in `~/.agent-bridge/config.yaml`, including
+paths, back up the profile stanza in `~/.agent-bridge/config.yaml`, including <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 `default_copilot_args` and `default_env`; adoption replaces the profile and
 those spawn defaults must be restored afterward.
 

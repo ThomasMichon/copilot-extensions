@@ -21,7 +21,9 @@ log = logging.getLogger("agent-bridge")
 CONFIG_FILENAME = "config.yaml"
 CANONICAL_REPO_CONFIG_DIR = Path(".copilot-extensions") / "agent-bridge"
 REPO_CONFIG_RELPATH = str(CANONICAL_REPO_CONFIG_DIR / CONFIG_FILENAME)
-LEGACY_REPO_CONFIG_RELPATH = ".agent-bridge/config.yaml"
+LEGACY_REPO_CONFIG_RELPATH = (
+    ".agent-bridge/config.yaml"  # marketplace-isolation: allow legacy-compatibility
+)
 MARKETPLACE_OVERLAYS_DIR = CANONICAL_REPO_CONFIG_DIR / "marketplaces"
 INSTALLATION_CONTEXT_ENV = "COPILOT_EXTENSIONS_CONTEXT"
 
@@ -311,7 +313,7 @@ def _state_root_machines_yaml(repo: Path) -> str | None:
     kroot = Path(root)
     for candidate in [
         kroot / "machines.yaml",
-        kroot / ".agent-worktrees" / "machines.yaml",
+        kroot / ".agent-worktrees" / "machines.yaml",  # marketplace-isolation: allow registry
         kroot / "config" / "machines.yaml",
         kroot / ".github" / "machines.yaml",
     ]:
@@ -410,7 +412,7 @@ def adopt_topology(
     if not machines_yaml:
         for candidate in [
             repo / "machines.yaml",
-            repo / ".agent-worktrees" / "machines.yaml",
+            repo / ".agent-worktrees" / "machines.yaml",  # marketplace-isolation: allow registry
             repo / "config" / "machines.yaml",
             repo / ".github" / "machines.yaml",
         ]:

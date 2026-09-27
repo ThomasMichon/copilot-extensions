@@ -135,7 +135,7 @@ def _agent_worktrees_launch_prefix() -> list[str] | None:
     core = _core()
     explicit_context = os.environ.get(_peer_launch.CONTEXT_ENV, "")
     if not explicit_context:
-        exe = shutil.which("agent-worktrees")
+        exe = shutil.which("agent-worktrees")  # marketplace-isolation: allow legacy-compatibility
         return [exe] if exe else None
     try:
         own = core._peer_launch.validate_owner("agent-bridge", _agent_bridge_owner_root(), explicit_context)

@@ -115,6 +115,7 @@ from context_budget import (
     capture_dynamic_session_files,
 )
 from scan_agents import (
+    agent_can_invoke_shell,
     agent_can_invoke_task,
     frontmatter_tool_names,
     has_anti_self_delegation,
@@ -194,6 +195,7 @@ from scan_skills import (
     extract_triggers,
     get_field,
     get_field_block,
+    has_disabled_mcp_fallback_marker,
     has_mcp_fallback,
     has_mcp_troubleshooting_skill,
     readme_documents_dependencies,
@@ -326,6 +328,7 @@ __all__ = [
     "_uses_suite_output_free_conventions",
     "_walk_customization_files",
     "_walk_named_files",
+    "agent_can_invoke_shell",
     "agent_can_invoke_task",
     "assemble_enabled_plugins",
     "build_context_budget",
@@ -336,6 +339,7 @@ __all__ = [
     "get_field",
     "get_field_block",
     "has_anti_self_delegation",
+    "has_disabled_mcp_fallback_marker",
     "has_mcp_fallback",
     "has_mcp_troubleshooting_skill",
     "main",

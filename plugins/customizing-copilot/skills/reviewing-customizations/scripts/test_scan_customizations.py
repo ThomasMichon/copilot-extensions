@@ -1426,7 +1426,7 @@ def test_agent_mcp_agent_rejects_negated_fallback(tmp_path: Path):
     assert any(f.check == "mcp-fallback" for f in report.findings)
 
 
-def test_agent_mcp_agent_accepts_conditional_auth_opt_out(tmp_path: Path):
+def test_agent_mcp_agent_rejects_conditional_auth_opt_out(tmp_path: Path):
     repo = tmp_path / "repo"
     agents = repo / ".github" / "agents"
     agents.mkdir(parents=True)
@@ -1447,6 +1447,7 @@ def test_agent_mcp_agent_accepts_conditional_auth_opt_out(tmp_path: Path):
 
     report = scan.run(repo)
 
+    assert any(f.check == "mcp-fallback-disabled" for f in report.findings)
     assert not any(f.check == "mcp-fallback" for f in report.findings)
 
 
@@ -1483,6 +1484,96 @@ def test_fallback_parser_rejects_common_negations():
         "Use neither the materialized fleet nor any CLI fallback.",
     ):
         assert not scan.has_mcp_fallback(phrase)
+
+
+def test_has_disabled_mcp_fallback_marker_detects_the_obsolete_phrasing():
+    assert scan.has_disabled_mcp_fallback_marker(
+        "Materialized CLI fallback: disabled by the authorization gate."
+    )
+    assert scan.has_disabled_mcp_fallback_marker(
+        "Materialized CLI fallback: disabled because authorization uses a "
+        "conditional gate."
+    )
+    assert not scan.has_disabled_mcp_fallback_marker(
+        "On catalog failure use the materialized fleet."
+    )
+
+
+def test_agent_mcp_agent_with_fallback_but_no_shell_tool_is_flagged(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "description: Service.\n"
+        "tools: ['read', 'search', 'service/*']\n"
+        "mcp-servers:\n"
+        "  service:\n"
+        "    command: agent-mcp\n"
+        "---\n\n"
+        "## MCP Readiness\n"
+        "Probe service_health. On catalog failure use the materialized fleet.\n"
+        "Do NOT use the task tool to spawn another service agent.\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    assert any(f.check == "mcp-fallback-needs-shell-tool" for f in report.findings)
+
+
+def test_agent_mcp_agent_with_fallback_and_execute_tool_passes(tmp_path: Path):
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "description: Service.\n"
+        "tools: ['read', 'search', 'execute', 'service/*']\n"
+        "mcp-servers:\n"
+        "  service:\n"
+        "    command: agent-mcp\n"
+        "---\n\n"
+        "## MCP Readiness\n"
+        "Probe service_health. On catalog failure use the materialized fleet.\n"
+        "Do NOT use the task tool to spawn another service agent.\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    assert not any(
+        f.check == "mcp-fallback-needs-shell-tool" for f in report.findings
+    )
+
+
+def test_agent_mcp_agent_with_unrestricted_tools_never_needs_shell_flag(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "description: Service.\n"
+        "tools: ['*']\n"
+        "mcp-servers:\n"
+        "  service:\n"
+        "    command: agent-mcp\n"
+        "---\n\n"
+        "## MCP Readiness\n"
+        "Probe service_health. On catalog failure use the materialized fleet.\n"
+        "Do NOT use the task tool to spawn another service agent.\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    assert not any(
+        f.check == "mcp-fallback-needs-shell-tool" for f in report.findings
+    )
 
 
 def test_external_plugin_agent_guard_is_origin_version_advisory(tmp_path: Path):

@@ -95,6 +95,11 @@ def test_reconcile_cooldowns_resumes_only_due_tasks(tmp_path):
     assert resumed == 1
     assert q.get(due.id).status == Status.STARTED
     assert q.get(not_due.id).status == Status.SUSPENDED
+    [wake] = q.list_wakes(due.id)
+    assert wake.message == (
+        f"Task {due.id}'s cooldown elapsed while it was suspended. Re-read it "
+        "and resume from the recorded state."
+    )
 
 
 def test_reconcile_cooldowns_ignores_a_task_with_no_monitor(tmp_path):

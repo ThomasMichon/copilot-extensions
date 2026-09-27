@@ -50,8 +50,8 @@ unavailable, surface that failure rather than improvising an install.
    <catalog argv[0]> discover
    ```
    Lists the registered repos that carry gated requirement packages for this
-   machine. The candidate set is `~/.agent-worktrees/projects.yaml`; paths are
-   resolved from `~/.agent-worktrees/repos.yaml` when present.
+   machine. The candidate set is `~/.agent-worktrees/projects.yaml`; paths are <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
+   resolved from `~/.agent-worktrees/repos.yaml` when present. <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 
 3. **Plan** (read-only) -- the managed surfaces and a content drift key:
    ```

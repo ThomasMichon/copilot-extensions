@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, budget posture, coordinator-first delegation, publication safety, WSL environment setup, and CLI customization",
-    "version": "1.9.1-dev2"
+    "version": "1.9.2-dev1"
   },
   "plugins": [
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.9.1-dev2",
+      "version": "1.9.2-dev1",
       "source": "plugins/agent-worktrees"
     },
     {
@@ -25,7 +25,7 @@
     {
       "name": "agent-bridge",
       "description": "Live cross-boundary inter-agent communication service - conversation transport, session management, SSE event streaming, agent subprocess spawning, and ACP-over-WebSocket support for external clients",
-      "version": "0.5.7-dev1",
+      "version": "0.5.8-dev1",
       "source": "plugins/agent-bridge"
     },
     {
@@ -79,13 +79,13 @@
     {
       "name": "customizing-copilot",
       "description": "Customize, diagnose, and extend the Copilot CLI - authoring skills, defining sub-agents, registering MCP servers, installing plugins, building an agent control-harness, reviewing customizations, diagnosing startup hangs, hoisting plugin agents around a delegation limitation, componentizing oversized modules, orchestrating multi-file componentization campaigns, authoring <repo>-harness plugins, and setting up an instruction-projection sync worker - with the per-skill folder conventions and Agent Skills best practices; ships twelve focused skills",
-      "version": "0.1.6-dev2",
+      "version": "0.1.6-dev3",
       "source": "plugins/customizing-copilot"
     },
     {
       "name": "agent-dispatch",
       "description": "Portable durable agent task-loop + per-host coordinator: a single-writer SQLite work queue (eight-state model with owner-preserving suspension, capability-gated atomic claim, affinity routing, liveness-reconciled recovery) so agents coordinate without push latency or an account per agent.",
-      "version": "0.5.2-dev1",
+      "version": "0.5.3-dev1",
       "source": "plugins/agent-dispatch"
     },
     {
@@ -97,7 +97,7 @@
     {
       "name": "copilot-extensions-harness",
       "description": "Operator harness for the copilot-extensions repo. Primary: help any consumer identify which local scripts/processes belong to this suite and enforce never-monkey-patch (file a bug upstream or auto-update instead). Secondary: portable contribution, deployment, and clean-room validation guidance plus an ambient pointer to the general-purpose, organization-neutral contribution boundary.",
-      "version": "0.1.2-dev2",
+      "version": "0.1.2-dev3",
       "source": "plugins/copilot-extensions-harness"
     },
     {
@@ -115,7 +115,7 @@
     {
       "name": "agent-machines",
       "description": "Portable machine setup and restore for Copilot CLI. Derives setup from declared topology, enabled capabilities, and in-repo requirement packages, then converges the current machine through Copilot settings, resources, and repo-local modules. Organization policy and per-machine values remain downstream while the engine and conductor stay generic.",
-      "version": "0.1.8-dev1",
+      "version": "0.1.9-dev1",
       "source": "plugins/agent-machines"
     },
     {
@@ -133,7 +133,7 @@
     {
       "name": "delegation-guidance",
       "description": "Coordinator-first task routing for Copilot CLI. A concise session-start kernel encourages early delegation of broad separable research, comparisons, evaluations, domain-tool work, and disjoint bulk edits while keeping synthesis, integration, cohesive implementation, and completion with the coordinating agent. Ships the delegating-work skill.",
-      "version": "0.1.0-dev14",
+      "version": "0.1.1-dev1",
       "source": "plugins/delegation-guidance"
     },
     {
@@ -145,7 +145,7 @@
     {
       "name": "agent-conduct-guidance",
       "description": "Consolidated, generally-good agent conduct guidance for Copilot CLI: one plugin hosting multiple independent ambient modules, each a concise checked-in instruction projection plus a paired on-demand skill. First module: process-spawn hygiene -- reminds an agent to spawn every ad hoc CMD/PowerShell/Python/Node/etc. child process headlessly, especially on Windows, where a naive spawn allocates a visible, focus-stealing console window per invocation. Ships the spawning-headless-processes skill with the per-language/per-OS routes.",
-      "version": "0.1.0-dev2",
+      "version": "0.1.1-dev1",
       "source": "plugins/agent-conduct-guidance"
     }
   ]

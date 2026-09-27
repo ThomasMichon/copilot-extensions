@@ -15,6 +15,7 @@ such as 3.12."""
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -97,6 +98,15 @@ def _write_py_stub(py_dir: Path, signed_exe: Path | None) -> None:
     (py_dir / "py.cmd").write_text("\r\n".join(lines) + "\r\n", encoding="utf-8")
 
 
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason="the py.cmd stub is a native Windows batch file; PowerShell Core's "
+    "cross-platform Get-Command does not do Windows-style PATHEXT-less "
+    "resolution off Windows, so on a non-Windows host it can never find "
+    "(or execute) the stub regardless of which pwsh/powershell binary runs "
+    "the harness -- spoofing $env:OS in the harness only bypasses "
+    "install.ps1's own OS guard, it cannot make cmd-file execution work",
+)
 @pytest.mark.parametrize("shell", ["powershell.exe", "pwsh"])
 def test_missing_newest_candidate_does_not_abort_probe(tmp_path: Path, shell: str) -> None:
     """Only 3.12 is "installed"; 3.13 must fail-and-skip, not throw."""
@@ -114,6 +124,11 @@ function Get-AuthenticodeSignature {
     assert result.stdout.strip() == f"RESULT:{signed_exe}"
 
 
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason="the py.cmd stub is a native Windows batch file; see the skip "
+    "reason on test_missing_newest_candidate_does_not_abort_probe above",
+)
 @pytest.mark.parametrize("shell", ["powershell.exe", "pwsh"])
 def test_no_candidate_installed_returns_null_not_throw(tmp_path: Path, shell: str) -> None:
     """Every probed version is missing: the function returns $null cleanly."""

@@ -21,7 +21,7 @@ IDLE_CONFIRM_COOLDOWN = 60.0
 
 
 def idle_confirm_message(task: dict) -> str:
-    """Work-bearing idle prompt: idle is not done; continue or complete for real.
+    """Work-bearing idle nudge: the session went idle while the task did not.
 
     Composed from the task's own recorded objective (``goal``/``prompt``) and
     ``done_criteria`` rather than a fixed generic sentence, so the worker is
@@ -36,12 +36,6 @@ def idle_confirm_message(task: dict) -> str:
     named = f"task {tid}" + (f" ({title})" if title else "")
     objective = str(task.get("goal") or task.get("prompt") or title).strip()
     objective_line = f"\nYour assignment: {objective}" if objective else ""
-    resume_line = (
-        "Idle does not mean done -- resume working toward the assignment "
-        "above now."
-        if objective
-        else "Idle does not mean done -- resume the task now."
-    )
     criteria = str(task.get("done_criteria") or "").strip()
     criteria_line = f"\nDone-criteria: {criteria}" if criteria else ""
     completion_clause = (
@@ -50,13 +44,14 @@ def idle_confirm_message(task: dict) -> str:
         else "if the assignment is genuinely, fully complete"
     )
     return (
-        f"You are idle, but {named} is not marked complete.{objective_line}"
-        f"{criteria_line}\n"
-        f"{resume_line} Only run `agent-dispatch complete "
+        f"Your session went idle while {named} is still in progress."
+        f"{objective_line}{criteria_line}\n"
+        f"Re-read the task and continue from its recorded state. Only run "
+        f"`agent-dispatch complete "
         f"{tid}` {completion_clause}; do not complete just "
-        "to clear this prompt. If the assignment is genuinely blocked, use "
-        "whatever resolution your own task's instructions define for that "
-        "case (e.g. `agent-dispatch suspend`) -- do not invent one."
+        "to clear this nudge. If the assignment is genuinely blocked, use "
+        "whatever resolution your own task's instructions already define for "
+        "that case (for example `agent-dispatch suspend`) -- do not invent one."
     )
 
 

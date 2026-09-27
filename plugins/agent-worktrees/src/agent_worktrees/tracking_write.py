@@ -188,6 +188,8 @@ _VERB_MODULES: tuple[str, ...] = (
     "agent_worktrees.tracking_followup_write",
     "agent_worktrees.tracking_claim_write",
     "agent_worktrees.tracking_session_lifecycle_write",
+    "agent_worktrees.tracking_session_registration_write",
+    "agent_worktrees.tracking_session_deregistration_write",
 )
 
 _verb_modules_loaded = False
@@ -256,9 +258,25 @@ def compute(kind: str, payload: dict) -> dict:
     ``payload`` must carry ``verb`` (a name registered via
     :func:`register_verb`, directly or via :data:`_VERB_MODULES`) and may
     carry ``args`` (a dict passed to that verb's function). Raises
-    ``ValueError`` for a wrong ``kind``, an unregistered verb, or a
-    malformed payload -- surfaced to the caller exactly like
-    ``_classify_daemon_compute``'s own validation errors.
+    ``ValueError`` for a wrong ``kind`` or a malformed payload -- surfaced
+    to the caller exactly like ``_classify_daemon_compute``'s own
+    validation errors. An unregistered verb is deliberately NOT one of
+    these: it returns ``{"unsupported_verb": True}`` instead of raising
+    (copilot-extensions#3812) -- ``work_coalescing_singleton``'s own
+    handler catches any exception ``compute()`` raises with a bare
+    ``except Exception: return`` (closing the connection with no response
+    bytes), which the client reads as an empty response and treats
+    identically to "the request may have already run" -- indistinguishable
+    from a request that genuinely started executing before failing. A
+    version-skew rolling-upgrade window (a post-upgrade client dispatching
+    a new verb to a still-running pre-upgrade daemon process, whose own
+    ``_VERB_MODULES`` registration never heard of it) hits this exact path
+    on every request until that daemon process itself restarts -- nothing
+    ever ran server-side in that case, so it is always safe to fall back,
+    but the empty-response signal alone can't tell the two apart. Returning
+    a real, JSON-safe result instead lets :func:`write_with_boot` make that
+    distinction explicitly and safely fall back rather than raising
+    :class:`AmbiguousWriteOutcome` for a request that never executed.
 
     Counts itself in :data:`_inflight_writes` for the whole verb call (see
     :func:`has_inflight_write` -- 2026-09-26 PR review finding: a client
@@ -277,7 +295,10 @@ def compute(kind: str, payload: dict) -> dict:
         raise ValueError("tracking_write request missing a verb name")
     fn = _VERBS.get(verb)
     if fn is None:
-        raise ValueError(f"tracking_write: unregistered verb {verb!r}")
+        # Never raise here (copilot-extensions#3812) -- see this function's
+        # own docstring for why an unregistered verb must be a real,
+        # JSON-safe result rather than an exception.
+        return {"unsupported_verb": True}
     args = payload.get("args")
     if args is None:
         args = {}
@@ -309,17 +330,34 @@ def start_server(
 def rendezvous_fields(server: CoalescingServer) -> dict:
     """Rendezvous fields namespaced so they never collide with the resident
     status-monitor's existing ``hook_ipc``/``classify_daemon``/
-    ``worktree_status_daemon``/``mux_link`` fields in the same lock file."""
+    ``worktree_status_daemon``/``mux_link`` fields in the same lock file.
+
+    Publishes this process's own currently-registered verb names
+    (``tracking_write_verbs``, 2026-09-27 PR review finding,
+    copilot-extensions#3812) so a client can refuse to dial an endpoint
+    that structurally cannot serve the verb it needs -- a resident daemon
+    process whose own ``_VERB_MODULES`` registration predates a verb (a
+    rolling-upgrade version-skew window) is missing or lacks that verb in
+    this list, never something a client should attempt to dial and then
+    have to recover from an ``unsupported_verb``/``AmbiguousWriteOutcome``
+    response for. Calls :func:`_ensure_verb_modules_loaded` itself so the
+    published list is always this process's FULL verb set, regardless of
+    whether any request has been served yet.
+    """
+    _ensure_verb_modules_loaded()
     rv = server.rendezvous()
     return {
         "tracking_write_transport": rv["transport"],
         "tracking_write_endpoint": rv["endpoint"],
         "tracking_write_token": rv["token"],
         "tracking_write_generation": rv["generation"],
+        "tracking_write_verbs": sorted(_VERBS),
     }
 
 
-def endpoint_from_rendezvous(data: dict | None) -> tuple[str, int, str] | None:
+def endpoint_from_rendezvous(
+    data: dict | None, *, verb: str | None = None,
+) -> tuple[str, int, str] | None:
     """Parse this module's rendezvous fields out of an already-read lock dict.
 
     Returns ``None`` for anything malformed or absent -- the caller's own
@@ -329,9 +367,25 @@ def endpoint_from_rendezvous(data: dict | None) -> tuple[str, int, str] | None:
     as a real endpoint and fail deep inside the socket client instead of
     safely degrading to the no-endpoint fallback here; mirrors
     ``mux_link.endpoint_from_rendezvous``'s own check).
+
+    When ``verb`` is given, ALSO rejects an endpoint whose own published
+    ``tracking_write_verbs`` list (see :func:`rendezvous_fields`) does not
+    contain it -- including data published by a pre-this-change daemon
+    process, which lacks the field entirely (2026-09-27 PR review finding,
+    copilot-extensions#3812: returning ``{"unsupported_verb": True}`` from
+    ``compute()`` only helps once BOTH sides already run this fix; it
+    cannot retroactively help a still-running daemon process that predates
+    it. This capability check closes that residual gap for good: an
+    endpoint that cannot demonstrate it serves ``verb`` is never dialed at
+    all, so the caller's normal boot-wait/fallback path runs instead,
+    exactly as if no endpoint had been found).
     """
     if not isinstance(data, dict):
         return None
+    if verb is not None:
+        verbs = data.get("tracking_write_verbs")
+        if not isinstance(verbs, list) or verb not in verbs:
+            return None
     endpoint = data.get("tracking_write_endpoint")
     token = data.get("tracking_write_token")
     if not isinstance(endpoint, str) or not isinstance(token, str) or not token:
@@ -487,9 +541,18 @@ def write_with_boot(
     was discoverable at all (even after the boot-wait), or the endpoint was
     found but the connection itself could never be established (a stale
     rendezvous entry left by a since-exited daemon) -- in both, nothing was
-    ever sent anywhere. Anything that fails *after* a connection was
-    established raises :class:`AmbiguousWriteOutcome` instead of silently
-    retrying (2026-09-26 PR review finding).
+    ever sent anywhere. This now also includes an endpoint whose own
+    published ``tracking_write_verbs`` capability list (see
+    :func:`endpoint_from_rendezvous`) does not cover the requested verb
+    (2026-09-27 PR review finding, copilot-extensions#3812) -- that
+    endpoint is never even dialed, so it is exactly as safe as "no
+    endpoint found." A further defense-in-depth case: a connection that DID
+    succeed anyway (a benign race between the capability check and a
+    connect, or an older client that skipped it) but whose response
+    reports ``unsupported_verb`` -- ``compute()`` never actually executed
+    anything in that case either. Anything else that fails *after* a
+    connection was established raises :class:`AmbiguousWriteOutcome`
+    instead of silently retrying (2026-09-26 PR review finding).
 
     Always mints its own fresh, unique coalescing key (``uuid4().hex``) --
     never accepts one from a caller -- so every entry point through this
@@ -497,9 +560,10 @@ def write_with_boot(
     execution, regardless of what a caller passes.
     """
     started = time.time()
+    verb = payload.get("verb") if isinstance(payload, dict) else None
 
     def _dial() -> tuple[str, int, str] | None:
-        return endpoint_from_rendezvous(read_lock_data())
+        return endpoint_from_rendezvous(read_lock_data(), verb=verb)
 
     endpoint = _dial()
     if endpoint is None and ensure_monitor is not None:
@@ -514,7 +578,7 @@ def write_with_boot(
     key = uuid.uuid4().hex
     client_id = wcs_client.new_client_id()
     try:
-        return _send_tracking_write_request(
+        result = _send_tracking_write_request(
             host,
             port,
             token,
@@ -523,6 +587,9 @@ def write_with_boot(
             request_deadline_s=request_deadline_s,
             client_id=client_id,
         )
+        if isinstance(result, dict) and result.get("unsupported_verb"):
+            return fallback()
+        return result
     except _PreSendFailure:
         return fallback()
     finally:
@@ -541,9 +608,9 @@ def dispatch(
     """The public entry point a migrated call site uses in place of calling
     its verb's function directly: try the resident daemon first (booting one
     on demand if none is reachable), falling back to :func:`run_direct`
-    (same code, logged) only when nothing could ever have been sent to a
-    daemon (see :func:`write_with_boot`'s own docstring for the exact two
-    safe cases).
+    (same code, logged) only when nothing could ever have run server-side
+    (see :func:`write_with_boot`'s own docstring for the exact three safe
+    cases).
 
     Raises :class:`AmbiguousWriteOutcome` when a request *was* sent and then
     failed -- that state is never safe to auto-retry. This is a genuine

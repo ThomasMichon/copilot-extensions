@@ -31,8 +31,12 @@ def build_remote_carrier_command(remote_platform: str) -> str:
             'cmd.exe /d /s /c ""%USERPROFILE%\\.local\\bin\\agent-bridge.cmd" '
             'carrier --stdio"'
         )
+    _posix_carrier = (
+        '"$HOME/.local/bin/agent-bridge" '  # marketplace-isolation: allow remote-management
+        'carrier --stdio'
+    )
     if platform in {"linux", "wsl", "posix", "sh", "bash"}:
-        return '"$HOME/.local/bin/agent-bridge" carrier --stdio'
+        return _posix_carrier
     raise ValueError(f"unsupported remote carrier platform: {remote_platform!r}")
 
 

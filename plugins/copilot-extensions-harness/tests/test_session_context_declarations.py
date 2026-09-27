@@ -11,7 +11,6 @@ PLUGINS = ROOT / "plugins"
 SCHEMA = "copilot-extensions.session-context-contributors"
 NO_SESSION_HOOK = {
     "copilot-extensions-harness",
-    "delegation-guidance",
 }
 RETIRED_AGGREGATE_FILES = {
     "scripts/invoke-context-contributor.sh",

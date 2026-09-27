@@ -138,13 +138,14 @@ class GitHubProvider:
     def get_pull(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
     ) -> PullResult:
+        host = self.authority_endpoint(api_base)
         proc = run_cli(
             [
                 "gh", "pr", "view", str(number),
                 "--repo", repo,
                 "--json", "url,number,state",
             ],
-            env=self._env(token),
+            env=self._env(token, host=host),
         )
         if proc.returncode != 0:
             raise ProviderError(

@@ -6,10 +6,19 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import obligations
-
 if TYPE_CHECKING:
     from . import tracking
+
+#: A short deadline for the ``session_register`` verb's own daemon request
+#: (default ``tracking_write.REQUEST_DEADLINE_S`` is 8s -- fine for an
+#: explicit CLI command, never for a sessionStart hook, which must bound
+#: worst-case added latency even when a resident daemon is technically
+#: reachable but stalled/wedged; see ``register_session``'s own docstring).
+_SESSION_REGISTER_REQUEST_DEADLINE_S = 1.5
+
+#: Same rationale, for the symmetric sessionEnd hook's own ``session_deregister``
+#: dispatch (see ``deregister_session``'s own docstring).
+_SESSION_DEREGISTER_REQUEST_DEADLINE_S = 1.5
 
 
 def _tracking():
@@ -143,145 +152,66 @@ def register_session(
     candidate_token: str | None = None,
     initial_projection: bool = False,
 ) -> tracking.SessionHandoff | None:
+    """Register (or reactivate) a Copilot session against a worktree.
+
+    Dispatches the whole transaction through the ``session_register`` verb
+    (daemon write path when reachable, else the identical logged in-process
+    fallback -- ``agent-worktrees-authoritative-daemon`` effort, Phase 3;
+    see ``tracking_session_registration_write.py``'s own module docstring
+    for the full design rationale). Called from the sessionStart hook, so
+    this bounds latency two ways rather than one (2026-09-27 PR review
+    finding): ``boot_wait_s=0`` never spin-waits for a cold daemon boot (an
+    already-warm daemon is dialed immediately; a cold/unreachable one falls
+    straight through to the same code with no added wait, matching this
+    function's pre-migration latency exactly) -- but that alone does not
+    bound a *reachable-but-stalled* daemon, which would otherwise still
+    block for the module's default ``REQUEST_DEADLINE_S`` (8s, ~9s
+    including the socket timeout) before raising. ``_SESSION_REGISTER_REQUEST_DEADLINE_S``
+    caps that same case at a small fraction of that, since this verb's own
+    work is simple file I/O expected to complete in milliseconds, not
+    seconds, on a healthy daemon. Re-raises ``tracking.SessionLifecycleError``
+    for a lifecycle rejection, matching the pre-migration contract of
+    letting it propagate synchronously to every existing caller's own
+    broad exception handling; ``tracking_write.AmbiguousWriteOutcome`` is
+    left to propagate the same way -- a genuinely stalled/wedged daemon
+    now surfaces as a bounded, fast registration failure instead of a
+    ~9-second hang, rather than being silently retried (unsafe -- see
+    ``AmbiguousWriteOutcome``'s own docstring).
+    """
     tracking = _tracking()
     yaml_path = tracking._owning_tracking_dir(worktree_id) / f"{worktree_id}.yaml"
     if not yaml_path.exists():
         return None
-    with tracking._RecordLock(yaml_path):
-        record = tracking.load_record(yaml_path)
-        if (
-            record.kind in tracking.MANAGED_KINDS
-            and record.status in {"complete", "completed", "finalized"}
-        ):
-            raise tracking.SessionLifecycleError(
-                f"worktree {worktree_id} is terminal and managed; refusing new session activation"
-            )
-        if record.sessions is None:
-            record.sessions = []
-        event_at = started_at or tracking._now_iso()
-        observed_at = recorded_at or tracking._now_iso()
-        tracking._ensure_head_ledger(record)
-        self_session_ref = tracking.format_claim_ref(
-            record.machine, record.repo, record.worktree_id, session=session_id
-        )
-        tracking.add_resource_claim(
-            record,
-            tracking.ResourceClaim(
-                kind="session",
-                ref=self_session_ref,
-                created_at=event_at,
-                state=obligations.ACTIVE,
-                note="live Copilot session",
-            ),
-            save=False,
-        )
+    from . import locks as _locks
+    from . import status_monitor_runtime as _smr
+    from . import tracking_write
 
-        def _link_if_fresh() -> tracking.SessionHandoff | None:
-            prior = next((handoff for handoff in record.handoffs if handoff.token == handoff_token), None)
-            already_linked = (
-                prior is not None
-                and prior.state == "linked"
-                and prior.successor == session_id
-            )
-            linked = tracking.link_handoff(
-                record,
-                handoff_token,
-                session_id,
-                linked_at=event_at,
-                save=False,
-            )
-            return None if already_linked else linked
-
-        for entry in record.sessions:
-            if entry.session_id != session_id:
-                continue
-            activation_added = _start_session_activation(
-                entry,
-                event_at=event_at,
-                recorded_at=observed_at,
-                source=source,
-            )
-            if pid:
-                entry.pid = pid
-            if pane_id:
-                entry.pane_id = pane_id
-            if handoff_token and tracking._handoff_state(record, handoff_token) == "cancelled":
-                handoff_token = None
-            if handoff_token:
-                try:
-                    linked_handoff = _link_if_fresh()
-                except tracking.SessionLifecycleError:
-                    if activation_added:
-                        tracking._next_lifecycle_revision(record, session_id)
-                    tracking.save_record(record)
-                    raise
-                tracking.save_record(record)
-                return linked_handoff
-            if (
-                not candidate_token
-                and record.resolved_head_session is None
-                and entry.state == "active"
-                and (
-                    source == "bind"
-                    or tracking._pending_handoffs_all_from_yielded(record)
-                )
-            ):
-                tracking._cancel_pending_handoffs(record)
-                tracking._append_head_transition(
-                    record,
-                    session_id,
-                    reason="rebind",
-                    at=event_at,
-                )
-            elif activation_added:
-                tracking._next_lifecycle_revision(record, session_id)
-            tracking.save_record(record)
-            return None
-
-        had_active_head = record.resolved_head_session is not None
-        new_entry = tracking.SessionEntry(
-            session_id=session_id,
-            started_at=event_at,
-            pid=pid,
-            pane_id=pane_id,
-            activations=[
-                tracking.SessionActivation(
-                    ordinal=1,
-                    started_at=event_at,
-                    start_recorded_at=observed_at,
-                    start_source=source,
-                )
-            ],
-        )
-        record.sessions.append(new_entry)
-        tracking._next_lifecycle_revision(record, session_id)
-        if initial_projection and record.controller_for_session(session_id) is None:
-            initial_sessions = set(
-                getattr(record, "_session_projection_initial_registration", set())
-            )
-            initial_sessions.add(session_id)
-            record._session_projection_initial_registration = initial_sessions
-        linked_handoff = None
-        if handoff_token and tracking._handoff_state(record, handoff_token) == "cancelled":
-            handoff_token = None
-        if handoff_token:
-            try:
-                linked_handoff = _link_if_fresh()
-            except tracking.SessionLifecycleError:
-                tracking.save_record(record)
-                raise
-        elif not candidate_token and not had_active_head and (
-            source == "bind" or tracking._pending_handoffs_all_from_yielded(record)
-        ):
-            tracking._cancel_pending_handoffs(record)
-            tracking._append_head_transition(
-                record,
-                session_id,
-                reason="rebind" if source == "bind" else "initial",
-                at=event_at,
-            )
-        tracking.save_record(record)
-        return linked_handoff
+    result = tracking_write.dispatch(
+        "session_register",
+        {
+            "worktree_id": worktree_id,
+            "yaml_path": str(yaml_path),
+            "session_id": session_id,
+            "pid": pid,
+            "pane_id": pane_id,
+            "started_at": started_at,
+            "source": source,
+            "recorded_at": recorded_at,
+            "handoff_token": handoff_token,
+            "candidate_token": candidate_token,
+            "initial_projection": initial_projection,
+        },
+        read_lock_data=lambda: _locks.read_lock(_smr._monitor_lock_path()),
+        ensure_monitor=(
+            _smr._ensure_status_monitor if _smr._status_monitor_enabled() else None
+        ),
+        boot_wait_s=0.0,
+        request_deadline_s=_SESSION_REGISTER_REQUEST_DEADLINE_S,
+    )
+    if result.get("error") == "lifecycle":
+        raise tracking.SessionLifecycleError(result["message"])
+    linked = result.get("linked_handoff")
+    return tracking.SessionHandoff(**linked) if linked else None
 
 
 def _record_has_open_session(record: tracking.WorktreeRecord) -> bool:
@@ -379,33 +309,41 @@ def deregister_session(
     source: str = "hook",
     recorded_at: str | None = None,
 ) -> None:
+    """Mark a Copilot session as ended on a worktree.
+
+    Dispatches through the ``session_deregister`` verb (daemon write path
+    when reachable, else the identical logged in-process fallback --
+    ``agent-worktrees-authoritative-daemon`` effort, Phase 3; see
+    ``tracking_session_deregistration_write.py``'s own module docstring).
+    Called from the sessionEnd hook, so this bounds latency exactly like
+    ``register_session`` does (same review-established checklist): a
+    cold/unreachable daemon never adds a boot-wait (``boot_wait_s=0``,
+    ``ensure_monitor()`` still fires the non-blocking spawn for the next
+    session), and a reachable-but-stalled one is bounded by a short
+    request deadline rather than the module's default ~9s.
+    """
     tracking = _tracking()
     yaml_path = tracking._owning_tracking_dir(worktree_id) / f"{worktree_id}.yaml"
     if not yaml_path.exists():
         return
-    with tracking._RecordLock(yaml_path):
-        record = tracking.load_record(yaml_path)
-        if record.sessions is None:
-            return
-        for entry in record.sessions:
-            if entry.session_id != session_id:
-                continue
-            changed = _end_session_activation(
-                entry,
-                event_at=ended_at or tracking._now_iso(),
-                recorded_at=recorded_at or tracking._now_iso(),
-                source=source,
-            )
-            if changed:
-                tracking._next_lifecycle_revision(record, session_id)
-                self_session_ref = tracking.format_claim_ref(
-                    record.machine,
-                    record.repo,
-                    record.worktree_id,
-                    session=session_id,
-                )
-                tracking.release_resource_claim(record, self_session_ref, save=False)
-                tracking.save_record(record)
-                if not _record_has_open_session(record):
-                    stop_fsmonitor_daemon(record.worktree_path)
-            return
+    from . import locks as _locks
+    from . import status_monitor_runtime as _smr
+    from . import tracking_write
+
+    tracking_write.dispatch(
+        "session_deregister",
+        {
+            "worktree_id": worktree_id,
+            "yaml_path": str(yaml_path),
+            "session_id": session_id,
+            "ended_at": ended_at,
+            "source": source,
+            "recorded_at": recorded_at,
+        },
+        read_lock_data=lambda: _locks.read_lock(_smr._monitor_lock_path()),
+        ensure_monitor=(
+            _smr._ensure_status_monitor if _smr._status_monitor_enabled() else None
+        ),
+        boot_wait_s=0.0,
+        request_deadline_s=_SESSION_DEREGISTER_REQUEST_DEADLINE_S,
+    )

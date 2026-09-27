@@ -190,7 +190,11 @@ class QueueSuspendMixin:
                     task_id,
                     owner,
                     wake_requested=True,
-                    wake_message="cooldown elapsed; resuming automatically",
+                    wake_message=(
+                        f"Task {task_id}'s cooldown elapsed while it was "
+                        "suspended. Re-read it and resume from the recorded "
+                        "state."
+                    ),
                     now=ts,
                 )
             except TaskError:

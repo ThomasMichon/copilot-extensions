@@ -65,7 +65,7 @@ const REPRESENT_TYPES = new Set([
 ]);
 const CONFIG_DIR = process.env.AGENT_BRIDGE_CONFIG_DIR
   ? process.env.AGENT_BRIDGE_CONFIG_DIR
-  : join(homedir(), ".agent-bridge");
+  : join(homedir(), ".agent-bridge"); // marketplace-isolation: allow legacy-compatibility
 
 // --- State ---
 const state = {

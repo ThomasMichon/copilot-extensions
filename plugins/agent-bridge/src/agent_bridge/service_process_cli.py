@@ -258,7 +258,7 @@ def _daemon_launch_argv() -> list[str]:
     )
     if os.path.isfile(py):
         return [py, "-m", "agent_bridge", "start"]
-    exe = shutil.which("agent-bridge")
+    exe = shutil.which("agent-bridge")  # marketplace-isolation: allow legacy-compatibility
     if exe:
         return [exe, "start"]
     return ["agent-bridge", "start"]
@@ -548,7 +548,9 @@ def _service_start() -> None:
 
     print(
         "[WARN] agent-bridge start issued but health check did not pass yet "
-        "-- check ~/.agent-bridge/agent-bridge-err.log",
+        "-- check ~/"
+        ".agent-bridge/"  # marketplace-isolation: allow deployed-runtime-diagnostics
+        "agent-bridge-err.log",
         file=sys.stderr,
     )
 

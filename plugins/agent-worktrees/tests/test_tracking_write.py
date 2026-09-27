@@ -51,7 +51,9 @@ def test_rendezvous_fields_are_namespaced_and_parseable():
             "tracking_write_endpoint",
             "tracking_write_token",
             "tracking_write_generation",
+            "tracking_write_verbs",
         }
+        assert isinstance(fields["tracking_write_verbs"], list)
         endpoint = tracking_write.endpoint_from_rendezvous(fields)
         assert endpoint is not None
         host, port, token = endpoint
@@ -93,6 +95,42 @@ def test_endpoint_from_rendezvous_accepts_a_valid_port():
     assert endpoint == ("127.0.0.1", 65535, "tok")
 
 
+def test_endpoint_from_rendezvous_rejects_endpoint_missing_the_verb():
+    """(2026-09-27 PR #4159 review finding, copilot-extensions#3812) An
+    endpoint whose own published capability list does not include the
+    requested verb must never be dialed -- a resident daemon process whose
+    ``_VERB_MODULES`` registration predates that verb (a rolling-upgrade
+    version-skew window) would only report ``unsupported_verb`` for it."""
+    fields = {
+        "tracking_write_endpoint": "127.0.0.1:65535",
+        "tracking_write_token": "tok",
+        "tracking_write_verbs": ["claim_settle", "session_conclude"],
+    }
+    assert tracking_write.endpoint_from_rendezvous(
+        fields, verb="session_register",
+    ) is None
+    assert tracking_write.endpoint_from_rendezvous(
+        fields, verb="claim_settle",
+    ) is not None
+
+
+def test_endpoint_from_rendezvous_rejects_pre_capability_daemon_data():
+    """A daemon process running code that predates the
+    ``tracking_write_verbs`` field entirely (i.e. before this fix existed)
+    publishes rendezvous data with no such key -- must be treated
+    identically to "lacks the verb", not "no verb requested"."""
+    old_shaped_fields = {
+        "tracking_write_endpoint": "127.0.0.1:65535",
+        "tracking_write_token": "tok",
+    }
+    assert tracking_write.endpoint_from_rendezvous(
+        old_shaped_fields, verb="session_register",
+    ) is None
+    # Without a verb filter, old-shaped data is still a valid endpoint --
+    # this check is opt-in per caller, not a blanket rejection.
+    assert tracking_write.endpoint_from_rendezvous(old_shaped_fields) is not None
+
+
 class TestVerbRegistryAndCompute:
     def test_register_verb_then_compute_dispatches_to_it(self):
         calls = []
@@ -117,11 +155,16 @@ class TestVerbRegistryAndCompute:
         )
         assert result == {"args": {}}
 
-    def test_compute_rejects_unregistered_verb(self):
-        with pytest.raises(ValueError, match="unregistered verb"):
-            tracking_write.compute(
-                tracking_write.KIND, {"verb": "does-not-exist"}
-            )
+    def test_compute_returns_unsupported_verb_marker_for_an_unregistered_verb(self):
+        """Never raises (copilot-extensions#3812): a rolling-upgrade window
+        where a resident daemon's own ``_VERB_MODULES`` registration
+        predates a client's verb must be a safe, JSON-safe result
+        ``write_with_boot`` can fall back on -- never an exception
+        indistinguishable from "the request may have already run"."""
+        result = tracking_write.compute(
+            tracking_write.KIND, {"verb": "does-not-exist"}
+        )
+        assert result == {"unsupported_verb": True}
 
     def test_compute_rejects_missing_verb_name(self):
         with pytest.raises(ValueError, match="missing a verb name"):
@@ -290,6 +333,85 @@ class TestDispatch:
             ensure_monitor=None,
             request_deadline_s=0.3,
         )
+        assert result == {"via": "fallback"}
+        assert calls == [{}]
+
+    def test_dispatch_never_dials_an_endpoint_lacking_the_verb(self):
+        """The primary defense (2026-09-27 PR #4159 review finding,
+        copilot-extensions#3812): an endpoint whose own published
+        ``tracking_write_verbs`` capability list doesn't cover the
+        requested verb is never even connected to -- proven here against a
+        REAL, live ``CoalescingServer`` that actually DOES have the verb
+        registered (via ``tracking_write.compute``), so if this test's
+        ``dispatch`` call reached the server at all, it would succeed there
+        too and this test could not distinguish the two paths by return
+        value alone (both read the same process-wide ``_VERBS`` dict).
+        Distinguishes them by THREAD instead: the real server's
+        ``compute()`` always runs on a spawned handler thread, never the
+        calling thread, so recording ``threading.get_ident()`` inside the
+        verb proves ``run_direct`` (same-thread) ran, not the server."""
+        calling_thread_id = threading.get_ident()
+        observed_thread_ids = []
+        tracking_write.register_verb(
+            "test-known-client-side",
+            lambda args: observed_thread_ids.append(threading.get_ident())
+            or {"via": "ran"},
+        )
+        server = tracking_write.start_server(tracking_write.compute)
+        server.start()
+        try:
+            real_lock_data = tracking_write.rendezvous_fields(server)
+            # Simulate a stale/old daemon's rendezvous snapshot: the real
+            # endpoint/token, but a capability list from BEFORE this verb
+            # was added.
+            stale_capability_lock_data = dict(
+                real_lock_data, tracking_write_verbs=["some-other-verb"],
+            )
+            result = tracking_write.dispatch(
+                "test-known-client-side",
+                {},
+                read_lock_data=lambda: stale_capability_lock_data,
+                ensure_monitor=None,
+            )
+        finally:
+            server.close()
+        assert result == {"via": "ran"}
+        assert observed_thread_ids == [calling_thread_id]
+
+    def test_dispatch_falls_back_when_a_live_daemon_reports_unsupported_verb(self):
+        """The third safe case (copilot-extensions#3812): a connection DOES
+        succeed and the daemon DOES respond, but reports
+        ``unsupported_verb`` -- a rolling-upgrade window where the resident
+        daemon process's own ``_VERB_MODULES`` registration predates this
+        verb. Nothing ever executed server-side in that case either, so it
+        must degrade to the identical in-process fallback rather than raise
+        AmbiguousWriteOutcome for a request that never actually ran.
+        Simulates the old-daemon side with a server whose own compute
+        callback always reports ``unsupported_verb`` (exactly what an old
+        process's real ``compute()`` would return for a verb it never
+        heard of), while the CLIENT-side ``_VERBS`` registry (used by the
+        in-process fallback) has the verb -- reproducing the asymmetry a
+        genuine rolling upgrade produces between two separate processes."""
+        calls = []
+        tracking_write.register_verb(
+            "test-known-to-client-only",
+            lambda args: calls.append(args) or {"via": "fallback"},
+        )
+        def _old_daemon_compute(kind, payload):
+            return {"unsupported_verb": True}
+
+        server = tracking_write.start_server(_old_daemon_compute)
+        server.start()
+        try:
+            lock_data = tracking_write.rendezvous_fields(server)
+            result = tracking_write.dispatch(
+                "test-known-to-client-only",
+                {},
+                read_lock_data=lambda: lock_data,
+                ensure_monitor=None,
+            )
+        finally:
+            server.close()
         assert result == {"via": "fallback"}
         assert calls == [{}]
 

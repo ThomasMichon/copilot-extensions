@@ -7,6 +7,7 @@ this step's own scope (see ``mux_daemon.py``'s module docstring)."""
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import threading
 import time
@@ -1420,6 +1421,59 @@ def test_spawn_detached_scrubs_auth_env(monkeypatch):
     assert "GH_TOKEN" not in captured["env"]
     assert "GITHUB_TOKEN" not in captured["env"]
     assert "AGENT_WORKTREES_AHP_AUTH_TOKEN" not in captured["env"]
+
+
+def test_spawn_detached_windows_kwargs_avoid_console_flash(monkeypatch):
+    """Regression test (2026-09-26 flashing-console bug): the daemon's own
+    subsequent per-tick ``subprocess.run([mux_bin, ...])`` calls (in
+    ``apply_status_options``/``_mux_session_alive``) are console-subsystem
+    children. A parent spawned with ``DETACHED_PROCESS`` gives such children
+    no console to inherit, so each one allocates -- and flashes -- its own.
+    Assert the Windows branch never sets ``DETACHED_PROCESS`` and does set
+    ``CREATE_NO_WINDOW``, matching ``agent_procutil.windowless_daemon_kwargs``'s
+    documented contract. ``_is_windows()`` reads ``os.name``, not
+    ``sys.platform`` -- patch that."""
+    captured = {}
+
+    def _fake_popen(argv, **kwargs):
+        captured["kwargs"] = kwargs
+        class _Proc:
+            pass
+        return _Proc()
+
+    monkeypatch.setattr(subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+
+    assert mux_daemon._spawn_detached(["python", "-m", "worktree_manager"]) is True
+    flags = captured["kwargs"].get("creationflags", 0)
+    # These constants only exist on the ``subprocess`` module on Windows;
+    # mirror agent_procutil's own portable fallbacks so this test can run
+    # (and correctly assert Windows-shaped kwargs) on any host OS.
+    create_no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+    detached_process = getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+    assert flags & create_no_window
+    assert not flags & detached_process
+
+
+def test_spawn_detached_posix_kwargs_unaffected(monkeypatch):
+    """POSIX has no console-subsystem concept; confirm the fix left its
+    ``start_new_session`` behavior alone."""
+    captured = {}
+
+    def _fake_popen(argv, **kwargs):
+        captured["kwargs"] = kwargs
+        class _Proc:
+            pass
+        return _Proc()
+
+    monkeypatch.setattr(subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+
+    assert mux_daemon._spawn_detached(["python", "-m", "worktree_manager"]) is True
+    assert captured["kwargs"].get("start_new_session") is True
+    assert "creationflags" not in captured["kwargs"]
 
 
 # ---------------------------------------------------------------------------

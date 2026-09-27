@@ -294,17 +294,32 @@ equivalence. An agent **fails** review if any applicable box is unchecked:
       block workarounds -- `agent-mcp`'s `materialize`/`call` subcommands are an
       equally-authenticated, equally-scoped invocation surface over the same
       bridge, not a workaround, and this restriction only disables the required
-      MCP Readiness fallback.
+      MCP Readiness fallback. **If `tools` is restricted for another, legitimate
+      reason (a narrower blast radius, a plugin-specific scope contract), it
+      must still include `execute` (or `*`)** -- the materialized-CLI-fallback
+      recipe shells out to a `.ps1`/`.cmd` stub and is unusable without
+      shell/PowerShell execution, no matter how thoroughly the body documents
+      it. `reviewing-customizations` flags this combination as
+      `mcp-fallback-needs-shell-tool`.
 - [ ] **Every MCP-owning agent has a `## MCP Readiness` section.** If the
       frontmatter declares `mcp-servers`, the body must carry the section that
       houses the readiness, equivalent-fallback, and anti-recursion guards.
 - [ ] **Readiness probe present.** The section instructs the agent to probe one
       MCP tool on startup and preserve the specific error (or, absent one, name
       the server/tool that failed), then report it even if fallback succeeds.
-- [ ] **Equivalent CLI fallback present.** Every agent-mcp-backed server names
-      its materialized fleet, uses the same bridge config/identity/top-level
-      `tools:` filter, probes a read-only stub with `--no-serve`, and stops only
-      after both surfaces fail. Raw product/API bypasses are not accepted.
+- [ ] **Equivalent CLI fallback present, always enabled.** Every agent-mcp-backed
+      server names its materialized fleet, uses the same bridge config/
+      identity/top-level `tools:` filter, probes a read-only stub with
+      `--no-serve`, and stops only after both surfaces fail. Raw product/API
+      bypasses are not accepted. **A blanket "disabled by the authorization/
+      conditional gate" opt-out is never acceptable, regardless of how
+      privileged, credential-minting, or destructive-capable the wrapped MCP
+      is** -- see *Decorator boundary reviewed* below for why. Without this
+      fallback the agent has **zero recourse, not even by the operator**, when
+      Copilot's native MCP catalog fails to register in-session (a Copilot
+      CLI-side extension/session-registration gap with no in-session repair):
+      every request simply fails outright. `reviewing-customizations` flags the
+      obsolete marker as `mcp-fallback-disabled`.
 - [ ] **Plugin recovery is discoverable.** A plugin-packaged MCP agent has a
       troubleshooting/diagnostic skill that covers its MCP or bridge failure
       modes, and the plugin README explicitly documents dependencies and
@@ -313,11 +328,19 @@ equivalence. An agent **fails** review if any applicable box is unchecked:
       bridge config or overlay, not only in `mcp-servers.env`.
 - [ ] **Fleet provenance matches.** `manifest.json.bridge` resolves to the same
       config path used by the primary frontmatter before the fleet is trusted.
-- [ ] **Decorator boundary reviewed.** Duplicate static restrictions in
-      top-level `tools:`. Conditional `gate`/argument-dependent authorization
-      requires the explicit marker `Materialized CLI fallback: disabled
-      (conditional authorization gate)`; shape-only decorators yield a wider
-      raw catalog that the agent documents.
+- [ ] **Decorator boundary reviewed, never used to justify disabling the
+      fallback.** Duplicate static restrictions in top-level `tools:` are
+      redundant with the bridge's own decorators. A bridge's `decorators:`
+      (`filter`/`transform`/`gate`) run inside **agent-mcp's own bridge
+      runtime**, not the invocation transport -- they are enforced identically
+      no matter which surface calls them: the native attached catalog, the
+      one-shot `call` subcommand, or a materialized stub. A conditional/
+      argument-dependent `gate` therefore does **not** justify disabling the
+      fallback (the now-obsolete `Materialized CLI fallback: disabled
+      (conditional authorization gate)` marker); it is exactly the case the
+      fallback must keep working for. Review only that shape-only decorators
+      (a static `filter`/`transform` with no runtime branching) yield a wider
+      raw catalog than intended, which the agent should document.
 - [ ] **MCP anti-self-delegation line present.** The section contains an explicit
       "Do NOT … (task tool / spawn / delegate) …" directive — canonically the
       literal line "Do NOT use the task tool to spawn another `<agent-name>`

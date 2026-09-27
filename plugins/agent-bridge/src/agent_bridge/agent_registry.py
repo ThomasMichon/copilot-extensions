@@ -252,7 +252,7 @@ def resolve_repo_remote(repo: str) -> str | None:
 
 def _agent_worktrees_bin() -> str | None:
     """Resolve the local ``agent-worktrees`` binstub, or None."""
-    exe = shutil.which("agent-worktrees")
+    exe = shutil.which("agent-worktrees")  # marketplace-isolation: allow legacy-compatibility
     if exe:
         return exe
     base = Path.home() / ".local" / "bin"

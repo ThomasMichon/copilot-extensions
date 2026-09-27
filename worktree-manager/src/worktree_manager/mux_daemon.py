@@ -43,6 +43,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
+from agent_procutil import windowless_daemon_kwargs
 from work_coalescing_singleton import CoalescingServer
 from work_coalescing_singleton import client as wcs_client
 
@@ -972,14 +973,17 @@ def _scrub_session_credentials(env: dict[str, str]) -> dict[str, str]:
 def _spawn_detached(argv: list[str]) -> bool:
     """Spawn a survivable background daemon. Best-effort; never raises.
 
-    Kept minimal deliberately: unlike
-    ``agent_worktrees.status_monitor_runtime._spawn_detached``, this does not
-    yet special-case a windowless ``pythonw`` trampoline or root the child
-    at HOME -- this daemon has no recurring console-child concern (it opens
-    no further terminal windows the way the resident status-monitor's
-    hook/classify servers' callers can) and is not yet on any production
-    launch path (Step 2's own explicit scope). Revisit if/when Step 3 wires
-    this into a UX-visible launch flow."""
+    This daemon DOES have recurring console-child concerns (per-session,
+    per-tick ``subprocess.run([mux_bin, ...])`` calls in
+    ``apply_status_options``/``_mux_session_alive``): a console-subsystem
+    child spawned from a ``DETACHED_PROCESS`` parent has no console to
+    inherit and allocates a brand new, briefly-visible one per call --
+    observed live as a continuous stream of flashing windows (2026-09-26).
+    Reuse ``agent_procutil.windowless_daemon_kwargs()``, the same helper
+    ``agent_worktrees.status_monitor_runtime._spawn_detached`` relies on for
+    its own recurring-console-child daemon: ``CREATE_NO_WINDOW`` alone (no
+    ``DETACHED_PROCESS``) retains one hidden console those descendants
+    inherit instead of each allocating their own."""
     env = _scrub_session_credentials(dict(os.environ))
     kwargs: dict = {
         "stdin": subprocess.DEVNULL,
@@ -987,10 +991,7 @@ def _spawn_detached(argv: list[str]) -> bool:
         "stderr": subprocess.DEVNULL,
         "env": env,
     }
-    if sys.platform == "win32":
-        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
-    else:
-        kwargs["start_new_session"] = True
+    kwargs.update(windowless_daemon_kwargs(breakaway=True))
     try:
         subprocess.Popen(argv, **kwargs)  # detached: fixed, trusted argv
         return True

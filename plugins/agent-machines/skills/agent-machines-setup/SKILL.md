@@ -51,7 +51,7 @@ description: >
 
 ## Install / update the runtime
 
-`agent-machines` is a runtime CLI (a venv plus a `~/.local/bin/agent-machines`
+`agent-machines` is a runtime CLI (a venv plus a `~/.local/bin/agent-machines` <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 binstub; on Windows the executable shim is `agent-machines.cmd`). The
 session-start hook reconciles the runtime only; it never runs machine-state
 `restore`. To (re)deploy the runtime from the source folder after a payload

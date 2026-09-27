@@ -386,6 +386,191 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-27 — `agent-bridge`'s doc/SKILL.md cluster resolved (PR #4240); first clean-room validation checkpoint of this session
+
+- Fresh guard count at merge time: 570 (down from 584).
+- `agent-bridge/SKILL.md` (4) and `references/cli-commands.md` (3):
+  doc-shaped prose mentions of the plugin's own config/routing-table
+  paths (`allow deployed-runtime-diagnostics`).
+- `agent-bridge-troubleshooting/SKILL.md` (7): mix of prose, a
+  standalone PowerShell command with a trailing comment, a Python
+  snippet, and **two PowerShell fenced commands using backtick line-
+  continuation** -- the marker could not go on the same physical line
+  without breaking the continuation (a `#` right after a backtick is
+  escaped into the command, not a real comment), so both were
+  restructured into a `$_log = "..."  # marker` variable assignment
+  before the continued command -- same pattern `agent-mcp`'s
+  `reliable-agent.md` established two slices ago. Verified via the
+  PowerShell Parser API that all 4 edited fenced blocks still parse.
+- **Operator directive this leg: periodically run clean-room validation
+  of plugin setup + the harness repo itself (Worktree Manager open/
+  update/create-worktree), to catch regressions as the guard-triage
+  edits accumulate.** First checkpoint this session:
+  - **`agent-worktrees-solo` (Tier P): 13/13 PASS.** Register -> create
+    -> finalize round-trips cleanly on a fresh box. No regression from
+    any of this session's `agent-worktrees`-adjacent edits (there
+    weren't any yet, but this establishes the pre-triage baseline).
+  - **`agent-bridge-solo` (Tier P): 9/10, found a genuine PRE-EXISTING
+    defect, NOT caused by this session's work.** `agent-bridge --version`
+    (and the `version` subcommand) can return EMPTY stdout, exit 0,
+    during an in-flight first-provision race -- reproduced twice via the
+    automated scenario and once manually via `docker exec` (a fresh
+    invocation right after the scenario's own phase-2 pass re-triggered
+    a full from-scratch reprovision, and only a SECOND, later call
+    succeeded). Confirmed this reproduces against the **published `main`
+    marketplace release** (the clean-room installs via `copilot plugin
+    install agent-bridge@copilot-extensions`, which resolves to `main`,
+    not this session's in-flight `dev` work) -- so it predates and is
+    unrelated to any of this leg's `agent-bridge` triage PRs. Searched
+    for and found no existing tracking issue (checked #1236 and #823,
+    both near-misses on the wrong root cause); filed
+    [aperture-labs#7688](https://gitea.michon.ski/tmichon/aperture-labs/issues/7688).
+  - **Review's own review-comment content on PR #4240 flagged a possible
+    concern with the new `$_log = "..."` PowerShell assignment** ("suppress
+    the standalone assignment output") -- verified empirically
+    (`pwsh -Command '$_log = "x"; Write-Output "..."'`) that a bare
+    PowerShell variable assignment produces **zero** console output
+    regardless, so the concern didn't correspond to an actual defect.
+    Noted here rather than silently overriding the review; merged
+    without further change.
+- Verified: `check-skills.py` (0 errors), `check-docs-consistency.py`,
+  PowerShell Parser API on every edited fenced block, and the full
+  `agent-bridge` suite via `test-supervisor` (800 passed, 10 skipped, 0
+  failures).
+- Guard count: 30 -> 16 findings for `agent-bridge`.
+
+### 2026-09-26 — `agent-bridge`'s src/ + extension.mjs cluster: 22 of 52 findings resolved (PR #4168)
+
+- Fresh guard count at merge time: 584 (down from 606). First slice into
+  `agent-bridge`, next plugin in the backlog order after `agent-machines`
+  reached backlog-only state.
+- Classified by shape, all matching precedent already established this
+  session: `shutil.which("agent-worktrees"/"agent-bridge")` sibling
+  launches (`allow legacy-compatibility`); 6 cross-plugin
+  `agent-worktrees` registry lookups spread across
+  `agent_registry_common.py`/`agent_registry_topology.py`/
+  `related_plugins.py`/`config.py` (`allow registry`); own-legacy-root
+  constants already named `LEGACY_*` by the plugin itself, in
+  `config.py`/`install_paths.py`/`extension.mjs` (`allow legacy-
+  compatibility`); descriptive error-message/help-text mentions of the
+  plugin's own paths in `service_process_cli.py`/`session_host_
+  connection.py`/`session_start.py` (`allow deployed-runtime-
+  diagnostics`).
+- **`install_paths.py`'s `systemd_unit_name()` already implements the
+  established `cell-derived-suffix` exemplar pattern correctly** (falls
+  back to the unqualified name only when no suffix is available) --
+  first time this session that pattern's OWN precedent (from
+  `runtime-gate.sh`/`.ps1`) showed up matched in a completely different
+  file, confirming it generalizes.
+- **`carrier.py` builds a remote-side `agent-bridge carrier --stdio`
+  command sent over SSH to a peer machine** -- same reasoning as
+  `agent-ssh`'s `allow remote-management` from earlier this session
+  (SSH-remote context, not local-cell), confirming that reason phrase's
+  first use wasn't a one-off.
+- **Found and fixed a second instance of last session's `lease`/
+  `InstallRelease` false-positive CLASS**: `session_manager.py` had a
+  local variable literally named `tasks` (a joined display string for an
+  error message) that coincidentally matched the `fixed-service-identity`
+  category's `task` keyword substring. Unlike the `agent-ssh` case
+  (a third-party pinned URL, annotated), this one was a trivial LOCAL
+  variable with no external meaning at all -- renamed to `summary`
+  instead of annotating a non-issue, since renaming genuinely eliminates
+  the false match at its root with zero behavior change. **Two false-
+  positive occurrences in two legs suggests this substring-collision
+  shape (short keywords like `task`/`lease`/`unit`/`pipe`/`socket`/
+  `mutex`/`endpoint`/`service` colliding with unrelated identifiers) may
+  be worth a systematic `grep` sweep across the whole repo rather than
+  waiting to trip over each one individually.**
+- Left deliberately untouched: `transport.py` (3) and `session_host/
+  spawner.py` (1) both hit the SAME module-size-ceiling wall as 4 other
+  files this session (baselines 1282/1028, both at exact current size --
+  see [aperture-labs#7672](https://gitea.michon.ski/tmichon/aperture-labs/issues/7672),
+  now a 5th and 6th occurrence). `install.sh`/`install.ps1` (9,
+  confirmed-genuine Phase 2 launcher-contract backlog),
+  `repair-scheduled-task.ps1` (2), `payload-invocation.json` (1), and 3
+  doc/SKILL.md files (14) -- not yet individually triaged.
+- Verified: `python -m py_compile` + `ruff --select E501` on every
+  touched file, `check-module-size.py`, `check-docs-consistency.py`, and
+  the full `agent-bridge` suite via `test-supervisor` (800 passed, 10
+  skipped, 0 failures). Merged via `pr-merge --now` after a clean
+  (0-finding) advisory review.
+- Guard count: 52 -> 30 findings for `agent-bridge`.
+
+### 2026-09-26 — `agent-machines`'s SKILL.md docs resolved, plugin now backlog-only; a live CI blocker hit and cleared (PR #4165)
+
+- Fresh guard count at merge time: 606 (down from 609).
+- `agent-machines-setup/SKILL.md` (1) and `restore-machinestate/SKILL.md`
+  (2): the usual doc-shaped `allow deployed-runtime-diagnostics`
+  mentions -- no new reasoning needed.
+- **`agent-machines` is now backlog-only at 30 findings**: 19 confirmed
+  Phase 2 launcher-contract (`init.ps1`/`init.sh`/`bootstrap-
+  check.{ps1,sh}`), 4 `installer-readiness.json`, 3
+  `payload-invocation.json`, 2+1 the surfaced-not-fixed task-name
+  cell-suffix design question (`self_update_state.py` + `fleet_update_
+  state.py`), 1 `cell_lifecycle.py` module-size deferral. Same end-state
+  pattern as `agent-ssh`/`agent-mcp` this session.
+- **Hit and cleared a genuine, all-PRs-blocking CI regression while
+  merging the prior PR (#4158, the `cell_lifecycle.py` journal update)**:
+  a `ThomasMichon/copilot-extensions` repository ruleset was updated
+  2026-09-26T23:13 PT (mid-session, by someone/something else) adding a
+  NEW required status check, "identifier leak guard," to `dev`'s branch
+  protection. That check's own log said it was misconfigured --
+  `FORBIDDEN_IDS_FACILITY`/`FORBIDDEN_IDS_WORK` repo secrets weren't set,
+  so it always failed -- meaning EVERY PR to `dev` (not just this
+  effort's) was blocked from merging, including one that had already
+  merged minutes earlier under the SAME failing check (before the
+  ruleset update took effect). Correctly did NOT attempt an admin/
+  gitea-admin force-merge (reserved for a dedicated unjamming agent, not
+  a routine coding agent's own call) and did NOT try to fix repo secrets
+  directly -- searched for and found no existing tracking issue, then
+  surfaced it to the operator directly rather than guessing at next
+  steps. Operator reverted the ruleset upstream; the very next merge
+  attempt (`pr-merge --now` on the same already-pushed PR, no other
+  changes) succeeded immediately. **No new issue needed filing since the
+  operator resolved it live** -- but the pattern (verify before assuming
+  it's your own change at fault, search for existing tracking, ask
+  rather than force) is the same error-response discipline this effort
+  has followed all session for its own module-size-ceiling questions.
+- Verified: `check-skills.py` (0 errors, no new warnings), `check-docs-
+  consistency.py`, and the full `agent-machines` suite via
+  `test-supervisor` (658 passed, 12 skipped, 0 failures).
+- Guard count: 33 -> 30 findings for `agent-machines`.
+
+### 2026-09-26 — `cell_lifecycle.py`'s 3-legs-deferred findings: 2 of 3 resolved (PR #4154)
+
+- Fresh guard count at merge time: 609 (down from 611).
+- Followed up on this session's own `agent-machines` slice, which noted
+  `cell_lifecycle.py`'s 3 findings had now been deferred across 3 legs.
+  Actually reading the code (rather than re-deferring on the strength of
+  a paraphrased prior handoff note) showed both were the SAME already-
+  established "recognize the plugin's own legacy identity" shape this
+  effort has fixed dozens of times -- no genuine design ambiguity, just
+  three legs in a row that hadn't looked closely.
+- `cell_lifecycle.py`'s module-size baseline is exactly 1018 lines -- the
+  **4th file this session** hit at zero headroom (after `agent-
+  containers/__main__.py`, `agent-ssh/fragment_registry.py`,
+  `agent-mcp/config.py`; tracked in the just-filed
+  [aperture-labs#7672](https://gitea.michon.ski/tmichon/aperture-labs/issues/7672)).
+  This time, made the fix net line-NEUTRAL instead of deferring again: one
+  marker fit on its existing line for free, and a 3-line list
+  comprehension collapsed to a 2-line form (a named constant + one-line
+  comprehension) freed exactly 1 line to pay for the OTHER new marker
+  line. File shrank by 1 net line overall (1018 -> 1017) -- a small
+  worked example of "restructure to net-zero" actually succeeding twice
+  in the same file, unlike the times this session it wasn't possible.
+- The third finding (line 650, inside a nested closure argument) still
+  had no equivalent line-saving restructure nearby and got deferred --
+  genuinely the module-size wall again, not a design question. It drops
+  out trivially once `cell_lifecycle.py` gets real headroom.
+- Guard count: 35 -> 33 findings for `agent-machines`. Verified via the
+  full `agent-machines` suite (658 passed, 12 skipped, 0 failures).
+  Merged via `pr-merge --now` after a clean (0-finding) advisory review.
+- **Lesson for future legs**: when a handoff says a finding is "plausibly
+  intentional, not yet reviewed," that's an instruction to go read the
+  code THIS leg, not license to defer again on the strength of the
+  phrase alone -- the actual review here took minutes and resolved a
+  3-leg-old open item.
+
 ### 2026-09-26 — `agent-machines`'s legacy-root/registry cluster: 13 of 48 findings resolved, 2 design questions surfaced (PR #4145)
 
 - Fresh guard count at merge time: 611 (down from 624). First slice into

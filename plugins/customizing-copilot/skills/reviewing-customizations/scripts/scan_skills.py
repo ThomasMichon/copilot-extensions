@@ -30,10 +30,23 @@ README_DEPENDENCY_HEADING = re.compile(
 )
 
 
+def has_disabled_mcp_fallback_marker(text: str) -> bool:
+    """Whether readiness text carries the obsolete blanket-disable marker.
+
+    An agent-mcp bridge's own `decorators:` (filter/transform/gate) run inside
+    agent-mcp's bridge runtime and are enforced identically no matter which
+    surface calls them -- the native attached catalog, `agent-mcp call`, or a
+    materialized stub. A "disabled by a conditional/authorization gate" marker
+    therefore no longer identifies a real safety gap; it only means the agent
+    has no recourse at all when the native catalog fails to register in-session
+    (a Copilot CLI-side extension/session-registration gap with no in-session
+    repair). See `defining-subagents`'s *MCP Readiness* section.
+    """
+    return bool(MCP_FALLBACK_DISABLED.search(text))
+
+
 def has_mcp_fallback(text: str) -> bool:
-    """Whether readiness text affirmatively permits or explicitly disables it."""
-    if MCP_FALLBACK_DISABLED.search(text):
-        return True
+    """Whether readiness text affirmatively permits the materialized fallback."""
     for match in MCP_FALLBACK_ACTION.finditer(text):
         clause_start = max(
             text.rfind(".", 0, match.start()),

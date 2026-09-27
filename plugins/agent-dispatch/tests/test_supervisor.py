@@ -1511,11 +1511,11 @@ def test_idle_confirm_nudge_asks_whether_the_task_is_done(monkeypatch):
     assert sent[0][0] == "sid-1"
     assert sent[0][1] is None
     msg = sent[0][2]
-    assert "task abc (do the thing) is not marked complete" in msg
-    assert "Idle does not mean done" in msg
+    assert "task abc (do the thing) is still in progress" in msg
+    assert "Re-read the task and continue from its recorded state" in msg
     assert "agent-dispatch complete abc" in msg
     assert "Done-criteria: comment posted" in msg
-    assert "do not complete just to clear this prompt" in msg
+    assert "do not complete just to clear this nudge" in msg
     assert "steering card" not in msg
 
 
@@ -1524,7 +1524,7 @@ def test_idle_confirm_nudge_without_goal_or_criteria_falls_back_to_title():
 
     msg = idle_confirm_message({"id": "abc", "title": "do the thing"})
     assert "Your assignment: do the thing" in msg
-    assert "resume working toward the assignment above now" in msg
+    assert "Re-read the task and continue from its recorded state" in msg
     assert "Done-criteria" not in msg
     assert "if the assignment is genuinely, fully complete" in msg
     assert "if the done-criteria are genuinely met" not in msg
@@ -1570,7 +1570,7 @@ def test_idle_confirm_nudge_routes_fleet_via_resume_session(monkeypatch):
     )
     assert sent[0][0] == "sess-9"
     assert sent[0][1] == "host-a"
-    assert "task abc is not marked complete" in sent[0][2]
+    assert "task abc is still in progress" in sent[0][2]
 
 
 def test_idle_headless_turn_nudges_confirm_done_instead_of_suspend(q, client):

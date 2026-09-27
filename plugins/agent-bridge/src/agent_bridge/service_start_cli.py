@@ -582,7 +582,9 @@ def register_service_start_commands(sub: argparse._SubParsersAction) -> None:
         "acp-connect",
         help="Relay stdio <-> a remote bridge's ACP-over-WebSocket endpoint",
     )
-    acp_connect_p.add_argument("url", help="ws(s):// URL, e.g. ws://127.0.0.1:9281/acp/<agent>")
+    _uh = "ws(s):// URL, e.g. "
+    _uh += "ws://127.0.0.1:9281/acp/<agent>"  # marketplace-isolation: allow doc-example
+    acp_connect_p.add_argument("url", help=_uh)
     acp_connect_p.add_argument("--token", default=None, help="****** (default: this machine's bridge token)")
     acp_connect_p.add_argument("--no-token", action="store_true", help="Connect without a bearer token")
     acp_connect_p.add_argument(
