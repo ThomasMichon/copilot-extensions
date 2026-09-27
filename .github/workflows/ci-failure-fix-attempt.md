@@ -48,16 +48,24 @@
      <hash>` anchor; (d) the issue's body was NEVER edited since creation
      (GraphQL `lastEditedAt`, distinct from `updatedAt`); and (e) the run id +
      commit SHA the body claims are INDEPENDENTLY verified against the real
-     Actions API (`gh run view`) -- the referenced run must actually exist, its
-     real `headSha` must match the claimed commit, and its real `conclusion`
-     must actually be `failure`/`timed_out`. A hand-authored or edited issue
-     satisfies none of these; forging (e) specifically would require causing a
-     real `dev` run to genuinely fail at an attacker-chosen commit.
-     (Earlier attempts at this check went through 2 more rounds of real review
+     Actions API -- the referenced run must actually exist, its real `headSha`
+     must match the claimed commit, and at least one JOB within that run must
+     have a real `failure`/`timed_out` conclusion (checked at the job level, via
+     the same `.../actions/runs/<id>/jobs` endpoint `ci_failure_watchdog.py`
+     itself already queries -- NOT the overall run's own conclusion, which is
+     still null/in-progress at the exact moment this check runs, since
+     `report-failure` -- the job that files this very issue -- is itself a job
+     within that same run). A hand-authored or edited issue satisfies none of
+     these; forging (e) specifically would require causing a real `dev` run to
+     genuinely fail at an attacker-chosen commit.
+     (Earlier attempts at this check went through 3 more rounds of real review
      on PR #3916 before converging -- see that PR's own history: round 1 compared
      against the bare string `github-actions` instead of `github-actions[bot]`;
      round 2 accepted any well-formed hex string as a "signature" without binding
-     it to any independently verified record, which (d)+(e) above now close.)
+     it to any independently verified record; round 3's first attempt at binding
+     it checked the RUN's overall conclusion, which would have rejected every
+     genuine watchdog issue for the reason in (e) above -- (e) as written now
+     checks the JOB level instead.)
   3. NO EDIT TOOL -- RESOLVED: `tools.edit:` added (confirmed via gh-aw's own Tools
      reference: "Allows file editing in the GitHub Actions workspace").
   4. PROTECTED-FILES DEFAULT MAY NOT COVER THIS REPO'S SPECIFIC PATHS -- RESOLVED,
@@ -120,11 +128,19 @@
   it, and didn't require the label at all on the `workflow_dispatch` path; fixed
   by additionally requiring the `ci-failure-signature` label directly and
   cross-checking the body's claimed run id + commit SHA against the real Actions
-  API (`gh run view`) -- headSha and conclusion (`failure`/`timed_out`) must
-  genuinely match, not merely be well-formatted text; (g) `threat-detection` was
-  left in gh-aw's default `continue-on-error: true` mode, which would only warn
-  rather than actually block `create-pull-request` on a finding -- set explicitly
-  to `false`. See the `verify-issue` job's own inline comments, the
+  API -- headSha and conclusion (`failure`/`timed_out`) must genuinely match,
+  not merely be well-formatted text; (g) `threat-detection` was left in gh-aw's
+  default `continue-on-error: true` mode, which would only warn rather than
+  actually block `create-pull-request` on a finding -- set explicitly to
+  `false`. A FOURTH review pass found 1 more, since fixed: (h) round 3's (f)
+  fix checked the RUN's own overall `conclusion`, but `report-failure` -- the
+  job that files this very issue -- is itself a job WITHIN that same run
+  (`${{ github.run_id }}`), so the run's overall conclusion is still null/in-
+  progress at the exact moment this check needs to pass, permanently rejecting
+  every genuine watchdog issue; fixed by checking the JOB level instead (the
+  same `.../actions/runs/<id>/jobs` endpoint `ci_failure_watchdog.py` itself
+  already queries) for at least one job with a real `failure`/`timed_out`
+  conclusion. See the `verify-issue` job's own inline comments, the
   `safe-outputs.threat-detection` block, and `validate-and-promote.yml`'s
   dispatch step for detail.
 -->
@@ -283,27 +299,37 @@ jobs:
             echo "authorized=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          RUN_JSON=$(gh run view "$RUN_ID" --repo "${{ github.repository }}" --json headSha,conclusion,name 2>/dev/null || echo '')
+          RUN_JSON=$(gh run view "$RUN_ID" --repo "${{ github.repository }}" --json headSha 2>/dev/null || echo '')
           if [ -z "$RUN_JSON" ]; then
             echo "::warning::Issue #$NUM references run $RUN_ID, which could not be independently verified via the Actions API -- refusing to run the agent."
             echo "authorized=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           RUN_SHA=$(printf '%s' "$RUN_JSON" | jq -r '.headSha')
-          RUN_CONCLUSION=$(printf '%s' "$RUN_JSON" | jq -r '.conclusion')
           if [ "$RUN_SHA" != "$COMMIT_SHA" ]; then
             echo "::warning::Issue #$NUM claims commit $COMMIT_SHA but run $RUN_ID's real headSha is $RUN_SHA -- refusing to run the agent (record does not match independent verification)."
             echo "authorized=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          case "$RUN_CONCLUSION" in
-            failure|timed_out) : ;;
-            *)
-              echo "::warning::Issue #$NUM references run $RUN_ID, whose real conclusion is '$RUN_CONCLUSION', not a failure -- refusing to run the agent."
-              echo "authorized=false" >> "$GITHUB_OUTPUT"
-              exit 0
-              ;;
-          esac
+          # Real review finding (PR #3916): checking the RUN's own overall
+          # `conclusion` is wrong, not just imprecise -- `report-failure`
+          # (which files this very issue) is itself a job WITHIN the same
+          # run it names in the body (`${{ github.run_id }}`), so the run's
+          # overall conclusion is still null (in progress) at the exact
+          # moment this check would need to pass, permanently rejecting
+          # every genuine watchdog issue. Check the JOB level instead --
+          # the same Actions endpoint `ci_failure_watchdog.py` itself
+          # already queries -- for at least one job that has ALREADY
+          # concluded `failure`/`timed_out` within that run. That is real,
+          # independent evidence a genuine failure occurred at this run/SHA,
+          # regardless of whether the run as a whole has finished yet.
+          JOBS_JSON=$(gh api "repos/${{ github.repository }}/actions/runs/$RUN_ID/jobs?per_page=100" 2>/dev/null || echo '')
+          FAILED_JOB_COUNT=$(printf '%s' "$JOBS_JSON" | jq '[.jobs[]? | select(.conclusion == "failure" or .conclusion == "timed_out")] | length' 2>/dev/null || echo 0)
+          if [ -z "$FAILED_JOB_COUNT" ] || [ "$FAILED_JOB_COUNT" -lt 1 ]; then
+            echo "::warning::Issue #$NUM references run $RUN_ID, but no job in that run has an independently verified failure/timed_out conclusion -- refusing to run the agent."
+            echo "authorized=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           echo "authorized=true" >> "$GITHUB_OUTPUT"
   agent:
     needs: [verify-issue]

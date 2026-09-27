@@ -1562,9 +1562,25 @@ _Pending._
   `create-pull-request` on a finding, directly undermining the very claim
   (round 3's fix to #5) that this stage is the machine-enforced backstop.
   Set explicitly to `false`.
-- **Four rounds deep now; #1, #3, #4, #6 have stayed resolved since round
-  1 with zero further findings across 3 subsequent review passes** — a
+- **A FIFTH review pass found 1 more, a genuinely embarrassing logic bug in
+  round 4's own fix, since fixed:** the run-verification check (f) compared
+  the referenced run's own overall `conclusion` against `failure`/
+  `timed_out` — but `report-failure` (the job that files this very issue)
+  is itself a job WITHIN that same run (`${{ github.run_id }}`), so the
+  run's overall conclusion is still null (in progress) at the exact moment
+  this check needs to pass. As written, round 4's fix would have
+  permanently rejected every single genuine watchdog issue — the review
+  caught this before it ever shipped. Fixed by checking the JOB level
+  instead (the same `.../actions/runs/<id>/jobs` endpoint
+  `ci_failure_watchdog.py` itself already queries) for at least one job
+  with a real `failure`/`timed_out` conclusion, which is available as soon
+  as that specific job concludes, regardless of whether the run as a whole
+  has finished.
+- **Five rounds deep now; #1, #3, #4, #6 have stayed resolved since round
+  1 with zero further findings across 4 subsequent review passes** — a
   reasonable signal those are genuinely settled, even without a live
-  compile. #2 and #5 needed real iteration to reach a defensible state.
-  Still outstanding regardless: `gh aw compile` verification (SSO-blocked,
-  unresolved this session).
+  compile. #2 needed real iteration across all 5 rounds to reach a
+  defensible state (the strongest of the six checks now, and the one that
+  most repaid the iteration); #5 settled by round 4. Still outstanding
+  regardless: `gh aw compile` verification (SSO-blocked, unresolved this
+  session).
