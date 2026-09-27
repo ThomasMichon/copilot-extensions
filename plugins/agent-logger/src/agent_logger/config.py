@@ -447,18 +447,11 @@ def find_repo_config(start: Path | None = None) -> Path | None:
             return None
         explicit = Path(env).expanduser()
         if not explicit.is_absolute():
-            # has_symlink_ancestor() needs both sides in the same (absolute)
-            # form to compute relative_to() -- explicit_root below is
-            # always absolute (_find_repo_root()/cwd already are), but a
-            # relative AGENT_LOGGER_REPO_CONFIG value stayed relative,
-            # making relative_to() raise and fail *unsafe* (rejecting every
-            # valid relative override). Path.absolute() (not .resolve() and
-            # not os.path.abspath's '..'-collapsing normpath, which could
-            # walk a different directory than the symlink-ancestor check
-            # below when a '..' segment follows a symlinked component)
-            # deliberately does not follow symlinks -- only textually joins
-            # the current directory -- so this cannot mask the leaf/ancestor
-            # symlink checks below.
+            # has_symlink_ancestor() needs both sides absolute for
+            # relative_to() -- Path.absolute() (never .resolve(), which
+            # follows symlinks, or normpath's '..'-collapsing, which could
+            # walk past a symlinked component) only textually joins cwd,
+            # so it can't mask the symlink checks below.
             explicit = explicit.absolute()
         if not explicit.is_file():
             raise RepositoryConfigError(
@@ -469,22 +462,17 @@ def find_repo_config(start: Path | None = None) -> Path | None:
         found_root = _find_repo_root(explicit.parent)
         explicit_root = found_root if found_root is not None else explicit.parent
         if found_root is None:
-            # No git root was found at all -- the explicit path may not
-            # even be inside a git checkout (e.g. an agent-worktrees
-            # `reference`-class registration, a read-only mirror pointed
-            # at through a symlink). Unlike a discovered git root (whose
-            # own descent from `explicit_root` down to `explicit` the
-            # has_symlink_ancestor() check below inspects), this fallback
-            # root has never itself been checked for a symlinked ANCESTOR
-            # -- has_symlink_ancestor() only walks components BETWEEN
-            # `root` and `candidate`, so a symlinked root (or an ancestor
-            # the root sits under) would silently pass unexamined and
-            # still load the file at the far end of that link. Reject
-            # outright if physically resolving the fallback root at all
-            # changes it -- that means some component of it, at any
-            # depth, is a symlink.
+            # No git root at all (e.g. a non-git agent-worktrees
+            # `reference` mirror). has_symlink_ancestor() below only walks
+            # components BETWEEN root and candidate, never root's own
+            # ancestry, so a symlinked fallback root would pass unexamined.
+            # Reject if resolving it changes it -- but normpath() first, so
+            # a purely lexical '..'/'.' collapse (e.g. a relative
+            # ../trusted/.agent-logger.yaml override) isn't mistaken for a
+            # symlink.
             try:
-                if explicit_root.resolve() != explicit_root:
+                normalized_root = Path(os.path.normpath(str(explicit_root)))
+                if normalized_root.resolve() != normalized_root:
                     return None
             except OSError:
                 return None

@@ -476,6 +476,36 @@ def test_explicit_repo_config_env_rejects_symlinked_non_git_root(
 
 
 @pytest.mark.no_autotrust
+def test_explicit_repo_config_env_accepts_relative_override_with_dotdot(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A relative AGENT_LOGGER_REPO_CONFIG value containing '..' (e.g.
+    ../trusted/.agent-logger.yaml) that resolves to a genuinely trusted,
+    non-symlinked directory must NOT be rejected merely for containing
+    '..' -- Path.absolute() preserves '..' textually (never normalizes
+    it), so comparing that against Path.resolve() (which DOES collapse
+    '..') would make the symlinked-fallback-root check added for
+    test_explicit_repo_config_env_rejects_symlinked_non_git_root treat
+    ordinary lexical normalization as if it were evidence of a symlink,
+    incorrectly rejecting a valid trust override."""
+    real_dir = tmp_path / "real-target"
+    real_dir.mkdir()
+    config_file = real_dir / ".agent-logger.yaml"
+    config_file.write_text("log:\n  path_template: logs/{title}.md\n", encoding="utf-8")
+
+    cwd_dir = tmp_path / "somewhere"
+    cwd_dir.mkdir()
+    monkeypatch.chdir(cwd_dir)
+    monkeypatch.setenv("AGENT_LOGGER_REPO_CONFIG", "../real-target/.agent-logger.yaml")
+    monkeypatch.setenv("AGENT_LOGGER_TRUST_REPO_CONFIG", str(real_dir.resolve()))
+
+    result = find_repo_config()
+
+    assert result is not None
+    assert result.resolve() == config_file.resolve()
+
+
+@pytest.mark.no_autotrust
 def test_explicit_repo_config_env_accepts_relative_path(
     tmp_path: Path, monkeypatch
 ) -> None:
