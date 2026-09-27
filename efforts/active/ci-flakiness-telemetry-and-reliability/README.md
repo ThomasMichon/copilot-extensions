@@ -274,14 +274,18 @@ find the noisiest and blocking issues, and fix them"
   historical noise predating its own fix (#4239), not a currently-open
   Phase 3 item -- **not confirmed conclusively**, since the check only
   covered the runs available via the API at the time, not a fresh
-  telemetry `refresh` scoped to start strictly after #4239's merge. The
-  next step, if this is picked up again, is exactly that: re-run
-  `tools/ci_telemetry.py refresh` with a lookback window starting after
-  2026-09-27 (this effort's own PR #4296/#4320 already establish the
-  pattern) and confirm the signature's occurrence count is zero going
-  forward. If it recurs even once post-fix, that would be genuinely new
-  evidence worth investigating from scratch, this time on a run created
-  after the guard existed.
+  telemetry `refresh` scoped by date. Note: `tools/ci_telemetry.py`
+  currently only supports a *relative* `--lookback-days` window, not an
+  absolute since-date/since-commit filter, so "start strictly after
+  2026-09-27" isn't directly expressible with today's CLI. The concretely
+  actionable next step, if this is picked up again: once several days have
+  passed (so that `--lookback-days` set smaller than the day-count since
+  2026-09-27 naturally excludes `60a62be1`/`e305b70c3` from the window),
+  re-run `refresh` and confirm the signature's occurrence count is zero.
+  Adding an absolute `--since` filter to the CLI would make this cleaner
+  and is a reasonable small follow-up, not yet done. If the signature
+  recurs even once on a run created after the guard existed, that would be
+  genuinely new evidence worth investigating from scratch.
 
 ## Validation Plan
 
@@ -328,10 +332,10 @@ determine whether this section needs anything beyond the Plan above._
   item at all -- its Phase 2 ranking occurrences were most likely entirely
   historical, predating and then resolved by #4239. The effort's own
   Journal/Plan sections above and below have been corrected to stop
-  pointing at it as an active next step. If picked up again: re-run
-  `tools/ci_telemetry.py refresh` with a lookback window starting strictly
-  after 2026-09-27 and confirm the occurrence count is zero going forward;
-  only a genuine post-fix recurrence would be worth a fresh investigation.
+  pointing at it as an active next step. See the Phase 3 Plan item above
+  for the concrete (CLI-capability-aware) next step if this is picked up
+  again -- `tools/ci_telemetry.py` only supports a relative
+  `--lookback-days` window today, not an absolute since-date filter.
 
 ### 2026-09-27 — Phase 2 ranking refinement: content-governance noise vs. real bugs
 - Directly verified two of the Phase 2 ranking's top entries
