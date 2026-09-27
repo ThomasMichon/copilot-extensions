@@ -517,8 +517,9 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
         follow this repo's normal `secrets`-skill vaulting discipline for
         any token involved, never hardcode it.
         **Auth-path decision: RESOLVED 2026-09-27 (operator decision) — the
-        PAT path.** A dedicated fine-grained PAT (`Aperture Science/GitHub:
-        Copilot Extensions Agent Worker` in the facility vault), scoped to
+        PAT path.** A dedicated fine-grained PAT, tracked in this facility's
+        own private credential store (kept out of this public repo by
+        policy), scoped to
         ONLY `ThomasMichon/copilot-extensions` with ONLY `Copilot Requests:
         Read` (no Repository permissions at all), stored as this repo's
         `COPILOT_GITHUB_TOKEN` secret. Deliberately NOT reused from an
@@ -2107,8 +2108,9 @@ _Pending._
   job's own `GITHUB_TOKEN` instead) to a workflow whose whole threat model
   assumes its agent job processes attacker-reachable log-excerpt content
   would have been an avoidable risk. Minted a dedicated, minimally-scoped
-  fine-grained PAT instead (`Aperture Science/GitHub: Copilot Extensions
-  Agent Worker`) — repo-scoped to only `copilot-extensions`, with ONLY
+  fine-grained PAT instead (tracked in this facility's own private
+  credential store, kept out of this public repo by policy) — repo-scoped
+  to only `copilot-extensions`, with ONLY
   `Copilot Requests: Read` under Account permissions, no Repository
   permissions at all — stored as the `COPILOT_GITHUB_TOKEN` repo secret.
   Removed the stale "not yet decided" TODO comment from the workflow

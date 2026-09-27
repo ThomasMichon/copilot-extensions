@@ -60,8 +60,9 @@ on:
   status-comment: false
 
 # Engine auth path: RESOLVED (operator decision, 2026-09-27) -- the PAT path.
-# A fine-grained PAT (`Aperture Science/GitHub: Copilot Extensions Agent
-# Worker` in the facility vault) scoped to ONLY `ThomasMichon/copilot-extensions`
+# A dedicated fine-grained PAT, tracked in this facility's own private
+# credential store (kept out of this public repo by policy), scoped to
+# ONLY `ThomasMichon/copilot-extensions`
 # with ONLY the `Copilot Requests: Read` Account permission -- no Repository
 # permissions at all -- is stored as this repo's `COPILOT_GITHUB_TOKEN` secret.
 # Deliberately NOT the org-billing `copilot-requests: write` path (no org
