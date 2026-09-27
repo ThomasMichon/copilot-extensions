@@ -126,6 +126,15 @@ def find_uv_editable_refs(consumer_dir: Path) -> list[tuple[str, str, str, bool]
         if not isinstance(entry, dict) or "path" not in entry:
             continue
         raw_path = entry["path"]
+        if not isinstance(raw_path, str):
+            # A malformed-but-TOML-valid entry (e.g. `path = 1`) must never
+            # crash `--check`/promotion with a raw TypeError from
+            # `Path / raw_path` below -- treat it as an unreadable manifest
+            # so every caller emits its normal diagnostic and fails closed.
+            raise ManifestUnreadable(
+                f"{pyproject}: [tool.uv.sources] {name!r}'s path is not a "
+                f"string ({raw_path!r})"
+            )
         candidate = (consumer_dir / raw_path).resolve()
         if escapes_root(candidate, consumer_root):
             out.append((name, raw_path, Path(raw_path).name, entry.get("editable") is True))
@@ -300,9 +309,13 @@ def rewrite_uv_source_to_editable(pyproject_path: Path, lib: str, relpath: str) 
     pyproject_path.write_text(text[:start] + new_table_text + text[end:], encoding="utf-8")
 
 
-def _file_hashes(lib_dir: Path, sub: str) -> dict[str, str]:
-    """Relative-path -> sha256 for every file under ``lib_dir/sub``."""
-    root = lib_dir / sub
+def _file_hashes(root: Path) -> dict[str, str]:
+    """Relative-path -> sha256 for every real file anywhere under ``root``
+    (recursively), ignoring only generated/ephemeral artifacts
+    (``__pycache__``, ``.pyc``/``.pyo``) -- never a fixed allowlist of
+    expected subpaths, so an unexpected extra file (a root-level LICENSE,
+    package metadata, or anything else) is never silently invisible to a
+    caller that compares two trees for equality."""
     out: dict[str, str] = {}
     if not root.is_dir():
         return out
@@ -316,23 +329,16 @@ def _file_hashes(lib_dir: Path, sub: str) -> dict[str, str]:
 
 
 def lib_tree_matches(canonical: Path, copy_dir: Path) -> bool:
-    """True when ``copy_dir``'s complete discardable tree -- ``src/``,
-    ``tests/``, ``README.md``, and ``pyproject.toml`` -- is byte-identical
-    to ``canonical``'s. Used to gate ``convert_to_uv_editable()``'s
-    destructive deletion of a real copy: comparing only ``src/`` (as this
-    repo's other drift checks historically have) would treat a copy with
-    an independently edited version/README/tests as agreeing, then
-    silently discard those files once the local copy is removed."""
-    for sub in ("src", "tests"):
-        if _file_hashes(canonical, sub) != _file_hashes(copy_dir, sub):
-            return False
-    for fname in ("README.md", "pyproject.toml"):
-        a_file, b_file = canonical / fname, copy_dir / fname
-        a_bytes = a_file.read_bytes() if a_file.is_file() else None
-        b_bytes = b_file.read_bytes() if b_file.is_file() else None
-        if a_bytes != b_bytes:
-            return False
-    return True
+    """True when ``copy_dir``'s complete tree is byte-identical to
+    ``canonical``'s -- every file anywhere under either directory,
+    including any unexpected extra content (a root-level LICENSE, package
+    metadata, or anything else). Used to gate
+    ``convert_to_uv_editable()``'s destructive deletion of a real copy:
+    comparing only a fixed allowlist of expected subpaths (``src/``,
+    ``tests/``, ``README.md``, ``pyproject.toml``) would treat a copy
+    carrying ANY additional file as agreeing, then silently discard that
+    content once the local copy is removed."""
+    return _file_hashes(canonical) == _file_hashes(copy_dir)
 
 
 def convert_to_uv_editable(

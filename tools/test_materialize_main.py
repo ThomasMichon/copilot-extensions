@@ -1149,3 +1149,40 @@ def test_materialize_one_uv_editable_ref_scopes_rewrite_to_uv_sources_table(tmp_
     # The unrelated table's identical-looking entry survives untouched.
     assert text.count('agent-zdd = { path = "../../libs/zdd", editable = true }') == 1
     assert 'agent-zdd = { path = "libs/zdd" }' in text
+
+
+def test_materialize_uv_editable_ref_into_refuses_a_symlinked_destination_manifest(
+    tmp_path: Path,
+):
+    root = tmp_path / "repo"
+    _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
+    victim = tmp_path / "outside-victim-pyproject.toml"
+    victim.write_text("victim content\n", encoding="utf-8")
+    consumer = root / "plugins/agent-bridge"
+    consumer.mkdir(parents=True)
+    real_pp = tmp_path / "real-pyproject.toml"
+    real_pp.write_text(
+        "[tool.uv.sources]\n"
+        'agent-zdd = { path = "../../libs/zdd", editable = true }\n',
+        encoding="utf-8",
+    )
+    (consumer / "pyproject.toml").symlink_to(victim)
+
+    # find_uv_editable_refs() reads via the symlink (so the ref is
+    # discovered), but the destination-manifest symlink itself must still
+    # be refused before ever writing through it.
+    victim.write_text(
+        "[tool.uv.sources]\n"
+        'agent-zdd = { path = "../../libs/zdd", editable = true }\n',
+        encoding="utf-8",
+    )
+
+    log = mm.materialize_uv_editable_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
+    )
+    assert any("is a symlink" in line for line in log)
+    assert victim.read_text() == (
+        "[tool.uv.sources]\n"
+        'agent-zdd = { path = "../../libs/zdd", editable = true }\n'
+    )
+    assert not (consumer / "libs/zdd").exists()

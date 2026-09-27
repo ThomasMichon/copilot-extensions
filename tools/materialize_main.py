@@ -435,6 +435,13 @@ def materialize_uv_editable_ref_into(
             continue
 
         pyproject = dest_consumer_dir / "pyproject.toml"
+        if pyproject.is_symlink():
+            # write_text() below would otherwise follow the link and
+            # overwrite an external target -- the same class of gap the
+            # existing destination-side symlink checks for the lib tree
+            # already close, applied to the destination MANIFEST itself.
+            log.append(f"SKIP {pyproject}: is a symlink -- refusing to rewrite it blindly")
+            continue
         log.append(_materialize_one_uv_editable_ref(
             canonical=canonical, dest_lib_dir=dest_lib_dir, pyproject=pyproject,
             name=name, raw_path=raw_path, lib=lib,

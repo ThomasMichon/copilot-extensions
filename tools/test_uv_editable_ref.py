@@ -231,3 +231,23 @@ def test_uv_editable_problems_rejects_an_unsafe_lib_name(tmp_path: Path, monkeyp
     )
     problems = uer.uv_editable_problems("alpha", consumer)
     assert any("not a safe lib name" in p for p in problems)
+
+
+def test_find_uv_editable_refs_raises_manifest_unreadable_for_a_non_string_path(tmp_path: Path):
+    consumer = tmp_path / "plugins/alpha"
+    consumer.mkdir(parents=True)
+    (consumer / "pyproject.toml").write_text(
+        '[project]\nname = "consumer"\nversion = "1.0.0"\n'
+        "[tool.uv.sources]\n"
+        "agent-x = { path = 1, editable = true }\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(uer.ManifestUnreadable):
+        uer.find_uv_editable_refs(consumer)
+
+
+def test_lib_tree_matches_false_for_an_unexpected_extra_file(tmp_path: Path):
+    a = _lib(tmp_path / "a", content="x = 1\n", version="0.1.0")
+    b = _lib(tmp_path / "b", content="x = 1\n", version="0.1.0")
+    (b / "LICENSE").write_text("MIT\n", encoding="utf-8")
+    assert uer.lib_tree_matches(a, b) is False
