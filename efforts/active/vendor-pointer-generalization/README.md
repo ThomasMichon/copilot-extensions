@@ -400,8 +400,23 @@ shape before committing to a design)_
       - [x] `single-instance-lease` converted, all 5 consumers
             (`plugins/agent-vault`, `agent-worktrees`, `agent-dispatch`,
             `agent-mcp`, `agent-bridge`).
+      - [x] `plugin-activation` converted, all 8 consumers
+            (`plugins/customizing-copilot`, `agent-worktrees`,
+            `agent-dispatch`, `agent-logger`, `agent-bridge`,
+            `agent-machines`, `agent-codespaces`, `worktree-manager`).
+            Found and fixed a real regression while converting:
+            `customizing-copilot`'s `installing-plugins` skill script
+            (`plugin-activation.py`) loaded `plugin_activation/state.py`
+            by hardcoded file path, bypassing the package's own
+            `__init__.py` entirely (deliberately, to avoid pulling in
+            `resolver.py`'s PyYAML dependency for this standalone,
+            stdlib-only-state-logic script) — broke once the local copy
+            became a pointer stub with no physical `state.py`. Fixed by
+            resolving the pointer's own `source` field directly when
+            present (still never importing the package, preserving the
+            original yaml-avoidance design).
       - [ ] Remaining real lib copies (`agent-procutil`, `dropin-registry`,
-            `plugin-activation`, `plugin-resolve`, `session-liveness-probe`,
+            `plugin-resolve`, `session-liveness-probe`,
             `venue-copilot`, `zdd`) not yet converted — future
             bounded-slice PRs, one (or a few related) lib(s) at a time,
             per this effort's own established pattern.
