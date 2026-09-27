@@ -457,6 +457,82 @@ def test_write_units_escapes_systemd_special_characters_in_path(tmp_path: Path) 
     _BASH is None or os.name == "nt",
     reason="a POSIX bash environment is not available",
 )
+def test_write_units_escapes_newline_in_path(tmp_path: Path) -> None:
+    """A discovered path containing an embedded newline (POSIX permits one
+    in a directory name, and `agent-worktrees repos find` output is copied
+    verbatim into the unit here-doc) must be escaped to a literal '\\n'
+    sequence, not passed through as a real line break -- otherwise the
+    Environment= assignment splits across physical lines in the generated
+    unit file, which can fail daemon-reload or be misread as a bogus
+    additional directive."""
+    install_dir = tmp_path / "install"
+    unit_dir = tmp_path / "units"
+    install_dir.mkdir()
+    unit_dir.mkdir()
+    (install_dir / "config.yaml").write_text("config_repo: demo\n", encoding="utf-8")
+
+    repo_dir = tmp_path / "demo-repo-with\nnewline"
+    repo_dir.mkdir()
+    (repo_dir / ".agent-logger.yaml").write_text("schema_version: 3\n", encoding="utf-8")
+
+    # Written to a side file, rather than embedded into the stub script's
+    # shell text via plain string interpolation -- the raw embedded
+    # newline would otherwise corrupt the generated stub script itself.
+    repo_dir_file = tmp_path / "repo-dir.txt"
+    repo_dir_file.write_text(str(repo_dir), encoding="utf-8")
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _executable(
+        fake_bin / "agent-worktrees",
+        "#!/bin/sh\n"
+        'if [ "$1" = "repos" ] && [ "$2" = "find" ] && [ "$3" = "demo" ]; then\n'
+        f'  cat "{repo_dir_file}"\n'
+        "  exit 0\n"
+        "fi\n"
+        "exit 1\n",
+    )
+
+    harness = tmp_path / "harness.sh"
+    harness.write_text(
+        "#!/bin/sh\nset -eu\n"
+        f'INSTALL_DIR="{install_dir}"\n'
+        f'UNIT_DIR="{unit_dir}"\n'
+        f'VENV="{_real_venv_with_python()}"\n'
+        'TIMER_NAME="agent-logger-sync"\n'
+        'chg() { :; }\n'
+        + _extract_sh_function("write_units")
+        + "\nwrite_units\n",
+        encoding="utf-8",
+    )
+    harness.chmod(0o755)
+    env = {
+        **os.environ,
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+        "AGENT_LOGGER_TRUST_REPO_CONFIG": str(repo_dir),
+    }
+    subprocess.run(
+        [_BASH, str(harness)], capture_output=True, text=True, env=env, timeout=20, check=True
+    )
+
+    unit_lines = (
+        (unit_dir / "agent-logger-sync.service").read_text(encoding="utf-8").splitlines()
+    )
+    env_lines = [
+        line for line in unit_lines if line.startswith('Environment="AGENT_LOGGER_REPO_CONFIG=')
+    ]
+    assert len(env_lines) == 1
+    escaped_path = str(repo_dir).replace("\n", "\\n")
+    assert (
+        env_lines[0]
+        == f'Environment="AGENT_LOGGER_REPO_CONFIG={escaped_path}/.agent-logger.yaml"'
+    )
+
+
+@pytest.mark.skipif(
+    _BASH is None or os.name == "nt",
+    reason="a POSIX bash environment is not available",
+)
 def test_write_units_omits_repo_config_env_without_config_repo(tmp_path: Path) -> None:
     """No config_repo declared (today's default) -- and no agent-worktrees
     lookup attempted at all -- is a silent no-op, not an error."""

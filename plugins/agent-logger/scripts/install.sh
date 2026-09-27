@@ -1032,11 +1032,37 @@ PYEOF
             ;;
         esac
         # Escape systemd.exec(5) Environment= special characters (\, ",
-        # and the specifier-escape %) before quoting the whole assignment
-        # -- quoting alone only protects whitespace, not these.
-        local repo_config_value
-        repo_config_value="AGENT_LOGGER_REPO_CONFIG=${candidate_path}"
-        repo_config_value="$(printf '%s' "${repo_config_value}" | sed 's/\\/\\\\/g; s/"/\\"/g; s/%/%%/g')"
+        # the specifier-escape %, and a literal newline/CR -- POSIX
+        # permits either in a directory name, and `agent-worktrees repos
+        # find` output is otherwise copied verbatim into this here-doc; an
+        # embedded newline would split the Environment= assignment across
+        # physical lines in the generated unit file, which can fail
+        # daemon-reload or be misread as a bogus additional directive.
+        # Quoting the whole assignment alone only protects whitespace, not
+        # any of this -- and a shell/sed pipeline can't safely see an
+        # embedded newline in the first place (sed operates line-by-line),
+        # so this uses the venv's own python for a single, complete escape
+        # pass instead. `-I` (isolated mode) is not needed here: this step
+        # only manipulates a string, importing no plugin code, so there is
+        # nothing for an ambient PYTHONPATH/CWD package to shadow.
+        local repo_config_value=""
+        if [ -x "${VENV}/bin/python3" ]; then
+          repo_config_value="$("${VENV}/bin/python3" - "AGENT_LOGGER_REPO_CONFIG=${candidate_path}" <<'PYEOF' 2>/dev/null
+import sys
+value = sys.argv[1]
+value = value.replace("\\", "\\\\")
+value = value.replace('"', '\\"')
+value = value.replace("%", "%%")
+value = value.replace("\r\n", "\\n")
+value = value.replace("\n", "\\n")
+value = value.replace("\r", "\\r")
+sys.stdout.write(value)
+PYEOF
+          )"
+        fi
+        if [ -z "${repo_config_value}" ]; then
+          continue
+        fi
         repo_config_env="Environment=\"${repo_config_value}\""
         break
       done
