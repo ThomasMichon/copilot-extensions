@@ -614,10 +614,16 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
       --add-assignee copilot`) or the equivalent GraphQL mutation, and write
       the issue body as a genuinely well-scoped Copilot cloud agent prompt
       (same narrow-scope instructions as below, adapted to issue-body form).
-      **Not needed — `gh-aw` proved fully workable:** compile-verified,
-      auth-wired, and live on both `dev` and `main`. Left unchecked as a
-      contingency this effort no longer needs, not because the fallback
-      itself was built.
+      **Real review finding (PR #4340): "fully workable" overstated what's
+      actually been validated.** Compilation and engine-auth wiring are
+      confirmed, and the workflow is present on both `dev` and `main` —
+      but **zero live end-to-end runs have occurred** (no real trigger has
+      fired an actual issue-to-draft-PR execution yet; see the Validation
+      Plan's own unchecked items below). Corrected: this contingency stays
+      genuinely open until a real live run is observed — wiring/compile
+      validation is not the same claim as "gh-aw proved workable in
+      practice," which is what this item's own trigger condition actually
+      asks about.
   - [ ] **The fallback path has no `safe-outputs` stage — the same
         machine-enforced protected-path check is mandatory here too, not
         optional.** Issue-assignment gives the Copilot cloud agent no
