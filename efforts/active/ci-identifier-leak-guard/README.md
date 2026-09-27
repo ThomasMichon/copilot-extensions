@@ -170,8 +170,12 @@ an untrusted findings artifact at all.
   feedback naming the matched value and reason. If the secrets are absent,
   record that this failure-path validation remains blocked on Phase 4 secret
   provisioning.
-- [ ] Confirm a clean PR produces no raw matched values in the workflow log and
-  no failure feedback comment.
+- [x] Confirm the clean scratch PR's **misconfiguration** path produces no
+  identifier-feedback comment and logs only the configuration gap (not any raw
+  matched value).
+- [ ] Once the denylist secrets exist, confirm a genuinely clean denylist-backed
+  scan produces no raw matched values in the workflow log and no failure
+  feedback comment.
 - [x] Inspect the branch-protection/ruleset configuration for `main` and `dev`
   and prepare the exact before/after diff to require the custom Check Run name,
   without applying it yet.
