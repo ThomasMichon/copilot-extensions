@@ -252,6 +252,16 @@ because they provide tools or services.
     - [x] Run the Agent Machines scenario in a disposable Linux clean-room arm.
     - [x] Windows Agent Machines clean-room arm waived by operator decision on
       2026-09-05; deterministic PowerShell parity tests remain required.
+    - [ ] Post-acceptance Agent Index installer defects (routed here from the
+      2026-09-24 bug sweep per Phase 7's migration-intake disposition — both
+      are installer-elevation/interpreter-selection gaps in this effort's own
+      accepted exemplar, not new scope):
+      - [ ] **[#107](https://github.com/ThomasMichon/copilot-extensions/issues/107)**
+        `Register-ScheduledTask` fails with `Access is denied` without
+        elevation; needs a user-level logon task instead.
+      - [ ] **[#106](https://github.com/ThomasMichon/copilot-extensions/issues/106)**
+        `uv venv` can select a broken uv-managed Python on Dev Box
+        (os error 448); needs an explicit `--python` pin.
 
 ### Phase 4 — Runtime and state rollout
 
@@ -325,21 +335,47 @@ because they provide tools or services.
 
 - [ ] Accept installation and marketplace candidates only through
       [`migration-intake`](../migration-intake/README.md)'s deduplication and
-      ownership gate.
-- [ ] Revalidate accepted technical scope against the current installation-cell
-      contract; return obsolete or unsafe candidates for explicit disposition.
-- [ ] Place each accepted public tracker item in exactly one existing phase,
-      extending this plan before implementation when necessary.
-- [ ] Keep examples synthetic and distribution-neutral.
+      ownership gate. Ongoing policy, not a one-time action — reconfirmed
+      2026-09-27 that no new candidate entered this effort's Plan outside that
+      gate this leg; the two 2026-09-24 bug-sweep items below predate the
+      policy and are the only pending exception, now explicitly routed rather
+      than grandfathered in place.
+- [x] Revalidate accepted technical scope against the current
+      installation-cell contract for this leg's reconciled backlog
+      (2026-09-27): the Phase 2 launcher-contract script clusters and
+      cross-plugin `payload-invocation.json`/`installer-readiness.json`
+      questions left open across all 9 guard-triaged plugins were confirmed
+      still live and in-scope — not obsolete — against `#1103` (Phase 2,
+      open, partial), `#1110` (Phase 6, open/reopened, guard-blocking
+      precondition unmet at 681 findings/1344 files), and the
+      module-size-ceiling tracker
+      [aperture-labs#7672](https://gitea.michon.ski/tmichon/aperture-labs/issues/7672)
+      (open, unclaimed). None require return-for-disposition.
+- [x] Place each accepted public tracker item in exactly one existing phase
+      (2026-09-27): the confirmed Phase 2/cross-plugin-JSON backlog already
+      lives correctly under Phase 2 (`#1103`) and `aperture-labs#7672` — no
+      new phase needed. The two Bug sweep items below are now placed under
+      Phase 3 (Agent Index installer follow-ups), the only remaining
+      unplaced candidates found this leg.
+- [x] Keep examples synthetic and distribution-neutral. Spot-checked
+      2026-09-27 across this leg's ~30 merged PRs' annotation examples and
+      the effort's own proposal docs — no environment-specific identifiers
+      found; holds.
 
 ### Bug sweep — linked open bugs (2026-09-24)
 
-_Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
+_Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review)._
 
-- [ ] **#107** agent-index installer: Register-ScheduledTask 'Access is denied' without elevation -- need a user-level logon task
-  - An installer elevation gap is this effort's installation-cells scope.
-- [ ] **#106** agent-index installer: uv venv selects a broken uv-managed Python on Dev Box (os error 448) -- pin --python
-  - A broken interpreter selection during install is this effort's installation-cells scope.
+- [x] **#107** agent-index installer: Register-ScheduledTask 'Access is denied' without elevation -- need a user-level logon task
+  - Triaged 2026-09-27: still open, unclaimed, not obsolete. Routed to Phase 3
+    (Agent Index installer follow-up) rather than closed here — the
+    underlying installer fix is unimplemented; only its placement is
+    resolved.
+- [x] **#106** agent-index installer: uv venv selects a broken uv-managed Python on Dev Box (os error 448) -- pin --python
+  - Triaged 2026-09-27: still open, unclaimed, not obsolete. Routed to Phase 3
+    (Agent Index installer follow-up) rather than closed here — the
+    underlying installer fix is unimplemented; only its placement is
+    resolved.
 
 ## Validation Plan
 
@@ -385,6 +421,49 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 [`phase-6-lifecycle.md`](phase-6-lifecycle.md).
 
 ## Journal
+
+### 2026-09-27 — Plan/Validation Plan reconciled against the completed 8-plugin backlog order; Phase 7 bug sweep triaged
+
+- Picked up the relay handoff whose next slice was explicitly **not** another
+  plugin — it was finishing the effort itself: reconcile the Plan checklist
+  against reality now that the 8-plugin guard-triage backlog order (Phase 7's
+  means, not its own end) is closed out, and triage the two unclosed Bug
+  sweep items.
+- **Revalidated, did not just re-check, the confirmed-backlog disposition**:
+  confirmed live via direct issue reads (not assumption) that `#1103` (Phase
+  2 tracker) is open/partial, `#1110` (Phase 6 tracker) is open/reopened with
+  its blocking-guard precondition still unmet (681 findings across 1344
+  files as of its last recheck — nowhere close to "all runtime plugins
+  conform"), and `aperture-labs#7672` (module-size-ceiling tracker) is open
+  and unclaimed. None of the confirmed-backlog items (Phase 2 launcher-
+  contract script clusters, `installer-readiness.json`/`payload-
+  invocation.json` cross-plugin questions) are obsolete or need re-
+  disposition — they're correctly already homed under `#1103`/`#7672`, not
+  this effort's own Phase 7.
+- **Phase 7 checklist**: three of four items are now satisfied for this
+  leg's reconciled scope (revalidate scope, place tracker items, keep
+  examples synthetic) and checked off with the evidence above; the
+  migration-intake gate item stays unchecked as ongoing policy (not a one-
+  time action) with a note that the two bug-sweep items are the only
+  pre-policy exception, now explicitly routed rather than silently
+  grandfathered.
+- **Bug sweep #107/#106 triaged**: both re-confirmed still open, unclaimed,
+  and in-scope (Agent Index installer elevation/interpreter-selection gaps
+  in this effort's own accepted Phase 3 exemplar). Placed as new Phase 3
+  follow-up sub-items rather than left in the unowned sweep list; the Bug
+  sweep checkboxes are closed as *triaged/placed*, not as *fixed* — the
+  underlying installer defects remain open work for whoever picks up Phase
+  3's follow-ups.
+- **Net effort state**: still **not** Done. Real, substantial remaining
+  work is Phase 2's "stop installing generic `agent-*` commands" item (~35
+  scripts across the launcher-contract family, tracked in
+  [phase-2-launcher-contracts.md](phase-2-launcher-contracts.md)) and Phase
+  6's blocking-guard turn-on, both gated on the same underlying conversion
+  work this session's 8-plugin sweep only annotated/deferred, never
+  implemented. Validation Plan remains entirely unchecked — none of its
+  items were exercised this leg (the Phase 3 Tier-P scenarios satisfy some
+  of them in spirit but haven't been cross-checked item-by-item against this
+  list; left honestly unchecked rather than assumed).
 
 ### 2026-09-27 — `agent-worktrees` resolved to backlog-only (PR #4318); **entire 8-plugin backlog order now complete**
 
