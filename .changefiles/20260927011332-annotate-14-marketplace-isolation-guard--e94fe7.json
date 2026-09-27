@@ -1,0 +1,9 @@
+{
+  "comment": "Annotate 14 marketplace-isolation guard findings across the src/agent_index/*.py cluster",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

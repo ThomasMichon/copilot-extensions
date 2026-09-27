@@ -18,7 +18,7 @@ LOG_DIR_ENV = "AGENT_INDEX_LOG_DIR"
 CACHE_DIR_ENV = "AGENT_INDEX_CACHE_DIR"
 CONFIG_ROOT_ENV = "AGENT_INDEX_CONFIG_ROOT"
 ROUTING_DIR_ENV = "AGENT_INDEX_ROUTING_DIR"
-ENDPOINT_ENV = "AGENT_INDEX_ENDPOINT"
+ENDPOINT_ENV = "AGENT_INDEX_ENDPOINT"  # marketplace-isolation: allow env-var-name-declaration
 HOME_ENV = "AGENT_INDEX_HOME"
 ROLE_ENV = "AGENT_INDEX_ROLE"
 CONFIG_ENV = "AGENT_INDEX_CONFIG"
@@ -29,7 +29,7 @@ REPO_ENV = "AGENT_INDEX_REPO"
 VALID_ROLES = ("host", "client")
 UNCONFIGURED_ROLE = "unconfigured"
 CONFIG_FILENAME = "config.yaml"
-SHAREABLE_CONFIG_DIR = Path(".agent-index")
+SHAREABLE_CONFIG_DIR = Path(".agent-index")  # marketplace-isolation: allow legacy-compatibility
 OVERLAY_CONFIG_DIR = Path(".copilot-extensions") / "agent-index"
 REPO_CONFIG_RELPATH = str(SHAREABLE_CONFIG_DIR / CONFIG_FILENAME)
 LEGACY_REPO_CONFIG_RELPATH = str(OVERLAY_CONFIG_DIR / CONFIG_FILENAME)
@@ -39,7 +39,7 @@ INSTALLATION_CONTEXT_ENV = "COPILOT_EXTENSIONS_CONTEXT"
 
 def install_dir() -> Path:
     """Runtime root for agent-index."""
-    return Path(os.environ.get(HOME_ENV) or (Path.home() / ".agent-index"))
+    return Path(os.environ.get(HOME_ENV) or (Path.home() / SHAREABLE_CONFIG_DIR))
 
 
 def data_dir() -> Path:
@@ -269,7 +269,8 @@ def _repo_root_for_effective_config_path(path: Path) -> Path | None:
         CONFIG_FILENAME,
     ):
         return normalized.parents[2]
-    if len(parts) >= 2 and parts[-2:] == (".agent-index", CONFIG_FILENAME):
+    _tail = (".agent-index", CONFIG_FILENAME)  # marketplace-isolation: allow legacy-compatibility
+    if len(parts) >= 2 and parts[-2:] == _tail:
         return normalized.parents[1]
     return None
 
@@ -496,7 +497,8 @@ def read_corpus_sources() -> list[dict]:
 def _agent_worktrees_home() -> Path:
     """The sibling agent-worktrees registry dir (``~/.agent-worktrees``)."""
     env = os.environ.get("AGENT_WORKTREES_HOME")
-    return Path(env).expanduser() if env else (Path.home() / ".agent-worktrees")
+    _awt = ".agent-worktrees"  # marketplace-isolation: allow registry
+    return Path(env).expanduser() if env else (Path.home() / _awt)
 
 
 def _registry_platform_key() -> str:

@@ -14,7 +14,7 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_ENGINE_URL = "http://127.0.0.1:8421"
+DEFAULT_ENGINE_URL = "http://127.0.0.1:8421"  # marketplace-isolation: allow legacy-compatibility
 
 # Generous timeout for embedding — model loading can take 20+ seconds on
 # first call, and a full batch takes time on a slow/CPU embed path. The read

@@ -185,8 +185,9 @@ def _default_backup_dir() -> Path:
     override = os.environ.get("AGENT_INDEX_BACKUP_DIR")
     if override:
         return Path(override).expanduser()
+    _default_home = "~/.agent-index"  # marketplace-isolation: allow legacy-compatibility
     install_root = Path(
-        os.environ.get("AGENT_INDEX_HOME", "~/.agent-index")
+        os.environ.get("AGENT_INDEX_HOME", _default_home)
     ).expanduser()
     return install_root / "backups"
 
@@ -203,7 +204,7 @@ class IndexConfig:
         default_factory=lambda: Path(
             os.environ.get("AGENT_INDEX_DATA_DIR")
             or os.environ.get("AGENT_INDEX_STATE_DIR")
-            or "~/.agent-index/data"
+            or "~/.agent-index/data"  # marketplace-isolation: allow legacy-compatibility
         ).expanduser()
     )
 

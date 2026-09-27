@@ -39,6 +39,11 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+
+def _legacy_root() -> str:
+    return str(Path.home() / ".agent-index")  # marketplace-isolation: allow legacy-compatibility
+
+
 # Throttle interval for persisting progress to SQLite (seconds).
 # SSE events are always emitted immediately.
 _PROGRESS_PERSIST_INTERVAL = 5.0
@@ -157,7 +162,7 @@ def _load_governance_module():
             "context": context_path,
             "marketplace_id": marketplace_id,
             "plugin_id": plugin_id,
-            "legacy_root": str(Path.home() / ".agent-index"),
+            "legacy_root": _legacy_root(),
         }
     except Exception as exc:
         return {
