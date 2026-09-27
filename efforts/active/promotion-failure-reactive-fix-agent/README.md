@@ -1822,3 +1822,56 @@ _Pending._
   and `ubuntu-slim` are accepted for a sibling workflow. This fix is
   repo-wide, not specific to this one draft — it unblocks every future
   `gh-aw` workflow this repo might compile.
+- **First real Copilot review pass on PR #4155 found 4 more issues, all
+  fixed and recompile-verified:**
+  - **HIGH — mutable action tag.** `--action-tag` compiled
+    `github/gh-aw-actions/setup@v0.89.21`, a mutable tag, not a SHA
+    pin. Resolving the SHA hit the same SSO wall (`--gh-aw-ref` and an
+    unresolved `--action-tag <tag>` both do a live API call); worked
+    around with an anonymous `curl` of the tag ref. Caught a subtler
+    bug in the process: `--action-tag` pins against `github/gh-aw` (the
+    monorepo), not `github/gh-aw-actions` (a different, similarly-named
+    repo) — the first SHA obtained was resolved from the wrong repo and
+    doesn't exist in `github/gh-aw` (confirmed 404/422) — would have
+    been a silently broken pin. Re-resolved the correct SHA
+    (`c35393777e5604a63721d09512263b1383301d4f`) from `github/gh-aw`
+    itself, verified `200` via anonymous curl, recompiled with
+    `--action-tag <sha>` (a raw SHA is used as-is, no API call).
+  - **HIGH — scope-check gap.** The post-steps contribution-surface
+    gate (from PR #3916) only diffed `$BASE` vs. `HEAD` — committed
+    history only — missing any uncommitted or untracked changes the
+    agent might leave behind. Rewrote the diff to combine
+    `git diff --name-only "$BASE" -- .` (tracked, working-tree
+    inclusive) with `git ls-files --others --exclude-standard`
+    (untracked new files), and explicitly exempted `.verify-issue/*`
+    (the file-based prompt handoff added this session) from the
+    violation check.
+  - **MEDIUM — dispatch fallback unreachable.** `label_command`'s
+    auto-generated `workflow_dispatch` trigger (documented as "for
+    manual testing") never actually activates a run: the generated
+    `pre_activation`/`activation` jobs' `if:` only checks for the
+    primary event type (`issues`), not `workflow_dispatch` — silently
+    breaking the entire Issue #1 dispatch-fallback fix from PR #3916.
+    Fixed by declaring an explicit `workflow_dispatch:` trigger (with
+    `item_number: required: false`, since label_command's own dispatch
+    forbids required inputs) alongside `label_command:` in `on:` —
+    compile-verified the generated `if:` conditions are now a real OR
+    across both trigger paths.
+  - **LOW — stale text.** The draft's comment block still claimed the
+    `item_number` input-naming convention was unconfirmed, contradicting
+    the now-successful compile. Rewrote issue #1's narrative to
+    document both the original fix and this round's dispatch-unreachable
+    bug, and added issues #13 (dispatch fallback), #14 (scope-gate
+    uncommitted changes), and #15 (mutable action tag) to the numbered
+    findings list.
+  - Recompiled clean after all four fixes (same single non-blocking
+    concurrency-discriminator warning); `check-trusted-ci.py`,
+    `check-docs-consistency.py`, and the full
+    `test_ci_failure_watchdog.py` + `test_check_trusted_ci.py` suite
+    (63 tests) all pass.
+- **Open follow-up, not yet tracked as a separate TODO:** the
+  `--action-tag <sha>` pin is a CLI flag passed to `gh aw compile`, not
+  persistent config — it must be re-supplied on every future recompile
+  of this file, or the pin silently reverts to a mutable tag. This
+  generalizes the already-open "pin the `gh-aw` extension version"
+  hardening item from Phase 2's checklist.

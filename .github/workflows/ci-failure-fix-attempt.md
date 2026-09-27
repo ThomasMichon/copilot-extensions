@@ -7,8 +7,16 @@ labels: ["automation", "ci", "reactive-fix"]
 # the documented gh-aw trigger for "a label as an authenticated invocation, with a
 # manual-dispatch escape hatch": the compiler generates BOTH an `issues: labeled`
 # event (filtered to this exact label name automatically -- no manual `if:` needed)
-# AND a `workflow_dispatch` trigger carrying an `item_number` input, which is exactly
-# what `report-failure`'s explicit dispatch call (blocking issue #1) targets.
+# AND a `workflow_dispatch` trigger carrying an `item_number` input. Real review
+# finding (PR #4155): `label_command`'s own auto-generated `workflow_dispatch` is
+# documented as being "for manual testing" only, and its generated activation gate
+# (`pre_activation`/`activation`) checks ONLY for the `issues` event -- the
+# `workflow_dispatch` path compiles and can be invoked, but the run never actually
+# activates, so `report-failure`'s explicit dispatch call (blocking issue #1) would
+# silently no-op. Declaring an EXPLICIT `workflow_dispatch:` trigger alongside
+# `label_command:` (not relying on its implicit one) gives it its own, genuine
+# activation path, combined via OR with the label path -- confirmed in the compiled
+# lock file's own `pre_activation`/`activation` conditions.
 # `remove_label: false` keeps the label on the issue permanently -- it is
 # `ci_failure_watchdog.py`'s own persistent dedup marker (`_existing_issue` searches
 # `--label ci-failure-signature`), never a one-shot command marker gh-aw should strip.
@@ -17,6 +25,12 @@ on:
     name: ci-failure-signature
     events: [issues]
     remove_label: false
+  workflow_dispatch:
+    inputs:
+      item_number:
+        description: "Issue number to process (report-failure's own automated dispatch call)"
+        required: false
+        type: string
 
 # TODO(successor): confirm engine auth path with the operator -- effort's own Plan
 # names two options (org-billing `copilot-requests: write` vs. a `COPILOT_GITHUB_TOKEN`
@@ -290,15 +304,30 @@ post-steps:
       set -euo pipefail
       git fetch origin "$DEFAULT_BRANCH" --quiet
       BASE=$(git merge-base HEAD "origin/$DEFAULT_BRANCH")
-      CHANGED=$(git diff --name-only "$BASE" HEAD || true)
+      # Real review finding (PR #4155): comparing only `$BASE` vs `HEAD`
+      # (committed history) ignores the normal state a `create-pull-request`
+      # safe-output actually collects from -- uncommitted and untracked
+      # changes in the agent's own workspace, which this gate would then
+      # silently miss entirely. Compare `$BASE` against the WORKING TREE
+      # instead (`git diff` with no second ref, which diffs against the
+      # working tree) for tracked-file changes, and add untracked new files
+      # via `git ls-files --others`, so nothing the agent actually produced
+      # can slip past this gate uninspected.
+      CHANGED=$(
+        { git diff --name-only "$BASE" -- .
+          git ls-files --others --exclude-standard; } | sort -u
+      )
       if [ -z "$CHANGED" ]; then
-        echo "::notice::No committed changes to scope-check."
+        echo "::notice::No changes to scope-check."
         exit 0
       fi
       VIOLATIONS=""
       while IFS= read -r FILE; do
         [ -z "$FILE" ] && continue
         case "$FILE" in
+          .verify-issue/*)
+            : # this workflow's own scratch state, never a legitimate fix target
+            ;;
           .github/workflows/*|plugin.json|*/plugin.json|pyproject.toml|*/pyproject.toml|marketplace.json|*/marketplace.json)
             VIOLATIONS="$VIOLATIONS
       - $FILE (an explicitly out-of-scope path -- already excluded from the safe-output patch, but its presence here means the agent attempted it)"
@@ -438,21 +467,33 @@ safe-outputs:
   Full original detail in the effort's 2026-09-26 Journal entry.
   ============================================================================
 
-  1. TRIGGER CANNOT FIRE AS DRAFTED -- RESOLVED via `label_command:` + explicit
-     dispatch. `validate-and-promote.yml`'s `report-failure` job files the tracking
+  1. TRIGGER CANNOT FIRE AS DRAFTED -- RESOLVED via `label_command:` + an
+     EXPLICIT `workflow_dispatch:` trigger + explicit dispatch.
+     `validate-and-promote.yml`'s `report-failure` job files the tracking
      issue with the default `GITHUB_TOKEN`, and GitHub suppresses new workflow-
      triggering events (including `issues: labeled`) for content created/labeled by
      that token -- the label event alone would never fire. Fix: `on: label_command:`
      (below) compiles to an `issues: labeled` trigger AND a `workflow_dispatch`
-     trigger with an `item_number` input (gh-aw's own documented "manual testing"
-     mechanism). `report-failure` now holds `actions: write` and, after filing a NEW
-     issue, explicitly calls `gh workflow run ci-failure-fix-attempt.lock.yml -f
-     item_number=<N>` -- an explicit dispatch call is NOT subject to the same-token
-     event-suppression rule (gh-aw's own FAQ documents third parties dispatching
-     workflows this exact way). See `validate-and-promote.yml`'s "Fire the fix-attempt
-     agent" step. NOT yet compile-verified that `label_command`'s generated
-     `workflow_dispatch` input is genuinely named `item_number` at the actual
-     `.lock.yml` level -- confirm once `gh aw compile` is runnable.
+     trigger with an `item_number` input (CONFIRMED via `gh aw compile`: the
+     generated `.lock.yml`'s `workflow_dispatch.inputs` block names it exactly
+     `item_number`). `report-failure` now holds `actions: write` and, after filing
+     a NEW issue, explicitly calls `gh workflow run ci-failure-fix-attempt.lock.yml
+     -f item_number=<N>` -- an explicit dispatch call is NOT subject to the
+     same-token event-suppression rule (gh-aw's own FAQ documents third parties
+     dispatching workflows this exact way). See `validate-and-promote.yml`'s "Fire
+     the fix-attempt agent" step.
+     A SECOND, deeper compile-driven finding (PR #4155, not caught by round 1-11's
+     doc-grounded review): `label_command`'s own auto-generated `workflow_dispatch`
+     is documented as being "for manual testing" only, and its generated activation
+     gate (`pre_activation`/`activation`) checked ONLY for the `issues` event -- the
+     dispatch path compiled and could be invoked, but the run would never actually
+     activate, silently no-op'ing `report-failure`'s explicit dispatch call. Fixed
+     by declaring an EXPLICIT `workflow_dispatch:` trigger (with `item_number:
+     required: false`, since `label_command`'s own dispatch path forbids a required
+     input) alongside `label_command:`, rather than relying solely on its implicit
+     one -- CONFIRMED in the compiled lock file that both generated activation
+     conditions are now a real logical OR across the `issues`-labeled path and any
+     other event (including `workflow_dispatch`).
   2. LABEL ALONE IS NOT AN AUTHENTICATED SIGNAL -- RESOLVED via the `verify-issue`
      custom job below (gh-aw's documented `jobs.<id>` + `jobs.agent.needs`/
      `jobs.agent.if` gating mechanism). It resolves the target issue number from
@@ -609,6 +650,33 @@ safe-outputs:
       attacker-controlled, since the pattern itself is unsafe in general.
       Routed every occurrence through `env:` instead (`verify-issue`'s
       `check` step, and the `post-steps` scope gate).
+  13. (Found by real review on the compiled lock file, PR #4155 -- resolving #1)
+      DISPATCH FALLBACK UNREACHABLE -- RESOLVED, see #1's own updated entry
+      above for the full account: `label_command`'s implicit `workflow_dispatch`
+      never actually activates the run. Fixed by declaring an explicit
+      `workflow_dispatch:` trigger of our own alongside `label_command:`.
+  14. (Found by real review on the compiled lock file, PR #4155 -- resolving #8)
+      SCOPE GATE IGNORED UNCOMMITTED/UNTRACKED CHANGES -- RESOLVED: the
+      `post-steps` change-scope gate (issue #8) diffed only `$BASE` against
+      `HEAD` (committed history), so an agent that produced changes without
+      committing them -- the normal state `create-pull-request` actually
+      collects from -- would pass this gate unchecked. Fixed by diffing `$BASE`
+      against the WORKING TREE for tracked files, plus listing untracked new
+      files separately, and explicitly exempting `.verify-issue/` (this
+      workflow's own scratch state, never a legitimate fix target) from the
+      contribution-surface check.
+  15. (Found by real review on the compiled lock file, PR #4155 -- infrastructure,
+      not one of #1-#14's classes) MUTABLE ACTION TAG -- RESOLVED: `gh aw compile`
+      (without an explicit action-pinning flag) recorded `github/gh-aw-actions/
+      setup@v0.89.21` as a mutable TAG reference, not a SHA, for the one action
+      this repo's other workflows don't already SHA-pin. Recompiled with
+      `--action-tag <resolved-commit-sha>` (the SHA independently resolved via an
+      anonymous `curl` against `github/gh-aw`'s own tag ref -- NOT
+      `github/gh-aw-actions`, a different repository whose SHA for the same tag
+      does NOT exist in `github/gh-aw` and would have been a silently-broken pin
+      had it been used, confirmed by checking both repos directly before
+      settling on the correct one), pinning it to
+      `github/gh-aw/actions/setup@<sha>`.
 
   A first pass at resolving #1/#2 (PR #3916) introduced two NEW, real issues real
   review caught before merge, both since fixed in this same file: (a) the
