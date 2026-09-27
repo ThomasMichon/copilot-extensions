@@ -353,7 +353,7 @@ launch/monitor ownership has moved out of `agent-worktrees`, the Picker treats
 backend vs. presentation as independent axes, and legacy `session_backend`
 bindings still resolve correctly through the compatibility view.
 
-### Phase 3c — Picker non-blocking I/O (In progress — Steps 1-2 landed, Steps 3-5 open)
+### Phase 3c — Picker non-blocking I/O (In progress — Steps 1-3 landed, Steps 4-5 open)
 - [ ] Make every I/O-touching Picker surface — pivot loads (built-in and
       plugin-contributed), menu opens, and action execution with progress
       reporting — consistently non-blocking, closing the gap found while
@@ -383,7 +383,13 @@ bindings still resolve correctly through the compatibility view.
       preserving the live path while leaving the other three synchronous
       `setup()` callers untouched for Step 3; the new blocking-gate mount
       coverage and updated capture/TUI readiness helpers keep the async mount
-      contract deterministic across the suite.
+      contract deterministic across the suite. **Step 3 landed in PR
+      [#4144](https://github.com/ThomasMichon/copilot-extensions/pull/4144)**:
+      the `r` reload handler and both post-action rescans now launch the same
+      epoch-guarded setup worker instead of calling synchronous `setup()`,
+      and new Step 3 race coverage proves rapid repeated reloads plus both
+      config-section/worktree-action rescan vs manual reload orderings always
+      resolve to the newer epoch.
 
 ### Phase 3d — Retire the Picker's in-process engine-module boundary (Planned — #3359, #3360)
 
@@ -725,6 +731,27 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-09-26** — Landed Phase 3c Step 3, PR
+  [#4144](https://github.com/ThomasMichon/copilot-extensions/pull/4144).
+  Cut the last three render-thread setup callers over to the Step 1/2
+  epoch-guarded reload worker: manual `r` reload in `engine_input.py`, the
+  config-section completion rescan in `engine_pivot_actions.py`, and the
+  contributed worktree-action completion rescan in
+  `engine_worktree_actions.py` now all call
+  `_start_setup_reload_worker()` instead of synchronous `setup()`. Re-grepped
+  `worktree-manager/src/worktree_manager/production_picker/` afterward to
+  confirm no production `self.setup(` render-thread caller remains. Added
+  deterministic Step 3 race coverage in
+  `tests/production_picker/test_setup_reload_epoch.py`: rapid repeated `r`
+  reloads no longer block while a stale worker is outstanding, and both
+  config-section/worktree-action rescan vs manual reload orderings apply only
+  the newer epoch's payload with no stale pivot/row flash. Validation:
+  targeted `test_setup_reload_epoch.py` green; full `worktree-manager` suite
+  matched the known Windows baseline at `1493 passed, 7 skipped, 13 failed`
+  (unchanged known failures: the same 3 unrelated provider-source failures in
+  `test_data_ssh_sources.py` plus 10 symlink-privilege failures on this
+  machine). Bumped `worktree-manager` `0.1.0-dev85` -> `0.1.0-dev86`.
 
 - **2026-09-26** — Landed Phase 3c Step 2, PR
   [#4007](https://github.com/ThomasMichon/copilot-extensions/pull/4007).
