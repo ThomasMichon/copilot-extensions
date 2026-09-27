@@ -324,6 +324,30 @@ once every remaining caller is already off the import boundary.
    still "Picker reaches agent-worktrees only through CLI verbs," and replacing
    `_engine_runtime.py` with another import surface would preserve the coupling
    this phase exists to remove.
+   - **Concrete Step 2 seam design (decided before implementation):**
+     - Add `<project> picker-bootstrap --json` as a new versioned bootstrap read
+       returning
+       `{"version":1,"project":"<resolved-project>","should_switch_cwd":<bool>,"cwd":"<normalized-abs-path>|null","default_live":<bool>}`.
+       This deliberately exposes the **decision** `runner._prepare()` needs
+       (authoritative project id + cwd-switch + default live/local mode), not
+       the private helper names or intermediate config objects.
+     - **No `resolve --json` payload/version change is planned for Step 2.**
+       The existing remote-launch envelope already carries the production
+       Picker's needed machine/environment answer
+       (`action`/`ssh_alias`/`remote_command`/`machine`/`display_name`) for
+       `--machine` / `--environment` / `--target-no-mux`; Step 2 reuses that
+       seam as-is rather than widening it speculatively.
+     - Add `<project> repair-stale-anchor --json` as a targeted, one-shot repair
+       action returning
+       `{"version":1,"project":"<resolved-project>","status":"unchanged|repaired|still-missing","self_present_before":<bool>,"self_present_after":<bool>}`.
+       This replaces the effect of `_heal_stale_anchor_if_self_missing` without
+       making the Picker depend on the helper's private import path.
+     - On the Manager side, extend the existing
+       `production_picker.context` binding surface with a versioned project
+       bootstrap record (resolved project + cwd-switch + default_live) so
+       downstream Picker/data helpers can consume the parent-owned binding once
+       Step 4 cuts `runner.py` over, without introducing a new global context
+       mechanism.
    - Add one runner-scoped bootstrap verb (for example
      `<project> picker-bootstrap --json`) that returns the high-level decisions
      `runner._prepare()` actually needs: resolved project identity, whether the

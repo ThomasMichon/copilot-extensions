@@ -2493,10 +2493,8 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     """Resolve a launch plan and emit it as JSON."""
     return resolve_cli.cmd_resolve(args)
 
-
 # resolve launch helpers are componentized into resolve_cli.py,
-# resolve_launch_cli.py, resolve_machine_cli.py, resolve_picker_cli.py,
-# and resolve_system_cli.py.
+# resolve_launch_cli.py, resolve_machine_cli.py, resolve_picker_cli.py, and resolve_system_cli.py.
 
 def _infer_worktree_id(
     explicit: str | None,
@@ -5755,7 +5753,9 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'follow-ups': ('follow_ups_cli', 'cmd_follow_ups'),
     'gc': ('cleanup_gc_cli', 'cmd_gc'),
     'get': ('context_cli', 'cmd_get'),
+    'picker-bootstrap': ('context_cli', 'cmd_picker_bootstrap'),
     'picker-paths': ('context_cli', 'cmd_picker_paths'),
+    'repair-stale-anchor': ('context_cli', 'cmd_repair_stale_anchor'),
     'handoff-cutover': ('handoff_cli', 'cmd_handoff_cutover'),
     'handoffs-check': ('handoff_cli', 'cmd_handoffs_check'),
     'head-session': ('session_tracking_cli', 'cmd_head_session'),
@@ -5998,9 +5998,9 @@ def _load_full_command_surface() -> None:
     global auto_clean_enabled, claims_cli, cleanup_gc_cli, cmd_accounts_dispatch, cmd_anchor_check, cmd_attribution_audit, cmd_backfill_sessions, cmd_bind_nudge
     global cmd_bind_session, cmd_claimant_liveness, cmd_claims, cmd_cleanup, cmd_codename_lookup, cmd_conclude_disposable, cmd_conclude_session, cmd_config_migrate
     global cmd_config_root_dispatch, cmd_coordination_readiness_dispatch, cmd_copilot_identity_dispatch, cmd_create, cmd_create_pr, cmd_deploy_instructions, cmd_deregister_session, cmd_dev, cmd_doctor
-    global cmd_effort_focus, cmd_embody, cmd_finalize, cmd_follow_ups, cmd_gc, cmd_get, cmd_git_dispatch, cmd_git_feature_branch, cmd_picker_paths
+    global cmd_effort_focus, cmd_embody, cmd_finalize, cmd_follow_ups, cmd_gc, cmd_get, cmd_git_dispatch, cmd_git_feature_branch, cmd_picker_bootstrap, cmd_picker_paths
     global cmd_git_merge_to_feature, cmd_git_sync, cmd_handoff_cutover, cmd_handoff_trace, cmd_handoffs_check, cmd_head_session, cmd_history_digest, cmd_hygiene
-    global cmd_install, cmd_install_status, cmd_installer_readiness, cmd_knowledge_dispatch, cmd_link_succession, cmd_list, cmd_list_sessions, cmd_machine_context
+    global cmd_install, cmd_install_status, cmd_installer_readiness, cmd_knowledge_dispatch, cmd_link_succession, cmd_list, cmd_list_sessions, cmd_machine_context, cmd_repair_stale_anchor
     global cmd_mark_complete, cmd_note_handoff, cmd_picker, cmd_post_exit, cmd_pr_complete, cmd_pr_dispatch, cmd_pr_merge_dispatch, cmd_pr_ready
     global cmd_pr_research_dispatch, cmd_pr_status, cmd_pr_watch_dispatch, cmd_pre_launch, cmd_push_changes, cmd_reap_sessions, cmd_reap_shells
     global cmd_recent_messages, cmd_reclaim, cmd_reconcile_binstubs, cmd_reconcile_marketplaces, cmd_reconcile_plugins, cmd_reconcile_sessions, cmd_register, cmd_register_project_entry
@@ -6077,8 +6077,8 @@ def _load_full_command_surface() -> None:
     _pr_reminder_for = context_cli._pr_reminder_for
     _emit_pr_reminder = context_cli._emit_pr_reminder
     cmd_deploy_instructions = context_cli.cmd_deploy_instructions
-    cmd_machine_context, cmd_get = context_cli.cmd_machine_context, context_cli.cmd_get
-    cmd_picker_paths = context_cli.cmd_picker_paths
+    cmd_machine_context, cmd_get, cmd_picker_bootstrap = context_cli.cmd_machine_context, context_cli.cmd_get, context_cli.cmd_picker_bootstrap
+    cmd_picker_paths, cmd_repair_stale_anchor = context_cli.cmd_picker_paths, context_cli.cmd_repair_stale_anchor
     cmd_install_status = context_cli.cmd_install_status
     cmd_installer_readiness = context_cli.cmd_installer_readiness
     cmd_reconcile_marketplaces = context_cli.cmd_reconcile_marketplaces
@@ -6454,8 +6454,10 @@ def _load_full_command_surface() -> None:
         "deploy-instructions": cmd_deploy_instructions,
         "machine-context": cmd_machine_context,
         "get": cmd_get,
+        "picker-bootstrap": cmd_picker_bootstrap,
         "picker-paths": cmd_picker_paths,
         "pre-launch": cmd_pre_launch,
+        "repair-stale-anchor": cmd_repair_stale_anchor,
         "stage-update": cmd_stage_update,
         "reconcile-marketplaces": cmd_reconcile_marketplaces,
         "reconcile-plugins": cmd_reconcile_plugins,

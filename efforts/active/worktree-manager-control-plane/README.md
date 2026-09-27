@@ -780,6 +780,14 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-09-27** — Claiming Phase 3d Step 2 ("Promote Group B's
+  project/config/ssh decisions to a narrow public CLI seam, additive only")
+  per
+  [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md)'s
+  ordered implementation plan. Working solo per standing operator directive;
+  recorded here per this effort's own Coordination-section claiming
+  discipline since #352 is closed.
+
 - **2026-09-27** — Landed Phase 3d Group A, PR
   [#4317](https://github.com/ThomasMichon/copilot-extensions/pull/4317).
   Added/pinned the low-frequency public read seam the Picker still needed

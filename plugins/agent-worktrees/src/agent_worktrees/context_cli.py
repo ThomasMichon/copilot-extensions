@@ -32,6 +32,26 @@ def _core_helper(name: str, local):
     return local
 
 
+def _json_output(*args, **kwargs):
+    return _core()._json_output(*args, **kwargs)
+
+
+def _json_error(*args, **kwargs):
+    return _core()._json_error(*args, **kwargs)
+
+
+def _resolve_active_project(*args, **kwargs):
+    return _core()._resolve_active_project(*args, **kwargs)
+
+
+def _cwd_is_inside_project(*args, **kwargs):
+    return _core()._cwd_is_inside_project(*args, **kwargs)
+
+
+def _in_ssh_session(*args, **kwargs):
+    return _core()._in_ssh_session(*args, **kwargs)
+
+
 _GET_KEYS: dict[str, str] = {
     "repo-dir": "Anchor repo directory",
     "worktree-dir": "Current worktree root (the worktree you are in; empty if not inside one)",
@@ -114,6 +134,26 @@ def add_parsers(sub) -> None:
         "--json",
         action="store_true",
         help="Emit the versioned path payload as JSON",
+    )
+
+    p = sub.add_parser(
+        "picker-bootstrap",
+        help="Emit the production Picker bootstrap decisions as JSON",
+    )
+    p.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the versioned bootstrap payload as JSON",
+    )
+
+    p = sub.add_parser(
+        "repair-stale-anchor",
+        help="Best-effort repair when this machine is missing from the anchor roster",
+    )
+    p.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the versioned repair payload as JSON",
     )
 
     sp = sub.add_parser(
@@ -427,6 +467,52 @@ def cmd_picker_paths(args: argparse.Namespace) -> int:
         print(json.dumps(payload, indent=2))
     else:
         print(payload["install_dir"])
+    return 0
+
+
+def cmd_picker_bootstrap(args: argparse.Namespace) -> int:
+    """Emit the project/cwd/live bootstrap decisions the Picker needs."""
+    project = cfg.project_name()
+    resolved, anchor = _resolve_active_project(project)
+    if not resolved:
+        return _json_error(f"unknown project {project!r}")
+    should_switch = bool(anchor is not None and not _cwd_is_inside_project(anchor))
+    payload = {
+        "version": 1,
+        "project": resolved,
+        "should_switch_cwd": should_switch,
+        "cwd": str(anchor.resolve()) if should_switch and anchor is not None else None,
+        "default_live": not _in_ssh_session(),
+    }
+    if getattr(args, "json", False):
+        _json_output(payload)
+    else:
+        print(payload["project"])
+    return 0
+
+
+def cmd_repair_stale_anchor(args: argparse.Namespace) -> int:
+    """Run the stale-anchor self-heal as a targeted, versioned JSON action."""
+    from . import update_runtime
+
+    try:
+        config = cfg.load_config()
+    except Exception as exc:
+        return _json_error(str(exc))
+    before = update_runtime._self_entry_present(config)
+    updated = update_runtime._heal_stale_anchor_if_self_missing(config)
+    after = update_runtime._self_entry_present(updated)
+    payload = {
+        "version": 1,
+        "project": cfg.project_name(),
+        "status": "unchanged" if before else ("repaired" if after else "still-missing"),
+        "self_present_before": before,
+        "self_present_after": after,
+    }
+    if getattr(args, "json", False):
+        _json_output(payload)
+    else:
+        print(payload["status"])
     return 0
 
 
