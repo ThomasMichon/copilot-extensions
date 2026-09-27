@@ -397,11 +397,14 @@ shape before committing to a design)_
             `agent-bridge`, `agent-codespaces`) — includes `agent-worktrees`
             itself, the largest/most-critical consumer converted so far
             (full suite validated: 630+ passed, clean).
+      - [x] `single-instance-lease` converted, all 5 consumers
+            (`plugins/agent-vault`, `agent-worktrees`, `agent-dispatch`,
+            `agent-mcp`, `agent-bridge`).
       - [ ] Remaining real lib copies (`agent-procutil`, `dropin-registry`,
             `plugin-activation`, `plugin-resolve`, `session-liveness-probe`,
-            `single-instance-lease`, `venue-copilot`, `zdd`) not yet
-            converted — future bounded-slice PRs, one (or a few related)
-            lib(s) at a time, per this effort's own established pattern.
+            `venue-copilot`, `zdd`) not yet converted — future
+            bounded-slice PRs, one (or a few related) lib(s) at a time,
+            per this effort's own established pattern.
             `session-liveness-probe`/`venue-copilot` have no top-level
             canonical `libs/<lib>/` yet (confirmed via `sync-vendored-libs
             .py --check`'s advisory drift note) — `--pointerize` requires

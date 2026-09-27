@@ -1,0 +1,25 @@
+{
+  "comment": "Vendor-pointer-generalization Phase 1: convert single-instance-lease to a src-passthrough vendor pointer (dev-branch authoring change only; materialize_main.py still expands it into a real, byte-identical copy at promotion, so no user-visible behavior changes).",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    }
+  ]
+}
