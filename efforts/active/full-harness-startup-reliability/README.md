@@ -8,10 +8,17 @@
 - **Vision:** hardens the marketplace's own reliability contract — every
   plugin's `sessionStart` hook and extension connection should load
   deterministically and cheaply at full-roster scale, not just in isolation.
-  Directly informs the still-open half of copilot-agent-runtime#22266 (the
-  "ready-then-exit(1)" mystery) by supplying the first reproducible, timed,
-  full-harness evidence of *why* a real session can take minutes to produce
-  its first response.
+  Ties directly to `visions/harness-guidance`'s `ambient-delivery-fails-open`
+  principle (ambient delivery must fail open and never block session
+  startup) and the non-blocking startup contract described in
+  `docs/patterns/session-scoped-dynamic-guidance.md`: a slow or
+  timing-out `sessionStart` hook is exactly the failure mode those
+  documents already require plugins to avoid, and this effort's fixes must
+  stay reconciled with that existing contract rather than introduce a new
+  one. Also directly informs the still-open half of
+  `github/copilot-agent-runtime#22266` (the "ready-then-exit(1)" mystery) by
+  supplying the first reproducible, timed, full-harness evidence of *why* a
+  real session can take minutes to produce its first response.
 - **Umbrella issue:** ThomasMichon/copilot-extensions#3303
 - **Related work:**
   `sessionstart-static-dynamic-conformance` (#2256, active) — audits hook
@@ -42,14 +49,17 @@ and reliably).
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| Windows operator workstation (this session) | Drives the test bench, diagnoses, fixes, lands PRs | local `copilot-extensions` worktree checkout |
-| Windows dev-tunnel box | Hosts the Windows-container clean-room test bench (Hyper-V isolation) | SSH alias + `docker` (`copilot-cleanroom:windows` image) |
+| PR-owning lane | Drives the round-by-round diagnosis, writes fixes, opens/lands each PR | a `copilot-extensions` worktree checkout |
+| Clean-room validation lane | Hosts the Windows-container clean-room test bench (Hyper-V isolation) used to reproduce and time each round's findings | a Windows-container-capable Docker host, reachable from the PR-owning lane |
 
 ## Coordination
 
-- **Topology:** single host, independent per-plugin PRs (short cycles, one
-  plugin or tightly-related group per PR, per this repo's own norm).
-- **Host (owns PRs):** the operator's Windows workstation.
+- **Topology:** two lanes, independent per-plugin PRs (short cycles, one
+  plugin or tightly-related group per PR, per this repo's own norm). The
+  PR-owning lane authors and lands every change; the clean-room validation
+  lane is a separate execution venue it reaches to build/run the test
+  bench, not a second PR owner.
+- **Host (owns PRs):** the PR-owning lane.
 - **Delegates:** none yet.
 - **Handoff:** none yet; single-session effort so far.
 
@@ -94,7 +104,7 @@ proven, so a fresh participant doesn't have to re-derive it:
     all 3 real extensions (`context-handoff`, `agent-worktrees`,
     `agent-bridge`) reaching `=== ready ===` then `=== exit code=1
     disposition=stopped-normally ===` — the exact signature from
-    copilot-agent-runtime#22266's still-unconfirmed second mystery. This
+    `github/copilot-agent-runtime#22266`'s still-unconfirmed second mystery. This
     reproduced spontaneously (unprompted) in an early full-harness run,
     though not yet on every run — reliability rate not yet measured
     rigorously (see Plan Phase 1).
@@ -148,7 +158,9 @@ Operator's verbatim ask (this session):
   time, whether all 3 real extensions reached `ready` without an unexpected
   `exit code=1`, whether every hook-registering plugin's hook completed
   (success or a *fast* no-op) rather than timing out, and the `/env` output's
-  own extension/hook tally. This baseline is Round 1 of the ledger below.
+  own extension/hook tally. This baseline becomes the next Round Ledger entry
+  below (Round Ledger numbering is independent of Phase numbering — see the
+  ledger's own entries for the current round number).
 
 ### Phase 2 — Round-by-round diagnose-and-fix loop (the ledger)
 - [ ] For each distinct blocking/failing/timing-out thing the baseline (or
@@ -238,23 +250,86 @@ correction inline, per the effort's own journal discipline)._
   manual work (see Journal, 2026-09-23), contaminating its diff with 4
   unrelated commits. #3332 was closed and superseded by a clean cherry-pick
   of the same fix onto current `main`: PR ThomasMichon/copilot-extensions#3501,
-  which carries this round's actual landed fix.
+  which carried this round's replacement fix (not yet merged at that point).
+  **Second correction (Journal, 2026-09-26):** #3501's own review caught a
+  real regression the fix introduced (backgrounding the WHOLE `stamp` action
+  left a window where a session's first turn could invoke `agent-machines`
+  before the binstub existed) plus atomicity/locking gaps. #3501 was closed
+  in turn and superseded again by PR ThomasMichon/copilot-extensions#4129,
+  which redesigns the fix (a dedicated fast, synchronous, lock-serialized,
+  atomically-published binstub-only path, backgrounding only the genuinely
+  slow snapshot copy) and is this round's current, still-unmerged candidate.
 - **Re-verified:** on a second genuinely fresh container/plugin-install with
   the fix applied, the same standalone invocation dropped to **9.23s** — a
   real, substantial improvement, but **not a full fix**: a *separate*,
-  distinct cost remains. Direct instrumentation traced the residual time to
-  the installation-context resolver's own synchronous status query
-  (`$statusJson = @(& $hostExe @statusArgs)`, itself a full child
-  `powershell.exe` spawn — measured standalone at ~1.4-1.7s per invocation
-  in this container, steady-state, ruling out a one-time cold-JIT effect as
-  the sole explanation). That resolver-status call is now Round 2's target:
-  either make it async too, or cache/skip it on the common
-  not-yet-provisioned path where its answer can't meaningfully change the
-  outcome. Also confirmed: `Test-Path`-gated state (`~/.agent-machines`,
-  `~/.copilot-extensions`) changes which code branch subsequent invocations
-  take, so accurate timing requires either a fresh container/install per
-  measurement or explicit removal of that state between repeated local
-  tests — noted for Phase 1's test-bench methodology going forward.
+  distinct cost remained. This round's own working theory attributed that
+  residual time to the installation-context resolver's synchronous status
+  query. **Correction (Round 2, 2026-09-26):** that theory was wrong — direct
+  instrumentation of the real (non-copied) script found the residual time
+  was dominated by two other things instead: (1) Windows' `Invoke-Stamp`
+  genuinely copies the whole plugin payload into a snapshot slot on every
+  call (not the "cheap" operation its own docstring claims), and (2) a fully
+  redundant duplicate legacy-mutation-probe spawn. See Round 2 below for the
+  actual root cause and fix. Also confirmed: `Test-Path`-gated state
+  (`~/.agent-machines`, `~/.copilot-extensions`) changes which code branch
+  subsequent invocations take, so accurate timing requires either a fresh
+  container/install per measurement or explicit removal of that state
+  between repeated local tests — noted for Phase 1's test-bench methodology
+  going forward.
+
+### Round 2 — corrected root cause: snapshot copy + a redundant probe spawn
+
+- **Found:** Round 1's own working theory (a slow resolver-status query) was
+  wrong. Direct instrumentation of the real, in-place `init.ps1` (a prior
+  attempt to instrument a *copied* script gave a false fast reading, because
+  `$PSScriptRoot`-relative lookups inside the copy resolved to the wrong
+  directory — corrected by instrumenting in place instead) found two real,
+  independent costs: (1) Windows' `Invoke-Stamp` copies the ENTIRE plugin
+  payload tree into a `snapshots/<version>/` slot on **every** call — a
+  genuinely expensive operation its own docstring mischaracterizes as
+  "cheap"; POSIX's equivalent `stamp` never does this and was already fast.
+  (2) `bootstrap-check.ps1`'s own `Test-LegacyMutationAllowed` pre-check
+  calls the exact same `legacy-entrypoint-probe.ps1` script, with equivalent
+  arguments, that `init.ps1`'s own top-level dispatch already re-runs for
+  every non-cell/-slot action — a fully redundant duplicate child-process
+  spawn, confirmed by reading both call sites side by side.
+- **Root cause:** confirmed via real, non-simulated timing in a sandboxed
+  `HOME`/`USERPROFILE`: a single synchronous `stamp-binstub`-equivalent call
+  (the pre-fix `stamp` path plus the redundant probe) took ~27-32s
+  standalone; removing just the redundant probe spawn alone cut that to
+  ~15.5s; the full corrected two-stage hook (below) returns in ~11.4s end to
+  end — still comfortably under the 15s hook timeout, with the binstub
+  already present the instant the hook returns (verified by listing the
+  target directory immediately after the process exited).
+- **Fix:** (a) split a new, fast `stamp-binstub` action (deploys ONLY the
+  self-provisioning binstub, no snapshot copy) that `bootstrap-check.ps1`
+  now calls **synchronously**, backgrounding only the full, genuinely-slow
+  `stamp` (snapshot copy) afterward — closing the real command-not-found
+  race window Round 1's all-or-nothing backgrounding left open; (b) removed
+  the redundant `Test-LegacyMutationAllowed` pre-check for this call site,
+  since `init.ps1` already re-enforces the identical gate internally; (c)
+  reverted POSIX's `stamp` back to synchronous (it was never actually slow —
+  Round 1 backgrounded it by unverified analogy with Windows, introducing an
+  unnecessary race for no benefit) and added the lock/atomic-publish
+  protection the review asked for on both platforms instead. PR:
+  ThomasMichon/copilot-extensions#4129 (still open, not yet merged).
+- **Re-verified:** real subprocess invocations against a sandboxed
+  `HOME`/`USERPROFILE` (not simulated): full hook returns in ~11.4s
+  (previously 22.47s, over its own 15s timeout); 3 concurrent
+  `stamp-binstub`/`stamp` invocations against the same install dir, both
+  platforms, all exit 0 with a complete, correctly-formed final binstub (no
+  torn write observed).
+- **New finding, deliberately deferred to a future round:** the
+  legacy-mutation-probe chain is actually **four** levels of nested
+  PowerShell process spawns end to end (`bootstrap-check.ps1` →
+  `init.ps1`'s own gate → `legacy-entrypoint-probe.ps1` →
+  `installation-context.ps1`), each measured at multiple seconds on the
+  machine used for validation. That machinery is shared
+  `installation-context` infrastructure used by other plugins too, not
+  agent-machines-specific — redesigning it is real, valuable future work,
+  but out of this round's scope (and this PR's) given the short-PR-cycle
+  norm and the blast radius of touching shared infrastructure. Logged here
+  so a future round picks it up deliberately rather than it being lost.
 
 ### Round 0 — Kickoff (pre-effort evidence)
 
@@ -279,13 +354,14 @@ correction inline, per the effort's own journal discipline)._
   problem, and work to fix it") rather than a single big-bang phase — the
   Round Ledger section exists specifically to carry that iteration record
   forward across sessions.
-- Test-bench substrate (Windows clean-room, cloud2, `copilot-cleanroom:windows`
+- Test-bench substrate (Windows clean-room, the clean-room validation lane's
+  Windows-container Docker host, `copilot-cleanroom:windows`
   image with the marketplace roster used in this investigation installable) already exists and was
   validated working in the seeding investigation; Phase 1 here is about
   making that repeatable and instrumented for 20-in-a-row runs, not building
   it from scratch.
 
-### 2026-09-23 — PR #3332 contamination found and remediated (Round 2 pickup)
+### 2026-09-23 — PR #3332 contamination found and remediated
 
 - On resuming via handoff for Round 2, found PR #3332 (Round 1's fix) had 5
   commits instead of 1: the legitimate async-stamp fix (`bb9e05ecc`) plus 4
@@ -306,3 +382,28 @@ correction inline, per the effort's own journal discipline)._
 - Takeaway for future rounds: never reuse a fix/effort worktree for unrelated
   manual work — create a fresh worktree per unrelated task instead, even for
   quick one-off git operations.
+
+### 2026-09-26 — Round 2 executed; PR #3501 review findings addressed; effort README revised per review
+
+- Resumed with `agent-worktrees` itself broken (a stale runtime slot,
+  `ImportError: MARKETPLACE_MANIFEST_RELS`) — filed
+  ThomasMichon/copilot-extensions#3999 and worked around it by invoking an
+  older, still-present runtime slot directly, then created a fresh worktree
+  through it once confirmed working.
+- Read PR #3501's real review findings (1 high, 3 medium, 2 low severity)
+  and re-diagnosed the residual delay from scratch rather than assuming the
+  prior round's own theory was correct — it wasn't (see Round 2 above for
+  the corrected root cause: a genuine Windows-only snapshot-copy cost plus
+  a fully redundant duplicate probe spawn, not a slow resolver-status
+  query).
+- Landed the corrected fix as PR #4129, closed #3501 with a comment linking
+  it (superseded, not merged — the review's own finding about premature
+  "landed" language in this ledger was itself one of the findings
+  addressed).
+- Separately addressed this effort README's OWN review findings on PR #3305
+  (Vision unlinked from `visions/harness-guidance`/
+  `docs/patterns/session-scoped-dynamic-guidance.md`; unqualified
+  `github/copilot-agent-runtime#22266` references; private participant/topology
+  details; a Round/Phase numbering collision; a stray private machine
+  alias; the premature "landed" ledger language) — all revised in this same
+  pass, see the current README content rather than restating each fix here.
