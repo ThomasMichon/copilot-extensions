@@ -30,7 +30,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
 VERSION_FILE = REPO_ROOT / ".github" / "gh-aw-version.txt"
 
-METADATA_PATTERN = re.compile(r"^#\s*gh-aw-metadata:\s*(\{.*\})\s*$")
+METADATA_PATTERN = re.compile(r"^#\s*gh-aw-metadata:\s*(.+?)\s*$")
 
 
 def read_pinned_version() -> str:
@@ -59,6 +59,14 @@ def find_version_mismatches() -> list[str]:
             violations.append(
                 f"{lock_file.relative_to(REPO_ROOT)}: gh-aw-metadata "
                 f"comment is not valid JSON ({exc})."
+            )
+            continue
+        if not isinstance(metadata, dict):
+            violations.append(
+                f"{lock_file.relative_to(REPO_ROOT)}: gh-aw-metadata "
+                f"comment decoded to a non-object JSON value "
+                f"({type(metadata).__name__}) -- cannot verify the "
+                "compiler version that produced this file."
             )
             continue
         actual = metadata.get("compiler_version")

@@ -80,6 +80,18 @@ def test_malformed_metadata_json_is_rejected(workflows_dir):
     assert "not valid JSON" in violations[0]
 
 
+@pytest.mark.parametrize("payload", ["null", "[]", "42", '"a string"'])
+def test_non_object_metadata_json_is_rejected_not_crashed(workflows_dir, payload):
+    lock_file = workflows_dir / "example.lock.yml"
+    lock_file.write_text(
+        f"# gh-aw-metadata: {payload}\njobs:\n  agent: {{}}\n",
+        encoding="utf-8",
+    )
+    violations = check_gh_aw_compiler_version.find_version_mismatches()
+    assert len(violations) == 1
+    assert "non-object JSON value" in violations[0]
+
+
 def test_no_lock_files_is_not_a_violation(workflows_dir):
     assert check_gh_aw_compiler_version.find_version_mismatches() == []
 
