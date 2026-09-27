@@ -386,6 +386,46 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-26 — `agent-machines`'s SKILL.md docs resolved, plugin now backlog-only; a live CI blocker hit and cleared (PR #4165)
+
+- Fresh guard count at merge time: 606 (down from 609).
+- `agent-machines-setup/SKILL.md` (1) and `restore-machinestate/SKILL.md`
+  (2): the usual doc-shaped `allow deployed-runtime-diagnostics`
+  mentions -- no new reasoning needed.
+- **`agent-machines` is now backlog-only at 30 findings**: 19 confirmed
+  Phase 2 launcher-contract (`init.ps1`/`init.sh`/`bootstrap-
+  check.{ps1,sh}`), 4 `installer-readiness.json`, 3
+  `payload-invocation.json`, 2+1 the surfaced-not-fixed task-name
+  cell-suffix design question (`self_update_state.py` + `fleet_update_
+  state.py`), 1 `cell_lifecycle.py` module-size deferral. Same end-state
+  pattern as `agent-ssh`/`agent-mcp` this session.
+- **Hit and cleared a genuine, all-PRs-blocking CI regression while
+  merging the prior PR (#4158, the `cell_lifecycle.py` journal update)**:
+  a `ThomasMichon/copilot-extensions` repository ruleset was updated
+  2026-09-26T23:13 PT (mid-session, by someone/something else) adding a
+  NEW required status check, "identifier leak guard," to `dev`'s branch
+  protection. That check's own log said it was misconfigured --
+  `FORBIDDEN_IDS_FACILITY`/`FORBIDDEN_IDS_WORK` repo secrets weren't set,
+  so it always failed -- meaning EVERY PR to `dev` (not just this
+  effort's) was blocked from merging, including one that had already
+  merged minutes earlier under the SAME failing check (before the
+  ruleset update took effect). Correctly did NOT attempt an admin/
+  gitea-admin force-merge (reserved for a dedicated unjamming agent, not
+  a routine coding agent's own call) and did NOT try to fix repo secrets
+  directly -- searched for and found no existing tracking issue, then
+  surfaced it to the operator directly rather than guessing at next
+  steps. Operator reverted the ruleset upstream; the very next merge
+  attempt (`pr-merge --now` on the same already-pushed PR, no other
+  changes) succeeded immediately. **No new issue needed filing since the
+  operator resolved it live** -- but the pattern (verify before assuming
+  it's your own change at fault, search for existing tracking, ask
+  rather than force) is the same error-response discipline this effort
+  has followed all session for its own module-size-ceiling questions.
+- Verified: `check-skills.py` (0 errors, no new warnings), `check-docs-
+  consistency.py`, and the full `agent-machines` suite via
+  `test-supervisor` (658 passed, 12 skipped, 0 failures).
+- Guard count: 33 -> 30 findings for `agent-machines`.
+
 ### 2026-09-26 — `cell_lifecycle.py`'s 3-legs-deferred findings: 2 of 3 resolved (PR #4154)
 
 - Fresh guard count at merge time: 609 (down from 611).
