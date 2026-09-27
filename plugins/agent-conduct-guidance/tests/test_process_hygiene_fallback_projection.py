@@ -21,7 +21,7 @@ def test_projection_declaration_shape():
         "instructions/process-hygiene-fallback.instructions.md"
     )
     assert projection["destination"] == (
-        ".github/instructions/process-hygiene-guidance/"
+        ".github/instructions/agent-conduct-guidance/"
         "process-hygiene-fallback.instructions.md"
     )
     assert projection["applyTo"] == "**"
@@ -32,7 +32,7 @@ def test_template_is_reviewable_static_fallback():
     content = _TEMPLATE.read_text(encoding="utf-8")
     assert content.startswith('---\napplyTo: "**"\n---\n')
     assert "spawning-headless-processes" in content
-    assert "process-hygiene-guidance@" in content
+    assert "agent-conduct-guidance@" in content
     assert "CREATE_NO_WINDOW" in content
     # No live/session/host state -- checked-in instructions never interpolate.
     for forbidden in (

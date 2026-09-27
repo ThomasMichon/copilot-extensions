@@ -1,0 +1,9 @@
+{
+  "comment": "Add agent-conduct-guidance plugin: consolidated agent conduct guidance, first module process-hygiene",
+  "changes": [
+    {
+      "plugin": "agent-conduct-guidance",
+      "type": "dev"
+    }
+  ]
+}

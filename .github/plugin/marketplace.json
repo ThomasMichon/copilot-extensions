@@ -143,10 +143,10 @@
       "source": "plugins/budget-guidance"
     },
     {
-      "name": "process-hygiene-guidance",
-      "description": "Ambient process-spawn hygiene for Copilot CLI. A concise, checked-in instruction projection reminds an agent to spawn every ad hoc CMD/PowerShell/Python/Node/etc. child process headlessly -- especially on Windows, where a naive spawn allocates a visible, focus-stealing console window per invocation. Ships the spawning-headless-processes skill with the per-language/per-OS routes.",
+      "name": "agent-conduct-guidance",
+      "description": "Consolidated, generally-good agent conduct guidance for Copilot CLI: one plugin hosting multiple independent ambient modules, each a concise checked-in instruction projection plus a paired on-demand skill. First module: process-spawn hygiene -- reminds an agent to spawn every ad hoc CMD/PowerShell/Python/Node/etc. child process headlessly, especially on Windows, where a naive spawn allocates a visible, focus-stealing console window per invocation. Ships the spawning-headless-processes skill with the per-language/per-OS routes.",
       "version": "0.1.0-dev1",
-      "source": "plugins/process-hygiene-guidance"
+      "source": "plugins/agent-conduct-guidance"
     }
   ]
 }

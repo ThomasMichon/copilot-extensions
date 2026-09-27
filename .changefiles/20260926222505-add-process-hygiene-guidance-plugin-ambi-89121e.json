@@ -1,9 +1,0 @@
-{
-  "comment": "Add process-hygiene-guidance plugin: ambient headless process-spawn conduct guidance",
-  "changes": [
-    {
-      "plugin": "process-hygiene-guidance",
-      "type": "dev"
-    }
-  ]
-}
