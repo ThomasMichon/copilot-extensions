@@ -88,6 +88,16 @@ def add_parsers(sub) -> None:
     p.add_argument("--config", default=None)
 
     p = sub.add_parser(
+        "pr-nudge",
+        help="Ask this repo's bound automated reviewer (pr.reviewer, e.g. "
+        "GitHub Copilot) to (re-)review the active PR. Nothing to nudge "
+        "(unconfigured/unsupported) is reported, not an error.",
+    )
+    p.add_argument("worktree_id", nargs="?", default=None)
+    p.add_argument("--json", action="store_true", help="JSON output mode")
+    p.add_argument("--config", default=None)
+
+    p = sub.add_parser(
         "pr-complete",
         help="Reconcile the worktree after its PR merged (fast-forward past the "
         "squash-merge, or rebase to preserve new work). Distinct from finalize.",
@@ -361,6 +371,47 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
                 output.ok("  resolved active comment threads.")
             elif threads.get("resolve_error"):
                 output.warn(f"  resolve failed: {threads.get('resolve_error')}")
+    return 0
+
+
+def cmd_pr_nudge(args: argparse.Namespace) -> int:
+    core = _core()
+    from . import pr_nudge_ops
+
+    use_json = getattr(args, "json", False)
+    try:
+        config = cfg.load_config(Path(args.config) if args.config else None)
+    except Exception as e:
+        if use_json:
+            return core._json_error(str(e))
+        raise
+    worktree_id = core._infer_worktree_id(args.worktree_id, config)
+    if not worktree_id:
+        msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
+        return core._json_error(msg) if use_json else (output.err(msg) or 1)
+    worktree_id = core._resolve_worktree_id(worktree_id)
+
+    result = pr_nudge_ops.pr_nudge(worktree_id, config=config)
+    if use_json:
+        core._json_output(result)
+        return 0 if "error" not in result else 1
+    if result.get("error"):
+        output.err(result["error"])
+        return 1
+    if not result.get("has_pr"):
+        print(result.get("detail") or f"{worktree_id}: no PR tracked (nothing to nudge).")
+        return 0
+    if not result.get("supported"):
+        output.warn(result.get("detail") or "No automated reviewer bound (nothing to nudge).")
+        return 0
+    if result.get("requested"):
+        output.ok(f"Requested a review from {result.get('reviewer')} on "
+                   f"#{result.get('number')} ({result.get('repo')}).")
+        if result.get("detail"):
+            print(f"  {result['detail']}")
+    else:
+        output.err(result.get("detail") or "Review request failed.")
+        return 1
     return 0
 
 

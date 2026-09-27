@@ -1981,7 +1981,6 @@ from .worktree_creation import (  # noqa: E402 -- re-export position matches ori
 )
 
 
-
 def _self_owner_ref(work_dir: str | None) -> str | None:
     """Qualified ClaimRef of the worktree rooted at ``work_dir`` (None if not one).
 
@@ -3156,7 +3155,6 @@ def _monitor_retire_handoff_predecessor(
             json=True,
         )
     )
-
 
 
 def _monitor_trigger_handoff_cutover(
@@ -5702,9 +5700,6 @@ def _current_session_ids() -> set[str]:
 
 # maintenance / doctor surfaces are componentized into maintenance_cli.py.
 
-
-
-
 # ── Lazy dispatch (agent-cli-lazy-dispatch effort, Phase 1) ────────────────
 # {command: (module_name, handler_attr_name)} for every subcommand whose own
 # module owns BOTH its argparse subparser (via that module's `add_parsers`,
@@ -5773,6 +5768,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'post-exit': ('finalize_cli', 'cmd_post_exit'),
     'pr-complete': ('pr_state_cli', 'cmd_pr_complete'),
     'pr-create': ('finalize_cli', 'cmd_create_pr'),
+    'pr-nudge': ('pr_state_cli', 'cmd_pr_nudge'),
     'pr-ready': ('pr_state_cli', 'cmd_pr_ready'),
     'pr-status': ('pr_state_cli', 'cmd_pr_status'),
     'pre-launch': ('update_cli', 'cmd_pre_launch'),
@@ -5998,7 +5994,7 @@ def _load_full_command_surface() -> None:
     global cmd_effort_focus, cmd_embody, cmd_finalize, cmd_follow_ups, cmd_gc, cmd_get, cmd_git_dispatch, cmd_git_feature_branch, cmd_picker_bootstrap, cmd_picker_paths, cmd_picker_reconcile_local
     global cmd_git_merge_to_feature, cmd_git_sync, cmd_handoff_cutover, cmd_handoff_trace, cmd_handoffs_check, cmd_head_session, cmd_history_digest, cmd_hygiene
     global cmd_install, cmd_install_status, cmd_installer_readiness, cmd_knowledge_dispatch, cmd_link_succession, cmd_list, cmd_list_sessions, cmd_machine_context, cmd_repair_stale_anchor
-    global cmd_mark_complete, cmd_note_handoff, cmd_picker, cmd_post_exit, cmd_pr_complete, cmd_pr_dispatch, cmd_pr_merge_dispatch, cmd_pr_ready
+    global cmd_mark_complete, cmd_note_handoff, cmd_picker, cmd_post_exit, cmd_pr_complete, cmd_pr_dispatch, cmd_pr_merge_dispatch, cmd_pr_nudge, cmd_pr_ready
     global cmd_pr_research_dispatch, cmd_pr_status, cmd_pr_watch_dispatch, cmd_pre_launch, cmd_push_changes, cmd_reap_sessions, cmd_reap_shells
     global cmd_recent_messages, cmd_reclaim, cmd_reconcile_binstubs, cmd_reconcile_marketplaces, cmd_reconcile_plugins, cmd_reconcile_sessions, cmd_register, cmd_register_project_entry
     global cmd_register_session, cmd_related_dispatch, cmd_remove_system, cmd_remux, cmd_repair, cmd_repos_dispatch, cmd_restart, cmd_run
@@ -6163,6 +6159,7 @@ def _load_full_command_surface() -> None:
     cmd_set_pr = pr_state_cli.cmd_set_pr
     cmd_pr_ready = pr_state_cli.cmd_pr_ready
     cmd_pr_status = pr_state_cli.cmd_pr_status
+    cmd_pr_nudge = pr_state_cli.cmd_pr_nudge
     cmd_pr_complete = pr_state_cli.cmd_pr_complete
     cmd_status = status_cli.cmd_status
     cmd_status_monitor = status_monitor_cli.cmd_status_monitor
@@ -6406,6 +6403,7 @@ def _load_full_command_surface() -> None:
         "set-pr": cmd_set_pr,
         "pr-ready": cmd_pr_ready,
         "pr-status": cmd_pr_status,
+        "pr-nudge": cmd_pr_nudge,
         "pr-complete": cmd_pr_complete,
         "mark-complete": cmd_mark_complete,
         "status": cmd_status,

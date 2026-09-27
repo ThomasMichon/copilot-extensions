@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 from .base import ProviderError, PRScope, PullResult
 
 if TYPE_CHECKING:
-    from ..pr_contract import PRSnapshot, ThreadsResult
+    from ..pr_contract import PRSnapshot, ReviewNudgeResult, ThreadsResult
 
 
 def _now() -> str:
@@ -59,6 +59,11 @@ class _FakePR:
     source_marker: str = ""
     auto_complete: bool = False
     auto_merge_armed: bool = False
+    review_nudge_count: int = 0
+    """Test-observable counter: how many times :meth:`MockPRProvider.request_review`
+    was called for this PR (does not fabricate a new review -- tests that want
+    one call :meth:`add_review` separately, mirroring how a real reviewer's
+    eventual verdict is a separate, asynchronous event from the request)."""
 
 
 class MockPRProvider:
@@ -306,6 +311,24 @@ class MockPRProvider:
             if pr.head == head:
                 return self._pull_result(pr)
         return None
+
+    def request_review(
+        self, repo: str, number: int, *, reviewer: str = "", api_base: str = "",
+        token: str | None = None,
+    ) -> "ReviewNudgeResult":
+        from ..pr_contract import ReviewNudgeResult
+
+        pr = self._get(repo, number)
+        if not reviewer:
+            return ReviewNudgeResult(
+                supported=False, detail="mock: no pr.reviewer configured on this repo."
+            )
+        pr.review_nudge_count += 1
+        return ReviewNudgeResult(
+            supported=True, requested=True, reviewer=reviewer,
+            detail=f"mock: requested a review from '{reviewer}' "
+                   f"(nudge #{pr.review_nudge_count}).",
+        )
 
     # -- test-only fabrication helpers (not part of the PRProvider protocol) --
 

@@ -1,0 +1,9 @@
+{
+  "comment": "pr-nudge: ask a repo's bound automated reviewer (pr.reviewer, e.g. GitHub Copilot) to (re-)review the active PR via a new provider.request_review primitive",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from ..pr_contract import PRSnapshot, ThreadsResult
+    from ..pr_contract import PRSnapshot, ReviewNudgeResult, ThreadsResult
 
 
 #: Matches a genuine ``@copilot`` mention (asking GitHub's Copilot cloud
@@ -400,6 +400,22 @@ class PRProvider(Protocol):
         """
         ...
 
+    def request_review(
+        self, repo: str, number: int, *, reviewer: str = "", api_base: str = "",
+        token: str | None = None,
+    ) -> ReviewNudgeResult:
+        """Ask this provider's bound automated reviewer to (re-)review the PR.
+
+        The ``pr-nudge`` primitive. ``reviewer`` is the repo's configured
+        ``pr.reviewer`` token (e.g. ``"copilot"`` -- see ``PRConfig.reviewer``);
+        the provider maps it to a concrete reviewer identity and issues
+        whatever request/re-request call that identity supports. Returns
+        ``supported=False`` (never raises) when this provider/repo has no
+        automated reviewer bound at all, or when ``reviewer`` names one this
+        provider doesn't recognize.
+        """
+        ...
+
 
 def _unsupported_snapshot(name: str) -> PRSnapshot:
     raise ProviderError(
@@ -443,6 +459,21 @@ def _unsupported_repo_policy(name: str):
         error=(f"Provider '{name}' does not support settings reads (adopt-time "
                "research is github/gitea only today)."),
     )
+
+
+def _unsupported_review_request(name: str, reviewer: str) -> ReviewNudgeResult:
+    """The default ``request_review`` for a provider with no bound automated
+    reviewer (unconfigured ``pr.reviewer``, or one this provider doesn't map)."""
+    from ..pr_contract import ReviewNudgeResult as _RNR
+
+    if reviewer:
+        detail = (
+            f"Provider '{name}' has no automated-reviewer binding for "
+            f"pr.reviewer={reviewer!r} (nothing to nudge)."
+        )
+    else:
+        detail = f"Repo has no pr.reviewer configured on provider '{name}' (nothing to nudge)."
+    return _RNR(supported=False, reviewer=reviewer, detail=detail)
 
 
 def actor_viewer_permission(
