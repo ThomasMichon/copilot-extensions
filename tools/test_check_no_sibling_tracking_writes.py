@@ -685,6 +685,54 @@ def test_atomic_write_is_denylisted(tmp_path):
     assert "_atomic_write" in violations[0].detail
 
 
+def test_replace_with_retry_is_denylisted(tmp_path):
+    # _replace_with_retry is the even-lower-level os.replace(src, dst)
+    # helper _atomic_write itself calls -- a sibling could stage a file
+    # and replace it straight over a tracking.yaml path directly.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking\n"
+        "\n"
+        "def write(src, dst):\n"
+        "    tracking._replace_with_retry(src, dst)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "_replace_with_retry" in violations[0].detail
+
+
+def test_verbs_registry_subscript_is_denylisted(tmp_path):
+    # tracking_write._VERBS["claim_add"](args) reaches a mutating handler
+    # via the raw registry dict, never naming run_direct, compute, or any
+    # apply_* function -- denylisting the `_VERBS` attribute NAME itself
+    # catches this the moment it's accessed, regardless of which key is
+    # subscripted.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking_write\n"
+        "\n"
+        "def write(args):\n"
+        "    tracking_write._VERBS[\"claim_add\"](args)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "_VERBS" in violations[0].detail
+
+
+def test_verbs_registry_bound_to_a_variable_is_still_denylisted(tmp_path):
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking_write\n"
+        "\n"
+        "def write(args):\n"
+        "    verbs = tracking_write._VERBS\n"
+        "    verbs[\"claim_add\"](args)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "_VERBS" in violations[0].detail
+
+
 def test_unreadable_file_fails_closed_not_silently_skipped(tmp_path, monkeypatch):
     # A file the guard cannot even read must be reported, not silently
     # treated as clean -- otherwise an unreadable/undecodable file is a

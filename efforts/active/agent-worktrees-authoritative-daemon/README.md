@@ -638,11 +638,11 @@ survey above.
       an AST-based scan of every `plugins/*` sibling plugin (excluding
       `agent-worktrees` itself) for a direct import/call of a
       hand-curated denylist covering every tracking-record write function
-      across 12 modules (52 functions total: `tracking.py` /
+      across 12 modules (54 functions total: `tracking.py` /
       `tracking_lifecycle.py` / `tracking_claims.py` /
       `tracking_session_registry.py` / `tracking_controller_relations.py`
       / `tracking_write.py` / the 6 `tracking_*_write.py` verb-handler
-      modules). Fourteen review rounds found real gaps each time (see Journal
+      modules). Fifteen review rounds found real gaps each time (see Journal
       for the full blow-by-blow: a missing re-export module, a
       package-root-alias attribute chain never tracked at all, an
       incomplete denylist, a wildcard-import escape hatch, the daemon's
@@ -758,8 +758,8 @@ writes.py`, an AST-based scan of every sibling `plugins/*` (excluding
 denylist covering every tracking-record write function -- derived by
 AST-walking each protected module for functions whose body calls
 `save_record`/`_save_record_unlocked`/the async stamp queue, then
-hand-verified against the remainder (the final denylist, after fourteen
-review rounds below, covers 52 functions across 12 modules:
+hand-verified against the remainder (the final denylist, after fifteen
+review rounds below, covers 54 functions across 12 modules:
 `tracking.py`/`tracking_lifecycle.py`/`tracking_claims.py`/
 `tracking_session_registry.py`/`tracking_controller_relations.py`/
 `tracking_write.py`/the 6 `tracking_*_write.py` verb-handler modules).
@@ -769,7 +769,7 @@ wording -- NOT extended to cover `worktree-manager/`'s own already-tracked
 exception (see above), since that scope decision belongs to a
 coordinated cross-effort call, not something to fold in unilaterally here.
 
-**Fourteen review rounds found real gaps, none assumed away:**
+**Fifteen review rounds found real gaps, none assumed away:**
 (1) `tracking_controller_relations.py`'s own thin
 `save_record`/`_save_record_unlocked` re-export wrappers were absent from
 the protected module set, so a sibling could route through that module
@@ -945,10 +945,21 @@ serialized YAML -- was absent from the denylist entirely. A sibling
 importing it directly could write raw content straight to a
 `tracking.yaml` path, bypassing every validation/locking/merge layer
 above it, not merely one specific field-level wrapper. Added to
-`WRITE_FUNCTIONS`. Every fix across all fourteen rounds has a dedicated
-regression test.
+`WRITE_FUNCTIONS`. (18) A FIFTEENTH review round found two more real
+gaps at the very bottom of the stack: **(a)** `_replace_with_retry`,
+the even-lower-level `os.replace(src, dst)` helper `_atomic_write`
+itself calls, was still missing; **(b)** `tracking_write._VERBS` -- the
+raw verb-name -> handler registry `run_direct`/`compute` themselves
+dispatch through -- was entirely unprotected, so
+`tracking_write._VERBS["claim_add"](args)` reaches a mutating handler
+without ever naming `run_direct`, `compute`, or any `apply_*` function.
+Fixed by adding `_replace_with_retry` to the denylist, and by
+denylisting the `_VERBS` ATTRIBUTE NAME itself (not a specific key) so
+any access to it -- subscripted immediately or bound to a variable
+first -- is caught the moment `._VERBS` is touched at all. Every fix
+across all fifteen rounds has a dedicated regression test.
 
-47 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
+50 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
 tree, the sanctioned read-only accessors staying unflagged, three
 single-level import/call shapes (module attribute call, direct
 `from agent_worktrees import <fn>`, `from agent_worktrees.tracking_claims
@@ -976,10 +987,12 @@ import never flagged), an aliased-`importlib`-module case, a bare
 `submit_mux` via a package-alias chain, `_apply`, a confirmation that an
 unrelated queue attribute is never flagged, the queue object reassigned
 to a new name, and a direct `_STAMP_QUEUE` import), an `_atomic_write`
-denylist case, the owning-plugin's own exemption, and a live-repo smoke
-test (confirmed clean: zero violations today, matching the original
-survey's own finding). Wired into `.github/workflows/ci.yml` alongside
-the existing `check-no-agent-machines-packages.py` guard.
+denylist case, a `_replace_with_retry` denylist case, two `_VERBS`
+registry cases (subscripted directly, and bound to a variable first),
+the owning-plugin's own exemption, and a live-repo smoke test (confirmed
+clean: zero violations today, matching the original survey's own
+finding). Wired into `.github/workflows/ci.yml` alongside the existing
+`check-no-agent-machines-packages.py` guard.
 
 ### 2026-09-27 — PR #4265: daemon writes push straight into record_cache -- the read-consistency companion to Phase 3's write migration, plus two real bugs review caught
 Operator redirected scope mid-session, away from an initially-discussed

@@ -79,6 +79,7 @@ WRITE_FUNCTIONS = frozenset({
     "save_record",
     "_save_record_unlocked",
     "_atomic_write",
+    "_replace_with_retry",
     "retire_record",
     "update_status",
     "set_disposition",
@@ -152,6 +153,14 @@ WRITE_FUNCTIONS = frozenset({
     # verb at all.
     "run_direct",
     "compute",
+    # `_VERBS` is the raw verb-name -> handler registry `run_direct`/
+    # `compute` themselves dispatch through. Denylisting the ATTRIBUTE
+    # NAME itself (not a specific key) means `tracking_write._VERBS[...]`
+    # is caught the moment `._VERBS` is accessed at all, regardless of
+    # which verb key is subscripted or whether the dict is bound to a
+    # variable first -- a sibling never needs to name a specific
+    # `apply_*` function to reach one this way.
+    "_VERBS",
 })
 
 #: `tracking.py`'s module-level ``_STAMP_QUEUE`` singleton (a
