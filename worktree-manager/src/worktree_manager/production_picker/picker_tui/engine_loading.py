@@ -11,12 +11,12 @@ from .engine_helpers import _DEFAULT_HOST_COLS, _DEFAULT_TARGET_ENVS, start_load
 from .selection import ListSelection
 from .. import config as cfg
 
-# How long the Picker's shared ConfigCacheSession (below) keeps an entry
-# before treating it as stale and recomputing it. Long enough to cover one
-# launch plus a few quick manual reloads/pivot switches without repaying
-# agent_worktrees.config.load_config()'s expensive control-plane discovery;
-# short enough that a real machines.yaml/config.yaml edit is picked up
-# within roughly a minute of a live session, not just at next launch.
+# How long the Picker's shared config-cache scope (below) keeps a direct-file
+# snapshot before treating it as stale and recomputing it. Long enough to cover
+# one launch plus a few quick manual reloads/pivot switches without repaying
+# repeated project-config / machines.yaml reads; short enough that a real
+# machines.yaml/config.yaml edit is picked up within roughly a minute of a live
+# session, not just at next launch.
 _CONFIG_CACHE_TTL_SECS = 60.0
 
 class PickerScreenLoadingMixin:
@@ -140,27 +140,15 @@ class PickerScreenLoadingMixin:
     def _load_config_cache_scope(self):
         """This Picker instance's shared, TTL-bounded config-cache scope.
 
-        Lazily creates ONE :class:`agent_worktrees.config.ConfigCacheSession`
-        per Picker instance (not per call) and reuses it across every thread
-        that enters this scope -- the initial live-roster fill
-        (``_setup_live_async``), the independent pivot-prewarm thread
-        (``_setup_live_pivots``), every non-live setup/reload worker
-        (``_start_setup_reload_worker()``), and the synchronous
-        ``setup_sync_for_tests()`` helper -- so they all draw on one warm
-        cache instead of each separately re-paying
-        ``agent_worktrees.config.load_config()``'s
-        expensive control-plane discovery (profiled at several seconds per
-        call on a fleet with many registered repos). A session is a plain
+        Lazily creates ONE manager-owned direct-file cache session per Picker
+        instance (not per call) and reuses it across every thread that enters
+        this scope -- the initial live-roster fill (``_setup_live_async``), the
+        independent pivot-prewarm thread (``_setup_live_pivots``), every
+        non-live setup/reload worker (``_start_setup_reload_worker()``), and
+        the synchronous ``setup_sync_for_tests()`` helper. A session is a plain
         object reference this method hands to each thread explicitly
-        (contextvars do not propagate across threads on their own), so this
-        is safe to enter concurrently from more than one thread.
-
-        Degrades to :func:`cfg.cached_load_config_scope` (single-pass, no
-        TTL) or a no-op context when the resolved engine predates
-        ``ConfigCacheSession``/``cached_load_config_scope`` -- an older,
-        independently-versioned ``agent-worktrees`` runtime slot the Manager
-        resolves at runtime must not crash the setup pass over a pure
-        latency optimization.
+        (contextvars do not propagate across threads on their own), so this is
+        safe to enter concurrently from more than one thread.
         """
         session = getattr(self, "_config_cache_session", None)
         if session is not None:
@@ -202,11 +190,8 @@ class PickerScreenLoadingMixin:
         try:
             # One logical pass asks the source for the roster, the
             # profiles-matrix axes, and the REPO/BRANCH topbar fields --
-            # each independently calls agent_worktrees.config.load_config(),
-            # whose control-plane related-PR discovery is expensive and
-            # otherwise uncached (profiled at several real seconds per call
-            # on a fleet with many registered repos). Memoize every
-            # load_config() call in this pass so that cost is paid once, not
+            # each independently reads project config / machines.yaml. Memoize
+            # every direct read in this pass so that cost is paid once, not
             # once per helper (#worktree-manager-picker-startup-latency).
             with self._load_config_cache_scope():
                 snapshot_fn = getattr(self.src, "source_snapshot", None)
@@ -253,11 +238,10 @@ class PickerScreenLoadingMixin:
         from . import tasks as _tasks_mod; _tasks_mod.prewarm_optional_modules()
         # Also prewarm the machine-key-map RESULT (not just the data_ssh
         # import): see _prewarm_machine_key_map's own docstring -- the
-        # underlying agent_worktrees.config.load_config() call is uncached
-        # and was profiled at several seconds on a machine with many
-        # registered repos. _machine_key_map() itself never blocks on this
-        # (it degrades to an empty/fallback map immediately), so this is
-        # purely a head start, not a correctness requirement here.
+        # underlying machines.yaml read is still worth warming ahead of time.
+        # _machine_key_map() itself never blocks on this (it degrades to an
+        # empty/fallback map immediately), so this is purely a head start, not
+        # a correctness requirement here.
         # (_prewarm_machine_key_map's own background thread enters this
         # Picker instance's shared config-cache session itself -- see its
         # docstring -- since it fans the real load_config() call out to yet

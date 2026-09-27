@@ -594,8 +594,8 @@ once every remaining caller is already off the import boundary.
      still reports the same pre-existing unrelated plugin-version drift on
      `delegation-guidance`, `efforts`, `harness-knowledge`, and `wsl-setup`.
 
-6. [ ] **Cut `data_local.py` over to the Group C batched verb, using Phase 3c's
-   now-landed worker path.** This is the Group C cutover PR.
+6. [x] **Cut `data_local.py` over to the Group C batched verb, using Phase 3c's
+   now-landed worker path.** **Landed in PR TBD.** This is the Group C cutover PR.
    - Route the refresh-time reconciliation path through the new batched verb
      instead of the current direct imports, including the `reconcile_prs()`,
      `reconcile_bound_live()`, `_overlay_cached_state()`, and
@@ -620,6 +620,54 @@ once every remaining caller is already off the import boundary.
      on that primitive instead of inventing a second ad hoc loader.
    - Confirm this step does not regress the cache-first first-paint shape or
      reintroduce per-row subprocess churn.
+   - **Landing details:**
+     - Replaced the Manager-side Group C imports with one
+       `engine_group_c.picker_reconcile_local(...)` call in
+       `picker_tui/data_local.py`'s authoritative classify load and targeted
+       per-row Refresh path, then merged the returned
+       `rows[{id,pr,prs,pr_count,session_bound_live,session_lock_live,session_lock_stale,stale_lock_pids,mux_session,mux_clients,mux_attached}]`
+       subset directly onto the Picker's raw rows before normalization. The old
+       Manager-side `reconcile_prs()` / `reconcile_bound_live()` helpers now
+       degrade to summary readers over that same batch, preserving the narrow
+       compatibility surface without reintroducing in-process engine access.
+     - `data_local._overlay_cached_state()` now trusts the row's existing
+       cached/batched `session_*` fields instead of calling
+       `sessions.worktree_session_lock_state()` in-process, and
+       `_stamp_from_raw()` is reduced to the same row-merge helper rather than
+       stamping tracking/session state from imported engine helpers. This keeps
+       cache-first first paint honest while making the later authoritative load
+       the sole place the Group C batch runs.
+     - Deleted the old post-load reconcile pair from `picker_tui/engine_runtime.py`.
+       One setup/reload epoch's classify load already carries the authoritative
+       Group C overlay, so the Picker no longer launches separate
+       `_start_pr_reconcile()` / `_start_bound_live_reconcile()` threads after
+       apply. The Phase 3c epoch-guarded setup/reload worker remains the only
+       non-live loader path, and the live local two-phase loader still keeps the
+       batch off the render thread.
+     - Drained the remaining `production_picker.config` proxy tail by replacing
+       `worktree_manager.production_picker.config` with Manager-owned direct
+       file readers + a shared cache session over `~/.<project>/config.yaml`,
+       `~/.<project>/worktrees`, the repo's in-repo config, and
+       `machines.yaml`. That direct reader is now the final source for
+       `picker_tui/data_local.py`, `data_ssh.py`, `engine_loading.py`,
+       `profiles_io.py`, `roster.py`, and `picker_tui/__init__.py`.
+     - Repointed `picker_tui/engine_worktree_actions.py`'s last authoritative
+       liveness reverify to a targeted `picker-reconcile-local --json
+       --worktree-id <id>` call instead of `sessions.verify_worktree_active()` +
+       `tracking.stamp_mux_live()`, so menu-open liveness refinement still runs
+       off-thread but no longer reaches the compatibility boundary.
+     - Validation on the landed tree: the full
+       `worktree-manager/tests/production_picker/` suite passed **twice**
+       back-to-back at `697 passed, 2 skipped` both runs; the full
+       `worktree-manager` suite (excluding the two standing hangs
+       `test_data_ssh_sources.py` / `test_launch_trace.py`) matched the machine
+       baseline at `1433 passed, 6 skipped, 10 failed`; the full
+       `agent-worktrees` suite remained within the established unrelated-failure
+       envelope from Step 5 (same families, no new Group C failures); `ruff
+       check --select F,E9` passed for both packages; `check-install-contract.py`
+       and `check-version-consistency.py` passed; and `check-version-bump.py`
+       still reports the same unrelated pre-existing version drift on
+       `delegation-guidance`, `efforts`, `harness-knowledge`, and `wsl-setup`.
 
 7. [ ] **Delete `_engine_runtime.py` and the remaining proxy shims, then lock in
    the regression guard.** This is the cleanup PR after every live call site is

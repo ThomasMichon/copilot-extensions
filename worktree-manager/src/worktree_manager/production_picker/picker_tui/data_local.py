@@ -11,13 +11,12 @@ from __future__ import annotations
 
 import datetime as _dt
 import socket
-from pathlib import Path
 
 from worktree_manager import engine_client
 
 from .. import context
 from .. import config as cfg
-from .. import reclaim, sessions, tracking
+from .. import engine_group_c
 from . import derive, roster, source_identity
 
 bucket = derive.bucket
@@ -27,6 +26,18 @@ host_cols = roster.host_cols
 target_envs = roster.target_envs
 
 _ENV_LABEL = {"windows": "Win", "wsl": "WSL", "linux": "Linux"}
+_GROUP_C_FIELDS = (
+    "pr",
+    "prs",
+    "pr_count",
+    "session_bound_live",
+    "session_lock_live",
+    "session_lock_stale",
+    "stale_lock_pids",
+    "mux_session",
+    "mux_clients",
+    "mux_attached",
+)
 
 
 def _local_identity() -> tuple[str, str]:
@@ -40,13 +51,7 @@ LOCAL_LABEL = f"{LOCAL[0]} · {LOCAL[1].lower()}"
 
 
 def _project_repo() -> tuple[str, str]:
-    """``(repo name, default branch)`` for the active project's default repo.
-
-    Data-backs the picker top bar's repo/branch segments (formerly hardcoded to
-    ``test-chamber`` / ``master``). Returns empty strings when config can't be
-    resolved, so the engine simply drops the segment rather than showing a
-    fabricated value.
-    """
+    """``(repo name, default branch)`` for the active project's default repo."""
     try:
         config = cfg.load_config()
         return config.repo_name, config.default_repo.default_branch
@@ -54,9 +59,6 @@ def _project_repo() -> tuple[str, str]:
         return "", ""
 
 
-# Import-time ``load_config`` blocked first paint on the bundled Picker side
-# (#1504). Keep the same lazy contract here so the transplanted Manager copy
-# does not reintroduce that startup I/O regression.
 _REPO_BRANCH: tuple[str, str] | None = None
 
 
@@ -78,199 +80,91 @@ def machines():
 def load_profile_column(machine, env):
     """Read a host's terminal-profile column (local in-process / remote SSH)."""
     from . import profiles_io
+
     return profiles_io.load_column(machine, env)
 
 
 def apply_profile_column(machine, env, sels, *, mirror=True):
     """Persist a host's terminal-profile column. Returns ``(ok, detail)``."""
     from . import profiles_io
+
     return profiles_io.apply_column(machine, env, sels, mirror=mirror)
 
 
-def reconcile_prs() -> int:
-    """Best-effort: reconcile this machine's worktrees' active PR state against
-    the provider, writing merged/closed back into the tracking YAML (#1423).
-
-    A PR merged externally (the ``auto-merge`` label / provider API, bypassing
-    ``finalize``/``pr-status``) leaves the local record stale at ``open``, so the
-    Picker shows already-merged worktrees as having open PRs. This reconciles
-    every local worktree whose active PR is still non-terminal and persists the
-    resolved state, so the next render is honest.
-
-    Returns the count of records whose active PR moved to a terminal state.
-    Never raises: an unconfigured/unreachable provider leaves state untouched.
-    Local machine only -- remote worktrees reconcile on their owning machine.
-    """
-    from .. import pr_ops
-
+def reconcile_local_batch(*, worktree_ids: list[str] | None = None):
+    """Best-effort Group C reconcile batch for the current project."""
     try:
-        config = cfg.load_config()
-        tracking_path = cfg.tracking_dir()
-        plat = cfg.detect_platform()
-        records = tracking.list_records(tracking_path, platform_filter=plat)
-    except Exception:
+        return engine_group_c.picker_reconcile_local(
+            context.project(),
+            worktree_ids=worktree_ids,
+        )
+    except (
+        engine_client.EngineError,
+        engine_client.EngineFeatureUnavailable,
+        ValueError,
+    ):
+        return None
+
+
+def reconcile_prs() -> int:
+    """Compatibility wrapper over the Group C batch summary."""
+    batch = reconcile_local_batch()
+    if batch is None:
         return 0
-    changed = 0
-    for rec in records:
-        active = rec.active_pr()
-        if active is None or active.number is None:
-            continue
-        if tracking._pr_is_terminal(active):
-            continue
-        try:
-            pr_ops._reconcile_active_pr(rec, config, best_effort=True)
-        except Exception:
-            continue
-        new_active = rec.active_pr()
-        if new_active is not None and tracking._pr_is_terminal(new_active):
-            changed += 1
-    return changed
+    return int(batch.summary.get("pr_terminal_count") or 0)
 
 
 def reconcile_bound_live() -> int:
-    """Off-hot-path: reconcile each local worktree's cached ``bound_live`` AND
-    ``mux_live`` signals against the authoritative machine-wide scans (#4057 /
-    #1416 / dotfiles#1205).
-
-    Despite the name (kept for its call sites), this sweep now reconciles BOTH
-    liveness hints in one records pass: the bound-Copilot signal (below) and the
-    ``mux_live`` signal. ``mux_live`` is otherwise only stamped at discrete
-    lifecycle events, so a ``wt-<id>`` mux that appears AFTER its last event-time
-    stamp (e.g. a psmux startup-restore landing minutes after resume) would
-    persist a stale ``false`` for a genuinely live mux; recomputing it here --
-    mirroring bound liveness -- keeps it honest (dotfiles#1205).
-
-    A bare-resumed Copilot (cwd=home) is invisible to BOTH the registered-session
-    lock scan (its session was never registered under the worktree) and the mux
-    batch (a bare Copilot has no mux), so its worktree wrongly renders non-ACTIVE
-    (#1416). This reconciler resolves every live bound Copilot on the machine via
-    :func:`reclaim.resolve_bound_copilots` -- cwd-independent, and NOT
-    self-excluding (unlike ``bare_orphan_worktree_ids``, so it also counts *this*
-    session's own worktree and every mux-homed one) -- and stamps each affected
-    worktree's cached ``bound_live`` so a follow-up populate can surface a
-    bare-resumed session in the Active section from cache alone.
-
-    TRI-STATE, minimal-churn: a live worktree is stamped ``True`` (refresh, so a
-    steadily-live session's hint never ages out); a worktree that was ``True`` but
-    is no longer bound is stamped ``False`` (the session-ended transition). A
-    never-bound worktree is left untouched (``None`` = Unknown, NEVER persisted),
-    so the fleet's idle YAMLs are not rewritten. When the scan itself fails
-    (Unknown), nothing is stamped. Never raises; local machine only -- remote
-    worktrees reconcile on their owning machine. Returns the count of records
-    whose CONSUMER-VISIBLE liveness (fresh ``bound_live=True`` vs not) flipped, so
-    a nonzero result reloads the picker -- including a still-live worktree whose
-    hint had aged past the populate TTL (renewing it must re-surface it ACTIVE,
-    not silently leave it non-active until the next poll).
-
-    A bound Copilot the scan could not attribute to a worktree (``worktree_id``
-    None -- a transient attribution failure, not proof of death) suppresses ALL
-    negative transitions this pass: a genuinely-gone positive still expires via
-    the freshness TTL, but a momentarily-unattributable live session is never
-    wrongly cleared to ``False``.
-    """
-    try:
-        tracking_path = cfg.tracking_dir()
-        plat = cfg.detect_platform()
-        records = tracking.list_records(tracking_path, platform_filter=plat)
-    except Exception:
+    """Compatibility wrapper over the Group C batch summary."""
+    batch = reconcile_local_batch()
+    if batch is None:
         return 0
-    records = [
-        r for r in records if r.worktree_path and Path(r.worktree_path).exists()
-    ]
-    if not records:
-        return 0
-    try:
-        bound = reclaim.resolve_bound_copilots()
-    except Exception:
-        return 0  # Unknown -- never persist
-    # Lazy import (avoids a picker_tui <-> __main__ cycle): the SAME fresh-hint
-    # test the populate path uses, so "changed" tracks true consumer visibility.
-    from ..__main__ import _fresh_bound_live_hint
+    return int(batch.summary.get("bound_visible_change_count") or 0)
 
-    live_ids = {b.get("worktree_id") for b in bound if b.get("worktree_id")}
-    # An unattributable live binding -> some worktree's liveness is Unknown this
-    # pass; hold off on clearing positives so a transient miss can't flap a live
-    # session to non-ACTIVE.
-    had_unresolved = any(b.get("worktree_id") is None for b in bound)
-    # Batch the wt-<id> mux presence check for the SAME record set so we can
-    # reconcile the cached ``mux_live`` hint here too. ``mux_live`` is otherwise
-    # only stamped at discrete lifecycle events (launch/Enter verify, Stop,
-    # confirmed teardown), so a mux that appears AFTER its last event-time stamp
-    # -- e.g. a psmux startup-restore that lands seconds/minutes after resume --
-    # is never re-observed and persists a stale ``false`` for a genuinely live
-    # mux (dotfiles#1205). Reconciling it on this off-hot-path sweep, mirroring
-    # bound liveness, closes that gap. Mux presence is a definitive local check
-    # (the session exists or it does not) when the batch SUCCEEDS -- no partial
-    # Unknown per record, unlike the bound scan's unattributable bindings. But a
-    # batch that raises is itself Unknown: it is guarded below (``mux_scan_ok``)
-    # so a transient failure never clears a cached ``mux_live=True`` to False.
-    try:
-        mux_map = sessions.mux_status_many([r.worktree_id for r in records])
-        mux_scan_ok = True
-    except Exception:
-        mux_map = {}
-        mux_scan_ok = False  # Unknown this pass -- never clear a cached positive
-    changed = 0
-    for rec in records:
-        was_visible = _fresh_bound_live_hint(rec) is True
-        if rec.worktree_id in live_ids:
-            tracking.stamp_bound_live(rec.worktree_id, True, refresh=True)
-            if not was_visible:
-                changed += 1  # became (or re-freshened into) ACTIVE-visible
-        elif rec.bound_live is True and not had_unresolved:
-            # True -> False: the bound session ended. Clear it (a real
-            # transition; idle worktrees that were never bound stay untouched).
-            tracking.stamp_bound_live(rec.worktree_id, False)
-            if was_visible:
-                changed += 1
-        # mux liveness (mirror of the bound transition logic): observe a mux
-        # that appeared or vanished since the last event-time stamp. A live mux
-        # renews its freshness (throttled); a false->true or true->false is a
-        # real ACTIVE-visibility transition, so it counts toward ``changed`` and
-        # reloads the picker. A mux that is absent and was already false is left
-        # untouched -- no YAML churn on the fleet's idle records. Skipped
-        # entirely when the mux batch failed (Unknown), so a transient scan
-        # error never clears a cached ``mux_live=True`` to False.
-        if mux_scan_ok:
-            info = mux_map.get(rec.worktree_id)
-            mux_present = bool(info and getattr(info, "exists", False))
-            if mux_present:
-                if rec.mux_live is not True:
-                    changed += 1
-                tracking.stamp_mux_live(
-                    rec.worktree_id, True, refresh=True, sync=True)
-            elif rec.mux_live is True:
-                tracking.stamp_mux_live(rec.worktree_id, False, sync=True)
-                changed += 1
-    return changed
+
+def _merge_reconcile_row(raw: dict, reconcile_row: dict | None) -> None:
+    if not isinstance(reconcile_row, dict):
+        return
+    for field in _GROUP_C_FIELDS:
+        if field in reconcile_row:
+            raw[field] = reconcile_row[field]
+        else:
+            raw.pop(field, None)
+
+
+def _overlay_reconcile_rows(
+    rows: list[dict],
+    *,
+    worktree_ids: list[str] | None = None,
+) -> list[dict]:
+    batch = reconcile_local_batch(worktree_ids=worktree_ids)
+    if batch is None:
+        return rows
+    by_id = {
+        str(row.get("id") or ""): row
+        for row in batch.rows
+        if isinstance(row, dict) and row.get("id")
+    }
+    for raw in rows:
+        _merge_reconcile_row(raw, by_id.get(str(raw.get("id") or "")))
+    return rows
 
 
 def _overlay_cached_state(raw: dict, rec) -> None:
-    """Overlay a worktree's cached session-render state onto its cache-only row.
+    """Overlay cached session-render state onto a cache-only row.
 
-    picker-cache-first-paint (dotfiles#948): the first-paint pass reads no
-    EXPENSIVE live data (no events.jsonl, no process-table scan, no git
-    classify), so turns/state/summary come from the record's session-render
-    cache (stamped by a prior populate / Refresh). Two exceptions are resolved
-    live because they are CHEAP and must be correct immediately:
-
-    * **Lock state** -- ``sessions.worktree_session_lock_state`` performs a
-      targeted glob + pid-check (not a machine scan) across the worktree's
-      registered sessions. A live ``inuse.<pid>.lock`` means a running Copilot
-      and forces ACTIVE over any cached/terminal/unknown state; dead-PID residue
-      is surfaced separately as ``session_lock_stale`` for the ``LOCK`` marker.
-    * The cached ``bound_live`` hint (``session_bound_live`` -- the
-      cwd-independent #1416 bare-resume signal, read cache-only by
-      ``_worktree_to_dict``) is the second live signal.
-
-    A worktree with neither live signal NOR any cached state (both
-    ``session_turns`` and ``git_state`` absent) renders **Unknown** -- a Refresh
-    or the follow-up populate fills it.
+    Cache-first first paint still comes from the provider's cache-only list
+    payload. Once the Group C batch lands, its ``session_*`` / ``mux_*`` fields
+    layer onto later authoritative loads via :func:`_merge_reconcile_row`;
+    cache-only paint keeps trusting whatever the cached payload already had and
+    otherwise degrades to the same "unknown until refined" shape as before.
     """
-    try:
-        lock_live, stale_pids = sessions.worktree_session_lock_state(rec)
-    except Exception:
-        lock_live, stale_pids = False, []
+    lock_live = raw.get("session_lock_live") is True
+    stale_pids = (
+        list(raw.get("stale_lock_pids") or [])
+        if raw.get("session_lock_stale")
+        else []
+    )
     live = lock_live or (raw.get("session_bound_live") is True)
 
     if rec.session_turns is not None:
@@ -281,9 +175,6 @@ def _overlay_cached_state(raw: dict, rec) -> None:
         raw["title"] = rec.session_summary
 
     if live:
-        # A live bound Copilot -> ACTIVE, authoritative in the fast pass (wins
-        # over a cached terminal/unknown state). Keep a registered lock distinct
-        # from the broader cached bound-process hint.
         if lock_live:
             raw["session_lock_live"] = True
         raw["state"] = "active"
@@ -311,9 +202,10 @@ def load(
     display name and env label, matching the multi-machine tab descriptors.
 
     ``classify=False`` requests the provider's cache-only first-paint contract;
-    ``classify=True`` requests canonical git/session/mux enrichment. Both calls
-    cross the same attributable process boundary as remote reads and run on the
-    caller's background loader thread, never the Textual event loop.
+    ``classify=True`` requests canonical git/session/mux enrichment plus the
+    Group C batched PR/session/mux reconcile overlay. Both calls cross the same
+    attributable process boundary as remote reads and run on the caller's
+    background loader thread, never the Textual event loop.
     """
     derive.NOW = _dt.datetime.now()
     machine = machine if machine is not None else LOCAL[0]
@@ -323,59 +215,43 @@ def load(
         "source_id": source_id,
         "source_label": source_label,
     }
-    rows = engine_client.list_worktree_rows(
-        context.project(),
-        classify=classify,
-        mux_details=classify,
-        cache_only=not classify,
-        runner=runner,
-    )
-    return [
-        derive.norm(row, machine, env, **norm_source)
-        for row in rows
-    ]
-
-
-def _stamp_from_raw(rec, raw: dict, session_ctx) -> None:
-    """Write the session-render cache back from a freshly gathered ``raw`` row.
-
-    picker-cache-first-paint (dotfiles#948): shared by the classify populate and
-    the per-row :func:`refresh_one` -- persists ``session_turns``/``git_state``/
-    ``session_summary`` so the next cache-only first paint reads them without any
-    ``events.jsonl`` or process scan. Best-effort: never raises.
-    """
-    try:
-        _norm = sessions._normalize_path(rec.worktree_path)
-        tracking.stamp_session_state(
-            rec.worktree_id,
-            turns=int(raw.get("turn_count", 0)),
-            summary=session_ctx.latest_summary.get(_norm),
-            git_state=raw.get("state"),
+    rows = list(
+        engine_client.list_worktree_rows(
+            context.project(),
+            classify=classify,
+            mux_details=classify,
+            cache_only=not classify,
+            runner=runner,
         )
-    except Exception:
-        pass
+    )
+    if classify:
+        rows = _overlay_reconcile_rows(rows)
+    return [derive.norm(row, machine, env, **norm_source) for row in rows]
+
+
+def _stamp_from_raw(rec, raw: dict, reconcile_row: dict | None) -> None:
+    """Compatibility helper: merge Group C reconcile fields onto ``raw``."""
+    _merge_reconcile_row(raw, reconcile_row)
 
 
 def refresh_one(worktree_id: str, machine: str | None = None,
                 env: str | None = None, *, runner=None):
-    """Live-gather + write-back for ONE worktree -- the picker's per-row Refresh.
-
-    The provider repairs a never-indexed session registry, refreshes exact
-    bound/mux liveness, bypasses its coalescing cache, and returns one canonical
-    row. Returns ``None`` when the record or checkout is gone.
-    """
+    """Live-gather for ONE worktree -- the picker's per-row Refresh."""
     derive.NOW = _dt.datetime.now()
     machine = machine if machine is not None else LOCAL[0]
     env = env if env is not None else LOCAL[1]
-    rows = engine_client.list_worktree_rows(
-        context.project(),
-        classify=True,
-        mux_details=True,
-        fresh=True,
-        worktree_id=worktree_id,
-        refresh=True,
-        runner=runner,
+    rows = list(
+        engine_client.list_worktree_rows(
+            context.project(),
+            classify=True,
+            mux_details=True,
+            fresh=True,
+            worktree_id=worktree_id,
+            refresh=True,
+            runner=runner,
+        )
     )
     if not rows:
         return None
+    rows = _overlay_reconcile_rows(rows, worktree_ids=[worktree_id])
     return derive.norm(rows[0], machine, env)

@@ -670,10 +670,11 @@ def test_load_config_cache_scope_shares_across_threads():
         calls.append(1)
         return "config-value"
 
-    from agent_worktrees import config as real_cfg
+    from worktree_manager.production_picker import context
     from worktree_manager.production_picker import config as pm_cfg
-    orig = real_cfg._load_config_uncached
-    real_cfg._load_config_uncached = fake_uncached
+    orig = pm_cfg._load_config_uncached
+    pm_cfg._load_config_uncached = fake_uncached
+    context.set_project("example")
     try:
         results = []
         with screen._load_config_cache_scope():
@@ -687,10 +688,33 @@ def test_load_config_cache_scope_shares_across_threads():
         t.start()
         t.join()
     finally:
-        real_cfg._load_config_uncached = orig
+        pm_cfg._load_config_uncached = orig
+        context.reset()
 
     assert len(calls) == 1  # the second (real) thread's call hit the cache
     assert results == ["config-value", "config-value"]
+
+
+def test_cache_only_local_load_skips_group_c_batch(monkeypatch):
+    from worktree_manager.production_picker.picker_tui import data_local
+
+    monkeypatch.setattr(data_local.context, "project", lambda: "example")
+    monkeypatch.setattr(
+        data_local.engine_client,
+        "list_worktree_rows",
+        lambda *_args, **_kwargs: [{"id": "wt-a"}],
+    )
+    monkeypatch.setattr(
+        data_local.engine_group_c,
+        "picker_reconcile_local",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("cache-only first paint must not wait on Group C batch")
+        ),
+    )
+
+    rows = data_local.load("host", "Win", classify=False)
+
+    assert rows[0]["raw"]["id"] == "wt-a"
 
 
 def test_setup_live_async_records_failure():

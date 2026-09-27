@@ -218,6 +218,9 @@ class PickerScreenWorktreeActionsMixin:
         ):
             try:
                 from .. import config as _config
+                from .. import context as _context
+                from .. import engine_group_c as _engine_group_c
+
                 _need_verify = (_config.tracking_dir() / f"{_wt_id}.yaml").exists()
             except Exception:
                 _need_verify = False
@@ -227,28 +230,34 @@ class PickerScreenWorktreeActionsMixin:
 
         def _verify():
             try:
-                import types as _types
-
-                from .. import sessions as _sessions
-                from .. import tracking as _tracking
-                verdict = _sessions.verify_worktree_active(
-                    _types.SimpleNamespace(worktree_id=_wt_id))
-                try:
-                    # #4057: warm the ground-layer cache from this authoritative
-                    # read so the next populate can prefer the hint (throttled).
-                    _tracking.stamp_mux_live(_wt_id, verdict.mux_live, refresh=True)
-                except Exception:
-                    pass
-                return verdict
+                batch = _engine_group_c.picker_reconcile_local(
+                    _context.project(),
+                    worktree_ids=[_wt_id],
+                )
+                for row in batch.rows:
+                    if isinstance(row, dict) and row.get("id") == _wt_id:
+                        return row
+                return None
             except Exception:
                 return None
 
-        def _done(verdict):
-            if verdict is not None:
-                rec["mux_live"] = verdict.mux_live
-                rec["attached"] = verdict.mux_clients > 0
-                rec["session_lock_live"] = bool(verdict.live_session_ids)
-                rec["session_bare_orphan"] = verdict.bare
+        def _done(reconcile_row):
+            if isinstance(reconcile_row, dict):
+                from . import data_local as _data_local
+
+                raw = dict(rec.get("raw") or {})
+                raw.setdefault("id", _wt_id)
+                _data_local._stamp_from_raw(None, raw, reconcile_row)
+                refreshed = _data_local.derive.norm(
+                    raw,
+                    rec.get("machine"),
+                    rec.get("env"),
+                    source_kind=rec.get("source_kind", "machine-ssh"),
+                    source_id=rec.get("source_id"),
+                    source_label=rec.get("source_label"),
+                )
+                rec.clear()
+                rec.update(refreshed)
             # Refine the OPEN menu's verbs in place + drop its footer spinner. The
             # main footer stays quiet -- the modal owns the load indicator.
             self._refresh_wt_submenu(rec)

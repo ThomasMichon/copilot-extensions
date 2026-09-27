@@ -68,40 +68,30 @@ class TestOverlayCachedState:
         assert raw["state"] == "active"
 
     def test_live_lock_forces_active_even_when_unknown(self, monkeypatch):
-        # The cheap lock-file scan is the primary first-paint ACTIVE signal: a
-        # running Copilot in a never-cached worktree must render ACTIVE, not "?".
-        monkeypatch.setattr(
-            data_local.sessions, "worktree_session_lock_state",
-            lambda rec: (True, []))
-        raw: dict = {}
+        raw: dict = {"session_lock_live": True}
         data_local._overlay_cached_state(raw, _rec())  # no cache at all
         assert raw["state"] == "active"
         assert raw["session_lock_live"] is True
         assert derive._state(raw) == "ACTIVE"
 
-    def test_live_lock_beats_cached_terminal(self, monkeypatch):
-        monkeypatch.setattr(
-            data_local.sessions, "worktree_session_lock_state",
-            lambda rec: (True, []))
-        raw: dict = {}
+    def test_live_lock_beats_cached_terminal(self):
+        raw: dict = {"session_lock_live": True}
         data_local._overlay_cached_state(
             raw, _rec(session_turns=9, git_state="completed"))
         assert raw["state"] == "active"
 
-    def test_no_live_signal_keeps_cached_state(self, monkeypatch):
-        monkeypatch.setattr(
-            data_local.sessions, "worktree_session_lock_state",
-            lambda rec: (False, []))
+    def test_no_live_signal_keeps_cached_state(self):
         raw: dict = {}
         data_local._overlay_cached_state(
             raw, _rec(session_turns=2, git_state="wip"))
         assert raw["state"] == "wip"
 
-    def test_stale_lock_is_visible_without_forcing_active(self, monkeypatch):
-        monkeypatch.setattr(
-            data_local.sessions, "worktree_session_lock_state",
-            lambda rec: (False, [999]))
-        raw: dict = {"id": "stale-lock"}
+    def test_stale_lock_is_visible_without_forcing_active(self):
+        raw: dict = {
+            "id": "stale-lock",
+            "session_lock_stale": True,
+            "stale_lock_pids": [999],
+        }
         data_local._overlay_cached_state(
             raw, _rec(session_turns=9, git_state="completed"))
         assert raw["state"] == "completed"
@@ -154,6 +144,45 @@ def test_local_load_uses_cache_only_then_classified_provider_reads(monkeypatch):
             "runner": None,
         }),
     ]
+
+
+def test_local_classify_load_invokes_group_c_batch_once(monkeypatch):
+    calls = []
+    monkeypatch.setattr(data_local.context, "project", lambda: "example")
+    monkeypatch.setattr(
+        data_local.engine_client,
+        "list_worktree_rows",
+        lambda *_args, **_kwargs: [
+            {"id": "wt-a", "state": "wip"},
+            {"id": "wt-b", "state": "completed"},
+            {"id": "wt-c", "state": "unknown"},
+        ],
+    )
+
+    def fake_batch(project, *, worktree_ids=None, timeout=None):
+        calls.append((project, tuple(worktree_ids or ())))
+        return type(
+            "Batch",
+            (),
+            {
+                "rows": [
+                    {"id": "wt-a", "session_bound_live": True, "mux_session": True, "mux_attached": True, "mux_clients": 2},
+                    {"id": "wt-b", "pr": None, "prs": [], "pr_count": 0},
+                    {"id": "wt-c", "session_lock_stale": True, "stale_lock_pids": [321]},
+                ],
+                "summary": {},
+            },
+        )()
+
+    monkeypatch.setattr(data_local.engine_group_c, "picker_reconcile_local", fake_batch)
+
+    rows = data_local.load("machine", "Win", classify=True)
+
+    assert calls == [("example", ())]
+    assert len(rows) == 3
+    assert rows[0]["state"] == "ACTIVE"
+    assert rows[0]["mux_live"] is True
+    assert rows[2]["session_lock_stale"] is True
 
 
 class TestWorktreeHasLiveSession:

@@ -3084,8 +3084,8 @@ def test_run_tui_picker_writes_crash_log(monkeypatch, tmp_path):
 
     import pytest
 
-    from agent_worktrees import config as cfg
     import worktree_manager.production_picker.picker_tui as pkg
+    from worktree_manager.production_picker import config as cfg
     from worktree_manager.production_picker.picker_tui import engine as eng
 
     monkeypatch.setattr(cfg, "install_dir", lambda: tmp_path)
@@ -3340,45 +3340,26 @@ def test_picker_buckets_sessionless_into_unowned():
 
 
 def test_reconcile_prs_counts_terminal_transitions(monkeypatch):
-    """#1423: reconcile_prs reconciles each non-terminal active PR and counts
-    those that moved to a terminal state, skipping no-PR / already-terminal."""
-    from pathlib import Path
-
+    """Group C compatibility wrapper reads the batch summary's PR count."""
     from worktree_manager.production_picker.picker_tui import data_local
 
-    class FakePR:
-        def __init__(self, number, state):
-            self.number, self.state = number, state
+    monkeypatch.setattr(
+        data_local,
+        "reconcile_local_batch",
+        lambda **_kwargs: type(
+            "Batch",
+            (),
+            {"summary": {"pr_terminal_count": 1}},
+        )(),
+    )
 
-    class FakeRec:
-        def __init__(self, pr):
-            self._pr = pr
-
-        def active_pr(self):
-            return self._pr
-
-    open_pr = FakePR(1, "open")
-    recs = [FakeRec(open_pr), FakeRec(FakePR(2, "merged")), FakeRec(None)]
-    monkeypatch.setattr(data_local.cfg, "load_config", lambda: object())
-    monkeypatch.setattr(data_local.cfg, "tracking_dir", lambda: Path("."))
-    monkeypatch.setattr(data_local.cfg, "detect_platform", lambda: "windows")
-    monkeypatch.setattr(data_local.tracking, "list_records",
-                        lambda p, platform_filter=None: recs)
-
-    def fake_reconcile(rec, config, *, best_effort=False):
-        if rec.active_pr() is open_pr:        # provider reports it merged
-            open_pr.state = "merged"
-
-    monkeypatch.setattr("agent_worktrees.pr_ops._reconcile_active_pr",
-                        fake_reconcile)
     assert data_local.reconcile_prs() == 1
 
 
-def test_picker_background_pr_reconcile_reloads_on_change():
-    """#1423: when the background reconcile reports a change, the non-live path
-    reloads local data so the render reflects the corrected PR state."""
+def test_picker_setup_does_not_spawn_legacy_reconcile_hooks():
+    """Phase 3d Step 6 folds local reconcile into the classify load itself."""
     src = _fixture_source()
-    calls = {"reconcile": 0, "load": 0}
+    calls = {"reconcile": 0, "bound": 0, "load": 0}
     orig_load = src.load
 
     def load2():
@@ -3389,8 +3370,13 @@ def test_picker_background_pr_reconcile_reloads_on_change():
         calls["reconcile"] += 1
         return 1
 
+    def reconcile_bound_live():
+        calls["bound"] += 1
+        return 1
+
     src.load = load2
     src.reconcile_prs = reconcile_prs
+    src.reconcile_bound_live = reconcile_bound_live
 
     async def run():
         app = PickerApp(src, live=False)
@@ -3399,33 +3385,8 @@ def test_picker_background_pr_reconcile_reloads_on_change():
             deadline = time.monotonic() + 3.0
             while time.monotonic() < deadline and not scr._pr_reconciled:
                 await pilot.pause()
-            assert calls["reconcile"] == 1
-            assert calls["load"] >= 2       # setup load + post-reconcile reload
-
-    asyncio.run(run())
-
-
-def test_picker_background_pr_reconcile_no_change_no_reload():
-    """A reconcile that changes nothing must not trigger a reload."""
-    src = _fixture_source()
-    calls = {"load": 0}
-    orig_load = src.load
-
-    def load2():
-        calls["load"] += 1
-        return orig_load()
-
-    src.load = load2
-    src.reconcile_prs = lambda: 0
-
-    async def run():
-        app = PickerApp(src, live=False)
-        async with app.run_test(size=(118, 36)) as pilot:
-            scr = app.query_one(PickerScreen)
-            deadline = time.monotonic() + 3.0
-            while time.monotonic() < deadline and not scr._pr_reconciled:
-                await pilot.pause()
-            assert calls["load"] == 1       # only the setup load
+            assert scr._bound_live_reconciled is True
+            assert calls == {"reconcile": 0, "bound": 0, "load": 1}
 
     asyncio.run(run())
 
@@ -8821,8 +8782,8 @@ def test_actions_menu_liveness_verify_is_offloaded(tmp_path, monkeypatch):
     import threading
 
     from worktree_manager.production_picker import config as _cfg
-    from worktree_manager.production_picker import sessions as _sessions
-    from worktree_manager.production_picker import tracking as _tracking
+    from worktree_manager.production_picker import context as _context
+    from worktree_manager.production_picker import engine_group_c as _engine_group_c
 
     src = _fixture_source()
     wt_id = "anomalous-potato-win-20260627-aaaa"
@@ -8830,18 +8791,26 @@ def test_actions_menu_liveness_verify_is_offloaded(tmp_path, monkeypatch):
     tdir.mkdir()
     (tdir / f"{wt_id}.yaml").write_text("id: x\n", encoding="utf-8")
     monkeypatch.setattr(_cfg, "tracking_dir", lambda: tdir)
-    monkeypatch.setattr(_tracking, "stamp_mux_live", lambda *a, **k: None)
+    monkeypatch.setattr(_context, "project", lambda: "example")
 
     gate = threading.Event()
     calls = {"n": 0}
 
-    def _gated_verify(ns):
+    def _gated_verify(project, *, worktree_ids=None, timeout=None):
         calls["n"] += 1
         gate.wait(5)                    # block as the real mux/session probe would
         return types.SimpleNamespace(
-            mux_live=True, mux_clients=1, live_session_ids=["s"], bare=False)
+            rows=[{
+                "id": wt_id,
+                "mux_session": True,
+                "mux_attached": True,
+                "mux_clients": 1,
+                "session_lock_live": True,
+            }],
+            summary={},
+        )
 
-    monkeypatch.setattr(_sessions, "verify_worktree_active", _gated_verify)
+    monkeypatch.setattr(_engine_group_c, "picker_reconcile_local", _gated_verify)
 
     async def run():
         app = PickerApp(src, live=False)
@@ -8879,8 +8848,8 @@ def test_actions_menu_liveness_verify_is_offloaded(tmp_path, monkeypatch):
 def test_actions_worker_finishes_quietly_after_resume_exits(tmp_path, monkeypatch):
     """A slow menu probe may finish after Resume has detached the picker screen."""
     from worktree_manager.production_picker import config as _cfg
-    from worktree_manager.production_picker import sessions as _sessions
-    from worktree_manager.production_picker import tracking as _tracking
+    from worktree_manager.production_picker import context as _context
+    from worktree_manager.production_picker import engine_group_c as _engine_group_c
 
     src = _verb_fixture_source()
     wt_id = "anomalous-potato-win-20260627-stop"
@@ -8888,18 +8857,26 @@ def test_actions_worker_finishes_quietly_after_resume_exits(tmp_path, monkeypatc
     tdir.mkdir()
     (tdir / f"{wt_id}.yaml").write_text("id: x\n", encoding="utf-8")
     monkeypatch.setattr(_cfg, "tracking_dir", lambda: tdir)
-    monkeypatch.setattr(_tracking, "stamp_mux_live", lambda *a, **k: None)
+    monkeypatch.setattr(_context, "project", lambda: "example")
 
     gate = threading.Event()
     started = threading.Event()
     thread_errors = []
     original_excepthook = threading.excepthook
 
-    def _gated_verify(ns):
+    def _gated_verify(project, *, worktree_ids=None, timeout=None):
         started.set()
         gate.wait()
         return types.SimpleNamespace(
-            mux_live=False, mux_clients=0, live_session_ids=[], bare=False)
+            rows=[{
+                "id": wt_id,
+                "mux_session": False,
+                "mux_attached": False,
+                "mux_clients": 0,
+                "session_lock_live": False,
+            }],
+            summary={},
+        )
 
     def _capture_thread_error(args):
         if args.thread.name == "pivot-action:Actions":
@@ -8907,7 +8884,7 @@ def test_actions_worker_finishes_quietly_after_resume_exits(tmp_path, monkeypatc
             return
         original_excepthook(args)
 
-    monkeypatch.setattr(_sessions, "verify_worktree_active", _gated_verify)
+    monkeypatch.setattr(_engine_group_c, "picker_reconcile_local", _gated_verify)
     monkeypatch.setattr(threading, "excepthook", _capture_thread_error)
 
     async def run():

@@ -443,6 +443,42 @@ def test_sync_setup_disposes_payload_when_apply_raises():
     assert disposed.is_set()
 
 
+def test_setup_sync_runs_one_local_reconcile_batch_per_epoch():
+    pytest.importorskip("textual")
+    from worktree_manager.production_picker.picker_tui import engine as eng
+
+    calls = {"batch": 0, "legacy_pr": 0, "legacy_bound": 0}
+
+    class Src:
+        LOCAL = ("host", "Win")
+
+        @staticmethod
+        def machines():
+            return [("host Win", "host", "Win", True)]
+
+        @staticmethod
+        def load():
+            calls["batch"] += 1
+            return []
+
+        @staticmethod
+        def reconcile_prs():
+            calls["legacy_pr"] += 1
+            return 1
+
+        @staticmethod
+        def reconcile_bound_live():
+            calls["legacy_bound"] += 1
+            return 1
+
+    screen = eng.PickerScreen(Src(), live=False)
+
+    screen.setup_sync_for_tests()
+    screen.setup_sync_for_tests()
+
+    assert calls == {"batch": 2, "legacy_pr": 0, "legacy_bound": 0}
+
+
 def test_apply_setup_payload_cancels_replaced_loader():
     disposed = threading.Event()
 
