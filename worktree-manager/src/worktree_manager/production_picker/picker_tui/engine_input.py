@@ -142,7 +142,7 @@ class PickerScreenInputMixin:
         elif key == "r":
             # Real reload: rebuild the data source (live mode re-fetches every
             # machine on its loader threads; fixture mode re-reads src.load()).
-            self.setup()
+            self._start_setup_reload_worker()
             self.sel = self.default_sel()
             self.debug = "refreshed · reloaded worktrees"
         elif key in ("q", "escape"):

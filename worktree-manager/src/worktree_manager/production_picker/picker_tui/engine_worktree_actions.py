@@ -486,7 +486,7 @@ class PickerScreenWorktreeActionsMixin:
             self.debug = (f"{label} ({source}): {msg or 'done'}" if ok
                           else f"{label} ({source}) failed: {msg}")
             try:
-                self.setup()
+                self._start_setup_reload_worker()
                 self.sel = self.default_sel()
             except Exception:
                 pass
