@@ -701,11 +701,22 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
       signature) — by the tool's own explicit design comment, a dedup
       comment "must never re-trigger the Phase 2 fix-attempt agent...
       re-running the agent against an issue it may already be mid-attempt
-      on would be a real race, not just a redundant one." This means the
-      fix-attempt agent is dispatched at most once per **currently-open**
-      tracking issue for a signature — there is no current path to a 2nd
-      attempt racing an in-progress one, so no counter is needed for that
-      specific race. **Real review finding (unrelated to this PR's own
+      on would be a real race, not just a redundant one." **Real review
+      finding: this is NOT actually an at-most-once guarantee.** Two
+      concurrent watchdog runs can both observe "no open issue" before
+      either's own `gh issue create` completes (a genuine TOCTOU race,
+      `_existing_issue` -> `_file_issue` has no lock between the read and
+      the write), and — see below — closing the tracking issue during an
+      in-flight attempt also enables a new dispatch. The only guarantee
+      that actually holds is the narrower one: a SEQUENTIAL recurrence
+      that finds the SAME still-open issue is correctly deduped to a
+      comment, never a re-dispatch. Concurrent races and closed-issue
+      recurrence are both real, unresolved paths to more than one
+      dispatch for the same signature — this item stays open, not
+      resolved, pending a decision on whether/how to close either gap
+      (e.g. a locking mechanism for the concurrent case, and a decision
+      on the closed-issue case per the finding below).
+      **Also found (unrelated to this PR's own
       diff, in unchanged watchdog code, flagged during review anyway per
       this repo's own "track it or fix it" convention):**
       `_existing_issue`'s dedup search is scoped to `--state open` only
@@ -747,9 +758,10 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
       dev-branch-release-pipeline's own Phase 6 (e.g., N clean cloud-agent
       fixes with zero reverts before considering any scope widening).
       **Defined (2026-09-27):** treat the current guardrail set (draft-PR-
-      only, single-dispatch-per-open-tracking-issue (not per signature
-      permanently — a closed tracking issue's signature can still
-      re-dispatch on recurrence, per the open follow-up above),
+      only, dedup-based dispatch limiting (not a hard at-most-once
+      guarantee — a genuine TOCTOU race between concurrent watchdog runs,
+      or a closed tracking issue's signature recurring, can both still
+      produce more than one dispatch, per the open follow-ups above),
       workflow-files/version-fields
       permanently out of scope, mandatory human review before merge) as
       fixed until **10 genuinely agent-authored fix-attempt PRs have
