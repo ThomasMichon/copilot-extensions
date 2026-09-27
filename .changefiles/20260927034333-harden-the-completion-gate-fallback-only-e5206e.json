@@ -1,0 +1,9 @@
+{
+  "comment": "Harden the completion-gate fallback: only two acceptable terminal outcomes for an effort-bound worktree/session (effort Done, or a handoff), and always circle back to the effort README after any tied PR merges before reporting status.",
+  "changes": [
+    {
+      "plugin": "efforts",
+      "type": "patch"
+    }
+  ]
+}
