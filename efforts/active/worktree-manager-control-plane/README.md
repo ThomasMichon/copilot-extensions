@@ -481,11 +481,20 @@ PR [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
       later cutover. Additive only: `runner.py` still uses the old
       compatibility path until Step 4. See
       [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
-- [ ] **Step 3 — reimplement Group B's Picker-owned lifecycle sweeps directly
-      in worktree-manager, additive first.** Port the process-lifecycle logic
-      that belongs to the Picker's own process boundary now that cross-repo
-      porting friction is lower, while explicitly coordinating the handoff so
-      engine sweepers do not keep mutating the same Manager-owned state. See
+- [x] **Step 3 — reimplement Group B's Picker-owned lifecycle sweeps directly
+      in worktree-manager, additive first.** Landed in PR
+      [#4323](https://github.com/ThomasMichon/copilot-extensions/pull/4323):
+      added `worktree_manager.production_picker.housekeeping` and
+      `monitor_roots` as the Manager-owned home for the Picker's lifecycle
+      sweeps / monitor-root glue, recorded the Step 4 coordination boundary
+      explicitly (Manager-owned mux-session names from `mux-mapping.json`,
+      Manager-owned worktree ids from that registry plus `execution_leg.provider
+      == ahp`, Manager-owned launcher shells from the relocated
+      `worktree-manager/bin/launch-session.*` / `pane-wrapper.*` path), and
+      proved parity with the current engine behavior through new Worktree
+      Manager tests. Kept additive-only per plan: `runner.py` still uses the
+      compatibility path and agent-worktrees' live sweeper behavior is
+      unchanged until Step 4. See
       [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
 - [ ] **Step 4 — cut `runner.py`, `pivot_manifest.py`, and `update_stage.py`
       over to the new seams.** After Steps 1-3, Groups A/B stop using
@@ -785,6 +794,35 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-09-27** — Landed Phase 3d Step 3, PR
+  [#4323](https://github.com/ThomasMichon/copilot-extensions/pull/4323).
+  Ported Group B's Picker-owned lifecycle housekeeping into Worktree Manager
+  without cutting the live runner over yet: added
+  `worktree_manager.production_picker.housekeeping` for the orphan-mux reap
+  plus the managed/launcher/finished lifecycle-boundary sweep wrappers, and
+  added `worktree_manager.production_picker.monitor_roots` as the Manager-owned
+  home for Picker heartbeat roots while preserving the existing engine-consumed
+  `status-monitor-roots.d/picker-*.json` schema. Nailed the Step 4 ownership
+  split up front instead of deferring it: Manager-owned mux-session names come
+  from Worktree Manager's live `mux-mapping.json` registry, Manager-owned
+  worktree rows are that registry's ids plus rows whose resolved
+  `execution_leg.provider` is `ahp`, and Manager-owned launcher shells are the
+  orphan-shell candidates whose positive launcher signature resolves to the
+  relocated `worktree-manager/bin/launch-session.*` / `pane-wrapper.*` path.
+  Explicitly kept this slice additive-only: `production_picker.runner` still
+  uses the old compatibility path and agent-worktrees' live sweeper behavior is
+  unchanged until Step 4 activates the Manager-owned lane. Validation:
+  targeted new Group B parity tests green; full `worktree-manager` suite
+  (excluding the two standing hangs `test_data_ssh_sources.py` /
+  `test_launch_trace.py`) matched the current unrelated baseline at `1274
+  passed, 2 skipped, 13 failed`; full `agent-worktrees` suite matched the
+  current unrelated baseline at `5733 passed, 50 skipped, 7 failed`; `ruff
+  check --select F,E9` passed for both packages; `python
+  tools/check-install-contract.py` and `python tools/check-version-consistency.py`
+  passed; `python tools/check-version-bump.py` still reports the same
+  pre-existing unrelated unbumped-plugin drift on `delegation-guidance`,
+  `efforts`, `harness-knowledge`, and `wsl-setup`.
 
 - **2026-09-27** — Claiming Phase 3d Step 3 ("Reimplement Group B's
   Picker-owned lifecycle sweeps directly in worktree-manager, additive
