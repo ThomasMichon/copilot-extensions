@@ -575,8 +575,12 @@ class PickerScreenRuntimeMixin:
                     self.refresh()
                     return
                 payload_to_apply = self._release_setup_payload(epoch) or payload
-                self._invalidate_setup_reload_caches()
-                self._apply_setup_payload(payload_to_apply)
+                try:
+                    self._invalidate_setup_reload_caches()
+                    self._apply_setup_payload(payload_to_apply)
+                except Exception:
+                    self._dispose_setup_payload(payload_to_apply)
+                    raise
                 self._setup_applied_epoch = epoch
                 self.refresh()
 

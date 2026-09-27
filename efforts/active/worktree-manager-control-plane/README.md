@@ -749,11 +749,15 @@ claiming discipline alone.
   disposal paths in the new test file. The last follow-up was ownership
   transfer itself: applying a newer live payload now cancels the previously
   owned loader before replacing `self.loader`, with a dedicated regression
-  test so repeated live reloads cannot accumulate orphaned loaders. Validation:
+  test so repeated live reloads cannot accumulate orphaned loaders. The final
+  review round also closed the apply-failure ownership gap by disposing a
+  collected payload if `_invalidate_setup_reload_caches()` or
+  `_apply_setup_payload()` raises after the payload has already been popped out
+  of the pending map. Validation:
   targeted
   `tests/production_picker/test_setup_reload_epoch.py` +
   `test_picker_first_paint.py` green; full `worktree-manager` suite matched
-  the machine's known baseline at `1471 passed, 7 skipped, 13 failed`
+  the machine's known baseline at `1472 passed, 7 skipped, 13 failed`
   (unchanged: 3 unrelated `test_data_ssh_sources.py` failures plus 10
   Windows symlink-privilege failures).
 

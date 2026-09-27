@@ -217,6 +217,55 @@ def test_setup_reload_unmount_disposes_payload_if_marshalled_callback_never_runs
     assert screen.applied == []
 
 
+def test_setup_reload_disposes_payload_when_apply_raises():
+    disposed = threading.Event()
+    raised = threading.Event()
+
+    class _Loader:
+        def cancel(self):
+            disposed.set()
+
+    class _App:
+        def call_from_thread(self, fn):
+            try:
+                fn()
+            except RuntimeError:
+                raised.set()
+
+    class _Screen(PickerScreenRuntimeMixin):
+        def __init__(self):
+            self.app = _App()
+            self._bg_cancel = threading.Event()
+            self._setup_epoch = 0
+            self._setup_applied_epoch = 0
+            self._setup_failed_epoch = 0
+            self._pending_setup_payloads = {}
+            self._setup_payloads_lock = threading.Lock()
+
+        def _prime_setup_reload(self):
+            return None
+
+        def _collect_setup_payload(self):
+            return replace(_payload("live"), loader=_Loader())
+
+        def _invalidate_setup_reload_caches(self):
+            return None
+
+        def _apply_setup_payload(self, payload):
+            raise RuntimeError("apply blew up")
+
+        def _apply_setup_failure(self, epoch, err):
+            raise AssertionError(f"unexpected failure path: {epoch} {err}")
+
+        def refresh(self):
+            return None
+
+    screen = _Screen()
+    screen._start_setup_reload_worker()
+    assert raised.wait(timeout=5)
+    assert disposed.wait(timeout=5)
+
+
 def test_apply_setup_payload_cancels_replaced_loader():
     disposed = threading.Event()
 
