@@ -851,6 +851,10 @@ reviewed-plan PR per the standard effort review gate before Phase 1 begins._
   illustrative `session_count` values to the "management memo" roster
   (roughly correlated with age/turn_count, never exceeding it), so the
   demo render now shows a believable spread (`1/6`, `2/14`, `5/52`, etc.).
+  Filed the resulting SVG+PNG to the operator's OneDrive in a new dated
+  folder (`2026/09.26 Worktrees Pivot UX Overhaul Phase 6/`, per their
+  organization profile's `MM.DD Topic Name` convention), alongside a short
+  README index, distinct from the Phase 1 baseline set.
 - Added a **"Developing a pivot: render early, render often"** section to
   `worktree-manager/README.md`'s Production Picker transplant docs (per
   operator request): any pivot change touching columns/derived fields/
