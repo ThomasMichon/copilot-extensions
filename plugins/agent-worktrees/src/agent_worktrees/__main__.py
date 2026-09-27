@@ -4899,25 +4899,20 @@ def reap_orphan_mux_sessions(
 
         {"available": bool,                  # False when no mux is installed
          "reaped": ["<id>", ...],
-         "skipped": [{"id": "<id>",
-                      "reason": "attached|system|active|busy|activity-unknown"}, ...],
+         "skipped": [{"id": "<id>", "reason": "attached|system|active|busy|activity-unknown"}, ...],
          "errors":  [{"id": "<id>", "reason": "..."}, ...]}
     """
     all_sessions = sessions._list_mux_sessions()
     if all_sessions is None:
         return {"available": False, "reaped": [], "skipped": [], "errors": []}
-
     from . import managed_mux_registry
-
     now = time.time() if now is None else now
     activity_by_name = sessions._mux_session_activity()
     tracking_path = cfg.tracking_dir()
     by_id: dict[str, tracking.WorktreeRecord] = {
         rec.worktree_id: rec for rec in tracking.list_records(tracking_path)
     }
-
-    # One reverse map, not a scan per session: the sweep is O(sessions x
-    # records) otherwise.
+    # One reverse map, not a scan per session: the sweep is O(sessions x records) otherwise.
     by_session = sessions.mux_session_index(by_id)
 
     reaped: list[str] = []
