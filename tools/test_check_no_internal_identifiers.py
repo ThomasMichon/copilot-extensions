@@ -71,6 +71,7 @@ def _run(repo: Path, *extra: str) -> subprocess.CompletedProcess[str]:
         cwd=repo,
         capture_output=True,
         text=True,
+        check=False,
         env={**_base_env(), "COPILOT_EXTENSIONS_FORBIDDEN_IDS": LEAK},
     )
 
@@ -155,6 +156,13 @@ def test_ci_loader_splits_first_pipe_only(repo: Path):
     ]
 
 
+def test_load_paths_file_preserves_filename_whitespace(repo: Path):
+    module = _load_module(repo)
+    paths_file = repo / "paths.txt"
+    paths_file.write_text(" leading space.txt \nplain.txt\n", encoding="utf-8")
+    assert module._load_paths_file(paths_file) == [" leading space.txt ", "plain.txt"]
+
+
 def test_json_out_writes_hashed_findings_without_raw_token_or_reason(repo: Path, tmp_path: Path):
     _write(repo, "plugins/new/clean.txt", f"oops {CI_TOKEN} sneaked in\n")
     _git(repo, "add", "-A")
@@ -170,6 +178,7 @@ def test_json_out_writes_hashed_findings_without_raw_token_or_reason(repo: Path,
         cwd=repo,
         capture_output=True,
         text=True,
+        check=False,
         env={
             **_base_env(),
             "COPILOT_EXTENSIONS_FORBIDDEN_IDS": LEAK,
@@ -193,6 +202,56 @@ def test_json_out_writes_hashed_findings_without_raw_token_or_reason(repo: Path,
     ]
 
 
+def test_git_ref_scan_reads_passive_pr_head_data_and_trusted_details(repo: Path, tmp_path: Path):
+    _write(repo, "plugins/new/clean.txt", f"oops {CI_TOKEN} sneaked in\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "introduce ci leak")
+    _write(repo, "plugins/new/clean.txt", "working tree cleaned after commit\n")
+    paths_file = tmp_path / "paths.txt"
+    json_out = tmp_path / "findings.json"
+    details_out = tmp_path / "trusted-details.json"
+    paths_file.write_text("plugins/new/clean.txt\n", encoding="utf-8")
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(repo / "tools" / SCRIPT.name),
+            "--ci",
+            "--paths-file",
+            str(paths_file),
+            "--git-ref",
+            "HEAD",
+            "--json-out",
+            str(json_out),
+            "--trusted-details-json-out",
+            str(details_out),
+        ],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **_base_env(),
+            "COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI": f"{CI_TOKEN}|{CI_REASON}",
+        },
+    )
+
+    assert result.returncode == 1
+    assert result.stdout.strip() == (
+        "1 forbidden identifier(s) found -- see PR review comments for details."
+    )
+    assert CI_TOKEN not in json_out.read_text(encoding="utf-8")
+    assert CI_REASON not in json_out.read_text(encoding="utf-8")
+    assert json.loads(details_out.read_text(encoding="utf-8")) == [
+        {
+            "file": "plugins/new/clean.txt",
+            "line": 1,
+            "col": 6,
+            "identifier": CI_TOKEN,
+            "reason": CI_REASON,
+        }
+    ]
+
+
 def test_ci_mode_stdout_is_count_only(repo: Path):
     _write(repo, "plugins/new/clean.txt", f"oops {CI_TOKEN} sneaked in\n")
     _git(repo, "add", "-A")
@@ -202,6 +261,7 @@ def test_ci_mode_stdout_is_count_only(repo: Path):
         cwd=repo,
         capture_output=True,
         text=True,
+        check=False,
         env={
             **_base_env(),
             "COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI": f"{CI_TOKEN}|{CI_REASON}",
@@ -234,6 +294,12 @@ def test_scan_tracks_first_column_for_multi_occurrence_line(repo: Path):
             reason=None,
         )
     ]
+
+
+def test_all_and_paths_file_are_mutually_exclusive(repo: Path):
+    result = _run(repo, "--all", "--paths-file", "ignored.txt")
+    assert result.returncode == 2
+    assert "mutually exclusive" in result.stderr
 
 
 def _load_module(repo: Path):

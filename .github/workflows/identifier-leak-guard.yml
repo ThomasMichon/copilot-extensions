@@ -1,0 +1,294 @@
+name: Identifier leak guard
+
+# GitHub's documented fork-safe pattern for privileged PR follow-up is:
+#   (1) run untrusted build/test work under `pull_request`, then
+#   (2) react from a separate privileged `workflow_run` workflow that loads its
+#       own YAML from the default branch and may use secrets/write APIs.
+# See:
+#   - docs.github.com/actions/.../events-that-trigger-workflows#workflow_run
+#   - securitylab.github.com/resources/github-actions-preventing-pwn-requests/
+#
+# This workflow deliberately NEVER checks out the PR head for execution. It
+# checks out only the trusted default-branch revision of this workflow/tooling,
+# then reads the PR head's changed file contents as inert git data (`git show`)
+# before running the trusted scanner and reporting a custom Check Run on the PR
+# head SHA.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+  checks: write
+
+jobs:
+  scan-and-report:
+    name: scan + report
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion != 'cancelled' &&
+      github.event.workflow_run.pull_requests[0].number
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - id: checkout
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          fetch-depth: 1
+
+      - id: setup-python
+        uses: actions/setup-python@v5
+        continue-on-error: true
+        with:
+          python-version: "3.12"
+
+      - id: pr
+        name: Resolve PR metadata
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          EVENT_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          base_ref=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.base.ref')
+          current_head_sha=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.head.sha')
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "base_ref=$base_ref" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$current_head_sha" >> "$GITHUB_OUTPUT"
+          if [ "$current_head_sha" != "$EVENT_HEAD_SHA" ]; then
+            echo "::notice::PR #$PR_NUMBER moved on to $current_head_sha after CI run ${{ github.event.workflow_run.id }} for $EVENT_HEAD_SHA; skipping stale reporting."
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "stale=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - id: fetch-pr-data
+        name: Fetch PR head as inert data only
+        continue-on-error: true
+        if: steps.pr.outputs.stale != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+        run: |
+          gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" \
+            --jq '.[] | select(.status != "removed") | .filename' \
+            > identifier-guard-paths.txt
+          git fetch --no-tags --depth=1 origin \
+            "$HEAD_SHA:refs/remotes/origin/pr-head/$PR_NUMBER"
+
+      - id: init-files
+        name: Initialize report files
+        continue-on-error: true
+        if: steps.pr.outputs.stale != 'true'
+        run: |
+          printf '[]\n' > identifier-guard-findings.json
+          printf '[]\n' > identifier-guard-details.json
+
+      - id: denylist
+        name: Load trusted denylist
+        continue-on-error: true
+        if: steps.pr.outputs.stale != 'true'
+        env:
+          RAW_FACILITY: ${{ secrets.FORBIDDEN_IDS_FACILITY }}
+          RAW_WORK: ${{ secrets.FORBIDDEN_IDS_WORK }}
+        run: |
+          joined=""
+          if [ -n "$RAW_FACILITY" ]; then
+            joined="$RAW_FACILITY"
+          fi
+          if [ -n "$RAW_WORK" ]; then
+            if [ -n "$joined" ]; then
+              joined="${joined}"$'\n'
+            fi
+            joined="${joined}${RAW_WORK}"
+          fi
+          {
+            echo "COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI<<__CI_IDS__"
+            printf '%s\n' "$joined"
+            echo "__CI_IDS__"
+          } >> "$GITHUB_ENV"
+          if [ -n "$joined" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - id: scan
+        name: Run trusted scanner
+        continue-on-error: true
+        if: steps.pr.outputs.stale != 'true'
+        run: >-
+          python tools/check-no-internal-identifiers.py
+          --ci
+          --paths-file identifier-guard-paths.txt
+          --git-ref refs/remotes/origin/pr-head/${{ steps.pr.outputs.pr_number }}
+          --json-out identifier-guard-findings.json
+          --trusted-details-json-out identifier-guard-details.json
+
+      - name: Publish Check Run and PR feedback
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          CHECK_NAME: identifier leak guard
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number || github.event.workflow_run.pull_requests[0].number }}
+          PR_HEAD_SHA: ${{ steps.pr.outputs.head_sha || github.event.workflow_run.head_sha }}
+          FINDINGS_PATH: identifier-guard-findings.json
+          DETAILS_PATH: identifier-guard-details.json
+          PATHS_PATH: identifier-guard-paths.txt
+          STALE: ${{ steps.pr.outputs.stale }}
+          DENYLIST_CONFIGURED: ${{ steps.denylist.outputs.configured }}
+          CHECKOUT_OUTCOME: ${{ steps.checkout.outcome }}
+          SETUP_PYTHON_OUTCOME: ${{ steps.setup-python.outcome }}
+          PR_OUTCOME: ${{ steps.pr.outcome }}
+          INIT_FILES_OUTCOME: ${{ steps.init-files.outcome }}
+          FETCH_PR_DATA_OUTCOME: ${{ steps.fetch-pr-data.outcome }}
+          DENYLIST_OUTCOME: ${{ steps.denylist.outcome }}
+          SCAN_OUTCOME: ${{ steps.scan.outcome }}
+        with:
+          script: |
+            const fs = require("fs");
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const checkName = process.env.CHECK_NAME;
+            const prNumber = Number(process.env.PR_NUMBER);
+            const headSha = process.env.PR_HEAD_SHA;
+            const stale = process.env.STALE === "true";
+            const configured = process.env.DENYLIST_CONFIGURED === "true";
+            const scanOutcome = process.env.SCAN_OUTCOME || "skipped";
+            const readJson = (path) => {
+              if (!fs.existsSync(path)) {
+                return [];
+              }
+              return JSON.parse(fs.readFileSync(path, "utf8"));
+            };
+            const findings = readJson(process.env.FINDINGS_PATH);
+            const details = readJson(process.env.DETAILS_PATH);
+            const scannedPaths = fs.existsSync(process.env.PATHS_PATH)
+              ? fs
+                  .readFileSync(process.env.PATHS_PATH, "utf8")
+                  .split(/\r?\n/)
+                  .filter((line) => line.length > 0)
+              : [];
+
+            if (stale) {
+              core.notice(`Skipping stale reporting for PR #${prNumber}.`);
+              return;
+            }
+
+            let conclusion = "success";
+            let title = "Identifier leak guard passed";
+            let summary = `Scanned ${scannedPaths.length} changed file(s) on PR head ${headSha}.`;
+            let text = "";
+            const failingSteps = [
+              ["trusted checkout", process.env.CHECKOUT_OUTCOME],
+              ["python setup", process.env.SETUP_PYTHON_OUTCOME],
+              ["PR metadata resolution", process.env.PR_OUTCOME],
+              ["report-file initialization", process.env.INIT_FILES_OUTCOME],
+              ["PR data fetch", process.env.FETCH_PR_DATA_OUTCOME],
+              ["denylist load", process.env.DENYLIST_OUTCOME],
+            ]
+              .filter(([, outcome]) => outcome && outcome !== "success" && outcome !== "skipped")
+              .map(([label]) => label);
+
+            if (!configured) {
+              conclusion = "failure";
+              title = "Identifier leak guard misconfigured";
+              summary =
+                "FORBIDDEN_IDS_FACILITY / FORBIDDEN_IDS_WORK repository secrets are not configured, so the trusted scan cannot enforce the identifier denylist yet.";
+            } else if (details.length > 0) {
+              conclusion = "failure";
+              title = `${details.length} forbidden identifier(s) found`;
+              summary =
+                "Trusted scan found forbidden identifiers in the PR head's changed file contents.";
+              const rendered = details.slice(0, 50).map((item) => {
+                const reason = item.reason ? ` — ${item.reason}` : "";
+                return `- ${item.file}:${item.line}:${item.col} — \`${item.identifier}\`${reason}`;
+              });
+              if (details.length > rendered.length) {
+                rendered.push(`- ...and ${details.length - rendered.length} more.`);
+              }
+              text = rendered.join("\n");
+            } else if (failingSteps.length > 0 || scanOutcome !== "success") {
+              conclusion = "failure";
+              title = "Identifier leak guard errored";
+              summary =
+                "The trusted scan step failed before it could produce findings. Inspect this workflow run's logs.";
+              const detailsList = [
+                ...failingSteps,
+                ...(scanOutcome !== "success" ? ["trusted scanner"] : []),
+              ];
+              text = `Failing step(s): ${detailsList.join(", ")}.`;
+            } else {
+              text = findings.length
+                ? `Redacted findings artifact contains ${findings.length} hashed entr${findings.length === 1 ? "y" : "ies"}.`
+                : "No forbidden identifiers were found.";
+            }
+
+            await github.rest.checks.create({
+              owner,
+              repo,
+              name: checkName,
+              head_sha: headSha,
+              status: "completed",
+              conclusion,
+              output: {
+                title,
+                summary,
+                text,
+              },
+            });
+
+            if (conclusion !== "failure" || details.length === 0) {
+              return;
+            }
+
+            const marker = `<!-- identifier-leak-guard:${headSha} -->`;
+            const lines = details.map((item) => {
+              const reason = item.reason ? ` — ${item.reason}` : "";
+              return `- \`${item.file}:${item.line}:${item.col}\` — \`${item.identifier}\`${reason}`;
+            });
+            const body = [
+              marker,
+              "Identifier leak guard found forbidden identifiers in this PR head:",
+              "",
+              ...lines,
+              "",
+              "Please replace each matched value with a generic/public-safe equivalent.",
+            ].join("\n");
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+            const existing = comments.find(
+              (comment) =>
+                comment.user?.login === "github-actions[bot]" &&
+                typeof comment.body === "string" &&
+                comment.body.includes(marker),
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: prNumber,
+                body,
+              });
+            }
