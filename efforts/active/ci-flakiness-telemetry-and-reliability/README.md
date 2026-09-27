@@ -249,43 +249,38 @@ find the noisiest and blocking issues, and fix them"
   -- a future refinement could correlate each occurrence's run against
   that PR's own eventual merge state, but that's out of scope for this
   pass.
-  **Genuine remaining code-level candidate, not yet investigated:**
+  **Genuine remaining code-level candidate, investigation ongoing:**
   `plugins/agent-logger/tests/test_install_signed_python_probe.py::
   test_missing_newest_candidate_does_not_abort_probe[pwsh]` (19
-  occurrences, 122 blocked `dev`-push runs -- the highest blocking impact
-  in the whole ranking) is a genuine Windows-runner PowerShell probe-script
-  test, unrelated to any PR's own doc content -- this is the next concrete
-  Phase 3 target and needs the same treatment #7715 got (direct
-  reproduction and root-cause before attempting a fix, not a guess from
-  reading the script).
-  **2026-09-27 investigation started (not concluded):** 20/20 local runs
+  occurrences, 122 blocked `dev`-push runs in the original 7-day-lookback
+  ranking -- the highest blocking impact in that ranking) looked like a
+  genuine Windows-runner probe-script bug, unrelated to any PR's own doc
+  content.
+  **2026-09-27 investigation, corrected after review:** 20/20 local runs
   via `tools/run-plugin-tests.py agent-logger` (Windows dev box) stayed
-  green -- this one does NOT reproduce readily on a quiet, uncontended local
-  machine the way #7715 did (consistent with it being a real CI-runner
-  resource-contention issue, not a pure logic race). Pulled a real historical
-  failure excerpt directly from PR-triggered `ci.yml` run 36302713272
-  (event `pull_request`, head branch
-  `pr/agent-logger-make-schema-v3-s-sync-local-1212`, commit `60a62be1`,
-  2026-09-27) instead of guessing -- **not** a `dev`-push run, so this
-  particular occurrence does not itself carry blocking impact by this
-  effort's own definition; it's cited purely for its failure content
-  (the exact assertion), not as a blocking-queue data point:
-  ```
-  AssertionError: assert 'RESULT:' == 'RESULT:/tmp/...python312.exe'
-  - RESULT:/tmp/ce-agent-logger-okc7q77h/pytest/group-1/test_missing_newest_candidate_1/python312.exe
-  + RESULT:
-  ```
-  The probe returned **empty** (as if no candidate existed at all) instead
-  of falling through to the stubbed 3.12 candidate -- note the temp path is
-  POSIX-style (`/tmp/...`) even though this test's own `skipif` requires
-  `os.name == "nt"` and its whole premise (`py.cmd`, PowerShell
-  `Get-AuthenticodeSignature`) is Windows-specific; reconciling that
-  apparent contradiction (a container/bash-shell path substitution on the
-  `windows-latest` runner? a `TMP`/`TEMP` env leak from an earlier workflow
-  step? `tools/run-plugin-tests.py`'s own `--basetemp` customization
-  behaving unexpectedly on that specific runner?) is the necessary next
-  step before touching the probe script itself -- not yet resolved. Handed
-  off at this point rather than guessing further without evidence.
+  green. A first pass here cited a historical failure excerpt from
+  PR-triggered `ci.yml` run 36302713272 (commit `60a62be1`) as open
+  evidence -- **that was wrong, caught by review**: `60a62be1` is the
+  commit *immediately before* PR #4239 (`e305b70c3`, merged 9 minutes
+  later the same day, 2026-09-27), which added exactly the
+  `os.name != "nt"` skip guard this test now carries. The cited failure
+  (a POSIX `/tmp/...` path, an Ubuntu job) is simply the original,
+  already-fixed bug #4239 fixed -- not new evidence of a still-open
+  problem. Searched failed PR-triggered `ci.yml` runs created after
+  #4239's merge timestamp (12 found in the available run-history window)
+  for any matching `agent-logger` job failure: **none found.** This
+  signature's Phase 2 ranking occurrences are very likely entirely
+  historical noise predating its own fix (#4239), not a currently-open
+  Phase 3 item -- **not confirmed conclusively**, since the check only
+  covered the runs available via the API at the time, not a fresh
+  telemetry `refresh` scoped to start strictly after #4239's merge. The
+  next step, if this is picked up again, is exactly that: re-run
+  `tools/ci_telemetry.py refresh` with a lookback window starting after
+  2026-09-27 (this effort's own PR #4296/#4320 already establish the
+  pattern) and confirm the signature's occurrence count is zero going
+  forward. If it recurs even once post-fix, that would be genuinely new
+  evidence worth investigating from scratch, this time on a run created
+  after the guard existed.
 
 ## Validation Plan
 
@@ -313,6 +308,29 @@ _Pending — Phase 3 findings (which fixes land, and in what order) will
 determine whether this section needs anything beyond the Plan above._
 
 ## Journal
+
+### 2026-09-27 — Signed-python-probe investigation corrected after review
+- A Copilot review on the PR carrying the prior entry (below) correctly
+  caught that the "investigation evidence" cited there was stale: the
+  failing run's commit (`60a62be1`) is the one immediately *before* PR
+  #4239 (`e305b70c3`, merged 9 minutes later the same day) added the
+  `os.name != "nt"` skip guard this test now carries -- the cited POSIX
+  `/tmp/...` path and empty-probe-result failure is simply the original
+  bug #4239 already fixed, not new evidence of a still-open problem.
+- Searched failed PR-triggered `ci.yml` runs created after #4239's merge
+  timestamp for a matching `agent-logger` job failure: none found among
+  the runs available via the API at check time. Not a conclusive proof of
+  zero recurrence (the check didn't cover the full historical window a
+  fresh telemetry `refresh` would), but no evidence found of the bug
+  recurring since its own fix landed.
+- Net effect: this signature is very likely NOT a currently-open Phase 3
+  item at all -- its Phase 2 ranking occurrences were most likely entirely
+  historical, predating and then resolved by #4239. The effort's own
+  Journal/Plan sections above and below have been corrected to stop
+  pointing at it as an active next step. If picked up again: re-run
+  `tools/ci_telemetry.py refresh` with a lookback window starting strictly
+  after 2026-09-27 and confirm the occurrence count is zero going forward;
+  only a genuine post-fix recurrence would be worth a fresh investigation.
 
 ### 2026-09-27 — Phase 2 ranking refinement: content-governance noise vs. real bugs
 - Directly verified two of the Phase 2 ranking's top entries
@@ -346,8 +364,13 @@ determine whether this section needs anything beyond the Plan above._
   (`agent-dispatch`, `agent-pull-requests`, `budget-guidance`) to stay in
   sync.
 - Next: work down the Phase 2 ranking (identifier-leak-guard noise is
-  already owned by #3923; the marketplace-isolation test and the
-  signed-python-probe test are the next concrete Phase 3 candidates).
+  already owned by #3923). **Superseded (2026-09-27):** see the later
+  "Phase 2 ranking refinement" and "signed-python-probe" Journal entries
+  below -- the marketplace-isolation test turned out not to be a Phase 3
+  candidate at all (a working guardrail, not a bug), and the
+  signed-python-probe test's cited evidence turned out to predate its own
+  already-merged fix (#4239); neither is a confirmed open Phase 3 item as
+  of this entry.
 
 ### 2026-09-27 — Phases 1/2 built and validated live
 - Landed `tools/ci_telemetry.py` (`refresh`/`report`) + 21 new unit tests
