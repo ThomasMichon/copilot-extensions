@@ -276,8 +276,10 @@ all (`code_model: mount` remains unimplemented) and no capability for a
 containerized `systemd --user` instance (its own maintenance timers need
 `CAP_SYS_ADMIN` + a writable `/sys/fs/cgroup`, neither granted by `trusted`'s
 defaults). Two opt-in fields close that gap -- both are rejected on a
-`restricted` fleet (`validate_restricted()` raises), since a host bind-mount
-and `CAP_SYS_ADMIN` both defeat the restricted containment contract:
+`restricted` fleet, or alongside `devcontainer_path` (`validate_restricted()`
+raises), since a host bind-mount and `CAP_SYS_ADMIN` both defeat the
+restricted containment contract, and a devcontainer-backed fleet's launch
+path never consumes these fields at all:
 
 ```yaml
 fleets:
@@ -286,30 +288,37 @@ fleets:
     security_profile: trusted
     workspace_folder: /workspace/myrepo
     exec_user: node
-    host_workspace_path: /srv/agent-containers/workspaces/self-maintaining-worker-1
-    host_home_path: /srv/agent-containers/home/self-maintaining-worker-1
+    size: 2
+    host_workspace_path: /srv/agent-containers/workspaces/self-maintaining-worker
+    host_home_path: /srv/agent-containers/home/self-maintaining-worker
     home_folder: /home/node        # the image's own HOME for exec_user -- not
                                     # probed automatically for trusted fleets,
                                     # so it must be declared alongside
-                                    # host_home_path
+                                    # host_home_path (both or neither -- an
+                                    # incomplete pair is rejected)
     systemd_capable: true
 ```
 
-`host_workspace_path` bind-mounts onto `workspace_folder`; `host_home_path`
-bind-mounts onto `home_folder` (both must be set together for the home mount).
-`systemd_capable: true` adds `--cap-add SYS_ADMIN`, writable/executable
-`/run` + `/run/lock` tmpfs mounts, an allocated tty, and `container=docker`,
-then launches the container via a wrapper that remounts `/sys/fs/cgroup`
-read-write before `exec`'ing `/lib/systemd/systemd` as PID 1 (in place of the
-historical `sleep infinity` placeholder) -- Docker's default `/sys/fs/cgroup`
-mount is read-only even under `trusted`, and a raw host bind-mount of it does
-NOT work (a cgroup-namespace path mismatch produces "No such file or
-directory"); an in-container remount at launch is the fix that actually works.
-**The image itself must provide `systemd`, `systemd-sysv`, and
-`dbus-user-session`** -- this plugin only wires the launch, it does not
-install systemd into the image. Once running, `loginctl enable-linger <user>`
-plus that user's own `systemctl --user ...` registers and runs real
-`.timer`/`.service` units exactly as on a normal machine.
+`host_workspace_path`/`host_home_path` are **parent** directories -- each
+fleet member mounts its own subdirectory, keyed by its unique container name
+(e.g. `self-maintaining-worker-1`, `self-maintaining-worker-2` for `size: 2`
+above), onto `workspace_folder`/`home_folder` respectively, so members of a
+multi-container fleet never collide on the same host path.
+`systemd_capable: true` (a real boolean only -- a quoted `"false"` or other
+non-boolean value is rejected rather than coerced) adds `--cap-add
+SYS_ADMIN`, writable/executable `/run` + `/run/lock` tmpfs mounts, an
+allocated tty, and `container=docker`, then launches the container via a
+wrapper that remounts `/sys/fs/cgroup` read-write before `exec`'ing
+`/lib/systemd/systemd` as PID 1 (in place of the historical `sleep infinity`
+placeholder) -- Docker's default `/sys/fs/cgroup` mount is read-only even
+under `trusted`, and a raw host bind-mount of it does NOT work (a
+cgroup-namespace path mismatch produces "No such file or directory"); an
+in-container remount at launch is the fix that actually works. **The image
+itself must provide `systemd`, `systemd-sysv`, and `dbus-user-session`** --
+this plugin only wires the launch, it does not install systemd into the
+image. Once running, `loginctl enable-linger <user>` plus that user's own
+`systemctl --user ...` registers and runs real `.timer`/`.service` units
+exactly as on a normal machine.
 
 Dispatch is defined only for containers with an exact fleet entry in the active
 configuration. An unmanaged/discovered container is visible for inventory but

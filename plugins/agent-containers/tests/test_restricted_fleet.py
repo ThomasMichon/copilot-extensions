@@ -209,8 +209,8 @@ def test_trusted_image_run_wires_host_mounts_and_systemd_capability(monkeypatch)
     fleet = FleetConfig(
         image="example/agent:latest",
         security_profile="trusted",
-        host_workspace_path="/mnt/data/workspaces/example-1",
-        host_home_path="/mnt/data/home/example-1",
+        host_workspace_path="/mnt/data/workspaces",
+        host_home_path="/mnt/data/home",
         home_folder="/home/node",
         systemd_capable=True,
     )
@@ -227,6 +227,9 @@ def test_trusted_image_run_wires_host_mounts_and_systemd_capability(monkeypatch)
     run = calls[0]
     assert "-v" in run
     mounts = [run[i + 1] for i, value in enumerate(run) if value == "-v"]
+    # Each fleet member mounts its OWN subdirectory (keyed by its container
+    # name) under the configured parent path -- never the bare parent path
+    # directly, which would collide across a size > 1 fleet's members.
     assert "/mnt/data/workspaces/example-1:/workspace/example" in mounts
     assert "/mnt/data/home/example-1:/home/node" in mounts
     assert run[run.index("--cap-add") + 1] == "SYS_ADMIN"
@@ -267,6 +270,34 @@ def test_trusted_image_run_without_systemd_capable_keeps_sleep_infinity(monkeypa
     assert run[-3:] == ["example/agent:latest", "sleep", "infinity"]
     assert "-v" not in run
     assert "--cap-add" not in run
+
+
+def test_trusted_image_run_namespaces_host_paths_per_fleet_member(monkeypatch):
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        fleet_mod,
+        "_docker",
+        lambda args, timeout=30: calls.append(args) or _ok("container-id\n"),
+    )
+    fleet = FleetConfig(
+        image="example/agent:latest",
+        security_profile="trusted",
+        host_workspace_path="/mnt/data/workspaces",
+    )
+
+    fleet_mod._image_run(
+        "example", fleet, "example-1",
+        workspace_folder="/workspace/example", exec_user="node",
+    )
+    fleet_mod._image_run(
+        "example", fleet, "example-2",
+        workspace_folder="/workspace/example", exec_user="node",
+    )
+
+    mounts_1 = [calls[0][i + 1] for i, v in enumerate(calls[0]) if v == "-v"]
+    mounts_2 = [calls[1][i + 1] for i, v in enumerate(calls[1]) if v == "-v"]
+    assert mounts_1 == ["/mnt/data/workspaces/example-1:/workspace/example"]
+    assert mounts_2 == ["/mnt/data/workspaces/example-2:/workspace/example"]
 
 
 def test_restricted_network_defaults_to_none(monkeypatch):

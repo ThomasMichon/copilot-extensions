@@ -426,10 +426,16 @@ def _image_run(
         # (see visions/plugins/agent-containers's full-harness-projection-trusted):
         # an image-backed trusted fleet otherwise has no persistence mechanism
         # at all (code_model's "mount" variant remains unimplemented).
+        # Each fleet member gets its OWN subdirectory (keyed by its unique
+        # container `name`) under the configured parent path -- mounting the
+        # bare configured path directly would let every member of a
+        # size > 1 fleet collide on the same host directory.
         if fleet.host_workspace_path:
-            args += ["-v", f"{fleet.host_workspace_path}:{workspace_folder}"]
+            member_workspace = f"{fleet.host_workspace_path.rstrip('/')}/{name}"
+            args += ["-v", f"{member_workspace}:{workspace_folder}"]
         if fleet.host_home_path and fleet.home_folder:
-            args += ["-v", f"{fleet.host_home_path}:{fleet.home_folder}"]
+            member_home = f"{fleet.host_home_path.rstrip('/')}/{name}"
+            args += ["-v", f"{member_home}:{fleet.home_folder}"]
         if fleet.systemd_capable:
             # A working `systemd --user` (for the venue's own maintenance
             # timers) needs CAP_SYS_ADMIN + a writable /sys/fs/cgroup +
