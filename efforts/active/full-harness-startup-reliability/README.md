@@ -159,6 +159,13 @@ Operator's verbatim ask (this session):
   Context section describes from its original investigation session). A
   fixed, hand-maintained list can silently drift stale and let the 20/20 run
   report success while never exercising a hook the manifest actually ships.
+  The manifest also marks some entries `defaultEnabled: false` (e.g.
+  `agent-pull-requests`) — deriving from every manifest entry regardless of
+  that flag would let a normal full-roster install pass without ever
+  exercising a not-default-enabled plugin's hook, so track the two rosters
+  separately: the *default-enabled* set for the standard 20/20 run, plus one
+  explicit all-plugins run (forcing every manifest entry on) so the
+  not-default-enabled hooks are still genuinely tested at least once.
 - [ ] Pin or explicitly record the Copilot CLI version in use before each
   timed attempt (the Context section already flags the CLI's own
   mid-turn self-update as a confound); without this, a run can silently mix
@@ -221,7 +228,14 @@ Operator's verbatim ask (this session):
   `sessionStart` hook completes (success or fast no-op) with **zero**
   `HookTimeoutError` warnings in the process log.
 - [ ] `/env` in every one of the 20 attempts reports the full expected
-  extension and hook/skill set loaded — no plugin silently missing.
+  **extension** set loaded — no extension silently missing. `/env` is not a
+  complete oracle for hooks or skills: existing investigation evidence shows
+  its Skills panel omits plugin-sourced skills, so it cannot by itself
+  establish that every `sessionStart` hook ran or every skill loaded.
+  Validate the hook side from the process log (success/no-op, no
+  `HookTimeoutError`, per the criterion above) and the skill side against
+  each plugin's own manifest, rather than treating `/env` as sufficient for
+  either.
 - [ ] Median and worst-case time-to-first-response across the 20 attempts is
   recorded and is dramatically lower than the 2m28s baseline (target: low
   single-digit seconds, matching the isolated single/dual-extension repro's
