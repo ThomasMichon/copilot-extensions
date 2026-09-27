@@ -515,19 +515,16 @@ def stamp_frozen_attribution(
 # Resource claims -- the outbound claim ledger (agent-fabric `resource-claims`)
 # ---------------------------------------------------------------------------
 
-# The kinds of outbound resource a worktree can own and claim. ``worktree`` is
-# a cross-repo worktree it spun up; ``task`` is an external, task-queue-owned
-# obligation (e.g. an agent-dispatch task suspended mid-flight, expecting to
-# resume in this exact worktree later) -- deliberately left unresolved by the
-# sweep (see sweep.py's per-kind handling: no branch = permanently ``spare``),
-# since only the owning task system can know when it is genuinely done;
-# ``session`` is a live Copilot session occupying this worktree (its ``ref``
-# is a qualified ``<machine>/<project>/<worktree_id>#<session_id>`` claim ref,
-# reusing the existing session-suffix grammar rather than a second
-# ``sessions:`` list) -- see Phase 8 of
-# ``efforts/2026/08/28 worktree-finality-and-obligations/README.md``; the rest are
-# placeholders the ledger view already understands so later phases can
-# journal them without a schema change.
+# The kinds of outbound resource a worktree can own and claim. ``worktree`` is a cross-repo
+# worktree it spun up; ``task`` is an external, task-queue-owned obligation (e.g. an agent-dispatch
+# task suspended mid-flight, expecting to resume in this exact worktree later) -- deliberately left
+# unresolved by the sweep (see sweep.py's per-kind handling: no branch = permanently ``spare``),
+# since only the owning task system can know when it is genuinely done; ``session`` is a live
+# Copilot session occupying this worktree (its ``ref`` is a qualified
+# ``<machine>/<project>/<worktree_id>#<session_id>`` claim ref, reusing the existing session-suffix
+# grammar rather than a second ``sessions:`` list) -- see Phase 8 of ``efforts/2026/08/28
+# worktree-finality-and-obligations/README.md``; the rest are placeholders the ledger view already
+# understands so later phases can journal them without a schema change.
 ResourceKind = Literal[
     "worktree", "codespace", "container", "ssh", "workdir", "pr", "task", "session"
 ]
@@ -2468,23 +2465,19 @@ def _save_record_unlocked(
                 merged.append(claim)
         merged.extend(reserved.values())
         record.resources = merged
-        # worktree-finality-and-obligations Phase 1/3: per-item highest-
-        # revision merge for the follow-up ledger. Each `FollowUpRecord`
-        # bumps its OWN `revision` on every mutation (add/resolve/dismiss/
-        # transfer), but nothing previously reconciled that against a
-        # concurrent writer's stale in-memory snapshot the way `resources`
-        # is reconciled above -- an ordinary background stamp writer (e.g.
-        # a liveness/title refresh) that loaded the record before a
-        # concurrent `follow-ups add`/`resolve`/`dismiss` landed could
-        # silently ERASE that mutation on its own later save (dropping an
-        # item entirely, or writing back its own older revision of one that
-        # was already resolved/dismissed elsewhere). Per-id, per-revision
-        # comparison: whichever side (in-memory or on-disk) holds the
-        # HIGHER revision for a given id wins; an id present only on disk
-        # (created by a concurrent writer after this record was loaded) is
-        # never dropped; a tombstoned (resolved/dismissed/transferred) item
-        # with a higher revision can never be resurrected back to `open` by
-        # a stale writer's lower-revision copy.
+        # worktree-finality-and-obligations Phase 1/3: per-item highest-revision merge for the
+        # follow-up ledger. Each `FollowUpRecord` bumps its OWN `revision` on every mutation
+        # (add/resolve/dismiss/transfer), but nothing previously reconciled that against a
+        # concurrent writer's stale in-memory snapshot the way `resources` is reconciled above --
+        # an ordinary background stamp writer (e.g. a liveness/title refresh) that loaded the
+        # record before a concurrent `follow-ups add`/`resolve`/`dismiss` landed could silently
+        # ERASE that mutation on its own later save (dropping an item entirely, or writing back its
+        # own older revision of one that was already resolved/dismissed elsewhere). Per-id,
+        # per-revision comparison: whichever side (in-memory or on-disk) holds the HIGHER revision
+        # for a given id wins; an id present only on disk (created by a concurrent writer after
+        # this record was loaded) is never dropped; a tombstoned (resolved/dismissed/transferred)
+        # item with a higher revision can never be resurrected back to `open` by a stale writer's
+        # lower-revision copy.
         current_follow_ups_by_id = {fu.id: fu for fu in current.follow_ups}
         merged_follow_ups: list[FollowUpRecord] = []
         seen_follow_up_ids: set[str] = set()
@@ -2517,20 +2510,16 @@ def _save_record_unlocked(
             and current.codename_source
             and record.codename_source != current.codename_source
         ):
-            # fix-PR-#3037-review finding: the SAME codename is already
-            # assigned on both sides, but the on-disk copy carries a
-            # DIFFERENT known codename_source (e.g. an operator's manual
-            # per-record promotion, or a concurrent writer's
-            # classification landing moments before this stale save) --
-            # not only when this snapshot's own source was unset, but ALSO
-            # when it holds a now-STALE value that disagrees with the
-            # on-disk one (round-7 review finding: a stale writer holding
-            # e.g. "built-in" must not silently overwrite an on-disk
-            # reclassification to "custom", which could let
-            # `may_publish_codename` authorize a marker for a custom
-            # vocabulary it should have blocked). Preserve that known
-            # provenance rather than silently overwriting it with an
-            # unset value merely because this snapshot never saw it.
+            # fix-PR-#3037-review finding: the SAME codename is already assigned on both sides, but
+            # the on-disk copy carries a DIFFERENT known codename_source (e.g. an operator's manual
+            # per-record promotion, or a concurrent writer's classification landing moments before
+            # this stale save) -- not only when this snapshot's own source was unset, but ALSO when
+            # it holds a now-STALE value that disagrees with the on-disk one (round-7 review
+            # finding: a stale writer holding e.g. "built-in" must not silently overwrite an
+            # on-disk reclassification to "custom", which could let `may_publish_codename`
+            # authorize a marker for a custom vocabulary it should have blocked). Preserve that
+            # known provenance rather than silently overwriting it with an unset value merely
+            # because this snapshot never saw it.
             record.codename_source = current.codename_source
         _merge_pr_attribution_state(record, current)
 
@@ -3031,11 +3020,21 @@ def save_record(
     path: Path | None = None,
     *,
     preserve_handoff_reservations: bool = True,
+    require_sidecar: bool = True,
 ) -> None:
-    """Locked cross-process CAS for one complete worktree record."""
+    """Locked cross-process CAS for one complete worktree record.
+
+    ``require_sidecar`` (default ``True``, every existing caller unchanged)
+    mirrors :class:`_RecordLock`'s own flag -- pass ``False`` only when
+    nested inside an already-open, deliberately degrading outer
+    ``_RecordLock(require_sidecar=False)``: the reentrancy fast path only
+    skips re-acquiring the sidecar when the outer lock's own attempt
+    actually succeeded, so a degraded outer lock would otherwise still
+    hard-require the sidecar here regardless of the caller's own choice
+    (2026-09-27 PR review finding)."""
     if path is None:
         path = record.yaml_path
-    with _RecordLock(path, require_sidecar=True):
+    with _RecordLock(path, require_sidecar=require_sidecar):
         _save_record_unlocked(
             record,
             path,

@@ -293,10 +293,8 @@ def test_settle_skip_if_released_wins_over_a_stale_reservation(record_path):
 def test_settle_defaults_to_requiring_the_sidecar_lock(record_path, monkeypatch):
     """Confirms the guard is opt-in only: the public ``claims settle`` CLI
     command's existing behavior (no ``require_sidecar`` arg passed) still
-    hard-requires the cross-process sidecar lock, unchanged. Captures the
-    OUTER (first) ``_RecordLock`` call only -- ``save_record``'s own nested
-    reentrant call inside the same transaction always hardcodes
-    ``require_sidecar=True`` and would otherwise clobber this assertion."""
+    hard-requires the cross-process sidecar lock, for both the outer
+    ``_RecordLock`` and the nested ``save_record`` call, unchanged."""
     calls = []
     real_lock = tracking._RecordLock
 
@@ -322,7 +320,7 @@ def test_settle_defaults_to_requiring_the_sidecar_lock(record_path, monkeypatch)
             "disposition": obligations.AT_REST,
         }
     )
-    assert calls[0] == {"require_sidecar": True}
+    assert calls == [{"require_sidecar": True}, {"require_sidecar": True}]
 
 
 def test_settle_require_sidecar_false_degrades_instead_of_hard_requiring(
@@ -335,8 +333,14 @@ def test_settle_require_sidecar_false_degrades_instead_of_hard_requiring(
     transient contention timeout into a ``TimeoutError`` that the repair's
     own best-effort ``contextlib.suppress(Exception)`` silently swallows,
     losing the cleanup instead of completing it via the in-process lock.
-    Captures the OUTER (first) ``_RecordLock`` call only -- see the sibling
-    test above for why."""
+
+    Asserts on EVERY captured ``_RecordLock`` call (a second review
+    finding): the reentrancy fast path in ``_RecordLock.__enter__`` only
+    skips re-acquiring the sidecar when the outer lock's own attempt
+    actually succeeded -- if the outer degraded, the nested
+    ``tracking.save_record`` call inside this same transaction must ALSO
+    see ``require_sidecar=False``, or it would silently reintroduce the
+    exact hard-require this guard exists to avoid."""
     calls = []
     real_lock = tracking._RecordLock
 
@@ -363,7 +367,9 @@ def test_settle_require_sidecar_false_degrades_instead_of_hard_requiring(
             "require_sidecar": False,
         }
     )
-    assert calls[0] == {"require_sidecar": False}
+    assert calls == [
+        {"require_sidecar": False}, {"require_sidecar": False},
+    ]
 
 
 def test_dispatch_reaches_claim_add_through_a_live_daemon(record_path):

@@ -166,17 +166,17 @@ def apply_claim_settle(args: dict) -> dict:
 
     ``require_sidecar`` (default ``True``, preserving the public ``claims
     add``/``release``/``settle`` commands' existing behavior unchanged)
-    controls whether a cross-process sidecar-lock timeout raises
-    (the normal foreground-CLI contract) or gracefully degrades to the
-    in-process lock alone (2026-09-27 PR review finding). The best-effort
-    repair caller above passes ``False`` -- its pre-migration inline
-    transaction used a plain, degrading ``_RecordLock`` (matching a
-    critical writer, never ``require_sidecar=True``); hard-requiring the
-    sidecar here would turn a transient contention timeout into a
-    ``TimeoutError`` that the repair's own best-effort
-    ``contextlib.suppress(Exception)`` then silently swallows -- losing
-    this one-shot cleanup for good instead of completing it via the
-    in-process lock like the old code always did.
+    controls whether a cross-process sidecar-lock timeout raises (the
+    normal foreground-CLI contract) or gracefully degrades to the
+    in-process lock alone. The best-effort repair caller above passes
+    ``False`` -- its pre-migration inline transaction used a plain,
+    degrading ``_RecordLock``. Threaded through to the ``tracking.save_record``
+    call below too (2026-09-27 PR review finding): the reentrancy fast path
+    in ``_RecordLock.__enter__`` only skips re-acquiring the sidecar when
+    the OUTER lock's own attempt actually succeeded -- if this outer lock
+    degraded (sidecar contended), a nested ``save_record`` hard-requiring
+    the sidecar by default would still raise, silently reintroducing the
+    exact failure this guard exists to avoid.
     """
     worktree_id = args["worktree_id"]
     yaml_path = Path(args["yaml_path"])
@@ -204,7 +204,7 @@ def apply_claim_settle(args: dict) -> dict:
         settled = tracking.settle_resource_claim(record, ref, disposition, save=False)
         if settled is None:
             return {"error": "not_found"}
-        tracking.save_record(record, yaml_path)
+        tracking.save_record(record, yaml_path, require_sidecar=require_sidecar)
 
     activity.log_event(
         "claim_settled", worktree_id=worktree_id, kind=settled.kind, ref=ref,
