@@ -28,6 +28,7 @@ from textual.containers import Horizontal
 from textual.widgets import Button, DataTable, Footer, Header, Static
 
 from . import engine_client as ec
+from . import handoff_client as hc
 
 #: Blocker code (from the closure descriptor's ``blockers`` list) -> a short,
 #: plain-language reason. Mirrors the vocabulary in
@@ -87,6 +88,7 @@ class _CompanionData:
 
     worktree: dict = field(default_factory=dict)
     sessions: list[dict] = field(default_factory=list)
+    pending_handoff: dict | None = None
     error: str | None = None
 
 
@@ -118,7 +120,19 @@ def _load_current_worktree(cwd: str | None = None) -> _CompanionData:
         except ec.EngineError:
             pass  # lineage stays empty; the status section still renders
 
-    return _CompanionData(worktree=payload, sessions=sessions)
+    # Phase 8 (worktrees-pivot-ux-overhaul #3307): situational-awareness-only
+    # pending context-handoff baton headline (visions/mux-companion
+    # §companion-reads-handoff-schema-never-drives-it) -- best-effort, never
+    # blocks the rest of the view.
+    pending = None
+    worktree_path = payload.get("path")
+    if worktree_path:
+        try:
+            pending = hc.pending_handoff(None, worktree_path)
+        except ec.EngineError:
+            pending = None
+
+    return _CompanionData(worktree=payload, sessions=sessions, pending_handoff=pending)
 
 
 def _fallback_label(row: dict) -> str:
@@ -292,6 +306,13 @@ class MuxCompanionApp(App):
         text.append(f"{label}\n", style=f"bold {color}")
         for line in _closure_explanation(row):
             text.append(line + "\n")
+        # Phase 8 (#3307): situational-awareness-only pending context-handoff
+        # baton headline (visions/mux-companion §companion-reads-handoff-
+        # schema-never-drives-it) -- read-only, never a resume/consume action.
+        pending = self._data.pending_handoff
+        if pending and pending.get("title"):
+            text.append("\u23f3 Pending handoff: ", style="bold #d7af00")
+            text.append(str(pending["title"]) + "\n")
         return text
 
     def on_button_pressed(self, event: Button.Pressed) -> None:

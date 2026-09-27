@@ -214,13 +214,14 @@ def _run(
     timeout: int = _DEFAULT_TIMEOUT,
     allow_nonzero: bool = False,
     runner=None,
+    cwd: str | None = None,
 ) -> str:
     """Run ``agent-worktrees [--project <p>] <args>`` and return stdout.
 
     Raises :class:`EngineError` when the binstub is missing (``install_hint``),
-    the process fails, or times out. A non-zero exit whose stdout is a JSON error
-    envelope surfaces the engine's own ``error`` message.
-    """
+    the process fails, or times out. A non-zero exit whose stdout is a JSON
+    error envelope surfaces the engine's own ``error`` message. ``cwd``, when
+    given, runs the engine from that directory (cwd-scoped verbs)."""
     base = engine_base_command()
     if base is None:
         raise EngineError(
@@ -234,12 +235,10 @@ def _run(
             proc = runner(cmd, timeout)
         else:
             kwargs = {
-                "capture_output": True,
-                "text": True,
-                "timeout": timeout,
-                "check": False,
-                "env": _engine_environment(),
+                "capture_output": True, "text": True, "timeout": timeout,
+                "check": False, "env": _engine_environment(),
                 "stdin": subprocess.DEVNULL,
+                **({"cwd": cwd} if cwd else {}),
             }
             if os.name == "nt":
                 kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)

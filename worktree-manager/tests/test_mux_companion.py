@@ -6,6 +6,7 @@ explanation text and current-worktree resolution, not any Textual rendering.
 from __future__ import annotations
 
 from worktree_manager import engine_client as ec
+from worktree_manager import handoff_client as hc
 from worktree_manager import mux_companion as companion
 
 
@@ -125,3 +126,56 @@ def test_load_current_worktree_skips_sessions_when_untracked(monkeypatch):
 
     assert not calls  # no id -> never asks the engine for sessions
     assert data.sessions == []
+
+
+def test_load_current_worktree_includes_pending_handoff(monkeypatch):
+    """#3307 Phase 8: the resolved worktree path feeds the pending-handoff
+    lookup, and its result surfaces on the loaded data."""
+    payload = {"version": 1, "id": "wt-ab12", "path": "/w", "state": "wip"}
+    monkeypatch.setattr(ec, "current_worktree_status", lambda **k: payload)
+    monkeypatch.setattr(ec, "list_worktree_sessions", lambda *a, **k: [])
+    seen = {}
+
+    def _fake_pending(project, worktree_path, **kwargs):
+        seen["worktree_path"] = worktree_path
+        return {"title": "Finish the retry-budget fix", "sessionId": "sess-1"}
+
+    monkeypatch.setattr(hc, "pending_handoff", _fake_pending)
+
+    data = companion._load_current_worktree("/w")
+
+    assert seen["worktree_path"] == "/w"
+    assert data.pending_handoff == {
+        "title": "Finish the retry-budget fix", "sessionId": "sess-1"}
+
+
+def test_load_current_worktree_degrades_when_pending_handoff_unavailable(monkeypatch):
+    payload = {"version": 1, "id": "wt-ab12", "path": "/w", "state": "wip"}
+    monkeypatch.setattr(ec, "current_worktree_status", lambda **k: payload)
+    monkeypatch.setattr(ec, "list_worktree_sessions", lambda *a, **k: [])
+
+    def _raise(*a, **k):
+        raise ec.EngineError("boom")
+
+    monkeypatch.setattr(hc, "pending_handoff", _raise)
+
+    data = companion._load_current_worktree("/w")
+
+    assert data.error is None
+    assert data.pending_handoff is None
+
+
+def test_status_text_shows_pending_handoff_headline():
+    """#3307 Phase 8: a pending handoff's title renders as a read-only,
+    situational-awareness line -- never shown when there's no pending baton."""
+    app = companion.MuxCompanionApp.__new__(companion.MuxCompanionApp)
+    app._data = companion._CompanionData(
+        worktree={"state": "wip"},
+        pending_handoff={"title": "Finish the retry-budget fix"},
+    )
+    text = app._status_text().plain
+    assert "Pending handoff: Finish the retry-budget fix" in text
+
+    app._data = companion._CompanionData(worktree={"state": "wip"})
+    assert "Pending handoff" not in app._status_text().plain
+

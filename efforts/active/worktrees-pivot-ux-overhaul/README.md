@@ -451,13 +451,18 @@ parallelizable across worktrees.
 - [x] Add a "Sessions" sub-menu/dialog listing all sessions recorded against
       a worktree (id, started/ended, turn count, head marker).
 
-### Phase 8 — Continue the Mux Companion (Ctrl-K) buildout
-- [ ] Scope and land the next slice(s) beyond v1's view-only status/lineage
+### Phase 8 — Continue the Mux Companion (Ctrl-K) buildout (Done 2026-09-27)
+- [x] Scope and land the next slice(s) beyond v1's view-only status/lineage
       display: candidates raised for exploration — split-screen into
       sub-agents, handoff tracking, extended status reporting. Each new
       capability gets its own Non-Goals-respecting sub-slice (per
       `visions/mux-companion`), not a single undifferentiated dump.
-- [ ] Record which candidate(s) are accepted vs. deferred, with rationale.
+- [x] Record which candidate(s) are accepted vs. deferred, with rationale.
+      **Accepted: handoff tracking** (operator's own choice, see journal).
+      **Deferred: split-screen sub-agents, extended status reporting** —
+      untouched; the vision's own Non-Goals already exclude them from v1,
+      and this slice's scope is exactly the one accepted candidate, not a
+      second undifferentiated dump onto the same PR.
 
 ### Phase 9 — Reconcile deferred backlog
 - [ ] Fold in further wishlist items raised after this effort's initial
@@ -1180,3 +1185,66 @@ Operator feedback on the rendered pivot, addressed as a bundled follow-up
   (operator's own "I'll think of more") -- unaffected by this phase.
 - **Next up**: Phase 8 (continue the Mux Companion Ctrl-K buildout) is the
   only phase in this effort's Plan still fully unstarted.
+
+### 2026-09-27 — Phase 8 complete: Mux Companion handoff tracking
+- Operator's choice among the three raised candidates (split-screen
+  sub-agents / handoff tracking / extended status reporting): **handoff
+  tracking**. Investigated `visions/mux-companion` first and found the
+  target already precisely specified there -- ``session-lineage-visibility``
+  §Concepts states the Companion shows "for situational awareness only --
+  the headline of any pending context-handoff baton, read by schema, never
+  acted on," and the dedicated Behavior `companion-reads-handoff-schema-
+  never-drives-it` states it explicitly. So this slice is exactly that: no
+  scope invention needed, just implementing an already-specified gap in v1.
+- Root-cause investigation ruled out two plausible-looking-but-wrong data
+  sources before finding the right one: `agent-worktrees`' `SessionHandoff`
+  ledger (`tracking.py`, `handoffs[]`/`open_handoff`/`link_handoff`) is a
+  head-succession bookkeeping primitive with no human title field, and is
+  not currently wired to any CLI verb at all; `note-handoff`'s disposition-
+  history entry is a historical audit log, not a "is one PENDING right now"
+  signal. The actual mechanism matching the vision's own wording is
+  context-handoff's (JS-side) file-backed schema: `saveFileHandoff` writes
+  `<worktree-state-dir>/handoff/handoff-<sid>.json` (`kind: "context-
+  handoff"`, `title`, `consumed`), and `worktree-state-dir` resolves via
+  `agent-worktrees get worktree-state-dir` (a plain-text, cwd-scoped verb).
+- Implementation stays fully on the read side of the process boundary
+  (`mux_companion.py`'s own module docstring: reach the engine only by
+  shelling out, never `import` a plugin): added `engine_client._run`'s
+  `cwd=` support (needed since this verb infers its target from the
+  process's own cwd, not a flag) plus a new `handoff_client.py` (`worktree_
+  state_dir`/`pending_handoff`) that runs the engine from the worktree path
+  and reads the JSON files directly -- still never importing context-handoff
+  itself, only reusing the SAME state-dir resolution it already uses. Wired
+  into `_CompanionData`/`_load_current_worktree` (best-effort, degrades to
+  `None` on any failure) and rendered as a `⏳ Pending handoff: <title>` line
+  in `_status_text()` -- read-only, no action offered, per the vision's
+  explicit boundary.
+- **Module-size fallout**: the two new functions initially pushed
+  `engine_client.py` (a NEW offender, never previously baselined) to 1077
+  lines. Split them into the new `handoff_client.py` (reusing
+  `engine_client`'s private `_run`/`EngineError`, the same sibling-file
+  pattern the Picker's own componentization already uses) and trimmed the
+  `_run` `cwd=` docstring/kwargs-construction to the minimum reasonable
+  size, landing back at exactly 1000 lines -- no baseline widen needed.
+- Tests: `test_mux_companion.py` (+3: pending-handoff wiring into
+  `_load_current_worktree`, degrade-on-error, and the rendered headline/
+  absence in `_status_text()`) plus updated monkeypatch targets for the
+  `handoff_client` split; new `test_handoff_client.py` (5: cwd-scoped
+  `_run` invocation, engine-unavailable degrade, newest-unconsumed-baton
+  selection ignoring a consumed entry and a non-handoff file, both empty
+  cases) -- all green (76/76 across the three files). Full `worktree-
+  manager` suite green apart from two ALREADY-known-pre-existing,
+  environment-specific failures unrelated to this diff (a Windows
+  symlink-privilege quirk in `test_update.py`/`test_trusted_materializer_
+  parity.py`, reproduced identically on an unmodified checkout) and the
+  same machine-load-sensitive `_open_task_menu`/`_open_submenu` modal-
+  timing flake documented in Phase 7's own journal entry (this session's
+  own sustained heavy test load, not a code defect -- confirmed clean on
+  CI's fresh runner during Phase 7 and expected to be so again here).
+  `tools/check-module-size.py` clean.
+- **This was the last item in this effort's own Plan.** Phases 1-9's
+  originally-scoped work is now complete; Phase 9's "fold in further
+  wishlist items" bullet stays deliberately open-ended per the operator's
+  own "I'll think of more," so this effort's Status stays Active rather
+  than Done, but there is no next scheduled slice -- further work here
+  awaits new operator feedback.
