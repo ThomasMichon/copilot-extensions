@@ -10,16 +10,19 @@
   [#3368](https://github.com/ThomasMichon/copilot-extensions/pull/3368),
   Group D's `profiles` dependency is closed via Phase 3e / PR
   [#3626](https://github.com/ThomasMichon/copilot-extensions/pull/3626), and
-  **Group A is implemented in PR
-  [#4317](https://github.com/ThomasMichon/copilot-extensions/pull/4317)**:
-  the Picker's low-frequency `pivot_manifest.py` / `update_stage.py` reads now
-  cross the process boundary through the pinned `picker-paths --json`,
-  existing `state-root --json`, and additive
-  `stage-update --indicator-state --json` seams. Phase 3c's prerequisite for
-  Group C is satisfied by PR
+  **Groups A and B are implemented in PRs
+  [#4317](https://github.com/ThomasMichon/copilot-extensions/pull/4317),
+  [#4322](https://github.com/ThomasMichon/copilot-extensions/pull/4322),
+  [#4323](https://github.com/ThomasMichon/copilot-extensions/pull/4323), and
+  [#4324](https://github.com/ThomasMichon/copilot-extensions/pull/4324)**:
+  the Picker's `pivot_manifest.py`, `update_stage.py`, and `runner.py` paths
+  now use the pinned `picker-paths --json`, `state-root --json`,
+  `stage-update --indicator-state --json`, `picker-bootstrap --json`,
+  `repair-stale-anchor --json`, and `resolve --json` seams, plus the
+  Manager-owned housekeeping / monitor-root lifecycle ports. Phase 3c's
+  prerequisite for Group C is satisfied by PR
   [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278), and
-  the remaining Group B/C work stays sequenced below as independently landable
-  PRs.
+  only the remaining Group C cleanup/deletion work stays sequenced below.
 
 ## Why this phase exists
 
@@ -459,21 +462,54 @@ once every remaining caller is already off the import boundary.
        unrelated unbumped-plugin drift on `delegation-guidance`, `efforts`,
        `harness-knowledge`, and `wsl-setup`.
 
-4. [ ] **Perform the remaining Group B cutover in one crisp PR.** Once Steps 2-3
-   are landed, switch the remaining non-hot-path `runner.py` call sites off the
-   compatibility boundary together.
-   - `runner.py` switches to the Step 2 public verbs for bootstrap,
-     stale-anchor repair, and remote planning, while its housekeeping/monitor
-     lifecycle moves to the Step 3 manager-owned implementation.
-   - Include the old-engine remote fallback in `worktree_manager.__main__`:
-     either `runner.compatibility_remote_plan()` is cut over to the same public
-     seam in this step, or the fallback is explicitly version-gated/retired
-     here so an older engine cannot silently keep exercising the private import
-     path after the main runner flow is clean.
-   - At the end of this step, Groups A and B's **runner/pivot/update** paths no
-     longer rely on
-     `engine_module(...)`, underscore-prefixed `agent_worktrees` helpers, or
-     any in-process `agent_worktrees` import for production Picker behavior.
+4. [x] **Perform the remaining Group B cutover in one crisp PR.** **Done in PR
+   [#4324](https://github.com/ThomasMichon/copilot-extensions/pull/4324).**
+   Once Steps 2-3 were landed, the remaining non-hot-path `runner.py` call
+   sites moved off the compatibility boundary together.
+   - `runner.py` now binds `context.ProjectBootstrap` from
+     `engine_group_b.picker_bootstrap()`, changes cwd only from that payload's
+     `should_switch_cwd`/`cwd` decision, schedules background stale-anchor
+     repair through `engine_group_b.repair_stale_anchor()`, resolves the
+     default live/local mode from the bound bootstrap record, and swaps the
+     old `agent_worktrees.__main__` housekeeping/monitor calls for
+     `production_picker.housekeeping` / `monitor_roots`.
+   - The parent-owned binding is now the authoritative project identity for
+     downstream consumers that already read `context.project()` /
+     `context.project_bootstrap()` (`pivot_manifest.py`, `update_stage.py`,
+     `maintenance.py`, `data_local.py`, `engine_worktree_actions.py`, and the
+     Step 3 housekeeping/monitor modules). The production Picker no longer
+     relies on ambient cwd or per-call in-process answers once bootstrap
+     resolves the project.
+   - `worktree_manager.__main__`'s old-engine remote fallback was **retired,
+     not reimplemented**. `resolve --json --machine ...` is already the pinned
+     public seam for remote planning; the private fallback existed only for
+     engines too old to support that seam, so cutting it over would have
+     preserved the exact boundary violation this phase is removing. Older
+     engines now fail clearly with `EngineFeatureUnavailable` instead of
+     silently importing `agent_worktrees.__main__`.
+   - `_engine_runtime.py`'s remaining live surface is now down to **5**
+     modules: `config`, `pr_ops`, `reclaim`, `sessions`, and `tracking`.
+     `production_picker.__main__` is deleted and no production Group A/B path
+     imports `agent_worktrees` in-process anymore.
+   - Validation: targeted Group B seam + cutover regressions passed (`7
+     passed` across `test_context_resolution.py`'s bootstrap/repair coverage,
+     `test_engine_group_b.py`, `test_housekeeping.py`, and
+     `test_production_picker_transplant.py`); the broader Worktree Manager
+     Group B regression batch passed (`64 passed`). Full `worktree-manager`
+     suite (excluding the two standing hangs
+     `tests/production_picker/test_data_ssh_sources.py` /
+     `tests/production_picker/test_launch_trace.py`) matched the current
+     unrelated baseline at `1286 passed, 2 skipped, 13 failed`. Full
+     `agent-worktrees` suite stayed red only in unrelated existing families on
+     this machine at `5731 passed, 50 skipped, 9 failed`
+     (`test_launch_cmd`, `test_lazy_dispatch`, `test_module_invocation`,
+     `test_mux_status_link`, `test_registration_home`,
+     `test_session_conduct`, `test_status_monitor_windows`); no failures
+     touched the Group B seam. `ruff check --select F,E9`,
+     `tools/check-install-contract.py`, and
+     `tools/check-version-consistency.py` passed; `tools/check-version-bump.py`
+     still reports the same pre-existing unrelated unbumped-plugin drift on
+     `delegation-guidance`, `efforts`, `harness-knowledge`, and `wsl-setup`.
 
 5. [ ] **Add Group C's batched reconcile-and-stamp verb in agent-worktrees,
    unused at first.** Operator direction resolved the ownership question here:
