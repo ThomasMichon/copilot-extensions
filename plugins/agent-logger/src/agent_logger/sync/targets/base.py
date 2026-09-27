@@ -67,6 +67,22 @@ class FleetSyncStatus:
     error: str = ""
 
 
+#: Sidecar files never transferred by an rsync-based target, mirroring the
+#: filesystem targets' ``_EXCLUDE_NAMES``/``_EXCLUDE_SUFFIXES`` (legacy lock
+#: names, plus any ``.lock``/``.tmp``/``.hold`` suffix -- including Copilot's
+#: restrictive-ACL ``inuse.<pid>.hold`` live-session marker). Must precede the
+#: recursive ``--include=session-state/***`` rules below: rsync applies the
+#: first matching filter rule, so an exclude listed after a matching include
+#: never takes effect.
+_SIDECAR_EXCLUDES = (
+    "--exclude=.lock",
+    "--exclude=lock",
+    "--exclude=*.lock",
+    "--exclude=*.tmp",
+    "--exclude=*.hold",
+)
+
+
 def rsync_session_filters(
     include_sessions: set[str] | None,
     detritus_roots: tuple[Path, ...] = (),
@@ -85,7 +101,7 @@ def rsync_session_filters(
     transferred; the global session-store.db is excluded so other repos'
     sessions never leak to the destination.
     """
-    exclusions = [rsync_exclude(root) for root in detritus_roots]
+    exclusions = [*_SIDECAR_EXCLUDES, *(rsync_exclude(root) for root in detritus_roots)]
     if include_sessions is None:
         return [
             *exclusions,

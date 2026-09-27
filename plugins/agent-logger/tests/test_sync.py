@@ -1086,6 +1086,7 @@ def test_rsync_children_suppress_console_window(monkeypatch, tmp_path: Path) -> 
     for key, val in base.NO_WINDOW_KWARGS.items():
         assert captured.get(key) == val
     assert "--include=provenance/abc-123.json" in captured_commands[-1]
+    assert "--exclude=*.hold" in captured_commands[-1]
     assert "--delete-excluded" not in captured_commands[-1]
 
     monkeypatch.setattr(ingest.subprocess, "run", _fake_run)
@@ -1093,6 +1094,7 @@ def test_rsync_children_suppress_console_window(monkeypatch, tmp_path: Path) -> 
     for key, val in base.NO_WINDOW_KWARGS.items():
         assert captured.get(key) == val
     assert "--include=provenance/abc-123.json" in captured_commands[-1]
+    assert "--exclude=*.hold" in captured_commands[-1]
     assert "--delete-excluded" not in captured_commands[-1]
 
 
@@ -1861,14 +1863,39 @@ def test_rsync_session_filters_scope_without_allowlist() -> None:
     assert filtered[-1] == "--exclude=*"
 
 
+def test_rsync_session_filters_exclude_lock_sidecars_before_includes() -> None:
+    """Lock/temp/hold sidecars must never reach an rsync-based target either.
+
+    Mirrors the filesystem targets' ``_EXCLUDE_NAMES``/``_EXCLUDE_SUFFIXES``:
+    a live ``inuse.<pid>.hold`` marker (or a ``.lock``/``.tmp`` sidecar) must
+    be excluded before the recursive include, since rsync's filter list uses
+    first-match-wins semantics.
+    """
+    from agent_logger.sync.targets.base import rsync_session_filters
+
+    filters = rsync_session_filters(None)
+
+    for pattern in ("--exclude=.lock", "--exclude=lock", "--exclude=*.lock",
+                    "--exclude=*.tmp", "--exclude=*.hold"):
+        assert pattern in filters
+        assert filters.index(pattern) < filters.index("--include=session-state/***")
+
+
 def test_rsync_session_filters_exclude_detected_detritus_first() -> None:
     from agent_logger.sync.targets.base import rsync_session_filters
 
     root = Path("session-state") / "abc-123" / "files" / "tool" / "browser"
     filters = rsync_session_filters(None, (root,))
 
-    assert filters[0] == f"--exclude=/{root.as_posix()}/***"
-    assert filters.index(filters[0]) < filters.index("--include=session-state/***")
+    assert f"--exclude=/{root.as_posix()}/***" in filters
+    assert (
+        filters.index(f"--exclude=/{root.as_posix()}/***")
+        < filters.index("--include=session-state/***")
+    )
+    # Lock/temp/hold sidecar excludes precede detected-detritus excludes.
+    assert filters.index("--exclude=*.hold") < filters.index(
+        f"--exclude=/{root.as_posix()}/***"
+    )
 
 
 def test_rsync_session_filters_escape_pattern_characters() -> None:
@@ -1877,9 +1904,9 @@ def test_rsync_session_filters_escape_pattern_characters() -> None:
     root = Path("session-state") / "abc" / "files" / "run[1]*?"
     filters = rsync_session_filters(None, (root,))
 
-    assert filters[0] == (
+    assert (
         "--exclude=/session-state/abc/files/run\\[1\\]\\*\\?/***"
-    )
+    ) in filters
 
 
 def test_local_target_push_includes_only_selected_provenance(tmp_path: Path) -> None:
