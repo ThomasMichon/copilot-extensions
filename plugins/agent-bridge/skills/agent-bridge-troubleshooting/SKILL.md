@@ -182,7 +182,7 @@ Look at:
   - `acp_resume_retry` -- a stop->resume ladder round fired.
   - `acp_resume_recreated` -- the end+create last resort fired.
 - **The daemon log** -- the always-logged child stderr lives in
-  **`~/.agent-bridge/agent-bridge-err.log`**.
+  **`~/.agent-bridge/agent-bridge-err.log`**. <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 
 > **Known gap:** for **CodeSpace** targets the child runs in the Session Host on
 > the far side, so its stderr does not yet relay into the local `sessions.db`
@@ -264,7 +264,8 @@ log. Count the flaps and read the port churn -- from the daemon log (simplest,
 PowerShell):
 
 ```powershell
-Select-String -Path "$env:USERPROFILE\.agent-bridge\agent-bridge-err.log" `
+$_log = "$env:USERPROFILE\.agent-bridge\agent-bridge-err.log"  # marketplace-isolation: allow deployed-runtime-diagnostics
+Select-String -Path $_log `
   -Pattern "reverse-forward|host relay port changed|relay unreachable"
 ```
 
@@ -273,7 +274,7 @@ quoting of the SQL; run with `python flaps.py`):
 
 ```python
 import sqlite3, os
-d = os.path.expanduser("~/.agent-bridge/sessions.db")
+d = os.path.expanduser("~/.agent-bridge/sessions.db")  # marketplace-isolation: allow deployed-runtime-diagnostics
 rows = sqlite3.connect(d).execute(
     "SELECT data_json FROM events WHERE event_type='acp_child_log'"
 ).fetchall()
@@ -290,7 +291,7 @@ reverse-forward up ... (-R P:127.0.0.1:P)` and then stays quiet.
 
 ## Deeper checks -- split-brain / stale published port
 
-The host relay port is published to **`~/.agent-bridge/relay-port`** and resolved
+The host relay port is published to **`~/.agent-bridge/relay-port`** and resolved <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 by `get_live_relay_port()`. Two ways it goes bad:
 
 - **Stale/dead published port.** Compare the file against what's actually
@@ -299,7 +300,7 @@ by `get_live_relay_port()`. Two ways it goes bad:
   that didn't republish). Sub-daemons resolve via this file, so they forward to
   a dead port.
   ```powershell
-  Get-Content "$env:USERPROFILE\.agent-bridge\relay-port"          # published port
+  Get-Content "$env:USERPROFILE\.agent-bridge\relay-port"          # published port # marketplace-isolation: allow deployed-runtime-diagnostics
   Get-NetTCPConnection -State Listen | ? { $_.LocalPort -eq <that port> }   # is anything there?
   Get-CimInstance Win32_Process -Filter "Name='python.exe'" | ? CommandLine -match 'agent_bridge' | select ProcessId,ParentProcessId,CommandLine
   ```
@@ -315,7 +316,7 @@ by `get_live_relay_port()`. Two ways it goes bad:
 
 > **Valid state, not a bug: on Windows the two `python.exe` show DIFFERENT
 > interpreter paths.** The supervisor (parent) runs from the versioned-slot path
-> `~/.agent-bridge/versions/<v>/Scripts/python.exe`; its worker **child** runs
+> `~/.agent-bridge/versions/<v>/Scripts/python.exe`; its worker **child** runs <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 > from the **base interpreter** `C:\Program Files\Python3XX\python.exe` -- and the
 > *base-path child is the one bound to port 9280*. This interpreter-path
 > difference is the **normal Windows stdlib-venv launcher redirect**, NOT version
@@ -361,7 +362,7 @@ legacy 9280 (fixed separately) -- always confirm via the routing table.
   next command brings the bridge back. Confirm live state, don't assume "down":
 
   ```pwsh
-  Get-Content ~/.agent-bridge/active.json | ConvertFrom-Json | Select -Expand active
+  Get-Content ~/.agent-bridge/active.json | ConvertFrom-Json | Select -Expand active  # marketplace-isolation: allow deployed-runtime-diagnostics
   # then GET http://127.0.0.1:<that port>/health
   ```
 

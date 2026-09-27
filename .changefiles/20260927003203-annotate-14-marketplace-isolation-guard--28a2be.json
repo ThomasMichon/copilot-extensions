@@ -1,0 +1,9 @@
+{
+  "comment": "Annotate 14 marketplace-isolation guard findings across the doc/SKILL.md cluster",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

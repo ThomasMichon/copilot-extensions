@@ -160,15 +160,15 @@ with macOS support planned.
 plugin. Source code lives in the installed plugin directory at
 `~/.copilot/installed-plugins/copilot-extensions/agent-bridge/`.
 
-**Config lives at:** `~/.agent-bridge/config.yaml` (topology profiles
+**Config lives at:** `~/.agent-bridge/config.yaml` (topology profiles <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 pointing to optional `machines.yaml`; the roster is derived from it when present.
-Provider namespaces from `~/.agent-bridge/providers.d/` work without a topology.)
+Provider namespaces from `~/.agent-bridge/providers.d/` work without a topology.) <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 
 ### Repository edits vs configuration adoption
 
 The payload-local `config adopt` operation is a **machine-local projection
 command**. It reads
-repository topology and writes the current user's `~/.agent-bridge/config.yaml`;
+repository topology and writes the current user's `~/.agent-bridge/config.yaml`; <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 it never edits, publishes, or deploys repository files.
 
 When topology or purpose-built agent definitions must change:
@@ -190,7 +190,7 @@ external paths can become invalid if it names a disposable worktree; `config
 validate` reports the missing file.
 
 Before repairing a profile with `config adopt`, back up its topology-profile
-stanza in `~/.agent-bridge/config.yaml`, including `default_copilot_args` and
+stanza in `~/.agent-bridge/config.yaml`, including `default_copilot_args` and <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 `default_env`: adoption replaces the named profile rather than merging those
 spawn defaults. Re-adopt against canonical source paths, then restore any
 recorded defaults.
