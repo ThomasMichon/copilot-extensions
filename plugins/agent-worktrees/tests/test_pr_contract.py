@@ -8,6 +8,7 @@ classification (from pr-consent), plus the binding-absent = no-op invariant.
 from __future__ import annotations
 
 from agent_worktrees import pr_contract as pc
+from agent_worktrees.pr_occupancy import occupancy_from_readiness
 
 
 def _rev(
@@ -1035,6 +1036,32 @@ class TestApprovalRequired:
         assert st.verdict == ""
         assert st.approval_stale is True
         assert st.consent_action == "skip"
+        assert occupancy_from_readiness(
+            pc.merge_readiness(snap, automerge_label="auto-complete")
+        )["occupancy"] == "needs-review"
+
+    def test_occupancy_needs_consent_when_approved_at_head(self):
+        snap = pc.PRSnapshot(
+            pr_state="open",
+            mergeable=True,
+            head_sha="h1",
+            reviews=(_rev(1, "APPROVED", commit_id="h1"),),
+        )
+        assert occupancy_from_readiness(
+            pc.merge_readiness(snap, automerge_label="auto-complete")
+        )["occupancy"] == "needs-consent"
+
+    def test_occupancy_needs_merge_when_consent_present(self):
+        snap = pc.PRSnapshot(
+            pr_state="open",
+            mergeable=True,
+            head_sha="h1",
+            labels=("auto-complete",),
+            reviews=(_rev(1, "APPROVED", commit_id="h1"),),
+        )
+        assert occupancy_from_readiness(
+            pc.merge_readiness(snap, automerge_label="auto-complete")
+        )["occupancy"] == "needs-merge"
 
     def test_stale_approval_can_authorize_merge_when_policy_permits(self):
         snap = pc.PRSnapshot(

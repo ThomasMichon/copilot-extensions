@@ -193,6 +193,7 @@ class TestDecorateEvents:
                 "consent_action": "skip", "consent_label": "", "eligible": False,
                 "needs_consent": False, "clear_to_merge": False, "held": [],
                 "wip": False,
+                "occupancy": "needs-consent",
                 "reason": "no auto-merge label configured (binding absent)",
             },
         }

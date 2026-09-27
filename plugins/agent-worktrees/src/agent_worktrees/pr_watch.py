@@ -25,6 +25,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
 from . import pr_contract as pc
+from .pr_occupancy import occupancy_from_readiness
 from .providers import ProviderError, account_token_for_slug, get_provider
 
 
@@ -75,16 +76,18 @@ def decorate_events(
         "base_ref": snap.base_ref,
         "cursor": pc.Baseline.from_snapshot(snap).to_cursor(),
     }
-    payload["merge"] = pc.merge_readiness(
-        snap,
-        automerge_label=automerge_label,
-        hold_labels=hold_labels,
-        wip_title_prefixes=wip_title_prefixes,
-        approval_required=approval_required,
-        allow_stale_approval=allow_stale_approval,
-        stale_approval_head_sha=stale_approval_head_sha,
-        stale_approval_head_observed_at=stale_approval_head_observed_at,
-        review_blocking=review_blocking,
+    payload["merge"] = occupancy_from_readiness(
+        pc.merge_readiness(
+            snap,
+            automerge_label=automerge_label,
+            hold_labels=hold_labels,
+            wip_title_prefixes=wip_title_prefixes,
+            approval_required=approval_required,
+            allow_stale_approval=allow_stale_approval,
+            stale_approval_head_sha=stale_approval_head_sha,
+            stale_approval_head_observed_at=stale_approval_head_observed_at,
+            review_blocking=review_blocking,
+        )
     )
     return payload
 
