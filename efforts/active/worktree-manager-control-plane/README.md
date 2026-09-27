@@ -353,8 +353,8 @@ launch/monitor ownership has moved out of `agent-worktrees`, the Picker treats
 backend vs. presentation as independent axes, and legacy `session_backend`
 bindings still resolve correctly through the compatibility view.
 
-### Phase 3c — Picker non-blocking I/O (In progress — Steps 1-4 landed, Step 5 open)
-- [ ] Make every I/O-touching Picker surface — pivot loads (built-in and
+### Phase 3c — Picker non-blocking I/O (Done — Steps 1-5 landed; optional progress-envelope follow-up tracked in #4274)
+- [x] Make every I/O-touching Picker surface — pivot loads (built-in and
       plugin-contributed), menu opens, and action execution with progress
       reporting — consistently non-blocking, closing the gap found while
       investigating a "menus feel slow" report after
@@ -389,7 +389,18 @@ bindings still resolve correctly through the compatibility view.
       epoch-guarded setup worker instead of calling synchronous `setup()`,
       and new Step 3 race coverage proves rapid repeated reloads plus both
       config-section/worktree-action rescan vs manual reload orderings always
-      resolve to the newer epoch.
+      resolve to the newer epoch. **Step 4 landed in PR
+      [#4164](https://github.com/ThomasMichon/copilot-extensions/pull/4164)**:
+      explicit UI-thread boundary tests now fail fast if mount, reload, or
+      action-completion rescan code paths regress to blocking setup I/O, while
+      the existing Actions-menu and steer-submit offload coverage is
+      documented as part of the same guardrail. **Step 5 landed in PR
+      [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278)**:
+      the lingering synchronous helper was renamed to the test-only
+      `setup_sync_for_tests()`, direct unit-test callers were updated, the
+      setup/reload docs were reconciled to the final worker-owned production
+      path, and the separate built-in progress-envelope follow-up was filed as
+      [#4274](https://github.com/ThomasMichon/copilot-extensions/issues/4274).
 
 ### Phase 3d — Retire the Picker's in-process engine-module boundary (Planned — #3359, #3360)
 
@@ -732,6 +743,29 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-09-27** — Landed Phase 3c Step 5, PR
+  [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
+  Renamed the old synchronous Picker setup helper to
+  `setup_sync_for_tests()` so no production code or comment surface still
+  advertises an inline `setup()` UI entrypoint, updated every intentional
+  synchronous test call site to the explicit test-only name, and refreshed the
+  related source/test commentary to describe the final worker-owned production
+  path instead of the pre-cutover shape. Audited the Step 1 seams before
+  deleting anything and kept only the helpers that still have a real shared
+  job: `_prime_setup_reload()` and `_invalidate_setup_reload_caches()` remain
+  because both `_start_setup_reload_worker()` and the synchronous test helper
+  still need them; no production compatibility wrapper remains in front of the
+  async setup/reload path. Recorded the optional richer built-in progress
+  follow-on explicitly as issue
+  [#4274](https://github.com/ThomasMichon/copilot-extensions/issues/4274)
+  instead of leaving the proposal implicit in the phase plan. Validation:
+  targeted picker tests green; full `tests/production_picker/` suite matched
+  the standing Windows baseline twice back-to-back at `775 passed, 3 skipped,
+  3 failed` (unchanged known provider-source failures), and the full
+  `worktree-manager` suite matched the Step 4 baseline shape at
+  `1500 passed, 7 skipped, 13 failed` (unchanged known failures: the same 3
+  provider-source failures plus 10 Windows symlink-privilege failures).
+
 - **2026-09-27** — Landed Phase 3c Step 4, PR
   [#4164](https://github.com/ThomasMichon/copilot-extensions/pull/4164).
   Promoted the standing "no blocking I/O on the render thread" contract from
@@ -747,9 +781,9 @@ claiming discipline alone.
   say explicitly that they are part of the same Phase 3c UI-thread boundary.
   Evaluated the plan's "default-on broad fixture" option and rejected it on
   purpose: the interactive picker suite still contains many intentional direct
-  `screen.setup()` tests covering lower-level synchronous seams, so a suite-
-  wide autouse guard would destabilize unrelated tests and obscure the actual
-  regression surface. Validation: targeted Phase 3c boundary tests green; full
+  `screen.setup_sync_for_tests()` tests covering lower-level synchronous seams,
+  so a suite-wide autouse guard would destabilize unrelated tests and obscure
+  the actual regression surface. Validation: targeted Phase 3c boundary tests green; full
   `worktree-manager` suite matched the Windows baseline at `1498 passed,
   7 skipped, 13 failed` (unchanged known failures: the same 3 unrelated
   provider-source failures in `test_data_ssh_sources.py` plus 10 Windows

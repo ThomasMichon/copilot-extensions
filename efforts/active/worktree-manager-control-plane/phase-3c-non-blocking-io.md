@@ -4,14 +4,18 @@
 - **Scope of this doc:** the ordered implementation plan for making the
   Picker's remaining I/O-touching setup/reload path consistently non-blocking,
   plus landed-step notes as each ordered slice merges.
-- **Status:** In progress — Steps 1-2 merged 2026-09-26 as
+- **Status:** Complete — Steps 1-2 merged 2026-09-26 as
   [#3903](https://github.com/ThomasMichon/copilot-extensions/pull/3903) and
   [#4007](https://github.com/ThomasMichon/copilot-extensions/pull/4007);
   Step 3 landed in
   [#4144](https://github.com/ThomasMichon/copilot-extensions/pull/4144);
-  Step 4 lands in
+  Step 4 landed in
   [#4164](https://github.com/ThomasMichon/copilot-extensions/pull/4164);
-  Step 5 remains open.
+  Step 5 landed in
+  [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
+  The in-repo non-blocking setup/reload cutover is complete; the optional
+  follow-on for richer built-in verb progress is tracked separately in
+  [#4274](https://github.com/ThomasMichon/copilot-extensions/issues/4274).
 - **Governing visions:**
   - [`visions/picker`](../../../visions/picker/README.md):
     §Features/`decision-support-before-cost`, `programmatic-parity`;
@@ -254,7 +258,7 @@ then tightens regression coverage and cleanup.
      the newer epoch.
 
 [x] **Step 4 — land the regression guards for menu opens and UI-thread
-      setup I/O.** Lands in
+      setup I/O.** Landed in
       [#4164](https://github.com/ThomasMichon/copilot-extensions/pull/4164):
       added explicit Phase 3c UI-thread boundary coverage in
       `tests/production_picker/test_setup_reload_epoch.py` for the three
@@ -262,15 +266,16 @@ then tightens regression coverage and cleanup.
       `_run_config_section()`'s rescan callback, and `_run_wt_action()`'s
       rescan callback), all with `_collect_setup_payload()` blocked behind a
       gate so the test fails immediately if any callback is changed back to
-      synchronous `setup()` or another direct-I/O path. Kept Step 2's blocked
+      synchronous inline setup or another direct-I/O path. Kept Step 2's blocked
       mount test as the fourth call-site guard and explicitly marked the
       existing Actions-menu liveness and steer-submit offload tests as part of
       the same standing Phase 3c non-blocking boundary. Deliberately did **not**
       install a broad default-on autouse fixture for every interactive picker
-      test: the suite still contains many intentional direct `screen.setup()`
-      unit tests (`test_picker_first_paint.py`, `test_picker_tui.py`, and this
-      module's own synchronous baseline checks), so a suite-wide guard would
-      either false-positive or force unrelated tests onto the async path just to
+      test: the suite still contains many intentional direct
+      `screen.setup_sync_for_tests()` unit tests
+      (`test_picker_first_paint.py`, `test_picker_tui.py`, and this module's
+      own synchronous baseline checks), so a suite-wide guard would either
+      false-positive or force unrelated tests onto the async path just to
       satisfy the fixture. Validation: targeted boundary tests green; full
       `worktree-manager` suite matched the Windows baseline at `1498 passed,
       7 skipped, 13 failed` (unchanged known failures: the same 3
@@ -281,18 +286,34 @@ then tightens regression coverage and cleanup.
    - Add the blocking-gate tests described above for setup/mount/reload.
    - Deliberately keep the guard as explicit tests rather than a default-on
      autouse fixture: the current interactive-picker corpus still carries many
-     intentional direct `screen.setup()`/baseline tests whose job is to
-     exercise synchronous helper seams, so a suite-wide guard would destabilize
-     unrelated coverage instead of protecting just the UI-thread boundary.
+     intentional direct `screen.setup_sync_for_tests()` / baseline tests
+     whose job is to exercise synchronous helper seams, so a suite-wide
+     guard would destabilize unrelated coverage instead of protecting just
+     the UI-thread boundary.
 
-5. **Cleanup, rename, and document the final shape.**
-   - Remove or rename the now-misleading synchronous `setup()` UI entrypoint so
-     future edits do not accidentally call it inline again.
-   - Collapse any temporary compatibility wrappers added in Steps 1-3.
-   - Update the effort/architecture docs and link the final helper names the
-     way the Phase 3b/3e docs do after cutover.
-   - Record the companion cross-repo proposal for built-in-verb progress
-     percentages (below) without blocking the in-repo cutover on it.
+[x] **Step 5 — cleanup, rename, and document the final shape.** Landed in
+     [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278):
+     renamed the remaining synchronous helper to
+     `setup_sync_for_tests()` so production code no longer advertises a
+     callable inline `setup()` entrypoint; updated every deliberate
+     synchronous test call site and related comments/docstrings to the new
+     test-only name; audited the Step 1 helper seams and retained only the
+     ones still genuinely shared by `_start_setup_reload_worker()` and the
+     synchronous test helper (`_prime_setup_reload()` and
+     `_invalidate_setup_reload_caches()` stay because both paths still need
+     them, while no temporary production compatibility wrapper remains in
+     front of the worker path); and closed the documentation loop in this
+     effort. Filed the optional richer-progress follow-on as
+     [#4274](https://github.com/ThomasMichon/copilot-extensions/issues/4274)
+     instead of leaving the cross-repo proposal implicit. Validation:
+     targeted `test_setup_reload_epoch.py`,
+     `test_picker_first_paint.py`, and `test_picker_tui.py` all green; the
+     full `tests/production_picker/` suite matched the standing Windows
+     baseline twice back-to-back at `775 passed, 3 skipped, 3 failed` (the
+     same provider-source failures), and the full `worktree-manager` suite
+     matched the Step 4 Windows baseline shape at `1500 passed, 7 skipped,
+     13 failed` (the same 3 provider-source failures plus 10 symlink-
+     privilege failures).
 
 ## Validation
 
@@ -374,7 +395,9 @@ The proposal is therefore a separate `agent-worktrees` follow-up: let the
 built-in lifecycle verbs optionally emit the same NDJSON progress contract that
 `tasks.run_action_stream(...)` already consumes. Worktree Manager can then wire
 those verbs into the existing `ProgressScreen` streaming mode incrementally.
-This proposal must not block the in-repo setup/reload cutover above.
+This proposal is now tracked in
+[#4274](https://github.com/ThomasMichon/copilot-extensions/issues/4274) and
+must not block the in-repo setup/reload cutover above.
 
 ## Non-Goals of this slice
 
