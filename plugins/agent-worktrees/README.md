@@ -135,6 +135,21 @@ works the same way: per-session `session-options.ps1` + opt-in
 `apply-mux-keybinds.ps1`; neither system owns `~/.psmux.conf`.) See the CLI
 Reference's *Per-session, not global* note for details.
 
+## PR Attribution & Codenames
+
+Every worktree is assigned a random, public-safe **codename** at creation,
+and `create-pr` embeds it in a hidden PR marker by default
+(codename-attribution-by-default) -- a public repo can't publish raw
+machine/worktree/session identifiers, but a codename gives the PR's author,
+or any maintainer who didn't write it, a way to trace a stalled or
+unfamiliar PR back to its source worktree: `resolve --codename <name>` or
+`embody --codename <name>`, resolved locally first and then via an automated
+cross-machine SSH scan that fails closed on a remote match (reports the
+machine, never launches remotely). See the
+[Architecture doc's PR Attribution & Codenames section](docs/architecture.md#pr-attribution--codenames)
+for the mechanism and threat-model tradeoff, and the `worktree` skill's
+`references/pr-attribution.md` for the consumer-facing how-to.
+
 ## Getting Started
 
 See [Getting Started](docs/getting-started.md) for the minimal standalone path:
@@ -151,7 +166,7 @@ the skills below for in-session guidance.
 | [Multiplexed Sessions](docs/mux.md) | Why sessions run in tmux/psmux — persistence, detach/rejoin, and muxed-vs-programmatic launch |
 | [Worktree Lifecycle & Change Management](docs/worktree-lifecycle.md) | The full landing flow — states, direct-push and PR mode, held/follow-up and serial-vs-parallel PRs |
 | [Cross-Repo Setup](docs/cross-repo-project-setup.md) | Which of repo class, agent exposure, and project registration to set for a given cross-repo need — decision table + traps (e.g. `expose_agent` without `--repo-dir` is a no-op; registering a `reference` repo silently reclassifies it to `worktree`) |
-| [Architecture](docs/architecture.md) | Plugin/runtime layers, installed layout, session lifecycle |
+| [Architecture](docs/architecture.md) | Plugin/runtime layers, installed layout, session lifecycle, PR attribution & codenames |
 | [CLI Reference](docs/cli-reference.md) | Commands, installer actions, config format |
 
 ## Validation

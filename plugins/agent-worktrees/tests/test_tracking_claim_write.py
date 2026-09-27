@@ -194,6 +194,145 @@ def test_settle_rejects_an_unknown_ref(record_path):
     assert result == {"error": "not_found"}
 
 
+def test_settle_skip_if_released_no_ops_an_already_released_claim(record_path):
+    """The ``skip_if_released`` guard (added for ``handoff_cutover.py``'s
+    ``_settle_predecessor_session_claim`` repair) must never resurrect an
+    already-``released`` claim -- mirrors ``finalize.py``'s
+    ``_settle_current_session_claim`` guard, now shared through this verb
+    instead of duplicated at the call site."""
+    tracking_claim_write.apply_claim_add(
+        {
+            "worktree_id": "wt-claim",
+            "yaml_path": str(record_path),
+            "kind": "codespace",
+            "ref": "cs-1",
+        }
+    )
+    tracking_claim_write.apply_claim_release(
+        {"worktree_id": "wt-claim", "yaml_path": str(record_path), "ref": "cs-1"}
+    )
+    result = tracking_claim_write.apply_claim_settle(
+        {
+            "worktree_id": "wt-claim",
+            "yaml_path": str(record_path),
+            "ref": "cs-1",
+            "disposition": obligations.AT_REST,
+            "skip_if_released": True,
+        }
+    )
+    assert result == {"ok": True, "skipped": "released"}
+    record = tracking.load_record(record_path)
+    match = next(c for c in record.resources if c.ref == "cs-1")
+    assert match.state == "released"
+
+
+def test_settle_without_skip_if_released_still_resettles_a_released_claim(record_path):
+    """Confirms the guard is opt-in only: the public ``claims settle`` CLI
+    command's existing behavior (unconditional resettle, no guard arg) is
+    unchanged."""
+    tracking_claim_write.apply_claim_add(
+        {
+            "worktree_id": "wt-claim",
+            "yaml_path": str(record_path),
+            "kind": "codespace",
+            "ref": "cs-1",
+        }
+    )
+    tracking_claim_write.apply_claim_release(
+        {"worktree_id": "wt-claim", "yaml_path": str(record_path), "ref": "cs-1"}
+    )
+    result = tracking_claim_write.apply_claim_settle(
+        {
+            "worktree_id": "wt-claim",
+            "yaml_path": str(record_path),
+            "ref": "cs-1",
+            "disposition": obligations.AT_REST,
+        }
+    )
+    assert result == {"ok": True, "kind": "codespace", "disposition": obligations.AT_REST}
+    record = tracking.load_record(record_path)
+    match = next(c for c in record.resources if c.ref == "cs-1")
+    assert match.state == obligations.AT_REST
+
+
+def test_settle_skip_if_released_wins_over_a_stale_reservation(record_path):
+    """The ``skip_if_released`` no-op must run BEFORE the reservation check
+    (2026-09-27 PR #3911 review finding): a released claim that still
+    carries a stale ``handoff_bundle`` reservation must still silently
+    no-op, exactly like the old inline repair (which never even reached a
+    reservation check once a claim was already ``released``) -- not
+    surface as ``{"error": "reserved"}``."""
+    tracking_claim_write.apply_claim_add(
+        {
+            "worktree_id": "wt-claim",
+            "yaml_path": str(record_path),
+            "kind": "codespace",
+            "ref": "cs-1",
+        }
+    )
+    tracking_claim_write.apply_claim_release(
+        {"worktree_id": "wt-claim", "yaml_path": str(record_path), "ref": "cs-1"}
+    )
+    record = tracking.load_record(record_path)
+    match = next(c for c in record.resources if c.ref == "cs-1")
+    match.handoff_bundle = "stale-bundle"
+    tracking.save_record(record, record_path)
+
+    result = tracking_claim_write.apply_claim_settle(
+        {
+            "worktree_id": "wt-claim",
+            "yaml_path": str(record_path),
+            "ref": "cs-1",
+            "disposition": obligations.AT_REST,
+            "skip_if_released": True,
+        }
+    )
+    assert result == {"ok": True, "skipped": "released"}
+
+
+def test_settle_always_hard_requires_the_sidecar_lock(record_path, monkeypatch):
+    """``claim_settle`` always hard-requires the sidecar, for both the
+    outer ``_RecordLock`` and the nested ``save_record`` call -- including
+    for the ``skip_if_released`` repair caller (2026-09-27 PR #3911 review
+    findings): the pre-migration inline transaction's own OUTER
+    ``_RecordLock`` degraded on contention, but its final
+    ``save_record`` call already hard-required the sidecar internally
+    (``save_record`` never accepted a softer policy), so on real
+    contention the old code's net effect was ALWAYS to fail the write
+    and let this repair's own best-effort
+    ``contextlib.suppress(Exception)`` swallow it -- never to persist a
+    stale in-memory snapshot without cross-process exclusion. Matching
+    that here avoids silently resurrecting an already-``released`` claim
+    if a concurrent ``deregister_session`` released it mid-transaction."""
+    calls = []
+    real_lock = tracking._RecordLock
+
+    def _spy(path, **kwargs):
+        calls.append(kwargs)
+        return real_lock(path, **kwargs)
+
+    monkeypatch.setattr(tracking, "_RecordLock", _spy)
+    tracking_claim_write.apply_claim_add(
+        {
+            "worktree_id": "wt-claim",
+            "yaml_path": str(record_path),
+            "kind": "codespace",
+            "ref": "cs-1",
+        }
+    )
+    calls.clear()
+    tracking_claim_write.apply_claim_settle(
+        {
+            "worktree_id": "wt-claim",
+            "yaml_path": str(record_path),
+            "ref": "cs-1",
+            "disposition": obligations.AT_REST,
+            "skip_if_released": True,
+        }
+    )
+    assert calls == [{"require_sidecar": True}, {"require_sidecar": True}]
+
+
 def test_dispatch_reaches_claim_add_through_a_live_daemon(record_path):
     """End-to-end: proves ``tracking_write.dispatch`` reaches
     ``apply_claim_add`` via an actual ``CoalescingServer``, the

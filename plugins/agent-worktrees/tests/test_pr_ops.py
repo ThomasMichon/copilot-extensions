@@ -3214,6 +3214,7 @@ class TestPRStatusLive:
         assert res["live"]["merge_state"] == "clean"
         assert res["live"]["eligible"] is True
         assert res["live"]["reviews"] == 1
+        assert res["live"]["occupancy"] == "needs-consent"
 
     def test_live_verdict_reports_comment_when_review_blocking_false(
         self, pr_repo, monkeypatch

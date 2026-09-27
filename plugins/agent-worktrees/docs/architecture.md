@@ -912,6 +912,65 @@ are safe to reach for immediately:
   can name the *exact* stalled stage (rather than just flagging that one
   exists) is also open follow-on work.
 
+## PR Attribution & Codenames
+
+**The problem.** A PR opened by an agent needs a way for its own author, or
+an unrelated maintainer, to trace it back to the worktree that produced it --
+useful for resuming a stalled PR, or diagnosing one that looks abandoned. But
+a public repo cannot publish raw machine names, worktree ids, or session ids
+in PR bodies or branch names -- that's facility-internal topology leaking into
+a shared codebase. The system resolves this tension with a **hidden PR
+marker** whose content is governed by the `pr.source_attribution` config key,
+plus a `codename` -- a random, public-safe label assigned to every worktree at
+creation time -- as the informationless-by-decoding handle that marker can
+safely carry.
+
+**Three modes**, set via `pr.source_attribution` (full field-level detail:
+`docs/config-reference.md`):
+
+- **`"codename"` (default, codename-attribution-by-default).** `create-pr`
+  embeds `<!-- agent-worktrees:source codename=<name> -->` and nothing else
+  -- no machine, worktree id, session id, or SHA. The marker decodes to
+  nothing on its own; it is only useful as a lookup key back into the
+  *originating* machine's own tracking store, via `resolve --codename` or
+  `embody --codename`. This is the right default for any repo whose PRs are
+  visible outside the facility.
+- **`true` (raw marker).** Embeds the full raw identifiers (worktree id,
+  machine, session, head SHA) directly in the hidden marker. Closed-circuit
+  systems only -- never a public repo.
+- **`false` (anonymous opt-out).** No marker at all.
+
+**Resolution path.** `resolve --codename <name>` and `embody --codename
+<name>` both resolve **locally first** (the codename is looked up in this
+machine's own tracking store), then fall back to an **automated
+cross-machine SSH scan** (effort `pr-attribution-codenames` Phase 3): every
+other known, SSH-reachable machine is asked over SSH whether its own
+tracking store recognizes that codename. A match on a different machine
+**fails closed** -- it reports which machine and worktree id own the
+codename rather than attempting a remote launch itself; resuming from there
+means SSHing to that machine directly (or, in the future, an agent-bridge
+dispatch).
+
+**Accepted threat-model tradeoff.** The codename mode is
+informationless-by-decoding, not unlinkable: the *same* codename recurring
+across multiple PRs from the same worktree is still a correlatable signal to
+an outside observer, even though no single marker decodes to anything on its
+own. This is a deliberate, accepted tradeoff for the coverage the mechanism
+buys -- not a gap to close.
+
+**Branch-name leak class.** The hidden marker isn't the only surface that can
+leak a private identifier -- the PR head's branch name is public too.
+Whenever `source_attribution` isn't exactly `true`, `create-pr` hard-blocks
+(never just warns) publishing a branch name that embeds the raw worktree id
+or machine name; `attribution-audit` checks a repo's configured
+`head_pattern` for this risk ahead of time. See `docs/config-reference.md`
+(`head_pattern`, `source_attribution`) and `docs/cli-reference.md`
+(`resolve`, `embody`, `create`, `list`) for the field- and flag-level
+detail -- this section only covers the mechanism's shape, not its full
+surface. The `worktree` skill's `references/pr-attribution.md` covers the
+consumer-facing how-to, including the maintainer/reviewer path for tracing
+an unfamiliar PR that isn't its own author.
+
 ## Terminal Integration
 
 The interactive mux launch scripts and their per-session terminal-integration

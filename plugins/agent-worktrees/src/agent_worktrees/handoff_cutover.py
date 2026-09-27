@@ -726,86 +726,92 @@ def _maybe_emit_stage_13(
             claim_path.unlink()
 
 
+def _dispatch_handoff_repair(verb: str, verb_args: dict):
+    """Dispatch a confirmed-retire repair verb (``claim_settle``/
+    ``session_conclude``) through the daemon's write path when reachable,
+    else the identical in-process code (logged) -- mirrors
+    ``session_tracking_cli._dispatch_session_lifecycle``/
+    ``claims_cli._dispatch_claim``. Both callers reuse those same public
+    verbs, distinguished only by their own opt-in no-op guard/lock-policy
+    args. May raise ``tracking_write.AmbiguousWriteOutcome``; both callers'
+    existing best-effort ``except``/``contextlib.suppress(Exception)``
+    swallow it -- an *unknown* outcome composes like a *confirmed* one."""
+    from . import status_monitor_runtime as _smr
+    from . import tracking_write
+
+    return tracking_write.dispatch(
+        verb,
+        verb_args,
+        read_lock_data=lambda: locks.read_lock(_smr._monitor_lock_path()),
+        ensure_monitor=_smr._ensure_status_monitor if _smr._status_monitor_enabled() else None,
+    )
+
+
 def _settle_predecessor_session_claim(wt_id: str | None, session_id: str) -> None:
     """Settle a confirmed-retired predecessor's ``session`` claim to at-rest.
-
     Runs for *every* confirmed retire (bare or token-bearing), unlike
-    :func:`_conclude_retired_predecessor` which only concludes the
-    ``SessionEntry`` on a bare retire -- a token-bearing retire's own
-    ``SessionEntry`` transition is ``link_handoff``'s job, but nothing else
-    settles the predecessor's Phase 8 ``session`` resource claim once its
-    pane and Copilot process are positively confirmed gone. Settles (not
-    releases) since ``settle_resource_claim`` never resurrects an
-    already-``released`` claim (mirrors ``finalize.py``'s
-    ``_settle_current_session_claim`` guard) -- a ``deregister_session`` that
-    raced ahead and released the claim first is left alone. Best-effort:
-    unknown worktree/session or a missing claim is a silent no-op, never a
-    hard failure of the retire itself.
-    """
+    :func:`_conclude_retired_predecessor` which only concludes on a bare
+    retire. Uses the shared ``claim_settle`` verb's ``skip_if_released``
+    guard, which never resurrects an already-``released`` claim (mirrors
+    ``finalize.py``'s ``_settle_current_session_claim`` guard) -- a
+    ``deregister_session`` that raced ahead is left alone. On sidecar
+    contention the verb's own ``require_sidecar=True`` raises, caught by
+    this repair's best-effort ``contextlib.suppress(Exception)`` (matching
+    the pre-migration transaction's own net effect -- its outer lock
+    degraded, but its final ``save_record`` call already hard-required the
+    sidecar). Best-effort: unknown worktree/session or a missing claim is a
+    silent no-op."""
     if not wt_id or not session_id:
         return
     with contextlib.suppress(Exception):
         yaml_path = tracking._owning_tracking_dir(wt_id) / f"{wt_id}.yaml"
         if not yaml_path.exists():
             return
-        with tracking._RecordLock(yaml_path):
-            record = tracking.load_record(yaml_path)
-            predecessor_ref = tracking.format_claim_ref(
-                record.machine, record.repo, record.worktree_id, session=session_id,
-            )
-            existing_claim = next(
-                (c for c in record.resources if c.ref == predecessor_ref), None,
-            )
-            if existing_claim is None or existing_claim.state == "released":
-                return
-            tracking.settle_resource_claim(
-                record, predecessor_ref, disposition=obligations.AT_REST, save=False,
-            )
-            tracking.save_record(record, yaml_path)
+        record = tracking.load_record(yaml_path)
+        predecessor_ref = tracking.format_claim_ref(
+            record.machine, record.repo, record.worktree_id, session=session_id,
+        )
+        _dispatch_handoff_repair(
+            "claim_settle",
+            {
+                "worktree_id": wt_id, "yaml_path": str(yaml_path), "ref": predecessor_ref,
+                "disposition": obligations.AT_REST, "skip_if_released": True,
+            },
+        )
 
 
 def _conclude_retired_predecessor(wt_id: str | None, session_id: str) -> None:
     """Mark a retire-confirmed predecessor's ``SessionEntry`` concluded.
-
     A confirmed ``--retire-pane`` (pane gone AND its Copilot process
-    positively verified dead by pid) is a deliberate, verified act -- not
-    liveness inference -- so it is safe to assert conclusion here, same as
-    ``conclude-session``'s own contract. Without this, a session whose
-    process died via a bare self-retire (no handoff-token successor link)
-    leaves its ``SessionEntry.state`` stuck at ``"active"`` forever, and
-    ``register_session``'s creation-guard then refuses to ever promote a
-    later successor to head -- a zombie head pointer.
-
-    Deliberately does NOT attempt to promote any other session found on the
-    record: ``conclude_session`` (and this repair, which shares its
-    contract) never infers a successor from list membership -- that's the
-    same invariant a plain ``conclude-session`` upholds ("another active
-    session is never promoted by list or timestamp order; a successor or
-    adopter must assert the next transition explicitly"). A session that
-    registered while this predecessor was still active is not necessarily
-    its successor -- it could be an unrelated parallel session -- so
-    guessing from "exactly one other active entry" would misattribute
-    succession exactly as easily as it would complete a deferred one. A
-    subsequent registration (any future hook/bind call) still correctly
-    claims the now-cleared head via ``register_session``'s own ordinary
-    path; closing the narrower race window where an already-registered
-    session is never re-triggered needs an explicit adoption/relationship
-    marker, which is a separate, larger change than this repair's scope.
-    Best-effort: unknown worktree/session or an already-concluded entry is a
-    silent no-op, never a hard failure of the retire itself.
-    """
+    positively verified dead) is a deliberate, verified act, so it is safe
+    to assert conclusion here. Without this, a bare self-retire (no
+    handoff-token successor) leaves ``SessionEntry.state`` stuck
+    ``"active"`` forever, blocking ``register_session``'s creation-guard
+    from ever promoting a later successor -- a zombie head pointer. Uses
+    the shared ``session_conclude`` verb's ``only_if_active`` guard,
+    which -- like this repair always has -- never infers a successor from
+    list membership: a session registered while this predecessor was still
+    active is not necessarily its successor, so guessing would misattribute
+    succession as easily as complete it. A later registration still
+    correctly claims the cleared head via ``register_session``'s ordinary
+    path. Best-effort: unknown worktree/session or an already-concluded
+    entry is a silent no-op."""
     if not wt_id or not session_id:
         return
     yaml_path = tracking._owning_tracking_dir(wt_id) / f"{wt_id}.yaml"
     if not yaml_path.exists():
         return
-    with contextlib.suppress(Exception), tracking._RecordLock(yaml_path):
-        record = tracking.load_record(yaml_path)
-        entry = record.session_entry(session_id)
-        if entry is None or entry.state != "active":
-            return
-        tracking.conclude_session(record, session_id, state="concluded", save=False)
-        tracking.save_record(record, yaml_path)
+    with contextlib.suppress(Exception):
+        _dispatch_handoff_repair(
+            "session_conclude",
+            {
+                "worktree_id": wt_id,
+                "yaml_path": str(yaml_path),
+                "session_id": session_id,
+                "state": "concluded",
+                "only_if_active": True,
+            },
+        )
 
 
 def _resolve_retire_pane_mux_session(

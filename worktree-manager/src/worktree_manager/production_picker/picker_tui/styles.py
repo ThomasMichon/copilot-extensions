@@ -19,6 +19,12 @@ C_TAB_FOCUS = "reverse bold"            # selected pivot, zone focused (cursor)
 C_TAB_FOCUS_ON = "reverse bold orange1"  # focused AND active view tab / ⚙ chip
 C_TABOFF = "grey58"
 C_SEL = "reverse"         # focused row -> invert (the cursor)
+# #3307 worktrees-pivot-ux-overhaul follow-up: a subtle alternating-row
+# background so a multi-line row (title + detail/worker lines) reads as one
+# visual unit against its neighbors, rather than every line looking like an
+# independent row. Applied only to the plain (unfocused, unselected)
+# background case -- focus/selection styles below always take precedence.
+C_ALT_BG = "on grey15"
 # Worktrees multi-select highlight states (#2258 follow-up): the focus cursor
 # inverts (reverse); a green invert means the cursor is ALSO in the selection,
 # a plain (white) invert means the cursor sits on an UNselected row, and a grey

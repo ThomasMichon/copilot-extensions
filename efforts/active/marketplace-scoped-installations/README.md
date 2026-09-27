@@ -386,6 +386,107 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-26 — `agent-containers`' 27 of 39 findings resolved (PR #3877)
+
+- Fresh guard count at merge time: 663 (`{bare-agent-command: 2, fixed-
+  service-identity: 134, global-plugin-binstub: 83, path-sibling-launch:
+  41, unqualified-runtime-root: 403}`) -- drifted up from the prior leg's
+  651 due to unrelated concurrent `dev` activity, as expected.
+- Classified `agent-containers`' 39 findings (36 own + a shared vendored
+  lib's 3, but the vendored lib actually carries 7 findings apiece across
+  3 plugins -- see below) by shape: `register-bridge-provider.ps1` (same
+  env-var-fallback shape as `agent-logger`'s already-fixed `register-cold-
+  store-provider.ps1`, `allow legacy compatibility root`), `_invoke.py`/
+  `config.py`'s own legacy-root fallback (two near-duplicate functions),
+  `provider_ssh.py` (one own-root fallback, one cross-plugin
+  `agent-worktrees` registry lookup, `allow registry`), `ssh_transport.py`
+  (`docker exec`-resolved paths that live inside a target container's own
+  filesystem via `_remote_home()`, a genuinely different context from
+  local-cell qualification -- **new reason phrase** `allow remote-
+  container-path`, not previously used in the repo), and
+  `containers-fleet/SKILL.md`'s 7 doc-shaped mentions (`allow deployed-
+  runtime-diagnostics`, same pattern as other plugins' `SKILL.md` fixes).
+- **The `venue-copilot` lib (vendored byte-identical in `agent-containers`,
+  `agent-codespaces`, `agent-ssh` -- provider-agnostic CLI-mode session
+  orchestration, agent-bridge-cli-mode-sessions Phase 4) turned out to be
+  genuinely annotation-shaped, not the "unconverted backlog needing a
+  design pass" the prior leg's handoff worried it might be** (that caution
+  was actually about `harness-knowledge`'s unrelated 2 findings, not this
+  lib specifically -- re-read the referenced 2026-09-24 entry directly
+  rather than trusting the paraphrase). Its `SEED_DIR`/
+  `_DEFAULT_BRIDGE_CONFIG_DIR`/`REFS_ROOT` and the shell-snippet functions
+  (`registration_credentials_script`, `bridge_probe_script`) all reference
+  **`agent-bridge`'s own** runtime root by name during remote CLI-mode
+  session setup -- the exact same cross-plugin-reference shape already
+  established in `context-handoff/handoff-core.mjs` (`allow agent-bridge-
+  management`), regardless of whether the reference resolves on this host
+  or the remote venue (the reasoning is identical either way: it names a
+  sibling plugin's cell, not this one's). One `shutil.which("agent-
+  bridge")` sibling launch got `allow legacy-compatibility` (matches this
+  same plugin's own established style). Fixed in `agent-containers` first,
+  then propagated byte-identically to the other 2 copies and re-verified
+  `check-vendored-libs-sync.py` -- this triggered a fresh-worktree-per-
+  plugin question that turned out not to apply here (all 3 copies live
+  under the ONE PR's diff, no separate per-plugin PRs needed for a shared
+  lib fix).
+- **Review caught a real, non-trivial class of bug across the first pass**:
+  every trailing `# marketplace-isolation: allow <reason>` comment I
+  appended pushed 14 lines past the plugin's Ruff 99-char limit (`E501`),
+  because a long established reason phrase (`allow legacy compatibility
+  root`, `allow deployed-runtime-diagnostics`) plus an already-long code
+  line has very little budget left. Fixed by restructuring -- split string
+  literals so the marked substring lands on its own short line, or pull a
+  short local constant ahead of the line that uses it -- rather than by
+  inventing shorter, inconsistent reason phrases; verified with `ruff
+  check --select E501` on every touched file plus a runtime output-
+  equality check (`repr()` before/after) for `bridge_probe_script`'s split
+  f-string, since splitting a shell-snippet string is exactly the kind of
+  change that can silently alter runtime output if done carelessly.
+- **That same restructuring fix then blew a SECOND, unrelated guard**:
+  `__main__.py`'s module-size baseline is exactly 1175 lines with zero
+  headroom, and the review's fix for 3 of its findings (config-migrate
+  help text, session-host-cleanup path validation, relay-port config-dir
+  default) needed at least 2 net new lines even after sharing a module-
+  level constant across use-sites (2 distinct literal roots, each needing
+  its own marked line). `check-module-size.py`'s own docstring is explicit
+  that `--allow-widen` is reserved for a scheduled **post-merge** job on
+  `main`, never an ordinary PR's own diff -- "growth past the grandfathered
+  size must be a conscious, visible decision, not a silent side effect."
+  Rather than launder that growth through this PR, reverted `__main__.py`
+  to byte-identical with `origin/dev` and left its 3 findings unannotated,
+  deferred to a future leg alongside an actual split/shrink of the module
+  (or a deliberate, separately-reviewed baseline-widening PR) -- this is
+  now a 4th backlog category alongside `payload-invocation.json` and
+  `init.ps1`/`init.sh`.
+- Verified: `python -m py_compile` + `ruff --select E501` on every touched
+  `.py` file, `check-module-size.py` (every module within cap/ceiling
+  after the revert), `check-vendored-libs-sync.py` (12 shared libs in
+  sync), `check-docs-consistency.py`, `check-changefile-presence.py
+  --base origin/dev` (one shared `patch` changefile naming all 3
+  affected plugins), and the full `agent-containers`/`agent-codespaces`/
+  `agent-ssh` suites via `test-supervisor` (`agent-codespaces` 291+11
+  passed; `agent-ssh` 171 passed/7 skipped/1 pre-existing failure --
+  `test_dtssh_apply_updates_existing_binary_without_login`; `agent-
+  containers` 128 passed/1 skipped/1 pre-existing failure --
+  `test_relay_profile_cannot_replace_refusal_with_default_allowlist`, a
+  WSL `powershell.exe`-detection issue -- both pre-existing failures
+  confirmed identical via `git stash`/`git stash pop` without this change
+  too, neither caused by this PR).
+- **Gotcha reconfirmed on the merge side, not the worktree side this
+  time**: `copilot-extensions`'s own `CONTRIBUTING.md` states PR review
+  here is advisory-only and non-blocking -- 0 approvals required, the
+  repo's `pr-self-merge` profile authorizes the submitter to merge
+  directly after addressing worthwhile findings (`pr-merge <#> --now`).
+  Do not wait indefinitely for a GitHub-style "approved" review-state
+  transition that this repo's workflow never produces -- that pattern
+  belongs to `aperture-labs`'s Intelligence-Dampener-gated flow, a
+  different repo with a different review contract. Merged directly once
+  the review's 2 remaining comments were confirmed stale (both cited
+  `__main__.py` lines that had since been fully reverted back to
+  `origin/dev`).
+- PR #3877 merged as commit `ffeb4cdc4` -> squash-merged; exact merge SHA
+  to be confirmed on `dev` at the start of the next leg.
+
 ### 2026-09-26 — Systemic `runtime-gate.ps1` marker-placement bug fixed across 5 more plugins
 
 - Fresh guard count for `dev` head (post `agent-logger` merge): 651.

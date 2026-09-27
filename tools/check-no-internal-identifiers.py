@@ -173,17 +173,19 @@ def _changed_files(base: str) -> list[str] | None:
     return [line for line in out.stdout.splitlines() if line]
 
 
-def _files_to_scan(scan_all: bool, base: str) -> list[str]:
+def _files_to_scan(scan_all: bool, base: str, *, emit_status: bool = True) -> list[str]:
     """Resolve the set of repo-relative files the guard should scan."""
     if scan_all:
         return _tracked_files()
     changed = _changed_files(base)
     if changed is None:
-        print(
-            f"base ref '{base}' not found -- scanning the whole tracked tree.",
-        )
+        if emit_status:
+            print(
+                f"base ref '{base}' not found -- scanning the whole tracked tree.",
+            )
         return _tracked_files()
-    print(f"scanning {len(changed)} file(s) changed vs {base}.")
+    if emit_status:
+        print(f"scanning {len(changed)} file(s) changed vs {base}.")
     return changed
 
 
@@ -278,7 +280,11 @@ def main(argv: list[str] | None = None) -> int:
             _write_json(Path(args.json_out), [])
         return 0
 
-    violations = _scan(_files_to_scan(args.all, args.base), identifiers, reasons)
+    violations = _scan(
+        _files_to_scan(args.all, args.base, emit_status=not args.ci),
+        identifiers,
+        reasons,
+    )
     if args.json_out:
         _write_json(Path(args.json_out), violations)
 

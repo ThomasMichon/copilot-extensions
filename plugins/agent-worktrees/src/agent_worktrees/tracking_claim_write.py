@@ -20,6 +20,15 @@ stay call-site-level, migrated (if ever) in a later, narrower slice.
 ``claim_added``/``claim_released``/``claim_settled`` are stage-mapped in
 ``activity.HANDOFF_STAGE_MAP``, so ``activity.log_event`` never reaches
 ``handoff_trace.append_event`` for any of them.
+
+``agent-worktrees-authoritative-daemon`` effort, Phase 3's fifth cluster
+(this same PR) reuses ``apply_claim_settle`` for ``handoff_cutover.py``'s
+``_settle_predecessor_session_claim`` repair via the ``skip_if_released``
+guard above, rather than registering a new verb for it -- both wrap the
+identical ``tracking.settle_resource_claim`` transaction, only differing
+in whether an already-``released`` claim is a silent no-op (repair) or
+resettled to the requested disposition (the public CLI command, which
+also supports settling explicitly TO ``released``).
 """
 
 from __future__ import annotations
@@ -136,15 +145,49 @@ def apply_claim_release(args: dict) -> dict:
 
 
 def apply_claim_settle(args: dict) -> dict:
-    """Registered as the ``claim_settle`` verb."""
+    """Registered as the ``claim_settle`` verb.
+
+    ``skip_if_released`` (default ``False``, preserving the public ``claims
+    settle`` CLI command's existing behavior unchanged) is an opt-in guard
+    for a best-effort repair caller (``handoff_cutover.py``'s
+    ``_settle_predecessor_session_claim``): when set and the matched claim
+    is already ``released``, this returns a silent ``{"ok": True, "skipped":
+    "released"}`` no-op instead of settling it, so a ``deregister_session``
+    that raced ahead and released the claim first is never resurrected back
+    to another disposition (mirrors ``finalize.py``'s
+    ``_settle_current_session_claim`` guard). Checked BEFORE the
+    reservation check below (2026-09-27 PR review finding) so a released
+    claim that still carries a stale reservation still silently no-ops --
+    the old inline repair never reached a reservation check once a claim
+    was already released, and reordering this after it would surface a
+    spurious ``{"error": "reserved"}`` instead. Must run inside this same
+    locked transaction, not at the caller -- checking then dispatching as
+    two separate steps would reopen exactly the race this guards against.
+
+    Always hard-requires the sidecar (2026-09-27 PR review findings): the
+    pre-migration inline repair's own OUTER ``_RecordLock`` degraded on
+    contention, but its final ``tracking.save_record`` call already
+    hard-required the sidecar internally (``save_record`` never accepted a
+    softer policy) -- so on real contention the old code's net effect was
+    ALWAYS to fail the write and let it fall through to this repair's own
+    best-effort ``contextlib.suppress(Exception)``, never to persist a
+    stale in-memory snapshot without cross-process exclusion. Matching
+    that net effect here (rather than genuinely degrading) avoids silently
+    resurrecting an already-``released`` claim if a concurrent
+    ``deregister_session`` released it between this verb's own load and
+    save.
+    """
     worktree_id = args["worktree_id"]
     yaml_path = Path(args["yaml_path"])
     ref = args["ref"]
     disposition = args["disposition"]
+    skip_if_released = bool(args.get("skip_if_released"))
 
     with tracking._RecordLock(yaml_path, require_sidecar=True):
         record = tracking.load_record(yaml_path)
         match = next((c for c in record.resources if c.ref == ref), None)
+        if skip_if_released and match is not None and match.state == "released":
+            return {"ok": True, "skipped": "released"}
         reservation = (
             tracking.claim_handoff_reservation(record, match) if match is not None else ""
         )

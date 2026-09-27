@@ -13,7 +13,8 @@ def runtime_root() -> Path:
     override = os.environ.get("AGENT_CONTAINERS_HOME", "").strip()
     if override:
         return Path(override).expanduser()
-    return Path.home() / ".agent-containers"
+    _legacy = ".agent-containers"  # marketplace-isolation: allow legacy compatibility root
+    return Path.home() / _legacy
 
 
 def payload_root() -> Path:
@@ -83,10 +84,11 @@ def _venv_python() -> str:
     legacy = _LEGACY_VENV_DIR / scripts / exe
     if legacy.exists():
         return str(legacy)
+    _root_name = ".agent-containers"  # marketplace-isolation: allow deployed-runtime-diagnostics
     raise RuntimeError(
         "Cannot resolve an agent_containers interpreter: no active versioned "
-        "runtime (~/.agent-containers/current-version -> versions/<ver>), an "
-        "empty sys.executable, and no legacy ~/.agent-containers/.venv."
+        f"runtime (~/{_root_name}/current-version -> versions/<ver>), an "
+        f"empty sys.executable, and no legacy ~/{_root_name}/.venv."
     )
 
 

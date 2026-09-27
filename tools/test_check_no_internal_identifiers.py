@@ -211,9 +211,8 @@ def test_ci_mode_stdout_is_count_only(repo: Path):
     assert result.returncode == 1
     assert CI_TOKEN not in result.stdout
     assert CI_REASON not in result.stdout
-    assert (
+    assert result.stdout.strip() == (
         "1 forbidden identifier(s) found -- see PR review comments for details."
-        in result.stdout
     )
 
 

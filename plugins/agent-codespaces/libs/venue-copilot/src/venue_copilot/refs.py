@@ -21,7 +21,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-REFS_ROOT = "$HOME/.agent-bridge/refs"
+REFS_ROOT = "$HOME/.agent-bridge/refs"  # marketplace-isolation: allow agent-bridge-management
 #: The payload travels in memory (tar.gz -> base64); larger inputs belong in a
 #: repository or storage account the venue can reach itself.
 MAX_REF_BYTES = 256 * 1024 * 1024
@@ -134,7 +134,8 @@ def deliver_note(session_id: str, note: str, *, run=subprocess.run) -> bool:
     about to report DONE would never see it) and bounded, so a wedged bridge
     cannot block the rejoin that delivers it.
     """
-    bridge = shutil.which("agent-bridge") or "agent-bridge"
+    _bin = "agent-bridge"  # marketplace-isolation: allow legacy-compatibility
+    bridge = shutil.which(_bin) or _bin
     try:
         result = run(
             [bridge, "send", session_id, "--prompt-file", "-", "--no-wait", "--steer"],

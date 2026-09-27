@@ -7661,6 +7661,88 @@ def test_detail_line_omits_badge_for_an_unclaimed_worktree():
     assert "·" not in line.plain
 
 
+def test_detail_line_never_falls_back_to_bare_state():
+    """#3307 follow-up: a row with no live-pulse intent and no disposition
+    activity shows no second-line suffix at all -- STATE is its own column
+    and must never be duplicated here as a fake "activity"."""
+    import worktree_manager.production_picker.picker_tui.engine as eng_mod
+
+    class _Eng:
+        def _worktree_claiming_task(self, _rec):
+            return None
+
+    view = eng_mod.WorktreesView(_Eng())
+    rec = {"title": "Fix the thing", "state": "wip"}
+    line = view._detail_line(rec, 80)
+
+    assert line.plain.strip() == "Fix the thing"
+
+
+def test_detail_line_prefers_live_intent_then_activity():
+    """Fallback order: live-pulse intent (fresh session) beats the
+    disposition-asserted ``activity`` field, which is shown when no live
+    pulse is present."""
+    import worktree_manager.production_picker.picker_tui.engine as eng_mod
+
+    class _Eng:
+        def _worktree_claiming_task(self, _rec):
+            return None
+
+    view = eng_mod.WorktreesView(_Eng())
+    with_both = {"title": "Fix the thing", "state": "wip",
+                 "live_pulse": "fresh", "live_intent": "running tests",
+                 "activity": "should not show"}
+    assert "running tests" in view._detail_line(with_both, 80).plain
+    assert "should not show" not in view._detail_line(with_both, 80).plain
+
+    activity_only = {"title": "Fix the thing", "state": "wip",
+                      "activity": "running the retry-budget tests"}
+    assert "running the retry-budget tests" in view._detail_line(activity_only, 80).plain
+
+
+def test_row_and_detail_line_alt_shading_skips_focused_or_selected():
+    """#3307 follow-up: the alternating-row background applies to a plain
+    row, but never overrides the focus/selection highlight (which already
+    carries its own background)."""
+    import worktree_manager.production_picker.picker_tui.engine as eng_mod
+    from worktree_manager.production_picker.picker_tui.styles import C_ALT_BG
+
+    class _Eng:
+        pulse = 0
+
+        def _checkbox(self, _is_sel):
+            return None
+
+        def _row_key(self, rec):
+            return rec["id"]
+
+        def _worktree_claiming_task(self, _rec):
+            return None
+
+    eng = _Eng()
+    eng.wt_sel = set()
+    view = eng_mod.WorktreesView(eng)
+    rec = {"id": "wt-1", "id4": "wt-1", "state": "wip", "title": "t",
+           "age": "1h", "used": "1h", "sess": "·", "sess_turns": "-/0",
+           "claims_summary": ""}
+    cols = [("id4", "id", 4, "l")]
+
+    plain_alt = view._row_text(rec, 0, None, 20, cols, None, None, alt=True)
+    styles_alt = {span.style for span in plain_alt.spans}
+    assert C_ALT_BG in styles_alt
+
+    plain_no_alt = view._row_text(rec, 0, None, 20, cols, None, None, alt=False)
+    assert C_ALT_BG not in {span.style for span in plain_no_alt.spans}
+
+    focused_alt = view._row_text(rec, 0, ("L", 0), 20, cols, None, None, alt=True)
+    assert C_ALT_BG not in {span.style for span in focused_alt.spans}
+
+    detail_alt = view._detail_line(rec, 80, alt=True)
+    assert C_ALT_BG in {span.style for span in detail_alt.spans}
+    detail_no_alt = view._detail_line(rec, 80, alt=False)
+    assert C_ALT_BG not in {span.style for span in detail_no_alt.spans}
+
+
 def test_fitted_columns_reserves_room_for_drop_indicator():
     """Regression: the flex (``title``) column absorbs 100% of any remaining
     width by design, so a caller that simply computed

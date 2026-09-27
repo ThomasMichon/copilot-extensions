@@ -14,7 +14,8 @@ rules.
 - Check the target repo's PR flow first (profiles + verb applicability)
 - Detecting PR mode + where PR config lives (machine-local vs in-repo)
 - Default conduct: drive every PR through to merge (waiting policy + sanctioned deviations)
-- `create-pr` (auto-open, attribution marker, labels)
+- `create-pr` (auto-open, attribution marker, labels) -- for tracing a PR you
+  didn't open, see [pr-attribution.md](pr-attribution.md) instead
 - Dispositions: keep-alive vs detach
 - Draft PRs (`--draft` / `pr-ready`)
 - Multiple PRs from one worktree
@@ -341,6 +342,9 @@ ssh-ready machine is asked over SSH whether its own tracking store has that
 codename. A match on a different machine still fails closed -- it reports the
 resolving machine and worktree id rather than attempting a remote launch; SSH
 there directly (or use a future agent-bridge dispatch) to actually resume it.
+(This is the *author's* path back to their own worktree; a maintainer or
+reviewer tracing a PR they didn't open should instead read
+[pr-attribution.md](pr-attribution.md), written from that side.)
 A closed-circuit repo may instead set `pr.source_attribution: true` to embed
 a hidden marker containing the raw source worktree, machine, session, and
 head SHA -- this must stay off for a public repo. Setting

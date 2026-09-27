@@ -57,7 +57,7 @@ idle restricted-fleet session evidence for publication without stopping members.
 ## Configuration (`containers.yaml`)
 
 Looked up from `$AGENT_CONTAINERS_CONFIG`, `./containers.yaml`,
-`~/.agent-containers/containers.yaml`, then (only when agent-worktrees is present
+`~/.agent-containers/containers.yaml`, then (only when agent-worktrees is present <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 and the current harness is bound to external state) a knowledge-overlay
 `containers.yaml`. Copy the starter example,
 [`references/containers.yaml`](references/containers.yaml), and adapt. A fleet
@@ -160,7 +160,7 @@ cleanup drift.
 <agent-bridge catalog argv[0]> send container:myrepo-1 "run the unit tests in packages/foo"
 ```
 
-The provider manifest in `~/.agent-bridge/providers.d/agent-containers.json`
+The provider manifest in `~/.agent-bridge/providers.d/agent-containers.json` <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 lets agent-bridge discover `container:` without importing this package into the
 bridge venv. The resolver launches the `exec --stdio <name>` action through its registered
 management entry point, which
@@ -201,7 +201,7 @@ the exact live-session row.
 
 `--ref-file PATH` (repeatable; a file or a folder, up to 256 MiB per call)
 copies an operator file (a HAR, a log, a transcript) into the container at
-`~/.agent-bridge/refs/<batch>/`, outside the checkout, over the SSH channel's
+`~/.agent-bridge/refs/<batch>/`, outside the checkout, over the SSH channel's <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 stdin, and tells the worker the exact paths: in the seed for a new session, or
 as a message when the same `--detach` rejoins a running one. The handle reports
 `ref_files` and `refs_delivered` (`seed`/`message`/`failed`). The orchestrator
@@ -241,7 +241,7 @@ To expose the target as a project-scoped, read-only Worktree Picker source:
 ```
 
 This writes a provider-owned descriptor under
-`~/.agent-worktrees/sources/agent-containers.json`. The Picker validates the
+`~/.agent-worktrees/sources/agent-containers.json`. The Picker validates the <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 descriptor, re-resolves live instance/lease/readiness/trust metadata through
 the provider command, and reads worktrees, recent messages, and sessions
 through the descriptor's isolated absolute provider-owned connection command. The
@@ -270,9 +270,9 @@ util-linux `script` and `setsid` helpers in the restricted image.
   inspection and cleanup. Leases are advisory and TTL-reclaimed.
 - `<catalog argv[0]> namespace-list` — bridge-facing provider CLI health. If
   bridge dispatch cannot see containers, check that the provider manifest exists
-  under `~/.agent-bridge/providers.d/` and points at the absolute binstub.
+  under `~/.agent-bridge/providers.d/` and points at the absolute binstub. <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 - `<catalog argv[0]> config-migrate` — migrate/stamp only the machine-local
-  `~/.agent-containers/containers.yaml`; repo/cwd configs are never rewritten.
+  `~/.agent-containers/containers.yaml`; repo/cwd configs are never rewritten. <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 
 There is no `doctor` action today.
 
@@ -283,4 +283,4 @@ There is no `doctor` action today.
   never mount a shared git worktree (branch-exclusivity + dangling-gitdir hazard).
 - Discovery recognises fleet members by the `agent-containers.fleet` label, a
   `devcontainer.local_folder` label, or a configured image-name prefix.
-- Runtime state (leases) lives in `~/.agent-containers/leases.json`.
+- Runtime state (leases) lives in `~/.agent-containers/leases.json`. <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->

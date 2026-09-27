@@ -24,6 +24,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from . import pr_contract as pc
+from .pr_occupancy import occupancy_from_state
 from .providers import account_token_for_slug, get_provider
 
 
@@ -116,6 +117,7 @@ def merge_one(
         "verdict": state.verdict, "merge_state": state.merge_state,
         "approval_stale": state.approval_stale,
         "approval_stale_authorized": state.approval_stale_authorized,
+        "occupancy": occupancy_from_state(state),
     }
     if action == "apply" and apply:
         confirm = provider.get_snapshot(repo, number, api_base=base, token=tok)
@@ -139,6 +141,7 @@ def merge_one(
                 approval_stale_authorized=(
                     confirmed_state.approval_stale_authorized
                 ),
+                occupancy=occupancy_from_state(confirmed_state),
             )
             return row
         if confirmed_action != "apply":
@@ -151,6 +154,7 @@ def merge_one(
                 approval_stale_authorized=(
                     confirmed_state.approval_stale_authorized
                 ),
+                occupancy=occupancy_from_state(confirmed_state),
             )
             return row
         # "Request auto-complete" is the first-class concept; the provider

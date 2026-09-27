@@ -10,7 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [CI Identifier Leak Guard](active/ci-identifier-leak-guard/README.md) | Draft | #3923 |
+| [CI Identifier Leak Guard](active/ci-identifier-leak-guard/README.md) | Active | #3923 |
 | [Worktree/Effort Railroad Binding](active/worktree-effort-railroad-binding/README.md) | Draft | #3581 |
 | [Worktree Head-Succession Hardening](active/worktree-head-succession-hardening/README.md) | Draft | #3584 |
 | [Picker Creature Comforts](active/picker-creature-comforts/README.md) | Draft | #3586 |
