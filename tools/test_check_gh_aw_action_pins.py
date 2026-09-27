@@ -67,6 +67,72 @@ def test_no_lock_files_is_not_a_violation(workflows_dir):
     assert check_gh_aw_action_pins.find_unpinned_refs() == []
 
 
+def test_single_quoted_mutable_tag_is_rejected(workflows_dir):
+    lock_file = workflows_dir / "example.lock.yml"
+    lock_file.write_text(
+        "jobs:\n"
+        "  setup:\n"
+        "    steps:\n"
+        "      - uses: 'github/gh-aw/actions/setup@v0.89.21'\n",
+        encoding="utf-8",
+    )
+    violations = check_gh_aw_action_pins.find_unpinned_refs()
+    assert len(violations) == 1
+    assert "v0.89.21" in violations[0]
+
+
+def test_double_quoted_mutable_tag_is_rejected(workflows_dir):
+    lock_file = workflows_dir / "example.lock.yml"
+    lock_file.write_text(
+        "jobs:\n"
+        "  setup:\n"
+        "    steps:\n"
+        '      - uses: "github/gh-aw/actions/setup@v0.89.21"\n',
+        encoding="utf-8",
+    )
+    violations = check_gh_aw_action_pins.find_unpinned_refs()
+    assert len(violations) == 1
+    assert "v0.89.21" in violations[0]
+
+
+def test_single_quoted_sha_pin_is_accepted(workflows_dir):
+    lock_file = workflows_dir / "example.lock.yml"
+    lock_file.write_text(
+        "jobs:\n"
+        "  setup:\n"
+        "    steps:\n"
+        f"      - uses: 'github/gh-aw/actions/setup@{SHA}'\n",
+        encoding="utf-8",
+    )
+    assert check_gh_aw_action_pins.find_unpinned_refs() == []
+
+
+def test_nested_action_path_mutable_tag_is_rejected(workflows_dir):
+    lock_file = workflows_dir / "example.lock.yml"
+    lock_file.write_text(
+        "jobs:\n"
+        "  setup:\n"
+        "    steps:\n"
+        "      - uses: github/gh-aw/actions/foo/bar@v0.89.21\n",
+        encoding="utf-8",
+    )
+    violations = check_gh_aw_action_pins.find_unpinned_refs()
+    assert len(violations) == 1
+    assert "v0.89.21" in violations[0]
+
+
+def test_nested_action_path_sha_pin_is_accepted(workflows_dir):
+    lock_file = workflows_dir / "example.lock.yml"
+    lock_file.write_text(
+        "jobs:\n"
+        "  setup:\n"
+        "    steps:\n"
+        f"      - uses: github/gh-aw/actions/foo/bar@{SHA}\n",
+        encoding="utf-8",
+    )
+    assert check_gh_aw_action_pins.find_unpinned_refs() == []
+
+
 def test_non_gh_aw_actions_are_ignored(workflows_dir):
     lock_file = workflows_dir / "example.lock.yml"
     lock_file.write_text(

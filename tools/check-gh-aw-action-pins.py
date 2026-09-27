@@ -27,11 +27,17 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
 
-# Matches `uses: github/gh-aw/actions/<name>@<ref>` (any ref shape); the
-# capture group is checked separately against the 40-hex-char SHA pattern so
-# the error message can show exactly what was found.
+# Matches `uses: github/gh-aw/actions/<name>@<ref>` in any valid YAML scalar
+# form -- bare, single-quoted, or double-quoted -- and any nested action path
+# (multiple `/`-separated segments after `actions/`, e.g. `actions/foo/bar`).
+# Real review finding (PR #4155, round 3): the original pattern only matched
+# a bare unquoted value with a single path segment -- `uses:
+# 'github/gh-aw/actions/setup@v0.89.21'` (quoted) or a nested subdirectory
+# path silently bypassed the guard entirely. The capture group is checked
+# separately against the 40-hex-char SHA pattern so the error message can
+# show exactly what was found.
 ACTION_REF_PATTERN = re.compile(
-    r"uses:\s*github/gh-aw/actions/[\w-]+@(\S+)"
+    r"uses:\s*[\"']?github/gh-aw/actions/[\w./-]+@([^\"'\s]+)[\"']?"
 )
 FULL_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 

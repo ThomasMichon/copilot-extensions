@@ -1892,6 +1892,21 @@ _Pending._
     `ci.yml` next to the trusted-CI guard) — fails CI outright if any
     committed `*.lock.yml` ever references a `github/gh-aw/actions/...`
     action by anything other than a full 40-character commit SHA.
+  - **Third real review pass (against the correct current head this time,
+    no staleness) found a genuine bypass in that same guard:** its regex
+    only matched a bare unquoted `uses:` value with a single path segment
+    — a single- or double-quoted YAML string (`uses: 'github/gh-aw/
+    actions/setup@v0.89.21'`), or a nested action subdirectory path, would
+    silently bypass the guard entirely. Fixed the pattern to accept
+    optional surrounding quotes and multi-segment action paths, added 6
+    regression cases (quoted mutable tag rejected, quoted SHA accepted,
+    nested-path mutable tag rejected, nested-path SHA accepted, for both
+    quote styles) — 10 tests total in that file now, 73 across the full
+    relevant suite. This same review pass also re-cited the prior round's
+    4 fixes as still "Open" with byte-identical wording to the already-
+    replied-to comment threads and no new inline evidence — a repeat of
+    the earlier stale-recap pattern (see below), not a real regression;
+    verified all 4 remain fixed against the current head before moving on.
   - **HIGH — new — membership gate still blocks the automated dispatch.**
     The explicit `workflow_dispatch:` trigger (issue #13's fix) made the
     activation *gate* reachable, but `label_command` unconditionally
