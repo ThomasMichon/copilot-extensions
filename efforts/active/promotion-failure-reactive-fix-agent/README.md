@@ -1339,7 +1339,7 @@ _Pending._
   `permissions:` don't inherit anything broader); then Phase 3's
   Validation Plan trials (the two-sided triage trial specifically).
 
-### 2026-09-26 — Real review on the draft (PR #3893) found 5 genuine blocking issues, not yet resolved
+### 2026-09-26 — Real review on the draft (PR #3893) found 6 genuine blocking issues, not yet resolved
 - Opened the draft as a WIP PR specifically for early feedback before
   investing further in a design that might be structurally wrong.
   That bet paid off: review found real, substantive problems, not

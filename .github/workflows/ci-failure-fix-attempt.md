@@ -26,7 +26,7 @@
 
   ============================================================================
   KNOWN BLOCKING ISSUES (real, review-confirmed 2026-09-26, PR #3893) --
-  NOT YET RESOLVED. Do not attempt to compile/wire this live until all five
+  NOT YET RESOLVED. Do not attempt to compile/wire this live until all six
   are fixed. Full detail in the effort's 2026-09-26 Journal entry.
   ============================================================================
 
