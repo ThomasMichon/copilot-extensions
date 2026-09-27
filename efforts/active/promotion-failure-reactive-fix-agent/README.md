@@ -1684,5 +1684,35 @@ _Pending._
   as this design can reasonably get without a full rearchitecture (or
   accepting that "auto-fix a failing test" inherently requires reading
   untrusted test output); #5's residual risk is now stated honestly
-  rather than implied away. Still outstanding regardless: `gh aw compile`
-  verification (SSO-blocked, unresolved this session).
+  rather than implied away.
+- **A TENTH review pass found a typo (the header still said "8-round"
+  after round 9's own note already said "Nine rounds deep") and re-flagged
+  the PR-description finding (the `gh pr edit` fix hadn't been re-scanned
+  yet) — both fixed.** Rebasing onto `dev` mid-review hit a real merge
+  conflict: another PR had independently fixed the SAME pre-existing
+  `customizing-copilot` guard failure (via an `ALLOW` marker instead of
+  a reword) while this PR was in flight — resolved by keeping this PR's
+  own reword (functionally equivalent, already tested) rather than
+  discarding it.
+- **An ELEVENTH review pass found 3 more, all fixed:** (a) the `resolve`
+  step's own number-format check (`grep -qE '^[0-9]+$'`) is LINE-oriented
+  -- a multi-line value with a numeric first line would pass `grep -q`
+  wrongly, letting a later `$GITHUB_OUTPUT` write smuggle a second,
+  attacker-controlled assignment through — switched to bash's own
+  `[[ =~ ]]`, which matches the whole string, not per line; (b) genuinely
+  new scope gap: `excluded-files`/`protected-files` are a DENY-list
+  applied only when the safe-outputs job builds the final patch — nothing
+  constrained what the agent could touch DURING its own run. gh-aw has no
+  built-in ALLOW-list field for `create-pull-request` (confirmed against
+  its own reference) — added a hand-written `post-steps` scope gate that
+  diffs the agent's actual commits against `dev` and fails the job (which
+  skips safe-outputs) if anything landed outside
+  `plugins/**`/`libs/**`/`tools/**`/`docs/**`/`.changefiles/**`; (c) the PR
+  description was missing `CONTRIBUTING.md`'s required explicit
+  Documentation-impact statement — added.
+- **Eleven rounds deep now. #1, #3, #4, #6 remain settled with zero
+  further findings across 10 subsequent review passes.** #2 and #5 are as
+  hardened as this design can reasonably get without a full
+  rearchitecture (or accepting that "auto-fix a failing test" inherently
+  requires reading untrusted test output). Still outstanding regardless:
+  `gh aw compile` verification (SSO-blocked, unresolved this session).

@@ -141,6 +141,26 @@
      unclosable (a fully attacker-modified copy of this file dispatched from the
      attacker's own branch, a known `workflow_dispatch` limitation this repo's
      own `validate-and-promote.yml` already documents for a different job).
+  8. (Found on round 11, resolving #1/#2/#5 -- not one of the original 6) NO
+     POSITIVE CHANGED-FILE ALLOWLIST -- RESOLVED via a hand-written `post-steps`
+     scope gate (gh-aw's `create-pull-request` has no built-in ALLOW-list field,
+     confirmed against its own reference -- only the DENY-list
+     `excluded-files`/`protected-files`, which constrain the eventual patch, not
+     what the agent can touch during its own run). The gate diffs the agent's
+     actual commits against the default branch and FAILS the agent job (which
+     transitively skips the downstream safe-outputs job) if anything outside
+     `plugins/**`/`libs/**`/`tools/**`/`docs/**`/`.changefiles/**` changed --
+     coarse, but a genuine machine-enforced boundary the charter's own "entire
+     scope" rule needed and didn't have.
+  9. (Found on round 11, resolving #2) NUMBER VALIDATION BYPASSABLE VIA EMBEDDED
+     NEWLINE -- RESOLVED: `verify-issue`'s own resolve step used `grep -qE
+     '^[0-9]+$'`, which is LINE-oriented -- a multi-line value like
+     "123\nnumber=$(...)" has a first line that alone matches, so `grep -q`
+     wrongly accepted the whole value and a later `echo "number=$NUM"` would
+     have emitted a second, attacker-controlled `$GITHUB_OUTPUT` assignment,
+     reintroducing the exact injection risk this step exists to close. Switched
+     to bash's own `[[ "$NUM" =~ ^[0-9]+$ ]]`, which matches the WHOLE string
+     (no per-line splitting), correctly rejecting any embedded newline.
 
   A first pass at resolving #1/#2 (PR #3916) introduced two NEW, real issues real
   review caught before merge, both since fixed in this same file: (a) the
@@ -314,7 +334,19 @@ jobs:
         run: |
           set -euo pipefail
           NUM="${RAW_ITEM_NUMBER:-$RAW_ISSUE_NUMBER}"
-          if ! printf '%s' "$NUM" | grep -qE '^[0-9]+$'; then
+          # Real review finding (PR #3916): `grep -E '^[0-9]+$'` is
+          # LINE-oriented -- a multi-line input such as
+          # "123\nnumber=$(...)" has a FIRST line that matches
+          # `^[0-9]+$` on its own, so `grep -q` (which only needs ONE
+          # matching line) would wrongly accept the whole multi-line
+          # value, and the later `echo "number=$NUM"` would then emit a
+          # SECOND, attacker-controlled `$GITHUB_OUTPUT` assignment,
+          # reintroducing the exact command-injection risk this step
+          # already exists to close. Bash's own `[[ =~ ]]` matches the
+          # ENTIRE string (no implicit per-line splitting) -- a newline
+          # embedded anywhere in `$NUM` cannot match `[0-9]`, so the
+          # whole regex correctly fails for any multi-line value.
+          if ! [[ "$NUM" =~ ^[0-9]+$ ]]; then
             echo "::error::Resolved issue/item number '$NUM' is not a plain positive integer -- refusing to proceed."
             exit 1
           fi
@@ -474,6 +506,51 @@ pre-agent-steps:
         printf '%s\n' "$BODY"
         echo "$DELIM"
       } >> "$GITHUB_OUTPUT"
+
+# Real review finding (PR #3916): `excluded-files`/`protected-files` below
+# are a DENY-list applied only while the safe-outputs job builds the patch
+# -- they do not constrain what the agent can edit during its own run, and
+# this workflow grants broad `edit`/`bash` access with no positive
+# changed-file scope check. gh-aw's `create-pull-request` has no built-in
+# `allowed-files`-style ALLOW-list field (confirmed against its own
+# reference), so this is a hand-written, machine-enforced gate: `post-steps`
+# runs inside the agent job after the engine finishes, and FAILS the job
+# (which skips the downstream safe-outputs job entirely, since it only runs
+# on the agent job's success) if the actual diff touches anything outside
+# this repo's ordinary contribution surface -- a coarse but genuine
+# allowlist, not merely more excludes.
+post-steps:
+  - name: Enforce a machine-checked change-scope gate
+    run: |
+      set -euo pipefail
+      git fetch origin "${{ github.event.repository.default_branch }}" --quiet
+      BASE=$(git merge-base HEAD "origin/${{ github.event.repository.default_branch }}")
+      CHANGED=$(git diff --name-only "$BASE" HEAD || true)
+      if [ -z "$CHANGED" ]; then
+        echo "::notice::No committed changes to scope-check."
+        exit 0
+      fi
+      VIOLATIONS=""
+      while IFS= read -r FILE; do
+        [ -z "$FILE" ] && continue
+        case "$FILE" in
+          .github/workflows/*|plugin.json|*/plugin.json|pyproject.toml|*/pyproject.toml|marketplace.json|*/marketplace.json)
+            VIOLATIONS="$VIOLATIONS
+      - $FILE (an explicitly out-of-scope path -- already excluded from the safe-output patch, but its presence here means the agent attempted it)"
+            ;;
+          plugins/*|libs/*|tools/*|docs/*|.changefiles/*)
+            : # the ordinary source-contribution surface
+            ;;
+          *)
+            VIOLATIONS="$VIOLATIONS
+      - $FILE (outside the ordinary contribution surface)"
+            ;;
+        esac
+      done <<< "$CHANGED"
+      if [ -n "$VIOLATIONS" ]; then
+        echo "::error::Change-scope gate failed -- this run touched file(s) outside the expected contribution surface, which the charter's own 'entire scope' rule forbids:$VIOLATIONS"
+        exit 1
+      fi
 
 # `edit:` (gh-aw's real file-editing tool -- blocking issue #3) joins the
 # existing inspection/test/changefile allowlist (`changefile.py add` --
