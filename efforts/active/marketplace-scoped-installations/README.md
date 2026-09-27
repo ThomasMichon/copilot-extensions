@@ -386,6 +386,69 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-27 — `agent-worktrees` resolved to backlog-only (PR #4318); **entire 8-plugin backlog order now complete**
+
+- `agent-worktrees` SKILL.md docs (PR #4318, 25/167 findings): the
+  usual `allow deployed-runtime-diagnostics` doc-shaped mentions across
+  `agent-worktrees-related/SKILL.md`, `agent-worktrees-repos/SKILL.md`,
+  `copilot-extensions-setup/SKILL.md` (this plugin's own setup guide,
+  which also documents companion plugins' runtime layouts as reference
+  material -- agent-bridge, agent-mcp, agent-containers, agent-
+  codespaces all got mentions annotated here too, since the setup
+  skill's job is describing what EVERY optional companion plugin
+  creates), `copilot-extensions-setup/references/optional-plugins-
+  setup.md`, and `create-setup-script/SKILL.md`.
+  - Two tree-listing fenced code blocks needed the fence's native `#`
+    comment rather than an HTML comment (established rule, reused a
+    third time this session).
+  - `create-setup-script/SKILL.md`'s frontmatter `description:` field
+    was rephrased to drop a literal path mention rather than annotated
+    -- an HTML comment there would pollute the rendered, user-facing
+    skill description (established convention, reused).
+  - `service-lifecycle/references/install.sh` -- a generic illustrative
+    scaffold script, not a real agent-worktrees installer -- got its
+    lone `SERVICE_USER="${USER}"` line annotated `allow doc-example`.
+- **`agent-worktrees` is now at confirmed backlog-only state**: 101
+  remaining findings, entirely `scripts/install.{sh,ps1}` (18),
+  `hooks.json` (8), the `register-nudge`/`register-session`/`session-
+  conduct`/`bootstrap-check`/`provision-check`/`bind-nudge`/`deregister-
+  session`/`project-hooks`/`anchor-hygiene-check`/`reconcile-machine-
+  settings`/`default-setup`/`service-utils`/`session-machine`/
+  `launch-command`/`resolve-runtime` script family (~35, all Phase 2
+  launcher-contract shaped), `bin/agent-worktrees{,.ps1}` (2),
+  `installer-readiness.json` (4), `payload-invocation.json` (1), and 3
+  Python guard scripts (`cross_repo_guard.py`, `statelessness_guard.py`,
+  `anchor_write_guard.py`, `hook_client.py`, `nudge_status.py`,
+  `registry_root.py` -- ~13 combined) -- every category matches the
+  same confirmed Phase 2/cross-plugin-JSON-question shape left as
+  documented backlog in every other plugin this session. Plus the 4
+  `config.py` dataclass-docstring findings deferred in the prior entry
+  (unsafe to annotate mid-docstring without corrupting rendered docs).
+- **This closes the entire 8-plugin backlog order** established at the
+  start of this leg: agent-containers, agent-ssh, agent-mcp,
+  agent-machines, agent-bridge, agent-index, agent-dispatch,
+  agent-codespaces, and now agent-worktrees are ALL at confirmed
+  backlog-only state -- every plugin's remaining findings are
+  documented, understood, and intentionally deferred to their proper
+  Phase (2, 3, 4, or 6) rather than force-annotated.
+- Session totals across the full leg (from the prior context-handoff
+  resume through this entry): **~410 findings resolved** across roughly
+  30 merged PRs (core clusters + docs + journal entries per plugin),
+  **6 new guard reason phrases** discovered and documented (`allow
+  remote-container-path`, `allow shared-config-lock`, `allow shared-
+  instance-mutex`, `allow durable-host-identity-backup`, `allow third-
+  party-installer-url`, `allow schema`, `allow query-column-list`,
+  `allow release-verb`, plus the `allow legacy` length-constrained
+  shorthand), **1 HIGH-severity bug fixed** (agent-index's fresh-install
+  binstub gap, #7702, after a review-caught wrong-shaped first attempt),
+  **4 pre-existing bugs found and filed** via clean-room checkpoints and
+  test-suite isolation (#7688, #7719, #7722, #7737), and **8 module-
+  size-ceiling hits** resolved without ever force-widening a baseline
+  (tracked cumulatively in aperture-labs#7672).
+- Verified: `check-marketplace-isolation.py`, `check-skills.py`,
+  `check-docs-consistency.py` all clean. Merged via `pr-merge --now`
+  after a clean advisory review.
+
 ### 2026-09-27 — `agent-worktrees` core src/ cluster (PR #4315, 37 findings); the harness's own most consequential leg this session
 
 - **agent-worktrees is the final, largest plugin in the backlog order**
