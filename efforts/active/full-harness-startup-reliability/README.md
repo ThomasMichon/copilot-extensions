@@ -151,6 +151,19 @@ Operator's verbatim ask (this session):
   launch via psmux, full capture of: wall-clock time to first response, the
   main process log, every per-extension log, and the `/env` command's own
   reported extension/hook counts.
+- [ ] Derive the installed/expected plugin roster for every baseline and
+  regression run **from `.github/plugin/marketplace.json` directly**, not
+  from a hand-copied list — the manifest currently declares 23 plugins
+  (including `agent-pull-requests`, `ai-attribution`, and `budget-guidance`,
+  each with their own `sessionStart` hook, beyond the roster this effort's
+  Context section describes from its original investigation session). A
+  fixed, hand-maintained list can silently drift stale and let the 20/20 run
+  report success while never exercising a hook the manifest actually ships.
+- [ ] Pin or explicitly record the Copilot CLI version in use before each
+  timed attempt (the Context section already flags the CLI's own
+  mid-turn self-update as a confound); without this, a run can silently mix
+  update time into the measured startup latency and make the 20-attempt
+  baseline non-reproducible across sessions.
 - [ ] Confirm whether per-attempt container reset is required (does
   `~/.copilot` state from a prior attempt change behavior?) or whether N
   attempts can safely run in the same container back-to-back.
@@ -196,7 +209,14 @@ Operator's verbatim ask (this session):
 
 - [ ] 20/20 clean full-harness starts: all 3 real extensions (and any others
   added to the roster meanwhile) reach `ready` and stay alive for the whole
-  turn — no unexpected `exit code=1 disposition=stopped-normally`.
+  turn — no unexpected `exit code=1 disposition=stopped-normally` **before
+  the turn completes**. The Context section's own reproduction shows this
+  exact signature is also the *expected* shutdown disposition once a turn
+  legitimately finishes; only an exit with this signature observed **during**
+  a still-in-progress turn counts as a failure for this criterion — record
+  each attempt's turn-completion timestamp alongside the exit timestamp so
+  the two can be distinguished, rather than pattern-matching the log line
+  alone.
 - [ ] 20/20 clean full-harness starts: every hook-registering plugin's
   `sessionStart` hook completes (success or fast no-op) with **zero**
   `HookTimeoutError` warnings in the process log.
@@ -437,10 +457,8 @@ correction inline, per the effort's own journal discipline)._
   the corrected root cause: a genuine Windows-only snapshot-copy cost plus
   a fully redundant duplicate probe spawn, not a slow resolver-status
   query).
-- Landed the corrected fix as PR #4129, closed #3501 with a comment linking
-  it (superseded, not merged — the review's own finding about premature
-  "landed" language in this ledger was itself one of the findings
-  addressed).
+- Opened the corrected fix as PR #4129 (still open, not yet merged at time
+  of writing), closed #3501 with a comment linking it as superseded.
 - Separately addressed this effort README's OWN review findings on PR #3305
   (Vision unlinked from `visions/harness-guidance`/
   `docs/patterns/session-scoped-dynamic-guidance.md`; unqualified
