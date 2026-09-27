@@ -1,0 +1,9 @@
+{
+  "comment": "Add a home-relative user-scoped requirement-package source (no adopted repo needed) and wire agent-machines-setup's self-update guidance to resolve a knowledge repo, falling back to it",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

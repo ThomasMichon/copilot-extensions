@@ -8,6 +8,24 @@ from agent_machines.manifest import ManifestError
 
 from ._helpers import base_package, enable_plugin, write_package
 
+#: Captured before the autouse `_isolated_user_scope` fixture below patches
+#: ``discover.user_package_root`` on every test, so the one test that checks
+#: the real implementation can still reach it.
+_REAL_USER_PACKAGE_ROOT = discover.user_package_root
+
+
+@pytest.fixture(autouse=True)
+def _isolated_user_scope(tmp_path, monkeypatch):
+    """Redirect ``user_package_root()`` -- always scanned by ``discover()`` --
+    so it never reads this developer/CI machine's real
+    ``~/.agent-machines/config``. Tests that exercise the user-scoped source
+    itself override this with their own ``monkeypatch`` as needed. Patches
+    ``user_package_root`` itself (not ``discover.home``, which other tests
+    rely on for unrelated ``~/.agent-worktrees/config.yaml`` resolution)."""
+    monkeypatch.setattr(
+        discover, "user_package_root", lambda home_dir=None: tmp_path / "isolated-user-scope"
+    )
+
 
 def _registry(srcroot, **repos):
     return {"schema_version": 1, "srcroot": {"windows": str(srcroot), "linux": str(srcroot),
@@ -272,6 +290,64 @@ def test_discover_only_considers_adopted_projects(tmp_path):
     reg = _registry(srcroot, acme={"class": "worktree"})
     assert discover.discover(machine="box-1", registry=reg, projects=_projects("other")) == []
     assert len(discover.discover(machine="box-1", registry=reg, projects=_projects("acme"))) == 1
+
+
+def test_user_package_root_is_home_relative_no_repo_needed(tmp_path):
+    home_dir = tmp_path / "home"
+    assert _REAL_USER_PACKAGE_ROOT(home_dir) == home_dir / ".agent-machines" / "config"
+
+
+def test_discover_finds_no_user_scoped_packages_when_root_absent(tmp_path):
+    # The autouse `_isolated_user_scope` fixture already points
+    # `user_package_root()` at a directory that does not exist.
+    assert discover.discover(machine="box-1", registry={}, projects={}) == []
+
+
+def test_discover_includes_user_scoped_packages_with_no_adopted_repo(monkeypatch, tmp_path):
+    root = tmp_path / "user-scope"
+    monkeypatch.setattr(discover, "user_package_root", lambda home_dir=None: root)
+    (root / "all").mkdir(parents=True)
+    (root / "all" / "self-update.yaml").write_text(
+        yaml.safe_dump(base_package(name="user/self-update-defaults", gate=["*"])),
+        encoding="utf-8",
+    )
+
+    # No registry, no projects -- no adopted repo of any kind -- yet the
+    # user-scoped source still surfaces, unlike every repo-based source.
+    found = discover.discover(machine="box-1", registry={}, projects={})
+    assert len(found) == 1
+    assert found[0].name == discover.USER_SCOPE_NAME
+    assert found[0].enabled is True
+    assert found[0].packages[0].name == "user/self-update-defaults"
+
+
+def test_discover_gates_user_scoped_packages_like_any_other_source(monkeypatch, tmp_path):
+    root = tmp_path / "user-scope"
+    monkeypatch.setattr(discover, "user_package_root", lambda home_dir=None: root)
+    (root / "all").mkdir(parents=True)
+    (root / "all" / "self-update.yaml").write_text(
+        yaml.safe_dump(base_package(name="user/self-update-defaults", gate=["other-box"])),
+        encoding="utf-8",
+    )
+    assert discover.discover(machine="box-1", registry={}, projects={}) == []
+
+
+def test_discover_combines_adopted_repo_and_user_scoped_packages(tmp_path, monkeypatch):
+    root = tmp_path / "user-scope"
+    monkeypatch.setattr(discover, "user_package_root", lambda home_dir=None: root)
+    (root / "all").mkdir(parents=True)
+    (root / "all" / "self-update.yaml").write_text(
+        yaml.safe_dump(base_package(name="user/self-update-defaults", gate=["*"])),
+        encoding="utf-8",
+    )
+
+    srcroot = tmp_path / "Src"
+    repo = srcroot / "acme"
+    write_package(repo, "defaults.yaml", base_package(gate=["*"]))
+    reg = _registry(srcroot, acme={"class": "worktree"})
+
+    found = discover.discover(machine="box-1", registry=reg, projects=_projects("acme"))
+    assert {repo.name for repo in found} == {"acme", discover.USER_SCOPE_NAME}
 
 
 def test_discover_grafts_bound_supplemental_repo(tmp_path):

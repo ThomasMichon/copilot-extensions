@@ -19,8 +19,8 @@ description: >
   - 'ensure this setting on every machine'
   - 'make this the default on all machines'
   - 'agent-machines setup'
-  - 'enable the self-update watchdog'
-  - 'set up a regular maintenance schedule'
+  - 'set up the machine maintenance task'
+  - 'keep my machines healthy'
 ---
 
 # agent-machines setup
@@ -174,9 +174,37 @@ Run `<catalog argv[0]> validate` after authoring to catch conflicts.
 
 ## Enable a regular unattended maintenance schedule (self-update watchdog)
 
+> **"Set up the machine maintenance task" / "keep my machines healthy" --
+> resolve the destination first, never author here.** This plugin (and this
+> repo generally) ships only the mechanism; the actual opt-in package always
+> belongs to *your own* config, never to `copilot-extensions` (see *Author a
+> requirement package* above -- the same hard-enforced rule applies). Resolve
+> where that config lives, in order:
+>
+> 1. **A bound knowledge/control repo**, if one is registered (check
+>    `~/.agent-worktrees/config.yaml` / a project's own `config.yaml` for
+>    `knowledge_repo`, or ask the operator). Author the package there, under
+>    its own `.copilot-extensions/agent-machines/all/` (fleet-wide) or
+>    `machines/<machine>/` (this machine only) -- see *Author a requirement
+>    package*.
+> 2. **No knowledge repo bound or reachable** -- fall back to the **user-scoped**
+>    root, which needs no repo, registry, or adoption at all:
+>    `~/.agent-machines/config/all/` (or `machines/<machine>/` for a
+>    single-machine override). `discover()` always scans this location
+>    alongside every adopted repo's own packages, so it works standalone
+>    (agent-worktrees entirely absent) and is exactly as authoritative as a
+>    repo-sourced package -- just without a repo, a PR, or a commit. Same
+>    package shape as anywhere else (below); create the directory if absent.
+>
+> Either way, the result is **only a declarative opt-in package** -- see the
+> `self-update` resource below. Actually registering the OS-level schedule
+> (`self-update install`) is a separate, one-time, interactive step that still
+> must run on the target machine after the package exists.
+
 A reachable, logged-in machine can converge on its own, on a schedule, without
 a live interactive session -- two independently-scheduled, independently-locked
-tiers: `watchdog` (hourly; dtssh launcher liveness only) and `sweep` (daily;
+tiers: `watchdog` (hourly; dtssh launcher liveness, dtssh host repair, and a
+dtssh mesh refresh) and `sweep` (daily;
 fast-forward pulls of discovered adopted repos, each owning repo's
 `update --no-manager` flow, and `agent-machines restore <!-- marketplace-isolation: allow self-update-watchdog-description -->
 --apply --all-projects --maintenance-safe`). Maintenance-safe sweep restores
@@ -189,7 +217,9 @@ Neither tier mutates anything when its resolved config is "not opted in."
 Opt in by declaring a `self-update` resource in a requirement package (`all/`
 for a fleet default, `machines/<machine>/` for one machine -- an explicit
 local declaration overrides a shared default, matching every other resource's
-authority precedence):
+authority precedence). This package can live in a knowledge/control repo, or
+(per the resolution above) in the home-relative user-scoped root -- the schema
+is identical either way:
 
 ```yaml
 schema_version: 3
