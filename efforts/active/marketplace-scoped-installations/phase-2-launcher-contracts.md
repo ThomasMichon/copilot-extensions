@@ -162,27 +162,30 @@ confirming two things the prior partial audits could only guess at:
 - **`copilot-extensions-harness` dropped to 0** (was 3) — fully converted,
   drops out of the per-plugin table entirely.
 
-| Contract family (2026-09-27, clean-checkout re-derivation) | Findings | Phase | Disposition under the corrected framework | Plugins |
-|-----------------|---------:|-------|---------|---------|
-| Generic wrapper publication and plugin-specific PATH guidance | 45 | n/a | **Own-payload placement — accepted, conditional on marketplace-cell.** Each plugin's own installer declaring where *it* writes *its own* global binstub/PATH. Not Phase 6 retirement work; not this item's gate. | all 13 plugins below except `agent-worktrees`'s own project-command lines |
-| Mixed project-command directory and PATH use | 11 | n/a | **Own-payload placement — permanent, accepted.** `agent-worktrees`'s attributable project-command surface. | `agent-worktrees` only |
-| Operator, bootstrap, and nudge launchers | 4 | Cross-boundary — needs `runtimeRoot`/session-catalog conversion | `agent-machines`'s `bootstrap-check.{sh,ps1}` probes its own legacy footprint (leans own-payload, needs a closer read) and `agent-worktrees`'s `register-nudge.{sh,ps1}` invokes a target session from a hook, outside any LLM turn (cross-boundary) — **not yet split apart; treat as needing verification, not settled.** | `agent-machines` (2), `agent-worktrees` (2) |
-| Readiness legacy fallback | 3 | Cross-boundary — needs verification | `agent-codespaces` probes the legacy binstub's presence from a hook context; likely cross-boundary (non-session) but not yet confirmed against the corrected framework. | `agent-codespaces` (`readiness-context.{sh,ps1}`, 3) |
-| `payload-invocation.json` legacy-footprint declarations | 2 | n/a | **Own-payload placement — accepted, no code change.** Declares each plugin's own historical legacy paths; metadata, not a live call. | `agent-index` (line 22), `agent-machines` (line 20) |
-| Remote transport selection | 2 | Cross-boundary — needs conversion | `agent-ssh` `dtssh` install scripts export a remote PATH across a machine/shell boundary — the clearest cross-boundary case in this table; `agent-index`'s equivalent already converted (`allow remote-management`). | `agent-ssh` `dtssh` `install-{client,host}.sh` |
-| Credential and askpass integration | 2 | Cross-boundary — needs conversion | The generated `vault-askpass` helper runs non-interactively via `sudo -A`, entirely outside any Copilot session — must resolve `runtimeRoot` rather than hardcode `$HOME/.local/bin/agent-vault`. | `agent-vault` `install.sh` (askpash exec + `SUDO_ASKPASS` guidance) |
-| Descriptive skills, help, and generated package metadata | 1 | n/a | Documentation only; revise with the owning slice, not a separate gate. | `agent-vault-setup/SKILL.md` |
-| **Total** | **70** | | | |
+| Contract family (2026-09-27, clean-checkout re-derivation, code-verified) | Findings | Disposition (verified against source, not guessed) | Plugins |
+|-----------------|---------:|---------|---------|
+| Generic wrapper publication and plugin-specific PATH guidance | 45 | **Own-payload placement — accepted, conditional on marketplace-cell.** Each plugin's own installer declaring where *it* writes *its own* global binstub/PATH. Not Phase 6 retirement work; not this item's gate. | all 13 plugins below except `agent-worktrees`'s own project-command lines |
+| Mixed project-command directory and PATH use | 11 | **Own-payload placement — permanent, accepted.** `agent-worktrees`'s attributable project-command surface. | `agent-worktrees` only |
+| Third-party tool PATH bootstrap (**reclassified 2026-09-27**, was "remote transport selection") | 2 → **0, converted this pass** | **Guard false positive, not agent-* consumption at all.** Read the actual code: these lines install and PATH-expose `dtssh`/`devtunnel-ssh`, an unrelated third-party CLI — nothing to do with any `agent-*` binstub or marketplace path. Annotated `allow third-party-installer-path` in [#4333](https://github.com/ThomasMichon/copilot-extensions/pull/4333) (same underlying concern the sibling `.ps1` files' `$InstallRelease` URL already carries as `allow third-party-installer-url`). | `agent-ssh` `dtssh` `install-{client,host}.sh` |
+| Operator, bootstrap, and nudge launchers | 4 | **Split, verified by reading each file:** `agent-machines`'s `bootstrap-check.{sh,ps1}` (2) already calls the installation-context resolver a few lines above (`ContextMarketplaceId`, `status`, `reason`, `namespaced-active`, `legacy_mutation_allowed`) and only falls through to the legacy `Binstub` path when that resolution says legacy — **already correctly gated, own-payload, accepted, no action needed.** `agent-worktrees`'s `register-nudge.{sh,ps1}` (2) has **no** installation-context awareness at all — a plain `command -v`/legacy-path existence check with no cell branching — **genuine unconverted cross-boundary work, not yet done**; the fix is to follow `bootstrap-check.sh`'s own pattern (call the resolver, branch on `reason`), not invent a new approach. | `agent-machines` (2, accepted), `agent-worktrees` (2, open) |
+| Readiness legacy fallback | 3 | **Verified: self-probe, own-payload, accepted.** `agent-codespaces`'s `readiness-context.{sh,ps1}` only *checks existence* of its own legacy binstub for a session-start readiness report — it never invokes anything at that path. Harmless, and naturally disappears only if/when this plugin's legacy wrapper itself retires (a placement question, not a consumption one). | `agent-codespaces` (`readiness-context.{sh,ps1}`, 3) |
+| `payload-invocation.json` legacy-footprint declarations | 2 | **Own-payload placement — accepted, no code change.** Declares each plugin's own historical legacy paths; metadata, not a live call. | `agent-index` (line 22), `agent-machines` (line 20) |
+| Credential and askpass integration | 2 | **Verified: currently correct, premature to convert.** `agent-vault`'s own `install.sh`/`init.ps1` has **zero** installation-context integration anywhere (confirmed by direct grep) — unlike `agent-machines`/`agent-index`, `agent-vault` was never one of Phase 3's cell-aware exemplars, so it always runs legacy-only regardless of host marketplace-cell config today. Its `vault-askpass` helper hardcoding `$HOME/.local/bin/agent-vault` is therefore **currently correct, not a bug** — there is no cell path it could resolve to yet. Converting this helper now, before `agent-vault` itself gains cell-awareness, would add complexity to a `sudo -A` elevation-critical path with zero present benefit and real risk. **Do not touch this file** until/unless `agent-vault` becomes a cell-aware plugin in its own right (a Phase-3-scale undertaking, not a quick patch). | `agent-vault` `install.sh` (askpash exec + `SUDO_ASKPASS` guidance) |
+| Descriptive skills, help, and generated package metadata | 1 | Documentation only; revise with the owning slice, not a separate gate. | `agent-vault-setup/SKILL.md` |
+| **Total** | **68** (post-conversion) | | |
 
-**Disposition summary**: of 70 findings, **58 are own-payload placement**
-(45 + 11 + 2), already correctly out of scope for this item under the
-corrected framework — no further action needed on those. The remaining
-**12** (operator/bootstrap/nudge 4, readiness-legacy-fallback 3,
-remote-transport 2, credential-askpass 2, descriptive 1) are the actual
-candidate cross-boundary conversion set, and only the remote-transport and
-credential-askpass findings (4 of the 12) are confirmed cross-boundary with
-confidence this pass — the other 8 need a closer per-line read before
-converting anything, to avoid mis-converting a genuinely own-payload probe.
+**Disposition summary (final, code-verified, 2026-09-27)**: of the original 70
+findings, **2 were guard false positives** (converted this pass, now 68
+remain). Of those 68: **60 are own-payload placement** (45 + 11 + 2 + 2, the
+`agent-machines` bootstrap-check pair, and the `agent-codespaces` readiness
+probes) — confirmed correct as-is, no action needed, permanently out of this
+item's scope. **2 are credential-askpass, verified currently-correct and
+explicitly deferred** (blocked on `agent-vault` gaining cell-awareness — do
+not attempt a standalone patch). **Only 2 findings are genuine, unconverted,
+actionable cross-boundary work**: `agent-worktrees`'s `register-nudge.{sh,ps1}`
+— and the fix pattern is already proven in this very codebase
+(`agent-machines/scripts/bootstrap-check.sh`).
+
 
 
 **Current per-plugin counts (2026-09-27, clean checkout, 70 total):**

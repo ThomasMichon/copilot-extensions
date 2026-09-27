@@ -34,7 +34,7 @@ ensure_dtssh() {
     else
       curl -fsSL https://raw.githubusercontent.com/bmiddha/devtunnel-ssh/main/scripts/install-release.sh | sh
     fi
-    export PATH="$HOME/.local/bin:$HOME/.dtssh/bin:$PATH"
+    export PATH="$HOME/.local/bin:$HOME/.dtssh/bin:$PATH"  # marketplace-isolation: allow third-party-installer-path
   fi
 }
 

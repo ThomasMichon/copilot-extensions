@@ -166,11 +166,15 @@ because they provide tools or services.
   Own-payload placement (a plugin's own installer declaring where *it*
   writes *its own* global binstub, and `agent-worktrees`'s permanent
   project-command surface) is accepted and out of this item's scope. The
-  [Phase 2 launcher contract inventory](phase-2-launcher-contracts.md) tracks
-  which of the current 70 guard-visible findings are accepted own-placement
-  vs. genuine cross-boundary consumption still needing conversion under this
-  corrected framework — that reclassification is itself the next actionable
-  slice, only partially done so far (see the doc's own 2026-09-27 entry).
+  [Phase 2 launcher contract inventory](phase-2-launcher-contracts.md) has now
+  **fully reclassified all findings by reading the actual source** (not
+  guessed): of 70 original findings, 2 were guard false positives (converted),
+  60 are verified own-payload placement (accepted, no action), 2
+  (`agent-vault` credential-askpass) are verified currently-correct and
+  explicitly deferred pending that plugin's own future cell-awareness, and
+  exactly **2 remain genuine open work** (`agent-worktrees`'s
+  `register-nudge.{sh,ps1}`, fix pattern already proven in
+  `agent-machines/scripts/bootstrap-check.sh`).
   - [x] Preserve complete default-legacy fallback coverage while migration is
     incomplete: every runtime `agent-*` stamp publishes every declared payload
     command, and agent-logger's multi-command family delegates through durable
@@ -443,6 +447,60 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 [`phase-6-lifecycle.md`](phase-6-lifecycle.md).
 
 ## Journal
+
+### 2026-09-27 — Read the actual source for all 12 candidate cross-boundary findings: 1 dtssh false positive fixed, 9 verified accepted/deferred, exactly 2 genuine open items remain
+
+- Directed to keep driving past the scope correction (below) into real
+  conversion work. Before touching anything, read every one of the 12
+  candidate cross-boundary findings' actual source rather than trusting the
+  filename-based classification from the prior pass — good thing: two of
+  the four "confirmed with confidence" findings from that pass turned out
+  to be **wrong on inspection**.
+- **`agent-ssh` `dtssh` "remote transport" (2) — actually a guard false
+  positive, not agent-* consumption at all.** Read the code: these lines
+  install and PATH-expose `dtssh`/`devtunnel-ssh`, an unrelated third-party
+  CLI. Fixed in [#4333](https://github.com/ThomasMichon/copilot-extensions/pull/4333)
+  with `# marketplace-isolation: allow third-party-installer-path` (same
+  underlying concern the sibling `.ps1` files' `$InstallRelease` URL line
+  already carries as `allow third-party-installer-url`). Guard count: 70 →
+  68. `test_dtssh_host_launcher.py` (3 tests) passed via `test-supervisor`.
+- **`agent-vault` credential-askpass (2) — verified currently-correct, NOT
+  a quick conversion.** `agent-vault`'s own installer has zero
+  installation-context integration anywhere (confirmed by direct grep,
+  unlike `agent-machines`/`agent-index` which are Phase 3's proven cell-aware
+  exemplars) — `agent-vault` runs legacy-only today regardless of host
+  config, so `vault-askpass`'s hardcoded `$HOME/.local/bin/agent-vault` is
+  *currently correct, not a bug*. This backs live `sudo -A` elevation
+  facility-wide; converting it now, before `agent-vault` itself gains
+  cell-awareness (a Phase-3-scale undertaking on its own), would add
+  complexity to a safety-critical path for zero present benefit. **Left
+  untouched, explicitly deferred** — documented so a future session doesn't
+  mis-convert it either.
+- **`agent-machines` bootstrap-check (2) — verified already correct.**
+  Reads the installation-context resolver a few lines above
+  (`ContextMarketplaceId`/`status`/`reason`/`namespaced-active`/
+  `legacy_mutation_allowed`) and only falls through to the legacy binstub
+  path when that resolution says legacy. Already properly gated; no action
+  needed. This is the reference pattern for converting other findings.
+- **`agent-codespaces` readiness-legacy-fallback (3) — verified self-probe,
+  harmless.** `readiness-context.{sh,ps1}` only checks existence of its own
+  legacy binstub for a readiness report; never invokes anything at that
+  path. Own-payload, accepted.
+- **`agent-worktrees` register-nudge (2) — the only genuine, confirmed,
+  unconverted cross-boundary work in the entire 70-finding inventory.** No
+  installation-context awareness at all (plain `command -v`/legacy-path
+  check). Left unconverted this pass (out of time/scope for this leg) but
+  precisely identified, with its fix pattern already proven in this same
+  codebase (`agent-machines/scripts/bootstrap-check.sh`) — the next
+  session's exact next slice.
+- Updated `phase-2-launcher-contracts.md`'s family table with this final,
+  source-verified disposition for every finding (no more "needs
+  verification" hedges) and corrected the main README's Phase 2 item to
+  cite the final counts: 2 false-positive (fixed), 60 own-payload
+  (accepted), 2 deferred (`agent-vault`), 2 open (`agent-worktrees`).
+- Verified: `check-marketplace-isolation.py` (70→68), `check-docs-
+  consistency.py`, `test-supervisor -- python3 -m pytest
+  plugins/agent-ssh/tests/test_dtssh_host_launcher.py` all clean.
 
 ### 2026-09-27 — Operator scope correction: Phase 2/6 completion criterion is universal consumer-side resolution, not global-binstub removal
 

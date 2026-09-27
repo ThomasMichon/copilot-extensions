@@ -19,7 +19,7 @@ done
 if ! command -v dtssh >/dev/null 2>&1; then
   echo "Installing dtssh..." >&2
   curl -fsSL https://raw.githubusercontent.com/bmiddha/devtunnel-ssh/main/scripts/install-release.sh | sh
-  export PATH="$HOME/.local/bin:$HOME/.dtssh/bin:$PATH"
+  export PATH="$HOME/.local/bin:$HOME/.dtssh/bin:$PATH"  # marketplace-isolation: allow third-party-installer-path
 fi
 
 is_logged_in() {
