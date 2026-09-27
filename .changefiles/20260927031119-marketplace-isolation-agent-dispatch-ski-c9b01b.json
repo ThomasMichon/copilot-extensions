@@ -1,0 +1,9 @@
+{
+  "comment": "marketplace-scoped-installations guard triage: annotate agent-dispatch's SKILL.md's own-runtime-path prose mentions with the established allow deployed-runtime-diagnostics marker.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "minor"
+    }
+  ]
+}
