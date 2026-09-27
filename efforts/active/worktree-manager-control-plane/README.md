@@ -402,7 +402,7 @@ bindings still resolve correctly through the compatibility view.
       path, and the separate built-in progress-envelope follow-up was filed as
       [#4274](https://github.com/ThomasMichon/copilot-extensions/issues/4274).
 
-### Phase 3d — Retire the Picker's in-process engine-module boundary (Planned — #3359, #3360)
+### Phase 3d — Retire the Picker's in-process engine-module boundary (Planned — ordered implementation plan authored; #3360)
 
 _(agent-recommended scoping below the two linked issues; the issues
 themselves are operator-filed.)_
@@ -420,11 +420,15 @@ this session (#3319, #3327). #3359 is the mechanical, low-risk half
 (vendor the 3 borrowed shared libs, `agent-procutil`/`dropin-registry`/
 `plugin-activation`) — **done**, PR
 [#3368](https://github.com/ThomasMichon/copilot-extensions/pull/3368).
-#3360 is the harder half (the CLI-root modules themselves) and needs real
-design, not a blind mechanical conversion — see
+#3360 is the harder half (the CLI-root modules themselves) and now has a
+reviewed ordered plan, not just an evidence dump — see
 [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md)
-for the full call-site inventory and the performance-tradeoff analysis behind
-each checkbox below.
+for the full call-site inventory, the operator-resolved ownership decisions,
+and the PR-by-PR sequencing behind each checkbox below. Group D's `profiles`
+branch is already closed via Phase 3e / PR
+[#3626](https://github.com/ThomasMichon/copilot-extensions/pull/3626), and
+Phase 3c's non-blocking worker prerequisite for Group C is now satisfied via
+PR [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
 
 - [x] **#3359 — vendor the 3 borrowed shared libs.** Landed via
       [#3368](https://github.com/ThomasMichon/copilot-extensions/pull/3368):
@@ -447,42 +451,47 @@ each checkbox below.
       Phase 3e since they also touch agent-worktrees' own
       `profiles`/`terminal-fragment`/`repair` CLI verbs, not just this
       Picker's read path.
-- [ ] **Design + convert the low-frequency, one-shot CLI-root reads.**
-      `pivot_manifest.py`'s `config.install_dir()` / `config._home()` /
-      `state_root_module.resolve_state_root(...)` run once per pivot-registry
-      scan pass, not per render frame — the safest subprocess-conversion
-      candidates. Needs: confirm/add a stable `--json` verb for each
-      (install dir, state root), matching the existing
-      `docs/engine-picker-contract.md` pinning discipline Phase 3 already
-      established for `engine_client`.
-- [ ] **Design the `runner.py` process-lifecycle call sites — likely NOT a
-      subprocess conversion at all.** `_start_anchor_heal_check`,
-      `reap_orphan_mux_sessions`, `_sweep_managed_on_exit`,
-      `_sweep_launcher_shells_on_exit`, `_sweep_finished_sessions_on_cadence`,
-      and `_start_picker_monitor_root` are private (`_`-prefixed),
-      never-designed-for-external-callers `agent_worktrees.__main__`
-      internals that manage the **Picker's own process lifetime**
-      (background threads, exit-time sweeps) — not agent-worktrees state
-      reads. A subprocess can't run "in this process's exit handler"; the
-      real fix is likely reclassifying this logic as worktree-manager's own
-      owned concern (or a new shared lib), not a CLI verb.
-- [ ] **Design the `data_local.py` hot path — needs a new batched verb, not
-      per-attribute conversion.** `tracking.list_records` /
-      `tracking._pr_is_terminal` / `pr_ops._reconcile_active_pr` /
-      `reclaim.resolve_bound_copilots` / `sessions.mux_status_many` /
-      `sessions.worktree_session_lock_state` / `tracking.stamp_*` run as one
-      read-reconcile-**write** loop over every managed worktree record, once
-      per Picker refresh (Phase 3c's synchronous hot path) — `stamp_*`
-      mutates `tracking.yaml` in-process using agent-worktrees' own file
-      lock. Naive per-attribute subprocess conversion would multiply
-      per-refresh subprocess spawns by up to 6× the worktree count and can't
-      hold a cross-process lock across separate calls. Needs one new atomic,
-      batched `--json` verb (read + reconcile + stamp in a single
-      agent-worktrees-owned call) before any of this path can move off the
-      in-process boundary — sequence this **after** Phase 3c's non-blocking
-      I/O work lands, since both touch the same call site.
-- [ ] Retire `_engine_runtime.py` (and its 9 proxy-module shims) once every
-      call site above has converted or been reclassified.
+- [x] **Write the reviewed ordered plan and resolve Open Questions 1-3.**
+      Landed in
+      [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md):
+      Group B is now split by ownership (Picker lifecycle sweeps move into
+      worktree-manager; project/config/ssh resolution stays engine-owned behind
+      a new public CLI seam), Group C's batch verb is explicitly engine-owned,
+      and Group C's former Phase 3c prerequisite is recorded as satisfied by
+      PR [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
+- [ ] **Step 1 — pin Group A's low-frequency public read surface, additive
+      only.** Add/pin the picker-supported `get <key>` / `state-root --json` /
+      `update-stage --json` contract and Manager-side client wrappers before any
+      caller cutover. See
+      [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
+- [ ] **Step 2 — add Group B's narrow public CLI seam for project/config/ssh
+      decisions.** Promote runner-scoped `--json` verbs (and reuse the existing
+      `resolve --json` remote seam) instead of replacing `_engine_runtime.py`
+      with another Python import API. See
+      [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
+- [ ] **Step 3 — reimplement Group B's Picker-owned lifecycle sweeps directly
+      in worktree-manager, additive first.** Port the process-lifecycle logic
+      that belongs to the Picker's own process boundary now that cross-repo
+      porting friction is lower. See
+      [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
+- [ ] **Step 4 — cut `runner.py`, `pivot_manifest.py`, and `update_stage.py`
+      over to the new seams.** After Steps 1-3, Groups A/B stop using
+      `engine_module(...)` and underscore-prefixed engine helpers in production.
+      See
+      [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
+- [ ] **Step 5 — add Group C's batched reconcile-and-stamp `--json` verb in
+      agent-worktrees, unused at first.** Keep the read/reconcile/write lock
+      scope with the engine that already owns `tracking.yaml`. See
+      [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
+- [ ] **Step 6 — cut `data_local.py` over to the batched Group C verb via the
+      now-landed Phase 3c worker path.** Preserve cache-first first paint and
+      keep the refresh hot path off the render thread. See
+      [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
+- [ ] **Step 7 — retire `_engine_runtime.py` and its remaining proxy shims.**
+      Cleanup lands only after Groups A/B/C are fully cut over, with a focused
+      regression guard that production Picker code no longer imports
+      `agent_worktrees` in-process. See
+      [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
 
 ### Phase 3e — Relocate terminal-profile handling out of agent-worktrees (Done — #3390)
 
@@ -743,6 +752,20 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-09-27** — Wrote Phase 3d's ordered implementation plan
+  ([`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md)),
+  replacing the old "evidence only + open questions" shape with the same
+  PR-sized additive-seam → cutover → cleanup structure used by Phases 3b,
+  3c, and 3e. Recorded today's operator decisions directly in the doc:
+  Group B splits at the true ownership boundary (Picker process-lifecycle
+  sweeps move into worktree-manager; project/config/ssh resolution stays
+  engine-owned behind a new public CLI seam), Group C's batched
+  reconcile-and-stamp verb is engine-owned, and the former Phase 3c
+  sequencing question is now satisfied by PR
+  [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
+  The ordered plan now sequences 7 remaining implementation steps, records
+  Group D as already closed by Phase 3e, and leaves no design questions
+  open before implementation begins.
 - **2026-09-27** — Landed Phase 3c Step 5, PR
   [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
   Renamed the old synchronous Picker setup helper to
