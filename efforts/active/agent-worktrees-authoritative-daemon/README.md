@@ -637,49 +637,21 @@ survey above.
       `check-no-agent-machines-packages.py`'s structural-invariant style),
       an AST-based scan of every `plugins/*` sibling plugin (excluding
       `agent-worktrees` itself) for a direct import/call of a
-      hand-curated, commented denylist of every tracking-record WRITE
-      function across `tracking.py` / `tracking_lifecycle.py` /
-      `tracking_claims.py` / `tracking_session_registry.py` /
-      `tracking_controller_relations.py` (36 functions). **Two review
-      rounds, four real gaps caught and fixed, none assumed away:**
-      (1) `tracking_controller_relations.py`'s own thin
-      `save_record`/`_save_record_unlocked` re-export wrappers were
-      missing from the protected module set; (2) the attribute-chain
-      matcher only handled a single-level module alias
-      (`tracking.save_record(...)`), missing the two-level
-      `import agent_worktrees as aw; aw.tracking.save_record(...)` form
-      and its unaliased equivalent -- a package-root alias was never
-      tracked at all; (3) the denylist itself was missing four
-      controller-relation write functions
-      (`backfill_legacy_controller_relations`/`set_controller_relation`/
-      `end_controller_relation`/`remove_controller_relation`, persisted in
-      `tracking_controller_relations.py` AND re-exported by `tracking.py`
-      itself) plus `load_or_create_anchor_record`; (4) the SECOND round
-      then found the FIRST round's own fix for gap (2) was itself
-      semantically wrong: `import agent_worktrees.tracking` with no `as`
-      binds only the top-level `agent_worktrees` name in Python (never a
-      bare `tracking`), so modeling it as a `tracking` module alias both
-      mis-caught an unrelated bare `tracking.save_record(...)` name
-      collision and MISSED this actual valid import shape -- fixed by
-      routing the unaliased dotted-import case into the package-alias
-      tracking instead; (5) a THIRD round then found a wildcard-import
-      escape hatch entirely outside the alias-tracking model: `from
-      agent_worktrees import *` (or `from agent_worktrees.tracking import
-      *`) followed by a bare `save_record(...)` call produces an
-      `ImportFrom` alias literally named `*`, which neither existing
-      branch ever matches -- fixed by rejecting the wildcard import
-      itself outright (unresolvable safely, so treated as a violation on
-      sight) rather than trying to resolve its exported names. Wired into
-      CI alongside `test_check_no_sibling_tracking_writes.py` (16 tests:
-      clean tree, read-only-accessor non-flagging, three single-level
-      import shapes, an aliased-module-import evasion case, three
-      package-root-alias evasion cases (aliased, unaliased bare, and
-      unaliased dotted), the `tracking_controller_relations` re-export
-      case, the four added controller-relation functions,
-      `load_or_create_anchor_record`, two wildcard-import rejection cases,
-      the owning-plugin exemption, and a live-repo smoke test). **Scoped
-      to sibling `plugins/*` only** (matching this effort's own original
-      survey and Plan wording) -- deliberately does NOT cover
+      hand-curated denylist covering every tracking-record write function
+      across 11 modules (47 functions total: `tracking.py` /
+      `tracking_lifecycle.py` / `tracking_claims.py` /
+      `tracking_session_registry.py` / `tracking_controller_relations.py`
+      / the 6 `tracking_*_write.py` verb-handler modules). Four review
+      rounds found real gaps each time (see Journal for the full
+      blow-by-blow: a missing re-export module, a package-root-alias
+      attribute chain never tracked at all, an incomplete denylist, a
+      wildcard-import escape hatch, the daemon's own verb handlers being
+      an equally-importable write surface, and a fail-open exception path
+      on unreadable/unparseable files) -- every one fixed with a
+      dedicated regression test, none assumed away. Wired into CI
+      alongside `test_check_no_sibling_tracking_writes.py` (20 tests).
+      **Scoped to sibling `plugins/*` only** (matching this effort's own
+      original survey and Plan wording) -- deliberately does NOT cover
       `worktree-manager/` (a separate, non-plugin, out-of-plugin
       control-plane app), which already imports several of these same
       write functions directly today via its own in-process
@@ -819,9 +791,27 @@ agent_worktrees.tracking import *`) followed by a bare `save_record(...)`
 call produces an `ImportFrom` alias literally named `*`, which neither
 existing branch ever matches -- fixed by rejecting the wildcard import
 itself outright (unresolvable safely against the denylist, so treated as
-a violation on sight). Every fix has a dedicated regression test.
+a violation on sight). (6) A FOURTH review round found two more real
+gaps: the module set stopped at the five original "public" tracking
+modules, but the daemon's own 6 `tracking_*_write.py` verb-handler
+modules (`apply_claim_add`/`apply_claim_release`/`apply_claim_settle`/
+`apply_status_disposition`/`apply_follow_up_add`/
+`apply_follow_up_resolve`/`apply_follow_up_dismiss`/
+`apply_session_deregister`/`apply_session_conclude`/
+`apply_session_link_succession`/`apply_session_register`, 11 functions)
+are an EQUALLY importable write surface -- each one itself acquires
+`_RecordLock`, mutates the record, and calls `tracking.save_record`,
+just skipping the verb-dispatch layer on the way there; and (7) the
+file-scan's own exception handling failed OPEN -- an unreadable,
+non-UTF-8, or syntactically invalid sibling `.py` file was silently
+treated as clean, so a file the guard simply couldn't parse was a
+guaranteed way to smuggle a forbidden import past CI. Fixed by adding
+the verb-handler modules/functions to the protected sets, and by turning
+every file-scan failure into a reported `Violation` instead of a silent
+empty list. Every fix across all four rounds has a dedicated regression
+test.
 
-16 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
+20 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
 tree, the sanctioned read-only accessors staying unflagged, three
 single-level import/call shapes (module attribute call, direct
 `from agent_worktrees import <fn>`, `from agent_worktrees.tracking_claims
@@ -829,10 +819,12 @@ import <fn>`), an aliased-module-import evasion case, three
 package-root-alias evasion cases (aliased, unaliased bare, and unaliased
 dotted), the `tracking_controller_relations` re-export case, the four
 added controller-relation functions, `load_or_create_anchor_record`, two
-wildcard-import rejection cases, the owning-plugin's own exemption, and a
-live-repo smoke test (confirmed clean: zero violations today, matching
-the original survey's own finding). Wired into `.github/workflows/ci.yml`
-alongside the existing `check-no-agent-machines-packages.py` guard.
+wildcard-import rejection cases, two verb-handler-module cases, two
+fail-closed file-scan-error cases (unreadable, syntactically invalid),
+the owning-plugin's own exemption, and a live-repo smoke test (confirmed
+clean: zero violations today, matching the original survey's own
+finding). Wired into `.github/workflows/ci.yml` alongside the existing
+`check-no-agent-machines-packages.py` guard.
 
 ### 2026-09-27 — PR #4265: daemon writes push straight into record_cache -- the read-consistency companion to Phase 3's write migration, plus two real bugs review caught
 Operator redirected scope mid-session, away from an initially-discussed

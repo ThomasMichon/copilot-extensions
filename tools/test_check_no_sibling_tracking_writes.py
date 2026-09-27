@@ -243,6 +243,68 @@ def test_wildcard_import_of_tracking_submodule_is_rejected_outright(tmp_path):
     assert "wildcard" in violations[0].detail
 
 
+def test_verb_handler_module_direct_call_is_caught(tmp_path):
+    # tracking_claim_write.apply_claim_add acquires _RecordLock, mutates
+    # the record, and calls tracking.save_record itself -- importing it
+    # directly is the SAME bypass as importing tracking.save_record, just
+    # skipping the verb-dispatch layer on the way there.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking_claim_write\n"
+        "\n"
+        "def write(args):\n"
+        "    tracking_claim_write.apply_claim_add(args)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "apply_claim_add" in violations[0].detail
+
+
+def test_verb_handler_direct_from_import_is_caught(tmp_path):
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees.tracking_session_registration_write import "
+        "apply_session_register\n"
+        "\n"
+        "def write(args):\n"
+        "    apply_session_register(args)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "apply_session_register" in violations[0].detail
+
+
+def test_unreadable_file_fails_closed_not_silently_skipped(tmp_path, monkeypatch):
+    # A file the guard cannot even read must be reported, not silently
+    # treated as clean -- otherwise an unreadable/undecodable file is a
+    # guaranteed way to smuggle a forbidden import past CI.
+    path = _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking\n",
+    )
+    real_read_text = Path.read_text
+
+    def _boom(self, *a, **kw):
+        if self == path:
+            raise OSError("permission denied (simulated)")
+        return real_read_text(self, *a, **kw)
+
+    monkeypatch.setattr(Path, "read_text", _boom)
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "could not be read" in violations[0].detail
+
+
+def test_syntactically_invalid_file_fails_closed_not_silently_skipped(tmp_path):
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "def broken(:\n    pass\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "syntax error" in violations[0].detail
+
+
 def test_real_repo_checkout_is_clean():
     """End-to-end smoke test: the real, live repo tree must never trip this
     guard -- confirms the script (not just find_violations()) exits 0

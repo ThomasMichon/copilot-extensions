@@ -107,6 +107,23 @@ WRITE_FUNCTIONS = frozenset({
     "set_controller_relation",
     "end_controller_relation",
     "remove_controller_relation",
+    # tracking_*_write.py -- the daemon's own verb-handler modules
+    # (tracking_write.py's registry dispatches to these; each acquires
+    # _RecordLock, mutates the record, and calls tracking.save_record
+    # itself). Importing one of these directly is the SAME bypass as
+    # importing tracking.save_record -- it just skips the verb-dispatch
+    # layer on the way there.
+    "apply_claim_add",
+    "apply_claim_release",
+    "apply_claim_settle",
+    "apply_status_disposition",
+    "apply_follow_up_add",
+    "apply_follow_up_resolve",
+    "apply_follow_up_dismiss",
+    "apply_session_deregister",
+    "apply_session_conclude",
+    "apply_session_link_succession",
+    "apply_session_register",
 })
 
 #: The module names a write function could be imported from -- all of these
@@ -117,6 +134,14 @@ TRACKING_MODULES = frozenset({
     "tracking_claims",
     "tracking_session_registry",
     "tracking_controller_relations",
+    # The daemon's own verb-handler modules (see the WRITE_FUNCTIONS
+    # comment above for why these belong here too).
+    "tracking_claim_write",
+    "tracking_disposition_write",
+    "tracking_followup_write",
+    "tracking_session_deregistration_write",
+    "tracking_session_lifecycle_write",
+    "tracking_session_registration_write",
 })
 
 
@@ -149,12 +174,32 @@ def _sibling_plugin_py_files(plugins_dir: Path) -> list[Path]:
 def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
     try:
         src = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return []
+    except OSError as exc:
+        return [Violation(
+            path, 0,
+            f"could not be read to scan for a direct tracking-write import "
+            f"({exc}) -- fix or exclude this file rather than letting the "
+            f"guard silently skip it",
+            repo_root=repo_root,
+        )]
+    except UnicodeDecodeError as exc:
+        return [Violation(
+            path, 0,
+            f"is not valid UTF-8, so it could not be scanned for a direct "
+            f"tracking-write import ({exc}) -- fix its encoding or exclude "
+            f"it rather than letting the guard silently skip it",
+            repo_root=repo_root,
+        )]
     try:
         tree = ast.parse(src, filename=str(path))
-    except SyntaxError:
-        return []
+    except SyntaxError as exc:
+        return [Violation(
+            path, exc.lineno or 0,
+            f"has a syntax error, so it could not be scanned for a direct "
+            f"tracking-write import ({exc.msg}) -- fix the syntax error "
+            f"rather than letting the guard silently skip this file",
+            repo_root=repo_root,
+        )]
 
     violations: list[Violation] = []
     # Local names bound to a whole tracking module (from either
