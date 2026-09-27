@@ -386,6 +386,41 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-26 — `cell_lifecycle.py`'s 3-legs-deferred findings: 2 of 3 resolved (PR #4154)
+
+- Fresh guard count at merge time: 609 (down from 611).
+- Followed up on this session's own `agent-machines` slice, which noted
+  `cell_lifecycle.py`'s 3 findings had now been deferred across 3 legs.
+  Actually reading the code (rather than re-deferring on the strength of
+  a paraphrased prior handoff note) showed both were the SAME already-
+  established "recognize the plugin's own legacy identity" shape this
+  effort has fixed dozens of times -- no genuine design ambiguity, just
+  three legs in a row that hadn't looked closely.
+- `cell_lifecycle.py`'s module-size baseline is exactly 1018 lines -- the
+  **4th file this session** hit at zero headroom (after `agent-
+  containers/__main__.py`, `agent-ssh/fragment_registry.py`,
+  `agent-mcp/config.py`; tracked in the just-filed
+  [aperture-labs#7672](https://gitea.michon.ski/tmichon/aperture-labs/issues/7672)).
+  This time, made the fix net line-NEUTRAL instead of deferring again: one
+  marker fit on its existing line for free, and a 3-line list
+  comprehension collapsed to a 2-line form (a named constant + one-line
+  comprehension) freed exactly 1 line to pay for the OTHER new marker
+  line. File shrank by 1 net line overall (1018 -> 1017) -- a small
+  worked example of "restructure to net-zero" actually succeeding twice
+  in the same file, unlike the times this session it wasn't possible.
+- The third finding (line 650, inside a nested closure argument) still
+  had no equivalent line-saving restructure nearby and got deferred --
+  genuinely the module-size wall again, not a design question. It drops
+  out trivially once `cell_lifecycle.py` gets real headroom.
+- Guard count: 35 -> 33 findings for `agent-machines`. Verified via the
+  full `agent-machines` suite (658 passed, 12 skipped, 0 failures).
+  Merged via `pr-merge --now` after a clean (0-finding) advisory review.
+- **Lesson for future legs**: when a handoff says a finding is "plausibly
+  intentional, not yet reviewed," that's an instruction to go read the
+  code THIS leg, not license to defer again on the strength of the
+  phrase alone -- the actual review here took minutes and resolved a
+  3-leg-old open item.
+
 ### 2026-09-26 — `agent-machines`'s legacy-root/registry cluster: 13 of 48 findings resolved, 2 design questions surfaced (PR #4145)
 
 - Fresh guard count at merge time: 611 (down from 624). First slice into
