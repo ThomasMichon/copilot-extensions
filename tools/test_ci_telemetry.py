@@ -125,6 +125,31 @@ def test_render_report_includes_known_noisy_nonblocking_checks(telemetry):
     assert "ci-identifier-leak-guard" in report
 
 
+def test_replace_source_snapshot_drops_stale_out_of_window_rows(telemetry, tmp_path):
+    # A repeated `refresh` must not accumulate stale runs that have since
+    # fallen out of the lookback window (or a source `--dev-only` no longer
+    # fetches) -- `report` loads every persisted row unconditionally, so a
+    # snapshot that only ever grows would silently rank stale data forever.
+    # Regression for a real Copilot review finding on PR #4296.
+    RunRecord = telemetry.RunRecord
+    conn = telemetry.open_db(tmp_path / "telemetry.sqlite3")
+    telemetry.persist_runs(
+        conn,
+        [
+            RunRecord(run_id=1, head_sha="old", conclusion="failure", created_at=_t(0), html_url="u1"),
+        ],
+    )
+    telemetry.replace_source_snapshot(conn, {"dev-push"})
+    telemetry.persist_runs(
+        conn,
+        [
+            RunRecord(run_id=2, head_sha="new", conclusion="success", created_at=_t(10), html_url="u2"),
+        ],
+    )
+    runs = telemetry.load_runs(conn)
+    assert [r.run_id for r in runs] == [2]
+
+
 def test_compute_flaky_shas_detects_a_same_run_rerun_recovery(telemetry):
     # `gh run rerun --failed` reuses the SAME run_id at a higher attempt
     # number rather than creating a new run -- the exact case
@@ -152,3 +177,34 @@ def test_compute_blocking_impact_ignores_pr_sourced_runs(telemetry):
         RunRecord(run_id=2, head_sha="b", conclusion="success", created_at=_t(10), html_url="u2", source="pr"),
     ]
     assert telemetry.compute_blocking_impact(runs) == {}
+
+
+def test_compute_blocking_impact_does_not_double_count_a_same_run_failed_rerun(telemetry):
+    # A later failed attempt of the SAME run_id is that run's own retry, not
+    # a newly-stalled, separate commit -- it must not inflate the blocked
+    # count. Regression for a real Copilot review finding on PR #4296.
+    RunRecord = telemetry.RunRecord
+    runs = [
+        RunRecord(run_id=1, head_sha="a", conclusion="failure", created_at=_t(0), html_url="u1", attempt=1),
+        RunRecord(run_id=1, head_sha="a", conclusion="failure", created_at=_t(0), html_url="u1", attempt=2),
+        RunRecord(run_id=2, head_sha="b", conclusion="success", created_at=_t(10), html_url="u2"),
+    ]
+    impact = telemetry.compute_blocking_impact(runs)
+    # run 1's own attempt 2 (same run_id) never counts as a blocked run;
+    # only run 2 (a genuinely different commit) does.
+    assert impact[(1, 1)] == 1
+
+
+def test_compute_blocking_impact_a_same_run_successful_rerun_still_ends_the_interval(telemetry):
+    # A same-run SUCCESSFUL rerun still legitimately unblocks the queue --
+    # it must terminate the blocked count exactly like any other success,
+    # even though it doesn't itself increment `blocked`.
+    RunRecord = telemetry.RunRecord
+    runs = [
+        RunRecord(run_id=1, head_sha="a", conclusion="failure", created_at=_t(0), html_url="u1", attempt=1),
+        RunRecord(run_id=1, head_sha="a", conclusion="success", created_at=_t(0), html_url="u1", attempt=2),
+        RunRecord(run_id=2, head_sha="b", conclusion="failure", created_at=_t(10), html_url="u2"),
+    ]
+    impact = telemetry.compute_blocking_impact(runs)
+    # run 1 is unblocked by its own successful rerun before run 2 ever runs.
+    assert impact[(1, 1)] == 0

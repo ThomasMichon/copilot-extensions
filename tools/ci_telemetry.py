@@ -27,8 +27,8 @@ Two signals are computed per distinct failure signature:
 
 Usage::
 
-    python tools/ci_telemetry.py refresh --db tools/ci_telemetry.sqlite3   # fetch + persist (needs gh + GH_TOKEN)
-    python tools/ci_telemetry.py report --db tools/ci_telemetry.sqlite3     # print the ranked report from persisted data
+    python tools/ci_telemetry.py --db tools/ci_telemetry.sqlite3 refresh   # fetch + persist (needs gh + GH_TOKEN)
+    python tools/ci_telemetry.py --db tools/ci_telemetry.sqlite3 report     # print the ranked report from persisted data
 
 `refresh` is the only network-touching subcommand; `report` only reads the
 already-populated database, so it works offline and is what CI/local
@@ -183,6 +183,15 @@ def compute_blocking_impact(runs: list[RunRecord]) -> dict[tuple[int, int], int]
             continue
         blocked = 0
         for later in ordered[i + 1 :]:
+            # A later attempt of the SAME run_id (a rerun) is not a new,
+            # separately-stalled commit -- it's the same commit's own retry.
+            # A same-run success still legitimately ends the stalled
+            # interval (the queue is unblocked); a same-run failure must
+            # not be counted as one more run stuck behind itself.
+            if later.run_id == run.run_id:
+                if later.conclusion == "success":
+                    break
+                continue
             blocked += 1
             if later.conclusion == "success":
                 break
@@ -507,8 +516,22 @@ def render_report(stats: list[SignatureStat]) -> str:
 # --------------------------------------------------------------------------
 
 
+def replace_source_snapshot(conn: sqlite3.Connection, sources: set[str]) -> None:
+    """Drop every persisted row for the given sources before a fresh
+    `refresh` re-persists them -- `INSERT OR REPLACE` alone never removes a
+    row that's fallen out of the requested lookback window (or a source
+    `--dev-only` no longer fetches), so a repeated refresh would otherwise
+    accumulate stale, out-of-window data forever and silently corrupt every
+    subsequent `report`."""
+    placeholders = ",".join("?" for _ in sources)
+    conn.execute(f"DELETE FROM runs WHERE source IN ({placeholders})", tuple(sources))
+    conn.execute(f"DELETE FROM failures WHERE source IN ({placeholders})", tuple(sources))
+    conn.commit()
+
+
 def cmd_refresh(args: argparse.Namespace) -> int:
     conn = open_db(Path(args.db))
+    sources = {"dev-push"} if args.dev_only else {"dev-push", "pr"}
     try:
         runs = fetch_runs(args.repo, args.branch, args.lookback_days, event="push")
         if not args.dev_only:
@@ -516,6 +539,7 @@ def cmd_refresh(args: argparse.Namespace) -> int:
     except LookupFailed as error:
         print(f"[ERROR] could not fetch run history: {error}", file=sys.stderr)
         return 1
+    replace_source_snapshot(conn, sources)
     persist_runs(conn, runs)
     print(f"[OK] persisted {len(runs)} run(s)/attempt(s)")
 
