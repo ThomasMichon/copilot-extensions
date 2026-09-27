@@ -534,8 +534,9 @@ class PickerApp(App):
         > .option-list--option-highlighted {
         background: #ffaf00; color: black; text-style: bold;
     }
-    /* NF5-5 pinned section header (hidden -> takes no space until scrolled). */
-    PickerScreen > #nf-body-sticky { width: 100%; height: 1; }
+    /* NF5-5 + Phase 9 item 1 (#3307) pinned column-header + section-band
+       region (hidden -> takes no space until scrolled). */
+    PickerScreen > #nf-body-sticky { width: 100%; height: 2; }
     """
 
     def __init__(

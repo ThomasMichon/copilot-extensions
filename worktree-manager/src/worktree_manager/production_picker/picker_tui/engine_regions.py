@@ -145,42 +145,55 @@ class _PickerButtons(_FocusRegion):
         return scr._join_lines([vr.text for vr in buttons], W)
 
 class _PickerStickyHeader(Widget):
-    """NF5-5 (#88): the pinned section header for the native OptionList body.
+    """NF5-5 (#88) + Phase 9 item 1 (worktrees-pivot-ux-overhaul #3307): the
+    pinned column-header + current-group-band region above the native
+    OptionList body.
 
-    A native ``OptionList`` scrolls all options uniformly, so a section header
-    (Active / Recent / Completed, or a maintenance group) scrolls off the top --
-    unlike the text-line body, which pins the current section. This 1-row widget
-    sits just above the list and shows the current top section's header while
-    that section's own header row is scrolled out of view; it is hidden
-    (``display = False``, taking no space) at the top of the list or when the
-    header itself is visible, so the unscrolled layout is unchanged."""
+    A native ``OptionList`` scrolls all options uniformly, so both the
+    column-header row (``ID STATE AGE ...``) and a section header (Active /
+    Recent / Completed, or a maintenance group) scroll off the top -- unlike
+    the text-line body, which pinned the current section only. This 2-row
+    widget sits just above the list: row 0 pins the column header, row 1 pins
+    the current top section's header, each shown only while its own source
+    row has scrolled out of view. Both rows are hidden together
+    (``display = False``, taking no space) at the top of the list; once
+    scrolled, BOTH rows stay reserved (blank when nothing applies to that
+    slot) so a section/column-header boundary never reflows the OptionList by
+    a row -- the same anti-flicker contract the original 1-row section pin
+    established (#169), now generalized to two independently-blankable rows."""
 
     can_focus = False
 
     def __init__(self, **kw) -> None:
         super().__init__(**kw)
-        self._line = None
+        self._colhdr_line = None
+        self._section_line = None
         self.display = False
 
-    def set_line(self, line, keep_space: bool = False) -> None:
-        # ``keep_space`` decouples *what to show* from *does the row exist*: while
-        # the list is scrolled we keep this 1-row region present with a blank
-        # line (rather than collapsing it to height 0) so a section boundary
-        # never reflows the OptionList by a row. That reflow -- the pin toggling
-        # ``display`` on/off as headers passed the top -- was the visible flicker
-        # (#169). Only the unscrolled top fully hides it, preserving the at-rest
-        # grid parity the feature was built to keep.
-        cur = self._line.plain if self._line is not None else None
-        new = line.plain if line is not None else None
-        want_display = bool(line is not None or keep_space)
+    def set_lines(self, colhdr_line, section_line,
+                  keep_space: bool = False) -> None:
+        # ``keep_space`` decouples *what to show* from *does the region exist*:
+        # see the class docstring -- while scrolled, this 2-row region stays
+        # present (blank rows where nothing applies) rather than collapsing,
+        # so pin toggling never reflows the OptionList (#169).
+        cur = (self._colhdr_line.plain if self._colhdr_line is not None else None,
+               self._section_line.plain if self._section_line is not None else None)
+        new = (colhdr_line.plain if colhdr_line is not None else None,
+               section_line.plain if section_line is not None else None)
+        want_display = bool(
+            colhdr_line is not None or section_line is not None or keep_space)
         if cur == new and self.display == want_display:
             return
-        self._line = line
+        self._colhdr_line = colhdr_line
+        self._section_line = section_line
         self.display = want_display
         self.refresh()
 
     def render(self):
-        return self._line if self._line is not None else Text("")
+        from rich.console import Group
+        top = self._colhdr_line if self._colhdr_line is not None else Text("")
+        bot = self._section_line if self._section_line is not None else Text("")
+        return Group(top, bot)
 
 class _PickerNativeData(OptionList):
     """NF5-5 (#88): swappable *native* data body -- the pivot's data rows as
@@ -209,6 +222,8 @@ class _PickerNativeData(OptionList):
         self._section_texts = {}  # section label -> its header Text (for sticky)
         self._kinds = []          # option index -> VRow kind ('section' etc.)
         self._l_rows = {}         # worktree row key -> (option index, rec, li)
+        self._colhdr_index = None  # option index of the pivot's column header
+        self._colhdr_text = None   # its Text (for sticky), or None (no colhdr)
         self._sig = None          # last data signature (rebuild only on change)
         self._syncing = False
         self._suppress_activate = False   # one-shot: gutter click toggled, don't open
@@ -265,6 +280,8 @@ class _PickerNativeData(OptionList):
             self._kinds = []
             self._l_rows = {}
             self._section_texts = {}
+            self._colhdr_index = None
+            self._colhdr_text = None
             cur_label = None
             opts = []
             for vr in data:
@@ -275,6 +292,11 @@ class _PickerNativeData(OptionList):
                 cur_label = ps[0] if ps else cur_label
                 if kind == "section" and cur_label is not None:
                     self._section_texts[cur_label] = text
+                if kind == "colhdr" and self._colhdr_index is None:
+                    # Exactly one column-header row per pivot (Phase 9 item 1):
+                    # pin it independently of the current-section band.
+                    self._colhdr_index = len(opts)
+                    self._colhdr_text = text
                 idx = len(opts)
                 opts.append(Option(text, disabled=stop is None))
                 self._stops.append(stop)
@@ -301,6 +323,14 @@ class _PickerNativeData(OptionList):
             if s == stop:
                 return i
         return None
+
+    def _first_enabled_index(self):
+        """The option index of the list's topmost focusable row (the first
+        non-``None`` stop) -- used to force a full scroll-to-top when focus
+        lands there (Phase 9 item 1, #3307), since it is usually several rows
+        below option index 0 (the column header / section band precede it)."""
+        return next((i for i, s in enumerate(self._stops) if s is not None),
+                    None)
 
     def _sync_from_sel(self, *, quiet: bool = False):
         """Point the native cursor at the option owning the engine's ``sel``.
@@ -331,10 +361,10 @@ class _PickerNativeData(OptionList):
             self._syncing = False
 
     def _update_sticky(self):
-        """Pin the current section header above the list when its own header row
-        has scrolled out of view (#88 NF5-5). Hidden at the top of the list or
-        when the section header is itself visible, so the unscrolled layout is
-        unchanged."""
+        """Pin the column header + current section header above the list when
+        their own source rows have scrolled out of view (#88 NF5-5; Phase 9
+        item 1, #3307). Hidden at the top of the list when NEITHER needs
+        pinning, so the unscrolled layout is unchanged."""
         scr = self._screen
         try:
             sticky = scr.query_one("#nf-body-sticky", _PickerStickyHeader)
@@ -344,21 +374,23 @@ class _PickerNativeData(OptionList):
         if y <= 0:
             # Unscrolled: fully hide the pin so the at-rest layout / grid parity
             # is unchanged (#88 NF5-5).
-            sticky.set_line(None)
+            sticky.set_lines(None, None)
             return
-        # Scrolled: keep the 1-row region present for EVERY offset (``keep_space``)
-        # so its presence never toggles the body's height mid-scroll -- blank it
-        # when there is nothing to pin (the top visible row is itself a section
-        # header, or out of range) instead of collapsing it, which used to jump
-        # the list by a row at each section boundary (the flicker, #169).
-        if y >= len(self._sections) or (
-            y < len(self._kinds) and self._kinds[y] == "section"
-        ):
-            sticky.set_line(None, keep_space=True)
-            return
-        label = self._sections[y] if y < len(self._sections) else None
-        line = self._section_texts.get(label) if label else None
-        sticky.set_line(line, keep_space=True)
+        # Scrolled: keep the 2-row region present for EVERY offset (``keep_space``)
+        # so its presence never toggles the body's height mid-scroll -- blank a
+        # slot when there is nothing to pin in it (the column header/top visible
+        # row is itself that same row, or out of range) instead of collapsing it,
+        # which used to jump the list by a row at each boundary (the flicker,
+        # #169).
+        colhdr_line = None
+        if (self._colhdr_index is not None and y > self._colhdr_index):
+            colhdr_line = self._colhdr_text
+        section_line = None
+        if not (y >= len(self._sections) or (
+                y < len(self._kinds) and self._kinds[y] == "section")):
+            label = self._sections[y] if y < len(self._sections) else None
+            section_line = self._section_texts.get(label) if label else None
+        sticky.set_lines(colhdr_line, section_line, keep_space=True)
 
     def refresh_data(self):
         """Called by the screen on a state change (in place of a plain
@@ -472,6 +504,16 @@ class _PickerNativeData(OptionList):
             # held-arrow freeze): the native cursor already moved, so mark the
             # chrome dirty and let ``_tick`` coalesce the refresh at ~10fps.
             scr._nav_dirty = True
+        if i == self._first_enabled_index():
+            # Phase 9 item 1 (#3307): focusing the list's topmost row must
+            # force-scroll the viewport all the way to the top. Textual's own
+            # ``scroll_to_highlight()`` (already run by the ``highlighted``
+            # watcher just before this event fires) only scrolls the MINIMUM
+            # distance needed to bring that one row into view -- which can
+            # leave the pinned column-header/section rows above it still
+            # scrolled out, so previously only a mouse-wheel scroll reached
+            # far enough to bring the header back.
+            self.scroll_home(animate=False, immediate=True)
         self._update_sticky()
 
     def on_option_list_option_selected(self, event) -> None:

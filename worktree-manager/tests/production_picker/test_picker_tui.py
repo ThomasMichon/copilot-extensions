@@ -6144,18 +6144,18 @@ def test_native_list_sticky_header(monkeypatch):
             await pilot.pause()
             assert int(nl.scroll_offset.y) > 0
             assert st.display is True
-            assert "──" in st._line.plain   # a section rule is pinned
+            assert "──" in st._section_line.plain   # a section rule is pinned
 
     asyncio.run(run())
 
 
 def test_native_list_sticky_no_reflow_flicker(monkeypatch):
-    """#169: once the native list is scrolled, the sticky section-header region
-    stays present at a CONSTANT height across section boundaries -- it must not
-    collapse (display False) when a section header reaches the top and re-appear
-    a row later, because that 1-row toggle reflowed the OptionList and read as a
-    flicker. It is hidden only at the very top (unscrolled), so grid parity is
-    unchanged."""
+    """#169: once the native list is scrolled, the sticky column-header +
+    section-band region stays present at a CONSTANT height across section
+    boundaries -- it must not collapse (display False) when a section header
+    reaches the top and re-appear a row later, because that toggle reflowed
+    the OptionList and read as a flicker. It is hidden only at the very top
+    (unscrolled), so grid parity is unchanged."""
     import datetime
     import types
 
@@ -6224,6 +6224,121 @@ def test_native_list_sticky_no_reflow_flicker(monkeypatch):
             # height is stable, so no row-reflow flicker.
             assert displays_while_scrolled
             assert all(displays_while_scrolled)
+
+    asyncio.run(run())
+
+
+def test_native_list_sticky_column_header(monkeypatch):
+    """Phase 9 item 1 (#3307, worktrees-pivot-ux-overhaul): the column-header
+    row (``ID STATE AGE ...``) pins above the list, independently of the
+    current-section band, once IT has scrolled out of view -- previously only
+    the section band pinned, so the column header scrolled away for good."""
+    import datetime
+    import types
+
+    from worktree_manager.production_picker.picker_tui import derive
+    from worktree_manager.production_picker.picker_tui.engine import _PickerStickyHeader
+
+    def _tall_src():
+        derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+        local = ("anomalous-potato", "Win")
+        raws = [{"id": f"anomalous-potato-win-2026062{i % 9}-r{i:02d}",
+                 "title": f"Row {i}", "status": "active",
+                 "started_at": "2026-06-27T17:00:00", "turn_count": i,
+                 "state": "active" if i % 2 else "wip"} for i in range(20)]
+        s = types.SimpleNamespace()
+        s.LOCAL = local
+        s.LOCAL_LABEL = "lc"
+        s.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+        s.bucket = derive.bucket
+        s.for_machine = derive.for_machine
+        s.load = lambda: [derive.norm(w, *local) for w in raws]
+        return s
+
+    async def run():
+        app = PickerApp(_tall_src(), live=False)
+        async with app.run_test(size=(118, 16)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            scr.sel = ("L", 0)
+            scr.refresh()
+            await pilot.pause()
+            st = scr.query_one("#nf-body-sticky", _PickerStickyHeader)
+            nl = scr.query_one("#nf-body-data")
+            assert nl._colhdr_index is not None   # the pivot has a column header
+            nl.focus()
+            await pilot.pause()
+            for _ in range(10):
+                await pilot.press("down")
+            await pilot.pause()
+            assert int(nl.scroll_offset.y) > nl._colhdr_index
+            assert st.display is True
+            assert st._colhdr_line is not None
+            assert "STATE" in st._colhdr_line.plain
+            # The section band pins independently, in the SECOND row.
+            assert st._section_line is not None
+            assert "──" in st._section_line.plain
+
+    asyncio.run(run())
+
+
+def test_native_list_focus_top_row_forces_scroll_home(monkeypatch):
+    """Phase 9 item 1 (#3307): moving focus back to the list's topmost row
+    force-scrolls the viewport all the way to the top, so the pinned
+    column-header/section rows are no longer needed and disappear -- not only
+    the minimal scroll Textual's own ``scroll_to_highlight`` performs (which
+    used to leave the header hidden until a mouse-wheel scroll went further)."""
+    import datetime
+    import types
+
+    from worktree_manager.production_picker.picker_tui import derive
+    from worktree_manager.production_picker.picker_tui.engine import _PickerStickyHeader
+
+    def _tall_src():
+        derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+        local = ("anomalous-potato", "Win")
+        raws = [{"id": f"anomalous-potato-win-2026062{i % 9}-r{i:02d}",
+                 "title": f"Row {i}", "status": "active",
+                 "started_at": "2026-06-27T17:00:00", "turn_count": i,
+                 "state": "active" if i % 2 else "wip"} for i in range(20)]
+        s = types.SimpleNamespace()
+        s.LOCAL = local
+        s.LOCAL_LABEL = "lc"
+        s.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+        s.bucket = derive.bucket
+        s.for_machine = derive.for_machine
+        s.load = lambda: [derive.norm(w, *local) for w in raws]
+        return s
+
+    async def run():
+        app = PickerApp(_tall_src(), live=False)
+        async with app.run_test(size=(118, 16)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            scr.sel = ("L", 0)
+            scr.refresh()
+            await pilot.pause()
+            st = scr.query_one("#nf-body-sticky", _PickerStickyHeader)
+            nl = scr.query_one("#nf-body-data")
+            nl.focus()
+            await pilot.pause()
+            for _ in range(10):
+                await pilot.press("down")
+            await pilot.pause()
+            # Scrolled: the pin is showing.
+            assert int(nl.scroll_offset.y) > 0
+            assert st.display is True
+            # Arrow all the way back up to the very first row.
+            for _ in range(10):
+                await pilot.press("up")
+            await pilot.pause()
+            # Force-scrolled all the way home, not just enough to see that row.
+            assert int(nl.scroll_offset.y) == 0
+            assert st.display is False
 
     asyncio.run(run())
 
