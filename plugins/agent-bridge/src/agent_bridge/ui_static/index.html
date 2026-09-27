@@ -42,9 +42,8 @@
   </header>
 
   <div class="toolbar">
-    <input id="q" type="search" placeholder="Filter by title, id, branch, or PR   ( / )" aria-label="Filter" />
+    <input id="q" type="search" placeholder="Filter by title, repo, id, branch, or PR   ( / )" aria-label="Filter" />
     <div id="venues" class="fchips" role="group" aria-label="Venue"></div>
-    <div id="repos" class="fchips" role="group" aria-label="Repo"></div>
   </div>
 
   <main>
@@ -61,13 +60,20 @@
 
 <dialog id="newtask" class="modal" aria-labelledby="nt-heading">
   <h2 id="nt-heading">New task</h2>
-  <p class="muted small">Starts a Copilot session in a fresh worktree with your prompt as its first message.
-    It keeps running in the background; it shows up in the Picker too.</p>
-  <label>Repo <select id="nt-project"></select></label>
-  <label>Title <span class="muted small">(optional)</span>
-    <input id="nt-title" type="text" maxlength="60" placeholder="A short headline for the board" /></label>
+  <p class="muted small">Starts a Copilot session in a fresh worktree, with your request as its first message.
+    It keeps running in the background and shows up in the Picker too.</p>
+  <fieldset id="nt-modes" class="modes" hidden>
+    <legend>How should it run?</legend>
+    <div id="nt-mode-list" class="mode-list" role="radiogroup"></div>
+  </fieldset>
   <label>What should it do?
     <textarea id="nt-prompt" rows="7" placeholder="Describe the task in plain language, as you would in a Copilot session."></textarea></label>
+  <label><span>Title <span class="muted small">(optional, up to 30 characters, as in the Picker)</span></span>
+    <input id="nt-title" type="text" maxlength="30" placeholder="A short headline for the board" /></label>
+  <div class="nt-where">
+    <label class="inline">Runs in <select id="nt-project"></select></label>
+    <span id="nt-where-hint" class="muted small"></span>
+  </div>
   <div class="row">
     <span id="nt-status" class="muted small" role="status"></span>
     <span class="grow"></span>

@@ -1,0 +1,9 @@
+{
+  "comment": "Bridge UI: repo-declared task modes in New task, earlier tasks show their last session's transcript and branch commits, simpler filters, rail and prompt styling.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    }
+  ]
+}

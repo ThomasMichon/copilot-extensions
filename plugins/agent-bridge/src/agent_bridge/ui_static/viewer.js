@@ -60,6 +60,7 @@ export class SessionViewer {
       h("div", { class: "v-composer-row" },
         h("div", { class: "segmented", role: "group", "aria-label": "Delivery" }, this.deliveryEls),
         this.kindEl, this.sendStatus, h("span", { class: "grow" }), this.sendBtn));
+    this.composerEl = composer;
     return h("section", { class: "viewer" }, this.headEl, this.feedEl, this.jumpBtn, composer);
   }
 
@@ -72,17 +73,9 @@ export class SessionViewer {
   open(session) {
     if (this.watch && this.watch.id === session.session_id) { this.update(session); return; }
     this.close();
-    this.model = new SessionModel();
-    this.nodes = [];
-    this.renderFrom = 0;
-    this.maxRendered = PAGE;
-    this.expanded = new Set();
-    this.openSteps = new Set();
-    this.pending = [];
-    this.unseen = 0;
-    this._setDelivery("steer");
+    this._reset();
     this.session = session;
-    clear(this.blocksEl);
+    this.composerEl.hidden = false;
     this.emptyEl.hidden = false;
     this.emptyEl.textContent = "Connecting…";
     this.earlierBtn.hidden = true;
@@ -99,6 +92,41 @@ export class SessionViewer {
     this._fetchHead(this.watch);
     this._stream(this.watch);
     this.timer = setInterval(() => this._renderHead(), 1000);
+  }
+
+  _reset() {
+    this.model = new SessionModel();
+    this.nodes = [];
+    this.renderFrom = 0;
+    this.maxRendered = PAGE;
+    this.expanded = new Set();
+    this.openSteps = new Set();
+    this.pending = [];
+    this.unseen = 0;
+    this.archive = null;
+    this._setDelivery("steer");
+    clear(this.blocksEl);
+  }
+
+  /**
+   * Show an ended session's transcript, read-only: no stream and no composer.
+   * `events` are `{event, data, ts}` in the live stream's own kinds (the
+   * bridge maps a cold-store transcript to them), oldest first.
+   */
+  openArchive(meta, events) {
+    this.close();
+    this._reset();
+    this.session = null;
+    this.archive = meta || {};
+    this.composerEl.hidden = true;
+    for (const ev of events || []) this.model.apply(ev.event, ev.data, ev.ts, null);
+    this.catchUp = { done: true, head: null, idle: null };
+    this.earlierBtn.hidden = true;
+    this._renderChanged(new Set(this.model.blocks.keys()), true);
+    this.emptyEl.hidden = this.model.blocks.length > 0;
+    if (!this.model.blocks.length) this.emptyEl.textContent = "This session left no messages.";
+    this._renderHead();
+    requestAnimationFrame(() => this._toBottom());
   }
 
   /** The newest event id right now, from the bounded result snapshot. */
@@ -280,11 +308,19 @@ export class SessionViewer {
 
   _renderBlock(b, i) {
     switch (b.type) {
-      case "user":
+      case "user": {
         if (b.relay) return h("div", { class: "b-relay" }, h("span", { text: "↳ " + b.text }));
-        return h("article", { class: "b b-user" },
+        // A long prompt (a scheduled tick, a handoff brief) is folded to a few lines.
+        const long = b.text.length > 600 || b.text.split("\n").length > 8;
+        const open = !long || this.expanded.has("u" + i);
+        return h("article", { class: "b b-user" + (open ? "" : " clamped") },
           h("header", null, h("span", { class: "who", text: "Prompt" }), h("time", { text: clock(b.ts) })),
-          h("div", { class: "md" }, markdown(parseMarkdown(b.text))));
+          h("div", { class: "md" }, markdown(parseMarkdown(b.text))),
+          long ? h("button", { class: "ghost small b-more", onclick: () => {
+            if (open) this.expanded.delete("u" + i); else this.expanded.add("u" + i);
+            this._rerender(i);
+          } }, open ? "Show less" : "Show the whole prompt") : null);
+      }
       case "sent":
         return h("article", { class: "b b-sent" },
           h("header", null, h("span", { class: "who", text: "You" }),
@@ -387,16 +423,28 @@ export class SessionViewer {
   }
 
   _renderHead() {
+    const m = this.model;
+    if (this.archive) {
+      const a = this.archive;
+      replaceChildren(this.headEl, [
+        h("span", { class: "chip", text: "ended · read-only" }),
+        a.session_id ? h("span", { class: "chip mono", title: a.session_id, text: String(a.session_id).slice(0, 8) }) : null,
+        m && m.usage.model ? h("span", { class: "chip", text: m.usage.model }) : null,
+        a.truncated_before ? h("span", { class: "muted small", text: "showing the latest part" }) : null,
+        m && m.lastTs ? h("span", { class: "muted small", text: "last event " + ago(m.lastTs) }) : null,
+      ]);
+      return;
+    }
     if (!this.session) return;
     const s = this.session;
-    const m = this.model;
     const run = m ? m.runningTool() : null;
     const pct = m ? m.contextPct() : null;
     const w = this.watch;
     const conn = !w ? "closed" : w.state === "live" ? "live" : w.state;
     const chips = [
-      h("span", { class: "chip conn-" + conn, title: w && w.error ? w.error : "",
-                  text: conn === "live" ? "● streaming" : conn === "connecting" ? "connecting…" : "reconnecting…" }),
+      // The connection is worth a chip only when it isn't streaming normally.
+      conn !== "live" ? h("span", { class: "chip conn-" + conn, title: w && w.error ? w.error : "",
+                  text: conn === "connecting" ? "connecting…" : conn === "closed" ? "not connected" : "reconnecting…" }) : null,
       s.liveness ? h("span", { class: "chip l-" + s.liveness, text: s.liveness }) : null,
       run ? h("span", { class: "chip running", title: run.label },
         h("span", { class: "spin" }), `${run.verb} ${run.label || run.name}`.slice(0, 60) +

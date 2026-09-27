@@ -216,8 +216,16 @@ session, with their PR's live title and state). Opening a task shows a session
 viewer that folds each stretch of tool calls into one collapsed line (expand
 it for inputs and outputs) and a composer that steers, queues, or interrupts.
 **New task** starts a Copilot session in a fresh Picker-visible worktree
-(`create --origin user`, then `embody --seed`); an Earlier task can be resumed
-or renamed. Filter with `/`, move with `j`/`k`, start a task with `n`.
+(`create --origin user`, then `embody --seed`). A repository can declare how
+tasks start in it in `.copilot-extensions/agent-bridge/task-modes.yaml` (for
+example "one task" and "campaign"): the dialog offers those modes, and the
+bridge builds the first message from the chosen mode's template (the page only
+names a mode). A repository that is another's bound knowledge repo is not
+offered, since its worktrees pair with tasks. An Earlier task shows what
+happened: its last session's transcript, read-only, when a cold-store provider
+(agent-logger) can supply it, plus the branch's own commits. It can be resumed
+or renamed. Filter with `/` (title, repo, id, branch, or PR), move with
+`j`/`k`, start a task with `n`.
 
 ### Choosing send vs create — check for an outstanding session first
 

@@ -31,6 +31,8 @@ class FakeCli:
                     {"id": "e2", "repo": "ext", "status": "active", "path": "/w/e2"}],
         }
         self.fail: set[str] = set()
+        self.state_roots: dict[str, dict] = {}
+        self.repos = json.loads(json.dumps(REPOS))
 
     async def __call__(self, cmd, *, timeout=None):
         args = list(cmd[1:])
@@ -41,7 +43,9 @@ class FakeCli:
         if verb in self.fail:
             return None, f"{verb} exploded"
         if args[:2] == ["repos", "list"]:
-            return json.dumps(REPOS), ""
+            return json.dumps(self.repos), ""
+        if verb == "state-root":
+            return json.dumps(self.state_roots.get(args[1], {"source": "project", "repo": args[1]})), ""
         if args[:2] == ["repos", "gh"]:
             return json.dumps({"data": {"repository": {"p7": {"title": "Fix the login page", "state": "MERGED"}}}}), ""
         if verb == "list":
@@ -132,7 +136,8 @@ def test_start_task_creates_titles_and_seeds_a_worktree(client, cli) -> None:
     resp = client.post("/api/v1/ui/tasks", headers=SAME,
                        json={"project": "harness", "prompt": "Fix the login page", "title": "  Login  fix "})
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"worktree_id": "h-new", "project": "harness", "seeded": True, "seed_reason": None}
+    assert resp.json() == {"worktree_id": "h-new", "project": "harness", "mode": None,
+                           "seeded": True, "seed_reason": None}
     assert ["-p", "harness", "create", "--origin", "user", "--json"] in cli.calls
     assert ["-p", "harness", "status", "--worktree-id", "h-new", "--title", "Login fix"] in cli.calls
     embody = next(c for c in cli.calls if "embody" in c)
@@ -149,6 +154,62 @@ def test_start_task_creates_titles_and_seeds_a_worktree(client, cli) -> None:
 def test_start_task_validates_its_input(client, cli, body, status) -> None:
     assert client.post("/api/v1/ui/tasks", headers=SAME, json=body).status_code == status
     assert not [c for c in cli.calls if "create" in c]
+
+
+MODES_YAML = """
+modes:
+  - id: task
+    label: One task
+    description: One worker.
+    prompt: "{prompt}"
+  - id: campaign
+    label: Campaign
+    description: Several workers sharing a board.
+    prompt: >-
+      Run this as a campaign
+      across workers. The goal: {prompt}
+"""
+
+
+def _declare_modes(cli, tmp_path, name="harness", text=MODES_YAML):
+    checkout = tmp_path / name
+    (checkout / ".copilot-extensions" / "agent-bridge").mkdir(parents=True)
+    (checkout / ".copilot-extensions" / "agent-bridge" / "task-modes.yaml").write_text(text, "utf-8")
+    for row in cli.repos["repos"]:
+        if row["name"] == name:
+            row["paths"] = {"windows": str(checkout), "linux": str(checkout)}
+
+
+def test_workspaces_describe_each_repos_modes_and_knowledge_role(client, cli, tmp_path) -> None:
+    _declare_modes(cli, tmp_path)
+    cli.state_roots["harness"] = {"source": "knowledge_repo", "repo": "ext"}
+    info = client.get("/api/v1/ui/workspaces").json()["project_info"]
+    assert [m["id"] for m in info["harness"]["modes"]] == ["task", "campaign"]
+    assert "prompt" not in info["harness"]["modes"][1]  # templates never leave the host
+    assert info["ext"]["knowledge_for"] == "harness" and "knowledge_for" not in info["harness"]
+    assert info["ext"]["modes"] == []
+
+
+def test_start_task_seeds_the_chosen_modes_template(client, cli, tmp_path) -> None:
+    _declare_modes(cli, tmp_path)
+    resp = client.post("/api/v1/ui/tasks", headers=SAME,
+                       json={"project": "harness", "prompt": "Speed up the list page", "mode": "campaign"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["mode"] == "campaign"
+    embody = next(c for c in cli.calls if "embody" in c)
+    assert embody[embody.index("--seed") + 1] == (
+        "Run this as a campaign across workers. The goal: Speed up the list page")
+
+
+def test_start_task_defaults_to_the_first_mode_and_refuses_an_undeclared_one(client, cli, tmp_path) -> None:
+    _declare_modes(cli, tmp_path)
+    assert client.post("/api/v1/ui/tasks", headers=SAME,
+                       json={"project": "harness", "prompt": "Fix it"}).status_code == 200
+    embody = next(c for c in cli.calls if "embody" in c)
+    assert embody[embody.index("--seed") + 1] == "Fix it"
+    for project, mode in (("harness", "rogue"), ("ext", "campaign")):
+        resp = client.post("/api/v1/ui/tasks", headers=SAME, json={"project": project, "prompt": "x", "mode": mode})
+        assert resp.status_code == 400 and "task mode" in resp.json()["detail"]
 
 
 def test_write_verbs_refuse_cross_origin_requests(client, cli) -> None:

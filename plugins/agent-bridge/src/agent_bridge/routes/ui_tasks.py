@@ -29,6 +29,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from .. import ui_task_modes as _modes
 from ..agent_registry import _agent_worktrees_bin
 from . import live_sessions as _live
 from . import worktrees as _wt
@@ -109,16 +110,46 @@ def _project_row(row: dict[str, Any], project: str) -> dict[str, Any]:
     return out
 
 
-async def _list_projects() -> tuple[list[str], str]:
+async def _repo_rows() -> tuple[list[dict[str, Any]], str]:
+    """Registry rows of every worktree-class repository."""
     data, err = await _aw(["repos", "list", "--json"], timeout=30.0)
     if data is None:
         return [], err
     repos = data.get("repos", data) if isinstance(data, dict) else data
-    names = [
-        str(r["name"]) for r in repos or []
+    return [
+        r for r in repos or []
         if isinstance(r, dict) and r.get("name") and r.get("class", "worktree") == "worktree"
-    ]
-    return sorted(set(names)), ""
+    ], ""
+
+
+async def _list_projects() -> tuple[list[str], str]:
+    rows, err = await _repo_rows()
+    return sorted({str(r["name"]) for r in rows}), err
+
+
+async def _project_info(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Per repository: the task modes it declares, its default branch, and
+    whether it is another repository's bound knowledge repo (whose worktrees
+    are paired with tasks rather than being tasks of their own)."""
+    names = {str(r["name"]) for r in rows}
+
+    async def knowledge_of(name: str) -> str | None:
+        data, _err = await _aw(["-p", name, "state-root", "--json"], timeout=30.0)
+        if isinstance(data, dict) and data.get("source") == "knowledge_repo":
+            repo = str(data.get("repo") or "")
+            return repo if repo in names and repo != name else None
+        return None
+
+    bound = await asyncio.gather(*(knowledge_of(n) for n in sorted(names)))
+    knowledge = {k: n for n, k in zip(sorted(names), bound) if k}
+    return {
+        str(r["name"]): {
+            "modes": _modes.public(_modes.load_modes(_modes.checkout_path(r))),
+            "default_branch": r.get("default_branch") or "main",
+            **({"knowledge_for": knowledge[str(r["name"])]} if str(r["name"]) in knowledge else {}),
+        }
+        for r in rows
+    }
 
 
 async def _pr_details(st: dict[str, Any], rows: list[dict[str, Any]]) -> None:
@@ -197,7 +228,8 @@ async def _subjects(st: dict[str, Any], rows: list[dict[str, Any]]) -> None:
 
 
 async def _collect(st: dict[str, Any]) -> dict[str, Any]:
-    projects, err = await _list_projects()
+    repo_rows, err = await _repo_rows()
+    projects = sorted({str(r["name"]) for r in repo_rows})
     errors: dict[str, str] = {"_repos": err} if err else {}
 
     async def one(project: str) -> list[dict[str, Any]]:
@@ -210,10 +242,11 @@ async def _collect(st: dict[str, Any]) -> dict[str, Any]:
             _project_row(r, project) for r in rows or [] if isinstance(r, dict) and r.get("id")
         ]
 
-    lists = await asyncio.gather(*(one(p) for p in projects))
+    lists, info = await asyncio.gather(asyncio.gather(*(one(p) for p in projects)), _project_info(repo_rows))
     rows = [r for group in lists for r in group]
     await asyncio.gather(_pr_details(st, rows), _subjects(st, rows))
-    return {"workspaces": rows, "projects": projects, "errors": errors, "fetched_at": time.time()}
+    return {"workspaces": rows, "projects": projects, "project_info": info, "errors": errors,
+            "fetched_at": time.time()}
 
 
 def _start_refresh(st: dict[str, Any]) -> asyncio.Task:
@@ -324,10 +357,16 @@ async def start_task(request: Request) -> JSONResponse:
         return _refuse(400, "describe the task in the prompt")
     if len(prompt) > MAX_PROMPT_CHARS:
         return _refuse(400, f"the prompt is longer than {MAX_PROMPT_CHARS} characters")
-    projects, err = await _list_projects()
-    if project not in projects:
-        known = ", ".join(projects)
+    repo_rows, err = await _repo_rows()
+    repo_row = next((r for r in repo_rows if r.get("name") == project), None)
+    if repo_row is None:
+        known = ", ".join(sorted(str(r["name"]) for r in repo_rows))
         return _refuse(400, err or f"unknown project {project!r}; choose one of: {known}")
+    mode = str(body.get("mode") or "").strip() or None
+    try:
+        seed = _modes.seed_for(_modes.load_modes(_modes.checkout_path(repo_row)), mode, prompt)
+    except KeyError:
+        return _refuse(400, f"{project} does not offer a {mode!r} task mode")
 
     async with st["lock"]:
         created, err = await _aw(["-p", project, "create", "--origin", "user", "--json"],
@@ -341,7 +380,7 @@ async def start_task(request: Request) -> JSONResponse:
                                     "--title", title], timeout=30.0, parse=False)
             if _set is None:
                 log.warning("ui task %s: could not set title: %s", worktree_id, terr)
-        embodied, err = await _embody(project, str(worktree_id), prompt)
+        embodied, err = await _embody(project, str(worktree_id), seed)
     _revalidate(st)
     if embodied is None or not embodied.get("ok", True):
         reason = err or str(_find(embodied, "error") or "embody failed")
@@ -349,7 +388,7 @@ async def start_task(request: Request) -> JSONResponse:
             502, f"created worktree {worktree_id} but could not start its session: {reason}",
         )
     return JSONResponse({
-        "worktree_id": worktree_id, "project": project,
+        "worktree_id": worktree_id, "project": project, "mode": mode,
         "seeded": bool(embodied.get("seed_submitted")),
         "seed_reason": embodied.get("seed_reason"),
     })
