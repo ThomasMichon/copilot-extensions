@@ -385,12 +385,19 @@ shape before committing to a design)_
             empirically-reproduced (but pre-existing, shared by all 3
             adopters, not introduced here) non-editable-install gap;
             tracked in #3905 rather than fixed ad-hoc in this PR.
+      - [x] `ssh-manager` converted, all 4 consumers (`plugins/agent-ssh`,
+            `agent-containers`, `agent-bridge`, `agent-codespaces`) —
+            PR #3917. Also fixed a real, pre-existing canonical-vs-copies
+            drift found along the way (canonical `pyproject.toml`'s
+            `name`/`build-system`/test-runner-constraint fields had never
+            been kept in sync with what every real copy already
+            established — see Journal).
       - [ ] Remaining real lib copies (`agent-procutil`, `config-migrate`,
             `dropin-registry`, `plugin-activation`, `plugin-resolve`,
             `session-liveness-probe`, `single-instance-lease`,
-            `ssh-manager`, `venue-copilot`, `zdd`) not yet converted —
-            future bounded-slice PRs, one (or a few related) lib(s) at a
-            time, per this effort's own established pattern.
+            `venue-copilot`, `zdd`) not yet converted — future
+            bounded-slice PRs, one (or a few related) lib(s) at a time,
+            per this effort's own established pattern.
             `session-liveness-probe`/`venue-copilot` have no top-level
             canonical `libs/<lib>/` yet (confirmed via `sync-vendored-libs
             .py --check`'s advisory drift note) — `--pointerize` requires

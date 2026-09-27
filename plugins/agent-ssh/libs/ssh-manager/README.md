@@ -57,7 +57,7 @@ In your plugin's `pyproject.toml`:
 
 ```toml
 dependencies = [
-    "ssh-manager @ file:///${PROJECT_ROOT}/../../libs/ssh-manager",
+    "agent-ssh-manager @ file:///${PROJECT_ROOT}/../../libs/ssh-manager",
 ]
 ```
 
