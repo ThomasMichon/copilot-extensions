@@ -235,11 +235,20 @@ gh api repos/ThomasMichon/copilot-extensions/pulls/<PR>/requested_reviewers \
   -X POST -f "reviewers[]=copilot-pull-request-reviewer[bot]"
 ```
 
-(Confirmed live and current: GitHub's own docs cite this exact call —
+(Confirmed both by GitHub's own docs and by a direct live test in this
+repo, not just cited: GitHub's docs describe this exact call —
 ["Using GitHub Copilot code review" § Requesting a re-review from
 Copilot](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#requesting-a-re-review-from-copilot),
 and [REST API endpoints for review
-requests](https://docs.github.com/en/rest/pulls/review-requests#request-reviewers-for-a-pull-request).)
+requests](https://docs.github.com/en/rest/pulls/review-requests#request-reviewers-for-a-pull-request)
+— and this exact endpoint really does trigger a genuine fresh re-review of
+an *already-reviewed, unchanged* commit, not just a no-op "add reviewer"
+call: on 2026-09-27, PR #4328 got an initial review at 20:02:56 UTC on
+commit `7ddb5dfc`; this call was issued against that same commit around
+20:07 UTC with no intervening push; a second, distinct review (different
+review ID) landed on that *same* commit `7ddb5dfc` at 20:12:47 UTC — the
+next actual push's own CI run wasn't even created until 20:12:56 UTC, so
+that second review could not have been triggered by a push.)
 This prompts a genuinely fresh, full-PR assessment — not just a diff-only
 pass against the latest push — which is what actually gives Copilot the
 chance to flip from `Comment` to `Approve` once nothing substantive
