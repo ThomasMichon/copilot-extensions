@@ -568,6 +568,33 @@ survey above.
       own `require_sidecar` lesson: trace what an existing pattern's *net*
       effect actually guarantees before changing it, not just what its
       stated policy/guideline suggests.)
+- [x] **Read-side companion (2026-09-27, not itself a Phase-3 write-migration
+      cluster): daemon writes push straight into the in-process read
+      cache.** Reframed from an initial "verb-ify `terminal_conclusion.py`'s
+      `_save_session_conclusion`" plan once the operator redirected scope:
+      the actual ask was narrower and squarely serves this effort's own
+      Guiding Intent ("every read *and* every mutation... funneled
+      through") without requiring the daemon to become the sole
+      authoritative writer first — a read/write-broker daemon gets the
+      same consistency guarantee. `record_cache.store()` seeds/refreshes
+      the existing per-process `(mtime_ns, size)`-keyed cache
+      (`copilot-extensions#3751`) with a record this process just wrote;
+      `tracking._save_record_unlocked` — not only `tracking.save_record`,
+      since several callers (the execution-leg CLI's own nested mutation
+      lock, `tracking_lifecycle.create_new_record_if_absent`) call
+      `_save_record_unlocked` directly to avoid re-acquiring a lock they
+      already hold, bypassing `save_record` entirely — calls it right
+      after its atomic write, inside whichever lock the caller already
+      holds. `tracking.load_record()` now routes through
+      `record_cache.cached_load()`, giving every one of its ~140 call
+      sites the same benefit without touching each one. Landed in PR
+      [#4265](https://github.com/ThomasMichon/copilot-extensions/pull/4265)
+      (2 review rounds; see Journal). This makes `terminal_conclusion.py`'s
+      `_save_session_conclusion` holdout a documented, permanent one for
+      Phase 3's write-migration purposes: it was always correctness-safe
+      (the cache self-invalidates on ANY writer's stat change, verb-
+      mediated or direct), and this pass confirms it needs no further
+      migration to get read-consistency either.
 - [ ] One call site (or a closely related cluster) at a time, each its own
       reviewable PR, per this repo's serial-single-writer convention —
       across whichever of `tracking.py` / `tracking_claims.py` /
@@ -636,6 +663,79 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-09-27 — PR #4265: daemon writes push straight into record_cache -- the read-consistency companion to Phase 3's write migration, plus two real bugs review caught
+Operator redirected scope mid-session, away from an initially-discussed
+"redesign `terminal_conclusion.py`'s `_save_session_conclusion`" plan: the
+actual ask was narrower and squarely serves this effort's own Guiding
+Intent ("every read *and* every mutation... funneled through") without
+requiring the daemon to become the sole authoritative writer first --
+"whether the daemon becomes the authoritative state handler, or just a
+read/write broker, the same effect is achieved: all entities reading and
+writing through the daemon get a consistent state."
+
+Investigated `record_cache.py` (an existing per-process, `(mtime_ns,
+size)`-keyed memoization cache, `copilot-extensions#3751`, used only by
+`tracking.list_records`) and confirmed `tracking.load_record` (the
+single-record read path, ~140 call sites) did NOT use it at all -- always a
+fresh re-parse. Added `record_cache.store()` (seeds/refreshes the cache
+with a record this process just wrote) and routed `load_record()` itself
+through `cached_load()`, giving every one of its call sites the benefit
+without touching each one.
+
+**First review round found two real bugs, both fixed, neither assumed
+away:**
+1. **High: recursive cache lookup in `list_records`.** The first attempt
+   left `list_records` calling `record_cache.cached_load(yaml_file,
+   load_record)` -- but `load_record()` now already IS a `cached_load`
+   call, so every cache MISS recursed into itself until `RecursionError`,
+   silently swallowed by `list_records`'s own broad `except Exception`
+   (returning no records at all, not stale ones). Fixed by calling
+   `load_record(yaml_file)` directly.
+2. **Medium: transient projection-dirty state was cached too.**
+   `copy.deepcopy(record)` also copied the runtime-only, never-serialized
+   `_session_projection_dirty` / `_session_projection_initial_registration`
+   / `_controller_projection_dirty` attributes `_save_record_unlocked` can
+   populate while serializing; these are cleared on the CALLER's own
+   object only after the cache write returns
+   (`_flush_session_projections`, once the lock releases). A cache-hit
+   `load_record()` could hand back a record that still looked dirty --
+   unlike a fresh uncached parse, which never carries these attributes at
+   all. Fixed by stripping them in `record_cache.store()`.
+
+**Also found, while manually validating before pushing (not by review):**
+a genuine regression in `test_execution_leg_cli.py` (2 failing tests) from
+an initial version that pushed the cache only from `tracking.save_record`.
+Several real callers -- the execution-leg CLI's own nested mutation lock,
+`tracking_lifecycle.create_new_record_if_absent` -- call
+`tracking._save_record_unlocked` DIRECTLY to avoid re-acquiring a lock
+they already hold, bypassing `save_record` entirely. Root-caused via
+`git stash` bisection (confirmed the failures were new, not
+pre-existing) down to a `_loaded_from`-staleness bug: `store()` cached a
+plain passthrough of the caller's `record`, whose `_loaded_from` is only
+set correctly by `save_record` AFTER the cache write (to avoid a
+write/stat race); a cache-hit `load_record()` handing that back to a
+caller that resaves with no explicit `path` (resolving one via
+`record.yaml_path`) silently wrote to the WRONG file. Fixed two ways: (a)
+`store()` stamps its own copy's `_loaded_from` explicitly rather than
+trusting the passthrough, and (b) moved the cache push from
+`save_record` down into `_save_record_unlocked` itself -- the ACTUAL
+universal physical-write chokepoint, reaching every direct caller too.
+Review's own third (Low) finding independently asked for regression
+coverage of exactly this direct-caller path; added
+`test_a_direct_unlocked_save_caller_also_pushes_the_cache`, which would
+fail if the push were ever moved back into `save_record` alone.
+
+Never a TTL/blackout cache: any writer's stat change (verb-mediated,
+`save_record`, a direct `_save_record_unlocked` caller, or a raw external
+rewrite) is visible on the very next read -- this was always a
+performance/consistency improvement, never a correctness fix, which is
+also why `terminal_conclusion.py`'s Phase-3 holdout needed no further
+write-migration work to get this same benefit.
+
+Full `agent-worktrees` suite: 5743 passed, 26 skipped -- only the two
+known pre-existing failures remain (`test_doctor.py::
+test_no_drift_when_consistent`, `test_registration_home.py`).
 
 ### 2026-09-27 — PR #4238: Phase 3's eighth migrated call-site cluster, deregister_session itself -- a lock-scope 'fix' tried and reverted twice in one review
 Migrated `deregister_session` (the symmetric sessionEnd counterpart to
