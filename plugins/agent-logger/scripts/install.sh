@@ -932,8 +932,28 @@ write_units() {
   # behavior, unaffected).
   local repo_config_env=""
   local config_repo_name=""
-  if [ -f "${INSTALL_DIR}/config.yaml" ]; then
-    config_repo_name="$(sed -n 's/^config_repo:[[:space:]]*//p' "${INSTALL_DIR}/config.yaml" | head -n1 | tr -d "\"'"$'\r')"
+  if [ -f "${INSTALL_DIR}/config.yaml" ] && [ -x "${VENV}/bin/python3" ]; then
+    # Parsed with real YAML semantics (the venv's own pyyaml, the same
+    # library agent_logger.config uses) rather than a line-oriented sed/tr
+    # extraction -- a bare regex/tr pass mishandles a trailing "# comment"
+    # or a quoted scalar containing '#'/'"', silently yielding the wrong
+    # (or no) repo name.
+    config_repo_name="$("${VENV}/bin/python3" - "${INSTALL_DIR}/config.yaml" <<'PYEOF' 2>/dev/null || true
+import sys
+try:
+    import yaml
+except ImportError:
+    sys.exit(0)
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+except Exception:
+    sys.exit(0)
+value = data.get("config_repo") if isinstance(data, dict) else None
+if isinstance(value, str) and value.strip():
+    print(value.strip())
+PYEOF
+)"
   fi
   if [ -n "${config_repo_name}" ] && command -v agent-worktrees >/dev/null 2>&1; then
     local config_repo_dir
@@ -950,9 +970,13 @@ write_units() {
         ".config/agent-logger.yml"
       do
         if [ -f "${config_repo_dir}/${candidate}" ]; then
-          # Quote the whole assignment (systemd.exec(5) Environment=) so a
-          # path containing whitespace is not split into multiple words.
-          repo_config_env="Environment=\"AGENT_LOGGER_REPO_CONFIG=${config_repo_dir}/${candidate}\""
+          # Escape systemd.exec(5) Environment= special characters (\, ",
+          # and the specifier-escape %) before quoting the whole assignment
+          # -- quoting alone only protects whitespace, not these.
+          local repo_config_value
+          repo_config_value="AGENT_LOGGER_REPO_CONFIG=${config_repo_dir}/${candidate}"
+          repo_config_value="$(printf '%s' "${repo_config_value}" | sed 's/\\/\\\\/g; s/"/\\"/g; s/%/%%/g')"
+          repo_config_env="Environment=\"${repo_config_value}\""
           break
         fi
       done

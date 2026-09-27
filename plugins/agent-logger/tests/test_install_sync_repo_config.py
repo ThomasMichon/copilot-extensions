@@ -56,6 +56,27 @@ def _executable(path: Path, text: str) -> None:
     path.chmod(0o755)
 
 
+def _real_venv_with_python() -> Path:
+    """The plugin's OWN dev venv (which already has pyyaml installed, a
+    hard dependency of this whole plugin) -- so write_units' real
+    YAML-based config_repo parsing runs against a genuine interpreter with
+    the right packages on its path.
+
+    Returned directly (not copied/symlinked into a fake structure): Python's
+    venv site-packages association is resolved via ``pyvenv.cfg`` sitting
+    next to the executable's OWN invocation path, not by following symlinks
+    to their final target -- a lone ``bin/python3`` symlink planted in an
+    otherwise-empty fake directory (no sibling ``pyvenv.cfg``) silently
+    loses that association and falls back to the base interpreter's
+    site-packages, missing pyyaml, even though ``sys.executable`` resolves
+    correctly. Using the real venv wholesale sidesteps this entirely.
+    """
+    real_python = PLUGIN / ".venv" / "bin" / "python3"
+    if not real_python.is_file() and not real_python.is_symlink():
+        pytest.skip("no plugin dev venv (.venv/bin/python3) available")
+    return PLUGIN / ".venv"
+
+
 @pytest.mark.skipif(
     _BASH is None or os.name == "nt",
     reason="a POSIX bash environment is not available",
@@ -95,7 +116,7 @@ def test_write_units_sets_repo_config_env_when_config_repo_adopted(
         "#!/bin/sh\nset -eu\n"
         f'INSTALL_DIR="{install_dir}"\n'
         f'UNIT_DIR="{unit_dir}"\n'
-        f'VENV="{tmp_path / "venv"}"\n'
+        f'VENV="{_real_venv_with_python()}"\n'
         'TIMER_NAME="agent-logger-sync"\n'
         'chg() { :; }\n'
         + _extract_sh_function("write_units")
@@ -110,6 +131,131 @@ def test_write_units_sets_repo_config_env_when_config_repo_adopted(
 
     unit_text = (unit_dir / "agent-logger-sync.service").read_text(encoding="utf-8")
     expected = f'Environment="AGENT_LOGGER_REPO_CONFIG={repo_dir}/.agent-logger.yaml"'
+    assert expected in unit_text
+
+
+@pytest.mark.skipif(
+    _BASH is None or os.name == "nt",
+    reason="a POSIX bash environment is not available",
+)
+@pytest.mark.parametrize(
+    "config_yaml_body",
+    [
+        "config_repo: demo  # central config\n",
+        'config_repo: "demo"  # central config\n',
+        "config_repo: 'demo'\n",
+    ],
+)
+def test_write_units_parses_config_repo_with_real_yaml_semantics(
+    tmp_path: Path, config_yaml_body: str
+) -> None:
+    """A trailing '# comment' or a quoted scalar must not corrupt the
+    extracted repo name -- a line-oriented sed/tr pass (the pre-fix
+    implementation) mishandles both, silently yielding no match."""
+    install_dir = tmp_path / "install"
+    unit_dir = tmp_path / "units"
+    install_dir.mkdir()
+    unit_dir.mkdir()
+    (install_dir / "config.yaml").write_text(config_yaml_body, encoding="utf-8")
+
+    repo_dir = tmp_path / "demo-repo"
+    repo_dir.mkdir()
+    (repo_dir / ".agent-logger.yaml").write_text("schema_version: 3\n", encoding="utf-8")
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _executable(
+        fake_bin / "agent-worktrees",
+        "#!/bin/sh\n"
+        'if [ "$1" = "repos" ] && [ "$2" = "find" ] && [ "$3" = "demo" ]; then\n'
+        f'  echo "{repo_dir}"\n'
+        "  exit 0\n"
+        "fi\n"
+        "exit 1\n",
+    )
+
+    harness = tmp_path / "harness.sh"
+    harness.write_text(
+        "#!/bin/sh\nset -eu\n"
+        f'INSTALL_DIR="{install_dir}"\n'
+        f'UNIT_DIR="{unit_dir}"\n'
+        f'VENV="{_real_venv_with_python()}"\n'
+        'TIMER_NAME="agent-logger-sync"\n'
+        'chg() { :; }\n'
+        + _extract_sh_function("write_units")
+        + "\nwrite_units\n",
+        encoding="utf-8",
+    )
+    harness.chmod(0o755)
+    env = {**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"}
+    subprocess.run(
+        [_BASH, str(harness)], capture_output=True, text=True, env=env, timeout=20, check=True
+    )
+
+    unit_text = (unit_dir / "agent-logger-sync.service").read_text(encoding="utf-8")
+    expected = f'Environment="AGENT_LOGGER_REPO_CONFIG={repo_dir}/.agent-logger.yaml"'
+    assert expected in unit_text
+
+
+@pytest.mark.skipif(
+    _BASH is None or os.name == "nt",
+    reason="a POSIX bash environment is not available",
+)
+def test_write_units_escapes_systemd_special_characters_in_path(tmp_path: Path) -> None:
+    """A discovered path containing a systemd Environment= special
+    character (\\, ", or the %-specifier escape) must be escaped, not just
+    whitespace-quoted -- otherwise the generated unit is malformed and
+    daemon-reload/the timer can fail instead of running."""
+    install_dir = tmp_path / "install"
+    unit_dir = tmp_path / "units"
+    install_dir.mkdir()
+    unit_dir.mkdir()
+    (install_dir / "config.yaml").write_text("config_repo: demo\n", encoding="utf-8")
+
+    repo_dir = tmp_path / 'demo"repo%with\\backslash'
+    repo_dir.mkdir()
+    (repo_dir / ".agent-logger.yaml").write_text("schema_version: 3\n", encoding="utf-8")
+
+    # Written to a side file and `cat`, rather than embedded into the stub
+    # script's shell text via plain string interpolation -- repo_dir
+    # contains a literal '"' character, which would otherwise prematurely
+    # close the stub's own quoted printf argument and corrupt the script.
+    repo_dir_file = tmp_path / "repo-dir.txt"
+    repo_dir_file.write_text(str(repo_dir), encoding="utf-8")
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _executable(
+        fake_bin / "agent-worktrees",
+        "#!/bin/sh\n"
+        'if [ "$1" = "repos" ] && [ "$2" = "find" ] && [ "$3" = "demo" ]; then\n'
+        f'  cat "{repo_dir_file}"\n'
+        "  exit 0\n"
+        "fi\n"
+        "exit 1\n",
+    )
+
+    harness = tmp_path / "harness.sh"
+    harness.write_text(
+        "#!/bin/sh\nset -eu\n"
+        f'INSTALL_DIR="{install_dir}"\n'
+        f'UNIT_DIR="{unit_dir}"\n'
+        f'VENV="{_real_venv_with_python()}"\n'
+        'TIMER_NAME="agent-logger-sync"\n'
+        'chg() { :; }\n'
+        + _extract_sh_function("write_units")
+        + "\nwrite_units\n",
+        encoding="utf-8",
+    )
+    harness.chmod(0o755)
+    env = {**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"}
+    subprocess.run(
+        [_BASH, str(harness)], capture_output=True, text=True, env=env, timeout=20, check=True
+    )
+
+    unit_text = (unit_dir / "agent-logger-sync.service").read_text(encoding="utf-8")
+    escaped_path = str(repo_dir).replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%")
+    expected = f'Environment="AGENT_LOGGER_REPO_CONFIG={escaped_path}/.agent-logger.yaml"'
     assert expected in unit_text
 
 
@@ -138,7 +284,7 @@ def test_write_units_omits_repo_config_env_without_config_repo(tmp_path: Path) -
         "#!/bin/sh\nset -eu\n"
         f'INSTALL_DIR="{install_dir}"\n'
         f'UNIT_DIR="{unit_dir}"\n'
-        f'VENV="{tmp_path / "venv"}"\n'
+        f'VENV="{_real_venv_with_python()}"\n'
         'TIMER_NAME="agent-logger-sync"\n'
         'chg() { :; }\n'
         + _extract_sh_function("write_units")
@@ -217,6 +363,12 @@ def test_write_sync_task_launcher_sets_repo_config_when_config_repo_adopted(
     exe = shutil.which(shell)
     if not exe:
         pytest.skip(f"{shell} is not installed")
+    # See _real_venv_with_python's docstring: the plugin's OWN dev venv
+    # interpreter, not sys.executable, which can lack pyyaml when invoked
+    # directly under uv.
+    real_python = PLUGIN / ".venv" / "bin" / "python3"
+    if not real_python.is_file() and not real_python.is_symlink():
+        pytest.skip("no plugin dev venv (.venv/bin/python3) available")
 
     install_dir = tmp_path / "install"
     install_dir.mkdir()
@@ -241,6 +393,7 @@ function agent-worktrees {{
 }}
 $InstallDir = '{install_dir}'.Replace('\\\\', '\\')
 $TaskLauncher = '{task_launcher}'.Replace('\\\\', '\\')
+$VenvPython = '{real_python}'.Replace('\\\\', '\\')
 Write-SyncTaskLauncher
 """,
         encoding="utf-8",

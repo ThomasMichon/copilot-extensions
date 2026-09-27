@@ -973,9 +973,33 @@ function Get-ConfigRepoRegistrationPath {
     try {
         $configYaml = Join-Path $InstallDir 'config.yaml'
         if (-not (Test-Path -LiteralPath $configYaml)) { return $null }
-        $match = Select-String -LiteralPath $configYaml -Pattern '^config_repo:\s*(.+)$' | Select-Object -First 1
-        if (-not $match) { return $null }
-        $repoName = $match.Matches[0].Groups[1].Value.Trim().Trim('"').Trim("'")
+        if (-not (Test-Path -LiteralPath $VenvPython)) { return $null }
+        # Parsed with real YAML semantics (the venv's own pyyaml, the same
+        # library agent_logger.config uses) rather than a line-oriented
+        # regex -- a bare regex mishandles a trailing "# comment" or a
+        # quoted scalar containing '#'/'"', silently yielding the wrong (or
+        # no) repo name.
+        $pyScript = @'
+import sys
+try:
+    import yaml
+except ImportError:
+    sys.exit(0)
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+except Exception:
+    sys.exit(0)
+value = data.get("config_repo") if isinstance(data, dict) else None
+if isinstance(value, str) and value.strip():
+    print(value.strip())
+'@
+        $repoName = $null
+        try {
+            $repoName = ($pyScript | & $VenvPython '-' $configYaml 2>$null | Select-Object -First 1)
+        } catch {
+            $repoName = $null
+        }
         if (-not $repoName) { return $null }
         if (-not (Get-Command agent-worktrees -ErrorAction SilentlyContinue)) { return $null }
         $dir = (& agent-worktrees repos find $repoName 2>$null | Select-Object -First 1)
