@@ -402,7 +402,7 @@ bindings still resolve correctly through the compatibility view.
       path, and the separate built-in progress-envelope follow-up was filed as
       [#4274](https://github.com/ThomasMichon/copilot-extensions/issues/4274).
 
-### Phase 3d — Retire the Picker's in-process engine-module boundary (Planned — ordered implementation plan authored; #3360)
+### Phase 3d — Retire the Picker's in-process engine-module boundary (In progress — Groups A/B done, only Group C remains; #3360)
 
 _(agent-recommended scoping below the two linked issues; the issues
 themselves are operator-filed.)_
@@ -411,9 +411,12 @@ themselves are operator-filed.)_
 "temporary compatibility boundary" — is the last major violation of the
 picker vision's process-boundary-only Non-Goal. Historically this boundary
 covered 9 `agent_worktrees.*` submodules; after Phase 3e retired the
-`profiles` proxy and PR [#4317](https://github.com/ThomasMichon/copilot-extensions/pull/4317)
-cut Group A over to subprocess reads, 6 remain live here (`config`, `pr_ops`,
-`reclaim`, `sessions`, `tracking`, `__main__`), still
+`profiles` proxy plus PRs [#4317](https://github.com/ThomasMichon/copilot-extensions/pull/4317),
+[#4322](https://github.com/ThomasMichon/copilot-extensions/pull/4322),
+[#4323](https://github.com/ThomasMichon/copilot-extensions/pull/4323), and
+[#4324](https://github.com/ThomasMichon/copilot-extensions/pull/4324) cut
+Groups A/B over to subprocess or Manager-owned seams, 5 remain live here
+(`config`, `pr_ops`, `reclaim`, `sessions`, `tracking`), still
 imported **in-process** via whole-module `__getattr__` proxies or inline
 `engine_module(name)` calls, sharing agent-worktrees' own venv/sys.path
 instead of going through the `--json` engine boundary every other Picker
@@ -496,10 +499,16 @@ PR [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
       compatibility path and agent-worktrees' live sweeper behavior is
       unchanged until Step 4. See
       [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
-- [ ] **Step 4 — cut `runner.py`, `pivot_manifest.py`, and `update_stage.py`
-      over to the new seams.** After Steps 1-3, Groups A/B stop using
-      `engine_module(...)` and underscore-prefixed engine helpers in production,
-      including the old-engine remote-plan fallback. See
+- [x] **Step 4 — cut `runner.py`, `pivot_manifest.py`, and `update_stage.py`
+      over to the new seams.** Landed in PR
+      [#4324](https://github.com/ThomasMichon/copilot-extensions/pull/4324):
+      `runner.py` now consumes the Step 2 bootstrap/repair verbs and the Step 3
+      Manager-owned housekeeping/monitor modules, while
+      `worktree_manager.__main__` retires the old private remote-plan fallback
+      in favor of an explicit "engine too old" failure. Groups A/B no longer
+      use `engine_module(...)`, underscore-prefixed engine helpers, or any
+      in-process `agent_worktrees` import for production Picker behavior; only
+      Group C remains before `_engine_runtime.py` can be deleted. See
       [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
 - [ ] **Step 5 — add Group C's batched reconcile-and-stamp `--json` verb in
       agent-worktrees, unused at first.** Keep the read/reconcile/write lock
@@ -794,6 +803,43 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-09-27** — Landed Phase 3d Step 4, PR
+  [#4324](https://github.com/ThomasMichon/copilot-extensions/pull/4324).
+  Performed the crisp Group B cutover that Step 2/3 were staged for:
+  `worktree_manager.production_picker.runner` now binds
+  `context.ProjectBootstrap` from `engine_group_b.picker_bootstrap()`, switches
+  cwd only from that payload's engine-owned decision, runs background
+  stale-anchor repair through `engine_group_b.repair_stale_anchor()`, and
+  routes its orphan-reap / managed-worktree / launcher-shell / finished-session
+  / monitor-root lifecycle through the Manager-owned
+  `production_picker.housekeeping` + `monitor_roots` modules instead of
+  `agent_worktrees.__main__`. `worktree_manager.__main__`'s old-engine remote
+  compatibility path is explicitly retired rather than reimplemented: an engine
+  too old for `resolve --json --machine ...` now fails clearly instead of
+  silently importing private engine helpers. The parent-side bootstrap binding
+  is now the authoritative project identity read by downstream
+  `context.project()` / `context.project_bootstrap()` consumers, so Group B is
+  fully done and only Group C remains in Phase 3d. Real boundary shrink:
+  `_engine_runtime.py` is down from the post-Group-A 6-module surface to 5 live
+  modules (`config`, `pr_ops`, `reclaim`, `sessions`, `tracking`) and
+  `production_picker.__main__` is deleted. Validation: targeted Group B seam +
+  cutover regressions passed (`7 passed` across agent-worktrees'
+  `test_context_resolution.py` bootstrap/repair coverage plus
+  worktree-manager's `test_engine_group_b.py`, `test_housekeeping.py`, and
+  `test_production_picker_transplant.py`); the broader Worktree Manager Group B
+  regression batch passed (`64 passed`); full `worktree-manager` suite
+  (excluding the two standing hangs `test_data_ssh_sources.py` /
+  `test_launch_trace.py`) matched the current unrelated baseline at `1286
+  passed, 2 skipped, 13 failed`; full `agent-worktrees` suite stayed red only
+  in unrelated existing families on this machine at `5731 passed, 50 skipped, 9
+  failed` (`test_launch_cmd`, `test_lazy_dispatch`, `test_module_invocation`,
+  `test_mux_status_link`, `test_registration_home`, `test_session_conduct`,
+  `test_status_monitor_windows`); `ruff check --select F,E9`,
+  `tools/check-install-contract.py`, and
+  `tools/check-version-consistency.py` passed; `tools/check-version-bump.py`
+  still reports the same pre-existing unrelated unbumped-plugin drift on
+  `delegation-guidance`, `efforts`, `harness-knowledge`, and `wsl-setup`.
 
 - **2026-09-27** — Claiming Phase 3d Step 4 ("Perform the remaining Group B
   cutover in one crisp PR" — switching `runner.py`'s bootstrap, stale-anchor
