@@ -1004,16 +1004,6 @@ if isinstance(value, str) and value.strip():
         if (-not (Get-Command agent-worktrees -ErrorAction SilentlyContinue)) { return $null }
         $dir = (& agent-worktrees repos find $repoName 2>$null | Select-Object -First 1)
         if (-not $dir) { return $null }
-        if (Test-Path -LiteralPath $dir) {
-            # `repos find` may return a registry entry's registered path
-            # as-is, relative or not -- the scheduled task runs with no
-            # meaningful working directory of its own, so a still-relative
-            # path here would resolve against the wrong directory once
-            # embedded in the launcher. Normalizing to absolute here, once,
-            # keeps every downstream use (the trust probe, alias
-            # candidates, the emitted $env: line) consistently absolute.
-            $dir = (Resolve-Path -LiteralPath $dir).ProviderPath
-        }
         # `repos find` also resolves `reference`-class registrations, which
         # are not guaranteed to be a git checkout at all -- so this
         # discovery MUST NOT wire the result into the scheduled launcher
@@ -1024,6 +1014,21 @@ if isinstance(value, str) and value.strip():
         # var at consumption time), but embedding an untrusted path here
         # regardless is needless exposure this installer can avoid
         # outright by checking first.
+        #
+        # A single isolated python invocation both canonicalizes and
+        # checks trust, printing the resolved directory on success:
+        #   - Path.resolve() canonicalizes physically (follows symlinks
+        #     all the way through), unlike Resolve-Path (which normalizes
+        #     '..'/'.' but does not follow a reparse point) -- a symlinked
+        #     checkout's LOGICAL path embedded here would otherwise be
+        #     rejected outright by find_repo_config()'s symlink-ancestor
+        #     check, silently dropping repo config that normal
+        #     (physically-resolving) discovery honors.
+        #   - '-I' (isolated mode) keeps this security decision tied to
+        #     the INSTALLED package: without it, an ambient PYTHONPATH or
+        #     a same-named agent_logger package reachable from the
+        #     installer's current directory could shadow the real
+        #     repo_trust module and forge a trusted verdict.
         $pyTrustScript = @'
 import sys
 from pathlib import Path
@@ -1031,16 +1036,23 @@ try:
     from agent_logger.repo_trust import repo_config_is_trusted
 except Exception:
     sys.exit(1)
-sys.exit(0 if repo_config_is_trusted(Path(sys.argv[1])) else 1)
+root = Path(sys.argv[1]).resolve()
+if repo_config_is_trusted(root):
+    print(root)
+    sys.exit(0)
+sys.exit(1)
 '@
         $trusted = $false
         try {
-            $pyTrustScript | & $VenvPython '-' $dir 2>$null | Out-Null
-            $trusted = ($LASTEXITCODE -eq 0)
+            $resolvedDir = ($pyTrustScript | & $VenvPython '-I' '-' $dir 2>$null)
+            $probeExitCode = $LASTEXITCODE
+            if ($resolvedDir -is [System.Array]) { $resolvedDir = $resolvedDir[0] }
+            $trusted = ($probeExitCode -eq 0) -and $resolvedDir
         } catch {
             $trusted = $false
         }
         if (-not $trusted) { return $null }
+        $dir = $resolvedDir
         # Mirrors agent_logger.config.REPO_CONFIG_FILENAMES's alias set and
         # precedence order -- a config repo may use any of these filenames,
         # not just the root .agent-logger.yaml. A candidate whose leaf (or,

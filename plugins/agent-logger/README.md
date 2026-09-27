@@ -183,8 +183,11 @@ name resolvable via `agent-worktrees repos find`. When set, the installer
 it against the same registered-project + default-branch trust gate as
 normal discovery, and wires the resolved config file into the scheduled
 unit/task as `AGENT_LOGGER_REPO_CONFIG`. Leaving `config_repo` unset (the
-default) is a silent no-op -- the scheduled sync then falls back to
-built-in defaults and any `AGENT_LOGGER_*` environment overrides only.
+default) only omits *repo-local* discovery for the scheduled run -- the
+generated unit/task still sets `AGENT_LOGGER_HOME`, so the scheduled sync
+continues to read the machine-local `$AGENT_LOGGER_HOME/config.yaml` (and
+any `AGENT_LOGGER_*` environment overrides) exactly as it always did; only
+a fleet repo's own `sync.local_path` declaration is unreachable without it.
 
 ## License
 

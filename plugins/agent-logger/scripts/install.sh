@@ -958,17 +958,6 @@ PYEOF
   if [ -n "${config_repo_name}" ] && command -v agent-worktrees >/dev/null 2>&1; then
     local config_repo_dir
     config_repo_dir="$(agent-worktrees repos find "${config_repo_name}" 2>/dev/null || true)"
-    if [ -n "${config_repo_dir}" ] && [ -d "${config_repo_dir}" ]; then
-      # `repos find` may return a registry entry's registered path as-is,
-      # relative or not -- the scheduled systemd service has no meaningful
-      # working directory of its own (it's a oneshot unit, not invoked from
-      # this script's CWD), so a still-relative path here would resolve
-      # against the wrong directory (or fail outright) once embedded in
-      # Environment=. Normalizing to absolute here, once, keeps every
-      # downstream use (the trust probe, alias candidates, the escaped
-      # Environment= value) consistently absolute.
-      config_repo_dir="$(cd "${config_repo_dir}" && pwd)"
-    fi
     # `repos find` also resolves `reference`-class registrations, which are
     # not guaranteed to be a git checkout at all -- so this discovery MUST
     # NOT wire the result into the service unless it passes the same
@@ -978,18 +967,39 @@ PYEOF
     # verdict from the env var at consumption time), but embedding an
     # untrusted path here regardless is needless exposure this installer
     # can avoid outright by checking first.
+    #
+    # A single isolated python invocation both canonicalizes and checks
+    # trust, printing the resolved directory on success:
+    #   - Path.resolve() canonicalizes physically (follows symlinks all
+    #     the way through), unlike a plain `cd ... && pwd` (no -P), which
+    #     only normalizes textually and would leave a symlinked checkout's
+    #     LOGICAL path embedded -- find_repo_config() rejects a symlink
+    #     ancestor outright, so the scheduled sync would silently ignore
+    #     perfectly good repo config that normal (physically-resolving)
+    #     discovery honors.
+    #   - `-I` (isolated mode; implies -E/-P/-s) keeps this security
+    #     decision tied to the INSTALLED package: without it, an ambient
+    #     PYTHONPATH or a same-named `agent_logger` package reachable from
+    #     the installer's current directory could shadow the real
+    #     `repo_trust` module and forge a trusted verdict.
     local config_repo_trusted=0
     if [ -n "${config_repo_dir}" ] && [ -x "${VENV}/bin/python3" ]; then
-      if "${VENV}/bin/python3" - "${config_repo_dir}" <<'PYEOF' >/dev/null 2>&1
+      local resolved_config_repo_dir
+      if resolved_config_repo_dir="$("${VENV}/bin/python3" -I - "${config_repo_dir}" <<'PYEOF' 2>/dev/null
 import sys
 from pathlib import Path
 try:
     from agent_logger.repo_trust import repo_config_is_trusted
 except Exception:
     sys.exit(1)
-sys.exit(0 if repo_config_is_trusted(Path(sys.argv[1])) else 1)
+root = Path(sys.argv[1]).resolve()
+if repo_config_is_trusted(root):
+    print(root)
+    sys.exit(0)
+sys.exit(1)
 PYEOF
-      then
+      )"; then
+        config_repo_dir="${resolved_config_repo_dir}"
         config_repo_trusted=1
       fi
     fi
