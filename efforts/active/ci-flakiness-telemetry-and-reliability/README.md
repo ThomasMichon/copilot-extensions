@@ -404,9 +404,6 @@ determine whether this section needs anything beyond the Plan above._
   blocking impact `tests/test_install_signed_python_probe.py::
   test_missing_newest_candidate_does_not_abort_probe[pwsh]` (122 `dev`-push
   runs stalled). Both are strong Phase 3 candidates alongside #7715.
-  _(See later entries below for how this assessment was revised: #7715 is
-  fixed, and the other two signatures turned out not to be confirmed open
-  Phase 3 items after further investigation.)_
 - Next: Phase 3 — fix aperture-labs#7715, then work down the ranking.
 
 ### 2026-09-27 — Phase 0 reconciliation resolved
