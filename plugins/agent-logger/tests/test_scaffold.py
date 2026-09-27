@@ -506,6 +506,36 @@ def test_explicit_repo_config_env_accepts_relative_override_with_dotdot(
 
 
 @pytest.mark.no_autotrust
+def test_explicit_repo_config_env_rejects_symlink_masked_by_dotdot(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """AGENT_LOGGER_REPO_CONFIG naming a path that traverses a symlink and
+    then backs out of it via '..' (e.g. .../link/../trusted/.agent-logger.yaml,
+    where 'link' is a symlink) must still be rejected -- a normpath()-style
+    lexical '..' collapse performed BEFORE comparing against .resolve()
+    would erase the fact the literal route passed through 'link' first,
+    since the collapsed form (.../trusted) has no symlink component left to
+    catch. This must be rejected even though the FINAL resolved target is a
+    perfectly ordinary, non-symlinked, explicitly trusted directory."""
+    real_dir = tmp_path / "real-target"
+    real_dir.mkdir()
+    config_file = real_dir / ".agent-logger.yaml"
+    config_file.write_text("log:\n  path_template: logs/{title}.md\n", encoding="utf-8")
+
+    link_target = tmp_path / "link-target"
+    link_target.mkdir()
+    link_dir = tmp_path / "link"
+    link_dir.symlink_to(link_target)
+
+    explicit_via_dotdot = link_dir / ".." / "real-target" / ".agent-logger.yaml"
+
+    monkeypatch.setenv("AGENT_LOGGER_REPO_CONFIG", str(explicit_via_dotdot))
+    monkeypatch.setenv("AGENT_LOGGER_TRUST_REPO_CONFIG", str(real_dir.resolve()))
+
+    assert find_repo_config() is None
+
+
+@pytest.mark.no_autotrust
 def test_explicit_repo_config_env_accepts_relative_path(
     tmp_path: Path, monkeypatch
 ) -> None:

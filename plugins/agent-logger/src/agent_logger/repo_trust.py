@@ -318,3 +318,37 @@ def has_symlink_ancestor(root: Path, candidate: Path) -> bool:
         if current.is_symlink():
             return True
     return False
+
+
+def path_traverses_symlink(path: Path) -> bool:
+    """Does ANY named component along ``path``'s LITERAL (uncollapsed)
+    route resolve through a symlink?
+
+    Unlike comparing ``os.path.normpath(path).resolve()`` against its own
+    normalized form, this checks each component at the point it's
+    introduced -- BEFORE a later ``..`` segment can lexically cancel it
+    back out of the final logical path. A path such as
+    ``.../link/../trusted`` (where ``link`` is a symlink) collapses to
+    ``.../trusted`` under ``normpath()``, silently erasing the fact the
+    literal route passed through ``link`` first; walking incrementally
+    here catches that regardless of what a later ``..`` does. ``..``/``.``
+    themselves pop/skip a manually tracked stack of already-checked named
+    components rather than being handed to the filesystem, so a symlink
+    check is never run against a path string that itself still contains
+    ``..`` (which the OS would silently re-resolve through whatever the
+    preceding component points at).
+    """
+    stack: list[str] = []
+    anchor = path.anchor
+    for part in path.parts:
+        if part == anchor or part in (".", ""):
+            continue
+        if part == "..":
+            if stack:
+                stack.pop()
+            continue
+        stack.append(part)
+        if Path(anchor, *stack).is_symlink():
+            return True
+    return False
+

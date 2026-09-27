@@ -937,8 +937,12 @@ write_units() {
     # library agent_logger.config uses) rather than a line-oriented sed/tr
     # extraction -- a bare regex/tr pass mishandles a trailing "# comment"
     # or a quoted scalar containing '#'/'"', silently yielding the wrong
-    # (or no) repo name.
-    config_repo_name="$("${VENV}/bin/python" - "${INSTALL_DIR}/config.yaml" <<'PYEOF' 2>/dev/null || true
+    # (or no) repo name. `-I` (isolated mode) keeps the `import yaml` tied
+    # to the venv's own installed package: without it, a same-named
+    # yaml.py/yaml/ reachable from this installer's current directory
+    # could shadow the real dependency and execute arbitrary code during
+    # installation.
+    config_repo_name="$("${VENV}/bin/python" -I - "${INSTALL_DIR}/config.yaml" <<'PYEOF' 2>/dev/null || true
 import sys
 try:
     import yaml

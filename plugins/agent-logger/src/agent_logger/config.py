@@ -27,7 +27,7 @@ try:
 except ImportError:  # pragma: no cover - pyyaml is a hard dependency
     yaml = None  # type: ignore[assignment]
 
-from .repo_trust import has_symlink_ancestor, repo_config_is_trusted
+from .repo_trust import has_symlink_ancestor, path_traverses_symlink, repo_config_is_trusted
 
 #: Neutral, personality- and multi-machine system-free defaults.
 DEFAULTS: dict[str, Any] = {
@@ -466,15 +466,13 @@ def find_repo_config(start: Path | None = None) -> Path | None:
             # `reference` mirror). has_symlink_ancestor() below only walks
             # components BETWEEN root and candidate, never root's own
             # ancestry, so a symlinked fallback root would pass unexamined.
-            # Reject if resolving it changes it -- but normpath() first, so
-            # a purely lexical '..'/'.' collapse (e.g. a relative
-            # ../trusted/.agent-logger.yaml override) isn't mistaken for a
-            # symlink.
-            try:
-                normalized_root = Path(os.path.normpath(str(explicit_root)))
-                if normalized_root.resolve() != normalized_root:
-                    return None
-            except OSError:
+            # path_traverses_symlink() checks each ORIGINAL (uncollapsed)
+            # component in order -- unlike normpath()+resolve(), it can't
+            # be fooled by a later '..' lexically erasing an earlier
+            # symlinked component (e.g. '.../link/../trusted'), while still
+            # allowing an ordinary relative override like
+            # ../trusted/.agent-logger.yaml that never touches a symlink.
+            if path_traverses_symlink(explicit_root):
                 return None
         if not repo_config_is_trusted(explicit_root):
             return None

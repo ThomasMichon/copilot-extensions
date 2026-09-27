@@ -978,7 +978,11 @@ function Get-ConfigRepoRegistrationPath {
         # library agent_logger.config uses) rather than a line-oriented
         # regex -- a bare regex mishandles a trailing "# comment" or a
         # quoted scalar containing '#'/'"', silently yielding the wrong (or
-        # no) repo name.
+        # no) repo name. '-I' (isolated mode) keeps `import yaml` tied to
+        # the venv's own installed package: without it, a same-named
+        # yaml.py/yaml/ reachable from this installer's current directory
+        # could shadow the real dependency and execute arbitrary code
+        # during installation.
         $pyScript = @'
 import sys
 try:
@@ -996,7 +1000,7 @@ if isinstance(value, str) and value.strip():
 '@
         $repoName = $null
         try {
-            $repoName = ($pyScript | & $VenvPython '-' $configYaml 2>$null | Select-Object -First 1)
+            $repoName = ($pyScript | & $VenvPython '-I' '-' $configYaml 2>$null | Select-Object -First 1)
         } catch {
             $repoName = $null
         }
