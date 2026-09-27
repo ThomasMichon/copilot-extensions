@@ -268,6 +268,18 @@ jobs:
           python -m pytest -q libs/peer-launch/tests
       - name: Installer readiness contract tests
         run: python -m pytest -q libs/installer-readiness/tests
+      - name: Canonical shared-library tests (uv-editable referenced libs)
+        # These libs are consumed through `uv`-editable canonical references
+        # (vendor-pointer-generalization, Phase 1), so no consumer checkout
+        # carries a pointer copy whose tests a consumer's own pytest run would
+        # collect. Run the canonical suites here so their wire/server coverage
+        # stays enforced.
+        env:
+          PYTHONPATH: libs/work-coalescing-singleton/src:libs/lazy-cli-dispatch/src
+        run: >-
+          python -m pytest -q
+          libs/work-coalescing-singleton/tests
+          libs/lazy-cli-dispatch/tests
       - name: Vendored library synchronization
         run: python tools/check-vendored-libs-sync.py
       - name: Windows headless launch invariants

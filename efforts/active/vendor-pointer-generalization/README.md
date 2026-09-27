@@ -1453,5 +1453,18 @@ _Pending._
     matching claim) were left stale after the `worktree-manager`
     changefiles were removed two commits later. Reworded the journal
     bullet in place; updated the PR description on GitHub to match.
+  - **Fourth review round**: one genuinely new finding -- deleting a
+    consumer's pointer copy also deletes the lib tests that consumer's
+    own root-level `pytest` run used to collect (`worktree-manager`
+    declares no `testpaths`, so `uv run pytest` walked `libs/*/tests`),
+    leaving `work-coalescing-singleton`'s wire/server coverage
+    unenforced. Added a `checks`-job CI step that runs the CANONICAL
+    suites directly (`libs/work-coalescing-singleton/tests` plus
+    `libs/lazy-cli-dispatch/tests`, whose coverage the earlier PR #4245
+    conversion dropped the same way), mirroring the existing
+    `peer-launch`/`installer-readiness` canonical-lib steps. Verified
+    locally: 42 passed.
 - **Next up**: `credential-relay` (4 consumers), per the effort's own
-  smallest-blast-radius-first ordering.
+  smallest-blast-radius-first ordering. Its conversion (and every later
+  one) must extend that canonical-lib CI step with the newly converted
+  lib, so no lib loses its suite the same way.
