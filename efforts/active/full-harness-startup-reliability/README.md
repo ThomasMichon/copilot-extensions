@@ -562,3 +562,77 @@ correction inline, per the effort's own journal discipline)._
   PR's current state directly rather than trusting any snapshot recorded
   here); watching both via `pr-watch` in the background rather than
   polling, per standard discipline.
+
+### 2026-09-27 — Operator-directed re-review cycle on #4129 (rounds 6-8); #3305's CLI-pin finding also fixed
+
+- Operator directed re-requesting Copilot review via the GitHub API directly
+  (`POST .../requested_reviewers` with `copilot-pull-request-reviewer[bot]`,
+  confirmed 201) rather than continuing the passive `pr-watch` loop, with a
+  bounded 5-minute wait per cycle. This surfaced three more real rounds on
+  #4129 in quick succession, each fixed the same way as before (read, fix
+  root cause, verify, push, resolve threads, comment) rather than merging
+  through them:
+  - **Round 6**: Windows markers (`init.ps1`) were still written via direct
+    truncating `WriteAllText`, unlike the POSIX side's round-3 fix -- fixed
+    with the same temp-file+rename pattern. A stale doc comment overclaimed
+    that removing a redundant pre-check spawn cut probe-process overhead
+    per hook invocation; corrected once the two-stage split's own second
+    `init.ps1` invocation (each running its own probe) was accounted for.
+    Added a real subprocess test that invokes the generated binstub itself
+    and asserts it reaches genuine provisioning rather than the fast
+    `:_noinst` exit-127 path, killing the resulting process tree via
+    `taskkill /T /F` (bare `terminate()`/timeout only signals the top-level
+    `cmd.exe`). Also fixed a bug in the tests themselves: they passed
+    `-InstallDir` to a directory the generated `.cmd`'s hardcoded
+    `_ROOT=%USERPROFILE%\.agent-machines` could never see.
+  - **Round 7**: two HIGH-severity marker-durability bugs the round-6 fix
+    hadn't caught -- `Invoke-StampBinstubOnly` pointed `payload-dir` at
+    `$PluginDir`, which on a marketplace install is a per-invocation
+    `.install-stage/<ts>-<pid>` copy a LATER invocation's own dead-stage
+    reaper can delete out from under it (now points at `$probePayload`, the
+    durable original payload root instead); and `Invoke-Stamp` used to
+    `Remove-Item` both markers immediately, before its own several-second
+    snapshot copy even started, leaving NONE at all for the whole copy
+    duration (worse than a torn write) -- removed the premature clear;
+    the existing atomic replace already handles the swap once the new
+    snapshot is ready. Also fixed the new test's own timeout enforcement:
+    `proc.stderr.readline()` blocks, so polling it against a wall-clock
+    deadline didn't actually bound it -- moved to a daemon reader thread
+    feeding a queue instead.
+  - **Round 8**: the SAME atomicity theme, one layer deeper --
+    `resolve-runtime.ps1`/`.sh` were still copied via a direct
+    `Copy-Item`/`cp -f` (truncating before copy); and `Move-Item -Force`
+    itself does not guarantee an atomic replace on every supported
+    PowerShell runtime (Windows PowerShell 5.1's `-Force` can delete the
+    destination before moving the new one in). Added a shared
+    `Publish-FileAtomically`/`Copy-FileAtomically` helper using
+    `[System.IO.File]::Replace()` (true atomic NTFS replace) with a
+    Move-Item fallback for first-ever publishes, applied to every Windows
+    write site. Getting `Replace()` to actually work in practice needed two
+    more fixes discovered by hand: its backup-path argument throws "The
+    path is empty" for both `$null` and `""` on this codebase's real
+    runtimes despite null being the documented no-backup form (give it a
+    real, discarded backup path instead), and it can throw a transient
+    "used by another process" IOException if a reader briefly has the file
+    open without `FILE_SHARE_DELETE` (retried briefly rather than treated
+    as fatal). A remaining finding -- the two marker files are each atomic
+    individually but not atomic as a PAIR -- was deliberately documented as
+    deferred rather than fixed: correctly solving it means redesigning the
+    on-disk marker format several OTHER call sites across this plugin
+    depend on (`invoke-payload-runtime.ps1/.sh`, `installation-context`,
+    receipts, the CLI), real future work well beyond this round's scope.
+    Strengthened the concurrency tests to poll the file on a background
+    thread WHILE the writer processes are still racing (not just after they
+    all exit), which is what surfaced both `Replace()` runtime quirks above.
+- Separately, PR #3305 picked up one more finding in the same window:
+  pinning/recording the CLI version alone does not prevent the mid-turn
+  self-update confound the Context section already observed -- fixed by
+  requiring the update be disabled/completed BEFORE the timer starts (not
+  merely recorded after), and any attempt that still updates mid-run marked
+  invalid and re-run rather than counted.
+- Each round: verified via PowerShell AST parse / `bash -n` / Python
+  `ast.parse`, the `stamp`-tagged regression suite, and (round 8) the
+  broader binstub/resolver/provision selection; rebased onto latest `dev`,
+  force-pushed with-lease, resolved every addressed thread via the GraphQL
+  API, and posted a summary comment citing the fixing commit -- same
+  discipline as every prior round.
