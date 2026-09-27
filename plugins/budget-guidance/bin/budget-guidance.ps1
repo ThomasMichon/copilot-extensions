@@ -32,24 +32,6 @@ function Write-BootTraceRecord(
 ) {
     if (-not $_bootTraceLogPath) { return }
     try {
-        # Never create the RUNTIME ROOT purely to log a phase: an ordinary
-        # read-only invocation (e.g. `--version` against an already-
-        # resolved runtime, or an installer-readiness probe with self-
-        # provisioning disabled) must stay side-effect-free -- an
-        # invariant this repo tests extensively (Copilot review, PR
-        # #3310). Creating just the `logs` subdirectory under an
-        # ALREADY-EXISTING runtime root is always safe and unconditional
-        # (the common case: a resolved runtime's root exists but hasn't
-        # logged before) -- only bypass this guard for a genuinely
-        # missing root once self-provisioning is committed to
-        # (`$script:_bootTraceWillProvision`, set right before this
-        # function is first called on that path), so the earlier
-        # `resolver-loaded`/`dispatch` phases -- which fire before the
-        # provisioning block's own `New-Item` -- are still captured on a
-        # genuine first-ever launch.
-        if (-not (Test-Path -LiteralPath $_runtimeRoot -PathType Container)) {
-            if (-not $script:_bootTraceWillProvision) { return }
-        }
         [IO.Directory]::CreateDirectory((Split-Path -Parent $_bootTraceLogPath)) | Out-Null
         $parts = [System.Collections.Generic.List[string]]::new()
         [void]$parts.Add('"ts":"' + (Escape-BootTraceJson (Get-BootTraceIsoTimestamp)) + '"')
@@ -167,15 +149,6 @@ function Resolve-PayloadRuntime {
 }
 
 $_py = Resolve-PayloadRuntime
-# Commit to self-provisioning (and, in doing so, permit
-# Write-BootTraceRecord to eagerly create a not-yet-existing runtime
-# root) as soon as we actually know provisioning will happen -- i.e. no
-# runtime resolved AND self-provisioning isn't disabled -- so
-# `resolver-loaded`/`dispatch` are captured on a genuine first-ever
-# launch instead of silently dropped, while a read-only probe (no
-# runtime, self-provisioning disabled) never creates anything (Copilot
-# review, PR #3310).
-$script:_bootTraceWillProvision = (-not $_py) -and (-not (Test-Path "env:BUDGET_GUIDANCE_NO_SELFPROVISION"))
 Write-BootTrace 'resolver-loaded'
 if ($_py) {
     Write-BootTrace 'dispatch' 'shim' '' '' '' 'fast'

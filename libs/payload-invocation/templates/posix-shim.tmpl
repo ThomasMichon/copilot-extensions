@@ -69,23 +69,6 @@ _boot_trace_log() {
     _bt_version="${6-}"
     _bt_dispatch_path="${7-}"
     _bt_log_dir="${_boot_trace_log_path%/*}"
-    if [ ! -d "$_runtime_root" ]; then
-        # Never create the RUNTIME ROOT purely to log a phase: an
-        # ordinary read-only invocation (e.g. `--version` against an
-        # already-resolved runtime, or an installer-readiness probe with
-        # self-provisioning disabled) must stay side-effect-free -- an
-        # invariant this repo tests extensively (Copilot review, PR
-        # #3310). Creating just the `logs` subdirectory under an
-        # ALREADY-EXISTING runtime root (the branch below) is always safe
-        # and unconditional -- only bypass THIS guard for a genuinely
-        # missing root once self-provisioning is committed to
-        # (`_boot_trace_will_provision`, set right before this function is
-        # first called on that path), so the earlier
-        # `resolver-loaded`/`dispatch` phases -- which fire before
-        # `provision-start`'s own `mkdir -p "$_runtime_root"` -- are still
-        # captured on a genuine first-ever launch.
-        [ -n "${_boot_trace_will_provision:-}" ] || return 0
-    fi
     if [ ! -d "$_bt_log_dir" ]; then
         mkdir -p "$_bt_log_dir" 2>/dev/null || return 0
     fi
@@ -177,16 +160,6 @@ _resolve_runtime() {
 }
 
 @@PAYLOAD_ROOT_ENV_POSIX@@_resolve_runtime
-# Commit to self-provisioning (and, in doing so, permit `_boot_trace_log`
-# to eagerly create a not-yet-existing runtime root) as soon as we
-# actually know provisioning will happen -- i.e. no runtime resolved AND
-# self-provisioning isn't disabled -- so `resolver-loaded`/`dispatch` are
-# captured on a genuine first-ever launch instead of silently dropped,
-# while a read-only probe (no runtime, self-provisioning disabled) never
-# creates anything (Copilot review, PR #3310).
-if [ -z "${AGENT_RT_PY:-}" ] && [ -z "${@@NO_SELFPROVISION_ENV@@:-}" ]; then
-    _boot_trace_will_provision=1
-fi
 _boot_trace resolver-loaded shim
 if [ -n "${AGENT_RT_PY:-}" ]; then
     _boot_trace dispatch shim '' '' '' fast
