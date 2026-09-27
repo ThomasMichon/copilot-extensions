@@ -16,7 +16,8 @@ def copilot_home() -> Path:
 
 
 def backups_root() -> Path:
-    return Path(os.path.expanduser("~")) / ".agent-machines" / "backups"
+    _legacy = ".agent-machines"  # marketplace-isolation: allow legacy-compatibility
+    return Path(os.path.expanduser("~")) / _legacy / "backups"
 
 
 @dataclass

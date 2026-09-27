@@ -71,6 +71,7 @@ curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/mai
 | [ai-attribution](plugins/ai-attribution/) | Ambient policy + skills | Keep publication and AI-attribution safety active through a concise payload-cwd-gated session-start kernel, host-qualified operator policy, an idempotent static-fallback setup skill, and an on-demand publication workflow. Payload-only; no runtime, network call, or authentication. |
 | [delegation-guidance](plugins/delegation-guidance/) | Ambient policy + skill | Route broad separable research, comparisons, evaluations, domain-tool calls, and disjoint bulk edits into bounded sub-agent contexts while the coordinator retains synthesis, integration, cohesive implementation, and completion. Payload-only; no runtime or configuration. |
 | [budget-guidance](plugins/budget-guidance/) | Budget posture CLI | Resolve strict offline allowance, consumption, reset, freshness, rate, and ceiling readings into one attributable posture with JSON and concise human status. |
+| [agent-conduct-guidance](plugins/agent-conduct-guidance/) | Ambient policy + skill | Consolidated, generally-good agent conduct guidance: one plugin hosting multiple independent ambient modules (instruction projection + paired skill). First module — process-spawn hygiene — reminds an agent to spawn every ad hoc CMD/PowerShell/Python/Node/etc. child process headlessly, especially on Windows, where a naive spawn allocates a visible, focus-stealing console window per invocation. Payload-only; no runtime or configuration. |
 
 All support **Windows** and **Linux/WSL** (macOS planned).
 
@@ -78,14 +79,15 @@ All support **Windows** and **Linux/WSL** (macOS planned).
 
 ## Architecture at a glance
 
-22 plugins, one marketplace. **Thirteen ship a runtime** (a `uv`-built venv under
+23 plugins, one marketplace. **Thirteen ship a runtime** (a `uv`-built venv under
 a plugin-owned runtime root such as `~/.agent-*` or `~/.budget-guidance`, plus a
-`~/.local/bin` binstub, deployed by the plugin's own installer); **nine are
+`~/.local/bin` binstub, deployed by the plugin's own installer); **ten are
 payload-only** — `efforts` (skills), `visions` (skills),
 `context-handoff` (hook + session extension + skill), `customizing-copilot` (skills),
 `copilot-extensions-harness` (skills + contribution-boundary hook), `wsl-setup` (skills),
 `harness-knowledge` (skills), `ai-attribution` (hook + skill),
-`delegation-guidance` (hook + skill) needs no install beyond enabling the
+`delegation-guidance` (hook + skill), and `agent-conduct-guidance`
+(instruction projection + skill) need no install beyond enabling the
 plugin.
 Everything installs **from the marketplace** and runs
 **from local install paths** — no git checkout required at runtime.

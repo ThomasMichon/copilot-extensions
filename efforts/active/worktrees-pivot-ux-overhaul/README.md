@@ -467,9 +467,36 @@ parallelizable across worktrees.
       second line's old STATE-reuse fallback (2026-09-26).
 - [x] USED column: recency of last real interaction, distinct from AGE
       (2026-09-26).
-- [ ] Sticky column-header + current-group band while scrolling, with
+- [x] Sticky column-header + current-group band while scrolling, with
       focus-top force-scrolling to the very top (operator feedback,
-      2026-09-26; not started).
+      2026-09-26; shipped 2026-09-27). The native list's existing `#88`
+      section-band pin (`_PickerStickyHeader`/`_PickerNativeData._update_
+      sticky` in `engine_regions.py`) only ever pinned the CURRENT-GROUP
+      band (`── Active ──` etc.) -- the column-header row (`ID STATE AGE
+      ...`, `kind="colhdr"`) was a normal scrolling data row like any other
+      and had no pin at all. `_PickerStickyHeader` is now a 2-row widget:
+      row 0 pins the pivot's column header once its own row (tracked via a
+      new `_colhdr_index`/`_colhdr_text` pair, generic across every `kind==
+      "colhdr"` emitter -- Worktrees/Maintenance/Profiles) has scrolled out
+      of view; row 1 keeps the existing section-band pin, independently.
+      Both rows stay reserved together (blank per-slot) while scrolled, per
+      the pre-existing anti-flicker contract (#169) generalized to two
+      slots. Separately, `_PickerNativeData.on_option_list_option_
+      highlighted` now force-scrolls the OptionList home (`scroll_home
+      (animate=False, immediate=True)`) whenever the newly-highlighted
+      option is the list's topmost FOCUSABLE row (`_first_enabled_index()`)
+      -- Textual's own `scroll_to_highlight()` only scrolls the minimum
+      distance needed to bring that one row into view, which used to leave
+      the pinned rows above it (colhdr + section) still scrolled out, so
+      only a mouse-wheel scroll reached far enough; arrowing back up to the
+      first row now always brings the header fully back into view. New
+      tests: `test_native_list_sticky_column_header`, `test_native_list_
+      focus_top_row_forces_scroll_home`; the two pre-existing sticky tests
+      (`test_native_list_sticky_header`, `test_native_list_sticky_no_
+      reflow_flicker`) updated for the renamed `_line` -> `_colhdr_line`/
+      `_section_line` API. Full `tests/production_picker/` suite green
+      (770 passed / 1 skipped); unscrolled/at-rest render unchanged (no
+      golden diff).
 - [x] CLAIMS abbreviation/hyperlink rework, in `claims_rank.py` (shared by
       Worktrees/Tasks/Codespaces/Containers): `format_claim()` is now
       cross-repo-aware via a new `own_repo=` parameter -- a `pr`/`bug`/
@@ -993,4 +1020,45 @@ Operator feedback on the rendered pivot, addressed as a bundled follow-up
 - **Next up**: continue Phase 7 (session/handoff-head mismatch + Sessions
   sub-menu), or pick up the 4 still-open feedback items above -- operator's
   call.
+
+### 2026-09-27 — Phase 9 item 1 complete: two-row sticky pin + focus-top force-scroll
+- Root-caused the operator's report as two DISTINCT gaps in the pre-existing
+  `#88` native-list sticky feature (`_PickerStickyHeader`/`_PickerNativeData`
+  in `engine_regions.py`), not one: (1) that feature only ever pinned the
+  CURRENT-GROUP band (`── Active ──` etc, `kind="section"`) -- the pivot's
+  column-header row (`ID STATE AGE ...`, `kind="colhdr"`, emitted generically
+  by Worktrees/Maintenance/Profiles) was an ordinary scrolling data row with
+  no pin at all; (2) arrowing back up to the list's topmost row relied on
+  Textual's own `scroll_to_highlight()`, which only scrolls the MINIMUM
+  distance to bring that one row into view -- since the pinned rows sit above
+  index 0 of the visible viewport once scrolled, that minimal scroll left
+  them (and thus the "header") still hidden; only a mouse-wheel scroll went
+  far enough.
+- Fix: `_PickerStickyHeader` is now a 2-row widget (`set_lines(colhdr_line,
+  section_line, keep_space=...)`, height 2) -- row 0 pins the column header
+  once ITS row (tracked via new `_colhdr_index`/`_colhdr_text`) has scrolled
+  out, row 1 keeps the pre-existing section-band pin, independently; both
+  stay reserved together while scrolled (blank per empty slot) so neither
+  toggling alone reflows the list, generalizing the existing anti-flicker
+  contract (#169) from one slot to two. `_PickerNativeData.on_option_list_
+  option_highlighted` now calls a new `_first_enabled_index()` and, when the
+  newly-highlighted option IS that topmost focusable row, force-scrolls with
+  `self.scroll_home(animate=False, immediate=True)` -- overriding the
+  framework's minimal in-view scroll so the pin actually clears and the
+  unscrolled layout is restored on arrow-key navigation, not only a
+  mouse-wheel scroll.
+- Tests: two new (`test_native_list_sticky_column_header`, `test_native_
+  list_focus_top_row_forces_scroll_home`); the two pre-existing sticky tests
+  updated for the renamed `_line` -> `_colhdr_line`/`_section_line` API.
+  Full `tests/production_picker/` suite green (770 passed/1 skipped, up from
+  753 pre-slice as more tests have accumulated this effort).
+  `tools/check-module-size.py` clean. Static/unscrolled demo render
+  (`picker screenshot --demo --format text`) confirmed byte-identical to
+  before the change -- the sticky feature only affects scrolled state, which
+  the deterministic capture doesn't exercise, so no golden touched.
+- **This was the last of Phase 9's 6 identified items** -- the phase's
+  operator-feedback checklist (besides the open-ended "I'll think of more"
+  bullet) is now fully reconciled. **Next up**: Phase 7 (session/handoff-head
+  mismatch warning + Sessions sub-menu) or Phase 8 (Mux Companion buildout),
+  both still fully unstarted -- operator's call.
 

@@ -39,7 +39,7 @@ def _topology_paths(repos: Iterable[Path]) -> list[Path]:
     for repo in repos:
         root = Path(repo).expanduser().resolve()
         for candidate in (
-            root / ".agent-worktrees" / "machines.yaml",
+            root / ".agent-worktrees" / "machines.yaml",  # marketplace-isolation: allow registry
             root / "machines.yaml",
             root / "config" / "machines.yaml",
             root / ".github" / "machines.yaml",

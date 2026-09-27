@@ -225,8 +225,9 @@ def _agent_ssh_argv_prefix() -> list[str] | None:
     if not raw:
         exe = shutil.which("agent-ssh")  # marketplace-isolation: allow legacy-compatibility
         return None if exe is None else [exe]
+    _legacy = "~/.agent-machines"  # marketplace-isolation: allow legacy-compatibility
     own_root = Path(
-        os.environ.get("AGENT_RT_ROOT", "~/.agent-machines")
+        os.environ.get("AGENT_RT_ROOT", _legacy)
     ).expanduser()
     try:
         own = _peer_launch.validate_owner("agent-machines", own_root, raw)
