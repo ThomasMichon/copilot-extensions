@@ -454,8 +454,18 @@ shape before committing to a design)_
       entry whose `path` escapes the plugin's own directory (reuse
       `_escapes_root()` from the existing containment work), copy
       canonical's `src/` (+ sync the `pyproject.toml` version) into a
-      freshly-created local `plugins/<plugin>/libs/<lib>/`, then
-      surgically rewrite the `pyproject.toml` line to the local,
+      freshly-created local `<consumer-root>/libs/<lib>/` — computed from
+      the CONSUMING project's own root, not hardcoded to
+      `plugins/<plugin>/`: Phase 1 explicitly includes `worktree-manager`
+      consumers too (a top-level tree, not under `plugins/`), and a
+      promotion step that only ever writes to `plugins/<plugin>/libs/<lib>`
+      would rewrite a converted `worktree-manager/pyproject.toml`'s
+      reference without ever materializing the dependency under
+      `worktree-manager/libs/<lib>`, shipping a broken package. Reuse
+      `sync-vendored-libs.py`'s existing `_consumer_dir()`/
+      `_EXTRA_CONSUMER_DIRS` resolution (already built for `--pointerize`,
+      PR #3810) to compute the correct destination for either layout —
+      then surgically rewrite the `pyproject.toml` line to the local,
       non-editable form (`{ path = "libs/<lib>" }`) — restoring exactly
       today's real shipped form. A surgical regex rewrite (matching this
       repo's existing convention — see `_VERSION_RE.sub`) is sufficient,
@@ -499,12 +509,14 @@ shape before committing to a design)_
       `src-passthrough` lacked.
 
 ### Phase 2 — Canonical-reference form for the shared installer engine
-> **Note (2026-09-26):** libs' mechanism pivoted to `src-passthrough`
-> (Phase 1); this phase's live-reference idea was designed as a libs-
-> mechanism corollary and has NOT been re-evaluated against that pivot.
-> Revisit whether a `src-passthrough`-style stub (or the still-viable
-> shell `source`/PowerShell `.` idea below) fits the installer-engine
-> surface better before executing this phase.
+> **Note (2026-09-27, updated):** libs' mechanism pivoted away to
+> `src-passthrough` on 2026-09-26, then reverted back to `uv`-editable on
+> 2026-09-27 (see both "course correction" Journal entries) — Phase 2's
+> live-reference idea (this phase's own corollary of the SAME mechanism)
+> is therefore valid again, though it still hasn't been formally executed
+> or re-confirmed against the current libs design. Revisit and confirm
+> before executing this phase, rather than assuming it's settled purely
+> because libs' mechanism happens to match again.
 - [x] **Scope correction (from review, still holds): this applies only to
       `vendored-installer-engine`'s shared engine files**
       (`scripts/installer-engine.{sh,ps1}`), never to a whole plugin's
@@ -512,19 +524,14 @@ shape before committing to a design)_
       a per-service wrapper/config (launch command, capability flags,
       sibling installs) that must keep varying by plugin, per that effort's
       own design.
-- [x] ~~**No new pointer kind needed — superseded by the same Design
-      Decision above.** A plugin's own `install.sh`/`install.ps1` directly
-      `source`s/dot-sources the canonical `scripts/installer-engine.sh`/
-      `.ps1` via a relative path in `dev` ...~~ — **historical, not
-      currently resolved**: this checklist item marked the live-reference
-      idea "resolved" by the (now-superseded) Design Decision above. Per
-      the note just above, Phase 2's mechanism has NOT been re-evaluated
-      since libs pivoted to `src-passthrough` — this design is a
-      candidate, not a settled decision, until that re-evaluation happens.
-      Left `[x]` (not reopened as `[ ]`) only because the underlying
-      dot-source-preservation ANALYSIS still holds regardless of which
-      pointer mechanism Phase 2 ultimately adopts; the "no new pointer
-      kind needed" CONCLUSION is what's now open again.
+- [x] **No new pointer kind needed** — the live-reference idea (a plugin's
+      `install.sh`/`install.ps1` directly `source`s/dot-sources the
+      canonical `scripts/installer-engine.sh`/`.ps1` via a relative path
+      in `dev`) matches libs' own current mechanism again as of the second
+      course correction above. Left `[x]` for the underlying dot-source-
+      preservation ANALYSIS (still holds regardless of which pointer
+      mechanism is in play) — but this phase itself has NOT been formally
+      executed or re-confirmed; do not treat this as "Phase 2 is done."
 - [ ] At promotion, `materialize_main.py` (extended the same way as the
       libs case) rewrites that `source`/`.` line to reference (or fully
       inline) a freshly-copied-in local `scripts/installer-engine.{sh,ps1}`
@@ -549,14 +556,14 @@ shape before committing to a design)_
 
 ### Phase 3 — Document the pattern; sweep for further "and more" candidates
 - [ ] Write `docs/patterns/vendor-pointer.md`: the file-pointer kind (docs,
-      unchanged) and `src-passthrough` (libs — see the Course-correction
-      Journal entry; **not** the live relative-path reference form
-      originally planned here, superseded before this phase started) and
-      the shared installer engine if Phase 2 lands — their lifecycle (a
-      physical stub file in `dev` forwarding to canonical at runtime, ->
-      `materialize_main.py` expansion into a real copy -> shipped `main`
-      content), which tool owns which invariant, and how a new plugin/
-      lib/script opts in.
+      unchanged) and the `uv`-editable canonical-reference form (libs,
+      and the shared installer engine if Phase 2 lands — see both
+      Course-correction Journal entries for the mechanism's full history;
+      `src-passthrough` was a temporary detour, now being reverted, and
+      must NOT be what this doc describes) — their lifecycle (a live
+      relative-path reference in `dev`, -> `materialize_main.py`
+      copy-and-rewrite at promotion -> shipped `main` content), which
+      tool owns which invariant, and how a new plugin/lib/script opts in.
 - [ ] Revisit whether any other currently-duplicated construct surfaced in
       Phase 0's audit ("and more") warrants conversion in this effort or a
       follow-on; file a tracked issue for anything deferred rather than
