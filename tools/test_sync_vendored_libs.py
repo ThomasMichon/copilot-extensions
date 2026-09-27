@@ -1128,3 +1128,31 @@ def test_check_reports_a_malformed_consumer_manifest(repo: Path):
     result = _run(repo, "--check")
     assert result.returncode == 1, result.stdout + result.stderr
     assert "could not read/parse" in result.stdout
+
+
+def test_uv_editable_refuses_a_nested_symlink_in_canonical(repo: Path):
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
+    victim = repo.parent / "outside-victim.py"
+    victim.write_text("evil = 1\n", encoding="utf-8")
+    (repo / "libs/shared-lib/src/shared_lib/sneaky.py").symlink_to(victim)
+    (repo / "plugins/alpha").mkdir(parents=True)
+    _seed_consumer_pyproject(repo, "plugins/alpha", "shared-lib")
+
+    result = _run(repo, "--uv-editable", "alpha", "shared-lib")
+    assert result.returncode != 0
+    assert "is a symlink" in (result.stdout + result.stderr)
+
+
+def test_uv_editable_refuses_a_nested_symlink_in_the_local_copy(repo: Path):
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
+    _write(repo, "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py", "value = 1\n")
+    _lib_pyproject(repo, "plugins/alpha/libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+    _write(repo, "plugins/alpha/libs/shared-lib/README.md", "# doc\n")
+    victim = repo.parent / "outside-victim2.py"
+    victim.write_text("evil = 1\n", encoding="utf-8")
+    (repo / "plugins/alpha/libs/shared-lib/src/shared_lib/sneaky.py").symlink_to(victim)
+    _seed_consumer_pyproject(repo, "plugins/alpha", "shared-lib")
+
+    result = _run(repo, "--uv-editable", "alpha", "shared-lib")
+    assert result.returncode != 0
+    assert "is a symlink" in (result.stdout + result.stderr)

@@ -1328,3 +1328,22 @@ def test_materialize_uv_editable_refs_passes_dest_root_for_the_ancestor_check(tm
     log = mm.materialize_uv_editable_refs(dest, canonical_root=root)
     assert any("is a symlink" in line for line in log)
     assert not (consumer / "libs/zdd").exists()
+
+
+def test_materialize_uv_editable_ref_into_refuses_a_symlinked_canonical_root(tmp_path: Path):
+    # canonical_root.resolve() must never run before its own is_symlink()
+    # is checked -- resolving first discards that fact, so every later
+    # _find_symlinked_ancestor() walk (which terminates AT the resolved
+    # root) would never inspect canonical_root itself, letting its
+    # external target be treated as trusted.
+    real_root = tmp_path / "real-repo"
+    _canonical_lib(real_root, "zdd", version="0.1.0-dev1", content="real\n")
+    root = tmp_path / "repo-symlink"
+    root.symlink_to(real_root, target_is_directory=True)
+    consumer = _uv_editable_consumer(root, "plugins/agent-bridge", "agent-zdd", "../../libs/zdd")
+
+    log = mm.materialize_uv_editable_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
+    )
+    assert any("is a symlink" in line for line in log)
+    assert not (consumer / "libs/zdd").exists()

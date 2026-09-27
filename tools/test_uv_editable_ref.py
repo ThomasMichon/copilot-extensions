@@ -274,3 +274,23 @@ def test_find_uv_editable_refs_raises_manifest_unreadable_for_invalid_utf8(tmp_p
     (consumer / "pyproject.toml").write_bytes(b"\xff\xfe not valid utf-8")
     with pytest.raises(uer.ManifestUnreadable):
         uer.find_uv_editable_refs(consumer)
+
+
+def test_uv_editable_problems_rejects_a_nested_symlink_in_canonical(tmp_path: Path, monkeypatch):
+    repo = tmp_path / "repo"
+    _lib(repo / "libs/shared-lib", content="value = 1\n", version="0.1.0")
+    victim = tmp_path / "victim.py"
+    victim.write_text("x = 1\n", encoding="utf-8")
+    (repo / "libs/shared-lib/src/sneaky.py").symlink_to(victim)
+    consumer = repo / "plugins/alpha"
+    consumer.mkdir(parents=True)
+    (consumer / "pyproject.toml").write_text(
+        '[project]\nname = "consumer"\nversion = "1.0.0"\n'
+        "[tool.uv.sources]\n"
+        'agent-shared-lib = { path = "../../libs/shared-lib", editable = true }\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(uer, "REPO", repo)
+    monkeypatch.setattr(uer, "LIBS_DIR", repo / "libs")
+    problems = uer.uv_editable_problems("alpha", consumer)
+    assert any("is a symlink" in p for p in problems)

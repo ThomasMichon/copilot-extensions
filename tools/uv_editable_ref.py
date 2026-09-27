@@ -175,6 +175,28 @@ def _find_symlinked_ancestor(path: Path, root: Path) -> Path | None:
         current = current.parent
 
 
+def _find_symlink(tree: Path) -> str | None:
+    """The first path (relative to ``tree``, or ``"."`` when ``tree``
+    itself is the symlink) under ``tree`` that is a symlink, or ``None`` if
+    none is found. Mirrors ``materialize_main.py``'s and
+    ``sync-vendored-libs.py``'s own copies (kept separate for the same
+    hyphenated-filename reason those two already duplicate small helpers
+    between themselves). ``_find_symlinked_ancestor()`` above only catches
+    ``libs/<lib>`` and its ANCESTORS being a symlink -- a symlink NESTED
+    somewhere below it (e.g. ``libs/<lib>/src/foo.py -> /external/file``)
+    is a distinct hazard this catches: the live `uv`-editable reference
+    would expose that nested link directly on `dev`, and a byte comparison
+    (``lib_tree_matches()``) would silently follow it too."""
+    if tree.is_symlink():
+        return "."
+    if not tree.is_dir():
+        return None
+    for entry in sorted(tree.rglob("*")):
+        if entry.is_symlink():
+            return str(entry.relative_to(tree))
+    return None
+
+
 def uv_editable_problems(consumer: str, consumer_dir: Path) -> list[str]:
     """Validity problems in ``consumer``'s `uv`-editable canonical-reference
     entries: a missing ``editable = true`` (would silently resolve to a
@@ -237,6 +259,21 @@ def uv_editable_problems(consumer: str, consumer_dir: Path) -> list[str]:
                 f"{consumer}: {name} references {raw_path} (resolved "
                 f"{canonical}) which is not libs/{lib}"
             )
+        else:
+            # A symlink NESTED somewhere below canonical (e.g.
+            # libs/<lib>/src/foo.py -> /external/file) is a distinct
+            # hazard from libs/<lib> itself (or an ancestor) being a
+            # symlink -- the live `uv`-editable reference exposes it
+            # directly on `dev`, and it's never caught by the ancestor-
+            # only check above.
+            nested = _find_symlink(canonical)
+            if nested is not None:
+                where = f"libs/{lib}" if nested == "." else f"libs/{lib}/{nested}"
+                problems.append(
+                    f"{consumer}: {name} references {raw_path}, but "
+                    f"{where} is a symlink -- refusing (a canonical lib "
+                    "tree must contain only real files)"
+                )
     return problems
 
 
@@ -413,6 +450,19 @@ def convert_to_uv_editable(
             "root, and every ancestor between it and the repo root, must "
             "be a real directory)"
         )
+    # A symlink NESTED somewhere below canonical (e.g.
+    # libs/<lib>/src/foo.py -> /external/file) is a distinct hazard from
+    # canonical itself (or an ancestor) being a symlink -- the resulting
+    # `uv`-editable reference would expose it directly on `dev`, and
+    # lib_tree_matches()'s own byte comparison would silently follow it
+    # too. Matches materialize_main.py's equivalent recursive check.
+    nested = _find_symlink(canonical)
+    if nested is not None:
+        where = f"libs/{lib}" if nested == "." else f"libs/{lib}/{nested}"
+        raise SystemExit(
+            f"{where} is a symlink -- refusing (a canonical lib tree must "
+            "contain only real files)"
+        )
     canon_pp = canonical / "pyproject.toml"
     if not canon_pp.is_file():
         raise SystemExit(f"{lib}: canonical libs/{lib}/pyproject.toml missing")
@@ -445,7 +495,18 @@ def convert_to_uv_editable(
             # from canonical across its COMPLETE tree (src/, tests/,
             # README.md, pyproject.toml -- not just src/, which would miss
             # an independently edited version/metadata/test file and then
-            # silently discard it below).
+            # silently discard it below). A nested symlink anywhere in
+            # EITHER tree must be rejected first: lib_tree_matches()'s own
+            # byte comparison would otherwise silently follow one,
+            # transparently reading whatever external content it points at
+            # instead of refusing outright.
+            nested = _find_symlink(copy_dir)
+            if nested is not None:
+                where = str(copy_dir) if nested == "." else f"{copy_dir}/{nested}"
+                raise SystemExit(
+                    f"{where} is a symlink -- refusing (a vendored copy "
+                    "must contain only real files)"
+                )
             if not lib_tree_matches(canonical, copy_dir):
                 raise SystemExit(
                     f"{lib}: {copy_dir} differs from canonical libs/{lib} -- "

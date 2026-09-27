@@ -378,6 +378,14 @@ def materialize_uv_editable_ref_into(
             "refusing to trust it for uv-editable canonical-reference "
             "expansion"
         ]
+    if canonical_root.is_symlink():
+        # canonical_root.resolve() below would otherwise silently discard
+        # this fact -- every later _find_symlinked_ancestor() walk in this
+        # function terminates AT canonical_root_r, so a symlinked
+        # canonical_root itself would never be inspected, letting its
+        # external target be treated as trusted and copied during
+        # promotion.
+        return [f"SKIP {dest_consumer_dir}: {canonical_root} is a symlink -- refusing"]
     canonical_root_r = canonical_root.resolve()
     try:
         refs = uer.find_uv_editable_refs(source_consumer_dir)
