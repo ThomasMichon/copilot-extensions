@@ -174,14 +174,14 @@ class TestBuildCopilotRemoteCommand:
         # the remote command as a literal --worktree-id (there is no such
         # tracked worktree to resolve).
         cmd = build_copilot_remote_command(
-            "anchor-odsp-web", anchor=True, ensure_mux=False,
+            "anchor-example-web", anchor=True, ensure_mux=False,
         )
         assert cmd == "bash -lc 'agent-worktrees copilot --anchor'"
-        assert "anchor-odsp-web" not in cmd
+        assert "anchor-example-web" not in cmd
 
     def test_anchor_with_driver_and_seed(self) -> None:
         cmd = build_copilot_remote_command(
-            "anchor-odsp-web", anchor=True, driver="cli-mode", seed="explore",
+            "anchor-example-web", anchor=True, driver="cli-mode", seed="explore",
         )
         assert cmd == (
             "bash -lc 'agent-worktrees copilot --anchor --driver cli-mode "
@@ -228,12 +228,12 @@ class TestRunVenueCopilot:
             return 0
 
         rc = run_venue_copilot(
-            "anchor-odsp-web", connect=connect, anchor=True, run=fake_run,
+            "anchor-example-web", connect=connect, anchor=True, run=fake_run,
         )
         assert rc == 0
-        assert reserved_worktree_ids == ["anchor-odsp-web"]
+        assert reserved_worktree_ids == ["anchor-example-web"]
         assert "--anchor" in seen_command["cmd"]
-        assert "anchor-odsp-web" not in seen_command["cmd"]
+        assert "anchor-example-web" not in seen_command["cmd"]
 
     def test_releases_even_when_connect_raises(self) -> None:
         calls: list[str] = []

@@ -2449,7 +2449,7 @@ def _interactive_ssh(
     # help text in `copilot_venue.add_copilot_subparser`) as "SSHes -t in",
     # but nothing here ever added the flag, so the documented contract was
     # never actually implemented (confirmed live, agent-bridge-cli-mode-
-    # sessions Phase 4 validation against a real odsp-web CodeSpace: the
+    # sessions Phase 4 validation against a real downstream CodeSpace: the
     # remote `agent-worktrees copilot` immediately refused with "needs a
     # controlling terminal to attach to"). An ordinary port-forward-only /
     # no-command interactive shell is unaffected -- `gh codespace ssh`

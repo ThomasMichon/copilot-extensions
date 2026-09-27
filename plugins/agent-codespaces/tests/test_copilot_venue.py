@@ -79,7 +79,7 @@ class TestInteractiveSshReverseForwardsAndRemoteCommand:
     def test_remote_command_requests_a_pty(self) -> None:
         """Regression coverage for a second real bug found live (this
         session, agent-bridge-cli-mode-sessions Phase 4 live validation
-        against a real odsp-web CodeSpace): the venue `copilot` verb's own
+        against a real downstream CodeSpace): the venue `copilot` verb's own
         docstring and CLI help text document "SSHes -t in", but no `-t`
         flag was ever actually added -- without one, ssh never allocates a
         remote pty for a command invocation, so the remote

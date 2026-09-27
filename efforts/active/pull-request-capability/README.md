@@ -50,7 +50,7 @@ Repo: `ThomasMichon/copilot-extensions`. Relevant source:
 `azure-devops` today), its concrete provider modules, and the existing
 `plugins/agent-worktrees/tests/test_pr_*.py` / `test_providers.py` suite.
 
-The vision and all three issues were mined from a live odsp-web-harness
+The vision and all three issues were mined from a live private-downstream
 clean-room finding: a `code-review` scenario-eval run correctly reported
 BLOCKED ("no PR available") rather than fabricate a review under literal
 mode -- honest behavior that also surfaced these three gaps in the

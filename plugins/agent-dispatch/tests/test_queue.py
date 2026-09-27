@@ -490,9 +490,9 @@ def test_set_hold_blocks_resume_release_and_reclaim(q):
     q.start(t.id, "w1")
     q.suspend(t.id, "w1", reason="waiting on an external decision")
 
-    held = q.set_hold(t.id, reason="operator paused from the picker", actor="tmichon")
+    held = q.set_hold(t.id, reason="operator paused from the picker", actor="operator")
     assert held.hold_reason == "operator paused from the picker"
-    assert held.hold_actor == "tmichon"
+    assert held.hold_actor == "operator"
     assert held.hold_at is not None
     # A hold does not itself change status -- the task is still suspended.
     assert held.status == Status.SUSPENDED
@@ -502,7 +502,7 @@ def test_set_hold_blocks_resume_release_and_reclaim(q):
     with pytest.raises(TaskError, match="held"):
         q.release_suspended(t.id, "w1")
 
-    unheld = q.clear_hold(t.id, actor="tmichon")
+    unheld = q.clear_hold(t.id, actor="operator")
     assert unheld.hold_reason is None
     assert unheld.hold_actor is None
     assert unheld.hold_at is None
@@ -518,23 +518,23 @@ def test_set_hold_on_claimed_task_blocks_start(q):
     pause."""
     t = q.create("investigate the flaky runner")
     q.claim_one("w1", task_id=t.id)
-    q.set_hold(t.id, reason="operator paused before start", actor="tmichon")
+    q.set_hold(t.id, reason="operator paused before start", actor="operator")
 
     with pytest.raises(TaskError, match="held"):
         q.start(t.id, "w1")
 
-    q.clear_hold(t.id, actor="tmichon")
+    q.clear_hold(t.id, actor="operator")
     started = q.start(t.id, "w1")
     assert started.status == Status.STARTED
 
 
 def test_set_hold_on_queued_task_prevents_claim(q):
     t = q.create("queued task an operator wants held")
-    q.set_hold(t.id, reason="hold before anyone claims it", actor="tmichon")
+    q.set_hold(t.id, reason="hold before anyone claims it", actor="operator")
     assert q.claim_one("w1") is None
     assert q.claim_one("w1", task_id=t.id) is None
 
-    q.clear_hold(t.id, actor="tmichon")
+    q.clear_hold(t.id, actor="operator")
     claimed = q.claim_one("w1", task_id=t.id)
     assert claimed is not None
     assert claimed.id == t.id
@@ -543,7 +543,7 @@ def test_set_hold_on_queued_task_prevents_claim(q):
 def test_set_hold_requires_a_reason(q):
     t = q.create("task")
     with pytest.raises(TaskError, match="non-empty reason"):
-        q.set_hold(t.id, reason="   ", actor="tmichon")
+        q.set_hold(t.id, reason="   ", actor="operator")
 
 
 def test_set_hold_refuses_terminal_task(q):
@@ -552,7 +552,7 @@ def test_set_hold_refuses_terminal_task(q):
     q.start(t.id, "w1")
     q.complete(t.id, "w1")
     with pytest.raises(TaskError, match="completed"):
-        q.set_hold(t.id, reason="too late", actor="tmichon")
+        q.set_hold(t.id, reason="too late", actor="operator")
 
 
 def test_set_hold_is_idempotent_and_clear_hold_is_a_noop_when_unheld(q):

@@ -391,13 +391,13 @@ def test_steer_roundtrip_clears_awaiting_and_delivers(q):
     form = steering.parse_request_input("decision:choice[revise,post-approved]")
     q.set_card(t.id, "w1", card=steering.build_card(request_input=form))
 
-    task = q.submit_steer(t.id, fields={"decision": "post-approved"}, sender="tmichon")
+    task = q.submit_steer(t.id, fields={"decision": "post-approved"}, sender="operator")
     assert task.awaiting_steer is False  # operator answered -> no longer blocked
 
     taken = q.take_steer(t.id, "w1")
     assert taken is not None
     assert taken["fields"] == {"decision": "post-approved"}
-    assert taken["sender"] == "tmichon"
+    assert taken["sender"] == "operator"
 
     # inbox is now drained
     assert q.take_steer(t.id, "w1") is None
@@ -622,7 +622,7 @@ def test_card_and_steer_roundtrip_over_http(api, monkeypatch):
 
     r = api.post(
         f"/tasks/{tid}/steer",
-        json={"fields": {"decision": "post-approved"}, "sender": "tmichon"},
+        json={"fields": {"decision": "post-approved"}, "sender": "operator"},
     )
     assert r.status_code == 200
     assert r.json()["awaiting_steer"] is False
@@ -645,7 +645,7 @@ def test_card_and_steer_roundtrip_over_http(api, monkeypatch):
     took = r.json()
     assert took["task_id"] == tid
     assert took["steers"][0]["fields"] == {"decision": "post-approved"}
-    assert took["steers"][0]["sender"] == "tmichon"
+    assert took["steers"][0]["sender"] == "operator"
 
     # inbox drained
     assert api.post(f"/tasks/{tid}/steer/take", json={"worker_id": "w1"}).json()["steer"] is None

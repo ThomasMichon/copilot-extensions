@@ -253,7 +253,7 @@ class TestProvisioningAndClient:
         assert "auth=" in client
 
     def test_relay_client_parses_resource_flag_for_get_access_token(self):
-        """`get-access-token --resource <guid>` (odsp-npm-token.sh's exact
+        """`get-access-token --resource <guid>` (the downstream npm-token helper's exact
         invocation) must resolve SCOPE to the guid, not the literal
         ``--resource`` string (#384): a bare positional mis-parse silently
         denied the allowlist lookup and returned empty output."""

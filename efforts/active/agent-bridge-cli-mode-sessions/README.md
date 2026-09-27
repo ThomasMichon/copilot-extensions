@@ -695,7 +695,7 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
       (`agent-bridge --json live-sessions list` showed the live session with
       `driven_by: "cli-mode"`) -- identical mechanism to the local case, no
       CLI-mode-specific divergence.
-      **Independently reconfirmed against a real odsp-web `agent-codespaces`
+      **Independently reconfirmed against a real private-downstream `agent-codespaces`
       CodeSpace (2026-09-22)**, closing the last gap the container pass
       couldn't cover (a genuinely distinct venue transport, not just a
       second Docker run): fixed a third real bug found only here --
@@ -715,7 +715,7 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
       CodeSpace, and -- driven by `tmux send-keys`/`capture-pane` exactly
       like the container pass -- completed a full real task ("add a haiku
       to a package README and open a PR"), landing real Azure DevOps PR
-      #2397021 on `odsp-web`. The CLI-mode reservation was released cleanly
+      #2397021 on the private downstream repo. The CLI-mode reservation was released cleanly
       on exit (`agent-bridge --json live-sessions cli-mode status` empty
       afterward) and the tmux session tore down on `/exit`.
 
@@ -817,12 +817,12 @@ two commits, then PR #3249):
    failures). Closes the "unified CLI-mode dispatch" feature request that
    turned out to be this whole session's real thread, start to finish.
 
-### 2026-09-22 — Full live validation against a real odsp-web CodeSpace: 2 more bugs found and fixed; Phase 4 genuinely done end-to-end
+### 2026-09-22 — Full live validation against a real private-downstream CodeSpace: 2 more bugs found and fixed; Phase 4 genuinely done end-to-end
 
 Continued from the container-only validation above with a request to prove
 the venue `copilot` verb against an actual `agent-codespaces` CodeSpace, not
-just the disposable Docker container. Resolved `odsp-web`'s preferred venue
-(`agent-worktrees related resolve odsp-web` -> CodeSpace, delegate
+just the disposable Docker container. Resolved the private downstream repo's preferred venue
+(`agent-worktrees related resolve <private-downstream>` -> CodeSpace, delegate
 `agent-codespaces`, per the harness's own routing policy) and picked an
 already-`Available` operator CodeSpace (`friendly-eureka-...`) rather than
 provisioning a fresh one.
@@ -882,9 +882,9 @@ pty-backed interactive `copilot` TUI inside a real tmux session on the
 CodeSpace (observed live via a second, independent `tmux capture-pane`
 SSH call, exactly mirroring the container pass's validation method), and
 drove it with an actual unscripted task -- "make a PR where you add a
-haiku into the README.md of the utilities/resources package on odsp-web"
+haiku into the README.md of the utilities/resources package on the private downstream repo"
 -- through to completion: it edited
-`odsp-common/utilities/resources/README.md`, ran the repo's own commit/PR
+`utilities/resources/README.md`, ran the repo's own commit/PR
 skill (including resolving a Rush change-file policy blocker along the
 way, entirely on its own), and landed real Azure DevOps PR **#2397021**
 ("Add haiku to utilities resources README"). Exited cleanly via `/exit`;

@@ -542,7 +542,7 @@ Round 2 (operator's response to that evaluation):
     ownership via the claimant graph first: only 2 of the 14 PRs (#3505,
     #3498) had a worktree registered on this machine, one of them (#3505)
     genuinely live/being driven — left untouched (it was already clean); the
-    other 12 traced to a different machine (`tmichon-cloud1`) or an
+    other 12 traced to a different machine or an
     already-finalized/pruned worktree here, confirming it was safe to fix
     them directly. This produced the written-up **migration guide** below (this
     same entry) as the natural next artifact, since the flip's residual
@@ -568,7 +568,7 @@ Round 2 (operator's response to that evaluation):
       (PRs #3623/#3627/#3628).
 - [ ] Audit every machine's local `copilot-extensions` anchor checkout for
       the same stale-`default_branch: main` config-resolution hazard found
-      on `lambda-core` (Journal, 2026-09-25) — at minimum `tmichon-cloud1`,
+      on `lambda-core` (Journal, 2026-09-25) — at minimum the second operator workstation,
       already known to carry other stale-vs-`dev` state from the same
       migration window.
 
@@ -1273,7 +1273,7 @@ the hardening itself exposed. In order:
 1. **Identifier scrub landed** (#3511), with a clarified allowlist worked
    out with the operator: `ThomasMichon`/`OneDrive` references are fine to
    keep (the operator's own public identity/product), but
-   `tmichon_microsoft`/`odsp-web`/`gim-home` are not — those are the
+   `operator_enterprise`/the private downstream repo/its private owner handle are not — those are the
    internal-only identifiers that actually needed scrubbing from the
    leaked content #3511 tracked.
 2. **Fixed the dead Promote/Validation-Gate `workflow_run` trigger**
@@ -1401,7 +1401,7 @@ contributor's) silently jammed.
     retargeted (or, for these 5, hadn't even been auto-retargeted yet since
     they predated GitHub's retarget sweep).
   - **2 already targeted `dev` but were CONFLICTING**: #3348, #3310 (both
-    from a different machine, `tmichon-cloud1`).
+    from a different machine).
   - The other 7 were already clean against `dev` — no action needed.
   - A stray `main source gate` check failure seen on a couple of PRs (e.g.
     #3495, #3310) turned out to be a **stale check, not a live bug**: that
@@ -1438,13 +1438,13 @@ contributor's) silently jammed.
   turns (idle-looking, also already clean, also left alone). The remaining
   12 — including all 7 that needed fixing — had no local worktree record at
   all (`agent-worktrees claims <id>` returned "worktree not found" for
-  every raw `worktree/tmichon-cloud1-*`/`worktree/tmichon-book2-*` head
+  every raw `worktree/operator-cloud1-*`/`worktree/operator-book2-*` head
   branch checked), meaning either a different machine or an
   already-finalized/pruned worktree here — confirming it was safe to work
   on them directly. Also traced one hop further for #3505: its owning
   `copilot-extensions` worktree is itself owned by a long-lived,
   currently-very-active `aperture-labs` worktree (a *root* claim, no further
-  owner recorded) — not an `odsp-web-harness` worktree; #3498's worktree has
+  owner recorded) — not a private-downstream worktree; #3498's worktree has
   no recorded owner at all (a root itself, or created out-of-band).
 - **Wrote the migration guide the sweep itself proved necessary.** Added a
   `> ### Migrating from the old main-targeting flow` callout directly under
@@ -1671,13 +1671,13 @@ efforts' own PRs).
     would default new PRs at `main` instead of `dev` — a plausible
     contributing factor to how PR #3622 ended up targeting `main` in the
     first place, though not confirmed as the specific cause (the erring
-    session may have run elsewhere, e.g. `tmichon-cloud1`, which was already
+    session may have run elsewhere, e.g. the second operator workstation, which was already
     known to carry its own stale-vs-`dev` state earlier this same night).
     Fixed via a logged break-glass edit (`repos allow-edits`): switched the
     anchor to `dev` (its old branch was already merged; nothing lost).
     GitHub's actual repo default branch and git's remote `HEAD` both
     correctly remain `main` — untouched, as they should be; only the
-    contribution-routing config was wrong. **`tmichon-cloud1` swept
+    contribution-routing config was wrong. **Second operator workstation swept
     (2026-09-25):** confirmed the identical staleness on this second
     machine, independently, while attempting `create-pr` for an unrelated
     `agent-worktrees` PR (Phase 1b Stage C, `agent-cli-lazy-dispatch`
@@ -1709,7 +1709,7 @@ efforts' own PRs).
     disagrees with `repos.yaml`'s registry entry for the same repo.
     correctly remain `main` — untouched, as they should be; only the
     contribution-routing config was wrong. **Not yet audited**: whether
-    other machines' anchors (e.g. `tmichon-cloud1`) carry the same staleness
+    other machines' anchors (e.g. the second operator workstation) carry the same staleness
     — worth a sweep next time that machine is active.
 
 ### 2026-09-25 — Repo-settings security sweep
@@ -1906,4 +1906,3 @@ efforts' own PRs).
   `report-failure` correctly skipped, since its own scope explicitly
   excludes the `Promote dev -> main` job), but exactly the kind of real
   bug that same monitoring discipline was well-positioned to catch.
-

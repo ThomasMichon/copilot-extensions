@@ -1016,30 +1016,28 @@ def _normalize_branch_ref(branch: str) -> str | None:
     return value if value.startswith("refs/heads/") else f"refs/heads/{value}"
 
 
-def _odsp_web_pr_ref(
+def _workspace_pr_ref(
     codespace_name: str,
     branch: str,
     *,
     remote_url: str | None = None,
+    expected_repository: str | None = None,
 ) -> str | None:
-    """The active odsp-web PR produced by this CodeSpace's current ADO branch,
-    or ``None`` when no such PR is detectable."""
+    """The active ADO PR for this branch, optionally constrained by repo."""
     branch_ref = _normalize_branch_ref(branch)
     if not branch_ref:
         return None
     remote = _ado_remote_ref(
         remote_url if remote_url is not None else (_codespace_remote_origin_url(codespace_name) or "")
     )
-    if remote is None or remote.repository.casefold() != "odsp-web":
+    if remote is None:
+        return None
+    if expected_repository and remote.repository.casefold() != expected_repository.casefold():
         return None
     token = _ado_rest_bearer()
     if not token:
         return None
-    query = urllib.parse.urlencode({
-        "searchCriteria.sourceRefName": branch_ref,
-        "searchCriteria.status": "active",
-        "api-version": "7.1",
-    })
+    query = urllib.parse.urlencode({"searchCriteria.sourceRefName": branch_ref, "searchCriteria.status": "active", "api-version": "7.1"})
     url = (
         f"{remote.api_base()}/_apis/git/repositories/"
         f"{urllib.parse.quote(remote.repository, safe='')}/pullrequests?{query}"
@@ -1067,24 +1065,13 @@ def _odsp_web_pr_ref(
     return remote.pr_url(pr_number)
 
 
-def _auto_claim_odsp_web_pr(
+def _auto_claim_workspace_pr(
     codespace_name: str,
     repository: str,
     _branch: str,
     worktree_id: str,
 ) -> str | None:
-    """Best-effort producer for Phase 4's odsp-web PR auto-claim.
-
-    Detection is intentionally read-triggered and idempotent: when the
-    Codespaces pivot materializes a row backed by a resolvable driving
-    worktree, it first checks whether config already declares the GH-hosted
-    launcher repo to back some *other* product repo and, when so, skips the
-    expensive live SSH probe entirely. Otherwise it probes the CodeSpace's
-    current real git workspace (ADO origin + checked-out branch) for an active
-    odsp-web PR and, if found, journals it onto that worktree's existing claim
-    ledger through the already-shipped `claims add pr` verb. No new claim store
-    exists here; `claims add` deduplicates by ref.
-    """
+    """Best-effort producer for the workspace-repo PR auto-claim."""
     if not worktree_id:
         return None
     try:
@@ -1104,17 +1091,21 @@ def _auto_claim_odsp_web_pr(
     )
     owner_worktree = getattr(record, "path", None) or getattr(record, "worktree_path", None)
     configured_workspace_repo = _configured_workspace_repo(repository)
-    if (
-        configured_workspace_repo
-        and _short_repo(configured_workspace_repo).casefold() != "odsp-web"
-    ):
-        return None
+    candidate_repo = configured_workspace_repo or repository
+    expected_repository = _short_repo(candidate_repo) if candidate_repo else None
+    if expected_repository and expected_repository.endswith("-codespaces"):
+        expected_repository = expected_repository[:-len("-codespaces")]
     remote_url, branch = _codespace_git_probe(
         codespace_name,
         repository,
         owner_worktree,
     )
-    pr_ref = _odsp_web_pr_ref(codespace_name, branch or "", remote_url=remote_url)
+    pr_ref = _workspace_pr_ref(
+        codespace_name,
+        branch or "",
+        remote_url=remote_url,
+        expected_repository=expected_repository,
+    )
     if not pr_ref:
         return None
     try:
@@ -1317,7 +1308,7 @@ def picker_payload(
             has_driving_worktree=has_driving_worktree,
             orphaned=m.orphaned,
         )
-        _auto_claim_odsp_web_pr(
+        _auto_claim_workspace_pr(
             m.name,
             m.repository,
             m.branch,

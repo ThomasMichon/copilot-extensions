@@ -290,7 +290,7 @@ def test_route_register_carries_venue_for_remote_cli_mode(client: TestClient) ->
     carries none."""
     venue = {
         "kind": "codespace",
-        "target": "odsp-web-codespaces",
+        "target": "example-web-codespaces",
         "mux_session_name": "wt-abc123",
     }
     r = client.post(

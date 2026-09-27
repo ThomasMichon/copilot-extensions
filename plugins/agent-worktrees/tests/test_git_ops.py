@@ -459,7 +459,7 @@ class TestPinGitCredential:
         ``_active_gh_account()``, which shells out to the REAL ``gh auth
         status`` on whatever machine runs this suite. A test using a
         plausible-looking real login (e.g. the EMU-mapped
-        ``tmichon_microsoft`` example) would then pass or fail depending on
+        ``operator_enterprise`` example) would then pass or fail depending on
         which account happens to be authenticated locally -- exactly the
         kind of environment-dependent flake a unit test must not have. Tests
         exercising the active-account branch explicitly override this with
@@ -508,14 +508,14 @@ class TestPinGitCredential:
 
     def test_allows_underscore_login(self, tmp_path: Path, monkeypatch):
         """EMU-mapped logins in this codebase use underscores (e.g.
-        'tmichon_microsoft'), which is not a real GitHub username character
+        'operator_enterprise'), which is not a real GitHub username character
         but must still be allowed -- only shell metacharacters are rejected."""
         monkeypatch.setattr(go.shutil, "which", lambda _: "/usr/bin/gh")
         repo = tmp_path / "repo"
         repo.mkdir()
         import subprocess as sp
         sp.run(["git", "init", "-q", str(repo)], check=True)
-        assert go.pin_git_credential(repo, "tmichon_microsoft") is True
+        assert go.pin_git_credential(repo, "operator_enterprise") is True
 
     def test_skips_when_login_is_active_account(self, tmp_path: Path, monkeypatch):
         """#900's own rationale, reapplied here: when login IS the active gh
@@ -598,14 +598,14 @@ class TestPinGitCredential:
         import subprocess as sp
         sp.run(["git", "init", "-q", str(repo)], check=True)
 
-        assert go.pin_git_credential(repo, "tmichon_microsoft") is True
+        assert go.pin_git_credential(repo, "operator_enterprise") is True
 
         username = sp.run(
             ["git", "-C", str(repo), "config", "--local",
              "credential.https://github.com.username"],
             capture_output=True, text=True, check=True,
         ).stdout.strip()
-        assert username == "tmichon_microsoft"
+        assert username == "operator_enterprise"
 
         helpers = sp.run(
             ["git", "-C", str(repo), "config", "--local", "--get-all",
@@ -615,7 +615,7 @@ class TestPinGitCredential:
         # A leading empty entry resets any inherited (global/system) helper
         # chain for this host before the pinned helper is appended.
         assert helpers[0] == ""
-        assert "tmichon_microsoft" in helpers[-1]
+        assert "operator_enterprise" in helpers[-1]
         assert "gh auth token" in helpers[-1]
 
     def test_idempotent_on_repeated_calls(self, tmp_path: Path, monkeypatch):
@@ -627,8 +627,8 @@ class TestPinGitCredential:
         import subprocess as sp
         sp.run(["git", "init", "-q", str(repo)], check=True)
 
-        assert go.pin_git_credential(repo, "tmichon_microsoft") is True
-        assert go.pin_git_credential(repo, "tmichon_microsoft") is True
+        assert go.pin_git_credential(repo, "operator_enterprise") is True
+        assert go.pin_git_credential(repo, "operator_enterprise") is True
 
         helpers = sp.run(
             ["git", "-C", str(repo), "config", "--local", "--get-all",
@@ -712,14 +712,14 @@ class TestPinGitCredential:
         sp.run(["git", "init", "-q", str(repo)], check=True)
         sp.run(["git", "-C", str(repo), "config", "core.bare", "true"], check=True)
 
-        assert go.pin_git_credential(repo, "tmichon_microsoft") is True
+        assert go.pin_git_credential(repo, "operator_enterprise") is True
 
         username = sp.run(
             ["git", "-C", str(repo), "config", "--local",
              "credential.https://github.com.username"],
             capture_output=True, text=True, check=True,
         ).stdout.strip()
-        assert username == "tmichon_microsoft"
+        assert username == "operator_enterprise"
 
 
 class TestFetchTimeout:
