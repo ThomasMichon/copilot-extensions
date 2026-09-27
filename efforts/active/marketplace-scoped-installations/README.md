@@ -148,7 +148,7 @@ because they provide tools or services.
   canonical templates.
 - [x] Add session-start command-catalog context so skills and agents receive the
   exact payload-owned invocation path; convert operative bare command examples.
-- [ ] **Scope corrected 2026-09-27 (operator directive — see Journal):** this
+- [x] **Scope corrected 2026-09-27 (operator directive — see Journal):** this
   item is **not** "stop installing generic `agent-*` commands into
   `~/.local/bin`" unconditionally. A plugin's own global-binstub *placement*
   retires only for a host that actually configures a marketplace-cell
@@ -167,17 +167,20 @@ because they provide tools or services.
   writes *its own* global binstub, and `agent-worktrees`'s permanent
   project-command surface) is accepted and out of this item's scope. The
   [Phase 2 launcher contract inventory](phase-2-launcher-contracts.md) has now
-  **fully reclassified all findings by reading the actual source** (not
+  **fully reclassified and, where genuinely open, fixed every finding** (not
   guessed): of 70 original findings, 2 were guard false positives (converted),
-  60 are verified own-payload placement (accepted, no action), 2
+  62 are verified own-payload placement (accepted, no action), and 2
   (`agent-vault` credential-askpass) are verified currently-correct and
-  explicitly deferred pending that plugin's own future cell-awareness, and
-  exactly **2 remain genuine open work** (`agent-worktrees`'s
-  `register-nudge.{sh,ps1}` — **corrected 2026-09-27**: not a quick
-  pattern-reuse from `bootstrap-check.sh`, which turns out to depend on the
-  same heavy resolver `register-nudge.sh` deliberately avoids for its
-  "tools-half box" bootstrap guarantee; needs new lightweight-detection
-  design first).
+  explicitly deferred pending that plugin's own future cell-awareness.
+  **Zero findings remain open.** The last genuine gap
+  (`agent-worktrees`'s `register-nudge.{sh,ps1}` marketplace-cell detection)
+  is closed via a new durable, resolver-free runtime-root pointer added to
+  the canonical `libs/installation-context` library (Python/bash/PowerShell
+  parity, synced to all 11 vendoring plugins) — see
+  [install-contract.md § Durable runtime-root
+  pointer](../../../docs/install-contract.md#durable-runtime-root-pointer-resolver-free-consumers) — rather than the heavier resolver dependency
+  `register-nudge.sh` deliberately avoids for its "tools-half box" bootstrap
+  guarantee.
   - [x] Preserve complete default-legacy fallback coverage while migration is
     incomplete: every runtime `agent-*` stamp publishes every declared payload
     command, and agent-logger's multi-command family delegates through durable
@@ -450,6 +453,77 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 [`phase-6-lifecycle.md`](phase-6-lifecycle.md).
 
 ## Journal
+
+### 2026-09-27 — Durable runtime-root pointer designed and implemented; Phase 2 launcher-contract inventory now at zero open findings
+
+- Directed to design a durable marketplace-cell lookup for `register-nudge.sh`
+  rather than stop at "needs design work." Added a new normative mechanism to
+  [install-contract.md § Durable runtime-root
+  pointer](../../../docs/install-contract.md#durable-runtime-root-pointer-resolver-free-consumers):
+  every `status` resolution that reaches `"ready"` with a non-null
+  `runtimeRoot` now publishes that value, as a side effect, to a plain-text,
+  single-line, well-known file (`<durable-home>/<plugin-id>/runtime-root`) —
+  no JSON parsing required to read it, so a genuinely resolver-free consumer
+  can make a best-effort existence check with a plain `cat`/`head`. Advisory
+  only, never authoritative; publication is skipped (not blanked) on any
+  non-`"ready"` status so a transient bad resolution never clobbers a
+  last-known-good pointer, and a failed write never fails the real result.
+- **Implemented in all three parity runtimes** in the canonical
+  `libs/installation-context/` library: Python
+  (`_publish_runtime_root_pointer` in `_installation_context_files.py`,
+  called from `resolve_installation_mode`'s return path in
+  `_installation_context_mode_cli.py`), bash (`publish_runtime_root_pointer`
+  in `installation-context.sh`, called only from the `status` action branch,
+  written without `atomic_write_text` to avoid its `fail()`-based exit
+  propagating out of a best-effort helper), and PowerShell
+  (`Publish-RuntimeRootPointer` in `installation-context.ps1`, gated on
+  `$Action -ceq 'status'` since `Resolve-InstallationStatus` also serves
+  `probe-legacy`). Synced to all 11 vendoring plugins via
+  `tools/sync-installation-context.py` (`--check` now clean).
+- **Fixed a broken test as part of adding the feature, not around it**:
+  `test_status_and_probe_cli_parity_and_read_only` asserted `status` was
+  fully read-only across all three runners — no longer true by design.
+  Updated it to assert the delta is *exactly* the one new pointer file (with
+  correct content), and that a subsequent `probe-legacy` call adds nothing
+  further. Dropped an initial exact-`0600`-permission assertion after
+  confirming it made the runner-parity test brittle for no security benefit
+  (the pointer holds a path, not a secret; PowerShell's default write mode on
+  this platform is `0664`, not `0600`, and there's no existing precedent in
+  this PS1 file for platform-conditional permission hardening) — softened
+  the doc's wording to match rather than bolt on a first-of-its-kind chmod.
+- **Confirmed via `git stash` isolation that ~12 other pre-existing test
+  failures** (`test_bootstrap_context_selection.py`,
+  `test_legacy_entrypoint_probe.py`) are unrelated to this change —
+  identical failures with and without it applied. Filed
+  [aperture-labs#7753](https://gitea.michon.ski/tmichon/aperture-labs/issues/7753)
+  rather than silently living with them or scope-creeping into fixing them
+  here.
+- **Fixed `agent-worktrees`'s `register-nudge.{sh,ps1}`** using the new
+  pointer: checks `command -v`/legacy-path first exactly as before (zero
+  behavior change for legacy hosts), then falls back to reading
+  `~/.copilot-extensions/agent-worktrees/runtime-root` and checking that the
+  named directory exists — closing the real gap (a marketplace-cell-only
+  host with no legacy binstub was previously invisible to this check) while
+  staying resolver-free and fail-open exactly like the rest of the file.
+  Deliberately checks directory *existence* only, not a specific binstub
+  sub-path, after confirming `runtimeRoot` means different things in legacy
+  vs. namespaced mode (the plugin's runtime/state root vs. the cell's
+  plugin-root) and that guessing a specific sub-path wrong would be no safer
+  than the existing heuristic-quality bar this file already accepts — the
+  consequence of either false-positive or false-negative here is a cosmetic
+  nudge-message miss, not a functional gate on any mutation.
+- **Phase 2 launcher-contract inventory reaches zero open findings.**
+  Updated the disposition summary: 62 own-payload placement (accepted), 2
+  deferred (`agent-vault`), 0 open. Checked off the corrected Phase 2 scope
+  item in the main Plan on that basis. Left the upstream GitHub `#1103`
+  tracker's own closure as an explicit reviewer/operator decision — its
+  history suggests broader scope than this specific inventory, and that call
+  shouldn't be inferred from local checklist state alone.
+- Verified: full `libs/installation-context/tests/test_installation_mode_governance.py`
+  (120 tests) passed via `test-supervisor`; `check-marketplace-isolation.py`
+  (68, unchanged — the retained legacy-path text is correctly still flagged
+  as accepted own-payload); `check-docs-consistency.py` clean; `bash -n` and
+  the PowerShell AST parser both clean on every edited script.
 
 ### 2026-09-27 — Correction: `register-nudge.sh`'s fix is NOT a `bootstrap-check.sh` pattern reuse — it needs new resolver-free design
 

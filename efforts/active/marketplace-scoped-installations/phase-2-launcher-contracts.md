@@ -167,7 +167,7 @@ confirming two things the prior partial audits could only guess at:
 | Generic wrapper publication and plugin-specific PATH guidance | 45 | **Own-payload placement — accepted, conditional on marketplace-cell.** Each plugin's own installer declaring where *it* writes *its own* global binstub/PATH. Not Phase 6 retirement work; not this item's gate. | all 13 plugins below except `agent-worktrees`'s own project-command lines |
 | Mixed project-command directory and PATH use | 11 | **Own-payload placement — permanent, accepted.** `agent-worktrees`'s attributable project-command surface. | `agent-worktrees` only |
 | Third-party tool PATH bootstrap (**reclassified 2026-09-27**, was "remote transport selection") | 2 → **0, converted this pass** | **Guard false positive, not agent-* consumption at all.** Read the actual code: these lines install and PATH-expose `dtssh`/`devtunnel-ssh`, an unrelated third-party CLI — nothing to do with any `agent-*` binstub or marketplace path. Annotated `allow third-party-installer-path` in [#4336](https://github.com/ThomasMichon/copilot-extensions/pull/4336) (same underlying concern the sibling `.ps1` files' `$InstallRelease` URL already carries as `allow third-party-installer-url`). | `agent-ssh` `dtssh` `install-{client,host}.sh` |
-| Operator, bootstrap, and nudge launchers | 4 | **Split, verified by reading each file:** `agent-machines`'s `bootstrap-check.{sh,ps1}` (2) already calls the installation-context resolver a few lines above (`ContextMarketplaceId`, `status`, `reason`, `namespaced-active`, `legacy_mutation_allowed`) and only falls through to the legacy `Binstub` path when that resolution says legacy — **already correctly gated, own-payload, accepted, no action needed.** `agent-worktrees`'s `register-nudge.{sh,ps1}` (2) has **no** installation-context awareness at all — a plain `command -v`/legacy-path existence check with no cell branching — genuinely unconverted, but **corrected 2026-09-27: not a quick copy of `bootstrap-check.sh`'s pattern.** The file's own header states it is deliberately "resolver-free" so it still runs on a "tools-half box" (a session-start hook, before full runtime provisioning). Tracing `bootstrap-check.sh`'s `legacy_mutation_allowed` shows it calls `legacy-entrypoint-probe.sh`, which itself shells out to the full, heavy `installation-context.sh` (bash 4.4+, `awk` JSON parsing) — **not actually resolver-free**, so copying that approach here would silently break the "tools-half box" guarantee `register-nudge.sh` exists to preserve. A correct fix needs a genuinely lightweight, resolver-free marketplace-cell detection (e.g. a raw grep/sed read of the durable `installation-mode.json` policy file's `enabled` field, no `awk`/bash-4.4 dependency) — new design work, not a pattern reuse. Left unconverted pending that design. | `agent-machines` (2, accepted), `agent-worktrees` (2, open — needs design, not a quick fix) |
+| Operator, bootstrap, and nudge launchers | 4 | **Resolved 2026-09-27**: `agent-machines`'s `bootstrap-check.{sh,ps1}` (2) already calls the installation-context resolver a few lines above and only falls through to the legacy `Binstub` path when that resolution says legacy — own-payload, accepted, no action needed. `agent-worktrees`'s `register-nudge.{sh,ps1}` (2) now also consults a durable, resolver-free marketplace-cell pointer (see the new [install-contract.md § Durable runtime-root pointer](../../../docs/install-contract.md#durable-runtime-root-pointer-resolver-free-consumers)) before falling back to its existing legacy-path check — closing the real functional gap (marketplace-cell availability was previously undetectable) without depending on the heavy resolver `register-nudge.sh` deliberately avoids. The guard still (correctly) flags the retained legacy-path text — that fallback is permanent, own-payload, accepted, exactly like `bootstrap-check.sh`'s. | `agent-machines` (2, accepted), `agent-worktrees` (2, accepted — functional gap closed, legacy fallback text remains and is expected) |
 | Readiness legacy fallback | 3 | **Verified: self-probe, own-payload, accepted.** `agent-codespaces`'s `readiness-context.{sh,ps1}` only *checks existence* of its own legacy binstub for a session-start readiness report — it never invokes anything at that path. Harmless, and naturally disappears only if/when this plugin's legacy wrapper itself retires (a placement question, not a consumption one). | `agent-codespaces` (`readiness-context.{sh,ps1}`, 3) |
 | `payload-invocation.json` legacy-footprint declarations | 2 | **Own-payload placement — accepted, no code change.** Declares each plugin's own historical legacy paths; metadata, not a live call. | `agent-index` (line 22), `agent-machines` (line 20) |
 | Credential and askpass integration | 2 | **Verified: currently correct, premature to convert.** `agent-vault`'s own `install.sh`/`init.ps1` has **zero** installation-context integration anywhere (confirmed by direct grep) — unlike `agent-machines`/`agent-index`, `agent-vault` was never one of Phase 3's cell-aware exemplars, so it always runs legacy-only regardless of host marketplace-cell config today. Its `vault-askpass` helper hardcoding `$HOME/.local/bin/agent-vault` is therefore **currently correct, not a bug** — there is no cell path it could resolve to yet. Converting this helper now, before `agent-vault` itself gains cell-awareness, would add complexity to a `sudo -A` elevation-critical path with zero present benefit and real risk. **Do not touch this file** until/unless `agent-vault` becomes a cell-aware plugin in its own right (a Phase-3-scale undertaking, not a quick patch). | `agent-vault` `install.sh` (askpash exec + `SUDO_ASKPASS` guidance) |
@@ -175,18 +175,21 @@ confirming two things the prior partial audits could only guess at:
 | **Total** | **68** (post-conversion) | | |
 
 **Disposition summary (final, code-verified, 2026-09-27)**: of the original 70
-findings, **2 were guard false positives** (converted this pass, now 68
-remain). Of those 68: **60 are own-payload placement** (45 + 11 + 2 + 2, the
-`agent-machines` bootstrap-check pair, and the `agent-codespaces` readiness
-probes) — confirmed correct as-is, no action needed, permanently out of this
-item's scope. **2 are credential-askpass, verified currently-correct and
-explicitly deferred** (blocked on `agent-vault` gaining cell-awareness — do
-not attempt a standalone patch). **The remaining 2 are `agent-worktrees`'s
-`register-nudge.{sh,ps1}`** — genuinely unconverted, but **not** a quick
-pattern-reuse fix: it needs new, genuinely lightweight (no `awk`/bash-4.4)
-marketplace-cell detection that preserves its deliberate "tools-half box,
-resolver-free" bootstrap guarantee. A design pass, not an implementation
-task, is the next step.
+findings, **2 were guard false positives** (converted this pass). Of the
+remaining 68: **62 are own-payload placement** (45 + 11 + 2 + 2 + 2, the
+`agent-machines` bootstrap-check pair and `agent-worktrees`'s
+`register-nudge` pair, now that both are confirmed correctly gated, plus the
+`agent-codespaces` readiness probes) — no further action needed, permanently
+out of this item's scope. **2 are credential-askpass, verified
+currently-correct and explicitly deferred** (blocked on `agent-vault`
+gaining cell-awareness — do not attempt a standalone patch). **Zero findings
+remain genuinely open.** `agent-worktrees`'s `register-nudge.{sh,ps1}` was
+the last one: fixed by adding a genuinely lightweight (no `awk`/bash-4.4)
+durable-pointer read (see [install-contract.md § Durable runtime-root
+pointer](../../../docs/install-contract.md#durable-runtime-root-pointer-resolver-free-consumers)),
+landed in the canonical `libs/installation-context` library (Python, bash,
+and PowerShell parity) and synced to all 11 vendoring plugins, rather than
+copying `bootstrap-check.sh`'s heavier resolver dependency.
 
 
 
@@ -408,6 +411,15 @@ target through the `runtimeRoot` resolver or session command catalog, treating
 a legacy-fallback root exactly like a marketplace-cell root. Own-payload
 global-binstub *placement* is explicitly **not** part of this gate — it is
 accepted, permanent on non-marketplace-cell hosts, and never itself "removed."
+
+**Satisfied 2026-09-27, this effort's own inventory (see the disposition
+summary above)**: every one of the 70 tracked findings is now either fixed,
+verified own-payload placement, or explicitly deferred with a stated reason.
+This local checklist item is checked off on that basis. Whether the upstream
+GitHub `#1103` tracker itself should close is a separate call this pass did
+not make — that issue's own history suggests broader installation-cell
+migration scope beyond this specific launcher-contract inventory; closing it
+is left to an explicit reviewer/operator decision, not inferred here.
 
 <details>
 <summary>Original wording (historical, no longer the completion criterion)</summary>

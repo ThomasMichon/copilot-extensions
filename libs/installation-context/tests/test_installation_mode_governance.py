@@ -2457,6 +2457,19 @@ def test_status_and_probe_cli_parity_and_read_only(
     assert value["desiredMode"] == "legacy"
     assert set(value["maintenance"]) == {"state", "scope", "marker", "sidecar"}
 
+    # `status` is not fully read-only: a "ready" resolution with a non-null
+    # runtimeRoot publishes the durable, advisory runtime-root pointer (see
+    # install-contract.md "Durable runtime-root pointer"). Assert the delta
+    # is exactly that one intentional side effect, nothing else.
+    after_status = _snapshot(tmp_path)
+    pointer_relative = f"durable/{value['pluginId']}/runtime-root"
+    assert set(after_status) - set(before) == {
+        f"durable/{value['pluginId']}",
+        pointer_relative,
+    }
+    pointer_path = tmp_path / pointer_relative
+    assert pointer_path.read_text(encoding="utf-8") == value["runtimeRoot"] + "\n"
+
     allowed = _run(
         runner,
         _cli_arguments(layout, legacy, action="probe-legacy"),
@@ -2465,7 +2478,7 @@ def test_status_and_probe_cli_parity_and_read_only(
     decision = json.loads(allowed.stdout)
     assert decision["allowMutation"] is True
     assert decision["probeReason"] == "legacy-active"
-    assert _snapshot(tmp_path) == before
+    assert _snapshot(tmp_path) == after_status
 
 
 @pytest.mark.parametrize(

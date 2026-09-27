@@ -4643,6 +4643,28 @@ emit_legacy_json() {
     printf '}'
 }
 
+publish_runtime_root_pointer() {
+    # Best-effort, advisory pointer for resolver-free consumers (see
+    # install-contract.md "Durable runtime-root pointer"). Never
+    # authoritative, and must never fail or block the real status result --
+    # every fallible step below returns non-zero instead of calling fail()
+    # (which would exit the whole process), so the caller's `|| true` is a
+    # belt-and-suspenders guard, not the only thing standing between this
+    # and an aborted status command.
+    local plugin_id="$1" runtime_root="$2" status="$3" durable_home="$4"
+    local directory path temporary
+    [[ -n "$plugin_id" && -n "$runtime_root" && "$status" == ready ]] || return 0
+    [[ "$plugin_id" =~ ^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$ &&
+        "$plugin_id" != "." && "$plugin_id" != ".." ]] || return 0
+    directory="$durable_home/$plugin_id"
+    path="$directory/runtime-root"
+    mkdir -p -- "$directory" 2>/dev/null || return 0
+    temporary="$(mktemp "$directory/.runtime-root.tmp.XXXXXX" 2>/dev/null)" || return 0
+    TEMP_FILES+=("$temporary")
+    printf '%s\n' "$runtime_root" >"$temporary" 2>/dev/null || return 0
+    mv -f -- "$temporary" "$path" 2>/dev/null || return 0
+}
+
 emit_status_result() {
     local desired_mode="$1" actual_mode="$2" status="$3" runtime_root="$4" context_path="$5" activation_path="$6" activation_generation="$7" install_generation="$8" reason="$9" allow_mutation="${10-}" probe_reason="${11-}"
     printf '{'
@@ -4808,6 +4830,7 @@ run_status_action() {
     fi
 
     if [[ "$ACTION" == status ]]; then
+        publish_runtime_root_pointer "$RESOLVED_PLUGIN_ID" "$runtime_root" "$status" "$DURABLE_HOME"
         emit_status_result "$desired_mode" "$actual_mode" "$status" "$runtime_root" \
             "$context_path" "$activation_path" "$activation_generation" "$install_generation" "$reason"
         printf '\n'

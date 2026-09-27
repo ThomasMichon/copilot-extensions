@@ -1595,6 +1595,27 @@ function Write-AtomicText([string]$Path, [string]$Value) {
     }
 }
 
+function Publish-RuntimeRootPointer(
+    [string]$PluginId,
+    [string]$RuntimeRoot,
+    [string]$Status,
+    [string]$DurableHome
+) {
+    # Best-effort, advisory pointer for resolver-free consumers (see
+    # install-contract.md "Durable runtime-root pointer"). Never
+    # authoritative, and must never fail or block the real status result.
+    if (-not $PluginId -or -not $RuntimeRoot -or $Status -cne 'ready') {
+        return
+    }
+    try {
+        Assert-PluginId $PluginId
+        Write-AtomicText (Join-Path (Join-Path $DurableHome $PluginId) 'runtime-root') $RuntimeRoot
+    }
+    catch {
+        # Swallow -- see the never-fail-the-real-result contract above.
+    }
+}
+
 function Read-LockOwner([string]$OwnerPath) {
     try {
         $bytes = [IO.File]::ReadAllBytes($OwnerPath)
@@ -4035,6 +4056,10 @@ function Resolve-InstallationStatus(
             disposition = $legacy.disposition
             ownerMarketplaceId = $legacy.ownerMarketplaceId
         }
+    }
+
+    if ($Action -ceq 'status') {
+        Publish-RuntimeRootPointer $target.pluginId $runtimeRoot $status $ResolvedDurableHome
     }
 
     if ($Action -ceq 'probe-legacy') {

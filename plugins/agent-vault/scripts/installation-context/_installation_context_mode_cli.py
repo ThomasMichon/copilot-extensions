@@ -249,6 +249,9 @@ def resolve_installation_mode(
     elif actual_mode == "namespaced":
         reason = "namespaced-active"
 
+    _publish_runtime_root_pointer(
+        resolved_durable_home, trusted_plugin_id, runtime_root, status
+    )
     return {
         "schema": RESOLUTION_SCHEMA,
         "version": 1,

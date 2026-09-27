@@ -119,10 +119,25 @@ fi
 emit_empty() { publish '{}'; }
 
 # Only nudge when agent-worktrees is actually available to register with (the
-# self-provisioning tool binstub is on PATH or deployed).
-if ! command -v agent-worktrees >/dev/null 2>&1 && [ ! -x "$HOME/.local/bin/agent-worktrees" ]; then
-    emit_empty
+# self-provisioning tool binstub is on PATH or deployed, OR the durable
+# runtime-root pointer -- see install-contract.md "Durable runtime-root
+# pointer" -- names a currently-existing root, e.g. a marketplace-cell
+# install with no legacy binstub at all). Resolver-free by design: only a
+# plain `head`/`test`, no JSON parsing, so this still works on a tools-half
+# box. The pointer is advisory and may be missing or stale; either way this
+# stays fail-open exactly as it already does for every other uncertainty
+# here -- a missing/stale pointer just falls through to "not available".
+available=0
+command -v agent-worktrees >/dev/null 2>&1 && available=1
+[ -x "$HOME/.local/bin/agent-worktrees" ] && available=1
+if [ "$available" -eq 0 ]; then
+    pointer="$HOME/.copilot-extensions/agent-worktrees/runtime-root"
+    if [ -r "$pointer" ]; then
+        pointer_root="$(head -n 1 "$pointer" 2>/dev/null)"
+        [ -n "$pointer_root" ] && [ -d "$pointer_root" ] && available=1
+    fi
 fi
+[ "$available" -eq 1 ] || emit_empty
 
 # Must be inside a git work tree.
 top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
