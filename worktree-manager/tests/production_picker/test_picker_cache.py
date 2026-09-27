@@ -1,8 +1,7 @@
-"""Tests for the picker cache-first-paint render logic (dotfiles#948).
+"""Tests for the landed Picker cache/read seams.
 
-Covers ``data_local._overlay_cached_state`` (how a cache-only first-paint row
-reads turns/state from the session-render cache, and renders Unknown when the
-cache was never populated) and the ``refresh_one`` missing-record guard.
+Covers the explicit engine-client read paths the transplanted local source now
+uses (cache-only list, classified list, and per-row refresh).
 """
 from __future__ import annotations
 
@@ -103,9 +102,8 @@ class TestOverlayCachedState:
         # (worktree-finality-and-obligations Phase 5 fix).
         assert normalized["state"] == "MERGED"
         assert normalized["sess"] == "LOCK"
-
-
 class TestRefreshOneGuard:
+
     def test_missing_record_returns_none(self, monkeypatch):
         monkeypatch.setattr(
             data_local.engine_client,
@@ -120,9 +118,16 @@ def test_local_load_uses_cache_only_then_classified_provider_reads(monkeypatch):
     calls = []
     monkeypatch.setattr(data_local.context, "project", lambda: "example")
     monkeypatch.setattr(
+        data_local.engine_group_c,
+        "picker_reconcile_local",
+        lambda project, **_kwargs: calls.append(("batch", project)) or types.SimpleNamespace(
+            rows=[], summary={}
+        ),
+    )
+    monkeypatch.setattr(
         data_local.engine_client,
         "list_worktree_rows",
-        lambda *args, **kwargs: calls.append((args, kwargs)) or [{"id": "wt-a"}],
+        lambda *args, **kwargs: calls.append(("list", args, kwargs)) or [{"id": "wt-a"}],
     )
 
     fast = data_local.load("machine", "Win", classify=False)
@@ -131,13 +136,14 @@ def test_local_load_uses_cache_only_then_classified_provider_reads(monkeypatch):
     assert fast[0]["raw"]["id"] == "wt-a"
     assert full[0]["raw"]["id"] == "wt-a"
     assert calls == [
-        (("example",), {
+        ("list", ("example",), {
             "classify": False,
             "mux_details": False,
             "cache_only": True,
             "runner": None,
         }),
-        (("example",), {
+        ("batch", "example"),
+        ("list", ("example",), {
             "classify": True,
             "mux_details": True,
             "cache_only": False,
@@ -181,7 +187,7 @@ def test_local_classify_load_invokes_group_c_batch_once(monkeypatch):
 
     rows = data_local.load("machine", "Win", classify=True, runner=runner)
 
-    assert calls == [("list", runner), ("example", (), runner)]
+    assert calls == [("example", (), runner), ("list", runner)]
     assert len(rows) == 3
     assert rows[0]["state"] == "ACTIVE"
     assert rows[0]["mux_live"] is True

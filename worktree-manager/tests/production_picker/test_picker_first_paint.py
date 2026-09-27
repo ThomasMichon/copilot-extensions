@@ -670,26 +670,29 @@ def test_load_config_cache_scope_shares_across_threads():
         calls.append(1)
         return "config-value"
 
-    from worktree_manager.production_picker import context
-    from worktree_manager.production_picker import config as pm_cfg
-    orig = pm_cfg._load_config_uncached
-    pm_cfg._load_config_uncached = fake_uncached
-    context.set_project("example")
+    from worktree_manager.production_picker import project_config as pm_cfg
+
+    orig = pm_cfg._read_yaml
+    orig_default = pm_cfg.default_config_path
+    pm_cfg.clear_caches()
+    pm_cfg._read_yaml = fake_uncached
+    pm_cfg.default_config_path = lambda *_a, **_k: pm_cfg.Path("dummy-config.yaml")
     try:
         results = []
         with screen._load_config_cache_scope():
-            results.append(pm_cfg.load_config())
+            results.append(pm_cfg._load_project_yaml("demo"))
 
         def worker():
             with screen._load_config_cache_scope():
-                results.append(pm_cfg.load_config())
+                results.append(pm_cfg._load_project_yaml("demo"))
 
         t = threading.Thread(target=worker)
         t.start()
         t.join()
     finally:
-        pm_cfg._load_config_uncached = orig
-        context.reset()
+        pm_cfg._read_yaml = orig
+        pm_cfg.default_config_path = orig_default
+        pm_cfg.clear_caches()
 
     assert len(calls) == 1  # the second (real) thread's call hit the cache
     assert results == ["config-value", "config-value"]

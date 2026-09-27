@@ -9,7 +9,7 @@ import time
 
 from .engine_helpers import _DEFAULT_HOST_COLS, _DEFAULT_TARGET_ENVS, start_loader, target_rows
 from .selection import ListSelection
-from .. import config as cfg
+from .. import project_config as cfg
 
 # How long the Picker's shared config-cache scope (below) keeps a direct-file
 # snapshot before treating it as stale and recomputing it. Long enough to cover

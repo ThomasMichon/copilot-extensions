@@ -767,6 +767,7 @@ def test_worktrees_view_component_renders_body():
             async with app.run_test(size=(118, 40)) as pilot:
                 scr = app.query_one(PickerScreen)
                 scr.machine_idx = scr.local_index()
+                scr.real_ops = True
                 await pilot.pause()
 
                 # (a) The component exists and owns the body render.
@@ -3084,8 +3085,8 @@ def test_run_tui_picker_writes_crash_log(monkeypatch, tmp_path):
 
     import pytest
 
+    from worktree_manager.production_picker import project_config as cfg
     import worktree_manager.production_picker.picker_tui as pkg
-    from worktree_manager.production_picker import config as cfg
     from worktree_manager.production_picker.picker_tui import engine as eng
 
     monkeypatch.setattr(cfg, "install_dir", lambda: tmp_path)
@@ -3338,7 +3339,6 @@ def test_picker_buckets_sessionless_into_unowned():
 
     asyncio.run(run())
 
-
 def test_reconcile_prs_counts_terminal_transitions(monkeypatch):
     """Group C compatibility wrapper reads the batch summary's PR count."""
     from worktree_manager.production_picker.picker_tui import data_local
@@ -3356,6 +3356,22 @@ def test_reconcile_prs_counts_terminal_transitions(monkeypatch):
     assert data_local.reconcile_prs() == 1
 
 
+def test_reconcile_local_batch_uses_group_c_engine_call(monkeypatch):
+    from worktree_manager.production_picker.picker_tui import data_local
+
+    batch = types.SimpleNamespace(rows=[], summary={"record_count": 1})
+    seen = []
+    monkeypatch.setattr(data_local.context, "project", lambda: "example")
+    monkeypatch.setattr(
+        data_local.engine_group_c,
+        "picker_reconcile_local",
+        lambda project, **_kwargs: seen.append(project) or batch,
+    )
+
+    assert data_local.reconcile_local_batch() is batch
+    assert seen == ["example"]
+
+
 def test_picker_setup_does_not_spawn_legacy_reconcile_hooks():
     """Phase 3d Step 6 folds local reconcile into the classify load itself."""
     src = _fixture_source()
@@ -3366,24 +3382,15 @@ def test_picker_setup_does_not_spawn_legacy_reconcile_hooks():
         calls["load"] += 1
         return orig_load()
 
-    def reconcile_prs():
-        calls["reconcile"] += 1
-        return 1
-
-    def reconcile_bound_live():
-        calls["bound"] += 1
-        return 1
-
     src.load = load2
-    src.reconcile_prs = reconcile_prs
-    src.reconcile_bound_live = reconcile_bound_live
+    src.reconcile_local_batch = lambda: calls.__setitem__("reconcile", calls["reconcile"] + 1)
 
     async def run():
         app = PickerApp(src, live=False)
         async with app.run_test(size=(118, 36)) as pilot:
             scr = app.query_one(PickerScreen)
             deadline = time.monotonic() + 3.0
-            while time.monotonic() < deadline and not scr._pr_reconciled:
+            while time.monotonic() < deadline and scr._setup_applied_epoch == 0:
                 await pilot.pause()
             assert scr._bound_live_reconciled is True
             assert calls == {"reconcile": 0, "bound": 0, "load": 1}
@@ -3658,6 +3665,7 @@ def test_resume_decision_exits_with_worktree():
         async with app.run_test(size=(118, 36)) as pilot:
             scr = app.query_one(PickerScreen)
             scr.machine_idx = scr.local_index()
+            scr.real_ops = True
             scr.sel = ("L", 0)
             scr._activate()                 # opens the sub-menu, no exit
             await pilot.pause()
@@ -3685,6 +3693,7 @@ def test_open_submenu_no_mux_toggle():
         async with app.run_test(size=(118, 36)) as pilot:
             scr = app.query_one(PickerScreen)
             scr.machine_idx = scr.local_index()
+            scr.real_ops = True
             scr.sel = ("L", 0)
             scr._open_submenu()
             await pilot.pause()
@@ -8781,7 +8790,7 @@ def test_actions_menu_liveness_verify_is_offloaded(tmp_path, monkeypatch):
     """
     import threading
 
-    from worktree_manager.production_picker import config as _cfg
+    from worktree_manager.production_picker import project_config as _cfg
     from worktree_manager.production_picker import context as _context
     from worktree_manager.production_picker import engine_group_c as _engine_group_c
 
@@ -8792,7 +8801,6 @@ def test_actions_menu_liveness_verify_is_offloaded(tmp_path, monkeypatch):
     (tdir / f"{wt_id}.yaml").write_text("id: x\n", encoding="utf-8")
     monkeypatch.setattr(_cfg, "tracking_dir", lambda: tdir)
     monkeypatch.setattr(_context, "project", lambda: "example")
-
     gate = threading.Event()
     calls = {"n": 0}
 
@@ -8847,7 +8855,7 @@ def test_actions_menu_liveness_verify_is_offloaded(tmp_path, monkeypatch):
 
 def test_actions_worker_finishes_quietly_after_resume_exits(tmp_path, monkeypatch):
     """A slow menu probe may finish after Resume has detached the picker screen."""
-    from worktree_manager.production_picker import config as _cfg
+    from worktree_manager.production_picker import project_config as _cfg
     from worktree_manager.production_picker import context as _context
     from worktree_manager.production_picker import engine_group_c as _engine_group_c
 
@@ -8858,7 +8866,6 @@ def test_actions_worker_finishes_quietly_after_resume_exits(tmp_path, monkeypatc
     (tdir / f"{wt_id}.yaml").write_text("id: x\n", encoding="utf-8")
     monkeypatch.setattr(_cfg, "tracking_dir", lambda: tdir)
     monkeypatch.setattr(_context, "project", lambda: "example")
-
     gate = threading.Event()
     started = threading.Event()
     thread_errors = []
@@ -8894,10 +8901,12 @@ def test_actions_worker_finishes_quietly_after_resume_exits(tmp_path, monkeypatc
             async with app.run_test(size=(118, 36)) as pilot:
                 scr = app.query_one(PickerScreen)
                 scr.machine_idx = scr.local_index()
+                scr.real_ops = True
                 await pilot.pause()
                 recs = scr.list_records()
-                scr.sel = ("L", next(
-                    i for i, rec in enumerate(recs) if rec["id4"] == "stop"))
+                stop_index = next(i for i, rec in enumerate(recs) if rec["id4"] == "stop")
+                scr.data[stop_index]["raw"] = {"id": wt_id}
+                scr.sel = ("L", stop_index)
                 scr._open_submenu()
                 assert await asyncio.to_thread(started.wait, 1)
                 worker = next(

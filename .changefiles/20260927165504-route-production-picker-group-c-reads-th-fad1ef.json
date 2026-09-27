@@ -1,0 +1,9 @@
+{
+  "comment": "Route production Picker Group C reads through the batched engine seam",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

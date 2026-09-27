@@ -300,6 +300,12 @@ class PickerScreenRuntimeMixin:
                 _rt.invalidate()
             except Exception:
                 pass
+        try:
+            from .. import project_config as _cfg
+
+            _cfg.clear_caches()
+        except Exception:
+            pass
 
     def _next_setup_epoch(self) -> int:
         self._setup_epoch += 1

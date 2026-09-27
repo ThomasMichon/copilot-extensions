@@ -17,7 +17,7 @@ the engine then falls back to its built-in default axes.
 """
 from __future__ import annotations
 
-from .. import config as cfg
+from .. import project_config as cfg
 
 # machines.yaml environment name -> the picker's short env label (and C_ENV key).
 _ENV_LABEL = {"windows": "Win", "wsl": "WSL", "linux": "Linux"}

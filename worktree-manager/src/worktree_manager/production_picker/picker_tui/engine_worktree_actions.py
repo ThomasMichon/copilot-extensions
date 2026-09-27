@@ -217,7 +217,7 @@ class PickerScreenWorktreeActionsMixin:
             and rec.get("source_kind", "machine-ssh") == "machine-ssh"
         ):
             try:
-                from .. import config as _config
+                from .. import project_config as _config
                 from .. import context as _context
                 from .. import engine_group_c as _engine_group_c
 

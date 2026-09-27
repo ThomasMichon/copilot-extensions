@@ -14,9 +14,8 @@ import socket
 
 from worktree_manager import engine_client
 
-from .. import context
-from .. import config as cfg
-from .. import engine_group_c
+from .. import context, engine_group_c
+from .. import project_config as cfg
 from . import derive, roster, source_identity
 
 bucket = derive.bucket
@@ -144,10 +143,12 @@ def _merge_reconcile_row(
 def _overlay_reconcile_rows(
     rows: list[dict],
     *,
+    batch=None,
     worktree_ids: list[str] | None = None,
     runner=None,
 ) -> list[dict]:
-    batch = reconcile_local_batch(worktree_ids=worktree_ids, runner=runner)
+    if batch is None:
+        batch = reconcile_local_batch(worktree_ids=worktree_ids, runner=runner)
     if batch is None:
         return rows
     preserve_mux = not bool(batch.summary.get("mux_scan_ok", True))
@@ -230,6 +231,9 @@ def load(
         "source_id": source_id,
         "source_label": source_label,
     }
+    batch = None
+    if classify:
+        batch = reconcile_local_batch(runner=runner)
     rows = list(
         engine_client.list_worktree_rows(
             context.project(),
@@ -240,7 +244,7 @@ def load(
         )
     )
     if classify:
-        rows = _overlay_reconcile_rows(rows, runner=runner)
+        rows = _overlay_reconcile_rows(rows, batch=batch, runner=runner)
     return [derive.norm(row, machine, env, **norm_source) for row in rows]
 
 
