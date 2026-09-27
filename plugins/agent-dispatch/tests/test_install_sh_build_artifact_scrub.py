@@ -235,6 +235,65 @@ fi
     assert not (plugin_dir / "some_pkg.egg-info").exists()
 
 
+def _seed_vendored_lib_build_residue(plugin_dir: Path, lib_name: str) -> Path:
+    """Seed stale build/egg-info residue inside libs/<lib_name>/ -- every
+    `[tool.uv.sources]` workspace path dep (agent-procutil, zdd,
+    dropin-registry, ...) is its OWN independent setuptools build root
+    under libs/<name>/, sitting alongside $PLUGIN_DIR itself, not inside
+    it. Directory names under libs/ don't map 1:1 to package names (e.g.
+    agent-zdd -> libs/zdd), which is why the scrub walks every immediate
+    child of libs/ rather than trying to enumerate them."""
+    lib_dir = plugin_dir / "libs" / lib_name
+    (lib_dir / "build" / "lib" / "some_vendored_pkg").mkdir(parents=True)
+    (lib_dir / "build" / "lib" / "some_vendored_pkg" / "mod.py").write_text(
+        "x = 1\n", encoding="utf-8"
+    )
+    (lib_dir / "some_vendored_pkg.egg-info").mkdir()
+    (lib_dir / "some_vendored_pkg.egg-info" / "PKG-INFO").write_text(
+        "stub\n", encoding="utf-8"
+    )
+    (lib_dir / "src" / "some_vendored_pkg.egg-info").mkdir(parents=True)
+    (lib_dir / "src" / "some_vendored_pkg.egg-info" / "PKG-INFO").write_text(
+        "stub\n", encoding="utf-8"
+    )
+    return lib_dir
+
+
+def test_vendored_lib_build_residue_is_also_scrubbed(tmp_path: Path) -> None:
+    """Regression (2026-09-27, confirmed in a live deployment): a stale
+    libs/agent-procutil/build/lib silently shipped a version of
+    agent_procutil missing windowless_python_env even after a fully clean
+    `uv cache clean` + forced `--reinstall-package`/`--refresh-package`
+    rebuild, because every rebuild kept reading the stale libs/.../build/lib
+    copy instead of the fresh libs/.../src/ -- those flags bust uv's
+    resolution/build cache, not a stale build artifact sitting directly in
+    the source tree uv builds FROM. _scrub_payload_build_artifacts must
+    also clean every libs/<name>/ subdirectory's own build/*.egg-info
+    residue, not just $PLUGIN_DIR's."""
+    plugin_dir = tmp_path / "plugin"
+    plugin_dir.mkdir()
+    _seed_build_residue(plugin_dir)
+    procutil_dir = _seed_vendored_lib_build_residue(plugin_dir, "agent-procutil")
+    zdd_dir = _seed_vendored_lib_build_residue(plugin_dir, "zdd")
+    uv_stub = """
+uv() { echo 'Installed 1 package'; return 0; }
+"""
+    extra = """
+if _pip_install "$PLUGIN_DIR"; then
+    echo "EXIT:0"
+else
+    echo "EXIT:1"
+fi
+"""
+    result = _run_harness(plugin_dir, uv_stub, extra)
+    assert "EXIT:0" in result.stdout
+    assert not (plugin_dir / "build").exists()
+    for lib_dir in (procutil_dir, zdd_dir):
+        assert not (lib_dir / "build").exists()
+        assert not (lib_dir / "some_vendored_pkg.egg-info").exists()
+        assert not (lib_dir / "src" / "some_vendored_pkg.egg-info").exists()
+
+
 def test_scrub_is_a_harmless_noop_when_nothing_to_clean(tmp_path: Path) -> None:
     plugin_dir = tmp_path / "plugin"
     plugin_dir.mkdir()
