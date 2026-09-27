@@ -200,10 +200,34 @@ if (-not (Test-Path $Manifest)) {
     }
     $payloadInit = Join-Path $PSScriptRoot 'init.ps1'
     if ((Test-Path $payloadInit) -and (Select-String -Path $payloadInit -Pattern "'stamp'" -Quiet)) {
-        if (-not (Test-LegacyMutationAllowed)) { Exit-SessionStart }
         $pw = Get-Command pwsh -ErrorAction SilentlyContinue
         $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
-        & $exe -NoProfile -ExecutionPolicy Bypass -File $payloadInit stamp *> $null
+        # Two-stage stamp (#3303, full-harness-startup-reliability Round 2):
+        # 1. SYNCHRONOUSLY run the fast 'stamp-binstub' action -- just a
+        #    couple of small file writes under a lock, sub-second -- so the
+        #    launcher is guaranteed on PATH before this hook returns. A prior
+        #    version backgrounded the WHOLE 'stamp' action (including its
+        #    snapshot copy of the entire plugin payload, independently
+        #    measured at ~9s standalone), leaving a real window where the
+        #    session's first turn could invoke `agent-machines` before the
+        #    background job had created it (command-not-found race).
+        # 2. Background the full 'stamp' (unchanged) so the slower snapshot
+        #    copy still completes, without blocking the hook on it.
+        # NOTE: no Test-LegacyMutationAllowed pre-check here -- init.ps1's OWN
+        # top-level dispatch (every $Action except the cell-/slot- family)
+        # already re-runs the SAME legacy-entrypoint-probe with equivalent
+        # -PayloadRoot/-LegacyRoot values before 'stamp-binstub' or 'stamp'
+        # ever executes. Pre-checking here spawned a SECOND, fully redundant
+        # child PowerShell process per hook invocation for no additional
+        # safety -- confirmed by reading both call sites; init.ps1 exits
+        # non-zero on its own if the probe disallows the mutation, which this
+        # hook already discards output/exit code for either way.
+        & $exe -NoProfile -ExecutionPolicy Bypass -File $payloadInit stamp-binstub *> $null
+        $command = "& `"$payloadInit`" stamp *> `$null"
+        $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+        Start-Process -FilePath 'conhost.exe' `
+            -ArgumentList @('--headless', "`"$exe`"", '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc) `
+            -WindowStyle Hidden | Out-Null
     }
     Exit-SessionStart
 }

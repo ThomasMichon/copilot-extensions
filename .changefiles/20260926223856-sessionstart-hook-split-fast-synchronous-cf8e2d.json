@@ -1,0 +1,9 @@
+{
+  "comment": "sessionStart hook: split fast synchronous binstub deploy from the slower backgrounded snapshot copy (fixes a HookTimeoutError seen at full-marketplace scale); lock-serialize and atomically publish the binstub on both platforms; drop a redundant duplicate legacy-mutation probe spawn",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

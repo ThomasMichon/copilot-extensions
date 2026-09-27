@@ -1333,9 +1333,10 @@ deploy_resolver() {
 
 deploy_binstub() {
     STUB="$LOCAL_BIN/agent-machines"
+    STUB_TMP="$STUB.tmp-$$"
     mkdir -p "$LOCAL_BIN"
     deploy_resolver
-    cat > "$STUB" << 'STUBEOF'
+    cat > "$STUB_TMP" << 'STUBEOF'
 #!/usr/bin/env bash
 # agent-machines binstub -- self-provisioning (install-on-first-use).
 # Resolves the interpreter SOLELY via the junction-free versioned-runtime marker
@@ -1402,13 +1403,22 @@ else
 fi
 exit "$_rc"
 STUBEOF
-    chmod +x "$STUB"
+    chmod +x "$STUB_TMP"
+    mv -f "$STUB_TMP" "$STUB"
     _ok "Binstub: $STUB (self-provisioning)"
 }
 # Cheap 'stamp': splat the binstub + payload marker, defer the venv build to first
-# use (fits a sessionStart hook's grace window). No venv, no uv.
+# use (fits a sessionStart hook's grace window). No venv, no uv, no snapshot
+# copy -- genuinely fast, unlike the Windows sibling (which also copies the
+# whole plugin payload into a snapshots/ slot); this stays a synchronous
+# sessionStart-hook call on POSIX (see bootstrap-check.sh) rather than being
+# backgrounded. flock-serialized against a concurrent stamp from another
+# session so two writers can never interleave their binstub/marker writes.
 if [[ "$ACTION" == "stamp" ]]; then
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
+    _stamp_lock="$INSTALL_DIR/.stamp.lock"
+    exec 9>"$_stamp_lock"
+    command -v flock >/dev/null 2>&1 && flock 9 2>/dev/null
     printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
     deploy_binstub
     _ok "Stamped: binstub on PATH; runtime provisions on first use."

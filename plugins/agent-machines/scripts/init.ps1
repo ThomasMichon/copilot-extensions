@@ -17,7 +17,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('install', 'init', 'stamp', 'provision', 'cell-provision', 'cell-repair', 'cell-uninstall', 'cell-attribute-legacy', 'cell-deactivate', 'cell-retire-legacy', 'slot-provision', 'slot-validate', 'slot-complete', 'slot-completion-validate', 'slot-cutover')]
+    [ValidateSet('install', 'init', 'stamp', 'stamp-binstub', 'provision', 'cell-provision', 'cell-repair', 'cell-uninstall', 'cell-attribute-legacy', 'cell-deactivate', 'cell-retire-legacy', 'slot-provision', 'slot-validate', 'slot-complete', 'slot-completion-validate', 'slot-cutover')]
     [string]$Action = 'install',
     [string]$InstallDir,
     [string]$Context,
@@ -1680,7 +1680,13 @@ _i="`$(cat "`$_root/payload-dir" 2>/dev/null)/scripts/init.sh"
 if [ -n "`$_i" ] && [ -f "`$_i" ]; then echo "[agent-machines] runtime not provisioned; run: bash \"`$_i\" provision" >&2; else echo "[agent-machines] runtime not provisioned and the installer was not found; re-enable the plugin, then retry." >&2; fi
 exit 1
 "@
-        [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
+        # Publish atomically (temp file in the SAME directory + rename, which is
+        # atomic on one filesystem): a reader mid-write must never observe a
+        # truncated/torn binstub. Stale leftovers from a killed writer are
+        # harmless -- each writer uses its own PID-suffixed temp name.
+        $stubTmp = "$stubPath.tmp-$PID"
+        [System.IO.File]::WriteAllText($stubTmp, $stubContent, $utf8NoBom)
+        Move-Item -LiteralPath $stubTmp -Destination $stubPath -Force
         Write-Ok "Binstub: $stubPath"
         return
     }
@@ -1688,6 +1694,7 @@ exit 1
     $ps1Path = Join-Path $LocalBin 'agent-machines.ps1'
     if (Test-Path $ps1Path) { Remove-Item $ps1Path -Force -ErrorAction SilentlyContinue }
     $cmdPath = Join-Path $LocalBin 'agent-machines.cmd'
+    $cmdTmp = "$cmdPath.tmp-$PID"
     $cmdContent = @'
 @echo off
 setlocal
@@ -1736,8 +1743,57 @@ if %ERRORLEVEL%==0 set "_PSX=pwsh"
 for /f "usebackq delims=" %%p in (`%_PSX% -NoProfile -ExecutionPolicy Bypass -Command "$env:AGENT_RT_ROOT='%_ROOT%'; . '%_ROOT%\bin\resolve-runtime.ps1'; if ($AgentRtPy) { $AgentRtPy }" 2^>nul`) do set "_PY=%%p"
 goto :eof
 '@
-    [System.IO.File]::WriteAllText($cmdPath, $cmdContent, $utf8NoBom)
+    [System.IO.File]::WriteAllText($cmdTmp, $cmdContent, $utf8NoBom)
+    Move-Item -LiteralPath $cmdTmp -Destination $cmdPath -Force
     Write-Ok "Binstub: $cmdPath (self-provisioning)"
+}
+
+# Serializes every stamp-family action (this fast binstub-only path AND the
+# full Invoke-Stamp below) against concurrent invocations -- e.g. two fresh
+# sessions launching their sessionStart hook at nearly the same instant --
+# under ONE named mutex keyed by the install dir, so they can never observe
+# or produce a half-written binstub/marker set.
+function Enter-StampLock {
+    $stampHash = [BitConverter]::ToString(
+        [Security.Cryptography.SHA256]::Create().ComputeHash(
+            [Text.Encoding]::UTF8.GetBytes($InstallDir.ToLowerInvariant())
+        )
+    ).Replace('-', '').Substring(0, 24)
+    $stampMutexName = if ($env:OS -eq 'Windows_NT') {
+        "Local\CopilotExtensions.AgentMachines.Stamp.$stampHash"
+    } else {
+        "CopilotExtensions.AgentMachines.Stamp.$stampHash"
+    }
+    $mutex = New-Object Threading.Mutex($false, $stampMutexName)
+    $held = $false
+    try {
+        $held = $mutex.WaitOne([TimeSpan]::FromSeconds(20))
+    } catch [Threading.AbandonedMutexException] {
+        $held = $true
+    }
+    if (-not $held) { $mutex.Dispose(); throw 'Timed out waiting for the agent-machines stamp lock.' }
+    return $mutex
+}
+
+# Fast entry point (#3303, full-harness-startup-reliability Round 2): deploy
+# ONLY the self-provisioning binstub -- no snapshot copy -- so a sessionStart
+# hook can call this SYNCHRONOUSLY (sub-second: just a couple of small file
+# writes) to guarantee the launcher is on PATH before the hook returns, then
+# background the slower full `stamp` (below) for the snapshot copy. Without
+# this split, backgrounding the whole `stamp` action left a window where a
+# session's very first turn could invoke `agent-machines` before the
+# background job had created it (command-not-found race).
+function Invoke-StampBinstubOnly {
+    $mutex = Enter-StampLock
+    try {
+        foreach ($dir in @($InstallDir, $LocalBin)) {
+            if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        }
+        Deploy-SelfProvisioningBinstub
+    } finally {
+        [void]$mutex.ReleaseMutex()
+        $mutex.Dispose()
+    }
 }
 
 function Invoke-Stamp {
@@ -1749,25 +1805,8 @@ function Invoke-Stamp {
     Write-Host ''
     Write-Host '=== agent-machines stamp (defer runtime to first use) ===' -ForegroundColor Cyan
     if (-not $SrcVersion) { Write-Fail 'Cannot stamp: no version in pyproject.toml'; exit 1 }
-    $stampHash = [BitConverter]::ToString(
-        [Security.Cryptography.SHA256]::Create().ComputeHash(
-            [Text.Encoding]::UTF8.GetBytes($InstallDir.ToLowerInvariant())
-        )
-    ).Replace('-', '').Substring(0, 24)
-    $stampMutexName = if ($env:OS -eq 'Windows_NT') {
-        "Local\CopilotExtensions.AgentMachines.Stamp.$stampHash"
-    } else {
-        "CopilotExtensions.AgentMachines.Stamp.$stampHash"
-    }
-    $stampMutex = New-Object Threading.Mutex($false, $stampMutexName)
-    $stampLockHeld = $false
+    $stampMutex = Enter-StampLock
     try {
-        try {
-            $stampLockHeld = $stampMutex.WaitOne([TimeSpan]::FromSeconds(20))
-        } catch [Threading.AbandonedMutexException] {
-            $stampLockHeld = $true
-        }
-        if (-not $stampLockHeld) { throw 'Timed out waiting for the agent-machines stamp lock.' }
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
@@ -1791,11 +1830,12 @@ function Invoke-Stamp {
     Deploy-SelfProvisioningBinstub
     Write-Ok 'Stamped: agent-machines binstub on PATH; runtime provisions on first use.'
     } finally {
-        if ($stampLockHeld) { [void]$stampMutex.ReleaseMutex() }
+        [void]$stampMutex.ReleaseMutex()
         $stampMutex.Dispose()
     }
 }
 
+if ($Action -eq 'stamp-binstub') { Invoke-StampBinstubOnly; exit 0 }
 if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
 
 # -- Preflight checks --------------------------------------------------
