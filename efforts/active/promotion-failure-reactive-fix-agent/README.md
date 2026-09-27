@@ -1576,11 +1576,38 @@ _Pending._
   with a real `failure`/`timed_out` conclusion, which is available as soon
   as that specific job concludes, regardless of whether the run as a whole
   has finished.
-- **Five rounds deep now; #1, #3, #4, #6 have stayed resolved since round
-  1 with zero further findings across 4 subsequent review passes** — a
+- **A SIXTH review pass found 2 more, both since fixed:** (a) round 4's
+  job-level fix was still paired with a `headSha` comparison against
+  `github.run_id` (the downstream `validate-and-promote` run) — but a
+  `workflow_run`-triggered run's own `headSha` reflects its *triggering*
+  ref, not the pinned SHA `full`/`worktree-manager`/`guards-full-sweep`
+  explicitly check out via `ref: needs.gate.outputs.sha` — so this
+  compared the WRONG run's metadata and would have rejected every
+  genuine watchdog issue *again*. Removed entirely: the author+label+
+  no-edit chain already binds the whole body (including its commit-SHA
+  claim) to an unaltered bot-authored record, so re-deriving the SHA
+  from Actions metadata that doesn't even reflect the real checkout ref
+  added fragility, not security. (b) None of the checks across all 5
+  prior rounds were actually TOCTOU-safe — the agent job still re-fetched
+  the body live via `issue_read` at its own later runtime, *after* every
+  `verify-issue` check had already passed, letting a write-access
+  collaborator edit the body in that exact window and defeat every check
+  above. Fixed by capturing the exact verified body inside `verify-issue`
+  itself (base64-encoded through a job output) and decoding it once
+  inside the agent job via a new `pre-agent-steps` entry — the markdown
+  prompt now embeds that immutable, already-verified value directly
+  instead of re-fetching anything live. This does put literal body text
+  back in the prompt (the shape #5's first fix moved away from) — but
+  this copy is provably the one `verify-issue` already authenticated, not
+  a live, editable fetch; the prompt itself now names the one residual
+  risk this can't close (injection content that was already present in
+  the watchdog's own genuine log excerpt), and `threat-detection` remains
+  the backstop for exactly that.
+- **Six rounds deep now; #1, #3, #4, #6 have stayed resolved since round
+  1 with zero further findings across 5 subsequent review passes** — a
   reasonable signal those are genuinely settled, even without a live
-  compile. #2 needed real iteration across all 5 rounds to reach a
-  defensible state (the strongest of the six checks now, and the one that
-  most repaid the iteration); #5 settled by round 4. Still outstanding
+  compile. #2 and #5 turned out to be genuinely entangled (the TOCTOU fix
+  that finally closed #5 for real also closed a gap #2's own checks left
+  open) and needed the full 6 rounds between them. Still outstanding
   regardless: `gh aw compile` verification (SSO-blocked, unresolved this
   session).
