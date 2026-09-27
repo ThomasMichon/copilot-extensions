@@ -831,16 +831,15 @@ claiming discipline alone.
   `production_picker.__main__` is deleted, while the total remaining live
   in-process engine-module surface is 9 once the Step 3 housekeeping-owned
   imports (`activity`, `gc`, `reap_cli`, `status_monitor_runtime`) are counted
-  too. Validation: targeted Group B seam + cutover regressions passed (`7
-  passed` across agent-worktrees'
+  too. Validation: targeted Group B seam + cutover regressions passed, including agent-worktrees'
   `test_context_resolution.py` bootstrap/repair coverage plus
-  worktree-manager's `test_engine_group_b.py`, `test_housekeeping.py`, and
-  `test_production_picker_transplant.py`); the broader Worktree Manager Group B
-  regression batch passed (`64 passed`); full `worktree-manager` suite
-  (excluding the two standing hangs `test_data_ssh_sources.py` /
-  `test_launch_trace.py`) matched the current unrelated baseline at `1286
-  passed, 2 skipped, 13 failed`; full `agent-worktrees` suite stayed red only
-  in unrelated existing families on this machine at `5731 passed, 50 skipped, 9
+  worktree-manager's `test_engine_group_b.py`, `test_housekeeping.py`,
+  `test_production_picker_transplant.py`, `test_picker_app.py`, and
+  `test_picker_preview_mode.py`; full `worktree-manager` suite (excluding the
+  two standing hangs `test_data_ssh_sources.py` / `test_launch_trace.py`)
+  matched the current unrelated baseline at `1290 passed, 2 skipped, 11
+  failed`; full `agent-worktrees` suite stayed red only in unrelated existing
+  families on this machine at `5732 passed, 50 skipped, 9
   failed` (`test_launch_cmd`, `test_lazy_dispatch`, `test_module_invocation`,
   `test_mux_status_link`, `test_registration_home`, `test_session_conduct`,
   `test_status_monitor_windows`); `ruff check --select F,E9`,

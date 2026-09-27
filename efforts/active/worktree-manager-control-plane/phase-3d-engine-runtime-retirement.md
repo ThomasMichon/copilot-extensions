@@ -495,17 +495,16 @@ once every remaining caller is already off the import boundary.
      **4** explicit Step 3 housekeeping-owned imports
      (`activity`, `gc`, `reap_cli`, `status_monitor_runtime`) that still ride
      the compatibility boundary until the later cleanup work.
-   - Validation: targeted Group B seam + cutover regressions passed (`7
-     passed` across `test_context_resolution.py`'s bootstrap/repair coverage,
-     `test_engine_group_b.py`, `test_housekeeping.py`, and
-     `test_production_picker_transplant.py`); the broader Worktree Manager
-     Group B regression batch passed (`64 passed`). Full `worktree-manager`
-     suite (excluding the two standing hangs
+   - Validation: targeted Group B seam + cutover regressions passed, including
+     the bootstrap/repair coverage in `test_context_resolution.py`, the
+     Worktree Manager `test_engine_group_b.py` / `test_housekeeping.py` /
+     `test_production_picker_transplant.py` lane, and the preview/reaper
+     regressions added for this step. Full `worktree-manager` suite (excluding the two standing hangs
      `tests/production_picker/test_data_ssh_sources.py` /
      `tests/production_picker/test_launch_trace.py`) matched the current
-     unrelated baseline at `1286 passed, 2 skipped, 13 failed`. Full
+     unrelated baseline at `1290 passed, 2 skipped, 11 failed`. Full
      `agent-worktrees` suite stayed red only in unrelated existing families on
-     this machine at `5731 passed, 50 skipped, 9 failed`
+     this machine at `5732 passed, 50 skipped, 9 failed`
      (`test_launch_cmd`, `test_lazy_dispatch`, `test_module_invocation`,
      `test_mux_status_link`, `test_registration_home`,
      `test_session_conduct`, `test_status_monitor_windows`); no failures
