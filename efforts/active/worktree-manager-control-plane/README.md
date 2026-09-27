@@ -515,11 +515,19 @@ PR [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
       housekeeping-owned engine imports plus Group C. Only Group C remains
       before `_engine_runtime.py` can be deleted. See
       [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
-- [ ] **Step 5 — add Group C's batched reconcile-and-stamp `--json` verb in
-      agent-worktrees, unused at first.** Keep the read/reconcile/write lock
-      scope with the engine that already owns `tracking.yaml`, but preserve the
-      current best-effort short-lock semantics rather than inventing a global
-      refresh transaction. See
+- [x] **Step 5 — add Group C's batched reconcile-and-stamp `--json` verb in
+      agent-worktrees, unused at first.** Landed in PR
+      [#4327](https://github.com/ThomasMichon/copilot-extensions/pull/4327):
+      added the engine-owned `picker-reconcile-local --json` batch (optional
+      repeated `--worktree-id`, otherwise "all current-platform local records")
+      plus the matching unused-at-first Manager wrapper
+      `production_picker.engine_group_c`, while keeping the existing best-effort
+      lock scope exactly as-is (no new batch-wide tracking lock; only the
+      helpers' short-lived stamp windows). The response reuses the Picker's
+      existing Group C list-row field names for the returned `rows` subset and
+      surfaces batch counters in `summary`, so Step 6 can consume it without a
+      second vocabulary. `data_local.py` is intentionally unchanged here; only
+      the additive seam landed. See
       [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
 - [ ] **Step 6 — cut `data_local.py` over to the batched Group C verb via the
       now-landed Phase 3c worker path.** Preserve cache-first first paint and
@@ -808,6 +816,38 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-09-27** — Landed Phase 3d Step 5, PR
+  [#4327](https://github.com/ThomasMichon/copilot-extensions/pull/4327).
+  Added Group C's additive, unused-at-first engine seam instead of cutting the
+  Picker over yet: `agent_worktrees.picker_reconcile_cli` now owns the new
+  `picker-reconcile-local --json` verb, which runs the existing engine-side
+  record loop in one coarse-grained call (list records, best-effort active-PR
+  reconcile, bound/mux/session-lock readback, engine-owned bound/mux stamp
+  writes, then a `rows` + `summary` payload whose field names intentionally
+  mirror the Picker's current Group C list-row vocabulary). On the Manager
+  side, `worktree_manager.production_picker.engine_group_c` adds the matching
+  version-skew-aware client wrapper and payload parser, but `data_local.py`
+  remains untouched for Step 6's later cutover. Kept the lock contract exactly
+  where the plan required it: no new cross-record/global tracking lock, no
+  provider/network call while holding a batch-wide write lock, and no logic
+  reimplementation in the client -- only the existing engine-owned
+  `tracking`/`pr_ops`/`reclaim`/`sessions` helpers orchestrated server-side.
+  Validation: targeted new contract tests green
+  (`plugins/agent-worktrees/tests/test_picker_reconcile_local.py`,
+  `worktree-manager/tests/production_picker/test_engine_group_c.py`); full
+  `worktree-manager` suite (excluding the two standing hangs
+  `test_data_ssh_sources.py` / `test_launch_trace.py`) finished at `1294
+  passed, 2 skipped, 10 failed`, staying within the effort's unrelated baseline
+  envelope; full `agent-worktrees` suite finished at `5738 passed, 50 skipped,
+  6 failed`, likewise only in pre-existing/environmental families on this
+  machine (`test_launch_cmd`, `test_lazy_dispatch`, `test_module_invocation`,
+  `test_mux_status_link`, `test_session_conduct`). `ruff check --select F,E9`,
+  `python tools/check-install-contract.py`, and
+  `python tools/check-version-consistency.py` passed; `python
+  tools/check-version-bump.py` still reports the same pre-existing unrelated
+  plugin-version drift on `delegation-guidance`, `efforts`,
+  `harness-knowledge`, and `wsl-setup`.
 
 - **2026-09-27** — Claiming Phase 3d Step 5 ("Add Group C's batched
   reconcile-and-stamp verb in agent-worktrees, unused at first") per
