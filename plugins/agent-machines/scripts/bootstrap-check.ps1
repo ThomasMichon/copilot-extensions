@@ -223,6 +223,18 @@ if (-not (Test-Path $Manifest)) {
         # non-zero on its own if the probe disallows the mutation, which this
         # hook already discards output/exit code for either way.
         & $exe -NoProfile -ExecutionPolicy Bypass -File $payloadInit stamp-binstub *> $null
+        # Review finding: the launcher-before-return guarantee this split
+        # exists for does not hold if the synchronous stage itself failed
+        # (probe denial, lock timeout, file-write failure) -- a discarded
+        # nonzero exit here still backgrounded the full 'stamp' and returned
+        # success, silently leaving no binstub. Check $LASTEXITCODE and skip
+        # backgrounding 'stamp' when the fast stage did not actually publish
+        # a usable launcher; a background stamp with no binstub to build on
+        # top of would just repeat the same failure.
+        if ($LASTEXITCODE -ne 0) {
+            [Console]::Error.WriteLine("[agent-machines] stamp-binstub failed (exit $LASTEXITCODE); skipping background stamp.")
+            Exit-SessionStart
+        }
         $command = "& `"$payloadInit`" stamp *> `$null"
         $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
         Start-Process -FilePath 'conhost.exe' `

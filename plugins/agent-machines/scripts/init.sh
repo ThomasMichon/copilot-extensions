@@ -1447,7 +1447,17 @@ if [[ "$ACTION" == "stamp" ]]; then
         done
     fi
     trap _unlock_stamp EXIT INT TERM
-    printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
+    # Review finding: the stamp lock above serializes writers against each
+    # other, but the generated binstub reads payload-dir WITHOUT taking it.
+    # A direct `>` redirection truncates the file before printf writes it, so
+    # a reader racing a later/concurrent stamp could see an empty path and
+    # exit 127 even though the binstub itself is atomically replaced. Publish
+    # the marker the same way deploy_binstub does: write to a same-directory
+    # temp file, then rename -- a reader always sees either the old or the
+    # new content, never a truncated one.
+    _payload_dir_tmp="$INSTALL_DIR/.payload-dir.tmp-$$"
+    printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$_payload_dir_tmp"
+    mv -f "$_payload_dir_tmp" "$INSTALL_DIR/payload-dir"
     deploy_binstub
     _ok "Stamped: binstub on PATH; runtime provisions on first use."
     _unlock_stamp
