@@ -735,7 +735,13 @@ claiming discipline alone.
   re-verified scope discipline before merge: `engine_loading.on_mount`, the
   `r` reload handler in `engine_input.py`, `_run_config_section()`'s `_done`,
   and `_run_wt_action()`'s `_done` all still call synchronous `setup()`
-  exactly as before. Validation: targeted
+  exactly as before. Copilot review surfaced three real follow-up fixes
+  before merge: synchronous `setup()` now advances the shared epoch too (so
+  it supersedes any older worker), discarded live payloads cancel their
+  unowned `LiveLoader` before returning, and the supersession tests now
+  serialize the first worker's start before launching the second so the
+  contract is deterministic instead of scheduler-dependent. Validation:
+  targeted
   `tests/production_picker/test_setup_reload_epoch.py` +
   `test_picker_first_paint.py` green; full `worktree-manager` suite matched
   the machine's known baseline at `1468 passed, 7 skipped, 13 failed`

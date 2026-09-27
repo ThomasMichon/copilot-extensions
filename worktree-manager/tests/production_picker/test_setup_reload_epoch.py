@@ -104,6 +104,7 @@ def test_setup_reload_supersession_discards_stale_success(
 ):
     calls = []
     first_release = threading.Event()
+    first_started = threading.Event()
     second_release = threading.Event()
     first_done = threading.Event()
     second_done = threading.Event()
@@ -112,6 +113,7 @@ def test_setup_reload_supersession_discards_stale_success(
         call = len(calls)
         calls.append(call)
         if call == 0:
+            first_started.set()
             first_release.wait(timeout=5)
             first_done.set()
             return _payload("stale")
@@ -123,6 +125,7 @@ def test_setup_reload_supersession_discards_stale_success(
         app = PickerApp(_fixture_source(), live=False)
         async with app.run_test(size=(100, 30)) as pilot:
             screen = app.query_one(PickerScreen)
+            base_epoch = screen._setup_epoch
             screen._prime_setup_reload = lambda: None
             screen._collect_setup_payload = _collect
             screen._reconcile_wt_sel = lambda: None
@@ -136,6 +139,7 @@ def test_setup_reload_supersession_discards_stale_success(
             screen._apply_setup_payload = _record_apply
 
             screen._start_setup_reload_worker()
+            assert first_started.wait(timeout=5)
             screen._start_setup_reload_worker()
             second_release.set()
             await wait_for_current_setup_epoch_applied(pilot, screen)
@@ -147,8 +151,8 @@ def test_setup_reload_supersession_discards_stale_success(
                 await pilot.pause()
                 await asyncio.sleep(0.01)
 
-            assert screen._setup_epoch == 2
-            assert screen._setup_applied_epoch == 2
+            assert screen._setup_epoch == base_epoch + 2
+            assert screen._setup_applied_epoch == base_epoch + 2
             assert applied == ["fresh"]
             assert screen.data[0]["title"] == "fresh"
 
@@ -159,6 +163,7 @@ def test_setup_reload_stale_failure_does_not_clobber_newer_success(
     wait_for_current_setup_epoch_applied,
 ):
     first_release = threading.Event()
+    first_started = threading.Event()
     second_release = threading.Event()
     first_done = threading.Event()
     second_done = threading.Event()
@@ -169,6 +174,7 @@ def test_setup_reload_stale_failure_does_not_clobber_newer_success(
         call = call_index
         call_index += 1
         if call == 0:
+            first_started.set()
             first_release.wait(timeout=5)
             first_done.set()
             raise RuntimeError("stale boom")
@@ -180,6 +186,7 @@ def test_setup_reload_stale_failure_does_not_clobber_newer_success(
         app = PickerApp(_fixture_source(), live=False)
         async with app.run_test(size=(100, 30)) as pilot:
             screen = app.query_one(PickerScreen)
+            base_epoch = screen._setup_epoch
             screen._prime_setup_reload = lambda: None
             screen._collect_setup_payload = _collect
             screen._reconcile_wt_sel = lambda: None
@@ -191,6 +198,7 @@ def test_setup_reload_stale_failure_does_not_clobber_newer_success(
             screen._apply_setup_failure = _record_failure
 
             screen._start_setup_reload_worker()
+            assert first_started.wait(timeout=5)
             screen._start_setup_reload_worker()
             second_release.set()
             await wait_for_current_setup_epoch_applied(pilot, screen)
@@ -202,7 +210,7 @@ def test_setup_reload_stale_failure_does_not_clobber_newer_success(
                 await asyncio.sleep(0.01)
 
             assert failures == []
-            assert screen._setup_applied_epoch == screen._setup_epoch == 2
+            assert screen._setup_applied_epoch == screen._setup_epoch == base_epoch + 2
             assert screen.data[0]["title"] == "fresh"
 
     asyncio.run(run())
@@ -221,6 +229,7 @@ def test_setup_reload_drops_results_after_unmount():
         app = PickerApp(_fixture_source(), live=False)
         async with app.run_test(size=(100, 30)) as pilot:
             screen = app.query_one(PickerScreen)
+            base_applied_epoch = screen._setup_applied_epoch
             screen._prime_setup_reload = lambda: None
             screen._collect_setup_payload = _collect
             screen._reconcile_wt_sel = lambda: None
@@ -236,7 +245,7 @@ def test_setup_reload_drops_results_after_unmount():
                 await asyncio.sleep(0.01)
 
             assert applied == []
-            assert screen._setup_applied_epoch == 0
+            assert screen._setup_applied_epoch == base_applied_epoch
 
     asyncio.run(run())
 
@@ -245,6 +254,7 @@ def test_setup_reload_applies_pivots_and_rows_from_one_epoch(
     wait_for_current_setup_epoch_applied,
 ):
     first_release = threading.Event()
+    first_started = threading.Event()
     second_release = threading.Event()
     first_done = threading.Event()
     second_done = threading.Event()
@@ -256,6 +266,7 @@ def test_setup_reload_applies_pivots_and_rows_from_one_epoch(
         call = call_index
         call_index += 1
         if call == 0:
+            first_started.set()
             first_release.wait(timeout=5)
             first_done.set()
             return _payload("alpha")
@@ -279,6 +290,7 @@ def test_setup_reload_applies_pivots_and_rows_from_one_epoch(
             screen._apply_setup_payload = _record_apply
 
             screen._start_setup_reload_worker()
+            assert first_started.wait(timeout=5)
             screen._start_setup_reload_worker()
             second_release.set()
             await wait_for_current_setup_epoch_applied(pilot, screen)
