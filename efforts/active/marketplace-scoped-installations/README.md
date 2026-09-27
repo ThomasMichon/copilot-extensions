@@ -386,6 +386,59 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-27 — `agent-bridge`'s doc/SKILL.md cluster resolved (PR #4240); first clean-room validation checkpoint of this session
+
+- Fresh guard count at merge time: 570 (down from 584).
+- `agent-bridge/SKILL.md` (4) and `references/cli-commands.md` (3):
+  doc-shaped prose mentions of the plugin's own config/routing-table
+  paths (`allow deployed-runtime-diagnostics`).
+- `agent-bridge-troubleshooting/SKILL.md` (7): mix of prose, a
+  standalone PowerShell command with a trailing comment, a Python
+  snippet, and **two PowerShell fenced commands using backtick line-
+  continuation** -- the marker could not go on the same physical line
+  without breaking the continuation (a `#` right after a backtick is
+  escaped into the command, not a real comment), so both were
+  restructured into a `$_log = "..."  # marker` variable assignment
+  before the continued command -- same pattern `agent-mcp`'s
+  `reliable-agent.md` established two slices ago. Verified via the
+  PowerShell Parser API that all 4 edited fenced blocks still parse.
+- **Operator directive this leg: periodically run clean-room validation
+  of plugin setup + the harness repo itself (Worktree Manager open/
+  update/create-worktree), to catch regressions as the guard-triage
+  edits accumulate.** First checkpoint this session:
+  - **`agent-worktrees-solo` (Tier P): 13/13 PASS.** Register -> create
+    -> finalize round-trips cleanly on a fresh box. No regression from
+    any of this session's `agent-worktrees`-adjacent edits (there
+    weren't any yet, but this establishes the pre-triage baseline).
+  - **`agent-bridge-solo` (Tier P): 9/10, found a genuine PRE-EXISTING
+    defect, NOT caused by this session's work.** `agent-bridge --version`
+    (and the `version` subcommand) can return EMPTY stdout, exit 0,
+    during an in-flight first-provision race -- reproduced twice via the
+    automated scenario and once manually via `docker exec` (a fresh
+    invocation right after the scenario's own phase-2 pass re-triggered
+    a full from-scratch reprovision, and only a SECOND, later call
+    succeeded). Confirmed this reproduces against the **published `main`
+    marketplace release** (the clean-room installs via `copilot plugin
+    install agent-bridge@copilot-extensions`, which resolves to `main`,
+    not this session's in-flight `dev` work) -- so it predates and is
+    unrelated to any of this leg's `agent-bridge` triage PRs. Searched
+    for and found no existing tracking issue (checked #1236 and #823,
+    both near-misses on the wrong root cause); filed
+    [aperture-labs#7688](https://gitea.michon.ski/tmichon/aperture-labs/issues/7688).
+  - **Review's own review-comment content on PR #4240 flagged a possible
+    concern with the new `$_log = "..."` PowerShell assignment** ("suppress
+    the standalone assignment output") -- verified empirically
+    (`pwsh -Command '$_log = "x"; Write-Output "..."'`) that a bare
+    PowerShell variable assignment produces **zero** console output
+    regardless, so the concern didn't correspond to an actual defect.
+    Noted here rather than silently overriding the review; merged
+    without further change.
+- Verified: `check-skills.py` (0 errors), `check-docs-consistency.py`,
+  PowerShell Parser API on every edited fenced block, and the full
+  `agent-bridge` suite via `test-supervisor` (800 passed, 10 skipped, 0
+  failures).
+- Guard count: 30 -> 16 findings for `agent-bridge`.
+
 ### 2026-09-26 — `agent-bridge`'s src/ + extension.mjs cluster: 22 of 52 findings resolved (PR #4168)
 
 - Fresh guard count at merge time: 584 (down from 606). First slice into
