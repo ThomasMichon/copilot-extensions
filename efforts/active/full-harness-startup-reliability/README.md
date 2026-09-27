@@ -167,11 +167,16 @@ Operator's verbatim ask (this session):
   separately: the *default-enabled* set for the standard 20/20 run, plus one
   explicit all-plugins run (forcing every manifest entry on) so the
   not-default-enabled hooks are still genuinely tested at least once.
-- [ ] Pin or explicitly record the Copilot CLI version in use before each
-  timed attempt (the Context section already flags the CLI's own
-  mid-turn self-update as a confound); without this, a run can silently mix
-  update time into the measured startup latency and make the 20-attempt
-  baseline non-reproducible across sessions.
+- [ ] Pin the Copilot CLI version before each timed attempt (disable/complete
+  any self-update prior to starting the timer, e.g. an explicit update step
+  in the container image build rather than relying on the timed run itself)
+  and record the pinned version alongside each attempt's results -- the
+  Context section already observed the CLI updating mid-turn during the
+  seeding investigation, and recording the version *after the fact* would
+  not by itself stop that same update from landing inside a future timed
+  attempt. If an attempt's own log still shows an update occurring despite
+  the pin, mark that attempt invalid and re-run it rather than counting its
+  latency toward the baseline.
 - [ ] Confirm whether per-attempt container reset is required (does
   `~/.copilot` state from a prior attempt change behavior?) or whether N
   attempts can safely run in the same container back-to-back.
