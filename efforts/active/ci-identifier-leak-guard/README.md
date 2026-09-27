@@ -139,7 +139,7 @@ an untrusted findings artifact at all.
 - [x] Validate the merged trigger chain end-to-end on a scratch PR: CI runs
   first, then the trusted `workflow_run` workflow, then the custom Check Run
   appears on the PR head SHA.
-- [x] If the repository secrets are present, validate the failure path with a
+- [ ] If the repository secrets are present, validate the failure path with a
   fabricated placeholder test token; otherwise validate the success/plumbing
   path only and record that full failure-path validation remains blocked on
   Phase 4 secret provisioning.
@@ -164,13 +164,13 @@ an untrusted findings artifact at all.
 - [x] Open a clean scratch PR and confirm the ordinary `CI` workflow runs
   first, then the trusted `workflow_run` follow-up runs, and then a custom
   Check Run named `identifier leak guard` appears on the PR head SHA.
-- [x] If `FORBIDDEN_IDS_FACILITY` / `FORBIDDEN_IDS_WORK` exist, open a scratch
+- [ ] If `FORBIDDEN_IDS_FACILITY` / `FORBIDDEN_IDS_WORK` exist, open a scratch
   PR that deliberately reintroduces a known-safe fabricated placeholder test
   token and confirm the trusted Check Run reports `failure` plus API-posted PR
   feedback naming the matched value and reason. If the secrets are absent,
   record that this failure-path validation remains blocked on Phase 4 secret
   provisioning.
-- [x] Confirm a clean PR produces no raw matched values in the workflow log and
+- [ ] Confirm a clean PR produces no raw matched values in the workflow log and
   no failure feedback comment.
 - [x] Inspect the branch-protection/ruleset configuration for `main` and `dev`
   and prepare the exact before/after diff to require the custom Check Run name,
