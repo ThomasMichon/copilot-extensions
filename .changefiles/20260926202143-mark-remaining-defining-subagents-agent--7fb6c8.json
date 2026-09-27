@@ -1,0 +1,9 @@
+{
+  "comment": "Mark remaining defining-subagents agent-mcp command mentions as documented examples.",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}

@@ -516,6 +516,7 @@ class TestMergeReadiness:
         assert m["consent_present"] is False
         assert m["consent_label"] == "auto-merge"
         assert m["verdict"] == "APPROVED"
+        assert m["occupancy"] == "needs-consent"
 
     def test_consent_already_present(self):
         m = pc.merge_readiness(_approved(labels=("auto-merge",)), **_BINDING)

@@ -775,9 +775,9 @@ def merge_readiness(
 
     Binding-absent (no ``automerge_label`` configured) degrades cleanly:
     ``needs_consent`` / ``clear_to_merge`` are False and ``reason`` says so --
-    a repo whose merges are human-driven simply reports the verdict + merge
-    state with no consent action to take.
+    a human-driven merge repo reports verdict + merge state with no action.
     """
+    from .pr_occupancy import occupancy_from_readiness
     st = classify_state(
         snap,
         automerge_label=automerge_label,
@@ -789,7 +789,7 @@ def merge_readiness(
         stale_approval_head_observed_at=stale_approval_head_observed_at,
         review_blocking=review_blocking,
     )
-    return {
+    return occupancy_from_readiness({
         "verdict": st.verdict,
         "approval_stale": st.approval_stale,
         "approval_stale_authorized": st.approval_stale_authorized,
@@ -805,7 +805,7 @@ def merge_readiness(
         "held": list(st.held),
         "wip": st.wip,
         "reason": st.reason,
-    }
+    })
 
 
 __all__ = [
