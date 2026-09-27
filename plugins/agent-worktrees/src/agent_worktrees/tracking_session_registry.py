@@ -6,8 +6,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import obligations
-
 if TYPE_CHECKING:
     from . import tracking
 
@@ -143,145 +141,56 @@ def register_session(
     candidate_token: str | None = None,
     initial_projection: bool = False,
 ) -> tracking.SessionHandoff | None:
+    """Register (or reactivate) a Copilot session against a worktree.
+
+    Dispatches the whole transaction through the ``session_register`` verb
+    (daemon write path when reachable, else the identical logged in-process
+    fallback -- ``agent-worktrees-authoritative-daemon`` effort, Phase 3;
+    see ``tracking_session_registration_write.py``'s own module docstring
+    for the full design rationale). Called from the sessionStart hook, so
+    ``boot_wait_s=0``: never spin-wait for a cold daemon boot (that would
+    add latency to every session launch) -- an already-warm daemon is
+    dialed immediately; a cold/unreachable one falls straight through to
+    the same code with no added wait, matching this function's
+    pre-migration latency exactly. Re-raises ``tracking.SessionLifecycleError``
+    for a lifecycle rejection, matching the pre-migration contract of
+    letting it propagate synchronously to every existing caller's own
+    broad exception handling; ``tracking_write.AmbiguousWriteOutcome`` is
+    left to propagate the same way.
+    """
     tracking = _tracking()
     yaml_path = tracking._owning_tracking_dir(worktree_id) / f"{worktree_id}.yaml"
     if not yaml_path.exists():
         return None
-    with tracking._RecordLock(yaml_path):
-        record = tracking.load_record(yaml_path)
-        if (
-            record.kind in tracking.MANAGED_KINDS
-            and record.status in {"complete", "completed", "finalized"}
-        ):
-            raise tracking.SessionLifecycleError(
-                f"worktree {worktree_id} is terminal and managed; refusing new session activation"
-            )
-        if record.sessions is None:
-            record.sessions = []
-        event_at = started_at or tracking._now_iso()
-        observed_at = recorded_at or tracking._now_iso()
-        tracking._ensure_head_ledger(record)
-        self_session_ref = tracking.format_claim_ref(
-            record.machine, record.repo, record.worktree_id, session=session_id
-        )
-        tracking.add_resource_claim(
-            record,
-            tracking.ResourceClaim(
-                kind="session",
-                ref=self_session_ref,
-                created_at=event_at,
-                state=obligations.ACTIVE,
-                note="live Copilot session",
-            ),
-            save=False,
-        )
+    from . import locks as _locks
+    from . import status_monitor_runtime as _smr
+    from . import tracking_write
 
-        def _link_if_fresh() -> tracking.SessionHandoff | None:
-            prior = next((handoff for handoff in record.handoffs if handoff.token == handoff_token), None)
-            already_linked = (
-                prior is not None
-                and prior.state == "linked"
-                and prior.successor == session_id
-            )
-            linked = tracking.link_handoff(
-                record,
-                handoff_token,
-                session_id,
-                linked_at=event_at,
-                save=False,
-            )
-            return None if already_linked else linked
-
-        for entry in record.sessions:
-            if entry.session_id != session_id:
-                continue
-            activation_added = _start_session_activation(
-                entry,
-                event_at=event_at,
-                recorded_at=observed_at,
-                source=source,
-            )
-            if pid:
-                entry.pid = pid
-            if pane_id:
-                entry.pane_id = pane_id
-            if handoff_token and tracking._handoff_state(record, handoff_token) == "cancelled":
-                handoff_token = None
-            if handoff_token:
-                try:
-                    linked_handoff = _link_if_fresh()
-                except tracking.SessionLifecycleError:
-                    if activation_added:
-                        tracking._next_lifecycle_revision(record, session_id)
-                    tracking.save_record(record)
-                    raise
-                tracking.save_record(record)
-                return linked_handoff
-            if (
-                not candidate_token
-                and record.resolved_head_session is None
-                and entry.state == "active"
-                and (
-                    source == "bind"
-                    or tracking._pending_handoffs_all_from_yielded(record)
-                )
-            ):
-                tracking._cancel_pending_handoffs(record)
-                tracking._append_head_transition(
-                    record,
-                    session_id,
-                    reason="rebind",
-                    at=event_at,
-                )
-            elif activation_added:
-                tracking._next_lifecycle_revision(record, session_id)
-            tracking.save_record(record)
-            return None
-
-        had_active_head = record.resolved_head_session is not None
-        new_entry = tracking.SessionEntry(
-            session_id=session_id,
-            started_at=event_at,
-            pid=pid,
-            pane_id=pane_id,
-            activations=[
-                tracking.SessionActivation(
-                    ordinal=1,
-                    started_at=event_at,
-                    start_recorded_at=observed_at,
-                    start_source=source,
-                )
-            ],
-        )
-        record.sessions.append(new_entry)
-        tracking._next_lifecycle_revision(record, session_id)
-        if initial_projection and record.controller_for_session(session_id) is None:
-            initial_sessions = set(
-                getattr(record, "_session_projection_initial_registration", set())
-            )
-            initial_sessions.add(session_id)
-            record._session_projection_initial_registration = initial_sessions
-        linked_handoff = None
-        if handoff_token and tracking._handoff_state(record, handoff_token) == "cancelled":
-            handoff_token = None
-        if handoff_token:
-            try:
-                linked_handoff = _link_if_fresh()
-            except tracking.SessionLifecycleError:
-                tracking.save_record(record)
-                raise
-        elif not candidate_token and not had_active_head and (
-            source == "bind" or tracking._pending_handoffs_all_from_yielded(record)
-        ):
-            tracking._cancel_pending_handoffs(record)
-            tracking._append_head_transition(
-                record,
-                session_id,
-                reason="rebind" if source == "bind" else "initial",
-                at=event_at,
-            )
-        tracking.save_record(record)
-        return linked_handoff
+    result = tracking_write.dispatch(
+        "session_register",
+        {
+            "worktree_id": worktree_id,
+            "yaml_path": str(yaml_path),
+            "session_id": session_id,
+            "pid": pid,
+            "pane_id": pane_id,
+            "started_at": started_at,
+            "source": source,
+            "recorded_at": recorded_at,
+            "handoff_token": handoff_token,
+            "candidate_token": candidate_token,
+            "initial_projection": initial_projection,
+        },
+        read_lock_data=lambda: _locks.read_lock(_smr._monitor_lock_path()),
+        ensure_monitor=(
+            _smr._ensure_status_monitor if _smr._status_monitor_enabled() else None
+        ),
+        boot_wait_s=0.0,
+    )
+    if result.get("error") == "lifecycle":
+        raise tracking.SessionLifecycleError(result["message"])
+    linked = result.get("linked_handoff")
+    return tracking.SessionHandoff(**linked) if linked else None
 
 
 def _record_has_open_session(record: tracking.WorktreeRecord) -> bool:
