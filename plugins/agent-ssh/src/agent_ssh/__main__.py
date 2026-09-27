@@ -18,7 +18,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import __version__, fragment_registry, host_restore, ssh_profile
+from . import fragment_registry, host_restore, ssh_profile
 from . import explore as explore_mod
 from . import mesh as mesh_mod
 from . import mesh_refresh as mesh_refresh_mod
@@ -332,6 +332,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.version or args.command == "version":
+        from . import __version__
+
         print(f"agent-ssh {__version__}")
         return 0
     if not hasattr(args, "func"):

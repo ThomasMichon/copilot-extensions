@@ -1655,7 +1655,27 @@ def cmd_vault_remove(args):
 def main(argv: list[str] | None = None):
     import argparse
 
-    from . import __version__
+    class _LazyVersionAction(argparse.Action):
+        """Defer ``__version__`` resolution until ``--version`` is actually
+        passed, instead of eagerly formatting it into every parser build
+        (argparse's own ``action="version"`` requires the finished string up
+        front, forcing the ``importlib.metadata`` lookup on every invocation
+        regardless of subcommand)."""
+
+        def __init__(self, option_strings, dest=argparse.SUPPRESS,
+                     default=argparse.SUPPRESS, help=None):
+            super().__init__(
+                option_strings=option_strings, dest=dest, default=default,
+                nargs=0, help=help,
+            )
+
+        def __call__(self, parser, namespace, values, option_string=None):
+            import sys as _sys
+
+            from . import __version__
+
+            parser._print_message(f"agent-vault {__version__}\n", _sys.stdout)
+            parser.exit()
 
     parser = argparse.ArgumentParser(
         prog="agent-vault",
@@ -1663,8 +1683,8 @@ def main(argv: list[str] | None = None):
     )
     parser.add_argument(
         "--version",
-        action="version",
-        version=f"agent-vault {__version__}",
+        action=_LazyVersionAction,
+        help="show program's version number and exit",
     )
     sub = parser.add_subparsers(dest="command")
 

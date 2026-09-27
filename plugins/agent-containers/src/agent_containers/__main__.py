@@ -32,7 +32,7 @@ from pathlib import Path, PurePosixPath
 
 from agent_procutil import no_window_flags
 
-from . import __version__, claim_provider_cli, rescue_capture_cli
+from . import claim_provider_cli, rescue_capture_cli
 from .config import (
     RESTRICTED_PROFILE,
     SECURITY_PROFILE_LABEL,
@@ -366,6 +366,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "session-host-cleanup":
             return _cmd_session_host_cleanup(args)
         if args.command == "version":
+            from . import __version__
+
             print(f"agent-containers {__version__}")
             return 0
         if args.command == "installer-readiness":

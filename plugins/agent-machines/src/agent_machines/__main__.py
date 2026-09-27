@@ -21,7 +21,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import __version__, cli_fleet_update
+from . import cli_fleet_update
 from . import discover as _discover
 from . import identity as _identity
 from . import layout as _layout
@@ -151,6 +151,8 @@ def _emit_identity_warnings(identity: _identity.MachineIdentity) -> None:
 
 
 def _cmd_version(_args: argparse.Namespace) -> int:
+    from . import __version__
+
     print(f"agent-machines {__version__}")
     return 0
 
@@ -702,9 +704,34 @@ def _cmd_provision_playwright_cli(args: argparse.Namespace) -> int:
     return 0
 
 
+class _LazyVersionAction(argparse.Action):
+    """Defer ``__version__`` resolution until ``--version`` is actually
+    passed, instead of eagerly formatting it into every parser build
+    (argparse's own ``action="version"`` requires the finished string up
+    front, forcing the ``importlib.metadata`` lookup on every invocation
+    regardless of subcommand)."""
+
+    def __init__(self, option_strings, dest=argparse.SUPPRESS,
+                 default=argparse.SUPPRESS, help=None):
+        super().__init__(
+            option_strings=option_strings, dest=dest, default=default,
+            nargs=0, help=help,
+        )
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        from . import __version__
+
+        parser._print_message(f"agent-machines {__version__}\n", sys.stdout)
+        parser.exit()
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agent-machines", description=__doc__)
-    parser.add_argument("--version", action="version", version=f"agent-machines {__version__}")
+    parser.add_argument(
+        "--version",
+        action=_LazyVersionAction,
+        help="show program's version number and exit",
+    )
     sub = parser.add_subparsers(dest="command")
 
     def add(name: str, func) -> argparse.ArgumentParser:
