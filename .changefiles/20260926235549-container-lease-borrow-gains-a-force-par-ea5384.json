@@ -1,0 +1,9 @@
+{
+  "comment": "Container lease borrow() gains a force parameter and same-worktree-family recognition (agent_containers.driving_worktrees.same_worktree_family), matching the codespace-venue-pool Phase 2b fix so a parent/child worktree pair doesn't need --force to reach the same leased container.",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "minor"
+    }
+  ]
+}
