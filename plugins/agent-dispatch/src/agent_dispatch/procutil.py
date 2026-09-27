@@ -48,6 +48,7 @@ __all__ = [
     "detached_kwargs",
     "no_window_flags",
     "no_window_kwargs",
+    "powershell_host",
     "relocate_off_payload",
     "resolve_own_runtime_python",
     "resolve_runtime_python",
@@ -82,6 +83,30 @@ _AGENT_WORKTREES_ENV_SCRUB = frozenset({
     "VIRTUAL_ENV",
     "__PYVENV_LAUNCHER__",
 })
+
+#: Memoized result of :func:`powershell_host`'s ``PATH`` resolution.
+_POWERSHELL_HOST: str | None = None
+
+
+def powershell_host() -> str:
+    """Prefer ``pwsh`` (PowerShell 7); fall back to legacy Windows PowerShell
+    5.1 only when ``pwsh`` isn't on ``PATH``.
+
+    The Windows process-inventory enumeration in ``reap.py`` and
+    ``supervisor_processes.py`` hardcoded ``"powershell"``/``"powershell.exe"``
+    directly, sending every invocation through the legacy 5.1 host even on a
+    machine where ``pwsh`` is installed and preferred.
+
+    Memoized: some callers (e.g. a tight process-enumeration poll loop) invoke
+    this on every cycle, and an unmemoized ``shutil.which`` PATH scan on each
+    call would add measurable per-tick overhead. The resolved host cannot
+    change within a process's lifetime once ``PATH`` is read at import/first
+    use, so a single resolution is safe to reuse.
+    """
+    global _POWERSHELL_HOST
+    if _POWERSHELL_HOST is None:
+        _POWERSHELL_HOST = shutil.which("pwsh") or shutil.which("powershell") or "powershell"
+    return _POWERSHELL_HOST
 
 
 def agent_worktrees_environment() -> dict[str, str]:

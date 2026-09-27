@@ -1,0 +1,9 @@
+{
+  "comment": "Prefer pwsh over legacy Windows PowerShell 5.1 when spawning powershell for process/WMI checks; memoize the resolution to avoid PATH-scan overhead in tight poll loops.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

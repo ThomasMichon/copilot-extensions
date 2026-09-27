@@ -1,0 +1,9 @@
+{
+  "comment": "Prefer pwsh over legacy Windows PowerShell 5.1 for Win32_Process enumeration; memoize the resolution.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

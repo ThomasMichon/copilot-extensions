@@ -45,7 +45,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from .procutil import no_window_kwargs
+from .procutil import no_window_kwargs, powershell_host
 
 log = logging.getLogger(__name__)
 
@@ -168,8 +168,8 @@ def _iter_windows() -> list[CoordProc]:
         "Get-CimInstance Win32_Process | "
         "ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }"
     )
-    argv = ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script]
-    out = subprocess.run(  # noqa: S603 -- fixed argv, no shell; powershell via PATH
+    argv = [powershell_host(), "-NoProfile", "-NonInteractive", "-Command", ps_script]
+    out = subprocess.run(  # noqa: S603 -- fixed argv, no shell; pwsh/powershell via PATH
         argv, capture_output=True, text=True, timeout=_ENUM_TIMEOUT_S, check=False,
         **no_window_kwargs(),
     )

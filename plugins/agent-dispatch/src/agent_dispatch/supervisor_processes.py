@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable
 
-from .procutil import no_window_kwargs
+from .procutil import no_window_kwargs, powershell_host
 
 log = logging.getLogger(__name__)
 
@@ -219,7 +219,7 @@ def iter_windows_processes() -> list[WindowsProcess]:
     )
     completed = subprocess.run(
         [
-            "powershell.exe",
+            powershell_host(),
             "-NoProfile",
             "-NonInteractive",
             "-Command",

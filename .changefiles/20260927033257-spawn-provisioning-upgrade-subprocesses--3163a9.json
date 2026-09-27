@@ -1,0 +1,9 @@
+{
+  "comment": "Spawn provisioning/upgrade subprocesses (venv creation, pip/uv install, health-gate checks, cutover, version reap/gc) with native CreateNoWindow instead of a plain invocation, so headless installs never flash a console window.",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

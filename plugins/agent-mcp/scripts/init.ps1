@@ -310,7 +310,7 @@ function Get-BootstrapPython {
         if ($d) { $p = Join-Path $d 'Scripts\python.exe'; if (Test-Path $p) { return $p } }
     }
     if (Get-Command py -ErrorAction SilentlyContinue) {
-        $exe = (& py -3 -c 'import sys; print(sys.executable)' 2>$null | Out-String).Trim()
+        $exe = (Invoke-Hidden py -3 -c 'import sys; print(sys.executable)' | Out-String).Trim()
         if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
     }
     foreach ($cand in 'python3', 'python') {
@@ -348,8 +348,8 @@ function Invoke-VersionedSlotClean {
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython
     if (-not $py) { return }
-    & $py $vr --root $InstallDir --link-name (Split-Path -Leaf $LinkDir) slot $SrcVersion --clean-incomplete 2>&1 |
-        ForEach-Object { Write-Host "  ...    $_" }
+    (Invoke-Hidden $py $vr --root $InstallDir --link-name (Split-Path -Leaf $LinkDir) slot $SrcVersion --clean-incomplete) -split "`r?`n" |
+        ForEach-Object { if ($_) { Write-Host "  ...    $_" } }
 }
 
 function Invoke-VersionedMarkComplete {
@@ -515,6 +515,37 @@ function Invoke-Stamp {
 
 if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
 
+# -- Windowless spawn helper --------------------------------------------
+# This script is frequently invoked headlessly (no console of its own --
+# spawned via CREATE_NO_WINDOW from the Python-side bridge launcher). A
+# plain `&`-invoked console-subsystem child (python.exe, uv.exe) in that
+# situation gets a FRESH console window allocated by Windows, which flashes
+# on screen once per spawn during provisioning. Route provisioning spawns
+# through this helper (native CreateNoWindow=true) instead, so the child
+# never gets a window regardless of this script's own console state.
+# Preserves stdout capture + $LASTEXITCODE so call sites need only replace
+# `& $exe @args` with `Invoke-Hidden $exe @args`.
+function Invoke-Hidden {
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [Parameter(ValueFromRemainingArguments = $true)][string[]]$ArgList
+    )
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $FilePath
+    foreach ($a in $ArgList) { [void]$psi.ArgumentList.Add($a) }
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    $stdout = $proc.StandardOutput.ReadToEnd()
+    $stderr = $proc.StandardError.ReadToEnd()
+    $proc.WaitForExit()
+    $global:LASTEXITCODE = $proc.ExitCode
+    if ($stderr) { $stderr -split "`r?`n" | Where-Object { $_ } | ForEach-Object { Write-Verbose $_ } }
+    return $stdout
+}
+
 # -- Preflight checks --------------------------------------------------
 
 Write-Host ''
@@ -587,7 +618,7 @@ if ($Force -or -not (Test-Path $VenvPython)) {
     $signedBase = $null
     if ($env:OS -eq 'Windows_NT' -and (Get-Command py -ErrorAction SilentlyContinue)) {
         foreach ($v in '3.13', '3.12', '3.11') {
-            $cand = (& py "-$v" -c "import sys;print(sys.executable)" 2>$null | Out-String).Trim()
+            $cand = (Invoke-Hidden py "-$v" -c "import sys;print(sys.executable)" | Out-String).Trim()
             if ($LASTEXITCODE -eq 0 -and $cand -and (Test-Path $cand)) {
                 try { if ((Get-AuthenticodeSignature $cand).Status -eq 'Valid') { $signedBase = $cand; break } } catch {}
             }
@@ -597,20 +628,20 @@ if ($Force -or -not (Test-Path $VenvPython)) {
         try { if ((Get-AuthenticodeSignature $VenvPython).Status -ne 'Valid') { Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop } } catch {}
     }
     if ($signedBase -and -not (Test-Path $VenvPython)) {
-        & $signedBase -m venv --copies $VenvDir 2>&1 | Out-Null
+        Invoke-Hidden $signedBase -m venv --copies $VenvDir | Out-Null
     }
     if (-not (Test-Path $VenvPython)) {
         if (Get-Command uv -ErrorAction SilentlyContinue) {
             Write-Step 'Creating venv via uv...'
             Invoke-VersionedSlotClean
-            & uv venv $VenvDir --allow-existing 2>&1 | Out-Null
+            Invoke-Hidden uv venv $VenvDir --allow-existing | Out-Null
             if ($LASTEXITCODE -ne 0) {
                 Write-Step 'uv venv failed -- falling back to python -m venv'
-                & $pythonCmd -m venv $VenvDir 2>&1 | Out-Null
+                Invoke-Hidden $pythonCmd -m venv $VenvDir | Out-Null
             }
         } else {
             Write-Step 'Creating venv via python -m venv...'
-            & $pythonCmd -m venv $VenvDir 2>&1 | Out-Null
+            Invoke-Hidden $pythonCmd -m venv $VenvDir | Out-Null
         }
     }
     $ErrorActionPreference = $prevEAP
@@ -630,9 +661,9 @@ $ErrorActionPreference = 'Continue'
 # Pre-strip any locked console-script trampoline so uv can overwrite it (os err 5).
 Remove-ConsoleTrampolines -VenvDir $VenvDir
 if (Get-Command uv -ErrorAction SilentlyContinue) {
-    & uv pip install --python $VenvPython "$PluginDir" --quiet 2>&1 | Out-Null
+    Invoke-Hidden uv pip install --python $VenvPython "$PluginDir" --quiet | Out-Null
 } else {
-    & $VenvPython -m pip install --quiet "$PluginDir" 2>&1 | Out-Null
+    Invoke-Hidden $VenvPython -m pip install --quiet "$PluginDir" | Out-Null
 }
 $pkgResult = $LASTEXITCODE
 $ErrorActionPreference = $prevEAP
@@ -655,13 +686,13 @@ if ($VersionedRuntime) {
     # Health-gate (#935): never swap the stable .venv link onto a slot whose
     # package does not import -- a broken build must not become the live runtime.
     # The marker is written only after this gate passes (so "marked" == healthy).
-    & $VenvPython -c 'import agent_mcp' 2>$null
+    Invoke-Hidden $VenvPython -c 'import agent_mcp' | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Fail "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
         exit 1
     }
     Invoke-VersionedMarkComplete
-    & $VenvPython $VrScript --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 | Out-Null
+    Invoke-Hidden $VenvPython $VrScript --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Fail "Failed to activate versioned venv (.venv -> versions/$SrcVersion)"
         exit 1
@@ -692,8 +723,8 @@ if ($VersionedRuntime -and -not $env:AGENT_MCP_NO_CUTOVER) {
     $cutoverHealthTimeout = if ($env:AGENT_MCP_CUTOVER_HEALTH_TIMEOUT) { $env:AGENT_MCP_CUTOVER_HEALTH_TIMEOUT } else { '15' }
     $cutoverDrainTimeout = if ($env:AGENT_MCP_CUTOVER_DRAIN_TIMEOUT) { $env:AGENT_MCP_CUTOVER_DRAIN_TIMEOUT } else { '30' }
     try {
-        $cutoverJson = & $VenvPython -I -X utf8 -m agent_mcp cutover --require-live --force --json `
-            --health-timeout $cutoverHealthTimeout --drain-timeout $cutoverDrainTimeout 2>$null
+        $cutoverJson = Invoke-Hidden $VenvPython -I -X utf8 -m agent_mcp cutover --require-live --force --json `
+            --health-timeout $cutoverHealthTimeout --drain-timeout $cutoverDrainTimeout
         $cutoverArg = (($cutoverJson | Out-String).Trim())
         if ($cutoverArg) {
             $cutoverResult = $cutoverArg | ConvertFrom-Json
@@ -720,7 +751,7 @@ if ($VersionedRuntime -and -not $env:AGENT_MCP_NO_VERSION_REAP) {
         # Use the plain (one 'version:pid' per line) output, not --json: under this
         # script's Set-StrictMode 2.0, an empty ConvertFrom-Json array collapses so
         # a later .Count throws. @(...) of the lines is always a countable array.
-        $reapLines = & $VenvPython $ReapScript --root $InstallDir --link-name '.venv' 2>$null
+        $reapLines = (Invoke-Hidden $VenvPython $ReapScript --root $InstallDir --link-name '.venv') -split "`r?`n"
         $reaped = @($reapLines | Where-Object { $_ -and $_.ToString().Trim() })
         if ($reaped.Count -gt 0) {
             $stale = ($reaped | ForEach-Object { ($_ -split ':', 2)[0] } | Sort-Object -Unique) -join ', '
