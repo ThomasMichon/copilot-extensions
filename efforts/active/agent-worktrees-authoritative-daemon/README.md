@@ -556,7 +556,9 @@ scoping concern, unlike PR #3807's disposition-history fix) with no
 registers `session_conclude`/`session_link_succession` verbs wrapping each
 transaction exactly (including the original post-save reload, kept for
 behavior parity). Landed in PR #3886 with **zero review findings** -- the
-first Phase 3 PR to get a clean first-round approval, likely because the
+first Phase 3 PR to get a clean first-round review (Copilot's own
+automated verdict is recorded as `COMMENTED`, with an approval
+recommendation, never a formal `APPROVED` state), likely because the
 design survey caught the risk upfront instead of a reviewer catching it
 after the fact.
 
