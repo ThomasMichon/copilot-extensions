@@ -409,6 +409,77 @@ def test_annotated_attribute_assignment_alias_is_still_caught(tmp_path):
     assert "save_record" in violations[0].detail
 
 
+def test_getattr_with_a_literal_write_function_name_is_caught(tmp_path):
+    # getattr(tracking, "save_record") never produces an ast.Attribute
+    # node, so it evades the plain attribute-access check entirely --
+    # but the literal string name still resolves statically.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking\n"
+        "\n"
+        "def write(record, path):\n"
+        "    getattr(tracking, \"save_record\")(record, path)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "save_record" in violations[0].detail
+
+
+def test_getattr_via_package_alias_chain_is_caught(tmp_path):
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "import agent_worktrees as aw\n"
+        "\n"
+        "def write(record, path):\n"
+        "    getattr(aw.tracking, \"save_record\")(record, path)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "save_record" in violations[0].detail
+
+
+def test_getattr_with_a_non_literal_name_is_not_claimed_safe(tmp_path):
+    # A non-literal getattr name (e.g. a variable) is genuinely
+    # undecidable statically -- this guard does not attempt it, and this
+    # test documents that boundary rather than asserting false safety.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking\n"
+        "\n"
+        "def write(record, path, fn_name):\n"
+        "    getattr(tracking, fn_name)(record, path)\n",
+    )
+    assert guard.find_violations(tmp_path) == []
+
+
+def test_dunder_dict_subscript_with_a_literal_write_function_name_is_caught(
+    tmp_path,
+):
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking\n"
+        "\n"
+        "def write(record, path):\n"
+        "    tracking.__dict__[\"save_record\"](record, path)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "save_record" in violations[0].detail
+
+
+def test_getattr_of_an_unrelated_module_is_not_flagged(tmp_path):
+    # getattr on something that isn't a tracked module/package alias must
+    # never be flagged, regardless of the literal name it fetches.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "import os\n"
+        "\n"
+        "def read():\n"
+        "    return getattr(os, \"save_record\")\n",
+    )
+    assert guard.find_violations(tmp_path) == []
+
+
 def test_unreadable_file_fails_closed_not_silently_skipped(tmp_path, monkeypatch):
     # A file the guard cannot even read must be reported, not silently
     # treated as clean -- otherwise an unreadable/undecodable file is a

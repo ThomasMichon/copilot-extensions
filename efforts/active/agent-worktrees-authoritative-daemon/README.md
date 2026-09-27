@@ -642,7 +642,7 @@ survey above.
       `tracking_lifecycle.py` / `tracking_claims.py` /
       `tracking_session_registry.py` / `tracking_controller_relations.py`
       / `tracking_write.py` / the 6 `tracking_*_write.py` verb-handler
-      modules). Nine review rounds found real gaps each time (see Journal
+      modules). Ten review rounds found real gaps each time (see Journal
       for the full blow-by-blow: a missing re-export module, a
       package-root-alias attribute chain never tracked at all, an
       incomplete denylist, a wildcard-import escape hatch, the daemon's
@@ -652,7 +652,7 @@ survey above.
       generic direct-execution APIs, a trivial-reassignment alias
       evasion, and two documentation-accuracy findings) -- every one
       fixed with a dedicated regression test, none assumed away. Wired
-      into CI alongside `test_check_no_sibling_tracking_writes.py` (26
+      into CI alongside `test_check_no_sibling_tracking_writes.py` (28
       tests). **Scoped to every `plugins/*` directory except
       `agent-worktrees` itself** (not filtered by an `agent-*` name
       prefix -- this repo ships several non-`agent-*`-named plugins too)
@@ -758,17 +758,18 @@ writes.py`, an AST-based scan of every sibling `plugins/*` (excluding
 denylist covering every tracking-record write function -- derived by
 AST-walking each protected module for functions whose body calls
 `save_record`/`_save_record_unlocked`/the async stamp queue, then
-hand-verified against the remainder (the final denylist, after five
+hand-verified against the remainder (the final denylist, after ten
 review rounds below, covers 51 functions across 12 modules:
 `tracking.py`/`tracking_lifecycle.py`/`tracking_claims.py`/
-`tracking_session_registry.py`/`tracking_controller_relations.py`/the 6
-`tracking_*_write.py` verb-handler modules). Scoped deliberately to
+`tracking_session_registry.py`/`tracking_controller_relations.py`/
+`tracking_write.py`/the 6 `tracking_*_write.py` verb-handler modules).
+Scoped deliberately to
 sibling PLUGINS only, matching this effort's own original survey/Plan
 wording -- NOT extended to cover `worktree-manager/`'s own already-tracked
 exception (see above), since that scope decision belongs to a
 coordinated cross-effort call, not something to fold in unilaterally here.
 
-**Nine review rounds found real gaps, none assumed away:**
+**Ten review rounds found real gaps, none assumed away:**
 (1) `tracking_controller_relations.py`'s own thin
 `save_record`/`_save_record_unlocked` re-export wrappers were absent from
 the protected module set, so a sibling could route through that module
@@ -881,10 +882,29 @@ tests") and a logically backwards claim in the
 `worktree-manager-control-plane` cross-link (implying the guard would
 need the `worktree-manager` call site added once it converts to the
 batched verb, when conversion should REMOVE that call site entirely) --
-both corrected. Every fix across all nine rounds has a dedicated
-regression test.
+both corrected. (13) A TENTH review round found the deepest gap yet:
+`getattr(tracking, "save_record")` and
+`tracking.__dict__["save_record"]` both fetch a write function
+reflectively -- neither produces an `ast.Attribute` node, so both
+evaded the entire attribute-matching model regardless of how complete
+the denylist or alias tracking was. Fixed by adding two narrow,
+literal-string-only checks: a `getattr(<tracked-module>, "<write-fn>")`
+call and a `<tracked-module>.__dict__["<write-fn>"]` subscript, both
+resolved through the SAME module/package-alias tracking the ordinary
+attribute check already uses. Deliberately NOT a general
+reflection-proof analysis -- a non-literal name
+(`getattr(tracking, some_variable)`) is genuinely undecidable statically
+and is not attempted; a dedicated regression test documents that
+boundary rather than asserting false safety. This round also caught two
+more documentation stragglers: the guard's own maintenance note still
+named only the original four modules (missing
+`tracking_controller_relations`/`tracking_write`/the six
+`tracking_*_write.py` modules added in later rounds), and this Journal
+entry's own "(26 tests)"/"five review rounds" phrasing had gone stale
+again after round 9's edits. Every fix across all ten rounds has a
+dedicated regression test.
 
-28 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
+33 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
 tree, the sanctioned read-only accessors staying unflagged, three
 single-level import/call shapes (module attribute call, direct
 `from agent_worktrees import <fn>`, `from agent_worktrees.tracking_claims
@@ -899,7 +919,11 @@ direct-execution APIs (one denylisted case, one confirming
 `dispatch`/`write_with_boot` stay unflagged), three reassignment-evasion
 cases (single-hop Name, multi-hop chained Name, and the
 package-attribute RHS form), two annotated-assignment cases (plain and
-package-attribute RHS), the owning-plugin's own exemption, and a
+package-attribute RHS), four reflective-access cases (`getattr` via a
+module alias, `getattr` via a package-alias chain, a non-literal
+`getattr` name confirming that boundary is not claimed safe, and the
+`__dict__` subscript form), a confirmation that an unrelated module's
+`getattr` is never flagged, the owning-plugin's own exemption, and a
 live-repo smoke test (confirmed clean: zero violations today, matching
 the original survey's own finding). Wired into
 `.github/workflows/ci.yml` alongside the existing

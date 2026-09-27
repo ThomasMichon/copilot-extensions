@@ -47,11 +47,15 @@ sibling plugin's actual (all read-only) usage found by the effort's
 original survey.
 
 **Maintenance note:** :data:`WRITE_FUNCTIONS` is a hand-curated denylist,
-not derived automatically -- update it in the same PR that adds a new
+not derived automatically -- update it (and :data:`TRACKING_MODULES` if a
+new module needs protecting) in the same PR that adds a new
 tracking-record write function (a function whose body persists a
-``WorktreeRecord``, directly or via the async stamp queue) to
+``WorktreeRecord``, directly or via the async stamp queue, including a
+new daemon verb handler) to any of the currently-protected modules:
 ``tracking.py`` / ``tracking_lifecycle.py`` / ``tracking_claims.py`` /
-``tracking_session_registry.py``.
+``tracking_session_registry.py`` / ``tracking_controller_relations.py`` /
+``tracking_write.py`` / the 6 ``tracking_*_write.py`` verb-handler
+modules.
 
 Exit code 0 = no sibling-plugin direct-write imports found, 1 = found one.
 """
@@ -353,31 +357,72 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
                 module_aliases[target] = lineno
                 changed = True
 
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Attribute) or node.attr not in WRITE_FUNCTIONS:
-            continue
-        # Single-level: `tracking.save_record(...)` via a module alias.
-        if isinstance(node.value, ast.Name) and node.value.id in module_aliases:
-            violations.append(Violation(
-                path, node.lineno,
-                f"calls write function `{node.value.id}.{node.attr}` directly",
-                repo_root=repo_root,
-            ))
-        # Two-level: `aw.tracking.save_record(...)` via a package alias
-        # (covers both `import agent_worktrees` and `import agent_worktrees
-        # as aw`, including the unaliased `agent_worktrees.tracking...` form).
-        elif (
-            isinstance(node.value, ast.Attribute)
-            and isinstance(node.value.value, ast.Name)
-            and node.value.value.id in package_aliases
-            and node.value.attr in TRACKING_MODULES
+    def _module_expr_label(expr: ast.expr) -> str | None:
+        """If ``expr`` resolves to a tracked module (a module alias, or a
+        two-level package-alias chain like ``aw.tracking``), return a
+        human-readable label for it; otherwise ``None``."""
+        if isinstance(expr, ast.Name) and expr.id in module_aliases:
+            return expr.id
+        if (
+            isinstance(expr, ast.Attribute)
+            and isinstance(expr.value, ast.Name)
+            and expr.value.id in package_aliases
+            and expr.attr in TRACKING_MODULES
         ):
-            violations.append(Violation(
-                path, node.lineno,
-                f"calls write function `{node.value.value.id}.{node.value.attr}."
-                f"{node.attr}` directly",
-                repo_root=repo_root,
-            ))
+            return f"{expr.value.id}.{expr.attr}"
+        return None
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr in WRITE_FUNCTIONS:
+            label = _module_expr_label(node.value)
+            if label is not None:
+                violations.append(Violation(
+                    path, node.lineno,
+                    f"calls write function `{label}.{node.attr}` directly",
+                    repo_root=repo_root,
+                ))
+        # Reflective access with a literal write-function name still
+        # resolves statically even though it isn't an ast.Attribute:
+        # `getattr(tracking, "save_record")` and
+        # `tracking.__dict__["save_record"]` both name the exact function
+        # being fetched in a plain string constant. This is deliberately
+        # NOT a general reflection-proof analysis (a non-literal name,
+        # e.g. `getattr(tracking, some_variable)`, is undecidable
+        # statically and is not attempted) -- it closes the specific,
+        # easy, literal-string bypass of the ast.Attribute check above.
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "getattr"
+            and len(node.args) >= 2
+            and isinstance(node.args[1], ast.Constant)
+            and isinstance(node.args[1].value, str)
+            and node.args[1].value in WRITE_FUNCTIONS
+        ):
+            label = _module_expr_label(node.args[0])
+            if label is not None:
+                violations.append(Violation(
+                    path, node.lineno,
+                    f"reflectively accesses write function "
+                    f"`getattr({label}, {node.args[1].value!r})`",
+                    repo_root=repo_root,
+                ))
+        elif (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.value, ast.Attribute)
+            and node.value.attr == "__dict__"
+            and isinstance(node.slice, ast.Constant)
+            and isinstance(node.slice.value, str)
+            and node.slice.value in WRITE_FUNCTIONS
+        ):
+            label = _module_expr_label(node.value.value)
+            if label is not None:
+                violations.append(Violation(
+                    path, node.lineno,
+                    f"reflectively accesses write function "
+                    f"`{label}.__dict__[{node.slice.value!r}]`",
+                    repo_root=repo_root,
+                ))
     return violations
 
 
