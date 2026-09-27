@@ -116,10 +116,12 @@ copilot-extensions create            # isolated worktree (no mux/session)
 #   Complete the documentation-impact review below.
 copilot-extensions create-pr         # squashes the worktree, pushes pr/<slug>,
                                      # and (auto_open) opens the GitHub PR
-#   → Copilot posts its review on the PR (non-blocking; never a merge gate)
-#   …address anything worth addressing, re-run push-changes to update the PR…
-#   → merge regardless of remaining low/medium findings -- there is no
-#     approval or "clean" verdict to wait for; see the note below.
+#   → wait ~5 minutes for Copilot's review to land
+#   → Approved: merge. Commented: address findings, push, wait ~5 minutes for
+#     the automatic post-push review; still not Approved -> re-request review
+#     via the API (see "Requesting a fresh review" below), wait ~5 minutes
+#     again. Repeat until Approved, or until the maintainer bypass below
+#     applies. See "Waiting for a verdict" for the full loop.
 copilot-extensions pr-merge ThomasMichon/copilot-extensions <#> --now   # MANUAL squash-merge (you own the merge)
 copilot-extensions finalize          # clean up the worktree
 ```
@@ -127,51 +129,88 @@ copilot-extensions finalize          # clean up the worktree
 - **Update an open PR** with `copilot-extensions push-changes` (it re-pushes the
   `pr/<slug>` head; it will NOT land on `main`).
 - **Merge is deliberately manual.** No auto-merge label is bound (the repo's
-  `pr-self-merge` profile authorizes the submitter to merge directly): open the
-  PR, give Copilot's review a bounded window of **about 5 minutes** (order of
-  minutes, not hours) to land, then squash-merge it yourself with `pr-merge <#>
-  --now` (equivalent to a plain `gh pr merge <#> --squash --delete-branch`, but
-  it resolves the right account and squashes uniformly). (0 approvals are
-  required by policy — a solo owner can't approve their own PR, and Copilot's
-  review is advisory.) **As the repo's maintainer, self-merge after that ~5
-  minute window regardless of whether a review has posted yet** -- address any
-  findings that *did* land in time, but do not extend the wait chasing a
-  verdict that may never come; a review arriving after merge can still be
-  addressed in a follow-up commit/PR.
-- **There is no verdict to wait for.** Copilot's review is always a
-  non-blocking comment, never a required approval, no matter how many
-  findings it reports or how many rounds you go through. Address genuinely
-  valuable findings, explain or dismiss the rest, and merge -- do not leave a
-  PR sitting untouched after a review lands "waiting" for a subsequent
-  approval or a zero-finding pass that may never come. If a PR has had a
-  review and nothing has happened since, that is a stuck PR: merge it or
-  explicitly abandon it, don't leave it idle.
-- **This flow describes the maintainer's own (bypassed) path.** As
-  `ThomasMichon`, "0 approvals required" and "no verdict to wait for" hold
-  because the ruleset's admin-role bypass exempts this account's PRs from the
-  review-count/codeowner gate entirely — Copilot's own review is still always
-  non-blocking commentary, exactly as described below, with or without that
-  bypass. **A PR authored by anyone else is different:** the maintainer's own
-  approving review is a real, required gate for it (see "Review" above) —
-  `pr-status`/`pr-watch`'s `eligible: false` / `reason: "not yet approved"`
-  genuinely means blocked in that case, not a wording gap.
-- **Ignore `pr-status`/`pr-watch`'s `eligible: false` / `reason: "not yet
-  approved"` fields as a blocker on this repo — for the maintainer's own PRs
-  only.** Those fields report a generic contract that assumes a universal
-  approval gate; for `ThomasMichon`'s own bypassed PRs specifically, they do
-  **not** mean a review is pending or required -- they are a known
-  tooling-wording gap (copilot-extensions#3638), not a live merge gate for
-  this account. Trust the prose above (checks green + no `CHANGES_REQUESTED`
-  + the ~5 minute window is enough), not that one field, when deciding
-  whether to self-merge as the maintainer.
+  `pr-self-merge` profile authorizes the submitter to merge directly): once
+  the wait-for-a-verdict loop below is satisfied, squash-merge with
+  `pr-merge <#> --now` (equivalent to a plain `gh pr merge <#> --squash
+  --delete-branch`, but it resolves the right account and squashes
+  uniformly).
+
+### Waiting for a verdict
+
+**Copilot code review can only ever render two outcomes: `Approve` or
+`Comment`.** (There is no "Request changes" capability in Copilot code
+review at all — confirmed against GitHub's own docs; do not write or expect
+a `CHANGES_REQUESTED` state from it.) Approvals are enabled in this repo
+(Settings → Copilot → Code review → Auto-approval), so a genuinely
+ready PR should come back `Approve`, not merely `Comment` — see
+[`REVIEW.md`](REVIEW.md)'s directive requiring Copilot to render `Approve`
+whenever it has no blocking findings, rather than habitually leaving a
+`Comment` review that just narrates readiness.
+
+**Everyone — contributor and maintainer alike — waits for a verdict before
+merging.** A `Comment` review is not a pass and is not merge-ready on its
+own; treat it the same way regardless of who authored the PR:
+
+1. Open (or update) the PR, then wait **~5 minutes** (order of minutes, not
+   hours) for Copilot's review to land.
+2. **`Approve` landed:** proceed to merge (subject to the separate
+   required-approving-review gate for a non-maintainer's PR — see "Review"
+   above; Copilot's own `Approve` never substitutes for that).
+3. **`Comment` landed (or nothing landed yet):** address the genuinely
+   valuable findings (or explicitly dismiss/resolve the rest with reasoning
+   in a reply), then push the update.
+4. Wait **~5 minutes** for the automatic review that follows a push. If it
+   comes back `Approve`, merge. If it's still `Comment`, **explicitly
+   re-request a review** — see "Requesting a fresh review" below; do not
+   just keep pushing small commits hoping the next automatic pass flips to
+   `Approve` on its own.
+5. Wait **~5 minutes** for the re-requested review, then repeat from step 2.
+6. **Maintainer bypass, narrowly:** as `ThomasMichon`, if the loop above has
+   run at least once and the *current* `Comment` review's remaining
+   findings are **all Low severity** (no Medium or High findings open), the
+   maintainer may self-merge without chasing a further `Approve` — state
+   which findings were dismissed and why in the merge/commit message. **Any
+   Medium or High finding still blocks self-merge**, maintainer or not,
+   until it's resolved and a fresh review is Approved (or requested).
+   This bypass does not extend to a non-maintainer's PR: the maintainer's
+   own approving review remains that PR's separate, always-required gate
+   regardless of Copilot's verdict.
+- **`pr-status`/`pr-watch`'s `eligible: false` / `reason: "not yet
+  approved"` fields still refer only to the codeowner/review-count gate**
+  (see "Review" above), not to Copilot's own verdict — for the maintainer's
+  own bypassed PRs those fields are a known tooling-wording gap
+  (copilot-extensions#3638), not a live merge gate for this account. They
+  are unrelated to whether Copilot has rendered `Approve` yet; track that
+  separately via the PR's reviews.
 - **Do not comment `@copilot review` (or similar) to request a fresh pass.**
   An `@copilot` mention on GitHub does not nudge the `copilot-pull-request-reviewer`
   bot -- it delegates a task to the separate Copilot **cloud coding agent**,
   which will start pushing its own commits directly to your PR branch (it can
   and will act on open review findings, which may or may not be what you
   want, and consumes its own credit budget independent of your session).
-  The review bot already re-runs automatically on every push; if you want a
-  fresh verdict, just push a commit.
+
+### Requesting a fresh review
+
+A push alone re-triggers an automatic review, but if that automatic pass
+still comes back `Comment`, explicitly re-request a review rather than
+pushing another commit and hoping. This is the same "Re-request review"
+action GitHub's own UI offers next to Copilot's name in the Reviewers
+list, done via the API instead of clicking:
+
+```bash
+gh api repos/ThomasMichon/copilot-extensions/pulls/<PR>/requested_reviewers \
+  -X POST -f reviewers[]=copilot-pull-request-reviewer[bot]
+```
+
+(Confirmed live and current: GitHub's own docs cite this exact call —
+["Using GitHub Copilot code review" § Requesting a re-review from
+Copilot](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#requesting-a-re-review-from-copilot),
+and [REST API endpoints for review
+requests](https://docs.github.com/en/rest/pulls/review-requests#request-reviewers-for-a-pull-request).)
+This prompts a genuinely fresh, full-PR assessment — not just a diff-only
+pass against the latest push — which is what actually gives Copilot the
+chance to flip from `Comment` to `Approve` once nothing substantive
+remains.
 - **Never** `git push origin main` or `push-changes` direct-to-`main`; both the
   tooling and the branch policy reject it. Break-glass (a genuine recovery)
   means temporarily relaxing the ruleset — not routing around it.

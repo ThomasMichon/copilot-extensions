@@ -100,6 +100,18 @@ specifically when reviewing a pull request, not a replacement for them.
 - **ruff signal, not noise.** Hold changed Python to at least the `F`/`E9`
   groups; do not block on pre-existing style debt in code the PR did not
   touch.
-- **Make every comment count.** Copilot review comments (it does not
-  approve or block merges here), so each comment should be actionable and
-  worth the author's attention.
+- **Always render a verdict — `Approve` when ready, never a bare `Comment`
+  that just narrates readiness.** Copilot code review can only ever submit
+  `Approve` or `Comment` (there is no `Request changes` capability in
+  Copilot code review at all). Approvals are enabled in this repo
+  (Settings → Copilot → Code review → Auto-approval), so when a PR has no
+  remaining Medium/High-severity finding and the overview's own readiness
+  assessment says it's ready to merge, **submit that as a genuine `Approve`
+  review**, not a `Comment` review whose text merely says the PR looks
+  ready. A `Comment`-only verdict is the submitter's and maintainer's
+  signal that real, unresolved findings remain (see `CONTRIBUTING.md` §
+  "Waiting for a verdict") — do not leave a PR in `Comment` limbo once
+  nothing substantive is left to flag.
+- **Make every comment count.** Copilot review comments should each be
+  actionable and worth the author's attention, whether the review's overall
+  verdict ends up `Approve` or `Comment`.
