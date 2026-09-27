@@ -203,6 +203,7 @@ def test_manager_owned_helpers_cover_mux_registry_and_ahp_records(tmp_path, monk
     assert housekeeping.is_manager_owned_launcher_shell(
         r"pwsh -File C:\Users\me\.worktree-manager\bin\launch-session.ps1"
     )
+    assert not housekeeping.is_manager_owned_launcher_shell("python -m worktree_manager")
     assert not housekeeping.is_manager_owned_launcher_shell("python -m agent_worktrees")
 
 
