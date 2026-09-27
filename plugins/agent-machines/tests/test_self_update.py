@@ -302,7 +302,7 @@ def test_default_launcher_starter_does_not_pass_creationflags_to_conhost(monkeyp
     # own `--headless` flag already keeps a window from appearing, so no
     # extra Popen creationflags belong on this specific spawn.
     monkeypatch.setattr(self_update.sys, "platform", "win32")
-    monkeypatch.setattr(self_update, "shutil_which", lambda _name: r"C:\pwsh\pwsh.exe")
+    monkeypatch.setattr(self_update_dtssh, "shutil_which", lambda _name: r"C:\pwsh\pwsh.exe")
     monkeypatch.setattr(Path, "is_file", lambda self: True)
     captured: dict = {}
 
