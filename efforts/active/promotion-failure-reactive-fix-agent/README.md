@@ -672,7 +672,7 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
       prompt's own "Output" section states explicitly "you are never
       authorized to merge it yourself" — the PR goes through this
       repository's normal review like any other contributor's.
-- [x] Cap attempts per signature (e.g., after 2 failed cloud-agent attempts
+- [ ] Cap attempts per signature (e.g., after 2 failed cloud-agent attempts
       at the same test, stop assigning and escalate to a plain human-facing
       issue instead of retrying indefinitely).
       **Structurally moot as currently designed, not implemented as a
@@ -683,12 +683,30 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
       comment "must never re-trigger the Phase 2 fix-attempt agent...
       re-running the agent against an issue it may already be mid-attempt
       on would be a real race, not just a redundant one." This means the
-      fix-attempt agent is dispatched EXACTLY ONCE per signature, ever —
-      there is no current path to a 2nd attempt at all, so no counter is
-      needed to cap it. **If re-dispatch-on-recurrence is ever added as a
-      future enhancement, a real attempt-counter must be implemented at
-      that time** — this item is resolved for the CURRENT design, not
-      permanently closed against a design that doesn't yet exist.
+      fix-attempt agent is dispatched at most once per **currently-open**
+      tracking issue for a signature — there is no current path to a 2nd
+      attempt racing an in-progress one, so no counter is needed for that
+      specific race. **Real review finding (unrelated to this PR's own
+      diff, in unchanged watchdog code, flagged during review anyway per
+      this repo's own "track it or fix it" convention):**
+      `_existing_issue`'s dedup search is scoped to `--state open` only
+      (`ci_failure_watchdog.py`) — if a tracking issue for a signature is
+      ever CLOSED (a human closing it after the fix merges, or any other
+      reason) and that exact signature recurs later, dedup won't find the
+      closed issue, so a brand-new issue gets filed and the fix-attempt
+      agent genuinely IS re-dispatched for "the same" signature, just via
+      a new issue number. Whether that's the *right* behavior (a closed-
+      then-recurring signature arguably deserves fresh diagnosis, since
+      closure implied "resolved") or a gap (an attacker/flaky-closer could
+      induce unbounded re-dispatches by repeatedly closing the tracking
+      issue) is a genuine, undecided design question — **not resolved
+      here**, left as an explicit open follow-up for a future session/the
+      operator to decide, not something this docs-only PR should decide
+      unilaterally. If unbounded re-dispatch via this path is judged a
+      real risk, THAT is where a genuine attempt-counter (keyed to the
+      signature across issue numbers, not just within one issue) would be
+      needed — sooner than "if re-dispatch-on-recurrence is ever added,"
+      since this path already exists today.
 - [x] Explicitly out of scope for this agent, permanently: workflow files,
       version fields, branch-protection/ruleset changes, anything requiring
       `--admin` — all of this same session's dev-branch-release-pipeline
