@@ -420,13 +420,15 @@ _Pending._
   use short event descriptors that point at the universal
   `operating-procedures` charter (and the `autopilot` task charter where
   relevant) while keeping route/lane/owner-specific mechanics inline. Full
-  suite: 3476 passed, 19 skipped, plus one confirmed pre-existing unrelated
-  failure (`test_idle_headless_fleet_nudge_includes_remote_host`); the other
-  documented Windows visible-window probe flake did not recur on that run.
+  local suite: 3476 passed, 19 skipped, plus one confirmed pre-existing
+  unrelated failure (`test_idle_headless_fleet_nudge_includes_remote_host`);
+  the other documented Windows visible-window probe flake did not recur on
+  that run.
 - PR #4152 merged: the idle-confirm, stalled-worker, steer-resume (bridge
   fallback + HTTP `/tasks/{id}/steer` route), and cooldown-resume nudges all
   shrank to short event descriptors, and direct tests were added where those
-  message paths previously had no literal coverage. Final full suite for this
-  slice: 3480 passed, 21 skipped, and exactly the two confirmed pre-existing
-  unrelated flakes recurred (`test_idle_headless_fleet_nudge_includes_remote_host`
-  and `test_namespaced_peer_from_windowless_parent`).
+  message paths previously had no literal coverage. Final local full-suite
+  rerun for this slice: 3480 passed, 21 skipped, and exactly the two
+  confirmed pre-existing unrelated flakes recurred
+  (`test_idle_headless_fleet_nudge_includes_remote_host` and
+  `test_namespaced_peer_from_windowless_parent`).
