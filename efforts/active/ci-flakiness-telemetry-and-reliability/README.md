@@ -249,7 +249,8 @@ find the noisiest and blocking issues, and fix them"
   -- a future refinement could correlate each occurrence's run against
   that PR's own eventual merge state, but that's out of scope for this
   pass.
-  **Genuine remaining code-level candidate, investigation ongoing:**
+  **Former candidate, now believed historical (pending post-#4239
+  confirmation) -- not currently actionable:**
   `plugins/agent-logger/tests/test_install_signed_python_probe.py::
   test_missing_newest_candidate_does_not_abort_probe[pwsh]` (19
   occurrences, 122 blocked `dev`-push runs in the original 7-day-lookback
@@ -398,16 +399,19 @@ determine whether this section needs anything beyond the Plan above._
   occurrences, 0% recovery); highest
   blocking impact `tests/test_install_signed_python_probe.py::
   test_missing_newest_candidate_does_not_abort_probe[pwsh]` (122 `dev`-push
-  runs stalled). **Superseded by the 2026-09-27 Phase 2 refinement entry
-  below:** the marketplace-isolation signature turned out NOT to be a
-  persisting standing bug (0% recovery there means "many different PR
-  authors independently tripped a working check," not "stuck and never
-  clears") -- only the signed-python-probe signature remains a genuine
-  Phase 3 candidate; #7715 is now fixed.
+  runs stalled). **Superseded by later refinement entries below (Phase 2
+  ranking refinement, and the signed-python-probe correction):** the
+  marketplace-isolation signature turned out NOT to be a persisting
+  standing bug (0% recovery there means "many different PR authors
+  independently tripped a working check," not "stuck and never clears"),
+  and the signed-python-probe signature turned out to be very likely
+  historical noise predating its own already-merged fix (#4239) --
+  neither is a confirmed Phase 3 candidate as of the later entries;
+  #7715 is now fixed (a different signature, not either of these).
 - Next: Phase 3 — fix aperture-labs#7715, then work down the ranking.
   **Superseded (2026-09-27):** #7715 is now fixed (see the later Journal
-  entry below); the next actionable item is the signed-python-probe
-  investigation (also below), not #7715.
+  entry below); see the even-later signed-python-probe correction entry
+  for why that signature is not a confirmed next step either.
 
 ### 2026-09-27 — Phase 0 reconciliation resolved
 - Read `promotion-failure-reactive-fix-agent`'s README in full and the
