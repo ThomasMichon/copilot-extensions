@@ -1,6 +1,8 @@
-"""Regression tests for the "no sibling agent-* plugin writes tracking YAML
+"""Regression tests for the "no sibling plugin writes tracking YAML
 directly" structural guard (agent-worktrees-authoritative-daemon effort,
-Phase 4).
+Phase 4). Scope: every `plugins/*` directory except `agent-worktrees`
+itself -- not filtered by an `agent-*` name prefix (matching the guard's
+own actual scope, see its docstring).
 
 ``find_violations``/``_check_file`` accept an explicit repo root, so most
 cases are plain unit tests against a throwaway directory tree (no

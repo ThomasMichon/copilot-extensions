@@ -652,7 +652,7 @@ survey above.
       generic direct-execution APIs, a trivial-reassignment alias
       evasion, and two documentation-accuracy findings) -- every one
       fixed with a dedicated regression test, none assumed away. Wired
-      into CI alongside `test_check_no_sibling_tracking_writes.py` (25
+      into CI alongside `test_check_no_sibling_tracking_writes.py` (26
       tests). **Scoped to every `plugins/*` directory except
       `agent-worktrees` itself** (not filtered by an `agent-*` name
       prefix -- this repo ships several non-`agent-*`-named plugins too)
