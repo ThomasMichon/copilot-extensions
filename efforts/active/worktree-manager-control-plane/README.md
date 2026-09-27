@@ -469,11 +469,17 @@ PR [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
       `engine-picker-contract.md`, and moved `pivot_manifest.py` /
       `update_stage.py` off the in-process engine boundary onto the same
       subprocess client pattern the rest of the Picker already uses.
-- [ ] **Step 2 — add Group B's narrow public CLI seam for project/config/ssh
-      decisions.** Promote runner-scoped `--json` verbs (and reuse the existing
-      `resolve --json` remote seam) instead of replacing `_engine_runtime.py`
-      with another Python import API, and bind the resolved project identity in
-      Manager-owned context for downstream consumers. See
+- [x] **Step 2 — add Group B's narrow public CLI seam for project/config/ssh
+      decisions.** Landed in PR
+      [#4322](https://github.com/ThomasMichon/copilot-extensions/pull/4322):
+      added/pinned `picker-bootstrap --json` and
+      `repair-stale-anchor --json`, documented them in
+      `engine-picker-contract.md`, confirmed the existing `resolve --json`
+      remote-launch payload already covered Group B's machine/environment
+      needs without a shape change, and introduced a Manager-owned
+      `ProjectBootstrap` binding record plus `engine_group_b.py` for the
+      later cutover. Additive only: `runner.py` still uses the old
+      compatibility path until Step 4. See
       [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
 - [ ] **Step 3 — reimplement Group B's Picker-owned lifecycle sweeps directly
       in worktree-manager, additive first.** Port the process-lifecycle logic
@@ -779,6 +785,36 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-09-27** — Landed Phase 3d Step 2, PR
+  [#4322](https://github.com/ThomasMichon/copilot-extensions/pull/4322).
+  Promoted Group B's project/config/ssh ownership split into a narrow public
+  engine seam without cutting over the live `runner.py` path yet: added
+  `agent-worktrees`' versioned `picker-bootstrap --json` bootstrap verb
+  (authoritative project + cwd-switch + default live/local mode) and
+  `repair-stale-anchor --json` targeted repair action, documented both in
+  `plugins/agent-worktrees/docs/engine-picker-contract.md`, and confirmed the
+  existing `resolve --json` remote-launch payload already supplied the Picker's
+  machine/environment answer so Step 2 needed no speculative shape growth
+  there. On the Manager side, added
+  `worktree_manager.production_picker.engine_group_b` and extended
+  `production_picker.context` with an authoritative `ProjectBootstrap` binding
+  record so downstream Picker/data helpers can consume the parent-owned
+  identity once Step 4 performs the actual cutover. Explicitly kept this slice
+  additive-only per plan: no `runner.py` call site moved in this PR, and the
+  compatibility boundary remains live until Step 4. Validation: targeted Group
+  B seam tests green on both sides; full `worktree-manager` suite (excluding
+  the two standing hangs `test_data_ssh_sources.py` /
+  `test_launch_trace.py`) matched the current unrelated baseline at `1274
+  passed, 2 skipped, 13 failed`; full `agent-worktrees` suite on this machine
+  remained red only in unrelated baseline families at `5733 passed, 50
+  skipped, 7 failed` (`test_launch_cmd`, `test_lazy_dispatch`,
+  `test_module_invocation`, `test_mux_status_link`,
+  `test_profile_assignment`, `test_session_conduct`); `ruff check --select
+  F,E9`, `tools/check-install-contract.py`, and
+  `tools/check-version-consistency.py` passed; `check-version-bump.py` still
+  reports the same pre-existing unrelated unbumped-plugin drift on
+  `delegation-guidance`, `efforts`, `harness-knowledge`, and `wsl-setup`.
 
 - **2026-09-27** — Claiming Phase 3d Step 2 ("Promote Group B's
   project/config/ssh decisions to a narrow public CLI seam, additive only")
