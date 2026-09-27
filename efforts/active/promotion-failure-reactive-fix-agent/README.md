@@ -490,10 +490,15 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
         This is `gh-aw`'s own enforcement of this effort's Phase 3
         guardrails, not a substitute for them — keep Phase 3's explicit
         scope checks too.
-        **Implemented:** `safe-outputs.create-pull-request` is the only
-        configured safe-output (`base-branch: "dev"`, `draft: true`,
-        `max: 1`, `fallback-as-issue: true`) — no other safe-output type
-        is declared.
+        **Implemented, with one accuracy correction (real review finding,
+        PR #4326):** `safe-outputs.create-pull-request` is the only
+        configured safe-output type, but `fallback-as-issue: true` means
+        its OWN documented fallback (used only if PR creation itself
+        fails) can file an issue instead — so the permitted write surface
+        is "open a pull request against `dev`, or gh-aw's own PR-creation
+        fallback of filing an issue," not a pull request alone. Still no
+        other safe-output type (comments, direct pushes, repo-settings)
+        is configured.
   - [ ] Pin the `gh-aw` extension/action to a specific reviewed version (it
         is an actively-developed external tool; do not float on `latest`)
         and set up **Copilot-engine authentication using one of `gh-aw`'s
@@ -530,7 +535,10 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
         `.github/workflows/ci-failure-fix-attempt.md` applies specifically
         to `jobs.agent` (confirmed, real review finding, PR #4155 issue
         #21) — there is no caller workflow to inherit a broader token
-        from. A real review pass (issue #21) additionally confirmed gh-aw's
+        from. (Per the correction two bullets above, "the `safe-outputs`
+        PR-creation stage" in this item's original wording should be read
+        as including its own `fallback-as-issue` path, not a pull request
+        alone.) A real review pass (issue #21) additionally confirmed gh-aw's
         own generated infrastructure jobs (`activation`/`conclusion`) hold
         their OWN separately-scoped write credentials for their own
         distinct purposes (status-comment/reaction — now disabled — and
