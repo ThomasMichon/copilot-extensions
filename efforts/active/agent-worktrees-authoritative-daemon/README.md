@@ -482,6 +482,24 @@ survey above.
       pre-migration transaction's own *net* lock-contention behavior
       (not just its outermost lock's stated policy) before assuming what
       "faithful to the old code" requires.
+- [x] Migrated the sixth call-site cluster: `finalize.py`'s
+      `_settle_current_session_claim` (settles the invoking session's own
+      outbound `session` claim to at-rest before finalize's obligation
+      gate runs) — reusing the same `claim_settle` verb's
+      `skip_if_released` guard via `tracking_write.dispatch`, instead of a
+      bespoke locked transaction duplicating the guard PR #3911 already
+      landed. Unlike `terminal_conclusion.py`'s `_save_session_conclusion`
+      (still deferred — embedded in a bigger single-lock cascade with two
+      separate `save_record` calls around it), this function already
+      opened its own SELF-CONTAINED `_RecordLock`, never sharing a lock
+      scope with `finalize()`'s surrounding flow — confirmed via
+      inspection of its only call site before migrating. Landed in PR
+      [#4064](https://github.com/ThomasMichon/copilot-extensions/pull/4064)
+      — one review round: the existing tests' autouse fixture disables
+      the resident monitor, so they only exercised the direct fallback;
+      added a live-`CoalescingServer` dispatch test and a
+      dispatch-failure-keeps-the-stale-record test to cover the daemon
+      path and the `except Exception: pass` contract explicitly.
 - [ ] One call site (or a closely related cluster) at a time, each its own
       reviewable PR, per this repo's serial-single-writer convention —
       across whichever of `tracking.py` / `tracking_claims.py` /
@@ -498,7 +516,23 @@ survey above.
       are embedded in bigger orchestrated flows or hot hook paths, not
       standalone CLI transactions; confirm a call site is genuinely
       self-contained (one dedicated CLI command, one lock, no shared
-      choreography) before wrapping it as a verb.
+      choreography) before wrapping it as a verb. A design survey this
+      session (2026-09-27, no code landed) found NO further standalone
+      candidate in `tracking_session_registry.py` (`register_session`/
+      `deregister_session` remain hot-path-excluded; `seal_worktree_identity`
+      is embedded in `finalize.py`'s own cascade; `record_repo_fetch_confirmed`
+      writes an entirely different file, a shared repo-freshness registry
+      cache, not a per-worktree `WorktreeRecord` YAML — out of this
+      effort's scope) or in `tracking_claims.py` (`load_or_create_anchor_record`
+      is a helper inside a bigger claim-journaling flow, not standalone;
+      the remaining exported functions are all multi-worktree batch
+      operations, already explicitly excluded). The genuinely remaining
+      Phase 3 work is now the three still-deferred EMBEDDED call sites
+      (`terminal_conclusion.py`'s `_save_session_conclusion`,
+      `register_session`'s own internal `link_handoff` call) — each needs
+      fresh design thinking on how to safely peel a verb out of a bigger
+      orchestrated flow without duplicating its surrounding choreography,
+      not a search for more standalone leaves.
 
 ### Phase 4 — Sibling-plugin guard + audit _(not started)_
 - [ ] Add the CI guard described above.
@@ -539,6 +573,72 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-09-27 — PR #4064: Phase 3's sixth migrated call-site cluster, finalize.py's own-session claim settlement; design survey found no further standalone candidates
+Migrated `finalize.py`'s `_settle_current_session_claim` onto the shared
+`claim_settle` verb's `skip_if_released` guard, instead of a bespoke
+locked transaction duplicating the exact same release guard PR #3911
+already implemented. This function was a good candidate precisely
+because -- unlike `terminal_conclusion.py`'s `_save_session_conclusion`,
+still deferred -- it already opened its own SELF-CONTAINED `_RecordLock`,
+never sharing a lock scope with `finalize()`'s surrounding flow: a
+genuinely standalone transaction, just not itself a top-level CLI
+command. Confirmed via inspection of its only call site before
+migrating, per this effort's own design-survey-first guidance.
+
+GitHub's Copilot code review caught one real gap: the existing
+`test_finalize_gate.py` tests all run under an autouse fixture that
+disables the resident status monitor, so they only ever exercised the
+direct in-process fallback -- never the actual daemon dispatch path
+(including `AmbiguousWriteOutcome` handling) this migration introduces.
+Added two tests: one proving the function reaches the verb via an
+actual `CoalescingServer` (mirroring the same live-daemon pattern already
+used in `test_tracking_claim_write.py`), and one proving that when the
+dispatch itself raises, the caller's `record` reference comes back
+exactly as passed in -- never a partially-applied or reloaded snapshot --
+matching the pre-migration transaction's own `except Exception: pass`
+contract precisely.
+
+Before landing this cluster, did a design survey (per the operator's
+"continue Phase 3" direction) across every remaining write function in
+`tracking_session_registry.py` and `tracking_claims.py`, looking for the
+next standalone candidate. Found none:
+- `tracking_session_registry.py`: `register_session`/`deregister_session`
+  remain hot-path-excluded (sessionStart/sessionEnd hooks);
+  `seal_worktree_identity` is embedded in `finalize.py`'s own cascade
+  (called right before `_settle_current_session_claim`, but itself saved
+  by a *later* step in that same cascade, not a standalone transaction);
+  `record_repo_fetch_confirmed` writes an entirely different file (a
+  shared repo-freshness registry cache, not a per-worktree
+  `WorktreeRecord` YAML) -- out of this effort's scope, which is
+  specifically about the daemon-mediated `WorktreeRecord` write-through
+  path.
+- `tracking_claims.py`: `load_or_create_anchor_record` is a helper inside
+  a bigger claim-journaling flow (`worktree_ops_cli.py`'s
+  `_ensure_anchor_ledger`/`_journal_run_claim`), not a standalone
+  transaction of its own; every other exported write function
+  (`sweep_abandoned_obligations`/`release_all_resources`/
+  `release_at_rest_resources`/`rehome_abandoned_obligations`/
+  `remove_orphaned_obligations`) is a multi-worktree batch operation,
+  already explicitly excluded by `tracking_claim_write.py`'s own module
+  docstring.
+
+**Phase 3's remaining work is now genuinely the three still-deferred
+EMBEDDED call sites** (`terminal_conclusion.py`'s
+`_save_session_conclusion`, `register_session`'s own internal
+`link_handoff` call) -- each needs fresh design thinking on how to safely
+peel a verb out of a bigger orchestrated flow without duplicating its
+surrounding choreography. This is harder, riskier work than the six
+clusters landed so far, all of which were standalone-shaped transactions
+merely waiting to be found. Any future session picking this up should
+expect to spend real design time on the choreography question itself,
+not another quick survey for an easy remaining leaf.
+
+Full `plugins/agent-worktrees` suite throughout: 5688 passed, 26 skipped,
+1 failed, 1 error -- the same 2 pre-existing/environment-dependent
+failures this effort's Journal has noted every round
+(`test_doctor.py::test_no_drift_when_consistent`,
+`test_registration_home.py`), unrelated to this change.
 
 ### 2026-09-27 — PR #3911: Phase 3's fifth migrated call-site cluster, handoff-cutover repairs (a lock-policy detour and its revert)
 Migrated `handoff_cutover.py`'s two confirmed-retire best-effort repairs
