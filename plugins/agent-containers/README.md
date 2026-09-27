@@ -303,7 +303,14 @@ fleets:
 fleet member mounts its own subdirectory, keyed by its unique container name
 (e.g. `self-maintaining-worker-1`, `self-maintaining-worker-2` for `size: 2`
 above), onto `workspace_folder`/`home_folder` respectively, so members of a
-multi-container fleet never collide on the same host path.
+multi-container fleet never collide on the same host path. Each member
+subdirectory is created and `chown`'d to `exec_user`'s real uid/gid (resolved
+the same way `restricted` already does) before it is ever mounted -- a
+missing bind-mount source would otherwise be auto-created by Docker owned by
+the daemon (root), leaving a non-root `exec_user` unable to write to its own
+"persistent" workspace/home on first launch. `chown` is POSIX-only; a
+Windows Docker Desktop host only gets the directory created (see the
+platform note on `_ensure_owned_dir`).
 `systemd_capable: true` (a real boolean only -- a quoted `"false"` or other
 non-boolean value is rejected rather than coerced) adds `--cap-add
 SYS_ADMIN`, writable/executable `/run` + `/run/lock` tmpfs mounts, an

@@ -18,9 +18,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from agent_procutil import no_window_flags
 
@@ -252,6 +254,21 @@ def _materialize_repo(
         log.info("Ran %s install_command in %s", label, container)
 
 
+def _ensure_owned_dir(path: str, uid: int, gid: int) -> None:
+    """Create a host bind-mount SOURCE dir (if missing) owned by uid/gid.
+
+    Docker creates a missing bind-mount source itself, owned by whatever the
+    daemon runs as (root) -- a non-root container `exec_user` could never
+    write to a freshly created mount otherwise. `chown` is POSIX-only (a
+    Windows Docker Desktop host shares files differently -- ownership there
+    doesn't map onto a Linux container's uid/gid the same way), so this is a
+    no-op on Windows; only mkdir runs there.
+    """
+    Path(path).mkdir(parents=True, exist_ok=True)
+    if os.name != "nt":
+        os.chown(path, uid, gid)
+
+
 def _image_user(
     image: str,
     user: str,
@@ -430,12 +447,28 @@ def _image_run(
         # container `name`) under the configured parent path -- mounting the
         # bare configured path directly would let every member of a
         # size > 1 fleet collide on the same host directory.
-        if fleet.host_workspace_path:
-            member_workspace = f"{fleet.host_workspace_path.rstrip('/')}/{name}"
-            args += ["-v", f"{member_workspace}:{workspace_folder}"]
-        if fleet.host_home_path and fleet.home_folder:
-            member_home = f"{fleet.host_home_path.rstrip('/')}/{name}"
-            args += ["-v", f"{member_home}:{fleet.home_folder}"]
+        if fleet.host_workspace_path or (fleet.host_home_path and fleet.home_folder):
+            # Docker creates a missing bind-mount SOURCE directory itself,
+            # owned by whatever the daemon runs as (root) -- the configured,
+            # normally non-root exec_user could never write to a freshly
+            # created mount. Pre-create + chown each member directory to the
+            # exec_user's real uid/gid (the same image-probe restricted mode
+            # already uses) before it's ever mounted.
+            uid, gid, _home = _image_user(
+                fleet.image,
+                exec_user,
+                memory=fleet.effective_memory(),
+                cpus=fleet.effective_cpus(),
+                pids_limit=fleet.effective_pids_limit(),
+            )
+            if fleet.host_workspace_path:
+                member_workspace = f"{fleet.host_workspace_path.rstrip('/')}/{name}"
+                _ensure_owned_dir(member_workspace, uid, gid)
+                args += ["-v", f"{member_workspace}:{workspace_folder}"]
+            if fleet.host_home_path and fleet.home_folder:
+                member_home = f"{fleet.host_home_path.rstrip('/')}/{name}"
+                _ensure_owned_dir(member_home, uid, gid)
+                args += ["-v", f"{member_home}:{fleet.home_folder}"]
         if fleet.systemd_capable:
             # A working `systemd --user` (for the venue's own maintenance
             # timers) needs CAP_SYS_ADMIN + a writable /sys/fs/cgroup +

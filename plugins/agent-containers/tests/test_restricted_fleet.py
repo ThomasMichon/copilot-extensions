@@ -206,6 +206,15 @@ def test_trusted_image_run_wires_host_mounts_and_systemd_capability(monkeypatch)
         "_docker",
         lambda args, timeout=30: calls.append(args) or _ok("container-id\n"),
     )
+    monkeypatch.setattr(
+        fleet_mod, "_image_user", lambda image, user, **kwargs: (1000, 1000, "/home/node")
+    )
+    ensure_owned_calls: list[tuple[str, int, int]] = []
+    monkeypatch.setattr(
+        fleet_mod,
+        "_ensure_owned_dir",
+        lambda path, uid, gid: ensure_owned_calls.append((path, uid, gid)),
+    )
     fleet = FleetConfig(
         image="example/agent:latest",
         security_profile="trusted",
@@ -232,6 +241,11 @@ def test_trusted_image_run_wires_host_mounts_and_systemd_capability(monkeypatch)
     # directly, which would collide across a size > 1 fleet's members.
     assert "/mnt/data/workspaces/example-1:/workspace/example" in mounts
     assert "/mnt/data/home/example-1:/home/node" in mounts
+    # Each member directory was created/chowned to the resolved exec_user
+    # uid/gid BEFORE the mount arg was added -- a missing bind-mount source
+    # would otherwise be auto-created by Docker as root.
+    assert ("/mnt/data/workspaces/example-1", 1000, 1000) in ensure_owned_calls
+    assert ("/mnt/data/home/example-1", 1000, 1000) in ensure_owned_calls
     assert run[run.index("--cap-add") + 1] == "SYS_ADMIN"
     tmpfs = [run[i + 1] for i, value in enumerate(run) if value == "--tmpfs"]
     assert "/run:rw,exec" in tmpfs
@@ -279,6 +293,10 @@ def test_trusted_image_run_namespaces_host_paths_per_fleet_member(monkeypatch):
         "_docker",
         lambda args, timeout=30: calls.append(args) or _ok("container-id\n"),
     )
+    monkeypatch.setattr(
+        fleet_mod, "_image_user", lambda image, user, **kwargs: (1000, 1000, "/home/node")
+    )
+    monkeypatch.setattr(fleet_mod, "_ensure_owned_dir", lambda path, uid, gid: None)
     fleet = FleetConfig(
         image="example/agent:latest",
         security_profile="trusted",
@@ -298,6 +316,20 @@ def test_trusted_image_run_namespaces_host_paths_per_fleet_member(monkeypatch):
     mounts_2 = [calls[1][i + 1] for i, v in enumerate(calls[1]) if v == "-v"]
     assert mounts_1 == ["/mnt/data/workspaces/example-1:/workspace/example"]
     assert mounts_2 == ["/mnt/data/workspaces/example-2:/workspace/example"]
+
+
+def test_ensure_owned_dir_creates_and_chowns(monkeypatch, tmp_path):
+    target = tmp_path / "workspaces" / "example-1"
+    chown_calls: list[tuple[str, int, int]] = []
+    monkeypatch.setattr(
+        fleet_mod.os, "chown", lambda path, uid, gid: chown_calls.append((path, uid, gid))
+    )
+
+    fleet_mod._ensure_owned_dir(str(target), 1000, 1000)
+
+    assert target.is_dir()
+    if fleet_mod.os.name != "nt":
+        assert chown_calls == [(str(target), 1000, 1000)]
 
 
 def test_restricted_network_defaults_to_none(monkeypatch):
