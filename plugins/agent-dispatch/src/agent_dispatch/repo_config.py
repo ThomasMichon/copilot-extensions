@@ -7,7 +7,8 @@ import os
 from pathlib import Path
 
 CANONICAL_REPO_CONFIG_DIR = Path(".copilot-extensions") / "agent-dispatch"
-LEGACY_REPO_CONFIG_DIR = Path(".agent-dispatch")
+_legacy_repo_dirname = ".agent-dispatch"  # marketplace-isolation: allow legacy-compatibility
+LEGACY_REPO_CONFIG_DIR = Path(_legacy_repo_dirname)
 MARKETPLACE_OVERLAYS_DIR = CANONICAL_REPO_CONFIG_DIR / "marketplaces"
 INSTALLATION_CONTEXT_ENV = "COPILOT_EXTENSIONS_CONTEXT"
 

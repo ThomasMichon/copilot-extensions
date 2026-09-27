@@ -106,10 +106,12 @@ def _reviewer_loop_setup(args: argparse.Namespace) -> int:
     path = Path(args.declaration).expanduser().resolve()
     repo_root = dispatch_repo_config.repo_root_from_surface_path(path, "registrar")
     if repo_root is None:
+        _legacy_dirname = ".agent-dispatch"  # marketplace-isolation: allow legacy-compatibility
+        _legacy_note = f"(legacy <repo>/{_legacy_dirname}/registrar/ also accepted)"
         raise ValueError(
             f"{path}: setup requires a declaration under "
             "<repo>/.copilot-extensions/agent-dispatch/registrar/ "
-            "(legacy <repo>/.agent-dispatch/registrar/ also accepted)"
+            f"{_legacy_note}"
         )
     _path, declarations, owner = _reviewer_loop_declarations(args)
     name = args.name or repo_root.name

@@ -1,0 +1,9 @@
+{
+  "comment": "marketplace-scoped-installations guard triage: annotate agent-dispatch's src/ cluster's genuine marketplace-isolation exceptions (sibling-plugin lookups, remote-management SSH contexts, legacy-compatibility fallbacks) and two new guard false-positive classes (allow query-column-list, allow release-verb) with reason markers.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "minor"
+    }
+  ]
+}

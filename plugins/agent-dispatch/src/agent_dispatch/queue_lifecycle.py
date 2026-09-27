@@ -30,6 +30,14 @@ from .queue_common import (
 )
 from .queue_records import SpawnState, Status, TaskError
 
+# marketplace-isolation: allow release-verb (a business verb, "release from
+# suspension" -- coincidentally matches the guard's lease/mutex keyword scan
+# via "release" containing "lease", not a lifecycle identity)
+_RELEASED_FROM_SUSPENSION = (
+    "task released from suspension"  # marketplace-isolation: allow release-verb
+)
+_RESET_TO_PROPOSED = "task reset to proposed"  # marketplace-isolation: allow release-verb
+
 
 class QueueLifecycleMixin:
     """Lifecycle, ownership, and progress methods for :class:`TaskQueue`."""
@@ -270,7 +278,7 @@ class QueueLifecycleMixin:
                 "resume_requested": 0,
             },
             release_spawn=True,
-            release_spawn_detail="task released from suspension",
+            release_spawn_detail=_RELEASED_FROM_SUSPENSION,
             reject_if_held=True,
             idempotent_replay=True,
         )
@@ -411,7 +419,7 @@ class QueueLifecycleMixin:
             note=note or "yield",
             extra=extra,
             release_spawn=release_spawn,
-            release_spawn_detail="task yielded",
+            release_spawn_detail="task yielded",  # marketplace-isolation: allow release-verb
             idempotent_replay=True,
         )
 
@@ -507,7 +515,7 @@ class QueueLifecycleMixin:
             reject_if_held=True,
             idempotent_replay=True,
             release_spawn=True,
-            release_spawn_detail="task reset to proposed",
+            release_spawn_detail=_RESET_TO_PROPOSED,
         )
 
     def heartbeat(self, task_id: str, worker_id: str, *, now: float | None = None) -> Task:
