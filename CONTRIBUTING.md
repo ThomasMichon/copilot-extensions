@@ -87,7 +87,14 @@ explicit admin escalation).** This is enforced on three layers that agree:
      maintainer's own approving review before it can merge — Copilot's review
      alone is never sufficient for a non-maintainer's PR, however clean it
      comes back, so a change never lands without the maintainer being aware
-     of it.
+     of it. This holds even though the repo's **"Allow Copilot to approve
+     pull requests"** setting (Settings → Copilot → Code review →
+     Auto-approval) is enabled, letting Copilot submit a genuine `Approve`
+     review that counts toward `required_approving_review_count`: that count
+     and `require_code_owner_review` are independent, both-must-pass gates,
+     and Copilot is deliberately **not** listed in CODEOWNERS, so its
+     approval alone can never satisfy the codeowner-specific half of the
+     requirement for someone else's PR.
    - The maintainer's own PRs (including this account's agent-authored work)
      bypass that specific review-count/codeowner requirement via a standing,
      admin-role-scoped `bypass_actors` entry on the ruleset (`bypass_mode:
