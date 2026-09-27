@@ -1,0 +1,9 @@
+{
+  "comment": "Purge stale #13492/#13494 reference from spawn-supervisor.md's headless-fleet-body rationale.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "dev"
+    }
+  ]
+}

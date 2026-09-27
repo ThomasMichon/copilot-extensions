@@ -43,14 +43,14 @@ capture, interactive process/session logs, and startup-boundary classification;
 return here when the differential reaches bridge-owned ACP recovery or
 live-session registration.
 
-Identify the mode and capture the trace. The resume-hang's original root cause
-was the Copilot CLI startup race github/copilot-agent-runtime **#13492** (fix
-**#13494**), originally scoped to *headed* sessions but also reproducing on
-**ACP** sessions. **That race is now permanently fixed upstream** (#13494
-shipped) -- a CLI build carrying the fix does not exhibit it. Treat any
-resume-hang symptom on an up-to-date CLI as a **new issue**, not a recurrence
-of #13492/#13494; the classification steps below still apply for
-capturing/triaging the symptom, but stop attributing it to this closed race.
+Identify the mode and capture the trace. A resume-hang can stem from more than
+one root cause -- do not assume it is a specific historical race without
+evidence. One current known cause is a **Copilot enterprise management-policy
+check that fails closed on permitting extension usage** (even for
+already-approved extensions), where the policy API call **itself** then fails
+on an auth timeout -- unstable auth produces failed extension loads and hangs.
+Confirm via the process/session logs (see
+`customizing-copilot:diagnosing-copilot-cli-startup`) rather than guessing.
 The relay-flap fix (sticky port + buffered token-fetch + single-owner
 republish) is tracked in **#580**.
 
@@ -189,19 +189,21 @@ Look at:
 > `acp_child_log`. For a CodeSpace, read the child stderr on the box, or use
 > `peek` (which reads `events.jsonl` directly).
 
-## Operator-authorized mitigations (attack the race at the source)
+## Operator-authorized mitigations (attack the hang at the source)
 
-> **#13492/#13494 is fixed permanently upstream.** These mitigations targeted
-> that specific, now-closed race. Keep them only as historical reference for a
-> CodeSpace still pinned to a pre-fix CLI; do not reach for them on an
-> up-to-date CLI, and do not assume a new hang is this same race.
+> Extension-load hangs can have more than one cause. Confirm the actual
+> failure signature (session logs, `diagnosing-copilot-cli-startup`) before
+> picking a mitigation -- don't reach for a fix blind.
 
-- **Bump the CodeSpace Copilot CLI past the #13494 fix.** This changes the
-  target environment and therefore requires explicit authorization. The race is a CLI
-  startup bug; a CLI carrying the fix stops reproducing it.
+- **Stabilize auth first.** A known current cause is unstable
+  authentication: the CLI's enterprise management-policy check for permitting
+  extension usage fails closed (even for already-approved extensions) when
+  its own policy API call times out, and that auth instability is what
+  produces the failed extension loads / hang. Re-authenticating or waiting
+  out a transient auth outage resolves this class before anything else does.
 - **ACP `--no-experimental`** -- an operator-authorized diagnostic that disables
-  extensions and sidesteps the extension-load leg of the startup generation
-  race.
+  extensions and sidesteps the extension-load leg of startup entirely (useful
+  to confirm the hang is extension-load-related at all).
 
 ---
 

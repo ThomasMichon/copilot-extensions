@@ -1,0 +1,9 @@
+{
+  "comment": "Purge stale #13492/#13494 resume-hang framing from agent-bridge-troubleshooting; document the current known enterprise-policy/auth-timeout extension-load-hang cause.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    }
+  ]
+}
