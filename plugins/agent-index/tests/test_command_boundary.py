@@ -72,12 +72,12 @@ def test_installers_are_base_only_and_never_implicitly_start_engine():
     )[0]
     ps_actions = ps.split("switch ($Action) {", 1)[1]
     sh_actions = sh.split('case "$ACTION" in', 1)[1]
-    for action, following in (("install", "update"), ("update", "ensure")):
+    for action, following in (("install", "update"),):
         ps_branch = ps_actions.split(f"'{action}' {{", 1)[1].split(
             f"'{following}'", 1
         )[0]
         sh_branch = sh_actions.split(f"{action})", 1)[1].split(
-            f"{following})", 1
+            f"{following}", 1
         )[0]
         assert "Invoke-ServiceCutover" in ps_branch
         assert "Install-LogonAutostart" in ps_branch
@@ -87,10 +87,26 @@ def test_installers_are_base_only_and_never_implicitly_start_engine():
         assert "_install_engine" not in sh_branch
         assert "_ensure_engine" not in sh_branch
 
+    # "ensure" is the sessionStart hook's cheap safety net -- it must NEVER pull
+    # in the heavy runtime build (that stays behind explicit install/update, or
+    # explicit setup for the runtime gate), but it DOES need to stamp the
+    # binstub when one has never been deployed: a prior version of "ensure"
+    # only health-checked/(re)started an already-installed service and never
+    # stamped anything, so a genuinely fresh machine's first session left the
+    # CLI entirely absent (nothing to health-check).
     ps_ensure = ps_actions.split("'ensure' {", 1)[1].split("'register-tasks'", 1)[0]
     sh_ensure = sh_actions.split("ensure)", 1)[1].split("stamp)", 1)[0]
-    assert "Ensure-Running; Install-LogonAutostart" in ps_ensure
-    assert "_ensure_running; _install_logon_autostart" in sh_ensure
+    assert "Deploy-SetupGatedBinstub" in ps_ensure
+    assert "Ensure-Running" in ps_ensure
+    assert "Install-LogonAutostart" in ps_ensure
+    assert "Install-Runtime" not in ps_ensure
+    assert "Install-Engine" not in ps_ensure
+    assert "deploy_binstub" in sh_ensure
+    assert "_ensure_running" in sh_ensure
+    assert "_install_logon_autostart" in sh_ensure
+    assert "_ensure_runtime" not in sh_ensure
+    assert "_install_engine" not in sh_ensure
+    assert "_ensure_engine" not in sh_ensure
 
 
 def test_installers_preserve_two_step_cuda_engine_swap():

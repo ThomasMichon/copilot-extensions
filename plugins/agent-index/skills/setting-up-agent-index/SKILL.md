@@ -27,9 +27,10 @@ search an already-enabled index. For day-to-day querying, use the
 - Inside an agent session, invoke the exact `argv` from the session command
   catalog. Do not search `PATH` or substitute another `agent-index` binary.
 - Session start is non-mutating: it only decides whether the command catalog and
-  scope guidance should appear, then runs a cheap `ensure` safety net for an
-  already-installed host runtime. It does **not** provision a runtime or
-  reindex.
+  scope guidance should appear, then runs a cheap `ensure` safety net that
+  health-checks (and restarts) an already-installed host runtime, stamping the
+  binstub first if a never-provisioned machine has none yet. It does **not**
+  provision a runtime or reindex.
 - The runtime can stay inactive even when the plugin is enabled globally. A repo
   must opt in through config.
 - Once the runtime is installed on a host, `install` / `update` register the

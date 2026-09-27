@@ -2327,7 +2327,22 @@ switch ($Action) {
         Install-LogonAutostart
         Write-Skip 'Durable engine runtime unchanged; use engine / engine-update for the heavy stack'
     }
-    'ensure' { Ensure-Running; Install-LogonAutostart }  # user-mode safety net + default logon auto-start registration (no elevation)
+    'ensure' {
+        # User-mode safety net + default durable auto-start registration; also
+        # stamps the binstub on a never-provisioned machine (fits a sessionStart
+        # hook's grace window -- no venv build, no heavy runtime provisioning here).
+        $ps1Stub = Join-Path $LocalBin 'agent-index.ps1'
+        if (-not (Test-Path -LiteralPath $ps1Stub -PathType Leaf)) {
+            foreach ($dir in @($InstallDir, $LocalBin)) {
+                if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+            }
+            $payloadDirMarker = Join-Path $InstallDir 'payload-dir'
+            [IO.File]::WriteAllText($payloadDirMarker, $probePayload, (New-Object System.Text.UTF8Encoding($false)))
+            Deploy-SetupGatedBinstub
+        }
+        Ensure-Running
+        Install-LogonAutostart
+    }
     'register-tasks' { Invoke-RegisterTasks }  # OPT-IN advanced tier (scheduled tasks) -- the sole action that may (opt-in) self-elevate that ONE step
     'engine' { Install-Engine | Out-Null; Ensure-EngineRunning }        # explicit host-side provisioning (role-independent), user-mode
     'engine-update' { if (Install-Engine -Upgrade) { Restart-EngineDaemon } }  # rebuild durable engine venv + restart daemon (decoupled from service update)

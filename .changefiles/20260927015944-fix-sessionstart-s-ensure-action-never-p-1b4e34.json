@@ -1,0 +1,9 @@
+{
+  "comment": "Fix: sessionStart's 'ensure' action never stamped the binstub on a never-provisioned machine, leaving the CLI entirely absent -- 'ensure' now stamps the binstub when missing, alongside its existing health-check/autostart safety net",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "minor"
+    }
+  ]
+}
