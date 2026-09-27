@@ -13,6 +13,7 @@ description: >
   - 'walk the claimant graph'
   - 'is this worktree's owner still alive' / 'is this PR orphaned'
   - 'find the worktree behind this PR'
+  - 'sweep the fleet for open PR claims'
   - triaging open upstream/dependency-repo PRs to decide if they're still
     actively driven before commenting, reviewing, or pinging
   The reverse/discovery direction of the `worktree` skill's own outbound-claim
@@ -84,6 +85,68 @@ else
 fi
 ```
 
+## Fleet-wide sweep: which worktrees hold a claim on an open PR
+
+The two-hop recipe above assumes you already know *which* worktree opened a
+PR. The other direction -- "across every worktree this machine knows about, in
+every registered project, on every platform, which ones are behind a
+**currently open** PR in some other repo" -- has no single command yet (see
+*A missing accelerator* below). Until one exists, this is the manual sweep:
+
+1. **Enumerate every worktree in the PR's own project, on every platform this
+   machine runs.** `list --json --include-other-platforms --tracking-status
+   all --all` merges platforms that share one tracking store, but **a
+   genuinely separate cell (e.g. a dual-boot machine's native-Windows install
+   next to its WSL install) keeps its own, entirely separate tracking store**
+   -- `--include-other-platforms` cannot see across that boundary. Repeat the
+   `list` call over SSH into each cell's own alias (see the `facility-ssh` /
+   equivalent machine-alias doc for this facility) with `--project <name>`,
+   and merge the JSON yourself.
+2. **Extract every locally-tracked "open" PR claim.** Each worktree record's
+   `pr` (latest) and `prs` (full history) fields carry a `state` and a `url`;
+   filter for `state == "open"`, and parse the PR number out of the `url`
+   (some pre-existing records carry a stale/absent `number` even when parsing
+   PR would be trivial by URL). Expect **heavy staleness**: a worktree's own
+   `state` can still read `"open"` long after the PR actually merged or
+   closed elsewhere -- this local field is a *candidate* list, never a
+   verdict.
+3. **Intersect against the live, authoritative state.** Pull the PR host's own
+   current open list once (`gh pr list --repo <owner/repo> --state open
+   --json number --limit 500` for GitHub) and intersect by PR number. Only
+   numbers appearing in *both* sets are worth tracing further -- this
+   typically collapses hundreds of stale local candidates down to a handful
+   of real ones.
+4. **Trace each surviving match with the two-hop recipe above** (`claims` ->
+   `owner_ref` -> `claimant-liveness`), from the *worktree that opened the
+   PR* (found in step 1/2), not the PR's target repo.
+5. **Independently confirm via the PR's own attribution marker**, when one is
+   present (`pr.source_attribution` in `"codename"` mode -- see the
+   `worktree` skill's `references/pr-attribution.md`): read the PR body's
+   `<!-- agent-worktrees:source codename=<name> -->` marker and run `resolve
+   --codename <name> --dry-run`. A codename match that agrees with the
+   claim-graph trace from step 4 is a **third, independent** confirmation
+   (local claim record, live PR state, and the PR's own self-declared source
+   all agreeing) -- valuable because it doesn't depend on the local tracking
+   store staying intact; the marker survives even if a claim record were ever
+   pruned or corrupted. A codename that fails to resolve anywhere reachable
+   from this machine (not local, no cross-machine SSH match) means the PR
+   was opened from a worktree this sweep cannot see at all -- a different,
+   unreachable machine, or a since-fully-pruned worktree -- not a sweep bug.
+
+### A missing accelerator
+
+There is no `claims find` (or similar fleet-wide query) command today. Every
+step above is a hand-rolled loop over `list --json` output piped through
+`jq`/a script, repeated per platform/cell, plus a separate live-PR-state
+fetch and manual intersection. This is real, repeated toil -- an
+`agent-worktrees claims find --resource-kind pr --repo <owner/repo> --state
+open [--include-other-platforms] [--all-cells]` (or equivalent) that did
+steps 1-3 itself, across every registered project's tracking store, would
+turn a several-tool-call investigation into one call. No such command
+exists as of this writing; if you build one, update this section to point at
+it instead of the manual recipe. Tracked as
+[ThomasMichon/copilot-extensions#4086](https://github.com/ThomasMichon/copilot-extensions/issues/4086).
+
 ## What this does NOT tell you
 
 - **Liveness is a local claim-graph fact, not upstream PR state.** Always
@@ -105,6 +168,7 @@ fi
 
 - **`worktree` skill** -- the *creating* side of this same graph: journaling
   outbound claims, the finalize obligation gate, and settling a claim when
-  its resource closes.
+  its resource closes. Its `references/pr-attribution.md` covers the PR
+  attribution marker/codename mechanism the fleet-sweep's step 5 relies on.
 - **`working-cross-repo` skill** -- opening and journaling a cross-repo PR in
   the first place (`claims add pr <url> --owner-ref ...`).

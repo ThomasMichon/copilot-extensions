@@ -1,0 +1,9 @@
+{
+  "comment": "Document fleet-wide PR-claim sweep recipe in tracing-claimant-graphs skill",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}
