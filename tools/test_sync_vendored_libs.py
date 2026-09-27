@@ -1120,3 +1120,11 @@ def test_check_rejects_a_symlinked_consumer_pyproject_even_with_no_visible_refs(
     result = _run(repo, "--check")
     assert result.returncode == 1, result.stdout + result.stderr
     assert "pyproject.toml is a symlink" in result.stdout
+
+
+def test_check_reports_a_malformed_consumer_manifest(repo: Path):
+    (repo / "plugins/alpha").mkdir(parents=True)
+    _write(repo, "plugins/alpha/pyproject.toml", "this is not [ valid toml")
+    result = _run(repo, "--check")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "could not read/parse" in result.stdout

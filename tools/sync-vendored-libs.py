@@ -443,7 +443,14 @@ def cmd_check() -> int:
                     print(f"  - {d}")
     uv_editable_found = False
     for consumer, consumer_dir in uer.iter_consumer_dirs():
-        refs = uer.find_uv_editable_refs(consumer_dir)
+        try:
+            refs = uer.find_uv_editable_refs(consumer_dir)
+        except uer.ManifestUnreadable as exc:
+            exit_code = 1
+            uv_editable_found = True
+            print(f"{consumer}: INVALID uv-editable canonical reference(s)")
+            print(f"  - {consumer}: {exc}")
+            continue
         # A symlinked pyproject.toml must be validated too, even though
         # find_uv_editable_refs() fails closed on it by returning [] --
         # otherwise it would look identical to a consumer with no

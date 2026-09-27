@@ -362,13 +362,42 @@ def materialize_uv_editable_ref_into(
             "expansion"
         ]
     canonical_root_r = canonical_root.resolve()
-    for name, raw_path, lib, editable in uer.find_uv_editable_refs(source_consumer_dir):
+    try:
+        refs = uer.find_uv_editable_refs(source_consumer_dir)
+    except uer.ManifestUnreadable as exc:
+        # A manifest that EXISTS but can't be read/parsed must never look
+        # identical to "no references at all" (which would let promotion
+        # emit no SKIP and ship an unresolved external path unchanged) --
+        # refuse the whole consumer explicitly instead.
+        return [f"SKIP {dest_consumer_dir}: {exc}"]
+    for name, raw_path, lib, editable in refs:
         if not editable:
             log.append(
                 f"SKIP {dest_consumer_dir}: {name} references {raw_path} "
                 "outside its own root but is missing editable = true -- "
                 "refusing to ship an unresolved external reference"
             )
+            continue
+        if not uer.is_safe_lib_name(lib):
+            log.append(
+                f"SKIP {dest_consumer_dir}: {name} references {raw_path}, "
+                f"whose final path component {lib!r} is not a safe lib "
+                "name -- refusing"
+            )
+            continue
+        # Check the UNRESOLVED, canonical (".."-free) libs/<lib> path for a
+        # symlinked ancestor BEFORE ever calling .resolve() on anything
+        # derived from raw_path -- resolving first would silently follow
+        # (and erase) a symlink along the way, so a later ancestor check
+        # against the already-resolved path could never detect it. Every
+        # copy this function performs reads from canonical_root_r/libs/lib
+        # directly (never from raw_path's own literal route), so checking
+        # THAT constructed path is what actually matters, not raw_path's
+        # own possibly `..`-laden text.
+        canonical_unresolved = canonical_root_r / "libs" / lib
+        bad_ancestor = _find_symlinked_ancestor(canonical_unresolved, canonical_root_r)
+        if bad_ancestor is not None:
+            log.append(f"SKIP {dest_consumer_dir}: {bad_ancestor} is a symlink -- refusing")
             continue
         canonical = (source_consumer_dir / raw_path).resolve()
         # Require the resolved path to be EXACTLY canonical_root/libs/<lib>
@@ -377,7 +406,7 @@ def materialize_uv_editable_ref_into(
         # say, ../../plugins/other and copy that OTHER plugin's tree into
         # this consumer's libs/<lib>/, rewriting it as a shared-lib
         # dependency it never was.
-        if canonical != (canonical_root_r / "libs" / lib).resolve():
+        if canonical != canonical_unresolved.resolve():
             log.append(
                 f"SKIP {dest_consumer_dir}: {name} references {raw_path} "
                 f"(resolved {canonical}) which is not canonical_root/libs/{lib} "
@@ -389,10 +418,6 @@ def materialize_uv_editable_ref_into(
                 f"SKIP {dest_consumer_dir}: {name} references {raw_path} "
                 f"(resolved {canonical}) which does not exist"
             )
-            continue
-        bad_ancestor = _find_symlinked_ancestor(canonical, canonical_root_r)
-        if bad_ancestor is not None:
-            log.append(f"SKIP {dest_consumer_dir}: {bad_ancestor} is a symlink -- refusing")
             continue
         symlink_found = _find_symlink(canonical)
         if symlink_found is not None:
@@ -428,19 +453,38 @@ def _materialize_one_uv_editable_ref(
     canonical lib -- never happens only after the canonical tree has
     already been (partially) copied in. Mirrors the existing directory/
     file pointer materializer's own fail-closed behavior for an incomplete
-    canonical lib (missing ``src/``)."""
+    canonical lib (missing ``src/``).
+
+    The rewrite is scoped to the ``[tool.uv.sources]`` table's own span
+    (``uv_editable_ref.uv_sources_table_span`` -- the same scoping the
+    dev-time conversion side uses), never the whole ``pyproject.toml`` file,
+    so an identical-looking value in an unrelated table can never be
+    rewritten by mistake. It also accepts either key order
+    (``path``-then-``editable`` or ``editable``-then-``path``) on a single
+    line -- ``find_uv_editable_refs()`` parses real TOML and accepts both,
+    so the rewrite must too, or a valid `uv`-editable entry authored with
+    the other order would pass ``--check`` yet make promotion emit an
+    unresolvable ``SKIP``."""
     if not (canonical / "src").is_dir():
         return f"SKIP {dest_lib_dir}: {canonical}/src not found -- refusing (canonical lib source must exist)"
     if not (canonical / "pyproject.toml").is_file():
         return f"SKIP {dest_lib_dir}: {canonical}/pyproject.toml missing -- refusing"
 
     text = pyproject.read_text(encoding="utf-8")
+    span = uer.uv_sources_table_span(text)
+    if span is None:
+        return f"SKIP {pyproject}: no [tool.uv.sources] table found"
+    start, end = span
+    escaped_name = re.escape(name)
+    escaped_path = re.escape(raw_path)
     pattern = re.compile(
-        r'^([ \t]*' + re.escape(name) + r'\s*=\s*)\{\s*path\s*=\s*"'
-        + re.escape(raw_path) + r'"\s*,\s*editable\s*=\s*true\s*\}[ \t]*$',
+        r'^([ \t]*' + escaped_name + r'\s*=\s*)\{\s*(?:'
+        r'path\s*=\s*"' + escaped_path + r'"\s*,\s*editable\s*=\s*true'
+        r'|editable\s*=\s*true\s*,\s*path\s*=\s*"' + escaped_path + r'"'
+        r')\s*\}[ \t]*$',
         re.MULTILINE,
     )
-    if pattern.search(text) is None:
+    if pattern.search(text[start:end]) is None:
         return f"SKIP {pyproject}: could not find {name}'s uv-editable entry to rewrite"
 
     dest_lib_dir.mkdir(parents=True)
@@ -453,11 +497,11 @@ def _materialize_one_uv_editable_ref(
         if src_file.is_file():
             shutil.copy2(src_file, dest_lib_dir / fname)
 
-    new_text, count = pattern.subn(
-        lambda m: f'{m.group(1)}{{ path = "libs/{lib}" }}', text, count=1
+    new_table_text, count = pattern.subn(
+        lambda m: f'{m.group(1)}{{ path = "libs/{lib}" }}', text[start:end], count=1
     )
     assert count == 1  # already confirmed via the preflight search() above
-    pyproject.write_text(new_text, encoding="utf-8")
+    pyproject.write_text(text[:start] + new_table_text + text[end:], encoding="utf-8")
     return f"OK   {dest_lib_dir} <- {raw_path}"
 
 

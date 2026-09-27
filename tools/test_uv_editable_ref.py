@@ -172,3 +172,62 @@ def test_uv_editable_problems_rejects_a_symlinked_consumer_pyproject(tmp_path: P
     assert uer.find_uv_editable_refs(consumer) == []
     problems = uer.uv_editable_problems("alpha", consumer)
     assert any("pyproject.toml is a symlink" in p for p in problems)
+
+
+def test_is_safe_lib_name():
+    assert uer.is_safe_lib_name("shared-lib") is True
+    assert uer.is_safe_lib_name("") is False
+    assert uer.is_safe_lib_name(".") is False
+    assert uer.is_safe_lib_name("..") is False
+    assert uer.is_safe_lib_name("../outside") is False
+    assert uer.is_safe_lib_name("a/b") is False
+
+
+def test_convert_to_uv_editable_refuses_an_unsafe_lib_name():
+    with pytest.raises(SystemExit, match="not a valid lib name"):
+        uer.convert_to_uv_editable(
+            "alpha", "../outside",
+            repo=Path("/nonexistent"), libs_dir=Path("/nonexistent/libs"),
+            consumer_dir_of=lambda c: Path("/nonexistent/plugins") / c,
+            find_symlinked_ancestor=lambda p, r: None,
+            remove_path=lambda p: None,
+            is_pointer_copy=lambda p: False,
+        )
+
+
+def test_find_uv_editable_refs_raises_manifest_unreadable_for_malformed_toml(tmp_path: Path):
+    consumer = tmp_path / "plugins/alpha"
+    consumer.mkdir(parents=True)
+    (consumer / "pyproject.toml").write_text("this is not [ valid toml", encoding="utf-8")
+    with pytest.raises(uer.ManifestUnreadable):
+        uer.find_uv_editable_refs(consumer)
+
+
+def test_find_uv_editable_refs_returns_empty_for_a_genuinely_absent_manifest(tmp_path: Path):
+    consumer = tmp_path / "plugins/alpha"
+    consumer.mkdir(parents=True)
+    assert uer.find_uv_editable_refs(consumer) == []
+
+
+def test_uv_editable_problems_surfaces_a_malformed_manifest(tmp_path: Path):
+    consumer = tmp_path / "plugins/alpha"
+    consumer.mkdir(parents=True)
+    (consumer / "pyproject.toml").write_text("this is not [ valid toml", encoding="utf-8")
+    problems = uer.uv_editable_problems("alpha", consumer)
+    assert any("could not read/parse" in p for p in problems)
+
+
+def test_uv_editable_problems_rejects_an_unsafe_lib_name(tmp_path: Path, monkeypatch):
+    consumer = tmp_path / "plugins/alpha"
+    consumer.mkdir(parents=True)
+    (consumer / "pyproject.toml").write_text(
+        '[project]\nname = "consumer"\nversion = "1.0.0"\n'
+        "[tool.uv.sources]\n"
+        # raw_path's own final component is ".." -- Path(raw_path).name is
+        # ".." too, an unsafe lib name that would let libs_dir / lib escape
+        # the intended libs/ tree entirely.
+        'agent-x = { path = "../../libs/..", editable = true }\n',
+        encoding="utf-8",
+    )
+    problems = uer.uv_editable_problems("alpha", consumer)
+    assert any("not a safe lib name" in p for p in problems)

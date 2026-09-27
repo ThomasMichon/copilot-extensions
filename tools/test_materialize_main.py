@@ -1039,3 +1039,113 @@ def test_materialize_uv_editable_ref_into_refuses_a_symlinked_source_pyproject(t
     )
     assert any("is a symlink" in line for line in log)
     assert not (consumer / "libs/zdd").exists()
+
+
+def test_materialize_uv_editable_ref_into_catches_a_symlinked_canonical_before_resolving(
+    tmp_path: Path,
+):
+    # The symlink-ancestor check must run on the UNRESOLVED, clean
+    # canonical_root/libs/<lib> path BEFORE any .resolve() call -- resolving
+    # first would silently follow (and erase) the symlink, so a later
+    # ancestor check against the already-resolved path could never detect
+    # it.
+    root = tmp_path / "repo"
+    real_lib = tmp_path / "outside-lib"
+    (real_lib / "src/zdd").mkdir(parents=True)
+    (real_lib / "src/zdd/__init__.py").write_text("evil\n", encoding="utf-8")
+    (real_lib / "pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "0.0.0"\n', encoding="utf-8"
+    )
+    (root / "libs").mkdir(parents=True)
+    (root / "libs/zdd").symlink_to(real_lib, target_is_directory=True)
+    consumer = _uv_editable_consumer(root, "plugins/agent-bridge", "agent-zdd", "../../libs/zdd")
+
+    log = mm.materialize_uv_editable_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
+    )
+    assert any("is a symlink" in line for line in log)
+    assert not (consumer / "libs/zdd").exists()
+
+
+def test_materialize_uv_editable_ref_into_refuses_an_unsafe_lib_name(tmp_path: Path):
+    root = tmp_path / "repo"
+    consumer = _uv_editable_consumer(
+        root, "plugins/agent-bridge", "agent-x", "../../libs/.."
+    )
+    log = mm.materialize_uv_editable_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
+    )
+    assert any("not a safe lib name" in line for line in log)
+
+
+def test_materialize_uv_editable_ref_into_refuses_a_malformed_manifest(tmp_path: Path):
+    root = tmp_path / "repo"
+    consumer = root / "plugins/agent-bridge"
+    consumer.mkdir(parents=True)
+    (consumer / "pyproject.toml").write_text("this is not [ valid toml", encoding="utf-8")
+
+    log = mm.materialize_uv_editable_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
+    )
+    assert any("could not read/parse" in line for line in log)
+
+
+def test_materialize_one_uv_editable_ref_accepts_editable_before_path_key_order(tmp_path: Path):
+    # find_uv_editable_refs() parses real TOML and accepts either key
+    # order -- the rewrite must too, or a valid entry authored with
+    # editable-then-path would pass --check yet make promotion emit an
+    # unresolvable SKIP.
+    canonical = tmp_path / "libs/zdd"
+    (canonical / "src/zdd").mkdir(parents=True)
+    (canonical / "src/zdd/__init__.py").write_text("real\n", encoding="utf-8")
+    (canonical / "pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "0.1.0"\n', encoding="utf-8"
+    )
+    consumer = tmp_path / "plugins/agent-bridge"
+    consumer.mkdir(parents=True)
+    pyproject = consumer / "pyproject.toml"
+    pyproject.write_text(
+        "[tool.uv.sources]\n"
+        'agent-zdd = { editable = true, path = "../../libs/zdd" }\n',
+        encoding="utf-8",
+    )
+    dest_lib_dir = consumer / "libs/zdd"
+
+    result = mm._materialize_one_uv_editable_ref(
+        canonical=canonical, dest_lib_dir=dest_lib_dir, pyproject=pyproject,
+        name="agent-zdd", raw_path="../../libs/zdd", lib="zdd",
+    )
+    assert result.startswith("OK"), result
+    assert (dest_lib_dir / "src/zdd/__init__.py").read_text() == "real\n"
+    assert 'agent-zdd = { path = "libs/zdd" }' in pyproject.read_text()
+
+
+def test_materialize_one_uv_editable_ref_scopes_rewrite_to_uv_sources_table(tmp_path: Path):
+    canonical = tmp_path / "libs/zdd"
+    (canonical / "src/zdd").mkdir(parents=True)
+    (canonical / "src/zdd/__init__.py").write_text("real\n", encoding="utf-8")
+    (canonical / "pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "0.1.0"\n', encoding="utf-8"
+    )
+    consumer = tmp_path / "plugins/agent-bridge"
+    consumer.mkdir(parents=True)
+    pyproject = consumer / "pyproject.toml"
+    pyproject.write_text(
+        "[tool.other]\n"
+        'agent-zdd = { path = "../../libs/zdd", editable = true }\n'
+        "\n"
+        "[tool.uv.sources]\n"
+        'agent-zdd = { path = "../../libs/zdd", editable = true }\n',
+        encoding="utf-8",
+    )
+    dest_lib_dir = consumer / "libs/zdd"
+
+    result = mm._materialize_one_uv_editable_ref(
+        canonical=canonical, dest_lib_dir=dest_lib_dir, pyproject=pyproject,
+        name="agent-zdd", raw_path="../../libs/zdd", lib="zdd",
+    )
+    assert result.startswith("OK"), result
+    text = pyproject.read_text()
+    # The unrelated table's identical-looking entry survives untouched.
+    assert text.count('agent-zdd = { path = "../../libs/zdd", editable = true }') == 1
+    assert 'agent-zdd = { path = "libs/zdd" }' in text

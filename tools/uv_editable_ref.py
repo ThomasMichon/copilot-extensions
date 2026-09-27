@@ -40,6 +40,15 @@ _UV_SOURCES_HEADER_RE = re.compile(r'^\[tool\.uv\.sources\]\s*$', re.MULTILINE)
 _TABLE_HEADER_RE = re.compile(r'^\[', re.MULTILINE)
 
 
+class ManifestUnreadable(Exception):
+    """Raised by ``find_uv_editable_refs`` when ``consumer_dir``'s
+    ``pyproject.toml`` genuinely EXISTS but cannot be read or parsed --
+    distinct from a genuinely absent manifest (a valid no-op for a
+    payload-only consumer). A malformed/unreadable manifest must never be
+    silently treated as "no references to validate": every caller catches
+    this and surfaces it as an explicit problem/refusal instead."""
+
+
 def escapes_root(candidate: Path, root: Path) -> bool:
     """True when ``candidate``'s resolved (symlink-followed) location is not
     ``root`` itself or a descendant of it. Mirrors ``materialize_main.py``'s
@@ -49,6 +58,16 @@ def escapes_root(candidate: Path, root: Path) -> bool:
     candidate_r = candidate.resolve()
     root_r = root.resolve()
     return candidate_r != root_r and root_r not in candidate_r.parents
+
+
+def is_safe_lib_name(lib: str) -> bool:
+    """True when ``lib`` is a plain single path component -- never empty,
+    never ``.``/``..``, and never containing a path separator. A ``lib``
+    interpolated into ``libs_dir / lib`` or ``consumer_dir / "libs" / lib``
+    without this check lets a crafted value (e.g. ``"../outside"``) treat
+    an arbitrary directory as the canonical lib, or delete/overwrite a path
+    outside the intended ``libs/`` tree entirely (path traversal)."""
+    return bool(lib) and lib not in (".", "..") and Path(lib).name == lib
 
 
 def iter_consumer_dirs() -> list[tuple[str, Path]]:
@@ -83,14 +102,23 @@ def find_uv_editable_refs(consumer_dir: Path) -> list[tuple[str, str, str, bool]
     relative escaping path is, not silently treated as in-tree. ``editable``
     is exactly ``entry.get("editable") is True`` -- a truthy-but-non-boolean
     TOML value (``"false"``, ``1``) is never treated as the real, required
-    ``editable = true``."""
+    ``editable = true``.
+
+    Raises ``ManifestUnreadable`` (never returns ``[]``) when
+    ``pyproject.toml`` EXISTS but cannot be read or parsed -- a genuinely
+    absent manifest (a valid no-op for a payload-only consumer) is the only
+    case that returns ``[]`` for that reason; a symlinked manifest also
+    returns ``[]`` (a distinct, already-explicit refusal every caller
+    checks for directly via ``.is_symlink()``)."""
     pyproject = consumer_dir / "pyproject.toml"
     if pyproject.is_symlink():
         return []
+    if not pyproject.is_file():
+        return []
     try:
         data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-    except (OSError, tomllib.TOMLDecodeError):
-        return []
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise ManifestUnreadable(f"{pyproject}: could not read/parse: {exc}") from exc
     sources = data.get("tool", {}).get("uv", {}).get("sources", {})
     consumer_root = consumer_dir.resolve()
     out: list[tuple[str, str, str, bool]] = []
@@ -148,8 +176,20 @@ def uv_editable_problems(consumer: str, consumer_dir: Path) -> list[str]:
             "an unresolved external source entry from both --check and "
             "promotion)"
         ]
+    try:
+        refs = find_uv_editable_refs(consumer_dir)
+    except ManifestUnreadable as exc:
+        return [f"{consumer}: {exc}"]
     problems: list[str] = []
-    for name, raw_path, lib, editable in find_uv_editable_refs(consumer_dir):
+    for name, raw_path, lib, editable in refs:
+        if not is_safe_lib_name(lib):
+            problems.append(
+                f"{consumer}: {name} references {raw_path}, whose final "
+                f"path component {lib!r} is not a safe lib name (must be a "
+                "single path component, never '..' or containing a "
+                "separator) -- refusing"
+            )
+            continue
         if not editable:
             problems.append(
                 f"{consumer}: {name} references {raw_path} outside its own "
@@ -193,7 +233,7 @@ def uv_editable_relpath(consumer_dir: Path, lib: str) -> str:
     return os.path.relpath(LIBS_DIR / lib, consumer_dir).replace("\\", "/")
 
 
-def _uv_sources_table_span(text: str) -> tuple[int, int] | None:
+def uv_sources_table_span(text: str) -> tuple[int, int] | None:
     """The ``(start, end)`` character span of the ``[tool.uv.sources]``
     table body within ``text`` -- from just after its own header line to
     the next ``[...]`` table header (or EOF). Scoping every rewrite to
@@ -223,7 +263,7 @@ def can_rewrite_uv_source_to_editable(pyproject_path: Path, lib: str) -> bool:
     vendored copy), so a real rewrite failure can never happen only after
     the data it would have preserved has already been discarded."""
     text = pyproject_path.read_text(encoding="utf-8")
-    span = _uv_sources_table_span(text)
+    span = uv_sources_table_span(text)
     if span is None:
         return False
     start, end = span
@@ -235,7 +275,7 @@ def rewrite_uv_source_to_editable(pyproject_path: Path, lib: str, relpath: str) 
     whose ``path`` is the local in-tree ``libs/<lib>`` form into the
     `uv`-editable canonical-reference form -- preserving every other line
     (comments included) and scoped ONLY to the ``[tool.uv.sources]`` table
-    body (see ``_uv_sources_table_span``), so an identical-looking value in
+    body (see ``uv_sources_table_span``), so an identical-looking value in
     an unrelated table is never touched. Matches this repo's existing
     convention (see ``materialize_main.py``'s own ``_VERSION_RE.sub``)
     rather than a full TOML round-trip that would discard hand-authored
@@ -243,7 +283,7 @@ def rewrite_uv_source_to_editable(pyproject_path: Path, lib: str, relpath: str) 
     BEFORE any destructive action -- this function still raises on failure,
     but only as a last-line defense."""
     text = pyproject_path.read_text(encoding="utf-8")
-    span = _uv_sources_table_span(text)
+    span = uv_sources_table_span(text)
     if span is None:
         raise SystemExit(f"{pyproject_path}: no [tool.uv.sources] table found")
     start, end = span
@@ -333,6 +373,12 @@ def convert_to_uv_editable(
     imported directly by the hyphenated CLI script, but the reverse isn't
     true, and duplicating this much validation logic a second time would
     itself risk the two copies drifting apart."""
+    if not is_safe_lib_name(lib):
+        raise SystemExit(
+            f"{lib!r}: not a valid lib name (must be a single path "
+            "component, never '..' or containing a separator) -- refusing "
+            "before touching any path built from it"
+        )
     canonical = libs_dir / lib
     if not canonical.is_dir():
         raise SystemExit(f"{lib}: no canonical libs/{lib}/ to reference from")
