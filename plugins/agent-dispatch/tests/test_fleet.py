@@ -249,6 +249,8 @@ def test_fleet_seed_drives_origin_over_ssh_with_explicit_owner():
         "t42", origin="brain", owner="fleet-t42-abc123", worker_id="fleet-t42-abc123"
     )
     # every lifecycle verb reaches the origin over ssh, with the explicit owner
+    assert "ssh brain agent-dispatch charter show operating-procedures" in seed
+    assert "ssh brain agent-dispatch charter show autopilot" in seed
     assert "ssh brain agent-dispatch claim --task t42 --worker fleet-t42-abc123" in seed
     assert "ssh brain agent-dispatch start t42 fleet-t42-abc123" in seed
     assert (

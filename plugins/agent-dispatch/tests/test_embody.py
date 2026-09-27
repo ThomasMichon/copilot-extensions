@@ -31,6 +31,8 @@ def test_autopilot_prompt_mentions_task_verbs_and_deferred_completion():
     # The full deferred-completion worker loop, driven under the worktree
     # identity (owner-less claim/start/complete so the task owner stays
     # machine/worktree and live-session tracking can join it).
+    assert "agent-dispatch charter show operating-procedures" in prompt
+    assert "agent-dispatch charter show autopilot" in prompt
     assert "agent-dispatch claim --task abc123" in prompt
     assert "agent-dispatch start abc123" in prompt
     assert "agent-dispatch steer take abc123 --all" in prompt
@@ -38,14 +40,14 @@ def test_autopilot_prompt_mentions_task_verbs_and_deferred_completion():
     # The progress-beat rhythm (Phase 7 Channel B): report at transitions.
     assert "agent-dispatch progress abc123" in prompt
     assert "--summary" in prompt
-    # Autopilot + the deferred-completion guarantee (do not complete early).
+    # Autopilot + the deferred-completion guarantee.
     assert "autopilot" in prompt.lower()
-    assert "not mark it complete before" in prompt.lower()
+    assert "only once the charters say the goal is genuinely met" in prompt.lower()
     # Contract-net evaluation window (dev55): claim under the tight evaluation
     # lease, assess, then accept (start) / decline (yield --exclude-self) / retire
     # (abandon --duplicate-of).
     assert "agent-dispatch claim --task abc123 --evaluation" in prompt
-    assert "evaluat" in prompt.lower()
+    assert "evaluation lease" in prompt.lower()
     assert "agent-dispatch yield abc123 --exclude-self worktree" in prompt
     assert "agent-dispatch abandon abc123 --duplicate-of" in prompt
 
@@ -214,17 +216,13 @@ def test_autopilot_prompt_carries_explicit_all_repos_claim_mode():
 
 def test_autopilot_prompt_carries_goal_loop_contract():
     prompt = embody.autopilot_worker_prompt("abc123", worker_id="w9")
-    # The seed reads the durable goal + done-criteria + prior progress log and
-    # resumes rather than restarting (the resumable-goal contract).
-    assert "agent-dispatch show abc123" in prompt
-    assert "goal" in prompt.lower()
-    assert "done_criteria" in prompt or "done-criteria" in prompt.lower()
-    assert "progress_log" in prompt
-    assert "resume" in prompt.lower()
-    # An explicit loop: work -> progress -> re-check done-criteria -> repeat.
-    assert "loop" in prompt.lower()
-    # A plain one-shot task (no goal) still behaves as before.
-    assert "one-shot" in prompt.lower()
+    # The seed now points at the charters instead of re-inlining the goal loop.
+    assert "agent-dispatch charter show operating-procedures" in prompt
+    assert "agent-dispatch charter show autopilot" in prompt
+    assert "goal/progress loop" not in prompt.lower()
+    assert "done_criteria" not in prompt
+    assert "progress_log" not in prompt
+    assert "DUPLICATE check" not in prompt
 
 
 def test_autopilot_prompt_concise_pulls_charter_instead_of_inlining_it():
@@ -234,8 +232,13 @@ def test_autopilot_prompt_concise_pulls_charter_instead_of_inlining_it():
     concise_prompt = embody.autopilot_worker_prompt(
         "abc123", worker_id="w9", concise=True
     )
-    # Much shorter: the behavioral essay is pulled on demand, not inlined.
-    assert len(concise_prompt) < len(default_prompt) / 2
+    # Both seeds now point at the charters rather than re-inline policy prose;
+    # the concise form only relaxes the charter read to "only if needed".
+    assert len(concise_prompt) < len(default_prompt)
+    assert "Start by reading this session's worker charters now" in default_prompt
+    assert "If this session has not already read the worker charters" in concise_prompt
+    assert "Otherwise skip this step" in concise_prompt
+    assert "agent-dispatch charter show operating-procedures" in concise_prompt
     assert f"agent-dispatch charter show {AUTOPILOT_CHARTER_NAME}" in concise_prompt
     # Still carries the task-specific mechanics a worker needs immediately.
     assert "abc123" in concise_prompt
@@ -259,6 +262,7 @@ def test_autopilot_prompt_concise_respects_route_and_explicit_identity():
         explicit_worker_identity=True,
         concise=True,
     )
+    assert "agent-dispatch --shared charter show operating-procedures" in prompt
     assert "agent-dispatch --shared charter show autopilot" in prompt
     assert "agent-dispatch --shared show abc123" in prompt
     assert (

@@ -386,6 +386,55 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-26 — `agent-mcp`'s core-package legacy-root cluster: 7 of 36 findings resolved (PR #4068)
+
+- Fresh guard count at merge time: 639 (down from 646). First slice into
+  `agent-mcp` (next plugin in the backlog order after `agent-ssh` reached
+  backlog-only state).
+- The overwhelming majority of `agent-mcp`'s `src/agent_mcp/*.py`
+  findings turned out to be **the exact same own-legacy-root fallback,
+  byte-for-byte identical shape, repeated 5 times across 4 files**
+  (`materialize.py` x2, `sockio.py`, `token_cache.py`, `storage.py`) --
+  `Path(os.environ.get("AGENT_MCP_HOME", Path.home() / ".agent-mcp"))`
+  (or the equivalent `Path(base) if base else Path.home() / ".agent-mcp"`
+  in `token_cache.py`). All `allow legacy compatibility root`, the same
+  as every other plugin's identical shape this effort has fixed all
+  along -- no new reasoning needed, just volume.
+- `__main__.py`'s 2 identical argparse help strings (`bridge name under
+  ~/.agent-mcp/bridges/`) shared one local constant, itself split across
+  two string-literal pieces to keep the marked line under the 99-char
+  limit (`allow deployed-runtime-diagnostics`).
+- **`config.py`'s 2 identical-shape findings (`BRIDGES_DIR`/
+  `OVERRIDES_DIR`) hit the same module-size wall a third time this
+  effort**: its baseline is exactly 1178 lines with zero headroom, and no
+  blank/removable line existed to trade for the one shared constant this
+  would need (same constraint as `agent-containers/__main__.py` and
+  `agent-ssh/fragment_registry.py`). Deferred, unannotated. **This is now
+  a recurring pattern worth a dedicated future pass**: several plugins'
+  largest module has settled at its exact grandfathered ceiling with
+  zero slack, meaning ANY future annotation-only fix in that specific
+  file needs either a real split/shrink first, or a deliberate,
+  separately-reviewed `--allow-widen` PR (the sanctioned but
+  post-merge-only escape hatch) landed ahead of the annotation PR. Worth
+  raising to the operator as its own small effort/issue rather than
+  re-discovering the same wall plugin by plugin.
+- Left deliberately untouched (not yet individually triaged this leg):
+  `installer-readiness.json` (4), `payload-invocation.json` (1),
+  `init.ps1`/`init.sh` (7, the same confirmed-genuine Phase 2
+  launcher-contract InstallDir/LocalBin backlog as every other plugin),
+  and 3 doc/`SKILL.md` files (`customizing-bridges/SKILL.md` 8,
+  `agent-mcp/SKILL.md` 4, `references/reliable-agent.md` 3 -- 15 doc
+  findings total, likely straightforward `allow deployed-runtime-
+  diagnostics`/`allow doc-example` like every other plugin's SKILL.md
+  cluster, but not yet read).
+- Verified: `python -m py_compile` + `ruff --select E501` on every
+  touched file, `check-module-size.py`, `check-docs-consistency.py`, and
+  the full `agent-mcp` suite via `test-supervisor` (609 passed, 7
+  skipped, 0 failures -- the cleanest test run of any plugin triaged so
+  far this effort). Merged via `pr-merge --now` after a clean (0-finding)
+  advisory review.
+- Guard count: 36 -> 29 findings for `agent-mcp`.
+
 ### 2026-09-26 — `agent-ssh`'s `transports/dtssh`/registrar cluster: 6 more findings resolved (PR #4060)
 
 - Fresh guard count at merge time: 646 (down from 652, unrelated

@@ -55,15 +55,17 @@ def test_worker_prompt_mentions_task_and_verbs():
     assert "w9" in prompt
     assert "without `--url`" in prompt
     assert "http://" not in prompt
+    assert "agent-dispatch charter show operating-procedures" in prompt
     assert "agent-dispatch claim abc123 --worker w9" in prompt
     assert "agent-dispatch steer take abc123 w9 --all" in prompt
-    assert "agent-dispatch charter show operating-procedures" in prompt
+    assert "agent-dispatch progress abc123 w9" in prompt
 
 
 def test_worker_prompt_threads_shared_moniker_route():
     prompt = bridge.worker_prompt("abc123", worker_id="w9", route=" --shared")
     assert "agent-dispatch --shared show abc123" in prompt
     assert "agent-dispatch --shared claim abc123 --worker w9" in prompt
+    assert "agent-dispatch --shared progress abc123 w9" in prompt
     assert "http://" not in prompt
 
 
