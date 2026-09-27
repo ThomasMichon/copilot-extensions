@@ -916,22 +916,32 @@ install_package() {
 
 write_units() {
   mkdir -p "${UNIT_DIR}"
-  # Discover the facility's multi-machine config repo (aperture-labs) via the
-  # agent-worktrees registry, if this machine has one adopted -- so the
+  # Optionally discover a facility-designated multi-machine config repo via
+  # the agent-worktrees registry, if this machine has one adopted -- so the
   # scheduled sync (invoked with no useful working directory of its own)
   # still discovers that repo's schema v3 sync.local_path declaration.
-  # AGENT_LOGGER_REPO_CONFIG's explicit-file path still goes through the
-  # same registered-project + default-branch trust gate as normal discovery
-  # (see agent_logger.repo_trust) -- this only tells it WHERE to look, never
-  # bypasses WHETHER to trust it. Never hardcoded: absent agent-worktrees, or
-  # aperture-labs not adopted here, this is silently a no-op (today's
+  # Which repo (if any) is left to machine-local installer configuration
+  # (config_repo: <name> in ${INSTALL_DIR}/config.yaml) rather than a
+  # hardcoded name -- this is a generic, publicly-distributed plugin and
+  # must not assume any specific private repo. AGENT_LOGGER_REPO_CONFIG's
+  # explicit-file path still goes through the same registered-project +
+  # default-branch trust gate as normal discovery (see
+  # agent_logger.repo_trust) -- this only tells it WHERE to look, never
+  # bypasses WHETHER to trust it. No config_repo set, agent-worktrees
+  # absent, or the named repo not adopted here: silently a no-op (today's
   # behavior, unaffected).
   local repo_config_env=""
-  if command -v agent-worktrees >/dev/null 2>&1; then
-    local aperture_labs_dir
-    aperture_labs_dir="$(agent-worktrees repos find aperture-labs 2>/dev/null || true)"
-    if [ -n "${aperture_labs_dir}" ] && [ -f "${aperture_labs_dir}/.agent-logger.yaml" ]; then
-      repo_config_env="Environment=AGENT_LOGGER_REPO_CONFIG=${aperture_labs_dir}/.agent-logger.yaml"
+  local config_repo_name=""
+  if [ -f "${INSTALL_DIR}/config.yaml" ]; then
+    config_repo_name="$(sed -n 's/^config_repo:[[:space:]]*//p' "${INSTALL_DIR}/config.yaml" | head -n1 | tr -d "\"'"$'\r')"
+  fi
+  if [ -n "${config_repo_name}" ] && command -v agent-worktrees >/dev/null 2>&1; then
+    local config_repo_dir
+    config_repo_dir="$(agent-worktrees repos find "${config_repo_name}" 2>/dev/null || true)"
+    if [ -n "${config_repo_dir}" ] && [ -f "${config_repo_dir}/.agent-logger.yaml" ]; then
+      # Quote the whole assignment (systemd.exec(5) Environment=) so a path
+      # containing whitespace is not split into multiple words.
+      repo_config_env="Environment=\"AGENT_LOGGER_REPO_CONFIG=${config_repo_dir}/.agent-logger.yaml\""
     fi
   fi
   cat > "${UNIT_DIR}/${TIMER_NAME}.service" <<EOF

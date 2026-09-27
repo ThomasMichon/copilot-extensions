@@ -1,0 +1,257 @@
+"""Regression coverage for the scheduled-sync repo-config discovery wiring
+(the ``config_repo:`` -> ``agent-worktrees repos find`` -> ``.agent-logger.yaml``
+lookup added alongside schema v3's ``sync.local_path``) in both installers.
+
+Without this wiring, the scheduled sync (a systemd service on POSIX, a
+Scheduled Task on Windows) runs with no useful working directory of its own,
+so it would never discover a repo's schema v3 ``sync.local_path`` declaration
+on its own -- confirmed live (see the sync.local_path activation fix this
+file accompanies). These tests exercise the actual generation code with a
+stubbed ``agent-worktrees repos find``, rather than only checking static
+installer text markers.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+PLUGIN = Path(__file__).resolve().parents[1]
+_INSTALL_SH = PLUGIN / "scripts" / "install.sh"
+_INSTALL_PS1 = PLUGIN / "scripts" / "install.ps1"
+
+
+def _resolve_bash() -> str | None:
+    git_bash = Path(r"C:\Program Files\Git\bin\bash.exe")
+    if git_bash.is_file():
+        return str(git_bash)
+    path = os.environ.get("PATH")
+    if not path:
+        return None
+    filtered = os.pathsep.join(
+        part
+        for part in path.split(os.pathsep)
+        if "windowsapps" not in part.lower()
+        and part.rstrip("\\").lower() != r"c:\windows\system32"
+    )
+    return shutil.which("bash", path=filtered)
+
+
+_BASH = _resolve_bash()
+
+
+def _extract_sh_function(name: str) -> str:
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    start = text.index(f"{name}()")
+    end = text.index("\n}\n", start)
+    return text[start : end + 2]
+
+
+def _executable(path: Path, text: str) -> None:
+    path.write_text(text, encoding="utf-8")
+    path.chmod(0o755)
+
+
+@pytest.mark.skipif(
+    _BASH is None or os.name == "nt",
+    reason="a POSIX bash environment is not available",
+)
+@pytest.mark.parametrize("repo_dir_name", ["demo-repo", "demo repo with spaces"])
+def test_write_units_sets_repo_config_env_when_config_repo_adopted(
+    tmp_path: Path, repo_dir_name: str
+) -> None:
+    """A machine-local config_repo: <name> plus an adopted registry match
+    must produce a correctly-quoted Environment= line in the generated
+    systemd unit -- including when the discovered path contains whitespace
+    (systemd splits an unquoted Environment= value on whitespace)."""
+    install_dir = tmp_path / "install"
+    unit_dir = tmp_path / "units"
+    install_dir.mkdir()
+    unit_dir.mkdir()
+    (install_dir / "config.yaml").write_text("config_repo: demo\n", encoding="utf-8")
+
+    repo_dir = tmp_path / repo_dir_name
+    repo_dir.mkdir()
+    (repo_dir / ".agent-logger.yaml").write_text("schema_version: 3\n", encoding="utf-8")
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _executable(
+        fake_bin / "agent-worktrees",
+        "#!/bin/sh\n"
+        'if [ "$1" = "repos" ] && [ "$2" = "find" ] && [ "$3" = "demo" ]; then\n'
+        f'  echo "{repo_dir}"\n'
+        "  exit 0\n"
+        "fi\n"
+        "exit 1\n",
+    )
+
+    harness = tmp_path / "harness.sh"
+    harness.write_text(
+        "#!/bin/sh\nset -eu\n"
+        f'INSTALL_DIR="{install_dir}"\n'
+        f'UNIT_DIR="{unit_dir}"\n'
+        f'VENV="{tmp_path / "venv"}"\n'
+        'TIMER_NAME="agent-logger-sync"\n'
+        'chg() { :; }\n'
+        + _extract_sh_function("write_units")
+        + "\nwrite_units\n",
+        encoding="utf-8",
+    )
+    harness.chmod(0o755)
+    env = {**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"}
+    subprocess.run(
+        [_BASH, str(harness)], capture_output=True, text=True, env=env, timeout=20, check=True
+    )
+
+    unit_text = (unit_dir / "agent-logger-sync.service").read_text(encoding="utf-8")
+    expected = f'Environment="AGENT_LOGGER_REPO_CONFIG={repo_dir}/.agent-logger.yaml"'
+    assert expected in unit_text
+
+
+@pytest.mark.skipif(
+    _BASH is None or os.name == "nt",
+    reason="a POSIX bash environment is not available",
+)
+def test_write_units_omits_repo_config_env_without_config_repo(tmp_path: Path) -> None:
+    """No config_repo declared (today's default) -- and no agent-worktrees
+    lookup attempted at all -- is a silent no-op, not an error."""
+    install_dir = tmp_path / "install"
+    unit_dir = tmp_path / "units"
+    install_dir.mkdir()
+    unit_dir.mkdir()
+    # No config.yaml at all.
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _executable(
+        fake_bin / "agent-worktrees",
+        "#!/bin/sh\necho 'should not be called' >&2\nexit 1\n",
+    )
+
+    harness = tmp_path / "harness.sh"
+    harness.write_text(
+        "#!/bin/sh\nset -eu\n"
+        f'INSTALL_DIR="{install_dir}"\n'
+        f'UNIT_DIR="{unit_dir}"\n'
+        f'VENV="{tmp_path / "venv"}"\n'
+        'TIMER_NAME="agent-logger-sync"\n'
+        'chg() { :; }\n'
+        + _extract_sh_function("write_units")
+        + "\nwrite_units\n",
+        encoding="utf-8",
+    )
+    harness.chmod(0o755)
+    env = {**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"}
+    result = subprocess.run(
+        [_BASH, str(harness)], capture_output=True, text=True, env=env, timeout=20, check=True
+    )
+
+    assert "should not be called" not in result.stderr
+    unit_text = (unit_dir / "agent-logger-sync.service").read_text(encoding="utf-8")
+    assert "AGENT_LOGGER_REPO_CONFIG" not in unit_text
+
+
+def _mask_here_strings(text: str) -> str:
+    """Replace the contents of PowerShell here-strings (``@'...'@`` /
+    ``@"..."@``) with same-length filler containing no braces, so a naive
+    brace-counting scan isn't confused by literal ``{``/``}`` characters
+    inside a here-string body (e.g. a nested function definition embedded
+    as launcher-script text)."""
+    out = []
+    i = 0
+    n = len(text)
+    while i < n:
+        if text.startswith("@'", i) or text.startswith('@"', i):
+            terminator = "'@" if text[i + 1] == "'" else '"@'
+            end = text.find(terminator, i + 2)
+            if end == -1:
+                out.append(text[i:])
+                break
+            out.append(text[i : i + 2])
+            out.append("".join("x" if c not in "\n" else "\n" for c in text[i + 2 : end]))
+            out.append(terminator)
+            i = end + 2
+        else:
+            out.append(text[i])
+            i += 1
+    return "".join(out)
+
+
+def _extract_ps1_function(name: str) -> str:
+    """Extract one PowerShell function definition by counting braces on a
+    here-string-masked copy of the file (see :func:`_mask_here_strings`),
+    then slicing the ORIGINAL (unmasked) text at the matching positions --
+    unlike a naive ``split("\\n}\\n")``, this is correct even when the
+    function body embeds a here-string that itself contains ``}`` at column
+    zero (``Write-SyncTaskLauncher``'s launcher-script template does)."""
+    install_ps1 = _INSTALL_PS1.read_text(encoding="utf-8")
+    masked = _mask_here_strings(install_ps1)
+    start = masked.index(f"function {name}")
+    open_brace = masked.index("{", start)
+    depth = 0
+    i = open_brace
+    while i < len(masked):
+        if masked[i] == "{":
+            depth += 1
+        elif masked[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return install_ps1[start : i + 1]
+        i += 1
+    raise AssertionError(f"unbalanced braces extracting function {name}")
+
+
+def _extract_ps1_functions(*names: str) -> str:
+    return "\n\n".join(_extract_ps1_function(name) for name in names)
+
+
+@pytest.mark.parametrize("shell", ["powershell.exe", "pwsh"])
+def test_write_sync_task_launcher_sets_repo_config_when_config_repo_adopted(
+    tmp_path: Path, shell: str
+) -> None:
+    exe = shutil.which(shell)
+    if not exe:
+        pytest.skip(f"{shell} is not installed")
+
+    install_dir = tmp_path / "install"
+    install_dir.mkdir()
+    (install_dir / "config.yaml").write_text("config_repo: demo\n", encoding="utf-8")
+    repo_dir = tmp_path / "demo-repo"
+    repo_dir.mkdir()
+    (repo_dir / ".agent-logger.yaml").write_text("schema_version: 3\n", encoding="utf-8")
+    task_launcher = install_dir / "bin" / "session-sync-task.ps1"
+
+    repo_dir_ps = str(repo_dir).replace("\\", "\\\\")
+    harness = tmp_path / f"harness-{shell.replace('.exe', '')}.ps1"
+    harness.write_text(
+        _extract_ps1_functions("Get-ConfigRepoRegistrationPath", "Write-SyncTaskLauncher")
+        + f"""
+
+function agent-worktrees {{
+    if ($args[0] -eq 'repos' -and $args[1] -eq 'find' -and $args[2] -eq 'demo') {{
+        Write-Output '{repo_dir_ps}'
+        exit 0
+    }}
+    exit 1
+}}
+$InstallDir = '{install_dir}'.Replace('\\\\', '\\')
+$TaskLauncher = '{task_launcher}'.Replace('\\\\', '\\')
+Write-SyncTaskLauncher
+""",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        [exe, "-NoProfile", "-File", str(harness)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    launcher_text = task_launcher.read_text(encoding="utf-8")
+    assert "AGENT_LOGGER_REPO_CONFIG" in launcher_text
+    assert str(repo_dir) in launcher_text

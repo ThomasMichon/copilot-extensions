@@ -955,20 +955,30 @@ function Deploy-ResolverHelpers {
     }
 }
 
-function Get-ApertureLabsRepoConfigPath {
-    # Discover the facility's multi-machine config repo (aperture-labs) via
+function Get-ConfigRepoRegistrationPath {
+    # Optionally discover a facility-designated multi-machine config repo via
     # the agent-worktrees registry, if this machine has one adopted -- so
     # the scheduled task (with no useful working directory of its own)
     # still discovers that repo's schema v3 sync.local_path declaration.
-    # AGENT_LOGGER_REPO_CONFIG's explicit-file path still goes through the
-    # same registered-project + default-branch trust gate as normal
-    # discovery (see agent_logger.repo_trust) -- this only tells it WHERE to
-    # look, never bypasses WHETHER to trust it. Never hardcoded: absent
-    # agent-worktrees, or aperture-labs not adopted here, this is silently a
-    # no-op (today's behavior, unaffected).
+    # Which repo (if any) is left to machine-local installer configuration
+    # (config_repo: <name> in $InstallDir\config.yaml) rather than a
+    # hardcoded name -- this is a generic, publicly-distributed plugin and
+    # must not assume any specific private repo. AGENT_LOGGER_REPO_CONFIG's
+    # explicit-file path still goes through the same registered-project +
+    # default-branch trust gate as normal discovery (see
+    # agent_logger.repo_trust) -- this only tells it WHERE to look, never
+    # bypasses WHETHER to trust it. No config_repo set, agent-worktrees
+    # absent, or the named repo not adopted here: silently a no-op (today's
+    # behavior, unaffected).
     try {
+        $configYaml = Join-Path $InstallDir 'config.yaml'
+        if (-not (Test-Path -LiteralPath $configYaml)) { return $null }
+        $match = Select-String -LiteralPath $configYaml -Pattern '^config_repo:\s*(.+)$' | Select-Object -First 1
+        if (-not $match) { return $null }
+        $repoName = $match.Matches[0].Groups[1].Value.Trim().Trim('"').Trim("'")
+        if (-not $repoName) { return $null }
         if (-not (Get-Command agent-worktrees -ErrorAction SilentlyContinue)) { return $null }
-        $dir = (& agent-worktrees repos find aperture-labs 2>$null | Select-Object -First 1)
+        $dir = (& agent-worktrees repos find $repoName 2>$null | Select-Object -First 1)
         if (-not $dir) { return $null }
         $configPath = Join-Path $dir '.agent-logger.yaml'
         if (Test-Path -LiteralPath $configPath) { return $configPath }
@@ -984,7 +994,7 @@ function Write-SyncTaskLauncher {
         New-Item -ItemType Directory -Path $launcherDir -Force | Out-Null
     }
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    $repoConfigPath = Get-ApertureLabsRepoConfigPath
+    $repoConfigPath = Get-ConfigRepoRegistrationPath
     $repoConfigLine = ''
     if ($repoConfigPath) {
         $escaped = $repoConfigPath -replace "'", "''"
