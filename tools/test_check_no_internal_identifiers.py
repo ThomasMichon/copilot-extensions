@@ -156,6 +156,13 @@ def test_ci_loader_splits_first_pipe_only(repo: Path):
     ]
 
 
+def test_load_paths_file_preserves_filename_whitespace(repo: Path):
+    module = _load_module(repo)
+    paths_file = repo / "paths.txt"
+    paths_file.write_text(" leading space.txt \nplain.txt\n", encoding="utf-8")
+    assert module._load_paths_file(paths_file) == [" leading space.txt ", "plain.txt"]
+
+
 def test_json_out_writes_hashed_findings_without_raw_token_or_reason(repo: Path, tmp_path: Path):
     _write(repo, "plugins/new/clean.txt", f"oops {CI_TOKEN} sneaked in\n")
     _git(repo, "add", "-A")

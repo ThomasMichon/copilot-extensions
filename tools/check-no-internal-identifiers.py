@@ -143,7 +143,7 @@ def _tracked_files() -> list[str]:
 
 
 def _load_paths_file(path: Path) -> list[str]:
-    return [line for raw in path.read_text(encoding="utf-8").splitlines() if (line := raw.strip())]
+    return [line for line in path.read_text(encoding="utf-8").splitlines() if line]
 
 
 DEFAULT_BASE = os.environ.get("COPILOT_EXTENSIONS_GUARD_BASE", "origin/main")
