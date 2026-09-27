@@ -71,15 +71,35 @@ explicit admin escalation).** This is enforced on three layers that agree:
 1. **Tooling** — `.agent-worktrees/config.yaml` sets `pr.required: true`, so
    `agent-worktrees push-changes` refuses direct-to-`dev` and the PR-workflow
    git-hooks block committing to `dev` / pushing a worktree branch directly.
-2. **Branch policy** — a GitHub repository ruleset ("Default-branch policy:
-   PR-required + non-blocking Copilot review") carries a `pull_request` rule (+
-   `non_fast_forward`) that blocks direct pushes to `dev` server-side, for
+2. **Branch policy** — a GitHub repository ruleset ("dev branch policy:
+   PR-required + non-blocking Copilot review") carries a `pull_request` rule
+   (+ `non_fast_forward`) that blocks direct pushes to `dev` server-side, for
    everyone (no bypass). A separate branch-protection rule on `main` restricts
    pushes to the promotion pipeline's own identity, with repo-admin escalation
    retained for genuine emergencies (see Release & Versioning below).
 3. **Review** — the same ruleset's `copilot_code_review` rule auto-requests a
-   **non-blocking** Copilot review on every PR (it is a review, not a required
-   status check, so it never gates the merge).
+   Copilot review on every PR into `dev`; this trigger itself is unconditional
+   and never bypassed for anyone. Whether that review (or anyone else's) must
+   formally *approve* the PR before merge is governed by a second ruleset
+   ("dev branch policy: review required (maintainer bypass)") plus
+   `.github/CODEOWNERS` (root-scoped to `@ThomasMichon`):
+   - A PR authored by anyone **other than** the maintainer requires the
+     maintainer's own approving review before it can merge — Copilot's review
+     alone is never sufficient for a non-maintainer's PR, however clean it
+     comes back, so a change never lands without the maintainer being aware
+     of it.
+   - The maintainer's own PRs (including this account's agent-authored work)
+     bypass that specific review-count/codeowner requirement via a standing,
+     admin-role-scoped `bypass_actors` entry on the ruleset (`bypass_mode:
+     pull_request` — still requires a real PR and all required status
+     checks; only the *review* requirement is exempted). This is an
+     author-based exception, which is why it lives in the ruleset rather than
+     CODEOWNERS: CODEOWNERS can only key off file paths, never off who opened
+     the PR.
+   - Required CI status checks (`PR gate`, a fixed-name aggregate — see its
+     own definition in `.github/workflows/ci.yml` for why a fixed anchor job
+     exists rather than naming dynamic matrix jobs directly) apply to
+     everyone with no bypass, including the maintainer.
 
 ### The flow every agent (and human) uses
 
@@ -119,14 +139,24 @@ copilot-extensions finalize          # clean up the worktree
   approval or a zero-finding pass that may never come. If a PR has had a
   review and nothing has happened since, that is a stuck PR: merge it or
   explicitly abandon it, don't leave it idle.
+- **This flow describes the maintainer's own (bypassed) path.** As
+  `ThomasMichon`, "0 approvals required" and "no verdict to wait for" hold
+  because the ruleset's admin-role bypass exempts this account's PRs from the
+  review-count/codeowner gate entirely — Copilot's own review is still always
+  non-blocking commentary, exactly as described below, with or without that
+  bypass. **A PR authored by anyone else is different:** the maintainer's own
+  approving review is a real, required gate for it (see "Review" above) —
+  `pr-status`/`pr-watch`'s `eligible: false` / `reason: "not yet approved"`
+  genuinely means blocked in that case, not a wording gap.
 - **Ignore `pr-status`/`pr-watch`'s `eligible: false` / `reason: "not yet
-  approved"` fields as a blocker on this repo.** Those fields report a
-  generic contract that assumes an approval gate exists; on this repo's
-  `pr-self-merge` profile with 0 required approvals, they do **not** mean a
-  review is pending or required -- they are a known tooling-wording gap
-  (copilot-extensions#3638), not a live merge gate. Trust the prose above
-  (checks green + no `CHANGES_REQUESTED` + the ~5 minute window is enough),
-  not that one field, when deciding whether to self-merge.
+  approved"` fields as a blocker on this repo — for the maintainer's own PRs
+  only.** Those fields report a generic contract that assumes a universal
+  approval gate; for `ThomasMichon`'s own bypassed PRs specifically, they do
+  **not** mean a review is pending or required -- they are a known
+  tooling-wording gap (copilot-extensions#3638), not a live merge gate for
+  this account. Trust the prose above (checks green + no `CHANGES_REQUESTED`
+  + the ~5 minute window is enough), not that one field, when deciding
+  whether to self-merge as the maintainer.
 - **Do not comment `@copilot review` (or similar) to request a fresh pass.**
   An `@copilot` mention on GitHub does not nudge the `copilot-pull-request-reviewer`
   bot -- it delegates a task to the separate Copilot **cloud coding agent**,
