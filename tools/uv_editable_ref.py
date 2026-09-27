@@ -19,8 +19,14 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-import tomllib
 from pathlib import Path
+
+try:  # tomllib is stdlib on 3.11+; tomli backports it for this repo's
+    # 3.10 support floor -- see worktree_manager.source_config's own
+    # identical fallback for the established pattern.
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - exercised only on 3.10
+    import tomli as tomllib
 
 REPO = Path(__file__).resolve().parent.parent
 PLUGINS_DIR = REPO / "plugins"
