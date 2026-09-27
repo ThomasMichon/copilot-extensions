@@ -28,6 +28,7 @@ import threading
 from pathlib import Path
 
 _TCP_HOST = "127.0.0.1"
+_LEGACY_ROOT = ".agent-mcp"  # marketplace-isolation: allow legacy compatibility root
 
 
 class HostUnreachableError(OSError):
@@ -51,7 +52,7 @@ def default_home_dir() -> Path:
     still running (see :func:`default_socket_path`'s own handle, which
     already lives here).
     """
-    return Path(os.environ.get("AGENT_MCP_HOME", Path.home() / ".agent-mcp"))
+    return Path(os.environ.get("AGENT_MCP_HOME", Path.home() / _LEGACY_ROOT))
 
 
 def default_socket_path() -> Path:

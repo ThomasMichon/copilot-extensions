@@ -43,7 +43,8 @@ from .base import BridgeContext, Decorator, Next, error_response, result_respons
 
 log = logging.getLogger("agent-mcp.storage")
 
-_DEFAULT_DIR = Path(os.environ.get("AGENT_MCP_HOME", Path.home() / ".agent-mcp")) / "storage"
+_LEGACY_ROOT = ".agent-mcp"  # marketplace-isolation: allow legacy compatibility root
+_DEFAULT_DIR = Path(os.environ.get("AGENT_MCP_HOME", Path.home() / _LEGACY_ROOT)) / "storage"
 
 
 class StreamBackend:

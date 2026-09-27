@@ -1,0 +1,9 @@
+{
+  "comment": "Annotate 7 marketplace-isolation guard findings (own legacy-root fallback across 4 files, deployed-runtime-diagnostics help text)",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

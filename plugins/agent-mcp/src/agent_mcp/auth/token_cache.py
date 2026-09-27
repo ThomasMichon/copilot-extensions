@@ -42,7 +42,8 @@ log = logging.getLogger("agent-mcp.auth.cache")
 
 def _root() -> Path:
     base = os.environ.get("AGENT_MCP_HOME")
-    root = Path(base) if base else Path.home() / ".agent-mcp"
+    _legacy = ".agent-mcp"  # marketplace-isolation: allow legacy compatibility root
+    root = Path(base) if base else Path.home() / _legacy
     return root / "token-cache"
 
 
