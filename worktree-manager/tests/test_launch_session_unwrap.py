@@ -279,7 +279,28 @@ def test_windows_failed_psmux_creation_reaps_only_the_named_session():
     assert "Sort-Object Value -Descending" in ps
     assert "[Diagnostics.Process]::GetProcessById($pidValue)" in ps
     assert "$startDeltaMs -gt 1" in ps
-    assert ps.count("Stop-AwOwnedPsmuxSession $sessName") == 2
+    # Two create-failure call sites (initial `new-session` retry loop, and the
+    # AHP token-handoff-failure path) plus one defensive call after `attach`
+    # returns and `has-session` reports the session gone -- `has-session`
+    # going away only means psmux's own registry forgot the session, not that
+    # its server/pane process tree actually exited (see #2830's 935-process
+    # leak from a zombie mux session). All three share the same launch-id
+    # ownership check, so this is a no-op on a genuinely clean exit.
+    assert ps.count("Stop-AwOwnedPsmuxSession $sessName") == 3
+
+
+def test_windows_post_attach_session_gone_still_reaps_owned_tree():
+    """A zombie mux session (`has-session` reports gone) must not skip the
+    owned-tree reap before post-exit finalization -- see #2830, where a
+    935-process pwsh/copilot/conhost tree survived a session that psmux's own
+    registry had already forgotten."""
+    ps = _LAUNCH_PS1.read_text()
+    gone_branch = ps.split('Write-SetupLog "psmux session gone, running post-exit checks"', 1)[1]
+    reap_idx = gone_branch.find("Stop-AwOwnedPsmuxSession $sessName")
+    post_exit_idx = gone_branch.find("Invoke-AwPostExit $plan.worktree_id")
+    assert reap_idx != -1, "reap call missing from the 'session gone' branch"
+    assert post_exit_idx != -1
+    assert reap_idx < post_exit_idx, "reap must run before post-exit finalization"
 
 
 def test_launchers_retry_mux_creation_and_preserve_recovery_context():
