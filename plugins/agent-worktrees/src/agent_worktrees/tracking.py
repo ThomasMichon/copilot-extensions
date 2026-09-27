@@ -3061,7 +3061,7 @@ def list_records(
 
     for yaml_file in sorted(tracking_path.glob("*.yaml")):
         try:
-            rec = record_cache.cached_load(yaml_file, load_record)
+            rec = load_record(yaml_file)
         except Exception:
             continue
         if status_filter and rec.status != status_filter:

@@ -46,6 +46,13 @@ _cache_lock = threading.Lock()
 _cache: dict[str, tuple[int, int, "WorktreeRecord"]] = {}
 
 
+_TRANSIENT_PROJECTION_ATTRS = (
+    "_session_projection_dirty",
+    "_session_projection_initial_registration",
+    "_controller_projection_dirty",
+)
+
+
 def cached_load(path: Path, loader: Callable[[Path], "WorktreeRecord"]) -> "WorktreeRecord":
     """``loader(path)``, memoized on the file's own ``(mtime_ns, size)``.
 
@@ -111,6 +118,16 @@ def store(path: Path, record: "WorktreeRecord") -> None:
     must never be reported as failed merely because this accelerator
     couldn't warm itself afterward; the next :func:`cached_load` call
     simply misses and re-reads, exactly as if this function didn't exist.
+
+    Also strips the transient, never-serialized session/controller
+    projection-dirty markers (``_session_projection_dirty`` and friends)
+    from the cached copy: ``_save_record_unlocked`` can populate these
+    while serializing, and they're cleared on the caller's OWN object only
+    AFTER this cache write returns (``_flush_session_projections``, once
+    the lock is released) -- so a bare passthrough would cache a copy that
+    still looks dirty, and a later cache-hit ``load_record()`` would hand
+    that stale dirty state back out, unlike a fresh uncached parse (which
+    never carries these attributes at all).
     """
     try:
         st = path.stat()
@@ -118,6 +135,9 @@ def store(path: Path, record: "WorktreeRecord") -> None:
         return
     cached_record = copy.deepcopy(record)
     cached_record._loaded_from = path
+    for attr in _TRANSIENT_PROJECTION_ATTRS:
+        if hasattr(cached_record, attr):
+            delattr(cached_record, attr)
     with _cache_lock:
         _cache[str(path)] = (st.st_mtime_ns, st.st_size, cached_record)
 

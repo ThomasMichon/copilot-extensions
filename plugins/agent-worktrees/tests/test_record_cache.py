@@ -91,6 +91,29 @@ class TestStoreStampsLoadedFrom:
         cached = record_cache.cached_load(path, tracking._load_record_uncached)
         assert cached._loaded_from == path
 
+    def test_store_strips_transient_projection_dirty_markers(self, tmp_path: Path):
+        # _save_record_unlocked can populate _session_projection_dirty /
+        # _session_projection_initial_registration / _controller_projection_
+        # dirty while serializing; these are cleared on the CALLER's own
+        # object only after the cache write returns
+        # (_flush_session_projections, once the lock releases). A fresh
+        # uncached parse never carries these attributes at all, so the
+        # cached copy must not either -- otherwise a cache-hit load_record()
+        # would replay already-flushed projection work.
+        path = tmp_path / "wt-A.yaml"
+        record = create_new_record(
+            "wt-A", "worktree/wt-A", str(tmp_path / "wt-A"), "test-chamber",
+            "anomalous-potato", "wsl", tmp_path,
+        )
+        record._session_projection_dirty = {"sess-1"}
+        record._session_projection_initial_registration = {"sess-1"}
+        record._controller_projection_dirty = {"ctrl-1"}
+        record_cache.store(path, record)
+        cached = record_cache.cached_load(path, tracking._load_record_uncached)
+        assert not hasattr(cached, "_session_projection_dirty")
+        assert not hasattr(cached, "_session_projection_initial_registration")
+        assert not hasattr(cached, "_controller_projection_dirty")
+
 
 class TestSaveRecordPushesCache:
     def test_load_record_after_save_never_reparses(self, tmp_path: Path, monkeypatch):
@@ -133,3 +156,38 @@ class TestSaveRecordPushesCache:
         reloaded.title = "resaved with implicit path"
         tracking.save_record(reloaded)
         assert tracking.load_record(path).title == "resaved with implicit path"
+
+    def test_a_direct_unlocked_save_caller_also_pushes_the_cache(
+        self, tmp_path: Path, monkeypatch,
+    ):
+        # Several real callers (the execution-leg CLI, tracking_lifecycle's
+        # create_new_record_if_absent) already hold their OWN record lock
+        # and call tracking._save_record_unlocked directly, bypassing
+        # save_record entirely, to avoid re-acquiring a lock they already
+        # hold. The cache push must live in _save_record_unlocked itself
+        # (the true universal write chokepoint) to reach these callers too
+        # -- moving store() back into save_record alone would pass every
+        # other test here while silently reintroducing that gap.
+        path = tmp_path / "wt-A.yaml"
+        record = create_new_record(
+            "wt-A", "worktree/wt-A", str(tmp_path / "wt-A"), "test-chamber",
+            "anomalous-potato", "wsl", tmp_path,
+        )
+        record.title = "pushed by a direct _save_record_unlocked caller"
+        with tracking._RecordLock(path, require_sidecar=True):
+            tracking._save_record_unlocked(record, path)
+
+        calls = []
+        real_uncached = tracking._load_record_uncached
+
+        def _spy(p: Path) -> tracking.WorktreeRecord:
+            calls.append(p)
+            return real_uncached(p)
+
+        monkeypatch.setattr(tracking, "_load_record_uncached", _spy)
+        reloaded = tracking.load_record(path)
+        assert reloaded.title == "pushed by a direct _save_record_unlocked caller"
+        assert calls == [], (
+            "a direct _save_record_unlocked caller's cache push must make this "
+            "a hit, not a re-parse"
+        )
