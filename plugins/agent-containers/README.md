@@ -314,18 +314,32 @@ platform note on `_ensure_owned_dir`).
 `systemd_capable: true` (a real boolean only -- a quoted `"false"` or other
 non-boolean value is rejected rather than coerced) adds `--cap-add
 SYS_ADMIN`, writable/executable `/run` + `/run/lock` tmpfs mounts, an
-allocated tty, and `container=docker`, then launches the container via a
-wrapper that remounts `/sys/fs/cgroup` read-write before `exec`'ing
-`/lib/systemd/systemd` as PID 1 (in place of the historical `sleep infinity`
-placeholder) -- Docker's default `/sys/fs/cgroup` mount is read-only even
-under `trusted`, and a raw host bind-mount of it does NOT work (a
-cgroup-namespace path mismatch produces "No such file or directory"); an
-in-container remount at launch is the fix that actually works. **The image
-itself must provide `systemd`, `systemd-sysv`, and `dbus-user-session`** --
-this plugin only wires the launch, it does not install systemd into the
-image. Once running, `loginctl enable-linger <user>` plus that user's own
-`systemctl --user ...` registers and runs real `.timer`/`.service` units
-exactly as on a normal machine.
+allocated tty, `container=docker`, and **`--user root`** (PID 1 -- systemd
+itself -- must boot as root regardless of the image's own default `USER`;
+`exec_user` only governs LATER `docker exec` calls for actual work, never
+the entrypoint process -- systemd drops to per-service users for real
+workloads via its own unit files, exactly like a normal machine's init),
+then launches the container via a wrapper that remounts `/sys/fs/cgroup`
+read-write before `exec`'ing `/lib/systemd/systemd` as PID 1 (in place of the
+historical `sleep infinity` placeholder) -- Docker's default `/sys/fs/cgroup`
+mount is read-only even under `trusted`, and a raw host bind-mount of it does
+NOT work (a cgroup-namespace path mismatch produces "No such file or
+directory"); an in-container remount at launch is the fix that actually
+works. **The image itself must provide `systemd`, `systemd-sysv`, and
+`dbus-user-session`** -- this plugin only wires the launch, it does not
+install systemd into the image. Once running, `loginctl enable-linger <user>`
+plus that user's own `systemctl --user ...` registers and runs real
+`.timer`/`.service` units exactly as on a normal machine.
+
+The per-member uid/gid used to `chown` `host_workspace_path`/`host_home_path`
+subdirectories is resolved via a trusted-specific probe (not the
+restricted-only `_image_user`, which requires real `memory`/`cpus`/
+`pids_limit` values and rejects a root `exec_user` -- both wrong for
+`trusted`'s normal unset defaults and its historical allowance of a root
+exec_user). The resolved member subdirectory is also validated to stay
+beneath the configured parent path -- `name` comes from the operator-
+configurable `name_prefix`, so a prefix containing `../` is rejected before
+anything is created or `chown`'d.
 
 Dispatch is defined only for containers with an exact fleet entry in the active
 configuration. An unmanaged/discovered container is visible for inventory but

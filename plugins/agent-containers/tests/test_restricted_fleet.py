@@ -207,7 +207,7 @@ def test_trusted_image_run_wires_host_mounts_and_systemd_capability(monkeypatch)
         lambda args, timeout=30: calls.append(args) or _ok("container-id\n"),
     )
     monkeypatch.setattr(
-        fleet_mod, "_image_user", lambda image, user, **kwargs: (1000, 1000, "/home/node")
+        fleet_mod, "_trusted_mount_owner", lambda image, user: (1000, 1000)
     )
     ensure_owned_calls: list[tuple[str, int, int]] = []
     monkeypatch.setattr(
@@ -247,6 +247,9 @@ def test_trusted_image_run_wires_host_mounts_and_systemd_capability(monkeypatch)
     assert ("/mnt/data/workspaces/example-1", 1000, 1000) in ensure_owned_calls
     assert ("/mnt/data/home/example-1", 1000, 1000) in ensure_owned_calls
     assert run[run.index("--cap-add") + 1] == "SYS_ADMIN"
+    # PID 1 (systemd) must boot as root regardless of the image's own
+    # default USER -- exec_user only governs later `docker exec` calls.
+    assert run[run.index("--user") + 1] == "root"
     tmpfs = [run[i + 1] for i, value in enumerate(run) if value == "--tmpfs"]
     assert "/run:rw,exec" in tmpfs
     assert "/run/lock:rw,exec" in tmpfs
@@ -294,7 +297,7 @@ def test_trusted_image_run_namespaces_host_paths_per_fleet_member(monkeypatch):
         lambda args, timeout=30: calls.append(args) or _ok("container-id\n"),
     )
     monkeypatch.setattr(
-        fleet_mod, "_image_user", lambda image, user, **kwargs: (1000, 1000, "/home/node")
+        fleet_mod, "_trusted_mount_owner", lambda image, user: (1000, 1000)
     )
     monkeypatch.setattr(fleet_mod, "_ensure_owned_dir", lambda path, uid, gid: None)
     fleet = FleetConfig(
@@ -318,6 +321,35 @@ def test_trusted_image_run_namespaces_host_paths_per_fleet_member(monkeypatch):
     assert mounts_2 == ["/mnt/data/workspaces/example-2:/workspace/example"]
 
 
+def test_trusted_image_run_rejects_path_traversal_via_name_prefix(monkeypatch):
+    monkeypatch.setattr(fleet_mod, "_docker", lambda args, timeout=30: _ok("id\n"))
+    monkeypatch.setattr(
+        fleet_mod, "_trusted_mount_owner", lambda image, user: (1000, 1000)
+    )
+    ensure_owned_calls: list[str] = []
+    monkeypatch.setattr(
+        fleet_mod, "_ensure_owned_dir",
+        lambda path, uid, gid: ensure_owned_calls.append(path),
+    )
+    fleet = FleetConfig(
+        image="example/agent:latest",
+        security_profile="trusted",
+        host_workspace_path="/mnt/data/workspaces",
+    )
+
+    with pytest.raises(RuntimeError, match="escapes the configured"):
+        fleet_mod._image_run(
+            "example",
+            fleet,
+            # a malicious/misconfigured name_prefix could produce this
+            "../../etc/example-1",
+            workspace_folder="/workspace/example",
+            exec_user="node",
+        )
+    # The rejection must happen BEFORE any directory is created/chowned.
+    assert ensure_owned_calls == []
+
+
 def test_ensure_owned_dir_creates_and_chowns(monkeypatch, tmp_path):
     target = tmp_path / "workspaces" / "example-1"
     chown_calls: list[tuple[str, int, int]] = []
@@ -330,6 +362,19 @@ def test_ensure_owned_dir_creates_and_chowns(monkeypatch, tmp_path):
     assert target.is_dir()
     if fleet_mod.os.name != "nt":
         assert chown_calls == [(str(target), 1000, 1000)]
+
+
+def test_member_host_path_accepts_a_normal_member_name(tmp_path):
+    parent = tmp_path / "workspaces"
+    resolved = fleet_mod._member_host_path(str(parent), "example-1", label="host_workspace_path")
+    assert resolved == str((parent / "example-1").resolve())
+
+
+@pytest.mark.parametrize("malicious_name", ["../escape", "../../etc/passwd", "/etc/passwd"])
+def test_member_host_path_rejects_traversal(tmp_path, malicious_name):
+    parent = tmp_path / "workspaces"
+    with pytest.raises(RuntimeError, match="escapes the configured"):
+        fleet_mod._member_host_path(str(parent), malicious_name, label="host_workspace_path")
 
 
 def test_restricted_network_defaults_to_none(monkeypatch):

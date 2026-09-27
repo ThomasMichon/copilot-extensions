@@ -109,6 +109,25 @@ def _next_indices(existing: list[DockerContainerInfo], prefix: str, count: int) 
     return indices
 
 
+def _member_host_path(parent: str, name: str, *, label: str) -> str:
+    """Resolve `<parent>/<name>` and REJECT it if `name` escapes `parent`.
+
+    `name` is a fleet member's Docker container name (`<name_prefix>-<n>`) --
+    `name_prefix` is an operator-configurable string, not a validated path
+    component. A prefix containing `../` could otherwise make the resolved
+    member path escape the configured parent entirely, before this function's
+    caller ever creates or chowns anything there.
+    """
+    parent_resolved = Path(parent).resolve()
+    member = (parent_resolved / name).resolve()
+    if parent_resolved not in member.parents:
+        raise RuntimeError(
+            f"Fleet member name {name!r} escapes the configured {label} "
+            f"parent directory {parent!r}"
+        )
+    return str(member)
+
+
 def _ensure_owned_dir(path: str, uid: int, gid: int) -> None:
     """Create a host bind-mount SOURCE dir (if missing) owned by uid/gid.
 
@@ -173,6 +192,41 @@ def _image_user(
             f"Restricted exec_user '{user}' has unsafe home directory '{home}'"
         )
     return uid, gid, home
+
+
+def _trusted_mount_owner(image: str, user: str) -> tuple[int, int]:
+    """Resolve a user's uid/gid from an image for trusted-fleet mount ownership.
+
+    A lighter twin of `_image_user`: that probe is restricted-specific (it
+    requires real memory/cpus/pids_limit values -- `None` under a trusted
+    fleet's normal unset defaults -- and rejects a root exec_user, which
+    trusted fleets have always allowed). This one only resolves uid/gid (no
+    home-directory safety checks -- trusted fleets don't get that
+    restricted-only guarantee) and explicitly permits uid/gid 0.
+    """
+    probe = 'id -u "$1" && id -g "$1"'
+    res = _docker(
+        [
+            "run", "--rm", "--network", "none",
+            "--read-only", "--cap-drop=ALL",
+            "--security-opt=no-new-privileges",
+            "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m",  # noqa: S108
+            "--entrypoint", "bash",
+            image, "-c", probe, "--", user,
+        ],
+        timeout=120,
+    )
+    if res.returncode != 0:
+        raise RuntimeError(
+            f"Trusted image '{image}' does not provide exec_user '{user}': "
+            f"{res.stderr.strip() or res.stdout.strip()}"
+        )
+    lines = res.stdout.strip().splitlines()
+    if len(lines) != 2:
+        raise RuntimeError(
+            f"Trusted image user probe returned an invalid result for '{user}'"
+        )
+    return int(lines[0]), int(lines[1])
 
 
 def _image_id(image: str) -> str:
@@ -307,21 +361,22 @@ def _image_run(
             # owned by whatever the daemon runs as (root) -- the configured,
             # normally non-root exec_user could never write to a freshly
             # created mount. Pre-create + chown each member directory to the
-            # exec_user's real uid/gid (the same image-probe restricted mode
-            # already uses) before it's ever mounted.
-            uid, gid, _home = _image_user(
-                fleet.image,
-                exec_user,
-                memory=fleet.effective_memory(),
-                cpus=fleet.effective_cpus(),
-                pids_limit=fleet.effective_pids_limit(),
-            )
+            # exec_user's real uid/gid, resolved via a TRUSTED-specific probe
+            # (not the restricted-only `_image_user`, which requires real
+            # memory/cpus/pids_limit values -- `None` under trusted's normal
+            # unset defaults -- and rejects a root exec_user, which trusted
+            # fleets have always allowed).
+            uid, gid = _trusted_mount_owner(fleet.image, exec_user)
             if fleet.host_workspace_path:
-                member_workspace = f"{fleet.host_workspace_path.rstrip('/')}/{name}"
+                member_workspace = _member_host_path(
+                    fleet.host_workspace_path, name, label="host_workspace_path"
+                )
                 _ensure_owned_dir(member_workspace, uid, gid)
                 args += ["-v", f"{member_workspace}:{workspace_folder}"]
             if fleet.host_home_path and fleet.home_folder:
-                member_home = f"{fleet.host_home_path.rstrip('/')}/{name}"
+                member_home = _member_host_path(
+                    fleet.host_home_path, name, label="host_home_path"
+                )
                 _ensure_owned_dir(member_home, uid, gid)
                 args += ["-v", f"{member_home}:{fleet.home_folder}"]
         if fleet.systemd_capable:
@@ -334,7 +389,20 @@ def _image_run(
             # mismatch) -- an in-container remount at startup is the fix.
             # Validated live against a real, unprivileged container -- see
             # the effort/issue this landed from.
+            #
+            # `--user root`: PID 1 (systemd itself) must boot as root
+            # regardless of the image's own default `USER` -- `exec_user`
+            # only governs LATER `docker exec` calls for actual work, never
+            # the container's own entrypoint process. Without this, an image
+            # with a non-root default USER would run `mount`/systemd as that
+            # user and fail to boot (mount(2) needs CAP_SYS_ADMIN in the
+            # calling process's effective set, which a non-root PID 1 is not
+            # guaranteed to have even though the capability is granted to the
+            # container). Systemd itself drops to per-service users for real
+            # workloads via its own unit files -- exactly like a normal
+            # machine's init.
             args += [
+                "--user", "root",
                 "--cap-add", "SYS_ADMIN",
                 "--tmpfs", "/run:rw,exec",
                 "--tmpfs", "/run/lock:rw,exec",
