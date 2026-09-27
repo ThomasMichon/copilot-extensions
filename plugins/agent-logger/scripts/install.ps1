@@ -1006,7 +1006,13 @@ if isinstance(value, str) and value.strip():
         if (-not $dir) { return $null }
         # Mirrors agent_logger.config.REPO_CONFIG_FILENAMES's alias set and
         # precedence order -- a config repo may use any of these filenames,
-        # not just the root .agent-logger.yaml.
+        # not just the root .agent-logger.yaml. A candidate whose leaf (or,
+        # for the .config/ aliases, whose .config ancestor) is a
+        # symlink/reparse point is skipped in favor of the next alias,
+        # mirroring find_repo_config()'s own symlink rejection exactly --
+        # selecting a symlinked candidate here would embed a path the real
+        # loader immediately rejects outright, instead of falling through
+        # to a valid lower-priority alias the way normal discovery does.
         foreach ($candidate in @(
             '.agent-logger.yaml',
             '.agent-logger.yml',
@@ -1014,7 +1020,18 @@ if isinstance(value, str) and value.strip():
             '.config/agent-logger.yml'
         )) {
             $configPath = Join-Path $dir $candidate
-            if (Test-Path -LiteralPath $configPath) { return $configPath }
+            if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) { continue }
+            if ((Get-Item -LiteralPath $configPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                continue
+            }
+            $ancestorDir = Split-Path -Parent $candidate
+            if ($ancestorDir) {
+                $ancestorPath = Join-Path $dir $ancestorDir
+                if ((Get-Item -LiteralPath $ancestorPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                    continue
+                }
+            }
+            return $configPath
         }
         return $null
     } catch {

@@ -448,6 +448,43 @@ def test_explicit_repo_config_env_rejects_symlinked_ancestor(
 
 
 @pytest.mark.no_autotrust
+def test_explicit_repo_config_env_accepts_relative_path(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A RELATIVE AGENT_LOGGER_REPO_CONFIG value must still be honored for a
+    genuinely trusted, non-symlinked repo -- has_symlink_ancestor() computes
+    relative_to() between the (always absolute) discovered git root and the
+    explicit path, which raises (failing *unsafe*) if the explicit path was
+    left relative while the root is absolute. A real relative override
+    (e.g. a machine-local script invoking with a repo-relative path) must
+    not be rejected just because of this internal representation mismatch."""
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, remote="https://example.test/example-owner/demo.git", branch="main")
+    config_file = repo / ".agent-logger.yaml"
+    config_file.write_text("log:\n  path_template: logs/{title}.md\n", encoding="utf-8")
+
+    registry = tmp_path / "repos.yaml"
+    registry.write_text(
+        yaml.safe_dump(
+            {
+                "repos": {
+                    "demo": {
+                        "remote": "https://example.test/example-owner/demo.git",
+                        "default_branch": "main",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_WORKTREES_REPOS_YAML", str(registry))
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("AGENT_LOGGER_REPO_CONFIG", ".agent-logger.yaml")
+
+    assert find_repo_config() == config_file
+
+
+@pytest.mark.no_autotrust
 def test_repo_config_rejects_symlinked_candidate(tmp_path: Path, monkeypatch) -> None:
     """A committed/local symlink standing in for .agent-logger.yaml must be
     rejected outright -- discovery must never follow a link out of the

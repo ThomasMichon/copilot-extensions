@@ -961,7 +961,13 @@ PYEOF
     if [ -n "${config_repo_dir}" ]; then
       # Mirrors agent_logger.config.REPO_CONFIG_FILENAMES's alias set and
       # precedence order -- a config repo may use any of these filenames,
-      # not just the root .agent-logger.yaml.
+      # not just the root .agent-logger.yaml. A candidate whose leaf (or,
+      # for the .config/ aliases, whose .config ancestor) is a symlink is
+      # skipped in favor of the next alias, mirroring find_repo_config()'s
+      # own symlink rejection exactly -- selecting a symlinked candidate
+      # here would embed a path the real loader immediately rejects
+      # outright, instead of falling through to a valid lower-priority
+      # alias the way normal discovery does.
       local candidate
       for candidate in \
         ".agent-logger.yaml" \
@@ -969,16 +975,25 @@ PYEOF
         ".config/agent-logger.yaml" \
         ".config/agent-logger.yml"
       do
-        if [ -f "${config_repo_dir}/${candidate}" ]; then
-          # Escape systemd.exec(5) Environment= special characters (\, ",
-          # and the specifier-escape %) before quoting the whole assignment
-          # -- quoting alone only protects whitespace, not these.
-          local repo_config_value
-          repo_config_value="AGENT_LOGGER_REPO_CONFIG=${config_repo_dir}/${candidate}"
-          repo_config_value="$(printf '%s' "${repo_config_value}" | sed 's/\\/\\\\/g; s/"/\\"/g; s/%/%%/g')"
-          repo_config_env="Environment=\"${repo_config_value}\""
-          break
+        local candidate_path="${config_repo_dir}/${candidate}"
+        if [ ! -f "${candidate_path}" ] || [ -L "${candidate_path}" ]; then
+          continue
         fi
+        case "${candidate}" in
+          */*)
+            if [ -L "${config_repo_dir}/${candidate%/*}" ]; then
+              continue
+            fi
+            ;;
+        esac
+        # Escape systemd.exec(5) Environment= special characters (\, ",
+        # and the specifier-escape %) before quoting the whole assignment
+        # -- quoting alone only protects whitespace, not these.
+        local repo_config_value
+        repo_config_value="AGENT_LOGGER_REPO_CONFIG=${candidate_path}"
+        repo_config_value="$(printf '%s' "${repo_config_value}" | sed 's/\\/\\\\/g; s/"/\\"/g; s/%/%%/g')"
+        repo_config_env="Environment=\"${repo_config_value}\""
+        break
       done
     fi
   fi

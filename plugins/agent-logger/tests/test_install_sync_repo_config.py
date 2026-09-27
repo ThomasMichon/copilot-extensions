@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -56,11 +57,35 @@ def _executable(path: Path, text: str) -> None:
     path.chmod(0o755)
 
 
+def _resolve_test_venv_root() -> Path:
+    """Return a venv root this environment actually has, preferring the
+    facility's own managed test-runner venv location
+    (``.test-venvs/<sys.platform>/agent-logger``, see
+    ``tools/run-plugin-tests.py``'s ``VENV_ROOT``) over a raw dev-local
+    ``.venv`` -- the standard CI/test-runner path materializes ONLY the
+    former, so relying on ``.venv`` alone would silently skip these tests
+    (via the trailing ``pytest.skip``) under that runner, giving a false
+    sense of coverage. Falls back to ``.venv`` for a plain
+    ``uv run pytest`` dev invocation, which doesn't populate
+    ``.test-venvs`` at all.
+    """
+    managed = PLUGIN.parents[1] / ".test-venvs" / sys.platform / "agent-logger"
+    for candidate in (managed, PLUGIN / ".venv"):
+        python3 = candidate / "bin" / "python3"
+        if python3.is_file() or python3.is_symlink():
+            return candidate
+    pytest.skip(
+        "no usable venv found (.test-venvs/<platform>/agent-logger or .venv)"
+    )
+    raise AssertionError("unreachable")  # pytest.skip always raises
+
+
 def _real_venv_with_python() -> Path:
-    """The plugin's OWN dev venv (which already has pyyaml installed, a
-    hard dependency of this whole plugin) -- so write_units' real
-    YAML-based config_repo parsing runs against a genuine interpreter with
-    the right packages on its path.
+    """The plugin's OWN usable dev/CI venv (which already has pyyaml
+    installed, a hard dependency of this whole plugin) -- so write_units'
+    real YAML-based config_repo parsing runs against a genuine interpreter
+    with the right packages on its path. See
+    :func:`_resolve_test_venv_root` for which venv root this resolves to.
 
     Returned directly (not copied/symlinked into a fake structure): Python's
     venv site-packages association is resolved via ``pyvenv.cfg`` sitting
@@ -71,10 +96,7 @@ def _real_venv_with_python() -> Path:
     site-packages, missing pyyaml, even though ``sys.executable`` resolves
     correctly. Using the real venv wholesale sidesteps this entirely.
     """
-    real_python = PLUGIN / ".venv" / "bin" / "python3"
-    if not real_python.is_file() and not real_python.is_symlink():
-        pytest.skip("no plugin dev venv (.venv/bin/python3) available")
-    return PLUGIN / ".venv"
+    return _resolve_test_venv_root()
 
 
 @pytest.mark.skipif(
@@ -131,6 +153,67 @@ def test_write_units_sets_repo_config_env_when_config_repo_adopted(
 
     unit_text = (unit_dir / "agent-logger-sync.service").read_text(encoding="utf-8")
     expected = f'Environment="AGENT_LOGGER_REPO_CONFIG={repo_dir}/.agent-logger.yaml"'
+    assert expected in unit_text
+
+
+@pytest.mark.skipif(
+    _BASH is None or os.name == "nt",
+    reason="a POSIX bash environment is not available",
+)
+def test_write_units_falls_through_symlinked_alias_to_next_candidate(
+    tmp_path: Path,
+) -> None:
+    """If the highest-priority alias (.agent-logger.yaml) is a symlink, it
+    must be skipped in favor of the next valid alias -- selecting it would
+    embed a path find_repo_config() immediately rejects outright (it never
+    falls through to a lower-priority alias for an explicit path), leaving
+    the scheduled sync with no usable AGENT_LOGGER_REPO_CONFIG at all even
+    though a perfectly good alias exists."""
+    install_dir = tmp_path / "install"
+    unit_dir = tmp_path / "units"
+    install_dir.mkdir()
+    unit_dir.mkdir()
+    (install_dir / "config.yaml").write_text("config_repo: demo\n", encoding="utf-8")
+
+    repo_dir = tmp_path / "demo-repo"
+    repo_dir.mkdir()
+    outside_target = tmp_path / "outside.yaml"
+    outside_target.write_text("schema_version: 3\n", encoding="utf-8")
+    (repo_dir / ".agent-logger.yaml").symlink_to(outside_target)
+    (repo_dir / ".agent-logger.yml").write_text("schema_version: 3\n", encoding="utf-8")
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _executable(
+        fake_bin / "agent-worktrees",
+        "#!/bin/sh\n"
+        'if [ "$1" = "repos" ] && [ "$2" = "find" ] && [ "$3" = "demo" ]; then\n'
+        f'  echo "{repo_dir}"\n'
+        "  exit 0\n"
+        "fi\n"
+        "exit 1\n",
+    )
+
+    harness = tmp_path / "harness.sh"
+    harness.write_text(
+        "#!/bin/sh\nset -eu\n"
+        f'INSTALL_DIR="{install_dir}"\n'
+        f'UNIT_DIR="{unit_dir}"\n'
+        f'VENV="{_real_venv_with_python()}"\n'
+        'TIMER_NAME="agent-logger-sync"\n'
+        'chg() { :; }\n'
+        + _extract_sh_function("write_units")
+        + "\nwrite_units\n",
+        encoding="utf-8",
+    )
+    harness.chmod(0o755)
+    env = {**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"}
+    subprocess.run(
+        [_BASH, str(harness)], capture_output=True, text=True, env=env, timeout=20, check=True
+    )
+
+    unit_text = (unit_dir / "agent-logger-sync.service").read_text(encoding="utf-8")
+    expected = f'Environment="AGENT_LOGGER_REPO_CONFIG={repo_dir}/.agent-logger.yml"'
     assert expected in unit_text
 
 
@@ -363,12 +446,10 @@ def test_write_sync_task_launcher_sets_repo_config_when_config_repo_adopted(
     exe = shutil.which(shell)
     if not exe:
         pytest.skip(f"{shell} is not installed")
-    # See _real_venv_with_python's docstring: the plugin's OWN dev venv
-    # interpreter, not sys.executable, which can lack pyyaml when invoked
-    # directly under uv.
-    real_python = PLUGIN / ".venv" / "bin" / "python3"
-    if not real_python.is_file() and not real_python.is_symlink():
-        pytest.skip("no plugin dev venv (.venv/bin/python3) available")
+    # See _resolve_test_venv_root's docstring: the plugin's OWN usable
+    # dev/CI venv interpreter, not sys.executable, which can lack pyyaml
+    # when invoked directly under uv.
+    real_python = _resolve_test_venv_root() / "bin" / "python3"
 
     install_dir = tmp_path / "install"
     install_dir.mkdir()

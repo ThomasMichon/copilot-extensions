@@ -446,6 +446,20 @@ def find_repo_config(start: Path | None = None) -> Path | None:
         if env.strip().lower() in {"0", "false", "off", "none"}:
             return None
         explicit = Path(env).expanduser()
+        if not explicit.is_absolute():
+            # has_symlink_ancestor() needs both sides in the same (absolute)
+            # form to compute relative_to() -- explicit_root below is
+            # always absolute (_find_repo_root()/cwd already are), but a
+            # relative AGENT_LOGGER_REPO_CONFIG value stayed relative,
+            # making relative_to() raise and fail *unsafe* (rejecting every
+            # valid relative override). Path.absolute() (not .resolve() and
+            # not os.path.abspath's '..'-collapsing normpath, which could
+            # walk a different directory than the symlink-ancestor check
+            # below when a '..' segment follows a symlinked component)
+            # deliberately does not follow symlinks -- only textually joins
+            # the current directory -- so this cannot mask the leaf/ancestor
+            # symlink checks below.
+            explicit = explicit.absolute()
         if not explicit.is_file():
             raise RepositoryConfigError(
                 f"AGENT_LOGGER_REPO_CONFIG does not name a file: {explicit}"
