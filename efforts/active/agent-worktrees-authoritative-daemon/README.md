@@ -733,8 +733,11 @@ performance/consistency improvement, never a correctness fix, which is
 also why `terminal_conclusion.py`'s Phase-3 holdout needed no further
 write-migration work to get this same benefit.
 
-Full `agent-worktrees` suite: 5743 passed, 26 skipped -- only the two
-known pre-existing failures remain (`test_doctor.py::
+Full `agent-worktrees` suite: 5733 passed before the review-fix commit's
+new regression tests, 5743 passed after (10 new tests added: the two
+review-caught-bug regressions plus the direct-`_save_record_unlocked`-
+caller and transient-attribute-stripping tests) -- both runs showed only
+the two known pre-existing failures (`test_doctor.py::
 test_no_drift_when_consistent`, `test_registration_home.py`).
 
 ### 2026-09-27 — PR #4238: Phase 3's eighth migrated call-site cluster, deregister_session itself -- a lock-scope 'fix' tried and reverted twice in one review
