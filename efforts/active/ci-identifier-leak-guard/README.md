@@ -180,7 +180,7 @@ _Pending._
   workflow or scanner implementation begins.
 
 ### 2026-09-26 - Phase 1 shipped
-- PR TBD extends `tools/check-no-internal-identifiers.py` with reusable scan
+- PR #3934 extends `tools/check-no-internal-identifiers.py` with reusable scan
   helpers, `--json-out`, and `--ci`, plus secret-backed
   `COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI` parsing for `token|reason` entries
   without emitting raw tokens or reasons in CI-mode stdout/JSON artifacts.
