@@ -16,6 +16,10 @@ if TYPE_CHECKING:
 #: reachable but stalled/wedged; see ``register_session``'s own docstring).
 _SESSION_REGISTER_REQUEST_DEADLINE_S = 1.5
 
+#: Same rationale, for the symmetric sessionEnd hook's own ``session_deregister``
+#: dispatch (see ``deregister_session``'s own docstring).
+_SESSION_DEREGISTER_REQUEST_DEADLINE_S = 1.5
+
 
 def _tracking():
     from . import tracking as tracking_mod
@@ -305,33 +309,41 @@ def deregister_session(
     source: str = "hook",
     recorded_at: str | None = None,
 ) -> None:
+    """Mark a Copilot session as ended on a worktree.
+
+    Dispatches through the ``session_deregister`` verb (daemon write path
+    when reachable, else the identical logged in-process fallback --
+    ``agent-worktrees-authoritative-daemon`` effort, Phase 3; see
+    ``tracking_session_deregistration_write.py``'s own module docstring).
+    Called from the sessionEnd hook, so this bounds latency exactly like
+    ``register_session`` does (same review-established checklist): a
+    cold/unreachable daemon never adds a boot-wait (``boot_wait_s=0``,
+    ``ensure_monitor()`` still fires the non-blocking spawn for the next
+    session), and a reachable-but-stalled one is bounded by a short
+    request deadline rather than the module's default ~9s.
+    """
     tracking = _tracking()
     yaml_path = tracking._owning_tracking_dir(worktree_id) / f"{worktree_id}.yaml"
     if not yaml_path.exists():
         return
-    with tracking._RecordLock(yaml_path):
-        record = tracking.load_record(yaml_path)
-        if record.sessions is None:
-            return
-        for entry in record.sessions:
-            if entry.session_id != session_id:
-                continue
-            changed = _end_session_activation(
-                entry,
-                event_at=ended_at or tracking._now_iso(),
-                recorded_at=recorded_at or tracking._now_iso(),
-                source=source,
-            )
-            if changed:
-                tracking._next_lifecycle_revision(record, session_id)
-                self_session_ref = tracking.format_claim_ref(
-                    record.machine,
-                    record.repo,
-                    record.worktree_id,
-                    session=session_id,
-                )
-                tracking.release_resource_claim(record, self_session_ref, save=False)
-                tracking.save_record(record)
-                if not _record_has_open_session(record):
-                    stop_fsmonitor_daemon(record.worktree_path)
-            return
+    from . import locks as _locks
+    from . import status_monitor_runtime as _smr
+    from . import tracking_write
+
+    tracking_write.dispatch(
+        "session_deregister",
+        {
+            "worktree_id": worktree_id,
+            "yaml_path": str(yaml_path),
+            "session_id": session_id,
+            "ended_at": ended_at,
+            "source": source,
+            "recorded_at": recorded_at,
+        },
+        read_lock_data=lambda: _locks.read_lock(_smr._monitor_lock_path()),
+        ensure_monitor=(
+            _smr._ensure_status_monitor if _smr._status_monitor_enabled() else None
+        ),
+        boot_wait_s=0.0,
+        request_deadline_s=_SESSION_DEREGISTER_REQUEST_DEADLINE_S,
+    )
