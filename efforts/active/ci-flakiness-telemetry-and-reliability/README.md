@@ -222,13 +222,65 @@ find the noisiest and blocking issues, and fix them"
   `FORBIDDEN_IDS_FACILITY`/`FORBIDDEN_IDS_WORK` secret setup.
 - [ ] Work down the Phase 2 ranking, opening one PR per fix (or a small
   batch when fixes are trivially related), closing/updating aperture-labs
-  issues as each lands. Next candidates from the live Phase 2 ranking:
+  issues as each lands.
+  **Important refinement found 2026-09-27 (must inform how the rest of
+  this Plan item proceeds):** most of the Phase 2 ranking's high-frequency/
+  high-blocking-impact entries are **not standing code bugs** the way
+  #7715 was. Directly verified live against current `dev` HEAD:
   `tools/test_check_marketplace_isolation.py::
   test_payload_catalog_adopter_capabilities_avoid_bare_global_commands`
-  (noisiest by frequency) and
-  `tests/test_install_signed_python_probe.py::
-  test_missing_newest_candidate_does_not_abort_probe[pwsh]` (highest
-  blocking impact).
+  (23 occurrences, 0% recovery) and
+  `plugins/copilot-extensions-harness/tests/test_session_context_declarations.py::
+  test_static_projection_plugins_register_no_session_start_hook` (9
+  occurrences) both **pass cleanly right now** -- there is no current
+  failure to fix. These are cross-cutting content-governance guards that
+  scan skill/agent docs (or session-hook wiring) across MANY plugins at
+  once; a failure means a *specific, different* PR's own in-progress doc
+  edit tripped it that day, and that PR's author fixed their own content
+  before merge (0% recovery makes sense: a genuine content mistake never
+  clears via a mere rerun, and it was never actually stuck on `dev` -- each
+  historical occurrence was a different PR's own pre-merge iteration, not
+  a persisting regression). **This is the check working as intended, not
+  noise to eliminate or a bug to fix.** Do not "fix" these by editing the
+  checks or the test suite; there is nothing broken. This is a real
+  limitation of the Phase 2 ranking worth being explicit about (it can't
+  currently distinguish "one persisting bug recurring" from "many
+  different authors independently tripping the same working guardrail")
+  -- a future refinement could correlate each occurrence's run against
+  that PR's own eventual merge state, but that's out of scope for this
+  pass.
+  **Genuine remaining code-level candidate, not yet investigated:**
+  `plugins/agent-logger/tests/test_install_signed_python_probe.py::
+  test_missing_newest_candidate_does_not_abort_probe[pwsh]` (19
+  occurrences, 122 blocked `dev`-push runs -- the highest blocking impact
+  in the whole ranking) is a genuine Windows-runner PowerShell probe-script
+  test, unrelated to any PR's own doc content -- this is the next concrete
+  Phase 3 target and needs the same treatment #7715 got (direct
+  reproduction and root-cause before attempting a fix, not a guess from
+  reading the script).
+  **2026-09-27 investigation started (not concluded):** 20/20 local runs
+  via `tools/run-plugin-tests.py agent-logger` (Windows dev box) stayed
+  green -- this one does NOT reproduce readily on a quiet, uncontended local
+  machine the way #7715 did (consistent with it being a real CI-runner
+  resource-contention issue, not a pure logic race). Pulled a real historical
+  failure excerpt directly from `dev`-push run 36302713272 (commit
+  `60a62be1`, 2026-09-27) instead of guessing:
+  ```
+  AssertionError: assert 'RESULT:' == 'RESULT:/tmp/...python312.exe'
+  - RESULT:/tmp/ce-agent-logger-okc7q77h/pytest/group-1/test_missing_newest_candidate_1/python312.exe
+  + RESULT:
+  ```
+  The probe returned **empty** (as if no candidate existed at all) instead
+  of falling through to the stubbed 3.12 candidate -- note the temp path is
+  POSIX-style (`/tmp/...`) even though this test's own `skipif` requires
+  `os.name == "nt"` and its whole premise (`py.cmd`, PowerShell
+  `Get-AuthenticodeSignature`) is Windows-specific; reconciling that
+  apparent contradiction (a container/bash-shell path substitution on the
+  `windows-latest` runner? a `TMP`/`TEMP` env leak from an earlier workflow
+  step? `tools/run-plugin-tests.py`'s own `--basetemp` customization
+  behaving unexpectedly on that specific runner?) is the necessary next
+  step before touching the probe script itself -- not yet resolved. Handed
+  off at this point rather than guessing further without evidence.
 
 ## Validation Plan
 
@@ -256,6 +308,18 @@ _Pending — Phase 3 findings (which fixes land, and in what order) will
 determine whether this section needs anything beyond the Plan above._
 
 ## Journal
+
+### 2026-09-27 — Phase 2 ranking refinement: content-governance noise vs. real bugs
+- Directly verified two of the Phase 2 ranking's top entries
+  (marketplace-isolation bare-command check, session-context-declarations
+  hook-wiring check) against current `dev` HEAD: both pass cleanly right
+  now. Concluded these are cross-cutting content-governance guards that
+  many *different* PR authors independently trip during their own
+  in-progress doc edits, always fixed before merge -- not standing code
+  bugs, and not this effort's to fix. See the Phase 3 Plan item above for
+  the full reasoning and the resulting real remaining candidate
+  (`test_install_signed_python_probe.py`'s Windows probe-script test,
+  genuinely unrelated to PR doc content, not yet investigated).
 
 ### 2026-09-27 — Phase 3 first item: aperture-labs#7715 fixed
 - Reproduced the flake directly (read-only diagnostic sub-agents, WSL,
