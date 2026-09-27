@@ -4,11 +4,13 @@ description: >
   Runbook for splitting an oversized or growing source module (or test file)
   into smaller, single-responsibility pieces -- proactively, not only when
   tools/check-module-size.py fails. Covers finding natural seams, the CLI/route
-  registration-table pattern, extracting a module safely with tests intact,
-  refreshing the shrink-only module-size baseline, splitting large test
-  modules by behavioral contract with @pytest.mark.contract attribution, and
-  using tools/rank-module-size.py to prioritize which already-grandfathered
-  files to tackle first.
+  registration-table pattern, splitting a compatibility root many siblings
+  already reverse-import (the __main__.py "_core()"/monkeypatch-safe
+  cross-call idiom), extracting a module safely with tests intact, landing on
+  a fast-moving base branch, refreshing the shrink-only module-size baseline,
+  splitting large test modules by behavioral contract with
+  @pytest.mark.contract attribution, and using tools/rank-module-size.py to
+  prioritize which already-grandfathered files to tackle first.
   Trigger phrases include:
   - 'split this module'
   - 'break this file up'
@@ -17,6 +19,8 @@ description: >
   - 'refresh the module size baseline'
   - 'what should we split next'
   - 'module size pecking order'
+  - 'split a compatibility root'
+  - 'monkeypatch still works after a split'
 ---
 
 # Componentizing Modules
@@ -95,6 +99,18 @@ though the automated cap currently only scans `*.py` (see CONTRIBUTING.md) —
 don't let that tooling gap be an excuse to let a large shell/PowerShell/
 TypeScript file keep growing unsplit.
 
+- **A compatibility root many siblings already call back into.** A large
+  `__main__.py` (or any module several sibling `*_cli.py`/`*_runtime.py`
+  files already reverse-import via `from . import __main__ as core`) is a
+  DIFFERENT shape from a plain CLI registration table: the functions you
+  want to move are frequently called *both* externally (other modules,
+  already going through `core()`) *and* internally (by sibling functions in
+  the same band you're about to move, currently calling each other by bare
+  name since they're all still in one file). See **"Splitting a
+  compatibility root"** below before starting this shape — naive extraction
+  silently breaks monkeypatch-based test compatibility in a way `ruff`/a
+  partial test run will not catch.
+
 ## Step 2 — extract
 
 1. Create the new module(s) with only the moved code plus the imports it
@@ -117,6 +133,103 @@ TypeScript file keep growing unsplit.
    `@staticmethod|@classmethod|@property|@cached_property` before you start
    and confirm every one of those decorated definitions still carries its
    decorator in its new home.
+
+## Splitting a compatibility root
+
+A big `__main__.py`-shaped module usually already has this idiom in play:
+sibling modules define `def _core(): from . import __main__ as core; return
+core`, then call `core.<name>(...)` for anything still living in the root —
+this is how `resolve_launch_cli.py`, `worktree_creation.py`, and
+`handoff_cutover.py` all call back into `agent-worktrees/__main__.py`. When
+you extract a new band OUT of that same root, two things you'd otherwise
+miss both stem from the same cause: tests monkeypatch functions **directly on
+the root module object** (`monkeypatch.setattr(m, "_some_func", fake)`,
+where `m` is the imported root module), and that monkeypatch must still be
+observed no matter which file's code path actually calls `_some_func` next.
+
+- **Every cross-call between functions in the band you're moving — and every
+  call out to a helper that stays resident in the root — must go through
+  `core()` (or an equivalent `_core()`/`_self_override()` accessor), never a
+  bare local name.** A bare name resolves through the *new* module's own
+  globals at call time, silently ignoring a monkeypatch applied to the root.
+  This is easy to get wrong exactly where it matters least visibly: a
+  function you moved calling ANOTHER function you moved in the same PR, with
+  no immediately obvious external caller — grep the test suite for
+  `monkeypatch.setattr(m, "<name>"` (or your project's equivalent alias) for
+  every name in the band before assuming a bare call is safe. This is *not*
+  only about functions: it applies identically to **module-level constants**
+  a test overrides (e.g. a retry-count/delay tunable) — moving the constant's
+  *definition* to the new module without routing every read through `core()`
+  means a test's `monkeypatch.setattr(m, "_RETRY_COUNT", 1)` silently stops
+  affecting the code that reads it.
+- **Compatibility re-exports aren't only about functions.** Before removing
+  an import that looks unused in the root after your move, check whether a
+  test accesses it directly as an attribute on the root
+  (`monkeypatch.setattr(m.<module>, ...)`, `m.<constant>`, `m.<ClassName>`) —
+  a shared module object, a constant, or a class can all be part of the
+  compatibility surface just as much as a function, and `ruff`'s "unused
+  import" signal has no visibility into a test file's attribute access.
+- **A source-string regression test needs updating, not just re-exporting.**
+  Some regression tests assert a literal code string is present in a
+  specific file's own text (a `Path(...).read_text()` + `assert '...' in
+  src` guard, usually protecting against a specific historical bug
+  reintroducing itself) rather than exercising behavior through a
+  monkeypatch. If the literal moved with your split, point that test's file
+  path at the new module — the guard's *intent* survives the move, but the
+  test itself does not update automatically the way a monkeypatch-based test
+  does.
+- Once the split lands, the pattern is self-reinforcing: the next person
+  extracting yet another band from the same root inherits the same
+  `core()`-everywhere discipline already visible in every sibling file.
+
+## Landing on a fast-moving base branch
+
+If the target repo has an active promote/release automation (a bot
+periodically fast-forwarding one branch from another, or squash-promoting a
+`dev` branch to `main` on a schedule), a componentization PR's base can move
+out from under it mid-review — expect this, don't treat it as an anomaly:
+
+- **Refresh onto the current base right before your final push, not just
+  once at the start — and prefer cherry-pick over a full rebase as the
+  mechanism.** A `git rebase origin/<base>` that replays many unrelated
+  intervening commits is slow and conflict-prone when the branches have
+  diverged far (version bump files, shared changelogs, and any other file
+  BOTH branches touch for unrelated reasons all become potential conflicts
+  on every intervening commit). Prefer resetting your branch onto the
+  current tip and cherry-picking your own commit(s) back on top instead:
+
+  ```bash
+  git fetch origin <base>                       # get the CURRENT tip, not a stale tracking ref
+  git branch backup-$(git rev-parse HEAD) HEAD   # cheap safety net before any reset
+  git checkout -B <branch> origin/<base>         # move the branch pointer, don't just merge
+  git cherry-pick <your commit(s)>               # replay only your actual change
+  ```
+
+  This replays only your actual change against the current tip, not the full
+  commit-by-commit history between your old base and the new one. Always
+  `fetch` immediately before the `checkout -B` — resetting onto a stale local
+  `origin/<base>` silently defeats the entire point. The backup branch costs
+  nothing and means a botched cherry-pick/reset is trivially recoverable
+  (`git checkout -B <branch> backup-<sha>` undoes it).
+- **Re-run `--refresh-baseline` (or your project's equivalent generated-file
+  refresh) against the POST-rebase tree, every time, not the value you
+  computed before rebasing.** A baseline/lockfile snapshot taken before a
+  rebase reflects a base that no longer exists; carrying it forward
+  reintroduces exactly the drift the refresh exists to catch, sometimes in
+  the opposite direction (a ceiling that's now *too low* for the merged
+  tree, failing the guard on unrelated files).
+- **Don't pin an exact line count in a PR description or journal entry if the
+  base branch is still moving.** State the source of truth instead ("run
+  `check-module-size.py` against the checked-in files") — a pinned number is
+  guaranteed to go stale by the time of merge and invites a review round
+  trip over a non-issue.
+- **A polite, single self-merge window beats waiting indefinitely on an
+  advisory-only automated review.** If the repo's contribution policy names
+  automated review as non-blocking (check its own `CONTRIBUTING.md` before
+  assuming otherwise — the wait/nudge/self-merge policy is project-specific
+  and does not generalize), give it its stated window, address anything it
+  actually found, and merge — don't leave a mergeable, checks-green PR idle
+  waiting for a verdict the policy already says isn't required.
 
 ## Step 3 — re-validate
 
