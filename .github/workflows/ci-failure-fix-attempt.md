@@ -47,6 +47,17 @@ on:
         required: false
         type: string
   bots: ["github-actions"]
+  # Real review finding (PR #4155, round 6): `label_command` defaults BOTH
+  # `reaction:` and `status-comment:` to enabled, which the compiler
+  # implements by granting the `activation` job `issues: write` (to post the
+  # eyes reaction and a started/completed status comment on the issue) --
+  # a write credential this workflow never actually needs and that
+  # contradicted the "only safe-outputs holds a write credential" claim
+  # below. Disabled both explicitly: this workflow's own diagnostic record
+  # (the resulting draft PR, or the fallback issue) is the intended status
+  # signal, not a comment on the triggering issue itself.
+  reaction: none
+  status-comment: false
 
 # TODO(successor): confirm engine auth path with the operator -- effort's own Plan
 # names two options (org-billing `copilot-requests: write` vs. a `COPILOT_GITHUB_TOKEN`
@@ -56,9 +67,28 @@ on:
 # before merging.
 engine: copilot
 
-# Read-only baseline, explicit per Phase 2's own guardrail checklist -- only the
-# safe-outputs stage below (a separate, permission-controlled job gh-aw generates)
-# ever holds a write credential.
+# Read-only baseline for the AGENT job specifically (this file's own
+# permissions: block only ever applies to `jobs.agent` -- gh-aw's separate
+# generated infrastructure jobs declare their OWN permissions independently
+# and are not bound by this block at all). Real review finding (PR #4155,
+# round 6): this comment previously claimed "only the safe-outputs stage
+# ever holds a write credential," which was never accurate -- gh-aw's
+# generated `activation` job needs `issues: write` for the reaction/status-
+# comment feature (now disabled above, closing that one), and its generated
+# `conclusion` job (which reports noop/incomplete/missing-tool status after
+# the agent job, regardless of outcome) unconditionally holds `contents:
+# write`/`issues: write`/`pull-requests: write` -- a broad but narrowly-
+# purposed scope inherent to having `create-pull-request` +
+# `fallback-as-issue: true` configured (confirmed: `conclusion`'s own
+# permissions are not overridable via frontmatter the way `jobs.agent.if`
+# is, unlike this job's own `if:` condition). The actual, meaningful
+# guarantee this workflow provides is narrower and still holds: the AGENT
+# job itself (the one executing on attacker-reachable log-excerpt content)
+# never holds a write credential, and the one job that DOES apply the
+# agent's own patch (`safe_outputs`) is gated on the agent job's own
+# success (issue #20's fix) plus a mandatory, blocking threat-detection
+# pass -- `conclusion` posts only compiler-authored status text, never the
+# agent's own patch or arbitrary agent-influenced content.
 permissions:
   contents: read
   issues: read
@@ -789,6 +819,32 @@ safe-outputs:
       compiler's own generated condition; compile-verified the generated
       `if:` now reads `(<original condition>) && (needs.agent.result ==
       'success')`.
+  21. (Found by real review, sixth pass, PR #4155 -- new, no prior issue)
+      GENERATED INFRASTRUCTURE JOBS HELD WRITE PERMISSIONS THIS FILE'S OWN
+      COMMENT CLAIMED DIDN'T EXIST -- PARTIALLY RESOLVED, CLAIM CORRECTED:
+      `label_command` defaults both `reaction:` and `status-comment:` to
+      enabled, which the compiler implements via the `activation` job
+      needing `issues: write` (to post the eyes reaction and a status
+      comment on the triggering issue) -- an avoidable write credential
+      this workflow never actually used. Disabled both explicitly
+      (`reaction: none`, `status-comment: false`); compile-verified
+      `activation`'s permissions are now `actions: read`/`contents: read`
+      only. Separately, the generated `conclusion` job (reports
+      noop/incomplete/missing-tool status after the agent job, regardless
+      of outcome) still holds `contents: write`/`issues: write`/
+      `pull-requests: write` -- confirmed this is NOT overridable via
+      frontmatter (unlike `jobs.agent.if`) and is an inherent consequence
+      of having `create-pull-request`/`fallback-as-issue: true` configured
+      at all. Since the write scope itself couldn't be narrowed further,
+      fixed the INACCURATE claim instead: the "Read-only baseline" comment
+      above `permissions:` previously said "only safe-outputs holds a
+      write credential," which was never true. Corrected it to state the
+      actual, still-meaningful guarantee: the AGENT job itself (the one
+      processing attacker-reachable log-excerpt content) never holds a
+      write credential, and `conclusion` posts only compiler-authored
+      status text, never the agent's own patch or agent-influenced
+      content -- distinct from `safe_outputs`, which DOES apply the
+      agent's patch and is the job issue #20 gated on agent success.
 
   A first pass at resolving #1/#2 (PR #3916) introduced two NEW, real issues real
   review caught before merge, both since fixed in this same file: (a) the

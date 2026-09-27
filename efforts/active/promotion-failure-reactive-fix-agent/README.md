@@ -2004,3 +2004,25 @@ _Pending._
   in this repo's `pr-self-merge` flow or branch protection is actually
   gated on that count -- only genuinely failing required checks and an
   unaddressed `CHANGES_REQUESTED`/unresolved thread would be.
+- **Sixth real review pass found a genuine documentation-accuracy gap, plus a
+  fresh stale-PR-description finding also resolved this round:** the
+  workflow's own "Read-only baseline" comment claimed "only safe-outputs
+  holds a write credential," but gh-aw's generated `activation` job needed
+  `issues: write` for the `label_command`-default reaction/status-comment
+  feature (avoidable -- disabled with `reaction: none`/`status-comment:
+  false`, compile-verified `activation`'s permissions dropped to
+  `actions: read`/`contents: read` only), and the generated `conclusion`
+  job unconditionally holds `contents: write`/`issues: write`/
+  `pull-requests: write` (confirmed NOT overridable via frontmatter,
+  an inherent consequence of `create-pull-request`/`fallback-as-issue:
+  true` being configured at all). Since the un-overridable part couldn't
+  be narrowed, corrected the comment's claim instead: the real, still-
+  meaningful guarantee is that the AGENT job itself (the one processing
+  attacker-reachable content) never holds a write credential, and
+  `conclusion` posts only compiler-authored status text, never the
+  agent's own patch. Also this round: a review comment flagged the PR
+  description's own "no changefile needed" scope claim as stale (it
+  didn't mention the new `tools/check-gh-aw-action-pins.py` guard) --
+  fixed by updating the PR description's Changes and Validation sections
+  to match the actual diff. Recompiled clean; all guards and the full
+  75-test suite still pass.
