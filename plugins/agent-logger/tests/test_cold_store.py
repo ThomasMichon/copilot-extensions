@@ -459,3 +459,72 @@ def test_resolve_session_honors_repo_local_sync_local_path(monkeypatch, tmp_path
 
     assert cold_store.resolve_session("some-session-id") is None
     assert captured["sync_path"] == tmp_path / "declared-target"
+
+
+@pytest.mark.no_autotrust
+def test_query_reviewer_sessions_honors_repo_local_sync_local_path(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """query_reviewer_sessions()'s OWN load_config() call (the no-cfg
+    fallback the session-fetch CLI uses) must also resolve schema v3's
+    repo-local sync.local_path -- a regression to
+    load_config(include_repo=False) at THAT call site (a distinct line
+    from resolve_session's own, and not exercised by it, since a cfg
+    resolve_session already has takes priority over calling load_config()
+    again) would pass every other query_reviewer_sessions test in this
+    file, which all stub load_config entirely. Mirrors
+    test_resolve_session_honors_repo_local_sync_local_path's pattern, but
+    driven through an actual catalog entry."""
+    from agent_logger.catalog import ReviewCatalogIndex
+
+    from .conftest import init_git_repo
+
+    monkeypatch.setattr(cold_store, "_local_state_root", lambda: None)
+
+    repo = tmp_path / "repo"
+    init_git_repo(repo, remote="https://example.test/example-owner/demo.git", branch="main")
+    (repo / ".agent-logger.yaml").write_text(
+        "schema_version: 3\nsync:\n  local_path: "
+        + str(tmp_path / "declared-target")
+        + "\n",
+        encoding="utf-8",
+    )
+    registry = tmp_path / "repos.yaml"
+    registry.write_text(
+        yaml.safe_dump(
+            {
+                "repos": {
+                    "demo": {
+                        "remote": "https://example.test/example-owner/demo.git",
+                        "default_branch": "main",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    home = tmp_path / "home"
+    monkeypatch.setenv("AGENT_WORKTREES_REPOS_YAML", str(registry))
+    monkeypatch.setenv("AGENT_LOGGER_HOME", str(home))
+    monkeypatch.chdir(repo)
+
+    index = ReviewCatalogIndex(home / "review-catalog.db")
+    index.record(
+        session_id="s1", repo="example/repo", pr_number=6100,
+        role="reviewer", recorded_at="2026-09-22T19:00:00Z",
+    )
+
+    captured = {}
+
+    def _fake_resolve_from_synced_corpus(session_id, sync_path):
+        captured["sync_path"] = sync_path
+        return None
+
+    monkeypatch.setattr(
+        cold_store, "_resolve_from_synced_corpus", _fake_resolve_from_synced_corpus
+    )
+
+    refs = cold_store.query_reviewer_sessions("example/repo", 6100)
+
+    assert refs == []
+    assert captured["sync_path"] == tmp_path / "declared-target"
