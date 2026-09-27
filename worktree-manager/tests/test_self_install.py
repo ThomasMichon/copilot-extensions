@@ -304,6 +304,87 @@ def test_self_install_raises_when_pointer_present_without_monorepo_ancestor(tmp_
     assert not version_slot("6.6.6", root).exists()
 
 
+def _fake_monorepo_with_uv_editable_ref(tmp: Path, version: str) -> Path:
+    """A synthetic monorepo shape mirroring ``_fake_monorepo_with_pointer``
+    above, but for the `uv`-editable canonical-reference form
+    (vendor-pointer-generalization effort's second course correction,
+    which superseded the ``VENDOR_POINTER.json`` directory-pointer form):
+    the payload's ``pyproject.toml`` carries an escaping
+    ``[tool.uv.sources]`` entry (``editable = true``) instead of vendoring
+    a local ``libs/<lib>`` copy at all -- there is no local copy to find a
+    pointer marker in; the reference lives in the manifest itself. Returns
+    the payload dir (``<tmp>/monorepo/worktree-manager``)."""
+    mono = tmp / "monorepo"
+    pd = _fake_payload(mono, version)
+    pd.rename(mono / "worktree-manager")
+    pd = mono / "worktree-manager"
+
+    canon = mono / "libs" / "shared-lib"
+    (canon / "src" / "shared_lib").mkdir(parents=True)
+    (canon / "src" / "shared_lib" / "__init__.py").write_text("value = 1\n", encoding="utf-8")
+    (canon / "pyproject.toml").write_text(
+        '[project]\nname = "shared-lib"\nversion = "0.1.0-dev1"\n', encoding="utf-8"
+    )
+
+    (pd / "pyproject.toml").write_text(
+        "[project]\nname='x'\n"
+        "\n[tool.uv.sources]\n"
+        'agent-shared-lib = { path = "../libs/shared-lib", editable = true }\n',
+        encoding="utf-8",
+    )
+    return pd
+
+
+def test_self_install_materializes_a_uv_editable_ref_from_a_live_monorepo(tmp_path, monkeypatch):
+    """The `uv`-editable counterpart of
+    ``test_self_install_materializes_a_vendor_pointer_from_a_live_monorepo``
+    above (review finding on PR #4331: `_materialize_payload_pointers`
+    originally only expanded the older directory-pointer form). A
+    self-installed slot's ``pyproject.toml`` retains an escaping
+    ``[tool.uv.sources]`` `path` that can never resolve once published
+    (no monorepo ancestor of its own) -- self_install must copy canonical's
+    complete lib tree into the slot's own ``libs/<lib>/`` and rewrite the
+    manifest entry to the local, non-editable form BEFORE publishing."""
+    pd = _fake_monorepo_with_uv_editable_ref(tmp_path, "5.5.6")
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+
+    res = self_install(pd, root=root, dry_run=False)
+    assert res.action == "installed"
+    slot = version_slot("5.5.6", root)
+    lib_dir = slot / "libs" / "shared-lib"
+    assert (lib_dir / "src" / "shared_lib" / "__init__.py").read_text() == "value = 1\n"
+    manifest_text = (slot / "pyproject.toml").read_text(encoding="utf-8")
+    assert 'agent-shared-lib = { path = "libs/shared-lib" }' in manifest_text
+    assert "editable = true" not in manifest_text
+
+
+def test_self_install_raises_when_uv_editable_ref_present_without_monorepo_ancestor(
+    tmp_path, monkeypatch,
+):
+    """The `uv`-editable counterpart of
+    ``test_self_install_raises_when_pointer_present_without_monorepo_ancestor``
+    above: an escaping ``[tool.uv.sources]`` entry with no reachable
+    canonical ``libs/`` sibling would install successfully but ship an
+    unresolvable dependency reference -- self_install must report an error
+    and publish nothing, not silently ship the broken payload."""
+    pd = _fake_payload(tmp_path, "6.6.8")
+    (pd / "pyproject.toml").write_text(
+        "[project]\nname='x'\n"
+        "\n[tool.uv.sources]\n"
+        'agent-shared-lib = { path = "../libs/shared-lib", editable = true }\n',
+        encoding="utf-8",
+    )
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+
+    res = self_install(pd, root=root, dry_run=False)
+    assert res.action == "error"
+    assert "unmaterialized vendor pointers or uv-editable" in (res.reason or "")
+    assert current_version(root) is None
+    assert not version_slot("6.6.8", root).exists()
+
+
 def test_self_install_refuses_a_symlink_anywhere_in_the_payload(tmp_path, monkeypatch):
     """Round-9 review finding: symlinks=True on the copytree PRESERVES a
     symlink instead of dereferencing it, but preservation alone doesn't

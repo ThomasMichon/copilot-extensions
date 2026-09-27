@@ -1,9 +1,0 @@
-{
-  "comment": "Convert the work-coalescing-singleton vendored lib to a uv-editable canonical reference (vendor-pointer-generalization Phase 1).",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

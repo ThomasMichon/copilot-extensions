@@ -1399,5 +1399,40 @@ _Pending._
     suite now 1535 passed (+3 new parity tests), 4 skipped;
     `sync-vendored-libs.py --check`/`check-vendored-libs-sync.py`/`check-
     install-contract.py`/`check-version-consistency.py` all green.
+  - **Second review round found 2 more real findings** (the two High
+    findings above also reappeared as still-"Open" in the reviewer's own
+    round-over-round summary -- confirmed against the current file state
+    that both were already fixed by the prior commit; this is the same
+    "stale carry-over" behavior this effort's own handoff notes already
+    document, not a re-regression):
+    - **Medium: the two `worktree-manager`-targeted changefiles were dead
+      weight.** `accumulate_bumps.compute()` resolves a changefile's
+      `plugin` entry via `plugins/<name>/plugin.json`; `worktree-manager`
+      has no such path (it's a standalone-versioned payload, not a
+      marketplace plugin), so both changefiles would be silently skipped
+      by the release bump pipeline -- and the version was already bumped
+      by hand in the prior commit, so they added nothing. Removed both
+      (`git rm`); the `agent-worktrees`-targeted changefile (a real
+      marketplace plugin) stays.
+    - **Medium: the new parity tests only called
+      `materialize_uv_editable_ref_into()` directly**, never exercising
+      `_materialize_payload_pointers()`'s own control flow (discovery,
+      canonical-root selection, failure normalization, slot-publication)
+      through the real `self_install()` entry point. Added 2 tests to
+      `test_self_install.py` mirroring the existing directory-pointer
+      pair (`test_self_install_materializes_a_vendor_pointer_from_a_live_
+      monorepo` / `test_self_install_raises_when_pointer_present_
+      without_monorepo_ancestor`): one confirms a full `self_install()`
+      run expands an escaping `uv`-editable reference into a real local
+      copy and rewrites the manifest before publishing; the other
+      confirms `self_install()` reports `action="error"` and publishes no
+      slot when no monorepo ancestor is reachable to resolve the
+      reference from.
+    - Re-validated after these fixes: `worktree-manager`'s own suite now
+      1537 passed (+2 more), 4 skipped; `check-changefile-presence.py
+      --base <pre-PR dev tip>` OK (every touched plugin has a pending
+      changefile); all other guards (`sync-vendored-libs.py --check`/
+      `check-vendored-libs-sync.py`/`check-install-contract.py`/`check-
+      version-consistency.py`) still green.
 - **Next up**: `credential-relay` (4 consumers), per the effort's own
   smallest-blast-radius-first ordering.
