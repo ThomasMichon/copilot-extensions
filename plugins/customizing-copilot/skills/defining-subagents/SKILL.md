@@ -198,6 +198,19 @@ config, or run commands. Narrow tools only when the agent genuinely must not
 have a capability. An agent whose explicit tools list omits `agent` / Task is
 Task-disabled and exempt from the self-delegation guard.
 
+**A related, now-obsolete pattern: restricting an MCP-owning agent's `tools`
+to *only* its MCP surface** (dropping shell/bash) to force MCP usage and keep
+the agent from working around a missing/misbehaving tool. That rationale
+predates `agent-mcp materialize`/`agent-mcp call`: the materialized CLI fleet
+is not a workaround, it is a second, equally-authenticated, equally-scoped
+invocation surface over the *same* bridge config -- the bridge's own top-level
+`tools:` allow/deny filter enforces identical scope on both surfaces (see
+*MCP fallback with agent-mcp* above). Restricting an agent to MCP-only tools
+no longer buys any safety; it only disables the required `## MCP Readiness`
+fallback below, which needs shell access to invoke the materialized fleet
+when the native catalog fails to register. Give an MCP-owning agent full
+tool access like any other.
+
 Every Task-capable agent -- including a coordinator that may spawn other agent
 types -- must include this literal, agent-specific line:
 
@@ -276,6 +289,12 @@ equivalence. An agent **fails** review if any applicable box is unchecked:
 - [ ] **Tools are not narrowed for anti-recursion.** `tools` is omitted or
       `["*"]` (or lists only *additive* MCP grants); it is **never** trimmed to
       "prevent recursion" — that cripples the agent, it doesn't protect it.
+- [ ] **Tools are not narrowed to force MCP-only usage.** An MCP-owning agent's
+      `tools` is not restricted to its MCP surface alone to compel MCP calls or
+      block workarounds -- `agent-mcp materialize`/`agent-mcp call` is an
+      equally-authenticated, equally-scoped invocation surface over the same
+      bridge, not a workaround, and this restriction only disables the required
+      MCP Readiness fallback.
 - [ ] **Every MCP-owning agent has a `## MCP Readiness` section.** If the
       frontmatter declares `mcp-servers`, the body must carry the section that
       houses the readiness, equivalent-fallback, and anti-recursion guards.

@@ -1,0 +1,9 @@
+{
+  "comment": "defining-subagents: document that agent-mcp materialize/call makes restricting an MCP-owning agent's tools to MCP-only obsolete; add matching hard-checklist item.",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "dev"
+    }
+  ]
+}
