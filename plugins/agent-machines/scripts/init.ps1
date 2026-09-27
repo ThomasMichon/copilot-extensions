@@ -1792,9 +1792,9 @@ function Invoke-StampBinstubOnly {
         # Review finding: without a usable payload-dir marker, the generated
         # binstub's self-provisioning path (":_prov" in the .cmd) reads an
         # empty %_ROOT%\payload-dir, finds no installer, and exits 127 --
-        # even though the binstub itself now exists. Point the marker at the
-        # already-self-staged $PluginDir (the SAME source Invoke-Stamp's own
-        # snapshot copy reads from) as an immediate, correct fallback; the
+        # even though the binstub itself now exists. Point the marker at a
+        # durable payload root as an immediate, correct fallback (see the
+        # round-7 comment below for exactly which one and why); the
         # background `stamp` overwrites both markers with the real snapshot
         # path once its copy completes, same as before.
         $payloadDirMarker = Join-Path $InstallDir 'payload-dir'
@@ -1806,7 +1806,20 @@ function Invoke-StampBinstubOnly {
         # empty/partial marker and a spurious exit 127.
         $payloadDirTmp = "$payloadDirMarker.tmp-$PID"
         $payloadOriginTmp = "$payloadOriginMarker.tmp-$PID"
-        [System.IO.File]::WriteAllText($payloadDirTmp, $PluginDir, $utf8NoBom)
+        # Review finding (round 7): the ORIGINAL fix pointed the marker at
+        # $PluginDir -- on a marketplace install this is the per-invocation
+        # `.install-stage/<ts>-<pid>/...` copy the install-contract self-stage
+        # above creates, NOT a durable location. Once this process exits, a
+        # LATER invocation's own self-stage reaper (see the dead-stage-dir
+        # cleanup a few hundred lines above) is free to delete this exact
+        # stage dir, leaving payload-dir pointing at a missing scripts\init.ps1
+        # and a spurious exit 127. $probePayload is the durable original
+        # payload root (the marketplace's own installed-plugins singleton, or
+        # the value COPILOT_PLUGIN_STAGED_FROM was already re-exec'd with) --
+        # it is never a throwaway per-invocation directory, so use it here
+        # instead; the background `stamp` still overwrites both markers with
+        # the even-more-durable snapshot path once its copy completes.
+        [System.IO.File]::WriteAllText($payloadDirTmp, $probePayload, $utf8NoBom)
         [System.IO.File]::WriteAllText($payloadOriginTmp, $probePayload, $utf8NoBom)
         Move-Item -LiteralPath $payloadDirTmp -Destination $payloadDirMarker -Force
         Move-Item -LiteralPath $payloadOriginTmp -Destination $payloadOriginMarker -Force
@@ -1833,7 +1846,17 @@ function Invoke-Stamp {
     }
     $payloadDirMarker = Join-Path $InstallDir 'payload-dir'
     $payloadOriginMarker = Join-Path $InstallDir 'payload-origin'
-    Remove-Item $payloadDirMarker, $payloadOriginMarker -Force -ErrorAction SilentlyContinue
+    # Review finding (round 7): this used to Remove-Item both markers HERE,
+    # before the (slow, several-second) snapshot copy below even starts --
+    # deleting the marker `stamp-binstub` already published and leaving NONE
+    # at all for the entire copy duration. A first-turn invocation racing that
+    # window reads a MISSING payload-dir (not merely a stale one) and 127s --
+    # exactly the regression this whole two-stage split exists to prevent, and
+    # strictly worse than a torn write. Do NOT pre-clear: the atomic
+    # Move-Item -Force further below replaces each marker in place only once
+    # the new snapshot is actually ready, so the previous usable marker (or,
+    # on a genuinely first-ever stamp, the absence of one) is left untouched
+    # until then.
     $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
     $snapTmp = "$snapDir.tmp-$PID"
     if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }

@@ -20,8 +20,11 @@ cases, matching the effort's own "fresh state per measurement" methodology.
 from __future__ import annotations
 
 import os
+import queue
 import shutil
 import subprocess
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -68,27 +71,48 @@ def _assert_binstub_resolves_marker(binstub: Path, env: dict[str, str], tmp_path
     resolved) line for a few seconds, then kills the whole process tree via
     `taskkill /T /F` (a bare `Popen.terminate()`/`subprocess.run(timeout=...)`
     only signals the top-level `cmd.exe`, leaving a nested `pwsh` running).
-    """
-    import time
 
+    Review finding (round 7): `proc.stderr.readline()` BLOCKS, so polling it
+    directly against a wall-clock deadline does not actually enforce that
+    deadline -- a hung `.cmd`/nested PowerShell that never writes a newline
+    would hang this whole loop (and the test) indefinitely. Read on a
+    daemon background thread into a queue instead, so the deadline loop's own
+    `queue.get(timeout=...)` is what's actually bounded, independent of
+    whether the subprocess ever produces output.
+    """
     proc = subprocess.Popen(
         [str(binstub)], env=env, cwd=tmp_path,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
+    lines: "queue.Queue[str]" = queue.Queue()
+
+    def _pump_stderr() -> None:
+        try:
+            for line in iter(proc.stderr.readline, ""):
+                lines.put(line)
+        except Exception:
+            pass
+
+    reader = threading.Thread(target=_pump_stderr, daemon=True)
+    reader.start()
+
     saw_noinst = False
     saw_provisioning = False
     try:
         deadline = time.monotonic() + 8
         while time.monotonic() < deadline:
-            line = proc.stderr.readline()
-            if line:
-                if "cannot self-provision" in line:
-                    saw_noinst = True
+            remaining = deadline - time.monotonic()
+            try:
+                line = lines.get(timeout=max(0.05, remaining))
+            except queue.Empty:
+                if proc.poll() is not None:
                     break
-                if "provisioning on first use" in line:
-                    saw_provisioning = True
-                    break
-            elif proc.poll() is not None:
+                continue
+            if "cannot self-provision" in line:
+                saw_noinst = True
+                break
+            if "provisioning on first use" in line:
+                saw_provisioning = True
                 break
         if proc.poll() is not None and not saw_noinst and not saw_provisioning:
             # Exited fast without either signature line -- only acceptable if
