@@ -459,7 +459,7 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 - **`agent-ssh` `dtssh` "remote transport" (2) — actually a guard false
   positive, not agent-* consumption at all.** Read the code: these lines
   install and PATH-expose `dtssh`/`devtunnel-ssh`, an unrelated third-party
-  CLI. Fixed in [#4333](https://github.com/ThomasMichon/copilot-extensions/pull/4333)
+  CLI. Fixed in [#4336](https://github.com/ThomasMichon/copilot-extensions/pull/4336)
   with `# marketplace-isolation: allow third-party-installer-path` (same
   underlying concern the sibling `.ps1` files' `$InstallRelease` URL line
   already carries as `allow third-party-installer-url`). Guard count: 70 →
