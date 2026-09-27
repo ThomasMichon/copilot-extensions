@@ -626,7 +626,7 @@ survey above.
       call is now moot -- it moved into the `session_register` verb
       itself, per the option above). Still genuinely open for THIS
       Phase's write-migration purpose (it does not yet dispatch through a
-      daemon verb) -- but the separate read-side cache-push work below
+      daemon verb) -- but the separate read-side cache-push work above
       already covers it for read-consistency, since that cache-push is
       universal at `_save_record_unlocked` regardless of which caller
       reaches it, verb-mediated or still-direct.
