@@ -59,9 +59,10 @@ Resolution order:
 **What "fails closed" means in practice:** a match found on a *different*
 machine is never auto-launched remotely. Instead the command reports which
 machine and worktree id own that codename, so you know where to look --
-resuming from there means SSHing to that machine directly (or, in future, an
-agent-bridge dispatch). This is deliberate: a cross-machine resolve should
-never silently open a live session on a machine you didn't expect.
+resuming from there means SSHing to that machine directly (a future
+inter-agent dispatch mechanism may automate this further). This is
+deliberate: a cross-machine resolve should never silently open a live
+session on a machine you didn't expect.
 
 ## When there's no marker at all
 
