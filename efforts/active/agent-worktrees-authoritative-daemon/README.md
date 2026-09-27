@@ -589,12 +589,14 @@ survey above.
       `record_cache.cached_load()`, giving every one of its ~140 call
       sites the same benefit without touching each one. Landed in PR
       [#4265](https://github.com/ThomasMichon/copilot-extensions/pull/4265)
-      (2 review rounds; see Journal). This makes `terminal_conclusion.py`'s
-      `_save_session_conclusion` holdout a documented, permanent one for
-      Phase 3's write-migration purposes: it was always correctness-safe
-      (the cache self-invalidates on ANY writer's stat change, verb-
-      mediated or direct), and this pass confirms it needs no further
-      migration to get read-consistency either.
+      (2 review rounds; see Journal). This does NOT close
+      `terminal_conclusion.py`'s `_save_session_conclusion` holdout as a
+      write-migration candidate -- it still does not dispatch through a
+      daemon verb, and remains listed below as genuinely open for that.
+      What this pass DOES confirm: that holdout was always correctness-
+      safe (the cache self-invalidates on ANY writer's stat change, verb-
+      mediated or direct) and needs no further work to get this same
+      read-consistency benefit -- the two are separate axes.
 - [ ] One call site (or a closely related cluster) at a time, each its own
       reviewable PR, per this repo's serial-single-writer convention —
       across whichever of `tracking.py` / `tracking_claims.py` /
@@ -622,7 +624,12 @@ survey above.
       inside a bigger single-lock cascade with two separate `save_record`
       calls around it; `register_session`'s own internal `link_handoff`
       call is now moot -- it moved into the `session_register` verb
-      itself, per the option above).
+      itself, per the option above). Still genuinely open for THIS
+      Phase's write-migration purpose (it does not yet dispatch through a
+      daemon verb) -- but the separate read-side cache-push work below
+      already covers it for read-consistency, since that cache-push is
+      universal at `_save_record_unlocked` regardless of which caller
+      reaches it, verb-mediated or still-direct.
 
 ### Phase 4 — Sibling-plugin guard + audit _(not started)_
 - [ ] Add the CI guard described above.
@@ -730,8 +737,9 @@ Never a TTL/blackout cache: any writer's stat change (verb-mediated,
 `save_record`, a direct `_save_record_unlocked` caller, or a raw external
 rewrite) is visible on the very next read -- this was always a
 performance/consistency improvement, never a correctness fix, which is
-also why `terminal_conclusion.py`'s Phase-3 holdout needed no further
-write-migration work to get this same benefit.
+also why `terminal_conclusion.py`'s still-open write-migration holdout
+needed no further work to get this SAME read-consistency benefit (a
+separate axis from write-migration, which it still awaits).
 
 Full `agent-worktrees` suite: 5733 passed before the review-fix commit's
 new regression tests, 5743 passed after (10 new tests added: the two
