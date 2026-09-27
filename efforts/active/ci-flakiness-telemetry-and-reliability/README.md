@@ -369,13 +369,8 @@ determine whether this section needs anything beyond the Plan above._
   (`agent-dispatch`, `agent-pull-requests`, `budget-guidance`) to stay in
   sync.
 - Next: work down the Phase 2 ranking (identifier-leak-guard noise is
-  already owned by #3923). **Superseded (2026-09-27):** see the later
-  "Phase 2 ranking refinement" and "signed-python-probe" Journal entries
-  below -- the marketplace-isolation test turned out not to be a Phase 3
-  candidate at all (a working guardrail, not a bug), and the
-  signed-python-probe test's cited evidence turned out to predate its own
-  already-merged fix (#4239); neither is a confirmed open Phase 3 item as
-  of this entry.
+  already owned by #3923; the marketplace-isolation test and the
+  signed-python-probe test are the next concrete Phase 3 candidates).
 
 ### 2026-09-27 — Phases 1/2 built and validated live
 - Landed `tools/ci_telemetry.py` (`refresh`/`report`) + 21 new unit tests
