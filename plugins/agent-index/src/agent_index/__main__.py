@@ -31,6 +31,7 @@ from .config import (
     load_config,
     routing_dir,
     run_dir,
+    server_venv_python,
 )
 from .query_surface import format_error, hit_to_dict
 from .rendezvous import clear_endpoint, pid_alive as _pid_exists
@@ -1301,7 +1302,12 @@ def cmd_deploy(args: argparse.Namespace) -> int:
 
     def spawn_passive(port: int):
         start_command = "__cell-start" if expected_installation else "start"
-        python = sys.executable
+        # Prefer the dedicated SERVER venv's own interpreter, if one has been
+        # provisioned (agent-index-server-venv-split) -- the passive instance
+        # then never loads fastapi/uvicorn/pydantic into a client-shaped venv.
+        # Falls back to the current interpreter (today's single-venv layout)
+        # when no server venv exists yet.
+        python = str(server_venv_python() or sys.executable)
         cmd = [
             windowless_python(python),
             "-I",

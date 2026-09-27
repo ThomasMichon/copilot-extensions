@@ -1,0 +1,9 @@
+{
+  "comment": "agent-index-server-venv-split: add inert server-venv interpreter resolution scaffolding (config.server_venv_python) and retarget spawn_passive to use it when provisioned, falling back to sys.executable unchanged",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

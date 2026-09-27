@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,6 +27,7 @@ EFFECTIVE_CONFIG_ENV = "AGENT_INDEX_EFFECTIVE_CONFIG"
 CONFIG_DATA_ENV = "AGENT_INDEX_CONFIG_DATA_B64"
 MACHINE_ENV = "AGENT_INDEX_MACHINE"
 REPO_ENV = "AGENT_INDEX_REPO"
+SERVER_VENV_PYTHON_ENV = "AGENT_INDEX_SERVER_VENV_PYTHON"
 VALID_ROLES = ("host", "client")
 UNCONFIGURED_ROLE = "unconfigured"
 CONFIG_FILENAME = "config.yaml"
@@ -53,6 +55,43 @@ def data_dir() -> Path:
 def run_dir() -> Path:
     """Directory holding the legacy endpoint rendezvous file."""
     return Path(os.environ.get(RUN_DIR_ENV) or (install_dir() / "run"))
+
+
+def server_venv_python() -> Path | None:
+    """Resolve the sibling SERVER venv's interpreter, if one is provisioned.
+
+    agent-index-server-venv-split moves the FastAPI/uvicorn/pydantic HTTP
+    service shell (the ``[server]`` extra) into its own per-version sibling
+    venv, distinct from the client/orchestrator venv this process normally
+    runs in -- so the server's own heavy deps never load into a pure client
+    install. Until the installer actually provisions that sibling venv
+    (still a separate Plan item), this returns ``None`` for every existing
+    single-venv layout, and callers fall back to running the server
+    in-process exactly as before -- this resolver is inert scaffolding, not
+    a behavior change on its own.
+
+    Resolution order:
+      1. ``AGENT_INDEX_SERVER_VENV_PYTHON`` -- an explicit interpreter path
+         override, honored unconditionally (test/dev convenience, or an
+         unconventional layout).
+      2. The convention: a ``.venv-server`` directory alongside whichever
+         ``.venv`` directory owns the currently-running interpreter, using
+         the same ``Scripts``/``bin`` and executable-name shape as the
+         current interpreter (so this works unchanged on both Windows and
+         POSIX layouts without hardcoding either).
+    """
+    override = os.environ.get(SERVER_VENV_PYTHON_ENV)
+    if override:
+        candidate = Path(override).expanduser()
+        return candidate if candidate.is_file() else None
+
+    current = Path(sys.executable).resolve()
+    venv_bin = current.parent
+    venv_dir = venv_bin.parent
+    if venv_dir.name != ".venv":
+        return None
+    candidate = venv_dir.with_name(".venv-server") / venv_bin.name / current.name
+    return candidate if candidate.is_file() else None
 
 
 def routing_dir() -> Path:
