@@ -302,24 +302,30 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
                         # i.e. the two-level package-alias chain below.
                         package_aliases.add("agent_worktrees")
 
-    # Propagate through simple reassignment (`writer_module = tracking`,
-    # `wt = agent_worktrees`) so a trivial rename can't evade the alias
-    # tracking above. A single bare-Name-to-bare-Name `Assign` (single
-    # target, no augmented/annotated/tuple/starred assignment) copies its
-    # RHS's own alias membership onto its LHS name. Iterated to a fixed
-    # point since a chain (`a = tracking; b = a; c = b`) needs more than
-    # one pass to fully propagate.
+    # Propagate through simple reassignment so a trivial rename can't
+    # evade the alias tracking above. Two RHS shapes are recognized on a
+    # single-target `Assign` (no augmented/annotated/tuple/starred
+    # assignment): a bare Name (`writer_module = tracking`,
+    # `wt = agent_worktrees`) copies that name's own alias membership
+    # onto the LHS; a two-level Attribute off a package alias
+    # (`tracking_module = aw.tracking`) resolves to the SAME thing a
+    # `tracking_module.save_record(...)` call already catches, so it's
+    # folded into `module_aliases` too rather than needing its own parallel
+    # check downstream. Iterated to a fixed point since a chain
+    # (`a = tracking; b = a; c = b`, or `x = aw.tracking; y = x`) needs
+    # more than one pass to fully propagate.
     changed = True
     while changed:
         changed = False
         for node in ast.walk(tree):
-            if (
+            if not (
                 isinstance(node, ast.Assign)
                 and len(node.targets) == 1
                 and isinstance(node.targets[0], ast.Name)
-                and isinstance(node.value, ast.Name)
             ):
-                target = node.targets[0].id
+                continue
+            target = node.targets[0].id
+            if isinstance(node.value, ast.Name):
                 source = node.value.id
                 if source in module_aliases and target not in module_aliases:
                     module_aliases[target] = node.lineno
@@ -327,6 +333,15 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
                 if source in package_aliases and target not in package_aliases:
                     package_aliases.add(target)
                     changed = True
+            elif (
+                isinstance(node.value, ast.Attribute)
+                and isinstance(node.value.value, ast.Name)
+                and node.value.value.id in package_aliases
+                and node.value.attr in TRACKING_MODULES
+                and target not in module_aliases
+            ):
+                module_aliases[target] = node.lineno
+                changed = True
 
     for node in ast.walk(tree):
         if not isinstance(node, ast.Attribute) or node.attr not in WRITE_FUNCTIONS:

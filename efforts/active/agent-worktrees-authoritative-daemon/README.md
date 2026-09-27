@@ -642,7 +642,7 @@ survey above.
       `tracking_lifecycle.py` / `tracking_claims.py` /
       `tracking_session_registry.py` / `tracking_controller_relations.py`
       / `tracking_write.py` / the 6 `tracking_*_write.py` verb-handler
-      modules). Six review rounds found real gaps each time (see Journal
+      modules). Seven review rounds found real gaps each time (see Journal
       for the full blow-by-blow: a missing re-export module, a
       package-root-alias attribute chain never tracked at all, an
       incomplete denylist, a wildcard-import escape hatch, the daemon's
@@ -768,7 +768,7 @@ wording -- NOT extended to cover `worktree-manager/`'s own already-tracked
 exception (see above), since that scope decision belongs to a
 coordinated cross-effort call, not something to fold in unilaterally here.
 
-**Six review rounds found real gaps, none assumed away:**
+**Seven review rounds found real gaps, none assumed away:**
 (1) `tracking_controller_relations.py`'s own thin
 `save_record`/`_save_record_unlocked` re-export wrappers were absent from
 the protected module set, so a sibling could route through that module
@@ -852,10 +852,17 @@ broader, name-prefix-independent scope rather than narrowing the scan
 to match a now-inaccurate claim. **(d)** This very Journal entry still
 quoted an earlier round's stale function/module counts after two later
 rounds had already changed them -- fixed by updating every remaining
-count in this entry, not just the one flagged. Every fix across all six
-rounds has a dedicated regression test.
+count in this entry, not just the one flagged. (10) A SEVENTH review
+round found the reassignment-propagation fix from round 6 was itself
+incomplete: it only handled a bare `Name = Name` RHS, missing the
+equally simple `tracking_module = aw.tracking` (a two-level `Attribute`
+RHS off a package alias) -- fixed by resolving that shape into the same
+`module_aliases` set a direct `aw.tracking.save_record(...)` call
+already populates, rather than adding a second parallel check
+downstream. Every fix across all seven rounds has a dedicated
+regression test.
 
-25 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
+26 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
 tree, the sanctioned read-only accessors staying unflagged, three
 single-level import/call shapes (module attribute call, direct
 `from agent_worktrees import <fn>`, `from agent_worktrees.tracking_claims
@@ -867,10 +874,11 @@ wildcard-import rejection cases, two verb-handler-module cases, two
 fail-closed file-scan-error cases (unreadable, syntactically invalid),
 the two private liveness-writer helpers, `tracking_write`'s own
 direct-execution APIs (one denylisted case, one confirming
-`dispatch`/`write_with_boot` stay unflagged), two reassignment-evasion
-cases (single-hop and multi-hop chained), the owning-plugin's own
-exemption, and a live-repo smoke test (confirmed clean: zero violations
-today, matching the original survey's own finding). Wired into
+`dispatch`/`write_with_boot` stay unflagged), three reassignment-evasion
+cases (single-hop Name, multi-hop chained Name, and the
+package-attribute RHS form), the owning-plugin's own exemption, and a
+live-repo smoke test (confirmed clean: zero violations today, matching
+the original survey's own finding). Wired into
 `.github/workflows/ci.yml` alongside the existing
 `check-no-agent-machines-packages.py` guard.
 
