@@ -57,6 +57,17 @@ def _executable(path: Path, text: str) -> None:
     path.chmod(0o755)
 
 
+def _venv_python_path(root: Path) -> Path:
+    """The platform-specific interpreter path inside a venv rooted at
+    ``root`` -- mirrors ``tools/run-plugin-tests.py``'s own
+    ``_venv_python()`` exactly (``Scripts/python.exe`` on Windows,
+    ``bin/python3`` elsewhere), since the two must agree on where a venv's
+    interpreter lives for the ``.test-venvs`` fallback below to find it."""
+    if sys.platform == "win32":
+        return root / "Scripts" / "python.exe"
+    return root / "bin" / "python3"
+
+
 def _resolve_test_venv_root() -> Path:
     """Return a venv root this environment actually has, preferring the
     facility's own managed test-runner venv location
@@ -71,8 +82,8 @@ def _resolve_test_venv_root() -> Path:
     """
     managed = PLUGIN.parents[1] / ".test-venvs" / sys.platform / "agent-logger"
     for candidate in (managed, PLUGIN / ".venv"):
-        python3 = candidate / "bin" / "python3"
-        if python3.is_file() or python3.is_symlink():
+        python_path = _venv_python_path(candidate)
+        if python_path.is_file() or python_path.is_symlink():
             return candidate
     pytest.skip(
         "no usable venv found (.test-venvs/<platform>/agent-logger or .venv)"
@@ -549,7 +560,7 @@ def test_write_sync_task_launcher_sets_repo_config_when_config_repo_adopted(
     # See _resolve_test_venv_root's docstring: the plugin's OWN usable
     # dev/CI venv interpreter, not sys.executable, which can lack pyyaml
     # when invoked directly under uv.
-    real_python = _resolve_test_venv_root() / "bin" / "python3"
+    real_python = _venv_python_path(_resolve_test_venv_root())
 
     install_dir = tmp_path / "install"
     install_dir.mkdir()
@@ -610,7 +621,7 @@ def test_write_sync_task_launcher_skips_untrusted_config_repo(
     exe = shutil.which(shell)
     if not exe:
         pytest.skip(f"{shell} is not installed")
-    real_python = _resolve_test_venv_root() / "bin" / "python3"
+    real_python = _venv_python_path(_resolve_test_venv_root())
 
     install_dir = tmp_path / "install"
     install_dir.mkdir()

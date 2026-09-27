@@ -1004,6 +1004,16 @@ if isinstance(value, str) and value.strip():
         if (-not (Get-Command agent-worktrees -ErrorAction SilentlyContinue)) { return $null }
         $dir = (& agent-worktrees repos find $repoName 2>$null | Select-Object -First 1)
         if (-not $dir) { return $null }
+        if (Test-Path -LiteralPath $dir) {
+            # `repos find` may return a registry entry's registered path
+            # as-is, relative or not -- the scheduled task runs with no
+            # meaningful working directory of its own, so a still-relative
+            # path here would resolve against the wrong directory once
+            # embedded in the launcher. Normalizing to absolute here, once,
+            # keeps every downstream use (the trust probe, alias
+            # candidates, the emitted $env: line) consistently absolute.
+            $dir = (Resolve-Path -LiteralPath $dir).ProviderPath
+        }
         # `repos find` also resolves `reference`-class registrations, which
         # are not guaranteed to be a git checkout at all -- so this
         # discovery MUST NOT wire the result into the scheduled launcher

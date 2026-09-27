@@ -958,6 +958,17 @@ PYEOF
   if [ -n "${config_repo_name}" ] && command -v agent-worktrees >/dev/null 2>&1; then
     local config_repo_dir
     config_repo_dir="$(agent-worktrees repos find "${config_repo_name}" 2>/dev/null || true)"
+    if [ -n "${config_repo_dir}" ] && [ -d "${config_repo_dir}" ]; then
+      # `repos find` may return a registry entry's registered path as-is,
+      # relative or not -- the scheduled systemd service has no meaningful
+      # working directory of its own (it's a oneshot unit, not invoked from
+      # this script's CWD), so a still-relative path here would resolve
+      # against the wrong directory (or fail outright) once embedded in
+      # Environment=. Normalizing to absolute here, once, keeps every
+      # downstream use (the trust probe, alias candidates, the escaped
+      # Environment= value) consistently absolute.
+      config_repo_dir="$(cd "${config_repo_dir}" && pwd)"
+    fi
     # `repos find` also resolves `reference`-class registrations, which are
     # not guaranteed to be a git checkout at all -- so this discovery MUST
     # NOT wire the result into the service unless it passes the same
