@@ -41,13 +41,23 @@
   2. LABEL ALONE IS NOT AN AUTHENTICATED SIGNAL -- RESOLVED via the `verify-issue`
      custom job below (gh-aw's documented `jobs.<id>` + `jobs.agent.needs`/
      `jobs.agent.if` gating mechanism). It resolves the target issue number from
-     either trigger shape, then verifies (a) the issue's author is the watchdog's own
-     `github-actions[bot]` token identity and (b) the body carries a `Signature:
-     <hash>` anchor line, before the agent job is allowed to run at all. A
-     hand-authored issue that merely re-uses the label satisfies neither check.
-     (A first attempt at this compared against the bare string `github-actions`
-     rather than the real bot login `github-actions[bot]` -- caught by real review
-     on PR #3916, since fixed; see that PR's own history.)
+     either trigger shape, then verifies, in order: (a) the issue's author is the
+     watchdog's own `github-actions[bot]` token identity; (b) the `ci-failure-
+     signature` label is actually present (the `workflow_dispatch` path can name
+     ANY issue number regardless of label); (c) the body carries a `Signature:
+     <hash>` anchor; (d) the issue's body was NEVER edited since creation
+     (GraphQL `lastEditedAt`, distinct from `updatedAt`); and (e) the run id +
+     commit SHA the body claims are INDEPENDENTLY verified against the real
+     Actions API (`gh run view`) -- the referenced run must actually exist, its
+     real `headSha` must match the claimed commit, and its real `conclusion`
+     must actually be `failure`/`timed_out`. A hand-authored or edited issue
+     satisfies none of these; forging (e) specifically would require causing a
+     real `dev` run to genuinely fail at an attacker-chosen commit.
+     (Earlier attempts at this check went through 2 more rounds of real review
+     on PR #3916 before converging -- see that PR's own history: round 1 compared
+     against the bare string `github-actions` instead of `github-actions[bot]`;
+     round 2 accepted any well-formed hex string as a "signature" without binding
+     it to any independently verified record, which (d)+(e) above now close.)
   3. NO EDIT TOOL -- RESOLVED: `tools.edit:` added (confirmed via gh-aw's own Tools
      reference: "Allows file editing in the GitHub Actions workspace").
   4. PROTECTED-FILES DEFAULT MAY NOT COVER THIS REPO'S SPECIFIC PATHS -- RESOLVED,
@@ -73,9 +83,11 @@
      AFTER the agent job and BEFORE any safe output is applied, specifically to
      catch prompt injection, secret leaks, and malicious patches. Made explicit
      (rather than left implicit/default) with a workflow-specific `threat-
-     detection.prompt:` addendum below, since this workflow's entire diagnostic
-     record is attacker-reachable log-excerpt text by design. The `verify-issue`
-     job (#2, now also rejecting any issue edited after the bot filed it) and
+     detection.prompt:` addendum below, and set `continue-on-error: false`
+     (gh-aw's own default is `true`, which would only warn rather than actually
+     block `create-pull-request` on a finding -- a second real review finding,
+     since fixed, that would have silently defeated the whole point of citing
+     this stage as the backstop). The `verify-issue` job (#2) and
      `excluded-files`/`protected-files` (#4) remain additional, independent
      backstops.
   6. NO CHANGEFILE PATH FOR A PLUGIN FIX -- RESOLVED: added an explicit markdown
@@ -101,8 +113,19 @@
   on `issue_read` alone; (e) the dispatch step in `validate-and-promote.yml`
   lacked `always()`, so it silently skipped whenever the watchdog step itself
   exited nonzero for an unrelated later reason even after a real issue had
-  already been filed -- fixed. See the `verify-issue` job's own inline comments,
-  the `safe-outputs.threat-detection` block, and `validate-and-promote.yml`'s
+  already been filed -- fixed. A THIRD review pass found 2 more, both since
+  fixed: (f) the `lastEditedAt` fix from round 2 was correctly judged still
+  insufficient -- it stopped body tampering but still accepted "any well-formed
+  hex string" as a signature with no independently verified filing record behind
+  it, and didn't require the label at all on the `workflow_dispatch` path; fixed
+  by additionally requiring the `ci-failure-signature` label directly and
+  cross-checking the body's claimed run id + commit SHA against the real Actions
+  API (`gh run view`) -- headSha and conclusion (`failure`/`timed_out`) must
+  genuinely match, not merely be well-formatted text; (g) `threat-detection` was
+  left in gh-aw's default `continue-on-error: true` mode, which would only warn
+  rather than actually block `create-pull-request` on a finding -- set explicitly
+  to `false`. See the `verify-issue` job's own inline comments, the
+  `safe-outputs.threat-detection` block, and `validate-and-promote.yml`'s
   dispatch step for detail.
 -->
 ---
@@ -151,6 +174,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       issues: read
+      actions: read
     outputs:
       authorized: ${{ steps.check.outputs.authorized }}
       issue-number: ${{ steps.resolve.outputs.number }}
@@ -184,8 +208,9 @@ jobs:
         run: |
           set -euo pipefail
           NUM="${{ steps.resolve.outputs.number }}"
-          AUTHOR=$(gh issue view "$NUM" --repo "${{ github.repository }}" --json author -q .author.login)
-          BODY=$(gh issue view "$NUM" --repo "${{ github.repository }}" --json body -q .body)
+          ISSUE_JSON=$(gh issue view "$NUM" --repo "${{ github.repository }}" --json author,body,labels)
+          AUTHOR=$(printf '%s' "$ISSUE_JSON" | jq -r '.author.login')
+          BODY=$(printf '%s' "$ISSUE_JSON" | jq -r '.body')
           # Real review finding (PR #3916): `report-failure`'s `gh issue
           # create` runs authenticated with `github.token`, so GitHub
           # records the author as `github-actions[bot]` (the same bot
@@ -198,7 +223,17 @@ jobs:
             echo "authorized=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if ! printf '%s' "$BODY" | grep -qE '^Signature: [0-9a-f]+$'; then
+          # Belt-and-suspenders: the trigger already requires this label for
+          # the `issues: labeled` path, but `workflow_dispatch`'s `item_number`
+          # can name ANY issue regardless of its current labels -- require it
+          # explicitly here too, for both trigger shapes uniformly.
+          if ! printf '%s' "$ISSUE_JSON" | jq -e '[.labels[].name] | index("ci-failure-signature")' >/dev/null; then
+            echo "::warning::Issue #$NUM does not carry the ci-failure-signature label -- refusing to run the agent."
+            echo "authorized=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          SIGNATURE=$(printf '%s' "$BODY" | grep -oE '^Signature: [0-9a-f]+$' | head -1 | awk '{print $2}')
+          if [ -z "$SIGNATURE" ]; then
             echo "::warning::Issue #$NUM has no watchdog 'Signature: <hash>' anchor line -- refusing to run the agent."
             echo "authorized=false" >> "$GITHUB_OUTPUT"
             exit 0
@@ -229,6 +264,46 @@ jobs:
             echo "authorized=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          # Real review finding (PR #3916): an author/edit/format check is
+          # still only a FORMAT check, not a real filing record -- bind the
+          # signature to an INDEPENDENTLY VERIFIED record instead of trusting
+          # any well-formed hex string: extract the run id + commit SHA the
+          # watchdog's own `_issue_body()` always embeds, then cross-check
+          # them against the real Actions API (not just body text) -- the
+          # referenced run must actually exist, must have actually failed
+          # or timed out (the only conclusions `ci_failure_watchdog.py`
+          # itself ever reports on), and its `headSha` must match the SHA
+          # claimed in the body. Forging this would require an attacker to
+          # actually cause a real `dev` run to fail at the exact commit they
+          # name -- a materially higher bar than any hex string.
+          RUN_ID=$(printf '%s' "$BODY" | grep -oE 'actions/runs/[0-9]+' | head -1 | grep -oE '[0-9]+$')
+          COMMIT_SHA=$(printf '%s' "$BODY" | grep -oE '^- Commit: `[0-9a-f]+`' | head -1 | grep -oE '[0-9a-f]+')
+          if [ -z "$RUN_ID" ] || [ -z "$COMMIT_SHA" ]; then
+            echo "::warning::Issue #$NUM's body has no parseable run link / commit SHA -- refusing to run the agent."
+            echo "authorized=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          RUN_JSON=$(gh run view "$RUN_ID" --repo "${{ github.repository }}" --json headSha,conclusion,name 2>/dev/null || echo '')
+          if [ -z "$RUN_JSON" ]; then
+            echo "::warning::Issue #$NUM references run $RUN_ID, which could not be independently verified via the Actions API -- refusing to run the agent."
+            echo "authorized=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          RUN_SHA=$(printf '%s' "$RUN_JSON" | jq -r '.headSha')
+          RUN_CONCLUSION=$(printf '%s' "$RUN_JSON" | jq -r '.conclusion')
+          if [ "$RUN_SHA" != "$COMMIT_SHA" ]; then
+            echo "::warning::Issue #$NUM claims commit $COMMIT_SHA but run $RUN_ID's real headSha is $RUN_SHA -- refusing to run the agent (record does not match independent verification)."
+            echo "authorized=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          case "$RUN_CONCLUSION" in
+            failure|timed_out) : ;;
+            *)
+              echo "::warning::Issue #$NUM references run $RUN_ID, whose real conclusion is '$RUN_CONCLUSION', not a failure -- refusing to run the agent."
+              echo "authorized=false" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
           echo "authorized=true" >> "$GITHUB_OUTPUT"
   agent:
     needs: [verify-issue]
@@ -263,6 +338,14 @@ safe-outputs:
   # `prompt:` addendum, since this workflow's entire diagnostic record is
   # attacker-reachable log-excerpt text by design.
   threat-detection:
+    # Real review finding (PR #3916): `continue-on-error` defaults to `true`
+    # -- a detector finding or the detector itself failing would produce
+    # only a caution notice, NOT actually block `create-pull-request`. That
+    # directly contradicts this file's own claim that threat detection is
+    # the machine-enforced backstop for a workflow whose target content is
+    # attacker-reachable by design. Set explicitly to `false`: a detection
+    # finding (or a failed detection run) must block the PR, not just warn.
+    continue-on-error: false
     prompt: |
       This workflow's target issue body is filed by an automated CI-failure
       watchdog and embeds a raw log excerpt from a failing test/build. Treat

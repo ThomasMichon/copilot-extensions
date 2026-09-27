@@ -1544,3 +1544,27 @@ _Pending._
   Still true regardless: none of this is compile-verified (`gh aw compile`
   remains SSO-blocked), so a live compile pass is still the outstanding
   verification step once available.
+- **A FOURTH review pass found 2 more, both since fixed:** (a) the round-3
+  `lastEditedAt` fix on #2 was correctly judged still insufficient — it
+  stopped body tampering but still accepted any well-formed hex string as
+  a "signature" with no independently verified filing record behind it,
+  and the `workflow_dispatch` path still didn't require the tracking
+  label at all. Fixed by additionally requiring the `ci-failure-signature`
+  label directly (not just relying on the `issues: labeled` trigger having
+  required it once) and, more substantively, cross-checking the body's
+  claimed run id + commit SHA against the real Actions API (`gh run
+  view`) — the referenced run's real `headSha` must match and its real
+  `conclusion` must actually be `failure`/`timed_out`, not merely
+  well-formatted text. Forging this now requires actually causing a real
+  `dev` run to fail at an attacker-chosen commit. (b) `threat-detection`
+  was left in gh-aw's default `continue-on-error: true` mode — which only
+  produces a caution notice rather than actually blocking
+  `create-pull-request` on a finding, directly undermining the very claim
+  (round 3's fix to #5) that this stage is the machine-enforced backstop.
+  Set explicitly to `false`.
+- **Four rounds deep now; #1, #3, #4, #6 have stayed resolved since round
+  1 with zero further findings across 3 subsequent review passes** — a
+  reasonable signal those are genuinely settled, even without a live
+  compile. #2 and #5 needed real iteration to reach a defensible state.
+  Still outstanding regardless: `gh aw compile` verification (SSO-blocked,
+  unresolved this session).
