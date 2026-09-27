@@ -284,19 +284,18 @@ per environment are genuinely undecided, not just unwritten._
         coordinator variants into the remote venue. There is no dedicated
         agent-bridge dispatch wrapper in this path; the no-CLI worker's
         viable channel is still coordinator HTTP once those values exist.
-        For hand-run validation, the reachable
-        `pcd-calibration-f2-p4v9r6rv5c6rw4` CodeSpace did **not** qualify as
-        genuinely no-CLI: `agent-dispatch` was already installed at
+        For hand-run validation, the reachable `ThomasMichon/copilot-extensions`
+        CodeSpace did **not** qualify as genuinely no-CLI: `agent-dispatch`
+        was already installed there at
         `/home/codespace/.local/bin/agent-dispatch`.
       - **Container:** `agent_containers._peer_launch.peer_environment()`
         forwards the same `AGENT_DISPATCH_*` / shared-coordinator variables
         into remote peer launches; again, there is no distinct dispatch
-        relay beyond direct coordinator HTTP. The reachable trusted
-        container `peaceful_wright` *did* qualify as genuinely no-CLI
-        (`agent-dispatch` absent there), and could still reach this host's
-        loopback coordinator over `http://host.docker.internal:<port>`,
-        proving an explicit injected HTTP endpoint is viable even without a
-        pre-staged dispatch install.
+        relay beyond direct coordinator HTTP. A reachable trusted container
+        *did* qualify as genuinely no-CLI (`agent-dispatch` absent there),
+        and could still reach this host's loopback coordinator over
+        `http://host.docker.internal:<port>`, proving an explicit injected
+        HTTP endpoint is viable even without a pre-staged dispatch install.
       - **Different machine:** today's concrete no-CLI reach-back is the
         explicit HTTP path — either `AGENT_DISPATCH_URL` /
         `AGENT_DISPATCH_TOKEN`, or the shared hosted coordinator
@@ -327,12 +326,12 @@ per environment are genuinely undecided, not just unwritten._
       only the tier-appropriate inline guidance.
       - Unit coverage landed in `tests/test_no_cli_prompts.py` plus the
         existing embody prompt tests.
-      - A real hand-run was attempted against the genuinely no-CLI trusted
-        container `peaceful_wright`, but `agent-containers copilot --detach`
-        failed before the worker session came up because `agent-worktrees`
-        is not installed in that fleet image. The scratch validation task was
-        abandoned and the partial detached-session state was stopped/cleaned
-        up. This leaves the hand-run half of Phase 3 honestly open.
+      - A real hand-run was attempted against a genuinely no-CLI trusted
+        container, but `agent-containers copilot --detach` failed before the
+        worker session came up because `agent-worktrees` is not installed in
+        that fleet image. The scratch validation task was abandoned and the
+        partial detached-session state was stopped/cleaned up. This leaves
+        the hand-run half of Phase 3 honestly open.
 
 ### Phase 4 — agent-bridge companion-agent heads-up
 - [ ] Confirm (or add, if missing) a minimal heads-up in agent-bridge's own
@@ -505,10 +504,10 @@ _Pending._
   regression surfaced in the rest of the suite.
 - Hand-run validation remains the honest gap for this phase. The reachable
   `ThomasMichon/copilot-extensions` CodeSpace did not qualify as genuinely
-  no-CLI (`agent-dispatch` already installed there). The reachable trusted
-  container `peaceful_wright` *did* qualify as no-CLI, and could reach this
-  host's coordinator over `host.docker.internal`, but `agent-containers
-  copilot --detach` failed before a worker could start because that fleet
-  image lacks `agent-worktrees`. The scratch validation task was abandoned
-  and the partial detached container session was stopped, so Phase 3 lands
-  as a partial, reviewable slice rather than a pretended full completion.
+  no-CLI (`agent-dispatch` was already installed there). A reachable trusted
+  container *did* qualify as no-CLI, and could reach this host's coordinator
+  over `host.docker.internal`, but `agent-containers copilot --detach`
+  failed before a worker could start because that fleet image lacks
+  `agent-worktrees`. The scratch validation task was abandoned and the
+  partial detached container session was stopped, so Phase 3 lands as a
+  partial, reviewable slice rather than a pretended full completion.
