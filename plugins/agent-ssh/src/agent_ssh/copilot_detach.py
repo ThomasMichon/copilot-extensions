@@ -31,7 +31,8 @@ from venue_copilot.refs import upload_for
 _RESERVATION_TTL = 900.0
 _RESERVE_RETRY_WINDOW = 90.0
 _PROBE_ATTEMPTS = 2
-_STATE_DIR = Path.home() / ".agent-ssh" / "forward-keepers"
+_LEGACY_ROOT = ".agent-ssh"  # marketplace-isolation: allow legacy compatibility root
+_STATE_DIR = Path.home() / _LEGACY_ROOT / "forward-keepers"
 _STORE = KeeperStore(_STATE_DIR)
 
 
@@ -141,9 +142,10 @@ def _ensure_posix(ssh_config: Any) -> None:
 
 
 def _ensure_remote_tooling(ssh_config: Any) -> None:
+    _fabric = "agent-worktrees"  # marketplace-isolation: allow remote-management
     script = (
         "command -v bash >/dev/null && command -v tmux >/dev/null && "
-        "command -v agent-worktrees >/dev/null && command -v copilot >/dev/null && "
+        f"command -v {_fabric} >/dev/null && command -v copilot >/dev/null && "
         "find ~/.copilot/installed-plugins -type d -name agent-bridge -print -quit "
         "| grep -q ."
     )

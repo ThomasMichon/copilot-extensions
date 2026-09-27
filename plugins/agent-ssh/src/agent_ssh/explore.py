@@ -83,7 +83,7 @@ printf '%s\n' "$_repos_json" \
   | sed -E 's/.*:[[:space:]]*"([^"]*)"$/\1/' \
   | while IFS= read -r _p; do
       [ -n "$_p" ] || continue
-      _rf="$_p/.agent-worktrees/related.yaml"
+      _rf="$_p/.agent-worktrees/related.yaml"  # marketplace-isolation: allow remote-management
       if [ -f "$_rf" ]; then
         printf '>>>RELFILE:%s\n' "$_p"
         cat "$_rf" 2>/dev/null || true

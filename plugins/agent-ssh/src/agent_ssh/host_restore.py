@@ -26,11 +26,14 @@ def _selected_runtime_root() -> Path | None:
     return candidate.resolve()
 
 
+_LEGACY_ROOT = ".agent-ssh"  # marketplace-isolation: allow legacy compatibility root
+
+
 def _runtime_root() -> Path:
     selected = _selected_runtime_root()
     if selected is not None:
         return selected
-    return (Path.home() / ".agent-ssh").resolve()
+    return (Path.home() / _LEGACY_ROOT).resolve()
 
 
 def _payload_manifest(path: Path) -> dict[str, Any] | None:

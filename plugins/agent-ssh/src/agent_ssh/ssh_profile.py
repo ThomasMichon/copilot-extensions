@@ -45,6 +45,9 @@ for _s in (sys.stdout, sys.stderr):
 
 ROOT_INCLUDE = "Include ~/.ssh/config.d/*"
 METADATA_PREFIX = "# agent-ssh-metadata: "
+# Coordinates exclusive access to the single shared ~/.ssh/config[.d]; must
+# NOT be cell-scoped, so this is a namespacing prefix, not a runtime root.
+_LOCK_DIR_NAME = ".agent-ssh-locks"  # marketplace-isolation: allow shared-config-lock
 _TRANSPORT_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 _ALIAS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _OPTION_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*$")
@@ -430,7 +433,7 @@ def ensure_root_include(
     include_line = _include_line(config_d)
     ssh_config.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     target = _root_config_target(ssh_config)
-    lock_path = target.parent / ".agent-ssh-locks" / "root-config.lock"
+    lock_path = target.parent / _LOCK_DIR_NAME / "root-config.lock"
     with exclusive_file_lock(lock_path):
         current_target = _root_config_target(ssh_config)
         if current_target != target:
@@ -443,7 +446,7 @@ def ensure_root_include(
         content = f"{include_line}\n\n{existing}".rstrip() + "\n"
         fd, temporary = tempfile.mkstemp(
             dir=str(target.parent),
-            prefix=".agent-ssh-root-config-",
+            prefix=".agent-ssh-root-config-",  # marketplace-isolation: allow shared-config-lock
             suffix=".tmp",
         )
         tmp = Path(temporary)
@@ -477,11 +480,11 @@ def write_fragment(
     _chmod(config_d, 0o700)  # mkdir(mode=) is a no-op for ACLs on Windows
     frag = config_d / fragment_name(module["module"])
     target_frag = canonical_config_d / frag.name
-    lock_path = config_d.parent / ".agent-ssh-locks" / f"{frag.name}.lock"
+    lock_path = config_d.parent / _LOCK_DIR_NAME / f"{frag.name}.lock"
     with exclusive_file_lock(lock_path):
         fd, temporary = tempfile.mkstemp(
             dir=str(canonical_config_d.parent),
-            prefix=".agent-ssh-fragment-",
+            prefix=".agent-ssh-fragment-",  # marketplace-isolation: allow shared-config-lock
             suffix=".tmp",
         )
         tmp = Path(temporary)

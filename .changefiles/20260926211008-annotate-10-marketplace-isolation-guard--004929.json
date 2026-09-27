@@ -1,0 +1,9 @@
+{
+  "comment": "Annotate 10 marketplace-isolation guard findings (legacy-root/registry/remote-management/shared-config-lock/doc)",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

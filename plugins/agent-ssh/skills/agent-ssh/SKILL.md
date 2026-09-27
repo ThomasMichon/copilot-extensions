@@ -141,7 +141,7 @@ the session there locally.
 
 `--ref-file PATH` (repeatable; a file or a folder, up to 256 MiB per call)
 copies an operator file (a HAR, a log, a transcript) to
-`~/.agent-bridge/refs/<batch>/` on the target, outside the checkout, over the
+`~/.agent-bridge/refs/<batch>/` on the target, outside the checkout, over the <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 SSH channel's stdin, and tells the worker the exact paths: in the seed for a
 new session, or as a message when the same `--detach` rejoins a running one.
 The handle reports `ref_files` and `refs_delivered` (`seed`/`message`/`failed`).
