@@ -12,4 +12,4 @@ def test_source_fallback_matches_plugin_manifest_exactly():
     source = (
         plugin / "src" / "agent_codespaces" / "__init__.py"
     ).read_text(encoding="utf-8")
-    assert f'__version__ = "{version}"' in source
+    assert f'_FALLBACK_VERSION = "{version}"' in source
