@@ -232,6 +232,36 @@ jobs:
     )
 
 
+def test_sibling_workflow_recognized_github_hosted_labels_are_accepted(
+    tmp_path: Path,
+) -> None:
+    # `ubuntu-slim` is a real, standard GitHub-hosted single-CPU runner label
+    # (docs.github.com/en/actions/reference/runners/github-hosted-runners) --
+    # `gh-aw`-compiled workflows' own generated infra jobs
+    # (`activation`/`conclusion`/`pre_activation`/`safe_outputs`) default to
+    # it. Regression: this allowlist once predated that label and rejected it
+    # as an "unauthorized self-hosted runner route", a false positive.
+    trusted = _workflow(tmp_path, lambda text: text)
+    sibling = tmp_path / "other.yml"
+    for index, runs_on in enumerate(("ubuntu-latest", "ubuntu-slim")):
+        sibling.write_text(
+            f"""
+name: Other
+on: pull_request
+jobs:
+  ok{index}:
+    runs-on: {runs_on}
+    steps:
+      - run: echo ok
+""",
+            encoding="utf-8",
+        )
+        errors = MODULE.validate_workflow(trusted)
+        assert not any(
+            "unauthorized self-hosted runner route" in error for error in errors
+        ), f"{runs_on!r} should be recognized as GitHub-hosted, got: {errors}"
+
+
 def test_compact_token_and_indexed_secret_references_are_rejected(
     tmp_path: Path,
 ) -> None:

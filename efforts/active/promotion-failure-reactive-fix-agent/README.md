@@ -1801,3 +1801,24 @@ _Pending._
   checklist (pin the `gh-aw` extension version, verify job-level
   `permissions:` don't inherit anything broader) is still open. Phase
   3's Validation Plan trials haven't started.
+- **A fourth genuine issue surfaced one level up: this repo's own CI,
+  not `gh aw compile` or a review pass.** `tools/check-trusted-ci.py` (a
+  cross-cutting guard, unrelated to `gh-aw`, that rejects any workflow
+  job routed to an unrecognized runner label) failed the PR opened for
+  this work: gh-aw's own generated infra jobs
+  (`activation`/`conclusion`/`pre_activation`/`safe_outputs`) default to
+  `runs-on: ubuntu-slim`, a label this guard's static allowlist didn't
+  recognize, so it failed closed treating it as an unauthorized
+  self-hosted route. First tried overriding `runs-on` per-job in
+  frontmatter — `pre_activation`/`activation` reject the field outright
+  (only `steps`/`outputs`/`pre-steps` allowed there), and
+  `conclusion`/`safe_outputs` silently accept but ignore it (no error,
+  no effect) — a dead end either way. Verified via GitHub's own official
+  "GitHub-hosted runners reference" docs that `ubuntu-slim` is a real,
+  standard, GitHub-hosted single-CPU runner label (not self-hosted, not
+  a custom runner group) — the guard's allowlist simply predates this
+  repo's `gh-aw` adoption. Added it to `GITHUB_HOSTED_LABELS` with a
+  citing comment, plus a regression test confirming both `ubuntu-latest`
+  and `ubuntu-slim` are accepted for a sibling workflow. This fix is
+  repo-wide, not specific to this one draft — it unblocks every future
+  `gh-aw` workflow this repo might compile.
