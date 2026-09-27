@@ -1875,3 +1875,66 @@ _Pending._
   of this file, or the pin silently reverts to a mutable tag. This
   generalizes the already-open "pin the `gh-aw` extension version"
   hardening item from Phase 2's checklist.
+- **Second real Copilot review pass found 2 recurrences + 3 new issues, all
+  fixed and recompile-verified:**
+  - **Recurrences (both restated as still-open until the FIRST review's fix
+    landed against the correct head):** the scope-check gap and the
+    stale/dispatch-fallback text were confirmed resolved once the review ran
+    against this session's actual pushed head rather than a stale
+    intermediate commit a race between push and review-trigger had caught
+    (see below).
+  - **HIGH — new — reproducibility of the SHA pin.** #15's SHA pin only
+    existed because that one `gh aw compile` invocation happened to pass an
+    out-of-band `--action-tag <sha>`; nothing in the committed source
+    remembered or enforced it, so a future plain `gh aw compile` would
+    silently regress to the mutable tag. Added
+    `tools/check-gh-aw-action-pins.py` (+ regression tests, wired into
+    `ci.yml` next to the trusted-CI guard) — fails CI outright if any
+    committed `*.lock.yml` ever references a `github/gh-aw/actions/...`
+    action by anything other than a full 40-character commit SHA.
+  - **HIGH — new — membership gate still blocks the automated dispatch.**
+    The explicit `workflow_dispatch:` trigger (issue #13's fix) made the
+    activation *gate* reachable, but `label_command` unconditionally
+    requires every activation path to also pass gh-aw's own
+    `check_membership` step, which by default only recognizes human actors
+    holding admin/maintainer/write repo roles.
+    `validate-and-promote.yml`'s automated dispatch authenticates with the
+    default `GITHUB_TOKEN`, so GitHub records the dispatching actor as the
+    `github-actions[bot]` App identity — never a repository collaborator,
+    so it could never satisfy a roles: check no matter how configured.
+    Fixed with gh-aw's own documented `on.bots:` mechanism (exactly for an
+    App sender, not a human) — `bots: ["github-actions"]` — without
+    loosening the human label-apply path's own roles: check.
+  - **MEDIUM — new — compiled step silently dropped hand-declared env
+    vars.** The `verify-issue` job's `check` step declared `GH_TOKEN`/`REPO`
+    in its own `env:` block but also referenced
+    `steps.resolve.outputs.number` inline in `run:` text — gh-aw's compiler
+    auto-generates an env var for that reference but REPLACES the step's
+    entire `env:` block with its own generated one rather than merging,
+    silently dropping `GH_TOKEN`/`REPO`. Under `set -u` this left `$REPO`
+    unbound, so every dispatch would have failed closed before
+    `authorized` was ever emitted. A first attempted fix (declaring the
+    step-output reference as our own `env:` entry instead) hit the SAME
+    expression-safety scanner from a different angle — it also rejects
+    `steps.*.outputs.*` references inside a custom job step's `env:`
+    block. The actual fix: have the `resolve` step export the value via
+    `$GITHUB_ENV` (a plain shell append, no expression syntax at all), so
+    `$NUM` becomes a normal process env var for later steps in the job.
+  - **LOW — new — dropped grammar clause.** The prompt's description of
+    `.verify-issue/body.txt` had a dropped clause ("the failing [...] one
+    was parseable)" missing "test node id (when"). Restored.
+  - Recompiled clean after all fixes (same single non-blocking
+    concurrency-discriminator warning); `check-gh-aw-action-pins.py`,
+    `check-trusted-ci.py`, `check-docs-consistency.py`, and the full
+    `test_ci_failure_watchdog.py` + `test_check_trusted_ci.py` +
+    `test_check_gh_aw_action_pins.py` suite (68 tests) all pass.
+- **A race between push and review-trigger surfaced this round:** two
+  review passes initially reported all four of the first round's fixes as
+  still-unresolved. Root cause: the reviewer had run against a stale
+  intermediate commit (an earlier, already-force-pushed-over version of
+  the trusted-ci fix) rather than the actual current head — a timing race
+  between the push webhook firing and this session's own subsequent
+  force-push completing, not a real regression. Confirmed by checking the
+  review's own recorded `commit_id` against `git log --all`, and by
+  waiting for the next review pass to land against the correct,
+  already-pushed head, which showed all four fixes as genuinely resolved.

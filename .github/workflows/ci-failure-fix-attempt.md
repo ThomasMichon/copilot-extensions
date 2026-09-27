@@ -20,6 +20,21 @@ labels: ["automation", "ci", "reactive-fix"]
 # `remove_label: false` keeps the label on the issue permanently -- it is
 # `ci_failure_watchdog.py`'s own persistent dedup marker (`_existing_issue` searches
 # `--label ci-failure-signature`), never a one-shot command marker gh-aw should strip.
+# `bots: ["github-actions"]` (real review finding, this round): `label_command`
+# unconditionally gates EVERY activation path (the explicit `workflow_dispatch`
+# above included) behind gh-aw's `check_membership` step, which by default only
+# recognizes human actors holding admin/maintainer/write repo roles.
+# `validate-and-promote.yml`'s own automated dispatch call (`report-failure`,
+# blocking issue #1/#13's fix) authenticates with `GH_TOKEN: github.token` --
+# the default `GITHUB_TOKEN` -- so GitHub records the dispatching actor as the
+# `github-actions[bot]` App identity, which is never a repository collaborator
+# and therefore can never satisfy a roles: check no matter how it's configured.
+# `on.bots:` is gh-aw's own documented mechanism for exactly this case (a
+# GitHub App sender, not a human collaborator) -- allowlisting it here is what
+# actually makes the automated fallback reachable; the `[bot]` suffix is
+# optional per gh-aw's own docs. This does not weaken the human label-apply
+# path: a human actor still has to satisfy the roles: check, since a human's
+# identity can never match a bot allowlist entry.
 on:
   label_command:
     name: ci-failure-signature
@@ -31,6 +46,7 @@ on:
         description: "Issue number to process (report-failure's own automated dispatch call)"
         required: false
         type: string
+  bots: ["github-actions"]
 
 # TODO(successor): confirm engine auth path with the operator -- effort's own Plan
 # names two options (org-billing `copilot-requests: write` vs. a `COPILOT_GITHUB_TOKEN`
@@ -123,6 +139,21 @@ jobs:
             exit 1
           fi
           echo "number=$NUM" >> "$GITHUB_OUTPUT"
+          # Real gh-aw compiler finding (this round's review): referencing
+          # `steps.resolve.outputs.number` (as a real expression, braces
+          # omitted in this retelling -- see the note earlier in this
+          # comment block about why) from a LATER step -- whether inline in
+          # `run:` text or in that step's own `env:` block --
+          # makes the compiler auto-inject a generated variable for it, and
+          # in the `env:` case the compiler REPLACES the whole block with
+          # its own generated one rather than merging, silently dropping any
+          # other hand-declared entries (confirmed: `GH_TOKEN`/`REPO` were
+          # dropped this way, leaving `$REPO` unbound under `set -u`, so
+          # every dispatch failed before `authorized` was ever emitted).
+          # Exporting to `$GITHUB_ENV` here instead avoids the compiler's
+          # expression scanner entirely -- `$NUM` becomes a normal process
+          # env var for every later step in this job, no expression syntax involved.
+          echo "NUM=$NUM" >> "$GITHUB_ENV"
       - name: Verify the issue was genuinely filed by the watchdog
         id: check
         env:
@@ -130,7 +161,6 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          NUM="${{ steps.resolve.outputs.number }}"
           ISSUE_JSON=$(gh issue view "$NUM" --repo "$REPO" --json author,body,labels)
           AUTHOR=$(printf '%s' "$ISSUE_JSON" | jq -r '.author.login')
           BODY=$(printf '%s' "$ISSUE_JSON" | jq -r '.body')
@@ -677,6 +707,60 @@ safe-outputs:
       had it been used, confirmed by checking both repos directly before
       settling on the correct one), pinning it to
       `github/gh-aw/actions/setup@<sha>`.
+  16. (Found by real review, second pass, PR #4155 -- resolving #15) PIN NOT
+      REPRODUCIBLE/ENFORCED -- RESOLVED: #15's SHA pin only existed because that
+      one `gh aw compile` invocation happened to be run with an out-of-band
+      `--action-tag <sha>` flag; nothing in the committed source remembered or
+      enforced it, so a future contributor running plain `gh aw compile` after
+      an unrelated edit would silently regress to the mutable tag with no
+      error and no diff-visible warning. Added `tools/check-gh-aw-action-pins.py`
+      (+ regression tests, wired into `ci.yml` alongside the trusted-CI guard)
+      -- it fails CI outright if any committed `*.lock.yml` ever references a
+      `github/gh-aw/actions/...` action by anything other than a full
+      40-character commit SHA, the same enforcement pattern
+      `check-trusted-ci.py` already uses for the `runs-on:` guard.
+  17. (Found by real review, second pass, PR #4155 -- resolving #1/#13, again)
+      MEMBERSHIP GATE STILL BLOCKS THE AUTOMATED DISPATCH -- RESOLVED: #13's
+      explicit `workflow_dispatch:` trigger made the activation *gate*
+      reachable, but `label_command` unconditionally requires EVERY activation
+      path (the explicit dispatch included) to also pass gh-aw's own
+      `check_membership` step, which by default only recognizes human actors
+      holding admin/maintainer/write repo roles.
+      `validate-and-promote.yml`'s automated dispatch call authenticates with
+      `GH_TOKEN: github.token` (the default `GITHUB_TOKEN`), so GitHub records
+      the dispatching actor as the `github-actions[bot]` App identity -- never
+      a repository collaborator, so it could never satisfy a roles: check no
+      matter how configured. Fixed with gh-aw's own documented `on.bots:`
+      mechanism (exactly for this case: an App sender, not a human) --
+      `bots: ["github-actions"]` allowlists that specific identity without
+      loosening the human label-apply path's own roles: check (a human actor
+      can never match a bot allowlist entry).
+  18. (Found by real review, second pass, PR #4155 -- new, no prior issue)
+      COMPILED STEP SILENTLY DROPPED HAND-DECLARED ENV VARS -- RESOLVED: the
+      `verify-issue` job's `check` step declared `GH_TOKEN`/`REPO` in its own
+      `env:` block, but also referenced `steps.resolve.outputs.number` (as a
+      real expression, braces omitted in this retelling) literally inline in
+      `run:` shell text -- a real gh-aw compiler behavior (not previously
+      documented in this file): the compiler auto-generates an env var for
+      that reference (`GH_AW_STEPS_RESOLVE_OUTPUTS_NUMBER`), but REPLACES the
+      step's entire `env:` block with its own generated one rather than
+      merging, silently dropping `GH_TOKEN`/`REPO`. Under `set -u` this left
+      `$REPO` unbound, so `gh issue view` failed before `authorized` was ever
+      emitted -- every dispatch would have failed closed. A first attempted
+      fix (declaring the step-output reference as our own `env:` entry
+      instead) turned out to hit the SAME expression-safety scanner from a
+      different angle -- it also rejects `steps.*.outputs.*` references
+      inside a custom job step's `env:` block, not just inline in `run:`
+      text. The actual fix: have the `resolve` step export the value via
+      `$GITHUB_ENV` (a plain shell-level append, no expression syntax
+      involved at all) so `$NUM` becomes a normal process env var for every
+      later step in the job -- this avoids the expression scanner entirely,
+      so the `check` step's own hand-declared `GH_TOKEN`/`REPO` survive
+      compilation intact.
+  19. (Found by real review, second pass, PR #4155 -- cosmetic) STALE/BROKEN
+      PROSE -- RESOLVED: the prompt's description of `.verify-issue/body.txt`'s
+      contents had a dropped clause ("the failing [...] one was parseable)"
+      -- missing "test node id (when"). Restored the full sentence.
 
   A first pass at resolving #1/#2 (PR #3916) introduced two NEW, real issues real
   review caught before merge, both since fixed in this same file: (a) the
@@ -800,7 +884,8 @@ otherwise touch `.verify-issue/` yourself -- it is workflow scratch state,
 not part of your fix, and is stripped from any patch regardless.
 
 `.verify-issue/body.txt` already carries the failing job name, the failing
-one was parseable), the run link and commit SHA, and a log excerpt. Treat
+test node id (when the failing one was parseable), the run link and commit
+SHA, and a log excerpt. Treat
 this as your starting evidence, not your only evidence -- confirm it against
 the live repository state before acting (the `dev` branch has very likely
 moved forward since this issue was filed).
