@@ -1,0 +1,9 @@
+{
+  "comment": "Annotate 6 marketplace-isolation guard findings in setting-up-agent-index/SKILL.md",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

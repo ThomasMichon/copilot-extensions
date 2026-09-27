@@ -46,11 +46,11 @@ Use the same layered naming and precedence documented for the other
 
 There are three distinct configuration roles:
 
-1. **In-repo** — `<repo>/.agent-index/config.yaml`
+1. **In-repo** — `<repo>/.agent-index/config.yaml` <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
    - Shareable, tracked, safe to commit.
    - Declares default `corpus.sources` for that repository.
    - Should not carry machine identity.
-2. **Knowledge overlay** — `<knowledge-repo>/.agent-index/config.yaml`
+2. **Knowledge overlay** — `<knowledge-repo>/.agent-index/config.yaml` <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
    - Shareable within the operator's private knowledge repo.
    - Sits above the in-repo base for repositories that require external state.
    - Typically self-declares knowledge-repo corpus sources that should follow
@@ -74,7 +74,7 @@ corpora.
 
 ## Author the checked-in repo defaults
 
-In the target repo, add `<repo>/.agent-index/config.yaml` with a `corpus.sources`
+In the target repo, add `<repo>/.agent-index/config.yaml` with a `corpus.sources` <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 list. Example:
 
 ```yaml
@@ -110,13 +110,13 @@ You can write this explicitly, or use:
 <catalog argv[0]> setup --indexer <machine> --ssh <alias> --repo <repo>
 ```
 
-`setup` writes the machine role into `~/.agent-index/config.yaml` and writes the
+`setup` writes the machine role into `~/.agent-index/config.yaml` and writes the <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 repo-local designation/overlay into
 `<repo>/.copilot-extensions/agent-index/config.yaml`.
 
 ## Add a bound knowledge-repo overlay
 
-In the bound knowledge repo, add `<knowledge-repo>/.agent-index/config.yaml`
+In the bound knowledge repo, add `<knowledge-repo>/.agent-index/config.yaml` <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 with any self-declared corpus sources that should follow the operator across
 stateless-harness repos. Example:
 
@@ -157,7 +157,7 @@ distinct from the current repo's machine-local overlay.
   separate. Confirm the source appears in `status`, then run the operator
   indexing flow if needed.
 - **Setup wrote machine-specific state into the wrong file**: machine identity
-  belongs in the repo-local overlay or `~/.agent-index/config.yaml`, never the
+  belongs in the repo-local overlay or `~/.agent-index/config.yaml`, never the <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
   checked-in `.agent-index/config.yaml`.
 - **Knowledge repo source not advertised in another repo**: verify the current
   repo requires external state, the knowledge repo is bound, and the knowledge
