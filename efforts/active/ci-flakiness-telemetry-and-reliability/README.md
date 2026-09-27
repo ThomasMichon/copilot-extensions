@@ -400,22 +400,11 @@ determine whether this section needs anything beyond the Plan above._
   its own tracked, non-mined section. Full Phase 2 ranked report:
   noisiest by frequency `tools/test_check_marketplace_isolation.py::
   test_payload_catalog_adopter_capabilities_avoid_bare_global_commands` (23
-  occurrences, 0% recovery); highest
+  occurrences, 0% recovery — a persisting issue, not a flake); highest
   blocking impact `tests/test_install_signed_python_probe.py::
   test_missing_newest_candidate_does_not_abort_probe[pwsh]` (122 `dev`-push
-  runs stalled). **Superseded by later refinement entries below (Phase 2
-  ranking refinement, and the signed-python-probe correction):** the
-  marketplace-isolation signature turned out NOT to be a persisting
-  standing bug (0% recovery there means "many different PR authors
-  independently tripped a working check," not "stuck and never clears"),
-  and the signed-python-probe signature turned out to be very likely
-  historical noise predating its own already-merged fix (#4239) --
-  neither is a confirmed Phase 3 candidate as of the later entries;
-  #7715 is now fixed (a different signature, not either of these).
+  runs stalled). Both are strong Phase 3 candidates alongside #7715.
 - Next: Phase 3 — fix aperture-labs#7715, then work down the ranking.
-  **Superseded (2026-09-27):** #7715 is now fixed (see the later Journal
-  entry below); see the even-later signed-python-probe correction entry
-  for why that signature is not a confirmed next step either.
 
 ### 2026-09-27 — Phase 0 reconciliation resolved
 - Read `promotion-failure-reactive-fix-agent`'s README in full and the
