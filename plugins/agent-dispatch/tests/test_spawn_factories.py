@@ -107,7 +107,8 @@ def test_default_nudge_is_a_short_event_descriptor(monkeypatch):
     assert "Task task-7 has not recorded progress recently" in sent["message"]
     assert "Goal: Ship the fix." in sent["message"]
     assert "record a progress beat or blocker" in sent["message"]
-    assert "close it out honestly" in sent["message"]
+    assert "complete it only if it is already done" in sent["message"]
+    assert "yield it if it is no longer yours" in sent["message"]
 
 
 def test_spawn_preparation_retained_is_directly_importable():
