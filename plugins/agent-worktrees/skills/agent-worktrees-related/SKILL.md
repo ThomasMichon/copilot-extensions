@@ -38,7 +38,7 @@ plain-markdown narrative per related repo under
 
 It complements (does **not** duplicate) the **global** repos registry
 (`<agent-worktrees catalog argv[0]> repos`,
-`~/.agent-worktrees/repos.yaml`): related entries are
+`~/.agent-worktrees/repos.yaml`): related entries are <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 **keyed by global-registry names** and add only **relationship** (role,
 summary, doc), **locus** (where to work), and **delegate** (how to hand off).
 Checkout paths, class, and remote still resolve from the global registry --

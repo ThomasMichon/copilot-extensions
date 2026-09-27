@@ -24,7 +24,7 @@ bridge flow.
 Install the agent-codespaces runtime (CLI binstub + `~/.agent-codespaces`
 home). The credential relay itself runs inside the agent-bridge service, but
 this step gives you the standalone `agent-codespaces` CLI and is the canonical
-owner of the `~/.local/bin/agent-codespaces` binstub.
+owner of the `~/.local/bin/agent-codespaces` binstub. <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 
 ```powershell
 # Windows
@@ -94,11 +94,11 @@ by the resolver; see the `agent-codespaces:codespaces-lifecycle` skill.)
 
 Install the agent-containers runtime (CLI binstub + `~/.agent-containers`
 home). agent-containers registers the `container:` namespace with the
-bridge daemon via a `~/.agent-bridge/providers.d/` manifest (the daemon
+bridge daemon via a `~/.agent-bridge/providers.d/` manifest (the daemon <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 drives the `agent-containers` binstub over a process boundary, not a venv
 import); this step gives you the standalone
 `agent-containers` CLI for fleet/lease management and owns the
-`~/.local/bin/agent-containers` binstub.
+`~/.local/bin/agent-containers` binstub. <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 
 ```powershell
 # Windows
@@ -113,7 +113,7 @@ bash "$an_dir/scripts/init.sh"
 ### What It Creates
 
 ```
-~/.agent-containers/
+~/.agent-containers/  # marketplace-isolation: allow deployed-runtime-diagnostics
   .venv/                   Python venv with the agent_containers package
   deploy-manifest.json
 
@@ -155,7 +155,7 @@ bash "$am_dir/scripts/init.sh"
 ### What It Creates
 
 ```
-~/.agent-mcp/
+~/.agent-mcp/  # marketplace-isolation: allow deployed-runtime-diagnostics
   .venv/                   Python venv with the agent_mcp package
   deploy-manifest.json
 
@@ -163,7 +163,7 @@ bash "$am_dir/scripts/init.sh"
   agent-mcp[.cmd]          Binstub
 ```
 
-You create `~/.agent-mcp/bridges/<name>.yaml` config files yourself (or pass
+You create `~/.agent-mcp/bridges/<name>.yaml` config files yourself (or pass <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 `--config <path>`); init does not create the `bridges/` directory.
 
 ### Verify
@@ -172,6 +172,6 @@ You create `~/.agent-mcp/bridges/<name>.yaml` config files yourself (or pass
 <agent-mcp catalog argv[0]> status            # prerequisites + available bridges
 ```
 
-Define a bridge under `~/.agent-mcp/bridges/<name>.yaml` (or pass `--config`),
+Define a bridge under `~/.agent-mcp/bridges/<name>.yaml` (or pass `--config`), <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 then validate it with `<agent-mcp catalog argv[0]> validate <name>`. See the `agent-mcp:agent-mcp` skill for
 the config format and how to wire it into an agent's `mcp-servers`.

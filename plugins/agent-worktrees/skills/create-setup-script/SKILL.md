@@ -3,7 +3,7 @@ name: create-setup-script
 description: >
   Create a session setup script for a repo that doesn't have one yet.
   Generates a setup.ps1 and/or setup.sh in the repo's tools/setup/
-  directory (or a local override in ~/.agent-worktrees/) that runs at
+  directory (or a local machine-global override) that runs at
   the start of each worktree session. Trigger phrases include:
   - 'create setup script'
   - 'add setup script'
@@ -197,7 +197,7 @@ and **launch Copilot last** (passing through the remaining args).
 ## If No Setup Script Exists
 
 When a repo has no setup script and no `launch:` config, agent-worktrees
-falls back to a built-in default script (`~/.agent-worktrees/scripts/
+falls back to a built-in default script (`~/.agent-worktrees/scripts/ <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 default-setup.{ps1,sh}`) that displays basic project info and launches
 Copilot. The default is functional but minimal — creating a custom setup
 script unlocks the full pre-session workflow.

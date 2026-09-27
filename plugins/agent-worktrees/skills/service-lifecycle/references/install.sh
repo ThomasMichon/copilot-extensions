@@ -7,7 +7,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="/opt/my-service"
-SERVICE_USER="${USER}"   # real user, not root
+SERVICE_USER="${USER}"   # real user, not root  # marketplace-isolation: allow doc-example
 
 case "${1:-status}" in
     install)       do_install ;;

@@ -1,0 +1,9 @@
+{
+  "comment": "marketplace-scoped-installations guard triage: annotate agent-worktrees's SKILL.md docs (own paths + prose mentions of agent-bridge/agent-mcp/agent-codespaces/agent-containers runtime paths) with the established allow deployed-runtime-diagnostics marker; rephrase one frontmatter description to remove a literal path per convention.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "minor"
+    }
+  ]
+}
