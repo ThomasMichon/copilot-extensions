@@ -403,17 +403,51 @@ once every remaining caller is already off the import boundary.
    `_sweep_launcher_shells_on_exit`, `_sweep_finished_sessions_on_cadence`, and
    `_start_picker_monitor_root` become Worktree Manager-owned logic because they
    govern the Picker's own process lifetime, not agent-worktrees' state model.
+   - **Step 3 design (decided before coding).**
+     - **Module home:** the four sweep/cadence functions live in a new
+       `worktree_manager.production_picker.housekeeping` module, with the Picker
+       liveness root ported into sibling module
+       `worktree_manager.production_picker.monitor_roots`. This deliberately
+       does **not** extend the Phase 3b companion mux daemon itself: that daemon
+       is the resident cross-process mux/status writer, while these Group B
+       behaviors are synchronous Picker-launch / Picker-exit / session-end
+       housekeeping owned by the foreground Picker process. The new modules may
+       consult existing Manager-owned runtime files (especially the mux-mapping
+       registry) but do not become a second resident daemon.
+     - **Manager-owned identification rule:** when Step 4 cuts production Picker
+       launches over to this lane, Manager ownership is derived from Manager-
+       owned artifacts rather than ambient cwd heuristics:
+       1. **Mux session names** are Manager-owned when they are present in
+          Worktree Manager's `mux-mapping.json` live mapping registry (the same
+          Phase 3b Sub-slice 3 source that already names the Manager-owned
+          `worktree_id ⇄ mux_session` mapping).
+       2. **Tracking rows / worktree ids** are Manager-owned when their
+          `worktree_id` appears in that live mapping registry **or** their
+          resolved `execution_leg.provider` is `ahp` (the current Manager-owned
+          no-mux/session-host lane). Ordinary zero-provider bundled-Picker
+          sessions continue to belong to agent-worktrees' own generic sweepers.
+       3. **Launcher shells** are Manager-owned when the positive launcher
+          signature resolves to the relocated `worktree-manager/bin/launch-
+          session.*` / `pane-wrapper.*` path (source-tree or installed-slot),
+          rather than agent-worktrees' own launcher path.
+       4. **Picker monitor roots** intentionally reuse the existing
+          `status-monitor-roots.d/picker-*.json` schema so the resident
+          status-monitor can keep consuming Picker liveness without a second
+          protocol change; the ownership split here is about who writes the root
+          (Manager vs agent-worktrees), not about a divergent on-disk format.
+     - **Coordination boundary / skip design:** Step 3 stays additive and does
+       **not** change live agent-worktrees behavior yet. Step 4 will enable the
+       Manager-owned lane and, in the same cutover, teach agent-worktrees'
+       generic lifecycle sweepers to exclude Manager-owned targets by those
+       rules above (or equivalently consume the Manager-produced ownership view)
+       so only one side mutates a given mux session / tracking row / launcher
+       shell lane at a time. This PR therefore lands the ownership helpers and
+       tests now, but defers the actual skip-path activation to Step 4.
    - Introduce a manager-owned housekeeping/runtime module that ports the
      current behavior into worktree-manager under its own tests. Recent
      2026-09-26 promotion-pipeline fixes remove the earlier "cross-repo porting
      is too painful" pressure, so a one-time code port is now acceptable where
      ownership is genuinely moving.
-   - Define the coordination boundary up front: once the Manager-owned sweeper
-     lane is enabled for production Picker sessions, agent-worktrees' generic
-     lifecycle sweepers must either skip those Manager-owned rows/session names
-     entirely or consume the Manager-produced view rather than mutating the same
-     tracking/worktree/session state in parallel. This step is not "copy the
-     code and hope"; it is "establish one owner for these sessions, then port."
    - Keep this step additive: the new local implementation exists and is tested,
      but `runner.py` still uses the current compatibility path until the next
      step performs the actual cutover.

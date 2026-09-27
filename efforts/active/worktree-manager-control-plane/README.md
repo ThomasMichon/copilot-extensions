@@ -786,6 +786,16 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-09-27** — Claiming Phase 3d Step 3 ("Reimplement Group B's
+  Picker-owned lifecycle sweeps directly in worktree-manager, additive
+  first" — `reap_orphan_mux_sessions`, `_sweep_managed_on_exit`,
+  `_sweep_launcher_shells_on_exit`, `_sweep_finished_sessions_on_cadence`,
+  `_start_picker_monitor_root`) per
+  [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md)'s
+  ordered implementation plan. Working solo per standing operator directive;
+  recorded here per this effort's own Coordination-section claiming
+  discipline since #352 is closed.
+
 - **2026-09-27** — Landed Phase 3d Step 2, PR
   [#4322](https://github.com/ThomasMichon/copilot-extensions/pull/4322).
   Promoted Group B's project/config/ssh ownership split into a narrow public
