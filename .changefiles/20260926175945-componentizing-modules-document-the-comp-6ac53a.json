@@ -1,0 +1,9 @@
+{
+  "comment": "componentizing-modules: document the compatibility-root (_core()/monkeypatch-safe cross-call) split shape and fast-moving-base-branch landing discipline, from the agent-worktrees __main__.py handoff-cutover + worktree-creation slices",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}
