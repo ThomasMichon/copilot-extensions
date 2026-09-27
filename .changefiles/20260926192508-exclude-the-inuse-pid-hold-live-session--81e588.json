@@ -1,0 +1,9 @@
+{
+  "comment": "Exclude the inuse.<pid>.hold live-session marker from session-sync so it is skipped like other lock sidecars instead of aborting the entire push with a permission-denied error.",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}
