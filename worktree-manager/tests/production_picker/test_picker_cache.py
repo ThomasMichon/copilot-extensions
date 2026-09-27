@@ -185,6 +185,40 @@ def test_local_classify_load_invokes_group_c_batch_once(monkeypatch):
     assert rows[2]["session_lock_stale"] is True
 
 
+def test_group_c_reconcile_preserves_existing_mux_fields_when_scan_unknown(monkeypatch):
+    monkeypatch.setattr(data_local.context, "project", lambda: "example")
+    monkeypatch.setattr(
+        data_local.engine_client,
+        "list_worktree_rows",
+        lambda *_args, **_kwargs: [
+            {
+                "id": "wt-a",
+                "state": "wip",
+                "mux_session": True,
+                "mux_attached": True,
+                "mux_clients": 2,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        data_local.engine_group_c,
+        "picker_reconcile_local",
+        lambda *_args, **_kwargs: type(
+            "Batch",
+            (),
+            {
+                "rows": [{"id": "wt-a", "session_bound_live": True}],
+                "summary": {"mux_scan_ok": False},
+            },
+        )(),
+    )
+
+    row = data_local.load("machine", "Win", classify=True)[0]
+
+    assert row["mux_live"] is True
+    assert row["attached"] is True
+
+
 class TestWorktreeHasLiveSession:
     """``sessions.worktree_has_live_session`` -- the cheap, registry-targeted
     lock-file ACTIVE probe used by the cache-only first paint."""

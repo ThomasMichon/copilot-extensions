@@ -381,14 +381,8 @@ class PickerScreenLoadingMixin:
         self._prof_loaded = False
         if callable(self._prof_load):
             self.profiles_view.start_load()
-        self._pr_reconciled = False
-        rec_fn = getattr(self.src, "reconcile_prs", None)
-        if callable(rec_fn):
-            self._start_pr_reconcile(rec_fn)
-        self._bound_live_reconciled = False
-        blr_fn = getattr(self.src, "reconcile_bound_live", None)
-        if callable(blr_fn):
-            self._start_bound_live_reconcile(blr_fn)
+        self._pr_reconciled = True
+        self._bound_live_reconciled = True
         self._reconcile_wt_sel()
     def _apply_loader_records(self):
         """Merge incomplete stream prefixes over cached rows."""

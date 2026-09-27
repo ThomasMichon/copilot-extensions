@@ -38,6 +38,7 @@ _GROUP_C_FIELDS = (
     "mux_clients",
     "mux_attached",
 )
+_GROUP_C_MUX_FIELDS = ("mux_session", "mux_clients", "mux_attached")
 
 
 def _local_identity() -> tuple[str, str]:
@@ -122,12 +123,19 @@ def reconcile_bound_live() -> int:
     return int(batch.summary.get("bound_visible_change_count") or 0)
 
 
-def _merge_reconcile_row(raw: dict, reconcile_row: dict | None) -> None:
+def _merge_reconcile_row(
+    raw: dict,
+    reconcile_row: dict | None,
+    *,
+    preserve_mux: bool = False,
+) -> None:
     if not isinstance(reconcile_row, dict):
         return
     for field in _GROUP_C_FIELDS:
         if field in reconcile_row:
             raw[field] = reconcile_row[field]
+        elif preserve_mux and field in _GROUP_C_MUX_FIELDS:
+            continue
         else:
             raw.pop(field, None)
 
@@ -140,13 +148,18 @@ def _overlay_reconcile_rows(
     batch = reconcile_local_batch(worktree_ids=worktree_ids)
     if batch is None:
         return rows
+    preserve_mux = not bool(batch.summary.get("mux_scan_ok", True))
     by_id = {
         str(row.get("id") or ""): row
         for row in batch.rows
         if isinstance(row, dict) and row.get("id")
     }
     for raw in rows:
-        _merge_reconcile_row(raw, by_id.get(str(raw.get("id") or "")))
+        _merge_reconcile_row(
+            raw,
+            by_id.get(str(raw.get("id") or "")),
+            preserve_mux=preserve_mux,
+        )
     return rows
 
 
