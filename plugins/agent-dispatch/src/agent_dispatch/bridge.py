@@ -36,6 +36,7 @@ from .procutil import (
     no_window_kwargs,
     run_ssh_command,
 )
+from .worker_charter import OPERATING_PROCEDURES_CHARTER_NAME
 
 # Re-exported from bridge_agent_registry (extracted for module size) so
 # every existing `bridge.X` call/patch site is unaffected.
@@ -118,13 +119,14 @@ def worker_prompt(task_id: str, *, worker_id: str, route: str = "") -> str:
     worker (the caller rejects that combination); routing is by discovery or a
     stable moniker only.
 
-    This is a **thinner** seed than :func:`agent_dispatch.embody_prompts.
-    autopilot_worker_prompt`: no contract-net evaluation window, no
-    duplicate/feasibility check, no goal/progress loop. It still points the
-    worker at the universal ``operating-procedures`` charter so it at least
-    picks up the tool-calls-not-prose / fail-fast / every-turn-ends contract;
-    see ``create_cli.py``'s embody-unavailable fallback for the loud warning
-    this gap prints when this thinner seed is actually the one used.
+    This is still a **thinner** seed than
+    :func:`agent_dispatch.embody_prompts.autopilot_worker_prompt`: it remains
+    the embody-unavailable fallback, so it does not invent the autopilot
+    contract-net / goal-loop guidance that only the richer seed owns. It does,
+    however, follow the same short "event + charter pointers + concrete
+    commands" shape so the universal operating-procedures contract is never
+    re-inlined per event. See ``create_cli.py``'s embody-unavailable fallback
+    for the loud warning this thinner seed prints when this path is used.
     """
     ad = f"agent-dispatch{route}"
     if route:
@@ -135,10 +137,11 @@ def worker_prompt(task_id: str, *, worker_id: str, route: str = "") -> str:
             "command resolves the live local coordinator "
         )
     return (
-        f"You are an agent-dispatch task worker (worker id: {worker_id}). "
-        f"A task has been queued for you. {discover}for each command. If you "
-        f"have not already read this session's operating procedures, run "
-        f"`{ad} charter show operating-procedures` first. "
+        f"You are an agent-dispatch task worker (worker id: {worker_id}). Task "
+        f"{task_id} is queued for you. {discover}for each command. Start by "
+        f"reading this session's operating procedures now: `{ad} charter show "
+        f"{OPERATING_PROCEDURES_CHARTER_NAME}`. The steps below are only the "
+        f"per-invocation mechanics. "
         f"Steps: (1) read it with `{ad} show {task_id}`; "
         f"(2) claim it with `{ad} claim {task_id} --worker {worker_id}` "
         f"(add `--capability <cap>` for each capability the task requires); "
@@ -146,7 +149,10 @@ def worker_prompt(task_id: str, *, worker_id: str, route: str = "") -> str:
         f"`{ad} steer take {task_id} {worker_id} --all` and incorporate any "
         f"pending operator guidance before doing the work described in the "
         f"task's prompt/payload; "
-        f"(4) `{ad} complete {task_id} {worker_id} --result-ref <ref>`. "
+        f"(4) record any real status transitions with `{ad} progress "
+        f"{task_id} {worker_id} --phase <phase> --summary "
+        f'"<one line>"`; '
+        f"(5) `{ad} complete {task_id} {worker_id} --result-ref <ref>`. "
         f"On a recoverable snag, `{ad} yield {task_id} {worker_id} "
         f"--note <why>` returns it to the queue."
     )

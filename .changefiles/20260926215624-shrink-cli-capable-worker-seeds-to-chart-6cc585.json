@@ -1,0 +1,9 @@
+{
+  "comment": "Shrink CLI-capable worker seeds to charter pointers",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

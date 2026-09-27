@@ -6,16 +6,11 @@ decline/duplicate/complete conventions -- was rebuilt and inlined verbatim
 into **every** seed by :func:`agent_dispatch.embody.autopilot_worker_prompt`,
 regardless of the triggering event or whether the worker already learned this
 material earlier in the same session. This module gives that policy prose one
-authoritative, independently-revisable home so a seed can instead be short and
-task-specific, pointing a worker at the ``agent-dispatch charter show`` command
-to pull the full text only when it needs it (typically once, the first time it
-embodies in a session) -- concise-event-then-charter-pull, per the
+authoritative, independently-revisable home so seeds can stay short and
+task-specific, pointing workers at ``agent-dispatch charter show`` to pull the
+full text only when they need it -- concise-event-then-charter-pull, per the
 ``agent-dispatch`` vision's ``concise-event-then-charter-pull`` /
 ``preloaded-dispatch-supplement`` goals.
-
-Existing callers are unaffected: every current call site keeps building the
-always-inlined legacy seed (``concise=False``); this module only adds a
-second, additive, opt-in way to build a much shorter one.
 
 **Two kinds of charter, not one.** ``autopilot`` (and any future
 ``reviewer``/``goal-driven``/etc. charter) is *task-type* policy: what this
