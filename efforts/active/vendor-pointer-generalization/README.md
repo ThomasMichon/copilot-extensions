@@ -25,9 +25,13 @@
   incomplete trial, and shipped a working alternative
   (`VENDOR_POINTER.json` `kind=src-passthrough`) before this effort's own
   Phase 1 execution caught up to it. Phase 1 then formally adopted
-  `src-passthrough` and converted 7 real libs with it (PRs #3810, #3904,
-  #3917, #3929, #3971, #4004) — see the 2026-09-26 "Course correction"
-  Journal entry for that decision's own rationale.
+  `src-passthrough` and converted 7 real libs with it: `lazy-cli-dispatch`
+  (PR #3790, from the unrelated `agent-cli-lazy-dispatch` effort that
+  originated the mechanism, adopted by this effort's own Phase 1 rather
+  than reconverted) plus 6 more converted directly by this effort's own
+  Phase 1 execution (PRs #3810, #3904, #3917, #3929, #3971, #4004) — see
+  the 2026-09-26 "Course correction" Journal entry for that decision's
+  own rationale.
   **That decision is now ALSO superseded.** A second, deeper empirical
   test (see the 2026-09-27 "Second course correction" Journal entry)
   found `src-passthrough` has a real STRUCTURAL weakness the first
@@ -189,9 +193,13 @@ committing to it:**
     an immediate `ImportError` in production. Promotion **must** rewrite
     the reference, not just copy content alongside it.
 - **At promotion (`materialize_main.py`), for every `[tool.uv.sources]`
-  entry whose `path` escapes the plugin's own directory** (i.e. resolves
-  outside it, up toward the shared canonical root — reuse `_escapes_root()`
-  from the existing containment work to detect this):
+  entry whose `path` escapes the CONSUMING PROJECT's own root** (a
+  plugin's `plugins/<plugin>/`, or `worktree-manager/` for that
+  extra top-level consumer — not just "the plugin's own directory": a
+  trigger scoped to plugins alone would skip `worktree-manager`'s own
+  `../libs/<lib>` reference entirely, i.e. resolves outside that root, up
+  toward the shared canonical root — reuse `_escapes_root()` from the
+  existing containment work to detect this):
   1. Physically copy the canonical `libs/<lib>` directory's **complete
      tree** — `src/`, `README.md`, and `tests/` (when the shipped payload
      is expected to carry one) — and sync the `pyproject.toml` version,
@@ -361,9 +369,11 @@ fail-closed hardening, still blocked on the dev-time resolver decision):
 > via relative path, and after the vendoring, C, would be copied into A
 > and B's node_modules folders directly.
 
-See the 2026-09-26 "Course correction" Journal entry for the resolution
-actually adopted (the Design Decision above documents the original,
-since-superseded resolution).
+See the 2026-09-27 "Second course correction" Journal entry for the
+resolution now in effect: the Design Decision above IS the effort's
+current, active plan again (after a temporary detour to `src-passthrough`,
+documented in the 2026-09-26 "Course correction" entry — that detour is
+itself now superseded, not the design above).
 
 ## Plan
 
