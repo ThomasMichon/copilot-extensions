@@ -353,7 +353,7 @@ launch/monitor ownership has moved out of `agent-worktrees`, the Picker treats
 backend vs. presentation as independent axes, and legacy `session_backend`
 bindings still resolve correctly through the compatibility view.
 
-### Phase 3c — Picker non-blocking I/O (Planned — ordered migration plan authored, implementation not started)
+### Phase 3c — Picker non-blocking I/O (In progress — Step 1 landed, Steps 2-5 open)
 - [ ] Make every I/O-touching Picker surface — pivot loads (built-in and
       plugin-contributed), menu opens, and action execution with progress
       reporting — consistently non-blocking, closing the gap found while
@@ -370,7 +370,13 @@ bindings still resolve correctly through the compatibility view.
       background-task primitive, migrating `setup()` onto it, a regression
       guard against future synchronous menu-opens, and a cross-repo proposal
       for built-in-verb progress percentages):
-      [`phase-3c-non-blocking-io.md`](phase-3c-non-blocking-io.md).
+      [`phase-3c-non-blocking-io.md`](phase-3c-non-blocking-io.md). **Step 1
+      landed in PR [#3903](https://github.com/ThomasMichon/copilot-extensions/pull/3903)**:
+      additive-only `_setup_epoch` / `_start_setup_reload_worker()` seam,
+      extracted `_collect_setup_payload()` / `_apply_setup_payload()`, reusable
+      `wait_for_current_setup_epoch_applied` test helper, and isolated contract
+      tests; the four production call sites still use synchronous `setup()`
+      exactly as before.
 
 ### Phase 3d — Retire the Picker's in-process engine-module boundary (Planned — #3359, #3360)
 
@@ -712,6 +718,49 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-09-26** — Landed Phase 3c Step 1, PR
+  [#3903](https://github.com/ThomasMichon/copilot-extensions/pull/3903).
+  Added the additive-only epoch-guarded setup/reload seam in
+  `worktree-manager`: `PickerScreen` now owns `_setup_epoch`,
+  `_setup_applied_epoch`, `_setup_failed_epoch`, and the dedicated
+  `_start_setup_reload_worker()` launcher, while synchronous `setup()` was
+  split into `_prime_setup_reload()` + `_collect_setup_payload()` +
+  `_invalidate_setup_reload_caches()` + `_apply_setup_payload()` with no
+  caller cutover yet. Added the reusable async test helper
+  `wait_for_current_setup_epoch_applied` in
+  `tests/production_picker/conftest.py`, and new
+  `test_setup_reload_epoch.py` contract coverage for supersession,
+  stale-failure, teardown-drop, and atomic-apply behavior. Explicitly
+  re-verified scope discipline before merge: `engine_loading.on_mount`, the
+  `r` reload handler in `engine_input.py`, `_run_config_section()`'s `_done`,
+  and `_run_wt_action()`'s `_done` all still call synchronous `setup()`
+  exactly as before. Copilot review surfaced three real follow-up fixes
+  before merge: synchronous `setup()` now advances the shared epoch too (so
+  it supersedes any older worker), discarded live payloads cancel their
+  unowned `LiveLoader` before returning, and the supersession tests now
+  serialize the first worker's start before launching the second so the
+  contract is deterministic instead of scheduler-dependent. A later review
+  round found one more real teardown race: a live setup payload whose
+  callback had already been marshalled to the UI thread could still leak its
+  `LiveLoader` if the picker unmounted before that callback ever ran, so the
+  final tree now tracks pending setup payloads explicitly, disposes them from
+  `on_unmount`, and covers both the marshal-failed and callback-dropped
+  disposal paths in the new test file. The last follow-up was ownership
+  transfer itself: applying a newer live payload now cancels the previously
+  owned loader before replacing `self.loader`, with a dedicated regression
+  test so repeated live reloads cannot accumulate orphaned loaders. The final
+  review round also closed the apply-failure ownership gap by disposing a
+  collected payload if `_invalidate_setup_reload_caches()` or
+  `_apply_setup_payload()` raises after the payload has already been popped out
+  of the pending map, including the still-live synchronous `setup()` path.
+  Validation:
+  targeted
+  `tests/production_picker/test_setup_reload_epoch.py` +
+  `test_picker_first_paint.py` green; full `worktree-manager` suite matched
+  the machine's known baseline at `1473 passed, 7 skipped, 13 failed`
+  (unchanged: 3 unrelated `test_data_ssh_sources.py` failures plus 10
+  Windows symlink-privilege failures).
 
 - **2026-09-26** — Closed the final two Phase 3b follow-on checkboxes, PR
   [#3891](https://github.com/ThomasMichon/copilot-extensions/pull/3891).

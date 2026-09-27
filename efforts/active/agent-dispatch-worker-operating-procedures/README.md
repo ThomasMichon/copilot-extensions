@@ -165,6 +165,26 @@ its `clean-room-judge` under literal mode (the "does the agent stay
 mechanical, or does it improvise around an obstacle" question literal mode
 already exists to answer). See the new Phase 5 below.
 
+**Round 5 (verbatim, resolving Phase 1's flagged interactive-embodiment
+tension):**
+
+> interactive_worker_prompt is valid for non-headless workers, i.e. ones
+> launched wrapped with mux without --acp. Should the task block, ideally
+> it would still make a tool call to update the task, so the user knows to
+> open the session directly.
+
+This resolves Phase 1's flagged tension without a carve-out: an interactive
+(mux, non-ACP) session is still a dispatch worker, not an agent-bridge
+companion, and *status-through-tool-calls-not-prose* applies to it exactly
+as written — the operator watching the pane is not guaranteed to be
+attached at the moment the agent needs input, so a bare in-pane question
+alone leaves the task's own status silent. The fix (already implemented,
+see Phase 2's first item below): the agent records the block with a
+durable card/progress tool call **first** — so the task's status itself
+tells the operator to come open this session — and only *then* pauses in
+the pane for whenever the operator attaches. This was small and
+well-scoped enough to implement immediately rather than deferring further.
+
 ## Plan
 
 ### Phase 1 — Canonical operating-procedures doc + fix the sweep's concrete bugs ✅ landed
@@ -222,19 +242,21 @@ resolve this explicitly rather than silently pick a side -- flagging it here
 rather than deciding it unreviewed mid-Phase-1.
 
 ### Phase 2 — Shrink CLI-capable-tier prompts to event descriptors
-- [ ] Resolve the interactive-embodiment tension found in Phase 1 (above)
-      before touching `interactive_worker_prompt()`: does an operator-watched
-      interactive session get a narrower carve-out from
-      *status-through-tool-calls-not-prose* (it has a live reader too, just
-      one who is also the task's own operator, not a bridge controller), or
-      does it lose the "pause and ask directly" affordance now that the
-      universal contract exists? Write the decision down.
-- [ ] Redesign `autopilot_worker_prompt()`, `interactive_worker_prompt()`,
-      and the unified `bridge`/fleet seed for a worker that **can** reach
+- [x] **Resolved (Round 5): no carve-out.** An interactive (mux, non-ACP)
+      session is still a dispatch worker, not an agent-bridge companion, so
+      *status-through-tool-calls-not-prose* applies as written: a block gets
+      recorded with a durable card/progress tool call **first**, so the
+      task's own status tells the operator to come open the session, and
+      only *then* does the agent pause in the pane. Implemented in
+      `interactive_worker_prompt()` ahead of the rest of this phase, since it
+      was small and well-scoped enough not to hold for the full redesign.
+- [ ] Redesign `autopilot_worker_prompt()`'s full/concise modes and the
+      unified `bridge`/fleet seed for a worker that **can** reach
       agent-dispatch directly: a short, event-classified descriptor plus one
       pointer command to the Phase 1 doc (and the task's own charter, if
       any) — generalizing `autopilot_worker_prompt(concise=True)`'s existing
-      shape rather than inventing a new one.
+      shape rather than inventing a new one. (`interactive_worker_prompt()`
+      itself is done, above.)
 - [ ] Apply the same shrink to the live-nudge sites: `idle_confirm_message()`,
       `spawn_factories._default_nudge()`, `resume_steered_owner()`'s default
       message, and `queue_suspend.reconcile_cooldowns()`'s wake message —
@@ -375,3 +397,20 @@ _Pending._
   Folded into this same pre-Phase-1 state rather than a separate plan-only
   PR, since no Phase 1 code has landed yet to conflict with.
 - Beginning Phase 1 now.
+
+### 2026-09-26 — Phase 1 lands (#3922); Round 5 resolves and closes the interactive-embodiment tension
+- Phase 1 merged: the `operating-procedures` charter, the fleet lane-bug
+  fix, the loud embody-fallback warning, and the untrusted-content framing
+  propagation. Full suite: 3475 passed, 19 skipped, one confirmed
+  pre-existing flake. Worktree synced forward.
+- Before starting the rest of Phase 2, the operator resolved Phase 1's
+  flagged tension (Round 5, see Request above): no carve-out for interactive
+  sessions -- a block still goes through a durable tool call first (a card
+  or a progress `--blocker`), specifically because the operator watching a
+  mux/non-ACP pane may not be attached at that exact moment. Implemented
+  immediately in `interactive_worker_prompt()` (small, well-scoped, directly
+  unblocks the rest of Phase 2 rather than waiting).
+- Continuing Phase 2 with the remaining items (redesigning the
+  autopilot/bridge/fleet seeds and the live-nudge sites to event
+  descriptors).
+

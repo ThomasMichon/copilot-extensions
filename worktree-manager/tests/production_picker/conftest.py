@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import pathlib
 import subprocess
 import sys
+import time
 import urllib.error
 
 import pytest
@@ -245,3 +247,29 @@ def pytest_unconfigure(config):
     original = getattr(current, "_wm_picker_original", None)
     if original is not None:
         subprocess.Popen.__init__ = original
+
+
+async def _wait_for_current_setup_epoch_applied(
+    pilot,
+    screen,
+    *,
+    timeout: float = 5.0,
+) -> int:
+    """Pause until ``screen``'s current setup epoch has applied."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        current = getattr(screen, "_setup_epoch", 0)
+        if current != 0 and getattr(screen, "_setup_applied_epoch", 0) == current:
+            return current
+        await pilot.pause()
+        await asyncio.sleep(0.01)
+    current = getattr(screen, "_setup_epoch", 0)
+    applied = getattr(screen, "_setup_applied_epoch", 0)
+    raise AssertionError(
+        f"timed out waiting for setup epoch {current} to apply (applied={applied})"
+    )
+
+
+@pytest.fixture(name="wait_for_current_setup_epoch_applied")
+def _wait_for_current_setup_epoch_applied_fixture():
+    return _wait_for_current_setup_epoch_applied

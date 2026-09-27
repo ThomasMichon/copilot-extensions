@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=83.0.0"]
+requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -18,7 +18,7 @@ authors = [
 # YAML read/write is the only non-stdlib need (migrate_file). migrate_doc /
 # the registry are pure-stdlib.
 dependencies = [
-    "pyyaml>=6.0.3",
+    "pyyaml>=6.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -30,7 +30,7 @@ line-length = 99
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=9.1.1",
+    "pytest>=8.0",
 ]
 
 [tool.ruff.lint]

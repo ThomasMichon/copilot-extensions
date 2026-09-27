@@ -1,4 +1,4 @@
-"""Regression tests for the internal-identifier pre-push guard (#541).
+"""Regression tests for the internal-identifier pre-push guard (#541, #3923).
 
 The guard used to scan the *entire* tracked tree, so a pre-existing identifier
 in an untouched file blocked every unrelated push. It now scans only the push
@@ -10,6 +10,8 @@ Run:  python -m pytest tools/test_check_no_internal_identifiers.py
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import shutil
 import subprocess
 import sys
@@ -19,6 +21,8 @@ import pytest
 
 SCRIPT = Path(__file__).resolve().parent / "check-no-internal-identifiers.py"
 LEAK = "acme-internal-id"
+CI_TOKEN = "widget-facility"
+CI_REASON = "replace with generic widget | never name the facility"
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -101,3 +105,146 @@ def test_diff_scope_still_catches_introduced_leak(repo: Path):
     result = _run(repo)
     assert result.returncode == 1
     assert LEAK in result.stdout
+
+
+def test_load_identifier_data_merges_plain_and_ci_sources_without_duplicates(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+):
+    module = _load_module(repo)
+    home_dir = repo / "home"
+    home_dir.mkdir()
+    monkeypatch.setattr(module, "HOME_LIST", home_dir / ".agent-codespaces" / "forbidden-identifiers.txt")
+    monkeypatch.setenv(
+        "COPILOT_EXTENSIONS_FORBIDDEN_IDS",
+        f"{LEAK},{CI_TOKEN},CaseOnly,",
+    )
+    monkeypatch.setenv(
+        module.CI_LIST_ENV,
+        f"{CI_TOKEN}|{CI_REASON};second-token|why this matters\ncaseonly|reason that loses\n",
+    )
+    (home_dir / ".agent-codespaces").mkdir()
+    (home_dir / ".agent-codespaces" / "forbidden-identifiers.txt").write_text(
+        "# comment\nthird-token\nSECOND-token\n",
+        encoding="utf-8",
+    )
+
+    identifiers, reasons = module._load_identifier_data()
+
+    assert identifiers == [
+        LEAK,
+        CI_TOKEN,
+        "caseonly",
+        "third-token",
+        "second-token",
+    ]
+    assert reasons == {
+        CI_TOKEN: CI_REASON,
+        "second-token": "why this matters",
+        "caseonly": "reason that loses",
+    }
+
+
+def test_ci_loader_splits_first_pipe_only(repo: Path):
+    module = _load_module(repo)
+    assert module._load_ci_identifiers(
+        f"{CI_TOKEN}|{CI_REASON};other-token|simple reason\nbare-token"
+    ) == [
+        (CI_TOKEN, CI_REASON),
+        ("other-token", "simple reason"),
+        ("bare-token", None),
+    ]
+
+
+def test_json_out_writes_hashed_findings_without_raw_token_or_reason(repo: Path, tmp_path: Path):
+    _write(repo, "plugins/new/clean.txt", f"oops {CI_TOKEN} sneaked in\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "introduce ci leak")
+    json_out = tmp_path / "findings.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(repo / "tools" / SCRIPT.name),
+            "--json-out",
+            str(json_out),
+        ],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        env={
+            **_base_env(),
+            "COPILOT_EXTENSIONS_FORBIDDEN_IDS": LEAK,
+            "COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI": f"{CI_TOKEN}|{CI_REASON}",
+        },
+    )
+
+    assert result.returncode == 1
+    payload_text = json_out.read_text(encoding="utf-8")
+    assert CI_TOKEN not in payload_text
+    assert "generic widget" not in payload_text
+    payload = json.loads(payload_text)
+    assert payload == [
+        {
+            "file": "plugins/new/clean.txt",
+            "line": 1,
+            "col": 6,
+            "identifier_hash": hashlib.sha256(CI_TOKEN.encode("utf-8")).hexdigest(),
+            "has_reason": True,
+        }
+    ]
+
+
+def test_ci_mode_stdout_is_count_only(repo: Path):
+    _write(repo, "plugins/new/clean.txt", f"oops {CI_TOKEN} sneaked in\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "introduce ci leak")
+    result = subprocess.run(
+        [sys.executable, str(repo / "tools" / SCRIPT.name), "--ci"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        env={
+            **_base_env(),
+            "COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI": f"{CI_TOKEN}|{CI_REASON}",
+        },
+    )
+
+    assert result.returncode == 1
+    assert CI_TOKEN not in result.stdout
+    assert CI_REASON not in result.stdout
+    assert (
+        "1 forbidden identifier(s) found -- see PR review comments for details."
+        in result.stdout
+    )
+
+
+def test_scan_tracks_first_column_for_multi_occurrence_line(repo: Path):
+    module = _load_module(repo)
+    _write(repo, "plugins/new/clean.txt", f"prefix {LEAK} middle {LEAK} suffix\n")
+    violations = module._scan(
+        ["plugins/new/clean.txt"],
+        [LEAK],
+        {},
+    )
+
+    assert violations == [
+        module.Violation(
+            path="plugins/new/clean.txt",
+            line=1,
+            col=8,
+            identifier=LEAK,
+            reason=None,
+        )
+    ]
+
+
+def _load_module(repo: Path):
+    import importlib.util
+    import sys as _sys
+
+    spec = importlib.util.spec_from_file_location("check_no_internal_identifiers", repo / "tools" / SCRIPT.name)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    _sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module

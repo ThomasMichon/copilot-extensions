@@ -1,11 +1,12 @@
 # Phase 3c — Picker non-blocking I/O
 
 - **Parent effort:** [`README.md`](README.md) § Phase 3c
-- **Scope of this doc:** planning only. This is the ordered implementation plan
-  for making the Picker's remaining I/O-touching setup/reload path
-  consistently non-blocking; no production code has landed for this slice yet.
-- **Status:** Planned — ordered migration plan authored, implementation not
-  started.
+- **Scope of this doc:** the ordered implementation plan for making the
+  Picker's remaining I/O-touching setup/reload path consistently non-blocking,
+  plus landed-step notes as each ordered slice merges.
+- **Status:** In progress — Step 1 merged 2026-09-26 as
+  [#3903](https://github.com/ThomasMichon/copilot-extensions/pull/3903);
+  Steps 2-5 remain open.
 - **Governing visions:**
   - [`visions/picker`](../../../visions/picker/README.md):
     §Features/`decision-support-before-cost`, `programmatic-parity`;
@@ -162,8 +163,27 @@ Each step lands as its own PR. The sequence stays additive first, then performs
 one crisp cutover from synchronous `setup()` callers to the epoch-guarded path,
 then tightens regression coverage and cleanup.
 
-1. **Add the epoch-guarded setup-reload primitive and reusable async-test
-   helper, unused.**
+[x] **Step 1 — add the epoch-guarded setup-reload primitive and reusable
+      async-test helper, unused.** Landed in
+      [#3903](https://github.com/ThomasMichon/copilot-extensions/pull/3903):
+      added the screen-owned `_setup_epoch` / `_setup_applied_epoch` /
+      `_setup_failed_epoch` counters plus `_start_setup_reload_worker()` as an
+      additive, still-unused epoch-guarded launcher; extracted synchronous
+      `setup()` into `_collect_setup_payload()` + `_apply_setup_payload()`
+      seams with `_prime_setup_reload()` / `_invalidate_setup_reload_caches()`
+      split around them; added the reusable
+      `wait_for_current_setup_epoch_applied` test helper in
+      `tests/production_picker/conftest.py`; and added
+      `test_setup_reload_epoch.py` covering supersession, stale-failure,
+      teardown-drop, and atomic-apply contract behavior. The four production
+      callers remain unchanged in this PR (`engine_loading.on_mount`,
+      `engine_input`'s `r` handler, `_run_config_section()`'s `_done`, and
+      `_run_wt_action()`'s `_done` still call synchronous `setup()` exactly as
+      before). Validation: targeted `test_setup_reload_epoch.py` +
+      `test_picker_first_paint.py` green; full `worktree-manager` suite
+      matched the known Windows baseline at `1473 passed, 7 skipped, 13 failed`
+      (the same 3 unrelated `test_data_ssh_sources.py` failures plus 10
+      symlink-privilege failures on this machine).
    - Add the screen-owned setup epoch and a dedicated helper for scheduling a
      setup/reload worker plus applying only-current results.
    - Extract the synchronous `setup()` work into explicit "collect payload" and

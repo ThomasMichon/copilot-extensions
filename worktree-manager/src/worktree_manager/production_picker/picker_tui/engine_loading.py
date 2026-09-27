@@ -497,6 +497,9 @@ class PickerScreenLoadingMixin:
         # running at this moment drops its outcome quietly instead of logging a
         # "could not marshal" warning for what is really just this expected exit.
         self._bg_cancel.set()
+        disposer = getattr(self, "_dispose_pending_setup_payloads", None)
+        if callable(disposer):
+            disposer()
         # Kill any in-flight SSH prefetch so it never orphans into a heavy
         # git-classify churning on the machine we're about to hand off into --
         # the picker perf bug where Copilot "slows to a crawl" after launch.
