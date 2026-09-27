@@ -2690,6 +2690,9 @@ def _wire_restart(monkeypatch, *, lock_data, live, superseded, spawn_ok=True):
         return True
 
     monkeypatch.setattr(_procs, "terminate_pid", _term)
+    import agent_worktrees.stale_runtime_reap as _srr
+
+    monkeypatch.setattr(_srr, "reap", lambda cfg: [])
     return spawned, reaped, removed
 
 
@@ -2745,6 +2748,64 @@ def test_cmd_restart_always_exits_zero(monkeypatch, capsys):
     rc = m.cmd_status_monitor_restart(argparse.Namespace())
     assert rc == 0
     assert "status-monitor:" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# stale_runtime_reap.reap() wiring into _restart_status_monitor -- #4268: a
+# one-shot CLI verb invocation mid-flight on a superseded runtime slot has no
+# self-check of its own (only the resident monitor loop rechecks
+# `_runtime_superseded` each tick), so it can wedge and pile up across every
+# deploy it survives unless the cutover reap also sweeps for it, not just the
+# monitor's own known lock pid. See test_stale_runtime_reap.py for the pure
+# `reap()`/`summary_bits()`/`summary_suffix()` unit tests.
+# ---------------------------------------------------------------------------
+
+
+def test_restart_reports_stale_runtime_reaped_alongside_monitor_reap(monkeypatch):
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    _wire_restart(
+        monkeypatch, lock_data={"pid": 4242, "prefix": "/old/slot"}, live=True, superseded=True
+    )
+    import agent_worktrees.stale_runtime_reap as _srr
+
+    monkeypatch.setattr(_srr, "reap", lambda cfg: [111, 333])
+
+    r = m._restart_status_monitor()
+
+    assert r["stale_runtime_reaped"] == [111, 333]
+    assert r["reaped"] == 4242  # the monitor's own lock-pid reap still runs too
+
+
+def test_restart_sweeps_stale_runtime_even_when_monitor_already_current(monkeypatch):
+    # The general sweep is independent of the singleton monitor's own state --
+    # a wedged one-shot verb invocation can exist on an old slot even when the
+    # CURRENT monitor already owns the host.
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    _wire_restart(
+        monkeypatch, lock_data={"pid": 999, "prefix": "/cur/slot"}, live=True, superseded=False
+    )
+    import agent_worktrees.stale_runtime_reap as _srr
+
+    monkeypatch.setattr(_srr, "reap", lambda cfg: [111])
+
+    r = m._restart_status_monitor()
+
+    assert r["already_current"] is True
+    assert r["stale_runtime_reaped"] == [111]
+
+
+def test_cmd_restart_reports_stale_runtime_reap_count(monkeypatch, capsys):
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    _wire_restart(monkeypatch, lock_data=None, live=False, superseded=False)
+    import agent_worktrees.stale_runtime_reap as _srr
+
+    monkeypatch.setattr(_srr, "reap", lambda cfg: [111, 222])
+
+    rc = m.cmd_status_monitor_restart(argparse.Namespace())
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "reaped 2 stale-runtime process(es)" in out
 
 
 def test_installers_invoke_monitor_restart_at_cutover():

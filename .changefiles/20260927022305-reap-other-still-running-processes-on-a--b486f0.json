@@ -1,0 +1,9 @@
+{
+  "comment": "Reap other still-running processes on a superseded runtime slot at cutover (status-monitor-restart), not just the monitor's own known lock pid -- a one-shot CLI verb invocation mid-flight on an outgoing version has no _runtime_superseded self-check of its own and can wedge/pile up across every deploy it survives (#4268)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
