@@ -744,7 +744,7 @@ claiming discipline alone.
   targeted
   `tests/production_picker/test_setup_reload_epoch.py` +
   `test_picker_first_paint.py` green; full `worktree-manager` suite matched
-  the machine's known baseline at `1468 passed, 7 skipped, 13 failed`
+  the machine's known baseline at `1469 passed, 7 skipped, 13 failed`
   (unchanged: 3 unrelated `test_data_ssh_sources.py` failures plus 10
   Windows symlink-privilege failures).
 

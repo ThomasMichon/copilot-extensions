@@ -523,6 +523,10 @@ class PickerScreenRuntimeMixin:
         self._prime_setup_reload()
         epoch = self._next_setup_epoch()
         cancel = self._bg_cancel
+        try:
+            app = self.app
+        except Exception:
+            app = None
 
         def _worker():
             payload = None
@@ -541,12 +545,20 @@ class PickerScreenRuntimeMixin:
                     return
                 if err is not None:
                     self._apply_setup_failure(epoch, err)
+                    self.refresh()
                     return
                 self._invalidate_setup_reload_caches()
                 self._apply_setup_payload(payload)
                 self._setup_applied_epoch = epoch
+                self.refresh()
 
-            self._apply_from_worker(_apply)
+            if app is None:
+                self._dispose_setup_payload(payload)
+                return
+            try:
+                app.call_from_thread(_apply)
+            except Exception:
+                self._dispose_setup_payload(payload)
 
         threading.Thread(
             target=_worker, name=f"picker-setup-reload:{epoch}", daemon=True

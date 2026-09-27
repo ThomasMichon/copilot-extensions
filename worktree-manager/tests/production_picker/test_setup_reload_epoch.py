@@ -14,7 +14,10 @@ from worktree_manager.production_picker.picker_tui.engine_helpers import (
     _DEFAULT_HOST_COLS,
     _DEFAULT_TARGET_ENVS,
 )
-from worktree_manager.production_picker.picker_tui.engine_runtime import _SetupPayload
+from worktree_manager.production_picker.picker_tui.engine_runtime import (
+    PickerScreenRuntimeMixin,
+    _SetupPayload,
+)
 
 
 def _fixture_source():
@@ -97,6 +100,55 @@ async def _settle_threads(*events: threading.Event) -> None:
             return
         await asyncio.sleep(0.01)
     raise AssertionError("timed out waiting for setup workers to finish")
+
+
+def test_setup_reload_disposes_payload_when_marshal_back_to_ui_fails():
+    disposed = threading.Event()
+
+    class _Loader:
+        def cancel(self):
+            disposed.set()
+
+    class _App:
+        def call_from_thread(self, fn):
+            raise RuntimeError("app already exited")
+
+    class _Screen(PickerScreenRuntimeMixin):
+        def __init__(self):
+            self.app = _App()
+            self._bg_cancel = threading.Event()
+            self._setup_epoch = 0
+            self._setup_applied_epoch = 0
+            self._setup_failed_epoch = 0
+            self.applied = []
+
+        def _prime_setup_reload(self):
+            return None
+
+        def _collect_setup_payload(self):
+            return _payload("live").__class__(
+                **{
+                    **_payload("live").__dict__,
+                    "loader": _Loader(),
+                }
+            )
+
+        def _invalidate_setup_reload_caches(self):
+            return None
+
+        def _apply_setup_payload(self, payload):
+            self.applied.append(payload)
+
+        def _apply_setup_failure(self, epoch, err):
+            raise AssertionError(f"unexpected failure path: {epoch} {err}")
+
+        def refresh(self):
+            return None
+
+    screen = _Screen()
+    screen._start_setup_reload_worker()
+    assert disposed.wait(timeout=5)
+    assert screen.applied == []
 
 
 def test_setup_reload_supersession_discards_stale_success(
