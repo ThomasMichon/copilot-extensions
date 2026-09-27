@@ -859,12 +859,17 @@ def claim(
             held = leases.get(codespace)
             if held and _claim_owner(held) != owner:
                 holder = _claim_owner(held)
-                if _worktree_alive(holder, active) and not force:
+                from .driving_worktrees import same_worktree_family
+
+                family = same_worktree_family(holder, owner)
+                if _worktree_alive(holder, active) and not force and not family:
                     raise ClaimConflict(codespace, holder, held.host, held.pid)
                 log.info(
                     "Taking CodeSpace '%s' claim from '%s' for '%s' (%s)",
                     codespace, holder, owner,
-                    "forced" if force else "prior owner gone",
+                    "forced" if force
+                    else "same worktree family" if family
+                    else "prior owner gone",
                 )
             now = time.time()
             keep_acquired = (

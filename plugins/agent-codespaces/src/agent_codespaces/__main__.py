@@ -3892,24 +3892,22 @@ def _cmd_create(args: argparse.Namespace) -> int:
 
     config = load_merged_config()
 
-    # Phase 2 (#708): reuse-before-create + budget-not-exceeded. Consult the pool
-    # planner before spending an account slot -- prefer reusing a suitable idle
-    # box, and refuse to over-provision past the core budget. Degrade-safe: any
-    # planner failure falls through to a plain create (never wedge a legit
-    # create). ``--force-create`` skips the guard entirely.
+    # Phase 2b (#708): resume this workstream's own claimed box, never a
+    # stranger's idle one; degrade-safe. ``--force-create`` skips this.
     if not getattr(args, "force_create", False):
         try:
+            from .driving_worktrees import resolve_current_workstream_box
             _members, _budget = pool_mod.build_pool()
             decision = pool_mod.plan_allocation(
                 _members, _budget, repo=args.repo,
                 new_cores=_intended_cores(config, args.repo),
-            )
+                workstream_box=resolve_current_workstream_box(_members, args.repo))
         except Exception:
             decision = None
         if decision is not None and decision.action == pool_mod.ALLOC_REUSE:
             print(f"[reuse] {decision.reason}")
             print(
-                f"A suitable idle CodeSpace already exists -- reuse "
+                f"This workstream already has a CodeSpace -- reuse "
                 f"'{decision.codespace}' (ssh/borrow) instead of creating a new "
                 f"box, or pass --force-create to create anyway.",
                 file=sys.stderr,
@@ -4348,13 +4346,10 @@ _ALLOC_PRESSURE_EXIT = 4
 
 def _cmd_allocate(args: argparse.Namespace) -> int:
     """Resolve a venue request for ``repo`` to a reuse/create/recycle/pressure
-    decision (Phase 2 / #708) -- the reuse-before-create, budget-bounded planner.
-
-    Advisory + read-only: it *decides* (which box to reuse, whether to create,
-    which stale box to recycle, or that the pool is full), the caller acts. Exit
-    ``0`` for an actionable decision; ``_ALLOC_PRESSURE_EXIT`` (4) for pressure so
-    a scripted gate can branch.
-    """
+    decision (Phase 2b / #708): resume this workstream's own box, create
+    fresh, recycle stale, or pressure. Advisory + read-only; caller acts.
+    Exit 0 for an actionable decision, ``_ALLOC_PRESSURE_EXIT`` (4) for
+    pressure (a scripted gate can branch on it)."""
     config = load_merged_config()
     new_cores = (
         args.new_cores if args.new_cores is not None
@@ -4368,9 +4363,14 @@ def _cmd_allocate(args: argparse.Namespace) -> int:
     members, budget = pool_mod.build_pool(
         budget_cores=budget_cores, stale_after=stale_after,
     )
+    try:
+        from .driving_worktrees import resolve_current_workstream_box
+        workstream_box = resolve_current_workstream_box(members, args.repo)
+    except Exception:
+        workstream_box = None
     decision = pool_mod.plan_allocation(
         members, budget, repo=args.repo, new_cores=new_cores,
-    )
+        workstream_box=workstream_box)
     if args.json_output:
         print(json.dumps(decision.to_dict()))
     else:

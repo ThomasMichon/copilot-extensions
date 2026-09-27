@@ -1,0 +1,13 @@
+{
+  "comment": "Phase 2b persist-for-workstream CodeSpace allocation: plan_allocation resumes a workstream's own claimed box instead of reusing any idle box for the repo, and a claim conflict no longer needs --force between worktrees in the same owner_ref family (agent-worktrees claims_owner.same_worktree_family + claims_of_owner).",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "minor"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "minor"
+    }
+  ]
+}

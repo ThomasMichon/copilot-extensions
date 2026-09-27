@@ -327,9 +327,9 @@ def test_claims_human_output(monkeypatch, tmp_path):
 def _seed_project_record(tmp_path, monkeypatch, project, worktree_id, resources):
     root = tmp_path / project
     tdir = root / "worktrees"
-    tdir.mkdir(parents=True)
+    tdir.mkdir(parents=True, exist_ok=True)
     wdir = root / worktree_id
-    wdir.mkdir()
+    wdir.mkdir(exist_ok=True)
     rec = tracking.create_new_record(
         worktree_id, f"worktree/{worktree_id}", str(wdir), project,
         "example-machine", "wsl", tdir,
@@ -407,6 +407,55 @@ def test_find_claim_owners_skips_bad_records(monkeypatch):
         lambda: [("proj-a", BadRecord())],
     )
     assert claims_owner.find_claim_owners("codespace", "cs-one") == []
+
+
+# --- same_worktree_family ----------------------------------------------------
+
+def test_same_worktree_family_identical_id_is_family():
+    assert claims_owner.same_worktree_family("wt-a", "wt-a") is True
+
+
+def test_same_worktree_family_direct_parent_child(monkeypatch, tmp_path):
+    # wt-child's owner_ref names wt-parent -- a worktree wt-parent created.
+    _seed_project_record(tmp_path, monkeypatch, "proj-a", "wt-parent", [])
+    child = _seed_project_record(tmp_path, monkeypatch, "proj-a", "wt-child", [])
+    child.owner_ref = "example-machine/proj-a/wt-parent#session"
+    tracking.save_record(child, tmp_path / "proj-a" / "worktrees" / "wt-child.yaml")
+
+    assert claims_owner.same_worktree_family("wt-parent", "wt-child") is True
+    assert claims_owner.same_worktree_family("wt-child", "wt-parent") is True
+
+
+def test_same_worktree_family_transitive_grandchild(monkeypatch, tmp_path):
+    _seed_project_record(tmp_path, monkeypatch, "proj-a", "wt-grandparent", [])
+    parent = _seed_project_record(tmp_path, monkeypatch, "proj-a", "wt-parent", [])
+    parent.owner_ref = "example-machine/proj-a/wt-grandparent#session"
+    tracking.save_record(parent, tmp_path / "proj-a" / "worktrees" / "wt-parent.yaml")
+    child = _seed_project_record(tmp_path, monkeypatch, "proj-a", "wt-child", [])
+    child.owner_ref = "example-machine/proj-a/wt-parent#session"
+    tracking.save_record(child, tmp_path / "proj-a" / "worktrees" / "wt-child.yaml")
+
+    assert claims_owner.same_worktree_family("wt-grandparent", "wt-child") is True
+
+
+def test_same_worktree_family_unrelated_worktrees_are_not_family(
+    monkeypatch, tmp_path,
+):
+    _seed_project_record(tmp_path, monkeypatch, "proj-a", "wt-a", [])
+    _seed_project_record(tmp_path, monkeypatch, "proj-b", "wt-b", [])
+    assert claims_owner.same_worktree_family("wt-a", "wt-b") is False
+
+
+def test_same_worktree_family_degrades_safe_on_bad_records(monkeypatch):
+    class BadRecord:
+        worktree_id = "wt-a"
+        owner_ref = None
+
+    monkeypatch.setattr(
+        "agent_worktrees.claims_owner._iter_records",
+        lambda: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    assert claims_owner.same_worktree_family("wt-a", "wt-b") is False
 
 
 # --- claims release ---------------------------------------------------------

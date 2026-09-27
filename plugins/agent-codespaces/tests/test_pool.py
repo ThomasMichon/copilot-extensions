@@ -1168,7 +1168,7 @@ def test_diff_entries_no_change_is_empty():
     assert removed == []
 
 
-# --- plan_allocation (Phase 2 / #708): reuse-before-create, budget-bounded ----
+# --- plan_allocation (Phase 2b / #708): persist-for-workstream, budget-bounded
 
 
 def _lease_for(cs_name, effort="holder", host="dev6"):
@@ -1178,7 +1178,7 @@ def _lease_for(cs_name, effort="holder", host="dev6"):
 
 
 def _plan(codespaces, *, repo, new_cores=0, budget_cores=64,
-          leases=None, markers=None, now=None):
+          leases=None, markers=None, now=None, workstream_box=None):
     from agent_codespaces.pool import build_pool, plan_allocation
 
     now = time.time() if now is None else now
@@ -1186,69 +1186,101 @@ def _plan(codespaces, *, repo, new_cores=0, budget_cores=64,
         budget_cores=budget_cores, now=now, codespaces=codespaces,
         leases=leases or [], markers=markers or {},
     )
-    return plan_allocation(members, budget, repo=repo, new_cores=new_cores)
+    return plan_allocation(
+        members, budget, repo=repo, new_cores=new_cores,
+        workstream_box=workstream_box,
+    )
 
 
-def test_plan_reuse_matching_running_idle_no_create():
-    # A matching running idle box is reused -- no new create, no extra budget.
+def test_plan_resumes_this_workstreams_running_box():
+    # workstream_box names a box this workstream already claims -- resumed
+    # regardless of its disposition, no new create, no extra budget.
     from agent_codespaces.pool import ALLOC_REUSE
     d = _plan(
         [_cs("web1", state="Available", machine="premiumLinux",
              repo="o/web-codespaces")],
-        repo="web", new_cores=8,
+        repo="web", new_cores=8, workstream_box="web1",
     )
     assert d.action == ALLOC_REUSE
     assert d.codespace == "web1"
-    assert d.needed_cores == 0        # reusing a running box costs nothing
+    assert d.needed_cores == 0        # already running -- costs nothing
 
 
-def test_plan_reuse_wins_even_at_zero_headroom():
-    # The pool is full (8/8), but the sole box is a matching running idle -- reuse
-    # it (free) rather than report pressure. Proves reuse precedes the budget gate.
+def test_plan_resume_wins_even_at_zero_headroom():
+    # The pool is full (8/8), but the sole box is THIS workstream's own -- it
+    # already spends its cores, so resuming it never needs new headroom.
     from agent_codespaces.pool import ALLOC_REUSE
     d = _plan(
         [_cs("web1", state="Available", machine="premiumLinux",
              repo="o/web-codespaces")],
-        repo="web", new_cores=8, budget_cores=8,
+        repo="web", new_cores=8, budget_cores=8, workstream_box="web1",
     )
     assert d.action == ALLOC_REUSE
     assert d.codespace == "web1"
 
 
-def test_plan_reuse_prefers_running_over_stopped():
+def test_plan_resumes_this_workstreams_stopped_box_when_it_fits_headroom():
+    from agent_codespaces.pool import ALLOC_REUSE
+    d = _plan(
+        [_cs("warm", state="Shutdown", machine="largePremiumLinux",
+             repo="o/web-codespaces")],
+        repo="web", new_cores=8, budget_cores=64, workstream_box="warm",
+    )
+    assert d.action == ALLOC_REUSE
+    assert d.codespace == "warm"
+    assert d.needed_cores == 16       # boot cost, not the create hint
+
+
+def test_plan_workstream_box_still_resumes_even_over_headroom():
+    # Resuming your own persistent box is not gated by headroom at all in this
+    # planner -- it is the SAME box the workstream already spent budget on;
+    # Phase 4 staleness recycling (not this planner) is what would ever
+    # reclaim it if truly abandoned.
     from agent_codespaces.pool import ALLOC_REUSE
     d = _plan(
         [
-            _cs("warm", state="Shutdown", machine="premiumLinux",
-                repo="o/web-codespaces"),
-            _cs("hot", state="Available", machine="premiumLinux",
+            _cs("filler", state="Available", machine="xLargePremiumLinux",
+                repo="o/other"),
+            _cs("warm", state="Shutdown", machine="xLargePremiumLinux",
                 repo="o/web-codespaces"),
         ],
-        repo="web", new_cores=8,
+        repo="web", new_cores=4, budget_cores=40,
+        leases=[_lease_for("filler")], workstream_box="warm",
     )
     assert d.action == ALLOC_REUSE
-    assert d.codespace == "hot"       # running wins the reuse ranking
+    assert d.codespace == "warm"
 
 
-def test_plan_reuse_prefers_clean_over_idle():
-    from agent_codespaces.pool import ALLOC_REUSE
+def test_plan_missing_workstream_box_falls_through_to_create():
+    # Named but no longer in the pool (recycled/deleted out of band) -- never
+    # silently adopt a different box; create a fresh one instead.
+    from agent_codespaces.pool import ALLOC_CREATE
     d = _plan(
-        [
-            _cs("plain", state="Available", machine="premiumLinux",
-                repo="o/web-codespaces"),
-            _cs("rescued", state="Available", machine="premiumLinux",
-                repo="o/web-codespaces"),
-        ],
-        repo="web", new_cores=8,
-        markers={"rescued": STATE_RECOVERED},   # -> disposition CLEAN
+        [_cs("unrelated", state="Available", machine="premiumLinux",
+             repo="o/web-codespaces")],
+        repo="web", new_cores=8, budget_cores=64, workstream_box="gone",
     )
-    assert d.action == ALLOC_REUSE
-    assert d.codespace == "rescued"
+    assert d.action == ALLOC_CREATE
+
+
+def test_plan_no_workstream_box_never_borrows_an_idle_box_creates_instead():
+    # Phase 2b's core retirement: an idle/clean box for the SAME repo is no
+    # longer fair game just because it's free -- it may belong to another
+    # workstream that will come looking for it. No workstream_box -> create.
+    from agent_codespaces.pool import ALLOC_CREATE
+    d = _plan(
+        [_cs("someone_elses", state="Available", machine="premiumLinux",
+             repo="o/web-codespaces")],
+        repo="web", new_cores=8, budget_cores=64,
+    )
+    assert d.action == ALLOC_CREATE
+    assert d.needed_cores == 8
 
 
 def test_plan_no_reuse_with_headroom_creates():
+    # A matching box exists but is IN_USE (held) -- and even an unheld one
+    # would no longer be borrowed cross-workstream; headroom -> create.
     from agent_codespaces.pool import ALLOC_CREATE
-    # A matching box exists but is IN_USE (held) -> not reusable; headroom -> create.
     d = _plan(
         [_cs("busy", state="Available", machine="premiumLinux",
              repo="o/web-codespaces")],
@@ -1258,38 +1290,6 @@ def test_plan_no_reuse_with_headroom_creates():
     assert d.action == ALLOC_CREATE
     assert d.codespace is None
     assert d.needed_cores == 8
-
-
-def test_plan_reuse_stopped_when_it_fits_headroom():
-    # Only a stopped matching idle box; booting it (16 cores) fits the headroom.
-    from agent_codespaces.pool import ALLOC_REUSE
-    d = _plan(
-        [_cs("warm", state="Shutdown", machine="largePremiumLinux",
-             repo="o/web-codespaces")],
-        repo="web", new_cores=8, budget_cores=64,
-    )
-    assert d.action == ALLOC_REUSE
-    assert d.codespace == "warm"
-    assert d.needed_cores == 16       # boot cost, not the create hint
-
-
-def test_plan_reuse_ignores_stopped_that_would_overflow_then_creates():
-    # A stopped matching box that would overflow the tiny headroom is NOT reused;
-    # a smaller create still fits -> create (never over-provision by reusing).
-    from agent_codespaces.pool import ALLOC_CREATE
-    d = _plan(
-        [
-            # fill 32/40 with a running IN_USE box -> headroom 8
-            _cs("filler", state="Available", machine="xLargePremiumLinux",
-                repo="o/other"),                       # 32 cores, held below
-            _cs("warm", state="Shutdown", machine="xLargePremiumLinux",
-                repo="o/web-codespaces"),              # 32-core boot > 8 headroom
-        ],
-        repo="web", new_cores=4, budget_cores=40,
-        leases=[_lease_for("filler")],
-    )
-    assert d.action == ALLOC_CREATE   # 4-core create fits the 8 headroom; 32-boot didn't
-    assert d.needed_cores == 4
 
 
 def test_plan_recycle_stale_running_when_full_then_create():
@@ -1305,22 +1305,25 @@ def test_plan_recycle_stale_running_when_full_then_create():
     assert d.then_codespace is None
 
 
-def test_plan_recycle_then_reuse_stopped_candidate():
+def test_plan_recycle_then_create_never_reuses_a_stopped_stranger():
+    # Even when a stopped box for the same repo exists, recycling makes room
+    # for a FRESH create -- never for reusing that stranger box either (the
+    # cross-workstream reuse this replaces would have picked "warm" here).
     from agent_codespaces.pool import ALLOC_RECYCLE
     d = _plan(
         [
             _cs("old", state="Available", machine="premiumLinux",
                 repo="o/other"),                       # running STALE, 8 cores
             _cs("warm", state="Shutdown", machine="standardLinux32gb",
-                repo="o/web-codespaces"),              # stopped idle, 4-core boot
+                repo="o/web-codespaces"),              # stopped, unclaimed by us
         ],
         repo="web", new_cores=8, budget_cores=8,
         markers={"old": STATE_PRUNABLE},               # fills 8/8 -> headroom 0
     )
     assert d.action == ALLOC_RECYCLE
     assert d.codespace == "old"                        # recycle frees 8
-    assert d.then == "reuse"
-    assert d.then_codespace == "warm"                  # 4-core boot fits after reclaim
+    assert d.then == "create"
+    assert d.then_codespace is None
 
 
 def test_plan_pressure_when_full_and_nothing_recyclable():
@@ -1333,17 +1336,6 @@ def test_plan_pressure_when_full_and_nothing_recyclable():
     assert d.action == ALLOC_PRESSURE
     assert d.codespace is None
     assert d.headroom_cores == 0
-
-
-def test_plan_does_not_reuse_a_different_repos_idle_box():
-    # An idle box for another repo is invisible to a web request -> create.
-    from agent_codespaces.pool import ALLOC_CREATE
-    d = _plan(
-        [_cs("other1", state="Available", machine="premiumLinux",
-             repo="o/other-codespaces")],
-        repo="web", new_cores=8, budget_cores=64,
-    )
-    assert d.action == ALLOC_CREATE
 
 
 def test_plan_unknown_new_cores_still_blocks_a_full_pool():
@@ -1374,8 +1366,8 @@ def test_allocation_decision_to_dict_shape():
     out = d.to_dict()
     assert out["action"] == ALLOC_RECYCLE
     assert out["codespace"] == "old"
-    assert out["then"] == "reuse"
-    assert out["then_codespace"] == "warm"
+    assert out["then"] == "create"
+    assert out["then_codespace"] is None
     # create/reuse decisions omit the recycle-only 'then' keys
     plain = _plan(
         [_cs("busy", state="Available", machine="premiumLinux",
