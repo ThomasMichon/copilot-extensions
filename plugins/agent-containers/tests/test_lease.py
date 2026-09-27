@@ -102,6 +102,41 @@ def test_borrow_specific_conflict_raises(fleet):
         lease_mod.borrow(fleet, "effort-b", container="myrepo-1")
 
 
+def test_borrow_force_takes_over_live_holder(fleet):
+    lease_mod.borrow(fleet, "effort-a", container="myrepo-1")
+    lease = lease_mod.borrow(
+        fleet, "effort-b", container="myrepo-1", force=True,
+    )
+    assert lease.effort == "effort-b"
+
+
+def test_borrow_same_worktree_family_takes_over_without_force(fleet, monkeypatch):
+    """A parent/child worktree pair (Phase 2b parity) reaches a container its
+    own family already leased without needing an explicit force-takeover."""
+    from agent_containers import driving_worktrees
+
+    monkeypatch.setattr(
+        driving_worktrees, "same_worktree_family",
+        lambda holder, owner: {holder, owner} == {"effort-a", "effort-b"},
+    )
+    lease_mod.borrow(fleet, "effort-a", container="myrepo-1")
+    lease = lease_mod.borrow(fleet, "effort-b", container="myrepo-1")
+    assert lease.effort == "effort-b"
+
+
+def test_borrow_unrelated_effort_still_conflicts_without_force(fleet, monkeypatch):
+    """A family-check failure (or an unrelated effort) still conflicts -- the
+    family bypass is additive, never a general conflict-check relaxation."""
+    from agent_containers import driving_worktrees
+
+    monkeypatch.setattr(
+        driving_worktrees, "same_worktree_family", lambda holder, owner: False,
+    )
+    lease_mod.borrow(fleet, "effort-a", container="myrepo-1")
+    with pytest.raises(RuntimeError, match="leased by effort 'effort-a'"):
+        lease_mod.borrow(fleet, "effort-b", container="myrepo-1")
+
+
 def test_borrow_same_effort_idempotent(fleet):
     first = lease_mod.borrow(fleet, "effort-a", container="myrepo-1")
     second = lease_mod.borrow(fleet, "effort-a", container="myrepo-1")

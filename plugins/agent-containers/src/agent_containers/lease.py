@@ -489,12 +489,14 @@ def borrow(
     container: str | None = None,
     fleet: str | None = None,
     ttl: float = DEFAULT_TTL,
+    force: bool = False,
 ) -> Lease:
     """Acquire an exclusive lease on a free fleet container for ``effort``.
 
     If ``container`` is given, lease that specific one (error if held by a
-    different live effort). Otherwise pick the first free fleet member,
-    preferring already-running containers.
+    different live effort, unless ``force`` or the current holder is in the
+    same worktree family -- see ``same_worktree_family``). Otherwise pick the
+    first free fleet member, preferring already-running containers.
 
     Re-borrowing the same container for the same effort is idempotent
     (refreshes the heartbeat).
@@ -548,9 +550,17 @@ def borrow(
                 if _lease_holder_liveness(held) is False:
                     reclaimed = held
                 else:
-                    raise RuntimeError(
-                        f"Container '{container}' is leased by effort "
-                        f"'{held.effort}' (host={held.host}, pid={held.pid})"
+                    from .driving_worktrees import same_worktree_family
+                    family = same_worktree_family(held.effort, effort)
+                    if not force and not family:
+                        raise RuntimeError(
+                            f"Container '{container}' is leased by effort "
+                            f"'{held.effort}' (host={held.host}, pid={held.pid})"
+                        )
+                    log.info(
+                        "Taking container '%s' lease from '%s' for '%s' (%s)",
+                        container, held.effort, effort,
+                        "forced" if force else "same worktree family",
                     )
             chosen = container
         else:
