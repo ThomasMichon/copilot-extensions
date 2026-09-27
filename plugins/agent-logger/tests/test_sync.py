@@ -67,6 +67,8 @@ def test_local_target_push_excludes_lock_and_writes_meta(tmp_path: Path) -> None
     projection.write_bytes(b"{opaque-future-or-malformed-projection")
     (src / "session-state" / "abc-123" / "review-annotations.json.lock").write_text("1")
     (src / "session-state" / "abc-123" / "review-annotations.json.abc123.tmp").write_text("[]")
+    (src / "session-state" / "abc-123" / "inuse.4242.hold").write_bytes(b"")
+    (src / "session-state" / "abc-123" / "inuse.4242.lock").write_text("4242")
     dest_root = tmp_path / "dest"
     target = LocalTarget({"path": str(dest_root)})
 
@@ -86,7 +88,47 @@ def test_local_target_push_excludes_lock_and_writes_meta(tmp_path: Path) -> None
     assert not (
         machine_dir / "session-state" / "abc-123" / "review-annotations.json.abc123.tmp"
     ).exists()
+    assert not (
+        machine_dir / "session-state" / "abc-123" / "inuse.4242.hold"
+    ).exists()
+    assert not (
+        machine_dir / "session-state" / "abc-123" / "inuse.4242.lock"
+    ).exists()
     assert (machine_dir / "sync-meta.json").is_file()
+
+
+def test_local_target_push_excludes_hold_marker_without_opening_it(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Regression test for a live Copilot session's ``inuse.<pid>.hold`` marker.
+
+    Unlike a locked browser database (a Windows sharing violation, deferred as
+    a retryable partial), a ``.hold`` marker can raise a plain
+    ``PermissionError`` with no ``winerror`` at all -- previously unrecognized
+    by ``_is_windows_sharing_violation`` and left to abort the entire push
+    rather than being skipped. It must never even be opened.
+    """
+    from agent_logger.sync.targets import filesystem
+
+    src = _make_source(tmp_path)
+    (src / "session-state" / "abc-123" / "inuse.4242.hold").write_bytes(b"")
+    original = filesystem.open_regular_no_follow
+
+    def fail_if_opened(source: Path):
+        if source.name == "inuse.4242.hold":
+            raise PermissionError(13, "Permission denied", str(source))
+        return original(source)
+
+    monkeypatch.setattr(filesystem, "open_regular_no_follow", fail_if_opened)
+    target = LocalTarget({"path": str(tmp_path / "dest")})
+
+    result = target.push(src, "m1")
+
+    assert result.ok, result.detail
+    assert not (
+        tmp_path / "dest" / "m1" / "session-state" / "abc-123" / "inuse.4242.hold"
+    ).exists()
+
 
 
 def test_local_target_excludes_and_removes_chromium_profile(
@@ -1044,6 +1086,7 @@ def test_rsync_children_suppress_console_window(monkeypatch, tmp_path: Path) -> 
     for key, val in base.NO_WINDOW_KWARGS.items():
         assert captured.get(key) == val
     assert "--include=provenance/abc-123.json" in captured_commands[-1]
+    assert "--exclude=*.hold" in captured_commands[-1]
     assert "--delete-excluded" not in captured_commands[-1]
 
     monkeypatch.setattr(ingest.subprocess, "run", _fake_run)
@@ -1051,6 +1094,7 @@ def test_rsync_children_suppress_console_window(monkeypatch, tmp_path: Path) -> 
     for key, val in base.NO_WINDOW_KWARGS.items():
         assert captured.get(key) == val
     assert "--include=provenance/abc-123.json" in captured_commands[-1]
+    assert "--exclude=*.hold" in captured_commands[-1]
     assert "--delete-excluded" not in captured_commands[-1]
 
 
@@ -1819,14 +1863,39 @@ def test_rsync_session_filters_scope_without_allowlist() -> None:
     assert filtered[-1] == "--exclude=*"
 
 
+def test_rsync_session_filters_exclude_lock_sidecars_before_includes() -> None:
+    """Lock/temp/hold sidecars must never reach an rsync-based target either.
+
+    Mirrors the filesystem targets' ``_EXCLUDE_NAMES``/``_EXCLUDE_SUFFIXES``:
+    a live ``inuse.<pid>.hold`` marker (or a ``.lock``/``.tmp`` sidecar) must
+    be excluded before the recursive include, since rsync's filter list uses
+    first-match-wins semantics.
+    """
+    from agent_logger.sync.targets.base import rsync_session_filters
+
+    filters = rsync_session_filters(None)
+
+    for pattern in ("--exclude=.lock", "--exclude=lock", "--exclude=*.lock",
+                    "--exclude=*.tmp", "--exclude=*.hold"):
+        assert pattern in filters
+        assert filters.index(pattern) < filters.index("--include=session-state/***")
+
+
 def test_rsync_session_filters_exclude_detected_detritus_first() -> None:
     from agent_logger.sync.targets.base import rsync_session_filters
 
     root = Path("session-state") / "abc-123" / "files" / "tool" / "browser"
     filters = rsync_session_filters(None, (root,))
 
-    assert filters[0] == f"--exclude=/{root.as_posix()}/***"
-    assert filters.index(filters[0]) < filters.index("--include=session-state/***")
+    assert f"--exclude=/{root.as_posix()}/***" in filters
+    assert (
+        filters.index(f"--exclude=/{root.as_posix()}/***")
+        < filters.index("--include=session-state/***")
+    )
+    # Lock/temp/hold sidecar excludes precede detected-detritus excludes.
+    assert filters.index("--exclude=*.hold") < filters.index(
+        f"--exclude=/{root.as_posix()}/***"
+    )
 
 
 def test_rsync_session_filters_escape_pattern_characters() -> None:
@@ -1835,9 +1904,9 @@ def test_rsync_session_filters_escape_pattern_characters() -> None:
     root = Path("session-state") / "abc" / "files" / "run[1]*?"
     filters = rsync_session_filters(None, (root,))
 
-    assert filters[0] == (
+    assert (
         "--exclude=/session-state/abc/files/run\\[1\\]\\*\\?/***"
-    )
+    ) in filters
 
 
 def test_local_target_push_includes_only_selected_provenance(tmp_path: Path) -> None:

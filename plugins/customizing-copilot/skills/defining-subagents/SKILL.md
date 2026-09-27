@@ -201,8 +201,8 @@ Task-disabled and exempt from the self-delegation guard.
 **A related, now-obsolete pattern: restricting an MCP-owning agent's `tools`
 to *only* its MCP surface** (dropping shell/bash) to force MCP usage and keep
 the agent from working around a missing/misbehaving tool. That rationale
-predates `agent-mcp materialize`/`agent-mcp call`: the materialized CLI fleet <!-- marketplace-isolation: allow doc-example -->
-is not a workaround, it is a second, equally-authenticated, equally-scoped
+predates `agent-mcp`'s `materialize`/`call` subcommands: the materialized CLI
+fleet is not a workaround, it is a second, equally-authenticated, equally-scoped
 invocation surface over the *same* bridge config -- the bridge's own top-level
 `tools:` allow/deny filter enforces identical scope on both surfaces (see
 *MCP fallback with agent-mcp* above). Restricting an agent to MCP-only tools
@@ -291,7 +291,7 @@ equivalence. An agent **fails** review if any applicable box is unchecked:
       "prevent recursion" — that cripples the agent, it doesn't protect it.
 - [ ] **Tools are not narrowed to force MCP-only usage.** An MCP-owning agent's
       `tools` is not restricted to its MCP surface alone to compel MCP calls or
-      block workarounds -- `agent-mcp materialize`/`agent-mcp call` is an <!-- marketplace-isolation: allow doc-example -->
+      block workarounds -- `agent-mcp`'s `materialize`/`call` subcommands are an
       equally-authenticated, equally-scoped invocation surface over the same
       bridge, not a workaround, and this restriction only disables the required
       MCP Readiness fallback.

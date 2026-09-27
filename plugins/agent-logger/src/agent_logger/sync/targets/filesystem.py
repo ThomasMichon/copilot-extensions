@@ -48,8 +48,8 @@ from agent_logger.sync.targets.base import (
     Target,
 )
 
-#: Excluded from sync: legacy lock names, plus any ``.lock``/``.tmp`` suffix.
-_EXCLUDE_NAMES, _EXCLUDE_SUFFIXES = frozenset({".lock", "lock"}), (".lock", ".tmp")
+#: Excluded from sync: legacy lock names, ``.lock``/``.tmp`` suffixes, and ``.hold`` (Copilot's restrictive-ACL ``inuse.<pid>.hold`` marker).
+_EXCLUDE_NAMES, _EXCLUDE_SUFFIXES = frozenset({".lock", "lock"}), (".lock", ".tmp", ".hold")
 
 #: Top-level session-index files kept alongside the ``session-state`` tree when
 #: no repo allowlist narrows the scope. Everything else under the source (the

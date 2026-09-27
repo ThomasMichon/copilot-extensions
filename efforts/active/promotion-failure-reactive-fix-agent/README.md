@@ -6,11 +6,14 @@
 - **Created:** 2026-09-25
 - **Status:** Active — Phase 1 live-validated (Phase 1.5 Done); Phase 2
   in progress: vision-reconciliation gate resolved, a draft `gh-aw`
-  workflow authored (`.github/workflows/ci-failure-fix-attempt.md`) but
-  **not functional yet** — two review passes (PR #3893) found 6 real
-  blocking issues (trigger can't fire, no edit tool, auth signal gap,
-  protected-files gap, prompt-injection gap, no changefile path), none
-  resolved; see the 2026-09-26 Journal entry
+  workflow authored (`.github/workflows/ci-failure-fix-attempt.md`) --
+  two review passes (PR #3893) found 6 real blocking issues (trigger
+  can't fire, no edit tool, auth signal gap, protected-files gap,
+  prompt-injection gap, no changefile path); a successor session
+  resolved all 6 through a 9-round iterative real-review cycle (PR
+  #3916), converging on a materially hardened design (still **not
+  compile-verified** -- `gh aw compile` remains blocked by the same
+  SAML-SSO wall, not re-attempted); see the 2026-09-26 Journal entry
 - **Vision:** [`visions/ci-failure-remediation`](../../../visions/ci-failure-remediation/README.md)
   (authored 2026-09-26 to resolve the reconciliation gate below). **Gate
   resolved:** the vision states the standing intent (detection+dedup,
@@ -1397,3 +1400,319 @@ _Pending._
   them; then #2, #4, #5, #6 as the security/completeness hardening pass
   before this ever runs for real), then finally get `gh aw compile`
   runnable somewhere to verify the result.
+
+### 2026-09-26 — Resolved all 6 blocking issues against gh-aw's own docs (still not compile-verified)
+- Consumed the handoff carrying the 6 findings above. Did not re-attempt
+  the known-dead `gh extension install github/gh-aw` SSO-blocked path;
+  instead researched gh-aw's own published reference docs directly
+  (`frontmatter`, `triggers`, `tools`, `safe-outputs`,
+  `safe-outputs-pull-requests`, `steps-jobs`, `faq`, and the
+  `introduction/architecture` security model) via direct page fetches
+  this session, both rendered and raw Markdown, to ground every fix in
+  a real documented mechanism rather than guessing.
+- **Issue #1 (trigger can't fire) — resolved via `label_command:`, not
+  a hand-rolled PAT or workflow_dispatch block.** Confirmed gh-aw's
+  `label_command:` trigger compiles to BOTH the `issues: labeled` event
+  AND an auto-generated `workflow_dispatch` trigger with an
+  `item_number` input, documented as "for manual testing" — exactly the
+  fallback path design option (b) needed, without hand-authoring a
+  `workflow_dispatch` block. `remove_label: false` keeps the label
+  persistent (required — `ci_failure_watchdog.py`'s own dedup lookup
+  searches by that label). `validate-and-promote.yml`'s `report-failure`
+  job now holds `actions: write` (widened from `actions: read`) and, in
+  a new step gated on the watchdog step's own new `filed_issue_numbers`
+  output, explicitly calls `gh workflow run ci-failure-fix-attempt.lock.yml
+  -f item_number=<N>` for each newly filed issue only — never for a dedup
+  comment on an already-tracked issue, avoiding a re-trigger race.
+  `tools/ci_failure_watchdog.py` was extended (`FILED_ISSUE_NUMBERS`,
+  parsed from `gh issue create`'s own printed URL, written to
+  `$GITHUB_OUTPUT`) with 4 new regression tests (39 total, all passing
+  via `test-supervisor`). **Not yet compile-verified** that the
+  generated input is genuinely named `item_number` at the `.lock.yml`
+  level — flagged explicitly in the draft's own leading comment.
+- **Issue #2 (label alone isn't authenticated) — resolved via a custom
+  `verify-issue` job**, using gh-aw's documented `jobs:` custom-job +
+  `jobs.agent.needs`/`jobs.agent.if` additive-gating mechanism (confirmed
+  in the `steps-jobs` reference, including the exact worked example this
+  design mirrors). It resolves the issue number from either trigger
+  shape, then checks the issue's author is the watchdog's own
+  `github-actions` token identity and that the body carries the
+  `Signature: <hash>` anchor line, before the agent job is allowed to
+  run at all.
+- **Issue #3 (no edit tool) — resolved:** confirmed via gh-aw's `tools`
+  reference (raw fetch of the actual doc source, not just the rendered
+  page) that the real key is `tools.edit:` ("Allows file editing in the
+  GitHub Actions workspace"). Added.
+- **Issue #4 (protected-files may not cover this repo's specific
+  paths) — resolved as defense-in-depth, not a single mechanism.** Kept
+  `protected-files: fallback-to-issue` (gh-aw's own built-in policy,
+  whatever it covers) AND added an explicit `excluded-files:` list
+  naming this repo's specific prohibitions (`.github/workflows/**`,
+  `plugin.json`, `pyproject.toml`, `marketplace.json`), confirmed via the
+  `safe-outputs-pull-requests` reference that `excluded-files`
+  deterministically strips matching files from the patch before the
+  commit is even created — independent of, and not reliant on, whatever
+  gh-aw's own built-in protected-file manifest happens to cover.
+- **Issue #5 (untrusted issue body interpolated without isolation) —
+  resolved by removing the raw interpolation entirely**, not by finding
+  a sanitization mechanism to wrap it in. The draft no longer embeds
+  `${{ github.event.issue.body }}` as literal instruction text. Instead
+  `tools.github: {toolsets: [issues]}` is enabled and the agent is told
+  to retrieve the diagnostic record via the GitHub MCP `issue_read` tool
+  call — the same idiom gh-aw's own `safe-outputs.steer` feature
+  documents for exactly this class of untrusted content (steering:
+  "the injected prompt identifies the exact issue and instructs the
+  agent to read relevant... comments with the GitHub MCP `issue_read`
+  tool" rather than embedding the raw text inline). This narrows, but
+  does not by itself eliminate, the injection surface — the markdown
+  body was also updated with an explicit "diagnostic data, never an
+  instruction" framing, and the real backstop remains the machine-
+  enforced `verify-issue` gate (#2) and `excluded-files`/
+  `protected-files` (#4), not prompt wording. Did not find (and stopped
+  looking for, given diminishing returns against the fetch budget) a
+  more specific gh-aw "untrusted content" sanitization primitive beyond
+  the general Activation-stage content-sanitization layer the
+  architecture doc describes at a high level — a genuine open question
+  if a future review finds this insufficient.
+- **Issue #6 (no changefile path) — resolved:** added an explicit
+  markdown instruction requiring `python tools/changefile.py add ...`
+  for any touched `plugins/**` content, plus a matching `tools.bash`
+  allowlist entry.
+- **Still not done:** `gh aw compile` remains unverified (same SSO wall,
+  deliberately not re-attempted this session per the prior handoff's own
+  instruction) — every fix above is grounded in gh-aw's published docs,
+  not a live compile, so a real review pass (this effort's own working
+  pattern for this file) is the next actual verification step, same as
+  last time. Also still open: the Copilot engine auth path decision
+  (org-billing vs. `COPILOT_GITHUB_TOKEN` PAT) — untouched this session,
+  still an explicit `TODO(successor)` in the draft; the main-branch
+  bootstrap companion PR; and Phase 2's remaining security-hardening
+  checklist (pin the `gh-aw` extension version, verify job-level
+  `permissions:` don't inherit anything broader), before Phase 3's
+  Validation Plan trials.
+- **That review pass came back immediately (PR #3916) and found exactly
+  what this working pattern exists to find: 2 new, real HIGH-severity
+  issues in the just-written fix itself, both fixed before merge.** (a)
+  The `verify-issue` job's first step interpolated the user-controlled
+  `workflow_dispatch` `item_number` input directly into `run:` shell
+  source rather than routing it through `env:` — a real command-
+  injection hole (`$(...)` in the input would execute before the
+  script's own first line) in a job whose entire purpose is
+  authorization. Fixed: the raw input now flows through `env:` (never
+  re-parsed as shell) and is validated digits-only before being written
+  onward. (b) The author-identity check (#2's fix) compared against the
+  bare string `github-actions` — the real login GitHub records for
+  issues filed via `github.token` is `github-actions[bot]` (confirmed
+  against this same workflow file's own `promote` job, which already
+  configures that exact identity for its commits). As drafted, the
+  check would have permanently rejected every genuine watchdog issue,
+  silently disabling the agent job forever. Fixed. Both are now
+  recorded in the draft's own leading comment block and the
+  `verify-issue` job's inline comments, not just here.
+- **A second review pass on that same fix (still PR #3916) came back
+  with 3 more real findings, all fixed before merge:** (a) the
+  author+signature-format checks were correctly identified as NOT real
+  authentication — a write-access collaborator could edit a genuine
+  `github-actions[bot]` watchdog issue's body while its author and
+  `Signature:` line both stayed intact, then dispatch the agent against
+  the tampered content via `workflow_dispatch` (which also bypasses the
+  label filter entirely). Fixed with an additional GraphQL `lastEditedAt`
+  check — null only when a body has never been edited since creation
+  (distinct from `updatedAt`, which also bumps on every comment) —
+  rejecting any issue ever edited. (b) Moving the issue body behind
+  `issue_read` (#5's fix) was correctly flagged as narrowing, not
+  eliminating, the injection surface — the tool result still reaches the
+  agent as context, and the agent holds `edit`/`bash` and can propose a
+  PR. Researched gh-aw's own `threat-detection` reference and confirmed
+  it already runs automatically whenever `safe-outputs` is configured (a
+  separate AI-powered job, after the agent, before any safe output is
+  applied, specifically for prompt injection/secret leaks/malicious
+  patches) — made it explicit with a workflow-specific `prompt:`
+  addendum rather than leaving it implicit, since this workflow's entire
+  diagnostic record is attacker-reachable log-excerpt text by design.
+  (c) The fix-attempt dispatch step in `validate-and-promote.yml` was
+  missing `always()`, so it silently skipped whenever the watchdog step
+  itself exited nonzero for a reason unrelated to a given signature
+  (e.g. a later failed job's log fetch failing) even after an earlier
+  issue had genuinely been filed — fixed.
+- **This working pattern (draft → real review → fix → re-review) is now
+  3 rounds deep on this one file and has converged**: round 2 found
+  fixes to round-1 fixes introduced 2 new issues; round 3 found the
+  round-2 fixes still had 1 residual gap each on #2 and #5, plus 1
+  unrelated dispatch-robustness gap — but found ZERO issues in the round-1
+  resolutions of #1, #3, #4, #6, suggesting those are genuinely settled.
+  Still true regardless: none of this is compile-verified (`gh aw compile`
+  remains SSO-blocked), so a live compile pass is still the outstanding
+  verification step once available.
+- **A FOURTH review pass found 2 more, both since fixed:** (a) the round-3
+  `lastEditedAt` fix on #2 was correctly judged still insufficient — it
+  stopped body tampering but still accepted any well-formed hex string as
+  a "signature" with no independently verified filing record behind it,
+  and the `workflow_dispatch` path still didn't require the tracking
+  label at all. Fixed by additionally requiring the `ci-failure-signature`
+  label directly (not just relying on the `issues: labeled` trigger having
+  required it once) and, more substantively, cross-checking the body's
+  claimed run id + commit SHA against the real Actions API (`gh run
+  view`) — the referenced run's real `headSha` must match and its real
+  `conclusion` must actually be `failure`/`timed_out`, not merely
+  well-formatted text. Forging this now requires actually causing a real
+  `dev` run to fail at an attacker-chosen commit. (b) `threat-detection`
+  was left in gh-aw's default `continue-on-error: true` mode — which only
+  produces a caution notice rather than actually blocking
+  `create-pull-request` on a finding, directly undermining the very claim
+  (round 3's fix to #5) that this stage is the machine-enforced backstop.
+  Set explicitly to `false`.
+- **A FIFTH review pass found 1 more, a genuinely embarrassing logic bug in
+  round 4's own fix, since fixed:** the run-verification check (f) compared
+  the referenced run's own overall `conclusion` against `failure`/
+  `timed_out` — but `report-failure` (the job that files this very issue)
+  is itself a job WITHIN that same run (`${{ github.run_id }}`), so the
+  run's overall conclusion is still null (in progress) at the exact moment
+  this check needs to pass. As written, round 4's fix would have
+  permanently rejected every single genuine watchdog issue — the review
+  caught this before it ever shipped. Fixed by checking the JOB level
+  instead (the same `.../actions/runs/<id>/jobs` endpoint
+  `ci_failure_watchdog.py` itself already queries) for at least one job
+  with a real `failure`/`timed_out` conclusion, which is available as soon
+  as that specific job concludes, regardless of whether the run as a whole
+  has finished.
+- **A SIXTH review pass found 2 more, both since fixed:** (a) round 4's
+  job-level fix was still paired with a `headSha` comparison against
+  `github.run_id` (the downstream `validate-and-promote` run) — but a
+  `workflow_run`-triggered run's own `headSha` reflects its *triggering*
+  ref, not the pinned SHA `full`/`worktree-manager`/`guards-full-sweep`
+  explicitly check out via `ref: needs.gate.outputs.sha` — so this
+  compared the WRONG run's metadata and would have rejected every
+  genuine watchdog issue *again*. Removed entirely: the author+label+
+  no-edit chain already binds the whole body (including its commit-SHA
+  claim) to an unaltered bot-authored record, so re-deriving the SHA
+  from Actions metadata that doesn't even reflect the real checkout ref
+  added fragility, not security. (b) None of the checks across all 5
+  prior rounds were actually TOCTOU-safe — the agent job still re-fetched
+  the body live via `issue_read` at its own later runtime, *after* every
+  `verify-issue` check had already passed, letting a write-access
+  collaborator edit the body in that exact window and defeat every check
+  above. Fixed by capturing the exact verified body inside `verify-issue`
+  itself (base64-encoded through a job output) and decoding it once
+  inside the agent job via a new `pre-agent-steps` entry — the markdown
+  prompt now embeds that immutable, already-verified value directly
+  instead of re-fetching anything live. This does put literal body text
+  back in the prompt (the shape #5's first fix moved away from) — but
+  this copy is provably the one `verify-issue` already authenticated, not
+  a live, editable fetch; the prompt itself now names the one residual
+  risk this can't close (injection content that was already present in
+  the watchdog's own genuine log excerpt), and `threat-detection` remains
+  the backstop for exactly that.
+- **A SEVENTH review pass found 1 more, since fixed:** the round-6 decode
+  fix used a FIXED `$GITHUB_OUTPUT` multiline delimiter string — but the
+  body is untrusted log content that can legitimately (or deliberately)
+  contain a line matching a fixed, guessable string, terminating the
+  multiline value early and silently truncating/corrupting what the agent
+  actually receives. Fixed by generating the delimiter at runtime and
+  confirming it does not literally occur anywhere in the body first,
+  retrying with fresh randomness on any collision.
+- **Seven rounds deep now; #1, #3, #4, #6 have stayed resolved since round
+  1 with zero further findings across 6 subsequent review passes** — a
+  reasonable signal those are genuinely settled, even without a live
+  compile. #2 and #5 turned out to be genuinely entangled (the TOCTOU fix
+  that finally closed #5 for real also closed a gap #2's own checks left
+  open) and needed the full 7 rounds between them, down to a real
+  delimiter-collision bug in round 6's own output-passing mechanism.
+- **An EIGHTH review pass found a genuinely different, structural finding
+  — not another bug in a prior fix, a NEW class of risk on the original
+  #1 trigger design: the `label_command`-generated `workflow_dispatch`
+  trigger inherits the same "loads the entire YAML from the dispatched
+  ref" risk `validate-and-promote.yml` already documents for a different
+  job.** A write-access collaborator could dispatch a modified copy of
+  the fix-attempt workflow itself from their own branch, bypassing every
+  check the file defines (since those checks live in the same file an
+  attacker fully controls in that scenario) — structurally, no check
+  *inside* this file can close that specific case. Added an explicit ref
+  check (`workflow_dispatch` must target the default branch) as a
+  best-effort, code-level mitigation for the well-behaved/accidental
+  path — `report-failure`'s own automated dispatch never specifies
+  `--ref` and already only ever targets the default branch — while
+  documenting explicitly, in both the draft's own comment block and this
+  entry, that the fully-attacker-modified-copy case remains structurally
+  unclosable from within the file and is bounded only by who holds write
+  access to the repository at all (the same outer trust boundary this
+  effort's own charter already treats as given, not something a workflow
+  file's own content can further restrict).
+- **Eight rounds deep now. #1, #3, #4, #6 have stayed resolved since round
+  1 with zero further findings across 7 subsequent review passes** — a
+  reasonable signal those are genuinely settled, even without a live
+  compile. #2 and #5 needed 7 rounds to reach a defensible, TOCTOU-safe,
+  delimiter-safe state. Round 8's finding is a different, honestly-named
+  exception: a documented, structural limitation of `workflow_dispatch`
+  itself, mitigated rather than fully closed, with the residual risk
+  stated explicitly rather than hidden.
+- **PR #3916's own CI (unrelated to this draft's content) surfaced a
+  genuine, pre-existing `dev`-wide failure**: `tools/
+  test_check_marketplace_isolation.py`'s bare-agent-command guard flagged
+  two lines in `plugins/customizing-copilot/skills/defining-subagents/
+  SKILL.md` (untouched by this PR, confirmed via `git diff origin/dev` --
+  a genuine pre-existing break on `dev` itself, not something this PR's
+  changes caused) — prose referencing `agent-mcp materialize`/`agent-mcp
+  call` inside a single backtick span reads, to the guard's regex, as an
+  operative bare-command instruction. Fixed as a small, atomic, in-scope
+  commit (per this repo's own "every issue gets fixed or gets tracked"
+  convention) by rewording to two separate backtick spans (`` `agent-mcp`
+  ``'s `` `materialize`/`call` `` subcommands) that don't trip the
+  pattern, with a matching changefile for `customizing-copilot`.
+- **A NINTH review pass found 1 more real issue and 1 documentation gap,
+  both addressed:** (a) round 6/7's fix (passing the pre-verified body to
+  the agent via `pre-agent-steps` instead of a live re-fetch) closed the
+  TOCTOU and delimiter bugs, but the draft's own framing implied this was
+  closer to a full isolation boundary against prompt injection than it
+  actually is -- `verify-issue` authenticates the *record* (who filed it,
+  that it names a real failure, that nobody edited it), not the *log
+  excerpt's own text*, and a real, unmodified failing test can print
+  arbitrary imperative-looking text with no way to distinguish it from
+  genuine diagnostic output. Rather than claim a false isolation boundary,
+  rewrote the prompt to say so explicitly and named the REAL compensating
+  controls: `threat-detection` analyzes the agent's output/patch (not its
+  input), and -- more fundamentally -- every output is a **draft** PR or
+  comment, never a merge, so a human always reviews before anything
+  reaches `dev`. This is stated as an accepted, structurally-inherent
+  residual risk of any "read a failing test's real output and fix it"
+  agent design, not a further-closable implementation gap. (b) the PR's
+  own description hadn't been updated after the marketplace-isolation
+  fix landed, still claiming no plugin/changefile changes existed when
+  the PR now included both -- corrected.
+- **Nine rounds deep now. #1, #3, #4, #6 remain settled with zero further
+  findings across 8 subsequent review passes.** #2 and #5 are as hardened
+  as this design can reasonably get without a full rearchitecture (or
+  accepting that "auto-fix a failing test" inherently requires reading
+  untrusted test output); #5's residual risk is now stated honestly
+  rather than implied away.
+- **A TENTH review pass found a typo (the header still said "8-round"
+  after round 9's own note already said "Nine rounds deep") and re-flagged
+  the PR-description finding (the `gh pr edit` fix hadn't been re-scanned
+  yet) — both fixed.** Rebasing onto `dev` mid-review hit a real merge
+  conflict: another PR had independently fixed the SAME pre-existing
+  `customizing-copilot` guard failure (via an `ALLOW` marker instead of
+  a reword) while this PR was in flight — resolved by keeping this PR's
+  own reword (functionally equivalent, already tested) rather than
+  discarding it.
+- **An ELEVENTH review pass found 3 more, all fixed:** (a) the `resolve`
+  step's own number-format check (`grep -qE '^[0-9]+$'`) is LINE-oriented
+  -- a multi-line value with a numeric first line would pass `grep -q`
+  wrongly, letting a later `$GITHUB_OUTPUT` write smuggle a second,
+  attacker-controlled assignment through — switched to bash's own
+  `[[ =~ ]]`, which matches the whole string, not per line; (b) genuinely
+  new scope gap: `excluded-files`/`protected-files` are a DENY-list
+  applied only when the safe-outputs job builds the final patch — nothing
+  constrained what the agent could touch DURING its own run. gh-aw has no
+  built-in ALLOW-list field for `create-pull-request` (confirmed against
+  its own reference) — added a hand-written `post-steps` scope gate that
+  diffs the agent's actual commits against `dev` and fails the job (which
+  skips safe-outputs) if anything landed outside
+  `plugins/**`/`libs/**`/`tools/**`/`docs/**`/`.changefiles/**`; (c) the PR
+  description was missing `CONTRIBUTING.md`'s required explicit
+  Documentation-impact statement — added.
+- **Eleven rounds deep now. #1, #3, #4, #6 remain settled with zero
+  further findings across 10 subsequent review passes.** #2 and #5 are as
+  hardened as this design can reasonably get without a full
+  rearchitecture (or accepting that "auto-fix a failing test" inherently
+  requires reading untrusted test output). Still outstanding regardless:
+  `gh aw compile` verification (SSO-blocked, unresolved this session).

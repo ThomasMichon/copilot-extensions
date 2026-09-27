@@ -38,6 +38,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -47,6 +48,18 @@ from datetime import datetime, timedelta, timezone
 ISSUE_LABEL = "ci-failure-signature"
 DEFAULT_REPO = "ThomasMichon/copilot-extensions"
 DEFAULT_RATE_LIMIT_HOURS = 6
+
+# Populated by `_file_issue` (never by `_comment_occurrence` -- a dedup
+# comment on an already-tracked issue must never re-trigger the Phase 2
+# fix-attempt agent, since `issues: labeled`/`label_command` only fires on
+# the ORIGINAL label application, and re-running the agent against an
+# issue it may already be mid-attempt on would be a real race, not just a
+# redundant one). `main()` writes these to `$GITHUB_OUTPUT` (when present)
+# so `report-failure` can explicitly `gh workflow run` the fix-attempt
+# workflow per newly filed issue -- see the Phase 2 draft's own leading
+# comment block (blocking issue #1) for why an explicit dispatch, not the
+# `issues: labeled` event itself, is what actually fires it.
+FILED_ISSUE_NUMBERS: list[str] = []
 
 # The three control jobs that surround this one in validate-and-promote.yml --
 # never treat their own failure (or this job's own in-progress/null
@@ -318,7 +331,13 @@ def _file_issue(repo: str, sig: FailureSignature, run_id: str, sha: str) -> bool
     if out.returncode != 0:
         print(f"[ERROR] gh issue create failed: {out.stderr.strip()}", file=sys.stderr)
         return False
-    print(f"[OK] filed {out.stdout.strip()}")
+    url = out.stdout.strip()
+    print(f"[OK] filed {url}")
+    # `gh issue create` prints the created issue's URL on success -- the
+    # trailing path segment is always its number.
+    number = url.rsplit("/", 1)[-1]
+    if number.isdigit():
+        FILED_ISSUE_NUMBERS.append(number)
     return True
 
 
@@ -430,6 +449,20 @@ def main(argv: list[str] | None = None) -> int:
                 args.repo, sig, args.run_id, args.sha, args.rate_limit_hours, args.file_issue
             )
             exit_code = exit_code or rc
+
+    # Surface any newly filed issue numbers to the calling Actions step, so
+    # it can explicitly dispatch the Phase 2 fix-attempt workflow (a
+    # `workflow_dispatch` call -- unlike the default-`GITHUB_TOKEN`-authored
+    # `issues: labeled` event this watchdog itself just produced, an
+    # explicit dispatch is NOT subject to GitHub's anti-recursion event
+    # suppression). Space-separated, matching the shell `for NUM in
+    # $OUTPUT` loop the workflow step uses. Guarded on `GITHUB_OUTPUT`
+    # being set so this stays a no-op under `pytest`/local dry runs.
+    github_output = os.environ.get("GITHUB_OUTPUT")
+    if github_output and FILED_ISSUE_NUMBERS:
+        with open(github_output, "a", encoding="utf-8") as handle:
+            handle.write(f"filed_issue_numbers={' '.join(FILED_ISSUE_NUMBERS)}\n")
+
     return exit_code
 
 

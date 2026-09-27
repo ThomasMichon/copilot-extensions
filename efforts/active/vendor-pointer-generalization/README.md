@@ -939,3 +939,52 @@ _Pending._
 - **Not yet done**: ~10 remaining real lib copies (`ssh-manager` next,
   tied for smallest blast radius); issue #3905's actual fix; Phase 2;
   Phase 3's pattern doc.
+
+### 2026-09-27 — Phase 1: ssh-manager, config-migrate, single-instance-lease (PRs #3917, #3929, #3971)
+
+- **`ssh-manager` (PR #3917)**: converted all 4 consumers. Found and
+  fixed a second real, pre-existing bug: canonical `pyproject.toml`'s
+  `name`/`build-system`/test-runner-constraint fields disagreed with
+  every real copy (all 4 already agreed on `agent-ssh-manager`, a
+  deliberate PyPI anti-squatting rename canonical never picked up) --
+  `--pointerize`'s byte-for-byte copy surfaced this immediately as a real
+  `uv pip install -e .` failure. Root cause: `--restore-canonical` only
+  ever syncs `src/` and the version field, never these other fields --
+  confirmed all 4 copies agreed with each other before fixing canonical
+  to match. Also filed **issue #3915** for a second, unrelated
+  pre-existing `agent-ssh` test flake found while validating.
+- **`config-migrate` (PR #3929)**: converted all 5 consumers, including
+  `agent-worktrees` itself -- the largest/most-critical consumer
+  converted so far (full suite: 630+ passed, clean). Review re-surfaced
+  the same non-editable-install gap (issue #3905) for these 5 new
+  instances; extended that issue rather than re-litigating per-PR.
+- **`single-instance-lease` (PR #3971)**: converted all 5 consumers
+  (`agent-vault`, `agent-worktrees`, `agent-dispatch`, `agent-mcp`,
+  `agent-bridge`). Clean review (zero findings, approval recommended).
+  Merge was briefly blocked by an unrelated, already-tracked `dev`-wide
+  `guards + lint` break (issue #3967, a `customizing-copilot` skill-doc
+  false positive) -- confirmed pre-existing/unrelated via `git stash`
+  before investigating a fix; another session/process fixed it upstream
+  during this PR's review window, so a rebase-and-repush was all that was
+  needed once confirmed.
+- **Running total this session**: 4 more real libs converted
+  (`credential-relay`, `ssh-manager`, `config-migrate`,
+  `single-instance-lease`), on top of `lazy-cli-dispatch` and
+  `work-coalescing-singleton` from earlier -- **6 of 13 total real libs
+  now converted**. Two genuine pre-existing tool/canonical bugs found and
+  fixed along the way (this entry's `ssh-manager` note, plus PR #3810's
+  nested-`__pycache__` fix). Two pre-existing test flakes confirmed
+  unrelated and tracked (issue #3570, already tracked; issue #3915,
+  newly filed). Separately, an unrelated `dev`-wide `guards + lint` CI
+  failure (issue #3967 -- a `check-marketplace-isolation.py` false
+  positive, not a test flake) briefly blocked #3971's merge; resolved
+  upstream by another session during that PR's review window.
+- **Not yet done**: 5 real lib copies remain eligible for conversion
+  (`agent-procutil` — 11 consumers, the largest; `dropin-registry` — 9;
+  `plugin-activation`/`plugin-resolve` — 7 each, tied smallest remaining;
+  `zdd` — 8); `session-liveness-probe`/`venue-copilot` still need a
+  canonical-promotion step first; issue #3905's actual cross-adopter fix;
+  Phase 2 (installer engine, still an open design question); Phase 3's
+  pattern doc. Next session should continue with `plugin-activation` or
+  `plugin-resolve` (tied smallest), one bounded PR at a time, per this
+  effort's own established pattern.
