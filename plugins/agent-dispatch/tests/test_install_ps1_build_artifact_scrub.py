@@ -141,8 +141,17 @@ def test_vendored_lib_build_residue_is_also_scrubbed(tmp_path: Path) -> None:
     _seed_build_residue(plugin_dir)
     procutil_dir = _seed_vendored_lib_build_residue(plugin_dir, "agent-procutil")
     zdd_dir = _seed_vendored_lib_build_residue(plugin_dir, "zdd")
-    stub = """
-function uv { Write-Output 'Installed 1 package'; $global:LASTEXITCODE = 0 }
+    stub = f"""
+function uv {{
+    if ((Test-Path "{procutil_dir}\\build") -or (Test-Path "{procutil_dir}\\some_vendored_pkg.egg-info") `
+        -or (Test-Path "{zdd_dir}\\build") -or (Test-Path "{zdd_dir}\\some_vendored_pkg.egg-info")) {{
+        [Console]::Error.WriteLine('vendored lib residue still present at install time')
+        $global:LASTEXITCODE = 1
+        return
+    }}
+    Write-Output 'Installed 1 package'
+    $global:LASTEXITCODE = 0
+}}
 """
     extra = f"""
 $result = & $installPkg "{plugin_dir}"
@@ -150,6 +159,7 @@ if ($result.Code -eq 0) {{ Write-Output "EXIT:0" }} else {{ Write-Output "EXIT:1
 """
     result = _run_harness(plugin_dir, stub, extra)
     assert "EXIT:0" in result.stdout
+    assert "residue still present" not in result.stderr
     assert not (plugin_dir / "build").exists()
     for lib_dir in (procutil_dir, zdd_dir):
         assert not (lib_dir / "build").exists()

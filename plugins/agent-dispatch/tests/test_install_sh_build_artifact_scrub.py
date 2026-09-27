@@ -275,8 +275,16 @@ def test_vendored_lib_build_residue_is_also_scrubbed(tmp_path: Path) -> None:
     _seed_build_residue(plugin_dir)
     procutil_dir = _seed_vendored_lib_build_residue(plugin_dir, "agent-procutil")
     zdd_dir = _seed_vendored_lib_build_residue(plugin_dir, "zdd")
-    uv_stub = """
-uv() { echo 'Installed 1 package'; return 0; }
+    uv_stub = f"""
+uv() {{
+    if [ -e "{procutil_dir}/build" ] || [ -e "{procutil_dir}/some_vendored_pkg.egg-info" ] \\
+        || [ -e "{zdd_dir}/build" ] || [ -e "{zdd_dir}/some_vendored_pkg.egg-info" ]; then
+        echo 'vendored lib residue still present at install time' >&2
+        return 1
+    fi
+    echo 'Installed 1 package'
+    return 0
+}}
 """
     extra = """
 if _pip_install "$PLUGIN_DIR"; then
@@ -287,6 +295,7 @@ fi
 """
     result = _run_harness(plugin_dir, uv_stub, extra)
     assert "EXIT:0" in result.stdout
+    assert "residue still present" not in result.stderr
     assert not (plugin_dir / "build").exists()
     for lib_dir in (procutil_dir, zdd_dir):
         assert not (lib_dir / "build").exists()

@@ -694,8 +694,15 @@ function Remove-PluginBuildArtifacts {
        Shared by BOTH the standalone zdd pre-install (which runs before the
        main package install below) and that main install's own scrub --
        the zdd pre-install builds from the exact same libs/zdd/ tree and is
-       equally vulnerable if it runs first without this. #>
-    param([string]$PluginDir)
+       equally vulnerable if it runs first without this.
+
+       -ExtraDir (optional): Resolve-Zdd/Resolve-VendoredLib can also
+       resolve to a checkout/registry path OUTSIDE $PluginDir entirely (a
+       sibling copilot-extensions checkout, not the marketplace-installed
+       payload) -- $PluginDir/libs/* scrubbing never reaches that tree, so
+       the standalone zdd pre-install passes its own resolved $ZddDir here
+       too. #>
+    param([string]$PluginDir, [string]$ExtraDir)
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
         (Join-Path $PluginDir 'build'), `
         (Join-Path $PluginDir '*.egg-info'), `
@@ -712,6 +719,12 @@ function Remove-PluginBuildArtifacts {
                     (Join-Path $_.FullName '*.egg-info'), `
                     (Join-Path (Join-Path $_.FullName 'src') '*.egg-info')
             }
+    }
+    if ($ExtraDir -and $ExtraDir -ne $PluginDir) {
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
+            (Join-Path $ExtraDir 'build'), `
+            (Join-Path $ExtraDir '*.egg-info'), `
+            (Join-Path (Join-Path $ExtraDir 'src') '*.egg-info')
     }
 }
 
@@ -959,15 +972,18 @@ function Install-Runtime {
     if ($ZddDir) {
         # Scrub BEFORE this standalone pre-install too, not just the main
         # install below -- this build reads from the exact same libs/zdd/
-        # tree and is equally vulnerable to stale build/lib residue
-        # shadowing a fresh source change if it runs first without this.
-        Remove-PluginBuildArtifacts -PluginDir $PluginDir
+        # tree (or, via Resolve-VendoredLib's registry/checkout fallback, a
+        # sibling checkout entirely OUTSIDE $PluginDir) and is equally
+        # vulnerable to stale build/lib residue shadowing a fresh source
+        # change if it runs first without this -- pass $ZddDir explicitly
+        # so an external resolved path is reached too, not just libs/*.
+        Remove-PluginBuildArtifacts -PluginDir $PluginDir -ExtraDir $ZddDir
         if (Get-Command uv -ErrorAction SilentlyContinue) {
             $zddOut = & uv pip install --python $VenvPython "$ZddDir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet 2>&1
         } else {
             $zddOut = & $VenvPython -m pip install "$ZddDir" 2>&1
         }
-        Remove-PluginBuildArtifacts -PluginDir $PluginDir
+        Remove-PluginBuildArtifacts -PluginDir $PluginDir -ExtraDir $ZddDir
         if ($LASTEXITCODE -ne 0) {
             $ErrorActionPreference = $prevEAP
             Write-Fail "zdd install failed (exit $LASTEXITCODE)"

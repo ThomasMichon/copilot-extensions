@@ -1,0 +1,9 @@
+{
+  "comment": "Scrub vendored-lib (libs/*) stale build artifacts, not just the plugin root",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
