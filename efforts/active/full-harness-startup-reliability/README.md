@@ -545,9 +545,15 @@ correction inline, per the effort's own journal discipline)._
   explicit all-plugins run; the Validation Plan's `/env` criterion is now
   scoped to extensions only, with hooks validated via process-log evidence
   and skills against each plugin's own manifest. Rebased, force-pushed,
-  resolved both threads, posted a summary comment. Both PRs remain open,
-  awaiting a review decision (their live `mergeable`/checks status
-  fluctuates by the minute during active review passes -- see each PR's
-  current state directly rather than trusting any snapshot recorded here);
-  watching both via `pr-watch` in the background rather than polling, per
-  standard discipline.
+  resolved both threads, posted a summary comment. PR #3305 then picked up
+  one more pass (1 new low finding + 1 previously-missed low finding on
+  unchanged code): the Journal's own PR-mergeability mentions were
+  themselves stale snapshots by the time later entries were written, and
+  the Vision overclaimed causal evidence the Context section itself still
+  marks unproven. Fixed both (see this and the prior paragraph's own
+  now-corrected wording), rebased, force-pushed, resolved, commented. Both
+  PRs remain open, awaiting a review decision (their live `mergeable`/checks
+  status fluctuates by the minute during active review passes -- see each
+  PR's current state directly rather than trusting any snapshot recorded
+  here); watching both via `pr-watch` in the background rather than
+  polling, per standard discipline.
