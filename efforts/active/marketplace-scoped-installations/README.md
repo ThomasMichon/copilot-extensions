@@ -386,6 +386,71 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-27 — Fixed the `agent-index` fresh-install bug found by the clean-room checkpoint (PR #4272, fixes aperture-labs#7702)
+
+- Root cause confirmed (see the prior entry below): `install.sh`'s/
+  `install.ps1`'s `ensure` action never stamped the CLI binstub, so a
+  genuinely fresh machine's `sessionStart` hook left `agent-index`
+  entirely absent from `PATH`.
+- **First attempt was the wrong shape and the review caught it.** The
+  initial fix made `ensure` run the full heavy path (`_ensure_runtime`
+  / `Install-Runtime`: uv fetch, venv build, package install) —
+  mirroring `update`. PR #4272's advisory review flagged this
+  correctly on four points: (1) medium — `hooks.json`'s `sessionStart`
+  hook has a 20-second timeout with output suppressed, and a full
+  provision can easily exceed that on a pristine box, silently
+  truncating and preserving a variant of the original bug; (2)/(4) low
+  — the changefile comment and a new test comment both embedded the
+  private `aperture-labs#7702` tracker identifier, violating the
+  public-artifact identifier-neutrality convention; (3) low — the fix
+  contradicted two checked-in docs (`docs/standalone-service-lifecycle.md`,
+  `skills/setting-up-agent-index/SKILL.md`) that explicitly document
+  `ensure` as a **cheap, non-provisioning** safety net by design.
+- Re-reading those docs (and `install.sh`'s own `do_stamp` comment:
+  "fits a sessionStart hook's grace window. No venv, no uv.") confirmed
+  the medium finding was substantive, not just style: `ensure` is
+  *intentionally* meant to stay fast, and the real gap was narrower
+  than the first attempt assumed — it needed to stamp the **binstub**
+  only (the same cheap artifact `stamp`/`install`/`update` all deploy
+  via `deploy_binstub` / `Deploy-SetupGatedBinstub`), not build the
+  full runtime.
+- **Corrected fix:** `ensure` now checks whether the binstub exists;
+  if not, it writes the `payload-dir` marker and calls
+  `deploy_binstub`/`Deploy-SetupGatedBinstub` (mkdir + two small
+  resolver-script copies + a small redirector shim — no interpreter,
+  no package manager), then proceeds with the existing health-check
+  (`_ensure_running`/`Ensure-Running`) and autostart registration
+  (`_install_logon_autostart`/`Install-LogonAutostart`) unchanged.
+- **Manually verified in a clean container** (fresh `$HOME`, no prior
+  `~/.agent-index` or `~/.local/bin/agent-index`): `ensure` now
+  completes in **~0.57s**, deploys a working binstub that resolves and
+  returns a clean `"state":"inactive"` status, and builds no `.venv` —
+  confirming both the timeout concern and the "must not silently
+  provision before explicit setup" design contract are satisfied.
+- Fixed the two identifier-neutrality findings by rewording the
+  changefile comment and the test comment to describe the bug/fix
+  generically, with no tracker reference. Updated both flagged docs to
+  describe the corrected behavior (stamps the binstub first when
+  absent, still never provisions a runtime).
+- Rewrote `test_installers_are_base_only_and_never_implicitly_start_engine`'s
+  `ensure`-specific assertions to check for `deploy_binstub`/
+  `Deploy-SetupGatedBinstub` + the existing health-check/autostart
+  calls, and explicitly assert `_ensure_runtime`/`Install-Runtime` are
+  **absent** from `ensure`'s body (the opposite of the first attempt's
+  assertions).
+- Verified: bash/PowerShell syntax checks, `check-docs-consistency.py`,
+  `check-module-size.py`, `check-marketplace-isolation.py` (all clean),
+  and the full `agent-index` suite via `test-supervisor` (562 passed,
+  1 skipped, 71 deselected, same `test_runtime_gate.py` exclusion).
+  All 8 required CI checks passed on GitHub before merge. Merged via
+  `pr-merge --now`.
+- **Takeaway for future legs:** when a review flags a design-contract
+  contradiction against checked-in docs, re-read those docs before
+  assuming the review is merely stylistic — here the "wrong" original
+  fix would have reintroduced a variant of the same bug under a tight
+  hook timeout, and the docs already described the correct, narrower
+  shape the fix needed to take.
+
 ### 2026-09-27 — `agent-index`'s SKILL.md docs resolved (PR #4264); clean-room checkpoint found a HIGH-severity first-install bug
 
 - Fresh guard count at merge time: not re-checked before the next
