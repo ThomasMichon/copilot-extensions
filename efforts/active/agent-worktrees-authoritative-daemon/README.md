@@ -640,20 +640,36 @@ survey above.
       hand-curated, commented denylist of every tracking-record WRITE
       function across `tracking.py` / `tracking_lifecycle.py` /
       `tracking_claims.py` / `tracking_session_registry.py` /
-      `tracking_controller_relations.py` (31 functions). Review caught two
-      real gaps before merge: `tracking_controller_relations.py`'s own
-      thin `save_record`/`_save_record_unlocked` re-export wrappers were
-      missing from the protected module set, and the attribute-chain
+      `tracking_controller_relations.py` (36 functions). **Two review
+      rounds, four real gaps caught and fixed, none assumed away:**
+      (1) `tracking_controller_relations.py`'s own thin
+      `save_record`/`_save_record_unlocked` re-export wrappers were
+      missing from the protected module set; (2) the attribute-chain
       matcher only handled a single-level module alias
       (`tracking.save_record(...)`), missing the two-level
       `import agent_worktrees as aw; aw.tracking.save_record(...)` form
-      (and its unaliased equivalent) -- both fixed, with a regression test
-      each. Wired into CI alongside
-      `test_check_no_sibling_tracking_writes.py` (11 tests: clean tree,
+      and its unaliased equivalent -- a package-root alias was never
+      tracked at all; (3) the denylist itself was missing four
+      controller-relation write functions
+      (`backfill_legacy_controller_relations`/`set_controller_relation`/
+      `end_controller_relation`/`remove_controller_relation`, persisted in
+      `tracking_controller_relations.py` AND re-exported by `tracking.py`
+      itself) plus `load_or_create_anchor_record`; (4) the SECOND round
+      then found the FIRST round's own fix for gap (2) was itself
+      semantically wrong: `import agent_worktrees.tracking` with no `as`
+      binds only the top-level `agent_worktrees` name in Python (never a
+      bare `tracking`), so modeling it as a `tracking` module alias both
+      mis-caught an unrelated bare `tracking.save_record(...)` name
+      collision and MISSED this actual valid import shape -- fixed by
+      routing the unaliased dotted-import case into the package-alias
+      tracking instead. Wired into CI alongside
+      `test_check_no_sibling_tracking_writes.py` (14 tests: clean tree,
       read-only-accessor non-flagging, three single-level import shapes,
-      an aliased-module-import evasion case, two package-root-alias
-      evasion cases, the `tracking_controller_relations` re-export case,
-      the owning-plugin exemption, and a live-repo smoke test). **Scoped
+      an aliased-module-import evasion case, three package-root-alias
+      evasion cases (aliased, unaliased bare, and unaliased dotted), the
+      `tracking_controller_relations` re-export case, the four added
+      controller-relation functions, `load_or_create_anchor_record`, the
+      owning-plugin exemption, and a live-repo smoke test). **Scoped
       to sibling `plugins/*` only** (matching this effort's own original
       survey and Plan wording) -- deliberately does NOT cover
       `worktree-manager/` (a separate, non-plugin, out-of-plugin
@@ -754,7 +770,7 @@ already has an ordered plan for.
 Landed the Phase 4 CI guard proper: `tools/check-no-sibling-tracking-
 writes.py`, an AST-based scan of every sibling `plugins/*` (excluding
 `agent-worktrees` itself) for a direct import/call of a hand-curated,
-31-function denylist covering every tracking-record write function across
+36-function denylist covering every tracking-record write function across
 `tracking.py`/`tracking_lifecycle.py`/`tracking_claims.py`/
 `tracking_session_registry.py`/`tracking_controller_relations.py` --
 derived by AST-walking each module for functions whose body calls
@@ -765,28 +781,43 @@ NOT extended to cover `worktree-manager/`'s own already-tracked exception
 (see above), since that scope decision belongs to a coordinated
 cross-effort call, not something to fold in unilaterally here.
 
-**First review round found two real evasions the initial version missed,
-both fixed:** (1) `tracking_controller_relations.py`'s own thin
+**Two review rounds found four real gaps, none assumed away:**
+(1) `tracking_controller_relations.py`'s own thin
 `save_record`/`_save_record_unlocked` re-export wrappers were absent from
 the protected module set, so a sibling could route through that module
-instead and pass clean; (2) the attribute-chain matcher only handled a
+instead and pass clean. (2) The attribute-chain matcher only handled a
 single-level module alias (`tracking.save_record(...)`), missing the
 two-level `import agent_worktrees as aw; aw.tracking.save_record(...)`
-form (and its unaliased `import agent_worktrees;
-agent_worktrees.tracking.save_record(...)` equivalent) -- a package-root
-alias was never tracked at all. Both fixed with a dedicated regression
-test each.
+form -- a package-root alias was never tracked at all. (3) The denylist
+itself was incomplete: `backfill_legacy_controller_relations`/
+`set_controller_relation`/`end_controller_relation`/
+`remove_controller_relation` persist records in
+`tracking_controller_relations.py` AND are re-exported by `tracking.py`
+itself, plus `load_or_create_anchor_record` conditionally persists via
+`create_new_record` -- none were in the original list. (4) The SECOND
+round then caught that round one's own fix for gap (2) was itself
+semantically wrong: `import agent_worktrees.tracking` with NO `as` binds
+only the top-level `agent_worktrees` name (Python's own import semantics
+-- the submodule name is never bound locally), so modeling it as a
+`tracking` module alias both mis-caught an unrelated bare
+`tracking.save_record(...)` name collision as if it came through this
+import AND missed the actual valid `agent_worktrees.tracking.save_record
+(...)` shape this import produces -- fixed by routing the unaliased
+dotted-import case into the package-alias tracking instead, matching
+`import agent_worktrees`'s own already-correct handling. Every fix has a
+dedicated regression test.
 
-11 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
+14 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
 tree, the sanctioned read-only accessors staying unflagged, three
 single-level import/call shapes (module attribute call, direct
 `from agent_worktrees import <fn>`, `from agent_worktrees.tracking_claims
-import <fn>`), an aliased-module-import evasion case, the two
-package-root-alias evasion cases above, the
-`tracking_controller_relations` re-export case, the owning-plugin's own
-exemption, and a live-repo smoke test (confirmed clean: zero violations
-today, matching the original survey's own finding). Wired into
-`.github/workflows/ci.yml` alongside the existing
+import <fn>`), an aliased-module-import evasion case, three
+package-root-alias evasion cases (aliased, unaliased bare, and unaliased
+dotted), the `tracking_controller_relations` re-export case, the four
+added controller-relation functions, `load_or_create_anchor_record`, the
+owning-plugin's own exemption, and a live-repo smoke test (confirmed
+clean: zero violations today, matching the original survey's own
+finding). Wired into `.github/workflows/ci.yml` alongside the existing
 `check-no-agent-machines-packages.py` guard.
 
 ### 2026-09-27 — PR #4265: daemon writes push straight into record_cache -- the read-consistency companion to Phase 3's write migration, plus two real bugs review caught

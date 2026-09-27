@@ -95,10 +95,18 @@ WRITE_FUNCTIONS = frozenset({
     "sweep_abandoned_obligations",
     "release_all_resources",
     "release_at_rest_resources",
+    "load_or_create_anchor_record",
     # tracking_session_registry.py
     "register_session",
     "deregister_session",
     "seal_worktree_identity",
+    # tracking_controller_relations.py (also re-exported by tracking.py
+    # itself, see that module's own `# noqa: F401 -- re-export for tests`
+    # imports -- a sibling importing either module's copy is a violation)
+    "backfill_legacy_controller_relations",
+    "set_controller_relation",
+    "end_controller_relation",
+    "remove_controller_relation",
 })
 
 #: The module names a write function could be imported from -- all of these
@@ -194,7 +202,18 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
                 if len(parts) == 1:
                     package_aliases.add(alias.asname or parts[0])
                 elif len(parts) == 2 and parts[1] in TRACKING_MODULES:
-                    module_aliases[alias.asname or parts[1]] = node.lineno
+                    if alias.asname:
+                        # `import agent_worktrees.tracking as X` binds X to
+                        # the submodule directly -- a genuine module alias.
+                        module_aliases[alias.asname] = node.lineno
+                    else:
+                        # `import agent_worktrees.tracking` (no `as`) binds
+                        # only the top-level package name `agent_worktrees`
+                        # in the local namespace (Python's own import
+                        # semantics) -- NOT `tracking`. The submodule is
+                        # only reachable via `agent_worktrees.tracking...`,
+                        # i.e. the two-level package-alias chain below.
+                        package_aliases.add("agent_worktrees")
 
     for node in ast.walk(tree):
         if not isinstance(node, ast.Attribute) or node.attr not in WRITE_FUNCTIONS:

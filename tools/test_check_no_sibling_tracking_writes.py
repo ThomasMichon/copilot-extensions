@@ -162,6 +162,56 @@ def test_tracking_controller_relations_reexport_is_caught(tmp_path):
     assert "save_record" in violations[0].detail
 
 
+def test_dotted_import_without_alias_binds_the_package_not_the_submodule(tmp_path):
+    # `import agent_worktrees.tracking` (NO `as`) is Python-bound to the
+    # top-level name `agent_worktrees`, never a bare `tracking` -- the
+    # submodule is only reachable via the two-level
+    # `agent_worktrees.tracking...` chain. A prior version of this guard
+    # mismodeled this shape as a `tracking` module-alias binding, which
+    # both mis-caught an unrelated bare `tracking.save_record(...)` name
+    # collision and MISSED this actual valid import shape.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "import agent_worktrees.tracking\n"
+        "\n"
+        "def write(record, path):\n"
+        "    agent_worktrees.tracking.save_record(record, path)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "save_record" in violations[0].detail
+
+
+def test_controller_relation_functions_are_denylisted(tmp_path):
+    # backfill_legacy_controller_relations / set_controller_relation /
+    # end_controller_relation / remove_controller_relation persist records
+    # in tracking_controller_relations.py and are ALSO re-exported by
+    # tracking.py itself -- both import paths must be caught.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking\n"
+        "\n"
+        "def write(record, **kw):\n"
+        "    tracking.set_controller_relation(record, **kw)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "set_controller_relation" in violations[0].detail
+
+
+def test_load_or_create_anchor_record_is_denylisted(tmp_path):
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking_claims\n"
+        "\n"
+        "def write(*a, **kw):\n"
+        "    tracking_claims.load_or_create_anchor_record(*a, **kw)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "load_or_create_anchor_record" in violations[0].detail
+
+
 def test_real_repo_checkout_is_clean():
     """End-to-end smoke test: the real, live repo tree must never trip this
     guard -- confirms the script (not just find_violations()) exits 0
