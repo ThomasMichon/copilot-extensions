@@ -199,6 +199,18 @@ force-removes a folder or branch, squashes, rebases, or pushes.** Its only
 job is to guarantee the branch's work is merged to the default branch --
 always safe to call.
 
+**The validated branch is the worktree's actual current checkout, not
+necessarily its originally-tracked branch name** (`worktree/<id>`).  If the
+checkout has since moved to a differently-named branch (e.g. a `-journal`
+suffix variant from manual renaming) or ended up detached, `finalize`
+validates and removes the *real* checked-out content -- checking the stale
+tracked name instead would risk a false "Unmerged work detected" or,
+worse, validating the wrong ref while the actual checkout held something
+different (#7723). When that divergence is detected, `finalize` also warns
+if the stale tracked branch still has content of its own not on upstream
+(possible orphaned work worth a manual look) and preserves that branch
+ref through cleanup instead of deleting it alongside the checkout.
+
 ### Decision table
 
 | Situation | Command |

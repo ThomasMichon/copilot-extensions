@@ -1,0 +1,9 @@
+{
+  "comment": "finalize: validate the worktree's actual checkout instead of a stale tracked branch name, and preserve a diverged tracked branch through cleanup",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
