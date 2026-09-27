@@ -1,0 +1,9 @@
+{
+  "comment": "Fix marketplace-isolation false positive: mark two historical-context bare-command mentions in defining-subagents/SKILL.md as allowed doc-examples",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}
