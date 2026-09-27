@@ -197,12 +197,18 @@ alike.** Copilot code review can only ever render `Approve` or `Comment`
 are enabled in this repo, so a genuinely ready PR should come back `Approve`,
 not merely `Comment` (see `REVIEW.md`). A `Comment`-only verdict means real
 findings remain -- it is not a pass:
-1. Open/update the PR, wait ~5 minutes for a review.
+1. Open/update the PR, wait ~5 minutes for a review. No review landed
+   (a timeout, not a review event): skip straight to step 4 -- there's
+   nothing to address or push yet.
 2. `Approve` landed: merge (subject to the separate maintainer-approval gate
    on a non-maintainer's PR).
 3. `Comment` landed: address genuinely valuable findings (explain/dismiss
-   the rest), push, wait ~5 minutes for the automatic post-push review.
-4. Still not `Approve`: explicitly re-request review via the API (see
+   the rest). If that requires an actual change, push it and wait ~5
+   minutes for the automatic post-push review; if every finding was
+   dismissed/explained with no real change needed, skip the push (there's
+   nothing new for a re-review to see) and go straight to step 4.
+4. Still not `Approve` (including a post-push timeout, which counts the
+   same as a `Comment`): explicitly re-request review via the API (see
    CONTRIBUTING.md § "Requesting a fresh review" for the exact call) and wait
    ~5 minutes again -- do not just keep pushing small commits hoping the next
    automatic pass flips on its own.

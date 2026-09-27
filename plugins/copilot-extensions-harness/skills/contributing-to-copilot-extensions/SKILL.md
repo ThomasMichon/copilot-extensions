@@ -182,12 +182,20 @@ installer. Know which kind you are changing.
      result) to wait for the initial review, **capturing a fresh `<cursor>`
      immediately before each wait** (`pr-watch cursor <owner>/<repo> <PR>`,
      or the cursor a prior wait returned) rather than always reusing `r0`,
-     which can report an old review instead of waiting for a new one. **No
+     which can report an old review instead of waiting for a new one.
+     **Check `events[].review.user` before treating a wake as Copilot's
+     verdict** -- this same `--until` set also wakes on an `approved` or
+     `changes_requested` review from any human maintainer or other
+     collaborator, and that is not Copilot's verdict; a human review
+     follows the ordinary contributor-review path (address feedback,
+     re-request the maintainer if needed), not this loop. **No
      review landed after that window (a timeout, not a review event):**
      skip straight to explicitly re-requesting a review (`POST
      .../pulls/<PR>/requested_reviewers` with
      `reviewers[]=copilot-pull-request-reviewer[bot]` -- see
-     `CONTRIBUTING.md` § "Requesting a fresh review" for the exact call)
+     `CONTRIBUTING.md` § "Requesting a fresh review" for the exact call,
+     including direct evidence that this call genuinely triggers a fresh
+     re-review rather than being a no-op)
      and wait ~5 minutes again -- there's nothing to address or push yet,
      so don't invent a commit just to have something to push. On
      `Approve`, merge. On `Comment`: address genuinely valuable findings;
