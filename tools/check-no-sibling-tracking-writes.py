@@ -544,21 +544,36 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
             ):
                 yield node.target.id, node.value, node.lineno
 
+    def _is_package_expr(value: ast.expr) -> bool:
+        """Whether ``value`` resolves to the bare ``agent_worktrees``
+        package -- a package-alias `Name`, or an inline dynamic import
+        that itself resolves to the package (e.g.
+        ``__import__("agent_worktrees.tracking")`` with no fromlist,
+        which returns the top-level package per CPython's own
+        semantics)."""
+        if isinstance(value, ast.Name) and value.id in package_aliases:
+            return True
+        dynamic = _dynamic_import_alias_kind(value)
+        return dynamic is not None and dynamic[0] == "package"
+
     def _module_expr_label(expr: ast.expr) -> str | None:
         """If ``expr`` resolves to a tracked module (a module alias, a
-        two-level package-alias chain like ``aw.tracking``, an inline
-        dynamic import, or a call to the internal `_tracking()` lazy-
-        import helper), return a human-readable label for it; otherwise
-        ``None``."""
+        two-level package-alias chain like ``aw.tracking`` -- including
+        one whose package half is itself an inline dynamic import -- or
+        a call to the internal `_tracking()` lazy-import helper), return
+        a human-readable label for it; otherwise ``None``."""
         if isinstance(expr, ast.Name) and expr.id in module_aliases:
             return expr.id
         if (
             isinstance(expr, ast.Attribute)
-            and isinstance(expr.value, ast.Name)
-            and expr.value.id in package_aliases
+            and _is_package_expr(expr.value)
             and expr.attr in TRACKING_MODULES
         ):
-            return f"{expr.value.id}.{expr.attr}"
+            base = (
+                expr.value.id if isinstance(expr.value, ast.Name)
+                else _string_arg_value(expr.value.args[0])
+            )
+            return f"{base}.{expr.attr}"
         dynamic = _dynamic_import_alias_kind(expr)
         if dynamic is not None:
             return _string_arg_value(expr.args[0])
@@ -570,6 +585,23 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
             and expr.func.id in tracking_helper_aliases
         ):
             return f"{expr.func.id}()"
+        return None
+
+    def _queue_expr_label(expr: ast.expr) -> str | None:
+        """If ``expr`` resolves to the `_STAMP_QUEUE` object itself (a
+        queue alias, or an inline `<module>._STAMP_QUEUE` chain), return
+        a human-readable label for it; otherwise ``None`` -- mirrors
+        `_module_expr_label` but one level down the stack, so a
+        write-triggering method reached off an ALREADY-resolved queue
+        expression (e.g. `getattr(tracking._STAMP_QUEUE, "submit")`, not
+        only the bare `tracking._STAMP_QUEUE.submit(...)` chain) is
+        still recognized."""
+        if isinstance(expr, ast.Name) and expr.id in queue_aliases:
+            return expr.id
+        if isinstance(expr, ast.Attribute) and expr.attr == STAMP_QUEUE_ATTR:
+            label = _module_expr_label(expr.value)
+            if label is not None:
+                return f"{label}.{STAMP_QUEUE_ATTR}"
         return None
 
     changed = True
@@ -696,6 +728,28 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
                     repo_root=repo_root,
                 ))
         elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "getattr"
+            and len(node.args) >= 2
+            and isinstance(node.args[1], ast.Constant)
+            and isinstance(node.args[1].value, str)
+            and node.args[1].value in STAMP_QUEUE_WRITE_METHODS
+        ):
+            # `getattr(<queue-expr>, "submit")` -- reflectively fetching a
+            # write-triggering QUEUE METHOD off an already-resolved queue
+            # expression (`tracking._STAMP_QUEUE`, a queue alias, ...),
+            # distinct from `getattr(<module>, "_STAMP_QUEUE")` above
+            # (which reflectively fetches the QUEUE OBJECT itself).
+            label = _queue_expr_label(node.args[0])
+            if label is not None:
+                violations.append(Violation(
+                    path, node.lineno,
+                    f"reflectively accesses write-triggering queue method "
+                    f"`getattr({label}, {node.args[1].value!r})`",
+                    repo_root=repo_root,
+                ))
+        elif (
             isinstance(node, ast.Subscript)
             and isinstance(node.value, ast.Attribute)
             and node.value.attr == "__dict__"
@@ -708,6 +762,22 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
                 violations.append(Violation(
                     path, node.lineno,
                     f"reflectively accesses write function "
+                    f"`{label}.__dict__[{node.slice.value!r}]`",
+                    repo_root=repo_root,
+                ))
+        elif (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.value, ast.Attribute)
+            and node.value.attr == "__dict__"
+            and isinstance(node.slice, ast.Constant)
+            and isinstance(node.slice.value, str)
+            and node.slice.value in STAMP_QUEUE_WRITE_METHODS
+        ):
+            label = _queue_expr_label(node.value.value)
+            if label is not None:
+                violations.append(Violation(
+                    path, node.lineno,
+                    f"reflectively accesses write-triggering queue method "
                     f"`{label}.__dict__[{node.slice.value!r}]`",
                     repo_root=repo_root,
                 ))

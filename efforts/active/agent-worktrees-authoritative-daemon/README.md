@@ -642,7 +642,7 @@ survey above.
       `tracking_lifecycle.py` / `tracking_claims.py` /
       `tracking_session_registry.py` / `tracking_controller_relations.py`
       / `tracking_write.py` / the 6 `tracking_*_write.py` verb-handler
-      modules). Seventeen review rounds found real gaps each time (see Journal
+      modules). Eighteen review rounds found real gaps each time (see Journal
       for the full blow-by-blow: a missing re-export module, a
       package-root-alias attribute chain never tracked at all, an
       incomplete denylist, a wildcard-import escape hatch, the daemon's
@@ -758,7 +758,7 @@ writes.py`, an AST-based scan of every sibling `plugins/*` (excluding
 denylist covering every tracking-record write function -- derived by
 AST-walking each protected module for functions whose body calls
 `save_record`/`_save_record_unlocked`/the async stamp queue, then
-hand-verified against the remainder (the final denylist, after seventeen
+hand-verified against the remainder (the final denylist, after eighteen
 review rounds below, covers 55 functions across 12 modules:
 `tracking.py`/`tracking_lifecycle.py`/`tracking_claims.py`/
 `tracking_session_registry.py`/`tracking_controller_relations.py`/
@@ -769,7 +769,7 @@ wording -- NOT extended to cover `worktree-manager/`'s own already-tracked
 exception (see above), since that scope decision belongs to a
 coordinated cross-effort call, not something to fold in unilaterally here.
 
-**Seventeen review rounds found real gaps, none assumed away:**
+**Eighteen review rounds found real gaps, none assumed away:**
 (1) `tracking_controller_relations.py`'s own thin
 `save_record`/`_save_record_unlocked` re-export wrappers were absent from
 the protected module set, so a sibling could route through that module
@@ -782,7 +782,7 @@ itself was incomplete: `backfill_legacy_controller_relations`/
 `remove_controller_relation` persist records in
 `tracking_controller_relations.py` AND are re-exported by `tracking.py`
 itself, plus `load_or_create_anchor_record` conditionally persists via
-`create_new_record` -- none were in the original list. (4) The SECOND
+`create_new_record` -- none were in the original list. The SECOND
 round then caught that round one's own fix for gap (2) was itself
 semantically wrong: `import agent_worktrees.tracking` with NO `as` binds
 only the top-level `agent_worktrees` name (Python's own import semantics
@@ -792,14 +792,14 @@ only the top-level `agent_worktrees` name (Python's own import semantics
 import AND missed the actual valid `agent_worktrees.tracking.save_record
 (...)` shape this import produces -- fixed by routing the unaliased
 dotted-import case into the package-alias tracking instead, matching
-`import agent_worktrees`'s own already-correct handling. (5) A THIRD
+`import agent_worktrees`'s own already-correct handling. A THIRD
 review round then found a wildcard-import escape hatch entirely outside
 the alias-tracking model: `from agent_worktrees import *` (or `from
 agent_worktrees.tracking import *`) followed by a bare `save_record(...)`
 call produces an `ImportFrom` alias literally named `*`, which neither
 existing branch ever matches -- fixed by rejecting the wildcard import
 itself outright (unresolvable safely against the denylist, so treated as
-a violation on sight). (6) A FOURTH review round found two more real
+a violation on sight). A FOURTH review round found two more real
 gaps: the module set stopped at the five original "public" tracking
 modules, but the daemon's own 6 `tracking_*_write.py` verb-handler
 modules (`apply_claim_add`/`apply_claim_release`/`apply_claim_settle`/
@@ -816,7 +816,7 @@ treated as clean, so a file the guard simply couldn't parse was a
 guaranteed way to smuggle a forbidden import past CI. Fixed by adding
 the verb-handler modules/functions to the protected sets, and by turning
 every file-scan failure into a reported `Violation` instead of a silent
-empty list. (8) A FIFTH review round found one more private
+empty list. A FIFTH review round found one more private
 read-modify-write helper absent: `_stamp_liveness` (backs
 `stamp_mux_live`/`stamp_bound_live`) -- underscore-prefixed, but nothing
 in Python actually prevents a sibling from importing a private name
@@ -829,7 +829,7 @@ gap this way (`_apply_session_state_stamp`, backing
 pass surfaced but manual inspection ruled out
 (`reopen_finalized_owner` calls `tracking.update_status(...,
 save=False)` -- mutates in-memory only, never itself persists, so it
-does not belong on the denylist). (9) A SIXTH review round found four
+does not belong on the denylist). A SIXTH review round found four
 more real findings: **(a)** `tracking_write.py`'s own generic
 direct-execution APIs -- `run_direct(verb, args, reason=...)` and
 `compute(kind, payload)` -- can load and invoke ANY registered verb's
@@ -853,14 +853,14 @@ broader, name-prefix-independent scope rather than narrowing the scan
 to match a now-inaccurate claim. **(d)** This very Journal entry still
 quoted an earlier round's stale function/module counts after two later
 rounds had already changed them -- fixed by updating every remaining
-count in this entry, not just the one flagged. (10) A SEVENTH review
+count in this entry, not just the one flagged. A SEVENTH review
 round found the reassignment-propagation fix from round 6 was itself
 incomplete: it only handled a bare `Name = Name` RHS, missing the
 equally simple `tracking_module = aw.tracking` (a two-level `Attribute`
 RHS off a package alias) -- fixed by resolving that shape into the same
 `module_aliases` set a direct `aw.tracking.save_record(...)` call
 already populates, rather than adding a second parallel check
-downstream. (11) An EIGHTH review round found three lingering
+downstream. An EIGHTH review round found three lingering
 documentation-accuracy stragglers from fix (c) above -- the CI step's
 own comment in `.github/workflows/ci.yml`, the test file's own module
 docstring, and this Journal's own "(25 tests)" count -- all still said
@@ -871,7 +871,7 @@ genuinely unrelated, pre-existing flaky test
 (`test_first_use_provision_is_serialized` in
 `libs/payload-invocation`/`agent-index`, nothing to do with this guard)
 -- confirmed unrelated and cleared with a CI rerun, not a code change.
-(12) A NINTH review round found the round-6/7 reassignment-propagation
+A NINTH review round found the round-6/7 reassignment-propagation
 fix was STILL incomplete: it only handled plain `ast.Assign`, missing
 the equally simple annotated form (`writer_module: object = tracking`)
 -- an annotation adds no actual indirection, so `ast.AnnAssign` needed
@@ -882,7 +882,7 @@ tests") and a logically backwards claim in the
 `worktree-manager-control-plane` cross-link (implying the guard would
 need the `worktree-manager` call site added once it converts to the
 batched verb, when conversion should REMOVE that call site entirely) --
-both corrected. (13) A TENTH review round found the deepest gap yet:
+both corrected. A TENTH review round found the deepest gap yet:
 `getattr(tracking, "save_record")` and
 `tracking.__dict__["save_record"]` both fetch a write function
 reflectively -- neither produces an `ast.Attribute` node, so both
@@ -901,7 +901,7 @@ named only the original four modules (missing
 `tracking_controller_relations`/`tracking_write`/the six
 `tracking_*_write.py` modules added in later rounds), and this Journal
 entry's own "(26 tests)"/"five review rounds" phrasing had gone stale
-again after round 9's edits. (14) An ELEVENTH review round found the
+again after round 9's edits. An ELEVENTH review round found the
 final escape hatch this static model had left open: a literal-string
 dynamic import (`importlib.import_module("agent_worktrees.tracking")`
 or `__import__("agent_worktrees.tracking")`) resolves a tracked module
@@ -912,7 +912,7 @@ argument only, matching the same non-literal boundary already accepted
 for `getattr`/`__dict__`) and feeding their resolved target into the
 SAME alias-propagation machinery an ordinary import already populates --
 both as an assignment RHS and as an inline, unassigned call whose result
-is used directly. (15) A TWELFTH review round found two more real gaps:
+is used directly. A TWELFTH review round found two more real gaps:
 **(a)** the denylist protected `tracking.stamp_mux_live`/
 `stamp_bound_live`/`stamp_session_state` but not the shared
 `_STAMP_QUEUE` singleton those wrappers themselves funnel through --
@@ -928,7 +928,7 @@ detector from round 11 only recognized the literal identifier
 `from importlib import import_module` (calling it completely bare) --
 fixed by tracking `importlib`'s own aliases and `import_module`'s own
 direct bindings the same way every other name in this guard is tracked,
-rather than hardcoding one spelling. (16) A THIRTEENTH review round
+rather than hardcoding one spelling. A THIRTEENTH review round
 found the queue-specific matcher from round 12 only recognized the
 INLINE `<module>._STAMP_QUEUE.<method>` chain in one expression -- a
 sibling reassigning the queue object itself first
@@ -938,14 +938,14 @@ Fixed by adding a `queue_aliases` set populated the same way
 `module_aliases`/`package_aliases` already are (a direct import of
 `_STAMP_QUEUE` itself, or an assignment whose RHS resolves to
 `<tracked-module>._STAMP_QUEUE`), then matching `<queue-alias>.<method>`
-alongside the existing inline chain. (17) A FOURTEENTH review round
+alongside the existing inline chain. A FOURTEENTH review round
 found the deepest layer still uncovered: `_atomic_write` -- the
 low-level function `save_record` itself calls to actually emit the
 serialized YAML -- was absent from the denylist entirely. A sibling
 importing it directly could write raw content straight to a
 `tracking.yaml` path, bypassing every validation/locking/merge layer
 above it, not merely one specific field-level wrapper. Added to
-`WRITE_FUNCTIONS`. (18) A FIFTEENTH review round found two more real
+`WRITE_FUNCTIONS`. A FIFTEENTH review round found two more real
 gaps at the very bottom of the stack: **(a)** `_replace_with_retry`,
 the even-lower-level `os.replace(src, dst)` helper `_atomic_write`
 itself calls, was still missing; **(b)** `tracking_write._VERBS` -- the
@@ -956,7 +956,7 @@ without ever naming `run_direct`, `compute`, or any `apply_*` function.
 Fixed by adding `_replace_with_retry` to the denylist, and by
 denylisting the `_VERBS` ATTRIBUTE NAME itself (not a specific key) so
 any access to it -- subscripted immediately or bound to a variable
-first -- is caught the moment `._VERBS` is touched at all. (19) A
+first -- is caught the moment `._VERBS` is touched at all. A
 SIXTEENTH review round -- the checks turning green for the first time --
 found four more real gaps: **(a)** `_StampWriteQueue`, the CLASS behind
 `_STAMP_QUEUE`, was itself importable/instantiable separately from the
@@ -986,7 +986,7 @@ that exact name) from one of the protected modules, and recognizing a
 bare, no-argument call to one of those specific names as resolving to
 `tracking` -- deliberately NOT a blanket "any function named `_tracking`
 anywhere" rule, which would risk flagging an unrelated sibling's own
-identically-named local helper. (20) A SEVENTEENTH review round found
+identically-named local helper. A SEVENTEENTH review round found
 two more real gaps, both refinements of round 16's own fixes: **(a)**
 `_has_fromlist` treated ANY supplied fourth-argument/keyword as
 non-empty, but `fromlist=[]` and `fromlist=None` are exactly equivalent
@@ -1002,10 +1002,33 @@ non-literal as "present." **(b)** The reflective-access checks
 `tracking.__dict__["_STAMP_QUEUE"]` both reflectively fetched the same
 queue object the plain-attribute check already flags outright, while
 evading both reflective checks entirely. Fixed by extending both checks
-to also recognize `STAMP_QUEUE_ATTR` alongside `WRITE_FUNCTIONS`. Every
-fix across all seventeen rounds has a dedicated regression test.
+to also recognize `STAMP_QUEUE_ATTR` alongside `WRITE_FUNCTIONS`. An
+EIGHTEENTH review round found two more real gaps, plus a documentation
+mismatch: **(a)** round 17's `_STAMP_QUEUE` reflective fix only
+recognized `getattr(<module>, "_STAMP_QUEUE")` (fetching the QUEUE
+OBJECT from a module), missing the deeper chain
+`getattr(tracking._STAMP_QUEUE, "submit")` (fetching a write-triggering
+METHOD off an ALREADY-resolved queue expression) -- fixed by adding a
+`_queue_expr_label` helper mirroring `_module_expr_label` one level
+down the stack, and using it for both the plain-attribute and
+reflective (`getattr`/`__dict__`) queue-method checks alike. **(b)** The
+inline package-alias chain (`aw.tracking.save_record(...)`) only
+recognized a bare `Name` package alias as its base, missing
+`__import__("agent_worktrees.tracking").tracking.save_record(...)` --
+`__import__` with no fromlist returning the package INLINE, immediately
+chained with `.tracking`, never assigned to a variable at all -- fixed
+by generalizing the package-base check (`_is_package_expr`) to also
+accept an inline dynamic-import call that itself resolves to the
+package. **(c)** This Journal's own per-round numbering (`(N)` prefixes
+before each spelled-out ordinal) had drifted out of sync with the
+actual round count -- a leftover artifact of numbering individual
+FINDINGS rather than ROUNDS, which diverge once a round contains more
+than one lettered finding. Fixed by dropping the redundant numeric
+prefixes entirely, keeping only the spelled-out round ordinals (which
+were themselves always accurate) as the source of truth. Every fix
+across all eighteen rounds has a dedicated regression test.
 
-62 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
+66 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
 tree, the sanctioned read-only accessors staying unflagged, three
 single-level import/call shapes (module attribute call, direct
 `from agent_worktrees import <fn>`, `from agent_worktrees.tracking_claims

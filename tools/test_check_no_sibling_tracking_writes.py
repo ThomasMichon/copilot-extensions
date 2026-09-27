@@ -677,6 +677,65 @@ def test_dunder_dict_subscript_of_stamp_queue_attribute_is_caught(tmp_path):
     assert "_STAMP_QUEUE" in violations[0].detail
 
 
+def test_getattr_of_queue_write_method_is_caught(tmp_path):
+    # getattr(tracking._STAMP_QUEUE, "submit")(...) -- reflectively
+    # fetching a write-triggering METHOD off an ALREADY-resolved queue
+    # expression, not the queue object itself (that's the previous test).
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking\n"
+        "\n"
+        "def write(wt_id):\n"
+        "    getattr(tracking._STAMP_QUEUE, \"submit\")(wt_id, turns=1)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "submit" in violations[0].detail
+
+
+def test_dunder_dict_subscript_of_queue_write_method_is_caught(tmp_path):
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking\n"
+        "\n"
+        "def write(wt_id):\n"
+        "    tracking._STAMP_QUEUE.__dict__[\"submit\"](wt_id, turns=1)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "submit" in violations[0].detail
+
+
+def test_queue_write_method_via_a_queue_alias_reflective_access_is_caught(tmp_path):
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "from agent_worktrees import tracking\n"
+        "queue = tracking._STAMP_QUEUE\n"
+        "\n"
+        "def write(wt_id):\n"
+        "    getattr(queue, \"submit\")(wt_id, turns=1)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "submit" in violations[0].detail
+
+
+def test_inline_dunder_import_package_chain_is_caught(tmp_path):
+    # __import__("agent_worktrees.tracking").tracking.save_record(...)
+    # -- __import__ with no fromlist returns the top-level package
+    # INLINE (never assigned to a variable), and the `.tracking` hop off
+    # that call result reaches the protected module directly.
+    _write_plugin_file(
+        tmp_path, "agent-example", "src/agent_example/thing.py",
+        "def write(record, path):\n"
+        "    __import__(\"agent_worktrees.tracking\")"
+        ".tracking.save_record(record, path)\n",
+    )
+    violations = guard.find_violations(tmp_path)
+    assert len(violations) == 1
+    assert "save_record" in violations[0].detail
+
+
 def test_stamp_write_queue_class_is_denylisted(tmp_path):
     # Importing the _StampWriteQueue CLASS directly and instantiating a
     # fresh queue reaches the exact same YAML-writing helpers as the
