@@ -733,13 +733,21 @@ coverage of exactly this direct-caller path; added
 `test_a_direct_unlocked_save_caller_also_pushes_the_cache`, which would
 fail if the push were ever moved back into `save_record` alone.
 
-Never a TTL/blackout cache: any writer's stat change (verb-mediated,
-`save_record`, a direct `_save_record_unlocked` caller, or a raw external
-rewrite) is visible on the very next read -- this was always a
+Never a TTL/blackout cache: any writer's STAT-CHANGING write (verb-
+mediated, `save_record`, a direct `_save_record_unlocked` caller, or a
+raw external rewrite whose resulting `(mtime_ns, size)` differs from
+what's cached) is visible on the very next read -- this was always a
 performance/consistency improvement, never a correctness fix, which is
 also why `terminal_conclusion.py`'s still-open write-migration holdout
 needed no further work to get this SAME read-consistency benefit (a
-separate axis from write-migration, which it still awaits).
+separate axis from write-migration, which it still awaits). Every writer
+THIS effort actually cares about (any `tracking.py` write function, verb-
+mediated or direct) is unaffected by the `(mtime_ns, size)` key's own
+theoretical blind spot (a raw external rewrite landing on the exact same
+size at the exact same nanosecond as what's cached) -- `store()` always
+stats the file itself, right after its own write, so it can never miss
+its own change; only a write bypassing `tracking.py` entirely could hit
+that pre-existing, narrower edge case, unchanged by this PR.
 
 Full `agent-worktrees` suite: 5733 passed before the review-fix commit's
 new regression tests, 5743 passed after (10 new tests added: the two
