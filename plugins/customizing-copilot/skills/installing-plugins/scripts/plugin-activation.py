@@ -11,16 +11,31 @@ from pathlib import Path
 from types import ModuleType
 
 
+def _resolve_state_py(plugin_root: Path) -> Path:
+    """Find the real, on-disk ``state.py`` for ``libs/plugin-activation`` --
+    either the local copy's own file, or (when the local copy is a
+    src-passthrough ``VENDOR_POINTER.json``) canonical's, resolved directly
+    from the pointer's own ``source`` field (a monorepo-root-relative path,
+    e.g. ``libs/plugin-activation`` -- resolved against the repo root, one
+    level up from ``plugin_root``, NOT against ``plugin_root`` itself).
+    Deliberately does NOT import ``plugin_activation`` itself: that
+    package's ``__init__.py`` (real or a passthrough stub) pulls in
+    ``resolver.py``, which needs PyYAML -- a dependency this standalone
+    skill script has no reason to require, since ``state.py`` itself is
+    stdlib-only. Loading it directly by file path keeps that isolation
+    intact regardless of which form the local copy currently is."""
+    lib_dir = plugin_root / "libs" / "plugin-activation"
+    pointer = lib_dir / "VENDOR_POINTER.json"
+    if pointer.is_file():
+        repo_root = plugin_root.parent.parent
+        source_rel = json.loads(pointer.read_text(encoding="utf-8"))["source"]
+        lib_dir = repo_root / source_rel
+    return lib_dir / "src" / "plugin_activation" / "state.py"
+
+
 def _load_state_module() -> ModuleType:
     plugin_root = Path(__file__).resolve().parents[3]
-    state_path = (
-        plugin_root
-        / "libs"
-        / "plugin-activation"
-        / "src"
-        / "plugin_activation"
-        / "state.py"
-    )
+    state_path = _resolve_state_py(plugin_root)
     spec = importlib.util.spec_from_file_location(
         "_customizing_copilot_plugin_activation_state",
         state_path,

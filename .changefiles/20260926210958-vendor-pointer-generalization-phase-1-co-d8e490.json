@@ -1,0 +1,33 @@
+{
+  "comment": "Vendor-pointer-generalization Phase 1: convert plugin-activation to a src-passthrough vendor pointer (dev-branch authoring change only; materialize_main.py still expands it into a real, byte-identical copy at promotion, so no user-visible behavior changes). Also fixes a real regression found while converting: customizing-copilot's installing-plugins skill script loaded plugin_activation/state.py by hardcoded file path (bypassing the package's own __init__.py), which broke once the local copy became a pointer stub -- now resolves through the pointer's own source field when present, still avoiding the package's yaml-dependent __init__.py entirely.",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-logger",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-machines",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "dev"
+    }
+  ]
+}
