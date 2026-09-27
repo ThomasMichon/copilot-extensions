@@ -1,0 +1,14 @@
+{
+  "schema": "copilot-extensions.instruction-projections",
+  "version": 1,
+  "projections": [
+    {
+      "id": "process-hygiene-fallback",
+      "template": "instructions/process-hygiene-fallback.instructions.md",
+      "destination": ".github/instructions/process-hygiene-guidance/process-hygiene-fallback.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": []
+    }
+  ]
+}

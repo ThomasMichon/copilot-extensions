@@ -141,6 +141,12 @@
       "description": "Provider-neutral current usage-budget posture with strict static readings, deterministic field-level source resolution, sustainable-rate arithmetic, and shared human and machine-readable status.",
       "version": "0.1.0-dev15",
       "source": "plugins/budget-guidance"
+    },
+    {
+      "name": "process-hygiene-guidance",
+      "description": "Ambient process-spawn hygiene for Copilot CLI. A concise, checked-in instruction projection reminds an agent to spawn every ad hoc CMD/PowerShell/Python/Node/etc. child process headlessly -- especially on Windows, where a naive spawn allocates a visible, focus-stealing console window per invocation. Ships the spawning-headless-processes skill with the per-language/per-OS routes.",
+      "version": "0.1.0-dev1",
+      "source": "plugins/process-hygiene-guidance"
     }
   ]
 }
