@@ -333,9 +333,11 @@ realized in `main`; unchecked items are the remaining delta.
       independent `No Mux` (presentation) and `AHP` (backend) toggles for the
       local Open/Resume submenu and the New Worktree options dialog; PR
       [#3891](https://github.com/ThomasMichon/copilot-extensions/pull/3891)
-      adds the missing combined-toggle regressions so all four combinations are
-      now covered explicitly (`direct+mux`, `direct+no-mux`, `AHP+mux`,
-      `AHP+no-mux`) rather than inferred indirectly from separate tests.
+      adds the missing combined-toggle regressions and the specific
+      `AHP+no-mux` launch-path regression; together with the existing
+      `direct+mux`, `direct+no-mux`, and `AHP+mux` coverage, the four-way
+      matrix is now explicit rather than inferred indirectly from separate
+      tests.
 - [x] Keep both mechanics fully functional through the relocation — this is a
       location and ownership change, not a behavior regression; existing
       worktrees with a recorded `session_backend` binding must keep resolving
@@ -719,10 +721,13 @@ claiming discipline alone.
   agent-worktrees already kept a reader-side `session_backend:` compatibility
   path through `derive_execution_leg()` / `execution-leg get`. The gap was
   proof, not implementation. Added the missing combined-toggle regressions in
-  `worktree-manager` (Picker UI + launcher path) and revalidated the legacy
-  binding contract against the current `agent-worktrees` tests. Marked Phase
-  3b **Done** in the plan: both remaining explicit bullets are now checked,
-  and there is no further open item in the Phase 3b section itself.
+  `worktree-manager`, plus the specific `AHP+no-mux` launch-path regression
+  that completes the explicit four-combination matrix alongside the pre-
+  existing `direct+mux`, `direct+no-mux`, and `AHP+mux` tests, and
+  revalidated the legacy binding contract against the current
+  `agent-worktrees` tests. Marked Phase 3b **Done** in the plan: both
+  remaining explicit bullets are now checked, and there is no further open
+  item in the Phase 3b section itself.
   Validation: focused `worktree-manager` Picker/launch toggle tests green;
   focused `agent-worktrees` legacy-execution-leg compatibility tests green;
   `python tools/check-install-contract.py` green; full `agent-worktrees`
