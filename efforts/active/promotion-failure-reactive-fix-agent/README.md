@@ -11,7 +11,7 @@
   can't fire, no edit tool, auth signal gap, protected-files gap,
   prompt-injection gap, no changefile path); a successor session
   resolved all 6 (plus 3 more found along the way) through an 11-round
-  iterative real-review cycle (PR #3916, merged) — **and this session
+  iterative real-review cycle (PR #3916, merged) — **and a later session
   finally got `gh aw compile` running** (the "SSO wall" only ever gated
   metadata lookups, not asset downloads or `copilot-extensions` itself;
   worked around by registering a manually-downloaded binary as a local
@@ -20,12 +20,25 @@
   must be the file's literal first bytes, a step output referenced in
   the prompt before it exists (fixed via a file-based handoff), and
   direct `github.event.*`/`github.repository` interpolation in shell
-  (CTR-006 template-injection). **`.github/workflows/
-  ci-failure-fix-attempt.lock.yml` now exists, compiled and committed**
-  — Phase 2's mechanism is compile-verified for the first time. Still
-  not wired live: the Copilot engine auth path is undecided, and the
-  main-branch bootstrap gotcha is unaddressed; see the 2026-09-26
-  Journal entry
+  (CTR-006 template-injection). `.github/workflows/
+  ci-failure-fix-attempt.lock.yml` was compiled and committed, then
+  driven through 6 further real review rounds (PRs #4155/#4326/#4334)
+  finding and fixing another 6 issues (a compiled-step env-var drop, a
+  membership gate blocking the automated dispatch, a mutable/non-
+  reproducible action-tag pin, a safe-outputs-after-scope-gate-failure
+  bypass, and 2 doc-accuracy fixes). **The Copilot engine auth path is
+  now RESOLVED** (2026-09-27, operator decision: a dedicated,
+  minimally-scoped fine-grained PAT, `Copilot Requests: Read` only,
+  stored as the `COPILOT_GITHUB_TOKEN` repo secret — PR #4334) and
+  **the main-branch bootstrap gotcha is RESOLVED** (2026-09-27: a
+  workflow-file-only bootstrap PR, #4338, confirmed
+  `ci-failure-fix-attempt.lock.yml` live on `main` via `git show`).
+  **The mechanism is fully wired end-to-end, but has NOT yet had a live
+  run** — no real trigger has fired an actual issue-to-draft-PR
+  execution; see the Validation Plan's still-unchecked items and the
+  2026-09-27 Journal entries for full detail, evidence, and the open
+  follow-up questions (closed-issue re-dispatch, cap-attempts) this
+  round of review surfaced.
 - **Vision:** [`visions/ci-failure-remediation`](../../../visions/ci-failure-remediation/README.md)
   (authored 2026-09-26 to resolve the reconciliation gate below). **Gate
   resolved:** the vision states the standing intent (detection+dedup,
