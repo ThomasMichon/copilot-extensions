@@ -1284,10 +1284,19 @@ function Publish-FileAtomically {
                 [System.IO.File]::Replace($tmp, $fullPath, $backup)
                 Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
             } else {
-                Move-Item -LiteralPath $tmp -Destination $fullPath -Force
+                # Review finding (round 9): this is also called from UNLOCKED
+                # call sites (e.g. the regular, non-stamp install path), so
+                # two racing first-time installs can both pass the Test-Path
+                # check above before either publishes. Omit -Force here: a
+                # plain Move-Item throws if a concurrent writer created the
+                # destination in that gap, instead of silently -Force
+                # deleting+recreating the very no-file window this whole
+                # helper exists to prevent. Caught below and retried, which
+                # re-checks Test-Path and takes the safe Replace() branch.
+                Move-Item -LiteralPath $tmp -Destination $fullPath
             }
             return
-        } catch [System.IO.IOException] {
+        } catch {
             if ($attempt -ge 20) { throw }
             Start-Sleep -Milliseconds 15
         }
@@ -1312,10 +1321,11 @@ function Copy-FileAtomically {
                 [System.IO.File]::Replace($tmp, $fullDest, $backup)
                 Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
             } else {
-                Move-Item -LiteralPath $tmp -Destination $fullDest -Force
+                # Same non-overwriting-move rationale as Publish-FileAtomically.
+                Move-Item -LiteralPath $tmp -Destination $fullDest
             }
             return
-        } catch [System.IO.IOException] {
+        } catch {
             if ($attempt -ge 20) { throw }
             Start-Sleep -Milliseconds 15
         }
@@ -1942,15 +1952,41 @@ function Invoke-Stamp {
     # on a genuinely first-ever stamp, the absence of one) is left untouched
     # until then.
     $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
-    $snapTmp = "$snapDir.tmp-$PID"
-    if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
-    New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
-    $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
-    Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
-        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+    # Review finding (round 9): re-stamping the SAME version (e.g. two
+    # first-install sessionStart hooks, one after another) used to
+    # unconditionally Remove-Item the existing $snapDir before copying a
+    # fresh one -- deleting the snapshot payload-dir STILL advertises as
+    # live, well before the marker is switched to anything else, since a
+    # reader (the binstub) never takes this mutex. A first-turn invocation
+    # racing that window reads a missing scripts\init.ps1 and 127s. Since a
+    # re-stamp of the identical $SrcVersion would copy byte-identical
+    # content anyway, skip the whole remove+recopy dance when a snapshot for
+    # this exact version already looks valid -- the fast, safe, idempotent
+    # path -- and only build a fresh one when it's genuinely missing/broken.
+    $snapAlreadyValid = Test-Path (Join-Path (Join-Path $snapDir 'scripts') 'init.ps1')
+    if (-not $snapAlreadyValid) {
+        $snapTmp = "$snapDir.tmp-$PID"
+        if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
+        New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
+        $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+        Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+        }
+        # A concurrent re-stamp of the SAME version (two first-install hooks
+        # racing, neither serialized against the other's Test-Path check
+        # above) could have already built $snapDir by now. Rename the
+        # now-redundant old copy aside (a directory rename is metadata-only,
+        # far faster than the delete this replaces) rather than deleting the
+        # live, currently-advertised snapshot outright, then move the fresh
+        # copy into place and reap the aside-renamed old one.
+        if (Test-Path $snapDir) {
+            $snapStale = "$snapDir.stale-$PID"
+            Rename-Item -LiteralPath $snapDir -NewName (Split-Path -Leaf $snapStale) -ErrorAction SilentlyContinue
+        }
+        Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
+        Get-ChildItem -LiteralPath (Split-Path -Parent $snapDir) -Directory -Filter "$(Split-Path -Leaf $snapDir).stale-*" -ErrorAction SilentlyContinue |
+            ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
     }
-    if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
-    Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
     # Same atomic-publish rationale as Invoke-StampBinstubOnly above: a
     # generated binstub reads payload-dir outside this stamp mutex.
     Publish-FileAtomically -Path $payloadOriginMarker -Content $probePayload -Encoding $utf8NoBom
