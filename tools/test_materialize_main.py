@@ -1020,3 +1020,22 @@ def test_materialize_uv_editable_ref_into_refuses_a_canonical_lib_missing_pyproj
     )
     assert any("pyproject.toml missing" in line for line in log)
     assert not (consumer / "libs/zdd").exists()
+
+
+def test_materialize_uv_editable_ref_into_refuses_a_symlinked_source_pyproject(tmp_path: Path):
+    root = tmp_path / "repo"
+    _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
+    real = tmp_path / "outside-pyproject.toml"
+    real.write_text(
+        '[tool.uv.sources]\nagent-zdd = { path = "../../libs/zdd", editable = true }\n',
+        encoding="utf-8",
+    )
+    consumer = root / "plugins/agent-bridge"
+    consumer.mkdir(parents=True)
+    (consumer / "pyproject.toml").symlink_to(real)
+
+    log = mm.materialize_uv_editable_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
+    )
+    assert any("is a symlink" in line for line in log)
+    assert not (consumer / "libs/zdd").exists()

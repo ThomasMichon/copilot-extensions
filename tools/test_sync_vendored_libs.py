@@ -1103,3 +1103,20 @@ def test_uv_editable_refuses_before_deleting_when_no_rewrite_target(repo: Path):
     assert "no [tool.uv.sources] entry" in (result.stdout + result.stderr)
     # The local copy survives -- nothing was deleted before the refusal.
     assert (repo / "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py").exists()
+
+
+def test_check_rejects_a_symlinked_consumer_pyproject_even_with_no_visible_refs(repo: Path):
+    # find_uv_editable_refs() returns [] for a symlinked pyproject.toml
+    # (fails closed on read) -- --check must not let that look identical
+    # to "nothing to validate": the symlink itself is the problem.
+    real = repo.parent / "outside-pyproject.toml"
+    real.write_text(
+        '[tool.uv.sources]\nagent-x = { path = "../../libs/x", editable = true }\n',
+        encoding="utf-8",
+    )
+    (repo / "plugins/alpha").mkdir(parents=True)
+    (repo / "plugins/alpha/pyproject.toml").symlink_to(real)
+
+    result = _run(repo, "--check")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "pyproject.toml is a symlink" in result.stdout

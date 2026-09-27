@@ -132,7 +132,22 @@ def uv_editable_problems(consumer: str, consumer_dir: Path) -> list[str]:
     correction exists to avoid), a referenced canonical ``libs/<lib>`` that
     does not exist, or one that IS a symlink (accepting a symlinked
     canonical lib root would let it point at an external tree instead of a
-    real directory)."""
+    real directory). A symlinked ``consumer_dir/pyproject.toml`` itself is
+    an explicit problem, not silently "no references to validate" --
+    ``find_uv_editable_refs()`` returns ``[]`` for one (fails closed on
+    read), which would otherwise make a symlinked manifest look identical
+    to a consumer with no `uv`-editable references at all, invisibly
+    skipping validation (and letting promotion leave the symlink -- and
+    whatever unresolved external source entry it hides -- in the
+    snapshot)."""
+    pyproject = consumer_dir / "pyproject.toml"
+    if pyproject.is_symlink():
+        return [
+            f"{consumer}: pyproject.toml is a symlink -- refusing to trust "
+            "it for uv-editable canonical-reference validation (could hide "
+            "an unresolved external source entry from both --check and "
+            "promotion)"
+        ]
     problems: list[str] = []
     for name, raw_path, lib, editable in find_uv_editable_refs(consumer_dir):
         if not editable:

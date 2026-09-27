@@ -153,3 +153,22 @@ def test_find_uv_editable_refs_editable_requires_exact_true(tmp_path: Path):
     )
     refs = {name: editable for name, _raw, _lib, editable in uer.find_uv_editable_refs(consumer)}
     assert refs == {"agent-a": False, "agent-b": False, "agent-c": True}
+
+
+def test_uv_editable_problems_rejects_a_symlinked_consumer_pyproject(tmp_path: Path):
+    # find_uv_editable_refs() fails closed on a symlinked pyproject.toml by
+    # returning [] -- uv_editable_problems() must not let that look
+    # identical to "nothing to validate"; it must surface the symlink
+    # itself as an explicit problem.
+    real = tmp_path / "outside-pyproject.toml"
+    real.write_text(
+        "[tool.uv.sources]\nagent-x = { path = \"../../libs/x\", editable = true }\n",
+        encoding="utf-8",
+    )
+    consumer = tmp_path / "plugins/alpha"
+    consumer.mkdir(parents=True)
+    (consumer / "pyproject.toml").symlink_to(real)
+
+    assert uer.find_uv_editable_refs(consumer) == []
+    problems = uer.uv_editable_problems("alpha", consumer)
+    assert any("pyproject.toml is a symlink" in p for p in problems)

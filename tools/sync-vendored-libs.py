@@ -444,7 +444,11 @@ def cmd_check() -> int:
     uv_editable_found = False
     for consumer, consumer_dir in uer.iter_consumer_dirs():
         refs = uer.find_uv_editable_refs(consumer_dir)
-        if not refs:
+        # A symlinked pyproject.toml must be validated too, even though
+        # find_uv_editable_refs() fails closed on it by returning [] --
+        # otherwise it would look identical to a consumer with no
+        # uv-editable references at all, silently skipping validation.
+        if not refs and not (consumer_dir / "pyproject.toml").is_symlink():
             continue
         uv_editable_found = True
         problems = uer.uv_editable_problems(consumer, consumer_dir)

@@ -349,6 +349,18 @@ def materialize_uv_editable_ref_into(
     ``plugins/<plugin>``, dest is a bare ``workdir/<plugin>`` with no
     monorepo ancestor of its own)."""
     log: list[str] = []
+    source_pyproject = source_consumer_dir / "pyproject.toml"
+    if source_pyproject.is_symlink():
+        # find_uv_editable_refs() fails closed on a symlinked pyproject.toml
+        # by returning [] -- which would otherwise make this look
+        # identical to "no uv-editable references at all" and silently
+        # leave the symlink (and whatever unresolved external source entry
+        # it hides) in the promoted snapshot untouched.
+        return [
+            f"SKIP {dest_consumer_dir}: {source_pyproject} is a symlink -- "
+            "refusing to trust it for uv-editable canonical-reference "
+            "expansion"
+        ]
     canonical_root_r = canonical_root.resolve()
     for name, raw_path, lib, editable in uer.find_uv_editable_refs(source_consumer_dir):
         if not editable:
