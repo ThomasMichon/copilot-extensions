@@ -85,6 +85,7 @@ async def test_token_injector_caches_and_invalidates(monkeypatch):
 
 
 async def test_entra_injector_wraps_source(monkeypatch):
+    monkeypatch.setattr("agent_mcp.auth.injectors.shutil.which", lambda name: None)
     inj = build_injector(_cfg({"kind": "entra", "resource": "res"}))
     assert isinstance(inj, EntraInjector)
 
@@ -96,6 +97,88 @@ async def test_entra_injector_wraps_source(monkeypatch):
 
     inj._source = FakeSource()
     assert await inj.headers() == {"Authorization": "Bearer AZTOKEN"}
+
+
+class _FakeProc:
+    def __init__(self, stdout: bytes, stderr: bytes, returncode: int) -> None:
+        self._stdout = stdout
+        self._stderr = stderr
+        self.returncode = returncode
+
+    async def communicate(self):
+        return self._stdout, self._stderr
+
+
+class _ExplodingSource:
+    """A fake ``az_login`` source that fails the test if it's ever reached."""
+
+    async def resolve(self, *args, **kwargs):
+        raise AssertionError("should not fall back to the local az CLI here")
+
+
+async def test_entra_injector_prefers_relay_helper_on_path(monkeypatch):
+    monkeypatch.setattr(
+        "agent_mcp.auth.injectors.shutil.which",
+        lambda name: "/fake/ado-auth-helper" if name == "ado-auth-helper" else None,
+    )
+    captured = {}
+
+    async def fake_exec(*argv, **kwargs):
+        captured["argv"] = argv
+        return _FakeProc(b"HELPERTOKEN\n", b"", 0)
+
+    monkeypatch.setattr("agent_mcp.auth.injectors.asyncio.create_subprocess_exec", fake_exec)
+
+    inj = build_injector(_cfg({
+        "kind": "entra", "resource": "499b84ac-1321-427f-aa17-267ca6975798",
+    }))
+    inj._source = _ExplodingSource()
+
+    assert await inj.acquire_secret() == "HELPERTOKEN"
+    assert captured["argv"] == (
+        "/fake/ado-auth-helper", "get-access-token", "--scope",
+        "499b84ac-1321-427f-aa17-267ca6975798/.default",
+    )
+
+
+async def test_entra_injector_skips_helper_when_tenant_configured(monkeypatch):
+    def which(name):
+        raise AssertionError("should not probe PATH when a tenant is configured")
+
+    monkeypatch.setattr("agent_mcp.auth.injectors.shutil.which", which)
+
+    inj = build_injector(_cfg({
+        "kind": "entra", "resource": "res", "tenant": "contoso.onmicrosoft.com",
+    }))
+
+    class FakeSource:
+        async def resolve(self, action, fields, *, timeout=30.0):
+            assert fields["tenant"] == "contoso.onmicrosoft.com"
+            return "protocol=https\nhost=h\ntoken=AZTOKEN\n\n"
+
+    inj._source = FakeSource()
+    assert await inj.acquire_secret() == "AZTOKEN"
+
+
+async def test_entra_injector_falls_back_when_helper_returns_no_token(monkeypatch):
+    monkeypatch.setattr(
+        "agent_mcp.auth.injectors.shutil.which",
+        lambda name: "/fake/ado-auth-helper" if name == "ado-auth-helper" else None,
+    )
+
+    async def fake_exec(*argv, **kwargs):
+        return _FakeProc(b"", b"relay unreachable\n", 1)
+
+    monkeypatch.setattr("agent_mcp.auth.injectors.asyncio.create_subprocess_exec", fake_exec)
+
+    inj = build_injector(_cfg({"kind": "entra", "resource": "res"}))
+
+    class FakeSource:
+        async def resolve(self, action, fields, *, timeout=30.0):
+            return "protocol=https\nhost=h\ntoken=FALLBACK\n\n"
+
+    inj._source = FakeSource()
+    assert await inj.acquire_secret() == "FALLBACK"
 
 
 def test_build_git_credential_derives_host():

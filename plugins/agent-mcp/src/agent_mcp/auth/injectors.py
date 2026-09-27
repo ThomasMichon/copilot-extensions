@@ -13,6 +13,7 @@ import asyncio
 import base64
 import logging
 import os
+import shutil
 from urllib.parse import urlsplit
 
 from .._exec import resolve_argv
@@ -53,9 +54,26 @@ class EnvInjector(TokenInjector):
 
 
 class EntraInjector(TokenInjector):
-    """Entra ID / Azure access token via ``credential_relay.sources.az_login``."""
+    """Entra ID / Azure access token via ``credential_relay.sources.az_login``.
+
+    Prefers an on-``PATH`` ``ado-auth-helper`` -- the credential-relay client
+    shim ``agent-codespaces`` installs on a Codespace guest (see its
+    ``codespace_assets``) -- over shelling to a local ``az`` CLI directly. A
+    guest has no logged-in Azure CLI session of its own, so the direct
+    ``AzLoginSource`` path always fails there even when the relay tunnel is
+    live and already serving every other Azure/ADO consumer in that guest.
+    Calling ``ado-auth-helper`` instead needs no environment detection here --
+    it's the same PATH-resolution trick ``rush``'s cloud build-cache login and
+    the ADO npm-token flow already rely on to work headlessly in a Codespace:
+    whichever binary answers on PATH determines local-vs-relayed behavior.
+    Falls back to the existing local-``az`` behavior unchanged when the helper
+    isn't present, or when an explicit ``tenant`` is configured (the relay's
+    ``get-azure-token`` action has no tenant parameter to forward).
+    """
 
     name = "entra"
+
+    _RELAY_HELPER = "ado-auth-helper"
 
     def __init__(self, spec: AuthSpec, *, timeout: float = 30.0) -> None:
         super().__init__(spec)
@@ -74,7 +92,53 @@ class EntraInjector(TokenInjector):
         await super().invalidate()
         self._source = self._new_source()  # drop the source's internal token cache
 
+    def _scope(self) -> str:
+        """The AAD scope to request, canonicalized the same way ``az_login`` does."""
+        from credential_relay.sources.az_login import _to_scope
+
+        return _to_scope(self.spec.scope or self.spec.resource or "")
+
+    async def _acquire_via_helper(self, helper: str) -> str | None:
+        """Mint a token via the on-PATH relay-client shim (Codespace guest path)."""
+        scope = self._scope()
+        if not scope:
+            return None
+        argv = resolve_argv([helper, "get-access-token", "--scope", scope])
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *argv,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=self._timeout,
+            )
+        except (TimeoutError, asyncio.TimeoutError):
+            log.error("%s get-access-token timed out (%.0fs)", helper, self._timeout)
+            return None
+        except OSError as exc:
+            log.error("%s get-access-token failed to launch: %s", helper, exc)
+            return None
+        if proc.returncode != 0:
+            err = stderr.decode(errors="replace").strip().replace("\n", " ")[:200]
+            log.error(
+                "%s get-access-token failed (exit %d): %s", helper, proc.returncode, err,
+            )
+            return None
+        token = stdout.decode(errors="replace").strip()
+        return token or None
+
     async def _acquire(self) -> str | None:
+        helper = None if self.spec.tenant else shutil.which(self._RELAY_HELPER)
+        if helper:
+            token = await self._acquire_via_helper(helper)
+            if token:
+                return token
+            log.warning(
+                "%s present but returned no token; falling back to local az CLI",
+                self._RELAY_HELPER,
+            )
         fields: dict[str, str] = {}
         if self.spec.scope:
             fields["scope"] = self.spec.scope

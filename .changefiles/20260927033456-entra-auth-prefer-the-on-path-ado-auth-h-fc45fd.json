@@ -1,0 +1,9 @@
+{
+  "comment": "entra auth: prefer the on-PATH ado-auth-helper relay shim before shelling to az directly, so a bridge with auth.kind: entra works unmodified for an agent-mcp process running as a Codespace guest",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}
