@@ -194,7 +194,7 @@ resolution the ACP dispatch path uses. `AGENT_CODESPACES_ACP_MODEL` /
 `_EFFORT` / `_CONTEXT` override it, `AGENT_CODESPACES_MODEL_PROPAGATE=0` turns
 it off, and a flag passed explicitly with `--copilot-arg` always wins.
 `--ref-file` (repeatable; a file or a folder, up to 256 MiB per call) copies
-reference material into `~/.agent-bridge/refs/<batch>/` on the venue -- outside
+reference material into `~/.agent-bridge/refs/<batch>/` on the venue -- outside <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 the product checkout, so it is never committed -- over the same egress-free
 stdin lane as plugin staging, and tells the worker the exact paths: in its seed
 for a new session, or as a message when the session is already running (so
@@ -218,7 +218,7 @@ loads `https://localhost:PORT`. The forward can exist before the server
 starts. A rejoin without the flag keeps it; `--stop` removes it. The launch
 reports `local_forwards_ready` per host port (bound locally); `false` usually
 means the host port is taken or a pre-`--forward` Owner is still running.
-A multi-line or long seed is written to `~/.agent-bridge/seeds/` on the venue and
+A multi-line or long seed is written to `~/.agent-bridge/seeds/` on the venue and <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 seeded as a one-line pointer (tmux-typed input must be a single line). It
 succeeds only once the session is registered with the host bridge (and its seed
 submitted); a failure reports the screen (`pane_tail`) and stops what it started.
@@ -475,7 +475,7 @@ All requests pass through a policy gate before reaching any source:
 
 **No manual registration is required.** When agent-codespaces is installed, its
 sessionStart hook drops a small **namespace-provider manifest** into
-`~/.agent-bridge/providers.d/` (declaring the `codespace:` namespace and the
+`~/.agent-bridge/providers.d/` (declaring the `codespace:` namespace and the <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 absolute path to the agent-codespaces binstub). agent-bridge discovers that
 manifest there and registers the `codespace:` **namespace resolver**, driving
 the provider over a process boundary. That resolver lists and resolves your
@@ -510,13 +510,13 @@ by agent-codespaces.
   CodeSpaces and retries SSH (up to ~180 s). If it still fails, try
   `<agent-codespaces catalog argv[0]> ssh <name> --remote-cmd "echo ok" --no-relay`.
   Check `<agent-bridge catalog argv[0]> status` and
-  `~/.agent-bridge/agent-bridge-err.log`.
+  `~/.agent-bridge/agent-bridge-err.log`. <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 - **No `codespace:` targets** -- provider registration still uses the explicit
   management binstub, not the session catalog. If that binstub is missing,
   stamp it from the same explicitly selected payload shown in
   `codespaces-setup` § *Readiness*, then start a new session so the provider
   manifest is registered.
-- **Session fails on start** -- check `~/.agent-bridge/agent-bridge-err.log`.
+- **Session fails on start** -- check `~/.agent-bridge/agent-bridge-err.log`. <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
   Common cause: wrong `ssh_user` in
   `.copilot-extensions/agent-codespaces/config.yaml`.
 - **Credential relay not working** -- check that `--no-relay` was not

@@ -135,7 +135,7 @@ cd /path/to/your/repo
   it can from your existing CodeSpaces via `gh codespace list`), and
 - **auto-adopts** the repo (registers its path in
   the active cell-local adoption store, falling back to
-  `~/.agent-codespaces/adopted-repos.yaml`) so the detached agent-bridge daemon
+  `~/.agent-codespaces/adopted-repos.yaml`) so the detached agent-bridge daemon <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
   reads it too. No separate `config adopt` step.
 
 If your repo already matches convention, `config init` will tell you so and the
