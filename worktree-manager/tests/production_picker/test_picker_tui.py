@@ -3183,6 +3183,29 @@ def test_sess_turns_combines_session_count_and_turn_count():
     assert n()["sess_turns"] == "-/0"                      # neither known
 
 
+def test_pair_marker_names_this_rows_own_role():
+    """#3307 follow-up: the citadel pair marker names THIS row's own
+    pair_role inline (e.g. "⚭knowledge Title") rather than a bare icon --
+    naming the SIBLING's repo needs a cross-project lookup not yet built
+    (tracked separately). Falls back to a bare icon + space if pair_role is
+    somehow absent despite a pair_id (defensive, shouldn't happen)."""
+    derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+
+    def n(**extra):
+        base = {"id": "anomalous-potato-win-zzzz", "status": "active",
+                "state": "wip", "started_at": "2026-06-27T17:00:00",
+                "title": "Implement Retry Logic"}
+        base.update(extra)
+        return derive.norm(base, "m", "Win")
+
+    assert n(pair_id="p1", pair_role="knowledge")["title"] == (
+        "⚭knowledge Implement Retry Logic")
+    assert n(pair_id="p1", pair_role="harness")["title"] == (
+        "⚭harness Implement Retry Logic")
+    assert n(pair_id="p1")["title"] == "⚭ Implement Retry Logic"
+    assert n()["title"] == "Implement Retry Logic"
+
+
 def _sessionless_source():
     """One normal (owned) worktree + one sessionless orphan (session_count 0)."""
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)

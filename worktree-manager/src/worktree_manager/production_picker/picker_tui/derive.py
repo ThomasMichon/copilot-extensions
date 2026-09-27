@@ -776,11 +776,10 @@ def norm(
     disp_title = summary if (title == "(untitled)" and summary) else title
     if follow_up:
         disp_title = f"✚ {disp_title}"
-    # citadel pair marker: a link glyph (inner of the urgent ⚠/✚ markers) so a
-    # paired row is scannable without widening the state column. Gated on the
-    # pair id, so an unpaired worktree's title is untouched.
+    # citadel pair marker: names THIS row's own pair_role -- naming the
+    # SIBLING's repo needs a cross-project lookup not built yet (#3307).
     if is_paired:
-        disp_title = f"⚭ {disp_title}"
+        disp_title = f"⚭{pair_role or ''} {disp_title}"
     # copilot-extensions#228: the "needs me" marker rides just inside the orphan
     # marker -- a live session parked on the operator is an act-now signal, more
     # urgent than a paired/follow-up cue but not the structural orphan hazard.

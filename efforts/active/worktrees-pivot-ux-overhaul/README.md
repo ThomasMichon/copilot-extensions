@@ -479,13 +479,17 @@ parallelizable across worktrees.
       bare (operator nit, 2026-09-26). Touches the shared `claims_rank.py`
       (Worktrees/Tasks/Codespaces/Containers all consume it) -- needs its
       own careful pass (operator feedback, 2026-09-26; not started).
-- [ ] Alternate-row background shading so a multi-line row's title + detail
-      lines read as one visual unit (operator feedback, 2026-09-26; not
-      started).
-- [ ] Riff on the `⚭` paired-worktree marker: name the link target inline
-      (e.g. `⚭dotfiles Implement Retry Logic`) vs. a plain `[paired]` text
-      form vs. the current bare icon (operator feedback, 2026-09-26; not
-      started -- operator explicitly invited exploring options here).
+- [x] Alternate-row background shading so a multi-line row's title + detail
+      lines read as one visual unit (operator feedback, 2026-09-26; shipped
+      2026-09-27, PR #3952).
+- [x] Riff on the `⚭` paired-worktree marker: named THIS row's own
+      `pair_role` inline (e.g. `⚭knowledge Implement Retry Logic`) rather
+      than the bare icon. Naming the SIBLING's actual repo (the operator's
+      literal example, `⚭dotfiles ...`) needs a new cross-project lookup
+      (resolve `pair_id` -> sibling record, possibly in a different tracked
+      project) -- operator chose the available, no-new-plumbing option for
+      now; the sibling-repo lookup remains a distinct, separately-tracked
+      follow-up if wanted later (2026-09-27).
 
 ## Validation Plan
 
