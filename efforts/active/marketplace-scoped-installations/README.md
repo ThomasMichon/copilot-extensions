@@ -386,6 +386,57 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-09-26 — `agent-machines`'s legacy-root/registry cluster: 13 of 48 findings resolved, 2 design questions surfaced (PR #4145)
+
+- Fresh guard count at merge time: 611 (down from 624). First slice into
+  `agent-machines`, next plugin in the backlog order after `agent-mcp`
+  reached backlog-only state.
+- `discover.py`: `LEGACY_MACHINE_STATE_ROOT` (a constant already named
+  "LEGACY_..." by the plugin itself -- as clean a "yes, annotate this"
+  signal as this effort has seen) plus 4 cross-plugin `agent-worktrees`
+  registry lookups, consolidated onto one shared `_AWT` constant.
+  `identity.py` had one more registry lookup of the same shape.
+  `manifest.py`'s `repo_root()` had a legacy-directory-name recognition
+  branch matching `discover.py`'s exact legacy concept (a comparison, not
+  a construction, but the same underlying concern). 6 more own-legacy-
+  root fallbacks across `fleet_update_state.py`/`fleet_update_tasks.py`/
+  `self_update_state.py`/`self_update_tasks.py`/`surfaces/_common.py`/
+  `self_update_dtssh.py` -- all the routine, already-established shapes.
+- **Surfaced (not annotated) a genuine potential design gap**: traced
+  every use site of `fleet_update_state.py`/`self_update_state.py`'s
+  `task_name="agent-machines-{fleet,self}-update-{sweep,watchdog}"`
+  scheduled-task names and confirmed NO cell-derived suffix is EVER
+  appended anywhere downstream (unlike the established `runtime-gate.sh`/
+  `.ps1` exemplar's `SERVICE_SUFFIX` pattern this plugin's own effort
+  README already flagged as superseded by the post-rewrite
+  `cell_lifecycle.py` engine). This means today, exactly ONE self-update
+  watchdog and ONE fleet-update sweep task can exist per machine
+  regardless of how many marketplace cells of `agent-machines` are
+  installed -- which may be entirely intentional (a single shared
+  watchdog making sense the same way `ssh_profile.py`'s shared-config-
+  lock did), or may be a genuine unqualified-identity gap nobody's
+  looked at since the cell_lifecycle.py rewrite. Left unannotated and
+  surfaced to the operator rather than guessed at either way -- this is
+  exactly the kind of call this effort's own discipline says needs
+  verification, not assumption.
+- `cell_lifecycle.py`'s 3 findings (from an even earlier leg's handoff,
+  carried forward again unresolved): still needs the same care. Not
+  touched this leg either -- three legs in a row have now deferred this
+  file specifically; it may be worth a dedicated follow-up rather than
+  hoping the next slice gets to it.
+- Left deliberately untouched (not yet individually triaged):
+  `installer-readiness.json` (4), `payload-invocation.json` (3, includes
+  the `cell_lifecycle.py`-adjacent legacy-binstub declaration),
+  `init.ps1`/`init.sh`/`bootstrap-check.{ps1,sh}` (19, confirmed-genuine
+  Phase 2 launcher-contract backlog matching every other plugin), and 2
+  `SKILL.md` files (3 findings, likely doc-shaped but not yet read).
+- Verified: `python -m py_compile` + `ruff --select E501` on every
+  touched file, `check-module-size.py`, `check-docs-consistency.py`, and
+  the full `agent-machines` suite via `test-supervisor` (658 passed, 12
+  skipped, 0 failures). Merged via `pr-merge --now` after a clean
+  (0-finding) advisory review.
+- Guard count: 48 -> 35 findings for `agent-machines`.
+
 ### 2026-09-26 — `agent-mcp`'s doc/SKILL.md cluster: 15 more findings resolved, plugin now backlog-only (PR #4082)
 
 - Fresh guard count at merge time: 624 (down from 639). `agent-mcp` now
