@@ -5,8 +5,7 @@ description: >-
   upstream tools are exposed, add/remove decorators (filter, defer, code-mode,
   rename, storage, transform, gate, input_gate), or tweak headers / auth / resource /
   timeout / upstream -- WITHOUT editing the committed or plugin-shipped config,
-  by writing a machine-local override overlay (`~/.agent-mcp/overrides/<id>.yaml`,
-  deep-merged at load). Use when asked to "customize a bridge", "override an mcp
+  by writing a machine-local override overlay file (deep-merged at load). Use when asked to "customize a bridge", "override an mcp
   bridge config", "change which tools <bridge> exposes", "expose all/more tools",
   "add a decorator to a bridge", "make a bridge lean / defer / code-mode",
   "per-machine / per-host mcp override", or "tune @spark / @ado-data / an
@@ -25,9 +24,9 @@ publish the catalog, use the compatibility readiness path from the
 
 Tune an **existing** agent-mcp bridge on this one machine, without touching the
 shared config. agent-mcp loads a bridge from its committed config -- an in-repo
-`--config`, a named `~/.agent-mcp/bridges/<name>.*`, or a **plugin-shipped** one
+`--config`, a named `~/.agent-mcp/bridges/<name>.*`, or a **plugin-shipped** one <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 -- and, right before use, **deep-merges a machine-local overlay** from
-`~/.agent-mcp/overrides/<id>.{yaml,yml,json}` on top of it. So a single host can
+`~/.agent-mcp/overrides/<id>.{yaml,yml,json}` on top of it. So a single host can <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 vary *any* field (tools, decorators, headers, auth, upstream URL) with a small
 overlay file -- no editing the shared file, no forking the plugin, no env vars.
 No overlay file → the config is used unchanged.
@@ -43,9 +42,9 @@ The overlay filename is keyed by the config's **id**: its explicit top-level
 
 | Config | id | Overlay file |
 |--------|----|--------------|
-| `spark.mcp.yaml` | `spark` | `~/.agent-mcp/overrides/spark.yaml` |
-| `ado.mcp.yaml` | `ado` | `~/.agent-mcp/overrides/ado.yaml` |
-| named bridge `foo.yaml` | `foo` | `~/.agent-mcp/overrides/foo.yaml` |
+| `spark.mcp.yaml` | `spark` | `~/.agent-mcp/overrides/spark.yaml` <!-- marketplace-isolation: allow deployed-runtime-diagnostics --> |
+| `ado.mcp.yaml` | `ado` | `~/.agent-mcp/overrides/ado.yaml` <!-- marketplace-isolation: allow deployed-runtime-diagnostics --> |
+| named bridge `foo.yaml` | `foo` | `~/.agent-mcp/overrides/foo.yaml` <!-- marketplace-isolation: allow deployed-runtime-diagnostics --> |
 
 `<agent-mcp catalog argv[0]> status` lists the known named + plugin-shipped
 bridges and their config paths. `AGENT_MCP_HOME` (default `~/.agent-mcp`)
@@ -69,7 +68,7 @@ copy-paste overlays. The common ones:
 ### Expose all / more upstream tools (header-driven upstreams)
 Some upstreams gate their advertised catalog on a request header. Add it:
 ```yaml
-# ~/.agent-mcp/overrides/spark.yaml -- request the full Spark catalog
+# ~/.agent-mcp/overrides/spark.yaml -- request the full Spark catalog # marketplace-isolation: allow deployed-runtime-diagnostics
 headers:
   X-Toolset-Domain: "*"
 ```
@@ -111,7 +110,7 @@ headers:
 
 ## Boundaries
 
-- **Machine-local, not shared.** The overlay lives under `~/.agent-mcp/`, never a
+- **Machine-local, not shared.** The overlay lives under `~/.agent-mcp/`, never a <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
   checkout -- ideal for per-host secrets, tenant route keys, or experiments. To
   change the default **for everyone**, edit the committed config (the `agent-mcp`
   skill / the owning plugin), not an overlay.

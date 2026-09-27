@@ -1,0 +1,9 @@
+{
+  "comment": "Annotate 15 more marketplace-isolation guard findings across 3 doc/SKILL.md files",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}
