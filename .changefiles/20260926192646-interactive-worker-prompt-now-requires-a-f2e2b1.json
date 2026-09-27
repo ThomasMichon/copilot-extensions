@@ -1,0 +1,9 @@
+{
+  "comment": "interactive_worker_prompt() now requires a durable card/progress tool call before pausing to ask the operator, since a mux/non-ACP pane's operator may not be attached at that moment.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "minor"
+    }
+  ]
+}

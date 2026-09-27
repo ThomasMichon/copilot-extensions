@@ -184,7 +184,9 @@ def interactive_worker_prompt(
 ) -> str:
     """Build the lightweight seed for Phase 1 item 3's interactive-embodiment
     transaction -- a CLI-backed session an OPERATOR watches/drives, not an
-    unattended autopilot worker.
+    unattended autopilot worker. Valid specifically for a **non-headless**
+    worker: one launched wrapped with mux, without ``--acp`` -- a live pane an
+    operator can attach to directly, not a background/programmatic session.
 
     Deliberately different from :func:`autopilot_worker_prompt`: it never
     injects a worker identity or pool/recipe framing (this transaction never
@@ -197,6 +199,16 @@ def interactive_worker_prompt(
     to leave the task's recorded state honest (complete / abandon / reset to
     proposed / suspended-for-resume), never to keep working unattended after
     the session ends.
+
+    **Blocking still goes through a tool call first** (per
+    *status-through-tool-calls-not-prose*, extended to this mux/non-ACP case
+    in the ``agent-dispatch-worker-operating-procedures`` effort): an operator
+    watching a live pane is not guaranteed to be attached at the moment the
+    agent actually needs input, so a bare in-pane question alone leaves the
+    task's own status silent about the block. The agent records the block
+    with a durable card/progress call *first* -- so the task's status itself
+    tells the operator to come open this session -- and only then pauses in
+    the pane for whenever the operator does attach.
 
     The task is already claimed and started under this worktree's own
     identity by the transaction itself (the same ownership/generation fencing
@@ -218,20 +230,27 @@ def interactive_worker_prompt(
         f"next phase, reporting progress as you go with `agent-dispatch progress "
         f"{task_id} --phase <phase> --summary \"<one line>\"` at real "
         f"transitions (plan settled, implementation done, a PR opened, a "
-        f"blocker hit) -- but you may pause and ask the operator directly for "
-        f"instructions at any point; that is expected, not an escape hatch. "
-        f"The OPERATOR decides when this session wraps up, not a done-criteria "
-        f"check alone. Whenever this session ends -- whether you judge the "
-        f"goal met or the operator says to stop -- leave the task's recorded "
-        f"state honest before finishing: `agent-dispatch complete {task_id} "
-        f"--result-ref <ref>` only if the goal is genuinely met; "
-        f"`agent-dispatch suspend {task_id} --reason \"<why>\"` to pause and "
-        f"preserve this worktree/session identity for a later resume (the "
-        f"default if you are simply pausing mid-work); or, only if the task "
-        f"itself is a duplicate/obsolete/permanently blocked, `agent-dispatch "
-        f"abandon {task_id} --permit --reason \"<why>\"` (`--duplicate-of <ref>` "
-        f"when citing an existing task/PR/issue) to retire it terminally rather "
-        f"than leaving it silently stalled. "
+        f"blocker hit). If you need the operator's input, do not just pause "
+        f"and ask in this pane and leave it at that -- the operator may not "
+        f"be attached to see it. First record the block with a tool call: "
+        f"`agent-dispatch card set {task_id} --title \"<question>\" "
+        f"--request-input <field>:<kind>` for a real decision, or at minimum "
+        f"`agent-dispatch progress {task_id} --blocker \"<question>\"`, so the "
+        f"task's own status tells the operator to come open this session "
+        f"rather than relying on them noticing the pane. Only THEN pause and "
+        f"wait for the operator's reply; that is expected, not an escape "
+        f"hatch. The OPERATOR decides when this session wraps up, not a "
+        f"done-criteria check alone. Whenever this session ends -- whether "
+        f"you judge the goal met or the operator says to stop -- leave the "
+        f"task's recorded state honest before finishing: `agent-dispatch "
+        f"complete {task_id} --result-ref <ref>` only if the goal is "
+        f"genuinely met; `agent-dispatch suspend {task_id} --reason \"<why>\"` "
+        f"to pause and preserve this worktree/session identity for a later "
+        f"resume (the default if you are simply pausing mid-work); or, only "
+        f"if the task itself is a duplicate/obsolete/permanently blocked, "
+        f"`agent-dispatch abandon {task_id} --permit --reason \"<why>\"` "
+        f"(`--duplicate-of <ref>` when citing an existing task/PR/issue) to "
+        f"retire it terminally rather than leaving it silently stalled. "
         f"Never keep working unattended after the session ends -- that is the "
         f"one hard rule this prompt carries."
     )
