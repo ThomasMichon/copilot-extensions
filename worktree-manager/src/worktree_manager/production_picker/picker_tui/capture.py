@@ -47,14 +47,19 @@ async def _wait_for_initial_setup(scr: Any, pilot: Any, *, timeout: float = 5.0)
     deadline = asyncio.get_event_loop().time() + timeout
     while asyncio.get_event_loop().time() < deadline:
         current = getattr(scr, "_setup_epoch", 0)
+        failed = getattr(scr, "_setup_failed_epoch", 0)
         if current != 0 and getattr(scr, "_setup_applied_epoch", 0) == current:
+            return
+        if current != 0 and failed == current:
             return
         await pilot.pause()
         await asyncio.sleep(0.01)
     current = getattr(scr, "_setup_epoch", 0)
     applied = getattr(scr, "_setup_applied_epoch", 0)
+    failed = getattr(scr, "_setup_failed_epoch", 0)
     raise AssertionError(
-        f"timed out waiting for setup epoch {current} to apply (applied={applied})"
+        "timed out waiting for setup epoch "
+        f"{current} to finish (applied={applied}, failed={failed})"
     )
 
 
