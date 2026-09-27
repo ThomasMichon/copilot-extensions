@@ -138,7 +138,10 @@ def test_summarize_claims_accepts_a_custom_pecking_order():
 
 def test_format_claim_falls_back_to_bare_ref_with_no_hash():
     assert claims_rank.format_claim("codespace", "cs-a1c4-relay") == "codespace cs-a1c4-relay"
-    assert claims_rank.format_claim("worktree", "a1c4") == "worktree a1c4"
+    # #3307 follow-up: "worktree" now gets its own "WT" label prefix (used
+    # when the ref doesn't parse as the machine/project/id convention --
+    # see test_format_claim_worktree_* below for the parsed-ref cases).
+    assert claims_rank.format_claim("worktree", "a1c4") == "WT a1c4"
 
 
 def test_summarize_claims_joins_prominent_entries():
@@ -157,3 +160,98 @@ def test_summarize_claims_empty_ledger_is_empty_string():
 def test_summarize_claims_all_non_live_is_empty_string():
     claims = [ResourceClaim(kind="pr", ref="r1#1", state="released")]
     assert claims_rank.summarize_claims(claims) == ""
+
+
+# --- #3307 worktrees-pivot-ux-overhaul follow-up: cross-repo abbreviations,
+# URL resolution, and the structured claim_entries_for_worktree() list -----
+
+def test_format_claim_worktree_same_repo_is_bare_last4():
+    ref = "host-win/copilot-extensions/aperture-labs-testchamber-4b8a"
+    assert claims_rank.format_claim(
+        "worktree", ref, own_repo="copilot-extensions",
+    ) == "4b8a"
+
+
+def test_format_claim_worktree_cross_repo_names_the_repo():
+    """Operator's own example: '<repo>:<last4>' when the claimed child
+    worktree lives in a DIFFERENT repo than the claiming worktree."""
+    ref = "host-win/dotfiles/2026-09-26-retry-logic"
+    assert claims_rank.format_claim(
+        "worktree", ref, own_repo="copilot-extensions",
+    ) == "dotfiles:ogic"
+
+
+def test_format_claim_worktree_unknown_own_repo_never_asserts_cross_repo():
+    """own_repo not passed (an older caller) -- never guesses cross-repo,
+    even though the ref carries a project segment."""
+    ref = "host-win/dotfiles/2026-09-26-retry-logic"
+    assert claims_rank.format_claim("worktree", ref) == "ogic"
+
+
+def test_format_claim_pr_same_repo_is_plain_pr_number():
+    assert claims_rank.format_claim(
+        "pr", "copilot-extensions#2481", own_repo="copilot-extensions",
+    ) == "PR #2481"
+    # repo unknown on our side -- never asserts cross-repo either.
+    assert claims_rank.format_claim("pr", "copilot-extensions#2481") == "PR #2481"
+
+
+def test_format_claim_pr_cross_repo_names_the_short_repo_not_the_owner():
+    assert claims_rank.format_claim(
+        "pr", "acme-org/sample-repo#2481", own_repo="copilot-extensions",
+    ) == "sample-repo#2481"
+
+
+def test_format_claim_pr_parses_a_full_github_url_ref():
+    url = "https://github.com/acme-org/sample-repo/pull/2481"
+    assert claims_rank.format_claim(
+        "pr", url, own_repo="copilot-extensions",
+    ) == "sample-repo#2481"
+    assert claims_rank.format_claim(
+        "bug", "https://github.com/acme-org/sample-repo/issues/17",
+        own_repo="sample-repo",
+    ) == "bug #17"
+
+
+def test_claim_url_resolves_github_pr_and_issue_refs():
+    assert claims_rank.claim_url("pr", "acme-org/sample-repo#2481") == (
+        "https://github.com/acme-org/sample-repo/pull/2481")
+    assert claims_rank.claim_url("bug", "acme-org/sample-repo#17") == (
+        "https://github.com/acme-org/sample-repo/issues/17")
+    # No owner/repo on the ref -- nothing to build a URL from.
+    assert claims_rank.claim_url("pr", "#2481") is None
+    # A non-PR-like kind with a raw URL ref passes it through as-is.
+    assert claims_rank.claim_url("task", "https://example.com/t/1") == (
+        "https://example.com/t/1")
+    # A non-PR-like kind with a bare ref has no URL.
+    assert claims_rank.claim_url("task", "task-9f21") is None
+
+
+def test_claim_entries_for_worktree_pairs_label_with_url():
+    claims = [
+        ResourceClaim(kind="pr", ref="acme-org/sample-repo#2481"),
+        ResourceClaim(
+            kind="worktree",
+            ref="host-win/copilot-extensions/aperture-labs-testchamber-4b8a",
+        ),
+    ]
+    entries = claims_rank.claim_entries_for_worktree(
+        claims, own_repo="copilot-extensions",
+    )
+    assert entries == [
+        {"label": "sample-repo#2481",
+         "url": "https://github.com/acme-org/sample-repo/pull/2481"},
+        {"label": "4b8a", "url": None},
+    ]
+
+
+def test_claim_entries_for_worktree_backfills_active_pr_like_summary_does():
+    active_pr = {"repo": "acme-org/sample-repo", "number": 91, "state": "open"}
+    entries = claims_rank.claim_entries_for_worktree(
+        [], active_pr, own_repo="copilot-extensions",
+    )
+    assert entries == [
+        {"label": "sample-repo#91",
+         "url": "https://github.com/acme-org/sample-repo/pull/91"},
+    ]
+

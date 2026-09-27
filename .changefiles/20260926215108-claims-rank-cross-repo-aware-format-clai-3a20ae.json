@@ -1,0 +1,9 @@
+{
+  "comment": "claims_rank: cross-repo-aware format_claim() (WT last4/<repo>:last4, PR #N/<repo>#N, GitHub URL parsing), claim_url()/claim_entries_for_worktree() for real hyperlinks.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "minor"
+    }
+  ]
+}
