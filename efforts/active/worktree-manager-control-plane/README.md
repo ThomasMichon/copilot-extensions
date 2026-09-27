@@ -411,8 +411,9 @@ themselves are operator-filed.)_
 "temporary compatibility boundary" — is the last major violation of the
 picker vision's process-boundary-only Non-Goal. Historically this boundary
 covered 9 `agent_worktrees.*` submodules; after Phase 3e retired the
-`profiles` proxy, 8 remain live here (`config`, `pr_ops`, `reclaim`,
-`sessions`, `tracking`, `__main__`, `update_stage`, `state_root`), still
+`profiles` proxy and PR [#4317](https://github.com/ThomasMichon/copilot-extensions/pull/4317)
+cut Group A over to subprocess reads, 6 remain live here (`config`, `pr_ops`,
+`reclaim`, `sessions`, `tracking`, `__main__`), still
 imported **in-process** via whole-module `__getattr__` proxies or inline
 `engine_module(name)` calls, sharing agent-worktrees' own venv/sys.path
 instead of going through the `--json` engine boundary every other Picker
@@ -460,12 +461,14 @@ PR [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
       a new public CLI seam), Group C's batch verb is explicitly engine-owned,
       and Group C's former Phase 3c prerequisite is recorded as satisfied by
       PR [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
-- [ ] **Step 1 — pin Group A's low-frequency public read surface, additive
-      only.** Add/pin the picker-supported `get <key>` / `state-root --json` /
-      read-only `update-indicator --json` contract and Manager-side client
-      wrappers before any caller cutover, with explicit project scope and an
-      off-UI-thread polling path for the new indicator read. See
-      [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
+- [x] **Step 1 — pin and cut over Group A's low-frequency public read
+      surface.** Landed in PR
+      [#4317](https://github.com/ThomasMichon/copilot-extensions/pull/4317):
+      added/pinned `picker-paths --json`, reused `state-root --json`, extended
+      `stage-update` with `--indicator-state --json`, documented the contract in
+      `engine-picker-contract.md`, and moved `pivot_manifest.py` /
+      `update_stage.py` off the in-process engine boundary onto the same
+      subprocess client pattern the rest of the Picker already uses.
 - [ ] **Step 2 — add Group B's narrow public CLI seam for project/config/ssh
       decisions.** Promote runner-scoped `--json` verbs (and reuse the existing
       `resolve --json` remote seam) instead of replacing `_engine_runtime.py`
@@ -759,6 +762,34 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-09-27** — Landed Phase 3d Group A, PR
+  [#4317](https://github.com/ThomasMichon/copilot-extensions/pull/4317).
+  Added/pinned the low-frequency public read seam the Picker still needed
+  (`picker-paths --json`, existing `state-root --json`, additive
+  `stage-update --indicator-state --json`), documented it in
+  `plugins/agent-worktrees/docs/engine-picker-contract.md`, and cut
+  `pivot_manifest.py` plus the cosmetic `update_stage.py` glyph reader over
+  to Worktree Manager-side subprocess helpers instead of the in-process
+  `_engine_runtime.py` import path. `update_stage` stayed in scope exactly as
+  the Group A table planned: the new reader degrades older engines to
+  `"idle"` rather than failing startup, while `pivot_manifest.py` now keeps its
+  `state-root` visibility gate on the engine-owned `--json` surface too.
+  Real boundary shrink: `state_root` is no longer reached through
+  `engine_module(...)`, and `update_stage.py` no longer imports the engine at
+  all; the remaining live boundary surface is the explicit Group B/C set
+  (`config`, `pr_ops`, `reclaim`, `sessions`, `tracking`, `__main__`). New
+  regression coverage proves the verb payloads and caller behavior, including
+  the older-engine graceful-degradation path for the glyph. Validation:
+  targeted Group A tests green; full `agent-worktrees` suite matched the
+  current unrelated baseline at `5733 passed, 50 skipped, 5 failed`; full
+  `worktree-manager` suite (excluding the two standing hangs:
+  `test_data_ssh_sources.py` / `test_launch_trace.py`) matched the current
+  unrelated baseline at `1260 passed, 2 skipped, 13 failed`; `ruff check
+  --select F,E9` passed; `check-install-contract.py` and
+  `check-version-consistency.py` passed; `check-version-bump.py` still reports
+  the same pre-existing unrelated unbumped-plugin drift already present on
+  `origin/dev`.
 
 - **2026-09-27** — Wrote Phase 3d's ordered implementation plan
   ([`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md)),

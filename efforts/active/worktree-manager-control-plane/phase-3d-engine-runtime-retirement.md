@@ -6,13 +6,20 @@
 - **Scope of this doc:** the ordered implementation plan for removing the
   Picker's last in-process `agent_worktrees.*` import boundary, building on the
   evidence-gathering inventory already recorded here.
-- **Status:** Planned — #3359's vendored-lib prework is done via PR
+- **Status:** In progress — #3359's vendored-lib prework is done via PR
   [#3368](https://github.com/ThomasMichon/copilot-extensions/pull/3368),
   Group D's `profiles` dependency is closed via Phase 3e / PR
   [#3626](https://github.com/ThomasMichon/copilot-extensions/pull/3626), and
-  the remaining Group A/B/C work is now sequenced below as independently
-  landable PRs. Phase 3c's prerequisite for Group C is satisfied by PR
-  [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
+  **Group A is implemented in PR
+  [#4317](https://github.com/ThomasMichon/copilot-extensions/pull/4317)**:
+  the Picker's low-frequency `pivot_manifest.py` / `update_stage.py` reads now
+  cross the process boundary through the pinned `picker-paths --json`,
+  existing `state-root --json`, and additive
+  `stage-update --indicator-state --json` seams. Phase 3c's prerequisite for
+  Group C is satisfied by PR
+  [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278), and
+  the remaining Group B/C work stays sequenced below as independently landable
+  PRs.
 
 ## Why this phase exists
 
@@ -93,6 +100,23 @@ conversion:**
 All three remain **contract version 1** changes: one new pinned read verb, one
 reuse of an already-pinned read verb, and one additive flag/payload on an
 existing verb.
+
+**Landing note — PR [#4317](https://github.com/ThomasMichon/copilot-extensions/pull/4317).**
+This slice shipped exactly those seams plus the caller cutover: Worktree
+Manager now routes `pivot_manifest.py` through subprocess helpers in
+`production_picker.engine_group_a` (built on the same `engine_client.run_json`
+pattern as the rest of the Picker), `update_stage.py` reads the additive
+indicator verb and degrades older engines to `"idle"`, `_engine_runtime.py`
+is no longer consulted for `state_root` or `update_stage`, and the remaining
+boundary is explicitly narrowed to Group B/C's `config`, `__main__`, `pr_ops`,
+`reclaim`, `sessions`, and `tracking` consumers. Validation in the PR:
+targeted new contract/regression tests green; full `agent-worktrees` suite
+matched the current unrelated baseline at `5733 passed, 50 skipped, 5 failed`;
+full `worktree-manager` suite (excluding the two standing hangs) matched the
+current unrelated baseline at `1260 passed, 2 skipped, 13 failed`; `ruff
+check --select F,E9` passed; `check-install-contract.py` and
+`check-version-consistency.py` passed; `check-version-bump.py` still reports
+the same pre-existing unrelated unbumped-plugin drift on `origin/dev`.
 
 ### Group B — `runner.py`: private process-lifecycle internals (likely NOT a subprocess conversion at all)
 
@@ -276,36 +300,23 @@ landed (PR #4278), so Group C is no longer blocked — it is merely sequenced
 after its additive verb work so the final `_engine_runtime.py` deletion happens
 once every remaining caller is already off the import boundary.
 
-1. [ ] **Pin the low-frequency public read surface for Group A, additive only.**
-   `pivot_manifest.py` and `update_stage.py` should stop depending on
-   in-process module imports, but the first PR should add the public seam
-   without changing either caller yet.
-   - Extend/pin the engine-facing contract for the exact one-shot reads the
-     Picker still needs: `config.install_dir()` / `config._home()` via the
-     existing scalar `get <key>` surface (new picker-supported keys rather than
-     a new import seam), `state_root_module.resolve_state_root(...)` via the
-     existing `state-root --json` family (pin the subset the Picker consumes, or
-     add a thin JSON wrapper if the current output shape is too broad), and a
-     new tiny **read-only** `update-indicator --json` verb for the glyph. Keep
-     it explicitly distinct from the existing `stage-update --json` command,
-     which performs the marketplace staging work rather than merely reporting
-     the cheap status `indicator_state()` reads.
-   - Pin the **explicit project scope** for those reads. In particular, any
-     `state-root --json` reuse must go through `<project> state-root --json` (or
-     an equivalent explicit `--project`/repo-scoped wrapper), not a child
-     process inheriting whatever cwd happens to exist when the Picker asks.
-     Record the fallback/error behavior for "no active project" and
-     adopted-anchor cases at the same time.
-   - Move the update-indicator polling path off the Textual UI thread before it
-     shells out. The current `_poll_update_state()` runs from `_tick()`; once it
-     becomes a subprocess read, Step 1 must route it through the existing
-     background-worker/callback path so a slow/hung engine cannot freeze render.
-   - Add Worktree Manager-side `engine_client` wrappers for those reads, but
-     leave `pivot_manifest.py` / `update_stage.py` on the compatibility shim in
-     this step.
-   - Update `plugins/agent-worktrees/docs/engine-picker-contract.md` so these
-     reads are documented as part of the pinned process-boundary contract rather
-     than merely existing as implementation detail.
+1. [x] **Pin and cut over Group A's low-frequency public read surface.**
+   **Done in PR [#4317](https://github.com/ThomasMichon/copilot-extensions/pull/4317).**
+   - Added/pinned `<project> picker-paths --json` for the two actual
+     `pivot_manifest.py` path reads (`install_dir` and the derived installed
+     plugins root), reused `<project> state-root --json` for the visibility gate,
+     and extended `stage-update` additively with `--indicator-state --json`
+     rather than inventing a second update-status command.
+   - Kept the reads explicitly project-scoped by binding the production Picker's
+     project in parent-owned context and routing the subprocess calls through
+     `production_picker.engine_group_a`, which reuses `engine_client.run_json`
+     and its error-envelope handling rather than restoring any in-process import.
+   - Cut `pivot_manifest.py` and `update_stage.py` over in the same PR because
+     both are genuinely one-shot/non-hot-path callers; older-engine rejection of
+     `--indicator-state` degrades the cosmetic glyph to `"idle"`.
+   - Documented the new/extended verbs in
+     `plugins/agent-worktrees/docs/engine-picker-contract.md` and added
+     contract/regression coverage on both sides of the seam.
 
 2. [ ] **Promote Group B's project/config/ssh decisions to a narrow public CLI
    seam, additive only.** This should be public `--json` CLI surface, not a
@@ -360,11 +371,9 @@ once every remaining caller is already off the import boundary.
      sweep/monitor semantics that matter to the Picker, while leaving
      agent-worktrees' remaining internal helpers free to evolve independently.
 
-4. [ ] **Perform the Group A + Group B cutover in one crisp PR.** Once Steps 1-3
-   are landed, switch the three remaining non-hot-path call sites off the
+4. [ ] **Perform the remaining Group B cutover in one crisp PR.** Once Steps 2-3
+   are landed, switch the remaining non-hot-path `runner.py` call sites off the
    compatibility boundary together.
-   - `pivot_manifest.py` and `update_stage.py` move to the new Group A public
-     surface.
    - `runner.py` switches to the Step 2 public verbs for bootstrap,
      stale-anchor repair, and remote planning, while its housekeeping/monitor
      lifecycle moves to the Step 3 manager-owned implementation.
