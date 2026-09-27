@@ -292,6 +292,10 @@ jobs:
         run: >-
           python tools/check-gh-aw-action-pins.py &&
           python -m pytest -q tools/test_check_gh_aw_action_pins.py
+      - name: gh-aw compiler version guard
+        run: >-
+          python tools/check-gh-aw-compiler-version.py &&
+          python -m pytest -q tools/test_check_gh_aw_compiler_version.py
       - name: Feed neutrality (no hardcoded public package-feed pins)
         # No config/Dockerfile/install-script/CI-workflow file may hardcode a
         # public package-feed URL (pypi.org, registry.npmjs.org,

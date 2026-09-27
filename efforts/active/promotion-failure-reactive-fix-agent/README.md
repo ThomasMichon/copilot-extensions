@@ -541,7 +541,7 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
         fallback of filing an issue," not a pull request alone. Still no
         other safe-output type (comments, direct pushes, repo-settings)
         is configured.
-  - [ ] Pin the `gh-aw` extension/action to a specific reviewed version (it
+  - [x] Pin the `gh-aw` extension/action to a specific reviewed version (it
         is an actively-developed external tool; do not float on `latest`)
         and set up **Copilot-engine authentication using one of `gh-aw`'s
         two documented paths** — pick one deliberately, don't assume:
@@ -581,13 +581,19 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
         confirmed via the compiled lock's own
         `validate_multi_secret.sh COPILOT_GITHUB_TOKEN` check — only the
         stale "not yet decided" comment in the `.md` source needed removing.
-        **Still open, separately:** pinning the `gh-aw` CLI *extension*
-        binary version itself (as opposed to the already-SHA-pinned
-        `github/gh-aw` action references, enforced by
-        `tools/check-gh-aw-action-pins.py`) — this machine's local
-        extension install currently floats on whatever release was
-        downloaded during this session's SSO workaround; a durable pin
-        (and how to re-verify/update it) is unresolved.
+        **Extension-version pin: RESOLVED (2026-09-27).** Added
+        `.github/gh-aw-version.txt` (the single source of truth for which
+        `gh aw` release this repo compiles against, currently
+        `v0.89.21`) and `tools/check-gh-aw-compiler-version.py` (+
+        regression tests, wired into `ci.yml` alongside the action-pin
+        guard) — it fails CI if any committed `*.lock.yml`'s own
+        `compiler_version` metadata (recorded in its leading
+        `gh-aw-metadata` comment) doesn't match the pin, the same pattern
+        `check-gh-aw-action-pins.py` already uses for action SHAs. This
+        doesn't force a specific local `gh aw` binary version at compile
+        time (nothing can, short of vendoring the binary) — it catches
+        the DRIFT after the fact, in CI, the same way the action-pin
+        guard does for a different silent-drift class.
   - [x] Give the agent job read-only repo access by default (its baseline
         posture) — only the `safe-outputs` PR-creation stage should hold
         any write credential at all **(narrowly: the attacker-facing
@@ -2303,3 +2309,14 @@ _Pending._
   occurred yet**; every Validation Plan item below stays unchecked until
   a real trigger fires and an actual issue-to-draft-PR execution is
   observed.
+
+### 2026-09-27 — `gh-aw` CLI extension version pin resolved
+
+Added `.github/gh-aw-version.txt` (single source of truth, currently
+`v0.89.21`) and `tools/check-gh-aw-compiler-version.py` (+ regression
+tests, wired into `ci.yml`) — fails CI if any committed `*.lock.yml`'s
+own `compiler_version` metadata doesn't match the pin, mirroring
+`check-gh-aw-action-pins.py`'s approach for the action-SHA class of
+drift. Recompiled clean; all guards and the full 81-test suite pass.
+This closes the last sub-item of the "pin the extension/action + set up
+auth" checklist entry — both halves are now resolved.
