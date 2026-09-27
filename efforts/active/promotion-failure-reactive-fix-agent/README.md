@@ -1645,5 +1645,44 @@ _Pending._
   delimiter-safe state. Round 8's finding is a different, honestly-named
   exception: a documented, structural limitation of `workflow_dispatch`
   itself, mitigated rather than fully closed, with the residual risk
-  stated explicitly rather than hidden. Still outstanding regardless:
-  `gh aw compile` verification (SSO-blocked, unresolved this session).
+  stated explicitly rather than hidden.
+- **PR #3916's own CI (unrelated to this draft's content) surfaced a
+  genuine, pre-existing `dev`-wide failure**: `tools/
+  test_check_marketplace_isolation.py`'s bare-agent-command guard flagged
+  two lines in `plugins/customizing-copilot/skills/defining-subagents/
+  SKILL.md` (untouched by this PR, confirmed via `git diff origin/dev` --
+  a genuine pre-existing break on `dev` itself, not something this PR's
+  changes caused) — prose referencing `agent-mcp materialize`/`agent-mcp
+  call` inside a single backtick span reads, to the guard's regex, as an
+  operative bare-command instruction. Fixed as a small, atomic, in-scope
+  commit (per this repo's own "every issue gets fixed or gets tracked"
+  convention) by rewording to two separate backtick spans (`` `agent-mcp`
+  ``'s `` `materialize`/`call` `` subcommands) that don't trip the
+  pattern, with a matching changefile for `customizing-copilot`.
+- **A NINTH review pass found 1 more real issue and 1 documentation gap,
+  both addressed:** (a) round 6/7's fix (passing the pre-verified body to
+  the agent via `pre-agent-steps` instead of a live re-fetch) closed the
+  TOCTOU and delimiter bugs, but the draft's own framing implied this was
+  closer to a full isolation boundary against prompt injection than it
+  actually is -- `verify-issue` authenticates the *record* (who filed it,
+  that it names a real failure, that nobody edited it), not the *log
+  excerpt's own text*, and a real, unmodified failing test can print
+  arbitrary imperative-looking text with no way to distinguish it from
+  genuine diagnostic output. Rather than claim a false isolation boundary,
+  rewrote the prompt to say so explicitly and named the REAL compensating
+  controls: `threat-detection` analyzes the agent's output/patch (not its
+  input), and -- more fundamentally -- every output is a **draft** PR or
+  comment, never a merge, so a human always reviews before anything
+  reaches `dev`. This is stated as an accepted, structurally-inherent
+  residual risk of any "read a failing test's real output and fix it"
+  agent design, not a further-closable implementation gap. (b) the PR's
+  own description hadn't been updated after the marketplace-isolation
+  fix landed, still claiming no plugin/changefile changes existed when
+  the PR now included both -- corrected.
+- **Nine rounds deep now. #1, #3, #4, #6 remain settled with zero further
+  findings across 8 subsequent review passes.** #2 and #5 are as hardened
+  as this design can reasonably get without a full rearchitecture (or
+  accepting that "auto-fix a failing test" inherently requires reading
+  untrusted test output); #5's residual risk is now stated honestly
+  rather than implied away. Still outstanding regardless: `gh aw compile`
+  verification (SSO-blocked, unresolved this session).
