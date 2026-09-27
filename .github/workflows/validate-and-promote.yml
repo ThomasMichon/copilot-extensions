@@ -226,8 +226,14 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-      actions: read
+      actions: write
       issues: write
+    # `actions: write` (widened from `actions: read`) is required for the
+    # final "Fire the fix-attempt agent" step below -- see that step's own
+    # comment and the Phase 2 draft's leading comment block (blocking
+    # issue #1) for why an explicit `workflow_dispatch` call, not the
+    # watchdog's own `issues: labeled` event, is what actually invokes
+    # `ci-failure-fix-attempt.md`'s compiled workflow.
     steps:
       - uses: actions/checkout@v4
         # Deliberately NOT `ref: needs.gate.outputs.sha`: that's the
@@ -268,6 +274,7 @@ jobs:
           --description "Red dev validation failure signature; report-only watchdog (no fix attempted)"
           --force
       - name: Detect + dedup + report
+        id: watchdog
         # Bootstrap gap: this is a NEW script, so it does not exist on the
         # default branch yet at the moment this PR first merges -- and
         # (unlike a workflow-file change) it cannot ride main-gate's
@@ -290,6 +297,42 @@ jobs:
             --run-id "${{ github.run_id }}" \
             --sha "${{ needs.gate.outputs.sha }}" \
             --file-issue
+      - name: Fire the fix-attempt agent for any newly filed issue
+        # Phase 2 (efforts/active/promotion-failure-reactive-fix-agent,
+        # `.github/workflows/ci-failure-fix-attempt.md`) is triggered by
+        # `label_command: ci-failure-signature`, which compiles to BOTH an
+        # `issues: labeled` event trigger AND a `workflow_dispatch` trigger
+        # with an `item_number` input. The `issues: labeled` event is the
+        # one the watchdog's own `gh issue create --label` call above
+        # produces -- but GitHub suppresses new workflow-triggering events
+        # for content created by the default `GITHUB_TOKEN` (the same
+        # anti-recursion class the `promote` job below already documents),
+        # so that event will NEVER actually fire the fix-attempt workflow.
+        # An explicit `gh workflow run` dispatch call, by contrast, is a
+        # deliberate API invocation, not an automatically-generated event
+        # -- gh-aw's own FAQ documents third parties (Jira, PagerDuty)
+        # dispatching workflows this exact way -- so it is NOT subject to
+        # that suppression. This step is that explicit dispatch.
+        #
+        # Only newly FILED issues are dispatched (never a dedup comment on
+        # an already-tracked one -- `ci_failure_watchdog.py`'s own
+        # `FILED_ISSUE_NUMBERS` list enforces this), so a recurring
+        # in-window failure never re-triggers a fix attempt that may
+        # already be in flight against the same issue.
+        if: steps.watchdog.outputs.filed_issue_numbers != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -f .github/workflows/ci-failure-fix-attempt.lock.yml ]; then
+            echo "::notice::ci-failure-fix-attempt.lock.yml not yet compiled/present on the default branch -- Phase 2 isn't wired live yet. Skipping dispatch."
+            exit 0
+          fi
+          for NUM in ${{ steps.watchdog.outputs.filed_issue_numbers }}; do
+            echo "::notice::Dispatching the fix-attempt agent for issue #$NUM"
+            gh workflow run ci-failure-fix-attempt.lock.yml \
+              --repo "${{ github.repository }}" \
+              -f item_number="$NUM"
+          done
 
   promote:
     name: Promote dev -> main

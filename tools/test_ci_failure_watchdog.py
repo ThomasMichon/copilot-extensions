@@ -356,6 +356,99 @@ def test_process_signature_files_when_no_existing_issue(watchdog, monkeypatch):
     assert filed_with["repo"] == "owner/repo"
 
 
+def test_file_issue_records_the_filed_issue_number(watchdog, monkeypatch):
+    # Phase 2's fix-attempt dispatch (validate-and-promote.yml's
+    # `report-failure` job) needs the real issue number to `gh workflow
+    # run ... -f item_number=<N>` -- parsed from `gh issue create`'s own
+    # printed URL, not re-derived some other way.
+    class _CreateRun:
+        returncode = 0
+        stdout = "https://github.com/owner/repo/issues/456\n"
+        stderr = ""
+
+    monkeypatch.setattr(watchdog, "_run_gh", lambda *_a, **_k: _CreateRun())
+    sig = watchdog.FailureSignature(job_name="j", test_id="t", key="k", excerpt="e")
+
+    assert watchdog._file_issue("owner/repo", sig, "1", "sha") is True
+    assert watchdog.FILED_ISSUE_NUMBERS == ["456"]
+
+
+def test_comment_occurrence_never_records_a_filed_issue_number(watchdog, monkeypatch):
+    # A dedup comment on an already-tracked issue must NEVER be treated as
+    # a fresh filing -- re-dispatching the fix-attempt agent against an
+    # issue it may already be mid-attempt on would be a real race.
+    class _CommentRun:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    monkeypatch.setattr(watchdog, "_run_gh", lambda *_a, **_k: _CommentRun())
+    sig = watchdog.FailureSignature(job_name="j", test_id="t", key="k", excerpt="e")
+
+    assert watchdog._comment_occurrence("owner/repo", 7, sig, "1", "sha") is True
+    assert watchdog.FILED_ISSUE_NUMBERS == []
+
+
+def test_main_writes_filed_issue_numbers_to_github_output(watchdog, monkeypatch, tmp_path):
+    jobs_response = {
+        "jobs": [
+            {"id": 2, "name": "full - agent-worktrees", "conclusion": "failure"},
+        ]
+    }
+
+    class _JobsRun:
+        returncode = 0
+        stdout = json.dumps(jobs_response)
+        stderr = ""
+
+    class _CreateRun:
+        returncode = 0
+        stdout = "https://github.com/owner/repo/issues/789\n"
+        stderr = ""
+
+    def _fake_gh(args):
+        if args[:2] == ["api", "repos/owner/repo/actions/runs/1/jobs?per_page=100"]:
+            return _JobsRun()
+        if args[:2] == ["issue", "create"]:
+            return _CreateRun()
+        raise AssertionError(f"unexpected gh call: {args}")
+
+    monkeypatch.setattr(watchdog, "_run_gh", _fake_gh)
+    monkeypatch.setattr(watchdog, "_fetch_job_log", lambda repo, job_id: SAMPLE_PYTEST_LOG)
+    monkeypatch.setattr(watchdog, "_existing_issue", lambda *_a, **_k: None)
+
+    output_file = tmp_path / "github_output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output_file))
+
+    rc = watchdog.main(["--repo", "owner/repo", "--run-id", "1", "--sha", "deadbeef", "--file-issue"])
+
+    assert rc == 0
+    assert output_file.read_text(encoding="utf-8") == "filed_issue_numbers=789\n"
+
+
+def test_main_writes_nothing_to_github_output_when_no_issue_was_filed(watchdog, monkeypatch, tmp_path):
+    jobs_response = {
+        "jobs": [
+            {"id": 1, "name": "gate (confirm this is a dev commit)", "conclusion": "success"},
+        ]
+    }
+
+    class _JobsRun:
+        returncode = 0
+        stdout = json.dumps(jobs_response)
+        stderr = ""
+
+    monkeypatch.setattr(watchdog, "_run_gh", lambda args: _JobsRun())
+
+    output_file = tmp_path / "github_output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output_file))
+
+    rc = watchdog.main(["--repo", "owner/repo", "--run-id", "1", "--sha", "deadbeef", "--file-issue"])
+
+    assert rc == 0
+    assert not output_file.exists()
+
+
 def test_process_signature_skips_comment_when_rate_limited(watchdog, monkeypatch):
     now = datetime.now(timezone.utc)
     existing = {

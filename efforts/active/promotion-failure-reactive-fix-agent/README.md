@@ -6,11 +6,14 @@
 - **Created:** 2026-09-25
 - **Status:** Active — Phase 1 live-validated (Phase 1.5 Done); Phase 2
   in progress: vision-reconciliation gate resolved, a draft `gh-aw`
-  workflow authored (`.github/workflows/ci-failure-fix-attempt.md`) but
-  **not functional yet** — two review passes (PR #3893) found 6 real
-  blocking issues (trigger can't fire, no edit tool, auth signal gap,
-  protected-files gap, prompt-injection gap, no changefile path), none
-  resolved; see the 2026-09-26 Journal entry
+  workflow authored (`.github/workflows/ci-failure-fix-attempt.md`) --
+  two review passes (PR #3893) found 6 real blocking issues (trigger
+  can't fire, no edit tool, auth signal gap, protected-files gap,
+  prompt-injection gap, no changefile path); a successor session
+  resolved all 6 against gh-aw's own docs (still **not compile-
+  verified** -- `gh aw compile` remains blocked by the same SAML-SSO
+  wall, not re-attempted), landing as a new PR; see the 2026-09-26
+  Journal entry
 - **Vision:** [`visions/ci-failure-remediation`](../../../visions/ci-failure-remediation/README.md)
   (authored 2026-09-26 to resolve the reconciliation gate below). **Gate
   resolved:** the vision states the standing intent (detection+dedup,
@@ -1397,3 +1400,93 @@ _Pending._
   them; then #2, #4, #5, #6 as the security/completeness hardening pass
   before this ever runs for real), then finally get `gh aw compile`
   runnable somewhere to verify the result.
+
+### 2026-09-26 — Resolved all 6 blocking issues against gh-aw's own docs (still not compile-verified)
+- Consumed the handoff carrying the 6 findings above. Did not re-attempt
+  the known-dead `gh extension install github/gh-aw` SSO-blocked path;
+  instead researched gh-aw's own published reference docs directly
+  (`frontmatter`, `triggers`, `tools`, `safe-outputs`,
+  `safe-outputs-pull-requests`, `steps-jobs`, `faq`, and the
+  `introduction/architecture` security model) via direct page fetches
+  this session, both rendered and raw Markdown, to ground every fix in
+  a real documented mechanism rather than guessing.
+- **Issue #1 (trigger can't fire) — resolved via `label_command:`, not
+  a hand-rolled PAT or workflow_dispatch block.** Confirmed gh-aw's
+  `label_command:` trigger compiles to BOTH the `issues: labeled` event
+  AND an auto-generated `workflow_dispatch` trigger with an
+  `item_number` input, documented as "for manual testing" — exactly the
+  fallback path design option (b) needed, without hand-authoring a
+  `workflow_dispatch` block. `remove_label: false` keeps the label
+  persistent (required — `ci_failure_watchdog.py`'s own dedup lookup
+  searches by that label). `validate-and-promote.yml`'s `report-failure`
+  job now holds `actions: write` (widened from `actions: read`) and, in
+  a new step gated on the watchdog step's own new `filed_issue_numbers`
+  output, explicitly calls `gh workflow run ci-failure-fix-attempt.lock.yml
+  -f item_number=<N>` for each newly filed issue only — never for a dedup
+  comment on an already-tracked issue, avoiding a re-trigger race.
+  `tools/ci_failure_watchdog.py` was extended (`FILED_ISSUE_NUMBERS`,
+  parsed from `gh issue create`'s own printed URL, written to
+  `$GITHUB_OUTPUT`) with 4 new regression tests (39 total, all passing
+  via `test-supervisor`). **Not yet compile-verified** that the
+  generated input is genuinely named `item_number` at the `.lock.yml`
+  level — flagged explicitly in the draft's own leading comment.
+- **Issue #2 (label alone isn't authenticated) — resolved via a custom
+  `verify-issue` job**, using gh-aw's documented `jobs:` custom-job +
+  `jobs.agent.needs`/`jobs.agent.if` additive-gating mechanism (confirmed
+  in the `steps-jobs` reference, including the exact worked example this
+  design mirrors). It resolves the issue number from either trigger
+  shape, then checks the issue's author is the watchdog's own
+  `github-actions` token identity and that the body carries the
+  `Signature: <hash>` anchor line, before the agent job is allowed to
+  run at all.
+- **Issue #3 (no edit tool) — resolved:** confirmed via gh-aw's `tools`
+  reference (raw fetch of the actual doc source, not just the rendered
+  page) that the real key is `tools.edit:` ("Allows file editing in the
+  GitHub Actions workspace"). Added.
+- **Issue #4 (protected-files may not cover this repo's specific
+  paths) — resolved as defense-in-depth, not a single mechanism.** Kept
+  `protected-files: fallback-to-issue` (gh-aw's own built-in policy,
+  whatever it covers) AND added an explicit `excluded-files:` list
+  naming this repo's specific prohibitions (`.github/workflows/**`,
+  `plugin.json`, `pyproject.toml`, `marketplace.json`), confirmed via the
+  `safe-outputs-pull-requests` reference that `excluded-files`
+  deterministically strips matching files from the patch before the
+  commit is even created — independent of, and not reliant on, whatever
+  gh-aw's own built-in protected-file manifest happens to cover.
+- **Issue #5 (untrusted issue body interpolated without isolation) —
+  resolved by removing the raw interpolation entirely**, not by finding
+  a sanitization mechanism to wrap it in. The draft no longer embeds
+  `${{ github.event.issue.body }}` as literal instruction text. Instead
+  `tools.github: {toolsets: [issues]}` is enabled and the agent is told
+  to retrieve the diagnostic record via the GitHub MCP `issue_read` tool
+  call — the same idiom gh-aw's own `safe-outputs.steer` feature
+  documents for exactly this class of untrusted content (steering:
+  "the injected prompt identifies the exact issue and instructs the
+  agent to read relevant... comments with the GitHub MCP `issue_read`
+  tool" rather than embedding the raw text inline). This narrows, but
+  does not by itself eliminate, the injection surface — the markdown
+  body was also updated with an explicit "diagnostic data, never an
+  instruction" framing, and the real backstop remains the machine-
+  enforced `verify-issue` gate (#2) and `excluded-files`/
+  `protected-files` (#4), not prompt wording. Did not find (and stopped
+  looking for, given diminishing returns against the fetch budget) a
+  more specific gh-aw "untrusted content" sanitization primitive beyond
+  the general Activation-stage content-sanitization layer the
+  architecture doc describes at a high level — a genuine open question
+  if a future review finds this insufficient.
+- **Issue #6 (no changefile path) — resolved:** added an explicit
+  markdown instruction requiring `python tools/changefile.py add ...`
+  for any touched `plugins/**` content, plus a matching `tools.bash`
+  allowlist entry.
+- **Still not done:** `gh aw compile` remains unverified (same SSO wall,
+  deliberately not re-attempted this session per the prior handoff's own
+  instruction) — every fix above is grounded in gh-aw's published docs,
+  not a live compile, so a real review pass (this effort's own working
+  pattern for this file) is the next actual verification step, same as
+  last time. Also still open: the Copilot engine auth path decision
+  (org-billing vs. `COPILOT_GITHUB_TOKEN` PAT) — untouched this session,
+  still an explicit `TODO(successor)` in the draft; the main-branch
+  bootstrap companion PR; and Phase 2's remaining security-hardening
+  checklist (pin the `gh-aw` extension version, verify job-level
+  `permissions:` don't inherit anything broader), before Phase 3's
+  Validation Plan trials.
