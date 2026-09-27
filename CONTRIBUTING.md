@@ -175,7 +175,9 @@ own; treat it the same way regardless of who authored the PR:
    maintainer may self-merge without chasing a further `Approve` — state
    which findings were dismissed and why in the merge/commit message. **Any
    Medium or High finding still blocks self-merge**, maintainer or not,
-   until it's resolved and a fresh review is Approved (or requested).
+   until it's resolved and a *subsequent* review actually lands `Approve`
+   — merely re-requesting a review is not itself a verdict, and does not
+   unblock self-merge on its own.
    This bypass does not extend to a non-maintainer's PR: the maintainer's
    own approving review remains that PR's separate, always-required gate
    regardless of Copilot's verdict.
