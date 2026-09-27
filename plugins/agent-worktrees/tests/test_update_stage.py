@@ -250,6 +250,20 @@ def test_stage_no_drift_when_versions_match(tmp_path: Path, monkeypatch):
     assert result["plugin_changed"] is False
 
 
+def test_cmd_stage_update_indicator_state_json(monkeypatch, capsys):
+    monkeypatch.setattr(us, "indicator_state", lambda **kwargs: "available")
+
+    rc = us.cmd_stage_update(
+        type("Args", (), {"status": None, "json": True, "indicator_state": True})()
+    )
+
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "version": 1,
+        "indicator_state": "available",
+    }
+
+
 @pytest.mark.parametrize("mode_status", ["ready", "deactivation-required"])
 @pytest.mark.parametrize("inherited_context", [None, "/caller/install.json"])
 def test_stage_namespaced_runtime_uses_validated_installer_environment(

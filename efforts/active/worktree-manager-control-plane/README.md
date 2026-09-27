@@ -774,6 +774,15 @@ claiming discipline alone.
   The ordered plan now sequences 7 remaining implementation steps, records
   Group D as already closed by Phase 3e, and leaves no design questions
   open before implementation begins.
+- **2026-09-27** — Claiming Phase 3d's Group A conversion (the "Design +
+  convert the low-frequency, one-shot CLI-root reads" checkbox): convert
+  `pivot_manifest.py`'s in-process `config.install_dir()` / `config._home()`
+  / `state_root_module.resolve_state_root(...)` reads to `--json` CLI verbs
+  over the engine boundary, per
+  [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md)'s
+  Group A disposition. Working solo per standing operator directive;
+  recorded here per this effort's own Coordination-section claiming
+  discipline since #352 is closed.
 - **2026-09-27** — Landed Phase 3c Step 5, PR
   [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
   Renamed the old synchronous Picker setup helper to

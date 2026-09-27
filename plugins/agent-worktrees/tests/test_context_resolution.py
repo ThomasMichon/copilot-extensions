@@ -9,6 +9,7 @@ never trusted for identity when the directory is authoritative.
 from __future__ import annotations
 
 import dataclasses
+import json
 import os
 import types
 from pathlib import Path
@@ -690,3 +691,24 @@ def test_get_pr_key_still_includes_control_plane_related_pr(
         rc = m.cmd_get(types.SimpleNamespace(key=key))
         assert rc == 0
         assert calls == [True], key
+
+
+def test_picker_paths_json_reports_install_and_plugin_roots(
+    monkeypatch,
+    capsys,
+    tmp_path,
+):
+    install_dir = tmp_path / ".agent-worktrees"
+    home = tmp_path / "home"
+    monkeypatch.setattr(cfg, "install_dir", lambda: install_dir)
+    monkeypatch.setattr(cfg, "_home", lambda: home)
+
+    rc = m.cmd_picker_paths(types.SimpleNamespace(json=True))
+
+    payload = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert payload == {
+        "version": 1,
+        "install_dir": str(install_dir),
+        "installed_plugins_dir": str(home / ".copilot" / "installed-plugins"),
+    }

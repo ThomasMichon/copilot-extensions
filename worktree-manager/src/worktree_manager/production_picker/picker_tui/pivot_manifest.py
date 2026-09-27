@@ -12,6 +12,8 @@ from typing import Any
 
 from dropin_registry import Finding, ScanAuthority, ScanSnapshot
 
+from .. import context as picker_context
+from .. import engine_group_a
 from .pivot_actions import (
     ConfigSection,
     ManifestError,
@@ -616,13 +618,10 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
 
 def _resolve_state_root_path() -> Path | None:
     try:
-        from .._engine_runtime import engine_module
-
-        config_module = engine_module("config")
-        state_root_module = engine_module("state_root")
-        resolved = state_root_module.resolve_state_root(config_module.load_config())
-        return Path(resolved.path).resolve() if resolved.path else None
-    except (ImportError, KeyError, OSError, RuntimeError, ValueError):
+        resolved = engine_group_a.state_root_resolution(picker_context.project())
+        state_root = resolved.get("state_root")
+        return Path(state_root).resolve() if state_root else None
+    except (engine_group_a.engine_client.EngineError, KeyError, OSError, RuntimeError, ValueError):
         return None
 
 
@@ -842,9 +841,8 @@ def pivots_dir(base: str | os.PathLike[str] | None = None) -> Path:
     env = os.environ.get(PIVOTS_DIR_ENV)
     if env:
         return Path(env)
-    from .. import config
-
-    return config.install_dir() / "pivots"
+    payload = engine_group_a.picker_paths(picker_context.project())
+    return Path(str(payload["install_dir"])) / "pivots"
 
 
 def installed_plugins_dir(base: str | os.PathLike[str] | None = None) -> Path:
@@ -861,9 +859,8 @@ def installed_plugins_dir(base: str | os.PathLike[str] | None = None) -> Path:
     env = os.environ.get(PLUGINS_ROOT_ENV)
     if env:
         return Path(env)
-    from .. import config
-
-    return config._home() / ".copilot" / "installed-plugins"
+    payload = engine_group_a.picker_paths(picker_context.project())
+    return Path(str(payload["installed_plugins_dir"]))
 
 
 
@@ -915,5 +912,3 @@ def order_pivots(builtins: Sequence[str], registered: Sequence[RegisteredPivot])
         else:
             descriptors.insert(idx + 1, entry)
     return descriptors
-
-

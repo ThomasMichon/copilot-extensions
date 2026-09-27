@@ -5567,15 +5567,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     pr_cli.add_parsers(sub)
     # stage-update (background marketplace download; #1430 stage-then-join)
-    sp = sub.add_parser(
-        "stage-update", help="Background-stage the plugin marketplace update (JSON status)"
-    )
+    sp = sub.add_parser("stage-update", help="Background-stage the plugin marketplace update (JSON status)")
     _sh_path = "~/.agent-worktrees/updater-status.json"  # marketplace-isolation: allow legacy
-    sp.add_argument(
-        "--status",
-        default=None,
-        help=f"Status file path (defaults to {_sh_path})",
-    )
+    sp.add_argument("--status", default=None, help=f"Status file path (defaults to {_sh_path})")
+    sp.add_argument("--indicator-state", action="store_true",
+                    help="Read only the Picker's version-indicator state instead of staging an update")
     sp.add_argument("--json", action="store_true", help="Echo the status dict to stdout")
     # reconcile-marketplaces -- retired (#2722); kept as a no-op compatibility
     # shim so a caller still running pre-upgrade script content (an in-flight
@@ -5759,6 +5755,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'follow-ups': ('follow_ups_cli', 'cmd_follow_ups'),
     'gc': ('cleanup_gc_cli', 'cmd_gc'),
     'get': ('context_cli', 'cmd_get'),
+    'picker-paths': ('context_cli', 'cmd_picker_paths'),
     'handoff-cutover': ('handoff_cli', 'cmd_handoff_cutover'),
     'handoffs-check': ('handoff_cli', 'cmd_handoffs_check'),
     'head-session': ('session_tracking_cli', 'cmd_head_session'),
@@ -6001,7 +5998,7 @@ def _load_full_command_surface() -> None:
     global auto_clean_enabled, claims_cli, cleanup_gc_cli, cmd_accounts_dispatch, cmd_anchor_check, cmd_attribution_audit, cmd_backfill_sessions, cmd_bind_nudge
     global cmd_bind_session, cmd_claimant_liveness, cmd_claims, cmd_cleanup, cmd_codename_lookup, cmd_conclude_disposable, cmd_conclude_session, cmd_config_migrate
     global cmd_config_root_dispatch, cmd_coordination_readiness_dispatch, cmd_copilot_identity_dispatch, cmd_create, cmd_create_pr, cmd_deploy_instructions, cmd_deregister_session, cmd_dev, cmd_doctor
-    global cmd_effort_focus, cmd_embody, cmd_finalize, cmd_follow_ups, cmd_gc, cmd_get, cmd_git_dispatch, cmd_git_feature_branch
+    global cmd_effort_focus, cmd_embody, cmd_finalize, cmd_follow_ups, cmd_gc, cmd_get, cmd_git_dispatch, cmd_git_feature_branch, cmd_picker_paths
     global cmd_git_merge_to_feature, cmd_git_sync, cmd_handoff_cutover, cmd_handoff_trace, cmd_handoffs_check, cmd_head_session, cmd_history_digest, cmd_hygiene
     global cmd_install, cmd_install_status, cmd_installer_readiness, cmd_knowledge_dispatch, cmd_link_succession, cmd_list, cmd_list_sessions, cmd_machine_context
     global cmd_mark_complete, cmd_note_handoff, cmd_picker, cmd_post_exit, cmd_pr_complete, cmd_pr_dispatch, cmd_pr_merge_dispatch, cmd_pr_ready
@@ -6080,8 +6077,8 @@ def _load_full_command_surface() -> None:
     _pr_reminder_for = context_cli._pr_reminder_for
     _emit_pr_reminder = context_cli._emit_pr_reminder
     cmd_deploy_instructions = context_cli.cmd_deploy_instructions
-    cmd_machine_context = context_cli.cmd_machine_context
-    cmd_get = context_cli.cmd_get
+    cmd_machine_context, cmd_get = context_cli.cmd_machine_context, context_cli.cmd_get
+    cmd_picker_paths = context_cli.cmd_picker_paths
     cmd_install_status = context_cli.cmd_install_status
     cmd_installer_readiness = context_cli.cmd_installer_readiness
     cmd_reconcile_marketplaces = context_cli.cmd_reconcile_marketplaces
@@ -6457,6 +6454,7 @@ def _load_full_command_surface() -> None:
         "deploy-instructions": cmd_deploy_instructions,
         "machine-context": cmd_machine_context,
         "get": cmd_get,
+        "picker-paths": cmd_picker_paths,
         "pre-launch": cmd_pre_launch,
         "stage-update": cmd_stage_update,
         "reconcile-marketplaces": cmd_reconcile_marketplaces,

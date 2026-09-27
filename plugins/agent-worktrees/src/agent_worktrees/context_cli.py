@@ -106,6 +106,16 @@ def add_parsers(sub) -> None:
         "not cwd inference",
     )
 
+    p = sub.add_parser(
+        "picker-paths",
+        help="Emit Picker-owned runtime paths as JSON",
+    )
+    p.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the versioned path payload as JSON",
+    )
+
     sp = sub.add_parser(
         "state-root",
         help="Resolve where efforts/visions/logs are written (stateless-harness "
@@ -403,6 +413,20 @@ def cmd_get(args: argparse.Namespace) -> int:
         return 1
 
     print(values[key]())
+    return 0
+
+
+def cmd_picker_paths(args: argparse.Namespace) -> int:
+    """Emit the Picker's low-frequency runtime paths as a versioned payload."""
+    payload = {
+        "version": 1,
+        "install_dir": str(cfg.install_dir()),
+        "installed_plugins_dir": str(cfg._home() / ".copilot" / "installed-plugins"),
+    }
+    if getattr(args, "json", False):
+        print(json.dumps(payload, indent=2))
+    else:
+        print(payload["install_dir"])
     return 0
 
 

@@ -69,10 +69,30 @@ state_root_module.resolve_state_root(config_module.load_config())  # pivot_manif
 ```
 
 Runs once per pivot-registry scan pass (not per render frame). A genuine
-subprocess-per-call is affordable here. **Needs:** confirm or add a stable
-`--json` verb for install-dir and state-root, following the same pinning
-discipline `docs/engine-picker-contract.md` already established for
-`engine_client` in Phase 3.
+subprocess-per-call is affordable here. **Concrete verb design for the Group A
+conversion:**
+
+- **New:** `<project> picker-paths --json` → `{"version": 1, "install_dir":
+  "<abs>", "installed_plugins_dir": "<abs>"}`. This is the narrowest
+  engine-owned shape that preserves the two actual downstream uses without
+  promoting `config._home()` itself as public API: `pivot_manifest.pivots_dir()`
+  still derives `<install_dir>/pivots`, and `installed_plugins_dir()` gets the
+  exact engine-owned marketplace root directly instead of reconstructing it from
+  a private helper.
+- **Reuse as-is:** `<project> state-root --json` already emits the needed
+  versionless resolution envelope (`state_root`/`source`/`repo`/`stateless`/
+  `requires_external`/`bound`/`error`). `pivot_manifest.py` should switch to
+  the subprocess client seam and read `state_root`.
+- **Additive extension:** `<project> stage-update --indicator-state --json` →
+  `{"version": 1, "indicator_state": "paused|checking|available|current|idle"}`
+  as the pure read-only counterpart to the existing mutating staging verb.
+  A newer Manager should treat an older engine rejecting `--indicator-state` as
+  feature-unavailable and degrade the cosmetic glyph to `"idle"` rather than
+  failing Picker startup.
+
+All three remain **contract version 1** changes: one new pinned read verb, one
+reuse of an already-pinned read verb, and one additive flag/payload on an
+existing verb.
 
 ### Group B — `runner.py`: private process-lifecycle internals (likely NOT a subprocess conversion at all)
 
@@ -219,7 +239,7 @@ verb exists for "is an update available."
 
 | Group | Modules | Real shape | Disposition |
 |---|---|---|---|
-| A | `config` (pivot_manifest only), `state_root`, `update_stage` | low-frequency, one-shot reads | convert to `--json` CLI verbs |
+| A | `config` (pivot_manifest only), `state_root`, `update_stage` | low-frequency, one-shot reads | convert via `picker-paths --json`, existing `state-root --json`, and `stage-update --indicator-state --json` |
 | B | `__main__`/`cli.*`, `config` (runner.py's `set_active_project`/`load_config`/`load_machines_yaml`) | private process-lifecycle internals, several managing the Picker's *own* process | reclassify as worktree-manager-owned logic, or promote a narrow public API per call site — **not** a uniform subprocess conversion |
 | C | `tracking`, `pr_ops`, `reclaim`, `sessions` (all via `data_local.py`) | one atomic read-reconcile-write hot-path loop, per Picker refresh | needs one new **batched** `--json` verb; sequence after Phase 3c |
 | D | `profiles` | also agent-worktrees' own installer/CLI dependency, not Picker-only | full relocation out of agent-worktrees (Phase 3e / #3390) — not a vendored copy, not a CLI conversion |
