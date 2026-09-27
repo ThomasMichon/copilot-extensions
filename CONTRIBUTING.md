@@ -149,35 +149,41 @@ whenever it has no blocking findings, rather than habitually leaving a
 
 **Everyone — contributor and maintainer alike — waits for a verdict before
 merging.** A `Comment` review is not a pass and is not merge-ready on its
-own; treat it the same way regardless of who authored the PR:
+own; treat it the same way regardless of who authored the PR. Each wait
+below uses `pr-watch wait <owner>/<repo> <PR> --since <cursor>
+--until approved,commented,changes_requested --timeout 300` — scope
+`--until` to actual review transitions (`--until any` also wakes on
+unrelated transitions like checks or conflicts, which is not itself a
+review result), and **capture a fresh `<cursor>` immediately before each
+wait** (the cursor `pr-watch`/`pr-status` returns, or `pr-watch cursor
+<owner>/<repo> <PR>` right before waiting) — reusing a stale cursor (e.g.
+always passing `--since r0`) can report an *old* review instead of waiting
+for the new one, since `r0` is the lowest possible baseline, not a "from
+now" marker:
 
 1. Open (or update) the PR, then wait **~5 minutes** (order of minutes, not
-   hours) for Copilot's review to land (`pr-watch wait <owner>/<repo> <PR>
-   --since r0 --until approved,commented,changes_requested --timeout 300`
-   — scope `--until` to actual review transitions; `--until any` also wakes
-   on unrelated transitions like checks or conflicts, which is not itself a
-   review result).
+   hours) for Copilot's review to land.
 2. **`Approve` landed:** proceed to merge (subject to the separate
    required-approving-review gate for a non-maintainer's PR — see "Review"
    above; Copilot's own `Approve` never substitutes for that).
 3. **`Comment` landed, and addressing it requires an actual change:**
-   address the genuinely valuable findings, push the update, then continue
-   to step 4.
+   address the genuinely valuable findings, push the update, then wait ~5
+   minutes for the automatic post-push review and go to step 4.
    **`Comment` landed, but every finding is dismissed/explained with no
    actual change needed:** there's nothing new for a re-review to see —
    skip the push and go straight to step 4's re-request action.
-   **Nothing landed yet (no review at all after the wait — a timeout, not
-   a review event):** there's nothing to address or push either — skip
-   straight to explicitly re-requesting a review (step 4's action), then
-   wait ~5 minutes and return to step 2. Do not invent an unrelated commit
-   just to have something to push in either no-push case.
-4. Wait **~5 minutes** for the automatic review that follows a push (when
-   one happened). If it comes back `Approve`, merge. If it's still
-   `Comment`, **explicitly re-request a review** — see "Requesting a fresh
-   review" below; do not just keep pushing small commits hoping the next
-   automatic pass flips to `Approve` on its own.
-5. Wait **~5 minutes** for the re-requested review, then repeat from step 2.
-6. **Maintainer bypass, narrowly:** as `ThomasMichon`, if the loop above has
+   **Nothing landed yet (a timeout, not a review event):** there's nothing
+   to address or push either — skip straight to step 4's re-request
+   action. Do not invent an unrelated commit just to have something to push
+   in either no-push case.
+4. **Automatic post-push review landed `Approve`:** merge. **Landed
+   `Comment`, or the post-push wait also timed out with nothing landing:**
+   explicitly re-request a review — see "Requesting a fresh review" below
+   — then wait ~5 minutes again and return to step 2. Do not just keep
+   pushing small commits hoping the next automatic pass flips to `Approve`
+   on its own, and do not treat a timeout here differently from a `Comment`
+   — both mean "not yet Approved, re-request."
+5. **Maintainer bypass, narrowly:** as `ThomasMichon`, if the loop above has
    run at least once and the *current* `Comment` review's remaining
    findings are **all Low severity** (no Medium or High findings open), the
    maintainer may self-merge without chasing a further `Approve` — state
