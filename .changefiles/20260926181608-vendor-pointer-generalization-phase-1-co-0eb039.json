@@ -1,0 +1,21 @@
+{
+  "comment": "Vendor-pointer-generalization Phase 1: convert credential-relay to a src-passthrough vendor pointer (dev-branch authoring change only; materialize_main.py still expands it into a real, byte-identical copy at promotion, so no user-visible behavior changes)",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "dev"
+    }
+  ]
+}
