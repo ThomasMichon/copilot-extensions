@@ -1,0 +1,9 @@
+{
+  "comment": "Watchdog tier now repairs a stale/wedged dtssh host via restore-host, closing the detect-but-never-repair gap (#3994)",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}
