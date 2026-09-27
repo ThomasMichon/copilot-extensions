@@ -1,0 +1,9 @@
+{
+  "comment": "Scrub stale build/egg-info before installer uv/pip attempts, including Windows and retry paths.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
