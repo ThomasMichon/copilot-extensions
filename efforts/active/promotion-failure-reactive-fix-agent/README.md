@@ -710,20 +710,31 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
       comment "must never re-trigger the Phase 2 fix-attempt agent...
       re-running the agent against an issue it may already be mid-attempt
       on would be a real race, not just a redundant one." **Real review
-      finding: this is NOT actually an at-most-once guarantee.** Two
-      concurrent watchdog runs can both observe "no open issue" before
-      either's own `gh issue create` completes (a genuine TOCTOU race,
-      `_existing_issue` -> `_file_issue` has no lock between the read and
-      the write), and — see below — closing the tracking issue during an
-      in-flight attempt also enables a new dispatch. The only guarantee
-      that actually holds is the narrower one: a SEQUENTIAL recurrence
-      that finds the SAME still-open issue is correctly deduped to a
-      comment, never a re-dispatch. Concurrent races and closed-issue
-      recurrence are both real, unresolved paths to more than one
-      dispatch for the same signature — this item stays open, not
-      resolved, pending a decision on whether/how to close either gap
-      (e.g. a locking mechanism for the concurrent case, and a decision
-      on the closed-issue case per the finding below).
+      finding, refined further after checking the actual deployment
+      context: `_existing_issue` -> `_file_issue` genuinely has no
+      internal lock between the dedup read and the issue-create write
+      (a real TOCTOU gap in the CODE), but the concurrent-race scenario
+      this would enable is NOT actually reachable in this repo's current
+      wiring** — `ci_failure_watchdog.py`'s only real invocation site is
+      `validate-and-promote.yml`'s `report-failure` job (not matrixed,
+      one job per run), and that ENTIRE workflow shares a single
+      `concurrency: {group: validate-and-promote-dev-to-main,
+      cancel-in-progress: false}` — GitHub's documented `queue: single`
+      semantics, so at most one (validate+promote) run is ever active at
+      a time. Two genuinely concurrent watchdog processes racing each
+      other cannot occur today given that serialization, even though the
+      script itself has no lock of its own — the guarantee is currently
+      provided by the CALLER's concurrency group, not the callee's own
+      code, which is worth knowing if the watchdog is ever invoked from
+      anywhere else. **Closing the tracking issue during an in-flight
+      attempt (see below) remains a real, unresolved path to more than
+      one dispatch for the same signature — that one is NOT protected by
+      any serialization**, since it's about a SEQUENTIAL recurrence after
+      closure, not a concurrent race. The guarantee that holds today: a
+      sequential recurrence that finds the SAME still-open issue is
+      correctly deduped to a comment, never a re-dispatch; a sequential
+      recurrence after the tracking issue was CLOSED is not deduped and
+      genuinely re-dispatches (open question below).
       **Also found (unrelated to this PR's own
       diff, in unchanged watchdog code, flagged during review anyway per
       this repo's own "track it or fix it" convention):**
@@ -767,9 +778,12 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
       fixes with zero reverts before considering any scope widening).
       **Defined (2026-09-27):** treat the current guardrail set (draft-PR-
       only, dedup-based dispatch limiting (not a hard at-most-once
-      guarantee — a genuine TOCTOU race between concurrent watchdog runs,
-      or a closed tracking issue's signature recurring, can both still
-      produce more than one dispatch, per the open follow-ups above),
+      guarantee — a closed tracking issue's signature recurring can still
+      produce more than one dispatch sequentially, per the open follow-up
+      above; the concurrent-race variant of this same concern turned out
+      NOT to be reachable given `validate-and-promote.yml`'s own
+      single-concurrency-group serialization, though the watchdog script
+      itself still has no lock of its own),
       workflow-files/version-fields
       permanently out of scope, mandatory human review before merge) as
       fixed until **10 genuinely agent-authored fix-attempt PRs have
@@ -2294,11 +2308,16 @@ _Pending._
   actually resolved** (a real review finding on this PR corrected an
   initial overclaim): `ci_failure_watchdog.py`'s dedup is scoped to
   `--state open` only, so a closed tracking issue's signature can
-  re-dispatch on recurrence, AND a genuine TOCTOU race between two
-  concurrent watchdog runs can file/dispatch twice for the same
-  signature — the only guarantee that actually holds is narrower (a
-  sequential recurrence against the same still-open issue is correctly
-  deduped). Left this explicitly open rather than resolved.
+  re-dispatch on recurrence — the only guarantee that actually holds is
+  narrower (a sequential recurrence against the same still-open issue is
+  correctly deduped). Left this explicitly open rather than resolved.
+  (A follow-up dig confirmed the code's own TOCTOU gap between the dedup
+  read and the issue-create write is real, but NOT actually reachable in
+  this repo's current deployment: `validate-and-promote.yml`'s single
+  `concurrency` group serializes every run, so two genuinely concurrent
+  watchdog invocations can't occur today — the guarantee is provided by
+  the caller's serialization, not the script's own code, worth knowing
+  if the watchdog is ever invoked elsewhere.)
   **Defined the walk-back/expansion criterion:** 10 genuinely
   agent-authored fix-attempt PRs merged with zero reverts/incidents over
   at least 4 weeks, before any scope widening is discussed — unmet
