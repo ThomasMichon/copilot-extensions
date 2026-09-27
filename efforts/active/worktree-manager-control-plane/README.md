@@ -217,7 +217,7 @@ realized in `main`; unchecked items are the remaining delta.
             launch/resume/create cutover for exact engine-created worktrees.
       - [x] Steps 5-6: delete the legacy agent-worktrees AHP backend/config path
             and complete the remaining launcher-contract test migration.
-- [ ] **Slice 2 (Mux):** relocate Mux launch/reattach/remux mechanics
+- [x] **Slice 2 (Mux):** relocate Mux launch/reattach/remux mechanics
       (`launch-session.{sh,ps1,cmd}`, `pane-wrapper.{sh,ps1}`, `cmd_remux`)
       from `agent-worktrees` to the Worktree Manager, consistent with the same
       vision. agent-worktrees keeps mux **liveness observation**
@@ -232,7 +232,11 @@ realized in `main`; unchecked items are the remaining delta.
       prototype); absent Worktree Manager, `cmd_launch` falls back to a small,
       new direct non-mux invocation, not a retained copy of the launcher
       scripts. Reviewed, ordered plan:
-      [`phase-3b-mux-relocation.md`](phase-3b-mux-relocation.md).
+      [`phase-3b-mux-relocation.md`](phase-3b-mux-relocation.md). **Done** —
+      the relocation itself finished in the earlier sub-slices, and PR
+      [#3891](https://github.com/ThomasMichon/copilot-extensions/pull/3891)
+      closes the last Picker-independence / legacy-compatibility follow-ons
+      tracked immediately below this slice.
       - [x] Sub-slice 2a Step 1: copied `launch-session.{sh,ps1,cmd}` +
             `pane-wrapper.{sh,ps1}` verbatim (hash-verified) into
             `worktree-manager/bin/`; proved the existing `_copy_payload`
