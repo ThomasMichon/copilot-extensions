@@ -1,3 +1,10 @@
+"""Phase 3c setup/reload UI-thread boundary tests for the production Picker.
+
+These guards pair with the action/menu offload tests in ``test_picker_tui.py``:
+both files define the standing "no blocking I/O on the render thread" contract
+for Phase 3c's setup/reload and modal/action surfaces.
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -817,6 +824,83 @@ def test_non_live_mount_eventually_matches_sync_setup_result(
             assert screen._busy_label is None
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    ("label", "trigger", "expected_debug"),
+    [
+        (
+            "manual-reload-key",
+            lambda screen: screen._dispatch_key("r"),
+            "refreshed · reloaded worktrees",
+        ),
+        (
+            "config-section-rescan",
+            lambda screen: screen._run_config_section(
+                SimpleNamespace(label="Config", source="plugin")
+            ),
+            "Config (plugin): done",
+        ),
+        (
+            "worktree-action-rescan",
+            lambda screen: screen._run_wt_action(
+                SimpleNamespace(label="Action", source="plugin"),
+                {
+                    "id4": "wt-id",
+                    "machine": "host",
+                    "env": "Win",
+                    "title": "Example worktree",
+                    "raw": {"id": "wt-id", "machine": "host"},
+                },
+            ),
+            "Action (plugin): done",
+        ),
+    ],
+)
+def test_setup_reload_ui_entrypoints_do_not_block_while_collecting_payload(
+    label,
+    trigger,
+    expected_debug,
+):
+    """Phase 3c boundary: UI-thread setup/reload entrypoints must never wait on
+    ``_collect_setup_payload()`` inline.
+
+    The worker's collect phase is gated behind an Event. If any entrypoint is
+    changed back to synchronous ``setup()`` (or an equivalent direct-I/O path),
+    the trigger call itself blocks here and this test fails with a targeted
+    message naming the offending UI callback.
+    """
+    screen = _SetupRaceScreen()
+    race = _install_setup_race(
+        screen,
+        first_tag=f"{label}-result",
+        second_tag="unused",
+    )
+
+    started = time.monotonic()
+    trigger(screen)
+    elapsed = time.monotonic() - started
+
+    assert race["first_started"].wait(timeout=5), (
+        f"{label} never scheduled a setup worker; expected "
+        "_start_setup_reload_worker()"
+    )
+    assert elapsed < 1.0, (
+        f"{label} blocked on _collect_setup_payload(); keep setup/reload I/O "
+        "off the UI thread via _start_setup_reload_worker()"
+    )
+    assert screen._setup_epoch == 1
+    assert screen._setup_applied_epoch == 0
+    assert screen.applied_titles == []
+    assert screen.debug == expected_debug
+
+    race["first_release"].set()
+    _wait_for_current_setup_epoch_applied_sync(screen)
+
+    assert screen._setup_applied_epoch == 1
+    assert screen.applied_titles == [f"{label}-result"]
+    assert screen.data[0]["title"] == f"{label}-result"
+    assert tuple(screen.htabs) == (f"{label}-result Tasks",)
 
 
 def test_manual_reload_key_prefers_newer_epoch():

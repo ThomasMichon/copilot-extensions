@@ -8480,13 +8480,16 @@ def test_steering_card_and_form_actions_gate_and_drive(tmp_path, monkeypatch):
 
 
 def test_steer_submit_is_offloaded_off_the_render_flow(tmp_path, monkeypatch):
-    """The Confirm subprocess (agent-dispatch steer submit) must NOT block the
-    Textual event loop -- it runs on a background worker via _run_bg, so the UI
-    stays live during the coordinator round-trip. Proven deterministically with a
-    runtime whose run_resolved blocks on an Event: right after Confirm the submit
-    has NOT run yet (deferred to the worker) and the status line shows the working
-    marker -- the loop was NOT blocked by the 5s gate. Releasing the gate lets the
-    worker finish and apply on the loop."""
+    """Phase 3c UI-thread boundary: the Confirm subprocess (agent-dispatch
+    steer submit) must NOT block the Textual event loop.
+
+    It runs on a background worker via ``_run_bg``, so the UI stays live during
+    the coordinator round-trip. Proven deterministically with a runtime whose
+    ``run_resolved`` blocks on an Event: right after Confirm the submit has NOT
+    run yet (deferred to the worker) and the status line shows the working
+    marker -- the loop was NOT blocked by the 5s gate. Releasing the gate lets
+    the worker finish and apply on the loop.
+    """
     import threading
 
     from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
@@ -8656,12 +8659,16 @@ def test_run_bg_drops_quietly_when_the_picker_already_cancelled_it(caplog):
 
 
 def test_actions_menu_liveness_verify_is_offloaded(tmp_path, monkeypatch):
-    """The worktree Actions menu opens IMMEDIATELY from cached liveness (never
-    frozen), shows a footer spinner while it re-verifies mux/session liveness (a
-    cross-process probe) off the render flow, and refines its verbs in place when
-    the probe lands. With a gated verify: the menu is already open + loading right
-    after _open_submenu (the loop wasn't frozen by the 5s probe); releasing the
-    gate clears the loading state and the verbs are refined."""
+    """Phase 3c UI-thread boundary: the worktree Actions menu opens
+    IMMEDIATELY from cached liveness (never frozen).
+
+    It shows a footer spinner while it re-verifies mux/session liveness (a
+    cross-process probe) off the render flow, and refines its verbs in place
+    when the probe lands. With a gated verify: the menu is already open +
+    loading right after ``_open_submenu`` (the loop wasn't frozen by the 5s
+    probe); releasing the gate clears the loading state and the verbs are
+    refined.
+    """
     import threading
 
     from worktree_manager.production_picker import config as _cfg
