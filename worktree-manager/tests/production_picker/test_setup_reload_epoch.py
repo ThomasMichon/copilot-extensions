@@ -438,7 +438,7 @@ def test_sync_setup_disposes_payload_when_apply_raises():
 
     screen = _Screen()
     with pytest.raises(RuntimeError, match="apply blew up"):
-        screen.setup()
+        screen.setup_sync_for_tests()
 
     assert disposed.is_set()
 
@@ -758,7 +758,7 @@ def test_non_live_mount_paints_skeleton_before_blocked_load_returns(
     asyncio.run(run())
 
 
-def test_non_live_mount_eventually_matches_sync_setup_result(
+def test_non_live_mount_eventually_matches_sync_test_setup_result(
     monkeypatch,
     wait_for_current_setup_epoch_applied,
 ):
@@ -810,7 +810,7 @@ def test_non_live_mount_eventually_matches_sync_setup_result(
     monkeypatch.setattr(PickerScreen, "_scan_pivot_payload", lambda self: pivot_payload)
 
     baseline = PickerScreen(SyncSrc(), live=False)
-    baseline.setup()
+    baseline.setup_sync_for_tests()
     expected = _setup_state(baseline)
 
     async def run():
@@ -866,7 +866,8 @@ def test_setup_reload_ui_entrypoints_do_not_block_while_collecting_payload(
     ``_collect_setup_payload()`` inline.
 
     The worker's collect phase is gated behind an Event. If any entrypoint is
-    changed back to synchronous ``setup()`` (or an equivalent direct-I/O path),
+    changed back to synchronous inline setup (for example
+    ``setup_sync_for_tests()``) or an equivalent direct-I/O path,
     the trigger call itself blocks here and this test fails with a targeted
     message naming the offending UI callback.
     """

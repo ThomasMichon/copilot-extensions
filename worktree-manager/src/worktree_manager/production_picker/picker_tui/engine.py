@@ -303,7 +303,8 @@ class PickerScreen(
         self._last_pivot_poll = 0.0   # registered-pivot repoll gate (#staleness)
         self._roster_ready = True     # False only during live chrome-first paint
         # Built-ins only here: scanning the pivot registry is I/O and must not
-        # run before the first frame. ``setup()`` / live async fill scan later.
+        # run before the first frame. ``setup_sync_for_tests()`` / live async
+        # fill scan later.
         self._load_pivots(scan=False)
         self.machine_idx = 0          # selected machine sub-pivot (Worktrees/Maint)
         self.sel = ("N", 0)           # (zone, index) -> default New Worktree

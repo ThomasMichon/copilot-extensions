@@ -53,11 +53,12 @@ class ProfilesView:
         self.grid = {}                # (target_idx, host_idx) -> bool present
         self.applied = {}             # last-applied snapshot of the grid
         self.targets = []
-        self.host_cols = list(_DEFAULT_HOST_COLS)   # config-bound in setup()
+        self.host_cols = list(_DEFAULT_HOST_COLS)   # config-bound during setup/reload apply
         self._prof_unavailable = set()  # host-col idxs that couldn't load (#1370)
         # Real per-host column load / Apply plumbing (own-column model). The
-        # source hooks are bound in PickerScreen.setup(); fixtures/tests leave
-        # them None and keep the seeded self·agent diagonal.
+        # source hooks are bound during the PickerScreen setup/reload apply
+        # path; fixtures/tests leave them None and keep the seeded
+        # self·agent diagonal.
         self._prof_lock = threading.Lock()
         self._prof_load = None        # src.load_profile_column (real sources)
         self._prof_apply = None       # src.apply_profile_column (real sources)

@@ -144,9 +144,11 @@ class PickerScreenLoadingMixin:
         per Picker instance (not per call) and reuses it across every thread
         that enters this scope -- the initial live-roster fill
         (``_setup_live_async``), the independent pivot-prewarm thread
-        (``_setup_live_pivots``), and every manual 'r' reload
-        (``setup()``) -- so they all draw on one warm cache instead of each
-        separately re-paying ``agent_worktrees.config.load_config()``'s
+        (``_setup_live_pivots``), every non-live setup/reload worker
+        (``_start_setup_reload_worker()``), and the synchronous
+        ``setup_sync_for_tests()`` helper -- so they all draw on one warm
+        cache instead of each separately re-paying
+        ``agent_worktrees.config.load_config()``'s
         expensive control-plane discovery (profiled at several seconds per
         call on a fleet with many registered repos). A session is a plain
         object reference this method hands to each thread explicitly
@@ -243,7 +245,7 @@ class PickerScreenLoadingMixin:
     def _setup_live_pivots(self):
         """Scan contributed pivots without delaying local or fleet rows."""
         # Prewarm FIRST, before the (potentially slow) registry scan below --
-        # same reasoning as the non-live setup() ordering fix: this thread is
+        # same reasoning as the non-live setup-reload ordering fix: this thread is
         # already off the render thread, but the prewarm's own purpose is to
         # finish importing data_ssh before the operator's first pivot-switch
         # keypress, and every second spent scanning before the import even

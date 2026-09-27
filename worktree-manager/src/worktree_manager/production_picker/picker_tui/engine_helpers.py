@@ -523,7 +523,7 @@ BUTTON_SETS = {"maintenance": ["K", "SY"]}
 
 # ---- Profiles matrix model ----------------------------------------------------
 # Axes are config-bound from machines.yaml at runtime (see picker_tui.roster and
-# PickerScreen.setup): the real data sources (data_local/data_ssh) expose
+# the PickerScreen setup/reload apply path): the real data sources expose
 # host_cols()/target_envs() derived from the roster. These fallbacks apply only
 # when a source omits those hooks (e.g. a fixture source with no
 # host_cols()/target_envs()). They are intentionally EMPTY so a missing roster

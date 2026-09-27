@@ -286,7 +286,7 @@ def test_provider_source_tab_scopes_by_canonical_source_id():
     ]
 
     screen = PickerScreen(src, live=False)
-    screen.setup()
+    screen.setup_sync_for_tests()
     screen.machine_idx = 2
 
     assert screen._scope_data() == [provider_row]
@@ -344,7 +344,7 @@ def test_setup_uses_one_source_snapshot_for_tabs_and_loader():
     )
 
     screen = PickerScreen(src, live=True)
-    screen.setup()
+    screen.setup_sync_for_tests()
 
     assert snapshot_calls == 1
     assert ("tabs", snapshot) in seen
@@ -399,7 +399,7 @@ def test_provider_selection_does_not_collide_with_machine_id4():
     ]
 
     screen = PickerScreen(src, live=False)
-    screen.setup()
+    screen.setup_sync_for_tests()
     screen.ready_source_ids = lambda: {
         "machine-ssh:anomalous-potato:win",
         provider_id,
@@ -3846,7 +3846,7 @@ def test_remote_submenu_does_not_offer_ahp():
 def test_ahp_owned_worktree_offers_explicit_disposal_action():
     src = _verb_fixture_source()
     screen = PickerScreen(src, live=False)
-    screen.setup()
+    screen.setup_sync_for_tests()
     rec = screen.list_records()[0]
     rec["execution_leg"] = {
         "provider": "ahp",
@@ -4713,7 +4713,7 @@ def test_update_indicator_focus_glyph_and_refresh():
 
     src = _fixture_source()
     s = PickerScreen(src, live=False)
-    s.setup()
+    s.setup_sync_for_tests()
     s.htab = 0
     s.frame = 0
 
@@ -4764,7 +4764,7 @@ def test_manager_update_seg_is_distinct_from_the_engine_update_seg(monkeypatch):
     from worktree_manager.production_picker.picker_tui.engine import PickerScreen
 
     s = PickerScreen(_fixture_source(), live=False)
-    s.setup()
+    s.setup_sync_for_tests()
     s.htab = 0
 
     # idle: no segment (matches the engine segment's own idle behavior).
@@ -4796,7 +4796,7 @@ def test_manager_update_seg_appears_in_the_topbar_next_to_the_version():
     from worktree_manager.production_picker.picker_tui.engine import PickerScreen
 
     s = PickerScreen(_fixture_source(), live=False)
-    s.setup()
+    s.setup_sync_for_tests()
     s.htab = 0
     s.manager_update_state = "current"
     s.update_state = "idle"
@@ -4812,7 +4812,7 @@ def test_update_icon_is_its_own_region_not_the_pivots():
     from worktree_manager.production_picker.picker_tui.engine import PickerScreen
 
     s = PickerScreen(_fixture_source(), live=False)
-    s.setup()
+    s.setup_sync_for_tests()
     s.htab = 0
     s.update_state = "available"      # the update icon is a real focus stop
 
