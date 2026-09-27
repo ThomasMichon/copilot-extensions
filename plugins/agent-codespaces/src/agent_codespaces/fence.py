@@ -29,7 +29,7 @@ import time
 from dataclasses import dataclass
 
 #: Marker path inside the CodeSpace (the home-dir lockfile).
-FENCE_PATH = "~/.agent-lease"
+FENCE_PATH = "~/.agent-lease"  # marketplace-isolation: allow shared-instance-mutex
 
 #: Marker schema version -- an unrecognized version parses as *unreadable*
 #: (proceed), never mis-honored.

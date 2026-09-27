@@ -41,7 +41,7 @@ SCRUB_ENV_VARS: tuple[str, ...] = (
 # ``LC_GIT_CREDENTIAL_RELAY`` (or inherited a since-torn-down port) can still
 # find an active channel back to the caller (dotfiles #489/#187/#19). Kept under
 # the same ``~/.agent-bridge`` dir the connect breadcrumb uses.
-RELAY_PORTMAP_DIR = "$HOME/.agent-bridge/relay-ports"
+RELAY_PORTMAP_DIR = "$HOME/.agent-bridge/relay-ports"  # marketplace-isolation: allow registry
 
 # Directory the launch prelude symlinks the RushStack-facing bare
 # ``azure-auth-helper`` name into. It sits outside the default PATH and is
@@ -393,8 +393,9 @@ def _published_live_relay_port() -> int | None:
     relay port is discovered even on the standalone path (#540 pt3). Returns
     ``None`` when the file is absent/unparseable.
     """
+    _default_dir = "~/.agent-bridge"  # marketplace-isolation: allow registry
     base = Path(
-        os.environ.get("AGENT_BRIDGE_CONFIG_DIR", "~/.agent-bridge")
+        os.environ.get("AGENT_BRIDGE_CONFIG_DIR", _default_dir)
     ).expanduser()
     if base.name == "elevated":
         base = base.parent

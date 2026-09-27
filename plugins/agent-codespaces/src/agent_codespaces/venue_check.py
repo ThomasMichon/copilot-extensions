@@ -53,11 +53,12 @@ echo "UV=$(command -v uv >/dev/null 2>&1 && echo yes || echo no)"
 echo "APT=$(command -v apt-get >/dev/null 2>&1 && echo yes || echo no)"
 echo "SUDO_NOPASSWD=$(sudo -n true >/dev/null 2>&1 && echo yes || echo no)"
 echo "AGENT_BRIDGE_PLUGIN=$(command -v copilot >/dev/null 2>&1 && copilot plugin list 2>/dev/null | grep -q "agent-bridge@" && echo yes || echo no)"
-aw=$(command -v agent-worktrees || true)
+aw=$(command -v agent-worktrees || true)  # marketplace-isolation: allow registry
 if [ -z "$aw" ]; then
   echo "AGENT_WORKTREES_STATE=absent"
 else
-  if [ -d "$HOME/.agent-worktrees/versions" ] && [ -n "$(ls -A "$HOME/.agent-worktrees/versions" 2>/dev/null)" ]; then
+  _aw_versions_dir="$HOME/.agent-worktrees/versions"  # marketplace-isolation: allow registry
+  if [ -d "$_aw_versions_dir" ] && [ -n "$(ls -A "$_aw_versions_dir" 2>/dev/null)" ]; then
     echo "AGENT_WORKTREES_STATE=full"
     echo "AGENT_WORKTREES_VERSION=$("$aw" --version 2>/dev/null | head -1)"
   else

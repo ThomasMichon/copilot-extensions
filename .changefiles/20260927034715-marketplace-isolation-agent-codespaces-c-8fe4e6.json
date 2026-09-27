@@ -1,0 +1,9 @@
+{
+  "comment": "marketplace-scoped-installations guard triage: annotate agent-codespaces's src/ cluster's genuine marketplace-isolation exceptions (own-root legacy-compatibility fallbacks, cross-plugin agent-bridge/agent-worktrees registry lookups, the shared home-dir fence lease) with reason markers.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "minor"
+    }
+  ]
+}

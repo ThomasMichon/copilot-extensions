@@ -29,7 +29,7 @@ log = logging.getLogger("agent-codespaces")
 # Default path for the on-device breadcrumb log (shared with agent-bridge so a
 # human only has one file to check on the target).
 CONNECT_LOG_ENV = "AGENT_BRIDGE_CONNECT_LOG"
-DEFAULT_CONNECT_LOG = "$HOME/.agent-bridge/connect.log"
+DEFAULT_CONNECT_LOG = "$HOME/.agent-bridge/connect.log"  # marketplace-isolation: allow registry
 
 
 class ConnectStage(IntEnum):

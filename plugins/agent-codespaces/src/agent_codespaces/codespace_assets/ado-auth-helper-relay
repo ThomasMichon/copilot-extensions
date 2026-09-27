@@ -52,7 +52,7 @@ if [ "$ACTION" = "get-access-token" ]; then
     done
 fi
 DEFAULT_RELAY_PORT=9857
-RELAY_PORTS_DIR="$HOME/.agent-bridge/relay-ports"
+RELAY_PORTS_DIR="$HOME/.agent-bridge/relay-ports"  # marketplace-isolation: allow registry
 RELAY_PORT="${LC_GIT_CREDENTIAL_RELAY:-}"
 RELAY_TOKEN="${LC_GIT_CREDENTIAL_RELAY_TOKEN:-}"
 
@@ -64,7 +64,7 @@ RELAY_TOKEN="${LC_GIT_CREDENTIAL_RELAY_TOKEN:-}"
 # relay is always preferred and refreshes the cache, and a cached credential is
 # served only while within RELAY_TOKEN_CACHE_TTL seconds (default 1500 = 25 min).
 # Files are written 0600.
-RELAY_TOKEN_CACHE_DIR="$HOME/.agent-bridge/token-cache"
+RELAY_TOKEN_CACHE_DIR="$HOME/.agent-bridge/token-cache"  # marketplace-isolation: allow registry
 RELAY_TOKEN_CACHE_TTL="${LC_GIT_CREDENTIAL_RELAY_CACHE_TTL:-1500}"
 
 # True (0) if a credential-relay channel accepts TCP on 127.0.0.1:<port>.
