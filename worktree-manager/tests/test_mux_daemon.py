@@ -587,6 +587,47 @@ def test_compute_reports_not_live_when_mapping_is_tombstoned(tmp_path):
     assert result == {"applied": False, "reason": "not-live"}
 
 
+def test_compute_dead_session_cleanup_does_not_tombstone_a_racing_newer_session(
+    tmp_path, monkeypatch
+):
+    """Copilot review finding on PR #3906: the dead-mux-session cleanup path
+    inside ``build_compute`` called ``registry.remove()`` directly with only
+    a ``mapping_revision`` guard, bypassing the new ``mux_session`` identity
+    guard -- a concurrent CLI ``register()`` replacing this mapping with a
+    NEWER live session at the same revision (an equal-revision live
+    replacement ``register()`` itself accepts as a benign refresh) could
+    still be tombstoned by this cleanup path."""
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry(mux_session="session-a", mapping_revision=1))
+
+    def _fake_alive(mux_bin, session):
+        # Simulate the race: between build_compute's own ``entry =
+        # registry.get(...)`` snapshot (still session-a) and this liveness
+        # probe, a concurrent CLI call replaces the mapping with session-b
+        # at the SAME revision.
+        registry.register(_entry(mux_session="session-b", mapping_revision=1))
+        return False
+
+    monkeypatch.setattr(mux_daemon, "_mux_session_alive", _fake_alive)
+    compute = mux_daemon.build_compute(registry)
+
+    result = compute(
+        mux_daemon.KIND,
+        {
+            "project": "proj",
+            "worktree_id": "wt-1",
+            "values": {"@aw_ctx": "x"},
+            "rendered_at": "2026-09-25T00:00:00Z",
+        },
+    )
+
+    assert result == {"applied": False, "reason": "not-live"}
+    stored = registry.get("proj", "wt-1")
+    assert stored is not None
+    assert stored["live"] is True
+    assert stored["mux_session"] == "session-b"
+
+
 def test_compute_rejects_missing_rendered_at(tmp_path):
     """Copilot review finding: a wire caller that bypasses status_push_key
     and submits a payload with no rendered_at sits outside the

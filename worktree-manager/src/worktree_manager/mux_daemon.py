@@ -642,7 +642,15 @@ def build_compute(
             # invalidates the mapping so a later lookup does not repeat the
             # same probe forever.
             if not _mux_session_alive(entry["mux_bin"], entry["mux_session"]):
-                registry.remove(project, worktree_id, mapping_revision=entry["mapping_revision"])
+                # Session identity guard here too: a concurrent CLI
+                # register() can replace this mapping with a NEWER live
+                # session at the same revision between the snapshot above
+                # and this remove() call -- passing mux_session rejects
+                # that race as a stale no-op instead of tombstoning it.
+                registry.remove(
+                    project, worktree_id,
+                    mapping_revision=entry["mapping_revision"], mux_session=entry["mux_session"],
+                )
                 tombstone = registry.get(project, worktree_id)
                 if tombstone is not None:
                     publish_live_observation(tombstone, ensure_monitor=False)

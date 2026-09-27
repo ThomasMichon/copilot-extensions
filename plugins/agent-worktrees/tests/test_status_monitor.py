@@ -3055,15 +3055,22 @@ def test_spawn_detached_uses_console_python_windowless_daemon(monkeypatch):
     assert "AGENT_WORKTREES_AHP_AUTH_TOKEN" not in seen["env"]
 
 
-def test_spawn_detached_scrubs_session_scoped_identity_and_roots_cwd_at_install_dir(
+def test_spawn_detached_scrubs_session_id_and_roots_cwd_at_install_dir(
     monkeypatch, tmp_path
 ):
-    """A resident, host-wide daemon must not inherit the ephemeral identity
-    (cell context, plugin-instance path, session id) or cwd of whichever
-    CLI invocation happened to ensure it -- it outlives all of them. Its
-    cwd is the stable install root (marketplace-cell root, or legacy
-    ``~/.agent-worktrees``), not a version slot that churns on every
-    update."""
+    """A resident, host-wide daemon must not inherit the ephemeral session
+    id or cwd of whichever CLI invocation happened to ensure it -- it
+    outlives all of them. Its cwd is the stable install root
+    (marketplace-cell root, or legacy ``~/.agent-worktrees``), not a
+    version slot that churns on every update.
+
+    ``COPILOT_EXTENSIONS_CONTEXT``/``COPILOT_PLUGIN_ROOT`` must survive
+    unchanged (Copilot review finding on PR #3906): the daemon itself calls
+    ``cfg.install_dir()`` throughout its own lifetime, and
+    ``registry_paths.registry_root()`` treats an absent context as legacy
+    mode -- stripping it would make a cell-spawned daemon resolve its OWN
+    monitor lock/state under the legacy root instead of its cell's, even
+    though its cwd was correctly cell-rooted at spawn time."""
     seen: dict = {}
 
     def _fake_popen(argv, **kwargs):
@@ -3072,7 +3079,7 @@ def test_spawn_detached_scrubs_session_scoped_identity_and_roots_cwd_at_install_
 
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "some-cell")
     monkeypatch.setenv("COPILOT_PLUGIN_ROOT", "/some/installed-plugin/path")
-    monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "some-session-id")
+    monkeypatch.setenv("copilot_agent_session_id", "mixed-case-should-also-be-scrubbed")
     monkeypatch.setenv("SAFE_VALUE", "kept")
     monkeypatch.setattr(m.subprocess, "Popen", _fake_popen)
     monkeypatch.setattr(m, "windowless_daemon_kwargs", lambda **_kw: {})
@@ -3083,9 +3090,10 @@ def test_spawn_detached_scrubs_session_scoped_identity_and_roots_cwd_at_install_
 
     assert m._spawn_detached([m.sys.executable, "-m", "agent_worktrees", "status-monitor"]) is True
     env = seen["kwargs"]["env"]
-    assert "COPILOT_EXTENSIONS_CONTEXT" not in env
-    assert "COPILOT_PLUGIN_ROOT" not in env
+    assert env["COPILOT_EXTENSIONS_CONTEXT"] == "some-cell"
+    assert env["COPILOT_PLUGIN_ROOT"] == "/some/installed-plugin/path"
     assert "COPILOT_AGENT_SESSION_ID" not in env
+    assert "copilot_agent_session_id" not in env
     assert env["SAFE_VALUE"] == "kept"
     assert seen["kwargs"]["cwd"] == str(install_root)
 
