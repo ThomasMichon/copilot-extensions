@@ -463,6 +463,9 @@ class PickerScreenRuntimeMixin:
 
     def _apply_setup_payload(self, payload: _SetupPayload) -> None:
         """Install a collected setup/reload payload. UI-thread only."""
+        self._busy_label = None
+        if self.debug == "loading":
+            self.debug = "ready"
         self._install_pivot_payload(payload.pivot_payload)
         self.source_tabs = payload.source_tabs
         self.machines = [
@@ -541,6 +544,7 @@ class PickerScreenRuntimeMixin:
 
     def _apply_setup_failure(self, epoch: int, err: Exception) -> None:
         self._setup_failed_epoch = epoch
+        self._busy_label = "Load failed"
         self.debug = f"setup-failed: {err}"
 
     def _start_setup_reload_worker(self) -> int:

@@ -177,6 +177,48 @@ def _fixture_source():
     return src
 
 
+async def _wait_for_initial_setup(pilot, scr, *, timeout: float = 5.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        current = getattr(scr, "_setup_epoch", 0)
+        if current != 0 and getattr(scr, "_setup_applied_epoch", 0) == current:
+            return
+        await pilot.pause()
+        await asyncio.sleep(0.01)
+    current = getattr(scr, "_setup_epoch", 0)
+    applied = getattr(scr, "_setup_applied_epoch", 0)
+    raise AssertionError(
+        f"timed out waiting for setup epoch {current} to apply (applied={applied})"
+    )
+
+
+@pytest.fixture(autouse=True)
+def _wait_for_non_live_run_test(monkeypatch):
+    original_run_test = PickerApp.run_test
+
+    class _ReadyRunTest:
+        def __init__(self, app, inner):
+            self._app = app
+            self._inner = inner
+
+        async def __aenter__(self):
+            pilot = await self._inner.__aenter__()
+            if not getattr(self._app, "_live", False):
+                await _wait_for_initial_setup(
+                    pilot,
+                    self._app.query_one(PickerScreen),
+                )
+            return pilot
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return await self._inner.__aexit__(exc_type, exc, tb)
+
+    def _run_test(app, *args, **kwargs):
+        return _ReadyRunTest(app, original_run_test(app, *args, **kwargs))
+
+    monkeypatch.setattr(PickerApp, "run_test", _run_test)
+
+
 def test_provider_source_tab_scopes_by_canonical_source_id():
     src = _fixture_source()
     provider_id = "provider-exec:example:target-1"

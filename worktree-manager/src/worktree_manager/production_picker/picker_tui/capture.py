@@ -30,6 +30,7 @@ Three capture forms, one seam:
 """
 from __future__ import annotations
 
+import asyncio
 import io
 from typing import Any, Awaitable, Callable, Optional
 
@@ -39,6 +40,22 @@ from rich.segment import Segment, Segments
 # The picker's canonical headless render size (matches the test suite). A wide
 # grid so columns don't get dropped by the responsive fitter.
 DEFAULT_SIZE = (118, 40)
+
+
+async def _wait_for_initial_setup(scr: Any, pilot: Any, *, timeout: float = 5.0) -> None:
+    """Wait until a non-live picker's initial async setup epoch has applied."""
+    deadline = asyncio.get_event_loop().time() + timeout
+    while asyncio.get_event_loop().time() < deadline:
+        current = getattr(scr, "_setup_epoch", 0)
+        if current != 0 and getattr(scr, "_setup_applied_epoch", 0) == current:
+            return
+        await pilot.pause()
+        await asyncio.sleep(0.01)
+    current = getattr(scr, "_setup_epoch", 0)
+    applied = getattr(scr, "_setup_applied_epoch", 0)
+    raise AssertionError(
+        f"timed out waiting for setup epoch {current} to apply (applied={applied})"
+    )
 
 
 def _screen_segments(scr: Any) -> list:
@@ -161,6 +178,8 @@ async def capture_async(
     app = PickerApp(source, live=live)
     async with app.run_test(size=size) as pilot:
         scr = app.query_one(PickerScreen)
+        if not live:
+            await _wait_for_initial_setup(scr, pilot)
         if view == "all":
             scr.machine_idx = 0
         else:
@@ -290,6 +309,8 @@ async def capture_frames_async(
     app = PickerApp(source, live=live)
     async with app.run_test(size=size) as pilot:
         scr = app.query_one(PickerScreen)
+        if not live:
+            await _wait_for_initial_setup(scr, pilot)
         if view == "all":
             scr.machine_idx = 0
         else:
@@ -357,6 +378,8 @@ async def capture_modal_async(
     app = PickerApp(source, live=live)
     async with app.run_test(size=size) as pilot:
         scr = app.query_one(PickerScreen)
+        if not live:
+            await _wait_for_initial_setup(scr, pilot)
         if view == "all":
             scr.machine_idx = 0
         else:

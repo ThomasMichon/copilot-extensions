@@ -97,6 +97,25 @@ def _payload(tag: str) -> _SetupPayload:
     )
 
 
+def _setup_state(screen: PickerScreen) -> dict[str, object]:
+    return {
+        "htabs": tuple(screen.htabs),
+        "source_tabs": [dict(tab) for tab in screen.source_tabs],
+        "machines": list(screen.machines),
+        "source_local": screen._source_local,
+        "source_repo_branch": screen._source_repo_branch,
+        "machine_idx": screen.machine_idx,
+        "data": list(screen.data),
+        "load_delay": dict(screen.load_delay),
+        "host_cols": list(screen.host_cols),
+        "targets": list(screen.targets),
+        "grid": dict(screen.grid),
+        "applied": dict(screen.applied),
+        "prof_unavailable": set(screen._prof_unavailable),
+        "loader": screen.loader,
+    }
+
+
 async def _settle_threads(*events: threading.Event) -> None:
     deadline = time.monotonic() + 5.0
     while time.monotonic() < deadline:
@@ -347,6 +366,7 @@ def test_setup_reload_supersession_discards_stale_success(
         app = PickerApp(_fixture_source(), live=False)
         async with app.run_test(size=(100, 30)) as pilot:
             screen = app.query_one(PickerScreen)
+            await wait_for_current_setup_epoch_applied(pilot, screen)
             base_epoch = screen._setup_epoch
             screen._prime_setup_reload = lambda: None
             screen._collect_setup_payload = _collect
@@ -408,6 +428,7 @@ def test_setup_reload_stale_failure_does_not_clobber_newer_success(
         app = PickerApp(_fixture_source(), live=False)
         async with app.run_test(size=(100, 30)) as pilot:
             screen = app.query_one(PickerScreen)
+            await wait_for_current_setup_epoch_applied(pilot, screen)
             base_epoch = screen._setup_epoch
             screen._prime_setup_reload = lambda: None
             screen._collect_setup_payload = _collect
@@ -438,7 +459,9 @@ def test_setup_reload_stale_failure_does_not_clobber_newer_success(
     asyncio.run(run())
 
 
-def test_setup_reload_drops_results_after_unmount():
+def test_setup_reload_drops_results_after_unmount(
+    wait_for_current_setup_epoch_applied,
+):
     release = threading.Event()
     worker_done = threading.Event()
 
@@ -451,6 +474,7 @@ def test_setup_reload_drops_results_after_unmount():
         app = PickerApp(_fixture_source(), live=False)
         async with app.run_test(size=(100, 30)) as pilot:
             screen = app.query_one(PickerScreen)
+            await wait_for_current_setup_epoch_applied(pilot, screen)
             base_applied_epoch = screen._setup_applied_epoch
             screen._prime_setup_reload = lambda: None
             screen._collect_setup_payload = _collect
@@ -500,6 +524,7 @@ def test_setup_reload_applies_pivots_and_rows_from_one_epoch(
         app = PickerApp(_fixture_source(), live=False)
         async with app.run_test(size=(100, 30)) as pilot:
             screen = app.query_one(PickerScreen)
+            await wait_for_current_setup_epoch_applied(pilot, screen)
             screen._prime_setup_reload = lambda: None
             screen._collect_setup_payload = _collect
             original_apply = screen._apply_setup_payload
@@ -526,5 +551,151 @@ def test_setup_reload_applies_pivots_and_rows_from_one_epoch(
             assert seen == [(("beta Tasks",), "beta")]
             assert tuple(screen.htabs) == ("beta Tasks",)
             assert screen.data[0]["title"] == "beta"
+
+    asyncio.run(run())
+
+
+def test_non_live_mount_paints_skeleton_before_blocked_load_returns(
+    monkeypatch,
+    wait_for_current_setup_epoch_applied,
+):
+    load_started = threading.Event()
+    release_load = threading.Event()
+
+    class Src:
+        LOCAL = ("host", "Win")
+        REPO = "repo"
+        BRANCH = "branch"
+
+        @staticmethod
+        def machines():
+            return [("host Win", "host", "Win", True)]
+
+        @staticmethod
+        def load():
+            load_started.set()
+            release_load.wait(timeout=5)
+            return [
+                derive.norm(
+                    {
+                        "id": "loaded-id",
+                        "title": "loaded",
+                        "status": "active",
+                        "state": "wip",
+                        "session_count": 1,
+                    },
+                    "host",
+                    "Win",
+                )
+            ]
+
+        bucket = staticmethod(derive.bucket)
+        for_machine = staticmethod(derive.for_machine)
+
+    pivot_payload = (
+        [],
+        [{"label": "Loaded Tasks", "kind": "tasks", "pivot": None}],
+        [],
+        [],
+    )
+    monkeypatch.setattr(PickerScreen, "_scan_pivot_payload", lambda self: pivot_payload)
+
+    async def run():
+        app = PickerApp(Src(), live=False)
+        async with app.run_test(size=(100, 30)) as pilot:
+            screen = app.query_one(PickerScreen)
+            deadline = time.monotonic() + 5.0
+            while time.monotonic() < deadline:
+                if load_started.is_set():
+                    break
+                await pilot.pause()
+                await asyncio.sleep(0.01)
+            assert load_started.is_set()
+
+            assert screen._setup_epoch == 1
+            assert screen._setup_applied_epoch == 0
+            assert screen._busy_label == "Loading…"
+            assert screen.loader is None
+            assert screen.data == []
+            assert tuple(screen.htabs)
+            assert "Loaded Tasks" not in tuple(screen.htabs)
+            assert len(screen.source_tabs) == 2
+            assert screen.source_tabs[0]["label"] == "All"
+            assert screen.machine_idx == 1
+
+            release_load.set()
+            await wait_for_current_setup_epoch_applied(pilot, screen)
+
+            assert screen._busy_label is None
+            assert tuple(screen.htabs) == ("Loaded Tasks",)
+            assert screen.data[0]["title"] == "loaded"
+
+    asyncio.run(run())
+
+
+def test_non_live_mount_eventually_matches_sync_setup_result(
+    monkeypatch,
+    wait_for_current_setup_epoch_applied,
+):
+    release_load = threading.Event()
+
+    def _rows():
+        return [
+            derive.norm(
+                {
+                    "id": "loaded-id",
+                    "title": "loaded",
+                    "status": "active",
+                    "state": "wip",
+                    "session_count": 1,
+                },
+                "host",
+                "Win",
+            )
+        ]
+
+    class SyncSrc:
+        LOCAL = ("host", "Win")
+        REPO = "repo"
+        BRANCH = "branch"
+
+        @staticmethod
+        def machines():
+            return [("host Win", "host", "Win", True)]
+
+        @staticmethod
+        def load():
+            return _rows()
+
+        bucket = staticmethod(derive.bucket)
+        for_machine = staticmethod(derive.for_machine)
+
+    class AsyncSrc(SyncSrc):
+        @staticmethod
+        def load():
+            release_load.wait(timeout=5)
+            return _rows()
+
+    pivot_payload = (
+        [],
+        [{"label": "Loaded Tasks", "kind": "tasks", "pivot": None}],
+        [],
+        [],
+    )
+    monkeypatch.setattr(PickerScreen, "_scan_pivot_payload", lambda self: pivot_payload)
+
+    baseline = PickerScreen(SyncSrc(), live=False)
+    baseline.setup()
+    expected = _setup_state(baseline)
+
+    async def run():
+        app = PickerApp(AsyncSrc(), live=False)
+        async with app.run_test(size=(100, 30)) as pilot:
+            screen = app.query_one(PickerScreen)
+            release_load.set()
+            await wait_for_current_setup_epoch_applied(pilot, screen)
+
+            assert _setup_state(screen) == expected
+            assert screen._busy_label is None
 
     asyncio.run(run())
