@@ -230,6 +230,9 @@ class PickerScreen(
         # extension of it) has visibility into what is still outstanding.
         self._bg_cancel = threading.Event()
         self._bg_threads: set[threading.Thread] = set()
+        self._setup_epoch = 0
+        self._setup_applied_epoch = 0
+        self._setup_failed_epoch = 0
         # Per-refresh render caches (#169): in the NF compose tree every segment
         # widget (title / pivots / chrome / machine / buttons / footer) renders
         # from this one screen's derived frame in the SAME paint pass. Without a

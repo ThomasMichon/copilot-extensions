@@ -369,17 +369,16 @@ def test_setup_prewarm_starts_before_the_pivot_scan(monkeypatch):
 
     screen = eng.PickerScreen(Src(), live=False)
 
-    def recording_load_pivots(*a, **k):
+    def recording_scan():
         order.append("scan")
-        return original_load_pivots(*a, **k)
+        return None
 
-    original_load_pivots = screen._load_pivots
-    monkeypatch.setattr(screen, "_load_pivots", recording_load_pivots)
+    monkeypatch.setattr(screen, "_scan_pivot_payload", recording_scan)
     order.clear()  # __init__/on_mount may already have called setup() once
     screen.setup()
 
     assert order == ["prewarm", "scan"], (
-        "prewarm_optional_modules must start before _load_pivots, not after")
+        "prewarm_optional_modules must start before _scan_pivot_payload, not after")
 
 
 def test_prewarm_optional_modules_imports_data_ssh(monkeypatch):

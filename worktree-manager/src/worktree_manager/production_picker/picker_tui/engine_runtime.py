@@ -4,10 +4,25 @@ from __future__ import annotations
 
 import threading
 import time
+from dataclasses import dataclass
 
 from .engine_helpers import _DEFAULT_HOST_COLS, _DEFAULT_TARGET_ENVS, start_loader, target_rows
 from .selection import ListSelection
 from .. import update_stage
+
+
+@dataclass(frozen=True)
+class _SetupPayload:
+    pivot_payload: object
+    source_tabs: list[dict[str, object]]
+    source_local: tuple[str, str] | None
+    source_repo_branch: tuple[str, str]
+    loader: object | None
+    data: list[object]
+    load_delay: dict[int, float]
+    host_cols: list[str]
+    target_env_list: list[str]
+
 
 class PickerScreenRuntimeMixin:
     def _poll_update_state(self):
@@ -250,7 +265,7 @@ class PickerScreenRuntimeMixin:
             for it in items:
                 if it["state"] != "failed":
                     it["state"] = "done"
-    def setup(self):
+    def _prime_setup_reload(self):
         # Kick off the data_ssh prewarm import FIRST, before anything else in
         # this method -- including the pivot-registry scan below. The prewarm
         # exists specifically so the FIRST switch onto a registered pivot
@@ -274,9 +289,8 @@ class PickerScreenRuntimeMixin:
         # docstring. Started here too, for the same maximize-the-head-start
         # reason as the import prewarm above.
         self._prewarm_machine_key_map()
-        # Re-scan the pivot registry so a refresh ('r') picks up a newly
-        # installed (or removed) contributed pivot without a picker restart.
-        self._load_pivots()
+
+    def _invalidate_setup_reload_caches(self):
         # A manual reload ('r') must also refresh the registered Tasks pivot, not
         # just the worktree lists (the pivot runtime is separate + has no TTL):
         # clear each pivot runtime's cache so the next frame's ensure() refetches,
@@ -286,6 +300,10 @@ class PickerScreenRuntimeMixin:
                 _rt.invalidate()
             except Exception:
                 pass
+
+    def _collect_setup_payload(self) -> _SetupPayload:
+        """Collect the synchronous setup/reload inputs with no widget mutation."""
+        pivot_payload = self._scan_pivot_payload()
         snapshot_fn = getattr(self.src, "source_snapshot", None)
         with self._load_config_cache_scope():
             source_snapshot = snapshot_fn() if callable(snapshot_fn) else None
@@ -315,7 +333,7 @@ class PickerScreenRuntimeMixin:
                 }
                 for label, machine, env, ready in machine_tabs
             ]
-        self.source_tabs = [{
+        source_tabs = [{
             "label": "All",
             "machine": None,
             "env": None,
@@ -324,19 +342,10 @@ class PickerScreenRuntimeMixin:
             "source_id": None,
             "capabilities": {},
         }, *tabs]
-        self.machines = [
-            (
-                tab["label"],
-                tab.get("machine"),
-                tab.get("env"),
-                bool(tab.get("ready")),
-            )
-            for tab in self.source_tabs
-        ]
         local = next(
             (
                 (tab.get("machine"), tab.get("env"))
-                for tab in self.source_tabs
+                for tab in source_tabs
                 if tab.get("local")
             ),
             None,
@@ -346,31 +355,21 @@ class PickerScreenRuntimeMixin:
                 local = self.src.LOCAL
             except Exception:
                 local = self._source_local
-        self._source_local = local or self._source_local
         with self._load_config_cache_scope():
             try:
-                self._source_repo_branch = (
+                source_repo_branch = (
                     getattr(self.src, "REPO", "") or "",
                     getattr(self.src, "BRANCH", "") or "",
                 )
             except Exception:
-                self._source_repo_branch = ("", "")
-        self.machine_idx = self.local_index()
-        self.maint_sel = ListSelection()  # drop any stale Maintenance selection
-        # Worktrees selection persists across reload (#2258 P3-7): it is NOT
-        # hard-cleared here. Survivors are kept and vanished rows dropped by
-        # _reconcile_wt_sel() at the end of setup, once the reloaded records are
-        # available.
-        self._last_poll = time.monotonic()   # first background poll is POLL_SECS out
-        self._last_pivot_poll = time.monotonic()  # registered-pivot repoll (#staleness)
+                source_repo_branch = ("", "")
         if self.live:
             # Real background SSH loads: one daemon thread per machine,
             # spinner -> ✓/✗. Every source -- local included -- streams in on a
             # thread (#1432), so the picker paints and accepts keys immediately;
             # seed self.data empty and let the render tick fill it as each
             # machine resolves.
-            self.data = []
-            self.loader = (
+            loader = (
                 self.src.make_loader(source_snapshot)
                 if source_snapshot is not None
                 else self.src.make_loader()
@@ -380,20 +379,25 @@ class PickerScreenRuntimeMixin:
             # operator actually navigates onto its tab
             # (picker-lazy-per-machine-loading; see LiveLoader.start's own
             # docstring). ``local`` is a plain (machine, env) tuple or None.
-            start_loader(self.loader, focus_keys={local} if local else None)
-            self.data = self.loader.records()
+            start_loader(loader, focus_keys={local} if local else None)
+            data = loader.records()
+            load_delay = {}
         else:
-            self.data = self.src.load()
+            loader = None
+            data = self.src.load()
             # Simulate background SSH status loads: local is instant, remotes
             # stagger in, the unreachable one (book2) is permanently disabled.
-            self.t0 = time.monotonic()
-            self.load_delay = {}
+            load_delay = {}
             d = 1.4
-            for i, (label, m, e, ok) in enumerate(self.machines):
+            for i, tab in enumerate(source_tabs):
+                label = tab["label"]
+                m = tab.get("machine")
+                e = tab.get("env")
+                ok = bool(tab.get("ready"))
                 if label == "All" or (m, e) == self._src_local() or not ok:
-                    self.load_delay[i] = 0.0
+                    load_delay[i] = 0.0
                 else:
-                    self.load_delay[i] = d
+                    load_delay[i] = d
                     d += 1.1
         # Profiles matrix axes are config-bound from machines.yaml (via the data
         # source); fall back to the built-in defaults for sources that don't
@@ -401,8 +405,52 @@ class PickerScreenRuntimeMixin:
         hc = getattr(self.src, "host_cols", None)
         te = getattr(self.src, "target_envs", None)
         with self._load_config_cache_scope():
-            self.host_cols = (hc() if callable(hc) else None) or list(_DEFAULT_HOST_COLS)
+            host_cols = (hc() if callable(hc) else None) or list(_DEFAULT_HOST_COLS)
             target_env_list = (te() if callable(te) else None) or _DEFAULT_TARGET_ENVS
+        return _SetupPayload(
+            pivot_payload=pivot_payload,
+            source_tabs=source_tabs,
+            source_local=local,
+            source_repo_branch=source_repo_branch,
+            loader=loader,
+            data=data,
+            load_delay=load_delay,
+            host_cols=host_cols,
+            target_env_list=target_env_list,
+        )
+
+    def _apply_setup_payload(self, payload: _SetupPayload) -> None:
+        """Install a collected setup/reload payload. UI-thread only."""
+        self._install_pivot_payload(payload.pivot_payload)
+        self.source_tabs = payload.source_tabs
+        self.machines = [
+            (
+                tab["label"],
+                tab.get("machine"),
+                tab.get("env"),
+                bool(tab.get("ready")),
+            )
+            for tab in self.source_tabs
+        ]
+        self._source_local = payload.source_local or self._source_local
+        self._source_repo_branch = payload.source_repo_branch
+        self.machine_idx = self.local_index()
+        self.maint_sel = ListSelection()  # drop any stale Maintenance selection
+        # Worktrees selection persists across reload (#2258 P3-7): it is NOT
+        # hard-cleared here. Survivors are kept and vanished rows dropped by
+        # _reconcile_wt_sel() at the end of setup, once the reloaded records are
+        # available.
+        self._last_poll = time.monotonic()   # first background poll is POLL_SECS out
+        self._last_pivot_poll = time.monotonic()  # registered-pivot repoll (#staleness)
+        self.loader = payload.loader
+        self.data = payload.data
+        if self.live:
+            self.load_delay = {}
+        else:
+            self.t0 = time.monotonic()
+            self.load_delay = dict(payload.load_delay)
+        self.host_cols = payload.host_cols
+        target_env_list = payload.target_env_list
         # Profiles matrix: seed a "self · agent" profile on each host.
         self.targets = target_rows(target_env_list)
         self.grid = {}
@@ -440,6 +488,50 @@ class PickerScreenRuntimeMixin:
         # a now-invalid range anchor. A no-op while records are still streaming.
         self._roster_ready = True
         self._reconcile_wt_sel()
+
+    def _apply_setup_failure(self, epoch: int, err: Exception) -> None:
+        self._setup_failed_epoch = epoch
+        self.debug = f"setup-failed: {err}"
+
+    def _start_setup_reload_worker(self) -> int:
+        """Schedule a setup/reload collect pass and apply it only if current."""
+        self._prime_setup_reload()
+        self._setup_epoch += 1
+        epoch = self._setup_epoch
+        cancel = self._bg_cancel
+
+        def _worker():
+            payload = None
+            err = None
+            try:
+                payload = self._collect_setup_payload()
+            except Exception as exc:
+                err = exc
+            if cancel.is_set() or epoch != self._setup_epoch:
+                return
+
+            def _apply():
+                if cancel.is_set() or epoch != self._setup_epoch:
+                    return
+                if err is not None:
+                    self._apply_setup_failure(epoch, err)
+                    return
+                self._invalidate_setup_reload_caches()
+                self._apply_setup_payload(payload)
+                self._setup_applied_epoch = epoch
+
+            self._apply_from_worker(_apply)
+
+        threading.Thread(
+            target=_worker, name=f"picker-setup-reload:{epoch}", daemon=True
+        ).start()
+        return epoch
+
+    def setup(self):
+        self._prime_setup_reload()
+        payload = self._collect_setup_payload()
+        self._invalidate_setup_reload_caches()
+        self._apply_setup_payload(payload)
     def _start_pr_reconcile(self, rec_fn):
         """Reconcile stale local PR states off the UI thread, then reload (#1423).
 
