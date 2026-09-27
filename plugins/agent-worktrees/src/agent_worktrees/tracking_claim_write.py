@@ -20,6 +20,15 @@ stay call-site-level, migrated (if ever) in a later, narrower slice.
 ``claim_added``/``claim_released``/``claim_settled`` are stage-mapped in
 ``activity.HANDOFF_STAGE_MAP``, so ``activity.log_event`` never reaches
 ``handoff_trace.append_event`` for any of them.
+
+``agent-worktrees-authoritative-daemon`` effort, Phase 3's fifth cluster
+(a later PR) reuses ``apply_claim_settle`` for ``handoff_cutover.py``'s
+``_settle_predecessor_session_claim`` repair via the ``skip_if_released``
+guard above, rather than registering a new verb for it -- both wrap the
+identical ``tracking.settle_resource_claim`` transaction, only differing
+in whether an already-``released`` claim is a silent no-op (repair) or
+resettled to the requested disposition (the public CLI command, which
+also supports settling explicitly TO ``released``).
 """
 
 from __future__ import annotations
@@ -136,11 +145,25 @@ def apply_claim_release(args: dict) -> dict:
 
 
 def apply_claim_settle(args: dict) -> dict:
-    """Registered as the ``claim_settle`` verb."""
+    """Registered as the ``claim_settle`` verb.
+
+    ``skip_if_released`` (default ``False``, preserving the public ``claims
+    settle`` CLI command's existing behavior unchanged) is an opt-in guard
+    for a best-effort repair caller (``handoff_cutover.py``'s
+    ``_settle_predecessor_session_claim``): when set and the matched claim
+    is already ``released``, this returns a silent ``{"ok": True, "skipped":
+    "released"}`` no-op instead of settling it, so a ``deregister_session``
+    that raced ahead and released the claim first is never resurrected back
+    to another disposition (mirrors ``finalize.py``'s
+    ``_settle_current_session_claim`` guard). Must run inside this same
+    locked transaction, not at the caller -- checking then dispatching as
+    two separate steps would reopen exactly the race this guards against.
+    """
     worktree_id = args["worktree_id"]
     yaml_path = Path(args["yaml_path"])
     ref = args["ref"]
     disposition = args["disposition"]
+    skip_if_released = bool(args.get("skip_if_released"))
 
     with tracking._RecordLock(yaml_path, require_sidecar=True):
         record = tracking.load_record(yaml_path)
@@ -156,6 +179,8 @@ def apply_claim_settle(args: dict) -> dict:
                     f"{reservation}; accept, decline, or cancel it first"
                 ),
             }
+        if skip_if_released and match is not None and match.state == "released":
+            return {"ok": True, "skipped": "released"}
         settled = tracking.settle_resource_claim(record, ref, disposition, save=False)
         if settled is None:
             return {"error": "not_found"}

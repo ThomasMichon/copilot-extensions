@@ -1,0 +1,9 @@
+{
+  "comment": "Migrate handoff-cutover's confirmed-retire session/claim repairs onto the tracking_write daemon verbs",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

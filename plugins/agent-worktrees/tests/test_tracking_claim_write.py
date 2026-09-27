@@ -194,6 +194,67 @@ def test_settle_rejects_an_unknown_ref(record_path):
     assert result == {"error": "not_found"}
 
 
+def test_settle_skip_if_released_no_ops_an_already_released_claim(record_path):
+    """The ``skip_if_released`` guard (added for ``handoff_cutover.py``'s
+    ``_settle_predecessor_session_claim`` repair) must never resurrect an
+    already-``released`` claim -- mirrors ``finalize.py``'s
+    ``_settle_current_session_claim`` guard, now shared through this verb
+    instead of duplicated at the call site."""
+    tracking_claim_write.apply_claim_add(
+        {
+            "worktree_id": "wt-claim",
+            "yaml_path": str(record_path),
+            "kind": "codespace",
+            "ref": "cs-1",
+        }
+    )
+    tracking_claim_write.apply_claim_release(
+        {"worktree_id": "wt-claim", "yaml_path": str(record_path), "ref": "cs-1"}
+    )
+    result = tracking_claim_write.apply_claim_settle(
+        {
+            "worktree_id": "wt-claim",
+            "yaml_path": str(record_path),
+            "ref": "cs-1",
+            "disposition": obligations.AT_REST,
+            "skip_if_released": True,
+        }
+    )
+    assert result == {"ok": True, "skipped": "released"}
+    record = tracking.load_record(record_path)
+    match = next(c for c in record.resources if c.ref == "cs-1")
+    assert match.state == "released"
+
+
+def test_settle_without_skip_if_released_still_resettles_a_released_claim(record_path):
+    """Confirms the guard is opt-in only: the public ``claims settle`` CLI
+    command's existing behavior (unconditional resettle, no guard arg) is
+    unchanged."""
+    tracking_claim_write.apply_claim_add(
+        {
+            "worktree_id": "wt-claim",
+            "yaml_path": str(record_path),
+            "kind": "codespace",
+            "ref": "cs-1",
+        }
+    )
+    tracking_claim_write.apply_claim_release(
+        {"worktree_id": "wt-claim", "yaml_path": str(record_path), "ref": "cs-1"}
+    )
+    result = tracking_claim_write.apply_claim_settle(
+        {
+            "worktree_id": "wt-claim",
+            "yaml_path": str(record_path),
+            "ref": "cs-1",
+            "disposition": obligations.AT_REST,
+        }
+    )
+    assert result == {"ok": True, "kind": "codespace", "disposition": obligations.AT_REST}
+    record = tracking.load_record(record_path)
+    match = next(c for c in record.resources if c.ref == "cs-1")
+    assert match.state == obligations.AT_REST
+
+
 def test_dispatch_reaches_claim_add_through_a_live_daemon(record_path):
     """End-to-end: proves ``tracking_write.dispatch`` reaches
     ``apply_claim_add`` via an actual ``CoalescingServer``, the

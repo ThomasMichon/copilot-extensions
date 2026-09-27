@@ -9,10 +9,6 @@ and no ambient-context reads -- the simplest cluster yet, deliberately
 picked over the same module's (``tracking_lifecycle.py``) riskier call
 sites still embedded in bigger orchestrated flows:
 
-- ``handoff_cutover.py``'s confirmed-retire repairs
-  (``_conclude_retired_predecessor``/``_settle_predecessor_session_claim``)
-  -- best-effort, silently-swallowed-exception call sites reachable from
-  the live handoff-cutover choreography, deferred pending more care.
 - ``terminal_conclusion.py``'s ``_save_session_conclusion`` -- one step
   inside the disposable-worktree conclusion cascade's own single lock, not
   a standalone transaction of its own.
@@ -22,6 +18,13 @@ sites still embedded in bigger orchestrated flows:
   this migration to avoid for an early verb.
 
 See the effort README's own Journal for the full survey.
+
+The fifth cluster (this same PR) reuses ``apply_session_conclude`` for
+``handoff_cutover.py``'s ``_conclude_retired_predecessor`` repair via the
+``only_if_active`` guard above, rather than registering a new verb for it
+-- both wrap the identical ``tracking.conclude_session`` transaction, only
+differing in whether an already-non-active entry is a silent no-op
+(repair) or unconditionally reasserted (the public CLI command).
 
 Both commands are "project-agnostic" (``_find_tracking_file`` searches
 every project, since a higher-layer caller's CWD is unrelated to the
@@ -56,15 +59,32 @@ def apply_session_conclude(args: dict) -> dict:
     (including its post-save reload, kept for behavior parity). Returns
     ``{"error": "lifecycle", "message": ...}`` for a
     ``tracking.SessionLifecycleError`` rejection (an unknown session or
-    invalid state), never raising."""
+    invalid state), never raising.
+
+    ``only_if_active`` (default ``False``, preserving the public
+    ``conclude-session`` CLI command's existing behavior unchanged) is an
+    opt-in guard for a best-effort repair caller
+    (``handoff_cutover.py``'s ``_conclude_retired_predecessor``): when set
+    and the session's current ``SessionEntry.state`` is not ``"active"``,
+    this returns a silent ``{"ok": True, "skipped": "not_active"}`` no-op
+    instead of concluding it, so a predecessor already concluded/handed-off
+    by some other path is never re-processed. Must run inside this same
+    locked transaction, not at the caller -- checking then dispatching as
+    two separate steps would reopen the same race this guards against.
+    """
     worktree_id = args["worktree_id"]
     yaml_path = Path(args["yaml_path"])
     session_id = args["session_id"]
     state = args.get("state", "handed-off")
     handoff_token = args.get("handoff_token")
+    only_if_active = bool(args.get("only_if_active"))
 
     with tracking._RecordLock(yaml_path):
         record = tracking.load_record(yaml_path)
+        if only_if_active:
+            entry = record.session_entry(session_id)
+            if entry is None or entry.state != "active":
+                return {"ok": True, "skipped": "not_active"}
         try:
             tracking.conclude_session(
                 record, session_id, state=state, handoff_token=handoff_token, save=False,

@@ -85,6 +85,49 @@ def test_conclude_rejects_an_unknown_session(record_path):
     assert load_record(record_path).session_entry("solo").state == "active"
 
 
+def test_conclude_only_if_active_no_ops_an_already_concluded_session(record_path):
+    """The ``only_if_active`` guard (added for ``handoff_cutover.py``'s
+    ``_conclude_retired_predecessor`` repair) must never re-process a
+    session whose ``SessionEntry.state`` isn't ``"active"`` -- a repair
+    that raced behind some other transition must leave it alone."""
+    tracking_session_lifecycle_write.apply_session_conclude(
+        {
+            "worktree_id": "wt-1",
+            "yaml_path": str(record_path),
+            "session_id": "solo",
+            "state": "handed-off",
+        }
+    )
+    result = tracking_session_lifecycle_write.apply_session_conclude(
+        {
+            "worktree_id": "wt-1",
+            "yaml_path": str(record_path),
+            "session_id": "solo",
+            "state": "concluded",
+            "only_if_active": True,
+        }
+    )
+    assert result == {"ok": True, "skipped": "not_active"}
+    assert load_record(record_path).session_entry("solo").state == "handed-off"
+
+
+def test_conclude_only_if_active_still_concludes_an_active_session(record_path):
+    """Confirms the guard is opt-in only and does not block a genuine
+    concluding of a currently-``active`` session."""
+    result = tracking_session_lifecycle_write.apply_session_conclude(
+        {
+            "worktree_id": "wt-1",
+            "yaml_path": str(record_path),
+            "session_id": "solo",
+            "state": "concluded",
+            "only_if_active": True,
+        }
+    )
+    assert result["ok"] is True
+    assert result["state"] == "concluded"
+    assert load_record(record_path).session_entry("solo").state == "concluded"
+
+
 def test_link_succession_writes_two_way_chain_and_moves_head(record_path):
     record = load_record(record_path)
     record.sessions.append(SessionEntry("new", "2026-01-01T00:00:00"))
