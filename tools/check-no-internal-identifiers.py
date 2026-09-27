@@ -24,7 +24,9 @@ identifier in an *untouched* file from blocking every unrelated push, while
 still catching anything a push introduces. Pass ``--all`` to audit the whole
 tracked tree instead (useful for a one-off full sweep). If the base ref can't
 be resolved (no ``origin/main`` in a fresh clone), the guard falls back to a
-full-tree scan.
+full-tree scan. Trusted CI may instead pass ``--paths-file`` plus ``--git-ref``
+to scan repo-relative paths from a fetched PR-head tree-ish as inert git data
+without checking out or executing that revision.
 
 Run manually:  python tools/check-no-internal-identifiers.py          # push diff
                python tools/check-no-internal-identifiers.py --all    # whole tree
@@ -42,6 +44,7 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -139,6 +142,10 @@ def _tracked_files() -> list[str]:
     return [line for line in out.stdout.splitlines() if line]
 
 
+def _load_paths_file(path: Path) -> list[str]:
+    return [line for raw in path.read_text(encoding="utf-8").splitlines() if (line := raw.strip())]
+
+
 DEFAULT_BASE = os.environ.get("COPILOT_EXTENSIONS_GUARD_BASE", "origin/main")
 
 
@@ -149,6 +156,7 @@ def _ref_exists(ref: str) -> bool:
             cwd=REPO,
             capture_output=True,
             text=True,
+            check=False,
         ).returncode
         == 0
     )
@@ -189,36 +197,79 @@ def _files_to_scan(scan_all: bool, base: str, *, emit_status: bool = True) -> li
     return changed
 
 
-def _scan(files: list[str], identifiers: list[str], reasons: dict[str, str | None]) -> list[Violation]:
+def _read_worktree_text(rel: str) -> str | None:
+    path = REPO / rel
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def _make_git_ref_loader(ref: str) -> Callable[[str], str | None]:
+    def _read_git_ref_text(rel: str) -> str | None:
+        try:
+            result = subprocess.run(
+                ["git", "show", f"{ref}:{rel}"],
+                cwd=REPO,
+                capture_output=True,
+                check=True,
+            )
+        except subprocess.CalledProcessError:
+            return None
+        try:
+            return result.stdout.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+
+    return _read_git_ref_text
+
+
+def _scan_text(
+    rel: str,
+    text: str,
+    identifiers: list[str],
+    reasons: dict[str, str | None],
+) -> list[Violation]:
+    violations: list[Violation] = []
+    lower = text.lower()
+    if not any(ident in lower for ident in identifiers if not _allowed(ident, rel)):
+        return violations
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        ll = line.lower()
+        for ident in identifiers:
+            if _allowed(ident, rel):
+                continue
+            col = ll.find(ident)
+            if col == -1:
+                continue
+            violations.append(
+                Violation(
+                    path=rel,
+                    line=lineno,
+                    col=col + 1,
+                    identifier=ident,
+                    reason=reasons.get(ident),
+                )
+            )
+    return violations
+
+
+def _scan(
+    files: list[str],
+    identifiers: list[str],
+    reasons: dict[str, str | None],
+    *,
+    text_loader: Callable[[str], str | None] | None = None,
+) -> list[Violation]:
+    loader = text_loader or _read_worktree_text
     violations: list[Violation] = []
     for rel in files:
         if rel in SELF:
             continue
-        path = REPO / rel
-        try:
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+        text = loader(rel)
+        if text is None:
             continue
-        lower = text.lower()
-        if not any(ident in lower for ident in identifiers if not _allowed(ident, rel)):
-            continue
-        for lineno, line in enumerate(text.splitlines(), start=1):
-            ll = line.lower()
-            for ident in identifiers:
-                if _allowed(ident, rel):
-                    continue
-                col = ll.find(ident)
-                if col == -1:
-                    continue
-                violations.append(
-                    Violation(
-                        path=rel,
-                        line=lineno,
-                        col=col + 1,
-                        identifier=ident,
-                        reason=reasons.get(ident),
-                    )
-                )
+        violations.extend(_scan_text(rel, text, identifiers, reasons))
     return violations
 
 
@@ -234,6 +285,20 @@ def _write_json(path: Path, violations: list[Violation]) -> None:
             "col": violation.col,
             "identifier_hash": _identifier_hash(violation.identifier),
             "has_reason": violation.reason is not None,
+        }
+        for violation in violations
+    ]
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def _write_trusted_details_json(path: Path, violations: list[Violation]) -> None:
+    payload = [
+        {
+            "file": violation.path,
+            "line": violation.line,
+            "col": violation.col,
+            "identifier": violation.identifier,
+            "reason": violation.reason,
         }
         for violation in violations
     ]
@@ -258,9 +323,24 @@ def main(argv: list[str] | None = None) -> int:
         "override via COPILOT_EXTENSIONS_GUARD_BASE).",
     )
     parser.add_argument(
+        "--paths-file",
+        metavar="PATH",
+        help="Read repo-relative paths to scan from PATH (one per line).",
+    )
+    parser.add_argument(
+        "--git-ref",
+        metavar="REF",
+        help="Read file contents from git tree-ish REF instead of the working tree.",
+    )
+    parser.add_argument(
         "--json-out",
         metavar="PATH",
         help="Write structured findings JSON to PATH.",
+    )
+    parser.add_argument(
+        "--trusted-details-json-out",
+        metavar="PATH",
+        help="Write trusted-workflow-only findings JSON, including matched values and reasons, to PATH.",
     )
     parser.add_argument(
         "--ci",
@@ -268,6 +348,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Suppress per-finding stdout and print only a count summary.",
     )
     args = parser.parse_args(argv)
+    if args.all and args.paths_file:
+        parser.error("--all and --paths-file are mutually exclusive")
 
     identifiers, reasons = _load_identifier_data()
     if not identifiers:
@@ -278,15 +360,26 @@ def main(argv: list[str] | None = None) -> int:
         )
         if args.json_out:
             _write_json(Path(args.json_out), [])
+        if args.trusted_details_json_out:
+            _write_trusted_details_json(Path(args.trusted_details_json_out), [])
         return 0
 
+    files_to_scan = (
+        _load_paths_file(Path(args.paths_file))
+        if args.paths_file
+        else _files_to_scan(args.all, args.base, emit_status=not args.ci)
+    )
+    text_loader = _make_git_ref_loader(args.git_ref) if args.git_ref else None
     violations = _scan(
-        _files_to_scan(args.all, args.base, emit_status=not args.ci),
+        files_to_scan,
         identifiers,
         reasons,
+        text_loader=text_loader,
     )
     if args.json_out:
         _write_json(Path(args.json_out), violations)
+    if args.trusted_details_json_out:
+        _write_trusted_details_json(Path(args.trusted_details_json_out), violations)
 
     if violations:
         if args.ci:

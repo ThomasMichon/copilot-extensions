@@ -57,41 +57,40 @@ follow-on phases:
    entries, where the reason explains why the token is forbidden and what kind
    of generic replacement to use.
 2. **Masking/logging boundary:** the script must never print a matched token to
-   stdout or any workflow log line. The untrusted job log reports only a count
+   stdout or any workflow log line. The trusted scan step's log reports only a count
    (for example `3 forbidden identifier(s) found — see PR review comments for details`)
    and fails the job. The actual matched value, reason, file, line, and column
-   are delivered through a GitHub PR review comment posted directly via the
-   GitHub API from a trusted workflow, because Actions log masking would make
+   are delivered through GitHub API-posted PR feedback (review comment or issue
+   comment) from the trusted workflow, because Actions log masking would make
    log-line findings unusable.
-3. **Fork-safe two-workflow split:**  
-   a. An **untrusted** `pull_request` workflow runs on the fork/head checkout
-   with no secrets and minimal permissions. It extends
-   `tools/check-no-internal-identifiers.py` rather than creating a separate
-   scanner, uses the `origin/main` diff base to match this repo's push-time
-   convention, writes a small structured findings artifact, and fails its own
-   job when findings are non-empty so the PR shows a real red required check.  
-   b. A **trusted** `workflow_run` workflow runs from the base branch
-   definition, does not check out or execute fork code, downloads the artifact,
-   and posts the review comment(s). The trusted job re-derives what matched and
-   why from the secret-backed denylist it holds, rather than trusting arbitrary
-   reason text from the untrusted artifact.
-4. **Required status check:** the untrusted workflow job becomes the required
-   branch-protection check on both `dev` and `main`. `main` already has ruleset
-   `18553911`; the implementation phase must inspect its current required-check
-   list and the corresponding `dev` protection/ruleset, then add the new
-   untrusted scan job there. The trusted comment-posting workflow is **not** the
-   required check.
+3. **Fork-safe trusted follow-up:** keep the existing lightweight
+   `pull_request` CI workflow for fast no-secrets validation only; do **not**
+   attempt identifier scanning there, because fork PRs receive no repository
+   secrets and repo `vars.*` would be public text, not a safe denylist channel.
+   A separate trusted `workflow_run` workflow reacts to that CI completion,
+   loads its own YAML from the default branch, resolves the triggering PR's
+   real head SHA/PR metadata, and then reads the PR head's changed file
+   contents strictly as inert git/API data -- never by checking out or
+   executing the fork head.
+4. **Required status check:** the trusted `workflow_run` path creates an
+   explicit Check Run on the PR head SHA with a stable name (for example
+   `identifier leak guard`) and `success`/`failure` conclusion. *That* custom
+   check -- not the untrusted CI job's own status and not the trusted
+   workflow's native run status -- becomes the required branch-protection
+   signal on both `dev` and `main`. `main` already has ruleset `18553911`; the
+   implementation phase must inspect its current required-check list and the
+   corresponding `dev` protection/ruleset, then prepare the exact mutation
+   needed to add the new custom check there without applying it until the
+   operator explicitly approves the admin change.
 5. **Existing local tool stays:** the local developer-experience path in
    `tools/check-no-internal-identifiers.py` remains in place. The CI backstop
    layers on top of the same scan logic, adding a structured-output mode (for
    example `--json-out <path>`) and a way to load `token|reason` pairs from the
    secret-backed format alongside the current local env/config input format.
 
-_(agent-recommended)_ The findings artifact should carry only the minimum data
-the trusted workflow needs to re-identify the match location and token without
-trusting untrusted explanatory prose; keep the review UX aggregated when
-multiple findings land on the same PR so repeated failures do not turn into
-comment spam.
+_(superseded by the 2026-09-26 design correction)_ The earlier artifact-handoff
+idea is kept here for history only; the corrected design no longer depends on
+an untrusted findings artifact at all.
 
 ## Plan
 
@@ -116,35 +115,38 @@ comment spam.
 - [x] Keep CI-mode stdout/log output count-only so matched values never appear
   in workflow logs.
 
-### Phase 2 - Add the untrusted pull-request scan and required-check registration
+### Phase 2 - Add the trusted workflow-run scan/report path
 
-- [ ] Author the untrusted `pull_request` workflow with no secrets and minimal
-  permissions, running the scan against the `origin/main` diff base.
-- [ ] Upload the structured findings artifact for the trusted follow-up
-  workflow.
-- [ ] Fail the untrusted job when findings are present so the PR itself shows a
-  red required check.
+- [ ] Remove the structurally-broken secret-backed identifier scan attempt from
+  the untrusted `pull_request` CI lane; keep that workflow only for fast
+  no-secrets validation.
+- [ ] Extend `tools/check-no-internal-identifiers.py` so the trusted follow-up
+  can scan a PR head's changed file contents as passive git data while still
+  emitting the Phase 1 redacted JSON artifact shape.
+- [ ] Author a `workflow_run` follow-up that runs from the default branch's own
+  workflow definition, never checks out or executes the PR head, resolves the
+  triggering PR/head metadata, reads the changed file contents as inert data
+  only, and runs the trusted scanner with the merged
+  `FORBIDDEN_IDS_FACILITY`/`FORBIDDEN_IDS_WORK` secret-backed denylist.
+- [ ] Create a custom Check Run on the PR head SHA with a stable required-check
+  name and a success/failure conclusion derived from the trusted scan.
+- [ ] Post failure feedback back to the PR via API-delivered text that may name
+  the matched placeholder/identifier and reason, while keeping the workflow log
+  itself free of raw matched values or denylist dumps.
+
+### Phase 3 - Register the new required check and close the loop
+
+- [ ] Validate the merged trigger chain end-to-end on a scratch PR: CI runs
+  first, then the trusted `workflow_run` workflow, then the custom Check Run
+  appears on the PR head SHA.
+- [ ] If the repository secrets are present, validate the failure path with a
+  fabricated placeholder test token; otherwise validate the success/plumbing
+  path only and record that full failure-path validation remains blocked on
+  Phase 4 secret provisioning.
 - [ ] Inspect the current branch-protection/ruleset configuration for `main`
-  and `dev`, then register the untrusted job as the required check in both
-  places.
-
-### Phase 3 - Add the trusted comment-posting workflow
-
-- [ ] Author the `workflow_run` follow-up that runs from the base-branch
-  workflow definition and never executes fork code.
-- [ ] Treat the untrusted artifact as a hint, not authority: independently
-  validate each reported location against the PR content/diff from the trusted
-  side before posting any review comment. _(agent-recommended)_
-- [ ] Download the structured findings artifact and re-derive the matched token
-  and reason from the secret-backed denylist held by the trusted workflow.
-- [ ] Post review comment feedback that names the actual matched value, explains
-  why it is forbidden, and instructs the contributor to replace it with a
-  generic equivalent.
-- [ ] Validate the triggering run/PR metadata and effective workflow definition
-  source against GitHub's actual `workflow_run` semantics before relying on the
-  trust boundary. _(agent-recommended)_
-- [ ] Keep trusted-workflow logging free of raw secret/denylist dumps even though
-  the API-posted review text intentionally names the matched value on the PR.
+  and `dev`, prepare the exact before/after required-check diff for the new
+  custom Check Run name, and stop for explicit operator confirmation before any
+  mutating admin call.
 
 ### Phase 4 - Provision the secret-backed denylists
 
@@ -157,17 +159,20 @@ comment spam.
 
 ## Validation Plan
 
-- [ ] Open a test PR that deliberately reintroduces a known-safe test token and
-  confirm the untrusted scan job fails, the required check blocks merge, and
-  the trusted follow-up posts review feedback naming the matched value and its
-  reason.
-- [ ] Confirm the same behavior on an owner-authored non-fork PR path.
-- [ ] Confirm a clean PR passes with zero review comments from the trusted
-  workflow.
-- [ ] Spot-check the raw untrusted workflow logs to confirm matched values and
-  raw denylist contents never appear there.
-- [ ] Confirm the trusted workflow never accepts untrusted artifact prose as
-  authoritative for the reason text it posts back to the PR. _(agent-recommended)_
+- [ ] Open a clean scratch PR and confirm the ordinary `CI` workflow runs
+  first, then the trusted `workflow_run` follow-up runs, and then a custom
+  Check Run named `identifier leak guard` appears on the PR head SHA.
+- [ ] If `FORBIDDEN_IDS_FACILITY` / `FORBIDDEN_IDS_WORK` exist, open a scratch
+  PR that deliberately reintroduces a known-safe fabricated placeholder test
+  token and confirm the trusted Check Run reports `failure` plus API-posted PR
+  feedback naming the matched value and reason. If the secrets are absent,
+  record that this failure-path validation remains blocked on Phase 4 secret
+  provisioning.
+- [ ] Confirm a clean PR produces no raw matched values in the workflow log and
+  no failure feedback comment.
+- [ ] Inspect the branch-protection/ruleset configuration for `main` and `dev`
+  and prepare the exact before/after diff to require the custom Check Run name,
+  without applying it yet.
 
 ## Proposal
 
@@ -187,3 +192,14 @@ _Pending._
 - Test coverage now exercises legacy default output behavior, merged identifier
   loading, JSON artifact redaction, CI-mode count-only output, and first-match
   column tracking.
+
+### 2026-09-26 - Design correction: Phase 2/3 merged into one trusted check-run path
+- The original split was wrong: an untrusted `pull_request` workflow on a fork
+  can never hold the real denylist because repository secrets are withheld
+  there and repository variables would be public plain text, so there was no
+  structurally-sound way for that lane to emit a meaningful required status.
+- The corrected design keeps `CI` as an untrusted, no-secrets fast lane only
+  and moves all identifier-leak enforcement into one trusted `workflow_run`
+  follow-up that loads its YAML from the default branch, reads the PR head only
+  as inert data, runs the trusted scanner with the real denylist, and creates a
+  custom Check Run on the PR head SHA for branch protection to require.
