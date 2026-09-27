@@ -463,12 +463,14 @@ PR [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
 - [ ] **Step 1 — pin Group A's low-frequency public read surface, additive
       only.** Add/pin the picker-supported `get <key>` / `state-root --json` /
       read-only `update-indicator --json` contract and Manager-side client
-      wrappers before any caller cutover. See
+      wrappers before any caller cutover, with explicit project scope and an
+      off-UI-thread polling path for the new indicator read. See
       [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
 - [ ] **Step 2 — add Group B's narrow public CLI seam for project/config/ssh
       decisions.** Promote runner-scoped `--json` verbs (and reuse the existing
       `resolve --json` remote seam) instead of replacing `_engine_runtime.py`
-      with another Python import API. See
+      with another Python import API, and bind the resolved project identity in
+      Manager-owned context for downstream consumers. See
       [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
 - [ ] **Step 3 — reimplement Group B's Picker-owned lifecycle sweeps directly
       in worktree-manager, additive first.** Port the process-lifecycle logic
@@ -490,7 +492,8 @@ PR [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
 - [ ] **Step 6 — cut `data_local.py` over to the batched Group C verb via the
       now-landed Phase 3c worker path.** Preserve cache-first first paint and
       keep the refresh hot path off the render thread while draining the last
-      live `production_picker.config` proxy consumers. See
+      live `production_picker.config` proxy consumers, and coalesce the old
+      post-load reconcile hooks into the new batch path. See
       [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
 - [ ] **Step 7 — retire `_engine_runtime.py` and its remaining proxy shims.**
       Cleanup lands only after Groups A/B/C are fully cut over, with a focused

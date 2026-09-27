@@ -270,6 +270,16 @@ once every remaining caller is already off the import boundary.
      it explicitly distinct from the existing `stage-update --json` command,
      which performs the marketplace staging work rather than merely reporting
      the cheap status `indicator_state()` reads.
+   - Pin the **explicit project scope** for those reads. In particular, any
+     `state-root --json` reuse must go through `<project> state-root --json` (or
+     an equivalent explicit `--project`/repo-scoped wrapper), not a child
+     process inheriting whatever cwd happens to exist when the Picker asks.
+     Record the fallback/error behavior for "no active project" and
+     adopted-anchor cases at the same time.
+   - Move the update-indicator polling path off the Textual UI thread before it
+     shells out. The current `_poll_update_state()` runs from `_tick()`; once it
+     becomes a subprocess read, Step 1 must route it through the existing
+     background-worker/callback path so a slow/hung engine cannot freeze render.
    - Add Worktree Manager-side `engine_client` wrappers for those reads, but
      leave `pivot_manifest.py` / `update_stage.py` on the compatibility shim in
      this step.
@@ -290,6 +300,12 @@ once every remaining caller is already off the import boundary.
      the default live-vs-local mode. This replaces the *effect* of
      `_resolve_active_project`, `_cwd_is_inside_project`, `_in_ssh_session`, and
      `set_active_project` without exporting those private helpers one-by-one.
+   - Pair that verb with a **parent-side binding step** in worktree-manager:
+     once bootstrap resolves the authoritative project identity, the parent
+     process records it in Manager-owned context and subsequent Picker/data
+     helpers consume that bound identity instead of ambient cwd or a one-off
+     child-process answer. The cutover is not complete until those downstream
+     consumers are migrated to the parent-owned binding.
    - Reuse the already-pinned `<project> resolve --json ...` remote-launch seam
      as the public answer for machine/environment resolution. If a small gap
      remains for production Picker parity, close it there instead of teaching
@@ -383,6 +399,11 @@ once every remaining caller is already off the import boundary.
      shims, by moving each one onto its final direct file reader or explicit
      engine-client call, so Step 7 can delete those proxies for real instead of
      leaving a hidden tail.
+   - Replace or coalesce the existing post-load reconcile hooks
+     (`_start_pr_reconcile()` / `_start_bound_live_reconcile()`) rather than
+     letting them survive beside the new batch path. One setup/reload epoch
+     should schedule at most one reconciliation batch for this surface; no
+     duplicate subprocesses or competing tracking writes after the cutover.
    - Keep the subprocess invocation off the render thread by reusing the
      epoch-guarded setup/reload infrastructure landed in Phase 3c. The
      dependency here is now **satisfied**, not speculative: Step 6 should build
@@ -422,6 +443,8 @@ once every remaining caller is already off the import boundary.
 1. **Group A**
    - Contract tests for the new scalar/path reads and `update-indicator --json`
      response shape.
+   - Boundary tests prove the `state-root` wrapper is invoked with explicit
+     project scope and that the update-indicator poll runs off the UI thread.
    - Targeted `pivot_manifest.py` / update-indicator tests prove the Picker
      still degrades cleanly when those verbs are unavailable or return empty
      state.
@@ -430,6 +453,9 @@ once every remaining caller is already off the import boundary.
    - Targeted CLI tests prove the new bootstrap verb and the reused
      `resolve --json` remote path return the same decisions the production
      Picker needs today, without exposing private helper names as contract.
+   - Parent-context tests prove the resolved project identity is bound once in
+     worktree-manager and reused consistently by later Picker/data consumers,
+     rather than drifting with ambient cwd after `_engine_runtime.py` is gone.
    - Targeted runner tests prove remote launch planning, cwd switching, and the
      best-effort stale-anchor repair still behave correctly after cutover.
 
@@ -447,6 +473,9 @@ once every remaining caller is already off the import boundary.
    - The new batch verb has engine-side tests for lock ownership, timeout, and
      stale-vs-fresh reconciliation behavior, including the guarantee that
      provider/network work does **not** hold tracking locks across the whole
+     batch.
+   - Setup/reload tests prove the batch replaces the old post-load reconcile
+     hooks instead of running beside them; one epoch yields one reconciliation
      batch.
    - Picker tests prove refresh/setup still stay off-thread with a deliberately
      blocked batch verb, matching Phase 3c's standing non-blocking contract.
