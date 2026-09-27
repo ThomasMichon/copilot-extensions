@@ -518,7 +518,12 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
         any token involved, never hardcode it.
   - [x] Give the agent job read-only repo access by default (its baseline
         posture) — only the `safe-outputs` PR-creation stage should hold
-        any write credential at all. **This must be an explicit job-level
+        any write credential at all **(narrowly: the attacker-facing
+        `agent` job itself — see the implementation note below for how
+        gh-aw's own generated infrastructure jobs, `activation`/
+        `conclusion`, separately and necessarily hold their own write
+        scopes for unrelated status-reporting purposes)**. **This must be
+        an explicit job-level
         `permissions:` block on the agent job itself, not implicit.**
         `validate-and-promote.yml` (the caller invoking this reusable
         workflow) already grants `contents: write`/`pull-requests: write`
