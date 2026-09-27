@@ -1080,7 +1080,13 @@ sys.exit(1)
                     continue
                 }
             }
-            return $configPath
+            # Returned alongside $dir (the resolved, already-trusted
+            # checkout root) -- the scheduled task's process re-runs
+            # repo_config_is_trusted() independently at every run with
+            # none of the installer's own AGENT_WORKTREES_REPOS_YAML /
+            # override context, so the caller must also carry an explicit
+            # trust grant for THIS resolved path into the launcher.
+            return [PSCustomObject]@{ ConfigPath = $configPath; TrustDir = $dir }
         }
         return $null
     } catch {
@@ -1094,11 +1100,13 @@ function Write-SyncTaskLauncher {
         New-Item -ItemType Directory -Path $launcherDir -Force | Out-Null
     }
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    $repoConfigPath = Get-ConfigRepoRegistrationPath
+    $repoConfig = Get-ConfigRepoRegistrationPath
     $repoConfigLine = ''
-    if ($repoConfigPath) {
-        $escaped = $repoConfigPath -replace "'", "''"
-        $repoConfigLine = "`$env:AGENT_LOGGER_REPO_CONFIG = '$escaped'"
+    if ($repoConfig) {
+        $escapedConfigPath = $repoConfig.ConfigPath -replace "'", "''"
+        $escapedTrustDir = $repoConfig.TrustDir -replace "'", "''"
+        $repoConfigLine = "`$env:AGENT_LOGGER_REPO_CONFIG = '$escapedConfigPath'`n" +
+            "`$env:AGENT_LOGGER_TRUST_REPO_CONFIG = '$escapedTrustDir'"
     }
     $launcherContent = @'
 $ErrorActionPreference = 'Stop'

@@ -1046,6 +1046,7 @@ PYEOF
         # only manipulates a string, importing no plugin code, so there is
         # nothing for an ambient PYTHONPATH/CWD package to shadow.
         local repo_config_value=""
+        local trust_config_value=""
         if [ -x "${VENV}/bin/python" ]; then
           repo_config_value="$("${VENV}/bin/python" - "AGENT_LOGGER_REPO_CONFIG=${candidate_path}" <<'PYEOF' 2>/dev/null
 import sys
@@ -1059,11 +1060,35 @@ value = value.replace("\r", "\\r")
 sys.stdout.write(value)
 PYEOF
           )"
+          # The install-time trust decision (above) may have depended on
+          # this machine's own AGENT_WORKTREES_REPOS_YAML / registry state
+          # or an operator AGENT_LOGGER_TRUST_REPO_CONFIG override -- none
+          # of which the scheduled unit inherits. Without also carrying
+          # forward an explicit trust grant for THIS EXACT resolved path,
+          # find_repo_config() re-runs repo_config_is_trusted() at every
+          # scheduled run with none of that context, silently dropping the
+          # config again despite the installer having just validated it.
+          # The override is scoped to a single path (never a wildcard), so
+          # this can only ever narrow a rejection into an acceptance for
+          # the one checkout this installer itself just approved.
+          trust_config_value="$("${VENV}/bin/python" - "AGENT_LOGGER_TRUST_REPO_CONFIG=${config_repo_dir}" <<'PYEOF' 2>/dev/null
+import sys
+value = sys.argv[1]
+value = value.replace("\\", "\\\\")
+value = value.replace('"', '\\"')
+value = value.replace("%", "%%")
+value = value.replace("\r\n", "\\n")
+value = value.replace("\n", "\\n")
+value = value.replace("\r", "\\r")
+sys.stdout.write(value)
+PYEOF
+          )"
         fi
-        if [ -z "${repo_config_value}" ]; then
+        if [ -z "${repo_config_value}" ] || [ -z "${trust_config_value}" ]; then
           continue
         fi
-        repo_config_env="Environment=\"${repo_config_value}\""
+        repo_config_env="Environment=\"${repo_config_value}\"
+Environment=\"${trust_config_value}\""
         break
       done
     fi
