@@ -633,7 +633,7 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
         validation (a required-status-check job, applied uniformly to
         *any* PR against `dev`, not just `gh-aw`-authored ones) so the
         fallback path is never weaker than the primary one.
-- [x] Whichever mechanism is used, the resulting PR must never touch
+- [ ] Whichever mechanism is used, the resulting PR must never touch
       `.github/workflows/**` (that's `main-gate`'s workflow-only bootstrap
       lane, a different mechanism entirely, and an autonomous agent must
       never have a path that even looks like it could qualify for that
@@ -642,7 +642,13 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
       `CONTRIBUTING.md`, exactly like any other contributor). **This is
       enforced by the required-status-check job above, not by prompt text
       alone, regardless of which Phase 2 mechanism produced the PR.**
-      **Implemented, doubly:** the `post-steps` scope gate (issue #4/#8/
+      **Real review finding: scoped this claim too broadly.** The
+      machine-enforced check below is implemented for the **gh-aw
+      mechanism only** — the fallback (issue-assignment to `copilot`,
+      never actually built since gh-aw proved workable) has no equivalent
+      enforced check of its own, so "regardless of which mechanism" is not
+      yet true. Left unchecked, scoped explicitly to gh-aw below:
+      **Implemented for gh-aw, doubly:** the `post-steps` scope gate (issue #4/#8/
       #14) fails the `agent` job outright on any `.github/workflows/**` or
       version-manifest change; the prompt's own "Explicitly out of scope,
       permanently" section additionally instructs the agent never to
@@ -715,18 +721,23 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
       **Implemented structurally, not merely by prompt text:** the agent
       job's own `permissions:` (`contents: read`, `issues: read`) and the
       `safe_outputs` job's own narrow scope (only `create-pull-request`
-      against `dev`, no `--admin`-equivalent capability, no branch-
-      protection/ruleset API access) mean there is no credential anywhere
-      in this workflow's execution path capable of a branch-protection/
-      ruleset change or any `--admin`-gated operation, regardless of what
-      the agent might attempt — workflow files/version fields additionally
+      against `dev`, plus its own `fallback-as-issue` path when PR
+      creation itself fails — no `--admin`-equivalent capability, no
+      branch-protection/ruleset API access, either way) mean there is no
+      credential anywhere in this workflow's execution path capable of a
+      branch-protection/ruleset change or any `--admin`-gated operation,
+      regardless of what the agent might attempt — workflow files/version
+      fields additionally
       have the named scope-gate + prompt-instruction backstop described
       above.
 - [x] Define a walk-back/expansion criterion analogous to
       dev-branch-release-pipeline's own Phase 6 (e.g., N clean cloud-agent
       fixes with zero reverts before considering any scope widening).
       **Defined (2026-09-27):** treat the current guardrail set (draft-PR-
-      only, single-dispatch-per-signature, workflow-files/version-fields
+      only, single-dispatch-per-open-tracking-issue (not per signature
+      permanently — a closed tracking issue's signature can still
+      re-dispatch on recurrence, per the open follow-up above),
+      workflow-files/version-fields
       permanently out of scope, mandatory human review before merge) as
       fixed until **10 genuinely agent-authored fix-attempt PRs have
       merged with zero reverts and zero post-merge incidents traced back
