@@ -731,14 +731,11 @@ def _dispatch_handoff_repair(verb: str, verb_args: dict):
     ``session_conclude``) through the daemon's write path when reachable,
     else the identical in-process code (logged) -- mirrors
     ``session_tracking_cli._dispatch_session_lifecycle``/
-    ``claims_cli._dispatch_claim``. Both callers below reuse those same
-    public verbs, distinguished only by their own opt-in no-op guard args
-    (``skip_if_released``/``only_if_active``). May raise
-    ``tracking_write.AmbiguousWriteOutcome``; both callers' existing
-    best-effort ``except``/``contextlib.suppress(Exception)`` swallow it
-    like any other failure -- an *unknown* outcome composes the same way
-    this repair already treats a *confirmed* one: never a hard failure,
-    never an automatic retry."""
+    ``claims_cli._dispatch_claim``. Both callers reuse those same public
+    verbs, distinguished only by their own opt-in no-op guard/lock-policy
+    args. May raise ``tracking_write.AmbiguousWriteOutcome``; both callers'
+    existing best-effort ``except``/``contextlib.suppress(Exception)``
+    swallow it -- an *unknown* outcome composes like a *confirmed* one."""
     from . import status_monitor_runtime as _smr
     from . import tracking_write
 
@@ -757,7 +754,11 @@ def _settle_predecessor_session_claim(wt_id: str | None, session_id: str) -> Non
     retire. Uses the shared ``claim_settle`` verb's ``skip_if_released``
     guard, which never resurrects an already-``released`` claim (mirrors
     ``finalize.py``'s ``_settle_current_session_claim`` guard) -- a
-    ``deregister_session`` that raced ahead is left alone. Best-effort:
+    ``deregister_session`` that raced ahead is left alone. Passes
+    ``require_sidecar=False``: the pre-migration transaction used a plain,
+    degrading ``_RecordLock`` (never ``require_sidecar=True``), and this
+    repair's own suppressed exception would otherwise turn a transient
+    sidecar-contention timeout into a silently lost cleanup. Best-effort:
     unknown worktree/session or a missing claim is a silent no-op."""
     if not wt_id or not session_id:
         return
@@ -774,6 +775,7 @@ def _settle_predecessor_session_claim(wt_id: str | None, session_id: str) -> Non
             {
                 "worktree_id": wt_id, "yaml_path": str(yaml_path), "ref": predecessor_ref,
                 "disposition": obligations.AT_REST, "skip_if_released": True,
+                "require_sidecar": False,
             },
         )
 

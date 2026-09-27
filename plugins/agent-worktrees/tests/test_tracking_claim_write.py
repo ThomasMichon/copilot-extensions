@@ -290,6 +290,82 @@ def test_settle_skip_if_released_wins_over_a_stale_reservation(record_path):
     assert result == {"ok": True, "skipped": "released"}
 
 
+def test_settle_defaults_to_requiring_the_sidecar_lock(record_path, monkeypatch):
+    """Confirms the guard is opt-in only: the public ``claims settle`` CLI
+    command's existing behavior (no ``require_sidecar`` arg passed) still
+    hard-requires the cross-process sidecar lock, unchanged. Captures the
+    OUTER (first) ``_RecordLock`` call only -- ``save_record``'s own nested
+    reentrant call inside the same transaction always hardcodes
+    ``require_sidecar=True`` and would otherwise clobber this assertion."""
+    calls = []
+    real_lock = tracking._RecordLock
+
+    def _spy(path, **kwargs):
+        calls.append(kwargs)
+        return real_lock(path, **kwargs)
+
+    monkeypatch.setattr(tracking, "_RecordLock", _spy)
+    tracking_claim_write.apply_claim_add(
+        {
+            "worktree_id": "wt-claim",
+            "yaml_path": str(record_path),
+            "kind": "codespace",
+            "ref": "cs-1",
+        }
+    )
+    calls.clear()
+    tracking_claim_write.apply_claim_settle(
+        {
+            "worktree_id": "wt-claim",
+            "yaml_path": str(record_path),
+            "ref": "cs-1",
+            "disposition": obligations.AT_REST,
+        }
+    )
+    assert calls[0] == {"require_sidecar": True}
+
+
+def test_settle_require_sidecar_false_degrades_instead_of_hard_requiring(
+    record_path, monkeypatch,
+):
+    """``handoff_cutover.py``'s repair passes ``require_sidecar=False``
+    (2026-09-27 PR #3911 review finding) -- its pre-migration inline
+    transaction used a plain, degrading ``_RecordLock`` (never
+    ``require_sidecar=True``); hard-requiring the sidecar here would turn a
+    transient contention timeout into a ``TimeoutError`` that the repair's
+    own best-effort ``contextlib.suppress(Exception)`` silently swallows,
+    losing the cleanup instead of completing it via the in-process lock.
+    Captures the OUTER (first) ``_RecordLock`` call only -- see the sibling
+    test above for why."""
+    calls = []
+    real_lock = tracking._RecordLock
+
+    def _spy(path, **kwargs):
+        calls.append(kwargs)
+        return real_lock(path, **kwargs)
+
+    monkeypatch.setattr(tracking, "_RecordLock", _spy)
+    tracking_claim_write.apply_claim_add(
+        {
+            "worktree_id": "wt-claim",
+            "yaml_path": str(record_path),
+            "kind": "codespace",
+            "ref": "cs-1",
+        }
+    )
+    calls.clear()
+    tracking_claim_write.apply_claim_settle(
+        {
+            "worktree_id": "wt-claim",
+            "yaml_path": str(record_path),
+            "ref": "cs-1",
+            "disposition": obligations.AT_REST,
+            "require_sidecar": False,
+        }
+    )
+    assert calls[0] == {"require_sidecar": False}
+
+
 def test_dispatch_reaches_claim_add_through_a_live_daemon(record_path):
     """End-to-end: proves ``tracking_write.dispatch`` reaches
     ``apply_claim_add`` via an actual ``CoalescingServer``, the

@@ -2700,6 +2700,77 @@ class TestCmdHandoffCutover:
         assert out["cmd"] == ["copilot", "-i", "<seed>"]
 
 
+class TestHandoffRepairDispatchArgs:
+    """Direct unit tests pinning the exact ``tracking_write`` verb/args each
+    confirmed-retire repair dispatches (2026-09-27 PR #3911 review findings)
+    -- distinct from the end-to-end ``cmd_handoff_cutover`` tests above,
+    which prove the resulting record state but not the wire-level args."""
+
+    def test_settle_predecessor_session_claim_requests_no_sidecar_requirement(
+        self, monkeypatch, tmp_tracking_dir, monkeypatch_config,
+    ):
+        """Must pass ``require_sidecar=False``: the pre-migration inline
+        transaction used a plain, degrading ``_RecordLock`` (never
+        ``require_sidecar=True``); hard-requiring the sidecar would turn a
+        transient contention timeout into a ``TimeoutError`` this repair's
+        own best-effort ``contextlib.suppress(Exception)`` would silently
+        swallow, losing the cleanup instead of completing it."""
+        from agent_worktrees import tracking as _tracking
+
+        rec = _tracking.WorktreeRecord(
+            worktree_id="wt-repair-args", branch="worktree/wt-repair-args",
+            worktree_path="/tmp/src/wt-repair-args", repo="test-repo",
+            machine="test", platform="wsl", started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
+            status="active", completed_at=None, sessions=[],
+        )
+        _tracking.save_record(rec, tmp_tracking_dir / "wt-repair-args.yaml")
+        _tracking.register_session("wt-repair-args", "old-sess")
+
+        from agent_worktrees import handoff_cutover as _hc
+
+        captured = {}
+        monkeypatch.setattr(
+            _hc, "_dispatch_handoff_repair",
+            lambda verb, verb_args: captured.update(verb=verb, args=verb_args),
+        )
+        m._settle_predecessor_session_claim("wt-repair-args", "old-sess")
+
+        assert captured["verb"] == "claim_settle"
+        assert captured["args"]["skip_if_released"] is True
+        assert captured["args"]["require_sidecar"] is False
+
+    def test_conclude_retired_predecessor_requests_only_if_active(
+        self, monkeypatch, tmp_tracking_dir, monkeypatch_config,
+    ):
+        """Must pass ``only_if_active=True`` so the shared ``session_conclude``
+        verb reproduces this repair's own long-standing no-op guard against
+        re-processing an already-concluded/handed-off entry."""
+        from agent_worktrees import tracking as _tracking
+
+        rec = _tracking.WorktreeRecord(
+            worktree_id="wt-repair-args-2", branch="worktree/wt-repair-args-2",
+            worktree_path="/tmp/src/wt-repair-args-2", repo="test-repo",
+            machine="test", platform="wsl", started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
+            status="active", completed_at=None, sessions=[],
+        )
+        _tracking.save_record(rec, tmp_tracking_dir / "wt-repair-args-2.yaml")
+        _tracking.register_session("wt-repair-args-2", "old-sess")
+
+        from agent_worktrees import handoff_cutover as _hc
+
+        captured = {}
+        monkeypatch.setattr(
+            _hc, "_dispatch_handoff_repair",
+            lambda verb, verb_args: captured.update(verb=verb, args=verb_args),
+        )
+        m._conclude_retired_predecessor("wt-repair-args-2", "old-sess")
+
+        assert captured["verb"] == "session_conclude"
+        assert captured["args"]["only_if_active"] is True
+
+
 class TestCmdHandoffsCheck:
     """``handoffs-check`` -- the on-demand diagnostic + repair counterpart to
     the resident status-monitor's own automatic predecessor-retire sweep."""

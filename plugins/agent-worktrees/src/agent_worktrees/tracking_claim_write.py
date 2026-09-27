@@ -163,14 +163,29 @@ def apply_claim_settle(args: dict) -> dict:
     spurious ``{"error": "reserved"}`` instead. Must run inside this same
     locked transaction, not at the caller -- checking then dispatching as
     two separate steps would reopen exactly the race this guards against.
+
+    ``require_sidecar`` (default ``True``, preserving the public ``claims
+    add``/``release``/``settle`` commands' existing behavior unchanged)
+    controls whether a cross-process sidecar-lock timeout raises
+    (the normal foreground-CLI contract) or gracefully degrades to the
+    in-process lock alone (2026-09-27 PR review finding). The best-effort
+    repair caller above passes ``False`` -- its pre-migration inline
+    transaction used a plain, degrading ``_RecordLock`` (matching a
+    critical writer, never ``require_sidecar=True``); hard-requiring the
+    sidecar here would turn a transient contention timeout into a
+    ``TimeoutError`` that the repair's own best-effort
+    ``contextlib.suppress(Exception)`` then silently swallows -- losing
+    this one-shot cleanup for good instead of completing it via the
+    in-process lock like the old code always did.
     """
     worktree_id = args["worktree_id"]
     yaml_path = Path(args["yaml_path"])
     ref = args["ref"]
     disposition = args["disposition"]
     skip_if_released = bool(args.get("skip_if_released"))
+    require_sidecar = args.get("require_sidecar", True)
 
-    with tracking._RecordLock(yaml_path, require_sidecar=True):
+    with tracking._RecordLock(yaml_path, require_sidecar=require_sidecar):
         record = tracking.load_record(yaml_path)
         match = next((c for c in record.resources if c.ref == ref), None)
         if skip_if_released and match is not None and match.state == "released":

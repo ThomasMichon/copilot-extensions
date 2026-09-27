@@ -2391,6 +2391,7 @@ from .handoff_cutover import (  # noqa: E402 -- re-export position matches origi
     _STAGE13_CLAIM_RETRIES,  # noqa: F401 -- re-exported for tests
     _STAGE13_CLAIM_RETRY_DELAY_S,  # noqa: F401 -- re-exported for tests
     _conclude_retired_predecessor,  # noqa: F401 -- re-exported for tests
+    _dispatch_handoff_repair,  # noqa: F401 -- re-exported for tests
     _handoff_cutover_retire_result,
     _handoff_cutover_retry_result,  # noqa: F401 -- re-exported for tests
     _handoff_cutover_spawn_result,
@@ -5898,24 +5899,20 @@ def _dispatch_lazy(command: str, args_list: list[str]) -> int:
     )
 
 
-# A cluster of CLI submodules cross-reference each other's helpers through
-# `_core()` (this __main__ module) rather than importing one another
-# directly -- a pre-existing pattern discovered while implementing lazy
-# dispatch (see the agent-cli-lazy-dispatch effort's Journal). An initial,
-# narrower version of this function tried to enumerate exactly the at-risk
-# names via static analysis; that missed a second calling shape
-# (`core = _core(); ... core.attr`, not just the direct `_core().attr`
-# chain) and shipped a live `AttributeError` in `create-pr` before being
-# caught. Given the residual risk that yet another calling shape exists
-# somewhere in this ~35-module surface, this now delegates straight to
-# `_load_full_command_surface()` -- fully safe by construction (identical to
-# every command's pre-lazy-dispatch behavior) -- rather than re-attempting a
-# narrower, harder-to-fully-verify subset. This means the fast path below
-# still avoids constructing the full ~110-entry argparse tree via
-# `build_parser()`, but no longer avoids this module cluster's own import
-# cost for `_LAZY_DISPATCH_TABLE` commands. Re-narrowing this safely (Phase
-# 1b) needs runtime-exercised verification of every fast-tracked command,
-# not static analysis alone.
+# A cluster of CLI submodules cross-reference each other's helpers through `_core()` (this __main__
+# module) rather than importing one another directly -- a pre-existing pattern discovered while
+# implementing lazy dispatch (see the agent-cli-lazy-dispatch effort's Journal). An initial,
+# narrower version of this function tried to enumerate exactly the at-risk names via static
+# analysis; that missed a second calling shape (`core = _core(); ... core.attr`, not just the
+# direct `_core().attr` chain) and shipped a live `AttributeError` in `create-pr` before being
+# caught. Given the residual risk that yet another calling shape exists somewhere in this
+# ~35-module surface, this now delegates straight to `_load_full_command_surface()` -- fully safe
+# by construction (identical to every command's pre-lazy-dispatch behavior) -- rather than
+# re-attempting a narrower, harder-to-fully-verify subset. This means the fast path below still
+# avoids constructing the full ~110-entry argparse tree via `build_parser()`, but no longer avoids
+# this module cluster's own import cost for `_LAZY_DISPATCH_TABLE` commands. Re-narrowing this
+# safely (Phase 1b) needs runtime-exercised verification of every fast-tracked command, not static
+# analysis alone.
 _CLUSTER_LOADED = False
 
 
