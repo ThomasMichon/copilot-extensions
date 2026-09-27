@@ -367,3 +367,57 @@ function python3 {{
     assert "residue still present" not in result.stderr, result.stdout + result.stderr
     assert not (zdd_dir / "build").exists()
     assert not (zdd_dir / "some_pkg.egg-info").exists()
+
+
+def test_standalone_zdd_preinstall_scrubs_external_resolved_path(tmp_path: Path) -> None:
+    """Regression: Resolve-Zdd (via Resolve-VendoredLib's registry/checkout
+    fallback branches) can resolve to a path OUTSIDE $PluginDir entirely --
+    a sibling copilot-extensions checkout, not the marketplace-installed
+    payload. $PluginDir/libs/* scrubbing never reaches that tree, so the
+    standalone zdd pre-install must pass its own resolved $ZddDir to
+    Remove-PluginBuildArtifacts's -ExtraDir explicitly."""
+    plugin_dir = tmp_path / "plugin"
+    plugin_dir.mkdir()
+    # Deliberately a SIBLING of plugin_dir, not nested under it -- not
+    # reachable via $PluginDir/libs/* scrubbing at all.
+    external_zdd_dir = tmp_path / "external-checkout" / "libs" / "zdd"
+    (external_zdd_dir / "build" / "lib" / "zdd").mkdir(parents=True)
+    (external_zdd_dir / "build" / "lib" / "zdd" / "__init__.py").write_text(
+        "x = 1\n", encoding="utf-8"
+    )
+    (external_zdd_dir / "some_pkg.egg-info").mkdir()
+
+    stub = f"""
+function Write-Ok {{ param($m) Write-Output "OK: $m" }}
+function Write-Fail {{ param($m) Write-Output "FAIL: $m" }}
+function Write-Skip {{ param($m) Write-Output "SKIP: $m" }}
+function Get-Command {{ [CmdletBinding()] param($Name) return $null }}
+function Resolve-Zdd {{ return "{external_zdd_dir}" }}
+$VenvPython = "python3"
+$PluginDir = "{plugin_dir}"
+$prevEAP = $ErrorActionPreference
+function python3 {{
+    param()
+    if ((Test-Path "{external_zdd_dir}\\build") -or (Test-Path "{external_zdd_dir}\\some_pkg.egg-info")) {{
+        [Console]::Error.WriteLine('external residue still present at zdd install time')
+        $global:LASTEXITCODE = 1
+        return
+    }}
+    $global:LASTEXITCODE = 0
+}}
+"""
+    harness = plugin_dir / "harness.ps1"
+    harness.write_text(
+        stub + "\n\n" + _extract_zdd_preinstall_block() + "\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [_PWSH, "-NoProfile", "-NonInteractive", "-File", str(harness)],
+        capture_output=True,
+        text=True,
+        env=os.environ,
+        timeout=30,
+    )
+    assert "external residue still present" not in result.stderr, result.stdout + result.stderr
+    assert not (external_zdd_dir / "build").exists()
+    assert not (external_zdd_dir / "some_pkg.egg-info").exists()
