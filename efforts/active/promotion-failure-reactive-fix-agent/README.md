@@ -463,7 +463,7 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
         `gh-aw` provides for this, and add the machine-enforced check
         below as the actual backstop — never trust the excerpt-derived
         content to self-limit.
-  - [ ] **Machine-enforced allowed/protected-path check before PR
+  - [x] **Machine-enforced allowed/protected-path check before PR
         creation — not prompt text alone.** The "never touch
         `.github/workflows/**` or version fields" rule two bullets below
         is currently only policy language; `safe-outputs` constrains the
@@ -474,12 +474,26 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
         rejects/blocks the PR if it touches any protected path — a
         compromised or merely confused agent must not be able to propose
         those files no matter what the prompt says.
-  - [ ] Configure its `safe-outputs` stage narrowly: the only permitted
+        **Implemented as the `post-steps` scope gate in
+        `.github/workflows/ci-failure-fix-attempt.md`** (issues #4/#8/#14
+        in the file's own history comment): diffs `$BASE` against the
+        working tree PLUS untracked files, fails the `agent` job outright
+        on any out-of-scope path (`.github/workflows/**`, version-manifest
+        files), and — since PR #4155's issue #20 fix — the `safe_outputs`
+        job is now additionally gated on `needs.agent.result == 'success'`,
+        so a scope-gate failure genuinely blocks the PR from being opened
+        at all, not merely a same-run status a reviewer would have to
+        notice.
+  - [x] Configure its `safe-outputs` stage narrowly: the only permitted
         write is **open a pull request against `dev`** (no direct push, no
         issue/PR comments beyond what's needed, no repo-settings access).
         This is `gh-aw`'s own enforcement of this effort's Phase 3
         guardrails, not a substitute for them — keep Phase 3's explicit
         scope checks too.
+        **Implemented:** `safe-outputs.create-pull-request` is the only
+        configured safe-output (`base-branch: "dev"`, `draft: true`,
+        `max: 1`, `fallback-as-issue: true`) — no other safe-output type
+        is declared.
   - [ ] Pin the `gh-aw` extension/action to a specific reviewed version (it
         is an actively-developed external tool; do not float on `latest`)
         and set up **Copilot-engine authentication using one of `gh-aw`'s
@@ -497,7 +511,7 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
         them or assume one satisfies the other. Whichever path is chosen,
         follow this repo's normal `secrets`-skill vaulting discipline for
         any token involved, never hardcode it.
-  - [ ] Give the agent job read-only repo access by default (its baseline
+  - [x] Give the agent job read-only repo access by default (its baseline
         posture) — only the `safe-outputs` PR-creation stage should hold
         any write credential at all. **This must be an explicit job-level
         `permissions:` block on the agent job itself, not implicit.**
@@ -509,6 +523,21 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
         the agent job's permissions to read-only explicitly in the
         callee, and verify at review time that no broader permission
         leaks through from the caller side.
+        **Implemented — and the caller-inheritance concern above is now
+        moot given the design pivot to a `label_command`/`issues`-triggered
+        workflow (not `workflow_call`, see the Journal): the top-level
+        `permissions: {contents: read, issues: read}` block in
+        `.github/workflows/ci-failure-fix-attempt.md` applies specifically
+        to `jobs.agent` (confirmed, real review finding, PR #4155 issue
+        #21) — there is no caller workflow to inherit a broader token
+        from. A real review pass (issue #21) additionally confirmed gh-aw's
+        own generated infrastructure jobs (`activation`/`conclusion`) hold
+        their OWN separately-scoped write credentials for their own
+        distinct purposes (status-comment/reaction — now disabled — and
+        status reporting respectively) — narrower where controllable
+        (`activation`), and inherent/non-configurable but non-patch-
+        applying where not (`conclusion`); documented in the file's own
+        comment rather than left as an inaccurate blanket claim.**
 - [ ] Fallback, only if `gh-aw` proves unworkable in practice (e.g. auth
       friction, engine limitations): extend the filed/updated issue to
       **also assign it to `copilot`** via the `gh` CLI (`gh issue edit <#>
