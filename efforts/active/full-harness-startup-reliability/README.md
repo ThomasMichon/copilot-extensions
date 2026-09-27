@@ -17,8 +17,9 @@
   stay reconciled with that existing contract rather than introduce a new
   one. Also directly informs the still-open half of
   `github/copilot-agent-runtime#22266` (the "ready-then-exit(1)" mystery) by
-  supplying the first reproducible, timed, full-harness evidence of *why* a
-  real session can take minutes to produce its first response.
+  reproducing, with reliable timing, the delay and timeout symptom a real
+  session shows before its first response — not yet the confirmed root
+  cause; see Context below (the watchdog-timeout theory remains unproven).
 - **Umbrella issue:** ThomasMichon/copilot-extensions#3303
 - **Related work:**
   `sessionstart-static-dynamic-conformance` (#2256, active) — audits hook
@@ -496,10 +497,13 @@ correction inline, per the effort's own journal discipline)._
   #3305 has no new findings as of this check; both remain open, awaiting
   review.
 
-### 2026-09-27 — PR #4129's third review round addressed; both PRs mergeable, awaiting review decision
+### 2026-09-27 — PR #4129's third review round addressed; both PRs mergeable as of this check, awaiting review decision
 
-- Resumed via handoff; both PRs confirmed `MERGEABLE` with no review
-  decision yet. PR #4129 had picked up a further review pass (5 open
+- Resumed via handoff; both PRs' merge status, snapshotted at the moment of
+  this check (2026-09-27 ~08:00Z), read `MERGEABLE` with no review decision
+  yet — a live, continuously-recomputed GitHub status that had already
+  changed by the time later entries below were written, not a durable
+  claim. PR #4129 had picked up a further review pass (5 open
   threads: 3 re-listing the already-fixed findings from the prior journal
   entry as still-unresolved threads, plus 2 genuinely new medium-severity
   findings). Fixed the 2 new ones: `bootstrap-check.ps1` now checks
@@ -542,5 +546,8 @@ correction inline, per the effort's own journal discipline)._
   scoped to extensions only, with hooks validated via process-log evidence
   and skills against each plugin's own manifest. Rebased, force-pushed,
   resolved both threads, posted a summary comment. Both PRs remain open,
-  `MERGEABLE`, `REVIEW_REQUIRED`; watching both via `pr-watch` in the
-  background rather than polling, per standard discipline.
+  awaiting a review decision (their live `mergeable`/checks status
+  fluctuates by the minute during active review passes -- see each PR's
+  current state directly rather than trusting any snapshot recorded here);
+  watching both via `pr-watch` in the background rather than polling, per
+  standard discipline.
