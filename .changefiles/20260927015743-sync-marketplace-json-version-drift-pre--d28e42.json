@@ -1,0 +1,9 @@
+{
+  "comment": "sync marketplace.json version drift (pre-existing branch inconsistency, boot-trace rebase)",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "dev"
+    }
+  ]
+}
