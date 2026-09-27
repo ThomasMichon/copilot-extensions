@@ -196,11 +196,49 @@ def test_windows_binstub_is_usable_while_background_stamp_still_runs(tmp_path, h
         stamp_proc.communicate(timeout=60)
 
 
+def _assert_no_torn_reads_while_running(
+    path: Path, procs: list[subprocess.Popen], *, prefix: str, suffix: str,
+) -> None:
+    """Poll `path` while any of `procs` is still running, and assert every
+    observed NON-EMPTY read is a complete file (starts with `prefix`, ends
+    with `suffix`) -- never a torn/partial write.
+
+    Review finding (round 8): the original concurrency tests only inspected
+    the final file after every writer had already exited, so a non-atomic
+    implementation that briefly exposed an empty or partial file DURING the
+    writes would still pass. Reading here mid-write, on a background thread
+    while the real writer processes race each other, is what actually
+    exercises the reader-visible guarantee the atomic-publish fix claims.
+    """
+    violations: list[str] = []
+
+    def _poll() -> None:
+        while any(p.poll() is None for p in procs):
+            try:
+                content = path.read_text(encoding="utf-8")
+            except (FileNotFoundError, OSError):
+                content = ""
+            if content and not (content.startswith(prefix) and content.rstrip().endswith(suffix)):
+                violations.append(content)
+            time.sleep(0.005)
+
+    poller = threading.Thread(target=_poll, daemon=True)
+    poller.start()
+    for proc in procs:
+        _, stderr = proc.communicate(timeout=60)
+        assert proc.returncode == 0, stderr
+    poller.join(timeout=5)
+    assert not violations, (
+        f"observed a torn/partial file during concurrent writes: {violations[0]!r}"
+    )
+
+
 @pytest.mark.skipif(not WINDOWS_HOSTS, reason="Windows PowerShell required")
 @pytest.mark.parametrize("host", WINDOWS_HOSTS, ids=lambda h: h.stem)
 def test_windows_concurrent_stamp_binstub_leaves_no_torn_binstub(tmp_path, host):
     install_dir = tmp_path / "install"
     env = _sandbox_env(tmp_path)
+    binstub = tmp_path / "userprofile" / ".local" / "bin" / "agent-machines.cmd"
     procs = [
         subprocess.Popen(
             [str(host), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(INIT_PS1),
@@ -209,14 +247,7 @@ def test_windows_concurrent_stamp_binstub_leaves_no_torn_binstub(tmp_path, host)
         )
         for _ in range(3)
     ]
-    for proc in procs:
-        _, stderr = proc.communicate(timeout=60)
-        assert proc.returncode == 0, stderr
-
-    binstub = tmp_path / "userprofile" / ".local" / "bin" / "agent-machines.cmd"
-    content = binstub.read_text(encoding="utf-8")
-    assert content.startswith("@echo off")
-    assert content.rstrip().endswith(":eof")
+    _assert_no_torn_reads_while_running(binstub, procs, prefix="@echo off", suffix=":eof")
 
 
 @pytest.mark.skipif(not BASH, reason="bash required")
@@ -249,6 +280,7 @@ def test_posix_concurrent_stamp_leaves_no_torn_binstub(tmp_path):
     env = _sandbox_env(tmp_path, extra={
         "COPILOT_PLUGIN_STAGED_FROM": str(PLUGIN),
     })
+    binstub = tmp_path / "home" / ".local" / "bin" / "agent-machines"
     procs = [
         subprocess.Popen(
             [BASH, str(INIT_SH), "stamp"],
@@ -256,11 +288,9 @@ def test_posix_concurrent_stamp_leaves_no_torn_binstub(tmp_path):
         )
         for _ in range(3)
     ]
-    for proc in procs:
-        _, stderr = proc.communicate(timeout=60)
-        assert proc.returncode == 0, stderr
-
-    binstub = tmp_path / "home" / ".local" / "bin" / "agent-machines"
+    _assert_no_torn_reads_while_running(
+        binstub, procs, prefix="#!/usr/bin/env bash", suffix='exit "$_rc"',
+    )
     content = binstub.read_text(encoding="utf-8")
     assert content.startswith("#!/usr/bin/env bash")
     assert content.rstrip().endswith('exit "$_rc"')

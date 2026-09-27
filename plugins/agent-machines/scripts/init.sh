@@ -1327,7 +1327,15 @@ _ensure_uv_index() {
 deploy_resolver() {
     mkdir -p "$INSTALL_DIR/bin"
     for r in resolve-runtime.sh resolve-runtime.ps1; do
-        [ -f "$SCRIPT_DIR/$r" ] && cp -f "$SCRIPT_DIR/$r" "$INSTALL_DIR/bin/$r"
+        [ -f "$SCRIPT_DIR/$r" ] || continue
+        # Review finding (round 8): a direct `cp -f` truncates the destination
+        # before copying, so a binstub sourcing this resolver concurrently
+        # could read a partial/empty script. Publish through a same-directory
+        # temp file + `mv -f`, the same atomic pattern deploy_binstub already
+        # uses for the binstub itself.
+        _r_tmp="$INSTALL_DIR/bin/$r.tmp-$$"
+        cp -f "$SCRIPT_DIR/$r" "$_r_tmp"
+        mv -f "$_r_tmp" "$INSTALL_DIR/bin/$r"
     done
 }
 

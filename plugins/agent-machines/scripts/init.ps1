@@ -1244,6 +1244,84 @@ if ($Action -eq 'cell-provision') {
 
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 
+# Publish a file's content atomically: write to a same-directory temp file,
+# then replace/rename into place. Review finding (round 8): `Move-Item -Force`
+# does NOT guarantee an atomic replace on every supported PowerShell runtime
+# -- notably Windows PowerShell 5.1, whose -Force implementation can delete
+# the existing destination before moving the new one in, leaving a brief
+# window with NO destination file at all (worse than a torn write for a
+# concurrent reader). [System.IO.File]::Replace() IS an atomic NTFS replace;
+# use it whenever a destination already exists, and fall back to a plain
+# Move-Item (itself an atomic rename when the destination is absent) for a
+# genuinely first-ever publish.
+#
+# NOTE: passing $null (or "") for Replace()'s destinationBackupFileName
+# throws "The path is empty" on this codebase's actual runtimes (confirmed
+# on both Windows PowerShell 5.1 and pwsh) despite that being the documented
+# no-backup form -- give it a real, own-PID-suffixed backup path instead and
+# discard it immediately after; Replace() itself is still the atomic step.
+#
+# NOTE: Replace()/rename can also throw a transient IOException ("used by
+# another process") if any reader briefly has the destination open without
+# FILE_SHARE_DELETE at that exact instant (a real, if narrow, Windows
+# sharing-violation window -- e.g. a concurrent read of the very marker or
+# binstub this publishes). Retry briefly rather than treating that as fatal.
+function Publish-FileAtomically {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Content,
+        [Parameter(Mandatory)]$Encoding
+    )
+    # File.Replace requires fully-qualified paths -- a relative path throws
+    # "The path is not of a legal form."
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    $tmp = "$fullPath.tmp-$PID"
+    [System.IO.File]::WriteAllText($tmp, $Content, $Encoding)
+    for ($attempt = 1; $true; $attempt++) {
+        try {
+            if (Test-Path -LiteralPath $fullPath) {
+                $backup = "$fullPath.bak-$PID"
+                [System.IO.File]::Replace($tmp, $fullPath, $backup)
+                Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
+            } else {
+                Move-Item -LiteralPath $tmp -Destination $fullPath -Force
+            }
+            return
+        } catch [System.IO.IOException] {
+            if ($attempt -ge 20) { throw }
+            Start-Sleep -Milliseconds 15
+        }
+    }
+}
+
+# Same-directory atomic copy of an on-disk source file (the resolver files),
+# reusing the exact same Replace-or-Move guarantee (and retry) as
+# Publish-FileAtomically.
+function Copy-FileAtomically {
+    param(
+        [Parameter(Mandatory)][string]$SourcePath,
+        [Parameter(Mandatory)][string]$DestPath
+    )
+    $fullDest = [IO.Path]::GetFullPath($DestPath)
+    $tmp = "$fullDest.tmp-$PID"
+    Copy-Item -LiteralPath $SourcePath -Destination $tmp -Force
+    for ($attempt = 1; $true; $attempt++) {
+        try {
+            if (Test-Path -LiteralPath $fullDest) {
+                $backup = "$fullDest.bak-$PID"
+                [System.IO.File]::Replace($tmp, $fullDest, $backup)
+                Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
+            } else {
+                Move-Item -LiteralPath $tmp -Destination $fullDest -Force
+            }
+            return
+        } catch [System.IO.IOException] {
+            if ($attempt -ge 20) { throw }
+            Start-Sleep -Milliseconds 15
+        }
+    }
+}
+
 # === install-contract:v3 strip-trampolines -- keep byte-identical across plugins ===
 function Remove-ConsoleTrampolines {
     <# Strip the uv-regenerated Scripts\<name>.exe console-script trampolines from
@@ -1664,7 +1742,11 @@ function Deploy-SelfProvisioningBinstub {
     if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
     foreach ($r in @('resolve-runtime.ps1', 'resolve-runtime.sh')) {
         $rSrc = Join-Path $PSScriptRoot $r
-        if (Test-Path $rSrc) { Copy-Item $rSrc (Join-Path $binDir $r) -Force }
+        # Review finding (round 8): a plain Copy-Item -Force truncates the
+        # destination before copying, so a binstub sourcing this resolver
+        # concurrently could read a partial/empty script even though the
+        # binstub itself is atomically replaced. Publish atomically instead.
+        if (Test-Path $rSrc) { Copy-FileAtomically -SourcePath $rSrc -DestPath (Join-Path $binDir $r) }
     }
     if ($env:OS -ne 'Windows_NT') {
         $stubPath = Join-Path $LocalBin 'agent-machines'
@@ -1680,13 +1762,10 @@ _i="`$(cat "`$_root/payload-dir" 2>/dev/null)/scripts/init.sh"
 if [ -n "`$_i" ] && [ -f "`$_i" ]; then echo "[agent-machines] runtime not provisioned; run: bash \"`$_i\" provision" >&2; else echo "[agent-machines] runtime not provisioned and the installer was not found; re-enable the plugin, then retry." >&2; fi
 exit 1
 "@
-        # Publish atomically (temp file in the SAME directory + rename, which is
-        # atomic on one filesystem): a reader mid-write must never observe a
-        # truncated/torn binstub. Stale leftovers from a killed writer are
-        # harmless -- each writer uses its own PID-suffixed temp name.
-        $stubTmp = "$stubPath.tmp-$PID"
-        [System.IO.File]::WriteAllText($stubTmp, $stubContent, $utf8NoBom)
-        Move-Item -LiteralPath $stubTmp -Destination $stubPath -Force
+        # Publish atomically -- a reader mid-write must never observe a
+        # truncated/torn binstub, nor a brief no-file window on a replace
+        # (see Publish-FileAtomically's own rationale above).
+        Publish-FileAtomically -Path $stubPath -Content $stubContent -Encoding $utf8NoBom
         Write-Ok "Binstub: $stubPath"
         return
     }
@@ -1694,7 +1773,6 @@ exit 1
     $ps1Path = Join-Path $LocalBin 'agent-machines.ps1'
     if (Test-Path $ps1Path) { Remove-Item $ps1Path -Force -ErrorAction SilentlyContinue }
     $cmdPath = Join-Path $LocalBin 'agent-machines.cmd'
-    $cmdTmp = "$cmdPath.tmp-$PID"
     $cmdContent = @'
 @echo off
 setlocal
@@ -1743,8 +1821,7 @@ if %ERRORLEVEL%==0 set "_PSX=pwsh"
 for /f "usebackq delims=" %%p in (`%_PSX% -NoProfile -ExecutionPolicy Bypass -Command "$env:AGENT_RT_ROOT='%_ROOT%'; . '%_ROOT%\bin\resolve-runtime.ps1'; if ($AgentRtPy) { $AgentRtPy }" 2^>nul`) do set "_PY=%%p"
 goto :eof
 '@
-    [System.IO.File]::WriteAllText($cmdTmp, $cmdContent, $utf8NoBom)
-    Move-Item -LiteralPath $cmdTmp -Destination $cmdPath -Force
+    Publish-FileAtomically -Path $cmdPath -Content $cmdContent -Encoding $utf8NoBom
     Write-Ok "Binstub: $cmdPath (self-provisioning)"
 }
 
@@ -1783,6 +1860,18 @@ function Enter-StampLock {
 # this split, backgrounding the whole `stamp` action left a window where a
 # session's very first turn could invoke `agent-machines` before the
 # background job had created it (command-not-found race).
+#
+# KNOWN GAP, deliberately deferred (review round 8): payload-dir and
+# payload-origin are each published atomically on their own (see
+# Publish-FileAtomically), but the PAIR is not published as one atomic unit --
+# a reader could still observe one file's NEW value alongside the other's OLD
+# value mid-publish (e.g. a stale dir with a fresh origin). Fixing this
+# correctly means either merging both values into one atomically-published
+# marker file or having the .cmd/.sh readers take the stamp lock too; both
+# markers are read by several OTHER call sites across this plugin
+# (invoke-payload-runtime.ps1/.sh, installation-context, receipts, the CLI),
+# so redesigning the on-disk format is real, valuable future work but out of
+# this short-PR-cycle round's scope -- logged in the effort's Round Ledger.
 function Invoke-StampBinstubOnly {
     $mutex = Enter-StampLock
     try {
@@ -1799,13 +1888,10 @@ function Invoke-StampBinstubOnly {
         # path once its copy completes, same as before.
         $payloadDirMarker = Join-Path $InstallDir 'payload-dir'
         $payloadOriginMarker = Join-Path $InstallDir 'payload-origin'
-        # Publish atomically (same-directory temp file + rename), matching
-        # Deploy-SelfProvisioningBinstub's own atomic-replace pattern: a
+        # Publish atomically (Replace-or-Move via Publish-FileAtomically): a
         # generated binstub reads payload-dir OUTSIDE this stamp mutex, so a
-        # direct truncating write here could hand a concurrent reader an
-        # empty/partial marker and a spurious exit 127.
-        $payloadDirTmp = "$payloadDirMarker.tmp-$PID"
-        $payloadOriginTmp = "$payloadOriginMarker.tmp-$PID"
+        # direct truncating write or a non-atomic Move-Item here could hand a
+        # concurrent reader an empty/partial marker and a spurious exit 127.
         # Review finding (round 7): the ORIGINAL fix pointed the marker at
         # $PluginDir -- on a marketplace install this is the per-invocation
         # `.install-stage/<ts>-<pid>/...` copy the install-contract self-stage
@@ -1819,10 +1905,8 @@ function Invoke-StampBinstubOnly {
         # it is never a throwaway per-invocation directory, so use it here
         # instead; the background `stamp` still overwrites both markers with
         # the even-more-durable snapshot path once its copy completes.
-        [System.IO.File]::WriteAllText($payloadDirTmp, $probePayload, $utf8NoBom)
-        [System.IO.File]::WriteAllText($payloadOriginTmp, $probePayload, $utf8NoBom)
-        Move-Item -LiteralPath $payloadDirTmp -Destination $payloadDirMarker -Force
-        Move-Item -LiteralPath $payloadOriginTmp -Destination $payloadOriginMarker -Force
+        Publish-FileAtomically -Path $payloadDirMarker -Content $probePayload -Encoding $utf8NoBom
+        Publish-FileAtomically -Path $payloadOriginMarker -Content $probePayload -Encoding $utf8NoBom
         Deploy-SelfProvisioningBinstub
     } finally {
         [void]$mutex.ReleaseMutex()
@@ -1869,12 +1953,8 @@ function Invoke-Stamp {
     Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
     # Same atomic-publish rationale as Invoke-StampBinstubOnly above: a
     # generated binstub reads payload-dir outside this stamp mutex.
-    $payloadOriginTmp = "$payloadOriginMarker.tmp-$PID"
-    $payloadDirTmp = "$payloadDirMarker.tmp-$PID"
-    [System.IO.File]::WriteAllText($payloadOriginTmp, $probePayload, $utf8NoBom)
-    [System.IO.File]::WriteAllText($payloadDirTmp, $snapDir, $utf8NoBom)
-    Move-Item -LiteralPath $payloadOriginTmp -Destination $payloadOriginMarker -Force
-    Move-Item -LiteralPath $payloadDirTmp -Destination $payloadDirMarker -Force
+    Publish-FileAtomically -Path $payloadOriginMarker -Content $probePayload -Encoding $utf8NoBom
+    Publish-FileAtomically -Path $payloadDirMarker -Content $snapDir -Encoding $utf8NoBom
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
     Write-Ok "Snapshot: $snapDir"
     Deploy-SelfProvisioningBinstub
