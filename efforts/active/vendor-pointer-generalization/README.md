@@ -65,9 +65,11 @@ if `vendored-installer-engine` adopts it, the shared installer-engine
 surface.
 
 **The concrete mechanism differs by construct** (see the header's
-"Mechanism status" note; the design has been resolved TWICE for the libs
-surface — see both the 2026-09-26 "Course correction" and the 2026-09-27
-"Second course correction" Journal entries for the full history):
+"Mechanism status" note; the design has now been resolved THREE times for
+the libs surface — the original decision below, then the 2026-09-26
+"Course correction" (to `src-passthrough`), then the 2026-09-27 "Second
+course correction" (back to this design) — see both Journal entries for
+the full history):
 
 - **Libs**: the `uv [tool.uv.sources]` `path`+`editable = true` live
   reference, as originally decided (see the Design Decision section
@@ -651,7 +653,7 @@ shape before committing to a design)_
       when building a scratch local-install preview. (The `src-passthrough`
       -era `_materialize_into_preview()` support, PR #3803/#3810, will
       need its own equivalent extension for this form — not yet built.)
-- [ ] `materialize_main.py`'s directory-pointer path refuses a `source`
+- [x] `materialize_main.py`'s directory-pointer path refuses a `source`
       that escapes `canonical_root` (the same containment guarantee the
       file-pointer path already has via `_resolve_within()`). **Done, PR
       #3752** — also extended to reject a symlink inside/as the canonical
@@ -662,7 +664,14 @@ shape before committing to a design)_
       libs are re-converted back to the `uv`-editable form and no
       consumer uses `src-passthrough` anymore. `_escapes_root()` itself
       is reused directly by the reference-rewrite containment check
-      above and by the file-pointer kind, so it is never removed.)
+      below and by the file-pointer kind, so it is never removed.)
+- [ ] **Still pending**: the reference-rewrite promotion step's OWN
+      containment check — once `materialize_main.py`/`promote_release.py`
+      is extended for the `uv`-editable form (Phase 1's still-unbuilt
+      Plan item above), it must reuse `_escapes_root()` to refuse a
+      `[tool.uv.sources]` `path` that escapes `canonical_root`, the same
+      way the (soon-to-be-retired) directory-pointer path above already
+      does. Not yet built, since the promotion step itself isn't built.
 - [ ] A promotion run against a deliberately malformed/unresolvable pointer
       aborts the promotion rather than producing a `main` snapshot
       containing an unexpanded stub. **Done, PR #3752** — covered for a
