@@ -329,6 +329,72 @@ def test_engine_runtime_rejects_foreign_explicit_context(monkeypatch, tmp_path):
         engine_runtime.ensure_engine_runtime()
 
 
+def test_engine_runtime_falls_back_to_canonical_libs_for_uv_editable_lib(monkeypatch, tmp_path):
+    """A lib converted to the `uv`-editable canonical-reference form
+    (vendor-pointer-generalization effort, Phase 1 -- e.g.
+    lazy-cli-dispatch) has NO local copy under
+    plugins/agent-worktrees/libs/<lib> in a dev checkout at all --
+    ensure_engine_runtime() must fall back to the monorepo's own canonical
+    libs/<lib>/src (the same live source `uv`'s own [tool.uv.sources]
+    reference already resolves to), not silently omit it from sys.path
+    (regression: ModuleNotFoundError: No module named 'lazy_cli_dispatch',
+    caught by CI's own worktree-manager suite)."""
+    checkout = tmp_path / "checkout"
+    plugin_src = checkout / "plugins/agent-worktrees/src"
+    (plugin_src / "agent_worktrees").mkdir(parents=True)
+    # lazy-cli-dispatch has no local copy under the plugin's own libs/ --
+    # only the monorepo's own canonical libs/lazy-cli-dispatch/src.
+    canonical_lib_src = checkout / "libs/lazy-cli-dispatch/src"
+    (canonical_lib_src / "lazy_cli_dispatch").mkdir(parents=True)
+    (canonical_lib_src / "lazy_cli_dispatch/__init__.py").write_text(
+        "x = 1\n", encoding="utf-8"
+    )
+    # A different (still real-copy-vendored) lib DOES have a local copy --
+    # confirms the fallback only ever applies when the local copy is
+    # genuinely absent, never overriding one that already exists.
+    local_config_migrate_src = plugin_src.parent / "libs/config-migrate/src"
+    (local_config_migrate_src / "config_migrate").mkdir(parents=True)
+
+    monkeypatch.delenv(engine_runtime.ENGINE_SOURCE_ENV, raising=False)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(engine_runtime, "_checkout_source", lambda: plugin_src)
+    monkeypatch.setattr(engine_runtime.sys, "path", [])
+
+    engine_runtime.ensure_engine_runtime()
+
+    assert str(canonical_lib_src) in engine_runtime.sys.path
+    assert str(local_config_migrate_src) in engine_runtime.sys.path
+
+
+def test_engine_runtime_installed_slot_never_uses_the_checkout_fallback(monkeypatch, tmp_path):
+    """An installed runtime (a site-packages slot) has no monorepo
+    libs/+plugins/ ancestor at all -- the canonical-libs fallback must
+    never fire there (it always carries a real local copy of every engine
+    lib, materialized at promotion time; attempting the fallback would be
+    a silent no-op at best, but must never be attempted regardless)."""
+    home = tmp_path / "home"
+    home.mkdir()
+    install, _python = namespaced_fixture(home, windows=engine_runtime.os.name == "nt")
+    slot = install.parent / "versions" / "1.2.3"
+    source = (
+        slot / "Lib" / "site-packages"
+        if engine_runtime.os.name == "nt"
+        else slot / "lib" / "python3.10" / "site-packages"
+    )
+    (source / "agent_worktrees").mkdir(parents=True)
+    _write_policy(home, enabled=True)
+    patch_profile(monkeypatch, engine_runtime.agent_plugin_runtime, home)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(install))
+    monkeypatch.delenv(engine_runtime.ENGINE_SOURCE_ENV, raising=False)
+    monkeypatch.setattr(engine_runtime, "_checkout_source", lambda: tmp_path / "no-checkout-here")
+    monkeypatch.setattr(engine_runtime.sys, "path", [])
+
+    engine_runtime.ensure_engine_runtime()
+
+    assert not any("lazy-cli-dispatch" in p or "lazy_cli_dispatch" in p
+                   for p in engine_runtime.sys.path)
+
+
 def test_production_runner_mock_skips_mutating_startup(monkeypatch):
     calls = []
 

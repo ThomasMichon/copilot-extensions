@@ -923,6 +923,7 @@ def test_uv_editable_converts_a_real_copy_to_a_live_reference(repo: Path):
     _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
     _write(repo, "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py", "value = 1\n")
     _lib_pyproject(repo, "plugins/alpha/libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+    _write(repo, "plugins/alpha/libs/shared-lib/README.md", "# doc\n")
     pp = _seed_consumer_pyproject(repo, "plugins/alpha", "shared-lib")
 
     result = _run(repo, "--uv-editable", "alpha", "shared-lib")
@@ -979,6 +980,7 @@ def test_uv_editable_supports_the_worktree_manager_extra_consumer_tree(repo: Pat
     _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
     _write(repo, "worktree-manager/libs/shared-lib/src/shared_lib/__init__.py", "value = 1\n")
     _lib_pyproject(repo, "worktree-manager/libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+    _write(repo, "worktree-manager/libs/shared-lib/README.md", "# doc\n")
     pp = _seed_consumer_pyproject(repo, "worktree-manager", "shared-lib")
 
     result = _run(repo, "--uv-editable", "worktree-manager", "shared-lib")
@@ -1028,3 +1030,76 @@ def test_check_passes_a_valid_uv_editable_entry(repo: Path):
     result = _run(repo, "--check")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "INVALID" not in result.stdout
+
+
+def test_uv_editable_refuses_a_copy_with_a_locally_edited_readme(repo: Path):
+    # The drift check must compare the COMPLETE discardable tree (src/,
+    # tests/, README.md, pyproject.toml) -- not just src/. A copy whose
+    # source is byte-identical to canonical but whose README.md was
+    # independently edited must still be refused, or that edit is silently
+    # discarded once the local copy is deleted.
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
+    _write(repo, "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py", "value = 1\n")
+    _lib_pyproject(repo, "plugins/alpha/libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+    _write(repo, "plugins/alpha/libs/shared-lib/README.md", "# locally edited doc\n")
+    _seed_consumer_pyproject(repo, "plugins/alpha", "shared-lib")
+
+    result = _run(repo, "--uv-editable", "alpha", "shared-lib")
+    assert result.returncode != 0
+    assert "differs from canonical" in (result.stdout + result.stderr)
+    assert (repo / "plugins/alpha/libs/shared-lib/README.md").read_text() == (
+        "# locally edited doc\n"
+    )
+
+
+def test_uv_editable_rewrite_scoped_to_uv_sources_table_only(repo: Path):
+    # An identical-looking `{ path = "libs/<lib>" }` value in an UNRELATED
+    # table must never be rewritten -- only the real [tool.uv.sources]
+    # entry.
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
+    _write(repo, "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py", "value = 1\n")
+    _lib_pyproject(repo, "plugins/alpha/libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+    (repo / "plugins/alpha/libs/shared-lib/README.md").write_text("# doc\n", encoding="utf-8")
+    pp = repo / "plugins/alpha/pyproject.toml"
+    pp.parent.mkdir(parents=True, exist_ok=True)
+    pp.write_text(
+        "[project]\n"
+        'name = "consumer"\n'
+        'version = "1.0.0"\n'
+        'dependencies = ["agent-shared-lib"]\n'
+        "\n"
+        "[tool.some-other-table]\n"
+        'unrelated_field = { path = "libs/shared-lib" }\n'
+        "\n"
+        "[tool.uv.sources]\n"
+        'agent-shared-lib = { path = "libs/shared-lib" }\n',
+        encoding="utf-8",
+    )
+
+    result = _run(repo, "--uv-editable", "alpha", "shared-lib")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    text = pp.read_text()
+    assert 'agent-shared-lib = { path = "../../libs/shared-lib", editable = true }' in text
+    # The unrelated table's identical-looking value survives untouched.
+    assert 'unrelated_field = { path = "libs/shared-lib" }' in text
+
+
+def test_uv_editable_refuses_before_deleting_when_no_rewrite_target(repo: Path):
+    # If the consumer pyproject has no exact "path = \"libs/<lib>\"" entry
+    # to rewrite, the conversion must refuse BEFORE the local copy is
+    # touched -- never delete it and then fail the rewrite.
+    _seed_canonical_lib(repo, "shared-lib", version="0.1.0-dev1", content="value = 1\n")
+    _write(repo, "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py", "value = 1\n")
+    _lib_pyproject(repo, "plugins/alpha/libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+    _write(repo, "plugins/alpha/libs/shared-lib/README.md", "# doc\n")
+    pp = repo / "plugins/alpha/pyproject.toml"
+    pp.parent.mkdir(parents=True, exist_ok=True)
+    # No [tool.uv.sources] entry at all for shared-lib.
+    pp.write_text('[project]\nname = "consumer"\nversion = "1.0.0"\n', encoding="utf-8")
+
+    result = _run(repo, "--uv-editable", "alpha", "shared-lib")
+    assert result.returncode != 0
+    assert "no [tool.uv.sources] entry" in (result.stdout + result.stderr)
+    # The local copy survives -- nothing was deleted before the refusal.
+    assert (repo / "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py").exists()

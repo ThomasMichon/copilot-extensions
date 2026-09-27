@@ -856,7 +856,6 @@ def cmd_uv_editable(consumer: str, lib: str) -> int:
         find_symlinked_ancestor=_find_symlinked_ancestor,
         remove_path=_remove_path,
         is_pointer_copy=_is_pointer_copy,
-        src_files=_src_files,
     )
     print(f"{lib}: converted {copy_dir.relative_to(REPO)} to uv-editable ({relpath})")
     return 0

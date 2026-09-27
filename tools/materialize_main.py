@@ -66,8 +66,11 @@ import argparse
 import json
 import re
 import shutil
-import tomllib
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import uv_editable_ref as uer  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 POINTER_NAME = "VENDOR_POINTER.json"
@@ -309,40 +312,6 @@ def _materialize_one_pointer(pointer_path: Path, *, checkout_root: Path, canonic
     return f"OK   {lib_copy_dir} <- {source_rel}"
 
 
-def find_uv_editable_refs(consumer_dir: Path) -> list[tuple[str, str, str]]:
-    """Every ``[tool.uv.sources]`` entry in ``consumer_dir/pyproject.toml``
-    whose ``path`` escapes ``consumer_dir``'s own root, marked ``editable =
-    true`` -- the `uv`-editable canonical-reference form (vendor-pointer-
-    generalization effort, Phase 1). Returns ``(name, raw_path, lib)``
-    tuples: ``name`` is the ``[tool.uv.sources]`` key (the distribution
-    name), ``raw_path`` is its literal ``path`` value (as authored, relative
-    to ``consumer_dir``), and ``lib`` is that path's final component (the
-    lib name under ``libs/``). An entry whose path stays WITHIN
-    ``consumer_dir`` (the ordinary in-tree vendored-copy form) is out of
-    scope for this function entirely -- only an escaping entry is this
-    reference form."""
-    pyproject = consumer_dir / "pyproject.toml"
-    if not pyproject.is_file() or pyproject.is_symlink():
-        return []
-    try:
-        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-    except (OSError, tomllib.TOMLDecodeError):
-        return []
-    sources = data.get("tool", {}).get("uv", {}).get("sources", {})
-    consumer_root = consumer_dir.resolve()
-    out: list[tuple[str, str, str]] = []
-    for name, entry in sources.items():
-        if not isinstance(entry, dict) or "path" not in entry or not entry.get("editable"):
-            continue
-        raw_path = entry["path"]
-        if Path(raw_path).is_absolute():
-            continue
-        candidate = (consumer_dir / raw_path).resolve()
-        if _escapes_root(candidate, consumer_root):
-            out.append((name, raw_path, Path(raw_path).name))
-    return out
-
-
 def materialize_uv_editable_ref_into(
     *, source_consumer_dir: Path, dest_consumer_dir: Path, canonical_root: Path
 ) -> list[str]:
@@ -364,6 +333,13 @@ def materialize_uv_editable_ref_into(
     ``main`` release never carries a live reference to a path that won't
     exist on the end-user's machine.
 
+    Uses ``uv_editable_ref.find_uv_editable_refs`` (shared with the dev-time
+    drift guard, not a second duplicate) -- which returns EVERY escaping
+    entry regardless of whether ``editable`` is set. An entry missing
+    ``editable = true`` is refused (``SKIP``) here rather than silently
+    passed through: skipping it invisibly would let ``promote_release.py``
+    ship the external path unchanged in a real release.
+
     ``source_consumer_dir`` and ``dest_consumer_dir`` are the same
     directory for a whole-repo snapshot (``materialize_main.py``'s own
     ``materialize()`` -- the copytree preserved the same nesting depth as
@@ -373,13 +349,27 @@ def materialize_uv_editable_ref_into(
     ``plugins/<plugin>``, dest is a bare ``workdir/<plugin>`` with no
     monorepo ancestor of its own)."""
     log: list[str] = []
-    for name, raw_path, lib in find_uv_editable_refs(source_consumer_dir):
-        canonical = (source_consumer_dir / raw_path).resolve()
-        canonical_root_r = canonical_root.resolve()
-        if _escapes_root(canonical, canonical_root_r):
+    canonical_root_r = canonical_root.resolve()
+    for name, raw_path, lib, editable in uer.find_uv_editable_refs(source_consumer_dir):
+        if not editable:
             log.append(
                 f"SKIP {dest_consumer_dir}: {name} references {raw_path} "
-                "which escapes the canonical root -- refusing"
+                "outside its own root but is missing editable = true -- "
+                "refusing to ship an unresolved external reference"
+            )
+            continue
+        canonical = (source_consumer_dir / raw_path).resolve()
+        # Require the resolved path to be EXACTLY canonical_root/libs/<lib>
+        # -- not merely "somewhere inside canonical_root". A looser
+        # containment check would accept an escaping entry pointing at,
+        # say, ../../plugins/other and copy that OTHER plugin's tree into
+        # this consumer's libs/<lib>/, rewriting it as a shared-lib
+        # dependency it never was.
+        if canonical != (canonical_root_r / "libs" / lib).resolve():
+            log.append(
+                f"SKIP {dest_consumer_dir}: {name} references {raw_path} "
+                f"(resolved {canonical}) which is not canonical_root/libs/{lib} "
+                "-- refusing"
             )
             continue
         if not canonical.is_dir():
@@ -407,35 +397,47 @@ def materialize_uv_editable_ref_into(
             log.append(f"SKIP {dest_lib_dir}: already exists -- refusing to overwrite")
             continue
 
-        dest_lib_dir.mkdir(parents=True)
-        for sub in ("src", "tests"):
-            src_sub = canonical / sub
-            if src_sub.is_dir():
-                shutil.copytree(src_sub, dest_lib_dir / sub)
-        for fname in ("pyproject.toml", "README.md"):
-            src_file = canonical / fname
-            if src_file.is_file():
-                shutil.copy2(src_file, dest_lib_dir / fname)
-
         pyproject = dest_consumer_dir / "pyproject.toml"
-        text = pyproject.read_text(encoding="utf-8")
-        pattern = re.compile(
-            r'^([ \t]*' + re.escape(name) + r'\s*=\s*)\{\s*path\s*=\s*"'
-            + re.escape(raw_path) + r'"\s*,\s*editable\s*=\s*true\s*\}[ \t]*$',
-            re.MULTILINE,
-        )
-        new_text, count = pattern.subn(
-            lambda m: f'{m.group(1)}{{ path = "libs/{lib}" }}', text, count=1
-        )
-        if count != 1:
-            log.append(
-                f"SKIP {pyproject}: could not find {name}'s uv-editable "
-                "entry to rewrite"
-            )
-            continue
-        pyproject.write_text(new_text, encoding="utf-8")
-        log.append(f"OK   {dest_lib_dir} <- {raw_path}")
+        log.append(_materialize_one_uv_editable_ref(
+            canonical=canonical, dest_lib_dir=dest_lib_dir, pyproject=pyproject,
+            name=name, raw_path=raw_path, lib=lib,
+        ))
     return log
+
+
+def _materialize_one_uv_editable_ref(
+    *, canonical: Path, dest_lib_dir: Path, pyproject: Path, name: str, raw_path: str, lib: str,
+) -> str:
+    """Copy ``canonical``'s complete lib tree into ``dest_lib_dir`` and
+    rewrite ``pyproject``'s entry to the local non-editable form --
+    preflighted (via the same regex the rewrite itself uses) BEFORE any
+    file is copied, so a rewrite failure never happens only after the
+    canonical tree has already been copied in."""
+    text = pyproject.read_text(encoding="utf-8")
+    pattern = re.compile(
+        r'^([ \t]*' + re.escape(name) + r'\s*=\s*)\{\s*path\s*=\s*"'
+        + re.escape(raw_path) + r'"\s*,\s*editable\s*=\s*true\s*\}[ \t]*$',
+        re.MULTILINE,
+    )
+    if pattern.search(text) is None:
+        return f"SKIP {pyproject}: could not find {name}'s uv-editable entry to rewrite"
+
+    dest_lib_dir.mkdir(parents=True)
+    for sub in ("src", "tests"):
+        src_sub = canonical / sub
+        if src_sub.is_dir():
+            shutil.copytree(src_sub, dest_lib_dir / sub)
+    for fname in ("pyproject.toml", "README.md"):
+        src_file = canonical / fname
+        if src_file.is_file():
+            shutil.copy2(src_file, dest_lib_dir / fname)
+
+    new_text, count = pattern.subn(
+        lambda m: f'{m.group(1)}{{ path = "libs/{lib}" }}', text, count=1
+    )
+    assert count == 1  # already confirmed via the preflight search() above
+    pyproject.write_text(new_text, encoding="utf-8")
+    return f"OK   {dest_lib_dir} <- {raw_path}"
 
 
 def materialize_uv_editable_refs(dest: Path, *, canonical_root: Path) -> list[str]:
