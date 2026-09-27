@@ -519,6 +519,28 @@ once every remaining caller is already off the import boundary.
    the batch verb belongs in `agent_worktrees`, because `tracking.yaml`'s
    format and file-lock semantics are already engine-owned and the correctness
    of this slice depends on keeping that lock scope with the format owner.
+   - **Concrete Step 5 contract design (decided before implementation):**
+     - Add `<project> picker-reconcile-local --json` as the coarse-grained
+       Group C verb. Request shape: no stdin/body payload, explicit project
+       scope as usual, and an optional repeated `--worktree-id <id>` filter for
+       future per-row refresh / targeted reload reuse; omitting the filter means
+       "all current-platform local tracking records," matching today's
+       `data_local.py` sweep.
+     - Response shape: `{"version":1,"rows":[...],"summary":{...}}`, where
+       each row intentionally reuses the Picker's existing list-row field names
+       for the **Group C-owned subset only** (`id`, `pr`, `prs`, `pr_count`,
+       `session_bound_live`, `session_lock_live`, `session_lock_stale`,
+       `stale_lock_pids`, `mux_session`, `mux_clients`, `mux_attached`) so Step
+       6 can layer this payload onto today's downstream consumers without
+       inventing a second translation vocabulary. `summary` carries the batch
+       counters / scope facts Step 6 needs to preserve today's reload decisions:
+       `platform`, `requested_worktree_ids`, `record_count`,
+       `pr_terminal_count`, `bound_visible_change_count`,
+       `had_unresolved_bound`, and `mux_scan_ok`.
+     - Versioning: this is an additive **contract v1** verb under
+       `docs/engine-picker-contract.md`'s existing pinning discipline. Future
+       rows/summary fields may be added, but the verb name and existing field
+       meanings stay stable within contract version 1.
    - Add one batched `--json` verb that performs the current
      `data_local.py` loop inside agent-worktrees: list records, reconcile
      active PR state, read bound/mux/session-lock liveness, stamp the resulting

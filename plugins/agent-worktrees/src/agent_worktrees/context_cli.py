@@ -155,6 +155,8 @@ def add_parsers(sub) -> None:
         action="store_true",
         help="Emit the versioned repair payload as JSON",
     )
+    from . import picker_reconcile_cli
+    picker_reconcile_cli.add_parser(sub)
 
     sp = sub.add_parser(
         "state-root",

@@ -83,7 +83,6 @@ from pathlib import Path
 # -- BEFORE any submodule import can trigger the problem -- makes `pr_cli`'s
 # import a no-op cache hit instead of a second full execution. Fixes #2650.
 sys.modules.setdefault(f"{__package__}.__main__", sys.modules[__name__])
-
 from agent_procutil import (
     detached_kwargs,
     windowless_daemon_kwargs as _windowless_daemon_kwargs_impl,
@@ -91,7 +90,6 @@ from agent_procutil import (
 )
 from lazy_cli_dispatch import dispatch_lazy as _shared_dispatch_lazy
 from lazy_cli_dispatch import self_override as _shared_self_override
-
 from . import (
     activity,
     claim_kinds_registry,
@@ -193,7 +191,6 @@ _NO_AUTO_CLEAN_ENV = "AGENT_WORKTREES_NO_AUTO_CLEAN"
 _AUTO_CLEAN_GRACE_ENV = "AGENT_WORKTREES_AUTO_CLEAN_GRACE_SECS"
 _INVOCATION_CWD: Path | None = None
 _UPDATE_CONTEXT_ENV = "AGENT_WORKTREES_UPDATE_CONTEXT"
-
 
 def windowless_daemon_kwargs(**kwargs):
     return _windowless_daemon_kwargs_impl(**kwargs)
@@ -5754,6 +5751,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'get': ('context_cli', 'cmd_get'),
     'picker-bootstrap': ('context_cli', 'cmd_picker_bootstrap'),
     'picker-paths': ('context_cli', 'cmd_picker_paths'),
+    'picker-reconcile-local': ('picker_reconcile_cli', 'cmd_picker_reconcile_local'),
     'repair-stale-anchor': ('context_cli', 'cmd_repair_stale_anchor'),
     'handoff-cutover': ('handoff_cli', 'cmd_handoff_cutover'),
     'handoffs-check': ('handoff_cli', 'cmd_handoffs_check'),
@@ -5997,7 +5995,7 @@ def _load_full_command_surface() -> None:
     global auto_clean_enabled, claims_cli, cleanup_gc_cli, cmd_accounts_dispatch, cmd_anchor_check, cmd_attribution_audit, cmd_backfill_sessions, cmd_bind_nudge
     global cmd_bind_session, cmd_claimant_liveness, cmd_claims, cmd_cleanup, cmd_codename_lookup, cmd_conclude_disposable, cmd_conclude_session, cmd_config_migrate
     global cmd_config_root_dispatch, cmd_coordination_readiness_dispatch, cmd_copilot_identity_dispatch, cmd_create, cmd_create_pr, cmd_deploy_instructions, cmd_deregister_session, cmd_dev, cmd_doctor
-    global cmd_effort_focus, cmd_embody, cmd_finalize, cmd_follow_ups, cmd_gc, cmd_get, cmd_git_dispatch, cmd_git_feature_branch, cmd_picker_bootstrap, cmd_picker_paths
+    global cmd_effort_focus, cmd_embody, cmd_finalize, cmd_follow_ups, cmd_gc, cmd_get, cmd_git_dispatch, cmd_git_feature_branch, cmd_picker_bootstrap, cmd_picker_paths, cmd_picker_reconcile_local
     global cmd_git_merge_to_feature, cmd_git_sync, cmd_handoff_cutover, cmd_handoff_trace, cmd_handoffs_check, cmd_head_session, cmd_history_digest, cmd_hygiene
     global cmd_install, cmd_install_status, cmd_installer_readiness, cmd_knowledge_dispatch, cmd_link_succession, cmd_list, cmd_list_sessions, cmd_machine_context, cmd_repair_stale_anchor
     global cmd_mark_complete, cmd_note_handoff, cmd_picker, cmd_post_exit, cmd_pr_complete, cmd_pr_dispatch, cmd_pr_merge_dispatch, cmd_pr_ready
@@ -6030,6 +6028,7 @@ def _load_full_command_surface() -> None:
         list_cli,
         maintenance_cli,
         picker_profiles_cli,
+        picker_reconcile_cli,
         pr_cli,
         pr_state_cli,
         reap_cli,
@@ -6077,7 +6076,8 @@ def _load_full_command_surface() -> None:
     _emit_pr_reminder = context_cli._emit_pr_reminder
     cmd_deploy_instructions = context_cli.cmd_deploy_instructions
     cmd_machine_context, cmd_get, cmd_picker_bootstrap = context_cli.cmd_machine_context, context_cli.cmd_get, context_cli.cmd_picker_bootstrap
-    cmd_picker_paths, cmd_repair_stale_anchor = context_cli.cmd_picker_paths, context_cli.cmd_repair_stale_anchor
+    cmd_picker_paths, cmd_picker_reconcile_local = context_cli.cmd_picker_paths, picker_reconcile_cli.cmd_picker_reconcile_local
+    cmd_repair_stale_anchor = context_cli.cmd_repair_stale_anchor
     cmd_install_status = context_cli.cmd_install_status
     cmd_installer_readiness = context_cli.cmd_installer_readiness
     cmd_reconcile_marketplaces = context_cli.cmd_reconcile_marketplaces
@@ -6455,6 +6455,7 @@ def _load_full_command_surface() -> None:
         "get": cmd_get,
         "picker-bootstrap": cmd_picker_bootstrap,
         "picker-paths": cmd_picker_paths,
+        "picker-reconcile-local": cmd_picker_reconcile_local,
         "pre-launch": cmd_pre_launch,
         "repair-stale-anchor": cmd_repair_stale_anchor,
         "stage-update": cmd_stage_update,
