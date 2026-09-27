@@ -958,7 +958,31 @@ PYEOF
   if [ -n "${config_repo_name}" ] && command -v agent-worktrees >/dev/null 2>&1; then
     local config_repo_dir
     config_repo_dir="$(agent-worktrees repos find "${config_repo_name}" 2>/dev/null || true)"
-    if [ -n "${config_repo_dir}" ]; then
+    # `repos find` also resolves `reference`-class registrations, which are
+    # not guaranteed to be a git checkout at all -- so this discovery MUST
+    # NOT wire the result into the service unless it passes the same
+    # registered-project + default-branch trust decision normal (CWD-based)
+    # discovery applies. Deferring entirely to find_repo_config()'s own
+    # runtime trust check would still be *safe* (it re-derives this same
+    # verdict from the env var at consumption time), but embedding an
+    # untrusted path here regardless is needless exposure this installer
+    # can avoid outright by checking first.
+    local config_repo_trusted=0
+    if [ -n "${config_repo_dir}" ] && [ -x "${VENV}/bin/python3" ]; then
+      if "${VENV}/bin/python3" - "${config_repo_dir}" <<'PYEOF' >/dev/null 2>&1
+import sys
+from pathlib import Path
+try:
+    from agent_logger.repo_trust import repo_config_is_trusted
+except Exception:
+    sys.exit(1)
+sys.exit(0 if repo_config_is_trusted(Path(sys.argv[1])) else 1)
+PYEOF
+      then
+        config_repo_trusted=1
+      fi
+    fi
+    if [ "${config_repo_trusted}" = 1 ]; then
       # Mirrors agent_logger.config.REPO_CONFIG_FILENAMES's alias set and
       # precedence order -- a config repo may use any of these filenames,
       # not just the root .agent-logger.yaml. A candidate whose leaf (or,

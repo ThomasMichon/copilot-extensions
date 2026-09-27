@@ -103,6 +103,66 @@ def _real_venv_with_python() -> Path:
     _BASH is None or os.name == "nt",
     reason="a POSIX bash environment is not available",
 )
+def test_write_units_skips_untrusted_config_repo(tmp_path: Path) -> None:
+    """`agent-worktrees repos find` also resolves `reference`-class
+    registrations, which are not guaranteed to be a git checkout at all --
+    a valid, non-symlinked ``.agent-logger.yaml`` present in the discovered
+    directory must NOT be wired into the service unless that directory
+    passes the same registered-project + default-branch trust decision
+    normal (CWD-based) discovery applies. No
+    ``AGENT_LOGGER_TRUST_REPO_CONFIG`` override and no real git remotes
+    here, so the directory is untrusted and the Environment= line must be
+    omitted entirely, even though nothing else about the discovery would
+    otherwise reject it."""
+    install_dir = tmp_path / "install"
+    unit_dir = tmp_path / "units"
+    install_dir.mkdir()
+    unit_dir.mkdir()
+    (install_dir / "config.yaml").write_text("config_repo: demo\n", encoding="utf-8")
+
+    repo_dir = tmp_path / "demo-repo"
+    repo_dir.mkdir()
+    (repo_dir / ".agent-logger.yaml").write_text("schema_version: 3\n", encoding="utf-8")
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _executable(
+        fake_bin / "agent-worktrees",
+        "#!/bin/sh\n"
+        'if [ "$1" = "repos" ] && [ "$2" = "find" ] && [ "$3" = "demo" ]; then\n'
+        f'  echo "{repo_dir}"\n'
+        "  exit 0\n"
+        "fi\n"
+        "exit 1\n",
+    )
+
+    harness = tmp_path / "harness.sh"
+    harness.write_text(
+        "#!/bin/sh\nset -eu\n"
+        f'INSTALL_DIR="{install_dir}"\n'
+        f'UNIT_DIR="{unit_dir}"\n'
+        f'VENV="{_real_venv_with_python()}"\n'
+        'TIMER_NAME="agent-logger-sync"\n'
+        'chg() { :; }\n'
+        + _extract_sh_function("write_units")
+        + "\nwrite_units\n",
+        encoding="utf-8",
+    )
+    harness.chmod(0o755)
+    env = {**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"}
+    env.pop("AGENT_LOGGER_TRUST_REPO_CONFIG", None)
+    subprocess.run(
+        [_BASH, str(harness)], capture_output=True, text=True, env=env, timeout=20, check=True
+    )
+
+    unit_text = (unit_dir / "agent-logger-sync.service").read_text(encoding="utf-8")
+    assert "AGENT_LOGGER_REPO_CONFIG" not in unit_text
+
+
+@pytest.mark.skipif(
+    _BASH is None or os.name == "nt",
+    reason="a POSIX bash environment is not available",
+)
 @pytest.mark.parametrize("repo_dir_name", ["demo-repo", "demo repo with spaces"])
 def test_write_units_sets_repo_config_env_when_config_repo_adopted(
     tmp_path: Path, repo_dir_name: str
@@ -146,7 +206,17 @@ def test_write_units_sets_repo_config_env_when_config_repo_adopted(
         encoding="utf-8",
     )
     harness.chmod(0o755)
-    env = {**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"}
+    env = {
+        **os.environ,
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+        # Bypasses the real registered-project/default-branch trust
+        # decision for exactly this stub repo dir -- a plain tmp_path
+        # directory has no git remotes at all, so without this the new
+        # trust gate (see test_write_units_skips_untrusted_config_repo)
+        # would correctly reject it and this test would no longer
+        # observe the Environment= line it asserts on.
+        "AGENT_LOGGER_TRUST_REPO_CONFIG": str(repo_dir),
+    }
     subprocess.run(
         [_BASH, str(harness)], capture_output=True, text=True, env=env, timeout=20, check=True
     )
@@ -207,7 +277,17 @@ def test_write_units_falls_through_symlinked_alias_to_next_candidate(
         encoding="utf-8",
     )
     harness.chmod(0o755)
-    env = {**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"}
+    env = {
+        **os.environ,
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+        # Bypasses the real registered-project/default-branch trust
+        # decision for exactly this stub repo dir -- a plain tmp_path
+        # directory has no git remotes at all, so without this the new
+        # trust gate (see test_write_units_skips_untrusted_config_repo)
+        # would correctly reject it and this test would no longer
+        # observe the Environment= line it asserts on.
+        "AGENT_LOGGER_TRUST_REPO_CONFIG": str(repo_dir),
+    }
     subprocess.run(
         [_BASH, str(harness)], capture_output=True, text=True, env=env, timeout=20, check=True
     )
@@ -270,7 +350,17 @@ def test_write_units_parses_config_repo_with_real_yaml_semantics(
         encoding="utf-8",
     )
     harness.chmod(0o755)
-    env = {**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"}
+    env = {
+        **os.environ,
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+        # Bypasses the real registered-project/default-branch trust
+        # decision for exactly this stub repo dir -- a plain tmp_path
+        # directory has no git remotes at all, so without this the new
+        # trust gate (see test_write_units_skips_untrusted_config_repo)
+        # would correctly reject it and this test would no longer
+        # observe the Environment= line it asserts on.
+        "AGENT_LOGGER_TRUST_REPO_CONFIG": str(repo_dir),
+    }
     subprocess.run(
         [_BASH, str(harness)], capture_output=True, text=True, env=env, timeout=20, check=True
     )
@@ -331,7 +421,17 @@ def test_write_units_escapes_systemd_special_characters_in_path(tmp_path: Path) 
         encoding="utf-8",
     )
     harness.chmod(0o755)
-    env = {**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"}
+    env = {
+        **os.environ,
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+        # Bypasses the real registered-project/default-branch trust
+        # decision for exactly this stub repo dir -- a plain tmp_path
+        # directory has no git remotes at all, so without this the new
+        # trust gate (see test_write_units_skips_untrusted_config_repo)
+        # would correctly reject it and this test would no longer
+        # observe the Environment= line it asserts on.
+        "AGENT_LOGGER_TRUST_REPO_CONFIG": str(repo_dir),
+    }
     subprocess.run(
         [_BASH, str(harness)], capture_output=True, text=True, env=env, timeout=20, check=True
     )
@@ -484,8 +584,72 @@ Write-SyncTaskLauncher
         check=True,
         capture_output=True,
         text=True,
+        env={
+            **os.environ,
+            # See test_write_units_sets_repo_config_env_when_config_repo_adopted:
+            # bypasses the real registered-project/default-branch trust
+            # decision for this stub repo dir, which has no real git remotes.
+            "AGENT_LOGGER_TRUST_REPO_CONFIG": str(repo_dir),
+        },
     )
 
     launcher_text = task_launcher.read_text(encoding="utf-8")
     assert "AGENT_LOGGER_REPO_CONFIG" in launcher_text
     assert str(repo_dir) in launcher_text
+
+
+@pytest.mark.parametrize("shell", ["powershell.exe", "pwsh"])
+def test_write_sync_task_launcher_skips_untrusted_config_repo(
+    tmp_path: Path, shell: str
+) -> None:
+    """Windows analogue of test_write_units_skips_untrusted_config_repo:
+    an adopted-but-untrusted discovered directory (no real git checkout,
+    no AGENT_LOGGER_TRUST_REPO_CONFIG override) must not have its path
+    embedded into the scheduled launcher even though a valid,
+    non-reparse-point .agent-logger.yaml is present."""
+    exe = shutil.which(shell)
+    if not exe:
+        pytest.skip(f"{shell} is not installed")
+    real_python = _resolve_test_venv_root() / "bin" / "python3"
+
+    install_dir = tmp_path / "install"
+    install_dir.mkdir()
+    (install_dir / "config.yaml").write_text("config_repo: demo\n", encoding="utf-8")
+    repo_dir = tmp_path / "demo-repo"
+    repo_dir.mkdir()
+    (repo_dir / ".agent-logger.yaml").write_text("schema_version: 3\n", encoding="utf-8")
+    task_launcher = install_dir / "bin" / "session-sync-task.ps1"
+
+    repo_dir_ps = str(repo_dir).replace("\\", "\\\\")
+    harness = tmp_path / f"harness-untrusted-{shell.replace('.exe', '')}.ps1"
+    harness.write_text(
+        _extract_ps1_functions("Get-ConfigRepoRegistrationPath", "Write-SyncTaskLauncher")
+        + f"""
+
+function agent-worktrees {{
+    if ($args[0] -eq 'repos' -and $args[1] -eq 'find' -and $args[2] -eq 'demo') {{
+        Write-Output '{repo_dir_ps}'
+        exit 0
+    }}
+    exit 1
+}}
+$InstallDir = '{install_dir}'.Replace('\\\\', '\\')
+$TaskLauncher = '{task_launcher}'.Replace('\\\\', '\\')
+$VenvPython = '{real_python}'.Replace('\\\\', '\\')
+Write-SyncTaskLauncher
+""",
+        encoding="utf-8",
+    )
+    env = dict(os.environ)
+    env.pop("AGENT_LOGGER_TRUST_REPO_CONFIG", None)
+    subprocess.run(
+        [exe, "-NoProfile", "-File", str(harness)],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    launcher_text = task_launcher.read_text(encoding="utf-8")
+    assert "AGENT_LOGGER_REPO_CONFIG" not in launcher_text
+

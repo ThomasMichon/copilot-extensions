@@ -1004,6 +1004,33 @@ if isinstance(value, str) and value.strip():
         if (-not (Get-Command agent-worktrees -ErrorAction SilentlyContinue)) { return $null }
         $dir = (& agent-worktrees repos find $repoName 2>$null | Select-Object -First 1)
         if (-not $dir) { return $null }
+        # `repos find` also resolves `reference`-class registrations, which
+        # are not guaranteed to be a git checkout at all -- so this
+        # discovery MUST NOT wire the result into the scheduled launcher
+        # unless it passes the same registered-project + default-branch
+        # trust decision normal (CWD-based) discovery applies. Deferring
+        # entirely to find_repo_config()'s own runtime trust check would
+        # still be *safe* (it re-derives this same verdict from the env
+        # var at consumption time), but embedding an untrusted path here
+        # regardless is needless exposure this installer can avoid
+        # outright by checking first.
+        $pyTrustScript = @'
+import sys
+from pathlib import Path
+try:
+    from agent_logger.repo_trust import repo_config_is_trusted
+except Exception:
+    sys.exit(1)
+sys.exit(0 if repo_config_is_trusted(Path(sys.argv[1])) else 1)
+'@
+        $trusted = $false
+        try {
+            $pyTrustScript | & $VenvPython '-' $dir 2>$null | Out-Null
+            $trusted = ($LASTEXITCODE -eq 0)
+        } catch {
+            $trusted = $false
+        }
+        if (-not $trusted) { return $null }
         # Mirrors agent_logger.config.REPO_CONFIG_FILENAMES's alias set and
         # precedence order -- a config repo may use any of these filenames,
         # not just the root .agent-logger.yaml. A candidate whose leaf (or,
