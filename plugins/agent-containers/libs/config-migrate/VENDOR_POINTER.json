@@ -1,6 +1,0 @@
-{
-  "schema": "copilot-extensions.vendor-pointer",
-  "version": 1,
-  "source": "libs/config-migrate",
-  "kind": "src-passthrough"
-}

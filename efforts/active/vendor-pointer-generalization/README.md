@@ -1899,3 +1899,43 @@ _Pending._
   that's outside this PR's diff).
 - Non-editable install probe and `materialize_main.py` round-trip both
   confirmed clean, as with the prior 3 conversions.
+
+### 2026-09-28 — Phase 1: converted `config-migrate` (5 consumers)
+
+- Converted all 5 real consumers (`agent-worktrees`, `agent-containers`,
+  `agent-logger`, `agent-bridge`, `agent-codespaces`) from a per-plugin
+  `src-passthrough` copy to a `uv`-editable canonical reference.
+  `config-migrate`'s own `pyproject.toml` has no dependency on another
+  vendored lib (only `pyyaml`), so no early-conversion ordering caveat
+  applied.
+- **Sweep for hardcoded plugin-local paths (recipe step 9) found two real
+  gaps, both already fixed, neither requiring a code change to install
+  logic**:
+  - `plugins/agent-worktrees/scripts/install.sh`'s config-migrate
+    pre-install block only checks `$PLUGIN_DIR/libs/config-migrate` (no
+    repo-root fallback, unlike `agent-containers`/`agent-logger`/
+    `agent-codespaces`, which already had the fallback pattern from the
+    `credential-relay` precedent). Confirmed this is **not a bug**: the
+    block is already guarded by `if [[ -f ... ]]`, so in dev (no local
+    copy) it silently no-ops and the main `uv pip install "$PLUGIN_DIR"`
+    call picks up config-migrate transitively via the uv-editable
+    pointer -- exactly how `single-instance-lease`/
+    `work-coalescing-singleton`/`lazy-cli-dispatch` already work in this
+    same script with zero special-casing. Only a real release
+    (materialized copy present) exercises the explicit reinstall branch,
+    unchanged. No fix needed; verified by inspection, not assumed.
+  - `worktree-manager/tests/test_production_picker_transplant.py` used
+    `config-migrate` as its worked example of "a still real-copy-vendored
+    lib" (to prove a fallback path only fires when a local copy is
+    genuinely absent) -- now stale since config-migrate itself just
+    became uv-editable. Fixed by swapping the example to `plugin-resolve`
+    (still a genuine real per-plugin copy in `agent-worktrees`), keeping
+    the regression test's own docstring claim accurate. Re-ran
+    `worktree-manager`'s full suite: 52/52 passed on the touched file.
+- Added `libs/config-migrate/tests/conftest.py` and wired the canonical
+  suite into CI's "Canonical shared-library tests" step.
+- Proactively updated `libs/config-migrate/README.md` with a dev-vs-
+  release vendoring note (learned from the prior leg's review round --
+  did this up front rather than waiting for the reviewer to ask again).
+- Non-editable install probe and `materialize_main.py` round-trip both
+  confirmed clean.

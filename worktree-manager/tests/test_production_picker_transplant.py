@@ -355,8 +355,12 @@ def test_engine_runtime_falls_back_to_canonical_libs_for_uv_editable_lib(monkeyp
     # A different (still real-copy-vendored) lib DOES have a local copy --
     # confirms the fallback only ever applies when the local copy is
     # genuinely absent, never overriding one that already exists.
-    local_config_migrate_src = plugin_src.parent / "libs/config-migrate/src"
-    (local_config_migrate_src / "config_migrate").mkdir(parents=True)
+    # (plugin-resolve, not config-migrate: config-migrate was itself
+    # converted to a uv-editable canonical reference in the
+    # vendor-pointer-generalization effort, so it no longer has a local
+    # copy to exercise this branch with.)
+    local_plugin_resolve_src = plugin_src.parent / "libs/plugin-resolve/src"
+    (local_plugin_resolve_src / "plugin_resolve").mkdir(parents=True)
 
     monkeypatch.delenv(engine_runtime.ENGINE_SOURCE_ENV, raising=False)
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
@@ -366,7 +370,7 @@ def test_engine_runtime_falls_back_to_canonical_libs_for_uv_editable_lib(monkeyp
     engine_runtime.ensure_engine_runtime()
 
     assert str(canonical_lib_src) in engine_runtime.sys.path
-    assert str(local_config_migrate_src) in engine_runtime.sys.path
+    assert str(local_plugin_resolve_src) in engine_runtime.sys.path
 
 
 def test_engine_runtime_installed_slot_never_uses_the_checkout_fallback(monkeypatch, tmp_path):
