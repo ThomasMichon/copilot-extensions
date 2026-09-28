@@ -43,13 +43,15 @@ agent-dropin-registry = { path = "libs/dropin-registry" }
 # Effective global-or-adopted-project plugin eligibility and identity-verified
 # roots for attributed registry entries (module ``plugin_activation``).
 agent-plugin-activation = { path = "libs/plugin-activation" }
-# Single-instance lease (module ``single_instance_lease``). Vendored per
-# plugin; byte-identical src across copies. Guards "one active classify pass
-# per project per host" (plugin-process-hygiene Phase 4c, #2315): a losing
-# caller waits for the winner's pass to finish, then reads its repaired
-# session-render cache instead of racing it or falling back to a wrong
-# heuristic.
-agent-single-instance-lease = { path = "libs/single-instance-lease" }
+# Single-instance lease (module ``single_instance_lease``). Guards "one active
+# classify pass per project per host" (plugin-process-hygiene Phase 4c,
+# #2315): a losing caller waits for the winner's pass to finish, then reads
+# its repaired session-render cache instead of racing it or falling back to a
+# wrong heuristic. This is a `uv`-editable canonical reference
+# (vendor-pointer-generalization effort, Phase 1): `path` escapes this
+# plugin's own root and resolves live to `libs/single-instance-lease`, so
+# every consumer shares one canonical copy.
+agent-single-instance-lease = { path = "../../libs/single-instance-lease", editable = true }
 # Work-coalescing-singleton daemon shape (module ``work_coalescing_singleton``):
 # coalesce/refcount/idle-exit wire protocol + client (plugin-process-hygiene
 # #744/#2323). This is a `uv`-editable canonical reference

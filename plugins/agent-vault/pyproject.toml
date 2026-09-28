@@ -28,10 +28,12 @@ agent-procutil = { path = "libs/agent-procutil" }
 # restart, so the unlocked master secret survives (#743).
 agent-zdd = { path = "libs/zdd" }
 # single-instance lease + supersession self-retire (module
-# ``single_instance_lease``). Vendored per plugin; byte-identical src across
-# copies. Guards "one active vault per host" and drives the drained predecessor's
-# self-retire during a cutover (#743).
-agent-single-instance-lease = { path = "libs/single-instance-lease" }
+# ``single_instance_lease``). Guards "one active vault per host" and drives the
+# drained predecessor's self-retire during a cutover (#743). This is a
+# `uv`-editable canonical reference (vendor-pointer-generalization effort,
+# Phase 1): `path` escapes this plugin's own root and resolves live to
+# `libs/single-instance-lease`, so every consumer shares one canonical copy.
+agent-single-instance-lease = { path = "../../libs/single-instance-lease", editable = true }
 
 [project.optional-dependencies]
 # The persistent on-disk credential cache (opt-in) encrypts entries with Fernet,
