@@ -12,7 +12,7 @@ import urllib.error
 
 import pytest
 
-from worktree_manager.production_picker._engine_runtime import ensure_engine_runtime
+from worktree_manager.agent_worktrees_runtime import ensure_engine_runtime
 
 
 ensure_engine_runtime()

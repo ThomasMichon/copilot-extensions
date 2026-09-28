@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from worktree_manager import harness_state
-from worktree_manager.production_picker import config, context
+from worktree_manager.production_picker import context, project_config
 
 
 def _project(name: str, anchor: Path) -> harness_state.ProjectInfo:
@@ -43,7 +43,7 @@ def test_load_config_uses_registry_default_branch_when_inrepo_config_missing(
     )
     context.set_project("demo")
     try:
-        cfg = config.load_config()
+        cfg = project_config.load_config()
     finally:
         context.reset()
 
@@ -75,7 +75,7 @@ def test_machines_yaml_path_uses_knowledge_repo_overlay(monkeypatch, tmp_path):
     )
     context.set_project("demo")
     try:
-        resolved = config.machines_yaml_path(launch_root)
+        resolved = project_config.machines_yaml_path(launch_root)
     finally:
         context.reset()
 

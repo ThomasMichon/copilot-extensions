@@ -15,7 +15,7 @@ from pathlib import Path
 
 import yaml
 
-from .. import engine_client, terminal_fragment
+from .. import engine_client, harness_state, terminal_fragment
 from . import context, engine_group_a
 
 
@@ -82,18 +82,38 @@ def clear_caches() -> None:
 
 @lru_cache(maxsize=None)
 def _project_dir(project: str) -> Path:
-    value = engine_client.get_value(project, "config-dir")
-    return Path(value)
+    try:
+        value = engine_client.get_value(project, "config-dir")
+    except engine_client.EngineError:
+        value = ""
+    if value:
+        return Path(value)
+    return harness_state.home() / f".{project}"
 
 
 @lru_cache(maxsize=None)
 def _repo_dir(project: str) -> str:
-    return engine_client.get_value(project, "repo-dir")
+    try:
+        value = engine_client.get_value(project, "repo-dir")
+    except engine_client.EngineError:
+        value = ""
+    if value:
+        return value
+    for info in harness_state.build_projects():
+        if info.name == project and info.anchor:
+            return info.anchor
+    return ""
 
 
 @lru_cache(maxsize=None)
 def _machine_name(project: str) -> str:
-    return engine_client.get_value(project, "machine")
+    try:
+        value = engine_client.get_value(project, "machine")
+    except engine_client.EngineError:
+        value = ""
+    if value:
+        return value
+    return str(harness_state.project_config(project).get("machine") or "")
 
 
 @lru_cache(maxsize=None)
@@ -208,6 +228,11 @@ def load_config() -> ProjectConfig:
     machine = _machine_name(project).strip()
     repo_dir = _repo_dir(project).strip()
     default_branch = str(repo_yaml.get("default_branch") or "").strip()
+    if not default_branch:
+        repos = harness_state.repos_registry().get("repos") or {}
+        entry = repos.get(project)
+        if isinstance(entry, dict):
+            default_branch = str(entry.get("default_branch") or "").strip()
     return ProjectConfig(
         repo_name=repo_name,
         machine=machine,
@@ -217,3 +242,27 @@ def load_config() -> ProjectConfig:
 
 def load_machines_yaml(repo_dir: str | Path) -> dict[str, MachineEntry]:
     return _load_machines_yaml(str(repo_dir))
+
+
+def machines_yaml_path(repo_dir: str | Path) -> Path:
+    root = Path(repo_dir)
+    project = project_name()
+    knowledge_repo = str(harness_state.project_config(project).get("knowledge_repo") or "").strip()
+    if knowledge_repo:
+        for info in harness_state.build_projects():
+            if info.name != knowledge_repo or not info.anchor:
+                continue
+            overlay_root = Path(info.anchor)
+            for candidate in (
+                overlay_root / ".agent-worktrees" / "machines.yaml",
+                overlay_root / "machines.yaml",
+            ):
+                if candidate.is_file():
+                    return candidate
+    for candidate in (
+        root / ".agent-worktrees" / "machines.yaml",
+        root / "machines.yaml",
+    ):
+        if candidate.is_file():
+            return candidate
+    return root / ".agent-worktrees" / "machines.yaml"

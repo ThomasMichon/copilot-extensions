@@ -19,9 +19,9 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from ..agent_worktrees_runtime import engine_module
 from .. import mux_mapping_registry
 from . import context, monitor_roots
-from ._engine_runtime import engine_module
 
 REAP_IDLE_GRACE_SECS = 6 * 3600
 _NO_AUTO_CLEAN_ENV = "AGENT_WORKTREES_NO_AUTO_CLEAN"

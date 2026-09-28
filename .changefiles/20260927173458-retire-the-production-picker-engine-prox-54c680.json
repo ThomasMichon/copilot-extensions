@@ -1,0 +1,9 @@
+{
+  "comment": "Retire the production Picker engine proxy layer",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

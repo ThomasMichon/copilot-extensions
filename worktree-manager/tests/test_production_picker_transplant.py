@@ -13,7 +13,7 @@ import pytest
 from worktree_manager import __main__ as entrypoint
 from worktree_manager import launcher
 from worktree_manager.production_picker import runner
-from worktree_manager.production_picker import _engine_runtime as engine_runtime
+from worktree_manager import agent_worktrees_runtime as engine_runtime
 
 from _installation_context_fixtures import namespaced_fixture, patch_profile
 

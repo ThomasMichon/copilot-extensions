@@ -12,7 +12,7 @@ import pytest
 
 
 def test_data_local_import_does_not_load_config(monkeypatch):
-    from worktree_manager.production_picker import config as cfg
+    from worktree_manager.production_picker import project_config as cfg
 
     def boom(*_a, **_k):
         raise AssertionError("load_config must not run at import")
@@ -27,7 +27,7 @@ def test_data_local_import_does_not_load_config(monkeypatch):
 
 
 def test_data_ssh_import_does_not_load_config(monkeypatch):
-    from worktree_manager.production_picker import config as cfg
+    from worktree_manager.production_picker import project_config as cfg
 
     def boom(*_a, **_k):
         raise AssertionError("load_config must not run at import")
