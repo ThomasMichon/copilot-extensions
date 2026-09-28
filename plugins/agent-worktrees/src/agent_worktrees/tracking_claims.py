@@ -487,7 +487,19 @@ def sweep_abandoned_obligations(
         except Exception:
             safe = None
         if obligations.should_abandon(gone=gone, safe=safe):
-            claim.state = obligations.ABANDONED
+            # pr-merge-obligation-gate defense 2: a `pr`-kind claim's
+            # gone-and-safe verdict IS "this PR is provably merged" (see
+            # sweep.py's `pr_merged`/`claim_gone`/`claim_safe`) -- a clean,
+            # successful hand-back, never an involuntary reclaim. Settle it
+            # as `released` (matching the foreground `_reconcile_active_pr`
+            # observation path) rather than `abandoned`, which this
+            # generic never-wedge sweep uses for every OTHER kind (a
+            # worktree/codespace/container whose holder crashed but whose
+            # content was independently proven safe -- genuinely a
+            # reclaim, not a normal completion).
+            claim.state = (
+                obligations.RELEASED if claim.kind == "pr" else obligations.ABANDONED
+            )
             reclaimed.append(claim)
     if reclaimed and save:
         tracking.save_record(record, path)

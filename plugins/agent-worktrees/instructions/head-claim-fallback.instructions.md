@@ -68,6 +68,36 @@ even runs is routinely slower than a quick manual check). If
 to a human or `agent-worktrees doctor --fix` rather than acting further on a
 guess.
 
+## If you opened a pull request, drive it through to merge
+
+`create-pr` claims the resulting PR on this worktree's outbound-resource
+ledger the moment the provider confirms it is genuinely open
+(`pr-merge-obligation-gate` defense 2) -- a live obligation, exactly like a
+child worktree, borrowed CodeSpace, or bridge session. **This claim exists
+no matter what the repo's `pr.strategy` says** (`keep-alive` or `detach`):
+`finalize`'s obligation gate reads the local claim ledger only, never
+`pr.strategy`, so an open, unmerged PR blocks finalize regardless of that
+setting. Merging is not optional busywork to skip past -- it is the only
+thing that clears the claim on its own; releasing it any other way requires
+an explicit, attributable operator action.
+
+- Directly, or through any downstream worktree/delegated agent you spawned:
+  drive every PR you (or it) opened through to a real merge. Opening a PR
+  and stopping, or reporting it as "landed" before it merges, is not the end
+  state. See the `worktree` skill's `references/pr-workflow.md` § "Default
+  conduct: drive every PR you open through to merge" for the exact waiting
+  policy per flow (self-merge / human-review / auto-complete).
+- The claim auto-releases the instant any PR-workflow command (`create-pr`,
+  `pr-ready`, `pr-status`, `pr-merge`, `finalize` itself, or the Picker's
+  background sweep) observes the PR as **merged** on the provider -- no
+  manual step needed on the happy path.
+- **Only the operator** may direct releasing that claim, resetting HEAD off
+  the unmerged commits, and abandoning the PR -- never do this on your own
+  judgment. That is `finalize --abandon --handoff-to <recipient>` (the
+  general obligation-gate escape hatch above), invoked only on the
+  operator's explicit instruction, never inferred from "this PR seems
+  stuck" or "CI has been red for a while".
+
 ## Rules
 
 - Never manually kill a pane or process to "fix" a stuck worktree -- diagnose
@@ -77,3 +107,5 @@ guess.
 - Never force-release or force-settle an outbound claim; resolve it via
   `claims show`/`sweep` and `references/obligations.md`, or the affirmative
   `--handoff-to` path -- never bypass the obligation gate.
+- Never abandon an open PR's claim, or reset HEAD off its unmerged commits,
+  on your own judgment -- that is an operator-directed action only.

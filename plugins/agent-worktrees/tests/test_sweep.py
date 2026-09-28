@@ -371,7 +371,12 @@ def test_sweep_reclaims_merged_pr_via_make_resolvers(monkeypatch):
     g, s = sweep.make_resolvers(types.SimpleNamespace())
     flipped = tracking.sweep_abandoned_obligations(rec, gone_of=g, safe_of=s, save=False)
     assert [c.ref for c in flipped] == ["o/r#merged"]
-    assert rec.resources[0].state == "abandoned"   # merged -> reclaimed
+    # pr-merge-obligation-gate defense 2: a merged PR is a clean hand-back,
+    # not an involuntary reclaim -- settled `released`, never `abandoned`
+    # (which stays reserved for every OTHER claim kind's crashed-but-safe
+    # case; see test_obligation_sweep.py's
+    # test_sweep_settles_merged_pr_claim_as_released_not_abandoned).
+    assert rec.resources[0].state == "released"   # merged -> released
     assert rec.resources[1].state == "active"      # open -> spared (still owed)
 
 

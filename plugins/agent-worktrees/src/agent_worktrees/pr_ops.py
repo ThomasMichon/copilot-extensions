@@ -40,7 +40,7 @@ import string
 from pathlib import Path
 
 from . import config as cfg
-from . import git_ops, hooks, tracking
+from . import git_ops, hooks, obligations, tracking
 from .config import Config, SourceAttribution
 from .tracking import PRRecord
 
@@ -1200,6 +1200,84 @@ def self_merge_bypass_note(
     )
 
 
+def _pr_claim_ref(pr: PRRecord) -> str:
+    """The resource-claim ``ref`` string identifying ``pr``'s PR.
+
+    Prefers the provider URL (matches both ``sweep.py``'s GitHub/ADO PR-view
+    regexes directly), falling back to the ``owner/repo#N`` shorthand
+    ``sweep.py`` also recognizes when no URL was ever recorded (e.g. a
+    manually ``set-pr``'d entry that only carries ``repo``/``number``).
+    Empty when neither is available -- no real PR identity to claim onto yet.
+    """
+    if pr.url:
+        return pr.url
+    if pr.repo and pr.number is not None:
+        return f"{pr.repo}#{pr.number}"
+    return ""
+
+
+def _ensure_pr_claim(
+    record: tracking.WorktreeRecord | None, pr: PRRecord | None,
+) -> None:
+    """Claim the resource ledger's ``pr``-kind entry for a confirmed-open PR.
+
+    ``pr-merge-obligation-gate`` defense 2: a worktree that opened a PR must
+    not be able to ``finalize`` while that PR sits open and unclaimed, no
+    matter what ``pr.strategy`` says -- ``finalize``'s existing generic
+    obligation gate (``_assert_obligations_settled``) already blocks on any
+    unsettled resource claim regardless of kind, so this only needs to
+    **create** the claim once a PR genuinely exists on the provider.
+
+    Deliberately narrow, per the effort's own design questions: only claims
+    a PR whose ``number`` is set AND whose ``state`` is the literal string
+    ``"open"`` -- never a numberless/``creating`` record (a failed or
+    ``--no-open`` ``create-pr`` call must not wrongly block finalize
+    forever), and never a bare non-``None`` number with an unconfirmed/blank
+    state (``set_pr`` persists state **without** a provider read; this must
+    wait for an actual provider observation of ``"open"`` -- see
+    ``_reconcile_active_pr``, which is exactly that confirmation path and
+    calls this helper once it has one). Idempotent: `add_resource_claim`
+    reuses a matching ``ref`` rather than duplicating it.
+    """
+    if record is None or pr is None or pr.number is None or pr.state != "open":
+        return
+    ref = _pr_claim_ref(pr)
+    if not ref:
+        return
+    try:
+        tracking.add_resource_claim(
+            record,
+            tracking.ResourceClaim(
+                kind="pr", ref=ref, created_at=tracking._now_iso(),
+                state=obligations.ACTIVE,
+                note=f"PR #{pr.number}" + (f" ({pr.repo})" if pr.repo else ""),
+            ),
+            save=False,
+        )
+    except ValueError:
+        # Owner is finalizing/orphaned/frozen -- nothing sane to claim onto;
+        # the caller's own save (if any) still reflects whatever else changed.
+        pass
+
+
+def _release_pr_claim(record: tracking.WorktreeRecord | None, pr: PRRecord | None) -> None:
+    """Settle a ``pr``-kind claim to ``released`` once its PR is confirmed MERGED.
+
+    Only ``merged`` releases the claim -- a PR ``closed`` *without* merging
+    is abandoned work, not a clean hand-back (mirrors ``sweep.py``'s
+    ``_github_pr_merged``/``_ado_pr_merged`` "never silently reclaimed"
+    contract for an unmerged close); its claim is left ``active`` so
+    finalize keeps blocking until an operator explicitly abandons it or the
+    PR is reopened and actually merged.
+    """
+    if record is None or pr is None:
+        return
+    ref = _pr_claim_ref(pr)
+    if not ref:
+        return
+    tracking.settle_resource_claim(record, ref, obligations.RELEASED, save=False)
+
+
 def _open_via_provider(
     result: dict,
     config: Config,
@@ -1345,6 +1423,11 @@ def _open_via_provider(
             record.parent_session = session
         if marker_published:
             target_pr.attribution_head = head_sha
+        # pr-merge-obligation-gate defense 2: the provider just confirmed
+        # this PR is genuinely open -- claim it now, in the SAME record save
+        # as everything else above, so a worktree can never finalize past an
+        # open PR it just created regardless of pr.strategy.
+        _ensure_pr_claim(record, target_pr)
         tracking.save_record(record)
     result["pr_opened"] = True
     result["url"] = pull.url
@@ -1746,6 +1829,15 @@ def _reconcile_active_pr(
         active.state = resolved
         if not active.closed_at:
             active.closed_at = tracking._now_iso()
+        if resolved == "merged":
+            # pr-merge-obligation-gate defense 2: a confirmed-merged PR is a
+            # clean hand-back, not an involuntary reclaim -- release its
+            # claim here so finalize's generic obligation gate unblocks the
+            # instant ANY of this function's many call sites (create-pr,
+            # pr-ready, pr-status, pr-nudge, the Picker's background sweep,
+            # pr-reconcile) next observes the merge, without waiting on the
+            # separate sweep/self-heal path.
+            _release_pr_claim(record, active)
         if best_effort:
             # Skip the persist on contention -- the monotonic transition is
             # re-applied next sweep; never block a critical updater.
@@ -1754,6 +1846,25 @@ def _reconcile_active_pr(
                     tracking.save_record(record)
         else:
             tracking.save_record(record)
+    else:
+        # Provider confirms the PR is still genuinely open (a real read
+        # succeeded and reported neither merged nor another terminal state)
+        # -- this IS the "successful provider observation of a non-terminal
+        # state" `_ensure_pr_claim` requires, closing the gap an out-of-band
+        # `set-pr` (which persists state with no provider read at all)
+        # leaves open. Idempotent + cheap; only actually writes when the
+        # claim doesn't already exist.
+        if active.state != "open":
+            active.state = "open"
+        had_claim = any(c.ref == _pr_claim_ref(active) for c in record.resources)
+        _ensure_pr_claim(record, active)
+        if not had_claim:
+            if best_effort:
+                with tracking._RecordLock(record.yaml_path, blocking=False) as lk:
+                    if lk.acquired:
+                        tracking.save_record(record)
+            else:
+                tracking.save_record(record)
 
 
 def _live_pr_state(

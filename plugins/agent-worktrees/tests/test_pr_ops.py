@@ -1607,6 +1607,68 @@ class TestPatchId:
         assert patch_ids == expected
 
 
+class TestPrClaimHelpers:
+    """pr-merge-obligation-gate defense 2: `_ensure_pr_claim`/`_release_pr_claim`."""
+
+    def _rec(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+        rec = tracking.WorktreeRecord(
+            worktree_id="wt-c", branch="worktree/wt-c",
+            worktree_path=str(tmp_path / "wt"), repo="o/r", machine="m",
+            platform="linux", started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
+            status="active", completed_at=None, sessions=None,
+        )
+        tracking.save_record(rec, tmp_path / "wt-c.yaml")
+        return rec
+
+    def test_ref_prefers_url_over_shorthand(self):
+        pr = tracking.PRRecord(number=9, repo="o/r", url="https://x/pull/9")
+        assert pr_ops._pr_claim_ref(pr) == "https://x/pull/9"
+
+    def test_ref_falls_back_to_shorthand(self):
+        pr = tracking.PRRecord(number=9, repo="o/r")
+        assert pr_ops._pr_claim_ref(pr) == "o/r#9"
+
+    def test_ref_empty_without_number_or_repo(self):
+        assert pr_ops._pr_claim_ref(tracking.PRRecord()) == ""
+
+    def test_numberless_creating_pr_is_never_claimed(self, tmp_path, monkeypatch):
+        """A failed/`--no-open` create-pr leaves a numberless `creating`
+        record -- it must never block finalize forever."""
+        rec = self._rec(tmp_path, monkeypatch)
+        pr_ops._ensure_pr_claim(rec, tracking.PRRecord(state="creating"))
+        assert rec.resources == []
+
+    def test_numbered_but_unconfirmed_state_is_never_claimed(self, tmp_path, monkeypatch):
+        """A bare `set-pr`-recorded number with no provider-observed state
+        yet must not be blindly trusted (set_pr persists state with NO
+        provider read)."""
+        rec = self._rec(tmp_path, monkeypatch)
+        pr_ops._ensure_pr_claim(rec, tracking.PRRecord(number=5, repo="o/r", state=""))
+        assert rec.resources == []
+
+    def test_confirmed_open_is_claimed(self, tmp_path, monkeypatch):
+        rec = self._rec(tmp_path, monkeypatch)
+        pr = tracking.PRRecord(number=5, repo="o/r", state="open")
+        pr_ops._ensure_pr_claim(rec, pr)
+        assert len(rec.resources) == 1
+        assert rec.resources[0].kind == "pr" and rec.resources[0].state == "active"
+        assert rec.resources[0].ref == "o/r#5"
+
+    def test_release_settles_to_released_not_abandoned(self, tmp_path, monkeypatch):
+        rec = self._rec(tmp_path, monkeypatch)
+        pr = tracking.PRRecord(number=5, repo="o/r", state="open")
+        pr_ops._ensure_pr_claim(rec, pr)
+        pr_ops._release_pr_claim(rec, pr)
+        assert rec.resources[0].state == "released"
+
+    def test_release_without_existing_claim_is_a_no_op(self, tmp_path, monkeypatch):
+        rec = self._rec(tmp_path, monkeypatch)
+        pr_ops._release_pr_claim(rec, tracking.PRRecord(number=5, repo="o/r"))
+        assert rec.resources == []
+
+
 class TestReconcileActivePrSelfHeal:
     """#1375/#1703: reconcile heals a zombie open PR whose content already merged."""
 
@@ -1696,6 +1758,91 @@ class TestReconcileActivePrSelfHeal:
         self._patch(monkeypatch, fake)
         pr_ops._reconcile_active_pr(rec, self._config(), best_effort=True)
         assert tracking.load_record(rec.yaml_path).active_pr().state == "merged"
+
+    # ── pr-merge-obligation-gate defense 2: claim lifecycle ──────────────────
+
+    def test_confirmed_open_creates_active_pr_claim(self, tmp_path, monkeypatch):
+        """A provider-confirmed-still-open PR gets an active `pr` claim --
+        the structural gate that blocks finalize independent of pr.strategy."""
+        rec = self._record(tmp_path, monkeypatch)
+        assert rec.resources == []
+        fake = self._fake_provider(merged=False, contained=False)
+        self._patch(monkeypatch, fake)
+        pr_ops._reconcile_active_pr(rec, self._config())
+        claims = [c for c in rec.resources if c.kind == "pr"]
+        assert len(claims) == 1
+        assert claims[0].state == "active"
+        assert claims[0].ref == pr_ops._pr_claim_ref(rec.active_pr())
+        # Persisted, not just in-memory.
+        on_disk = [c for c in tracking.load_record(rec.yaml_path).resources
+                   if c.kind == "pr"]
+        assert len(on_disk) == 1 and on_disk[0].state == "active"
+
+    def test_confirmed_open_claim_is_idempotent(self, tmp_path, monkeypatch):
+        rec = self._record(tmp_path, monkeypatch)
+        fake = self._fake_provider(merged=False, contained=False)
+        self._patch(monkeypatch, fake)
+        pr_ops._reconcile_active_pr(rec, self._config())
+        pr_ops._reconcile_active_pr(rec, self._config())
+        assert len([c for c in rec.resources if c.kind == "pr"]) == 1
+
+    def test_merge_releases_pr_claim(self, tmp_path, monkeypatch):
+        """A merged PR's claim settles to `released` -- a clean hand-back,
+        not the sweep's `abandoned` (involuntary reclaim) disposition."""
+        rec = self._record(tmp_path, monkeypatch)
+        # Pre-existing active claim, as if `create-pr` claimed it earlier.
+        tracking.add_resource_claim(
+            rec, tracking.ResourceClaim(
+                kind="pr", ref=pr_ops._pr_claim_ref(rec.active_pr()),
+                created_at=tracking._now_iso(), state="active"),
+            save=False)
+        fake = self._fake_provider(merged=True, contained=None)
+        self._patch(monkeypatch, fake)
+        pr_ops._reconcile_active_pr(rec, self._config())
+        claims = [c for c in rec.resources if c.kind == "pr"]
+        assert len(claims) == 1 and claims[0].state == "released"
+
+    def test_zombie_heal_to_merged_also_releases_claim(self, tmp_path, monkeypatch):
+        rec = self._record(tmp_path, monkeypatch)
+        tracking.add_resource_claim(
+            rec, tracking.ResourceClaim(
+                kind="pr", ref=pr_ops._pr_claim_ref(rec.active_pr()),
+                created_at=tracking._now_iso(), state="active"),
+            save=False)
+        fake = self._fake_provider(merged=False, contained=True)
+        self._patch(monkeypatch, fake)
+        pr_ops._reconcile_active_pr(rec, self._config())
+        claims = [c for c in rec.resources if c.kind == "pr"]
+        assert len(claims) == 1 and claims[0].state == "released"
+
+    def test_closed_unmerged_never_releases_claim(self, tmp_path, monkeypatch):
+        """A closed-without-merge PR is abandoned WORK, not a clean
+        hand-back -- its claim stays active (blocking) until an operator
+        explicitly abandons it, mirroring sweep.py's own
+        never-silently-reclaim-an-unmerged-close contract."""
+        rec = self._record(tmp_path, monkeypatch)
+        tracking.add_resource_claim(
+            rec, tracking.ResourceClaim(
+                kind="pr", ref=pr_ops._pr_claim_ref(rec.active_pr()),
+                created_at=tracking._now_iso(), state="active"),
+            save=False)
+
+        from agent_worktrees.providers import PullResult
+
+        class _ClosedProvider:
+            name = "gitea"
+
+            def get_pull(self, repo, number, *, api_base="", token=None):
+                return PullResult(number=number, state="closed", merged=False,
+                                  head_sha="abc", base_ref="master")
+
+            def head_contained_in_base(self, *a, **k):
+                return None
+
+        self._patch(monkeypatch, _ClosedProvider())
+        pr_ops._reconcile_active_pr(rec, self._config())
+        claims = [c for c in rec.resources if c.kind == "pr"]
+        assert len(claims) == 1 and claims[0].state == "active"
 
 
 class TestRefreshHeadObservation:

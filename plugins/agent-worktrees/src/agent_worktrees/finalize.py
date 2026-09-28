@@ -1670,6 +1670,28 @@ def validate_and_finalize(
     )
     _advise_other_live_sessions(record, current_session_ref)
 
+    # pr-merge-obligation-gate defense 2: refresh the tracked PR(s) against
+    # the provider RIGHT BEFORE the obligation gate reads the local ledger.
+    # `_reconcile_active_pr` is the one shared observation path every other
+    # PR-workflow verb already funnels through (create-pr, pr-ready,
+    # pr-status, the Picker's background sweep, pr-reconcile); calling it
+    # here too means finalize never trusts a stale/never-verified local
+    # ``pr.state`` -- in particular an out-of-band ``set-pr`` (which
+    # persists state with NO provider read at all) gets its first real
+    # provider confirmation right here, so its `pr`-kind claim is created
+    # (still open) or released (confirmed merged) before the gate below
+    # ever runs. Best-effort: a provider failure/timeout degrades to the
+    # local state exactly as every other caller of this function already
+    # tolerates -- finalize is never blocked BY the reconcile itself, only
+    # by whatever obligation the ledger already (or now) records.
+    if record is not None and repo.pr.enabled:
+        try:
+            from . import pr_ops as _pr_ops
+
+            _pr_ops._reconcile_active_pr(record, config)
+        except Exception:
+            pass
+
     # Obligation gate (resource-obligation-settlement Phase 2). A worktree
     # answers for the outbound resources it still owns before it may finalize.
     # Runs BEFORE any destructive step so a blocking gate refuses cleanly. Read

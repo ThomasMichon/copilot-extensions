@@ -4,7 +4,8 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** per-phase PRs against `dev`
 - **Created:** 2026-09-27
-- **Status:** Active (Phase 1 done; Phase 2/3 remain)
+- **Status:** In Progress (Phases 1-3 core landed; operator-authorization
+  follow-up deferred, see Plan)
 - **Vision:** `visions/agent-fabric` §§ `resource-claims` / `resource-accountability`
   — extends the `worktree-finality-and-obligations` effort's implementation of
   that vision (`efforts/2026/08/28 worktree-finality-and-obligations/`, Done)
@@ -166,6 +167,11 @@ explicit and enforced, not just implied by the default.)_
       **config value** silently resolving to `detach` by accident (config
       default + duplicate-key bugs), both fixed in #4374. No `keep-alive`
       worktree can currently reset HEAD off unmerged, unowned-PR content.
+      **Phase 2 addendum:** since this audit, the claim gate below now ALSO
+      runs ahead of `_pr_finalize_precondition` for any worktree holding a
+      confirmed-open PR claim, so even the `detach` opt-out's own "open PR on
+      the remote is early-ok" branch is only ever reached after the PR
+      merges or an operator explicitly abandons the claim.
 - [x] Where a gap exists, add an explicit guard (not just documentation)
       that refuses a HEAD-reset-past-unmerged-commits operation unless
       `strategy == "detach"`, naming the blocking reason. **No code gap
@@ -173,7 +179,8 @@ explicit and enforced, not just implied by the default.)_
       already names the blocking reason correctly for `keep-alive`
       ("tracked PR is not merged and no feature branch is on '{remote}'" /
       "In 'keep-alive' mode finalize verifies only alignment with
-      {upstream}").
+      {upstream}"). Phase 2's claim gate adds a second, independent layer
+      ahead of it (see addendum above), not a replacement.
 - [x] Document the guard in `references/pr-workflow.md` and this effort's
       Journal. **Found and fixed real doc drift while documenting:**
       `pr-workflow.md`'s "Finalizing a PR-mode worktree" section (and its
@@ -192,7 +199,7 @@ journal them without a schema change." This phase defines that existing
 kind's PR identity and lifecycle; it must not introduce a second,
 incompatible claim type alongside it.)_
 
-- [ ] Define the `pr`-kind claim's identity (provider + repo + PR number,
+- [x] Define the `pr`-kind claim's identity (provider + repo + PR number,
       matching how `PRRecord` already identifies a tracked PR) and lifecycle
       within the existing vocabulary: what puts it into `active` (**not**
       merely a `PRRecord` being saved — see the numberless-`creating`-state
@@ -200,92 +207,117 @@ incompatible claim type alongside it.)_
       merges, or the operator explicitly releases it), and how it
       round-trips through the existing claim ledger
       (`tracking.ResourceClaim`) the same way CodeSpace/container/bridge
-      claims already do.
-- [ ] Wire `create-pr` to place the claim; wire `_assert_obligations_settled`
+      claims already do. Landed as `pr_ops._pr_claim_ref`/`_ensure_pr_claim`/
+      `_release_pr_claim`.
+- [x] Wire `create-pr` to place the claim; wire `_assert_obligations_settled`
       (or a new gate alongside it) to check it before `finalize` proceeds.
+      `_assert_obligations_settled` needed **no changes at all** — it
+      already blocks on any unsettled claim of any kind (only `session` is
+      excluded); Phase 2 only needed to make sure a `pr` claim actually gets
+      **created**. `_open_via_provider` claims immediately on provider-
+      confirmed open; `finalize` itself now also calls
+      `pr_ops._reconcile_active_pr` before the gate runs (closes the
+      out-of-band-`set-pr` gap — see design questions below).
 - [ ] Explicit, attributable release path: an operator-directed
-      `--abandon`-style flag (mirroring the existing obligation-gate
-      abandon/`--handoff-to` shape) that releases a `pr`-kind claim on an
-      explicitly named PR, distinct from the general obligation abandon
-      path, since abandoning a PR claim means "give up on getting this PR
-      merged," a materially bigger decision than re-homing a CodeSpace. This
-      path must enforce the operator-only boundary itself (see design
-      question below) — a bare CLI flag callable by any invoker does not
-      satisfy defense 3's "only the operator may countermand" contract.
-- [ ] Tests: claim created on an actually-opened PR (not a numberless
+      `--abandon`-style flag ... — **not done as its own dedicated verb.**
+      The existing general `finalize --abandon --handoff-to <recipient>`
+      escape hatch already releases ANY unsettled claim (including a `pr`
+      one) attributably (it's logged + requires a named recipient); a
+      *PR-specific* abandon flag distinct from that path, plus real
+      operator-vs-agent authorization (see the design question below), is
+      deliberately deferred — this repo has no invoker-identity mechanism at
+      this layer to enforce it cryptographically, and inventing one is a
+      separate, larger effort. Tracked as a follow-up, not silently dropped.
+- [x] Tests: claim created on an actually-opened PR (not a numberless
       `creating` record), blocks `finalize` while open, auto-releases on
-      merge observed through **every** existing merge-detection path (see
-      design question below), explicit-release path works, is attributable
-      (who released it, when, why), and is rejected for a non-operator
-      invoker.
+      merge observed through the shared `_reconcile_active_pr` path (the one
+      every other PR-workflow verb already funnels through) and through the
+      sweep self-heal path, is NOT released on an unmerged close. See
+      `tests/test_pr_ops.py::TestPrClaimHelpers`/`TestReconcileActivePrSelfHeal`,
+      `tests/test_finalize_gate.py::test_active_pr_claim_blocks_finalize_regardless_of_strategy`,
+      `tests/test_obligation_sweep.py::test_sweep_settles_merged_pr_claim_as_released_not_abandoned`.
+      **Not covered:** an attributable/rejected-for-non-operator release
+      path (deferred with the bullet above), and a full live-git
+      `validate_and_finalize` end-to-end run (the unit-level coverage above
+      already exercises every individual seam).
 
 #### Design questions to resolve before implementation (from Copilot review)
 
-- **Claim timing vs. `create-pr` failure modes.** `create-pr` persists a
-  `creating`-state `PRRecord` *before* the provider actually opens the PR,
-  and supports `--no-open` and provider-failure paths that can leave a
-  numberless record. The claim must not go `active` until the PR is
-  confirmed actually open (a real provider number exists) — otherwise a
-  failed/`--no-open` create-pr call wrongly blocks `finalize` forever.
-- **Manual association via `set-pr`.** The documented workflow also allows
-  opening a PR out-of-band and recording it via `set-pr`, not just via
-  `create-pr`. The claim design must cover this path too, or a
-  manually-associated open PR goes unclaimed. `set-pr --state open`
-  persists that state **without a provider read**, so a non-null PR number
-  alone does not confirm the PR is actually open — an already-merged or
-  closed out-of-band PR recorded this way could otherwise create an
-  `active` claim and block `finalize` indefinitely. Require a successful
-  provider observation of a non-terminal state (or equivalent evidence from
-  the auto-open response) before the claim goes `active`, not the presence
-  of a number.
-- **Unify every merge-observation path.** `pr_ops`, `pr_reconcile`, and
-  `prune` each have their own reconciliation logic, and `sweep.py` currently
-  marks a merged `pr`-kind claim `abandoned` (not `released`/`at-rest`) —
-  inconsistent with this effort's intent. All paths that can observe an
-  external merge must settle the claim through one shared path before
-  `_assert_obligations_settled` runs, or an externally-merged PR can leave
-  the claim `active` and wrongly block `finalize`.
-- **Operator-only enforcement, not just a CLI flag.** Defense 3's "only the
-  operator may countermand" boundary needs an actual authorization/
-  provenance mechanism on the abandon path (not merely a flag any invoker
-  can pass) plus a regression test that an agent-only invocation is
-  rejected.
-- **Generic `claims release`/`claims settle` are an existing bypass.** These
-  pre-existing verbs already accept any claim kind, including `pr`, and can
-  currently make an open PR claim non-blocking without going through any
-  PR-specific path. Phase 2 must gate those generic verbs for `kind=pr` (or
-  route them through the same operator-provenance check as the dedicated
-  abandon path) — otherwise the operator-only boundary has a pre-existing
-  side door.
+- **Claim timing vs. `create-pr` failure modes.** ... **Resolved:**
+  `_ensure_pr_claim` requires both `pr.number is not None` AND
+  `pr.state == "open"` (a real provider-observed value, never a bare
+  default) — a numberless/`creating`/failed/`--no-open` record is never
+  claimed.
+- **Manual association via `set-pr`.** ... **Resolved:** `_ensure_pr_claim`
+  is deliberately NEVER called directly from `set_pr`/`_set_pr_locked` (which
+  persists state with no provider read) — only from `_open_via_provider`
+  (a real provider response) and `_reconcile_active_pr` (a real provider
+  read). `finalize` now calls `_reconcile_active_pr` itself before the
+  obligation gate runs, so an out-of-band `set-pr`'d PR gets its first real
+  provider confirmation — and its claim — at the latest possible/soonest
+  necessary moment: right before finalize would otherwise check the ledger.
+- **Unify every merge-observation path.** ... **Resolved:** `_reconcile_active_pr`
+  is the one shared path (`create-pr`, `pr-ready`, `pr-status`, `pr-nudge`,
+  the Picker's background sweep, `pr_reconcile.py`, and now `finalize`
+  itself all funnel through it) and now settles the claim to `released` on
+  a confirmed merge. The independent sweep/self-heal crash-recovery path
+  (`sweep.py`'s `pr_merged` + `tracking_claims.sweep_abandoned_obligations`)
+  is fixed to settle a `pr`-kind claim as `released` (a clean hand-back)
+  instead of the generic `abandoned` it used for every other kind.
+- **Operator-only enforcement, not just a CLI flag.** **Not resolved** —
+  deferred with the abandon-path bullet above. This needs its own design
+  (an actual invoker-identity/provenance signal this layer doesn't have
+  today), not a bolt-on flag that would look enforced without being so.
+- **Generic `claims release`/`claims settle` are an existing bypass.**
+  **Not resolved** — same reason as above (gating them meaningfully needs
+  the same authorization primitive). Still an open side door; noted here so
+  it isn't rediscovered as a surprise later.
 
 ### Phase 3 — Agent-guidance instruction
 
-- [ ] Add or extend a static-fallback `.instructions.md` (matching this
+- [x] Add or extend a static-fallback `.instructions.md` (matching this
       repo's own pattern — see `plugins/*/instructions/*.md`) directing
       every agent to drive every PR it opens, directly or via a downstream
       worktree/agent, through to merge — and that only the operator may
       direct releasing that claim, resetting HEAD, and abandoning it.
-- [ ] Cross-reference from the `worktree` skill (`pr-workflow.md`'s
+      Extended `plugins/agent-worktrees/instructions/head-claim-fallback.instructions.md`
+      (already the ambient, always-loaded obligation-gate fallback) with a
+      new "If you opened a pull request" section, rather than adding a
+      redundant sibling file.
+- [x] Cross-reference from the `worktree` skill (`pr-workflow.md`'s
       "Default conduct: drive every PR you open through to merge" section
       already states this in prose; this phase makes it load-bearing
       ambient guidance, not just skill prose an agent might not load).
 
 ## Validation Plan
 
-- [ ] A worktree that opens a PR and attempts `finalize` before merge is
+- [x] A worktree that opens a PR and attempts `finalize` before merge is
       **blocked** by the new obligation gate even when `pr.strategy` is
       unset or misconfigured to `detach` by mistake (regression coverage
-      for the exact failure class that produced #4328 and siblings).
-- [ ] A worktree cannot reset `worktree/<id>` off unmerged commits without
+      for the exact failure class that produced #4328 and siblings). See
+      `test_finalize_gate.py::test_active_pr_claim_blocks_finalize_regardless_of_strategy`.
+- [x] A worktree cannot reset `worktree/<id>` off unmerged commits without
       either the PR merging or an explicit, attributable `detach`/abandon
-      action.
-- [ ] Once the PR merges, the obligation auto-settles and `finalize`
-      proceeds without any manual claim release.
+      action. Covered structurally: the claim gate runs before
+      `_pr_finalize_precondition`'s `detach`-only early-ok branch can ever be
+      reached (see Phase 1's finding above); `--abandon --handoff-to` is the
+      attributable escape hatch, pre-existing and unchanged.
+- [x] Once the PR merges, the obligation auto-settles and `finalize`
+      proceeds without any manual claim release. See
+      `TestReconcileActivePrSelfHeal::test_merge_releases_pr_claim` /
+      `test_zombie_heal_to_merged_also_releases_claim` and
+      `test_sweep_settles_merged_pr_claim_as_released_not_abandoned`.
 - [ ] An operator-directed release (abandon the PR claim, reset HEAD) works,
       is attributable in the claim ledger, and is refused without explicit
-      operator direction.
-- [ ] Existing `worktree-finality-and-obligations` obligation-gate tests
-      (CodeSpace/container/bridge-session claims) show no regression.
+      operator direction. **Partially covered**: the pre-existing generic
+      `--abandon --handoff-to` path already does the first two (attributable,
+      logged); "refused without explicit operator direction" needs the
+      deferred authorization primitive from Phase 2's design questions — not
+      yet implemented or tested.
+- [x] Existing `worktree-finality-and-obligations` obligation-gate tests
+      (CodeSpace/container/bridge-session claims) show no regression. Full
+      `test_finalize_gate.py`/`test_obligation_sweep.py`/`test_pr_ops.py`/
+      `test_sweep.py`/`test_finalize_precondition.py` suites pass (274 tests).
 
 ## Proposal
 
@@ -313,4 +345,45 @@ _Pending._
   `references/pr-workflow.md` stated "finalize is decoupled from merge"
   universally, when that was only ever true under `detach`. Corrected both
   the workflow-step summary and the "Finalizing a PR-mode worktree" section
-  to state   the actual `keep-alive`/`detach` split.
+  to state the actual `keep-alive`/`detach` split.
+
+### 2026-09-28 — Phases 2-3 core landed (concurrent with a "backup open-PR
+gate", #4389, landed independently the same day -- see below)
+
+- Landed the structural claim gate: `_open_via_provider` claims a PR the
+  instant the provider confirms it open; `_reconcile_active_pr` (the one
+  path every PR-workflow verb already shares) both ensures the claim on a
+  confirmed-still-open read and releases it to `released` on a confirmed
+  merge; `finalize` now calls that same reconcile before its (pre-existing,
+  unchanged) generic obligation gate runs, closing the out-of-band `set-pr`
+  gap. Fixed `sweep.py`'s crash-recovery self-heal path
+  (`tracking_claims.sweep_abandoned_obligations`) to settle a merged `pr`
+  claim as `released` instead of `abandoned` — the exact inconsistency
+  flagged in this effort's own kickoff.
+- Net effect: an open, unmerged PR now blocks `finalize` **regardless of
+  `pr.strategy`** through the pre-existing generic obligation gate, once the
+  new `pr`-kind claim exists on the ledger.
+- Extended the ambient `head-claim-fallback.instructions.md` (Phase 3)
+  rather than adding a new file, since it already carries the general
+  obligation-gate fallback guidance this is one more case of.
+- **Landed independently the same day, discovered on rebase:** #4389 added
+  `finalize_open_pr_gate.py`, a SECOND, independent "backup" gate that
+  live-re-reconciles every tracked PR (not just the active one) and refuses
+  finalize on any still-open one directly off `record.prs`/`has_live_pr()`
+  — deliberately not a replacement for the claim-ledger mechanism above, per
+  its own docstring. The two now run back-to-back in `validate_and_finalize`
+  (claim gate via `_assert_obligations_settled`, then the backup gate) —
+  genuinely complementary, not duplicative: the claim gate is the
+  structural, ledger-integrated defense (auto-releases on merge, composes
+  with every other resource kind); the backup gate is a live, PR-record-
+  direct re-check independent of whether a claim was ever correctly placed
+  in the first place. No conflict to reconcile beyond this Journal entry and
+  a straightforward rebase (both touched adjacent code in `finalize.py` but
+  auto-merged cleanly).
+- **Deliberately deferred** (design questions never fully resolved, tracked
+  above rather than dropped): a PR-specific `--abandon`-style verb distinct
+  from the general obligation abandon path, and any actual operator-vs-agent
+  authorization primitive gating it (or the pre-existing generic `claims
+  release`/`claims settle` side door) — this layer has no invoker-identity
+  signal to enforce that boundary on today, and inventing one is its own,
+  separate effort. Surfaced explicitly rather than silently narrowing scope.
