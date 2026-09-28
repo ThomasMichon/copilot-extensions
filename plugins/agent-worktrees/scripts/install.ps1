@@ -1729,15 +1729,58 @@ function Deploy-Package {
     }
 
     # Vendored plugin-resolution lib (agent-plugin-resolve / module
-    # plugin_resolve). Like config-migrate, install it first so the package's
-    # dependency is satisfied from the local path: the venv build prefers
-    # `python -m pip`, which does NOT honor pyproject's [tool.uv.sources] path,
-    # so the dep must already be present when the main package installs.
+    # plugin_resolve). Plugin-vendored (marketplace/release layout) or, when
+    # absent, the monorepo's own canonical `libs/plugin-resolve` (git-checkout/
+    # dev layout, uv-editable canonical reference -- vendor-pointer-
+    # generalization effort, Phase 1). Needed even when `uv` is available,
+    # since the `Invoke-VenvPackageInstall` fallback to bare `python -m pip`
+    # (used when `uv` is absent) does not honor `[tool.uv.sources]` at all.
     $pluginResolveDir = Join-Path $PluginDir 'libs\plugin-resolve'
+    if (-not (Test-Path (Join-Path $pluginResolveDir 'pyproject.toml'))) {
+        $pluginResolveDir = Join-Path $PluginDir '..\..\libs\plugin-resolve'
+    }
     if (Test-Path (Join-Path $pluginResolveDir 'pyproject.toml')) {
         $libRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-plugin-resolve' -PkgDir $pluginResolveDir
         if ($libRes.ExitCode -ne 0) {
             Write-ServiceErr "plugin-resolve library install failed (exit $($libRes.ExitCode))"
+            if ($libRes.Output.Trim()) { Write-ServiceErr ("install: " + $libRes.Output.Trim()) }
+            $ErrorActionPreference = $prevEAP
+            return $false
+        }
+    }
+
+    # Vendored plugin contribution registry lib (agent-dropin-registry /
+    # module dropin_registry). Same dev/release-layout fallback as
+    # config-migrate/plugin-resolve above (vendor-pointer-generalization
+    # effort, Phase 1).
+    $dropinRegistryDir = Join-Path $PluginDir 'libs\dropin-registry'
+    if (-not (Test-Path (Join-Path $dropinRegistryDir 'pyproject.toml'))) {
+        $dropinRegistryDir = Join-Path $PluginDir '..\..\libs\dropin-registry'
+    }
+    if (Test-Path (Join-Path $dropinRegistryDir 'pyproject.toml')) {
+        $libRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-dropin-registry' -PkgDir $dropinRegistryDir
+        if ($libRes.ExitCode -ne 0) {
+            Write-ServiceErr "dropin-registry library install failed (exit $($libRes.ExitCode))"
+            if ($libRes.Output.Trim()) { Write-ServiceErr ("install: " + $libRes.Output.Trim()) }
+            $ErrorActionPreference = $prevEAP
+            return $false
+        }
+    }
+
+    # Vendored plugin activation/inventory lib (agent-plugin-activation /
+    # module plugin_activation). Installed AFTER dropin-registry and
+    # plugin-resolve above: it imports both at module load time, so its own
+    # install step must come after theirs (mirrors agent-logger's own
+    # install-order guard). Same dev/release-layout fallback (vendor-pointer-
+    # generalization effort, Phase 1).
+    $pluginActivationDir = Join-Path $PluginDir 'libs\plugin-activation'
+    if (-not (Test-Path (Join-Path $pluginActivationDir 'pyproject.toml'))) {
+        $pluginActivationDir = Join-Path $PluginDir '..\..\libs\plugin-activation'
+    }
+    if (Test-Path (Join-Path $pluginActivationDir 'pyproject.toml')) {
+        $libRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-plugin-activation' -PkgDir $pluginActivationDir
+        if ($libRes.ExitCode -ne 0) {
+            Write-ServiceErr "plugin-activation library install failed (exit $($libRes.ExitCode))"
             if ($libRes.Output.Trim()) { Write-ServiceErr ("install: " + $libRes.Output.Trim()) }
             $ErrorActionPreference = $prevEAP
             return $false
