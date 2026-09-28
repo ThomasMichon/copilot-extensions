@@ -583,20 +583,21 @@ def _config_from_args(args: argparse.Namespace) -> Config:
     return Config(host=host, port=cfg.port if port is None else int(port))
 
 
-def serve(config: Config | None = None, *, passive: bool = False) -> None:
+def serve(cfg: Config | None = None, *, passive: bool = False) -> None:
     """Lazily import and delegate to the real ``.server.serve``.
 
     Kept as a real, always-present module attribute (not a bare local
     import inside each caller) so tests can monkeypatch ``cli.serve``
     exactly as before -- only the heavy FastAPI/uvicorn import underneath
-    is deferred, to the first actual call. ``config`` keeps its original
-    ``None``-defaulted signature (``server.serve``'s own default) so any
-    existing caller of ``agent_index.__main__.serve()`` with no argument
-    keeps working unchanged.
+    is deferred, to the first actual call. Signature (parameter name
+    ``cfg``, defaulting to ``None``) matches ``server.serve`` exactly, so
+    any existing caller of ``agent_index.__main__.serve()`` -- positional
+    or keyword, with no argument or with ``cfg=...`` -- keeps working
+    unchanged.
     """
     from .server import serve as _serve
 
-    return _serve(config, passive=passive)
+    return _serve(cfg, passive=passive)
 
 
 def cmd_start(args: argparse.Namespace) -> int:

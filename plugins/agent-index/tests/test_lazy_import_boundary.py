@@ -75,9 +75,10 @@ def test_importing_main_never_loads_server_module_even_with_fastapi_blocked():
 def test_non_service_subcommands_work_with_fastapi_blocked():
     """`--version`, `--help`, and `status` never touch the service shell, so
     all three must succeed even with fastapi/uvicorn/pydantic blocked.
-    ``--version`` uses argparse's own ``action="version"``-style ``exit()``
-    (SystemExit), not a normal return, so catch that explicitly."""
-    result = _run(
+    Each runs in its own fresh subprocess so a regression in one path (e.g.
+    ``--help`` accidentally importing ``agent_index.server``) can't hide
+    behind another path's success."""
+    version_result = _run(
         "from agent_index.__main__ import main\n"
         "try:\n"
         "    main(['--version'])\n"
@@ -88,8 +89,32 @@ def test_non_service_subcommands_work_with_fastapi_blocked():
         "assert 'agent_index.server' not in sys.modules\n"
         "print('OK')\n"
     )
-    assert result.returncode == 0, result.stderr
-    assert "OK" in result.stdout
+    assert version_result.returncode == 0, version_result.stderr
+    assert "OK" in version_result.stdout
+
+    help_result = _run(
+        "from agent_index.__main__ import main\n"
+        "try:\n"
+        "    main(['--help'])\n"
+        "except SystemExit as exc:\n"
+        "    assert exc.code in (0, None), f'--help exited {exc.code}'\n"
+        "else:\n"
+        "    raise AssertionError('expected --help to call parser.exit()')\n"
+        "assert 'agent_index.server' not in sys.modules\n"
+        "print('OK')\n"
+    )
+    assert help_result.returncode == 0, help_result.stderr
+    assert "OK" in help_result.stdout
+
+    status_result = _run(
+        "from agent_index.__main__ import main\n"
+        "rc = main(['status'])\n"
+        "assert rc == 0, f'status failed: {rc}'\n"
+        "assert 'agent_index.server' not in sys.modules\n"
+        "print('OK')\n"
+    )
+    assert status_result.returncode == 0, status_result.stderr
+    assert "OK" in status_result.stdout
 
 
 def test_start_command_fails_only_at_actual_invocation_not_at_import():
