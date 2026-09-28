@@ -57,7 +57,18 @@ jobs:
         id: widen-pr
         uses: peter-evans/create-pull-request@v7
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # NOT the default GITHUB_TOKEN: GitHub never fires other workflow
+          # events (including `pull_request`) for content pushed/authored
+          # with it -- a documented anti-recursion safeguard -- so a
+          # GITHUB_TOKEN-authored PR here would never get a `ci.yml`
+          # `pull_request` run at all, permanently missing the "main source
+          # gate" required check and wedging every single one of these PRs
+          # (confirmed: dozens opened and closed unmerged since #3622-erratum
+          # tightened that gate, e.g. #2994-#3914). Use the same
+          # APERTURE_RELEASE_TOKEN PAT validate-and-promote.yml's own
+          # main-targeting PR already relies on for exactly this reason, so
+          # this PR is authored as ThomasMichon and triggers CI normally.
+          token: ${{ secrets.APERTURE_RELEASE_TOKEN }}
           commit-message: "tools: widen-safe module-size baseline refresh (automated)"
           title: "tools: widen-safe module-size baseline refresh (automated)"
           body: |
