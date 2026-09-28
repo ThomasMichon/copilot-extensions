@@ -1,0 +1,9 @@
+{
+  "comment": "Fix send/_resolve_target to resolve a worktree handle whose session was minted with a different id (create --worktree-id / resume_worktree), instead of misreading it as an unknown agent name and attempting a fresh spawn (#2247). Adds a clean-room agent-bridge-solo regression stage.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

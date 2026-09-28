@@ -1,6 +1,6 @@
 {
   "name": "agent-bridge-solo",
-  "description": "Tier-P F1 solo scenario: install ONLY agent-bridge (the without-agent-worktrees degenerate case) and assert the DEGRADE-SAFE contract -- agent-bridge is loose-coupled to agent-worktrees (no hard import; reads AW data files + shells binstubs when present, falls open when absent), so installed alone it must still provision, expose a binstub with a real version, and answer its read verbs (agents/machines/sessions/status) rather than crash on a missing base. Name-free / public.",
+  "description": "Tier-P F1 solo scenario: install ONLY agent-bridge (the without-agent-worktrees degenerate case) and assert the DEGRADE-SAFE contract -- agent-bridge is loose-coupled to agent-worktrees (no hard import; reads AW data files + shells binstubs when present, falls open when absent), so installed alone it must still provision, expose a binstub with a real version, and answer its read verbs (agents/machines/sessions/status) rather than crash on a missing base. Also guards copilot-extensions#2247: `send <worktree-handle>` must resolve a session minted with a different random session id (e.g. via `create --worktree-id`) rather than misreading the handle as an unknown agent name. Name-free / public.",
   "tier": "P",
   "family": "F1",
   "image": "base",
@@ -21,6 +21,7 @@
     { "n": 1, "title": "install ONLY agent-bridge (no agent-worktrees base)" },
     { "n": 2, "title": "runtime provisions on first session" },
     { "n": 3, "title": "binstub on PATH + reports a REAL version" },
-    { "n": 4, "title": "DEGRADE-SAFE: read verbs answer without an agent-worktrees base" }
+    { "n": 4, "title": "DEGRADE-SAFE: read verbs answer without an agent-worktrees base" },
+    { "n": 5, "title": "worktree-handle send resolves a session minted with a different id (copilot-extensions#2247)" }
   ]
 }
