@@ -59,8 +59,6 @@ _VR_SCRIPT = SCRIPTS / "versioned_runtime.py"
 _RESOLVER_PS1 = SCRIPTS / "resolve-runtime.ps1"
 _RESOLVER_SH = SCRIPTS / "resolve-runtime.sh"
 
-pytestmark = pytest.mark.guard
-
 _PWSH = shutil.which("pwsh") or shutil.which("powershell")
 _BASH = (
     shutil.which("bash", path=r"C:\Program Files\Git\usr\bin")
@@ -145,6 +143,7 @@ Write-Output "DERIVED=$derived"
 # heuristic), before activate() runs.
 # ---------------------------------------------------------------------------
 
+@pytest.mark.guard
 def test_install_ps1_gc_call_has_min_age_days_floor():
     text = (SCRIPTS / "install.ps1").read_text(encoding="utf-8")
     assert "'gc', '--protect-pids', '--min-age-days', '0.05'" in text
@@ -172,6 +171,7 @@ def test_install_ps1_gc_call_has_min_age_days_floor():
     assert resolve_idx < mark_complete_idx
 
 
+@pytest.mark.guard
 def test_install_sh_gc_call_has_min_age_days_floor():
     text = (SCRIPTS / "install.sh").read_text(encoding="utf-8")
     assert "gc --protect-pids \"${gc_keep_args[@]}\" --min-age-days 0.05" in text
