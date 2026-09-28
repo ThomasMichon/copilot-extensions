@@ -1,0 +1,9 @@
+{
+  "comment": "Fix _StatusSegmentCache.get() NameError on status-monitor's fast-dispatch path (resolve _find_record_for_path/_render_status_segment via _self_override instead of the bare, deferred-only globals) -- was silently rendering every managed session's mux status segment empty forever (#4341).",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
