@@ -2042,9 +2042,17 @@ _Pending._
   `git stash pop` against unmodified `dev`** (none caused by this PR):
   - `customizing-copilot`'s
     `test_shipped_projection_budgets.py::...[agent-worktrees]` --
-    `head-claim-fallback.instructions.md` (5519 bytes) exceeds the 4 KiB
+    `head-claim-fallback.instructions.md` (5519 bytes) exceeded the 4 KiB
     instruction-projection template budget, introduced by an unrelated
-    merged PR (#4406). Filed as tracked issue **#4416**.
+    merged PR (#4406). Filed as tracked issue #4416, then **fixed directly
+    in this same PR** (rather than left tracked-only) once it became clear
+    it would fail CI's default (non-deselecting) `customizing-copilot` job
+    the moment this PR touched that plugin: trimmed the file from 5519 to
+    3180 bytes, all content preserved (just tightened prose), bringing the
+    rendered projection to 4088 bytes -- under the 4096-byte budget with 8
+    bytes to spare. Closed #4416 once verified. Full `agent-worktrees` +
+    `customizing-copilot` suites re-confirmed green afterward, with no
+    deselect needed anymore.
   - `agent-dispatch`'s full-suite run intermittently exceeds
     `run-plugin-tests.py`'s 300s default per-sub-suite wall-clock budget
     (hits a DIFFERENT specific test each retry, and every individually-

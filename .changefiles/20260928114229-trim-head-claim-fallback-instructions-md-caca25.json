@@ -1,0 +1,9 @@
+{
+  "comment": "Trim head-claim-fallback.instructions.md under the 4KiB instruction-projection template budget (was silently exceeding it, breaking real projection sync for consuming repos).",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
