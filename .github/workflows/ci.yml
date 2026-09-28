@@ -183,8 +183,15 @@ jobs:
         # never touched, which used to happen whenever another already-merged PR
         # grew a shared module faster than the post-merge widen job below
         # could catch up.
+        #
+        # --head is pinned explicitly for the exact same reason as the
+        # changefile-presence step above: without it, --changed-since's
+        # default HEAD resolves to the ephemeral refs/pull/<n>/merge commit
+        # actions/checkout produces (PR head merged into dev's CURRENT tip),
+        # which silently folds every commit dev gained since this PR opened
+        # into what looks like this PR's own diff.
         if: github.event_name == 'pull_request'
-        run: python tools/check-module-size.py --changed-since ${{ github.event.pull_request.base.sha }}
+        run: python tools/check-module-size.py --changed-since ${{ github.event.pull_request.base.sha }} --head ${{ github.event.pull_request.head.sha }}
       - name: Module size (hard cap + shrink-only baseline, full sweep)
         # Every tracked, non-test source module must stay within its line-count
         # cap, or its grandfathered ceiling for pre-existing offenders -- the
