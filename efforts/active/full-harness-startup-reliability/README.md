@@ -636,3 +636,40 @@ correction inline, per the effort's own journal discipline)._
   force-pushed with-lease, resolved every addressed thread via the GraphQL
   API, and posted a summary comment citing the fixing commit -- same
   discipline as every prior round.
+- **Round 9** (same re-review cycle): two more real races. `Publish-
+  FileAtomically`/`Copy-FileAtomically` are also called from UNLOCKED call
+  sites (the regular, non-stamp install path), so two racing first-time
+  installs could both pass a Test-Path check and both take the
+  `Move-Item -Force` branch -- recreating the round-8 no-file window on
+  Windows PowerShell. Fixed by dropping `-Force` on that branch (a
+  concurrent writer now throws instead of silently clobbering, caught and
+  retried). Separately, re-stamping the SAME version used to unconditionally
+  delete the existing snapshot directory before copying a fresh one --
+  deleting a payload-dir that was STILL advertised as live. Fixed by
+  skipping the whole remove+recopy dance when a valid snapshot for that
+  exact version already exists (idempotent fast path).
+- **Round 10** (same cycle): the single most consequential finding of this
+  whole chain. `stamp-binstub` exists specifically so bootstrap-check.ps1's
+  synchronous hook call stays sub-second -- but the install-contract
+  self-stage block unconditionally copies the WHOLE plugin payload before
+  ANY action dispatches on a real marketplace install, silently
+  reintroducing the exact cost (and race) this entire two-stage split was
+  built to eliminate. Every prior round's own subprocess tests never caught
+  this because they invoke `init.ps1` directly from the repo checkout,
+  which never matches the self-stage guard's `/.copilot/installed-plugins/`
+  path check -- a real marketplace install is the only place this bug
+  actually bites. Fixed by skipping self-stage for `stamp-binstub`
+  specifically, the same way cell-/slot- actions already do. Also fixed:
+  both stamp-family actions now reject a custom `-InstallDir` outright
+  (the generated launcher's marker root was never `-InstallDir`-aware, so a
+  custom value silently produced a broken launcher); and the PID-symlink
+  stale-lock fallback's TOCTOU race, fixed with an atomic `mkdir`-based
+  reaper mutex applied to both occurrences of the pattern in the file.
+  Verified against the FULL agent-machines suite (641 passed, 33 skipped,
+  excluding the two machine-pre-existing flaky tests), not just the
+  targeted selection, given how deep this round's self-stage change reaches.
+- Ten review rounds on one PR is unusual even by this effort's own
+  standard, but each one caught a genuinely real, previously-undetected bug
+  -- convergence (findings per round: 5, 3, 2, 6, 2, 3) suggests the
+  remaining surface is shrinking, not that the process is stuck; continuing
+  the same discipline rather than merging through open findings.
