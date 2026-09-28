@@ -706,6 +706,39 @@ reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
 
+### 2026-09-27 — Real-bug fix: `_StatusSegmentCache.get()` NameError on the resident monitor's fast-dispatch path (#4341)
+Found live while chasing the mux status-bar freeze (see
+`worktree-manager-control-plane`'s companion fix, journaled there): after
+that fix restored the render pipeline end-to-end (push succeeded,
+`last_status_rendered_at` advanced), the actual `@aw_seg` value applied to
+tmux was still permanently empty for every managed session. Root-caused via
+a direct, in-process repro (not guessed): `agent_worktrees.__main__`'s
+`_StatusSegmentCache.get()` referenced the bare module globals
+`_find_record_for_path`/`_render_status_segment` directly -- but both are
+only ever bound by the deferred `_load_full_command_surface()` block, which
+`status-monitor`'s own fast-dispatch entry (`_LAZY_DISPATCH_TABLE`,
+`status_monitor_cli` marked cluster-free) never runs. Every real call raised
+`NameError`, silently swallowed by `_monitor_sweep`'s blanket
+`except Exception: pass`, so the segment stayed `""` forever with zero
+visible error. This test suite's own `conftest.py` unconditionally
+pre-loads the full surface for every test, which is exactly why the existing
+`test_segment_cache_*` tests never caught it -- they can't observe the real
+unloaded-fast-path state at all. Fixed by resolving both names through the
+already-established `_self_override(...)` + `from . import status_bar_cli`
+pattern (mirroring `_monitor_maybe_trigger_handoff_cutover`'s own existing
+Stage-D-safe call a few hundred lines above it) instead of the bare globals
+-- a 3-line, self-contained diff. Added a genuine regression test that
+deletes the bare globals to reproduce the real unloaded state (proven to
+fail with the exact `NameError` against the pre-fix code, pass after).
+Module-size-neutral: `__main__.py` sits exactly at its grandfathered
+7072-line ceiling, so the fix's own comment was compacted to a single line
+to land at net-zero growth rather than touching unrelated regions.
+Validation: full `agent-worktrees` suite, 5797 passed, 26 skipped, plus 3
+pre-existing failures confirmed unrelated (a `_CLUSTER_FREE_MODULES`/scan
+drift from concurrent unrelated PRs, and a local `gh` CLI state-leak
+artifact from this machine's own auth usage) -- both reproduced identically
+with this fix stashed out.
+
 ### 2026-09-27 — Phase 4 CI guard landed; process-consolidation cross-link confirmed with worktree-manager-control-plane
 Operator directed continuing this effort "as you go" while explicitly
 checking alignment with process consolidation -- reducing rogue process

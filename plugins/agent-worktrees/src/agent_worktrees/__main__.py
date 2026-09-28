@@ -3531,6 +3531,8 @@ class _StatusSegmentCache:
         return os.path.normcase(os.path.realpath(path))
 
     def get(self, path: str) -> str:
+        # Stage D (cluster-free): via _self_override -- unset on fast path (#4341).
+        from . import status_bar_cli as _sbc
         input_key = self._key(path)
         with self._lock:
             now = time.monotonic()
@@ -3539,7 +3541,7 @@ class _StatusSegmentCache:
             if cached and now - cached[0] < self.ttl:
                 return cached[1]
 
-        record = _find_record_for_path(path)
+        record = _self_override("_find_record_for_path", _sbc._find_record_for_path)(path)
         target = record.worktree_path if record and record.worktree_path else path
         key = self._key(target)
         with self._lock:
@@ -3548,7 +3550,7 @@ class _StatusSegmentCache:
             if cached and now - cached[0] < self.ttl:
                 self._aliases[input_key] = key
                 return cached[1]
-        value = _render_status_segment(
+        value = _self_override("_render_status_segment", _sbc._render_status_segment)(
             target, fetch=False, plain=False, no_title=False, persist_title=True
         )
         with self._lock:
