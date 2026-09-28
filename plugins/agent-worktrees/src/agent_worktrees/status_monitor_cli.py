@@ -408,18 +408,19 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         ) or tracking_write.has_inflight_write()
 
     def _cleanup_retired_request_surfaces() -> None:
-        retired_hook_servers[:] = [
-            server for server in retired_hook_servers if server.active_handler_count() > 0
-        ]
-        retired_classify_servers[:] = [
-            server for server in retired_classify_servers if server.active_handler_count() > 0
-        ]
-        if not tracking_write.has_inflight_write():
-            retired_tracking_write_servers[:] = [
-                server
-                for server in retired_tracking_write_servers
-                if server.active_handler_count() > 0
+        with state_lock:
+            retired_hook_servers[:] = [
+                server for server in retired_hook_servers if server.active_handler_count() > 0
             ]
+            retired_classify_servers[:] = [
+                server for server in retired_classify_servers if server.active_handler_count() > 0
+            ]
+            if not tracking_write.has_inflight_write():
+                retired_tracking_write_servers[:] = [
+                    server
+                    for server in retired_tracking_write_servers
+                    if server.active_handler_count() > 0
+                ]
 
     def _drain_busy_reasons() -> list[str]:
         reasons: list[str] = []

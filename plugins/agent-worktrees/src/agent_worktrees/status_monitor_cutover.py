@@ -132,12 +132,14 @@ class ControlServer:
 class ControlClient:
     """Small JSON-line client for the status-monitor control surface."""
 
-    def __init__(self, base_url: str, *, timeout: float = 5.0):
+    def __init__(self, base_url: str, *, config_dir: Path | None = None, timeout: float = 5.0):
         parsed = urlparse(base_url)
         if parsed.scheme not in ("http", "") or not parsed.hostname or parsed.port is None:
             raise ValueError(f"invalid status-monitor control URL: {base_url!r}")
         self.host = parsed.hostname
         self.port = int(parsed.port)
+        self.base_url = base_url
+        self.config_dir = Path(config_dir) if config_dir is not None else None
         self.timeout = timeout
 
     def _request(self, action: str, payload: dict | None = None) -> dict:
@@ -165,6 +167,14 @@ class ControlClient:
         return self._request("health")
 
     def drain(self, *, timeout: float, poll: float, force: bool) -> dict:
+        if self.config_dir is not None:
+            active = routing.read_active_endpoint(self.config_dir, verify_listener=False)
+            if active is not None and active.base_url != self.base_url:
+                promoted = ControlClient(
+                    active.base_url, config_dir=self.config_dir, timeout=self.timeout
+                ).promote()
+                if not promoted.get("adopted"):
+                    raise ValueError("status-monitor successor refused promotion")
         return self._request(
             "drain",
             {"timeout": timeout, "poll": poll, "force": force},
@@ -177,6 +187,9 @@ class ControlClient:
         return self._request("shutdown")
 
     def adopt_relay(self) -> dict:
+        return self.promote()
+
+    def promote(self) -> dict:
         return self._request("promote")
 
 
@@ -229,7 +242,7 @@ def _health_check(host: str, port: int) -> bool:
 
 
 def _make_client(base_url: str) -> ControlClient:
-    return ControlClient(base_url, timeout=65.0)
+    return ControlClient(base_url, config_dir=routing_dir(), timeout=65.0)
 
 
 def _is_status_monitor_cmdline(cmdline: str) -> bool:
@@ -242,7 +255,28 @@ def _is_status_monitor_cmdline(cmdline: str) -> bool:
 
 def _iter_status_monitor_pids() -> set[int]:
     if os.name == "nt":
-        return set()
+        argv = [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }",
+        ]
+        out = subprocess.run(  # noqa: S603
+            argv, capture_output=True, text=True, timeout=10, check=False
+        )
+        hits: set[int] = set()
+        for line in (out.stdout or "").splitlines():
+            if "\t" not in line:
+                continue
+            pid_s, cmdline = line.split("\t", 1)
+            try:
+                pid = int(pid_s.strip())
+            except ValueError:
+                continue
+            if _is_status_monitor_cmdline(cmdline):
+                hits.add(pid)
+        return hits
     argv = ["ps", "-eo", "pid=,args="]
     out = subprocess.run(argv, capture_output=True, text=True, timeout=5, check=False)  # noqa: S603
     hits: set[int] = set()
@@ -279,6 +313,7 @@ def _reap_abandoned_passive(record: dict | None) -> dict:
         terminate=_terminate,
         active_pid=int(active_pid) if active_pid else None,
         record=record,
+        grace_seconds=0.0,
     )
 
 
