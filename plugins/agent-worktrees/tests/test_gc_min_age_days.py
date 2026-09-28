@@ -83,6 +83,15 @@ def test_install_ps1_gc_call_has_min_age_days_floor():
     text = (SCRIPTS / "install.ps1").read_text(encoding="utf-8")
     assert "'gc', '--protect-pids', '--min-age-days', '0.05'" in text
     assert "LastWriteTime = Get-Date" in text
+    # Ordering guard (review finding on #4451): the touch must happen BEFORE
+    # activate() runs, not after -- installs run concurrently by design, so a
+    # delayed touch (after activate + status-monitor-restart + last-known-
+    # good) leaves a window where a concurrent installer's own gc (protecting
+    # only ITS $prev, the version we're about to activate) can reap this
+    # $prev first.
+    touch_idx = text.index("LastWriteTime = Get-Date")
+    activate_idx = text.index("--link-name '.venv' activate $SrcVersion")
+    assert touch_idx < activate_idx
 
 
 def test_install_sh_gc_call_has_min_age_days_floor():
@@ -90,6 +99,10 @@ def test_install_sh_gc_call_has_min_age_days_floor():
     assert "gc --protect-pids --keep \"$prev\" --min-age-days 0.05" in text
     assert "gc --protect-pids --min-age-days 0.05" in text
     assert 'touch "$INSTALL_DIR/versions/$prev"' in text
+    # Ordering guard (review finding on #4451): same reasoning as the ps1 test.
+    touch_idx = text.index('touch "$INSTALL_DIR/versions/$prev"')
+    activate_idx = text.index('".venv" activate "$SRC_VERSION" --no-link')
+    assert touch_idx < activate_idx
 
 
 # ---------------------------------------------------------------------------
