@@ -162,6 +162,14 @@ def test_install_ps1_gc_call_has_min_age_days_floor():
     touch_idx = text.index("LastWriteTime = Get-Date")
     activate_idx = text.index("--link-name '.venv' activate $SrcVersion")
     assert touch_idx < activate_idx
+    # Ordering guard (review round 6): the resolver call must run BEFORE
+    # Invoke-VersionedMarkComplete -- marking $SrcVersion complete makes IT a
+    # valid tier-3 candidate too, so resolving afterward could have the
+    # newest-slot scan pick the brand-new slot itself instead of the real
+    # previously-pinned older slot.
+    resolve_idx = text.index(". $resolverSrc")
+    mark_complete_idx = text.index("\n    Invoke-VersionedMarkComplete\n")
+    assert resolve_idx < mark_complete_idx
 
 
 def test_install_sh_gc_call_has_min_age_days_floor():
@@ -182,6 +190,10 @@ def test_install_sh_gc_call_has_min_age_days_floor():
     touch_idx = text.index('touch "$INSTALL_DIR/versions/$prev"')
     activate_idx = text.index('".venv" activate "$SRC_VERSION" --no-link')
     assert touch_idx < activate_idx
+    # Ordering guard (review round 6): same reasoning as the ps1 test.
+    resolve_idx = text.index('. "$_resolver_src"')
+    mark_complete_idx = text.index("\n    _versioned_mark_complete\n")
+    assert resolve_idx < mark_complete_idx
 
 
 def re_set_dash_e_after_source(text: str) -> bool:

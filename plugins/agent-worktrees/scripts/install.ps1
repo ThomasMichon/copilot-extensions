@@ -721,7 +721,6 @@ function Invoke-VersionedActivate {
         }
         return $false
     }
-    Invoke-VersionedMarkComplete
     # Determine the just-superseded slot by calling the CANONICAL resolver
     # (resolve-runtime.ps1) directly, rather than reimplementing its tiered
     # marker/last-known-good/newest-slot validity logic here (review finding,
@@ -734,6 +733,14 @@ function Invoke-VersionedActivate {
     # authoritative by construction: it IS the exact code path a real
     # resolve()/launch would use, so whatever slot it returns here is exactly
     # what a plan resolved moments earlier would have pinned.
+    #
+    # MUST run BEFORE Invoke-VersionedMarkComplete (review finding, round 6):
+    # marking $SrcVersion complete makes IT a valid tier-3 candidate too: if
+    # both the marker and last-known-good are invalid at this exact moment,
+    # a resolve AFTER mark-complete could have the newest-slot scan pick the
+    # brand-new $SrcVersion itself (its own version number sorts newest)
+    # instead of the actually-previously-pinned older slot, leaving that real
+    # $prev undetected and unprotected.
     $prev = $null
     try {
         $savedRtRoot = $env:AGENT_RT_ROOT
@@ -752,6 +759,7 @@ function Invoke-VersionedActivate {
     } finally {
         $env:AGENT_RT_ROOT = $savedRtRoot
     }
+    Invoke-VersionedMarkComplete
     # Touch the just-superseded slot's mtime IMMEDIATELY after resolving it,
     # BEFORE activate() runs (review finding on #4451): installs run
     # concurrently by design, so a delay here (activate + status-monitor-
