@@ -78,11 +78,17 @@ even one unrelated entry's ceiling.
 Usage::
 
     python tools/check-module-size.py                  # enforce (pre-push/CI push/dispatch)
-    python tools/check-module-size.py --changed-since REF  # enforce, PR-diff-scoped (CI pull_request);
+    python tools/check-module-size.py --changed-since REF [--head REF2]  # enforce,
+                                                             # PR-diff-scoped (CI pull_request);
                                                              # if REF's diff touches
                                                              # tools/module-size-baseline.json, also
                                                              # checks every entry that diff itself
-                                                             # added/changed/removed
+                                                             # added/changed/removed. --head defaults
+                                                             # to "HEAD" but should be pinned to the
+                                                             # PR's real head sha in CI -- see
+                                                             # _diff_touches_baseline's docstring for
+                                                             # why the default silently mis-scopes
+                                                             # once the base branch has moved.
     python tools/check-module-size.py --refresh-baseline  # tighten after shrinking a file
     python tools/check-module-size.py --refresh-baseline --allow-widen  # post-merge only; see above
 
@@ -133,7 +139,7 @@ def _tracked_py_files() -> list[str]:
     ]
 
 
-def _diff_touches_baseline(base_ref: str) -> bool:
+def _diff_touches_baseline(base_ref: str, head_ref: str = "HEAD") -> bool:
     """True when this branch's own commits touch the baseline JSON itself.
 
     A baseline-only edit (or one that edits the baseline alongside files
@@ -141,9 +147,20 @@ def _diff_touches_baseline(base_ref: str) -> bool:
     its ``*.py`` file list: a ceiling can be lowered/removed for a file that
     list would otherwise skip entirely. See ``_changed_baseline_keys`` for
     how that gap is closed without falling back to a fully unscoped sweep.
+
+    ``head_ref`` defaults to ``HEAD`` but should be pinned to the PR's real
+    head sha in CI (see ``--head``): a ``pull_request`` trigger without a
+    pinned checkout ``ref:`` checks out the ephemeral ``refs/pull/<n>/merge``
+    commit (PR head merged into whatever `dev`'s CURRENT tip is), not the
+    PR's own head. The triple-dot diff below only correctly excludes `dev`'s
+    own drift when ``head_ref`` is genuinely the PR's own commit -- against
+    the merge commit, ``base_ref`` is already its own merge-base (it's an
+    ancestor via the merge's other parent), so the triple-dot silently
+    degrades to a plain two-dot diff and folds every intervening `dev`
+    commit into what looks like this PR's own diff.
     """
     out = subprocess.run(
-        ["git", "diff", "--name-only", f"{base_ref}...HEAD", "--", str(BASELINE_PATH)],
+        ["git", "diff", "--name-only", f"{base_ref}...{head_ref}", "--", str(BASELINE_PATH)],
         cwd=REPO,
         capture_output=True,
         text=True,
@@ -152,13 +169,17 @@ def _diff_touches_baseline(base_ref: str) -> bool:
     return bool(out.stdout.strip())
 
 
-def _changed_py_files(base_ref: str) -> set[str]:
+def _changed_py_files(base_ref: str, head_ref: str = "HEAD") -> set[str]:
     """Files this branch's own commits touch, relative to its merge-base with
     ``base_ref`` -- unaffected by how far ``base_ref``'s own branch has moved
     since (triple-dot diff), so a PR is never blamed for a file it never
-    touched."""
+    touched.
+
+    See ``_diff_touches_baseline`` for why ``head_ref`` must be pinned to the
+    PR's real head sha in CI rather than left to default to ``HEAD``.
+    """
     out = subprocess.run(
-        ["git", "diff", "--name-only", f"{base_ref}...HEAD", "--", "*.py"],
+        ["git", "diff", "--name-only", f"{base_ref}...{head_ref}", "--", "*.py"],
         cwd=REPO,
         capture_output=True,
         text=True,
@@ -191,7 +212,7 @@ def _write_baseline(baseline: dict[str, int]) -> None:
     )
 
 
-def _changed_baseline_keys(base_ref: str) -> set[str]:
+def _changed_baseline_keys(base_ref: str, head_ref: str = "HEAD") -> set[str]:
     """Baseline entries this branch's own commits added, changed, or removed,
     relative to its merge-base with ``base_ref``.
 
@@ -200,9 +221,12 @@ def _changed_baseline_keys(base_ref: str) -> set[str]:
     the guard is otherwise scoped to this diff's own files -- without
     re-litigating every other already-recorded entry the diff never
     touched (see ``main()``'s ``--changed-since`` handling below).
+
+    See ``_diff_touches_baseline`` for why ``head_ref`` must be pinned to the
+    PR's real head sha in CI rather than left to default to ``HEAD``.
     """
     merge_base = subprocess.run(
-        ["git", "merge-base", base_ref, "HEAD"],
+        ["git", "merge-base", base_ref, head_ref],
         cwd=REPO,
         capture_output=True,
         text=True,
@@ -320,6 +344,22 @@ def main() -> int:
             "Mutually exclusive with --refresh-baseline."
         ),
     )
+    parser.add_argument(
+        "--head",
+        metavar="REF",
+        default="HEAD",
+        help=(
+            "Head ref to diff against with --changed-since (default: HEAD). "
+            "Pin this to the PR's real head sha in CI (e.g. "
+            "${{ github.event.pull_request.head.sha }}) rather than leaving "
+            "it to default to \"HEAD\" -- a pull_request trigger with no "
+            "pinned checkout ref: checks out the ephemeral refs/pull/<n>/merge "
+            "commit (PR head merged into whatever the base branch's CURRENT "
+            "tip is), not the PR's own head, which silently folds every "
+            "commit the base branch gained since into what looks like this "
+            "PR's own diff. See _diff_touches_baseline's docstring."
+        ),
+    )
     args = parser.parse_args()
     if args.allow_widen and not args.refresh_baseline:
         parser.error("--allow-widen requires --refresh-baseline")
@@ -339,7 +379,7 @@ def main() -> int:
 
     only_paths = None
     if args.changed_since:
-        if _diff_touches_baseline(args.changed_since):
+        if _diff_touches_baseline(args.changed_since, args.head):
             # A baseline edit could change the ceiling for a file this diff's
             # *.py list wouldn't otherwise name -- but the diff's own baseline
             # edits are still exactly knowable, so scope to this diff's
@@ -352,16 +392,16 @@ def main() -> int:
             # prevent in the first place. A file whose own baseline entry
             # this diff doesn't touch, and whose own source this diff doesn't
             # touch, is not this diff's responsibility.
-            changed_keys = _changed_baseline_keys(args.changed_since)
+            changed_keys = _changed_baseline_keys(args.changed_since, args.head)
             print(
                 f"[INFO] {BASELINE_PATH.relative_to(REPO)} changed -- scoping "
                 "to this diff's changed files plus its own baseline edits "
                 f"({len(changed_keys)} entr{'y' if len(changed_keys) == 1 else 'ies'}), "
                 "not a fully unscoped sweep."
             )
-            only_paths = _changed_py_files(args.changed_since) | changed_keys
+            only_paths = _changed_py_files(args.changed_since, args.head) | changed_keys
         else:
-            only_paths = _changed_py_files(args.changed_since)
+            only_paths = _changed_py_files(args.changed_since, args.head)
     violations = check(baseline, only_paths=only_paths)
     if violations:
         print(f"[FAIL] module size ({CAP_LINES}-line cap, shrink-only baseline):")

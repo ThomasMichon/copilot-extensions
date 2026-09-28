@@ -268,6 +268,61 @@ def test_changed_since_exempts_a_file_the_pr_never_touched(repo: Path):
     assert "src/shared.py" not in result.stdout
 
 
+def test_changed_since_default_head_misattributes_base_drift_via_merge_ref(
+    repo: Path,
+):
+    """Reproduces the real bug: a `pull_request` trigger with no pinned
+    checkout `ref:` checks out the ephemeral `refs/pull/<n>/merge` commit
+    (PR head merged into the base branch's CURRENT tip), not the PR's own
+    head. Diffing that merge commit against an increasingly stale
+    `base.sha` folds every commit the base branch gained since into what
+    looks like the PR's own diff -- misattributing another, unrelated PR's
+    growth to this one. `--head` must be pinned to the PR's real head sha
+    (as CI now does) to avoid this; the default (bare `HEAD`) reproduces it.
+    """
+    _write_lines(repo, "src/shared.py", 5000)
+    _write_baseline(repo, {"src/shared.py": 5000})
+    _commit_all(repo)
+    _git(repo, "branch", "-M", "dev")
+    base_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+    # The PR branch: diverges at base_sha, adds its own file, never touches
+    # shared.py.
+    _git(repo, "checkout", "-q", "-b", "pr-branch")
+    _write_lines(repo, "src/mine.py", 10)
+    _commit_all(repo)
+    pr_head_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+    # Meanwhile, `dev` advances (an unrelated already-merged PR grows
+    # shared.py past its ceiling) -- base_sha, captured at PR-open time, is
+    # now stale relative to dev's current tip.
+    _git(repo, "checkout", "-q", "dev")
+    _write_lines(repo, "src/shared.py", 5001)
+    _commit_all(repo)
+
+    # actions/checkout with no ref: override produces exactly this: a merge
+    # commit of the PR branch into dev's CURRENT tip, without ever touching
+    # the PR branch itself.
+    _git(repo, "checkout", "-q", "-b", "merge-ref", "dev")
+    _git(repo, "merge", "-q", "--no-ff", "-m", "Merge pr-branch into dev", "pr-branch")
+
+    # Default --head ("HEAD" == the merge-ref commit) reproduces the bug:
+    # dev's own unrelated growth of shared.py gets misattributed to this PR.
+    buggy = _run(repo, "--changed-since", base_sha)
+    assert buggy.returncode == 1, buggy.stdout + buggy.stderr
+    assert "src/shared.py" in buggy.stdout
+
+    # Pinning --head to the PR's real head sha (as CI now does) fixes it:
+    # the diff is scoped to exactly this PR's own commits again.
+    fixed = _run(repo, "--changed-since", base_sha, "--head", pr_head_sha)
+    assert fixed.returncode == 0, fixed.stdout + fixed.stderr
+    assert "src/shared.py" not in fixed.stdout
+
+
 def test_changed_since_still_enforces_a_file_the_pr_itself_touches(repo: Path):
     _write_lines(repo, "src/mine.py", 999)
     _commit_all(repo)

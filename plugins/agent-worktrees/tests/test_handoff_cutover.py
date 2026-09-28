@@ -3126,6 +3126,95 @@ class TestCmdHandoffsCheck:
         assert all(f["retired"] for f in out["findings"])
 
 
+class TestCmdHandoffCutoverTrigger:
+    """``handoff-cutover-trigger`` -- the on-demand, explicit counterpart to
+    the resident status-monitor's own per-worktree claim+spawn+retire
+    choreography (mux-companion-manual-cutover-diagnostics, #4369). Unlike
+    ``handoffs-check``, there is no read-only preview: invoking the verb IS
+    the explicit human action, so these tests exercise the real
+    ``_monitor_maybe_process_handoff_record`` call via a stub rather than
+    asserting it is withheld."""
+
+    def _record(self, tmp_tracking_dir, worktree_id):
+        from agent_worktrees import tracking as _tracking
+
+        rec = _tracking.WorktreeRecord(
+            worktree_id=worktree_id, branch=f"worktree/{worktree_id}",
+            worktree_path=f"/tmp/src/{worktree_id}", repo="test-repo",
+            machine="test", platform="wsl", started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
+            status="active", completed_at=None, sessions=[],
+        )
+        path = tmp_tracking_dir / f"{worktree_id}.yaml"
+        _tracking.save_record(rec, path)
+        return path
+
+    def test_errors_on_unknown_worktree(self, capfd, monkeypatch_config):
+        rc = m.cmd_handoff_cutover_trigger(
+            argparse.Namespace(worktree_id="wt-does-not-exist", json=True))
+        assert rc != 0
+        out = json.loads(capfd.readouterr().out)
+        assert "error" in out
+
+    def test_no_actionable_handoff_is_a_silent_successful_no_op(
+        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+    ):
+        self._record(tmp_tracking_dir, "wt-trigger-1")
+        # Real _monitor_maybe_process_handoff_record with nothing pending is
+        # itself a no-op; stub it so this test doesn't depend on the daemon's
+        # full internal check chain (mux/activity/etc.) -- only this verb's
+        # own before/after reporting is under test here.
+        monkeypatch.setattr(m, "_monitor_maybe_process_handoff_record", lambda rec: None)
+
+        rc = m.cmd_handoff_cutover_trigger(
+            argparse.Namespace(worktree_id="wt-trigger-1", json=True))
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["changed"] is False
+        assert out["head_before"] == out["head_after"]
+
+    def test_reports_head_change_after_a_successful_spawn(
+        self, monkeypatch, capfd, tmp_tracking_dir, monkeypatch_config,
+    ):
+        from agent_worktrees import tracking as _tracking
+
+        path = self._record(tmp_tracking_dir, "wt-trigger-2")
+        _tracking.register_session("wt-trigger-2", "predecessor-1")
+
+        def _fake_process(record):
+            # Simulate the daemon's own choreography landing a successor:
+            # register + set head on the SAME record file the CLI will reload.
+            _tracking.register_session("wt-trigger-2", "successor-1")
+            reloaded = _tracking.load_record(path)
+            _tracking.set_head_session(reloaded, "successor-1")
+            _tracking.save_record(reloaded, path)
+
+        monkeypatch.setattr(m, "_monitor_maybe_process_handoff_record", _fake_process)
+
+        rc = m.cmd_handoff_cutover_trigger(
+            argparse.Namespace(worktree_id="wt-trigger-2", json=True))
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["changed"] is True
+        assert out["head_after"] == "successor-1"
+        assert out["session_count_after"] == out["session_count_before"] + 1
+
+    def test_human_readable_output_when_nothing_changed(
+        self, monkeypatch, capsys, tmp_tracking_dir, monkeypatch_config,
+    ):
+        self._record(tmp_tracking_dir, "wt-trigger-3")
+        monkeypatch.setattr(m, "_monitor_maybe_process_handoff_record", lambda rec: None)
+
+        rc = m.cmd_handoff_cutover_trigger(
+            argparse.Namespace(worktree_id="wt-trigger-3", json=False))
+
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "no actionable pending handoff" in out
+
+
 def test_retire_stamps_predecessor_session_state_with_successor_id(monkeypatch):
     predecessor_state = sessions._session_state_dir() / "old-sess"
     predecessor_state.mkdir(parents=True, exist_ok=True)

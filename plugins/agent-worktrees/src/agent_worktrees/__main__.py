@@ -5752,6 +5752,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'repair-stale-anchor': ('context_cli', 'cmd_repair_stale_anchor'),
     'handoff-cutover': ('handoff_cli', 'cmd_handoff_cutover'),
     'handoffs-check': ('handoff_cli', 'cmd_handoffs_check'),
+    'handoff-cutover-trigger': ('handoff_cli', 'cmd_handoff_cutover_trigger'),
     'head-session': ('session_tracking_cli', 'cmd_head_session'),
     'history-digest': ('session_metadata_cli', 'cmd_history_digest'),
     'hygiene': ('maintenance_cli', 'cmd_hygiene'),
@@ -5994,7 +5995,7 @@ def _load_full_command_surface() -> None:
     global cmd_bind_session, cmd_claimant_liveness, cmd_claims, cmd_cleanup, cmd_codename_lookup, cmd_conclude_disposable, cmd_conclude_session, cmd_config_migrate
     global cmd_config_root_dispatch, cmd_coordination_readiness_dispatch, cmd_copilot_identity_dispatch, cmd_create, cmd_create_pr, cmd_deploy_instructions, cmd_deregister_session, cmd_dev, cmd_doctor
     global cmd_effort_focus, cmd_embody, cmd_finalize, cmd_follow_ups, cmd_gc, cmd_get, cmd_git_dispatch, cmd_git_feature_branch, cmd_picker_bootstrap, cmd_picker_paths, cmd_picker_reconcile_local
-    global cmd_git_merge_to_feature, cmd_git_sync, cmd_handoff_cutover, cmd_handoff_trace, cmd_handoffs_check, cmd_head_session, cmd_history_digest, cmd_hygiene
+    global cmd_git_merge_to_feature, cmd_git_sync, cmd_handoff_cutover, cmd_handoff_trace, cmd_handoffs_check, cmd_handoff_cutover_trigger, cmd_head_session, cmd_history_digest, cmd_hygiene
     global cmd_install, cmd_install_status, cmd_installer_readiness, cmd_knowledge_dispatch, cmd_link_succession, cmd_list, cmd_list_sessions, cmd_machine_context, cmd_repair_stale_anchor
     global cmd_mark_complete, cmd_note_handoff, cmd_picker, cmd_post_exit, cmd_pr_complete, cmd_pr_dispatch, cmd_pr_merge_dispatch, cmd_pr_nudge, cmd_pr_ready
     global cmd_pr_research_dispatch, cmd_pr_status, cmd_pr_watch_dispatch, cmd_pre_launch, cmd_push_changes, cmd_reap_sessions, cmd_reap_shells
@@ -6286,6 +6287,7 @@ def _load_full_command_surface() -> None:
     _resolve_codename_anywhere = handoff_cli._resolve_codename_anywhere
     cmd_embody = handoff_cli.cmd_embody
     cmd_handoffs_check = handoff_cli.cmd_handoffs_check
+    cmd_handoff_cutover_trigger = handoff_cli.cmd_handoff_cutover_trigger
     _enumerate_launcher_shells_posix = reap_cli._enumerate_launcher_shells_posix
     _proc_boot_time = reap_cli._proc_boot_time
     reap_orphan_launcher_shells = reap_cli.reap_orphan_launcher_shells
@@ -6421,6 +6423,7 @@ def _load_full_command_surface() -> None:
         "handoff-cutover": cmd_handoff_cutover,
         "handoff-trace": cmd_handoff_trace,
         "handoffs-check": cmd_handoffs_check,
+        "handoff-cutover-trigger": cmd_handoff_cutover_trigger,
         "embody": cmd_embody,
         "copilot": cmd_copilot,
         "list": cmd_list,

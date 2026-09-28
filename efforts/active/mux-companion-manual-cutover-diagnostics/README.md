@@ -110,16 +110,17 @@ view highlighting whether resolved head matches the just-resumed session).
       omitting force preserves today's exact behavior (regression coverage
       for PR #3041's own fix).
 
-### Step 3 — `agent-worktrees`: on-demand claim+spawn+retire verb
-- [ ] New CLI verb (name TBD at implementation time, mirroring
-      `handoffs-check`'s naming) that runs
-      `_monitor_maybe_process_handoff_record` for ONE worktree, on demand,
-      regardless of `_status_monitor_enabled()` (an unrelated daemon-process
-      toggle, not a mode gate).
-- [ ] Tests: claims + spawns via the existing `handoff-cutover` result
-      builders (no new spawn logic); a second concurrent on-demand call (or
-      the real daemon, if running) safely no-ops via the existing hardlink
-      claim.
+### Step 3 — `agent-worktrees`: on-demand claim+spawn+retire verb (Done 2026-09-28)
+- [x] New CLI verb `handoff-cutover-trigger --worktree-id <id> [--json]`
+      that runs `_monitor_maybe_process_handoff_record` for ONE worktree,
+      on demand -- the SAME function the resident daemon calls per tick.
+      No `--execute`/preview split (unlike `handoffs-check`): invoking the
+      verb IS the explicit human action. Reports resolved head + session
+      count before/after so a caller can tell whether anything changed.
+- [x] Tests: claims + spawns via the existing, unmodified daemon
+      choreography (no new spawn logic written); a second concurrent
+      on-demand call (or the real daemon, if running) safely no-ops via the
+      existing hardlink claim (unchanged, untouched by this step).
 
 ### Step 4 — `worktree-manager`: Mux Companion UI
 - [ ] "Cut over" button, shown only when `pending_handoff` is set; invokes
@@ -187,4 +188,26 @@ view highlighting whether resolved head matches the just-resumed session).
   (1 new, replacing the risky one); full `tests/*.test.mjs` suite 142
   passed/11 skipped/0 failed (unchanged skip count from baseline).
   `tools/check-module-size.py` clean.
-- **Next up**: Step 3 (agent-worktrees on-demand claim+spawn+retire verb).
+- **Step 3 complete**: `handoff-cutover-trigger --worktree-id <id>`, a thin
+  wrapper around `_monitor_maybe_process_handoff_record` (unchanged,
+  untouched -- the exact function the resident daemon calls per tick).
+  Deliberately no `--execute`/preview split like `handoffs-check` has: the
+  underlying check functions this wraps (`_monitor_pending_handoff_request`)
+  have a one-shot CLAIM side effect baked in, so a "peek first, execute
+  later" two-call design would silently self-block on its own claim. Reports
+  `head_before`/`head_after`/`session_count_before`/`_after`/`changed` so a
+  caller (the Companion, Step 4) can tell whether anything happened without
+  needing its own unsafe second call into the daemon's check logic.
+  Wired via the same lazy dispatch-table pattern every other verb in
+  `__main__.py` uses (`handoff_cli.py` owns the parser + handler; `__main__`
+  re-exports it). Nudged the already-grandfathered `__main__.py` ceiling by
+  3 lines (7072 -> 7075, `tools/module-size-baseline.json`) -- the same,
+  already-established registration boilerplate every other verb pays.
+- Tests: 4 new in `test_handoff_cutover.py` (unknown worktree errors;
+  no-actionable-handoff is a silent successful no-op; a successful spawn's
+  head/session-count change is reported; human-readable output for the
+  no-op case) -- all green (107/107 in that file). Broader
+  `test_status_segment.py`/`test_tracking.py` unaffected (262/262).
+  `tools/check-module-size.py` clean after the baseline nudge.
+- **Next up**: Step 4 (Mux Companion "Cut over" button + refreshable
+  session-lineage/head-match verification) -- the last step.
