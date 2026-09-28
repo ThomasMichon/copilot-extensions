@@ -2069,3 +2069,59 @@ _Pending._
   correctly loses `editable = true` on its internal `dropin-registry`/
   `plugin-resolve` references, exactly as `ssh-manager`'s precedent
   established for `agent-procutil`).
+- **Review round 2 caught 3 more real findings, all in this same
+  Windows-installer-fallback class the effort's own recipe now flags on
+  every leg**:
+  - `agent-worktrees/scripts/install.ps1`'s `plugin-resolve` block still
+    had no repo-root fallback (round 1 only fixed `config-migrate`'s), and
+    `dropin-registry`/`plugin-activation` had NO blocks at all. Added the
+    fallback plus two new blocks, `plugin-activation` last (module-load-
+    time import ordering, mirroring `agent-logger`'s own guard).
+  - `agent-dispatch/scripts/install.ps1`: same gap for `dropin-registry`,
+    `plugin-resolve`, `plugin-activation` -- and, discovered while fixing
+    it, `single-instance-lease` from an EARLIER, unrelated leg (#4403) had
+    the identical gap the whole time, never caught until this round. Added
+    a single parameterized preinstall loop covering all 4 (using the
+    script's own existing `Resolve-VendoredLib` 4-tier fallback helper,
+    already used for `zdd`), rather than four near-duplicate blocks.
+  - `agent-machines/scripts/init.sh` AND `init.ps1`: same gap for
+    `dropin-registry`/`plugin-resolve`/`plugin-activation` in BOTH POSIX
+    and Windows installers (this script's bash side genuinely does fall
+    back to bare `python -m pip`, unlike `agent-worktrees`'s bash, which
+    fully requires `uv` -- confirmed by inspection, not assumed). Added
+    matching preinstall blocks to both.
+  - **A 4th finding was a real bug I introduced, not a missed gap**:
+    `customizing-copilot`'s `installing-plugins/scripts/
+    plugin-activation.py` runs from the INSTALLED marketplace payload in a
+    real release, where `plugin_root.parent.parent` is the Copilot
+    installation directory, not this repository -- my round-1 rewrite of
+    `_resolve_state_py()` (to always resolve straight to a monorepo-
+    relative canonical path) was simply WRONG for that case; it would
+    resolve to a nonexistent path and break every `inspect`/`remove`
+    command post-release. Root cause: `materialize_main.py` discovers
+    `VENDOR_POINTER.json` pointer copies by directly scanning
+    `plugins/*/libs/<lib>/`, independent of any consuming
+    `pyproject.toml` -- so `customizing-copilot`'s ORIGINAL `src-
+    passthrough` pointer copy was already release-materializable and
+    correct all along. **Reverted both the pointer-copy deletion and the
+    script rewrite back to their pre-PR state** rather than re-inventing
+    a fix -- `customizing-copilot` simply isn't a `uv`-editable-
+    convertible consumer (no `pyproject.toml` of its own) and the
+    effort's own forward-looking Plan note (written before this was
+    fully investigated) was wrong to assume otherwise. Corrected
+    `libs/plugin-activation/README.md`'s wording to match.
+  - The changefile-mismatch finding was stale (already fixed one commit
+    earlier, before this review round ran) -- confirmed via `git diff
+    origin/dev --stat` and replied with that evidence rather than
+    re-fixing.
+  - Re-validated: `agent-machines` (665 passed), `agent-dispatch` (3523
+    passed), `agent-worktrees` (5882 passed), `customizing-copilot` (274
+    passed) all green; all 3 new/changed `.ps1`/`.sh` scripts syntax-
+    validated with PowerShell's own parser / `bash -n`.
+  - **Lesson for the next lib conversion**: audit EVERY consumer's actual
+    installer (not just the specific plugin the reviewer happens to flag
+    first) for this exact non-uv-pip-fallback gap, for EVERY lib the
+    consumer has ever converted (not just the one currently being
+    converted) -- this class of finding has now recurred across 3
+    consecutive PRs in this effort (#4409, and twice within #4420) and is
+    clearly the single most-missed step in the whole recipe.

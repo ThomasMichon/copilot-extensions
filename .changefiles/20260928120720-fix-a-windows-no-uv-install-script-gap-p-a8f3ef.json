@@ -1,0 +1,9 @@
+{
+  "comment": "Fix a Windows/no-uv install script gap: preinstall the uv-editable canonical libs (dropin-registry, plugin-resolve, single-instance-lease where applicable, plugin-activation) before the bare-pip fallback path, which does not honor [tool.uv.sources].",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
