@@ -331,6 +331,13 @@ class PickerScreenMaintenanceActionsMixin:
             # launcher does it (action=refresh). #1430.
             self._decide({"action": "refresh"})
             return
+        if zone == "MUP":
+            # The Manager's OWN update icon: self-update the Manager (and
+            # reconcile the harness the same way `refresh` does), then
+            # reopen the Picker -- distinct decision from "refresh" so the
+            # caller can tell which update actually triggered this. #4425.
+            self._decide({"action": "manager-update"})
+            return
         if zone == "V":
             self.sel = ("PR", 0) if self._kind() == "profiles" else ("M", 0)
         elif zone == "M":

@@ -286,6 +286,24 @@ def test_block_mode_refuses_unsettled(monkeypatch, capsys):
     assert "blocked" in (out.err + out.out).lower()
 
 
+def test_active_pr_claim_blocks_finalize_regardless_of_strategy(monkeypatch, capsys):
+    """pr-merge-obligation-gate defense 2: the obligation gate that blocks an
+    open, unclaimed PR's worktree from finalizing is entirely independent of
+    ``pr.strategy`` -- it never reads that config value at all, so a repo
+    (mis)configured to ``detach`` gets exactly the same protection as
+    ``keep-alive``. (The gate's `_record` fixture here has no `pr.strategy`
+    concept at all -- proving the point: nothing about this gate call
+    consults it.)"""
+    _gate(monkeypatch, "block")
+    rec = SimpleNamespace(
+        machine="m", repo="p", worktree_id="wt",
+        resources=[ResourceClaim(kind="pr", ref="o/r#42", state="active")],
+    )
+    assert _assert_obligations_settled(rec, "wt", abandon=False) is False
+    out = capsys.readouterr()
+    assert "blocked" in (out.err + out.out).lower()
+
+
 def test_block_mode_abandon_overrides(monkeypatch, capsys):
     _gate(monkeypatch, "block")
     rec = _record("active")

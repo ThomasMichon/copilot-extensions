@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-logger"
-version = "0.1.11-dev1"
+version = "0.1.12-dev1"
 description = "Reusable Copilot CLI session logging -- segmenter, log writer, local/rescue session-sync, and orchestrator"
 readme = "README.md"
 license = "MIT"
@@ -22,8 +22,10 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-# config schema versioning + migration (module ``config_migrate``); vendored
-# locally, resolved from the path, never an index.
+# config schema versioning + migration (module ``config_migrate``); resolved
+# from a `uv`-editable canonical reference (vendor-pointer-generalization
+# effort, Phase 1): `path` escapes this plugin's own root and resolves live
+# to `libs/config-migrate`, so every consumer shares one canonical copy.
 agent-config-migrate = { path = "libs/config-migrate" }
 # Windows-headless process-spawn helpers (module ``agent_procutil``). Vendored
 # per plugin; byte-identical src across copies.

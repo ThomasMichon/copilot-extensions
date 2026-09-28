@@ -84,8 +84,17 @@ def _regenerate_lazy_dispatch_table() -> dict[str, tuple[str, str]]:
     return final
 
 
+@pytest.mark.guard
 def test_lazy_dispatch_table_matches_regenerated_scan():
     """_LAZY_DISPATCH_TABLE must not silently drift from the real registrations.
+
+    Marked ``guard``: cheap and deterministic (pure argparse introspection,
+    no subprocess/tmux), so it runs for real on every PR touching
+    agent-worktrees (via `worktrees-smoke`'s ``--guards`` step) rather than
+    being deferred to the post-merge full-suite validation only -- a real
+    regression here (#4378/#4379) silently blocked the whole promotion
+    pipeline for hours before anyone noticed, since PR-time CI only
+    collect-only's this plugin's suite.
 
     Regenerates the table via the exact introspection method documented in
     _LAZY_DISPATCH_TABLE's own comment and diffs it against the checked-in
@@ -165,9 +174,15 @@ def test_fast_path_help_matches_full_parser_help(command, capsys):
     assert fast_help == full_help
 
 
+@pytest.mark.guard
 def test_cluster_free_modules_matches_regenerated_scan():
     """`_CLUSTER_FREE_MODULES` must not silently drift from the real
     `_core()` call-shapes in every dispatch-table module.
+
+    Marked ``guard`` for the same reason as this file's other drift-check
+    test above: cheap, deterministic AST introspection with no subprocess/
+    tmux dependency, so it should run on every PR touching agent-worktrees
+    rather than only in the post-merge full-suite validation.
 
     Regenerates the set via the AST-based scanner (`_core_cluster_scan.py`,
     which walks the direct `_core().attr` chain, the assigned `core =

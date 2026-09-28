@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 from . import config as cfg, finalize as fin, output, profile_assignment, sessions, tracking
-from . import reclaim_cli, resolve_launch_cli
+from . import reclaim_cli, resolve_launch_cli, status_monitor_runtime
 
 
 def _core():
@@ -21,8 +21,6 @@ def _core_helper(name: str, local):
         return candidate
     return local
 
-
-LaunchPreflightError = _core().LaunchPreflightError
 
 def _apply_assignment_env(*args, **kwargs): return _core_helper("_apply_assignment_env", resolve_launch_cli._apply_assignment_env)(*args, **kwargs)
 def _build_env(*args, **kwargs): return _core()._build_env(*args, **kwargs)
@@ -44,8 +42,8 @@ def _unsupported_hosted_launch(*args, **kwargs): return _core()._unsupported_hos
 def _pending_handoff_retire_requests(*args, **kwargs): return _core()._pending_handoff_retire_requests(*args, **kwargs)
 def _monitor_retire_handoff_predecessor(*args, **kwargs): return _core()._monitor_retire_handoff_predecessor(*args, **kwargs)
 def _monitor_maybe_process_handoff_record(*args, **kwargs): return _core()._monitor_maybe_process_handoff_record(*args, **kwargs)
-def _monitor_session_state_handoff_path(*args, **kwargs): return _core()._monitor_session_state_handoff_path(*args, **kwargs)
-def _monitor_read_session_state_handoff(*args, **kwargs): return _core()._monitor_read_session_state_handoff(*args, **kwargs)
+def _monitor_session_state_handoff_path(*args, **kwargs): return _core_helper("_monitor_session_state_handoff_path", status_monitor_runtime._monitor_session_state_handoff_path)(*args, **kwargs)
+def _monitor_read_session_state_handoff(*args, **kwargs): return _core_helper("_monitor_read_session_state_handoff", status_monitor_runtime._monitor_read_session_state_handoff)(*args, **kwargs)
 def resolve_worktree_id_by_codename(*args, **kwargs): return _core().resolve_worktree_id_by_codename(*args, **kwargs)
 
 
@@ -362,7 +360,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
                     kind="session",
                     recovery=getattr(args, "recovery", False),
                 )
-        except LaunchPreflightError as e:
+        except _core().LaunchPreflightError as e:
             return _json_error(str(e), exit_code=3)
         except Exception as e:
             return _json_error(f"failed to create worktree: {e}")

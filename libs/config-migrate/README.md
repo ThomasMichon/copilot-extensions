@@ -9,6 +9,13 @@ path.
 > Distribution name: **`agent-config-migrate`** (namespaced to avoid
 > dependency-confusion). Import module: **`config_migrate`**.
 
+**In dev**, every consumer's `pyproject.toml` references this library through
+a `uv`-editable canonical pointer (`vendor-pointer-generalization` effort,
+Phase 1), so there is no per-plugin dev copy to keep in sync. **At release**,
+`tools/materialize_main.py` rewrites that pointer into a real, promoted copy
+at `plugins/<plugin>/libs/config-migrate/` for each consumer -- non-editable,
+so a published plugin installs a self-contained source tree.
+
 ## Why
 
 Plugin configs have accumulated schemas. SQLite stores and `deploy-manifest.json`

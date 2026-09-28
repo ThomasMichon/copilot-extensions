@@ -90,6 +90,35 @@ def test_update_engine_absent_hints_setup(monkeypatch):
     assert "worktree-manager setup" in buf.getvalue()
 
 
+def test_update_invalidates_the_manager_update_cache(tmp_path, monkeypatch):
+    """After self-updating, the pre-update `manager_update_check` cache is
+    stale (computed against the OLD version) -- `_cmd_update` must drop it so
+    the Picker's next poll re-checks for real instead of continuing to show
+    the pre-update verdict for up to CHECK_INTERVAL_SECS."""
+    from worktree_manager import manager_update_check as muc
+
+    # Redirect the module's status file to tmp_path so both the setup check
+    # and _cmd_update's own (root-less) `invalidate()` call hit the same file.
+    monkeypatch.setattr(muc, "status_path", lambda root=None: tmp_path / "update-check.json")
+    monkeypatch.setattr(self_install, "current_version", lambda root=None: "0.1.0-dev8")
+    monkeypatch.setattr(
+        self_install, "fetch_remote_version", lambda root=None: "0.1.0-dev9")
+    muc.check_now()
+    assert muc.indicator_state() == "available"
+
+    monkeypatch.setattr(self_install, "self_update",
+                        lambda **kw: self_install.SelfUpdateResult(
+                            action="updated", version="0.1.0-dev9", previous="0.1.0-dev8"))
+    monkeypatch.setattr(ec, "run_engine_passthrough", lambda project, args, **kw: 0)
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = wm._cmd_update([])
+
+    assert rc == 0
+    assert muc.read_status() == {}
+
+
 def test_extract_project_pulls_pair_and_leaves_rest():
     project, rest = wm._extract_project(["--force", "--project", "x", "--skip-modules"])
     assert project == "x"

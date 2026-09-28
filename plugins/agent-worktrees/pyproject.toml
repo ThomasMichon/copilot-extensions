@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-worktrees"
-version = "1.12.1-dev1"
+version = "1.12.2-dev1"
 description = "Worktree isolation system for concurrent Copilot CLI sessions"
 readme = "README.md"
 license = "MIT"
@@ -29,7 +29,10 @@ dependencies = [
 # Always resolve the vendored config-schema-migration lib from the local path,
 # never an index. Distribution name is namespaced (agent-config-migrate, not the
 # squattable "config-migrate") to prevent dependency-confusion; the import
-# module stays ``config_migrate``.
+# module stays ``config_migrate``. This is a `uv`-editable canonical
+# reference (vendor-pointer-generalization effort, Phase 1): `path` escapes
+# this plugin's own root and resolves live to `libs/config-migrate`, so
+# every consumer shares one canonical copy.
 agent-config-migrate = { path = "libs/config-migrate" }
 # Copilot CLI + Claude plugin resolution -- marketplaces, plugins, repo settings
 # (module ``plugin_resolve``). Shared with agent-bridge / agent-codespaces.

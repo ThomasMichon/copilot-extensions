@@ -355,8 +355,12 @@ def test_engine_runtime_falls_back_to_canonical_libs_for_uv_editable_lib(monkeyp
     # A different (still real-copy-vendored) lib DOES have a local copy --
     # confirms the fallback only ever applies when the local copy is
     # genuinely absent, never overriding one that already exists.
-    local_config_migrate_src = plugin_src.parent / "libs/config-migrate/src"
-    (local_config_migrate_src / "config_migrate").mkdir(parents=True)
+    # (plugin-resolve, not config-migrate: config-migrate was itself
+    # converted to a uv-editable canonical reference in the
+    # vendor-pointer-generalization effort, so it no longer has a local
+    # copy to exercise this branch with.)
+    local_plugin_resolve_src = plugin_src.parent / "libs/plugin-resolve/src"
+    (local_plugin_resolve_src / "plugin_resolve").mkdir(parents=True)
 
     monkeypatch.delenv(engine_runtime.ENGINE_SOURCE_ENV, raising=False)
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
@@ -366,7 +370,7 @@ def test_engine_runtime_falls_back_to_canonical_libs_for_uv_editable_lib(monkeyp
     engine_runtime.ensure_engine_runtime()
 
     assert str(canonical_lib_src) in engine_runtime.sys.path
-    assert str(local_config_migrate_src) in engine_runtime.sys.path
+    assert str(local_plugin_resolve_src) in engine_runtime.sys.path
 
 
 def test_engine_runtime_installed_slot_never_uses_the_checkout_fallback(monkeypatch, tmp_path):
@@ -519,15 +523,22 @@ def test_manager_acts_on_production_picker_resume_decision(monkeypatch):
 
 
 def test_manager_acts_on_production_picker_refresh_decision(monkeypatch):
-    """The "Update available" gesture (`action: refresh`) must thread the
+    """The "Update available" gesture (`action: refresh`) must (1) thread the
     resolved project through to `_cmd_update`, mirroring every other decision
-    branch here -- otherwise `agent-worktrees update` runs with no `--project`
-    and can't resolve context outside an adopted repo/worktree."""
-    monkeypatch.setattr(
-        runner,
-        "run",
-        lambda project: {"action": "refresh"},
-    )
+    branch here, and (2) loop back to reopen the very same Picker afterward
+    instead of ending the whole `worktree-manager` process -- a prior bug
+    (#worktree-manager-update-loop) `return`ed `_cmd_update`'s own exit code
+    from here, silently exiting the process on "Update available" instead of
+    reloading the Manager."""
+    run_calls = []
+
+    def fake_run(project):
+        run_calls.append(project)
+        if len(run_calls) == 1:
+            return {"action": "refresh"}
+        return None  # operator closed the picker on the reopened run
+
+    monkeypatch.setattr(runner, "run", fake_run)
     calls = []
     monkeypatch.setattr(
         entrypoint,
@@ -537,6 +548,34 @@ def test_manager_acts_on_production_picker_refresh_decision(monkeypatch):
 
     assert entrypoint._run_production_picker("demo") == 0
     assert calls == [["--project", "demo"]]
+    # The Picker was reopened (a second `runner.run` call) rather than the
+    # function returning `_cmd_update`'s own exit code straight away.
+    assert run_calls == ["demo", "demo"]
+
+
+def test_manager_acts_on_production_picker_manager_update_decision(monkeypatch):
+    """The Manager's OWN update button (`action: manager-update`, zone
+    "MUP") runs the same update command (which self-updates the Manager
+    first) and likewise reopens the Picker rather than exiting."""
+    run_calls = []
+
+    def fake_run(project):
+        run_calls.append(project)
+        if len(run_calls) == 1:
+            return {"action": "manager-update"}
+        return None
+
+    monkeypatch.setattr(runner, "run", fake_run)
+    calls = []
+    monkeypatch.setattr(
+        entrypoint,
+        "_cmd_update",
+        lambda rest: calls.append(rest) or 0,
+    )
+
+    assert entrypoint._run_production_picker("demo") == 0
+    assert calls == [["--project", "demo"]]
+    assert run_calls == ["demo", "demo"]
 
 
 def test_manager_acts_on_production_picker_open_venue_decision(monkeypatch):

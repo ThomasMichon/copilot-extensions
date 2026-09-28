@@ -387,12 +387,25 @@ class PickerScreenModelMixin:
         (Enter = apply + restart); the spinner/✓ states are informational.
         """
         return getattr(self, "update_state", "idle") == "available"
+    def _manager_update_actionable(self) -> bool:
+        """True when the Manager's OWN update indicator is a focusable action.
+
+        Distinct from :meth:`_update_actionable` (the engine/marketplace
+        payload's staged state) -- see ``_manager_update_seg``'s docstring
+        for why the two must not be conflated. Only ``"available"`` has
+        something to do (Enter = self-update + restart); ``current``/``idle``
+        stay informational-only.
+        """
+        return getattr(self, "manager_update_state", "idle") == "available"
     def _v_stops(self):
-        """Top-region vertical stops, in visual (top-to-bottom) order: the update
-        refresh icon ("UPD", 0) on the title line when an update is staged, then
-        the View pivot row ("V", 0). The ⚙ Configuration entry is NOT a vertical
-        stop -- it rides the pivot row's horizontal ◀▶ nav (#1426)."""
+        """Top-region vertical stops, in visual (top-to-bottom) order: the
+        Manager's own update icon ("MUP", 0) when ITS update is staged, then
+        the engine/marketplace update refresh icon ("UPD", 0) when staged,
+        then the View pivot row ("V", 0). The ⚙ Configuration entry is NOT a
+        vertical stop -- it rides the pivot row's horizontal ◀▶ nav (#1426)."""
         out = []
+        if self._manager_update_actionable():
+            out.append(("MUP", 0))
         if self._update_actionable():
             out.append(("UPD", 0))
         out.append(("V", 0))
@@ -439,7 +452,7 @@ class PickerScreenModelMixin:
             return self._pr_head()
         if zone == "L":
             return self._l_head()
-        return {"V": ("V", 0), "UPD": ("V", 0), "CFG": ("CFG", 0), "M": ("M", 0),
+        return {"V": ("V", 0), "UPD": ("V", 0), "MUP": ("V", 0), "CFG": ("CFG", 0), "M": ("M", 0),
                 "BTN": ("BTN", 0), "L": ("L", 0), "SA": ("SA", 0),
                 "GH": ("GH", 0), "C": ("C", 0), "PR": ("PR", 0)}.get(
                     zone, ("V", 0))

@@ -47,6 +47,23 @@ def read_status(root: Path | None = None) -> dict:
         return {}
 
 
+def invalidate(root: Path | None = None) -> None:
+    """Discard the cached check result so the next poll re-checks for real.
+
+    Call this right after a Manager self-update (successful or not): the
+    cached ``update-check.json`` was computed against the *pre-update*
+    version, so leaving it in place would keep reporting a stale "available"
+    (or "current") verdict for up to :data:`CHECK_INTERVAL_SECS` even though
+    the on-disk version just changed. Best-effort/never raises -- a failed
+    delete just means the next poll still serves the (now-wrong) cache until
+    it expires naturally, same as any other best-effort I/O in this module.
+    """
+    try:
+        status_path(root).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def _write_status(data: dict, root: Path | None = None) -> None:
     path = status_path(root)
     try:

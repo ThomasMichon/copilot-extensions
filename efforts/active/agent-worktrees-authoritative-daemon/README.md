@@ -706,6 +706,55 @@ reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
 
+### 2026-09-28 — Confirmed operational pattern: duplicate resident `status-monitor` processes are a real, correctable bug, not benign
+Found while updating a Windows-native install after the two fixes above:
+**two** `status-monitor` processes were running simultaneously on one host,
+both on the same (already-fixed) version -- not a version-supersession race
+`status-monitor-restart` would reap (that command only ever reaps a
+version-*superseded* owner; a same-version duplicate is left alone, exactly
+as it did here: "a current monitor already owns the host -- left as-is").
+Confirmed which PID was the genuine lock owner by reading
+`~/.agent-worktrees/status-monitor.lock`'s own `pid` field directly, then
+killed only the non-owning duplicate by specific PID. The same host also had
+a dozen stale `worktree_manager --project ...` Picker processes accumulated
+across three old versions with no Picker terminal actually open -- confirmed
+with the operator before killing all of them, since "no open terminals" is
+exactly the kind of claim that needs the operator's own confirmation, not an
+agent's assumption, before a bulk kill.
+
+**This is now a documented, sanctioned diagnostic+remediation pattern** (not
+a one-off cleanup): a duplicate resident `status-monitor` is a genuine,
+potentially-blocking bug -- two instances can race applying `mux-status-v1`
+writes to the same session, corrupting rendering in ways indistinguishable
+from the render-freeze bugs fixed above. Added to the facility's own
+error-response-discipline documentation as a cross-host/cross-OS trigger,
+with a fail-closed, identity-bound recipe (three rounds of Copilot review
+correctly hardened this: first flagging the initial draft's naive "kill
+every non-owning PID from an earlier read" as racy, then flagging that even
+a fresh command-line check before a plain PID kill is still not
+reuse-safe, then flagging that the recipe still had no floor -- if the
+re-read finds no live owner at all, "kill every other candidate" degenerates
+into killing everything observed): **whenever an agent observes more than
+one resident `status-monitor` process on a single host, re-read the lock
+file (`locks.read_lock`) and check `locks.lock_is_live`** for each candidate
+PID's own recorded `start_time`
+(`plugins/agent-worktrees/src/agent_worktrees/locks.py`) -- **note
+`lock_is_live` itself fails OPEN (treats a pid as live) when `start_time` is
+absent or unreadable, so it alone does not prove a candidate is stale; use
+it only to find the one entry the lock FILE claims as current owner, never
+as the sole basis for judging a candidate safe to kill. If that re-read
+finds no parseable lock, or `lock_is_live` is false, or the claimed owner PID
+isn't present in a fresh process census, STOP -- there is no validated live
+owner to exclude, so no candidate may be terminated yet; re-enumerate (or
+just retry the whole check) until a real live owner is confirmed present.**
+Only once a validated live owner is confirmed, **terminate every OTHER
+candidate via `procs.terminate_pid_if_identity(pid, expected_start_time)`**,
+never a plain `kill`/`Stop-Process` by bare PID: that helper binds the
+termination itself to the verified process identity (an open pidfd + start-time check on POSIX,
+a creation-time check through the same handle `TerminateProcess` uses on
+Windows) and fails closed if the identity can't be proven, closing the
+reuse window a check-then-kill can never fully close on its own.
+
 ### 2026-09-28 — Real bug found via CI drift: `picker-reconcile-local`'s fast-dispatch path was broken, blocking the whole dev->main promotion pipeline
 Found while pushing the `_StatusSegmentCache` fix (above) through the release
 pipeline: the `full - agent-worktrees` full-tree CI job -- one of the gates

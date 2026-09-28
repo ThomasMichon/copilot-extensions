@@ -203,6 +203,7 @@ class PickerScreen(
         "V": "nf-pivots",
         "CFG": "nf-pivots",
         "UPD": "nf-pivots",
+        "MUP": "nf-pivots",
         "M": "nf-machine",
         "BTN": "nf-buttons",
     }

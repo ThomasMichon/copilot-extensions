@@ -79,19 +79,32 @@ jobs:
           fetch-depth: 0
       - id: check
         run: |
+          # Resolve the candidate sha for EITHER trigger the same way, then
+          # apply the identical ancestor check to both -- `workflow_dispatch`
+          # previously short-circuited straight to `is_dev=true` for
+          # whatever `github.sha` happened to be (the tip of whatever ref
+          # it was run against), never verified against `dev` at all. That
+          # was safe only by accident, because every downstream promotion
+          # call hard-coded `origin/dev` regardless of this job's own `sha`
+          # output -- once promotion started trusting `sha` (see the
+          # `promote` job's `DEV_SHA`), an operator manually dispatching
+          # this workflow from an unreviewed feature/PR branch could
+          # promote that branch's own unreviewed content straight to
+          # `main`. Requiring the SAME `git merge-base --is-ancestor`
+          # proof for both events closes that gap without giving manual
+          # dispatch any special trust `workflow_run` doesn't also get.
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "is_dev=true" >> "$GITHUB_OUTPUT"
-            echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
-            exit 0
+            sha="${{ github.sha }}"
+          else
+            sha="${{ github.event.workflow_run.head_sha }}"
           fi
-          sha="${{ github.event.workflow_run.head_sha }}"
           git fetch origin dev
           if git merge-base --is-ancestor "$sha" origin/dev; then
             echo "is_dev=true" >> "$GITHUB_OUTPUT"
             echo "sha=$sha" >> "$GITHUB_OUTPUT"
           else
             echo "is_dev=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::$sha is not on origin/dev's history -- skipping (this CI completion was for a different branch/PR)."
+            echo "::notice::$sha is not on origin/dev's history -- skipping (this CI completion was for a different branch/PR, or workflow_dispatch was run against a non-dev ref)."
           fi
 
   full:
@@ -429,11 +442,21 @@ jobs:
         # cross-workflow "did Validation Gate's whole run succeed" check --
         # `needs.<job>.result`/`.outputs` are ordinary same-run facts, not
         # event metadata, so there is nothing left here to be unreliable.
+        #
+        # Deliberately NO `workflow_dispatch` special case any more: it
+        # used to fast-path straight to `proceed=true`, skipping both
+        # `gate.outputs.is_dev` and the `full`/`worktree-manager`/
+        # `guards-full-sweep` result checks below entirely -- meaning a
+        # manual dispatch could promote even when those validation jobs
+        # failed (or, once `gate` started requiring ancestor proof for
+        # dispatch too, ran with an EMPTY `sha`, since `full`/
+        # `worktree-manager`/`guards-full-sweep` are skipped by their own
+        # `if: needs.gate.outputs.is_dev == 'true'` whenever `gate` finds a
+        # non-`dev` ref, but `decide` never checked that). Every trigger
+        # now goes through the identical checks below -- manual dispatch
+        # is for forcing a promotion RUN, never for bypassing what that
+        # run validates.
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
           if [ "${{ needs.gate.result }}" != "success" ]; then
             echo "proceed=false" >> "$GITHUB_OUTPUT"
             echo "::notice::gate job did not succeed (${{ needs.gate.result }}) -- skipping promotion."
@@ -472,12 +495,31 @@ jobs:
         if: steps.decide.outputs.proceed == 'true'
         env:
           PUSH_INPUT: ${{ github.event.inputs.push }}
+          # Pin to the EXACT commit `gate` validated as a real `dev`
+          # ancestor -- the same commit `full`/`worktree-manager`/
+          # `guards-full-sweep` checked out and tested -- never a fresh
+          # re-resolve of `origin/dev`. This job's own checkout above only
+          # fetches (`ref: main` + full history); it never re-runs gate's
+          # ancestor check. `full`/`worktree-manager`/`guards-full-sweep`
+          # are a genuine 10-30 min validation window by this workflow's
+          # own design (see top-of-file comment) -- if new commits (and
+          # new changefiles) land on `dev` while those are still running,
+          # a bare `origin/dev` re-resolved at THIS checkout would
+          # silently be newer than what was validated, sweeping
+          # never-validated changefiles into this promotion's consumed/
+          # deleted set. Confirmed live: PR #4397 ("clear changefiles
+          # consumed by promotion 36394331795") was initially misdiagnosed
+          # as deleting two unconsumed changefiles -- that specific alarm
+          # was a false positive (the wrong promotion commit was used for
+          # comparison), but it surfaced this real structural gap: nothing
+          # here actually pinned promotion to what `gate` validated.
+          DEV_SHA: ${{ needs.gate.outputs.sha }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$PUSH_INPUT" = "false" ]; then
-            python tools/promote_release.py --dev-ref origin/dev --main-ref origin/main
+            python tools/promote_release.py --dev-ref "$DEV_SHA" --main-ref origin/main
             echo "land=false" >> "$GITHUB_OUTPUT"
           else
-            output=$(python tools/promote_release.py --dev-ref origin/dev --main-ref origin/main \
+            output=$(python tools/promote_release.py --dev-ref "$DEV_SHA" --main-ref origin/main \
               --push --candidate-branch "$CANDIDATE_BRANCH")
             echo "$output"
             echo "land=true" >> "$GITHUB_OUTPUT"

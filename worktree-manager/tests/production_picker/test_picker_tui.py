@@ -4870,27 +4870,30 @@ def test_manager_update_seg_is_distinct_from_the_engine_update_seg(monkeypatch):
 
     # idle: no segment (matches the engine segment's own idle behavior).
     s.manager_update_state = "idle"
-    assert s._manager_update_seg() is None
+    assert s._manager_update_seg(False) is None
 
     # current: a plain checkmark, no focus stop (purely informational).
     s.manager_update_state = "current"
-    assert "\u2713" in s._manager_update_seg().plain        # ✓
-    assert ("UPD", 0) not in s.stops()
+    assert "\u2713" in s._manager_update_seg(False).plain    # ✓
+    assert ("MUP", 0) not in s.stops()
 
-    # available: names the remote version and the CLI command to run --
-    # there is no in-picker apply flow for the Manager's own update (unlike
-    # the engine's staged-payload refresh), so this never becomes a stop.
-    from worktree_manager import manager_update_check as muc
-    monkeypatch.setattr(
-        muc, "read_status",
-        lambda root=None: {"checked_at": 0, "local_version": "0.1.0-dev54",
-                            "remote_version": "0.1.0-dev55", "available": True})
+    # available: a short, focusable "↻ Update available" button -- kept
+    # terse (no embedded version number or literal command) to match the
+    # engine segment's own style and never overflow the topbar.
     s.manager_update_state = "available"
-    seg = s._manager_update_seg()
+    seg = s._manager_update_seg(False)
     assert "\u21bb" in seg.plain                            # ↻
-    assert "0.1.0-dev55" in seg.plain
-    assert "worktree-manager update" in seg.plain
-    assert ("UPD", 0) not in s.stops()
+    assert "Update available" in seg.plain
+    assert "worktree-manager update" not in seg.plain
+    assert ("MUP", 0) in s.stops()
+
+    # Enter on the Manager's own update icon records a distinct
+    # `action: manager-update` decision (never conflated with `refresh`).
+    captured = {}
+    s._decide = lambda d: captured.update(d)
+    s.sel = ("MUP", 0)
+    s._activate()
+    assert captured == {"action": "manager-update"}
 
 
 def test_manager_update_seg_appears_in_the_topbar_next_to_the_version():
@@ -4903,6 +4906,25 @@ def test_manager_update_seg_appears_in_the_topbar_next_to_the_version():
     s.update_state = "idle"
     text = "".join(row.plain for row in s.topbar(140))
     assert "\u2713" in text
+
+
+def test_manager_update_seg_stays_short_when_available():
+    """Regression: the Manager's own "available" text used to name the
+    remote version and the literal `worktree-manager update` command inline,
+    which regularly overflowed the topbar and forced the version/engine
+    segments to drop out entirely. It must now stay short."""
+    from worktree_manager.production_picker.picker_tui.engine import PickerScreen
+
+    s = PickerScreen(_fixture_source(), live=False)
+    s.setup_sync_for_tests()
+    s.htab = 0
+    s.manager_update_state = "available"
+    s.update_state = "idle"
+    text = "".join(row.plain for row in s.topbar(140))
+    assert "Update available" in text
+    assert "worktree-manager update" not in text
+    # The version string still fits alongside the short button at a normal width.
+    assert "v" in text
 
 
 def test_update_icon_is_its_own_region_not_the_pivots():

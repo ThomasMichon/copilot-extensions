@@ -1097,40 +1097,16 @@ def _resolve_content_ref(
 def _pr_is_merged(record: tracking.WorktreeRecord, repo) -> bool:
     """Authoritative, squash-safe check that the tracked PR has merged.
 
-    The durable "did the work land" signal -- **branch-independent** (survives a
-    head branch deleted on merge) and **immune to version-file churn** on the
-    moving upstream tip (the failure that false-blocks an already-merged
-    worktree: its real code matches ``origin/<default>``, but bookkeeping files
-    like ``plugin.json`` / ``marketplace.json`` were re-bumped by *later* PRs, so
-    blob-equivalence against the live tip sees a spurious diff).
-
-    Fast path: a tracking record whose ``pr.state`` is already ``"merged"`` was
-    set from an authoritative observation -- trust it, no network. Otherwise ask
-    the provider (``get_pull().merged``). **Fail-CLOSED**: a missing PR number,
-    no provider/token, or any provider error returns ``False`` so finalize never
-    certifies unmerged work as safe to prune.
+    The durable "did the work land" signal -- **branch-independent**
+    (survives a head branch deleted on merge) and **immune to version-file
+    churn** on the moving upstream tip. Fail-CLOSED: an indeterminate lookup
+    (see ``finalize_open_pr_gate.pr_merge_status``) collapses to ``False``
+    here so finalize never certifies unmerged-or-unknown work as safe to
+    prune. Delegates to that module (not module-size-capped, #4400 round 13)
+    for the tri-state lookup itself.
     """
-    pr = getattr(record, "pr", None)
-    if not pr:
-        return False
-    if getattr(pr, "state", "") == "merged":
-        return True
-    number = getattr(pr, "number", None)
-    slug = getattr(pr, "repo", "") or ""
-    if not number or not slug:
-        return False
-    prcfg = repo.pr
-    try:
-        from . import providers
-        provider = providers.get_provider(prcfg.provider)
-        token = providers.account_token_for_slug(slug, prcfg)
-        result = provider.get_pull(
-            slug, int(number),
-            api_base=getattr(prcfg, "api_base", "") or "", token=token,
-        )
-        return bool(getattr(result, "merged", False))
-    except Exception:
-        return False
+    from . import finalize_open_pr_gate as fopg
+    return fopg.pr_merge_status(record, repo) is True
 
 
 def _pr_finalize_precondition(
@@ -1145,17 +1121,12 @@ def _pr_finalize_precondition(
     ``origin/<default>``* -- it does **not** consult the feature/PR branch,
     except in ``detach`` mode. Order:
 
-    1. **Fast path (both modes)** -- content already reachable/patch-equivalent
-       on ``origin/<default>`` (git-only, no network).
-    2. **Authoritative (both modes)** -- the tracked PR *merged*
-       (``_pr_is_merged``); squash-safe and independent of the feature branch or
-       version-file churn.
-    3. **``detach`` mode only** -- accept "code is upstream in an OPEN PR" (the
-       feature branch is on the remote) as an *early* ok, because detached
-       finalizes *before* merge. Non-detached (``keep-alive``) never looks at the
-       feature branch: after the PR merges, ``sync``/``pr-merge`` realigns
-       ``worktree/<id>`` to ``origin/<default>`` (FINAL) and finalize affirms.
-
+    1. **Fast path** -- content on origin/<default>, gated on a tracked merged head (#4400).
+    2. **Authoritative** -- PR merged AND content has no commits beyond its tracked head.
+    3. **``detach`` mode only** -- an open PR (feature branch on the remote)
+       is early-ok, since detached finalizes *before* merge. ``keep-alive``
+       ignores the feature branch: after merge, ``sync``/``pr-merge`` realigns
+       ``worktree/<id>`` and finalize affirms.
     Returns ``(ok, error_message)``.
     """
     remote = repo.remote
@@ -1164,20 +1135,22 @@ def _pr_finalize_precondition(
     upstream = f"{remote}/{repo.default_branch}"
     strategy = (getattr(repo.pr, "strategy", "") or "keep-alive").strip().lower()
 
-    # (1) Fast path: content already on origin/<default>. Resolve a durable ref
-    #     (feature -> worktree/<id> -> HEAD); the refspec head scheme keeps no
-    #     local pr/<slug> branch, so probing ``feature`` alone would miss.
-    content_ref = _resolve_content_ref(feature, record.worktree_id, cwd=cwd)
+    # (1) Fast path (#4400): content on origin/<default>, via the LIVE
+    #     checkout ref, never a frozen feature-branch snapshot.
+    from . import finalize_open_pr_gate as fopg
+    content_ref = fopg.resolve_precondition_ref(
+        feature, record.worktree_id, worktree_path, cwd=cwd)
     if (
         content_ref is not None
         and git_ops.ref_exists(upstream, cwd=cwd)
         and _is_content_on_upstream(content_ref, upstream, cwd=cwd)
+        and fopg.upstream_match_is_trustworthy(record, content_ref, upstream, cwd=cwd, repo=repo)
     ):
         return True, None
-
-    # (2) Authoritative squash-safe signal (both modes): the tracked PR merged.
     if _pr_is_merged(record, repo):
-        return True, None
+        if not fopg.content_exceeds_merged_head_any(record, content_ref, upstream, cwd=cwd):
+            return True, None
+        return False, fopg.merged_pr_block_message(record, content_ref, upstream, cwd=cwd)
 
     # (3) DETACHED mode only: "code is upstream in an OPEN PR" (feature branch on
     #     the remote) is an early ok. keep-alive never consults the feature
@@ -1670,6 +1643,28 @@ def validate_and_finalize(
     )
     _advise_other_live_sessions(record, current_session_ref)
 
+    # pr-merge-obligation-gate defense 2: refresh the tracked PR(s) against
+    # the provider RIGHT BEFORE the obligation gate reads the local ledger.
+    # `_reconcile_active_pr` is the one shared observation path every other
+    # PR-workflow verb already funnels through (create-pr, pr-ready,
+    # pr-status, the Picker's background sweep, pr-reconcile); calling it
+    # here too means finalize never trusts a stale/never-verified local
+    # ``pr.state`` -- in particular an out-of-band ``set-pr`` (which
+    # persists state with NO provider read at all) gets its first real
+    # provider confirmation right here, so its `pr`-kind claim is created
+    # (still open) or released (confirmed merged) before the gate below
+    # ever runs. Best-effort: a provider failure/timeout degrades to the
+    # local state exactly as every other caller of this function already
+    # tolerates -- finalize is never blocked BY the reconcile itself, only
+    # by whatever obligation the ledger already (or now) records.
+    if record is not None and repo.pr.enabled:
+        try:
+            from . import pr_ops as _pr_ops
+
+            _pr_ops._reconcile_active_pr(record, config)
+        except Exception:
+            pass
+
     # Obligation gate (resource-obligation-settlement Phase 2). A worktree
     # answers for the outbound resources it still owns before it may finalize.
     # Runs BEFORE any destructive step so a blocking gate refuses cleanly. Read
@@ -1696,16 +1691,19 @@ def validate_and_finalize(
     preserve_tracked_branch = False
     renamed_branch_to_clean: str | None = None
     if pr_mode:
-        # PR mode: finalize is decoupled from merge. Work is safe to prune as
-        # soon as the feature branch is pushed -- the PR may still be open.
+        # PR mode (#4400 round 12): `assert_no_live_pr` above already refused
+        # a still-open PR (short of --force-open-pr). `detach` allows an
+        # early ok once pushed; other strategies require a genuine merge
+        # AND live content not exceeding that merged head.
+        dirty_err = finalize_open_pr_gate.dirty_worktree_error(worktree_path, wt_exists=wt_exists)
+        if dirty_err:
+            output.err(dirty_err)
+            return False
         ok, err = _pr_finalize_precondition(record, repo, worktree_path, anchor)
         if not ok:
             output.err(err or "PR finalize precondition not met.")
             return False
-        print(
-            f"Verified: feature branch '{record.pr.branch}' is safely on "
-            f"{repo.remote}. Finalizing this worktree (the PR may still be open)."
-        )
+        print(f"Verified: feature branch '{record.pr.branch}' is safely on {repo.remote}.")
     elif wt_exists:
         # Validate against the worktree's ACTUAL current checkout, not just
         # the possibly-stale tracked `record.branch` name (#7723). A worktree
@@ -1877,6 +1875,18 @@ def validate_and_finalize(
         inside_worktree = git_ops.is_cwd_inside(worktree_path)
         has_live_session = _has_live_session(record)
 
+        # PR mode (#4400 round 16): re-validate BEFORE reconciliation --
+        # its rebase can itself drop a just-landed EMPTY race commit,
+        # narrowing that window.
+        if pr_mode:
+            from . import finalize_open_pr_gate
+            err = finalize_open_pr_gate.pr_precondition_recheck(
+                record, repo, worktree_path, anchor, precondition_fn=_pr_finalize_precondition)
+            if err:
+                output.err(err)
+                _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id)
+                return False
+
         # Reconcile local branch pointers with origin now that the content is
         # verified upstream, so a merged-but-not-yet-cleaned worktree stops
         # rendering as diverged in the picker (#1106).
@@ -1938,6 +1948,18 @@ def validate_and_finalize(
                     f"{k['name'] or '?'}({k['pid']})" for k in killed if k["killed"])
                 if names:
                     output.info(f"Terminated lingering process(es): {names}")
+
+            # PR mode (#4400 rounds 14-16): re-validate as the LAST possible
+            # step before removal -- narrows, but per reviewer feedback can't
+            # fully eliminate, the TOCTOU window absent a write-blocking hook.
+            if pr_mode:
+                err = finalize_open_pr_gate.pr_precondition_recheck(
+                    record, repo, worktree_path, anchor,
+                    precondition_fn=_pr_finalize_precondition)
+                if err:
+                    output.err(err)
+                    _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id)
+                    return False
 
             if not git_ops.remove_worktree(anchor, worktree_path):
                 output.warn("Could not remove worktree via git -- forcing directory removal.")

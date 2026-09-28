@@ -80,6 +80,19 @@ boundary (`agent-worktrees --json`), owning no worktree logic of its own.
 
 ## Context
 
+**Cross-link (2026-09-28):** the companion `mux-daemon`'s own zero-downtime
+update story (graceful cutover on `worktree-manager update`, generation
+self-retire, so a stale daemon can never stack up after a rapid-fire
+release) is tracked by a separate, dedicated effort —
+[`graceful-cutover-worktrees-and-ssh`](../graceful-cutover-worktrees-and-ssh/README.md)
+(covers `agent-worktrees` and `worktree-manager` adopting the same
+pre-existing `zdd`/`graceful-daemon-cutover` pattern already proven by
+`agent-bridge`/`agent-dispatch`/`agent-index`, plus `agent-ssh` as an
+**audit candidate** — its own README documents no persistent daemon today,
+so that effort's Phase 3 may conclude no adoption is needed there at all) —
+not owned here, to avoid fragmenting that cross-plugin rollout across
+per-plugin efforts.
+
 The Manager already exists and is being built out in phases (see
 [`worktree-manager/README.md`](../../../worktree-manager/README.md)): the
 out-of-plugin skeleton, a dependency-free plugin-knowledge catalog, and

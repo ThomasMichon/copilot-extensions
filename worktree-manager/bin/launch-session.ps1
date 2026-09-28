@@ -941,6 +941,30 @@ if (-not $refreshedVenvPython) {
 $VenvPython = $refreshedVenvPython
 Write-SetupLog "Runtime refreshed before knowledge preflight: $VenvPython"
 
+# Patch a stale `-RuntimePython` embedded in the resolved plan's cmd (#stale-venv).
+# `resolve` (run BEFORE the update-apply above) bakes the interpreter that ran
+# it (Python's `sys.executable`) into $plan.cmd as the literal `-RuntimePython
+# <path>` argument default-setup.ps1 will use. If stage-update swapped the
+# runtime venv in between (installing a new version and pruning the old one's
+# pyvenv.cfg), that baked path now points at a partially-deleted venv: its
+# python.exe binary can survive as a locked leftover file even after its
+# pyvenv.cfg is gone, so default-setup.ps1 fails with "failed to locate
+# pyvenv.cfg" instead of cleanly falling back. Rewrite it to the
+# just-refreshed $VenvPython so the pane command always launches on a runtime
+# that's actually still on disk.
+if ($plan.cmd) {
+    $planCmd = @($plan.cmd)
+    for ($i = 0; $i -lt $planCmd.Count - 1; $i++) {
+        if ($planCmd[$i] -in @('-RuntimePython', '--runtime-python')) {
+            if ($planCmd[$i + 1] -ne $VenvPython) {
+                Write-SetupLog "Patching stale $($planCmd[$i]) in resolved plan: $($planCmd[$i + 1]) -> $VenvPython"
+                $planCmd[$i + 1] = $VenvPython
+            }
+        }
+    }
+    $plan.cmd = $planCmd
+}
+
 $knowledgeCwd = if ($plan.PSObject.Properties['status_path'] -and $plan.status_path) {
     [string]$plan.status_path
 } else {

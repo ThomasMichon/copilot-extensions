@@ -490,9 +490,11 @@ def self_heal(
 
     The never-wedge sweep applied to a single owner -- used by finalize's
     obligation gate to self-heal against a crashed/missed settlement before it
-    would block. Returns the claims it flipped to ``abandoned`` (empty on a
-    no-op). Conservative: only definitive gone-AND-safe claims flip; unknown is
-    spare.
+    would block. Returns the claims it flipped to ``abandoned`` (or, for a
+    ``pr``-kind claim whose PR is provably merged, ``released`` -- a clean
+    completion, not a reclaim; see `tracking_claims.sweep_abandoned_obligations`).
+    Empty on a no-op. Conservative: only definitive gone-AND-safe claims flip;
+    unknown is spare.
     """
     g, s = make_resolvers(config)
     return tracking.sweep_abandoned_obligations(

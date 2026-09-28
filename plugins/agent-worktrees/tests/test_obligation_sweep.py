@@ -75,6 +75,23 @@ def test_sweep_resolver_exception_is_spare(tmp_path):
     assert flipped == [] and rec.resources[0].state == "active"
 
 
+def test_sweep_settles_merged_pr_claim_as_released_not_abandoned():
+    """pr-merge-obligation-gate defense 2: a `pr`-kind claim's gone-and-safe
+    verdict means "this PR is provably merged" (sweep.py's `pr_merged`) -- a
+    clean, successful completion, never an involuntary reclaim. Every OTHER
+    kind still gets `abandoned` (unchanged)."""
+    claims = [
+        tracking.ResourceClaim(kind="pr", ref="o/r#1", state="active"),
+        tracking.ResourceClaim(kind="worktree", ref="m/p/gone-safe", state="active"),
+    ]
+    rec = _rec(claims)
+    flipped = tracking.sweep_abandoned_obligations(
+        rec, gone_of=lambda c: True, safe_of=lambda c: True, save=False)
+    assert {c.ref for c in flipped} == {"o/r#1", "m/p/gone-safe"}
+    assert claims[0].state == "released"
+    assert claims[1].state == "abandoned"
+
+
 # ── _claims_sweep CLI (child-record resolution) ──────────────────────────────
 
 def _seed_project(tmp_path, monkeypatch, machine="m", project="p"):
