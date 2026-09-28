@@ -184,7 +184,7 @@ adjustable setting a repo tunes for its own churn rate, not a hardcoded
 constant — a repo under heavy concurrent-PR churn can tighten it; a quieter
 one can loosen it, without changing this capability's own shape.
 
-### the propagation loop never silently breaks
+### the correlation loop never silently breaks
 
 If a trunk-gate event cannot durably record and correlate its freshly-earned
 baseline, that failure is visible (the same way a stuck changefile-cleanup
@@ -204,13 +204,13 @@ why.
   change's own targeting.
 - **Not a specific tool, format, or mechanism.** Whether a repo builds this
   on `coverage.py` dynamic contexts, `pytest-testmon`, or another approach;
-  where the baseline artifact lives; and exactly how propagation is wired
+  where the baseline artifact lives; and exactly how correlation is wired
   are implementation choices for the realizing effort, not this vision.
 - **Not mandatory for every repo, and not the same mechanism everywhere.**
   A repo without a dev→main-style trunk gate earns its baseline from
   whatever full-validation event it already has (a scheduled run, a
   different trunk gate); the underlying concepts here (baseline, diff-scoped
-  selection, smoke fallback, propagation, debt accounting) are meant to be
+  selection, smoke fallback, correlation, debt accounting) are meant to be
   portable across that variation, not bound to one repo's own pipeline
   shape.
 
