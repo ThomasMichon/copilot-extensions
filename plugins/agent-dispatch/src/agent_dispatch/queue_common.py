@@ -304,8 +304,15 @@ class Task:
 _TASK_DB_COLUMNS = tuple(
     field.name for field in dataclasses.fields(Task) if field.name not in {"result", "has_result"}
 )
-_TASK_SELECT = ", ".join((*_TASK_DB_COLUMNS, "result"))
-_TASK_BULK_SELECT = ", ".join((*_TASK_DB_COLUMNS, "result IS NOT NULL AS has_result"))
+_TASK_SELECT = ", ".join(  # marketplace-isolation: allow query-column-list
+    (*_TASK_DB_COLUMNS, "result")
+)
+_BULK_HAS_RESULT_COL = (
+    "result IS NOT NULL AS has_result"  # marketplace-isolation: allow query-column-list
+)
+_TASK_BULK_SELECT = ", ".join(  # marketplace-isolation: allow query-column-list
+    (*_TASK_DB_COLUMNS, _BULK_HAS_RESULT_COL)
+)
 
 
 @dataclass(frozen=True)

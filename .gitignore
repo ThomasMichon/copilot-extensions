@@ -40,3 +40,9 @@ plugins/agent-worktrees/full_test_run*.log
 
 wcs_out.log
 wcs_err.log
+
+# Locally-generated ci_telemetry.py output db -- regenerate via `refresh`,
+# never hand-edit or commit a snapshot (see the
+# ci-flakiness-telemetry-and-reliability effort for whether/when a
+# periodic-refresh job should check one in instead).
+tools/ci_telemetry.sqlite3

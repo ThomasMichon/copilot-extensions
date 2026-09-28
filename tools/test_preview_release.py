@@ -557,6 +557,15 @@ class _FakeMaterializeMain:
         pointer.write_text(canonical.read_text(), encoding="utf-8")
         return [f"OK   {pointer} (file pointer) <- docs/patterns/thing.md"]
 
+    def materialize_uv_editable_ref_into(
+        self, *, source_consumer_dir: Path, dest_consumer_dir: Path, canonical_root: Path
+    ) -> list[str]:
+        # No uv-editable references exist in this test's fixture plugin --
+        # a real (non-fake) materialize_main would simply find none and
+        # return an empty log, which this stand-in mirrors.
+        assert canonical_root == self._canonical_root
+        return []
+
 
 def test_materialize_file_pointers_into_preview_writes_only_into_dest(
     isolated: Path, monkeypatch: pytest.MonkeyPatch,
@@ -582,3 +591,41 @@ def test_materialize_file_pointers_into_preview_writes_only_into_dest(
     manifest = json.loads((dest / "PREVIEW.json").read_text())
     assert any("(file pointer)" in line for line in manifest["vendored_file_pointers_materialize_log"])
 
+
+
+def test_build_materializes_a_uv_editable_reference_into_the_preview(isolated: Path):
+    # Real (not mocked) end-to-end: a plugin whose pyproject.toml carries a
+    # `uv`-editable canonical-reference entry gets canonical's complete lib
+    # tree copied into the PREVIEW's own libs/<lib>/, and the preview's own
+    # pyproject.toml rewritten to the local non-editable form -- the real
+    # plugin's own pyproject.toml (and the real repo) must never be touched.
+    plugin_dir = _plugin(isolated, "agent-bridge", "1.0.0")
+    (plugin_dir / "pyproject.toml").write_text(
+        '[project]\nname = "agent-bridge"\nversion = "1.0.0"\n'
+        'dependencies = ["agent-zdd"]\n'
+        "\n"
+        "[tool.uv.sources]\n"
+        'agent-zdd = { path = "../../libs/zdd", editable = true }\n',
+        encoding="utf-8",
+    )
+    (isolated / "libs/zdd/src/zdd").mkdir(parents=True)
+    (isolated / "libs/zdd/src/zdd/__init__.py").write_text("real = True\n", encoding="utf-8")
+    (isolated / "libs/zdd/pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "0.1.0-dev5"\n', encoding="utf-8"
+    )
+
+    dest = preview_release.build("agent-bridge", isolated / "work")
+
+    assert (dest / "libs/zdd/src/zdd/__init__.py").read_text() == "real = True\n"
+    dest_pp = (dest / "pyproject.toml").read_text()
+    assert 'agent-zdd = { path = "libs/zdd" }' in dest_pp
+    assert "editable" not in dest_pp
+    # The real plugin's own pyproject.toml is never mutated.
+    real_pp = (plugin_dir / "pyproject.toml").read_text()
+    assert "editable = true" in real_pp
+    assert not (plugin_dir / "libs/zdd").exists()
+
+    manifest = json.loads((dest / "PREVIEW.json").read_text())
+    assert any(
+        line.startswith("OK") for line in manifest["vendored_uv_editable_refs_materialize_log"]
+    )

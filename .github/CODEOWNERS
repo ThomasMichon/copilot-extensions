@@ -1,2 +1,16 @@
+# Root ownership: every path in this repository defaults to @ThomasMichon
+# unless a more specific pattern below overrides it (CODEOWNERS uses
+# last-match-wins, so more specific patterns after this one take precedence).
+#
+# This is the maintainer-review gate: any PR authored by someone other than
+# ThomasMichon requires ThomasMichon's own approval before merging into a
+# CODEOWNERS-enforced branch, regardless of what any automated reviewer
+# (including Copilot) says. ThomasMichon's own PRs (including agent-authored
+# ones under this same account) bypass that specific gate via the branch
+# ruleset's own admin-role bypass -- see "dev: review required (maintainer
+# bypass)" and the default-branch ruleset -- never via CODEOWNERS itself,
+# which cannot key off PR authorship at all.
+* @ThomasMichon
+
 /.github/workflows/ @ThomasMichon
 /.github/CODEOWNERS @ThomasMichon

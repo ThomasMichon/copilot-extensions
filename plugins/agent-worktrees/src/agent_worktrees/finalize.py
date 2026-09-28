@@ -54,6 +54,9 @@ from . import (
 )
 from .config import Config
 from .finalize_lock import FinalizeLock
+from .finalize_ref import is_content_on_upstream as _is_content_on_upstream
+from .finalize_ref import resolve_finalize_ref as _resolve_finalize_ref
+from .finalize_ref import warn_if_tracked_branch_diverged as _warn_if_diverged
 
 
 def _warn_of_codespace_claims_for_worktree(worktree_id: str) -> None:
@@ -620,63 +623,6 @@ def push_changes(
         lock.release()
 
 
-def _is_content_on_upstream(
-    branch: str,
-    upstream: str,
-    cwd: str,
-) -> bool:
-    """Non-mutating check: is the branch's content already on upstream?
-
-    Uses multiple strategies in order of reliability:
-    1. Ancestor check (branch is ancestor of upstream)
-    2. git cherry (patch-id comparison)
-    3. Blob comparison of changed files
-    """
-    # Strategy 1: branch is an ancestor of upstream (already merged)
-    r = git_ops.git(
-        "merge-base", "--is-ancestor", branch, upstream,
-        cwd=cwd, check=False,
-    )
-    if r.returncode == 0:
-        return True
-
-    # Strategy 2: git cherry -- all patches accounted for on upstream
-    cherry_r = git_ops.git(
-        "cherry", upstream, branch,
-        cwd=cwd, check=False,
-    )
-    if cherry_r.returncode == 0 and cherry_r.stdout.strip():
-        unmerged = [ln for ln in cherry_r.stdout.splitlines() if ln.startswith("+")]
-        if not unmerged:
-            return True
-
-    # Strategy 3: compare file blobs between branch and upstream
-    merge_base_r = git_ops.git(
-        "merge-base", branch, upstream,
-        cwd=cwd, check=False,
-    )
-    if merge_base_r.returncode != 0:
-        return False
-
-    diff_r = git_ops.git(
-        "diff", "--name-only", merge_base_r.stdout.strip(), branch,
-        cwd=cwd, check=False,
-    )
-    changed_files = [f for f in diff_r.stdout.splitlines() if f.strip()]
-    if not changed_files:
-        return True
-
-    for file in changed_files:
-        b_blob = git_ops.git(
-            "rev-parse", f"{branch}:{file}", cwd=cwd, check=False
-        )
-        m_blob = git_ops.git(
-            "rev-parse", f"{upstream}:{file}", cwd=cwd, check=False
-        )
-        if b_blob.stdout.strip() != m_blob.stdout.strip():
-            return False
-
-    return True
 
 
 def _reconcile_merged_pointers(
@@ -1738,6 +1684,8 @@ def validate_and_finalize(
     if record and record.repo:
         tracking.record_repo_fetch_confirmed(record.repo)
 
+    preserve_tracked_branch = False
+    renamed_branch_to_clean: str | None = None
     if pr_mode:
         # PR mode: finalize is decoupled from merge. Work is safe to prune as
         # soon as the feature branch is pushed -- the PR may still be open.
@@ -1750,17 +1698,41 @@ def validate_and_finalize(
             f"{repo.remote}. Finalizing this worktree (the PR may still be open)."
         )
     elif wt_exists:
+        # Validate against the worktree's ACTUAL current checkout, not just
+        # the possibly-stale tracked `record.branch` name (#7723). A worktree
+        # can end up checked out to a differently-named branch (e.g. a
+        # `-journal` suffix variant) or in a detached-HEAD state after its
+        # creation-time tracking record was written -- in that case `branch`
+        # no longer names what's actually sitting in `worktree_path`, and
+        # checking it instead of the real HEAD can produce a false "Unmerged
+        # work detected" verdict (or, just as dangerous, silently validate
+        # the wrong ref and let genuinely different content be discarded).
+        effective_ref, current_ref, diverged = _resolve_finalize_ref(
+            branch, worktree_path)
+        if diverged:
+            preserve_tracked_branch = _warn_if_diverged(
+                worktree_id, branch, current_ref, upstream, worktree_path)
+            if current_ref is not None and current_ref != branch:
+                # The checkout renamed to a real (non-detached) branch other
+                # than the tracked name -- that renamed branch is the one
+                # actually validated below, so clean it up too once
+                # confirmed safe, or the rename just leaks a dangling ref
+                # forever (#7723).
+                renamed_branch_to_clean = current_ref
+
         # Check if the worktree is unused (0 commits, clean tree)
-        ahead_commits = git_ops.get_commits_ahead(branch, upstream, cwd=worktree_path)
+        ahead_commits = git_ops.get_commits_ahead(
+            effective_ref, upstream, cwd=worktree_path)
         is_clean = git_ops.is_clean(cwd=worktree_path)
         if len(ahead_commits) == 0 and is_clean:
             print("No commits and clean tree -- finalizing unused worktree.")
             # Fall through to cleanup
-        elif not _is_content_on_upstream(branch, upstream, cwd=worktree_path):
+        elif not _is_content_on_upstream(effective_ref, upstream, cwd=worktree_path):
             if repo.pr.required:
                 output.err(
-                    f"Unmerged work detected on {branch}, and PRs are required "
-                    f"for this repo -- it cannot be finalized direct-to-master.\n"
+                    f"Unmerged work detected on {effective_ref}, and PRs are "
+                    f"required for this repo -- it cannot be finalized "
+                    f"direct-to-master.\n"
                     f"Land it through a pull request:\n"
                     f"  1. agent-worktrees create-pr --title \"...\"\n"
                     f"  2. open the PR via the '{repo.pr.provider}' provider, "
@@ -1770,14 +1742,14 @@ def validate_and_finalize(
                 )
             else:
                 output.err(
-                    f"Unmerged work detected on {branch}. "
+                    f"Unmerged work detected on {effective_ref}. "
                     f"Run 'agent-worktrees push-changes' to push your changes "
                     f"to {repo.remote}/{repo.default_branch} first, "
                     f"then retry 'agent-worktrees finalize'."
                 )
             return False
         else:
-            print(f"Verified: all content from {branch} is on {upstream}.")
+            print(f"Verified: all content from {effective_ref} is on {upstream}.")
     else:
         # Worktree directory gone -- check if branch content is on upstream
         # from the anchor repo
@@ -1962,8 +1934,27 @@ def validate_and_finalize(
                 output.warn("Could not remove worktree via git -- forcing directory removal.")
 
             print(f"Removing branch {branch}...")
-            if not git_ops.delete_branch(branch, cwd=anchor):
+            if preserve_tracked_branch:
+                output.warn(
+                    f"Preserving branch {branch} instead of deleting it -- "
+                    f"it was flagged above as a stale tracked ref with "
+                    f"content not confirmed on {upstream}. Deleting it here "
+                    f"would rely on 'git branch -d''s merged-check against "
+                    f"the anchor's local branch (not upstream), which can "
+                    f"silently discard genuinely orphaned work right after "
+                    f"warning about it. Remove it manually once rescued or "
+                    f"confirmed disposable."
+                )
+            elif not git_ops.delete_branch(branch, cwd=anchor):
                 output.warn(f"Could not delete branch {branch} (may already be gone).")
+
+            if renamed_branch_to_clean:
+                print(f"Removing validated renamed branch {renamed_branch_to_clean}...")
+                if not git_ops.delete_branch(renamed_branch_to_clean, cwd=anchor):
+                    output.warn(
+                        f"Could not delete branch {renamed_branch_to_clean} "
+                        f"(may already be gone)."
+                    )
 
             if pr_mode and record.prs:
                 # Remove every tracked PR's local feature branch (serial +

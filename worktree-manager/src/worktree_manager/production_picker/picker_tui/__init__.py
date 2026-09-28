@@ -117,7 +117,7 @@ def _write_picker_crash_log(exc, *, live, mock_mode, app=None):
     from datetime import datetime, timezone
 
     try:
-        from .. import config as cfg
+        from .. import project_config as cfg
 
         logs_dir = cfg.install_dir() / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)

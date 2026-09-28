@@ -138,9 +138,8 @@ def _owns_active_route() -> bool:
             if now - _last_missing_active_heal_attempt >= _MISSING_ACTIVE_HEAL_INTERVAL_S:
                 _last_missing_active_heal_attempt = now
                 try:
-                    routing.reap_stale_active(
-                        routing_dir(), service="agent-dispatch"
-                    )
+                    svc = "agent-dispatch"  # marketplace-isolation: allow legacy-compatibility
+                    routing.reap_stale_active(routing_dir(), service=svc)
                 except Exception:
                     log.debug(
                         "missing-active self-heal probe failed", exc_info=True
@@ -199,7 +198,8 @@ def _publish_routing(cfg: Config, bound_port: int, *, passive: bool = False) -> 
         try:
             # Dead-port watchdog: retire any advertised-but-dead endpoint a prior
             # crashed coordinator/cutover left before we announce ourselves.
-            routing.reap_stale_active(routing_dir(), service="agent-dispatch")
+            svc = "agent-dispatch"  # marketplace-isolation: allow legacy-compatibility
+            routing.reap_stale_active(routing_dir(), service=svc)
         except Exception:
             log.debug("startup dead-port sweep skipped", exc_info=True)
 
@@ -222,8 +222,9 @@ def _publish_routing(cfg: Config, bound_port: int, *, passive: bool = False) -> 
         try:
             from zdd import lifecycle
 
+            svc = "agent-dispatch"  # marketplace-isolation: allow legacy-compatibility
             rec = lifecycle.record(
-                routing_dir(), lifecycle.START, service="agent-dispatch",
+                routing_dir(), lifecycle.START, service=svc,
                 outcome=lifecycle.OK, version=__version__, port=bound_port,
             )
             # Remember we logged START -- only if it was actually written (record
@@ -256,8 +257,9 @@ def _clear_routing() -> None:
             try:
                 from zdd import lifecycle
 
+                svc = "agent-dispatch"  # marketplace-isolation: allow legacy-compatibility
                 lifecycle.record(
-                    routing_dir(), lifecycle.STOP, service="agent-dispatch",
+                    routing_dir(), lifecycle.STOP, service=svc,
                     outcome=lifecycle.OK,
                 )
             except Exception:

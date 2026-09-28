@@ -13,7 +13,7 @@ import pytest
 from worktree_manager import __main__ as entrypoint
 from worktree_manager import launcher
 from worktree_manager.production_picker import runner
-from worktree_manager.production_picker import _engine_runtime as engine_runtime
+from worktree_manager import agent_worktrees_runtime as engine_runtime
 
 from _installation_context_fixtures import namespaced_fixture, patch_profile
 
@@ -110,125 +110,128 @@ def test_production_runner_activates_project_and_uses_transplanted_ui(monkeypatc
         def start(self):
             self.target()
 
-    class Config:
-        @staticmethod
-        def set_active_project(project):
-            calls.append(("active", project))
-
-    class Cli:
-        @staticmethod
-        def _resolve_active_project(project):
-            return project, None
-
-        @staticmethod
-        def _in_ssh_session():
-            return False
-
-        @staticmethod
-        def _heal_stale_anchor_if_self_missing(config):
-            calls.append(("heal", config))
-            return config
-
-        @staticmethod
-        def reap_orphan_mux_sessions():
-            calls.append(("reap",))
-
-        @staticmethod
-        def _sweep_managed_on_exit():
-            calls.append(("managed",))
-
-        @staticmethod
-        def _sweep_launcher_shells_on_exit():
-            calls.append(("shells",))
-
-        @staticmethod
-        def _sweep_finished_sessions_on_cadence():
-            calls.append(("finished",))
-
-        @staticmethod
-        def _start_picker_monitor_root():
-            return None
-
-    Config.load_config = staticmethod(lambda: "config")
-
+    runner.context.reset()
     monkeypatch.setattr(
-        runner,
-        "engine_module",
-        lambda name: Config if name == "config" else Cli,
+        runner.engine_group_b,
+        "picker_bootstrap",
+        lambda project: calls.append(("bootstrap", project)) or {
+            "version": 1,
+            "project": "resolved-demo",
+            "should_switch_cwd": True,
+            "cwd": "C:/resolved-demo",
+            "default_live": False,
+        },
+    )
+    monkeypatch.setattr(
+        runner.engine_group_b,
+        "repair_stale_anchor",
+        lambda project: calls.append(("heal", project)),
+    )
+    monkeypatch.setattr(runner.os, "chdir", lambda path: calls.append(("chdir", path)))
+    monkeypatch.setattr(
+        runner.housekeeping,
+        "reap_orphan_mux_sessions",
+        lambda **kwargs: calls.append(("reap", kwargs.get("only_owned"))),
+    )
+    monkeypatch.setattr(
+        runner.housekeeping,
+        "sweep_managed_on_exit",
+        lambda: calls.append(("managed",)),
+    )
+    monkeypatch.setattr(
+        runner.housekeeping,
+        "sweep_launcher_shells_on_exit",
+        lambda: calls.append(("shells",)),
+    )
+    monkeypatch.setattr(
+        runner.housekeeping,
+        "sweep_finished_sessions_on_cadence",
+        lambda: calls.append(("finished",)),
+    )
+    monkeypatch.setattr(
+        runner.housekeeping,
+        "start_picker_monitor_root",
+        lambda: calls.append(("monitor", runner.context.project())) or None,
     )
     monkeypatch.setattr(
         runner,
         "run_tui_picker",
-        lambda *, live: calls.append(("picker", live)) or {"action": "new"},
+        lambda *, live: calls.append(("picker", live, runner.context.project()))
+        or {"action": "new"},
     )
     monkeypatch.setattr(runner.threading, "Thread", ImmediateThread)
 
-    assert runner.run("demo") == {"action": "new"}
-    assert calls == [
-        ("active", "demo"),
-        ("heal", "config"),
-        ("reap",),
-        ("managed",),
-        ("shells",),
-        ("finished",),
-        ("picker", True),
-    ]
+    try:
+        assert runner.run("demo") == {"action": "new"}
+        assert calls == [
+            ("bootstrap", "demo"),
+            ("chdir", "C:/resolved-demo"),
+            ("heal", "resolved-demo"),
+            ("reap", True),
+            ("managed",),
+            ("shells",),
+            ("finished",),
+            ("monitor", "resolved-demo"),
+            ("picker", False, "resolved-demo"),
+        ]
+        assert runner.context.project() == "resolved-demo"
+    finally:
+        runner.context.reset()
 
 
-def test_prepare_does_not_block_first_paint_on_slow_config_load(monkeypatch):
-    """``_prepare`` must return (so the Picker can mount and paint) without
-    waiting on ``config_module.load_config()``/the anchor heal check -- a
-    real, uncached ``load_config()`` can take several real seconds on a
-    machine with many registered repos (its control-plane related-PR
-    discovery walks every anchor), and blocking the render thread on that
-    before the Textual app even exists was the actual cause of a many-second
-    blank screen at Picker launch. Proven here with a real background
-    thread (not the ImmediateThread test double other tests in this module
-    use) and a slow ``load_config`` gated on an Event only the anchor-heal
-    background worker sets."""
+def test_prepare_does_not_block_first_paint_on_background_anchor_repair(monkeypatch):
+    """``_prepare`` must return before the background repair finishes."""
     import threading
 
     heal_started = threading.Event()
     release_heal = threading.Event()
 
-    class Config:
-        @staticmethod
-        def set_active_project(project):
-            pass
-
-        @staticmethod
-        def load_config():
-            heal_started.set()
-            assert release_heal.wait(timeout=5), "heal worker never released"
-            return "config"
-
-    class Cli:
-        @staticmethod
-        def _resolve_active_project(project):
-            return project, None
-
-        @staticmethod
-        def _in_ssh_session():
-            return False
-
-        @staticmethod
-        def _heal_stale_anchor_if_self_missing(config):
-            return config
-
+    runner.context.reset()
     monkeypatch.setattr(
-        runner,
-        "engine_module",
-        lambda name: Config if name == "config" else Cli,
+        runner.engine_group_b,
+        "picker_bootstrap",
+        lambda project: {
+            "version": 1,
+            "project": "resolved-demo",
+            "should_switch_cwd": False,
+            "cwd": None,
+            "default_live": True,
+        },
     )
 
+    def _repair(project):
+        assert project == "resolved-demo"
+        heal_started.set()
+        assert release_heal.wait(timeout=5), "heal worker never released"
+
+    monkeypatch.setattr(runner.engine_group_b, "repair_stale_anchor", _repair)
+
     try:
-        cli, default_live = runner._prepare("demo")
-        assert cli is Cli
+        default_live = runner._prepare("demo")
         assert default_live is True
+        assert runner.context.project() == "resolved-demo"
         assert heal_started.wait(timeout=5), (
             "background anchor-heal worker never started")
     finally:
         release_heal.set()
+        runner.context.reset()
+
+
+def test_prepare_requires_picker_bootstrap_support(monkeypatch):
+    from worktree_manager import engine_client
+
+    runner.context.reset()
+
+    def _boom(project):
+        raise engine_client.EngineFeatureUnavailable("older engine")
+
+    monkeypatch.setattr(runner.engine_group_b, "picker_bootstrap", _boom)
+
+    try:
+        with pytest.raises(RuntimeError, match="picker-bootstrap --json"):
+            runner._prepare("demo")
+    finally:
+        runner.context.reset()
 
 
 def test_engine_runtime_prefers_explicit_context_over_checkout(monkeypatch, tmp_path):
@@ -329,58 +332,118 @@ def test_engine_runtime_rejects_foreign_explicit_context(monkeypatch, tmp_path):
         engine_runtime.ensure_engine_runtime()
 
 
+def test_engine_runtime_falls_back_to_canonical_libs_for_uv_editable_lib(monkeypatch, tmp_path):
+    """A lib converted to the `uv`-editable canonical-reference form
+    (vendor-pointer-generalization effort, Phase 1 -- e.g.
+    lazy-cli-dispatch) has NO local copy under
+    plugins/agent-worktrees/libs/<lib> in a dev checkout at all --
+    ensure_engine_runtime() must fall back to the monorepo's own canonical
+    libs/<lib>/src (the same live source `uv`'s own [tool.uv.sources]
+    reference already resolves to), not silently omit it from sys.path
+    (regression: ModuleNotFoundError: No module named 'lazy_cli_dispatch',
+    caught by CI's own worktree-manager suite)."""
+    checkout = tmp_path / "checkout"
+    plugin_src = checkout / "plugins/agent-worktrees/src"
+    (plugin_src / "agent_worktrees").mkdir(parents=True)
+    # lazy-cli-dispatch has no local copy under the plugin's own libs/ --
+    # only the monorepo's own canonical libs/lazy-cli-dispatch/src.
+    canonical_lib_src = checkout / "libs/lazy-cli-dispatch/src"
+    (canonical_lib_src / "lazy_cli_dispatch").mkdir(parents=True)
+    (canonical_lib_src / "lazy_cli_dispatch/__init__.py").write_text(
+        "x = 1\n", encoding="utf-8"
+    )
+    # A different (still real-copy-vendored) lib DOES have a local copy --
+    # confirms the fallback only ever applies when the local copy is
+    # genuinely absent, never overriding one that already exists.
+    local_config_migrate_src = plugin_src.parent / "libs/config-migrate/src"
+    (local_config_migrate_src / "config_migrate").mkdir(parents=True)
+
+    monkeypatch.delenv(engine_runtime.ENGINE_SOURCE_ENV, raising=False)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(engine_runtime, "_checkout_source", lambda: plugin_src)
+    monkeypatch.setattr(engine_runtime.sys, "path", [])
+
+    engine_runtime.ensure_engine_runtime()
+
+    assert str(canonical_lib_src) in engine_runtime.sys.path
+    assert str(local_config_migrate_src) in engine_runtime.sys.path
+
+
+def test_engine_runtime_installed_slot_never_uses_the_checkout_fallback(monkeypatch, tmp_path):
+    """An installed runtime (a site-packages slot) has no monorepo
+    libs/+plugins/ ancestor at all -- the canonical-libs fallback must
+    never fire there (it always carries a real local copy of every engine
+    lib, materialized at promotion time; attempting the fallback would be
+    a silent no-op at best, but must never be attempted regardless)."""
+    home = tmp_path / "home"
+    home.mkdir()
+    install, _python = namespaced_fixture(home, windows=engine_runtime.os.name == "nt")
+    slot = install.parent / "versions" / "1.2.3"
+    source = (
+        slot / "Lib" / "site-packages"
+        if engine_runtime.os.name == "nt"
+        else slot / "lib" / "python3.10" / "site-packages"
+    )
+    (source / "agent_worktrees").mkdir(parents=True)
+    _write_policy(home, enabled=True)
+    patch_profile(monkeypatch, engine_runtime.agent_plugin_runtime, home)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(install))
+    monkeypatch.delenv(engine_runtime.ENGINE_SOURCE_ENV, raising=False)
+    monkeypatch.setattr(engine_runtime, "_checkout_source", lambda: tmp_path / "no-checkout-here")
+    monkeypatch.setattr(engine_runtime.sys, "path", [])
+
+    engine_runtime.ensure_engine_runtime()
+
+    assert not any("lazy-cli-dispatch" in p or "lazy_cli_dispatch" in p
+                   for p in engine_runtime.sys.path)
+
+
 def test_production_runner_mock_skips_mutating_startup(monkeypatch):
     calls = []
 
-    class Config:
-        @staticmethod
-        def set_active_project(project):
-            calls.append(("active", project))
-
-        @staticmethod
-        def load_config():
-            return "config"
-
-    class Cli:
-        @staticmethod
-        def _resolve_active_project(project):
-            return project, None
-
-        @staticmethod
-        def _in_ssh_session():
-            return False
-
-        @staticmethod
-        def _heal_stale_anchor_if_self_missing(config):
-            calls.append(("heal", config))
-
-        @staticmethod
-        def _start_picker_monitor_root():
-            calls.append(("monitor",))
-            return None
-
+    runner.context.reset()
     monkeypatch.setattr(
-        runner,
-        "engine_module",
-        lambda name: Config if name == "config" else Cli,
+        runner.engine_group_b,
+        "picker_bootstrap",
+        lambda project: calls.append(("bootstrap", project)) or {
+            "version": 1,
+            "project": "resolved-demo",
+            "should_switch_cwd": False,
+            "cwd": None,
+            "default_live": True,
+        },
+    )
+    monkeypatch.setattr(
+        runner.engine_group_b,
+        "repair_stale_anchor",
+        lambda project: calls.append(("heal", project)),
     )
     monkeypatch.setattr(
         runner,
         "_start_housekeeping",
-        lambda cli: calls.append(("housekeeping",)),
+        lambda: calls.append(("housekeeping",)),
+    )
+    monkeypatch.setattr(
+        runner.housekeeping,
+        "start_picker_monitor_root",
+        lambda: calls.append(("monitor",)),
     )
     monkeypatch.setattr(
         runner,
         "run_tui_picker",
-        lambda *, live, mock_mode: calls.append(("picker", live, mock_mode))
-        or None,
+        lambda *, live, mock_mode: calls.append(
+            ("picker", live, mock_mode, runner.context.project())
+        ) or None,
     )
 
-    assert runner.run("demo", mock_mode=True, local=True) is None
-    assert calls == [
-        ("active", "demo"),
-        ("picker", False, True),
-    ]
+    try:
+        assert runner.run("demo", mock_mode=True, local=True) is None
+        assert calls == [
+            ("bootstrap", "demo"),
+            ("picker", False, True, "resolved-demo"),
+        ]
+    finally:
+        runner.context.reset()
 
 
 def test_production_capture_uses_read_only_prepare(monkeypatch):
@@ -390,7 +453,7 @@ def test_production_capture_uses_read_only_prepare(monkeypatch):
     monkeypatch.setattr(
         runner,
         "_prepare",
-        lambda project, *, heal: calls.append((project, heal)) or (object(), False),
+        lambda project, *, heal: calls.append((project, heal)) or True,
     )
     monkeypatch.setattr(
         picker_capture,
@@ -1470,7 +1533,7 @@ def test_production_picker_disposal_decision_calls_manager_owned_provider(
     assert calls[0][0] == ("demo", "demo-1234", str(tmp_path))
 
 
-def test_resolve_for_uses_remote_compatibility_on_older_engine(monkeypatch):
+def test_resolve_for_reports_remote_plan_unavailable_on_older_engine(monkeypatch, capsys):
     from worktree_manager import engine_client
 
     request = type(
@@ -1492,25 +1555,11 @@ def test_resolve_for_uses_remote_compatibility_on_older_engine(monkeypatch):
             engine_client.EngineFeatureUnavailable("older engine")
         ),
     )
-    monkeypatch.setattr(
-        runner,
-        "compatibility_remote_plan",
-        lambda *args, **kwargs: {
-            "action": "remote",
-            "ssh_alias": "example-wsl",
-            "remote_command": "demo --worktree-id demo-1234 --bare-resume --no-mux",
-        },
-    )
 
     plan, code = entrypoint._resolve_for(request)
-    assert code == 0
-    assert plan.action == "remote"
-    assert plan.raw["ssh_alias"] == "example-wsl"
-
-
-def test_remote_compatibility_rejects_shell_metacharacters():
-    with pytest.raises(RuntimeError, match="unsafe remote launch token"):
-        runner._remote_command(["demo;Remove-Item", "--new"])
+    assert plan is None
+    assert code == 1
+    assert "could not resolve a launch plan: older engine" in capsys.readouterr().out
 
 
 def test_normal_picker_command_uses_production_transplant(monkeypatch):

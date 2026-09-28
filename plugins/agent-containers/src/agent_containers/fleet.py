@@ -18,11 +18,9 @@ from __future__ import annotations
 
 import json
 import logging
-import shutil
-import subprocess
+import os
 from dataclasses import dataclass, field
-
-from agent_procutil import no_window_flags
+from pathlib import Path
 
 from .config import (
     FLEET_LABEL,
@@ -33,9 +31,7 @@ from .config import (
     SECURITY_PROFILE_LABEL,
     SECURITY_UID_LABEL,
     ContainersConfig,
-    DotfilesConfig,
     FleetConfig,
-    HarnessConfig,
 )
 from .lifecycle import (
     DockerContainerInfo,
@@ -48,6 +44,7 @@ from .lifecycle import (
     start_container,
     stop_container,
 )
+from .devcontainer_launch import _devcontainer_up
 
 log = logging.getLogger("agent-containers")
 
@@ -73,10 +70,6 @@ class FleetOperationResult:
     deferred: dict[str, str] = field(default_factory=dict)
     rescues: dict[str, dict] = field(default_factory=dict)
     telemetry_abandoned: list[str] = field(default_factory=list)
-
-
-def _creation_flags() -> int:
-    return no_window_flags()
 
 
 def _fleet_members(config: ContainersConfig, fleet_name: str) -> list[DockerContainerInfo]:
@@ -116,140 +109,38 @@ def _next_indices(existing: list[DockerContainerInfo], prefix: str, count: int) 
     return indices
 
 
-def _devcontainer_up(
-    fleet_name: str,
-    fleet: FleetConfig,
-    name: str,
-    dotfiles: DotfilesConfig | None = None,
-    harness: HarnessConfig | None = None,
-    exec_user: str = "vscode",
-) -> str:
-    """Bring up one container via the devcontainer CLI; return its name.
+def _member_host_path(parent: str, name: str, *, label: str) -> str:
+    """Resolve `<parent>/<name>` and REJECT it if `name` escapes `parent`.
 
-    Tags the container with ``agent-containers.fleet`` (via id-label, which
-    devcontainer applies as a docker label) and renames it to ``name``. When
-    ``fleet.devcontainer_config`` is set it is passed as ``--config`` (for
-    nested specs). When ``dotfiles.repo`` is set the host dotfiles repo is
-    reproduced inside the container after creation (via ``docker cp``); likewise
-    ``harness.repo`` reproduces the control-plane harness checkout at its
-    (distinct) ``target``.
+    `name` is a fleet member's Docker container name (`<name_prefix>-<n>`) --
+    `name_prefix` is an operator-configurable string, not a validated path
+    component. A prefix containing `../` could otherwise make the resolved
+    member path escape the configured parent entirely, before this function's
+    caller ever creates or chowns anything there.
     """
-    devcontainer_exe = shutil.which("devcontainer")
-    if not devcontainer_exe:
+    parent_resolved = Path(parent).resolve()
+    member = (parent_resolved / name).resolve()
+    if parent_resolved not in member.parents:
         raise RuntimeError(
-            "devcontainer CLI not found. Install with "
-            "`npm i -g @devcontainers/cli`, or use an image-based fleet."
+            f"Fleet member name {name!r} escapes the configured {label} "
+            f"parent directory {parent!r}"
         )
-    args = [
-        devcontainer_exe, "up",
-        "--workspace-folder", fleet.devcontainer_path,
-        "--id-label", f"{FLEET_LABEL}={fleet_name}",
-        "--id-label", f"agent-containers.instance={name}",
-        "--id-label", f"{SECURITY_PROFILE_LABEL}={fleet.security_profile}",
-    ]
-    config_path = fleet.resolved_config()
-    if config_path:
-        args += ["--config", config_path]
-    log.info("devcontainer up: %s", " ".join(args))
-    res = subprocess.run(
-        args, capture_output=True, text=True, timeout=1800,
-        creationflags=_creation_flags(),
-    )
-    if res.returncode != 0:
-        raise RuntimeError(f"devcontainer up failed for {name}: {res.stderr.strip()}")
-
-    container_id = None
-    for line in res.stdout.splitlines():
-        line = line.strip()
-        if not line.startswith("{"):
-            continue
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        container_id = obj.get("containerId") or container_id
-    if not container_id:
-        raise RuntimeError(
-            f"Could not determine containerId from devcontainer up output for {name}"
-        )
-
-    rename = _docker(["rename", container_id, name])
-    if rename.returncode != 0:
-        log.warning("Could not rename %s to %s: %s", container_id, name, rename.stderr.strip())
-        name = container_id
-
-    if dotfiles and dotfiles.host_repo():
-        _materialize_repo(name, exec_user, dotfiles, label="dotfiles")
-    if harness and harness.host_repo():
-        _materialize_repo(name, exec_user, harness, label="harness")
-    return name
+    return str(member)
 
 
-def _materialize_repo(
-    container: str, user: str, spec: DotfilesConfig | HarnessConfig, *, label: str,
-) -> None:
-    """Reproduce a host repo (``spec.repo``) inside the container (copy + optional
-    install).
+def _ensure_owned_dir(path: str, uid: int, gid: int) -> None:
+    """Create a host bind-mount SOURCE dir (if missing) owned by uid/gid.
 
-    Copies the host repo into the container at ``spec.target`` via ``docker cp``
-    (the host checkout is only read, never mounted, so it is never mutated),
-    chowns it to the remote user, then runs ``spec.install_command`` (if any) in
-    ``target`` as that user. Used for BOTH the dotfiles shim (``label`` =
-    ``"dotfiles"``, runs ``install.sh``) and the control-plane harness (``label``
-    = ``"harness"``, no install by default). Best-effort: a failed copy/install
-    is warned about, never fatal (the container is already usable).
+    Docker creates a missing bind-mount source itself, owned by whatever the
+    daemon runs as (root) -- a non-root container `exec_user` could never
+    write to a freshly created mount otherwise. `chown` is POSIX-only (a
+    Windows Docker Desktop host shares files differently -- ownership there
+    doesn't map onto a Linux container's uid/gid the same way), so this is a
+    no-op on Windows; only mkdir runs there.
     """
-    host_repo = spec.host_repo()
-    if host_repo is None:
-        return
-    target = spec.target
-
-    mk = _docker(
-        ["exec", "-u", "0", container, "bash", "-lc", f"mkdir -p {target}"],
-        timeout=60,
-    )
-    if mk.returncode != 0:
-        log.warning(
-            "%s target mkdir failed in %s: %s",
-            label, container, mk.stderr.strip() or mk.stdout.strip(),
-        )
-        return
-    cp = _docker(
-        ["cp", f"{host_repo.as_posix()}/.", f"{container}:{target}"], timeout=300
-    )
-    if cp.returncode != 0:
-        log.warning(
-            "%s copy into %s failed: %s",
-            label, container, cp.stderr.strip() or cp.stdout.strip(),
-        )
-        return
-    chown = _docker(
-        ["exec", "-u", "0", container, "chown", "-R", f"{user}:{user}", target],
-        timeout=120,
-    )
-    if chown.returncode != 0:
-        log.warning(
-            "%s chown in %s failed (continuing): %s",
-            label, container, chown.stderr.strip() or chown.stdout.strip(),
-        )
-    log.info("Reproduced %s repo at %s in %s", label, target, container)
-
-    if not spec.install_command:
-        return
-    res = _docker(
-        [
-            "exec", "-u", user, "-w", target, container,
-            "bash", "-lc", spec.install_command,
-        ],
-        timeout=600,
-    )
-    if res.returncode != 0:
-        log.warning(
-            "%s install_command failed in %s (non-fatal): %s",
-            label, container, res.stderr.strip() or res.stdout.strip(),
-        )
-    else:
-        log.info("Ran %s install_command in %s", label, container)
+    Path(path).mkdir(parents=True, exist_ok=True)
+    if os.name != "nt":
+        os.chown(path, uid, gid)
 
 
 def _image_user(
@@ -301,6 +192,41 @@ def _image_user(
             f"Restricted exec_user '{user}' has unsafe home directory '{home}'"
         )
     return uid, gid, home
+
+
+def _trusted_mount_owner(image: str, user: str) -> tuple[int, int]:
+    """Resolve a user's uid/gid from an image for trusted-fleet mount ownership.
+
+    A lighter twin of `_image_user`: that probe is restricted-specific (it
+    requires real memory/cpus/pids_limit values -- `None` under a trusted
+    fleet's normal unset defaults -- and rejects a root exec_user, which
+    trusted fleets have always allowed). This one only resolves uid/gid (no
+    home-directory safety checks -- trusted fleets don't get that
+    restricted-only guarantee) and explicitly permits uid/gid 0.
+    """
+    probe = 'id -u "$1" && id -g "$1"'
+    res = _docker(
+        [
+            "run", "--rm", "--network", "none",
+            "--read-only", "--cap-drop=ALL",
+            "--security-opt=no-new-privileges",
+            "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m",  # noqa: S108
+            "--entrypoint", "bash",
+            image, "-c", probe, "--", user,
+        ],
+        timeout=120,
+    )
+    if res.returncode != 0:
+        raise RuntimeError(
+            f"Trusted image '{image}' does not provide exec_user '{user}': "
+            f"{res.stderr.strip() or res.stdout.strip()}"
+        )
+    lines = res.stdout.strip().splitlines()
+    if len(lines) != 2:
+        raise RuntimeError(
+            f"Trusted image user probe returned an invalid result for '{user}'"
+        )
+    return int(lines[0]), int(lines[1])
 
 
 def _image_id(image: str) -> str:
@@ -422,9 +348,80 @@ def _image_run(
             args += ["--cpus", str(fleet.effective_cpus())]
         if fleet.effective_pids_limit() is not None:
             args += ["--pids-limit", str(fleet.effective_pids_limit())]
+        # Optional real, host-backed persistence for full-harness-projection
+        # (see visions/plugins/agent-containers's full-harness-projection-trusted):
+        # an image-backed trusted fleet otherwise has no persistence mechanism
+        # at all (code_model's "mount" variant remains unimplemented).
+        # Each fleet member gets its OWN subdirectory (keyed by its unique
+        # container `name`) under the configured parent path -- mounting the
+        # bare configured path directly would let every member of a
+        # size > 1 fleet collide on the same host directory.
+        if fleet.host_workspace_path or (fleet.host_home_path and fleet.home_folder):
+            # Docker creates a missing bind-mount SOURCE directory itself,
+            # owned by whatever the daemon runs as (root) -- the configured,
+            # normally non-root exec_user could never write to a freshly
+            # created mount. Pre-create + chown each member directory to the
+            # exec_user's real uid/gid, resolved via a TRUSTED-specific probe
+            # (not the restricted-only `_image_user`, which requires real
+            # memory/cpus/pids_limit values -- `None` under trusted's normal
+            # unset defaults -- and rejects a root exec_user, which trusted
+            # fleets have always allowed).
+            uid, gid = _trusted_mount_owner(fleet.image, exec_user)
+            if fleet.host_workspace_path:
+                member_workspace = _member_host_path(
+                    fleet.host_workspace_path, name, label="host_workspace_path"
+                )
+                _ensure_owned_dir(member_workspace, uid, gid)
+                args += ["-v", f"{member_workspace}:{workspace_folder}"]
+            if fleet.host_home_path and fleet.home_folder:
+                member_home = _member_host_path(
+                    fleet.host_home_path, name, label="host_home_path"
+                )
+                _ensure_owned_dir(member_home, uid, gid)
+                args += ["-v", f"{member_home}:{fleet.home_folder}"]
+        if fleet.systemd_capable:
+            # A working `systemd --user` (for the venue's own maintenance
+            # timers) needs CAP_SYS_ADMIN + a writable /sys/fs/cgroup +
+            # writable/executable /run + a container marker + (for visible
+            # PID1 boot logging) an allocated tty. Docker's default
+            # /sys/fs/cgroup mount is read-only even under `trusted`; a raw
+            # host bind-mount of it does NOT work (cgroup-namespace path
+            # mismatch) -- an in-container remount at startup is the fix.
+            # Validated live against a real, unprivileged container -- see
+            # the effort/issue this landed from.
+            #
+            # `--user root`: PID 1 (systemd itself) must boot as root
+            # regardless of the image's own default `USER` -- `exec_user`
+            # only governs LATER `docker exec` calls for actual work, never
+            # the container's own entrypoint process. Without this, an image
+            # with a non-root default USER would run `mount`/systemd as that
+            # user and fail to boot (mount(2) needs CAP_SYS_ADMIN in the
+            # calling process's effective set, which a non-root PID 1 is not
+            # guaranteed to have even though the capability is granted to the
+            # container). Systemd itself drops to per-service users for real
+            # workloads via its own unit files -- exactly like a normal
+            # machine's init.
+            args += [
+                "--user", "root",
+                "--cap-add", "SYS_ADMIN",
+                "--tmpfs", "/run:rw,exec",
+                "--tmpfs", "/run/lock:rw,exec",
+                "-t",
+                "--env", "container=docker",
+            ]
     for key, value in sorted(fleet.environment.items()):
         args += ["--env", f"{key}={value}"]
-    args += [fleet.image, "sleep", "infinity"]
+    if fleet.systemd_capable:
+        # The image must provide `systemd`/`systemd-sysv`/`dbus-user-session`
+        # itself -- this plugin only wires the launch, it does not install
+        # systemd into the image.
+        cmd = [
+            "bash", "-c",
+            "mount -o remount,rw /sys/fs/cgroup && exec /lib/systemd/systemd",
+        ]
+    else:
+        cmd = ["sleep", "infinity"]
+    args += [fleet.image, *cmd]
     res = _docker(args, timeout=120)
     if res.returncode != 0:
         raise RuntimeError(f"docker run failed for {name}: {res.stderr.strip()}")

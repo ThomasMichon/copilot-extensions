@@ -153,7 +153,7 @@ def engine_command(home: Path | None = None) -> list[str]:
     return [
         windowless_python(str(py)),
         "-m",
-        "agent_index.engine.app",
+        "agent_index_engine.app",
         "--host",
         host,
         "--port",

@@ -130,7 +130,7 @@ def _run_worktrees(args: list[str], *, cwd: str | None = None,
     cross-project reclaim runs the binstub with ``cwd`` set to the child's repo
     anchor.
     """
-    binstub = shutil.which("agent-worktrees")
+    binstub = shutil.which("agent-worktrees")  # marketplace-isolation: allow legacy-compatibility
     if not binstub:
         return None
     try:

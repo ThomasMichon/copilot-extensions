@@ -155,9 +155,25 @@ if ($ContextOnly) {
 
 function Emit-Empty { Publish-Context '{}'; exit 0 }
 
-# Only nudge when agent-worktrees is available to register with.
+# Only nudge when agent-worktrees is available to register with (the
+# self-provisioning tool binstub is on PATH or deployed, OR the durable
+# runtime-root pointer -- see install-contract.md "Durable runtime-root
+# pointer" -- names a currently-existing root, e.g. a marketplace-cell
+# install with no legacy binstub at all). Resolver-free by design: a plain
+# file read, no JSON parsing, so this still works on a tools-half box. The
+# pointer is advisory and may be missing or stale; either way this stays
+# fail-open exactly as it already does for every other uncertainty here --
+# a missing/stale pointer just falls through to "not available".
 $binstub = Join-Path $env:USERPROFILE '.local\bin\agent-worktrees'
-if (-not (Get-Command agent-worktrees -ErrorAction SilentlyContinue) -and -not (Test-Path $binstub)) { Emit-Empty }
+$available = [bool](Get-Command agent-worktrees -ErrorAction SilentlyContinue) -or (Test-Path $binstub)
+if (-not $available) {
+    $pointer = Join-Path $env:USERPROFILE '.copilot-extensions\agent-worktrees\runtime-root'
+    if (Test-Path $pointer) {
+        $pointerRoot = (Get-Content -LiteralPath $pointer -TotalCount 1 -ErrorAction SilentlyContinue)
+        if ($pointerRoot -and (Test-Path -LiteralPath $pointerRoot)) { $available = $true }
+    }
+}
+if (-not $available) { Emit-Empty }
 
 # Must be inside a git work tree.
 $top = (git rev-parse --show-toplevel 2>$null)

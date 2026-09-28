@@ -41,7 +41,7 @@ def test_engine_endpoint_env(monkeypatch):
 
 def test_engine_command_targets_durable_venv(tmp_path):
     cmd = daemon.engine_command(tmp_path)
-    assert cmd[1:] == ["-m", "agent_index.engine.app", "--host",
+    assert cmd[1:] == ["-m", "agent_index_engine.app", "--host",
                         daemon.engine_endpoint()[0], "--port", str(daemon.engine_endpoint()[1])]
     assert str(tmp_path) in cmd[0]
 
@@ -218,7 +218,7 @@ def test_spawn_uses_windowless_daemon_contract(monkeypatch):
         lambda cmd, **kwargs: captured.update(cmd=cmd, kwargs=kwargs) or FakeProc(),
     )
 
-    daemon._spawn(["pythonw.exe", "-m", "agent_index.engine.app"], python="python.exe")
+    daemon._spawn(["pythonw.exe", "-m", "agent_index_engine.app"], python="python.exe")
 
     assert captured["kwargs"]["creationflags"] == 0x08000000
     assert captured["kwargs"]["stdin"] is daemon.subprocess.DEVNULL

@@ -282,7 +282,9 @@ realized in `main`; unchecked items are the remaining delta.
             Final state: Manager-owned sessions never repopulate
             `status-monitor.d`, never fall back to resident direct
             `_monitor_mux_set()` writes, and recover monitor/daemon restarts via
-            Worktree Manager live-mapping republication instead. Unmanaged /
+            Worktree Manager live-mapping republication instead (2026-09-27
+            follow-on: also republished on an independent keep-alive cadence,
+            not restart-only -- see Journal and the plan doc). Unmanaged /
             zero-provider sessions keep the existing direct/status-updater
             fallback lane unchanged.
       - [x] **Sub-slice 4 (landed 2026-09-14): same-config marketplace-cell
@@ -353,8 +355,8 @@ launch/monitor ownership has moved out of `agent-worktrees`, the Picker treats
 backend vs. presentation as independent axes, and legacy `session_backend`
 bindings still resolve correctly through the compatibility view.
 
-### Phase 3c — Picker non-blocking I/O (In progress — Steps 1-4 landed, Step 5 open)
-- [ ] Make every I/O-touching Picker surface — pivot loads (built-in and
+### Phase 3c — Picker non-blocking I/O (Done — Steps 1-5 landed; optional progress-envelope follow-up tracked in #4274)
+- [x] Make every I/O-touching Picker surface — pivot loads (built-in and
       plugin-contributed), menu opens, and action execution with progress
       reporting — consistently non-blocking, closing the gap found while
       investigating a "menus feel slow" report after
@@ -389,19 +391,38 @@ bindings still resolve correctly through the compatibility view.
       epoch-guarded setup worker instead of calling synchronous `setup()`,
       and new Step 3 race coverage proves rapid repeated reloads plus both
       config-section/worktree-action rescan vs manual reload orderings always
-      resolve to the newer epoch.
+      resolve to the newer epoch. **Step 4 landed in PR
+      [#4164](https://github.com/ThomasMichon/copilot-extensions/pull/4164)**:
+      explicit UI-thread boundary tests now fail fast if mount, reload, or
+      action-completion rescan code paths regress to blocking setup I/O, while
+      the existing Actions-menu and steer-submit offload coverage is
+      documented as part of the same guardrail. **Step 5 landed in PR
+      [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278)**:
+      the lingering synchronous helper was renamed to the test-only
+      `setup_sync_for_tests()`, direct unit-test callers were updated, the
+      setup/reload docs were reconciled to the final worker-owned production
+      path, and the separate built-in progress-envelope follow-up was filed as
+      [#4274](https://github.com/ThomasMichon/copilot-extensions/issues/4274).
 
-### Phase 3d — Retire the Picker's in-process engine-module boundary (Planned — #3359, #3360)
+### Phase 3d — Retire the Picker's in-process engine-module boundary (Done, one residual gap flagged — #3360)
 
 _(agent-recommended scoping below the two linked issues; the issues
 themselves are operator-filed.)_
 
 `production_picker/_engine_runtime.py` — its own docstring calls it a
 "temporary compatibility boundary" — is the last major violation of the
-picker vision's process-boundary-only Non-Goal: 9 `agent_worktrees.*`
-submodules (`config`, `profiles`, `pr_ops`, `reclaim`, `sessions`,
-`tracking`, `__main__`, `update_stage`, `state_root`) are imported
-**in-process** via whole-module `__getattr__` proxies or inline
+picker vision's process-boundary-only Non-Goal. Historically this boundary
+covered 9 `agent_worktrees.*` submodules; after Phase 3e retired the
+`profiles` proxy plus PRs [#4317](https://github.com/ThomasMichon/copilot-extensions/pull/4317),
+[#4322](https://github.com/ThomasMichon/copilot-extensions/pull/4322),
+[#4323](https://github.com/ThomasMichon/copilot-extensions/pull/4323), and
+[#4324](https://github.com/ThomasMichon/copilot-extensions/pull/4324) cut
+the direct Group A/B runner/pivot/update call sites over to subprocess or
+Manager-owned seams, 9 engine modules still remain live here (`activity`,
+`config`, `gc`, `pr_ops`, `reap_cli`, `reclaim`, `sessions`,
+`status_monitor_runtime`, `tracking`) — including 5 legacy proxy/shim modules
+and 4 explicit housekeeping-owned imports — still
+imported **in-process** via whole-module `__getattr__` proxies or inline
 `engine_module(name)` calls, sharing agent-worktrees' own venv/sys.path
 instead of going through the `--json` engine boundary every other Picker
 read path uses. This directly caused two live production bugs already fixed
@@ -409,11 +430,15 @@ this session (#3319, #3327). #3359 is the mechanical, low-risk half
 (vendor the 3 borrowed shared libs, `agent-procutil`/`dropin-registry`/
 `plugin-activation`) — **done**, PR
 [#3368](https://github.com/ThomasMichon/copilot-extensions/pull/3368).
-#3360 is the harder half (the CLI-root modules themselves) and needs real
-design, not a blind mechanical conversion — see
+#3360 is the harder half (the CLI-root modules themselves) and now has a
+reviewed ordered plan, not just an evidence dump — see
 [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md)
-for the full call-site inventory and the performance-tradeoff analysis behind
-each checkbox below.
+for the full call-site inventory, the operator-resolved ownership decisions,
+and the PR-by-PR sequencing behind each checkbox below. Group D's `profiles`
+branch is already closed via Phase 3e / PR
+[#3626](https://github.com/ThomasMichon/copilot-extensions/pull/3626), and
+Phase 3c's non-blocking worker prerequisite for Group C is now satisfied via
+PR [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
 
 - [x] **#3359 — vendor the 3 borrowed shared libs.** Landed via
       [#3368](https://github.com/ThomasMichon/copilot-extensions/pull/3368):
@@ -436,42 +461,173 @@ each checkbox below.
       Phase 3e since they also touch agent-worktrees' own
       `profiles`/`terminal-fragment`/`repair` CLI verbs, not just this
       Picker's read path.
-- [ ] **Design + convert the low-frequency, one-shot CLI-root reads.**
-      `pivot_manifest.py`'s `config.install_dir()` / `config._home()` /
-      `state_root_module.resolve_state_root(...)` run once per pivot-registry
-      scan pass, not per render frame — the safest subprocess-conversion
-      candidates. Needs: confirm/add a stable `--json` verb for each
-      (install dir, state root), matching the existing
-      `docs/engine-picker-contract.md` pinning discipline Phase 3 already
-      established for `engine_client`.
-- [ ] **Design the `runner.py` process-lifecycle call sites — likely NOT a
-      subprocess conversion at all.** `_start_anchor_heal_check`,
-      `reap_orphan_mux_sessions`, `_sweep_managed_on_exit`,
-      `_sweep_launcher_shells_on_exit`, `_sweep_finished_sessions_on_cadence`,
-      and `_start_picker_monitor_root` are private (`_`-prefixed),
-      never-designed-for-external-callers `agent_worktrees.__main__`
-      internals that manage the **Picker's own process lifetime**
-      (background threads, exit-time sweeps) — not agent-worktrees state
-      reads. A subprocess can't run "in this process's exit handler"; the
-      real fix is likely reclassifying this logic as worktree-manager's own
-      owned concern (or a new shared lib), not a CLI verb.
-- [ ] **Design the `data_local.py` hot path — needs a new batched verb, not
-      per-attribute conversion.** `tracking.list_records` /
-      `tracking._pr_is_terminal` / `pr_ops._reconcile_active_pr` /
-      `reclaim.resolve_bound_copilots` / `sessions.mux_status_many` /
-      `sessions.worktree_session_lock_state` / `tracking.stamp_*` run as one
-      read-reconcile-**write** loop over every managed worktree record, once
-      per Picker refresh (Phase 3c's synchronous hot path) — `stamp_*`
-      mutates `tracking.yaml` in-process using agent-worktrees' own file
-      lock. Naive per-attribute subprocess conversion would multiply
-      per-refresh subprocess spawns by up to 6× the worktree count and can't
-      hold a cross-process lock across separate calls. Needs one new atomic,
-      batched `--json` verb (read + reconcile + stamp in a single
-      agent-worktrees-owned call) before any of this path can move off the
-      in-process boundary — sequence this **after** Phase 3c's non-blocking
-      I/O work lands, since both touch the same call site.
-- [ ] Retire `_engine_runtime.py` (and its 9 proxy-module shims) once every
-      call site above has converted or been reclassified.
+- [x] **Write the reviewed ordered plan and resolve Open Questions 1-3.**
+      Landed in
+      [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md):
+      Group B is now split by ownership (Picker lifecycle sweeps move into
+      worktree-manager; project/config/ssh resolution stays engine-owned behind
+      a new public CLI seam), Group C's batch verb is explicitly engine-owned,
+      and Group C's former Phase 3c prerequisite is recorded as satisfied by
+      PR [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
+- [x] **Step 1 — pin and cut over Group A's low-frequency public read
+      surface.** Landed in PR
+      [#4317](https://github.com/ThomasMichon/copilot-extensions/pull/4317):
+      added/pinned `picker-paths --json`, reused `state-root --json`, extended
+      `stage-update` with `--indicator-state --json`, documented the contract in
+      `engine-picker-contract.md`, and moved `pivot_manifest.py` /
+      `update_stage.py` off the in-process engine boundary onto the same
+      subprocess client pattern the rest of the Picker already uses.
+- [x] **Step 2 — add Group B's narrow public CLI seam for project/config/ssh
+      decisions.** Landed in PR
+      [#4322](https://github.com/ThomasMichon/copilot-extensions/pull/4322):
+      added/pinned `picker-bootstrap --json` and
+      `repair-stale-anchor --json`, documented them in
+      `engine-picker-contract.md`, confirmed the existing `resolve --json`
+      remote-launch payload already covered Group B's machine/environment
+      needs without a shape change, and introduced a Manager-owned
+      `ProjectBootstrap` binding record plus `engine_group_b.py` for the
+      later cutover. Additive only: `runner.py` still uses the old
+      compatibility path until Step 4. See
+      [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
+- [x] **Step 3 — reimplement Group B's Picker-owned lifecycle sweeps directly
+      in worktree-manager, additive first.** Landed in PR
+      [#4323](https://github.com/ThomasMichon/copilot-extensions/pull/4323):
+      added `worktree_manager.production_picker.housekeeping` and
+      `monitor_roots` as the Manager-owned home for the Picker's lifecycle
+      sweeps / monitor-root glue, recorded the Step 4 coordination boundary
+      explicitly (Manager-owned mux-session names from `mux-mapping.json`,
+      Manager-owned worktree ids from that registry plus `execution_leg.provider
+      == ahp`, Manager-owned launcher shells from the relocated
+      `worktree-manager/bin/launch-session.*` / `pane-wrapper.*` path), and
+      proved parity with the current engine behavior through new Worktree
+      Manager tests. Kept additive-only per plan: `runner.py` still uses the
+      compatibility path and agent-worktrees' live sweeper behavior is
+      unchanged until Step 4. See
+      [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
+- [x] **Step 4 — cut `runner.py`, `pivot_manifest.py`, and `update_stage.py`
+      over to the new seams.** Landed in PR
+      [#4324](https://github.com/ThomasMichon/copilot-extensions/pull/4324):
+      `runner.py` now consumes the Step 2 bootstrap/repair verbs and the Step 3
+      Manager-owned housekeeping/monitor modules, while
+      `worktree_manager.__main__` retires the old private remote-plan fallback
+      in favor of an explicit "engine too old" failure. The direct Group A/B
+      `runner.py` / `pivot_manifest.py` / `update_stage.py` call sites no
+      longer use `engine_module(...)` or underscore-prefixed engine helpers; the
+      remaining live `_engine_runtime.py` surface is the Step 3
+      housekeeping-owned engine imports plus Group C. Only Group C remains
+      before `_engine_runtime.py` can be deleted. See
+      [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
+- [x] **Step 5 — add Group C's batched reconcile-and-stamp `--json` verb in
+      agent-worktrees, unused at first.** Landed in PR
+      [#4327](https://github.com/ThomasMichon/copilot-extensions/pull/4327):
+      added the engine-owned `picker-reconcile-local --json` batch (optional
+      repeated `--worktree-id`, otherwise "all current-platform local records")
+      plus the matching unused-at-first Manager wrapper
+      `production_picker.engine_group_c`, while keeping the existing best-effort
+      lock scope exactly as-is (no new batch-wide tracking lock; only the
+      helpers' short-lived stamp windows). The response reuses the Picker's
+      existing Group C list-row field names for the returned `rows` subset and
+      surfaces batch counters in `summary`, so Step 6 can consume it without a
+      second vocabulary. `data_local.py` is intentionally unchanged here; only
+      the additive seam landed. See
+      [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
+- [x] **Step 6 — cut `data_local.py` over to the batched Group C verb via the
+      now-landed Phase 3c worker path.** Landed in PR
+      [#4350](https://github.com/ThomasMichon/copilot-extensions/pull/4350):
+      the production
+      Picker's local classify load and per-row Refresh now call
+      `production_picker.engine_group_c.picker_reconcile_local(...)` once per
+      refresh epoch (or once per targeted row refresh) and merge the returned
+      `rows[{id,pr,prs,pr_count,session_bound_live,session_lock_live,session_lock_stale,stale_lock_pids,mux_session,mux_clients,mux_attached}]`
+      payload directly onto Picker rows instead of importing
+      `tracking`/`pr_ops`/`reclaim`/`sessions` in-process. The old
+      `_start_pr_reconcile()` / `_start_bound_live_reconcile()` background
+      hooks are gone; the authoritative classify load already carries the Group
+      C reconcile result, so one setup/reload epoch now yields one batched
+      reconcile call instead of two competing post-load threads. The remaining
+      `production_picker.config` proxy consumers named in the plan were drained
+      by replacing `production_picker.config` itself with a Manager-owned
+      direct-file reader/cache layer (`data_local.py`, `data_ssh.py`,
+      `engine_loading.py`, `profiles_io.py`, `roster.py`,
+      `picker_tui/__init__.py`), and the Actions menu's last authoritative
+      liveness probe in `engine_worktree_actions.py` now reuses the targeted
+      Group C engine call instead of `sessions.verify_worktree_active()` +
+      `tracking.stamp_mux_live()`. Validation on the final tree: the full
+      `worktree-manager/tests/production_picker/` suite passed twice back-to-
+      back at `700 passed, 2 skipped`; the full `worktree-manager` suite
+      (excluding the two standing hangs) matched the rebased machine baseline
+      at `1439 passed, 6 skipped, 11 failed`; the full `agent-worktrees` suite stayed in
+      the established unrelated-failure envelope (final counts recorded in the
+      Journal entry below); `ruff check --select F,E9` passed for both packages;
+      `check-install-contract.py` and `check-version-consistency.py` passed; and
+      `check-version-bump.py` still reports the same unrelated pre-existing
+      drift on `delegation-guidance`, `efforts`, `harness-knowledge`, and
+      `wsl-setup`. Cache-first first paint remains intact (`classify=False` /
+      bootstrap rows still skip the Group C batch), and the new regression
+      coverage proves the hot path stayed O(1) in subprocesses rather than one
+      subprocess per worktree/helper. See
+      [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
+- [x] **Step 7 — retire `_engine_runtime.py` and its remaining proxy shims.**
+      Landed in PR
+      [#4357](https://github.com/ThomasMichon/copilot-extensions/pull/4357):
+      moved the last non-Picker compatibility bootstrap to
+      `worktree_manager.agent_worktrees_runtime`, deleted
+      `production_picker/_engine_runtime.py` plus the dead
+      `config`/`pr_ops`/`reclaim`/`sessions`/`tracking` proxy modules, and
+      added a focused source-level regression guard proving
+      `worktree_manager.production_picker` no longer carries a direct
+      `agent_worktrees` import. With Step 7 landed, Groups A/B/C and the full
+      Phase 3d plan are complete. See
+      [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
+      **Residual gap flagged 2026-09-27 (re-audit, not yet fixed):** the
+      Step 7 regression guard proves no `production_picker/*.py` file
+      contains a literal `import agent_worktrees` statement, but
+      `production_picker/housekeeping.py` (the Step 3-ported Picker-owned
+      lifecycle sweeps: `reap_orphan_mux_sessions`, `sweep_managed_on_exit`,
+      `sweep_launcher_shells_on_exit`, `sweep_finished_sessions_on_cadence`)
+      still calls `worktree_manager.agent_worktrees_runtime.engine_module(...)`
+      for `config`/`tracking`/`sessions`/`activity`/`reap_cli`/`gc`/
+      `status_monitor_runtime` — the same dynamic in-process
+      `importlib.import_module("agent_worktrees.<name>")` mechanism
+      `_engine_runtime.py` used, just relocated one module up so the
+      package-scoped regression guard's literal-import scan doesn't trip on
+      it. `agent_worktrees_runtime.py`'s own docstring is candid about this
+      ("a small number of Worktree Manager-owned helpers ... still import
+      selected agent-worktrees modules directly"), but `housekeeping.py` is
+      Picker-owned code by Step 3's own framing, not a legitimately-separate
+      Worktree-Manager-internal concern — so this reads as the phase's
+      stated goal (no in-process `agent_worktrees` access from Picker-owned
+      code) not being fully met, dressed as met by a guard that checks the
+      letter (no direct import *statement* in the package) rather than the
+      substance (no in-process access from Picker-owned code, however
+      indirected). Closing this for real means converting `housekeeping.py`'s
+      7-module usage to `--json` verbs/subprocess calls, which has a genuine,
+      undecided tradeoff: these functions run from process-exit hooks and a
+      background cadence timer, not just Picker refresh cycles, so a
+      subprocess-per-sweep cost profile needs evaluation before committing to
+      that conversion (unlike Group A/B/C's already-established low-frequency
+      or already-async call sites). **Not resolved in this pass** — recorded
+      here rather than silently accepted so a future session (or the
+      operator) can make an informed call: either do the conversion, or
+      explicitly amend the vision's Non-Goal wording to carve out this
+      documented exception on purpose instead of by omission.
+      **Cross-linked 2026-09-27** (`agent-worktrees-authoritative-daemon`
+      effort, Phase 4): Step 5's batched verb should register against that
+      effort's `tracking_write.py` verb registry
+      (`register_verb`/`dispatch`/`write_with_boot`, plus capability-aware
+      endpoint selection and the `AmbiguousWriteOutcome` contract) rather
+      than inventing a second wire shape. That effort's own Phase 4 also
+      documents this call site's CURRENT direct in-process
+      `tracking.stamp_bound_live`/`stamp_mux_live`/`stamp_session_state`
+      usage (`data_local.py`, via `_engine_runtime.py`) as a KNOWN,
+      deliberately-out-of-scope exception to its sibling-plugin write guard
+      (`tools/check-no-sibling-tracking-writes.py`) -- Step 6/7 above
+      should REMOVE this direct call site entirely once the batched verb
+      lands, not add it to that guard's protected surface; that guard also
+      deliberately scans only `plugins/*` (`worktree-manager/` sits
+      outside it entirely). Any future decision to widen the guard's scope
+      to cover `worktree-manager/` too is separate from this migration and
+      would need its own coordination.
 
 ### Phase 3e — Relocate terminal-profile handling out of agent-worktrees (Done — #3390)
 
@@ -732,6 +888,356 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-09-27** — Re-audited Phase 3d Step 7's "Done" claim (PR #4357,
+  landed concurrently by another session) instead of taking it at face
+  value, per this effort's own investigate-before-trusting-prior-reports
+  discipline. Finding: the Step 7 regression guard
+  (`test_production_picker_runtime_boundary.py`) only scans for a literal
+  `import agent_worktrees` statement inside `production_picker/*.py`, and
+  passes clean -- but `production_picker/housekeeping.py` (Step 3's ported
+  Picker-owned lifecycle sweeps) still calls
+  `worktree_manager.agent_worktrees_runtime.engine_module(...)` for 7
+  modules (`config`, `tracking`, `sessions`, `activity`, `reap_cli`, `gc`,
+  `status_monitor_runtime`) -- the identical dynamic
+  `importlib.import_module("agent_worktrees.<name>")` mechanism the deleted
+  `_engine_runtime.py` used, just relocated one module up so the
+  package-scoped literal-import scan doesn't trip on it. This satisfies the
+  guard's letter, not the phase's own stated substance ("no in-process
+  `agent_worktrees` import for production Picker **behavior**," not merely
+  "no import statement in this **package**"). Did not attempt a fix this
+  pass: genuinely converting `housekeeping.py`'s 7-module usage to `--json`
+  verbs is a real, undecided design tradeoff (these sweeps run from
+  process-exit hooks and a background cadence timer, not the Picker's own
+  refresh cycle, so a subprocess-per-sweep cost/latency profile needs actual
+  evaluation, unlike Group A/B/C's already-established low-frequency or
+  already-async call sites). Recorded the gap explicitly in both this file
+  (Phase 3d's Step 7 checkbox, header changed to "Done, one residual gap
+  flagged") and
+  [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md)'s
+  own Step 7 entry, rather than silently letting an incomplete boundary
+  closure stand as fully "Done." Docs-only; no code changed. Left as an open
+  item for whoever picks this up next: either do the conversion, or
+  deliberately amend the governing visions' exit criteria to carve out
+  `housekeeping.py` as a reasoned exception instead of an accidental one.
+
+- **2026-09-27** — Fixed a real production regression discovered live during
+  facility diagnosis: since Phase 3b Sub-slice 3 (#3865), the companion
+  `mux-daemon` only republished a live mux mapping to the resident
+  status-monitor on a status-monitor lock **generation change** (i.e. only
+  right after a monitor restart) -- never on an ongoing cadence. Because the
+  monitor's own managed-mux cache treats a pushed mapping as stale after
+  `mux_link.MAPPING_STALE_AFTER_SECONDS` (45s), every managed session's mux
+  status bar silently went blank 45s after the last monitor restart and
+  stayed blank until the next one -- for hours, facility-wide, with no error
+  anywhere. Root-caused live (process census, `py-spy dump`, direct
+  `register`/`publish_live_observation` replay) rather than assumed from the
+  symptom; confirmed by reproducing the exact "renders once after a restart,
+  then never again" signature the operator reported. Fix: `mux_daemon.py`'s
+  resident loop now also republishes on an independent
+  `LIVE_MAPPING_BACKSTOP_INTERVAL_S` (20s, safely under the 45s staleness
+  window) keep-alive cadence, regardless of generation. The decision itself
+  (`live_mapping_republish_due`) is a new pure helper in the sibling
+  `mux_mapping_registry` module -- extracted there, not inlined in
+  `mux_daemon.py`, purely to keep that already-999-line module under this
+  repo's shrink-only module-size ceiling. New regression tests: an
+  integration test proving a second republish fires with no generation
+  change at all, and unit coverage of the extracted helper's six decision
+  branches. Full `worktree-manager` suite: 1562 passed, 4 skipped, same
+  pre-existing unrelated simulated-failure warning.
+- **2026-09-27** — Landed Phase 3d Step 6, PR
+  [#4350](https://github.com/ThomasMichon/copilot-extensions/pull/4350).
+  Cut `worktree_manager.production_picker.picker_tui.data_local` over to the
+  Step 5 `picker-reconcile-local --json` seam: the authoritative local classify
+  load and per-row Refresh now make one batched `engine_group_c` call and map
+  the returned row subset straight onto the Picker's raw row vocabulary
+  (`pr`/`prs`/`pr_count`, `session_bound_live`, `session_lock_live` /
+  `session_lock_stale` / `stale_lock_pids`, `mux_session` /
+  `mux_clients` / `mux_attached`) before normalization, while cache-only first
+  paint keeps the existing cached-row shape and deliberately does **not** wait
+  on that batch. Replaced the old post-load reconcile pair
+  (`_start_pr_reconcile()` / `_start_bound_live_reconcile()`) with this single
+  load-time batch path, so one setup/reload epoch schedules one Group C batch
+  instead of two background threads that raced the same tracking writes. Drained
+  the remaining config-proxy tail by replacing
+  `worktree_manager.production_picker.config` with Manager-owned direct-file
+  readers/caching used by `data_local.py`, `data_ssh.py`, `engine_loading.py`,
+  `profiles_io.py`, `roster.py`, and `picker_tui/__init__.py`; also repointed
+  `engine_worktree_actions.py`'s Actions-menu liveness reverify to the targeted
+  Group C engine call instead of `sessions.verify_worktree_active()` /
+  `tracking.stamp_mux_live()`. Validation: new regression coverage added for
+  behavior preservation, cache-first first paint skipping the batch, one
+  reconcile batch per setup/reload epoch, and O(1) subprocess count across
+  multi-row loads; full `worktree-manager/tests/production_picker/` passed
+  twice (`700 passed, 2 skipped` both runs); full `worktree-manager` suite
+  excluding the two standing hangs matched the current machine baseline at
+  `1439 passed, 6 skipped, 11 failed` (the same symlink-privilege families plus
+  the already-upstream `test_mux_daemon` failure on this Windows machine); full
+  `agent-worktrees` suite remained in its existing
+  unrelated-failure envelope (same families as Step 5; exact final count from
+  the validating run recorded on the PR); `ruff check --select F,E9` passed for
+  both packages; `check-install-contract.py` and
+  `check-version-consistency.py` passed; `check-version-bump.py` still reports
+  the unrelated pre-existing drift on `delegation-guidance`, `efforts`,
+  `harness-knowledge`, and `wsl-setup`. With Step 6 done, only Step 7 (delete
+  `_engine_runtime.py` + the remaining proxy shims and add the regression
+  guard) remains for Phase 3d.
+- **2026-09-27** — Landed Phase 3d Step 7, PR
+  [#4357](https://github.com/ThomasMichon/copilot-extensions/pull/4357).
+  Deleted the production Picker's last in-package engine import seam:
+  `worktree_manager.production_picker._engine_runtime` moved to the top-level
+  compatibility helper `worktree_manager.agent_worktrees_runtime`, the dead
+  `production_picker.config` / `pr_ops` / `reclaim` / `sessions` /
+  `tracking` pass-through shims were removed, and `housekeeping.py` plus the
+  remaining transplant/conftest callers now import the top-level helper
+  instead of anything under `production_picker`. Added a focused
+  `test_production_picker_runtime_boundary.py` guard that proves those deleted
+  files stay gone and that no Python source under
+  `worktree_manager.production_picker` imports `agent_worktrees` directly.
+  Validation: focused runtime-boundary/transplant/housekeeping/regression
+  lanes green (`367 passed` for the main Step 7 slice, plus `63 passed` for the
+  config-reader/runtime-helper follow-up lane); full `worktree-manager` suite
+  matched the current unrelated Windows baseline at
+  `14 failed, 1552 passed, 7 skipped, 1 warning`; `ruff check --select F,E9`
+  passed; Phase 3d's ordered plan is now fully complete.
+- **2026-09-27** — Landed Phase 3d Step 5, PR
+  [#4327](https://github.com/ThomasMichon/copilot-extensions/pull/4327).
+  Added Group C's additive, unused-at-first engine seam instead of cutting the
+  Picker over yet: `agent_worktrees.picker_reconcile_cli` now owns the new
+  `picker-reconcile-local --json` verb, which runs the existing engine-side
+  record loop in one coarse-grained call (list records, best-effort active-PR
+  reconcile, bound/mux/session-lock readback, engine-owned bound/mux stamp
+  writes, then a `rows` + `summary` payload whose field names intentionally
+  mirror the Picker's current Group C list-row vocabulary). On the Manager
+  side, `worktree_manager.production_picker.engine_group_c` adds the matching
+  version-skew-aware client wrapper and payload parser, but `data_local.py`
+  remains untouched for Step 6's later cutover. Kept the lock contract exactly
+  where the plan required it: no new cross-record/global tracking lock, no
+  provider/network call while holding a batch-wide write lock, and no logic
+  reimplementation in the client -- only the existing engine-owned
+  `tracking`/`pr_ops`/`reclaim`/`sessions` helpers orchestrated server-side.
+  Validation: targeted new contract tests green
+  (`plugins/agent-worktrees/tests/test_picker_reconcile_local.py`,
+  `worktree-manager/tests/production_picker/test_engine_group_c.py`); full
+  `worktree-manager` suite (excluding the two standing hangs
+  `test_data_ssh_sources.py` / `test_launch_trace.py`) finished at `1294
+  passed, 2 skipped, 10 failed`, staying within the effort's unrelated baseline
+  envelope; full `agent-worktrees` suite finished at `5738 passed, 50 skipped,
+  6 failed`, likewise only in pre-existing/environmental families on this
+  machine (`test_launch_cmd`, `test_lazy_dispatch`, `test_module_invocation`,
+  `test_mux_status_link`, `test_session_conduct`). `ruff check --select F,E9`,
+  `python tools/check-install-contract.py`, and
+  `python tools/check-version-consistency.py` passed; `python
+  tools/check-version-bump.py` still reports the same pre-existing unrelated
+  plugin-version drift on `delegation-guidance`, `efforts`,
+  `harness-knowledge`, and `wsl-setup`.
+
+- **2026-09-27** — Claiming Phase 3d Step 5 ("Add Group C's batched
+  reconcile-and-stamp verb in agent-worktrees, unused at first") per
+  [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md)'s
+  ordered implementation plan. Working solo per standing operator directive;
+  recorded here per this effort's own Coordination-section claiming
+  discipline since #352 is closed.
+
+- **2026-09-27** — Landed Phase 3d Step 4, PR
+  [#4324](https://github.com/ThomasMichon/copilot-extensions/pull/4324).
+  Performed the crisp Group B cutover that Step 2/3 were staged for:
+  `worktree_manager.production_picker.runner` now binds
+  `context.ProjectBootstrap` from `engine_group_b.picker_bootstrap()`, switches
+  cwd only from that payload's engine-owned decision, runs background
+  stale-anchor repair through `engine_group_b.repair_stale_anchor()`, and
+  routes its orphan-reap / managed-worktree / launcher-shell / finished-session
+  / monitor-root lifecycle through the Manager-owned
+  `production_picker.housekeeping` + `monitor_roots` modules instead of
+  `agent_worktrees.__main__`. `worktree_manager.__main__`'s old-engine remote
+  compatibility path is explicitly retired rather than reimplemented: an engine
+  too old for `resolve --json --machine ...` now fails clearly instead of
+  silently importing private engine helpers. The parent-side bootstrap binding
+  is now the authoritative project identity read by downstream
+  `context.project()` / `context.project_bootstrap()` consumers, so Group B is
+  fully done and only Group C remains in Phase 3d. Real boundary shrink: the
+  post-Group-A 6-module proxy/shim surface is down to 5
+  (`config`, `pr_ops`, `reclaim`, `sessions`, `tracking`) because
+  `production_picker.__main__` is deleted, while the total remaining live
+  in-process engine-module surface is 9 once the Step 3 housekeeping-owned
+  imports (`activity`, `gc`, `reap_cli`, `status_monitor_runtime`) are counted
+  too. Validation: targeted Group B seam + cutover regressions passed, including agent-worktrees'
+  `test_context_resolution.py` bootstrap/repair coverage plus
+  worktree-manager's `test_engine_group_b.py`, `test_housekeeping.py`,
+  `test_production_picker_transplant.py`, `test_picker_app.py`, and
+  `test_picker_preview_mode.py`; full `worktree-manager` suite (excluding the
+  two standing hangs `test_data_ssh_sources.py` / `test_launch_trace.py`)
+  matched the current unrelated baseline at `1290 passed, 2 skipped, 11
+  failed`; full `agent-worktrees` suite stayed red only in unrelated existing
+  families on this machine at `5732 passed, 50 skipped, 9
+  failed` (`test_launch_cmd`, `test_lazy_dispatch`, `test_module_invocation`,
+  `test_mux_status_link`, `test_registration_home`, `test_session_conduct`,
+  `test_status_monitor_windows`); `ruff check --select F,E9`,
+  `tools/check-install-contract.py`, and
+  `tools/check-version-consistency.py` passed; `tools/check-version-bump.py`
+  still reports the same pre-existing unrelated unbumped-plugin drift on
+  `delegation-guidance`, `efforts`, `harness-knowledge`, and `wsl-setup`.
+
+- **2026-09-27** — Claiming Phase 3d Step 4 ("Perform the remaining Group B
+  cutover in one crisp PR" — switching `runner.py`'s bootstrap, stale-anchor
+  repair, remote planning, and housekeeping/monitor lifecycle over to the
+  Step 2/3 seams, plus resolving `worktree_manager.__main__`'s old-engine
+  remote fallback) per
+  [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md)'s
+  ordered implementation plan. Working solo per standing operator directive;
+  recorded here per this effort's own Coordination-section claiming
+  discipline since #352 is closed.
+
+- **2026-09-27** — Landed Phase 3d Step 3, PR
+  [#4323](https://github.com/ThomasMichon/copilot-extensions/pull/4323).
+  Ported Group B's Picker-owned lifecycle housekeeping into Worktree Manager
+  without cutting the live runner over yet: added
+  `worktree_manager.production_picker.housekeeping` for the orphan-mux reap
+  plus the managed/launcher/finished lifecycle-boundary sweep wrappers, and
+  added `worktree_manager.production_picker.monitor_roots` as the Manager-owned
+  home for Picker heartbeat roots while preserving the existing engine-consumed
+  `status-monitor-roots.d/picker-*.json` schema. Nailed the Step 4 ownership
+  split up front instead of deferring it: Manager-owned mux-session names come
+  from Worktree Manager's live `mux-mapping.json` registry, Manager-owned
+  worktree rows are that registry's ids plus rows whose resolved
+  `execution_leg.provider` is `ahp`, and Manager-owned launcher shells are the
+  orphan-shell candidates whose positive launcher signature resolves to the
+  relocated `worktree-manager/bin/launch-session.*` / `pane-wrapper.*` path.
+  Explicitly kept this slice additive-only: `production_picker.runner` still
+  uses the old compatibility path and agent-worktrees' live sweeper behavior is
+  unchanged until Step 4 activates the Manager-owned lane. Validation:
+  targeted new Group B parity tests green; full `worktree-manager` suite
+  (excluding the two standing hangs `test_data_ssh_sources.py` /
+  `test_launch_trace.py`) matched the current unrelated baseline at `1274
+  passed, 2 skipped, 13 failed`; full `agent-worktrees` suite matched the
+  current unrelated baseline at `5733 passed, 50 skipped, 7 failed`; `ruff
+  check --select F,E9` passed for both packages; `python
+  tools/check-install-contract.py` and `python tools/check-version-consistency.py`
+  passed; `python tools/check-version-bump.py` still reports the same
+  pre-existing unrelated unbumped-plugin drift on `delegation-guidance`,
+  `efforts`, `harness-knowledge`, and `wsl-setup`.
+
+- **2026-09-27** — Claiming Phase 3d Step 3 ("Reimplement Group B's
+  Picker-owned lifecycle sweeps directly in worktree-manager, additive
+  first" — `reap_orphan_mux_sessions`, `_sweep_managed_on_exit`,
+  `_sweep_launcher_shells_on_exit`, `_sweep_finished_sessions_on_cadence`,
+  `_start_picker_monitor_root`) per
+  [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md)'s
+  ordered implementation plan. Working solo per standing operator directive;
+  recorded here per this effort's own Coordination-section claiming
+  discipline since #352 is closed.
+
+- **2026-09-27** — Landed Phase 3d Step 2, PR
+  [#4322](https://github.com/ThomasMichon/copilot-extensions/pull/4322).
+  Promoted Group B's project/config/ssh ownership split into a narrow public
+  engine seam without cutting over the live `runner.py` path yet: added
+  `agent-worktrees`' versioned `picker-bootstrap --json` bootstrap verb
+  (authoritative project + cwd-switch + default live/local mode) and
+  `repair-stale-anchor --json` targeted repair action, documented both in
+  `plugins/agent-worktrees/docs/engine-picker-contract.md`, and confirmed the
+  existing `resolve --json` remote-launch payload already supplied the Picker's
+  machine/environment answer so Step 2 needed no speculative shape growth
+  there. On the Manager side, added
+  `worktree_manager.production_picker.engine_group_b` and extended
+  `production_picker.context` with an authoritative `ProjectBootstrap` binding
+  record so downstream Picker/data helpers can consume the parent-owned
+  identity once Step 4 performs the actual cutover. Explicitly kept this slice
+  additive-only per plan: no `runner.py` call site moved in this PR, and the
+  compatibility boundary remains live until Step 4. Validation: targeted Group
+  B seam tests green on both sides; full `worktree-manager` suite (excluding
+  the two standing hangs `test_data_ssh_sources.py` /
+  `test_launch_trace.py`) matched the current unrelated baseline at `1274
+  passed, 2 skipped, 13 failed`; full `agent-worktrees` suite on this machine
+  remained red only in unrelated baseline families at `5733 passed, 50
+  skipped, 7 failed` (`test_launch_cmd`, `test_lazy_dispatch`,
+  `test_module_invocation`, `test_mux_status_link`,
+  `test_profile_assignment`, `test_session_conduct`); `ruff check --select
+  F,E9`, `tools/check-install-contract.py`, and
+  `tools/check-version-consistency.py` passed; `check-version-bump.py` still
+  reports the same pre-existing unrelated unbumped-plugin drift on
+  `delegation-guidance`, `efforts`, `harness-knowledge`, and `wsl-setup`.
+
+- **2026-09-27** — Claiming Phase 3d Step 2 ("Promote Group B's
+  project/config/ssh decisions to a narrow public CLI seam, additive only")
+  per
+  [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md)'s
+  ordered implementation plan. Working solo per standing operator directive;
+  recorded here per this effort's own Coordination-section claiming
+  discipline since #352 is closed.
+
+- **2026-09-27** — Landed Phase 3d Group A, PR
+  [#4317](https://github.com/ThomasMichon/copilot-extensions/pull/4317).
+  Added/pinned the low-frequency public read seam the Picker still needed
+  (`picker-paths --json`, existing `state-root --json`, additive
+  `stage-update --indicator-state --json`), documented it in
+  `plugins/agent-worktrees/docs/engine-picker-contract.md`, and cut
+  `pivot_manifest.py` plus the cosmetic `update_stage.py` glyph reader over
+  to Worktree Manager-side subprocess helpers instead of the in-process
+  `_engine_runtime.py` import path. `update_stage` stayed in scope exactly as
+  the Group A table planned: the new reader degrades older engines to
+  `"idle"` rather than failing startup, while `pivot_manifest.py` now keeps its
+  `state-root` visibility gate on the engine-owned `--json` surface too.
+  Real boundary shrink: `state_root` is no longer reached through
+  `engine_module(...)`, and `update_stage.py` no longer imports the engine at
+  all; the remaining live boundary surface is the explicit Group B/C set
+  (`config`, `pr_ops`, `reclaim`, `sessions`, `tracking`, `__main__`). New
+  regression coverage proves the verb payloads and caller behavior, including
+  the older-engine graceful-degradation path for the glyph. Validation:
+  targeted Group A tests green; full `agent-worktrees` suite matched the
+  current unrelated baseline at `5733 passed, 50 skipped, 5 failed`; full
+  `worktree-manager` suite (excluding the two standing hangs:
+  `test_data_ssh_sources.py` / `test_launch_trace.py`) matched the current
+  unrelated baseline at `1260 passed, 2 skipped, 13 failed`; `ruff check
+  --select F,E9` passed; `check-install-contract.py` and
+  `check-version-consistency.py` passed; `check-version-bump.py` still reports
+  the same pre-existing unrelated unbumped-plugin drift already present on
+  `origin/dev`.
+
+- **2026-09-27** — Wrote Phase 3d's ordered implementation plan
+  ([`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md)),
+  replacing the old "evidence only + open questions" shape with the same
+  PR-sized additive-seam → cutover → cleanup structure used by Phases 3b,
+  3c, and 3e. Recorded today's operator decisions directly in the doc:
+  Group B splits at the true ownership boundary (Picker process-lifecycle
+  sweeps move into worktree-manager; project/config/ssh resolution stays
+  engine-owned behind a new public CLI seam), Group C's batched
+  reconcile-and-stamp verb is engine-owned, and the former Phase 3c
+  sequencing question is now satisfied by PR
+  [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
+  The ordered plan now sequences 7 remaining implementation steps, records
+  Group D as already closed by Phase 3e, and leaves no design questions
+  open before implementation begins.
+- **2026-09-27** — Claiming Phase 3d's Group A conversion (the "Design +
+  convert the low-frequency, one-shot CLI-root reads" checkbox): convert
+  `pivot_manifest.py`'s in-process `config.install_dir()` / `config._home()`
+  / `state_root_module.resolve_state_root(...)` reads to `--json` CLI verbs
+  over the engine boundary, per
+  [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md)'s
+  Group A disposition. Working solo per standing operator directive;
+  recorded here per this effort's own Coordination-section claiming
+  discipline since #352 is closed.
+- **2026-09-27** — Landed Phase 3c Step 5, PR
+  [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
+  Renamed the old synchronous Picker setup helper to
+  `setup_sync_for_tests()` so no production code or comment surface still
+  advertises an inline `setup()` UI entrypoint, updated every intentional
+  synchronous test call site to the explicit test-only name, and refreshed the
+  related source/test commentary to describe the final worker-owned production
+  path instead of the pre-cutover shape. Audited the Step 1 seams before
+  deleting anything and kept only the helpers that still have a real shared
+  job: `_prime_setup_reload()` and `_invalidate_setup_reload_caches()` remain
+  because both `_start_setup_reload_worker()` and the synchronous test helper
+  still need them; no production compatibility wrapper remains in front of the
+  async setup/reload path. Recorded the optional richer built-in progress
+  follow-on explicitly as issue
+  [#4274](https://github.com/ThomasMichon/copilot-extensions/issues/4274)
+  instead of leaving the proposal implicit in the phase plan. Validation:
+  targeted picker tests green; full `tests/production_picker/` suite matched
+  the standing Windows baseline twice back-to-back at `775 passed, 3 skipped,
+  3 failed` (unchanged known provider-source failures), and the full
+  `worktree-manager` suite matched the Step 4 baseline shape at
+  `1500 passed, 7 skipped, 13 failed` (unchanged known failures: the same 3
+  provider-source failures plus 10 Windows symlink-privilege failures).
+
 - **2026-09-27** — Landed Phase 3c Step 4, PR
   [#4164](https://github.com/ThomasMichon/copilot-extensions/pull/4164).
   Promoted the standing "no blocking I/O on the render thread" contract from
@@ -747,9 +1253,9 @@ claiming discipline alone.
   say explicitly that they are part of the same Phase 3c UI-thread boundary.
   Evaluated the plan's "default-on broad fixture" option and rejected it on
   purpose: the interactive picker suite still contains many intentional direct
-  `screen.setup()` tests covering lower-level synchronous seams, so a suite-
-  wide autouse guard would destabilize unrelated tests and obscure the actual
-  regression surface. Validation: targeted Phase 3c boundary tests green; full
+  `screen.setup_sync_for_tests()` tests covering lower-level synchronous seams,
+  so a suite-wide autouse guard would destabilize unrelated tests and obscure
+  the actual regression surface. Validation: targeted Phase 3c boundary tests green; full
   `worktree-manager` suite matched the Windows baseline at `1498 passed,
   7 skipped, 13 failed` (unchanged known failures: the same 3 unrelated
   provider-source failures in `test_data_ssh_sources.py` plus 10 Windows

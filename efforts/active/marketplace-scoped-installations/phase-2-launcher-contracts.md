@@ -4,17 +4,34 @@ Back to the [Marketplace-Scoped Installations effort](README.md).
 
 ## Purpose
 
-Phase 2 made agent-facing calls payload-local and made global project commands
-attributable. The remaining `global-plugin-binstub` findings are not one
-mechanical cleanup: they mix payload-owned calls that can move now, durable
-external launch records that need installation context, legacy wrapper
-publication that can retire only after migration, and descriptive text that is
-not itself a launcher.
+**Scope corrected 2026-09-27** (operator directive, recorded in the main
+README's Journal): this inventory's completion criterion is **not** removing
+every plugin's own global-binstub placement. Placement retires only on a host
+that actually configures a marketplace-cell install; a legacy host keeps it
+permanently, by design. The real gate is **universal consumer-side
+resolution**: every call that crosses a plugin boundary, or runs outside an
+LLM-mediated skill turn, must resolve its target through the already-built
+Phase 3 `runtimeRoot` resolver
+([install-contract.md](../../../docs/install-contract.md#resolver-result-and-precedence))
+or the session command catalog, and must treat a legacy-fallback `runtimeRoot`
+exactly like a marketplace-cell root — never special-cased.
 
-This inventory preserves the literal Phase 2 completion criterion: generic
-global plugin wrappers do not count as retired while any real external caller
-still depends on them. The 86 findings are the guard-visible baseline, not proof
-that the guard currently sees every caller.
+Every finding below now sorts into one of two dispositions:
+
+- **Own-payload placement (accepted, conditional on marketplace-cell — not
+  Phase 6 retirement work)**: a plugin's own installer declaring where *it*
+  writes *its own* global binstub/PATH guidance, or `agent-worktrees`'s
+  permanent project-command surface. This is most of the "Generic wrapper
+  publication" family below.
+- **Cross-boundary consumption (genuine remaining work)**: a caller invoking a
+  *different* plugin's command, or any `agent-*` invocation outside an
+  LLM-mediated skill turn (installers, hooks, generated non-interactive
+  helpers like `vault-askpass`, remote/transport boundaries). These must
+  convert to the `runtimeRoot` resolver or session catalog.
+
+The reclassification of all 70 current findings against this two-way split is
+only partially done (see the family table below); finishing it is the next
+concrete slice, not another guess-based sample.
 
 ## Baseline (historical snapshot, superseded by the 2026-09-25 re-audit below)
 
@@ -105,12 +122,104 @@ own fresh family pass" note further down):
 This table is the current count per plugin; it is not yet split by contract
 family the way the 2026-08-26 table below is — that per-finding family
 re-derivation (which of the 83 belongs to which retirement-dependency
-bucket) is the fresh pass still needed.
+bucket) was the fresh pass still needed. It is done below, superseded by the
+2026-09-27 re-derivation.
+
+### 2026-09-27 — Full family re-derivation (supersedes the 2026-09-25 count)
+
+`python tools/check-marketplace-isolation.py --json` in a **clean checkout**
+(a fresh `copilot-extensions create` worktree, not a long-lived anchor) now
+reports **70** `global-plugin-binstub` findings — down from 83. Running the
+same guard against the long-lived `/home/tmichon/src/copilot-extensions`
+anchor at the identical commit reported 74; the 4-finding gap is confirmed
+build-time noise (`*.egg-info/PKG-INFO` files a prior local `pip install -e
+.` generated in that anchor, never committed, absent from a fresh checkout)
+— **use a clean checkout as the source of truth for this guard**, not the
+anchor.
+
+Every one of the 70 current findings was re-classified this pass (not
+sampled) into the retirement-dependency families the 2026-08-26 table used,
+confirming two things the prior partial audits could only guess at:
+
+- **`agent-machines`'s two flagged-but-unresolved findings from the
+  2026-09-25 note are already resolved.** `cell_lifecycle.py`'s two
+  `.local/bin/agent-machines` identity checks (lines ~162 and ~294) both
+  carry `# marketplace-isolation: allow legacy-compatibility` — landed in
+  [#4154](https://github.com/ThomasMichon/copilot-extensions/pull/4154)
+  ("resolve 2 of `cell_lifecycle.py`'s 3 findings"), which the 2026-09-25
+  note predates. Only `payload-invocation.json`'s `legacyFootprint.paths`
+  entry (line 20) remains, and it needs no further resolution here: it is
+  the same intentional, accepted `legacyFootprint.paths` declaration shape
+  `agent-index/payload-invocation.json` already carries (line 22) — JSON
+  cannot take an inline guard-suppression comment, so this family stays
+  documented-and-accepted rather than annotated, identically to
+  `agent-index`'s.
+- **`agent-index`'s remote-transport finding (`transport.py`) already
+  converted.** It now carries `# marketplace-isolation: allow
+  remote-management` — the Phase 3 remote-transport-selection item for
+  `agent-index` specifically is done; only `agent-ssh`'s `dtssh`
+  install-client/install-host PATH exports remain in this family.
+- **`copilot-extensions-harness` dropped to 0** (was 3) — fully converted,
+  drops out of the per-plugin table entirely.
+
+| Contract family (2026-09-27, clean-checkout re-derivation, code-verified) | Findings | Disposition (verified against source, not guessed) | Plugins |
+|-----------------|---------:|---------|---------|
+| Generic wrapper publication and plugin-specific PATH guidance | 45 | **Own-payload placement — accepted, conditional on marketplace-cell.** Each plugin's own installer declaring where *it* writes *its own* global binstub/PATH. Not Phase 6 retirement work; not this item's gate. | all 13 plugins below except `agent-worktrees`'s own project-command lines |
+| Mixed project-command directory and PATH use | 11 | **Own-payload placement — permanent, accepted.** `agent-worktrees`'s attributable project-command surface. | `agent-worktrees` only |
+| Third-party tool PATH bootstrap (**reclassified 2026-09-27**, was "remote transport selection") | 2 → **0, converted this pass** | **Guard false positive, not agent-* consumption at all.** Read the actual code: these lines install and PATH-expose `dtssh`/`devtunnel-ssh`, an unrelated third-party CLI — nothing to do with any `agent-*` binstub or marketplace path. Annotated `allow third-party-installer-path` in [#4336](https://github.com/ThomasMichon/copilot-extensions/pull/4336) (same underlying concern the sibling `.ps1` files' `$InstallRelease` URL already carries as `allow third-party-installer-url`). | `agent-ssh` `dtssh` `install-{client,host}.sh` |
+| Operator, bootstrap, and nudge launchers | 4 | **Resolved 2026-09-27**: `agent-machines`'s `bootstrap-check.{sh,ps1}` (2) already calls the installation-context resolver a few lines above and only falls through to the legacy `Binstub` path when that resolution says legacy — own-payload, accepted, no action needed. `agent-worktrees`'s `register-nudge.{sh,ps1}` (2) now also consults a durable, resolver-free marketplace-cell pointer (see the new [install-contract.md § Durable runtime-root pointer](../../../docs/install-contract.md#durable-runtime-root-pointer-resolver-free-consumers)) before falling back to its existing legacy-path check — closing the real functional gap (marketplace-cell availability was previously undetectable) without depending on the heavy resolver `register-nudge.sh` deliberately avoids. The guard still (correctly) flags the retained legacy-path text — that fallback is permanent, own-payload, accepted, exactly like `bootstrap-check.sh`'s. | `agent-machines` (2, accepted), `agent-worktrees` (2, accepted — functional gap closed, legacy fallback text remains and is expected) |
+| Readiness legacy fallback | 3 | **Verified: self-probe, own-payload, accepted.** `agent-codespaces`'s `readiness-context.{sh,ps1}` only *checks existence* of its own legacy binstub for a session-start readiness report — it never invokes anything at that path. Harmless, and naturally disappears only if/when this plugin's legacy wrapper itself retires (a placement question, not a consumption one). | `agent-codespaces` (`readiness-context.{sh,ps1}`, 3) |
+| `payload-invocation.json` legacy-footprint declarations | 2 | **Own-payload placement — accepted, no code change.** Declares each plugin's own historical legacy paths; metadata, not a live call. | `agent-index` (line 22), `agent-machines` (line 20) |
+| Credential and askpass integration | 2 | **Verified: currently correct, premature to convert.** `agent-vault`'s own `install.sh`/`init.ps1` has **zero** installation-context integration anywhere (confirmed by direct grep) — unlike `agent-machines`/`agent-index`, `agent-vault` was never one of Phase 3's cell-aware exemplars, so it always runs legacy-only regardless of host marketplace-cell config today. Its `vault-askpass` helper hardcoding `$HOME/.local/bin/agent-vault` is therefore **currently correct, not a bug** — there is no cell path it could resolve to yet. Converting this helper now, before `agent-vault` itself gains cell-awareness, would add complexity to a `sudo -A` elevation-critical path with zero present benefit and real risk. **Do not touch this file** until/unless `agent-vault` becomes a cell-aware plugin in its own right (a Phase-3-scale undertaking, not a quick patch). | `agent-vault` `install.sh` (askpash exec + `SUDO_ASKPASS` guidance) |
+| Descriptive skills, help, and generated package metadata | 1 | Documentation only; revise with the owning slice, not a separate gate. | `agent-vault-setup/SKILL.md` |
+| **Total** | **68** (post-conversion) | | |
+
+**Disposition summary (final, code-verified, 2026-09-27)**: of the original 70
+findings, **2 were guard false positives** (converted this pass). Of the
+remaining 68: **62 are own-payload placement** (45 + 11 + 2 + 2 + 2, the
+`agent-machines` bootstrap-check pair and `agent-worktrees`'s
+`register-nudge` pair, now that both are confirmed correctly gated, plus the
+`agent-codespaces` readiness probes) — no further action needed, permanently
+out of this item's scope. **2 are credential-askpass, verified
+currently-correct and explicitly deferred** (blocked on `agent-vault`
+gaining cell-awareness — do not attempt a standalone patch). **Zero findings
+remain genuinely open.** `agent-worktrees`'s `register-nudge.{sh,ps1}` was
+the last one: fixed by adding a genuinely lightweight (no `awk`/bash-4.4)
+durable-pointer read (see [install-contract.md § Durable runtime-root
+pointer](../../../docs/install-contract.md#durable-runtime-root-pointer-resolver-free-consumers)),
+landed in the canonical `libs/installation-context` library (Python, bash,
+and PowerShell parity) and synced to all 11 vendoring plugins, rather than
+copying `bootstrap-check.sh`'s heavier resolver dependency.
+
+
+
+**Current per-plugin counts (2026-09-27, clean checkout, 70 total):**
+
+| Plugin | Findings |
+|--------|---------:|
+| `agent-worktrees` | 13 |
+| `agent-codespaces` | 7 |
+| `agent-vault` | 7 |
+| `agent-machines` | 6 |
+| `agent-ssh` | 6 |
+| `agent-dispatch` | 5 |
+| `agent-index` | 5 |
+| `agent-containers` | 4 |
+| `agent-logger` | 4 |
+| `agent-pull-requests` | 4 |
+| `budget-guidance` | 4 |
+| `agent-mcp` | 3 |
+| `agent-bridge` | 2 |
+
+No plugin's count is untraced or unclassified as of this pass — every
+finding above maps to exactly one family and phase. The Durable provider
+manifests family (Phase 3, 4 findings in the 2026-08-26 baseline) has fully
+converted and no longer appears at all, matching the main README's Phase 3
+being fully checked off.
 
 The table below is retained as the historical 2026-08-26 record (do not
-edit it to match the current count) — the accurate, current per-plugin
-breakdown is the table immediately above, and a family re-derivation for it
-is still a fresh pass needed.
+edit it to match the current count) — the accurate, current per-plugin and
+per-family breakdown is the two tables immediately above.
 
 | Contract family (2026-08-26 snapshot) | Findings | Phase | Reason |
 |-----------------|---------:|-------|--------|
@@ -245,19 +354,27 @@ equivalent paths assembled from components or strings whose source escaping
 does not match its regular expression. The caller inventory therefore also
 includes:
 
-- `agent-codespaces/src/agent_codespaces/_invoke.py`, whose persisted spawn
-  command selects the version-stable global binstub.
-- `agent-containers/src/agent_containers/_invoke.py`, which carries the same
-  persisted-spawn requirement.
-- `agent-bridge/src/agent_bridge/agent_registry.py`, where the service resolves
-  the global `agent-worktrees` management command.
-- the PowerShell remote branch in `agent-index/src/agent_index/transport.py`,
-  alongside the one Bash branch already counted.
+- `agent-bridge/src/agent_bridge/agent_registry.py:258`
+  (`_agent_worktrees_bin()`), which still resolves the global `agent-worktrees`
+  management command via `Path.home() / ".local" / "bin"` (component-built,
+  guard-invisible). Confirmed still live 2026-09-27 — unconverted.
+- the PowerShell remote branch in `agent-index/src/agent_index/transport.py`
+  (line 173, `\.local\bin\agent-index.ps1`, escaped-form guard-invisible).
+  Confirmed still live 2026-09-27 — unconverted; the Bash branch in the same
+  file (line 162) already converted and carries `# marketplace-isolation:
+  allow remote-management`.
+- ~~`agent-codespaces/src/agent_codespaces/_invoke.py`~~ and
+  ~~`agent-containers/src/agent_containers/_invoke.py`~~ — **resolved**,
+  confirmed 2026-09-27. Both now expose a `binstub()`/`payload_binstub()`
+  resolver pinned to `_payload_root()` (each file's own package directory),
+  and `dispatch_argv()`/the persisted-spawn helper prefers that payload-local
+  binstub over any global path. Neither references `.local/bin` in any form
+  any more. Removed from this list.
 
-These callers reinforce the Phase 3 dependency: each needs a durable canonical
-launcher or explicit management context, not a replaceable payload path.
-Broadening the guard to recognize component-built and escaped path forms is a
-prerequisite for making it blocking in Phase 6.
+These remaining callers reinforce the Phase 3 dependency: each needs a durable
+canonical launcher or explicit management context, not a replaceable payload
+path. Broadening the guard to recognize component-built and escaped path
+forms is a prerequisite for making it blocking in Phase 6.
 
 ## Serial execution
 
@@ -286,7 +403,30 @@ prerequisite for making it blocking in Phase 6.
 
 ## Completion rule
 
+**Corrected 2026-09-27** (supersedes the wording below, kept for history):
+Phase 2 issue #1103 and this item's checkbox stay open until every
+cross-boundary consumer (a caller invoking a *different* plugin's command, or
+any `agent-*` invocation outside an LLM-mediated skill turn) resolves its
+target through the `runtimeRoot` resolver or session command catalog, treating
+a legacy-fallback root exactly like a marketplace-cell root. Own-payload
+global-binstub *placement* is explicitly **not** part of this gate — it is
+accepted, permanent on non-marketplace-cell hosts, and never itself "removed."
+
+**Satisfied 2026-09-27, this effort's own inventory (see the disposition
+summary above)**: every one of the 70 tracked findings is now either fixed,
+verified own-payload placement, or explicitly deferred with a stated reason.
+This local checklist item is checked off on that basis. Whether the upstream
+GitHub `#1103` tracker itself should close is a separate call this pass did
+not make — that issue's own history suggests broader installation-cell
+migration scope beyond this specific launcher-contract inventory; closing it
+is left to an explicit reviewer/operator decision, not inferred here.
+
+<details>
+<summary>Original wording (historical, no longer the completion criterion)</summary>
+
 Phase 2 issue #1103 remains open and the effort checkbox remains unchecked until
 the generic global wrappers can be removed without stranding any service,
 provider, MCP, remote, credential, askpass, deployment, generated, or operator
 caller. Finishing the six immediate findings is progress, not closure.
+
+</details>

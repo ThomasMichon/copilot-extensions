@@ -45,12 +45,10 @@ Binding rules that make it real:
 - **One source of truth.** The three-tier order lives once (in the primitive and
   the shared shell resolver); a launch site copies the resolver, never the logic.
   `tools/check-runtime-resolution.py` guards against re-divergence.
-- **Opt-in boot tracing is stderr-only.** Set
-  `COPILOT_EXTENSIONS_BOOT_TRACE=1` to have the generated payload binstub and
-  resolver emit one `::boot-trace::` line per phase transition to **stderr**
-  only, using stable `plugin=... phase=... t=<epoch-ms>` fields plus optional
-  `source=...`, `result=...`, and `version=...` details. Unset or empty means a
-  complete no-op: no trace lines, no files, no locks, and no behavior change.
+- **Boot tracing has two channels.** Every launch now appends one durable JSONL
+  record per phase transition to that plugin's own local log, with the existing
+  `COPILOT_EXTENSIONS_BOOT_TRACE=1` stderr stream retained unchanged as an
+  additional live-debug channel.
 - **Completion is necessary; consumer readiness may be stricter.** The shared
   resolver rejects slots without a valid completion marker. A consumer whose
   launch contract includes an import/readiness probe must apply that probe to the
@@ -63,6 +61,96 @@ The canonical phase names are:
   `provision-start`, `provision-end`, `dispatch`
 - Runtime resolvers: `resolver-marker-start`, `resolver-marker-result`,
   `resolver-slot-result`
+
+### Boot-trace channels and durable log schema
+
+The durable channel is **on by default** and records every phase whether or
+not `COPILOT_EXTENSIONS_BOOT_TRACE` is set -- with one narrow, named
+exception: see the `installationContext: required` caveat below, where nine
+plugins' own inner dispatchers do not yet consume the forwarded shim-start
+timestamp and so do not yet emit a durable `shim-start`/`dispatch` record.
+
+- **Generated payload shims + canonical resolvers** append JSONL to
+  `~/.<plugin>/logs/boot-trace.jsonl`.
+- **`agent-worktrees`' bespoke launchers/resolvers** append to their existing
+  durable activity log at `~/.agent-worktrees/logs/activity.jsonl` so boot
+  timing sits beside other worktree lifecycle events.
+- **Opt-in stderr remains unchanged.** Setting
+  `COPILOT_EXTENSIONS_BOOT_TRACE=1` still emits the original
+  `::boot-trace:: plugin=... phase=... t=<epoch-ms> ...` lines to **stderr**
+  only. This is additive: durable logging still happens, and the stderr extras
+  keep their existing `source=... result=... version=... path=...` vocabulary.
+- **The durable write is synchronous, not fire-and-forget.** Every launcher's
+  write is a single small, exception-swallowed append (never raises, never
+  blocks dispatch on *failure*) -- but it does still run to completion before
+  dispatch continues, so a slow or contended filesystem (a network-mapped
+  home directory, heavy antivirus scanning, a concurrent writer) adds real
+  latency to every phase logged, not just a failure path. Accepted as a
+  bounded tradeoff given the write is one small local append per phase
+  (Copilot review, PR #3310) rather than backgrounded, which would add its
+  own measurable per-launch overhead spinning up a job/runspace to hide a
+  cost that is normally smaller than that overhead itself.
+- **`installationContext: required` plugins defer `shim-start`/`dispatch`
+  durable writes to their own inner, installation-context-aware dispatcher.**
+  The outer generated dispatcher shim (`dispatcher-posix.tmpl`/
+  `dispatcher-powershell.tmpl` -- the only templates these plugins select)
+  structurally cannot know whether the active root is the legacy one or a
+  resolved namespaced context, so it never writes these two phases itself;
+  it only computes/stderr-emits `shim-start`'s timestamp and forwards it via
+  `COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS` for the inner dispatcher to
+  log once it has resolved the genuinely active root. `agent-worktrees`'
+  own bespoke inner launcher (`invoke-payload-runtime.sh`/`.ps1`) does this;
+  the other nine `installationContext: required` plugins' own inner
+  dispatchers (each plugin's own bespoke `scripts/runtime-gate.*`, not a
+  shared/vendored file) do not yet consume the forwarded env var, so those
+  plugins simply do not yet emit a durable `shim-start`/`dispatch` record --
+  the same "not yet implemented" state every other unimplemented phase is
+  already in for those plugins, not a regression or a misrouted/lost record.
+
+Durable records reuse the activity-style event shape:
+
+```json
+{
+  "ts": "2026-09-22T14:30:10-07:00",
+  "event": "boot_trace",
+  "plugin": "agent-example",
+  "phase": "resolver-marker-result",
+  "t_ms": 1790112610123,
+  "pid": 12345,
+  "host": "host-name",
+  "source": "resolver",
+  "resolution_source": "current-version",
+  "result": "hit",
+  "version": "1.2.3"
+}
+```
+
+Notes:
+
+- `source` in the durable JSON means the **emitter** (`shim`, `resolver`, or
+  `launcher`), matching existing activity-log naming.
+- Resolver-specific tier data uses `resolution_source` instead of `source`
+  because `source` is already part of the durable event schema.
+- Dispatch records omit resolver-only fields and instead carry
+  `path=fast|provisioned` in JSON as `"path": "fast"` / `"provisioned"`.
+- Logging is best-effort and fail-open. The shell-level launch path tries to
+  create the target log directory, but any failure (missing parent, permissions,
+  disk full, malformed environment) is swallowed and must never block the real
+  dispatch.
+
+### Retention / rotation
+
+- **`agent-worktrees`** reuses the existing `activity.jsonl` rolling-retention
+  policy from `plugins/agent-worktrees/src/agent_worktrees/activity.py`:
+  pruning begins once the log exceeds 512 KiB and keeps a 7-day window.
+- **All other plugins' new `logs/boot-trace.jsonl` files are currently
+  append-only and unrotated.** That is intentional for this first landing so
+  the earliest shell-only phases can persist without spawning another process or
+  entangling the shared service-lifecycle logs (for example `zdd`'s
+  `lifecycle.log`) with a second event schema. A follow-up should add bounded
+  retention for `boot-trace.jsonl` itself, ideally reusing each plugin's
+  existing local log-management story rather than inventing a new one per
+  surface.
 
 ### Gotchas this pattern encodes
 

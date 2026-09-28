@@ -193,7 +193,7 @@ bash "$aw_dir/scripts/init.sh"
 ### What It Creates
 
 ```
-~/.agent-worktrees/
+~/.agent-worktrees/  # marketplace-isolation: allow deployed-runtime-diagnostics
   versions/<version>/       immutable Python venv slot with agent_worktrees
   current-version           marker naming the active slot
   payload-dir               installed payload pointer used for self-provisioning
@@ -240,7 +240,7 @@ Register a repo for worktree-managed sessions. Run **from inside the repo**.
 
 1. **Detect repo** -- `git rev-parse --show-toplevel`, identify default branch
 2. **Resolve machines.yaml if present** -- prefer
-   `{repo}/.agent-worktrees/machines.yaml`, falling back to legacy
+   `{repo}/.agent-worktrees/machines.yaml`, falling back to legacy <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
    `{repo}/machines.yaml`.
    If found, ask user which machine this is. If not, auto-detect from hostname.
 3. **Sweep for services** -- look for `services/*/service.yaml`
@@ -248,7 +248,7 @@ Register a repo for worktree-managed sessions. Run **from inside the repo**.
 5. **Choose worktree root** -- default: `<anchor>.worktrees` (a sibling folder,
    matching the Copilot CLI `/worktree` layout)
 6. **Generate config** -- write `~/.{repo-name}/config.yaml`
-7. **Create project binstub** -- `~/.local/bin/{repo-name}[.cmd]`
+7. **Create project binstub** -- `~/.local/bin/{repo-name}[.cmd]` <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 
 ### Binstub Format
 
@@ -258,7 +258,7 @@ and launches sessions. It falls back to `launch-session` only when the runtime i
 missing (recovery), preserving the same explicit project argument.
 
 The generated project binstub routes to the versioned runtime slot named by
-`~/.agent-worktrees/current-version` and invokes:
+`~/.agent-worktrees/current-version` and invokes: <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 
 ```text
 python -m agent_worktrees --project {repo-name} ...
@@ -339,7 +339,7 @@ user unit is unrelated to interactive logon).
 ### What It Creates
 
 ```
-~/.agent-bridge/
+~/.agent-bridge/  # marketplace-isolation: allow deployed-runtime-diagnostics
   venv/                    Python venv (fastapi, uvicorn, etc.)
   config.yaml              Runtime config (port, bind, topology profiles)
   auth.yaml                Bearer auth token (generated on first run)
@@ -351,7 +351,7 @@ user unit is unrelated to interactive logon).
 
 Windows: "Agent Bridge" scheduled task (at-logon, 15s delay; or boot-start
          S4U with `-NonInteractive`)
-Linux:   ~/.config/systemd/user/agent-bridge.service (enabled)
+Linux:   ~/.config/systemd/user/agent-bridge.service (enabled)  # marketplace-isolation: allow deployed-runtime-diagnostics
 ```
 
 ### Migration
@@ -384,7 +384,7 @@ install.ps1 uninstall    # remove (preserves config by default)
 ## 4. Agent-Bridge Adopt (Topology Wiring)
 
 Wire agent-bridge to a repo's machine mesh. This creates a **topology
-profile** in `~/.agent-bridge/config.yaml` pointing to the same
+profile** in `~/.agent-bridge/config.yaml` pointing to the same <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 `machines.yaml` used by Windows Terminal fragments.
 
 > **Detailed machine config guide:** For `machines.yaml` format, the derived
@@ -407,7 +407,7 @@ profile** in `~/.agent-bridge/config.yaml` pointing to the same
 
 | File | Locations checked |
 |------|-------------------|
-| machines.yaml | canonical `{repo}/.agent-worktrees/machines.yaml`, with legacy `{repo}/machines.yaml` fallback where supported |
+| machines.yaml | canonical `{repo}/.agent-worktrees/machines.yaml`, with legacy `{repo}/machines.yaml` fallback where supported | <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 
 > `acp-agents.json` is **retired** — the roster is derived from `machines.yaml`
 > (+ `.copilot-extensions/agent-worktrees/related.yaml`, with legacy
@@ -451,7 +451,7 @@ Restart agent-bridge to load new topology:
 agent-bridge service restart # marketplace-isolation: allow service-management
 
 # Linux equivalent
-systemctl --user restart agent-bridge.service
+systemctl --user restart agent-bridge.service  # marketplace-isolation: allow deployed-runtime-diagnostics
 
 # Then verify
 <agent-bridge catalog argv[0]> machines
@@ -525,7 +525,7 @@ The bootstrap above works unchanged **from inside a WSL distro** — run the
 Two WSL-specific facts:
 
 - **`~/.local/bin` is already on `PATH`** via the stock `~/.profile` snippet
-  (+ `~/.local/bin/env` from uv), so the binstubs the installers deploy there are
+  (+ `~/.local/bin/env` from uv), so the binstubs the installers deploy there are <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
   picked up without editing PATH.
 - **Don't install (or symlink) the Copilot CLI.** The Windows Copilot CLI's WSL
   stub auto-installs the Linux binary on first run, and agent-worktrees

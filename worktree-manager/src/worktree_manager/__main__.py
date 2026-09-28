@@ -1273,7 +1273,6 @@ def _resolve_for(req) -> "tuple[object | None, int]":
     from .engine_client import (
         EngineError,
         EngineFeatureUnavailable,
-        launch_plan_from_dict,
         resolve_launch_plan,
     )
     try:
@@ -1285,21 +1284,9 @@ def _resolve_for(req) -> "tuple[object | None, int]":
             target_environment=getattr(req, "environment", None),
             target_no_mux=getattr(req, "no_mux", False),
         )
-    except EngineFeatureUnavailable:
-        from .production_picker import runner
-
-        try:
-            plan = launch_plan_from_dict(runner.compatibility_remote_plan(
-                req.project,
-                machine=req.machine,
-                environment=getattr(req, "environment", None),
-                worktree_id=req.worktree_id,
-                mode=req.mode,
-                no_mux=getattr(req, "no_mux", False),
-            ))
-        except (RuntimeError, OSError, ValueError) as error:
-            print(f"error: could not resolve a remote launch plan: {error}")
-            return None, 1
+    except EngineFeatureUnavailable as e:
+        print(f"error: could not resolve a launch plan: {e}")
+        return None, 1
     except EngineError as e:
         print(f"error: could not resolve a launch plan: {e}")
         return None, 1

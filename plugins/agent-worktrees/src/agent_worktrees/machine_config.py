@@ -12,7 +12,10 @@ import os
 
 from . import config as cfg
 
-_MARKERS = (".agent-worktrees", os.path.join(".copilot-extensions", "agent-worktrees"))
+_MARKERS = (
+    ".agent-worktrees",  # marketplace-isolation: allow legacy-compatibility
+    os.path.join(".copilot-extensions", "agent-worktrees"),
+)
 
 
 def machine_config_root(base: str | None) -> str | None:

@@ -17,8 +17,11 @@ process group, so the worst a bad spawn path can do is fail to reap a child
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import os
 import sys
+from typing import Any
 
 
 def safe_killpg(pid: int, sig: int) -> bool:
@@ -43,3 +46,35 @@ def safe_killpg(pid: int, sig: int) -> bool:
     except (ProcessLookupError, PermissionError, OSError):
         return False
     return True
+
+
+async def terminate_windows_tree(
+    proc: Any, *, grace: float = 3.0, kill_timeout: float = 5.0,
+) -> None:
+    """Windows tree-kill, graceful stdin-close first (shared, see #4031).
+
+    A forceful ``taskkill /T /F`` alone vanishes the local process instantly,
+    but gives a child like ``ssh.exe`` no chance to tear its own remote
+    session down -- the remote end then notices only via its own keepalive
+    timeout (tens of seconds). Closing stdin first lets a well-behaved child
+    exit on its own within ``grace`` seconds; only then do we escalate to the
+    forceful whole-tree kill, unchanged.
+    """
+    pid = proc.pid
+    with contextlib.suppress(Exception):
+        if proc.stdin and not proc.stdin.is_closing():
+            proc.stdin.close()
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=grace)
+        return
+    except (TimeoutError, asyncio.TimeoutError):
+        pass
+    try:
+        killer = await asyncio.create_subprocess_exec(
+            "taskkill", "/PID", str(pid), "/T", "/F",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await asyncio.wait_for(killer.wait(), timeout=kill_timeout)
+    except (TimeoutError, asyncio.TimeoutError, OSError, ProcessLookupError):
+        pass

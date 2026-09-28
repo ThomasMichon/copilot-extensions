@@ -46,6 +46,24 @@ def test_log_event_drops_none_fields(patch_install_dir: Path):
     assert "reason" not in rec
 
 
+def test_read_events_preserves_shell_written_boot_trace_records(
+    patch_install_dir: Path,
+):
+    log = activity.log_path()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text(
+        '{"ts":"2026-09-22T21:00:00+00:00","event":"boot_trace","plugin":"agent-worktrees","phase":"dispatch","t_ms":1790112610123,"pid":123,"host":"test-host","source":"launcher","path":"fast"}\n',
+        encoding="utf-8",
+    )
+
+    rec = activity.read_events()[0]
+    assert rec["event"] == "boot_trace"
+    assert rec["plugin"] == "agent-worktrees"
+    assert rec["phase"] == "dispatch"
+    assert rec["source"] == "launcher"
+    assert rec["path"] == "fast"
+
+
 def test_log_event_stamps_known_handoff_stage(patch_install_dir: Path):
     activity.log_event("handoff_requested", worktree_id="wt-1", session_id="s1")
     rec = activity.read_events()[0]

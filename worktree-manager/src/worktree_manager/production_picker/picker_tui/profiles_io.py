@@ -62,7 +62,7 @@ def load_column(machine, env, *, runner=_default_runner):
     Local host reads its own config in-process (always reachable -> set/``None``,
     never ``UNAVAILABLE``); a remote host is queried over SSH.
     """
-    from .. import config as cfg
+    from .. import project_config as cfg
 
     if (machine, env) == _local_key():
         cfg_path = cfg.default_config_path()
@@ -110,7 +110,7 @@ def apply_column(machine, env, sels, *, mirror=True, runner=_default_runner):
     ``TargetSel``; the locked self.agent target is always included by the
     persistence layer.
     """
-    from .. import config as cfg
+    from .. import project_config as cfg
 
     sels = list(sels)
     if (machine, env) == _local_key():

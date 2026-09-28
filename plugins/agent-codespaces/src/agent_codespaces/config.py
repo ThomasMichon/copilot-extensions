@@ -64,7 +64,7 @@ def _runtime_dir() -> Path:
     override = os.environ.get("AGENT_CODESPACES_HOME", "").strip()
     if override:
         return Path(override).expanduser()
-    return _home() / ".agent-codespaces"
+    return _home() / ".agent-codespaces"  # marketplace-isolation: allow legacy compatibility root
 
 
 # Canonical paths
@@ -81,7 +81,7 @@ LOG_FILE = RUNTIME_DIR / "agent-codespaces.log"
 CONFIG_DIR_NAME = str(Path(".copilot-extensions") / "agent-codespaces")
 CONFIG_FILE_IN_DIR = "config.yaml"
 CANONICAL_CONFIG_REL = f"{CONFIG_DIR_NAME}/{CONFIG_FILE_IN_DIR}"
-LEGACY_CONFIG_DIR_NAME = ".agent-codespaces"
+LEGACY_CONFIG_DIR_NAME = ".agent-codespaces"  # marketplace-isolation: allow legacy-compatibility
 LEGACY_CONFIG_REL = f"{LEGACY_CONFIG_DIR_NAME}/{CONFIG_FILE_IN_DIR}"
 MARKETPLACE_OVERLAYS_DIR = (
     Path(".copilot-extensions") / "agent-codespaces" / "marketplaces"

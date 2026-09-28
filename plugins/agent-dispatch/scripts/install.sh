@@ -765,6 +765,27 @@ _ensure_runtime() {
         # `no_pair` field) on a live deployment. Clean both locations.
         rm -rf "$PLUGIN_DIR/build" "$PLUGIN_DIR"/*.egg-info \
                "$PLUGIN_DIR"/src/*.egg-info 2>/dev/null || true
+        # Every vendored `[tool.uv.sources]` workspace path dep under
+        # libs/<name>/ is its OWN independent setuptools build root -- it
+        # accumulates the exact same build/lib + *.egg-info residue as
+        # $PLUGIN_DIR, equally shadowing its own fresh src/ on a later
+        # install, and _STALE_CACHE_REFRESH_PACKAGES' --reinstall-package /
+        # --refresh-package flags do nothing to prevent it (those bust
+        # uv's resolution/build cache, not a stale build artifact sitting
+        # directly in the source tree uv builds FROM). Confirmed live
+        # (2026-09-27): agent-procutil's own libs/agent-procutil/build/lib
+        # silently shipped a version missing windowless_python_env even
+        # after a fully clean `uv cache clean` + forced rebuild, because
+        # every rebuild kept reading the stale build/lib copy instead of
+        # the fresh src/. Directory names under libs/ don't map 1:1 to
+        # package names (e.g. agent-zdd -> libs/zdd), so glob every
+        # immediate child rather than trying to enumerate them.
+        local lib_dir
+        for lib_dir in "$PLUGIN_DIR"/libs/*/; do
+            [[ -d "$lib_dir" ]] || continue
+            rm -rf "${lib_dir}build" "${lib_dir}"*.egg-info \
+                   "${lib_dir}"src/*.egg-info 2>/dev/null || true
+        done
     }
     _pip_install() {  # $1 = package spec
         local rc

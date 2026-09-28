@@ -17,6 +17,13 @@ path (``embed_query`` / ``embed_texts`` / ``dimension`` plus the
 ``is_ready`` / ``spinup`` / ``spindown`` / ``health`` / ``close`` lifecycle the
 server endpoints poke at). Lifecycle calls operate on the local CPU model rather
 than a remote subprocess.
+
+This class needs the full torch/sentence-transformers stack (via
+``EmbeddingPipeline``), so it lives in ``agent-index-engine`` rather than the
+light ``agent-index`` package -- it is only reachable when the operator opts
+into ``AGENT_INDEX_SEARCH_IN_PROCESS=1`` on a single-venv install that has this
+package installed alongside the service (see
+``agent_index.search.engine.create_search_engine``).
 """
 
 from __future__ import annotations
@@ -24,7 +31,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from agent_index.embedding.pipeline import EmbeddingPipeline
+from agent_index_engine.pipeline import EmbeddingPipeline
 
 if TYPE_CHECKING:
     import numpy as np

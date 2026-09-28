@@ -199,6 +199,18 @@ force-removes a folder or branch, squashes, rebases, or pushes.** Its only
 job is to guarantee the branch's work is merged to the default branch --
 always safe to call.
 
+**The validated branch is the worktree's actual current checkout, not
+necessarily its originally-tracked branch name** (`worktree/<id>`).  If the
+checkout has since moved to a differently-named branch (e.g. a `-journal`
+suffix variant from manual renaming) or ended up detached, `finalize`
+validates and removes the *real* checked-out content -- checking the stale
+tracked name instead would risk a false "Unmerged work detected" or,
+worse, validating the wrong ref while the actual checkout held something
+different (#7723). When that divergence is detected, `finalize` also warns
+if the stale tracked branch still has content of its own not on upstream
+(possible orphaned work worth a manual look) and preserves that branch
+ref through cleanup instead of deleting it alongside the checkout.
+
 ### Decision table
 
 | Situation | Command |
@@ -262,7 +274,7 @@ before signing off -- it is not the same everywhere:**
 ```
 
 - **`direct`** -- no PR flow; `finalize` lands to the default branch.
-- **`pr-human-merge`** -- a **human** approves + merges: `create-pr` / `pr-watch` / `pr-status` / `pr-complete`; **`pr-merge` does not apply**.
+- **`pr-human-merge`** -- a **human** approves + merges: `create-pr` / `pr-watch` / `pr-status` / `pr-nudge` / `pr-complete`; **`pr-merge` does not apply**.
 - **`pr-agent-merge`** -- after approval the author runs `pr-merge` to signal consent and the review gate merges.
 - **`pr-self-merge`** -- the submitter merges directly once checks/reviews allow. On GitHub, never approve your own PR. Use `pr-merge <pr> --now` when ready; bare `pr-merge` refuses in this profile.
 
@@ -309,6 +321,7 @@ hidden source metadata never substitutes for reviewable intent.
 | **PR mode: create + push a feature branch** | `<agent-worktrees catalog argv[0]> create-pr --title "desc" --body-file <path>` |
 | **PR mode: record PR metadata** (after sub-agent opens it) | `<agent-worktrees catalog argv[0]> set-pr --url URL --number N` |
 | **PR mode: show tracked PR state** | `<agent-worktrees catalog argv[0]> pr-status` |
+| **PR mode: nudge the bound automated reviewer** | `<agent-worktrees catalog argv[0]> pr-nudge` |
 | **Check the target repo's PR flow** | `<agent-worktrees catalog argv[0]> get pr-profile` |
 | Set/update title only | `<agent-worktrees catalog argv[0]> push-changes --title "desc" --title-only` |
 | Show worktree git status | `<agent-worktrees catalog argv[0]> status` |
@@ -350,6 +363,18 @@ fresh-safety-revalidation guarantees non-forced cleanup provides, and the
 narrow, single-worktree `--force` exception -- the policy above tells you
 *what* to do; that reference has the *exact commands* so you don't improvise
 syntax.
+
+**Investigating a whole backlog of worktrees stuck `active` with no clear
+owner** (e.g. after a mux/daemon crash left status caches stale, or a
+standing audit) is a different task from resolving one known-dirty
+worktree -- read
+[references/fleet-sweep.md](references/fleet-sweep.md) for the full
+procedure: baseline health checks, releasing the claims-ledger backlog
+first (mechanical and safe), and -- critically -- verifying each session's
+actual *content* (directly for small sessions, via the `session-rampup`
+sub-agent for large ones) before trusting a clean git tree and an empty
+claims ledger to mean the work is done. Git-clean and claims-clear only
+prove nothing was lost; they don't prove the story resolved.
 
 ## Worktree States
 
@@ -422,5 +447,6 @@ Copilot CLI session
 - [references/pr-attribution.md](references/pr-attribution.md) -- identifying a PR's source worktree from the marker (reviewer/maintainer perspective, not the author's)
 - [references/obligations.md](references/obligations.md) -- finalize's outbound-resource obligation gate
 - [references/cleanup-details.md](references/cleanup-details.md) -- per-worktree dirty resolution and cleanup safety guarantees
+- [references/fleet-sweep.md](references/fleet-sweep.md) -- investigating a fleet-wide backlog of stale/`active` worktrees (claims release + session-content verification)
 - [references/leases.md](references/leases.md) -- the resource-lease primitive
 - [references/reference.md](references/reference.md) -- payload-command resolution, cross-machine inspection, finalization merge mechanics, session detection, titles

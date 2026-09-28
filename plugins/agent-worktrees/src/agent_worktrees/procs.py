@@ -25,7 +25,9 @@ __all__ = [
     "count_processes_named",
     "process_executable_path",
     "processes_with_cwd_under",
+    "processes_with_executable_under",
     "terminate_processes_under",
+    "terminate_processes_under_executable",
     "terminate_pid",
     "terminate_pid_if_identity",
 ]
@@ -570,6 +572,110 @@ def terminate_processes_under(
             reap_audit.record("cwd-proc", t["pid"],
                               reason="terminate_processes_under", killed=ok,
                               root=root, name=t.get("name"))
+        except Exception:
+            pass
+        results.append({**t, "killed": ok})
+    return results
+
+
+def processes_with_executable_under(
+    root: str, *, exclude: str | None = None, exclude_pids: set[int] | None = None,
+) -> list[dict]:
+    """Find processes whose resolved **executable** path is at or under
+    ``root`` -- unlike :func:`processes_with_cwd_under`, which matches a
+    process's *current working directory*, this matches the interpreter/binary
+    image it was launched from (e.g. a ``versions/<v>/Scripts/python.exe``
+    runtime slot). ``exclude``, when given, is itself a path prefix to skip
+    (typically the CURRENT runtime slot nested under the same ``versions/``
+    root) so a caller can find only *other*, non-current instances.
+
+    Returns ``{"pid": int, "name": str, "executable": str}`` dicts.
+    Best-effort: any process that can't be opened or read is silently skipped,
+    matching :func:`processes_with_cwd_under`.
+    """
+    excluded_pids = {os.getpid()}
+    if exclude_pids:
+        excluded_pids |= exclude_pids
+    hits: list[dict] = []
+
+    def _candidates():
+        if platform.system() == "Windows":
+            try:
+                k32 = _win_kernel32()
+            except OSError:
+                return
+            for pid in _win_enum_pids():
+                if pid in excluded_pids:
+                    continue
+                try:
+                    _cwd, name = _win_read_cwd(k32, pid)
+                except OSError:
+                    name = ""
+                yield pid, name
+        else:
+            for pid, _cwd, name in _iter_processes_posix():
+                if pid in excluded_pids:
+                    continue
+                yield pid, name
+
+    for pid, name in _candidates():
+        try:
+            exe = process_executable_path(pid)
+        except OSError:
+            continue
+        if not exe or not _is_under(exe, root):
+            continue
+        if exclude and _is_under(exe, exclude):
+            continue
+        hits.append({"pid": pid, "name": name, "executable": exe})
+    return hits
+
+
+def terminate_processes_under_executable(
+    root: str, *, exclude: str | None = None, exclude_pids: set[int] | None = None,
+) -> list[dict]:
+    """Terminate every process whose resolved executable is at or under
+    ``root`` (excluding ``exclude``, typically the current runtime slot).
+
+    The cutover counterpart to :func:`terminate_processes_under`: a version
+    bump publishes a fresh ``versions/<v>`` slot, but any one-shot CLI verb
+    invocation still mid-flight on the OUTGOING slot has no self-check to
+    retire itself -- only the resident status-monitor loop rechecks
+    ``_runtime_superseded`` each tick (dotfiles#911 is the prior incident for
+    that loop's own case). Left alone, such an invocation can wedge
+    indefinitely on a lock/IPC call and pile up across every deploy it
+    survives (#4268 observed 18 such processes for a
+    single project over roughly two hours). Called from the cutover reap
+    alongside the singleton monitor's own known-pid reap.
+
+    Returns the list of ``{"pid", "name", "executable", "killed": bool}`` that
+    were targeted.
+    """
+    targets = processes_with_executable_under(root, exclude=exclude, exclude_pids=exclude_pids)
+    if not targets:
+        return []
+
+    if platform.system() == "Windows":
+        try:
+            k32 = _win_kernel32()
+        except OSError:
+            return [{**t, "killed": False} for t in targets]
+        killer = lambda pid: _terminate_windows(k32, pid)  # noqa: E731
+    else:
+        killer = _terminate_posix
+
+    results: list[dict] = []
+    for t in targets:
+        ok = False
+        try:
+            ok = killer(t["pid"])
+        except OSError:
+            ok = False
+        try:
+            from . import reap_audit
+            reap_audit.record("stale-runtime-exe", t["pid"],
+                              reason="terminate_processes_under_executable",
+                              killed=ok, root=root, name=t.get("name"))
         except Exception:
             pass
         results.append({**t, "killed": ok})

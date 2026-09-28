@@ -2007,3 +2007,53 @@ def test_engine_no_notify_without_url(monkeypatch, tmp_path):
     monkeypatch.setattr(engine, "post_notify", lambda *a, **k: calls.append(a) or True)
     assert engine.run_sync(cfg) == 0
     assert calls == []
+
+
+@pytest.mark.no_autotrust
+def test_main_honors_repo_local_sync_local_path(monkeypatch, tmp_path):
+    """engine.main() -- the actual session-sync CLI entry point every
+    scheduled sync invokes -- must resolve schema v3's repo-local
+    sync.local_path, not just the ambient CLI config command. This was
+    missed when schema v3 was added: main() hardcoded
+    load_config(include_repo=False), a pre-v3 boundary that made the whole
+    feature inert for the one thing it exists to fix."""
+    from .conftest import init_git_repo
+
+    repo = tmp_path / "repo"
+    init_git_repo(repo, remote="https://example.test/example-owner/demo.git", branch="main")
+    (repo / ".agent-logger.yaml").write_text(
+        "schema_version: 3\nsync:\n  local_path: "
+        + str(tmp_path / "declared-target")
+        + "\n",
+        encoding="utf-8",
+    )
+    registry = tmp_path / "repos.yaml"
+    import yaml
+
+    registry.write_text(
+        yaml.safe_dump(
+            {
+                "repos": {
+                    "demo": {
+                        "remote": "https://example.test/example-owner/demo.git",
+                        "default_branch": "main",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_WORKTREES_REPOS_YAML", str(registry))
+    monkeypatch.setenv("AGENT_LOGGER_HOME", str(tmp_path / "home"))
+    monkeypatch.chdir(repo)
+
+    captured = {}
+
+    def _fake_run_sync(cfg, **kwargs):
+        captured["sync_path"] = cfg.sync_path
+        return 0
+
+    monkeypatch.setattr(engine, "run_sync", _fake_run_sync)
+
+    assert engine.main(["run"]) == 0
+    assert captured["sync_path"] == tmp_path / "declared-target"

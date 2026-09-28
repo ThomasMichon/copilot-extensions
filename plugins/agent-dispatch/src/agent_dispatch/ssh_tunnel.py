@@ -87,7 +87,8 @@ def resolve_peer_endpoint(machine: str, *, timeout: float = 15.0) -> tuple[str, 
         pass
     # Fallback: parse the routing table directly (version-agnostic).
     try:
-        raw = _ssh_capture(exe, alias, "cat ~/.agent-dispatch/active.json", timeout)
+        cmd = "cat ~/.agent-dispatch/active.json"  # marketplace-isolation: allow remote-management
+        raw = _ssh_capture(exe, alias, cmd, timeout)
         active = (json.loads(raw) or {}).get("active") or {}
         port = active.get("port")
         if isinstance(port, int) and port > 0:

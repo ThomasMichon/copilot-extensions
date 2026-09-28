@@ -44,7 +44,7 @@ same-named command found through `PATH`. Full readiness detail:
 ## Advisory lease (borrow / release / leases)
 
 The lease is **host-local advisory state** in
-`~/.agent-codespaces/leases.json` (exclusive-locked for race-safety across
+`~/.agent-codespaces/leases.json` (exclusive-locked for race-safety across <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 parallel worktree agents on one box). It records that a given **effort/worktree**
 is borrowing a CodeSpace so a second agent on the same machine doesn't dispatch
 to it concurrently. A CodeSpace is addressed **by name** (unlike the container

@@ -178,6 +178,20 @@ jobs:
         run: python tools/check-no-agent-machines-packages.py
       - name: No agent-machines consuming-side packages guard tests
         run: python -m pytest -q tools/test_check_no_agent_machines_packages.py
+      - name: No sibling plugin writes tracking YAML directly
+        # agent-worktrees-authoritative-daemon effort, Phase 4: only
+        # agent-worktrees itself may mutate a worktree's tracking record --
+        # a sibling plugin importing one of its write functions directly
+        # would bypass the resident daemon's own lock/cache/verb
+        # machinery, reintroducing the cross-process atomicity hazard that
+        # effort exists to close. See the guard's own docstring for scope
+        # (every plugins/* directory except agent-worktrees itself, not
+        # filtered by an agent-* name prefix; worktree-manager's own known,
+        # separately-tracked exception is documented there, not silently
+        # exempted).
+        run: python tools/check-no-sibling-tracking-writes.py
+      - name: No sibling tracking-writes guard tests
+        run: python -m pytest -q tools/test_check_no_sibling_tracking_writes.py
       - name: Module health watchdog tests
         run: python -m pytest -q tools/test_module_health_watchdog.py
       - name: CI failure watchdog tests
@@ -254,6 +268,17 @@ jobs:
           python -m pytest -q libs/peer-launch/tests
       - name: Installer readiness contract tests
         run: python -m pytest -q libs/installer-readiness/tests
+      - name: Canonical shared-library tests (uv-editable referenced libs)
+        # These libs are consumed through `uv`-editable canonical references
+        # (vendor-pointer-generalization, Phase 1), so no consumer checkout
+        # carries a pointer copy whose tests a consumer's own pytest run would
+        # collect. Run the canonical suites here so their wire/server coverage
+        # stays enforced. Each suite puts its own lib on `sys.path` from its
+        # `tests/conftest.py`, as the sibling canonical-lib suites do -- run
+        # one invocation per lib so a suite only ever sees its own `src`.
+        run: >-
+          python -m pytest -q libs/work-coalescing-singleton/tests &&
+          python -m pytest -q libs/lazy-cli-dispatch/tests
       - name: Vendored library synchronization
         run: python tools/check-vendored-libs-sync.py
       - name: Windows headless launch invariants
@@ -274,6 +299,14 @@ jobs:
         run: >-
           python tools/check-trusted-ci.py &&
           python -m pytest -q tools/test_check_trusted_ci.py
+      - name: gh-aw action pin guard
+        run: >-
+          python tools/check-gh-aw-action-pins.py &&
+          python -m pytest -q tools/test_check_gh_aw_action_pins.py
+      - name: gh-aw compiler version guard
+        run: >-
+          python tools/check-gh-aw-compiler-version.py &&
+          python -m pytest -q tools/test_check_gh_aw_compiler_version.py
       - name: Feed neutrality (no hardcoded public package-feed pins)
         # No config/Dockerfile/install-script/CI-workflow file may hardcode a
         # public package-feed URL (pypi.org, registry.npmjs.org,
@@ -555,3 +588,56 @@ jobs:
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Full suite - ${{ matrix.plugin }}
         run: python tools/run-plugin-tests.py ${{ matrix.plugin }}
+
+  pr-gate:
+    name: PR gate (required check)
+    # The single, fixed-name aggregate this repo's branch protection points
+    # at. Every job this depends on either uses dynamic matrix names (smoke's
+    # own per-plugin job name changes per PR) or conditionally no-ops
+    # (worktrees-smoke/worktrees-windows-launch skip unless the heavy plugin
+    # is in scope) -- neither shape can be named directly as a GitHub
+    # required status check without risking a PR that never triggers a given
+    # dynamic/conditional name getting stuck forever on "Expected -- waiting
+    # for status to be reported." This job is unconditional (`if: always()`)
+    # and always reports exactly one of success/failure, so it is always
+    # itself observable regardless of what its dependencies did.
+    #
+    # Exists because neither of #4151 nor #4166 (the regressions that stalled
+    # dev's CI for hours) was actually invisible: #4151's own PR-time
+    # `agent-logger` check WAS red, and still merged, because this repo had
+    # no required-status-checks branch protection on dev/main at all --
+    # nothing technically blocked it. This job is the anchor that lets that
+    # protection finally exist without brittleness.
+    if: always() && github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'main'
+    needs:
+      - checks
+      - windows-hooks
+      - worktree-manager
+      - test-runner-linux
+      - test-runner-windows
+      - discover
+      - smoke
+      - worktrees-smoke
+      - worktrees-windows-launch
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Confirm every required job succeeded or was legitimately skipped
+        env:
+          NEEDS_JSON: ${{ toJson(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          results = json.loads(os.environ["NEEDS_JSON"])
+          bad = {name: info["result"] for name, info in results.items()
+                 if info["result"] not in ("success", "skipped")}
+          if bad:
+              print("Failing/cancelled required job(s):", bad)
+              sys.exit(1)
+          print("All required jobs succeeded or were legitimately skipped:")
+          for name, info in results.items():
+              print(f"  {name}: {info['result']}")
+          PY

@@ -47,7 +47,12 @@ def log_path() -> Path:
     Resolved stdlib-only (no ``config`` import) so the dependency-free callers
     stay dependency-free.
     """
-    return Path(os.path.expanduser("~")) / ".agent-worktrees" / "logs" / "reap-audit.jsonl"
+    return (
+        Path(os.path.expanduser("~"))
+        / ".agent-worktrees"  # marketplace-isolation: allow legacy-compatibility
+        / "logs"
+        / "reap-audit.jsonl"
+    )
 
 
 def _caller_frames(limit: int = 8) -> list[str]:

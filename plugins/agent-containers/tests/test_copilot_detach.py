@@ -38,7 +38,9 @@ def _args(**kw):
 
 def _target(profile: str = "trusted"):
     config = ContainersConfig(forward_gh_token=False, relay_enabled=True, relay_port=9857)
-    fleet = FleetConfig(repo="example/repo", workspace_folder="/workspaces/repo", exec_user="vscode")
+    fleet = FleetConfig(
+        repo="example/repo", workspace_folder="/workspaces/repo", exec_user="vscode"
+    )
     return types.SimpleNamespace(
         name="repo-1",
         config=config,
@@ -79,6 +81,7 @@ def seams(monkeypatch):
         cleaned=[],
         deregister=[],
         remote_env=[],
+        shims=[],
     )
     target = _target()
     import agent_containers.config as config_mod
@@ -95,7 +98,9 @@ def seams(monkeypatch):
     monkeypatch.setattr(
         venue_detached,
         "reserve_with_retry",
-        lambda scope, venue, **kw: calls.reserve.append((scope, venue)) or {"reservation_id": "r1"},
+        lambda scope, venue, **kw: (
+            calls.reserve.append((scope, venue)) or {"reservation_id": "r1"}
+        ),
     )
     monkeypatch.setattr(
         venue_detached,
@@ -107,18 +112,26 @@ def seams(monkeypatch):
         "release_cli_mode",
         lambda scope, reservation_id=None: calls.release.append((scope, reservation_id)) or 1,
     )
-    monkeypatch.setattr(venue_copilot, "live_session_for", lambda handle: {
-        "session_id": "sid-42",
-        "venue": {"target": "repo-1"},
-    })
+    monkeypatch.setattr(
+        venue_copilot,
+        "live_session_for",
+        lambda handle: {
+            "session_id": "sid-42",
+            "venue": {"target": "repo-1"},
+        },
+    )
     monkeypatch.setattr(
         venue_detached,
         "deregister_live_session",
         lambda sid: calls.deregister.append(sid) or True,
     )
-    monkeypatch.setattr(ssh_transport, "prepare_ssh_config", lambda name, user: types.SimpleNamespace())
+    monkeypatch.setattr(
+        ssh_transport, "prepare_ssh_config", lambda name, user: types.SimpleNamespace()
+    )
     monkeypatch.setattr(ssh_transport, "build_ssh_command", lambda cfg, cmd, **kw: ["ssh", cmd])
-    monkeypatch.setattr(ssh_transport, "container_environment", lambda name, user: {"PATH": "/bin"})
+    monkeypatch.setattr(
+        ssh_transport, "container_environment", lambda name, user: {"PATH": "/bin"}
+    )
     monkeypatch.setattr(
         ssh_transport,
         "write_remote_env",
@@ -129,10 +142,20 @@ def seams(monkeypatch):
         "cleanup_remote_env",
         lambda name, user, path: calls.cleaned.append(path),
     )
-    monkeypatch.setattr("agent_containers.container_shims.deploy", lambda *a, **k: None)
-    monkeypatch.setattr("agent_containers.container_shims.git_credential_environment", lambda: {
-        "GIT_TERMINAL_PROMPT": "0",
-    })
+    monkeypatch.setattr(
+        "agent_containers.container_shims.ensure_agent_worktrees",
+        lambda *a, **k: calls.shims.append(("ensure", a, k)),
+    )
+    monkeypatch.setattr(
+        "agent_containers.container_shims.deploy",
+        lambda *a, **k: calls.shims.append(("deploy", a, k)),
+    )
+    monkeypatch.setattr(
+        "agent_containers.container_shims.git_credential_environment",
+        lambda: {
+            "GIT_TERMINAL_PROMPT": "0",
+        },
+    )
     monkeypatch.setattr("agent_containers.relay_provider.token_for", lambda name: "relay-token")
     monkeypatch.setattr(
         forward_keeper,
@@ -145,13 +168,15 @@ def seams(monkeypatch):
         lambda name: calls.stop_keeper.append(name) or True,
     )
     monkeypatch.setattr(forward_keeper, "read_state", lambda name: None)
-    created = json.dumps({
-        "ok": True,
-        "created": True,
-        "resumed": False,
-        "seed_submitted": True,
-        "session": "wt-anchor-repo",
-    })
+    created = json.dumps(
+        {
+            "ok": True,
+            "created": True,
+            "resumed": False,
+            "seed_submitted": True,
+            "session": "wt-anchor-repo",
+        }
+    )
 
     def fake_run(argv, **kwargs):
         command = argv[-1]
@@ -193,6 +218,7 @@ def test_detach_success_provisions_credentials_starts_keeper_and_reports_handle(
         "relay_port": 9857,
         "host_relay_port": 61234,
     }
+    assert [item[0] for item in seams.shims] == ["ensure", "deploy"]
     assert "auth.yaml" in seams.run[0] and "active.json" in seams.run[0]
     launch = next(cmd for cmd in seams.run if "agent-worktrees embody" in cmd)
     assert "cd /workspaces/repo" in launch
@@ -211,7 +237,9 @@ def test_detach_forwards_the_host_github_token_when_enabled(seams, monkeypatch, 
     target.config.forward_gh_token = True
     monkeypatch.setattr(resolver_mod, "host_gh_token", lambda: "gho_host")
     rc = detach.cmd_detach(
-        _args(), require_live_relay_port=lambda: 61234, relay_healthy=lambda p: True,
+        _args(),
+        require_live_relay_port=lambda: 61234,
+        relay_healthy=lambda p: True,
     )
     assert rc == 0
     assert seams.remote_env[0]["GH_TOKEN"] == "gho_host"
@@ -220,20 +248,28 @@ def test_detach_forwards_the_host_github_token_when_enabled(seams, monkeypatch, 
     assert "gho_host" not in capsys.readouterr().out
 
 
-def test_detach_fails_before_launch_when_the_forwarded_token_is_missing(seams, monkeypatch, capsys):
+def test_detach_fails_before_launch_when_the_forwarded_token_is_missing(
+    seams, monkeypatch, capsys
+):
     import agent_containers.resolver as resolver_mod
 
     target = resolver_mod.resolve_live_exec_target("repo-1")
     target.config.forward_gh_token = True
     monkeypatch.setattr(resolver_mod, "host_gh_token", lambda: None)
     rc = detach.cmd_detach(
-        _args(), require_live_relay_port=lambda: 61234, relay_healthy=lambda p: True,
+        _args(),
+        require_live_relay_port=lambda: 61234,
+        relay_healthy=lambda p: True,
     )
     assert rc == 1
     captured = capsys.readouterr()
     assert "signed out" in captured.err
     failure = json.loads(captured.out)
-    assert failure["ok"] is False and "launch_detail" not in failure and "reservation_ttl" not in failure
+    assert (
+        failure["ok"] is False
+        and "launch_detail" not in failure
+        and "reservation_ttl" not in failure
+    )
     assert not any("agent-worktrees embody" in cmd for cmd in seams.run)
     assert _FakeLock.instances[0].released is True
 
@@ -245,14 +281,18 @@ def test_restricted_container_is_refused(monkeypatch, capsys):
     target = _target(RESTRICTED_PROFILE)
     monkeypatch.setattr(config_mod, "load_config", lambda: target.config)
     monkeypatch.setattr(resolver_mod, "resolve_live_exec_target", lambda name, config=None: target)
-    rc = detach.cmd_detach(_args(), require_live_relay_port=lambda: 1, relay_healthy=lambda p: True)
+    rc = detach.cmd_detach(
+        _args(), require_live_relay_port=lambda: 1, relay_healthy=lambda p: True
+    )
     assert rc == 1
     assert "restricted" in capsys.readouterr().err
 
 
 def test_missing_daemon_port_fails_before_keeper(seams, monkeypatch):
     monkeypatch.setattr(venue_detached, "resolve_daemon_port", lambda: None)
-    rc = detach.cmd_detach(_args(), require_live_relay_port=lambda: 1, relay_healthy=lambda p: True)
+    rc = detach.cmd_detach(
+        _args(), require_live_relay_port=lambda: 1, relay_healthy=lambda p: True
+    )
     assert rc == 1
     assert seams.keeper == []
 
@@ -268,7 +308,9 @@ def test_launch_failure_stops_started_keeper_and_kills_created_mux(seams, monkey
         return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(detach.subprocess, "run", fake_run)
-    rc = detach.cmd_detach(_args(), require_live_relay_port=lambda: 61234, relay_healthy=lambda p: True)
+    rc = detach.cmd_detach(
+        _args(), require_live_relay_port=lambda: 61234, relay_healthy=lambda p: True
+    )
     assert rc == 1
     assert "repo-1" in seams.stop_keeper
     assert any("tmux kill-session" in cmd for cmd in seams.run)
@@ -290,7 +332,9 @@ def test_rejoin_does_not_start_a_second_keeper(seams, monkeypatch, capsys):
         return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(detach.subprocess, "run", fake_run)
-    rc = detach.cmd_detach(_args(), require_live_relay_port=lambda: 61234, relay_healthy=lambda p: True)
+    rc = detach.cmd_detach(
+        _args(), require_live_relay_port=lambda: 61234, relay_healthy=lambda p: True
+    )
     assert rc == 0
     assert json.loads(capsys.readouterr().out)["resumed"] is True
     assert seams.stop_keeper == []
@@ -315,12 +359,18 @@ def test_forward_keeper_state_reuse_and_replace(tmp_path, monkeypatch):
     class Proc:
         pid = 200
 
-    forward_keeper._STORE.write("repo-1", {
-        "pid": 100,
-        "mux": "wt-anchor-repo",
-        "venue_port": 41234,
-    })
-    assert forward_keeper.ensure_running("repo-1", venue_port=41234, mux="wt-anchor-repo")["started"] is False
+    forward_keeper._STORE.write(
+        "repo-1",
+        {
+            "pid": 100,
+            "mux": "wt-anchor-repo",
+            "venue_port": 41234,
+        },
+    )
+    assert (
+        forward_keeper.ensure_running("repo-1", venue_port=41234, mux="wt-anchor-repo")["started"]
+        is False
+    )
     out = forward_keeper.ensure_running(
         "repo-1",
         venue_port=41235,
@@ -333,8 +383,12 @@ def test_forward_keeper_state_reuse_and_replace(tmp_path, monkeypatch):
 
 def test_forward_keeper_exits_when_mux_is_gone(tmp_path, monkeypatch):
     monkeypatch.setattr(forward_keeper, "_STORE", shared_forward_keeper.KeeperStore(tmp_path))
-    monkeypatch.setattr("agent_containers.resolver.resolve_live_exec_target", lambda name: _target())
-    monkeypatch.setattr("agent_containers.ssh_transport.prepare_ssh_config", lambda name, user: object())
+    monkeypatch.setattr(
+        "agent_containers.resolver.resolve_live_exec_target", lambda name: _target()
+    )
+    monkeypatch.setattr(
+        "agent_containers.ssh_transport.prepare_ssh_config", lambda name, user: object()
+    )
     monkeypatch.setattr(forward_keeper, "_mux_exists", lambda cfg, mux: False)
 
     class Fwd:
@@ -351,15 +405,17 @@ def test_forward_keeper_exits_when_mux_is_gone(tmp_path, monkeypatch):
             Fwd.stopped += 1
 
     monkeypatch.setattr(forward_keeper, "SupervisedRelayForward", Fwd)
-    rc = forward_keeper.cmd_forward_keeper(argparse.Namespace(
-        name="repo-1",
-        venue_port=41234,
-        mux="wt-anchor-repo",
-        relay_port=None,
-        host_relay_port=None,
-        probe_interval=1,
-        startup_grace=0,
-    ))
+    rc = forward_keeper.cmd_forward_keeper(
+        argparse.Namespace(
+            name="repo-1",
+            venue_port=41234,
+            mux="wt-anchor-repo",
+            relay_port=None,
+            host_relay_port=None,
+            probe_interval=1,
+            startup_grace=0,
+        )
+    )
     assert rc == 0
     assert Fwd.started == 1 and Fwd.stopped == 1
     assert forward_keeper.read_state("repo-1") is None
@@ -370,7 +426,10 @@ def test_dry_run_names_ref_files_and_a_missing_one_fails(seams, tmp_path, capsys
     har.write_text("{}")
     assert detach.cmd_detach(_args(dry_run=True, ref_files=[str(har)]), **_RELAY) == 0
     assert json.loads(capsys.readouterr().out)["ref_files"] == ["trace.har"]
-    assert detach.cmd_detach(_args(dry_run=True, ref_files=[str(tmp_path / "nope.har")]), **_RELAY) == 1
+    assert (
+        detach.cmd_detach(_args(dry_run=True, ref_files=[str(tmp_path / "nope.har")]), **_RELAY)
+        == 1
+    )
     assert "reference file not found" in capsys.readouterr().err
 
 
@@ -379,6 +438,13 @@ _RELAY = {"require_live_relay_port": lambda: 61234, "relay_healthy": lambda p: T
 
 def test_detached_session_mirrors_the_callers_model(monkeypatch):
     seen = []
-    monkeypatch.setattr(detach, "model_copilot_args", lambda existing: seen.append(list(existing)) or ["--model=example-model"])
-    assert detach._with_caller_model(["--no-ask-user"]) == ["--no-ask-user", "--model=example-model"]
+    monkeypatch.setattr(
+        detach,
+        "model_copilot_args",
+        lambda existing: seen.append(list(existing)) or ["--model=example-model"],
+    )
+    assert detach._with_caller_model(["--no-ask-user"]) == [
+        "--no-ask-user",
+        "--model=example-model",
+    ]
     assert seen == [["--no-ask-user"]]

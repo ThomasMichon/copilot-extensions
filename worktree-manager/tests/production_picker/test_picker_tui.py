@@ -66,6 +66,20 @@ def _task_menu_open(scr):
     return _task_menu(scr) is not None
 
 
+async def _open_task_menu_and_wait(scr, pilot):
+    """Open the task action sub-menu, then poll briefly for the modal to
+    actually mount. A single ``pilot.pause()`` right after ``push_screen`` is
+    occasionally not enough to observe the new screen on the stack under
+    system load -- a pre-existing, load-sensitive flake independent of any
+    particular test's own content (reproduces identically on an unmodified
+    checkout); poll instead of assuming one pump always suffices."""
+    scr._open_task_menu()
+    for _ in range(50):
+        await pilot.pause()
+        if _task_menu(scr) is not None:
+            return
+
+
 def _cfg_menu(scr):
     """The F4 CfgMenuScreen instance on the app's screen stack, or None."""
     from worktree_manager.production_picker.picker_tui.engine import CfgMenuScreen
@@ -148,6 +162,20 @@ def _msgview_screen(scr):
 def _msgview_open(scr):
     """True when the F4 MsgViewScreen (recent-messages viewer) is stacked."""
     return _msgview_screen(scr) is not None
+
+
+def _sessionsview_screen(scr):
+    """The SessionsViewScreen instance on the app's screen stack, or None."""
+    from worktree_manager.production_picker.picker_tui.engine import SessionsViewScreen
+    for s in scr.app.screen_stack:
+        if isinstance(s, SessionsViewScreen):
+            return s
+    return None
+
+
+def _sessionsview_open(scr):
+    """True when the "Sessions" sub-menu (SessionsViewScreen) is stacked."""
+    return _sessionsview_screen(scr) is not None
 
 
 def _fixture_source():
@@ -286,7 +314,7 @@ def test_provider_source_tab_scopes_by_canonical_source_id():
     ]
 
     screen = PickerScreen(src, live=False)
-    screen.setup()
+    screen.setup_sync_for_tests()
     screen.machine_idx = 2
 
     assert screen._scope_data() == [provider_row]
@@ -344,7 +372,7 @@ def test_setup_uses_one_source_snapshot_for_tabs_and_loader():
     )
 
     screen = PickerScreen(src, live=True)
-    screen.setup()
+    screen.setup_sync_for_tests()
 
     assert snapshot_calls == 1
     assert ("tabs", snapshot) in seen
@@ -399,7 +427,7 @@ def test_provider_selection_does_not_collide_with_machine_id4():
     ]
 
     screen = PickerScreen(src, live=False)
-    screen.setup()
+    screen.setup_sync_for_tests()
     screen.ready_source_ids = lambda: {
         "machine-ssh:anomalous-potato:win",
         provider_id,
@@ -739,6 +767,7 @@ def test_worktrees_view_component_renders_body():
             async with app.run_test(size=(118, 40)) as pilot:
                 scr = app.query_one(PickerScreen)
                 scr.machine_idx = scr.local_index()
+                scr.real_ops = True
                 await pilot.pause()
 
                 # (a) The component exists and owns the body render.
@@ -3056,7 +3085,7 @@ def test_run_tui_picker_writes_crash_log(monkeypatch, tmp_path):
 
     import pytest
 
-    from agent_worktrees import config as cfg
+    from worktree_manager.production_picker import project_config as cfg
     import worktree_manager.production_picker.picker_tui as pkg
     from worktree_manager.production_picker.picker_tui import engine as eng
 
@@ -3310,77 +3339,43 @@ def test_picker_buckets_sessionless_into_unowned():
 
     asyncio.run(run())
 
-
 def test_reconcile_prs_counts_terminal_transitions(monkeypatch):
-    """#1423: reconcile_prs reconciles each non-terminal active PR and counts
-    those that moved to a terminal state, skipping no-PR / already-terminal."""
-    from pathlib import Path
-
+    """Group C compatibility wrapper reads the batch summary's PR count."""
     from worktree_manager.production_picker.picker_tui import data_local
 
-    class FakePR:
-        def __init__(self, number, state):
-            self.number, self.state = number, state
+    monkeypatch.setattr(
+        data_local,
+        "reconcile_local_batch",
+        lambda **_kwargs: type(
+            "Batch",
+            (),
+            {"summary": {"pr_terminal_count": 1}},
+        )(),
+    )
 
-    class FakeRec:
-        def __init__(self, pr):
-            self._pr = pr
-
-        def active_pr(self):
-            return self._pr
-
-    open_pr = FakePR(1, "open")
-    recs = [FakeRec(open_pr), FakeRec(FakePR(2, "merged")), FakeRec(None)]
-    monkeypatch.setattr(data_local.cfg, "load_config", lambda: object())
-    monkeypatch.setattr(data_local.cfg, "tracking_dir", lambda: Path("."))
-    monkeypatch.setattr(data_local.cfg, "detect_platform", lambda: "windows")
-    monkeypatch.setattr(data_local.tracking, "list_records",
-                        lambda p, platform_filter=None: recs)
-
-    def fake_reconcile(rec, config, *, best_effort=False):
-        if rec.active_pr() is open_pr:        # provider reports it merged
-            open_pr.state = "merged"
-
-    monkeypatch.setattr("agent_worktrees.pr_ops._reconcile_active_pr",
-                        fake_reconcile)
     assert data_local.reconcile_prs() == 1
 
 
-def test_picker_background_pr_reconcile_reloads_on_change():
-    """#1423: when the background reconcile reports a change, the non-live path
-    reloads local data so the render reflects the corrected PR state."""
+def test_reconcile_local_batch_uses_group_c_engine_call(monkeypatch):
+    from worktree_manager.production_picker.picker_tui import data_local
+
+    batch = types.SimpleNamespace(rows=[], summary={"record_count": 1})
+    seen = []
+    monkeypatch.setattr(data_local.context, "project", lambda: "example")
+    monkeypatch.setattr(
+        data_local.engine_group_c,
+        "picker_reconcile_local",
+        lambda project, **_kwargs: seen.append(project) or batch,
+    )
+
+    assert data_local.reconcile_local_batch() is batch
+    assert seen == ["example"]
+
+
+def test_picker_setup_does_not_spawn_legacy_reconcile_hooks():
+    """Phase 3d Step 6 folds local reconcile into the classify load itself."""
     src = _fixture_source()
-    calls = {"reconcile": 0, "load": 0}
-    orig_load = src.load
-
-    def load2():
-        calls["load"] += 1
-        return orig_load()
-
-    def reconcile_prs():
-        calls["reconcile"] += 1
-        return 1
-
-    src.load = load2
-    src.reconcile_prs = reconcile_prs
-
-    async def run():
-        app = PickerApp(src, live=False)
-        async with app.run_test(size=(118, 36)) as pilot:
-            scr = app.query_one(PickerScreen)
-            deadline = time.monotonic() + 3.0
-            while time.monotonic() < deadline and not scr._pr_reconciled:
-                await pilot.pause()
-            assert calls["reconcile"] == 1
-            assert calls["load"] >= 2       # setup load + post-reconcile reload
-
-    asyncio.run(run())
-
-
-def test_picker_background_pr_reconcile_no_change_no_reload():
-    """A reconcile that changes nothing must not trigger a reload."""
-    src = _fixture_source()
-    calls = {"load": 0}
+    calls = {"reconcile": 0, "bound": 0, "load": 0}
     orig_load = src.load
 
     def load2():
@@ -3388,16 +3383,17 @@ def test_picker_background_pr_reconcile_no_change_no_reload():
         return orig_load()
 
     src.load = load2
-    src.reconcile_prs = lambda: 0
+    src.reconcile_local_batch = lambda: calls.__setitem__("reconcile", calls["reconcile"] + 1)
 
     async def run():
         app = PickerApp(src, live=False)
         async with app.run_test(size=(118, 36)) as pilot:
             scr = app.query_one(PickerScreen)
             deadline = time.monotonic() + 3.0
-            while time.monotonic() < deadline and not scr._pr_reconciled:
+            while time.monotonic() < deadline and scr._setup_applied_epoch == 0:
                 await pilot.pause()
-            assert calls["load"] == 1       # only the setup load
+            assert scr._bound_live_reconciled is True
+            assert calls == {"reconcile": 0, "bound": 0, "load": 1}
 
     asyncio.run(run())
 
@@ -3669,6 +3665,7 @@ def test_resume_decision_exits_with_worktree():
         async with app.run_test(size=(118, 36)) as pilot:
             scr = app.query_one(PickerScreen)
             scr.machine_idx = scr.local_index()
+            scr.real_ops = True
             scr.sel = ("L", 0)
             scr._activate()                 # opens the sub-menu, no exit
             await pilot.pause()
@@ -3696,6 +3693,7 @@ def test_open_submenu_no_mux_toggle():
         async with app.run_test(size=(118, 36)) as pilot:
             scr = app.query_one(PickerScreen)
             scr.machine_idx = scr.local_index()
+            scr.real_ops = True
             scr.sel = ("L", 0)
             scr._open_submenu()
             await pilot.pause()
@@ -3846,7 +3844,7 @@ def test_remote_submenu_does_not_offer_ahp():
 def test_ahp_owned_worktree_offers_explicit_disposal_action():
     src = _verb_fixture_source()
     screen = PickerScreen(src, live=False)
-    screen.setup()
+    screen.setup_sync_for_tests()
     rec = screen.list_records()[0]
     rec["execution_leg"] = {
         "provider": "ahp",
@@ -4063,6 +4061,109 @@ def test_msgview_local_load_populates_and_closes(monkeypatch):
             await pilot.pause()
             assert not _msgview_open(scr)
             assert scr.msgview is None
+
+    asyncio.run(run())
+
+
+def test_sessions_verb_gated_on_registered_session_count():
+    """#3307 Phase 7: the "Sessions" sub-menu verb is offered whenever a
+    worktree has at least one registered session (``session_count``),
+    independent of current liveness -- unlike "Messages" (gated off
+    ``sessionless``), a stopped worktree's session HISTORY is still worth
+    browsing. The cold-start ("none", session_count=0) row never offers it."""
+    src = _verb_fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            recs = scr.list_records()
+            by_id4 = {w["id4"]: i for i, w in enumerate(recs)}
+
+            for key in ("live", "stop"):
+                scr.sel = ("L", by_id4[key])
+                scr._open_submenu()
+                await pilot.pause()
+                menu = _sub_menu(scr)
+                assert menu is not None
+                assert "Sessions" in menu._actions, key
+                scr.app.pop_screen()
+                await pilot.pause()
+
+            scr.sel = ("L", by_id4["none"])
+            scr._open_submenu()
+            await pilot.pause()
+            menu = _sub_menu(scr)
+            assert menu is not None
+            assert "Sessions" not in menu._actions
+
+    asyncio.run(run())
+
+
+def test_sessionsview_local_load_populates_and_closes(monkeypatch):
+    """Enter on 'Sessions' loads the worktree's full session registry through
+    the provider CLI and renders id/state/started/ended/turns/head -- the
+    #3307 Phase 7 dedicated history browse, distinct from Messages' abbreviated
+    per-session list."""
+    from worktree_manager import engine_client
+    from worktree_manager.production_picker import context
+
+    monkeypatch.setattr(context, "project", lambda: "example")
+    monkeypatch.setattr(
+        engine_client,
+        "list_worktree_sessions",
+        lambda *_a, **_k: [
+            {"id": "sess-head-0001", "is_head": True, "state": "active",
+             "turn_count": 7, "started_at_marker": "2026-06-27T17:00:00",
+             "ended_at_marker": None},
+            {"id": "sess-pred-0002", "is_head": False, "state": "handed-off",
+             "turn_count": 3, "started_at_marker": "2026-06-27T16:00:00",
+             "ended_at_marker": "2026-06-27T17:00:00"},
+        ],
+    )
+
+    src = _verb_fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            by_id4 = {w["id4"]: i for i, w in enumerate(scr.list_records())}
+            scr.sel = ("L", by_id4["stop"])
+            scr._open_submenu()
+            await pilot.pause()
+            menu = _sub_menu(scr)
+            assert menu is not None
+            for _ in range(menu._actions.index("Sessions")):
+                await pilot.press("down")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert not _sub_menu_open(scr)
+            assert scr.sessionsview is not None
+            assert _sessionsview_open(scr)
+            for _ in range(200):
+                if scr.sessionsview and not scr.sessionsview["loading"]:
+                    break
+                await pilot.pause()
+                time.sleep(0.01)
+            assert scr.sessionsview["loading"] is False
+            assert scr.sessionsview["error"] is None
+            ids = [s["id"] for s in scr.sessionsview["sessions"]]
+            assert ids == ["sess-head-0001", "sess-pred-0002"]
+            await pilot.pause()
+            out = _sessionsview_screen(scr)._panel().renderable.plain
+            assert "sess-head" in out
+            assert "sess-pred" in out
+            assert "\u25cf" in out          # head marker rendered
+            # Esc through the real keyboard pipeline closes it.
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not _sessionsview_open(scr)
+            assert scr.sessionsview is None
 
     asyncio.run(run())
 
@@ -4713,7 +4814,7 @@ def test_update_indicator_focus_glyph_and_refresh():
 
     src = _fixture_source()
     s = PickerScreen(src, live=False)
-    s.setup()
+    s.setup_sync_for_tests()
     s.htab = 0
     s.frame = 0
 
@@ -4764,7 +4865,7 @@ def test_manager_update_seg_is_distinct_from_the_engine_update_seg(monkeypatch):
     from worktree_manager.production_picker.picker_tui.engine import PickerScreen
 
     s = PickerScreen(_fixture_source(), live=False)
-    s.setup()
+    s.setup_sync_for_tests()
     s.htab = 0
 
     # idle: no segment (matches the engine segment's own idle behavior).
@@ -4796,7 +4897,7 @@ def test_manager_update_seg_appears_in_the_topbar_next_to_the_version():
     from worktree_manager.production_picker.picker_tui.engine import PickerScreen
 
     s = PickerScreen(_fixture_source(), live=False)
-    s.setup()
+    s.setup_sync_for_tests()
     s.htab = 0
     s.manager_update_state = "current"
     s.update_state = "idle"
@@ -4812,7 +4913,7 @@ def test_update_icon_is_its_own_region_not_the_pivots():
     from worktree_manager.production_picker.picker_tui.engine import PickerScreen
 
     s = PickerScreen(_fixture_source(), live=False)
-    s.setup()
+    s.setup_sync_for_tests()
     s.htab = 0
     s.update_state = "available"      # the update icon is a real focus stop
 
@@ -7866,6 +7967,29 @@ def test_detail_line_never_falls_back_to_bare_state():
     assert line.plain.strip() == "Fix the thing"
 
 
+def test_detail_line_shows_session_head_mismatch_warning():
+    """#3307 Phase 7 (dotfiles#1298): a worktree flagged
+    ``session_head_mismatch`` (the asserted head disagrees with the session
+    most-recently touched on disk) shows a visible "head mismatch" warning
+    on the detail line -- an unflagged row shows nothing extra."""
+    import worktree_manager.production_picker.picker_tui.engine as eng_mod
+
+    class _Eng:
+        def _worktree_claiming_task(self, _rec):
+            return None
+
+    view = eng_mod.WorktreesView(_Eng())
+    flagged = {"title": "Fix the thing", "state": "wip",
+               "session_head_mismatch": True}
+    line = view._detail_line(flagged, 80)
+    assert "head mismatch" in line.plain
+    assert "\u26a0" in line.plain
+
+    unflagged = {"title": "Fix the thing", "state": "wip",
+                 "session_head_mismatch": False}
+    assert "head mismatch" not in view._detail_line(unflagged, 80).plain
+
+
 def test_detail_line_prefers_live_intent_then_activity():
     """Fallback order: live-pulse intent (fresh session) beats the
     disposition-asserted ``activity`` field, which is shown when no live
@@ -8180,8 +8304,7 @@ def test_registered_pivot_action_menu_runs_and_invalidates(tmp_path, monkeypatch
 
             # Enter opens the action sub-menu (ModalScreen) with the manifest's
             # actions.
-            scr._open_task_menu()
-            await pilot.pause()
+            await _open_task_menu_and_wait(scr, pilot)
             menu = _task_menu(scr)
             assert menu is not None
             assert [a.label for a in menu._actions] == [
@@ -8346,8 +8469,7 @@ def test_registered_pivot_conditional_actions_filter_by_when(tmp_path, monkeypat
             # Row 0 (in-use): Details + Release, NOT Recycle.
             scr.sel = ("T", 0)
             await pilot.pause()
-            scr._open_task_menu()
-            await pilot.pause()
+            await _open_task_menu_and_wait(scr, pilot)
             menu = _task_menu(scr)
             assert menu is not None
             assert [a.label for a in menu._actions] == ["Details", "Release"]
@@ -8357,8 +8479,7 @@ def test_registered_pivot_conditional_actions_filter_by_when(tmp_path, monkeypat
             # Row 1 (stale): Details + Recycle, NOT Release.
             scr.sel = ("T", 1)
             await pilot.pause()
-            scr._open_task_menu()
-            await pilot.pause()
+            await _open_task_menu_and_wait(scr, pilot)
             menu = _task_menu(scr)
             assert menu is not None
             assert [a.label for a in menu._actions] == ["Details", "Recycle"]
@@ -8432,8 +8553,7 @@ def test_steering_card_and_form_actions_gate_and_drive(tmp_path, monkeypatch):
             # Awaiting-steer row: Card + Steer are shown (plus Abandon).
             scr.sel = ("T", 0)
             await pilot.pause()
-            scr._open_task_menu()
-            await pilot.pause()
+            await _open_task_menu_and_wait(scr, pilot)
             menu = _task_menu(scr)
             assert [a.label for a in menu._actions] == ["View card", "Steer", "Abandon"]
             await pilot.press("escape")
@@ -8442,8 +8562,7 @@ def test_steering_card_and_form_actions_gate_and_drive(tmp_path, monkeypatch):
             # Non-awaiting row: only Abandon (card/steer gated out).
             scr.sel = ("T", 1)
             await pilot.pause()
-            scr._open_task_menu()
-            await pilot.pause()
+            await _open_task_menu_and_wait(scr, pilot)
             menu = _task_menu(scr)
             assert [a.label for a in menu._actions] == ["Abandon"]
             await pilot.press("escape")
@@ -8671,9 +8790,9 @@ def test_actions_menu_liveness_verify_is_offloaded(tmp_path, monkeypatch):
     """
     import threading
 
-    from worktree_manager.production_picker import config as _cfg
-    from worktree_manager.production_picker import sessions as _sessions
-    from worktree_manager.production_picker import tracking as _tracking
+    from worktree_manager.production_picker import project_config as _cfg
+    from worktree_manager.production_picker import context as _context
+    from worktree_manager.production_picker import engine_group_c as _engine_group_c
 
     src = _fixture_source()
     wt_id = "anomalous-potato-win-20260627-aaaa"
@@ -8681,18 +8800,25 @@ def test_actions_menu_liveness_verify_is_offloaded(tmp_path, monkeypatch):
     tdir.mkdir()
     (tdir / f"{wt_id}.yaml").write_text("id: x\n", encoding="utf-8")
     monkeypatch.setattr(_cfg, "tracking_dir", lambda: tdir)
-    monkeypatch.setattr(_tracking, "stamp_mux_live", lambda *a, **k: None)
-
+    monkeypatch.setattr(_context, "project", lambda: "example")
     gate = threading.Event()
     calls = {"n": 0}
 
-    def _gated_verify(ns):
+    def _gated_verify(project, *, worktree_ids=None, timeout=None):
         calls["n"] += 1
         gate.wait(5)                    # block as the real mux/session probe would
         return types.SimpleNamespace(
-            mux_live=True, mux_clients=1, live_session_ids=["s"], bare=False)
+            rows=[{
+                "id": wt_id,
+                "mux_session": True,
+                "mux_attached": True,
+                "mux_clients": 1,
+                "session_lock_live": True,
+            }],
+            summary={},
+        )
 
-    monkeypatch.setattr(_sessions, "verify_worktree_active", _gated_verify)
+    monkeypatch.setattr(_engine_group_c, "picker_reconcile_local", _gated_verify)
 
     async def run():
         app = PickerApp(src, live=False)
@@ -8729,9 +8855,9 @@ def test_actions_menu_liveness_verify_is_offloaded(tmp_path, monkeypatch):
 
 def test_actions_worker_finishes_quietly_after_resume_exits(tmp_path, monkeypatch):
     """A slow menu probe may finish after Resume has detached the picker screen."""
-    from worktree_manager.production_picker import config as _cfg
-    from worktree_manager.production_picker import sessions as _sessions
-    from worktree_manager.production_picker import tracking as _tracking
+    from worktree_manager.production_picker import project_config as _cfg
+    from worktree_manager.production_picker import context as _context
+    from worktree_manager.production_picker import engine_group_c as _engine_group_c
 
     src = _verb_fixture_source()
     wt_id = "anomalous-potato-win-20260627-stop"
@@ -8739,18 +8865,25 @@ def test_actions_worker_finishes_quietly_after_resume_exits(tmp_path, monkeypatc
     tdir.mkdir()
     (tdir / f"{wt_id}.yaml").write_text("id: x\n", encoding="utf-8")
     monkeypatch.setattr(_cfg, "tracking_dir", lambda: tdir)
-    monkeypatch.setattr(_tracking, "stamp_mux_live", lambda *a, **k: None)
-
+    monkeypatch.setattr(_context, "project", lambda: "example")
     gate = threading.Event()
     started = threading.Event()
     thread_errors = []
     original_excepthook = threading.excepthook
 
-    def _gated_verify(ns):
+    def _gated_verify(project, *, worktree_ids=None, timeout=None):
         started.set()
         gate.wait()
         return types.SimpleNamespace(
-            mux_live=False, mux_clients=0, live_session_ids=[], bare=False)
+            rows=[{
+                "id": wt_id,
+                "mux_session": False,
+                "mux_attached": False,
+                "mux_clients": 0,
+                "session_lock_live": False,
+            }],
+            summary={},
+        )
 
     def _capture_thread_error(args):
         if args.thread.name == "pivot-action:Actions":
@@ -8758,7 +8891,7 @@ def test_actions_worker_finishes_quietly_after_resume_exits(tmp_path, monkeypatc
             return
         original_excepthook(args)
 
-    monkeypatch.setattr(_sessions, "verify_worktree_active", _gated_verify)
+    monkeypatch.setattr(_engine_group_c, "picker_reconcile_local", _gated_verify)
     monkeypatch.setattr(threading, "excepthook", _capture_thread_error)
 
     async def run():
@@ -8768,10 +8901,12 @@ def test_actions_worker_finishes_quietly_after_resume_exits(tmp_path, monkeypatc
             async with app.run_test(size=(118, 36)) as pilot:
                 scr = app.query_one(PickerScreen)
                 scr.machine_idx = scr.local_index()
+                scr.real_ops = True
                 await pilot.pause()
                 recs = scr.list_records()
-                scr.sel = ("L", next(
-                    i for i, rec in enumerate(recs) if rec["id4"] == "stop"))
+                stop_index = next(i for i, rec in enumerate(recs) if rec["id4"] == "stop")
+                scr.data[stop_index]["raw"] = {"id": wt_id}
+                scr.sel = ("L", stop_index)
                 scr._open_submenu()
                 assert await asyncio.to_thread(started.wait, 1)
                 worker = next(

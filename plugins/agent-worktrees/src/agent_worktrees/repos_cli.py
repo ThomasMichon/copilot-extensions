@@ -780,7 +780,8 @@ def _accounts_usage() -> None:
     print(f"Usage: {project} accounts <command>")
     print()
     print("Catalog of gh account identities and their (re)login flows")
-    print("(~/.agent-worktrees/accounts.yaml). The owner->account MAP lives in")
+    _acct_path = "~/.agent-worktrees/accounts.yaml"  # marketplace-isolation: allow legacy
+    print(f"({_acct_path}). The owner->account MAP lives in")
     print("repos.yaml (see 'repos account'); this catalog describes the logins")
     print("that map points at -- host, expected scopes, and how to (re)login.")
     print()

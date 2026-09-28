@@ -269,6 +269,78 @@ restricted fleet, both resolve false. `agent-containers fleet --json` reports
 the effective `security_profile`, `network`, and `host_credentials` posture so a
 dispatcher can verify the venue before launch.
 
+### Host-backed persistence and systemd for trusted, image-backed fleets
+
+An `image:`-backed `trusted` fleet otherwise has no persistence mechanism at
+all (`code_model: mount` remains unimplemented) and no capability for a
+containerized `systemd --user` instance (its own maintenance timers need
+`CAP_SYS_ADMIN` + a writable `/sys/fs/cgroup`, neither granted by `trusted`'s
+defaults). Two opt-in fields close that gap -- both are rejected on a
+`restricted` fleet, or alongside `devcontainer_path` (`validate_restricted()`
+raises), since a host bind-mount and `CAP_SYS_ADMIN` both defeat the
+restricted containment contract, and a devcontainer-backed fleet's launch
+path never consumes these fields at all:
+
+```yaml
+fleets:
+  self-maintaining-worker:
+    image: example/agent:latest
+    security_profile: trusted
+    workspace_folder: /workspace/myrepo
+    exec_user: node
+    size: 2
+    host_workspace_path: /srv/agent-containers/workspaces/self-maintaining-worker
+    host_home_path: /srv/agent-containers/home/self-maintaining-worker
+    home_folder: /home/node        # the image's own HOME for exec_user -- not
+                                    # probed automatically for trusted fleets,
+                                    # so it must be declared alongside
+                                    # host_home_path (both or neither -- an
+                                    # incomplete pair is rejected)
+    systemd_capable: true
+```
+
+`host_workspace_path`/`host_home_path` are **parent** directories -- each
+fleet member mounts its own subdirectory, keyed by its unique container name
+(e.g. `self-maintaining-worker-1`, `self-maintaining-worker-2` for `size: 2`
+above), onto `workspace_folder`/`home_folder` respectively, so members of a
+multi-container fleet never collide on the same host path. Each member
+subdirectory is created and `chown`'d to `exec_user`'s real uid/gid (resolved
+the same way `restricted` already does) before it is ever mounted -- a
+missing bind-mount source would otherwise be auto-created by Docker owned by
+the daemon (root), leaving a non-root `exec_user` unable to write to its own
+"persistent" workspace/home on first launch. `chown` is POSIX-only; a
+Windows Docker Desktop host only gets the directory created (see the
+platform note on `_ensure_owned_dir`).
+`systemd_capable: true` (a real boolean only -- a quoted `"false"` or other
+non-boolean value is rejected rather than coerced) adds `--cap-add
+SYS_ADMIN`, writable/executable `/run` + `/run/lock` tmpfs mounts, an
+allocated tty, `container=docker`, and **`--user root`** (PID 1 -- systemd
+itself -- must boot as root regardless of the image's own default `USER`;
+`exec_user` only governs LATER `docker exec` calls for actual work, never
+the entrypoint process -- systemd drops to per-service users for real
+workloads via its own unit files, exactly like a normal machine's init),
+then launches the container via a wrapper that remounts `/sys/fs/cgroup`
+read-write before `exec`'ing `/lib/systemd/systemd` as PID 1 (in place of the
+historical `sleep infinity` placeholder) -- Docker's default `/sys/fs/cgroup`
+mount is read-only even under `trusted`, and a raw host bind-mount of it does
+NOT work (a cgroup-namespace path mismatch produces "No such file or
+directory"); an in-container remount at launch is the fix that actually
+works. **The image itself must provide `systemd`, `systemd-sysv`, and
+`dbus-user-session`** -- this plugin only wires the launch, it does not
+install systemd into the image. Once running, `loginctl enable-linger <user>`
+plus that user's own `systemctl --user ...` registers and runs real
+`.timer`/`.service` units exactly as on a normal machine.
+
+The per-member uid/gid used to `chown` `host_workspace_path`/`host_home_path`
+subdirectories is resolved via a trusted-specific probe (not the
+restricted-only `_image_user`, which requires real `memory`/`cpus`/
+`pids_limit` values and rejects a root `exec_user` -- both wrong for
+`trusted`'s normal unset defaults and its historical allowance of a root
+exec_user). The resolved member subdirectory is also validated to stay
+beneath the configured parent path -- `name` comes from the operator-
+configurable `name_prefix`, so a prefix containing `../` is rejected before
+anything is created or `chown`'d.
+
 Dispatch is defined only for containers with an exact fleet entry in the active
 configuration. An unmanaged/discovered container is visible for inventory but
 cannot inherit global launch or credential defaults. Restricted dispatch also

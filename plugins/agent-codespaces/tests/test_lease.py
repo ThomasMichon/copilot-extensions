@@ -262,6 +262,33 @@ def test_claim_force_takes_over_live_owner(leases):
     assert cl.worktree == "/wt/b"
 
 
+def test_claim_same_worktree_family_takes_over_without_force(leases, monkeypatch):
+    """A parent/child worktree pair (Phase 2b) reaches a box its own family
+    already claimed without needing an explicit force-takeover."""
+    from agent_codespaces import driving_worktrees
+
+    monkeypatch.setattr(
+        driving_worktrees, "same_worktree_family",
+        lambda holder, owner: {holder, owner} == {"/wt/a", "/wt/b"},
+    )
+    lease_mod.claim("cs-one", "/wt/a", active={"/wt/a", "/wt/b"})
+    cl = lease_mod.claim("cs-one", "/wt/b", active={"/wt/a", "/wt/b"})
+    assert cl.worktree == "/wt/b"
+
+
+def test_claim_unrelated_worktree_still_bounces_without_force(leases, monkeypatch):
+    """A family-check failure (or an unrelated worktree) still bounces -- the
+    family bypass is additive, never a general conflict-check relaxation."""
+    from agent_codespaces import driving_worktrees
+
+    monkeypatch.setattr(
+        driving_worktrees, "same_worktree_family", lambda holder, owner: False,
+    )
+    lease_mod.claim("cs-one", "/wt/a", active={"/wt/a", "/wt/b"})
+    with pytest.raises(lease_mod.ClaimConflict):
+        lease_mod.claim("cs-one", "/wt/b", active={"/wt/a", "/wt/b"})
+
+
 def test_claim_is_blocked_by_provider_deploy_hold(leases):
     with lease_mod.deploy_hold("cs-one", "claim-reclaim"):
         with pytest.raises(

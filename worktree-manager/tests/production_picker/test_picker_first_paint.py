@@ -12,7 +12,7 @@ import pytest
 
 
 def test_data_local_import_does_not_load_config(monkeypatch):
-    from worktree_manager.production_picker import config as cfg
+    from worktree_manager.production_picker import project_config as cfg
 
     def boom(*_a, **_k):
         raise AssertionError("load_config must not run at import")
@@ -27,7 +27,7 @@ def test_data_local_import_does_not_load_config(monkeypatch):
 
 
 def test_data_ssh_import_does_not_load_config(monkeypatch):
-    from worktree_manager.production_picker import config as cfg
+    from worktree_manager.production_picker import project_config as cfg
 
     def boom(*_a, **_k):
         raise AssertionError("load_config must not run at import")
@@ -86,8 +86,8 @@ def test_setup_live_pivots_prewarms_optional_modules(monkeypatch):
 
 
 def test_setup_live_pivots_prewarm_starts_before_the_pivot_scan(monkeypatch):
-    """Same ordering requirement as ``setup()`` (see
-    ``test_setup_prewarm_starts_before_the_pivot_scan``): even though
+    """Same ordering requirement as ``setup_sync_for_tests()`` (see
+    ``test_setup_sync_for_tests_prewarm_starts_before_the_pivot_scan``): even though
     ``_setup_live_pivots`` already runs off the render thread, starting the
     prewarm import before the scan (rather than after) maximizes its head
     start over the operator's first pivot-switch keypress, wall-clock-wise
@@ -153,9 +153,10 @@ def test_setup_live_pivots_prewarms_machine_key_map(monkeypatch):
 
 
 def test_prewarm_machine_key_map_does_not_block_the_calling_thread(monkeypatch):
-    """``setup()`` must run ``_prewarm_machine_key_map``'s compute on a
-    background thread, not inline -- a slow/cold ``load_config()`` call
-    there must never reintroduce the freeze this exists to remove."""
+    """``setup_sync_for_tests()`` must run ``_prewarm_machine_key_map``'s
+    compute on a background thread, not inline -- a slow/cold
+    ``load_config()`` call there must never reintroduce the freeze this
+    exists to remove."""
     pytest.importorskip("textual")
     from worktree_manager.production_picker.picker_tui import engine as eng
     from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
@@ -186,7 +187,7 @@ def test_prewarm_machine_key_map_does_not_block_the_calling_thread(monkeypatch):
     monkeypatch.setattr(data_ssh, "machine_key_map", slow_machine_key_map)
     try:
         t0 = time.perf_counter()
-        screen.setup()
+        screen.setup_sync_for_tests()
         elapsed = time.perf_counter() - t0
     finally:
         release.set()  # let the worker thread's slow call unblock and finish
@@ -300,13 +301,14 @@ def test_prewarm_machine_key_map_does_not_spawn_a_second_thread_while_inflight(
 
 
 def test_setup_prewarms_optional_modules_too(monkeypatch):
-    """``setup()`` -- the shared non-live-mount / manual-reload ('r') path --
-    must warm the same modules as ``_setup_live_pivots``: a registered pivot
-    can be *first discovered* here too (e.g. a plugin installed after the
-    picker started, picked up on the next 'r' reload), and unlike
-    ``_setup_live_pivots`` this path already runs synchronously either way
-    (pre-existing pivot filesystem scan), so it must not be the one place
-    left paying the import hitch on the UI thread."""
+    """``setup_sync_for_tests()`` -- the synchronous test helper for the
+    shared non-live setup/reload path -- must warm the same modules as
+    ``_setup_live_pivots``: a registered pivot can be *first discovered*
+    here too (e.g. a plugin installed after the picker started, picked up on
+    the next 'r' reload), and unlike ``_setup_live_pivots`` this helper
+    still runs the setup/reload path synchronously either way (pre-existing
+    pivot filesystem scan), so it must not be the one place left paying the
+    import hitch on the UI thread."""
     pytest.importorskip("textual")
     from worktree_manager.production_picker.picker_tui import engine as eng
     from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
@@ -326,28 +328,30 @@ def test_setup_prewarms_optional_modules_too(monkeypatch):
             return []
 
     screen = eng.PickerScreen(Src(), live=False)
-    calls.clear()  # __init__/on_mount may already have called setup() once
-    screen.setup()
+    calls.clear()  # __init__/on_mount may already have kicked setup-reload once
+    screen.setup_sync_for_tests()
 
     assert calls == [1]
 
 
-def test_setup_prewarm_starts_before_the_pivot_scan(monkeypatch):
-    """``setup()`` must kick off the ``prewarm_optional_modules`` thread
+def test_setup_sync_for_tests_prewarm_starts_before_the_pivot_scan(monkeypatch):
+    """``setup_sync_for_tests()`` must kick off the
+    ``prewarm_optional_modules`` thread
     BEFORE running the (potentially slow, synchronous) pivot-registry scan,
     not after it.
 
     The prewarm thread exists purely to give ``data_ssh``'s import a head
     start over the operator's first pivot-switch keypress (see
-    ``prewarm_optional_modules``'s own docstring). If ``setup()`` runs the
-    scan first and only starts the prewarm thread once the scan returns, the
-    render thread is blocked for the scan's own duration AND the prewarm
-    thread barely has a head start once input resumes -- the operator's very
-    next keypress (often landing the instant the app looks responsive again)
-    can still race the same import lock the prewarm was meant to avoid. This
-    was reported as a live pivot-switch freeze even with the prewarm fix
-    already in place; asserting the ordering here keeps a future edit from
-    silently re-introducing it."""
+    ``prewarm_optional_modules``'s own docstring). If
+    ``setup_sync_for_tests()`` runs the scan first and only starts the
+    prewarm thread once the scan returns, the render thread is blocked for
+    the scan's own duration AND the prewarm thread barely has a head start
+    once input resumes -- the operator's very next keypress (often landing
+    the instant the app looks responsive again) can still race the same
+    import lock the prewarm was meant to avoid. This was reported as a live
+    pivot-switch freeze even with the prewarm fix already in place;
+    asserting the ordering here keeps a future edit from silently
+    re-introducing it."""
     pytest.importorskip("textual")
     from worktree_manager.production_picker.picker_tui import engine as eng
     from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
@@ -374,8 +378,8 @@ def test_setup_prewarm_starts_before_the_pivot_scan(monkeypatch):
         return None
 
     monkeypatch.setattr(screen, "_scan_pivot_payload", recording_scan)
-    order.clear()  # __init__/on_mount may already have called setup() once
-    screen.setup()
+    order.clear()  # __init__/on_mount may already have kicked setup-reload once
+    screen.setup_sync_for_tests()
 
     assert order == ["prewarm", "scan"], (
         "prewarm_optional_modules must start before _scan_pivot_payload, not after")
@@ -468,9 +472,9 @@ def test_prewarm_optional_modules_spawns_no_thread_of_its_own(monkeypatch):
     registered pivot while that inner thread is still mid-import (CPython's
     per-module import lock would then block the render thread on the same
     import anyway, only shrinking the freeze window instead of closing it).
-    A caller reachable from the UI thread (``setup()``) is responsible for
-    wrapping this call in its own worker thread instead -- see the sibling
-    test below."""
+    A caller reachable from the UI thread (``setup_sync_for_tests()`` /
+    ``_start_setup_reload_worker()``) is responsible for wrapping this call
+    in its own worker thread instead -- see the sibling test below."""
     pytest.importorskip("textual")
     from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
 
@@ -482,12 +486,14 @@ def test_prewarm_optional_modules_spawns_no_thread_of_its_own(monkeypatch):
     tasks_mod.prewarm_optional_modules()  # must not raise
 
 
-def test_setup_prewarm_call_does_not_block_the_calling_thread(monkeypatch):
-    """``setup()`` -- the shared non-live-mount / manual-reload ('r') path,
-    which runs synchronously on the render/key-handling thread either way --
-    must wrap ``tasks.prewarm_optional_modules()`` in its own worker thread,
-    so a slow/cold import there cannot reintroduce the exact freeze the fix
-    exists to remove."""
+def test_setup_sync_for_tests_prewarm_call_does_not_block_the_calling_thread(
+    monkeypatch,
+):
+    """``setup_sync_for_tests()`` -- the synchronous test helper for the
+    shared non-live setup/reload path, which still runs on the calling
+    thread -- must wrap ``tasks.prewarm_optional_modules()`` in its own
+    worker thread, so a slow/cold import there cannot reintroduce the exact
+    freeze the fix exists to remove."""
     pytest.importorskip("textual")
     from worktree_manager.production_picker.picker_tui import engine as eng
     from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
@@ -513,7 +519,7 @@ def test_setup_prewarm_call_does_not_block_the_calling_thread(monkeypatch):
     screen = eng.PickerScreen(Src(), live=False)
     try:
         t0 = time.perf_counter()
-        screen.setup()
+        screen.setup_sync_for_tests()
         elapsed = time.perf_counter() - t0
     finally:
         release.set()  # let the worker thread's slow_prewarm unblock and finish
@@ -569,7 +575,7 @@ def test_first_refresh_callback_is_scheduled_in_every_mode(monkeypatch, live):
     screen = eng.PickerScreen(Src(), live=live)
     deferred = []
     monkeypatch.setattr(screen, "_setup_skeleton", lambda: None)
-    monkeypatch.setattr(screen, "setup", lambda: None)
+    monkeypatch.setattr(screen, "_start_setup_reload_worker", lambda: None)
     monkeypatch.setattr(screen, "_finish_mount", lambda: None)
     monkeypatch.setattr(screen, "call_after_refresh", deferred.append)
 
@@ -664,27 +670,54 @@ def test_load_config_cache_scope_shares_across_threads():
         calls.append(1)
         return "config-value"
 
-    from agent_worktrees import config as real_cfg
-    from worktree_manager.production_picker import config as pm_cfg
-    orig = real_cfg._load_config_uncached
-    real_cfg._load_config_uncached = fake_uncached
+    from worktree_manager.production_picker import project_config as pm_cfg
+
+    orig = pm_cfg._read_yaml
+    orig_default = pm_cfg.default_config_path
+    pm_cfg.clear_caches()
+    pm_cfg._read_yaml = fake_uncached
+    pm_cfg.default_config_path = lambda *_a, **_k: pm_cfg.Path("dummy-config.yaml")
     try:
         results = []
         with screen._load_config_cache_scope():
-            results.append(pm_cfg.load_config())
+            results.append(pm_cfg._load_project_yaml("demo"))
 
         def worker():
             with screen._load_config_cache_scope():
-                results.append(pm_cfg.load_config())
+                results.append(pm_cfg._load_project_yaml("demo"))
 
         t = threading.Thread(target=worker)
         t.start()
         t.join()
     finally:
-        real_cfg._load_config_uncached = orig
+        pm_cfg._read_yaml = orig
+        pm_cfg.default_config_path = orig_default
+        pm_cfg.clear_caches()
 
     assert len(calls) == 1  # the second (real) thread's call hit the cache
     assert results == ["config-value", "config-value"]
+
+
+def test_cache_only_local_load_skips_group_c_batch(monkeypatch):
+    from worktree_manager.production_picker.picker_tui import data_local
+
+    monkeypatch.setattr(data_local.context, "project", lambda: "example")
+    monkeypatch.setattr(
+        data_local.engine_client,
+        "list_worktree_rows",
+        lambda *_args, **_kwargs: [{"id": "wt-a"}],
+    )
+    monkeypatch.setattr(
+        data_local.engine_group_c,
+        "picker_reconcile_local",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("cache-only first paint must not wait on Group C batch")
+        ),
+    )
+
+    rows = data_local.load("host", "Win", classify=False)
+
+    assert rows[0]["raw"]["id"] == "wt-a"
 
 
 def test_setup_live_async_records_failure():

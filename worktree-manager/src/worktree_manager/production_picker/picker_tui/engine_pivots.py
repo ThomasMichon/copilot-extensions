@@ -132,7 +132,7 @@ class PickerScreenPivotsMixin:
         this translation.
 
         NEVER blocks the calling thread. Once :meth:`_prewarm_machine_key_map`
-        (started from ``setup()``/``_setup_live_pivots``) has resolved
+        (started from ``_prime_setup_reload()``/``_setup_live_pivots``) has resolved
         ``self._mkey_map``, this returns that cached map. Until then it
         degrades to ``{}`` -- harmless, since every caller (``_pivot_machine_id``
         etc.) already tolerates an empty/unresolved map by falling back to the
@@ -143,7 +143,7 @@ class PickerScreenPivotsMixin:
         first time an operator switched onto any registered pivot, even with the
         background prewarm already given a head start. Also kicks the prewarm
         here as a safety net (idempotent/no-op if already running or resolved),
-        in case something calls this before ``setup()`` ever ran it."""
+        in case something calls this before the setup-reload path ever ran it."""
         cached = getattr(self, "_mkey_map", None)
         if cached is not None:
             return cached
@@ -176,7 +176,7 @@ class PickerScreenPivotsMixin:
         user-facing label/spinner, and (unlike ``_run_bg``, which resolves
         ``self.app`` eagerly) ``_apply_from_worker`` degrades safely when
         called outside a mounted app -- e.g. a unit test that constructs a
-        bare ``PickerScreen`` and calls ``setup()`` directly."""
+        bare ``PickerScreen`` and calls ``setup_sync_for_tests()`` directly."""
         if getattr(self, "_mkey_map", None) is not None:
             return
         if getattr(self, "_mkey_map_inflight", False):

@@ -42,7 +42,8 @@ const path = require("path");
 const HOME = os.homedir();
 const DEFAULT_RELAY_PORT = 9857;
 const RELAY_CLIENT = path.join(HOME, ".local", "bin", "ado-auth-helper-relay");
-const RELAY_PORTS_DIR = path.join(HOME, ".agent-bridge", "relay-ports");
+const BRIDGE_DIR = ".agent-bridge"; // marketplace-isolation: allow registry
+const RELAY_PORTS_DIR = path.join(HOME, BRIDGE_DIR, "relay-ports");
 const EXT_PREFIX = "ms-codespaces-tools.ado-codespaces-auth";
 
 // When neither the relay nor the VS Code helper is available yet, callers like

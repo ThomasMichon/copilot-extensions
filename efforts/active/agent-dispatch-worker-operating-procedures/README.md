@@ -270,19 +270,72 @@ rather than deciding it unreviewed mid-Phase-1.
 ### Phase 3 — Reachability-tiered delivery for no-CLI-access workers
 _Exploration first, per the operator's framing — the concrete mechanisms
 per environment are genuinely undecided, not just unwritten._
-- [ ] Enumerate the environments this actually needs to cover (a Codespace,
+- [x] Enumerate the environments this actually needs to cover (a Codespace,
       a container, a different machine, a cross-repo/unaffiliated agent
       with no prior agent-dispatch knowledge) and, for each, the concrete
       reach-back mechanism available today (generalizing fleet's
       SSH-to-origin relay — is there an HTTP+token path, an MCP tool
       surface, a relay through agent-bridge, or something else per
       environment?).
-- [ ] Design the "full inline" seed variant for this tier: the complete
+      - **Codespace:** the existing reach-back primitive is explicit
+        environment threading, not a dispatch-specific relay:
+        `agent_codespaces._peer_launch.peer_environment()` forwards
+        `AGENT_DISPATCH_URL` / `AGENT_DISPATCH_TOKEN` and the shared
+        coordinator variants into the remote venue. There is no dedicated
+        agent-bridge dispatch wrapper in this path; the no-CLI worker's
+        viable channel is still coordinator HTTP once those values exist.
+        For hand-run validation, the reachable `ThomasMichon/copilot-extensions`
+        CodeSpace did **not** qualify as genuinely no-CLI: `agent-dispatch`
+        was already installed there at
+        `/home/codespace/.local/bin/agent-dispatch`.
+      - **Container:** `agent_containers._peer_launch.peer_environment()`
+        forwards the same `AGENT_DISPATCH_*` / shared-coordinator variables
+        into remote peer launches; again, there is no distinct dispatch
+        relay beyond direct coordinator HTTP. A reachable trusted container
+        *did* qualify as genuinely no-CLI (`agent-dispatch` absent there),
+        and could still reach this host's loopback coordinator over
+        `http://host.docker.internal:<port>`, proving an explicit injected
+        HTTP endpoint is viable even without a pre-staged dispatch install.
+      - **Different machine:** today's concrete no-CLI reach-back is the
+        explicit HTTP path — either `AGENT_DISPATCH_URL` /
+        `AGENT_DISPATCH_TOKEN`, or the shared hosted coordinator
+        (`AGENT_DISPATCH_SHARED_URL` plus
+        `AGENT_DISPATCH_SHARED_TOKEN` / `_COMMAND`). Fleet's existing
+        SSH-to-origin pattern remains the shipped **CLI-capable** precedent,
+        but it still depends on `agent-dispatch` being runnable on the far
+        side and therefore is not the no-CLI tier itself.
+      - **Cross-repo / unaffiliated agent:** the coordinator-hosted `/mcp`
+        surface is real and expressly meant for remote identity-bearing
+        clients, but the current tool list does **not** expose the full
+        lifecycle this charter needs (`dispatch_progress`, steering-card
+        operations, and steer submission are absent today). So, for a
+        worker with no prior agent-dispatch knowledge, direct coordinator
+        HTTP is the only shipped full-lifecycle channel right now; MCP is a
+        partial future follow-up, not the Phase 3 answer by itself.
+- [x] Design the "full inline" seed variant for this tier: the complete
       operating-procedure text (it cannot fetch the Phase 1 doc) plus the
       concrete, environment-appropriate command(s) for issuing status calls.
+      - Implemented as `no_cli_autopilot_worker_prompt()` in
+        `src/agent_dispatch/no_cli_prompts.py`. The seed inlines the exact
+        `OPERATING_PROCEDURES_TEXT`, also inlines the `autopilot` task-type
+        charter (a no-CLI worker cannot fetch either charter by name), and
+        ships a zero-extra-dependency `dispatch_http.py` helper that drives
+        the coordinator's HTTP routes with an explicit worker id.
 - [ ] Tests + a hand-run scenario: spawn a worker in at least one genuinely
       no-CLI-access environment and confirm it can complete a task using
       only the tier-appropriate inline guidance.
+      - Unit coverage landed in `tests/test_no_cli_prompts.py` plus the
+        existing embody prompt tests.
+      - Follow-up hand-run (2026-09-27) closed the specific infrastructure
+        gap from the first attempt: `agent-containers` now auto-provisions
+        `agent-worktrees` into a genuinely no-CLI trusted container before
+        detached launch, and the real `peaceful_wright` validation got past
+        the old `missing_agent_worktrees_error` point into actual
+        `agent-worktrees embody` execution. The next honest blocker is
+        different: that container's `/workspaces/odsp-web` checkout is not
+        adopted yet (`Could not resolve a project for 'embody'` / `agent-
+        worktrees register odsp-web`), so the full no-CLI task-completion
+        half of Phase 3 remains open.
 
 ### Phase 4 — agent-bridge companion-agent heads-up
 - [ ] Confirm (or add, if missing) a minimal heads-up in agent-bridge's own
@@ -432,3 +485,71 @@ _Pending._
   confirmed pre-existing unrelated flakes recurred
   (`test_idle_headless_fleet_nudge_includes_remote_host` and
   `test_namespaced_peer_from_windowless_parent`).
+
+### 2026-09-27 — Phase 3 partial landing (#4292)
+- Investigated the actual no-CLI reach-back primitives before adding code:
+  CodeSpace/container peer launches already propagate `AGENT_DISPATCH_*`
+  and shared-coordinator environment into remote venues, a different machine
+  can reach back through explicit HTTP/shared-coordinator config, and the
+  coordinator-hosted `/mcp` surface is real but still incomplete for this
+  lifecycle because it does not yet expose progress/card/steer operations.
+  That made direct coordinator HTTP the only shipped full-lifecycle channel
+  for the no-CLI tier today.
+- Added `no_cli_autopilot_worker_prompt()` and its tests: the new seed
+  inlines both the universal operating procedures and the autopilot
+  task-type charter, then gives the worker a zero-extra-dependency
+  `dispatch_http.py` helper plus explicit `show` / `claim-eval` / `start` /
+  `steer-take` / `progress` / `suspend` / `yield` / `abandon` /
+  `complete` commands instead of assuming any local `agent-dispatch` CLI.
+- Local full suite on the final implementation tree: 3488 passed / 21
+  skipped with exactly the documented Windows supervisor flake
+  `test_idle_headless_fleet_nudge_includes_remote_host`, and the isolated
+  rerun reproduced that same known unrelated failure; no new Phase-3-caused
+  regression surfaced in the rest of the suite.
+- Hand-run validation remains the honest gap for this phase. The reachable
+  `ThomasMichon/copilot-extensions` CodeSpace did not qualify as genuinely
+  no-CLI (`agent-dispatch` was already installed there). A reachable trusted
+  container *did* qualify as no-CLI, and could reach this host's coordinator
+  over `host.docker.internal`, but `agent-containers copilot --detach`
+  failed before a worker could start because that fleet image lacks
+  `agent-worktrees`. The scratch validation task was abandoned and the
+  partial detached container session was stopped, so Phase 3 lands as a
+  partial, reviewable slice rather than a pretended full completion.
+
+### 2026-09-27 — Phase 3 follow-up: close the missing-agent-worktrees gap; hand-run now reaches embody
+- Implemented an `agent-containers` follow-up slice that auto-provisions
+  `agent-worktrees` for trusted detached CLI-mode launches before the launch
+  attempts `agent-worktrees embody`: the helper stages the host's
+  materialized marketplace payload into the container, passes through the
+  governed-feed URL needed for `uv pip install`, runs
+  `bash scripts/install.sh provision --install-dir /home/vscode/.agent-worktrees`
+  as the container's `exec_user`, and drops a PATH-safe `/usr/local/bin/agent-worktrees`
+  wrapper so non-interactive launch shells can find the installed binstub.
+- Real hand-run against the shared trusted container `peaceful_wright`:
+  `docker exec -u vscode peaceful_wright bash -lc 'agent-worktrees --version'`
+  initially failed with `command not found`; after
+  `uv run --directory plugins/agent-containers python -c "from agent_containers.container_shims import ensure_agent_worktrees; ensure_agent_worktrees('peaceful_wright', user='vscode')"`
+  it succeeded (`agent-worktrees 1.9.3-dev1 ...`). A real detached launch,
+  `uv run --directory plugins/agent-containers agent-containers copilot peaceful_wright --detach --seed "Validation session: confirm detached launch reached a ready prompt, then wait for stop."`,
+  advanced through `[DETACH] launch: \`agent-worktrees embody\` in the container`
+  and then failed on the *next*, unrelated prerequisite:
+  `Could not resolve a project for 'embody' ... This git repo (odsp-web) is
+  not adopted yet. Adopt it: agent-worktrees register odsp-web`. That closes
+  the specific Phase 3 gap identified in the prior entry without pretending
+  the end-to-end no-CLI worker run is now complete.
+- Cleanup/state after the hand-run: no validation tmux session remained
+  (`tmux has-session -t =wt-anchor-odsp-web` → `missing`),
+  `agent-containers leases` reported no active leases, and
+  `agent-containers fleet --json` showed `peaceful_wright` still running,
+  unleased, with `lifecycle_hold.state = none`.
+- Validation for this slice:
+  - Focused unit coverage: `uv run --directory plugins/agent-containers --extra dev pytest -q tests/test_container_shims.py tests/test_copilot_detach.py`
+    → **18 passed**.
+  - Canonical full plugin runner:
+    `python tools/run-plugin-tests.py agent-containers`
+    → **511 passed, 12 skipped, 3 failed** overall. The failures were the
+    current Windows-only `tests/test_restricted_fleet.py`
+    (`test_trusted_image_run_wires_host_mounts_and_systemd_capability`,
+    `test_trusted_image_run_namespaces_host_paths_per_fleet_member`,
+    `test_ensure_owned_dir_creates_and_chowns`), unrelated to this
+    detached-launch/provisioning slice.

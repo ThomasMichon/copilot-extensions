@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=83.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-index-engine"
+version = "0.1.0-dev1"
+description = "Heavy embedding-engine server for agent-index -- a separate, independently-installable program that owns the torch/sentence-transformers stack. Installed only on a host role, never on a search client."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Thomas Michon" }
+]
+dependencies = [
+    # The light agent-index package (index_config, engine.generation, engine.client,
+    # capability) -- shared config/identity/HTTP-client surface, torch-free. This is
+    # what makes this program a "separate program that talks to the client wrapper",
+    # not a fork: both sides read the same ModelProfile/IndexConfig. Pre-installed
+    # from the local checkout by the installer (see agent-index's install.{ps1,sh}
+    # Install-Engine), the same way agent-index itself pre-installs vendored
+    # agent-zdd/agent-procutil before a plain `pip install` would try (and fail) to
+    # resolve them from PyPI.
+    "agent-index",
+    # The heavy embedding stack -- the durable, persistent ENGINE runtime only,
+    # provisioned on the engine host (in a durable venv outside the versioned
+    # service runtime). Never installed alongside the light service (effort
+    # agent-index-engine-daemon; vision §warm-durable-engine).
+    "torch",
+    # jina-v2-base-code loads via trust_remote_code; transformers 5.x broke that
+    # custom modeling path (copilot-extensions#114). Pin below 5 so every host gets
+    # the newest working 4.x -- a compat ceiling, not a capability downgrade.
+    "transformers>=4.40,<6",
+    "sentence-transformers",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 99
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "S", "B", "A", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "S105", "S106"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

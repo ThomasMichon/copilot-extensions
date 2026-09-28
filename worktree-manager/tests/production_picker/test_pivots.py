@@ -431,6 +431,26 @@ def test_installed_plugins_dir_env_override(tmp_path, monkeypatch):
     assert pivots.installed_plugins_dir() == tmp_path / "custom"
 
 
+def test_runtime_dirs_use_picker_paths_contract(monkeypatch):
+    monkeypatch.delenv(pivots.PIVOTS_DIR_ENV, raising=False)
+    monkeypatch.delenv(pivots.PLUGINS_ROOT_ENV, raising=False)
+    monkeypatch.setattr(pivot_manifest.picker_context, "project", lambda: "dotfiles")
+    monkeypatch.setattr(
+        pivot_manifest.engine_group_a,
+        "picker_paths",
+        lambda project: {
+            "version": 1,
+            "install_dir": "C:/Users/test/.agent-worktrees",
+            "installed_plugins_dir": "C:/Users/test/.copilot/installed-plugins",
+        },
+    )
+
+    assert pivots.pivots_dir() == Path("C:/Users/test/.agent-worktrees/pivots")
+    assert pivots.installed_plugins_dir() == Path(
+        "C:/Users/test/.copilot/installed-plugins"
+    )
+
+
 # ---- config_sections (B slice 2) ----------------------------------------
 
 

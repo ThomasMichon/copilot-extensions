@@ -31,7 +31,10 @@ supervision.
   than stacking both.
 - **Session start:** session hooks still publish guidance, and now also run a
   cheap `ensure` safety net. The hook never provisions a runtime; it only
-  health-checks the installed host runtime and starts it when absent.
+  health-checks the installed host runtime and starts it when absent -- and, on
+  a never-provisioned machine that has no binstub at all yet, stamps one first
+  (splats the payload marker + redirector shim; still no venv, no uv) so the
+  CLI resolves and there is something for the health-check to act on.
 - **Installation cells:** namespaced installation cells build and reconcile the
   host runtime with the same local slot/cutover primitives as legacy mode. They
   remain self-contained and do not require `agent-dispatch`.

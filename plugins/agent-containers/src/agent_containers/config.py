@@ -89,6 +89,18 @@ def is_sensitive_environment_name(name: str) -> bool:
     return bool(_SENSITIVE_ENV_RE.search(name.upper()))
 
 
+def _strict_bool(value: Any, label: str) -> bool:
+    """Parse a YAML value as a real boolean; never coerce a truthy string.
+
+    ``bool("false")`` is ``True`` in Python -- a quoted ``"false"`` or a typo
+    in a fleet's config must be rejected, not silently flip an opt-in
+    privilege/launch-posture switch on.
+    """
+    if isinstance(value, bool):
+        return value
+    raise RuntimeError(f"{label} must be a boolean (true/false), got {value!r}")
+
+
 @dataclass
 class DotfilesConfig:
     """A designated host *dotfiles* repo to reproduce in a fleet container.
@@ -226,6 +238,29 @@ class FleetConfig:
     relay_enabled: bool | None = None
     # "clone" (Model A, default) or "mount" (Model B, future).
     code_model: str = "clone"
+    # Trusted, image-backed fleets only (validate_restricted rejects these on
+    # a restricted fleet, or alongside devcontainer_path). Real, host-backed
+    # persistence in place of the image's own ephemeral storage -- see
+    # visions/plugins/agent-containers's full-harness-projection-trusted.
+    # Each is the PARENT directory for the fleet -- `_image_run` mounts a
+    # per-member subdirectory keyed by the member's own container name, so a
+    # size > 1 fleet's members never collide on the same host path.
+    # `host_workspace_path` bind-mounts onto `workspace_folder`;
+    # `host_home_path` bind-mounts onto `home_folder` (both must be set
+    # together for the home mount -- `home_folder` exists because, unlike
+    # restricted fleets, a trusted image-backed fleet's HOME is never
+    # resolved by probing the image, so it must be declared).
+    host_workspace_path: str | None = None
+    host_home_path: str | None = None
+    home_folder: str | None = None
+    # Trusted, image-backed fleets only. Grants exactly the capability/mount
+    # set a containerized `systemd --user` instance needs (CAP_SYS_ADMIN + a
+    # writable /run + an in-container /sys/fs/cgroup remount at launch) so
+    # the venue's own maintenance timers (e.g. a plugin runtime's self-update
+    # sweep) can register and run natively instead of relying on an external
+    # host-side trigger. The IMAGE must itself provide `systemd`/
+    # `systemd-sysv`/`dbus-user-session` -- this only wires the launch.
+    systemd_capable: bool = False
 
     def prefix(self, fleet_name: str) -> str:
         return self.name_prefix or fleet_name
@@ -278,9 +313,38 @@ class FleetConfig:
         return "512m" if self.restricted else None
 
     def validate_restricted(self) -> None:
-        """Reject restricted settings that disable their own resource bounds."""
+        """Validate cross-field invariants; restricted fleets get extra bounds.
+
+        The devcontainer-exclusivity and home-pair checks below apply to
+        EVERY fleet regardless of security_profile -- they catch
+        configuration that would silently no-op or leave a mount half-wired,
+        not just a restricted-containment violation.
+        """
+        if self.devcontainer_path and (
+            self.host_workspace_path or self.host_home_path or self.systemd_capable
+        ):
+            raise RuntimeError(
+                "host_workspace_path/host_home_path/systemd_capable apply only "
+                "to image:-backed fleets -- a devcontainer_path fleet never "
+                "consumes them (reconcile_up() prioritizes devcontainer_path, "
+                "and the devcontainer launch path ignores these fields "
+                "entirely, so the configuration would silently no-op)"
+            )
+        if bool(self.host_home_path) != bool(self.home_folder):
+            raise RuntimeError(
+                "host_home_path and home_folder must be set together "
+                "(an incomplete pair silently falls back to ephemeral home "
+                "storage instead of failing loudly)"
+            )
         if not self.restricted:
             return
+        if self.host_workspace_path or self.host_home_path or self.systemd_capable:
+            raise RuntimeError(
+                "Restricted fleet cannot set host_workspace_path/host_home_path/"
+                "systemd_capable -- these are trusted-only capabilities "
+                "(host bind-mounts and CAP_SYS_ADMIN both defeat the restricted "
+                "containment contract)"
+            )
         if self.effective_cpus() <= 0 or not math.isfinite(self.effective_cpus()):
             raise RuntimeError("Restricted fleet 'cpus' must be a positive finite value")
         if self.effective_pids_limit() <= 0:
@@ -727,6 +791,12 @@ def load_config(*, strict: bool = False) -> ContainersConfig:
                 else None
             ),
             code_model=raw.get("code_model", "clone"),
+            host_workspace_path=raw.get("host_workspace_path"),
+            host_home_path=raw.get("host_home_path"),
+            home_folder=raw.get("home_folder"),
+            systemd_capable=_strict_bool(
+                raw.get("systemd_capable", False), f"Fleet '{name}' systemd_capable"
+            ),
         )
         fleet.validate_restricted()
         config.fleets[name] = fleet

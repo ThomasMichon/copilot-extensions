@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import os
 import sys
+import time
+
+import pytest
 
 from agent_mcp.auth import (
     CommandInjector,
@@ -85,6 +91,7 @@ async def test_token_injector_caches_and_invalidates(monkeypatch):
 
 
 async def test_entra_injector_wraps_source(monkeypatch):
+    monkeypatch.setattr("agent_mcp.auth.injectors.shutil.which", lambda name: None)
     inj = build_injector(_cfg({"kind": "entra", "resource": "res"}))
     assert isinstance(inj, EntraInjector)
 
@@ -96,6 +103,229 @@ async def test_entra_injector_wraps_source(monkeypatch):
 
     inj._source = FakeSource()
     assert await inj.headers() == {"Authorization": "Bearer AZTOKEN"}
+
+
+class _FakeProc:
+    def __init__(self, stdout: bytes, stderr: bytes, returncode: int) -> None:
+        self._stdout = stdout
+        self._stderr = stderr
+        self.returncode = returncode
+
+    async def communicate(self):
+        return self._stdout, self._stderr
+
+
+class _ExplodingSource:
+    """A fake ``az_login`` source that fails the test if it's ever reached."""
+
+    async def resolve(self, *args, **kwargs):
+        raise AssertionError("should not fall back to the local az CLI here")
+
+
+async def test_entra_injector_prefers_relay_helper_on_path(monkeypatch):
+    monkeypatch.setattr(
+        "agent_mcp.auth.injectors.shutil.which",
+        lambda name: "/fake/ado-auth-helper" if name == "ado-auth-helper" else None,
+    )
+    captured = {}
+
+    async def fake_exec(*argv, **kwargs):
+        captured["argv"] = argv
+        return _FakeProc(b"HELPERTOKEN\n", b"", 0)
+
+    monkeypatch.setattr("agent_mcp.auth.injectors.asyncio.create_subprocess_exec", fake_exec)
+
+    inj = build_injector(_cfg({
+        "kind": "entra", "resource": "499b84ac-1321-427f-aa17-267ca6975798",
+    }))
+    inj._source = _ExplodingSource()
+
+    assert await inj.acquire_secret() == "HELPERTOKEN"
+    assert captured["argv"] == (
+        "/fake/ado-auth-helper", "get-access-token", "--scope",
+        "499b84ac-1321-427f-aa17-267ca6975798/.default",
+    )
+
+
+async def test_entra_injector_skips_helper_when_tenant_configured(monkeypatch):
+    def which(name):
+        raise AssertionError("should not probe PATH when a tenant is configured")
+
+    monkeypatch.setattr("agent_mcp.auth.injectors.shutil.which", which)
+
+    inj = build_injector(_cfg({
+        "kind": "entra", "resource": "res", "tenant": "contoso.onmicrosoft.com",
+    }))
+
+    class FakeSource:
+        async def resolve(self, action, fields, *, timeout=30.0):
+            assert fields["tenant"] == "contoso.onmicrosoft.com"
+            return "protocol=https\nhost=h\ntoken=AZTOKEN\n\n"
+
+    inj._source = FakeSource()
+    assert await inj.acquire_secret() == "AZTOKEN"
+
+
+async def test_entra_injector_falls_back_when_helper_returns_no_token(monkeypatch):
+    monkeypatch.setattr(
+        "agent_mcp.auth.injectors.shutil.which",
+        lambda name: "/fake/ado-auth-helper" if name == "ado-auth-helper" else None,
+    )
+
+    async def fake_exec(*argv, **kwargs):
+        return _FakeProc(b"", b"relay unreachable\n", 1)
+
+    monkeypatch.setattr("agent_mcp.auth.injectors.asyncio.create_subprocess_exec", fake_exec)
+
+    inj = build_injector(_cfg({"kind": "entra", "resource": "res"}))
+
+    class FakeSource:
+        async def resolve(self, action, fields, *, timeout=30.0):
+            return "protocol=https\nhost=h\ntoken=FALLBACK\n\n"
+
+    inj._source = FakeSource()
+    assert await inj.acquire_secret() == "FALLBACK"
+
+
+class _HangingProc:
+    """A fake process whose ``communicate()`` never returns on its own."""
+
+    def __init__(self) -> None:
+        self.pid = 999_999_999  # not a real PID -- exercises the fallback path
+        self.returncode: int | None = None
+        self.killed = False
+        self.waited = False
+
+    async def communicate(self):
+        await asyncio.sleep(10)
+        return b"", b""  # pragma: no cover -- cancelled by wait_for before this
+
+    def kill(self):
+        self.killed = True
+        self.returncode = -9
+
+    async def wait(self):
+        self.waited = True
+        return self.returncode
+
+
+async def test_entra_injector_reaps_hung_helper_on_timeout(monkeypatch):
+    proc = _HangingProc()
+    monkeypatch.setattr(
+        "agent_mcp.auth.injectors.shutil.which",
+        lambda name: "/fake/ado-auth-helper" if name == "ado-auth-helper" else None,
+    )
+
+    async def fake_exec(*argv, **kwargs):
+        return proc
+
+    monkeypatch.setattr("agent_mcp.auth.injectors.asyncio.create_subprocess_exec", fake_exec)
+
+    inj = build_injector(_cfg({"kind": "entra", "resource": "res"}))
+    inj._timeout = 0.05
+
+    class FakeSource:
+        async def resolve(self, action, fields, *, timeout=30.0):
+            return "protocol=https\nhost=h\ntoken=FALLBACK\n\n"
+
+    inj._source = FakeSource()
+
+    assert await inj.acquire_secret() == "FALLBACK"
+    assert proc.killed
+    assert proc.waited
+
+
+async def test_terminate_tree_kills_a_real_process():
+    # Beyond the fake-process test above (which forces the fallback path via an
+    # invalid PID): prove _terminate_tree actually terminates a genuine, running
+    # child through the real killpg/taskkill path, not just a mocked one.
+    from agent_procutil import windowless_daemon_kwargs
+
+    from agent_mcp.auth.injectors import _terminate_tree
+
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, "-c", "import time; time.sleep(30)",
+        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+        **windowless_daemon_kwargs(),
+    )
+    assert proc.returncode is None  # still running
+
+    await _terminate_tree(proc)
+
+    assert proc.returncode is not None  # the OS confirmed it's actually gone
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group teardown path")
+async def test_terminate_tree_kills_real_descendant_posix(tmp_path):
+    """_terminate_tree must kill a spawned DESCENDANT, not just the direct child."""
+    from agent_mcp.auth.injectors import _terminate_tree
+
+    marker = tmp_path / "gpid"
+    code = (
+        "import subprocess,time;"
+        "p=subprocess.Popen(['sleep','30']);"
+        f"open({str(marker)!r},'w').write(str(p.pid));"
+        "time.sleep(30)"
+    )
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, "-c", code, start_new_session=True,
+    )
+
+    gpid = None
+    for _ in range(50):
+        if marker.exists() and marker.read_text().strip():
+            gpid = int(marker.read_text().strip())
+            break
+        await asyncio.sleep(0.1)
+    assert gpid is not None, "descendant never started"
+    assert _alive(gpid)
+
+    await _terminate_tree(proc)
+    assert proc.returncode is not None
+
+    deadline = time.time() + 5
+    while time.time() < deadline and _alive(gpid):
+        await asyncio.sleep(0.1)
+    assert not _alive(gpid), "descendant survived the tree-kill"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group teardown path")
+async def test_terminate_tree_does_not_kill_a_foreign_shared_group(tmp_path):
+    """A child sharing OUR own process group (no ``start_new_session`` -- the
+    ``COPILOT_EXTENSIONS_TEST_CONTAINED=1`` case) must still be killed directly,
+    but ``_terminate_tree`` must NOT ``killpg`` that shared group, or it would
+    take down an unrelated sibling/the caller's own group along with it.
+    """
+    from agent_mcp.auth.injectors import _terminate_tree
+
+    sibling = await asyncio.create_subprocess_exec(
+        sys.executable, "-c", "import time; time.sleep(30)",
+    )
+    target = await asyncio.create_subprocess_exec(
+        sys.executable, "-c", "import time; time.sleep(30)",
+    )
+    try:
+        assert os.getpgid(target.pid) == os.getpgid(0)  # shares our group
+
+        await _terminate_tree(target)
+        assert target.returncode is not None  # still killed, just not via killpg
+
+        await asyncio.sleep(0.3)
+        assert _alive(sibling.pid), "a shared-group sibling was killed by killpg"
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            sibling.kill()
+        await sibling.wait()
 
 
 def test_build_git_credential_derives_host():
@@ -191,7 +421,7 @@ async def test_command_not_found_is_empty():
     assert await inj.child_env() == {}
 
 
-async def test_command_timeout_kills_child():
+async def test_command_timeout_kills_child(monkeypatch):
     # A command that outlives the timeout must be reaped, not leaked.
     inj = build_injector(_command_cfg({
         "command": [sys.executable, "-c", "import time; time.sleep(30)"],
@@ -199,13 +429,15 @@ async def test_command_timeout_kills_child():
     }))
     inj._timeout = 0.5
     captured: dict = {}
-    orig_term = inj._terminate
+
+    from agent_mcp.auth import injectors as injectors_module
+    orig_term = injectors_module._terminate_proc
 
     async def spy(proc):
         captured["proc"] = proc
         await orig_term(proc)
 
-    inj._terminate = spy
+    monkeypatch.setattr("agent_mcp.auth.injectors._terminate_proc", spy)
     assert await inj.child_env() == {}  # timed out -> no token
     proc = captured.get("proc")
     assert proc is not None

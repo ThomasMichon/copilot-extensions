@@ -38,7 +38,7 @@ import threading
 
 from agent_procutil import no_window_flags
 
-from .. import config as cfg
+from .. import project_config as cfg
 from . import data_local, derive, provider_sources, roster, source_identity
 from .loader_lazy import LazyLoadMixin, _lazy_loading_enabled, _ping_argv, _PING_TIMEOUT_SECS  # noqa: F401
 
@@ -889,25 +889,9 @@ def apply_profile_column(machine, env, sels, *, mirror=True):
     return profiles_io.apply_column(machine, env, sels, mirror=mirror)
 
 
-def reconcile_prs() -> int:
-    """Reconcile the LOCAL machine's stale PR states against the provider (#1423).
-
-    Delegates to :func:`data_local.reconcile_prs`. Each *remote* machine's PRs are
-    reconciled on their own owning machine by :meth:`LiveLoader.reconcile_remote_prs`
-    (a bounded, after-first-paint ``list --reconcile-prs`` over SSH, #2102).
-    """
-    return data_local.reconcile_prs()
-
-
-def reconcile_bound_live() -> int:
-    """Reconcile the LOCAL machine's cached bound-Copilot liveness (#4057/#1416).
-
-    Delegates to :func:`data_local.reconcile_bound_live`. The bound-Copilot scan
-    is inherently machine-local (it reads this host's session-state), so -- like
-    :func:`reconcile_prs` -- each remote machine reconciles its own worktrees when
-    its picker runs; this only ever touches the local machine's records.
-    """
-    return data_local.reconcile_bound_live()
+def reconcile_local_batch():
+    """Run the local Group C reconcile batch; remotes reconcile on their host."""
+    return data_local.reconcile_local_batch()
 
 
 def _reconcile_argv(source: "Source"):

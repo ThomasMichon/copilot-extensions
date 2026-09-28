@@ -11,11 +11,15 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import logging
 import os
+import shutil
 from urllib.parse import urlsplit
 
-from .._exec import resolve_argv
+from agent_procutil import windowless_daemon_kwargs
+
+from .._exec import no_window_creationflags, resolve_argv
 from ..config import AuthSpec, BridgeConfig
 from .base import AuthInjector, CompositeInjector, NoneInjector, TokenInjector
 
@@ -41,6 +45,59 @@ def _token_from(text: str | None) -> str | None:
     return fields.get("token") or fields.get("password")
 
 
+async def _terminate_proc(proc: asyncio.subprocess.Process | None) -> None:
+    """Kill and reap a child process (no-op if already gone)."""
+    if proc is None or proc.returncode is not None:
+        return
+    try:
+        proc.kill()
+        await proc.wait()
+    except ProcessLookupError:
+        pass
+
+
+async def _terminate_tree(proc: asyncio.subprocess.Process | None) -> None:
+    """Kill and reap a child **and its descendants** (no-op if already gone).
+
+    For a wrapper that is not a single-process executable -- e.g. a Node shim
+    that ``spawnSync``s further shell/Python helpers, as the Codespace
+    credential-relay client does -- killing only the direct child can leave a
+    nested process running until its own timeout. Best-effort: a failed or
+    slow tree-kill attempt still falls through to :func:`_terminate_proc` for
+    the direct child.
+    """
+    if proc is None or proc.returncode is not None:
+        return
+    if os.name == "nt":
+        with contextlib.suppress(Exception):
+            tree_kill = await asyncio.create_subprocess_exec(
+                "taskkill", "/T", "/F", "/PID", str(proc.pid),
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+                creationflags=no_window_creationflags(),
+            )
+            # taskkill /T /F is observed to take 100+ seconds under endpoint-
+            # protection scanning (CONTRIBUTING.md's agent-codespaces-ssh
+            # postmortem). Bound our wait so a slow tree-kill can't stall this
+            # acquisition past its own timeout; shield the kill itself so it
+            # keeps running to completion in the background rather than being
+            # cancelled outright, then fall through to the direct-process reap.
+            with contextlib.suppress(TimeoutError, asyncio.TimeoutError):
+                await asyncio.wait_for(asyncio.shield(tree_kill.wait()), timeout=10)
+    else:
+        with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+            import signal
+
+            child_pgid = os.getpgid(proc.pid)
+            # Only kill the *group* when the child actually owns one of its own
+            # (windowless_daemon_kwargs skips start_new_session in contained test
+            # mode, so a timed-out child can otherwise share -- and killpg would
+            # tear down -- the calling process's/test runner's own group).
+            if child_pgid != os.getpgid(0):
+                os.killpg(child_pgid, signal.SIGKILL)
+    await _terminate_proc(proc)
+
+
 class EnvInjector(TokenInjector):
     """Token from a host environment variable (``env``) or a literal (``static``)."""
 
@@ -53,9 +110,26 @@ class EnvInjector(TokenInjector):
 
 
 class EntraInjector(TokenInjector):
-    """Entra ID / Azure access token via ``credential_relay.sources.az_login``."""
+    """Entra ID / Azure access token via ``credential_relay.sources.az_login``.
+
+    Prefers an on-``PATH`` ``ado-auth-helper`` -- the credential-relay client
+    shim ``agent-codespaces`` installs on a Codespace guest (see its
+    ``codespace_assets``) -- over shelling to a local ``az`` CLI directly. A
+    guest has no logged-in Azure CLI session of its own, so the direct
+    ``AzLoginSource`` path always fails there even when the relay tunnel is
+    live and already serving every other Azure/ADO consumer in that guest.
+    Calling ``ado-auth-helper`` instead needs no environment detection here --
+    it's the same PATH-resolution trick ``rush``'s cloud build-cache login and
+    the ADO npm-token flow already rely on to work headlessly in a Codespace:
+    whichever binary answers on PATH determines local-vs-relayed behavior.
+    Falls back to the existing local-``az`` behavior unchanged when the helper
+    isn't present, or when an explicit ``tenant`` is configured (the relay's
+    ``get-azure-token`` action has no tenant parameter to forward).
+    """
 
     name = "entra"
+
+    _RELAY_HELPER = "ado-auth-helper"
 
     def __init__(self, spec: AuthSpec, *, timeout: float = 30.0) -> None:
         super().__init__(spec)
@@ -74,7 +148,63 @@ class EntraInjector(TokenInjector):
         await super().invalidate()
         self._source = self._new_source()  # drop the source's internal token cache
 
+    def _scope(self) -> str:
+        """The AAD scope to request, canonicalized the same way ``az_login`` does."""
+        from credential_relay.sources.az_login import _to_scope
+
+        return _to_scope(self.spec.scope or self.spec.resource or "")
+
+    async def _acquire_via_helper(self, helper: str) -> str | None:
+        """Mint a token via the on-PATH relay-client shim (Codespace guest path)."""
+        scope = self._scope()
+        if not scope:
+            return None
+        argv = resolve_argv([helper, "get-access-token", "--scope", scope])
+        # The wrapper is not a single-process executable -- its Node shim
+        # spawnSync's further shell/Python helpers of its own. windowless_daemon_kwargs
+        # keeps it windowless on Windows and puts it in its own POSIX session, so
+        # the whole tree stays killable as one unit (see _terminate_tree).
+        proc: asyncio.subprocess.Process | None = None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *argv,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                **windowless_daemon_kwargs(),
+            )
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=self._timeout,
+            )
+        except (TimeoutError, asyncio.TimeoutError):
+            log.error("%s get-access-token timed out (%.0fs)", helper, self._timeout)
+            # wait_for cancelled communicate() but left the child (and any of its
+            # own nested helpers) running -- kill the whole tree so a hung relay
+            # client doesn't leak processes per acquisition/401 retry.
+            await _terminate_tree(proc)
+            return None
+        except OSError as exc:
+            log.error("%s get-access-token failed to launch: %s", helper, exc)
+            return None
+        if proc.returncode != 0:
+            err = stderr.decode(errors="replace").strip().replace("\n", " ")[:200]
+            log.error(
+                "%s get-access-token failed (exit %d): %s", helper, proc.returncode, err,
+            )
+            return None
+        token = stdout.decode(errors="replace").strip()
+        return token or None
+
     async def _acquire(self) -> str | None:
+        helper = None if self.spec.tenant else shutil.which(self._RELAY_HELPER)
+        if helper:
+            token = await self._acquire_via_helper(helper)
+            if token:
+                return token
+            log.warning(
+                "%s present but returned no token; falling back to local az CLI",
+                self._RELAY_HELPER,
+            )
         fields: dict[str, str] = {}
         if self.spec.scope:
             fields["scope"] = self.spec.scope
@@ -186,17 +316,6 @@ class CommandInjector(TokenInjector):
         return ("\n".join(lines) + "\n\n").encode()
 
     @staticmethod
-    async def _terminate(proc: asyncio.subprocess.Process | None) -> None:
-        """Kill and reap a child process (no-op if already gone)."""
-        if proc is None or proc.returncode is not None:
-            return
-        try:
-            proc.kill()
-            await proc.wait()
-        except ProcessLookupError:
-            pass
-
-    @staticmethod
     def _bound_err(stderr: bytes) -> str:
         """Bound possibly-large/sensitive helper stderr for a single log line."""
         err = stderr.decode(errors="replace").strip().replace("\n", " ")
@@ -240,7 +359,7 @@ class CommandInjector(TokenInjector):
             # wait_for cancelled communicate() but left the child running -- a
             # hung helper (e.g. an interactive credential prompt) would otherwise
             # leak a process, one per acquisition/401-retry. Reap it.
-            await self._terminate(proc)
+            await _terminate_proc(proc)
             return None, True
         except FileNotFoundError:
             log.error("auth command not found on PATH: %s", argv[0])
@@ -278,7 +397,7 @@ class CommandInjector(TokenInjector):
             )
         except (TimeoutError, asyncio.TimeoutError):
             log.error("auth repair timed out (%.0fs): %s", self._repair_timeout, argv[0])
-            await self._terminate(proc)
+            await _terminate_proc(proc)
             return False
         except FileNotFoundError:
             log.error("auth repair not found on PATH: %s", argv[0])

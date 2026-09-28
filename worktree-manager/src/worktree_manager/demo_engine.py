@@ -15,14 +15,27 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 
-from . import demo
+try:
+    from . import demo
+except ImportError:  # pragma: no cover - direct-script fallback
+    src_root = Path(__file__).resolve().parents[1]
+    if str(src_root) not in sys.path:
+        sys.path.insert(0, str(src_root))
+    from worktree_manager import demo
+
+
+def command_argv() -> list[str]:
+    """Run the bundled fake engine without depending on ambient PYTHONPATH."""
+    return [sys.executable, str(Path(__file__).resolve())]
 
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     # Parse the client's argument surface: the engine-global ``--project <name>``
     # the client prepends, the verb, and (for resolve) the launch selectors.
+    project = demo.DEMO_PROJECT
     verb = None
     worktree_id = None
     new = False
@@ -31,6 +44,8 @@ def main(argv: list[str] | None = None) -> int:
     while i < len(args):
         a = args[i]
         if a == "--project":
+            if i + 1 < len(args):
+                project = args[i + 1] or project
             i += 2
             continue
         if a == "--worktree-id":
@@ -52,6 +67,32 @@ def main(argv: list[str] | None = None) -> int:
     if verb == "resolve":
         json.dump(demo.resolve_plan(worktree_id, new=new, bare_resume=bare_resume),
                   sys.stdout)
+        sys.stdout.write("\n")
+        return 0
+    if verb == "picker-bootstrap":
+        json.dump(
+            {
+                "version": 1,
+                "project": project,
+                "should_switch_cwd": False,
+                "cwd": None,
+                "default_live": False,
+            },
+            sys.stdout,
+        )
+        sys.stdout.write("\n")
+        return 0
+    if verb == "repair-stale-anchor":
+        json.dump(
+            {
+                "version": 1,
+                "project": project,
+                "status": "unchanged",
+                "self_present_before": True,
+                "self_present_after": True,
+            },
+            sys.stdout,
+        )
         sys.stdout.write("\n")
         return 0
     # Unknown verb: mimic the engine's JSON error envelope + non-zero exit.

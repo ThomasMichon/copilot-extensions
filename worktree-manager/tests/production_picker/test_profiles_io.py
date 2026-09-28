@@ -22,7 +22,7 @@ def test_load_local_column_reads_config(monkeypatch, tmp_path):
         self_machine="Anomalous-Potato", self_env="Win")
     monkeypatch.setattr(profiles_io, "_local_key", lambda: ("Anomalous-Potato", "Win"))
     monkeypatch.setattr(
-        "agent_worktrees.config.default_config_path", lambda: cfg_path)
+        "worktree_manager.production_picker.project_config.default_config_path", lambda: cfg_path)
 
     col = profiles_io.load_column("Anomalous-Potato", "Win")
     assert TargetSel("Anomalous-Potato", "Win", "agent") in col   # self, locked
@@ -36,7 +36,7 @@ def test_load_local_unmanaged_returns_none(monkeypatch, tmp_path):
     cfg_path.write_text("machine: anomalous-potato\n", encoding="utf-8")
     monkeypatch.setattr(profiles_io, "_local_key", lambda: ("Anomalous-Potato", "Win"))
     monkeypatch.setattr(
-        "agent_worktrees.config.default_config_path", lambda: cfg_path)
+        "worktree_manager.production_picker.project_config.default_config_path", lambda: cfg_path)
 
     assert profiles_io.load_column("Anomalous-Potato", "Win") is None
 
@@ -120,7 +120,7 @@ def test_apply_local_writes_config(monkeypatch, tmp_path):
     cfg_path = tmp_path / "config.yaml"
     monkeypatch.setattr(profiles_io, "_local_key", lambda: ("Anomalous-Potato", "Win"))
     monkeypatch.setattr(
-        "agent_worktrees.config.default_config_path", lambda: cfg_path)
+        "worktree_manager.production_picker.project_config.default_config_path", lambda: cfg_path)
 
     ok, _detail = profiles_io.apply_column(
         "Anomalous-Potato", "Win",

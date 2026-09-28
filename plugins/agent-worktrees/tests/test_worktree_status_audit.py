@@ -272,25 +272,34 @@ def test_check_freshness_bound_widens_with_demanded_count_past_the_sweep_cap():
     assert wsa._check_freshness(entry, now=now, demanded_count=demanded_count) == []
 
 
-def test_count_actively_demanded_excludes_rows_whose_demand_has_aged_out():
-    """Regression (Copilot review, PR #3348): `len(cache_rows)` counts every
-    durable row, including ones `WorktreeStatusCache.sweep_due` will never
-    refresh again -- rows whose `demanded_at` has already passed
-    `DEMAND_TTL_SECONDS` are evicted, not refreshed. Counting those dormant
-    rows would inflate the cap-based freshness bound for every genuinely
-    active entry, and enough abandoned rows could let a real stuck sweep
-    slip past the audit entirely."""
-    from agent_worktrees.worktree_status_cache import DEMAND_TTL_SECONDS
+def test_count_due_and_demanded_excludes_dormant_and_still_fresh_rows():
+    """Regression (Copilot review, PR #3348): the cap-aware bound must count
+    only rows `WorktreeStatusCache.sweep_due` would actually compete for a
+    cap slot on -- i.e. its own `sampled` predicate (within
+    `DEMAND_TTL_SECONDS` of last demand AND already past `DEFAULT_TTL_SECONDS`
+    since its last compute). Counting every actively-demanded row regardless
+    of whether it's individually due (the prior, first-round fix) OVER-widens
+    the bound whenever most demanded rows are still fresh: with many fresh
+    rows and only a couple genuinely due, the cap (well above 2) never needs
+    extra ticks to serve them, so the bound must not act as though it does."""
+    from agent_worktrees.worktree_status_cache import DEFAULT_TTL_SECONDS, DEMAND_TTL_SECONDS
 
     now = time.time()
     rows = [
-        {"demanded_at": now},  # active
-        {"demanded_at": now - (DEMAND_TTL_SECONDS - 1)},  # still active (barely)
-        {"demanded_at": now - (DEMAND_TTL_SECONDS + 1)},  # dormant -- excluded
-        {"demanded_at": now - 10_000},  # long dormant -- excluded
-        {},  # malformed/missing -- conservatively counted as active
+        {"demanded_at": now, "computed_at": now},  # fresh -- not due, excluded
+        {"demanded_at": now, "computed_at": now - (DEFAULT_TTL_SECONDS + 1)},  # due -- counted
+        {
+            "demanded_at": now - (DEMAND_TTL_SECONDS - 1),
+            "computed_at": now - (DEFAULT_TTL_SECONDS + 1),
+        },  # still active (barely) and due -- counted
+        {
+            "demanded_at": now - (DEMAND_TTL_SECONDS + 1),
+            "computed_at": now - (DEFAULT_TTL_SECONDS + 1),
+        },  # dormant -- excluded regardless of due-ness
+        {"demanded_at": now - 10_000, "computed_at": now},  # long dormant -- excluded
+        {"demanded_at": now},  # malformed/missing computed_at -- conservatively counted as due
     ]
-    assert wsa._count_actively_demanded(rows, now=now) == 3
+    assert wsa._count_due_and_demanded(rows, now=now) == 3
 
 
 # -- audit_one -------------------------------------------------------------

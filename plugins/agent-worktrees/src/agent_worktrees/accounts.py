@@ -66,7 +66,11 @@ class AccountsCatalog:
 
 def _accounts_yaml_path() -> Path:
     """Path to the accounts catalog file."""
-    return Path.home() / ".agent-worktrees" / "accounts.yaml"
+    return (
+        Path.home()
+        / ".agent-worktrees"  # marketplace-isolation: allow legacy-compatibility
+        / "accounts.yaml"
+    )
 
 
 def read_catalog() -> AccountsCatalog:
@@ -109,8 +113,9 @@ def write_catalog(catalog: AccountsCatalog) -> None:
     path = _accounts_yaml_path()
     path.parent.mkdir(parents=True, exist_ok=True)
 
+    _hdr = "# ~/.agent-worktrees/accounts.yaml"  # marketplace-isolation: allow legacy
     lines = [
-        "# ~/.agent-worktrees/accounts.yaml",
+        _hdr,
         "# Catalog of gh account identities and how to (re)authenticate them.",
         "# The org->account MAP lives in repos.yaml (account_map:); this file is",
         "# the identity catalog those logins point at.",

@@ -671,6 +671,63 @@ function Test-ZddInstalled {
     return $LASTEXITCODE -eq 0
 }
 
+function Remove-PluginBuildArtifacts {
+    <# Installing FROM the pristine payload directory ($PluginDir, under the
+       plugin install root) leaves setuptools' own build/ + *.egg-info staging
+       behind IN that tree. Left in place, a stale build/ can silently shadow
+       fresh src/ on a later install if setuptools' incremental-build mtime
+       check decides nothing "changed" -- confirmed live on POSIX
+       (copilot-extensions#3444): a truncated recipes_cli.py shipped this way
+       and crash-looped a production daemon for ~8h.
+
+       Every vendored `[tool.uv.sources]` workspace path dep under
+       libs/<name>/ (agent-procutil, zdd, dropin-registry, ...) is its OWN
+       independent setuptools build root and accumulates the identical
+       residue -- confirmed live: a stale libs/agent-procutil/build/lib
+       silently shipped a version of agent_procutil missing a since-added
+       function even after a fully clean `uv cache clean` + a forced
+       `--reinstall-package`/`--refresh-package` rebuild, because every
+       rebuild kept reading the stale build/lib copy instead of the fresh
+       src/ underneath it (those flags bust uv's resolution/build cache, not
+       a stale artifact sitting directly in the source tree uv builds FROM).
+
+       Shared by BOTH the standalone zdd pre-install (which runs before the
+       main package install below) and that main install's own scrub --
+       the zdd pre-install builds from the exact same libs/zdd/ tree and is
+       equally vulnerable if it runs first without this.
+
+       -ExtraDir (optional): Resolve-Zdd/Resolve-VendoredLib can also
+       resolve to a checkout/registry path OUTSIDE $PluginDir entirely (a
+       sibling copilot-extensions checkout, not the marketplace-installed
+       payload) -- $PluginDir/libs/* scrubbing never reaches that tree, so
+       the standalone zdd pre-install passes its own resolved $ZddDir here
+       too. #>
+    param([string]$PluginDir, [string]$ExtraDir)
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
+        (Join-Path $PluginDir 'build'), `
+        (Join-Path $PluginDir '*.egg-info'), `
+        (Join-Path (Join-Path $PluginDir 'src') '*.egg-info')
+    # Directory names under libs/ don't map 1:1 to package names (e.g.
+    # agent-zdd -> libs/zdd), so glob every immediate child rather than
+    # trying to enumerate them.
+    $libsDir = Join-Path $PluginDir 'libs'
+    if (Test-Path -LiteralPath $libsDir) {
+        Get-ChildItem -LiteralPath $libsDir -Directory -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
+                    (Join-Path $_.FullName 'build'), `
+                    (Join-Path $_.FullName '*.egg-info'), `
+                    (Join-Path (Join-Path $_.FullName 'src') '*.egg-info')
+            }
+    }
+    if ($ExtraDir -and $ExtraDir -ne $PluginDir) {
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
+            (Join-Path $ExtraDir 'build'), `
+            (Join-Path $ExtraDir '*.egg-info'), `
+            (Join-Path (Join-Path $ExtraDir 'src') '*.egg-info')
+    }
+}
+
 function Get-AdoptedProjects {
     <# The adopted-project names from agent-worktrees' adoption registry (empty
        when the registry is absent). Used only to give `agent-worktrees get
@@ -913,11 +970,20 @@ function Install-Runtime {
     # install below finds the requirement already satisfied.
     $ZddDir = Resolve-Zdd
     if ($ZddDir) {
+        # Scrub BEFORE this standalone pre-install too, not just the main
+        # install below -- this build reads from the exact same libs/zdd/
+        # tree (or, via Resolve-VendoredLib's registry/checkout fallback, a
+        # sibling checkout entirely OUTSIDE $PluginDir) and is equally
+        # vulnerable to stale build/lib residue shadowing a fresh source
+        # change if it runs first without this -- pass $ZddDir explicitly
+        # so an external resolved path is reached too, not just libs/*.
+        Remove-PluginBuildArtifacts -PluginDir $PluginDir -ExtraDir $ZddDir
         if (Get-Command uv -ErrorAction SilentlyContinue) {
             $zddOut = & uv pip install --python $VenvPython "$ZddDir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet 2>&1
         } else {
             $zddOut = & $VenvPython -m pip install "$ZddDir" 2>&1
         }
+        Remove-PluginBuildArtifacts -PluginDir $PluginDir -ExtraDir $ZddDir
         if ($LASTEXITCODE -ne 0) {
             $ErrorActionPreference = $prevEAP
             Write-Fail "zdd install failed (exit $LASTEXITCODE)"
@@ -972,13 +1038,12 @@ function Install-Runtime {
         # mtime check decides nothing "changed". Scrub on every attempt
         # (success or not) so the payload directory stays the pristine
         # clone it's supposed to be -- mirrors the POSIX installer's
-        # cleanup in install.sh.
-        $scrubArtifacts = {
-            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
-                (Join-Path $PluginDir 'build'), `
-                (Join-Path $PluginDir '*.egg-info'), `
-                (Join-Path (Join-Path $PluginDir 'src') '*.egg-info')
-        }
+        # cleanup in install.sh. Also reaches every vendored
+        # `[tool.uv.sources]` workspace path dep under libs/<name>/, which
+        # is its own independent build root and equally vulnerable -- see
+        # Remove-PluginBuildArtifacts's own docstring for the confirmed
+        # live incident.
+        $scrubArtifacts = { Remove-PluginBuildArtifacts -PluginDir $PluginDir }
         # Scrub BEFORE installing too, not just after: residue already
         # sitting in $PluginDir the moment this call starts (an earlier
         # failed attempt, a marketplace resync, a concurrent process) is

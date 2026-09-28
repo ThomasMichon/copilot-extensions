@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 INSTALL_DIR_ENV = "AGENT_DISPATCH_INSTALL_DIR"
-LEGACY_INSTALL_DIRNAME = ".agent-dispatch"
+LEGACY_INSTALL_DIRNAME = ".agent-dispatch"  # marketplace-isolation: allow legacy-compatibility
 SCOPED_SERVICE_HASH_LENGTH = 12
 
 

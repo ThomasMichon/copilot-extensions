@@ -26,7 +26,7 @@ from agent_procutil import no_window_flags
 from ssh_manager import SSHProfileSource, get_default_manager
 
 from .connect import ConnectError, ConnectStage, ConnectTracker
-from .procgroup import safe_killpg
+from .procgroup import safe_killpg, terminate_windows_tree
 from .relay_state import get_live_relay_port
 
 log = logging.getLogger("agent-bridge")
@@ -184,16 +184,7 @@ class AgentProcess:
             return
         pid = self.proc.pid
         if sys.platform == "win32":
-            try:
-                killer = await asyncio.create_subprocess_exec(
-                    "taskkill", "/PID", str(pid), "/T", "/F",
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.DEVNULL,
-                )
-                async with asyncio.timeout(5):
-                    await killer.wait()
-            except (TimeoutError, OSError, ProcessLookupError):
-                pass
+            await terminate_windows_tree(self.proc)
         else:
             # POSIX: the agent spawns use start_new_session, so the child is a
             # process-group leader -- signal the whole group. Guard against

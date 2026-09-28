@@ -83,7 +83,6 @@ from pathlib import Path
 # -- BEFORE any submodule import can trigger the problem -- makes `pr_cli`'s
 # import a no-op cache hit instead of a second full execution. Fixes #2650.
 sys.modules.setdefault(f"{__package__}.__main__", sys.modules[__name__])
-
 from agent_procutil import (
     detached_kwargs,
     windowless_daemon_kwargs as _windowless_daemon_kwargs_impl,
@@ -91,7 +90,6 @@ from agent_procutil import (
 )
 from lazy_cli_dispatch import dispatch_lazy as _shared_dispatch_lazy
 from lazy_cli_dispatch import self_override as _shared_self_override
-
 from . import (
     activity,
     claim_kinds_registry,
@@ -193,7 +191,6 @@ _NO_AUTO_CLEAN_ENV = "AGENT_WORKTREES_NO_AUTO_CLEAN"
 _AUTO_CLEAN_GRACE_ENV = "AGENT_WORKTREES_AUTO_CLEAN_GRACE_SECS"
 _INVOCATION_CWD: Path | None = None
 _UPDATE_CONTEXT_ENV = "AGENT_WORKTREES_UPDATE_CONTEXT"
-
 
 def windowless_daemon_kwargs(**kwargs):
     return _windowless_daemon_kwargs_impl(**kwargs)
@@ -821,8 +818,8 @@ def _classify_records_lease_guarded(
         return _classify_records_live(records, session_ctx)
 
     from single_instance_lease import AlreadyRunningError, SingleInstance
-
-    lease = SingleInstance(lock_dir, service="classify")
+    service = "classify"  # marketplace-isolation: allow legacy-compatibility
+    lease = SingleInstance(lock_dir, service=service)
     try:
         lease.acquire()
     except AlreadyRunningError:
@@ -1122,7 +1119,9 @@ def _worktree_to_dict(
     (existence and attached client count).
 
     If ``session_ctx`` is provided, includes session-derived metrics
-    (turn_count, session_count, latest_summary).
+    (turn_count, session_count, latest_summary), plus
+    ``session_head_mismatch``/``_scanned_id`` (#3307 Phase 7) when the head
+    disagrees with the session most-recently touched on disk.
 
     If ``bare_orphan_wts`` is provided (the set of worktree ids that host a
     **bare**/un-muxed bound Copilot, from :func:`reclaim.bare_orphan_worktree_ids`),
@@ -1339,6 +1338,17 @@ def _worktree_to_dict(
         # directory is temporarily unavailable.
         if registered_sessions is None:
             d["session_count"] = session_ctx.session_count.get(norm, 0)
+        # #3307 Phase 7 (dotfiles#1298): the asserted head ALWAYS wins for
+        # resumability (unchanged above); a worktree whose head disagrees
+        # with the session actually most-recently touched on disk
+        # (``session_ctx.last_session_id``, GH #198's scan) is a real
+        # inconsistency worth surfacing (e.g. a resumed session landing on
+        # a stale predecessor). Purely additive -- never changes which
+        # session ``last_session_id`` resolves to.
+        scanned_sid = session_ctx.last_session_id.get(norm)
+        if head_session and scanned_sid and scanned_sid != head_session:
+            d["session_head_mismatch"] = True
+            d["session_head_mismatch_scanned_id"] = scanned_sid
         # two-step-restore: the session id(s) currently held by a live
         # ``inuse.<pid>.lock`` (a bound Copilot process -- mux OR bare), and the
         # current durable head for this worktree. The Picker shows the head id
@@ -1971,7 +1981,6 @@ from .worktree_creation import (  # noqa: E402 -- re-export position matches ori
 )
 
 
-
 def _self_owner_ref(work_dir: str | None) -> str | None:
     """Qualified ClaimRef of the worktree rooted at ``work_dir`` (None if not one).
 
@@ -2480,10 +2489,8 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     """Resolve a launch plan and emit it as JSON."""
     return resolve_cli.cmd_resolve(args)
 
-
 # resolve launch helpers are componentized into resolve_cli.py,
-# resolve_launch_cli.py, resolve_machine_cli.py, resolve_picker_cli.py,
-# and resolve_system_cli.py.
+# resolve_launch_cli.py, resolve_machine_cli.py, resolve_picker_cli.py, and resolve_system_cli.py.
 
 def _infer_worktree_id(
     explicit: str | None,
@@ -3148,7 +3155,6 @@ def _monitor_retire_handoff_predecessor(
             json=True,
         )
     )
-
 
 
 def _monitor_trigger_handoff_cutover(
@@ -4006,7 +4012,7 @@ def _start_provisioning_if_needed(
         return diagnostic + (f"[agent-worktrees] Runtime provisioning preview failed: {exc}\n")
     if plan.get("action") != "reconcile":
         return diagnostic
-    services = ", ".join(
+    services = ", ".join(  # marketplace-isolation: allow query-column-list
         dict.fromkeys(
             str(item.get("service"))
             for item in plan.get("updates", [])
@@ -4878,33 +4884,29 @@ def reap_orphan_mux_sessions(
     **Conservative by design** -- a session is never reaped when:
 
     - a terminal client is **attached** (a human is using it),
+    - Worktree Manager already owns the mux session via ``mux-mapping.json``,
     - its worktree record is ``kind: system`` (daemon-owned), or
     - its worktree is still **active** (tracked, dir present), or
-    - it has been **active within the grace window** (fresh pane activity => the
-      Copilot inside is busy), or the activity signal is **unknown** (never risk
-      killing a session we can't prove is idle).
+    - it has been **active within the grace window** (fresh pane activity => the Copilot inside is busy), or the activity signal is **unknown** (never risk killing a session we can't prove is idle).
 
     Returns a JSON-ready dict::
 
         {"available": bool,                  # False when no mux is installed
          "reaped": ["<id>", ...],
-         "skipped": [{"id": "<id>",
-                      "reason": "attached|system|active|busy|activity-unknown"}, ...],
+         "skipped": [{"id": "<id>", "reason": "attached|system|active|busy|activity-unknown|manager-owned"}, ...],
          "errors":  [{"id": "<id>", "reason": "..."}, ...]}
     """
     all_sessions = sessions._list_mux_sessions()
     if all_sessions is None:
         return {"available": False, "reaped": [], "skipped": [], "errors": []}
-
+    from . import managed_mux_registry
     now = time.time() if now is None else now
     activity_by_name = sessions._mux_session_activity()
     tracking_path = cfg.tracking_dir()
     by_id: dict[str, tracking.WorktreeRecord] = {
         rec.worktree_id: rec for rec in tracking.list_records(tracking_path)
     }
-
-    # One reverse map, not a scan per session: the sweep is O(sessions x
-    # records) otherwise.
+    # One reverse map, not a scan per session: the sweep is O(sessions x records) otherwise.
     by_session = sessions.mux_session_index(by_id)
 
     reaped: list[str] = []
@@ -4918,6 +4920,9 @@ def reap_orphan_mux_sessions(
         # "untracked" below -- which reaps a live, tracked session.
         wt_id = sessions.worktree_id_from_mux_session(name, index=by_session)
         if only_id is not None and wt_id != only_id:
+            continue
+        if managed_mux_registry.live_mapping_for_session(name):
+            skipped.append({"id": wt_id, "reason": "manager-owned"})
             continue
         if attached and attached > 0:
             skipped.append({"id": wt_id, "reason": "attached"})
@@ -5366,7 +5371,8 @@ def _write_global_config(
     if path.exists():
         output.skipped(f"Global config exists at {path} (user-owned, left as-is)")
         return
-    content = f"""# ~/.agent-worktrees/config.yaml
+    _p = "~/.agent-worktrees/config.yaml"  # marketplace-isolation: allow legacy-compatibility
+    content = f"""# {_p}
 # GLOBAL machine-wide agent-worktrees config (lowest precedence tier).
 #
 # Machine-wide defaults shared across every project on this machine. Per-repo
@@ -5552,18 +5558,13 @@ def build_parser() -> argparse.ArgumentParser:
     git_cli.add_parsers(sub)
 
     pr_cli.add_parsers(sub)
-
     # stage-update (background marketplace download; #1430 stage-then-join)
-    sp = sub.add_parser(
-        "stage-update", help="Background-stage the plugin marketplace update (JSON status)"
-    )
-    sp.add_argument(
-        "--status",
-        default=None,
-        help="Status file path (defaults to ~/.agent-worktrees/updater-status.json)",
-    )
+    sp = sub.add_parser("stage-update", help="Background-stage the plugin marketplace update (JSON status)")
+    _sh_path = "~/.agent-worktrees/updater-status.json"  # marketplace-isolation: allow legacy
+    sp.add_argument("--status", default=None, help=f"Status file path (defaults to {_sh_path})")
+    sp.add_argument("--indicator-state", action="store_true",
+                    help="Read only the Picker's version-indicator state instead of staging an update")
     sp.add_argument("--json", action="store_true", help="Echo the status dict to stdout")
-
     # reconcile-marketplaces -- retired (#2722); kept as a no-op compatibility
     # shim so a caller still running pre-upgrade script content (an in-flight
     # launch, or a stale deployed marketplace-overrides.ps1/.sh) doesn't
@@ -5699,9 +5700,6 @@ def _current_session_ids() -> set[str]:
 
 # maintenance / doctor surfaces are componentized into maintenance_cli.py.
 
-
-
-
 # ── Lazy dispatch (agent-cli-lazy-dispatch effort, Phase 1) ────────────────
 # {command: (module_name, handler_attr_name)} for every subcommand whose own
 # module owns BOTH its argparse subparser (via that module's `add_parsers`,
@@ -5746,6 +5744,10 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'follow-ups': ('follow_ups_cli', 'cmd_follow_ups'),
     'gc': ('cleanup_gc_cli', 'cmd_gc'),
     'get': ('context_cli', 'cmd_get'),
+    'picker-bootstrap': ('context_cli', 'cmd_picker_bootstrap'),
+    'picker-paths': ('context_cli', 'cmd_picker_paths'),
+    'picker-reconcile-local': ('picker_reconcile_cli', 'cmd_picker_reconcile_local'),
+    'repair-stale-anchor': ('context_cli', 'cmd_repair_stale_anchor'),
     'handoff-cutover': ('handoff_cli', 'cmd_handoff_cutover'),
     'handoffs-check': ('handoff_cli', 'cmd_handoffs_check'),
     'head-session': ('session_tracking_cli', 'cmd_head_session'),
@@ -5766,6 +5768,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'post-exit': ('finalize_cli', 'cmd_post_exit'),
     'pr-complete': ('pr_state_cli', 'cmd_pr_complete'),
     'pr-create': ('finalize_cli', 'cmd_create_pr'),
+    'pr-nudge': ('pr_state_cli', 'cmd_pr_nudge'),
     'pr-ready': ('pr_state_cli', 'cmd_pr_ready'),
     'pr-status': ('pr_state_cli', 'cmd_pr_status'),
     'pre-launch': ('update_cli', 'cmd_pre_launch'),
@@ -5988,10 +5991,10 @@ def _load_full_command_surface() -> None:
     global auto_clean_enabled, claims_cli, cleanup_gc_cli, cmd_accounts_dispatch, cmd_anchor_check, cmd_attribution_audit, cmd_backfill_sessions, cmd_bind_nudge
     global cmd_bind_session, cmd_claimant_liveness, cmd_claims, cmd_cleanup, cmd_codename_lookup, cmd_conclude_disposable, cmd_conclude_session, cmd_config_migrate
     global cmd_config_root_dispatch, cmd_coordination_readiness_dispatch, cmd_copilot_identity_dispatch, cmd_create, cmd_create_pr, cmd_deploy_instructions, cmd_deregister_session, cmd_dev, cmd_doctor
-    global cmd_effort_focus, cmd_embody, cmd_finalize, cmd_follow_ups, cmd_gc, cmd_get, cmd_git_dispatch, cmd_git_feature_branch
+    global cmd_effort_focus, cmd_embody, cmd_finalize, cmd_follow_ups, cmd_gc, cmd_get, cmd_git_dispatch, cmd_git_feature_branch, cmd_picker_bootstrap, cmd_picker_paths, cmd_picker_reconcile_local
     global cmd_git_merge_to_feature, cmd_git_sync, cmd_handoff_cutover, cmd_handoff_trace, cmd_handoffs_check, cmd_head_session, cmd_history_digest, cmd_hygiene
-    global cmd_install, cmd_install_status, cmd_installer_readiness, cmd_knowledge_dispatch, cmd_link_succession, cmd_list, cmd_list_sessions, cmd_machine_context
-    global cmd_mark_complete, cmd_note_handoff, cmd_picker, cmd_post_exit, cmd_pr_complete, cmd_pr_dispatch, cmd_pr_merge_dispatch, cmd_pr_ready
+    global cmd_install, cmd_install_status, cmd_installer_readiness, cmd_knowledge_dispatch, cmd_link_succession, cmd_list, cmd_list_sessions, cmd_machine_context, cmd_repair_stale_anchor
+    global cmd_mark_complete, cmd_note_handoff, cmd_picker, cmd_post_exit, cmd_pr_complete, cmd_pr_dispatch, cmd_pr_merge_dispatch, cmd_pr_nudge, cmd_pr_ready
     global cmd_pr_research_dispatch, cmd_pr_status, cmd_pr_watch_dispatch, cmd_pre_launch, cmd_push_changes, cmd_reap_sessions, cmd_reap_shells
     global cmd_recent_messages, cmd_reclaim, cmd_reconcile_binstubs, cmd_reconcile_marketplaces, cmd_reconcile_plugins, cmd_reconcile_sessions, cmd_register, cmd_register_project_entry
     global cmd_register_session, cmd_related_dispatch, cmd_remove_system, cmd_remux, cmd_repair, cmd_repos_dispatch, cmd_restart, cmd_run
@@ -6021,6 +6024,7 @@ def _load_full_command_surface() -> None:
         list_cli,
         maintenance_cli,
         picker_profiles_cli,
+        picker_reconcile_cli,
         pr_cli,
         pr_state_cli,
         reap_cli,
@@ -6067,8 +6071,9 @@ def _load_full_command_surface() -> None:
     _pr_reminder_for = context_cli._pr_reminder_for
     _emit_pr_reminder = context_cli._emit_pr_reminder
     cmd_deploy_instructions = context_cli.cmd_deploy_instructions
-    cmd_machine_context = context_cli.cmd_machine_context
-    cmd_get = context_cli.cmd_get
+    cmd_machine_context, cmd_get, cmd_picker_bootstrap = context_cli.cmd_machine_context, context_cli.cmd_get, context_cli.cmd_picker_bootstrap
+    cmd_picker_paths, cmd_picker_reconcile_local = context_cli.cmd_picker_paths, picker_reconcile_cli.cmd_picker_reconcile_local
+    cmd_repair_stale_anchor = context_cli.cmd_repair_stale_anchor
     cmd_install_status = context_cli.cmd_install_status
     cmd_installer_readiness = context_cli.cmd_installer_readiness
     cmd_reconcile_marketplaces = context_cli.cmd_reconcile_marketplaces
@@ -6154,6 +6159,7 @@ def _load_full_command_surface() -> None:
     cmd_set_pr = pr_state_cli.cmd_set_pr
     cmd_pr_ready = pr_state_cli.cmd_pr_ready
     cmd_pr_status = pr_state_cli.cmd_pr_status
+    cmd_pr_nudge = pr_state_cli.cmd_pr_nudge
     cmd_pr_complete = pr_state_cli.cmd_pr_complete
     cmd_status = status_cli.cmd_status
     cmd_status_monitor = status_monitor_cli.cmd_status_monitor
@@ -6397,6 +6403,7 @@ def _load_full_command_surface() -> None:
         "set-pr": cmd_set_pr,
         "pr-ready": cmd_pr_ready,
         "pr-status": cmd_pr_status,
+        "pr-nudge": cmd_pr_nudge,
         "pr-complete": cmd_pr_complete,
         "mark-complete": cmd_mark_complete,
         "status": cmd_status,
@@ -6444,7 +6451,11 @@ def _load_full_command_surface() -> None:
         "deploy-instructions": cmd_deploy_instructions,
         "machine-context": cmd_machine_context,
         "get": cmd_get,
+        "picker-bootstrap": cmd_picker_bootstrap,
+        "picker-paths": cmd_picker_paths,
+        "picker-reconcile-local": cmd_picker_reconcile_local,
         "pre-launch": cmd_pre_launch,
+        "repair-stale-anchor": cmd_repair_stale_anchor,
         "stage-update": cmd_stage_update,
         "reconcile-marketplaces": cmd_reconcile_marketplaces,
         "reconcile-plugins": cmd_reconcile_plugins,

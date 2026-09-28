@@ -80,9 +80,9 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
-          "sha256": "fe08b187185a99022b5d6c09c2ec8a00a58fb4a56b2a4712ba42afcc491f8cc9",
-          "semantic": true,
-          "non_semantic_reason": null
+          "sha256": "fc97c03d617099c86a18685b2b41880d565684ce30149d699530070214d94938",
+          "semantic": false,
+          "non_semantic_reason": "Adds a RuntimeError -> HTTP 409 mapping for a namespace-provider readiness refusal in start_session; the representative session-create wire shape (request/response contract) is unchanged."
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",

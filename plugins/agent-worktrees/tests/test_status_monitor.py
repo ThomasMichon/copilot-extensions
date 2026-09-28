@@ -2690,6 +2690,9 @@ def _wire_restart(monkeypatch, *, lock_data, live, superseded, spawn_ok=True):
         return True
 
     monkeypatch.setattr(_procs, "terminate_pid", _term)
+    import agent_worktrees.stale_runtime_reap as _srr
+
+    monkeypatch.setattr(_srr, "reap", lambda cfg: [])
     return spawned, reaped, removed
 
 
@@ -2747,6 +2750,64 @@ def test_cmd_restart_always_exits_zero(monkeypatch, capsys):
     assert "status-monitor:" in capsys.readouterr().out
 
 
+# ---------------------------------------------------------------------------
+# stale_runtime_reap.reap() wiring into _restart_status_monitor -- #4268: a
+# one-shot CLI verb invocation mid-flight on a superseded runtime slot has no
+# self-check of its own (only the resident monitor loop rechecks
+# `_runtime_superseded` each tick), so it can wedge and pile up across every
+# deploy it survives unless the cutover reap also sweeps for it, not just the
+# monitor's own known lock pid. See test_stale_runtime_reap.py for the pure
+# `reap()`/`summary_bits()`/`summary_suffix()` unit tests.
+# ---------------------------------------------------------------------------
+
+
+def test_restart_reports_stale_runtime_reaped_alongside_monitor_reap(monkeypatch):
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    _wire_restart(
+        monkeypatch, lock_data={"pid": 4242, "prefix": "/old/slot"}, live=True, superseded=True
+    )
+    import agent_worktrees.stale_runtime_reap as _srr
+
+    monkeypatch.setattr(_srr, "reap", lambda cfg: [111, 333])
+
+    r = m._restart_status_monitor()
+
+    assert r["stale_runtime_reaped"] == [111, 333]
+    assert r["reaped"] == 4242  # the monitor's own lock-pid reap still runs too
+
+
+def test_restart_sweeps_stale_runtime_even_when_monitor_already_current(monkeypatch):
+    # The general sweep is independent of the singleton monitor's own state --
+    # a wedged one-shot verb invocation can exist on an old slot even when the
+    # CURRENT monitor already owns the host.
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    _wire_restart(
+        monkeypatch, lock_data={"pid": 999, "prefix": "/cur/slot"}, live=True, superseded=False
+    )
+    import agent_worktrees.stale_runtime_reap as _srr
+
+    monkeypatch.setattr(_srr, "reap", lambda cfg: [111])
+
+    r = m._restart_status_monitor()
+
+    assert r["already_current"] is True
+    assert r["stale_runtime_reaped"] == [111]
+
+
+def test_cmd_restart_reports_stale_runtime_reap_count(monkeypatch, capsys):
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    _wire_restart(monkeypatch, lock_data=None, live=False, superseded=False)
+    import agent_worktrees.stale_runtime_reap as _srr
+
+    monkeypatch.setattr(_srr, "reap", lambda cfg: [111, 222])
+
+    rc = m.cmd_status_monitor_restart(argparse.Namespace())
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "reaped 2 stale-runtime process(es)" in out
+
+
 def test_installers_invoke_monitor_restart_at_cutover():
     # Consolidated-status-daemon Phase 1 contract: BOTH runtime installers must
     # invoke `status-monitor-restart` at the version cutover, or a deploy silently
@@ -2800,6 +2861,65 @@ def test_status_monitor_backs_off_at_iteration_boundary_without_mutating(
     assert governance_calls == ["iteration-boundary"]
     assert sleeps == [m._GOVERNANCE_BACKOFF_SECONDS]
     assert len(writes) == 2  # startup ownership stamp only; no loop renewal
+
+
+def test_status_monitor_binds_and_unbinds_resident_push(tmp_path, monkeypatch):
+    """resident_push must be bound to THIS run's real wake-event/segment-cache
+    at startup (so a `status_disposition_write` verb served in-process during
+    this monitor's lifetime can push an immediate refresh instead of waiting
+    out `interval` -- see resident_push.py/test_resident_push.py) and
+    explicitly un-bound again on shutdown, isolated via the same
+    single-iteration governance-backoff exit `test_status_monitor_backs_off_
+    at_iteration_boundary_without_mutating` uses."""
+    from agent_worktrees import resident_push
+
+    lock = tmp_path / "status-monitor.lock"
+    monkeypatch.setattr(m, "_monitor_lock_path", lambda: lock)
+    monkeypatch.setattr(m, "_load_hook_client_module", lambda: None)
+    monkeypatch.setattr(m.locks, "write_lock", lambda _path, extra=None: None)
+    runtime_states = iter([False, True])
+    monkeypatch.setattr(m, "_runtime_superseded", lambda **_kw: next(runtime_states))
+    monkeypatch.setattr(
+        m,
+        "_monitor_sweep",
+        lambda *args, **kwargs: pytest.fail("sweep must not run while backing off"),
+    )
+    monkeypatch.setattr(m.time, "sleep", lambda *_a, **_k: None)
+
+    class _Governance:
+        def recheck(self, checkpoint):
+            return {"status": "backoff", "reason": "test-exit"}
+
+    monkeypatch.setattr(m.loop_governance_mod, "LoopGovernance", lambda: _Governance())
+
+    bound = []
+    real_bind = resident_push.bind
+
+    def _spy_bind(wake_event, segment_cache):
+        bound.append((wake_event, segment_cache))
+        real_bind(wake_event, segment_cache)
+
+    monkeypatch.setattr(resident_push, "bind", _spy_bind)
+    reset_calls = []
+    real_reset = resident_push.reset
+
+    def _spy_reset():
+        reset_calls.append(True)
+        real_reset()
+
+    monkeypatch.setattr(resident_push, "reset", _spy_reset)
+
+    assert m.cmd_status_monitor(argparse.Namespace(interval=5)) == 0
+
+    assert len(bound) == 1
+    wake_event, segment_cache = bound[0]
+    assert isinstance(wake_event, threading.Event)
+    assert hasattr(segment_cache, "invalidate")  # the real _StatusSegmentCache
+    assert reset_calls == [True]
+    # Un-bound at shutdown -- a stray notify() after this monitor exits must
+    # be a safe no-op, never touch a wake-event/cache from a dead run.
+    assert resident_push._wake_event is None
+    assert resident_push._segment_cache is None
 
 
 def test_classify_daemon_started_published_in_lock_and_closed_on_exit(

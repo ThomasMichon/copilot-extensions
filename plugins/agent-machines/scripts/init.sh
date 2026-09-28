@@ -669,8 +669,30 @@ if [[ ( "$ACTION" == "cell-provision" || "$ACTION" == "slot-cutover" ) &&
             owner="$(readlink "$LOCK_LINK" 2>/dev/null || true)"
             if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
                 sleep 1
-            elif [[ "$(readlink "$LOCK_LINK" 2>/dev/null || true)" == "$owner" ]]; then
-                rm -f "$LOCK_LINK"
+            elif ln -s "$$" "$LOCK_LINK.reap" 2>/dev/null; then
+                # Review finding (round 10, on the stamp lock's identical
+                # sibling pattern below): a plain readlink-then-rm here is a
+                # TOCTOU race -- another process could reap the same stale
+                # link and create its own live one between our two readlink
+                # calls, and this rm -f would then delete THAT live lock. A
+                # PID-bearing symlink (same pattern as the main lock, NOT a
+                # bare `mkdir`) is atomic AND self-healing: only one process
+                # at a time can hold it, and if ITS owner dies before
+                # cleanup, the `elif` branch below reclaims it instead of
+                # wedging every future reap attempt forever (round-11
+                # finding on the round-10 fix itself). Re-verify the link is
+                # still the SAME stale value we observed before removing it.
+                if [[ "$(readlink "$LOCK_LINK" 2>/dev/null || true)" == "$owner" ]]; then
+                    rm -f "$LOCK_LINK"
+                fi
+                rm -f "$LOCK_LINK.reap"
+            elif [[ "$(readlink "$LOCK_LINK.reap" 2>/dev/null || true)" =~ ^[0-9]+$ ]] &&
+                 ! kill -0 "$(readlink "$LOCK_LINK.reap" 2>/dev/null)" 2>/dev/null; then
+                # The reap mutex itself is stale (its owner died mid-reap) --
+                # reclaim it so the main lock can never wedge permanently.
+                rm -f "$LOCK_LINK.reap" 2>/dev/null || true
+            else
+                sleep 0.1
             fi
         done
     fi
@@ -1327,15 +1349,24 @@ _ensure_uv_index() {
 deploy_resolver() {
     mkdir -p "$INSTALL_DIR/bin"
     for r in resolve-runtime.sh resolve-runtime.ps1; do
-        [ -f "$SCRIPT_DIR/$r" ] && cp -f "$SCRIPT_DIR/$r" "$INSTALL_DIR/bin/$r"
+        [ -f "$SCRIPT_DIR/$r" ] || continue
+        # Review finding (round 8): a direct `cp -f` truncates the destination
+        # before copying, so a binstub sourcing this resolver concurrently
+        # could read a partial/empty script. Publish through a same-directory
+        # temp file + `mv -f`, the same atomic pattern deploy_binstub already
+        # uses for the binstub itself.
+        _r_tmp="$INSTALL_DIR/bin/$r.tmp-$$"
+        cp -f "$SCRIPT_DIR/$r" "$_r_tmp"
+        mv -f "$_r_tmp" "$INSTALL_DIR/bin/$r"
     done
 }
 
 deploy_binstub() {
     STUB="$LOCAL_BIN/agent-machines"
+    STUB_TMP="$STUB.tmp-$$"
     mkdir -p "$LOCAL_BIN"
     deploy_resolver
-    cat > "$STUB" << 'STUBEOF'
+    cat > "$STUB_TMP" << 'STUBEOF'
 #!/usr/bin/env bash
 # agent-machines binstub -- self-provisioning (install-on-first-use).
 # Resolves the interpreter SOLELY via the junction-free versioned-runtime marker
@@ -1402,16 +1433,100 @@ else
 fi
 exit "$_rc"
 STUBEOF
-    chmod +x "$STUB"
+    chmod +x "$STUB_TMP"
+    mv -f "$STUB_TMP" "$STUB"
     _ok "Binstub: $STUB (self-provisioning)"
 }
 # Cheap 'stamp': splat the binstub + payload marker, defer the venv build to first
-# use (fits a sessionStart hook's grace window). No venv, no uv.
+# use (fits a sessionStart hook's grace window). No venv, no uv, no snapshot
+# copy -- genuinely fast, unlike the Windows sibling (which also copies the
+# whole plugin payload into a snapshots/ slot); this stays a synchronous
+# sessionStart-hook call on POSIX (see bootstrap-check.sh) rather than being
+# backgrounded. Lock-serialized against a concurrent stamp from another
+# session so two writers can never interleave their binstub/marker writes --
+# flock when available, else the same PID-symlink fallback
+# cell_provision's own lock uses (init.sh:662-675) so macOS (no flock by
+# default) and COPILOT_EXT_NO_FLOCK=1 still get real mutual exclusion, not a
+# best-effort no-op.
 if [[ "$ACTION" == "stamp" ]]; then
+    # Review finding (round 11): deploy_binstub's generated stub hardcodes
+    # `$HOME/.agent-machines` as its marker root (matching the Windows
+    # `.cmd`'s own hardcoded `%USERPROFILE%\.agent-machines`, rejected for
+    # the same reason in round 10) -- it does NOT follow a custom
+    # --install-dir. A custom INSTALL_DIR would therefore publish payload-dir
+    # under a root the generated stub can never read, producing a broken
+    # (exit-1-on-first-use) launcher. bootstrap-check.sh's real
+    # sessionStart-hook call never passes --install-dir for this action, so
+    # reject it explicitly here rather than silently deploying a stub that
+    # cannot work.
+    _default_install_dir="$HOME/.agent-machines"
+    if [[ "$INSTALL_DIR" != "$_default_install_dir" ]]; then
+        _fail "stamp only supports the default install dir ($_default_install_dir) -- the generated binstub hardcodes that root and cannot read markers written to '$INSTALL_DIR'."
+        exit 1
+    fi
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
-    printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
+    _stamp_lock_link=""
+    _unlock_stamp() {
+        if [[ -n "$_stamp_lock_link" ]]; then
+            local owner
+            owner="$(readlink "$_stamp_lock_link" 2>/dev/null || true)"
+            [[ "$owner" != "$$" ]] || rm -f "$_stamp_lock_link"
+            _stamp_lock_link=""
+        else
+            flock -u 9 2>/dev/null || true
+            exec 9>&-
+        fi
+    }
+    if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
+        exec 9>"$INSTALL_DIR/.stamp.lock"
+        flock 9
+    else
+        _stamp_lock_link="$INSTALL_DIR/.stamp.lock.pid"
+        until ln -s "$$" "$_stamp_lock_link" 2>/dev/null; do
+            owner="$(readlink "$_stamp_lock_link" 2>/dev/null || true)"
+            if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
+                sleep 1
+            elif ln -s "$$" "$_stamp_lock_link.reap" 2>/dev/null; then
+                # Review finding (round 10): a plain readlink-then-rm is a
+                # TOCTOU race -- another process could reap the same stale
+                # link and create its own live one between our two readlink
+                # calls, and this rm -f would then delete THAT live lock. A
+                # PID-bearing symlink (NOT a bare `mkdir`) is atomic AND
+                # self-healing: if ITS owner dies before cleanup, the next
+                # `elif` branch below reclaims it instead of wedging every
+                # future reap attempt forever (round-11 finding on the
+                # round-10 fix itself). Re-verify the link is still the SAME
+                # stale value we observed before removing it.
+                if [[ "$(readlink "$_stamp_lock_link" 2>/dev/null || true)" == "$owner" ]]; then
+                    rm -f "$_stamp_lock_link"
+                fi
+                rm -f "$_stamp_lock_link.reap"
+            elif [[ "$(readlink "$_stamp_lock_link.reap" 2>/dev/null || true)" =~ ^[0-9]+$ ]] &&
+                 ! kill -0 "$(readlink "$_stamp_lock_link.reap" 2>/dev/null)" 2>/dev/null; then
+                # The reap mutex itself is stale (its owner died mid-reap) --
+                # reclaim it so the main lock can never wedge permanently.
+                rm -f "$_stamp_lock_link.reap" 2>/dev/null || true
+            else
+                sleep 0.1
+            fi
+        done
+    fi
+    trap _unlock_stamp EXIT INT TERM
+    # Review finding: the stamp lock above serializes writers against each
+    # other, but the generated binstub reads payload-dir WITHOUT taking it.
+    # A direct `>` redirection truncates the file before printf writes it, so
+    # a reader racing a later/concurrent stamp could see an empty path and
+    # exit 127 even though the binstub itself is atomically replaced. Publish
+    # the marker the same way deploy_binstub does: write to a same-directory
+    # temp file, then rename -- a reader always sees either the old or the
+    # new content, never a truncated one.
+    _payload_dir_tmp="$INSTALL_DIR/.payload-dir.tmp-$$"
+    printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$_payload_dir_tmp"
+    mv -f "$_payload_dir_tmp" "$INSTALL_DIR/payload-dir"
     deploy_binstub
     _ok "Stamped: binstub on PATH; runtime provisions on first use."
+    _unlock_stamp
+    trap - EXIT INT TERM
     exit 0
 fi
 

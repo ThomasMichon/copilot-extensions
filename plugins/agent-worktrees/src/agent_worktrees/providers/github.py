@@ -14,7 +14,7 @@ from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse
 from urllib.parse import quote
 
-from ..pr_contract import Comment, CommentThread, PRSnapshot, Review, ThreadsResult
+from ..pr_contract import Comment, CommentThread, PRSnapshot, Review, ReviewNudgeResult, ThreadsResult
 from .base import ProviderError, PRScope, PullResult, reject_copilot_mention, run_cli
 
 
@@ -623,6 +623,55 @@ class GitHubProvider:
                 f"{proc.stderr.strip() or proc.stdout.strip()}"
             )
         return ""
+
+    #: Maps a repo's abstract ``pr.reviewer`` token to the concrete GitHub
+    #: reviewer login ``requested_reviewers`` understands. Only ``"copilot"``
+    #: is mapped today; an unmapped token falls to ``_unsupported_review_request``.
+    _REVIEWER_BOT_LOGINS = {
+        "copilot": "copilot-pull-request-reviewer[bot]",
+    }
+
+    def request_review(
+        self, repo: str, number: int, *, reviewer: str = "", api_base: str = "",
+        token: str | None = None,
+    ) -> ReviewNudgeResult:
+        """Ask GitHub's Copilot code-review bot to (re-)review PR ``number``
+        via ``POST .../requested_reviewers`` -- works for both the initial
+        request and a re-request once Copilot has already reviewed, though
+        the latter is asynchronous and not reliably observable from the API
+        response alone (a 2xx means GitHub accepted the request, not that a
+        fresh verdict will land). Carries no comment body (never risks an
+        ``@copilot`` mention -- see ``reject_copilot_mention``).
+        """
+        token_key = (reviewer or "").strip().lower()
+        bot_login = self._REVIEWER_BOT_LOGINS.get(token_key, "")
+        if not bot_login:
+            from .base import _unsupported_review_request
+            return _unsupported_review_request(self.name, reviewer)
+
+        host = self.authority_endpoint(api_base)
+        proc = run_cli(
+            [
+                "gh", "api", "--hostname", host, "-X", "POST",
+                f"repos/{repo}/pulls/{number}/requested_reviewers",
+                "-f", f"reviewers[]={bot_login}",
+            ],
+            env=self._env(token, host=host),
+        )
+        if proc.returncode != 0:
+            detail = proc.stderr.strip() or proc.stdout.strip()
+            return ReviewNudgeResult(
+                supported=True, requested=False, reviewer=bot_login,
+                error=f"gh api requested_reviewers failed for {repo}#{number}: {detail}",
+            )
+        return ReviewNudgeResult(
+            supported=True, requested=True, reviewer=bot_login,
+            detail=(
+                f"Requested a review from {bot_login}. GitHub processes this "
+                "asynchronously (observed latency: minutes) -- poll pr-status "
+                "or pr-watch afterward rather than assuming an immediate verdict."
+            ),
+        )
 
     def pull_review_gate(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None,

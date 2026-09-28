@@ -114,7 +114,7 @@ boundaries, and deploy/drift checklist are in
 
 | `auth.kind` | Source | http injects | stdio injects |
 |-------------|--------|--------------|---------------|
-| `entra` / `az` | `az account get-access-token` | `Authorization: Bearer` | env var |
+| `entra` / `az` | on-PATH `ado-auth-helper` (Codespace-guest relay client) if present, else `az account get-access-token`; always the latter when `tenant` is configured, since the relay has no tenant parameter | `Authorization: Bearer` | env var |
 | `gh` | `gh auth token` | `Authorization: Bearer` | env var |
 | `git-credential` | Git Credential Manager | `Authorization: Basic` | env var |
 | `command` | any git-credential-fill-shaped command | templated header | target env var |

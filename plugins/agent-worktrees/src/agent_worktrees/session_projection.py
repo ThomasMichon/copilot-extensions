@@ -111,15 +111,14 @@ def _session_paths(
         raise MissingSessionTree(f"missing session directory: {session_dir}")
     _validate_session_directory(root, session_dir, session_id)
     if writing and (session_dir / "rescued-origin.json").exists():
-        raise RestoredProjectionReadOnly(
-            f"restored session is read-only: {session_id}"
-        )
+        raise RestoredProjectionReadOnly(f"restored session is read-only: {session_id}")
     target = session_dir / SIDECAR_NAME
     if target.exists():
         if _is_reparse(target) or not target.is_file():
             raise ProjectionError(f"unsafe projection target: {target}")
-    lock_base = root / ".agent-worktrees-locks" / f"{session_id}.json"
-    temp_dir = root / ".agent-worktrees-tmp"
+    _lock_dirname = ".agent-worktrees-locks"  # marketplace-isolation: allow legacy-compatibility
+    lock_base = root / _lock_dirname / f"{session_id}.json"
+    temp_dir = root / ".agent-worktrees-tmp"  # marketplace-isolation: allow legacy-compatibility
     if not writing:
         return target, lock_base, temp_dir
     for managed_dir in (lock_base.parent, temp_dir):

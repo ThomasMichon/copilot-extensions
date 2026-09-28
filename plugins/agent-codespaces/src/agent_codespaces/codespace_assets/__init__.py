@@ -48,7 +48,10 @@ __all__ = [
 _RELAY_CLIENT = "ado-auth-helper-relay"
 _WRAPPER = "ado-auth-helper-wrapper"
 _AUTH_ERROR_POLICY = "auth-error-policy.instructions.md"
-AUTH_ERROR_POLICY_INSTRUCTIONS_ROOT = "$HOME/.agent-codespaces/custom-instructions"
+_LEGACY_ROOT = (
+    "$HOME/.agent-codespaces/custom-instructions"  # marketplace-isolation: allow legacy
+)
+AUTH_ERROR_POLICY_INSTRUCTIONS_ROOT = _LEGACY_ROOT
 AUTH_ERROR_POLICY_REMOTE_PATH = (
     f"{AUTH_ERROR_POLICY_INSTRUCTIONS_ROOT}/.github/instructions/{_AUTH_ERROR_POLICY}"
 )
@@ -165,7 +168,7 @@ for ws in sorted(glob.glob("/workspaces/*")):
     if not (os.path.isfile(rush_json) and os.path.isfile(installer)):
         continue
     npmrc = os.path.join(ws, ".npmrc")
-    backup = npmrc + ".agent-codespaces-bak"
+    backup = npmrc + ".agent-codespaces-bak"  # marketplace-isolation: allow legacy-compatibility
     had_npmrc = os.path.exists(npmrc)
     try:
         if had_npmrc:
@@ -383,7 +386,7 @@ def build_provision_command(ado_host: str | None = None) -> str:
         _chunked_payload_pipeline(
             wrapper_b64,
             ".agent-codespaces-auth-wrapper.b64",
-            '> "$HOME/.agent-codespaces-auth-wrapper"',
+            '> "$HOME/.agent-codespaces-auth-wrapper"',  # marketplace-isolation: allow legacy
         ),
         # Older releases also installed the relay wrapper as
         # ~/azure-auth-helper. That shadows Azure CLI's native login helper,
@@ -407,7 +410,8 @@ def build_provision_command(ado_host: str | None = None) -> str:
         '_interp=$(printf "%s" "$_sb" | sed -e "s/^#![[:space:]]*//" -e "s/[[:space:]].*$//"); '
         'case "$_sb" in "#!"*node*) [ -x "$_interp" ] || _sb="#!/usr/bin/env node" ;; '
         '*) _sb="#!/usr/bin/env node" ;; esac; '
-        '{ printf "%s\\n" "$_sb"; tail -n +2 "$HOME/.agent-codespaces-auth-wrapper"; } '
+        '{ printf "%s\\n" "$_sb"; tail -n +2 '
+        '"$HOME/.agent-codespaces-auth-wrapper"; } '  # marketplace-isolation: allow legacy
         '> "$HOME/$_n"; '
         'chmod +x "$HOME/$_n"; '
         # Expose the bare name on PATH (~/.local/bin) so official bare-name
@@ -416,7 +420,7 @@ def build_provision_command(ado_host: str | None = None) -> str:
         # ~/<name> alone is unreachable by `Executable.spawnSync('<name>')`.
         'ln -sf "$HOME/$_n" "$HOME/.local/bin/$_n"; '
         'done; '
-        'rm -f "$HOME/.agent-codespaces-auth-wrapper"',
+        'rm -f "$HOME/.agent-codespaces-auth-wrapper"',  # marketplace-isolation: allow legacy
         # --- #133/#112/#159: pin the relay-first git credential helper --------
         # The native git config points ADO (dev.azure.com or an
         # organization's own *.visualstudio.com host) at the VS Code broker

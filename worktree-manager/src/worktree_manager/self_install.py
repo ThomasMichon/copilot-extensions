@@ -312,13 +312,17 @@ def _write_marker(root: Path, version: str) -> None:
 
 def _materialize_payload_pointers(payload_dir: Path, slot: Path) -> None:
     """Expand any vendor-pointer lib copies under a freshly-copied
-    ``slot/libs/*`` into real, self-contained content -- a standalone
+    ``slot/libs/*``, AND any `uv`-editable canonical-reference entry in
+    ``slot/pyproject.toml`` (the mechanism that superseded the
+    src-passthrough directory-pointer form -- vendor-pointer-generalization
+    effort, Phase 1), into real, self-contained content -- a standalone
     self-installed slot (or a self-updated one fetched via git/tarball) has
-    no ``libs/``+``plugins/`` monorepo ancestor of its own, so the
-    src-passthrough pointer stub's runtime ``_find_repo_root`` walk can
-    never find canonical there; every pointer copy MUST be materialized
-    into a real copy before (or as part of) publishing this slot, exactly
-    the way a `main`-branch release already does.
+    no ``libs/``+``plugins/`` monorepo ancestor of its own, so neither the
+    src-passthrough pointer stub's runtime ``_find_repo_root`` walk NOR a
+    `uv`-editable entry's escaping relative ``path`` can ever resolve
+    there; every pointer/reference MUST be materialized into a real copy
+    before (or as part of) publishing this slot, exactly the way a
+    `main`-branch release already does.
 
     Uses ``_trusted_pointer_materializer`` -- a real, statically-shipped
     copy of ``tools/materialize_main.py``'s pointer-expansion core, NOT a
@@ -334,37 +338,51 @@ def _materialize_payload_pointers(payload_dir: Path, slot: Path) -> None:
     ``payload_dir`` is the SOURCE being copied (still-live at the moment
     this runs, whether a dev checkout or a freshly fetched self_update
     staging tree -- see ``self_update``'s git-clone/tarball paths, both of
-    which now guarantee a ``libs/`` sibling next to the payload). Resolves
+    which now guarantee a ``libs/`` sibling next to the payload) -- also
+    the correct base a `uv`-editable entry's relative ``path`` was
+    authored against, since ``payload_dir`` and ``slot`` share the same
+    nesting depth (a plain ``copytree``, not a re-rooted layout). Resolves
     canonical from ``payload_dir.parent`` -- if that ancestor lacks a real
-    ``libs/`` (and thus can't provide canonical content), any pointer found
-    in the copied slot is an unresolvable, permanently-broken import for
-    whoever runs it next, so this raises rather than silently shipping it.
+    ``libs/`` (and thus can't provide canonical content), any pointer/
+    reference found in the copied slot is an unresolvable, permanently-
+    broken import for whoever runs it next, so this raises rather than
+    silently shipping it.
     """
     from . import _trusted_pointer_materializer as materializer
 
     libs_dir = slot / "libs"
-    if not libs_dir.is_dir():
-        return
-    # Discover pointer markers FIRST, before deciding whether canonical is
-    # even reachable -- a normal payload with real (non-pointer) libs has
-    # nothing to materialize at all, so there's no reason to fail (or
-    # even inspect) canonical reachability for it.
-    unresolved = materializer.find_pointers_in_libs_dir(libs_dir)
-    if not unresolved:
+    # Discover pointer markers and uv-editable references FIRST, before
+    # deciding whether canonical is even reachable -- a normal payload with
+    # only real (non-pointer, non-escaping) dependencies has nothing to
+    # materialize at all, so there's no reason to fail (or even inspect)
+    # canonical reachability for it.
+    unresolved = materializer.find_pointers_in_libs_dir(libs_dir) if libs_dir.is_dir() else []
+    try:
+        uv_refs = materializer.find_uv_editable_refs(payload_dir)
+    except materializer.ManifestUnreadable as e:
+        raise RuntimeError(f"cannot install this payload: {e}") from e
+    if not unresolved and not uv_refs:
         return
     monorepo_root = payload_dir.parent
     has_canonical = (monorepo_root / "libs").is_dir()
     if not has_canonical:
-        names = ", ".join(sorted(p.parent.name for p in unresolved))
+        names = sorted(p.parent.name for p in unresolved) + sorted(
+            lib for _name, _raw_path, lib, _editable in uv_refs
+        )
         raise RuntimeError(
-            f"cannot install this payload: libs/{{{names}}} are unmaterialized "
-            "vendor pointers, but no monorepo ancestor (libs/) is reachable "
+            f"cannot install this payload: libs/{{{', '.join(names)}}} are "
+            "unmaterialized vendor pointers or uv-editable canonical "
+            "references, but no monorepo ancestor (libs/) is reachable "
             "from the fetched payload to resolve canonical content from -- "
             "self_update's fetch must provide the full monorepo shape, not "
             "just the worktree-manager/ subtree"
         )
     try:
-        log = materializer.materialize_libs_dir(libs_dir, canonical_root=monorepo_root)
+        log = materializer.materialize_libs_dir(libs_dir, canonical_root=monorepo_root) if unresolved else []
+        log.extend(materializer.materialize_uv_editable_ref_into(
+            source_consumer_dir=payload_dir, dest_consumer_dir=slot,
+            canonical_root=monorepo_root, dest_root=slot,
+        ) if uv_refs else [])
     except Exception as e:  # noqa: BLE001 -- normalize ANY materialization
         # failure (a malformed pointer's json.JSONDecodeError/KeyError, an
         # OSError from a copy/remove failure, ...) into the one exception

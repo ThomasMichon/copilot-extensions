@@ -284,7 +284,7 @@ class SteerOutcome(Enum):
     RESUME_WITH_WAKE = "resume_with_wake"
     #: A suspended headless task has no interactive inbox to wake, so it
     #: is instead released to QUEUED for safe re-embodiment.
-    RELEASE_TO_QUEUED = "release_to_queued"
+    RELEASE_TO_QUEUED = "release_to_queued"  # marketplace-isolation: allow release-verb
 
 
 #: Which declared ``TRANSITIONS`` name a given steer outcome maps to. Both

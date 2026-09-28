@@ -16,6 +16,28 @@ def _core():
     return core
 
 
+#: Memoized result of :func:`_powershell_host`'s ``PATH`` resolution.
+_powershell_host_cache: str | None = None
+
+
+def _powershell_host() -> str:
+    """Prefer ``pwsh`` (PowerShell 7); fall back to the legacy Windows
+    PowerShell 5.1 binary only when ``pwsh`` isn't on ``PATH``.
+
+    Several call sites in this module poll or spawn via a PowerShell host --
+    some in a tight retry loop firing dozens of times per operation. A
+    hardcoded ``"powershell"`` sends every one of those through the legacy
+    5.1 host even on a machine where ``pwsh`` is installed and preferred.
+
+    Memoized so a tight poll loop (e.g. ``_pid_is_agent_bridge`` retried every
+    0.1-0.25s) does not repeat a ``shutil.which`` ``PATH`` scan on every tick.
+    """
+    global _powershell_host_cache
+    if _powershell_host_cache is None:
+        _powershell_host_cache = shutil.which("pwsh") or shutil.which("powershell") or "powershell"
+    return _powershell_host_cache
+
+
 def _print_reconcile_status() -> None:
     """Surface the last session-start auto-reconcile attempt, if recorded."""
     core = _core()
@@ -59,7 +81,7 @@ def _pid_on_port(port: int) -> int | None:
         )
         try:
             out = sp.run(
-                ["powershell", "-NoProfile", "-Command", ps],
+                [_powershell_host(), "-NoProfile", "-Command", ps],
                 capture_output=True, text=True, timeout=15,
             )
             val = (out.stdout or "").strip()
@@ -151,7 +173,7 @@ def _pid_is_agent_bridge(pid: int, timeout: float = 15.0) -> bool:
         if sys.platform == "win32":
             out = sp.run(
                 [
-                    "powershell",
+                    _powershell_host(),
                     "-NoProfile",
                     "-Command",
                     "(Get-CimInstance Win32_Process -Filter "
@@ -287,7 +309,7 @@ def _spawn_via_wmi_broker_pid(argv: list[str]) -> int | None:
     encoded = base64.b64encode(ps.encode("utf-16-le")).decode("ascii")
     try:
         out = _sp.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+            [_powershell_host(), "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
             capture_output=True,
             text=True,
             timeout=30,

@@ -955,12 +955,173 @@ function Deploy-ResolverHelpers {
     }
 }
 
+function Get-ConfigRepoRegistrationPath {
+    # Optionally discover a facility-designated multi-machine config repo via
+    # the agent-worktrees registry, if this machine has one adopted -- so
+    # the scheduled task (with no useful working directory of its own)
+    # still discovers that repo's schema v3 sync.local_path declaration.
+    # Which repo (if any) is left to machine-local installer configuration
+    # (config_repo: <name> in $InstallDir\config.yaml) rather than a
+    # hardcoded name -- this is a generic, publicly-distributed plugin and
+    # must not assume any specific private repo. AGENT_LOGGER_REPO_CONFIG's
+    # explicit-file path still goes through the same registered-project +
+    # default-branch trust gate as normal discovery (see
+    # agent_logger.repo_trust) -- this only tells it WHERE to look, never
+    # bypasses WHETHER to trust it. No config_repo set, agent-worktrees
+    # absent, or the named repo not adopted here: silently a no-op (today's
+    # behavior, unaffected).
+    try {
+        $configYaml = Join-Path $InstallDir 'config.yaml'
+        if (-not (Test-Path -LiteralPath $configYaml)) { return $null }
+        if (-not (Test-Path -LiteralPath $VenvPython)) { return $null }
+        # Parsed with real YAML semantics (the venv's own pyyaml, the same
+        # library agent_logger.config uses) rather than a line-oriented
+        # regex -- a bare regex mishandles a trailing "# comment" or a
+        # quoted scalar containing '#'/'"', silently yielding the wrong (or
+        # no) repo name. '-I' (isolated mode) keeps `import yaml` tied to
+        # the venv's own installed package: without it, a same-named
+        # yaml.py/yaml/ reachable from this installer's current directory
+        # could shadow the real dependency and execute arbitrary code
+        # during installation.
+        $pyScript = @'
+import sys
+try:
+    import yaml
+except ImportError:
+    sys.exit(0)
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+except Exception:
+    sys.exit(0)
+value = data.get("config_repo") if isinstance(data, dict) else None
+if isinstance(value, str) and value.strip():
+    print(value.strip())
+'@
+        $repoName = $null
+        try {
+            $repoName = ($pyScript | & $VenvPython '-I' '-' $configYaml 2>$null | Select-Object -First 1)
+        } catch {
+            $repoName = $null
+        }
+        if (-not $repoName) { return $null }
+        if (-not (Get-Command agent-worktrees -ErrorAction SilentlyContinue)) { return $null }
+        $dir = (& agent-worktrees repos find $repoName 2>$null | Select-Object -First 1)
+        if (-not $dir) { return $null }
+        # `repos find` also resolves `reference`-class registrations, which
+        # are not guaranteed to be a git checkout at all -- so this
+        # discovery MUST NOT wire the result into the scheduled launcher
+        # unless it passes the same registered-project + default-branch
+        # trust decision normal (CWD-based) discovery applies. Deferring
+        # entirely to find_repo_config()'s own runtime trust check would
+        # still be *safe* (it re-derives this same verdict from the env
+        # var at consumption time), but embedding an untrusted path here
+        # regardless is needless exposure this installer can avoid
+        # outright by checking first.
+        #
+        # A single isolated python invocation both canonicalizes and
+        # checks trust, printing the resolved directory on success:
+        #   - Path.resolve() canonicalizes physically (follows symlinks
+        #     all the way through), unlike Resolve-Path (which normalizes
+        #     '..'/'.' but does not follow a reparse point) -- a symlinked
+        #     checkout's LOGICAL path embedded here would otherwise be
+        #     rejected outright by find_repo_config()'s symlink-ancestor
+        #     check, silently dropping repo config that normal
+        #     (physically-resolving) discovery honors.
+        #   - '-I' (isolated mode) keeps this security decision tied to
+        #     the INSTALLED package: without it, an ambient PYTHONPATH or
+        #     a same-named agent_logger package reachable from the
+        #     installer's current directory could shadow the real
+        #     repo_trust module and forge a trusted verdict.
+        $pyTrustScript = @'
+import sys
+from pathlib import Path
+try:
+    from agent_logger.repo_trust import repo_config_is_trusted
+except Exception:
+    sys.exit(1)
+root = Path(sys.argv[1]).resolve()
+if repo_config_is_trusted(root):
+    print(root)
+    sys.exit(0)
+sys.exit(1)
+'@
+        $trusted = $false
+        try {
+            $resolvedDir = ($pyTrustScript | & $VenvPython '-I' '-' $dir 2>$null)
+            $probeExitCode = $LASTEXITCODE
+            if ($resolvedDir -is [System.Array]) { $resolvedDir = $resolvedDir[0] }
+            $trusted = ($probeExitCode -eq 0) -and $resolvedDir
+        } catch {
+            $trusted = $false
+        }
+        if (-not $trusted) { return $null }
+        $dir = $resolvedDir
+        # Mirrors agent_logger.config.REPO_CONFIG_FILENAMES's alias set and
+        # precedence order -- a config repo may use any of these filenames,
+        # not just the root .agent-logger.yaml. A candidate whose leaf (or,
+        # for the .config/ aliases, whose .config ancestor) is a
+        # symlink/reparse point is skipped in favor of the next alias,
+        # mirroring find_repo_config()'s own symlink rejection exactly --
+        # selecting a symlinked candidate here would embed a path the real
+        # loader immediately rejects outright, instead of falling through
+        # to a valid lower-priority alias the way normal discovery does.
+        foreach ($candidate in @(
+            '.agent-logger.yaml',
+            '.agent-logger.yml',
+            '.config/agent-logger.yaml',
+            '.config/agent-logger.yml'
+        )) {
+            $configPath = Join-Path $dir $candidate
+            if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) { continue }
+            if ((Get-Item -LiteralPath $configPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                continue
+            }
+            $ancestorDir = Split-Path -Parent $candidate
+            if ($ancestorDir) {
+                $ancestorPath = Join-Path $dir $ancestorDir
+                if ((Get-Item -LiteralPath $ancestorPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                    continue
+                }
+            }
+            # Returned alongside the config path: AGENT_WORKTREES_REPOS_YAML
+            # (if the installer's own process has it set) so the caller can
+            # carry forward WHICH registry file to re-check against --
+            # never a trust bypass. The scheduled task's process doesn't
+            # inherit the installer's own env, so without this a non-default
+            # registry location would make the runtime
+            # repo_config_is_trusted() re-check (still driven by the LIVE
+            # git remotes/default branch, never skipped) look in the wrong
+            # place and reject a genuinely registered repo. The default
+            # registry location needs no propagation -- both processes read
+            # the same well-known on-disk path already.
+            return [PSCustomObject]@{
+                ConfigPath = $configPath
+                ReposYaml = $env:AGENT_WORKTREES_REPOS_YAML
+            }
+        }
+        return $null
+    } catch {
+        return $null
+    }
+}
+
 function Write-SyncTaskLauncher {
     $launcherDir = Split-Path -Parent $TaskLauncher
     if (-not (Test-Path $launcherDir)) {
         New-Item -ItemType Directory -Path $launcherDir -Force | Out-Null
     }
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $repoConfig = Get-ConfigRepoRegistrationPath
+    $repoConfigLine = ''
+    if ($repoConfig) {
+        $escapedConfigPath = $repoConfig.ConfigPath -replace "'", "''"
+        $repoConfigLine = "`$env:AGENT_LOGGER_REPO_CONFIG = '$escapedConfigPath'"
+        if ($repoConfig.ReposYaml) {
+            $escapedReposYaml = $repoConfig.ReposYaml -replace "'", "''"
+            $repoConfigLine += "`n`$env:AGENT_WORKTREES_REPOS_YAML = '$escapedReposYaml'"
+        }
+    }
     $launcherContent = @'
 $ErrorActionPreference = 'Stop'
 $env:PYTHONUTF8 = '1'
@@ -975,11 +1136,12 @@ function Resolve-RuntimePython {
     return $AgentRtPy
 }
 $env:AGENT_LOGGER_HOME = $_root
+__REPO_CONFIG_LINE__
 $_py = Resolve-RuntimePython
 if (-not $_py) { exit 1 }
 & $_py -m agent_logger.sync.engine run --prune
 exit $LASTEXITCODE
-'@.Replace('__INSTALL_DIR__', ($InstallDir -replace "'", "''"))
+'@.Replace('__INSTALL_DIR__', ($InstallDir -replace "'", "''")).Replace('__REPO_CONFIG_LINE__', $repoConfigLine)
     [System.IO.File]::WriteAllText($TaskLauncher, $launcherContent, $utf8NoBom)
 }
 

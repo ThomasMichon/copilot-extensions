@@ -121,6 +121,7 @@ def main(argv: list[str] | None = None) -> int:
     borrow_p.add_argument("effort", help="Effort name (lease holder)")
     borrow_p.add_argument("--container", help="Borrow a specific container")
     borrow_p.add_argument("--fleet", help="Restrict to a fleet")
+    borrow_p.add_argument("--force", action="store_true", help="Force takeover")
 
     release_p = sub.add_parser("release", help="Release a lease")
     release_p.add_argument("target", help="Container name or effort name")
@@ -840,9 +841,14 @@ def _cmd_fleet_op(args: argparse.Namespace) -> int:
 
 def _cmd_borrow(args: argparse.Namespace) -> int:
     from .lease import borrow
-
-    config = load_config()
-    lease = borrow(config, args.effort, container=args.container, fleet=args.fleet)
+    try:
+        lease = borrow(load_config(), args.effort, container=args.container,
+                        fleet=args.fleet, force=getattr(args, "force", False))
+    except RuntimeError as exc:
+        if not args.container:  # not a specific-target conflict; bookkeeping
+            raise
+        print(f"[BUSY] {exc} Use --force to take over.", file=sys.stderr)
+        return _BUSY_EXIT
     print(lease.container)
     return 0
 

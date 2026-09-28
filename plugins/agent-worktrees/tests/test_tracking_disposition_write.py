@@ -223,3 +223,45 @@ def test_dispatch_reaches_the_verb_through_a_live_daemon(record_path):
     record = tracking.load_record(record_path)
     assert record.summary == "via daemon"
     assert record.status == "active"
+
+
+def test_apply_status_disposition_pushes_the_worktree_path_to_resident_push(
+    record_path, monkeypatch
+):
+    """A successful write must notify resident_push with the record's own
+    ``worktree_path`` -- the resident monitor's live segment cache is keyed
+    by worktree path, not worktree id -- so that, when this transaction runs
+    INSIDE the resident daemon process, OTHER sessions' status bars refresh
+    on the monitor's very next loop iteration instead of waiting out the
+    full periodic sweep interval."""
+    from agent_worktrees import resident_push
+
+    seen = []
+    monkeypatch.setattr(resident_push, "notify", seen.append)
+
+    tracking_disposition_write.apply_status_disposition(
+        {"worktree_id": "wt-disp", "yaml_path": str(record_path), "summary": "push me"}
+    )
+
+    assert seen == ["/tmp/wt-disp"]
+
+
+def test_apply_status_disposition_does_not_push_on_a_refused_write(
+    record_path, monkeypatch
+):
+    """A guard rejection (terminal/effort-bound) never mutates the record --
+    it must not push a stale/no-op refresh either."""
+    from agent_worktrees import resident_push
+
+    record = tracking.load_record(record_path)
+    record.kind = "system"
+    tracking.save_record(record, record_path)
+
+    seen = []
+    monkeypatch.setattr(resident_push, "notify", seen.append)
+
+    tracking_disposition_write.apply_status_disposition(
+        {"worktree_id": "wt-disp", "yaml_path": str(record_path), "summary": "nope"}
+    )
+
+    assert seen == []

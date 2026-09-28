@@ -166,13 +166,11 @@ class RuntimeMaterializer(Protocol):
 
 def managed_runtime_root() -> Path:
     """Resolve placement without acquiring a package-manager toolchain."""
+    _legacy_dirname = ".agent-dispatch"  # marketplace-isolation: allow legacy compatibility root
+    legacy_root = Path.home() / _legacy_dirname / "managed-runtimes"
     return Path(
         os.environ.get(MANAGED_RUNTIME_ROOT_ENV)
-        or (
-            Path.home() / ".agent-dispatch" / "managed-runtimes"
-            if uses_legacy_install_dir()
-            else install_dir() / "mr"
-        )
+        or (legacy_root if uses_legacy_install_dir() else install_dir() / "mr")
     )
 
 

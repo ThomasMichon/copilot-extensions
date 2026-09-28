@@ -50,6 +50,40 @@ def _wait_for_tracking_write_idle(
         sleep(poll_interval_s)
 
 
+def _wake_interruptible_wait(wake_event, seconds: float) -> None:
+    """Sleep up to ``seconds``, but return immediately (and clear the event)
+    if :func:`resident_push.notify` sets ``wake_event`` first.
+
+    This is what turns the periodic sweep interval into a mere **backstop**:
+    an explicit status push (or any ``postToolUse`` mutation observed via the
+    hook-IPC path) wakes the loop early instead of waiting out the full
+    interval, while the interval itself still fires unconditionally for
+    every other source of staleness (external git activity, a stale mux
+    session, etc.) that has no explicit push of its own.
+    """
+    if wake_event.wait(timeout=seconds):
+        wake_event.clear()
+
+
+def _kind_wakes_sweep(kind: str, targets: list[str] | None) -> bool:
+    """Whether a hook-IPC ``kind`` actually invalidated something and should
+    therefore wake the sweep loop early.
+
+    ``postToolUse`` fires for EVERY tool call, but
+    ``_ResidentHookPolicy.mutation_targets`` returns an empty list for a
+    read-only one (e.g. ``git status``) -- waking the loop for those would
+    turn the periodic backstop into a high-frequency render path for zero
+    benefit (2026-09-27 Copilot review finding). ``targets is None`` means
+    "invalidate everything" (a real, unbounded-scope mutation); a non-empty
+    list means "invalidate these specific paths" (also real); an empty list
+    means nothing was invalidated at all -- no wake. Pulled out as its own
+    pure predicate so the "which kinds push" policy is directly unit-testable
+    without needing a live ``HookIpcServer``/``_ResidentHookPolicy.ready()``
+    to drive ``_decide`` end-to-end.
+    """
+    return kind == "postToolUse" and (targets is None or bool(targets))
+
+
 def _core():
     from . import __main__ as core
 
@@ -87,7 +121,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
 
     from . import classify_daemon, loop_governance, monitor_roots, mux_link, pane_reaper, registry_paths, session_catalog
     from . import locks as _locks
-    from . import status_monitor_runtime, status_updater_cli
+    from . import resident_push, status_monitor_runtime, status_updater_cli
     from . import tracking_write
     from . import worktree_status_daemon
     from .hook_ipc import HookIpcServer, HookUnavailable
@@ -158,6 +192,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     except ValueError:
         cache_ttl = 60.0
     segment_cache = status_segment_cache_type(cache_ttl)
+    wake_event = threading.Event()
+    resident_push.bind(wake_event, segment_cache)
     published: dict[tuple[str, str], str] = {}
     incarnations: dict[str, str] = {}
     session_projects: dict[str, str] = {}
@@ -208,6 +244,16 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     provisioning_start_event=provisioning_start_event,
                 )
                 lifecycle_completed = True
+                if kind == "postToolUse":
+                    targets = hook_policy.mutation_targets(payload)
+                    if _kind_wakes_sweep(kind, targets):
+                        # This tool call actually invalidated one or more
+                        # cached segments (or all of them, when targets is
+                        # None) -- wake the sweep loop now rather than
+                        # waiting out `interval`, same as an explicit
+                        # `status` push (resident_push.notify). A read-only
+                        # tool call (empty targets) never wakes.
+                        wake_event.set()
                 return result
             finally:
                 state_lock.release()
@@ -379,7 +425,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 time.sleep(core._GOVERNANCE_BACKOFF_SECONDS)
                 continue
             if served < 0:
-                time.sleep(interval)
+                _wake_interruptible_wait(wake_event, interval)
                 continue
 
             if (
@@ -411,7 +457,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         break
             else:
                 empty_strikes = 0
-            time.sleep(interval)
+            _wake_interruptible_wait(wake_event, interval)
     finally:
         if hook_server is not None:
             hook_server.close()
@@ -435,6 +481,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             # on a wedged compute.
             tracking_write_server.close()
             _wait_for_tracking_write_idle(_tracking_write_busy)
+        resident_push.reset()
         worktree_status_runtime.shutdown()
         managed_mux_runtime.shutdown()
         d = _locks.read_lock(lock)

@@ -165,9 +165,9 @@ def _path_within(path: Path, root: Path) -> bool:
     parent = os.path.normcase(os.path.normpath(str(root.resolve(strict=False))))
     return target == parent or target.startswith(parent + os.sep)
 
-
 def _declares_external_state_root(root: Path) -> bool:
-    config_path = root / ".agent-worktrees" / "config.yaml"
+    config_dir = ".agent-worktrees"  # marketplace-isolation: allow legacy-compatibility
+    config_path = root / config_dir / "config.yaml"
     if not config_path.is_file():
         return False
     try:

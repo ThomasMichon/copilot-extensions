@@ -80,8 +80,9 @@ class LocalBridgeRemoteClient:
         return value.rstrip("/")
 
     def _connection(self) -> tuple[str, str]:
+        _default_dir = "~/.agent-bridge"  # marketplace-isolation: allow registry
         config_dir = self._config_dir or Path(
-            os.environ.get("AGENT_BRIDGE_CONFIG_DIR", "~/.agent-bridge")
+            os.environ.get("AGENT_BRIDGE_CONFIG_DIR", _default_dir)
         ).expanduser()
         explicit = os.environ.get("AGENT_BRIDGE_BASE_URL")
         if explicit:

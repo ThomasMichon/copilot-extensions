@@ -32,12 +32,14 @@ from typing import Any
 from .client import DispatchClient
 from .config import client_token, client_url, shared_token, shared_url
 
-ENV_TASK_ID = "AGENT_DISPATCH_SCRIPT_TASK_ID"
+ENV_TASK_ID = "AGENT_DISPATCH_SCRIPT_TASK_ID"  # marketplace-isolation: allow legacy-compatibility
 ENV_WORKER_ID = "AGENT_DISPATCH_SCRIPT_WORKER_ID"
 ENV_ROUTE = "AGENT_DISPATCH_SCRIPT_ROUTE"
 ENV_REPO = "AGENT_DISPATCH_SCRIPT_REPO"
 ENV_ALL_REPOS = "AGENT_DISPATCH_SCRIPT_ALL_REPOS"
-ENV_TASK_FILE = "AGENT_DISPATCH_SCRIPT_TASK_FILE"
+ENV_TASK_FILE = (
+    "AGENT_DISPATCH_SCRIPT_TASK_FILE"  # marketplace-isolation: allow legacy-compatibility
+)
 ENV_HEARTBEAT_SECONDS = "AGENT_DISPATCH_SCRIPT_HEARTBEAT_SECONDS"
 
 

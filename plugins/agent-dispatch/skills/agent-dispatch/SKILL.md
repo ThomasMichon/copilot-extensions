@@ -100,8 +100,8 @@ plugin vision (`visions/plugins/agent-dispatch/` in the source repo).
 Every verb except `serve` is a thin client that talks to a coordinator over
 HTTP. Point the CLI at one with `AGENT_DISPATCH_URL`; otherwise the client
 discovers the local coordinator through the zdd routing table /
-`~/.agent-dispatch/run/endpoint.json`, then falls back to legacy
-`http://127.0.0.1:9847`. Add `AGENT_DISPATCH_TOKEN` if it requires bearer auth.
+`~/.agent-dispatch/run/endpoint.json`, then falls back to legacy <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
+`http://127.0.0.1:9847`. Add `AGENT_DISPATCH_TOKEN` if it requires bearer auth. <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 
 ```bash
 <agent-dispatch catalog argv[0]> health          # confirm a coordinator is reachable first
@@ -927,8 +927,8 @@ never claim). `--headless-label` is ignored in fleet mode. See the design doc's
 "Headless-fleet body" section.
 
 **Persistent supervisor profiles.** The installer manages a primary supervisor
-from `~/.agent-dispatch/supervisor.env` plus named profiles in
-`~/.agent-dispatch/supervisors/<name>.env` (safe names: letters, digits, `_`,
+from `~/.agent-dispatch/supervisor.env` plus named profiles in <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
+`~/.agent-dispatch/supervisors/<name>.env` (safe names: letters, digits, `_`, <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 `-`). Each profile uses the same `AGENT_DISPATCH_SUPERVISE_*` schema and becomes
 its own `agent-dispatch-supervisor-<name>` unit/task; `status`/`start`/`stop` and
 `uninstall` iterate them, deleted env files remove orphaned profiles, and

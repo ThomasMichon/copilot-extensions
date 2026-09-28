@@ -221,13 +221,34 @@ if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; t
     flock 9
 else
     LOCK_LINK="$RUNTIME_ROOT/.provision.lock.pid"
+    REAP_MUTEX="$RUNTIME_ROOT/.provision.reap.mutex"
     until ln -s "$$" "$LOCK_LINK" 2>/dev/null; do
         owner="$(readlink "$LOCK_LINK" 2>/dev/null || true)"
         if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
             sleep 1
-        elif [[ "$(readlink "$LOCK_LINK" 2>/dev/null || true)" == "$owner" ]]; then
+            continue
+        fi
+        # A plain check-then-destroy is still a real TOCTOU even when the
+        # destroy step itself is atomic (an `mv`-based claim) -- see
+        # libs/payload-invocation/templates/posix-shim.tmpl's matching fix
+        # (aperture-labs#7715) for the full analysis and reproduction
+        # history: the staleness verdict above can go stale itself before
+        # the destroy runs, letting one racer destroy a FRESH lock another
+        # racer already recreated. Serializing the decision-and-destroy via
+        # a `mkdir`-based mutex (atomic create-if-absent, same guarantee as
+        # `ln -s`) closes that gap: at most one racer can ever be inside
+        # this section, and it re-reads staleness there before destroying.
+        if ! mkdir "$REAP_MUTEX" 2>/dev/null; then
+            sleep 1
+            continue
+        fi
+        owner2="$(readlink "$LOCK_LINK" 2>/dev/null || true)"
+        if [[ "$owner2" =~ ^[0-9]+$ ]]; then
+            kill -0 "$owner2" 2>/dev/null || rm -f "$LOCK_LINK"
+        else
             rm -f "$LOCK_LINK"
         fi
+        rmdir "$REAP_MUTEX" 2>/dev/null || true
     done
 fi
 trap unlock_provision EXIT INT TERM

@@ -17,7 +17,7 @@ from pathlib import Path
 
 from agent_procutil import windowless_python
 
-from . import activity, locks, sessions_pane_retire, tracking
+from . import activity, locks, sessions_pane_retire, stale_runtime_reap, tracking
 from . import config as cfg
 from . import status_updater_cli
 
@@ -683,6 +683,7 @@ def _restart_status_monitor() -> dict:
     }
     if not result["enabled"]:
         return result
+    result["stale_runtime_reaped"] = stale_runtime_reap.reap(cfg)
     try:
         from . import locks as _locks
 
@@ -713,9 +714,7 @@ def _restart_status_monitor() -> dict:
             _locks.remove_lock(lock)
     except Exception:
         pass
-    result["spawned"] = _spawn_detached(
-        [sys.executable, "-m", "agent_worktrees", "status-monitor"]
-    )
+    result["spawned"] = _spawn_detached([sys.executable, "-m", "agent_worktrees", "status-monitor"])
     return result
 
 
@@ -730,12 +729,13 @@ def cmd_status_monitor_restart(args: argparse.Namespace) -> int:
         print("status-monitor: disabled (AGENT_WORKTREES_STATUS_MONITOR=0) -- skipped")
         return 0
     if r.get("already_current"):
-        print("status-monitor: a current monitor already owns the host -- left as-is")
+        print("status-monitor: a current monitor already owns the host -- left as-is" + stale_runtime_reap.summary_suffix(r.get("stale_runtime_reaped")))
         return 0
     bits = []
     if r.get("reaped"):
         bits.append(f"reaped superseded pid {r['reaped']}")
     bits.append("spawned current monitor" if r.get("spawned") else "spawn failed")
+    bits.extend(stale_runtime_reap.summary_bits(r.get("stale_runtime_reaped")))
     print("status-monitor: " + ", ".join(bits))
     return 0
 

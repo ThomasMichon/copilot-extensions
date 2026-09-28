@@ -59,7 +59,7 @@ class ModelProfile:
     systemd_unit: str | None = None
     # How the indexer brings this model's engine up when it isn't already
     # reachable:
-    #   "subprocess" -- spawn ``python -m agent_index.engine.app`` as a detached
+    #   "subprocess" -- spawn ``python -m agent_index_engine.app`` as a detached
     #                   child process (needs torch in the service venv),
     #   "systemd"    -- start a systemd unit (Linux system deployments),
     #   "external"   -- never manage it; a durable, externally-owned daemon owns

@@ -27,7 +27,7 @@ try:
 except ImportError:  # pragma: no cover - pyyaml is a hard dependency
     yaml = None  # type: ignore[assignment]
 
-from .repo_trust import has_symlink_ancestor, repo_config_is_trusted
+from .repo_trust import has_symlink_ancestor, path_traverses_symlink, repo_config_is_trusted
 
 #: Neutral, personality- and multi-machine system-free defaults.
 DEFAULTS: dict[str, Any] = {
@@ -427,23 +427,56 @@ def find_repo_config(start: Path | None = None) -> Path | None:
     trust decision, so an untrusted checkout could otherwise use it to
     bypass the gate entirely by pointing it at its own repo-local config.
     The file's containing git root is resolved and trust-checked the same
-    way. A candidate that is a symlink (committed or otherwise) is rejected
-    outright -- discovery must never follow a link out of the checkout to
-    read arbitrary machine-local YAML.
+    way -- and when no git root can be found at all (e.g. the path came
+    from an ``agent-worktrees`` ``reference``-class registration, which is
+    not guaranteed to be a git checkout), the trust check runs against the
+    file's own containing directory instead of being skipped: falling back
+    to "no git root means unconditionally trusted" would let a non-git
+    reference path bypass the gate entirely, which is exactly what a
+    ``reference`` entry is (a read-only mirror, not an operator-reviewed
+    checkout). A candidate that is a symlink (committed or otherwise), or
+    reached through a symlinked ancestor directory such as ``.config``
+    (some :data:`REPO_CONFIG_FILENAMES` aliases nest under it, and this
+    override can point at any of them via install.sh/install.ps1's
+    config-repo discovery), is rejected outright -- discovery must never
+    follow a link out of the checkout to read arbitrary machine-local YAML.
     """
     env = os.environ.get("AGENT_LOGGER_REPO_CONFIG")
     if env:
         if env.strip().lower() in {"0", "false", "off", "none"}:
             return None
         explicit = Path(env).expanduser()
+        if not explicit.is_absolute():
+            # has_symlink_ancestor() needs both sides absolute for
+            # relative_to() -- Path.absolute() (never .resolve(), which
+            # follows symlinks, or normpath's '..'-collapsing, which could
+            # walk past a symlinked component) only textually joins cwd,
+            # so it can't mask the symlink checks below.
+            explicit = explicit.absolute()
         if not explicit.is_file():
             raise RepositoryConfigError(
                 f"AGENT_LOGGER_REPO_CONFIG does not name a file: {explicit}"
             )
         if explicit.is_symlink():
             return None
-        explicit_root = _find_repo_root(explicit.parent)
-        if explicit_root is not None and not repo_config_is_trusted(explicit_root):
+        found_root = _find_repo_root(explicit.parent)
+        explicit_root = found_root if found_root is not None else explicit.parent
+        if found_root is None:
+            # No git root at all (e.g. a non-git agent-worktrees
+            # `reference` mirror). has_symlink_ancestor() below only walks
+            # components BETWEEN root and candidate, never root's own
+            # ancestry, so a symlinked fallback root would pass unexamined.
+            # path_traverses_symlink() checks each ORIGINAL (uncollapsed)
+            # component in order -- unlike normpath()+resolve(), it can't
+            # be fooled by a later '..' lexically erasing an earlier
+            # symlinked component (e.g. '.../link/../trusted'), while still
+            # allowing an ordinary relative override like
+            # ../trusted/.agent-logger.yaml that never touches a symlink.
+            if path_traverses_symlink(explicit_root):
+                return None
+        if not repo_config_is_trusted(explicit_root):
+            return None
+        if has_symlink_ancestor(explicit_root, explicit):
             return None
         return explicit
 

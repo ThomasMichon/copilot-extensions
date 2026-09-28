@@ -2,7 +2,7 @@
 
 Keeps the engine *container* always up while the heavy torch *worker* process
 inside it starts on demand and stops on idle. The shim holds the public port,
-supervises the worker subprocess (``python -m agent_index.engine.app`` on an internal loopback
+supervises the worker subprocess (``python -m agent_index_engine.app`` on an internal loopback
 port), reverse-proxies embed traffic to it, and answers liveness locally so the
 container stays healthy while the model is cold.
 
@@ -62,7 +62,7 @@ def _worker_command(worker_host: str, worker_port: int) -> list[str]:
     list) -- used by tests to substitute a lightweight fake worker so the shim's
     spawn/proxy/stop path is exercised without torch/GPU. ``--host``/``--port``
     are always appended (so the override cannot omit them). The default prefix
-    runs ``python -m agent_index.engine.app`` in this same interpreter/venv.
+    runs ``python -m agent_index_engine.app`` in this same interpreter/venv.
     """
     prefix: list[str] | None = None
     raw = os.environ.get("AGENT_INDEX_ENGINE_WORKER_CMD")
@@ -76,7 +76,7 @@ def _worker_command(worker_host: str, worker_port: int) -> list[str]:
         except (ValueError, TypeError):
             logger.warning("AGENT_INDEX_ENGINE_WORKER_CMD is not valid JSON; ignoring")
     if prefix is None:
-        prefix = [sys.executable, "-m", "agent_index.engine.app"]
+        prefix = [sys.executable, "-m", "agent_index_engine.app"]
     return [*prefix, "--host", worker_host, "--port", str(worker_port)]
 
 

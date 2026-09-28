@@ -139,7 +139,7 @@ def _spawn_engine(profile: ModelProfile) -> subprocess.Popen:
     cmd = [
         windowless_python(python),
         "-m",
-        "agent_index.engine.app",
+        "agent_index_engine.app",
         "--host",
         profile.engine_host,
         "--port",

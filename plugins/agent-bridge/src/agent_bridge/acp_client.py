@@ -63,7 +63,7 @@ from acp.schema import (
 )
 
 from . import __version__
-from .procgroup import safe_killpg
+from .procgroup import safe_killpg, terminate_windows_tree
 
 log = logging.getLogger("agent-bridge")
 
@@ -181,15 +181,7 @@ async def _terminate_process_tree(proc: asyncio.subprocess.Process) -> None:
     """
     pid = proc.pid
     if sys.platform == "win32":
-        try:
-            killer = await asyncio.create_subprocess_exec(
-                "taskkill", "/PID", str(pid), "/T", "/F",
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            await asyncio.wait_for(killer.wait(), timeout=5.0)
-        except (TimeoutError, asyncio.TimeoutError, OSError, ProcessLookupError):
-            pass
+        await terminate_windows_tree(proc)
     else:
         # POSIX: agent spawns use start_new_session, so the child leads its
         # own process group -- signal the whole group, then escalate. Guard

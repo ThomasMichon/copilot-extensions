@@ -81,7 +81,7 @@ DEFAULT_HANDOFF_FALLBACK_GRACE = 3600.0  # 1h
 # its own namespace. See docs/patterns/local-endpoint-discovery.md.
 RUN_DIR_ENV = "AGENT_DISPATCH_RUN_DIR"
 ROUTING_DIR_ENV = "AGENT_DISPATCH_ROUTING_DIR"
-ENDPOINT_ENV = "AGENT_DISPATCH_ENDPOINT"
+ENDPOINT_ENV = "AGENT_DISPATCH_ENDPOINT"  # marketplace-isolation: allow legacy-compatibility
 OVERRIDES_ENV = "AGENT_DISPATCH_OVERRIDES"
 # Opt-in: keep a WSL guest a *client* of the Windows host's coordinator (the
 # pre-per-environment behavior). Default (unset) means a WSL guest runs and
@@ -226,11 +226,12 @@ def _windows_run_dirs() -> list[Path]:
     users = Path(mount) / "Users"
     skip = {"public", "default", "default user", "all users"}
     candidates: list[tuple[float, Path]] = []
+    _legacy = ".agent-dispatch"  # marketplace-isolation: allow legacy-compatibility
     try:
         for profile in users.iterdir():
             if profile.name.lower() in skip:
                 continue
-            ep = profile / ".agent-dispatch" / "run" / "endpoint.json"
+            ep = profile / _legacy / "run" / "endpoint.json"
             try:
                 mtime = ep.stat().st_mtime
             except OSError:

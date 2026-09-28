@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-worktrees"
-version = "1.9.3-dev1"
+version = "1.10.0-dev1"
 description = "Worktree isolation system for concurrent Copilot CLI sessions"
 readme = "README.md"
 license = "MIT"
@@ -52,15 +52,20 @@ agent-plugin-activation = { path = "libs/plugin-activation" }
 agent-single-instance-lease = { path = "libs/single-instance-lease" }
 # Work-coalescing-singleton daemon shape (module ``work_coalescing_singleton``):
 # coalesce/refcount/idle-exit wire protocol + client (plugin-process-hygiene
-# #744/#2323). Vendored per plugin; byte-identical src across copies.
+# #744/#2323). This is a `uv`-editable canonical reference
+# (vendor-pointer-generalization effort, Phase 1): `path` escapes this
+# plugin's own root and resolves live to `libs/work-coalescing-singleton`,
+# so this `dev`-branch checkout has nothing to keep manually in sync -- only
+# a real `main`-branch release (tools/materialize_main.py) ever gets a real
+# local copy.
 agent-work-coalescing-singleton = { path = "libs/work-coalescing-singleton" }
 # Shared two-phase (argv-peek, lazy-import-by-table) fast-dispatch mechanism
-# (module ``lazy_cli_dispatch``, agent-cli-lazy-dispatch effort Phase 2).
-# This copy is a src-passthrough VENDOR_POINTER (see
-# tools/sync-vendored-libs.py's own docstring): its src/ forwards every
-# import to the real libs/lazy-cli-dispatch/src/ tree at runtime, so this
-# `dev`-branch checkout has nothing to keep manually in sync -- only a real
-# `main`-branch release (tools/materialize_main.py) ever gets a real copy.
+# (module `lazy_cli_dispatch`, agent-cli-lazy-dispatch effort Phase 2).
+# This is a `uv`-editable canonical reference (vendor-pointer-generalization
+# effort, Phase 1): `path` escapes this plugin's own root and resolves live
+# to `libs/lazy-cli-dispatch`, so this `dev`-branch checkout has nothing to
+# keep manually in sync -- only a real `main`-branch release
+# (tools/materialize_main.py) ever gets a real local copy.
 agent-lazy-cli-dispatch = { path = "libs/lazy-cli-dispatch" }
 
 [project.scripts]

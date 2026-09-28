@@ -395,9 +395,11 @@ def test_worktree_to_dict_emits_saved_head_without_session_scan():
 
     assert d["session_count"] == 2
     assert d["last_session_id"] == "successor"
+    assert "session_head_mismatch" not in d
     row = derive.norm(d, "machine", "windows")
     assert row["sessionless"] is False
     assert row["last_session_id"] == "successor"
+    assert row["session_head_mismatch"] is False
 
 
 def test_worktree_to_dict_keeps_head_over_newer_transcript_and_mux():
@@ -420,6 +422,31 @@ def test_worktree_to_dict_keeps_head_over_newer_transcript_and_mux():
     assert d["session_count"] == 2
     assert d["last_session_id"] == "successor"
     assert d["mux_session"] is True
+    # #3307 Phase 7 (dotfiles#1298): the head still wins (unchanged, above),
+    # but the disagreement with the on-disk scan is now a surfaced warning.
+    assert d["session_head_mismatch"] is True
+    assert d["session_head_mismatch_scanned_id"] == "predecessor"
+    row = derive.norm(d, "machine", "windows")
+    assert row["session_head_mismatch"] is True
+    assert row["session_head_mismatch_scanned_id"] == "predecessor"
+
+
+def test_worktree_to_dict_no_mismatch_when_scan_agrees_with_head():
+    rec = _record(
+        worktree_path="/w/wt",
+        sessions=_session_chain(),
+        head_session="successor",
+    )
+    ctx = sessions.SessionContext()
+    norm = m._normalize_path(rec.worktree_path)
+    ctx.session_count[norm] = 1
+    ctx.last_session_id[norm] = "successor"
+
+    d = m._worktree_to_dict(rec, session_ctx=ctx)
+
+    assert d["last_session_id"] == "successor"
+    assert "session_head_mismatch" not in d
+    assert "session_head_mismatch_scanned_id" not in d
 
 
 def test_worktree_to_dict_does_not_resurrect_concluded_session():

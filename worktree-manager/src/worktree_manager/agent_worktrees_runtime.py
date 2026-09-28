@@ -1,4 +1,11 @@
-"""Temporary compatibility boundary to the active agent-worktrees runtime."""
+"""Temporary compatibility helpers for non-Picker agent-worktrees imports.
+
+Production Picker runtime call sites now stay on the public engine-client seam,
+but a small number of Worktree Manager-owned helpers and cross-surface tests
+still import selected agent-worktrees modules directly. Keep that bootstrap in
+one top-level module so ``worktree_manager.production_picker`` itself stays free
+of direct ``agent_worktrees`` imports.
+"""
 
 from __future__ import annotations
 
@@ -9,24 +16,16 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
-from .. import agent_plugin_runtime
+from . import agent_plugin_runtime
 
 ENGINE_SOURCE_ENV = "WORKTREE_MANAGER_AGENT_WORKTREES_SRC"
 
 
 class EngineRuntimeError(RuntimeError):
-    """The production Picker's temporary engine compatibility layer is absent."""
+    """The temporary agent-worktrees compatibility layer is absent."""
 
 
 def _validate_explicit_context() -> None:
-    """Raise a clear diagnostic for a genuinely foreign/invalid explicit
-    context. This is a UX nicety only -- the actual root/slot selection
-    always comes from ``agent_plugin_runtime.resolve_installed_plugin_slot``,
-    which applies the identical validated, policy-gated, namespaced-then-
-    legacy fallback ``engine_client.installed_engine_command`` uses, so both
-    the subprocess and in-process paths can never disagree about which
-    install is available.
-    """
     context = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip()
     if not context:
         return
@@ -49,11 +48,6 @@ def _validate_explicit_context() -> None:
 
 def _active_runtime_source() -> Path | None:
     _validate_explicit_context()
-    # Shares the exact namespaced-then-legacy slot selection
-    # engine_client.installed_engine_command() uses (marker/fallback walk,
-    # completion-marker requirement, validated receipts) so the Picker's
-    # in-process import path and the CLI subprocess path can never disagree
-    # about which install is available.
     slot = agent_plugin_runtime.resolve_installed_plugin_slot("agent-worktrees")
     if slot is None:
         return None
@@ -94,14 +88,6 @@ def ensure_engine_runtime() -> Path:
         sys.path.insert(0, source_text)
     plugin_root = source.parent
     libs_root = plugin_root / "libs"
-    # agent-procutil, dropin-registry, and plugin-activation are NOT injected
-    # here: worktree-manager vendors its own byte-identical copies of those
-    # three (declared, installed dependencies -- see libs/ and pyproject.toml)
-    # so its own call sites resolve them from its own venv, not by accident of
-    # import order against this borrowed path (copilot-extensions#3359).
-    # plugin-resolve is vendored by worktree-manager too, but agent-worktrees'
-    # own CLI-root modules (config, profiles, ...) reached via engine_module()
-    # still need it importable under this borrowed path.
     for lib in (
         "plugin-resolve",
         "config-migrate",
@@ -109,6 +95,12 @@ def ensure_engine_runtime() -> Path:
         "lazy-cli-dispatch",
     ):
         lib_source = libs_root / lib / "src"
+        if not lib_source.is_dir():
+            repo_root = plugin_root.parent.parent
+            if (repo_root / "libs").is_dir() and (repo_root / "plugins").is_dir():
+                canonical_source = repo_root / "libs" / lib / "src"
+                if canonical_source.is_dir():
+                    lib_source = canonical_source
         if lib_source.is_dir() and str(lib_source) not in sys.path:
             sys.path.insert(0, str(lib_source))
     return source
@@ -118,15 +110,6 @@ def engine_module(name: str) -> ModuleType:
     ensure_engine_runtime()
     module = importlib.import_module(f"agent_worktrees.{name}")
     if name == "__main__":
-        # agent-worktrees' own CLI dispatch defers ~35 submodules' worth of
-        # cross-references behind `_load_full_command_surface()`, populated
-        # only when the CLI's own `main()` runs (build_parser() or the
-        # COMMAND_MAP fallback) -- see ThomasMichon/copilot-extensions#3309.
-        # This module is the one shared external-consumer boundary that
-        # imports the engine's `__main__` directly as a library rather than
-        # invoking its CLI, so it must trigger that load itself; older
-        # installed agent-worktrees runtimes may predate this function
-        # entirely, hence the defensive getattr. See #3319.
         loader = getattr(module, "_load_full_command_surface", None)
         if callable(loader):
             loader()

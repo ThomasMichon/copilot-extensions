@@ -329,6 +329,42 @@ def _codespace_claim_key(target: "SpawnTarget") -> tuple[str, str] | None:
     return name, owner
 
 
+def _run_venue_claim(
+    command: list[str], *, target_name: str, kind: str,
+) -> tuple[str, str]:
+    """Shell a claim-provider CLI's conflict-check command and interpret its
+    busy/coordination-rejected/ok exit code.
+
+    Shared by the CodeSpace and container claim seams (#897 /
+    codespace-venue-pool Phase 2b parity) so the subprocess-and-exit-code
+    plumbing lives in one place rather than being copy-pasted per venue kind.
+    """
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True, text=True, timeout=30,
+            creationflags=no_window_flags(),
+        )
+    except Exception as exc:
+        log.info("%s claim skipped for %s: %s", kind, target_name, exc)
+        return "ok", ""
+    if result.returncode == _CODESPACE_BUSY_EXIT:
+        return "conflict", (result.stderr or result.stdout or "").strip()
+    if result.returncode == _CODESPACE_COORDINATION_EXIT:
+        return (
+            "coordination-rejected",
+            (result.stderr or result.stdout or "").strip(),
+        )
+    if result.returncode != 0:
+        # Any other non-zero is a bookkeeping error, not a conflict -- never
+        # block the dispatch on it (degrade-safe, mirroring the direct path).
+        log.info(
+            "%s claim for %s exited %s: %s",
+            kind, target_name, result.returncode, (result.stderr or "").strip(),
+        )
+    return "ok", ""
+
+
 def _claim_codespace(
     codespace_name: str,
     owner: str,
@@ -356,36 +392,12 @@ def _claim_codespace(
     binstub = shutil.which("agent-codespaces")  # marketplace-isolation: allow provider-management
     if not binstub:
         return "ok", ""
-    creationflags = no_window_flags()
     command = [binstub, "claim", codespace_name]
     if owner:
         command.extend(["--owner", owner])
     if holder_ref:
         command.extend(["--holder-ref", holder_ref])
-    try:
-        result = subprocess.run(
-            command,
-            capture_output=True, text=True, timeout=30,
-            creationflags=creationflags,
-        )
-    except Exception as exc:
-        log.info("CodeSpace claim skipped for %s: %s", codespace_name, exc)
-        return "ok", ""
-    if result.returncode == _CODESPACE_BUSY_EXIT:
-        return "conflict", (result.stderr or result.stdout or "").strip()
-    if result.returncode == _CODESPACE_COORDINATION_EXIT:
-        return (
-            "coordination-rejected",
-            (result.stderr or result.stdout or "").strip(),
-        )
-    if result.returncode != 0:
-        # Any other non-zero is a bookkeeping error, not a conflict -- never
-        # block the dispatch on it (degrade-safe, mirroring the direct path).
-        log.info(
-            "CodeSpace claim for %s exited %s: %s",
-            codespace_name, result.returncode, (result.stderr or "").strip(),
-        )
-    return "ok", ""
+    return _run_venue_claim(command, target_name=codespace_name, kind="CodeSpace")
 
 
 def _release_codespace_claim(codespace_name: str, owner: str) -> bool:
@@ -407,6 +419,83 @@ def _release_codespace_claim(codespace_name: str, owner: str) -> bool:
             [binstub, "release-claim", codespace_name, "--owner", owner],
             capture_output=True, text=True, timeout=30,
             creationflags=creationflags,
+        )
+    except Exception:
+        return False
+    return result.returncode == 0
+
+
+class ContainerClaimConflictError(Exception):
+    """Raised when a container is exclusively leased by another worktree.
+
+    Mirrors :class:`CodespaceClaimConflictError` for agent-containers' fleet
+    lease broker (codespace-venue-pool Phase 2b container-claim parity).
+    """
+
+    def __init__(self, container: str, owner: str, detail: str) -> None:
+        self.container = container
+        self.owner = owner
+        self.detail = detail
+        super().__init__(
+            detail
+            or (
+                f"Container '{container}' is exclusively leased by another "
+                f"worktree; refusing to dispatch '{owner}' over it."
+            )
+        )
+
+
+def _container_claim_key(target: "SpawnTarget") -> tuple[str, str] | None:
+    """Resolve ``(container_name, owner_worktree)`` for a container target --
+    the container counterpart to :func:`_codespace_claim_key`."""
+    container = getattr(target, "container", None)
+    name = container.get("name") if isinstance(container, dict) else None
+    if not name:
+        return None
+    owner = getattr(target, "caller_worktree", None)
+    if not owner:
+        return None
+    return name, owner
+
+
+def _claim_container(container_name: str, owner: str) -> tuple[str, str]:
+    """Acquire the exclusive, worktree-keyed container lease before the
+    Session-Host transport is established -- the container counterpart to
+    :func:`_claim_codespace` (codespace-venue-pool Phase 2b parity).
+
+    Containers have no cross-machine coordination leg, so only ``"ok"`` and
+    ``"conflict"`` are ever returned here (never ``"coordination-rejected"``).
+    """
+    if os.environ.get("AGENT_CONTAINERS_DISABLE_CLAIM"):
+        return "ok", ""
+    if not container_name or not owner:
+        return "ok", ""
+    binstub = shutil.which("agent-containers")  # marketplace-isolation: allow provider-management
+    if not binstub:
+        return "ok", ""
+    command = [binstub, "borrow", owner, "--container", container_name]
+    return _run_venue_claim(command, target_name=container_name, kind="Container")
+
+
+def _release_container_claim(container_name: str, owner: str) -> bool:
+    """Release a Session-Host container lease and report success.
+
+    Mirrors :func:`_release_codespace_claim`; ``owner`` is accepted for
+    symmetry but unused -- ``agent-containers release`` releases by target
+    name regardless of holder (idempotent no-op if unheld).
+    """
+    if os.environ.get("AGENT_CONTAINERS_DISABLE_CLAIM"):
+        return True
+    if not container_name:
+        return True
+    binstub = shutil.which("agent-containers")
+    if not binstub:
+        return False
+    try:
+        result = subprocess.run(
+            [binstub, "release", container_name],
+            capture_output=True, text=True, timeout=30,
+            creationflags=no_window_flags(),
         )
     except Exception:
         return False
@@ -833,6 +922,7 @@ __all__ = [
     "AcpClient",
     "CodespaceClaimConflictError",
     "CodespaceCoordinationRejectedError",
+    "ContainerClaimConflictError",
     "DaemonDrainingError",
     "ProviderTargetRefreshError",
     "RemoteHostRecoveryPendingError",
@@ -846,7 +936,9 @@ __all__ = [
     "_MAX_RESUME_ROUNDS",
     "_background_recovery_backoff_seconds",
     "_claim_codespace",
+    "_claim_container",
     "_release_codespace_claim",
+    "_release_container_claim",
     "_resolve_relay_launch_env",
     "_resolve_remote_ai_plugin_dirs",
     "session_manager_from_config",

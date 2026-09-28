@@ -217,7 +217,7 @@ def _send_refs(name: str, upload: tuple[str, bytes, list[tuple[str, int]]]) -> s
 _VENUE_TOOLING = (
     'P="$HOME/.copilot/installed-plugins/copilot-extensions"; '
     '{ [ -d "$P/agent-bridge" ] || copilot plugin install agent-bridge@copilot-extensions >&2 || true; } && '
-    '{ command -v agent-worktrees >/dev/null 2>&1 || '
+    '{ command -v agent-worktrees >/dev/null 2>&1 || '  # marketplace-isolation: allow registry
     '{ [ -f "$P/agent-worktrees/scripts/install.sh" ] && bash "$P/agent-worktrees/scripts/install.sh" install >&2; } || true; } && '
     'export PATH="$HOME/.local/bin:$PATH"'
 )

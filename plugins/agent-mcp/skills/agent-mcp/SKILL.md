@@ -177,7 +177,7 @@ drift contract live in
 
 | kind | acquires via | injects |
 |------|--------------|---------|
-| `entra` / `az` | `az account get-access-token` | `Authorization: Bearer` (http) / env (stdio) |
+| `entra` / `az` | on-PATH `ado-auth-helper` (Codespace-guest relay client) if present, else `az account get-access-token`; always the latter when `tenant` is configured, since the relay has no tenant parameter | `Authorization: Bearer` (http) / env (stdio) |
 | `gh` | `gh auth token` | `Authorization: Bearer` / env |
 | `git-credential` | Git Credential Manager | `Authorization: Basic` / env |
 | `command` | any `git credential fill`-shaped command | templated header / env |

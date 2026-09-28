@@ -56,8 +56,8 @@ def plan_for(args: argparse.Namespace, target: Any) -> dict[str, Any]:
             "(authenticated probe failed)"
         ),
         "missing_agent_worktrees_error": (
-            "agent-worktrees is not installed in the container; install it on "
-            "the trusted fleet image before using detached CLI-mode sessions"
+            "agent-worktrees was still not runnable in the container after the "
+            "pre-launch provisioning step"
         ),
         "old_agent_worktrees_error": (
             "the container's agent-worktrees is too old for detached launch "
@@ -70,7 +70,9 @@ def plan_for(args: argparse.Namespace, target: Any) -> dict[str, Any]:
 
 def _fail(message: str, plan: dict[str, Any] | None = None, **extra: Any) -> int:
     print(f"[FAIL] {message}", file=sys.stderr)
-    print(json.dumps({"ok": False, "error": message, **public_plan(plan or {}), **extra}, indent=2))
+    print(
+        json.dumps({"ok": False, "error": message, **public_plan(plan or {}), **extra}, indent=2)
+    )
     return 1
 
 
@@ -105,7 +107,9 @@ def _remote(
     return result.returncode, result.stdout or "", result.stderr or ""
 
 
-def _remote_input(ssh_config: Any, command: str, stdin: bytes, *, timeout: float) -> tuple[int, str, str]:
+def _remote_input(
+    ssh_config: Any, command: str, stdin: bytes, *, timeout: float
+) -> tuple[int, str, str]:
     from .ssh_transport import build_ssh_command
 
     result = subprocess.run(
@@ -145,9 +149,11 @@ def _launch_env(
     if getattr(args, "no_relay", False) or not relay_enabled:
         return env, None, None
     from .container_shims import deploy as deploy_shims
+    from .container_shims import ensure_agent_worktrees
     from .container_shims import git_credential_environment
     from .relay_provider import token_for
 
+    ensure_agent_worktrees(args.name, user=target.user)
     host_relay_port = require_live_relay_port()
     if not relay_healthy(host_relay_port):
         raise RuntimeError(
@@ -156,16 +162,20 @@ def _launch_env(
             "restart agent-bridge or set relay.enabled: false in containers.yaml"
         )
     deploy_shims(args.name, ado=True)
-    env.update({
-        "LC_GIT_CREDENTIAL_RELAY_HOST": "127.0.0.1",
-        "LC_GIT_CREDENTIAL_RELAY": str(config.relay_port),
-        "LC_GIT_CREDENTIAL_RELAY_TOKEN": token_for(args.name),
-        **git_credential_environment(),
-    })
+    env.update(
+        {
+            "LC_GIT_CREDENTIAL_RELAY_HOST": "127.0.0.1",
+            "LC_GIT_CREDENTIAL_RELAY": str(config.relay_port),
+            "LC_GIT_CREDENTIAL_RELAY_TOKEN": token_for(args.name),
+            **git_credential_environment(),
+        }
+    )
     return env, int(config.relay_port), int(host_relay_port)
 
 
-def _prepare_remote_env(args: argparse.Namespace, target: Any, values: dict[str, str]) -> str | None:
+def _prepare_remote_env(
+    args: argparse.Namespace, target: Any, values: dict[str, str]
+) -> str | None:
     if not values:
         return None
     from .ssh_transport import container_environment, write_remote_env
@@ -270,10 +280,18 @@ def cmd_detach(
     except (OSError, ValueError) as exc:
         return _fail(str(exc), plan)
     if getattr(args, "dry_run", False):
-        print(json.dumps({
-            "ok": True, "dry_run": True, **public_plan(plan), "seed_len": len(seed or ""),
-            "ref_files": [name for name, _ in refs[2]] if refs else [],
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "dry_run": True,
+                    **public_plan(plan),
+                    "seed_len": len(seed or ""),
+                    "ref_files": [name for name, _ in refs[2]] if refs else [],
+                },
+                indent=2,
+            )
+        )
         return 0
 
     target_lock = TargetLock(f"container:{args.name}", op="copilot")

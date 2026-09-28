@@ -28,3 +28,5 @@ plugins/agent-machines/bin/agent-machines text eol=lf
 plugins/agent-ssh/bin/agent-ssh text eol=lf
 plugins/*/scripts/launch-session.sh text eol=lf
 tools/hooks/* text eol=lf
+
+.github/workflows/*.lock.yml linguist-generated=true

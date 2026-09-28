@@ -765,6 +765,25 @@ def _atomic_write_json(
             temporary.unlink()
 
 
+def _publish_runtime_root_pointer(
+    durable_home: Path,
+    plugin_id: str | None,
+    runtime_root: str | None,
+    status: str,
+) -> None:
+    # Best-effort, advisory pointer for resolver-free consumers (see
+    # install-contract.md "Durable runtime-root pointer"). Never
+    # authoritative and never allowed to fail or block the real resolution:
+    # a transient bad status leaves the last-known-good pointer untouched.
+    if not plugin_id or not runtime_root or status != "ready":
+        return
+    try:
+        _assert_plugin_id(plugin_id)
+        _atomic_write_text(durable_home / plugin_id / "runtime-root", runtime_root)
+    except (OSError, InstallationContextError):
+        pass
+
+
 def _atomic_write_text(
     path: Path,
     value: str,

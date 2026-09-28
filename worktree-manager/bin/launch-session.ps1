@@ -1876,6 +1876,16 @@ if (-not $noMux) {
             Write-SetupLog "psmux session gone, running post-exit checks"
             Write-ActivityLog -Event 'copilot_exited' -WorktreeId $plan.worktree_id -Fields @('mux=psmux')
 
+            # `has-session` reporting the session gone only means psmux's own
+            # session registry no longer lists it -- it does not prove the
+            # underlying server + pane process tree actually tore down (a
+            # zombie mux session can leave a live pwsh/copilot/conhost tree
+            # running, see #2830's 935-process leak). Defensively reap any
+            # tree still owned by *this* launch before finalizing; the
+            # launch-id ownership check inside makes this a no-op on the
+            # normal clean-exit path.
+            Stop-AwOwnedPsmuxSession $sessName
+
             # Post-exit finalization
             if ($plan.post_exit -and $plan.worktree_id) {
                 Write-SetupLog "Running post-exit finalization"

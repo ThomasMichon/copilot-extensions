@@ -916,6 +916,196 @@ install_package() {
 
 write_units() {
   mkdir -p "${UNIT_DIR}"
+  # Optionally discover a facility-designated multi-machine config repo via
+  # the agent-worktrees registry, if this machine has one adopted -- so the
+  # scheduled sync (invoked with no useful working directory of its own)
+  # still discovers that repo's schema v3 sync.local_path declaration.
+  # Which repo (if any) is left to machine-local installer configuration
+  # (config_repo: <name> in ${INSTALL_DIR}/config.yaml) rather than a
+  # hardcoded name -- this is a generic, publicly-distributed plugin and
+  # must not assume any specific private repo. AGENT_LOGGER_REPO_CONFIG's
+  # explicit-file path still goes through the same registered-project +
+  # default-branch trust gate as normal discovery (see
+  # agent_logger.repo_trust) -- this only tells it WHERE to look, never
+  # bypasses WHETHER to trust it. No config_repo set, agent-worktrees
+  # absent, or the named repo not adopted here: silently a no-op (today's
+  # behavior, unaffected).
+  local repo_config_env=""
+  local config_repo_name=""
+  if [ -f "${INSTALL_DIR}/config.yaml" ] && [ -x "${VENV}/bin/python" ]; then
+    # Parsed with real YAML semantics (the venv's own pyyaml, the same
+    # library agent_logger.config uses) rather than a line-oriented sed/tr
+    # extraction -- a bare regex/tr pass mishandles a trailing "# comment"
+    # or a quoted scalar containing '#'/'"', silently yielding the wrong
+    # (or no) repo name. `-I` (isolated mode) keeps the `import yaml` tied
+    # to the venv's own installed package: without it, a same-named
+    # yaml.py/yaml/ reachable from this installer's current directory
+    # could shadow the real dependency and execute arbitrary code during
+    # installation.
+    config_repo_name="$("${VENV}/bin/python" -I - "${INSTALL_DIR}/config.yaml" <<'PYEOF' 2>/dev/null || true
+import sys
+try:
+    import yaml
+except ImportError:
+    sys.exit(0)
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+except Exception:
+    sys.exit(0)
+value = data.get("config_repo") if isinstance(data, dict) else None
+if isinstance(value, str) and value.strip():
+    print(value.strip())
+PYEOF
+)"
+  fi
+  if [ -n "${config_repo_name}" ] && command -v agent-worktrees >/dev/null 2>&1; then
+    local config_repo_dir
+    config_repo_dir="$(agent-worktrees repos find "${config_repo_name}" 2>/dev/null || true)"
+    # `repos find` also resolves `reference`-class registrations, which are
+    # not guaranteed to be a git checkout at all -- so this discovery MUST
+    # NOT wire the result into the service unless it passes the same
+    # registered-project + default-branch trust decision normal (CWD-based)
+    # discovery applies. Deferring entirely to find_repo_config()'s own
+    # runtime trust check would still be *safe* (it re-derives this same
+    # verdict from the env var at consumption time), but embedding an
+    # untrusted path here regardless is needless exposure this installer
+    # can avoid outright by checking first.
+    #
+    # A single isolated python invocation both canonicalizes and checks
+    # trust, printing the resolved directory on success:
+    #   - Path.resolve() canonicalizes physically (follows symlinks all
+    #     the way through), unlike a plain `cd ... && pwd` (no -P), which
+    #     only normalizes textually and would leave a symlinked checkout's
+    #     LOGICAL path embedded -- find_repo_config() rejects a symlink
+    #     ancestor outright, so the scheduled sync would silently ignore
+    #     perfectly good repo config that normal (physically-resolving)
+    #     discovery honors.
+    #   - `-I` (isolated mode; implies -E/-P/-s) keeps this security
+    #     decision tied to the INSTALLED package: without it, an ambient
+    #     PYTHONPATH or a same-named `agent_logger` package reachable from
+    #     the installer's current directory could shadow the real
+    #     `repo_trust` module and forge a trusted verdict.
+    local config_repo_trusted=0
+    if [ -n "${config_repo_dir}" ] && [ -x "${VENV}/bin/python" ]; then
+      local resolved_config_repo_dir
+      if resolved_config_repo_dir="$("${VENV}/bin/python" -I - "${config_repo_dir}" <<'PYEOF' 2>/dev/null
+import sys
+from pathlib import Path
+try:
+    from agent_logger.repo_trust import repo_config_is_trusted
+except Exception:
+    sys.exit(1)
+root = Path(sys.argv[1]).resolve()
+if repo_config_is_trusted(root):
+    print(root)
+    sys.exit(0)
+sys.exit(1)
+PYEOF
+      )"; then
+        config_repo_dir="${resolved_config_repo_dir}"
+        config_repo_trusted=1
+      fi
+    fi
+    if [ "${config_repo_trusted}" = 1 ]; then
+      # Mirrors agent_logger.config.REPO_CONFIG_FILENAMES's alias set and
+      # precedence order -- a config repo may use any of these filenames,
+      # not just the root .agent-logger.yaml. A candidate whose leaf (or,
+      # for the .config/ aliases, whose .config ancestor) is a symlink is
+      # skipped in favor of the next alias, mirroring find_repo_config()'s
+      # own symlink rejection exactly -- selecting a symlinked candidate
+      # here would embed a path the real loader immediately rejects
+      # outright, instead of falling through to a valid lower-priority
+      # alias the way normal discovery does.
+      local candidate
+      for candidate in \
+        ".agent-logger.yaml" \
+        ".agent-logger.yml" \
+        ".config/agent-logger.yaml" \
+        ".config/agent-logger.yml"
+      do
+        local candidate_path="${config_repo_dir}/${candidate}"
+        if [ ! -f "${candidate_path}" ] || [ -L "${candidate_path}" ]; then
+          continue
+        fi
+        case "${candidate}" in
+          */*)
+            if [ -L "${config_repo_dir}/${candidate%/*}" ]; then
+              continue
+            fi
+            ;;
+        esac
+        # Escape systemd.exec(5) Environment= special characters (\, ",
+        # the specifier-escape %, and a literal newline/CR -- POSIX
+        # permits either in a directory name, and `agent-worktrees repos
+        # find` output is otherwise copied verbatim into this here-doc; an
+        # embedded newline would split the Environment= assignment across
+        # physical lines in the generated unit file, which can fail
+        # daemon-reload or be misread as a bogus additional directive.
+        # Quoting the whole assignment alone only protects whitespace, not
+        # any of this -- and a shell/sed pipeline can't safely see an
+        # embedded newline in the first place (sed operates line-by-line),
+        # so this uses the venv's own python for a single, complete escape
+        # pass instead. `-I` (isolated mode) is not needed here: this step
+        # only manipulates a string, importing no plugin code, so there is
+        # nothing for an ambient PYTHONPATH/CWD package to shadow.
+        local repo_config_value=""
+        if [ -x "${VENV}/bin/python" ]; then
+          repo_config_value="$("${VENV}/bin/python" - "AGENT_LOGGER_REPO_CONFIG=${candidate_path}" <<'PYEOF' 2>/dev/null
+import sys
+value = sys.argv[1]
+value = value.replace("\\", "\\\\")
+value = value.replace('"', '\\"')
+value = value.replace("%", "%%")
+value = value.replace("\r\n", "\\n")
+value = value.replace("\n", "\\n")
+value = value.replace("\r", "\\r")
+sys.stdout.write(value)
+PYEOF
+          )"
+        fi
+        if [ -z "${repo_config_value}" ]; then
+          continue
+        fi
+        repo_config_env="Environment=\"${repo_config_value}\""
+        # Preserve REGISTRY LOCATION context, never a trust bypass: the
+        # scheduled unit doesn't inherit the installer process's own
+        # AGENT_WORKTREES_REPOS_YAML, so if the operator pointed this
+        # install at a non-default registry file, the runtime
+        # repo_config_is_trusted() re-check (every scheduled run, from the
+        # checkout's LIVE git remotes/default branch -- never bypassed
+        # here) would look in the wrong place and reject a genuinely
+        # registered repo. This is safe to carry forward unconditionally:
+        # unlike an AGENT_LOGGER_TRUST_REPO_CONFIG override, it never
+        # short-circuits the remote/default-branch match itself, only
+        # which registry file that match is read from. The default
+        # registry location needs no propagation -- both processes read
+        # the same well-known on-disk path already.
+        if [ -n "${AGENT_WORKTREES_REPOS_YAML:-}" ]; then
+          local repos_yaml_value=""
+          if [ -x "${VENV}/bin/python" ]; then
+            repos_yaml_value="$("${VENV}/bin/python" - "AGENT_WORKTREES_REPOS_YAML=${AGENT_WORKTREES_REPOS_YAML}" <<'PYEOF' 2>/dev/null
+import sys
+value = sys.argv[1]
+value = value.replace("\\", "\\\\")
+value = value.replace('"', '\\"')
+value = value.replace("%", "%%")
+value = value.replace("\r\n", "\\n")
+value = value.replace("\n", "\\n")
+value = value.replace("\r", "\\r")
+sys.stdout.write(value)
+PYEOF
+            )"
+          fi
+          if [ -n "${repos_yaml_value}" ]; then
+            repo_config_env="${repo_config_env}
+Environment=\"${repos_yaml_value}\""
+          fi
+        fi
+        break
+      done
+    fi
+  fi
   cat > "${UNIT_DIR}/${TIMER_NAME}.service" <<EOF
 [Unit]
 Description=Agent Logger session-sync -- push Copilot session data to the configured target
@@ -925,6 +1115,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 Environment=AGENT_LOGGER_HOME=${INSTALL_DIR}
+${repo_config_env}
 ExecStart=${VENV}/bin/session-sync run --prune
 # Generous start timeout: the FIRST sync cold-copies the entire session
 # history (potentially thousands of sessions over a CIFS mount) and can take

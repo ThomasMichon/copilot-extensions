@@ -466,3 +466,98 @@ def test_ensure_state_dir_enforces_owner_only_mode(monkeypatch, tmp_path):
     assert state_dir.is_dir()
     if os.name != "nt":
         assert stat.S_IMODE(state_dir.stat().st_mode) == 0o700
+
+
+def test_trusted_fleet_accepts_host_paths_and_systemd_capable():
+    fleet = FleetConfig(
+        security_profile="trusted",
+        host_workspace_path="/mnt/data/workspaces/example-1",
+        host_home_path="/mnt/data/home/example-1",
+        home_folder="/home/node",
+        systemd_capable=True,
+    )
+    fleet.validate_restricted()  # no-op for trusted; must not raise
+    assert fleet.host_workspace_path == "/mnt/data/workspaces/example-1"
+    assert fleet.host_home_path == "/mnt/data/home/example-1"
+    assert fleet.home_folder == "/home/node"
+    assert fleet.systemd_capable is True
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"host_workspace_path": "/mnt/data/workspaces/example-1"},
+        {"host_home_path": "/mnt/data/home/example-1", "home_folder": "/home/node"},
+        {"systemd_capable": True},
+    ],
+)
+def test_restricted_fleet_rejects_trusted_only_capabilities(kwargs):
+    fleet = FleetConfig(security_profile="restricted", **kwargs)
+    with pytest.raises(RuntimeError, match="trusted-only capabilities"):
+        fleet.validate_restricted()
+
+
+def test_load_config_parses_trusted_only_fleet_fields(tmp_path, monkeypatch):
+    cfg = tmp_path / "containers.yaml"
+    cfg.write_text(
+        textwrap.dedent(
+            """
+            fleets:
+              myrepo:
+                repo: your-org/your-repo
+                image: your-org/your-image:latest
+                security_profile: trusted
+                host_workspace_path: /mnt/data/workspaces/myrepo-1
+                host_home_path: /mnt/data/home/myrepo-1
+                home_folder: /home/node
+                systemd_capable: true
+            """
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(cfg))
+    c = load_config()
+    fleet = c.fleets["myrepo"]
+    assert fleet.host_workspace_path == "/mnt/data/workspaces/myrepo-1"
+    assert fleet.host_home_path == "/mnt/data/home/myrepo-1"
+    assert fleet.home_folder == "/home/node"
+    assert fleet.systemd_capable is True
+
+
+def test_load_config_rejects_non_boolean_systemd_capable(tmp_path, monkeypatch):
+    cfg = tmp_path / "containers.yaml"
+    cfg.write_text(
+        textwrap.dedent(
+            """
+            fleets:
+              myrepo:
+                image: your-org/your-image:latest
+                security_profile: trusted
+                systemd_capable: "false"
+            """
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(cfg))
+    with pytest.raises(RuntimeError, match="must be a boolean"):
+        load_config()
+
+
+def test_devcontainer_fleet_rejects_image_only_options():
+    fleet = FleetConfig(
+        devcontainer_path="/src/myrepo",
+        security_profile="trusted",
+        systemd_capable=True,
+    )
+    with pytest.raises(RuntimeError, match="apply only to image:-backed fleets"):
+        fleet.validate_restricted()
+
+
+def test_incomplete_home_pair_is_rejected():
+    only_path = FleetConfig(security_profile="trusted", host_home_path="/mnt/data/home")
+    with pytest.raises(RuntimeError, match="must be set together"):
+        only_path.validate_restricted()
+
+    only_folder = FleetConfig(security_profile="trusted", home_folder="/home/node")
+    with pytest.raises(RuntimeError, match="must be set together"):
+        only_folder.validate_restricted()

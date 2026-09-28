@@ -475,7 +475,7 @@ shape before committing to a design)_
             canonical `libs/<lib>/` yet (confirmed via `sync-vendored-libs
             .py --check`'s advisory drift note) — needs a canonical-
             promotion step before either is eligible for any conversion.
-- [ ] **Build the conversion tool**: a script performing the rewrite above
+- [x] **Build the conversion tool**: a script performing the rewrite above
       across every real consumer of a given lib in one pass (a new tool,
       or a new mode on `sync-vendored-libs.py` — this repo currently has
       no "convert a real copy to a pointer/reference" tool FOR THIS FORM;
@@ -486,7 +486,7 @@ shape before committing to a design)_
       the copy had that canonical didn't. Must ALSO provide the reverse
       operation (re-convert an already-`src-passthrough` copy back to this
       form) for the 7-lib re-conversion above.
-- [ ] **Build the new drift/consistency guard for the reference form**:
+- [x] **Build the new drift/consistency guard for the reference form**:
       `check-vendored-libs-sync.py` has no concept of this reference form
       at all (it hashes whatever `src/` exists locally and compares copies
       against each other) — a `dev`-tree with no local copy shouldn't read
@@ -502,7 +502,7 @@ shape before committing to a design)_
       form, confirm `editable = true` is present (a forgotten `editable`
       would silently produce a frozen, non-live copy), and confirm the
       referenced canonical `libs/<lib>` actually exists.
-- [ ] **Extend `materialize_main.py`/`promote_release.py` for the
+- [x] **Extend `materialize_main.py`/`promote_release.py` for the
       reference-rewrite promotion step**: for every `[tool.uv.sources]`
       entry whose `path` escapes the **consuming project's own root**
       (same predicate as the drift guard above, not "the plugin's own
@@ -556,7 +556,7 @@ shape before committing to a design)_
       (the file-pointer kind still needs them, and the reference-rewrite
       step above reuses `_escapes_root()` directly). Note the removal's
       rationale in this effort's Journal (not just the commit message).
-- [ ] Update `tools/preview_release.py` ("preview-promo") to perform the
+- [x] Update `tools/preview_release.py` ("preview-promo") to perform the
       same copy-then-rewrite operation into its scratch preview copy
       (never the real tree) for a plugin using the reference form — its
       current `_materialize_into_preview()` only handles the
@@ -663,7 +663,9 @@ shape before committing to a design)_
       `uv`-editable is current again; a `src-passthrough` copy's own
       "local pointer directory present, `src/` replaced by a stub"
       criterion no longer applies once each lib is re-converted.)
-- [ ] **NEW criterion, added by the second course correction**: a
+- [ ] **NEW criterion, added by the second course correction**
+      (confirmed for `lazy-cli-dispatch` specifically, PR #4245 -- not
+      yet for every lib, since only that one is converted so far): a
       converted plugin's own test suite ALSO passes when the plugin
       itself (not just the dependency) is installed **non-editably**
       (`uv pip install <plugin-dir>`, no `-e`) from a live `dev` checkout
@@ -682,11 +684,10 @@ shape before committing to a design)_
       — the "in-place test scripts in `dev`" / "call across folders"
       requirement, demonstrated against a real plugin (not just the
       isolated prototype).
-- [ ] `tools/preview_release.py` ("preview-promo") correctly performs the
+- [x] `tools/preview_release.py` ("preview-promo") correctly performs the
       copy-then-rewrite for a plugin using the canonical-reference form
-      when building a scratch local-install preview. (The `src-passthrough`
-      -era `_materialize_into_preview()` support, PR #3803/#3810, will
-      need its own equivalent extension for this form — not yet built.)
+      when building a scratch local-install preview. **Done, PR #4245** --
+      confirmed end-to-end against `lazy-cli-dispatch` (not mocked).
 - [x] `materialize_main.py`'s directory-pointer path refuses a `source`
       that escapes `canonical_root` (the same containment guarantee the
       file-pointer path already has via `_resolve_within()`). **Done, PR
@@ -699,13 +700,13 @@ shape before committing to a design)_
       consumer uses `src-passthrough` anymore. `_escapes_root()` itself
       is reused directly by the reference-rewrite containment check
       below and by the file-pointer kind, so it is never removed.)
-- [ ] **Still pending**: the reference-rewrite promotion step's OWN
-      containment check — once `materialize_main.py`/`promote_release.py`
-      is extended for the `uv`-editable form (Phase 1's still-unbuilt
-      Plan item above), it must reuse `_escapes_root()` to refuse a
-      `[tool.uv.sources]` `path` that escapes `canonical_root`, the same
-      way the (soon-to-be-retired) directory-pointer path above already
-      does. Not yet built, since the promotion step itself isn't built.
+- [x] The reference-rewrite promotion step's OWN containment check —
+      **done, PR #4245**: `materialize_main.py`'s
+      `materialize_uv_editable_ref_into()` refuses a `[tool.uv.sources]`
+      `path` that escapes `canonical_root`, the same way the (soon-to-be-
+      retired) directory-pointer path above already does (its own
+      `_escapes_root()` copy, mirroring rather than importing across the
+      hyphenated/non-hyphenated filename boundary).
 - [ ] A promotion run against a deliberately malformed/unresolvable pointer
       aborts the promotion rather than producing a `main` snapshot
       containing an unexpanded stub. **Done, PR #3752** — covered for a
@@ -1248,3 +1249,222 @@ _Pending._
   exactly one already-`src-passthrough` lib (smallest: `lazy-cli-dispatch`,
   1 consumer) before doing the bulk re-conversion of the other 6 -- per
   this effort's own established "prove on one before bulk" pattern.
+
+### 2026-09-27 — Phase 1: uv-editable tooling built and proved on lazy-cli-dispatch (PR #4245)
+
+- **Built the three previously-missing pieces of tooling** the second
+  course correction left open: `tools/sync-vendored-libs.py --uv-editable
+  CONSUMER LIB` (bidirectional conversion tool -- real copy or
+  `src-passthrough` pointer copy, either direction, into the `uv`-editable
+  form; refuses to discard a drifted real copy), a new drift/consistency
+  guard folded into `--check` (recognizes an escaping `[tool.uv.sources]`
+  entry, verifies `editable = true` and canonical existence, across both
+  `plugins/<plugin>` and `worktree-manager` consumers), and a promotion-
+  time reference-rewriter in both `materialize_main.py` and
+  `preview_release.py` (copies canonical's complete lib tree -- `src/`,
+  `README.md`, `tests/`, `pyproject.toml` -- into the consumer's own
+  `libs/<lib>/` and rewrites the entry back to the plain local form).
+- **`sync-vendored-libs.py` crossed the repo's 1000-line module-size cap**
+  once the new tooling landed -- split two purely-additive pieces into
+  their own modules (`tools/uv_editable_ref.py`, a normal importable
+  module with no logic risk from the extraction; `tools/
+  passthrough_pointer_template.py`, a plain string-constant move with zero
+  logic change) rather than touching the pre-existing `src-passthrough`
+  writer itself, keeping the componentization scoped to only the code this
+  session actually added.
+- **Proved the whole pipeline on `lazy-cli-dispatch`** (smallest, 1
+  consumer) exactly as planned: converted `plugins/agent-worktrees/libs/
+  lazy-cli-dispatch` from `src-passthrough` to `uv`-editable -- no local
+  directory remains. Validated end-to-end, not just unit-tested:
+  `sync-vendored-libs.py --check`/`check-vendored-libs-sync.py`/`check-
+  install-contract.py` all pass; `run-plugin-tests.py agent-worktrees
+  --reinstall`'s full suite (all 10 sub-suites) passes with no local copy
+  present; a **non-editable** `uv pip install <plugin-dir>` in a fresh
+  venv (no `-e`) still resolved `agent-lazy-cli-dispatch` live from
+  canonical -- the exact property this effort's second course correction
+  was staked on, confirmed for a real lib, not just the earlier isolated
+  `agent-mcp` reproduction; `materialize_main.py` expands the reference
+  into a byte-for-byte lossless copy at promotion time, confirmed against
+  the real repo tree.
+- **Filed as PR #4245**, targeting `dev`. Journaled here per this effort's
+  own "even for pure documentation" convention, but this entry is itself
+  part of that same PR (not a separate follow-up commit).
+- **Merged 2026-09-27 (admin-merge, operator-authorized)**. The automated
+  reviewer drove the PR through 13 review rounds, surfacing (and this
+  session fixing) 29 distinct findings -- fail-closed promotion gaps,
+  TOML-table-scoping, several nested/ancestor/early-resolve symlink
+  hardenings, path-traversal via an unsafe lib name, alias-materialization,
+  Python 3.10 `tomllib` compatibility, and more (see the individual commits
+  on the merged PR for the full list; each was replied-to inline with the
+  fixing commit). The last two review rounds both reported "Findings:
+  None," but the automated reviewer's own review state never flipped to a
+  formal GitHub "Approved" (stayed "COMMENTED") even after a manual re-ping
+  -- the operator judged the PR clean given zero remaining findings across
+  two consecutive rounds and authorized an admin-merge (bypassing the
+  stuck required-review gate) rather than waiting further on a reviewer
+  quirk outside this effort's own scope to fix.
+- **Still open for the next session**: re-convert the remaining 6
+  `src-passthrough` libs (`work-coalescing-singleton` next by blast-radius,
+  then the tied pairs), convert the 4 never-yet-`src-passthrough` real
+  libs directly, retire the `src-passthrough` pointer kind once all 7 are
+  re-converted, then Phase 2 (installer engine) and Phase 3 (pattern doc)
+  -- see the Plan section above for the full ordering, unchanged by this
+  session. The tooling built and hardened in PR #4245
+  (`--uv-editable`, the `--check` drift guard, and the promotion-time
+  rewriter) is now proven end-to-end and ready to apply directly to each
+  remaining lib with no further tooling work expected -- only the
+  re-conversion + validation cycle per lib.
+
+### 2026-09-27 — Phase 1: converted `work-coalescing-singleton` (2 consumers)
+
+- Applied the proven recipe from the `lazy-cli-dispatch` conversion (PR
+  #4245) to the next-smallest-blast-radius `src-passthrough` lib:
+  `tools/sync-vendored-libs.py --uv-editable` for both consumers
+  (`plugins/agent-worktrees`, `worktree-manager`), hand-updated each
+  consumer's `[tool.uv.sources]` prose comment to describe the new
+  `uv`-editable mechanism, then validated end-to-end: `sync-vendored-
+  libs.py --check`/`check-vendored-libs-sync.py`/`check-install-
+  contract.py` all green; `run-plugin-tests.py agent-worktrees
+  --reinstall`'s full suite completed with 433 passed, 8 skipped, and 2
+  pre-existing failures (`test_lazy_dispatch.py`'s dispatch-table/cluster-
+  free-modules drift checks, confirmed pre-existing and unrelated by
+  re-running the identical suite against the unmodified `dev` tip via
+  `git stash`);
+  `worktree-manager` has no `run-plugin-tests.py` suite of its own, so ran
+  its real test suite directly via `uv run --extra dev` (1532 passed, 4
+  skipped, before the review-round additions below); a **non-editable**
+  `uv pip install plugins/agent-worktrees` in
+  a fresh venv (no `-e`) still resolved `agent-work-coalescing-singleton`
+  live from canonical (`__file__` pointed at `libs/work-coalescing-
+  singleton`, not a copy); `materialize_main.py --dest` round-tripped
+  both consumers' pointers byte-for-byte (only `.ruff_cache`/`__pycache__`
+  diffs, both non-source cache artifacts).
+- **Caught and fixed a self-inflicted false alarm mid-validation**: the
+  non-editable-install probe's `uv pip install` build step left stray
+  `build/`/`*.egg-info` directories under `plugins/agent-worktrees/libs/
+  work-coalescing-singleton/` (untracked build cruft from building the
+  path-dependency sdist), which made the directory reappear on disk and
+  caused `materialize_main.py` to report a false `SKIP ... already exists
+  -- refusing to overwrite` for that one pointer. Removed the untracked
+  cruft and re-ran; the pointer materialized cleanly (`OK`) on the next
+  pass. Worth remembering for the remaining libs: re-check for stray
+  build artifacts after any non-editable-install probe, before trusting a
+  `materialize_main.py` `SKIP`/warning as a real regression.
+- Added a changefile per touched plugin (`agent-worktrees`,
+  `worktree-manager`) -- later reduced to just `agent-worktrees` (see
+  below): the `worktree-manager` changefiles were removed once identified
+  as dead weight for a standalone-versioned, non-marketplace payload.
+- **Filed as PR #4331**, targeting `dev`. The GitHub-native automated
+  reviewer's first pass surfaced a real, previously-unrecognized gap in
+  this conversion recipe (2 High findings), fixed in the same PR:
+  - **`worktree-manager`'s own standalone self-install/self-update path
+    had no way to expand a `uv`-editable canonical reference.**
+    `worktree_manager/self_install.py`'s `_materialize_payload_pointers()`
+    (and its hand-maintained, statically-shipped
+    `_trusted_pointer_materializer.py` -- kept separate from
+    `tools/materialize_main.py` on purpose; see that module's own
+    docstring for the trusted-vs-untrusted-fetch rationale) only ever knew
+    how to expand the OLDER `VENDOR_POINTER.json` directory-pointer form.
+    A `uv`-editable consumer manifest entry (this conversion's own output)
+    was invisible to it -- a self-installed or self-updated Manager slot
+    would ship an escaping `path = "../libs/work-coalescing-singleton"`
+    reference that can never resolve outside a monorepo checkout, breaking
+    every deployed Manager on next self-update. Ported
+    `materialize_uv_editable_ref_into()` and the `find_uv_editable_refs()`/
+    `uv_sources_table_span()` helpers it depends on (mirroring
+    `tools/materialize_main.py`/`tools/uv_editable_ref.py`) into the
+    trusted module, wired `_materialize_payload_pointers()` to discover
+    and expand escaping `[tool.uv.sources]` entries alongside the existing
+    directory-pointer discovery (failing closed the same way: no canonical
+    `libs/` reachable from the fetched payload is a hard error, not a
+    silent skip), and added 3 new parity tests to
+    `test_trusted_materializer_parity.py` (clean expansion, missing
+    `editable = true` refusal, symlinked-canonical refusal) alongside the
+    existing 6 directory-pointer scenarios.
+  - **`worktree-manager` is a standalone-versioned payload, not a
+    marketplace plugin** -- a plugin changefile alone never bumps
+    `worktree_manager/__init__.py`'s own `__version__`
+    (`self_install()`'s actual publication gate), so an already-installed
+    machine would never pick up this fix. Bumped `__version__` (and the
+    matching `worktree-manager/pyproject.toml` `version`)
+    `0.1.0-dev93` -> `0.1.0-dev94`, confirmed via
+    `tools/check-version-consistency.py`, per this repo's own established
+    per-fix version-bump convention (see the `self_install.py` git history
+    cited in this same review round).
+  - Also tightened this journal's own wording per a Low finding: the
+    validation bullet above previously read as an unqualified "passes"
+    despite reporting 2 failures in the same sentence -- reworded to state
+    the pass/skip/pre-existing-failure counts unambiguously.
+  - Re-ran the full validation battery after these fixes:
+    `run-plugin-tests.py agent-worktrees --reinstall` still 433 passed, 8
+    skipped, the same 2 pre-existing failures; `worktree-manager`'s own
+    suite now 1535 passed (+3 new parity tests), 4 skipped;
+    `sync-vendored-libs.py --check`/`check-vendored-libs-sync.py`/`check-
+    install-contract.py`/`check-version-consistency.py` all green.
+  - **Second review round found 2 more real findings** (the two High
+    findings above also reappeared as still-"Open" in the reviewer's own
+    round-over-round summary -- confirmed against the current file state
+    that both were already fixed by the prior commit; this is the same
+    "stale carry-over" behavior this effort's own handoff notes already
+    document, not a re-regression):
+    - **Medium: the two `worktree-manager`-targeted changefiles were dead
+      weight.** `accumulate_bumps.compute()` resolves a changefile's
+      `plugin` entry via `plugins/<name>/plugin.json`; `worktree-manager`
+      has no such path (it's a standalone-versioned payload, not a
+      marketplace plugin), so both changefiles would be silently skipped
+      by the release bump pipeline -- and the version was already bumped
+      by hand in the prior commit, so they added nothing. Removed both
+      (`git rm`); the `agent-worktrees`-targeted changefile (a real
+      marketplace plugin) stays.
+    - **Medium: the new parity tests only called
+      `materialize_uv_editable_ref_into()` directly**, never exercising
+      `_materialize_payload_pointers()`'s own control flow (discovery,
+      canonical-root selection, failure normalization, slot-publication)
+      through the real `self_install()` entry point. Added 2 tests to
+      `test_self_install.py` mirroring the existing directory-pointer
+      pair (`test_self_install_materializes_a_vendor_pointer_from_a_live_
+      monorepo` / `test_self_install_raises_when_pointer_present_
+      without_monorepo_ancestor`): one confirms a full `self_install()`
+      run expands an escaping `uv`-editable reference into a real local
+      copy and rewrites the manifest before publishing; the other
+      confirms `self_install()` reports `action="error"` and publishes no
+      slot when no monorepo ancestor is reachable to resolve the
+      reference from.
+    - Re-validated after these fixes: `worktree-manager`'s own suite now
+      1537 passed (+2 more), 4 skipped; `check-changefile-presence.py
+      --base <pre-PR dev tip>` OK (every touched plugin has a pending
+      changefile); all other guards (`sync-vendored-libs.py --check`/
+      `check-vendored-libs-sync.py`/`check-install-contract.py`/`check-
+      version-consistency.py`) still green.
+  - **Third review round**: the reviewer's own "Resolved since last
+    review" list confirmed both Medium findings above (the dead
+    changefiles, the missing self-install-level tests) as fixed. It also
+    re-listed the two prior High findings (self-install materializer,
+    self-install parity tests) as still "Open" despite both already
+    being addressed by the prior commit -- re-verified against the
+    current file state (`self_install.py`'s `_materialize_payload_
+    pointers` still calls `materializer.find_uv_editable_refs`/
+    `materialize_uv_editable_ref_into`; both new tests still present and
+    passing in `test_self_install.py`) and treated as the SAME documented
+    reviewer lag (stale round-over-round carry-over), not a real
+    regression -- no code change made for those two. One genuinely NEW
+    finding: this journal's own "Added a changefile per touched plugin
+    (agent-worktrees, worktree-manager)" bullet (and the PR description's
+    matching claim) were left stale after the `worktree-manager`
+    changefiles were removed two commits later. Reworded the journal
+    bullet in place; updated the PR description on GitHub to match.
+  - **Fourth review round**: one genuinely new finding -- deleting a
+    consumer's pointer copy also deletes the lib tests that consumer's
+    own root-level `pytest` run used to collect (`worktree-manager`
+    declares no `testpaths`, so `uv run pytest` walked `libs/*/tests`),
+    leaving `work-coalescing-singleton`'s wire/server coverage
+    unenforced. Added a `checks`-job CI step that runs the CANONICAL
+    suites directly (`libs/work-coalescing-singleton/tests` plus
+    `libs/lazy-cli-dispatch/tests`, whose coverage the earlier PR #4245
+    conversion dropped the same way), mirroring the existing
+    `peer-launch`/`installer-readiness` canonical-lib steps. Verified
+    locally: 42 passed.
+- **Next up**: `credential-relay` (4 consumers), per the effort's own
+  smallest-blast-radius-first ordering. Its conversion (and every later
+  one) must extend that canonical-lib CI step with the newly converted
+  lib, so no lib loses its suite the same way.

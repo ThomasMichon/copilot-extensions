@@ -9,6 +9,7 @@ never trusted for identity when the directory is authoritative.
 from __future__ import annotations
 
 import dataclasses
+import json
 import os
 import types
 from pathlib import Path
@@ -690,3 +691,80 @@ def test_get_pr_key_still_includes_control_plane_related_pr(
         rc = m.cmd_get(types.SimpleNamespace(key=key))
         assert rc == 0
         assert calls == [True], key
+
+
+def test_picker_paths_json_reports_install_and_plugin_roots(
+    monkeypatch,
+    capsys,
+    tmp_path,
+):
+    install_dir = tmp_path / ".agent-worktrees"
+    home = tmp_path / "home"
+    monkeypatch.setattr(cfg, "install_dir", lambda: install_dir)
+    monkeypatch.setattr(cfg, "_home", lambda: home)
+
+    rc = m.cmd_picker_paths(types.SimpleNamespace(json=True))
+
+    payload = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert payload == {
+        "version": 1,
+        "install_dir": str(install_dir),
+        "installed_plugins_dir": str(home / ".copilot" / "installed-plugins"),
+    }
+
+
+def test_picker_bootstrap_json_reports_runner_decisions(
+    adopted_repo,
+    active_myproj,
+    monkeypatch,
+    capfd,
+):
+    anchor, _wt_root, _wt_path, _wt_id, _conf = adopted_repo
+    monkeypatch.setattr(m, "_resolve_active_project", lambda project: (project, anchor))
+    monkeypatch.setattr(m, "_cwd_is_inside_project", lambda candidate: False)
+    monkeypatch.setattr(m, "_in_ssh_session", lambda: True)
+
+    rc = m.cmd_picker_bootstrap(types.SimpleNamespace(json=True))
+
+    payload = json.loads(capfd.readouterr().out)
+    assert rc == 0
+    assert payload == {
+        "version": 1,
+        "project": "myproj",
+        "should_switch_cwd": True,
+        "cwd": str(anchor.resolve()),
+        "default_live": False,
+    }
+
+
+def test_repair_stale_anchor_json_reports_targeted_status(
+    adopted_repo,
+    active_myproj,
+    monkeypatch,
+    capfd,
+):
+    _anchor, _wt_root, _wt_path, _wt_id, conf = adopted_repo
+    states = iter((False, True))
+
+    def _present(_config):
+        return next(states)
+
+    monkeypatch.setattr("agent_worktrees.update_runtime._self_entry_present", _present)
+    monkeypatch.setattr(
+        "agent_worktrees.update_runtime._heal_stale_anchor_if_self_missing",
+        lambda config: config,
+    )
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: conf)
+
+    rc = m.cmd_repair_stale_anchor(types.SimpleNamespace(json=True))
+
+    payload = json.loads(capfd.readouterr().out)
+    assert rc == 0
+    assert payload == {
+        "version": 1,
+        "project": "myproj",
+        "status": "repaired",
+        "self_present_before": False,
+        "self_present_after": True,
+    }

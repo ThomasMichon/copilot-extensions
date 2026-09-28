@@ -432,6 +432,18 @@ def indicator_state(
 def cmd_stage_update(args) -> int:
     """CLI: run one background staging pass (launcher backgrounds this)."""
     st = getattr(args, "status", None)
+    if getattr(args, "indicator_state", False):
+        payload = {
+            "version": 1,
+            "indicator_state": indicator_state(
+                status=Path(st) if st else None,
+            ),
+        }
+        if getattr(args, "json", False):
+            print(json.dumps(payload))
+        else:
+            print(payload["indicator_state"])
+        return 0
     result = stage(status=Path(st) if st else None)
     if getattr(args, "json", False):
         print(json.dumps(result))

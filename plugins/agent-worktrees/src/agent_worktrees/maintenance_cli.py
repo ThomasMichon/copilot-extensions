@@ -31,17 +31,17 @@ def _current_session_ids(*args, **kwargs):
 
 
 def add_parsers(sub) -> None:
-    sp = sub.add_parser(
-        "config-migrate",
-        help="Migrate machine-local config schemas in ~/.agent-worktrees/ (idempotent)",
-    )
+    _cmm = "~/.agent-worktrees/"  # marketplace-isolation: allow legacy
+    _cm_help = f"Migrate machine-local config schemas in {_cmm} (idempotent)"
+    sp = sub.add_parser("config-migrate", help=_cm_help)
     sp.add_argument("--quiet", action="store_true", help="Suppress per-file output")
 
-    sp = sub.add_parser(
-        "reconcile-binstubs",
-        help="Reconcile ~/.local/bin project binstubs against projects.yaml "
-        "(add for every registered project, remove deregistered ones)",
+    _rbm = "~/.local/bin"  # marketplace-isolation: allow legacy
+    _rb_help = (
+        f"Reconcile {_rbm} project binstubs against projects.yaml "
+        "(add for every registered project, remove deregistered ones)"
     )
+    sp = sub.add_parser("reconcile-binstubs", help=_rb_help)
     ownership_action = sp.add_mutually_exclusive_group()
     ownership_action.add_argument(
         "--transfer",

@@ -109,7 +109,7 @@ class PickerScreenRuntimeMixin:
             pass
         # Reconcile remote tabs' PR state on their own owning machine, once per
         # source, in the background after first paint (#2102). The local tab's
-        # PRs are reconciled separately via the #1423 path in setup().
+        # PRs are reconciled separately via the #1423 setup-reload apply path.
         recon = getattr(self.loader, "reconcile_remote_prs", None)
         if callable(recon):
             try:
@@ -300,6 +300,12 @@ class PickerScreenRuntimeMixin:
                 _rt.invalidate()
             except Exception:
                 pass
+        try:
+            from .. import project_config as _cfg
+
+            _cfg.clear_caches()
+        except Exception:
+            pass
 
     def _next_setup_epoch(self) -> int:
         self._setup_epoch += 1
@@ -521,21 +527,14 @@ class PickerScreenRuntimeMixin:
         self._prof_loaded = False
         if callable(self._prof_load):
             self.profiles_view.start_load()
-        # Best-effort background PR-state reconcile (#1423): correct already-
-        # merged-but-stale PRs in the tracking store, then re-render so the
-        # Picker stops showing merged worktrees as having open PRs. Sources
-        # without the hook (fixtures/tests) skip it.
-        self._pr_reconciled = False
-        rec_fn = getattr(self.src, "reconcile_prs", None)
-        if callable(rec_fn):
-            self._start_pr_reconcile(rec_fn)
-        # #4057/#1416: same after-first-paint pattern for the cached bound-Copilot
-        # liveness reconcile -- surfaces a bare-resumed session (cwd=home) in the
-        # Active section without a live per-worktree scan on the populate path.
-        self._bound_live_reconciled = False
-        blr_fn = getattr(self.src, "reconcile_bound_live", None)
-        if callable(blr_fn):
-            self._start_bound_live_reconcile(blr_fn)
+        # Phase 3d Step 6: the local Group C reconcile is now folded into the
+        # authoritative classify load itself (`data_local.load(classify=True)`),
+        # so setup/reload no longer spawns separate post-apply PR/bound-live
+        # reconcile threads. Keep the legacy flags true for tests and any
+        # observational call sites: once this payload applies, the current epoch
+        # already includes the freshest available Group C overlay.
+        self._pr_reconciled = True
+        self._bound_live_reconciled = True
         # Reconcile the persisted Worktrees selection against the freshly loaded
         # records (#2258 P3-7): keep survivors, drop rows that vanished, re-seat
         # a now-invalid range anchor. A no-op while records are still streaming.
@@ -601,7 +600,12 @@ class PickerScreenRuntimeMixin:
         ).start()
         return epoch
 
-    def setup(self):
+    def setup_sync_for_tests(self):
+        """Run setup/reload synchronously for unit tests only.
+
+        Production entrypoints must schedule ``_start_setup_reload_worker()``
+        instead of calling the collect/apply path inline on the UI thread.
+        """
         self._prime_setup_reload()
         epoch = self._next_setup_epoch()
         try:
@@ -616,58 +620,3 @@ class PickerScreenRuntimeMixin:
             self._dispose_setup_payload(payload)
             raise
         self._setup_applied_epoch = epoch
-    def _start_pr_reconcile(self, rec_fn):
-        """Reconcile stale local PR states off the UI thread, then reload (#1423).
-
-        Never blocks the first paint and never raises: a provider that is
-        unconfigured/unreachable simply leaves the tracking state as-is. Only
-        triggers a reload when something actually changed, so an all-current
-        store costs one silent pass.
-        """
-        def work():
-            try:
-                changed = rec_fn()
-            except Exception:
-                changed = 0
-            if changed:
-                try:
-                    self._reload_local_after_reconcile()
-                except Exception:
-                    pass
-            self._pr_reconciled = True
-
-        threading.Thread(target=work, name="pr-reconcile", daemon=True).start()
-    def _start_bound_live_reconcile(self, blr_fn):
-        """Reconcile cached bound-Copilot liveness off the UI thread, then reload.
-
-        Mirrors :meth:`_start_pr_reconcile` (#4057/#1416): resolves the machine's
-        live bound Copilots via the authoritative scan and stamps each worktree's
-        cached ``bound_live`` so a bare-resumed session surfaces ACTIVE. Never
-        blocks the first paint and never raises; only reloads when a bound-liveness
-        transition actually happened (an all-current store costs one silent pass).
-        """
-        def work():
-            try:
-                changed = blr_fn()
-            except Exception:
-                changed = 0
-            if changed:
-                try:
-                    self._reload_local_after_reconcile()
-                except Exception:
-                    pass
-            self._bound_live_reconciled = True
-
-        threading.Thread(
-            target=work, name="bound-live-reconcile", daemon=True).start()
-    def _reload_local_after_reconcile(self):
-        """Re-fetch the local machine's rows after a PR reconcile wrote back.
-
-        Mirrors the post-maintenance reload (#1421): in live mode the local
-        source re-threads and the render tick picks up the fresh records; in the
-        non-live path the data is reloaded in-place."""
-        m, e = self._src_local()
-        if self.live and self.loader is not None:
-            self.loader.reload(m, e)
-        elif not self.live:
-            self.data = self.src.load()

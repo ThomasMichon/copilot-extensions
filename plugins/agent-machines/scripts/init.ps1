@@ -17,7 +17,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('install', 'init', 'stamp', 'provision', 'cell-provision', 'cell-repair', 'cell-uninstall', 'cell-attribute-legacy', 'cell-deactivate', 'cell-retire-legacy', 'slot-provision', 'slot-validate', 'slot-complete', 'slot-completion-validate', 'slot-cutover')]
+    [ValidateSet('install', 'init', 'stamp', 'stamp-binstub', 'provision', 'cell-provision', 'cell-repair', 'cell-uninstall', 'cell-attribute-legacy', 'cell-deactivate', 'cell-retire-legacy', 'slot-provision', 'slot-validate', 'slot-complete', 'slot-completion-validate', 'slot-cutover')]
     [string]$Action = 'install',
     [string]$InstallDir,
     [string]$Context,
@@ -150,6 +150,22 @@ if ($cellSlotAction) {
 $cellSlotDirect = $cellSlotAction -and -not $env:COPILOT_PLUGIN_INSTALL_STAGED
 if ($cellSlotDirect) {
     $env:COPILOT_PLUGIN_INSTALL_STAGED = 'cell-slot-action'
+}
+
+# Review finding (round 10): `stamp-binstub` (#3303, full-harness-startup-
+# reliability) exists SPECIFICALLY so bootstrap-check.ps1's synchronous
+# sessionStart-hook call stays sub-second, inside its 15s hook timeout. But
+# the self-stage block right below unconditionally copies the WHOLE plugin
+# payload (Copy-Item -Recurse, no excludes) before ANY action dispatches on
+# a real marketplace install -- exactly the cost this two-stage split
+# exists to avoid backgrounding, silently reintroducing the same
+# command-not-found race on a slow disk/first invocation. Skip self-stage
+# for this action alone, the same way cell-/slot- actions already do:
+# Invoke-StampBinstubOnly only ever reads/writes via $probePayload/
+# $InstallDir (never $PluginDir, since the round-7 fix), so it needs no
+# staged copy to run correctly.
+if ($Action -eq 'stamp-binstub' -and -not $env:COPILOT_PLUGIN_INSTALL_STAGED) {
+    $env:COPILOT_PLUGIN_INSTALL_STAGED = 'stamp-binstub-fast-path'
 }
 
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
@@ -732,6 +748,7 @@ if (-not $InstallDir) {
     $InstallDir = Join-Path $env:USERPROFILE '.agent-machines'
 }
 $InstallDir = [IO.Path]::GetFullPath($InstallDir)
+$DefaultInstallDir = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.agent-machines'))
 $VenvDir  = Join-Path $InstallDir '.venv'
 $LocalBin = Join-Path $env:USERPROFILE '.local\bin'
 
@@ -1244,6 +1261,94 @@ if ($Action -eq 'cell-provision') {
 
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 
+# Publish a file's content atomically: write to a same-directory temp file,
+# then replace/rename into place. Review finding (round 8): `Move-Item -Force`
+# does NOT guarantee an atomic replace on every supported PowerShell runtime
+# -- notably Windows PowerShell 5.1, whose -Force implementation can delete
+# the existing destination before moving the new one in, leaving a brief
+# window with NO destination file at all (worse than a torn write for a
+# concurrent reader). [System.IO.File]::Replace() IS an atomic NTFS replace;
+# use it whenever a destination already exists, and fall back to a plain
+# Move-Item (itself an atomic rename when the destination is absent) for a
+# genuinely first-ever publish.
+#
+# NOTE: passing $null (or "") for Replace()'s destinationBackupFileName
+# throws "The path is empty" on this codebase's actual runtimes (confirmed
+# on both Windows PowerShell 5.1 and pwsh) despite that being the documented
+# no-backup form -- give it a real, own-PID-suffixed backup path instead and
+# discard it immediately after; Replace() itself is still the atomic step.
+#
+# NOTE: Replace()/rename can also throw a transient IOException ("used by
+# another process") if any reader briefly has the destination open without
+# FILE_SHARE_DELETE at that exact instant (a real, if narrow, Windows
+# sharing-violation window -- e.g. a concurrent read of the very marker or
+# binstub this publishes). Retry briefly rather than treating that as fatal.
+function Publish-FileAtomically {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Content,
+        [Parameter(Mandatory)]$Encoding
+    )
+    # File.Replace requires fully-qualified paths -- a relative path throws
+    # "The path is not of a legal form."
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    $tmp = "$fullPath.tmp-$PID"
+    [System.IO.File]::WriteAllText($tmp, $Content, $Encoding)
+    for ($attempt = 1; $true; $attempt++) {
+        try {
+            if (Test-Path -LiteralPath $fullPath) {
+                $backup = "$fullPath.bak-$PID"
+                [System.IO.File]::Replace($tmp, $fullPath, $backup)
+                Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
+            } else {
+                # Review finding (round 9): this is also called from UNLOCKED
+                # call sites (e.g. the regular, non-stamp install path), so
+                # two racing first-time installs can both pass the Test-Path
+                # check above before either publishes. Omit -Force here: a
+                # plain Move-Item throws if a concurrent writer created the
+                # destination in that gap, instead of silently -Force
+                # deleting+recreating the very no-file window this whole
+                # helper exists to prevent. Caught below and retried, which
+                # re-checks Test-Path and takes the safe Replace() branch.
+                Move-Item -LiteralPath $tmp -Destination $fullPath
+            }
+            return
+        } catch {
+            if ($attempt -ge 20) { throw }
+            Start-Sleep -Milliseconds 15
+        }
+    }
+}
+
+# Same-directory atomic copy of an on-disk source file (the resolver files),
+# reusing the exact same Replace-or-Move guarantee (and retry) as
+# Publish-FileAtomically.
+function Copy-FileAtomically {
+    param(
+        [Parameter(Mandatory)][string]$SourcePath,
+        [Parameter(Mandatory)][string]$DestPath
+    )
+    $fullDest = [IO.Path]::GetFullPath($DestPath)
+    $tmp = "$fullDest.tmp-$PID"
+    Copy-Item -LiteralPath $SourcePath -Destination $tmp -Force
+    for ($attempt = 1; $true; $attempt++) {
+        try {
+            if (Test-Path -LiteralPath $fullDest) {
+                $backup = "$fullDest.bak-$PID"
+                [System.IO.File]::Replace($tmp, $fullDest, $backup)
+                Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
+            } else {
+                # Same non-overwriting-move rationale as Publish-FileAtomically.
+                Move-Item -LiteralPath $tmp -Destination $fullDest
+            }
+            return
+        } catch {
+            if ($attempt -ge 20) { throw }
+            Start-Sleep -Milliseconds 15
+        }
+    }
+}
+
 # === install-contract:v3 strip-trampolines -- keep byte-identical across plugins ===
 function Remove-ConsoleTrampolines {
     <# Strip the uv-regenerated Scripts\<name>.exe console-script trampolines from
@@ -1664,7 +1769,11 @@ function Deploy-SelfProvisioningBinstub {
     if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
     foreach ($r in @('resolve-runtime.ps1', 'resolve-runtime.sh')) {
         $rSrc = Join-Path $PSScriptRoot $r
-        if (Test-Path $rSrc) { Copy-Item $rSrc (Join-Path $binDir $r) -Force }
+        # Review finding (round 8): a plain Copy-Item -Force truncates the
+        # destination before copying, so a binstub sourcing this resolver
+        # concurrently could read a partial/empty script even though the
+        # binstub itself is atomically replaced. Publish atomically instead.
+        if (Test-Path $rSrc) { Copy-FileAtomically -SourcePath $rSrc -DestPath (Join-Path $binDir $r) }
     }
     if ($env:OS -ne 'Windows_NT') {
         $stubPath = Join-Path $LocalBin 'agent-machines'
@@ -1680,7 +1789,10 @@ _i="`$(cat "`$_root/payload-dir" 2>/dev/null)/scripts/init.sh"
 if [ -n "`$_i" ] && [ -f "`$_i" ]; then echo "[agent-machines] runtime not provisioned; run: bash \"`$_i\" provision" >&2; else echo "[agent-machines] runtime not provisioned and the installer was not found; re-enable the plugin, then retry." >&2; fi
 exit 1
 "@
-        [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
+        # Publish atomically -- a reader mid-write must never observe a
+        # truncated/torn binstub, nor a brief no-file window on a replace
+        # (see Publish-FileAtomically's own rationale above).
+        Publish-FileAtomically -Path $stubPath -Content $stubContent -Encoding $utf8NoBom
         Write-Ok "Binstub: $stubPath"
         return
     }
@@ -1736,8 +1848,139 @@ if %ERRORLEVEL%==0 set "_PSX=pwsh"
 for /f "usebackq delims=" %%p in (`%_PSX% -NoProfile -ExecutionPolicy Bypass -Command "$env:AGENT_RT_ROOT='%_ROOT%'; . '%_ROOT%\bin\resolve-runtime.ps1'; if ($AgentRtPy) { $AgentRtPy }" 2^>nul`) do set "_PY=%%p"
 goto :eof
 '@
-    [System.IO.File]::WriteAllText($cmdPath, $cmdContent, $utf8NoBom)
+    Publish-FileAtomically -Path $cmdPath -Content $cmdContent -Encoding $utf8NoBom
     Write-Ok "Binstub: $cmdPath (self-provisioning)"
+}
+
+# Serializes every stamp-family action (this fast binstub-only path AND the
+# full Invoke-Stamp below) against concurrent invocations -- e.g. two fresh
+# sessions launching their sessionStart hook at nearly the same instant --
+# under ONE named mutex keyed by the install dir, so they can never observe
+# or produce a half-written binstub/marker set.
+function Enter-StampLock {
+    $stampHash = [BitConverter]::ToString(
+        [Security.Cryptography.SHA256]::Create().ComputeHash(
+            [Text.Encoding]::UTF8.GetBytes($InstallDir.ToLowerInvariant())
+        )
+    ).Replace('-', '').Substring(0, 24)
+    $stampMutexName = if ($env:OS -eq 'Windows_NT') {
+        "Local\CopilotExtensions.AgentMachines.Stamp.$stampHash"
+    } else {
+        "CopilotExtensions.AgentMachines.Stamp.$stampHash"
+    }
+    $mutex = New-Object Threading.Mutex($false, $stampMutexName)
+    $held = $false
+    try {
+        $held = $mutex.WaitOne([TimeSpan]::FromSeconds(20))
+    } catch [Threading.AbandonedMutexException] {
+        $held = $true
+    }
+    if (-not $held) { $mutex.Dispose(); throw 'Timed out waiting for the agent-machines stamp lock.' }
+    return $mutex
+}
+
+# Fast entry point (#3303, full-harness-startup-reliability Round 2): deploy
+# ONLY the self-provisioning binstub -- no snapshot copy -- so a sessionStart
+# hook can call this SYNCHRONOUSLY (sub-second: just a couple of small file
+# writes) to guarantee the launcher is on PATH before the hook returns, then
+# background the slower full `stamp` (below) for the snapshot copy. Without
+# this split, backgrounding the whole `stamp` action left a window where a
+# session's very first turn could invoke `agent-machines` before the
+# background job had created it (command-not-found race).
+#
+# KNOWN GAP, deliberately deferred (review round 8): payload-dir and
+# payload-origin are each published atomically on their own (see
+# Publish-FileAtomically), but the PAIR is not published as one atomic unit --
+# a reader could still observe one file's NEW value alongside the other's OLD
+# value mid-publish (e.g. a stale dir with a fresh origin). Fixing this
+# correctly means either merging both values into one atomically-published
+# marker file or having the .cmd/.sh readers take the stamp lock too; both
+# markers are read by several OTHER call sites across this plugin
+# (invoke-payload-runtime.ps1/.sh, installation-context, receipts, the CLI),
+# so redesigning the on-disk format is real, valuable future work but out of
+# this short-PR-cycle round's scope -- logged in the effort's Round Ledger.
+function Invoke-StampBinstubOnly {
+    # Review finding (round 10): Deploy-SelfProvisioningBinstub generates a
+    # launcher whose self-provisioning path hardcodes
+    # `%USERPROFILE%\.agent-machines` (and `$HOME/.agent-machines` for its
+    # POSIX stub) as the marker root -- it does NOT follow a custom
+    # -InstallDir. A custom -InstallDir would therefore publish markers the
+    # generated launcher can never read, producing a broken (127-on-first-
+    # use) binstub. bootstrap-check.ps1's real sessionStart-hook call never
+    # passes -InstallDir for this action, so reject it explicitly here
+    # rather than silently deploying a launcher that cannot work.
+    if (-not [StringComparer]::OrdinalIgnoreCase.Equals($InstallDir, $DefaultInstallDir)) {
+        Write-Fail "stamp-binstub only supports the default install dir ($DefaultInstallDir) -- the generated launcher hardcodes that root and cannot read markers written to '$InstallDir'."
+        exit 1
+    }
+    # Review finding (round 11): this used to take the SAME Enter-StampLock
+    # mutex Invoke-Stamp holds across its whole (multi-second) snapshot copy.
+    # A concurrent slow `stamp` already holding it made this "fast" path wait
+    # behind it for up to 20 seconds -- reintroducing the very hook-timeout
+    # race this two-stage split exists to prevent. Deliberately NOT taking
+    # any lock here: every operation below (Publish-FileAtomically's marker
+    # writes, Deploy-SelfProvisioningBinstub's stub/resolver writes) was
+    # already hardened in round 9 to be safe under UNLOCKED concurrent
+    # callers -- non-overwriting Move-Item with retry-through-Replace() on a
+    # destination race -- so this fast path no longer needs mutual exclusion
+    # to be correct, only to be genuinely fast.
+    foreach ($dir in @($InstallDir, $LocalBin)) {
+        if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    }
+    # Review finding: without a usable payload-dir marker, the generated
+    # binstub's self-provisioning path (":_prov" in the .cmd) reads an
+    # empty %_ROOT%\payload-dir, finds no installer, and exits 127 --
+    # even though the binstub itself now exists. Point the marker at a
+    # durable payload root as an immediate, correct fallback (see the
+    # round-7 comment below for exactly which one and why); the
+    # background `stamp` overwrites both markers with the real snapshot
+    # path once its copy completes, same as before.
+    $payloadDirMarker = Join-Path $InstallDir 'payload-dir'
+    $payloadOriginMarker = Join-Path $InstallDir 'payload-origin'
+    # Publish atomically (Replace-or-Move via Publish-FileAtomically): a
+    # generated binstub reads payload-dir OUTSIDE any lock, so a direct
+    # truncating write or a non-atomic Move-Item here could hand a
+    # concurrent reader an empty/partial marker and a spurious exit 127.
+    # Review finding (round 7): the ORIGINAL fix pointed the marker at
+    # $PluginDir -- on a marketplace install this is the per-invocation
+    # `.install-stage/<ts>-<pid>/...` copy the install-contract self-stage
+    # above creates, NOT a durable location. Once this process exits, a
+    # LATER invocation's own self-stage reaper (see the dead-stage-dir
+    # cleanup a few hundred lines above) is free to delete this exact
+    # stage dir, leaving payload-dir pointing at a missing scripts\init.ps1
+    # and a spurious exit 127. $probePayload is the durable original
+    # payload root (the marketplace's own installed-plugins singleton, or
+    # the value COPILOT_PLUGIN_STAGED_FROM was already re-exec'd with) --
+    # it is never a throwaway per-invocation directory, so use it here
+    # instead; the background `stamp` still overwrites both markers with
+    # the even-more-durable snapshot path once its copy completes.
+    #
+    # Review finding (round 12): without ANY lock, this fast path can now
+    # run concurrently with -- or even AFTER -- a full `stamp` that already
+    # published a real `snapshots/<version>` marker, unconditionally
+    # overwriting `payload-dir` back to this fallback and silently
+    # regressing an already-valid, more-durable snapshot marker to the
+    # weaker one. Make the payload-dir write CREATE-ONLY: skip it entirely
+    # if the marker already resolves to something with a real
+    # scripts\init.ps1 (whether from a concurrent/prior full `stamp` or a
+    # concurrent/prior stamp-binstub), so this fast path can never regress
+    # an already-valid marker -- it only ever fills in a genuinely missing
+    # or broken one. payload-origin needs no such guard: both functions
+    # always write it the identical value ($probePayload).
+    $payloadDirAlreadyValid = $false
+    if (Test-Path -LiteralPath $payloadDirMarker -PathType Leaf) {
+        try {
+            $existingPayloadDir = (Get-Content -LiteralPath $payloadDirMarker -Raw -ErrorAction Stop).Trim()
+            if ($existingPayloadDir -and (Test-Path -LiteralPath (Join-Path $existingPayloadDir 'scripts\init.ps1') -PathType Leaf)) {
+                $payloadDirAlreadyValid = $true
+            }
+        } catch {}
+    }
+    if (-not $payloadDirAlreadyValid) {
+        Publish-FileAtomically -Path $payloadDirMarker -Content $probePayload -Encoding $utf8NoBom
+    }
+    Publish-FileAtomically -Path $payloadOriginMarker -Content $probePayload -Encoding $utf8NoBom
+    Deploy-SelfProvisioningBinstub
 }
 
 function Invoke-Stamp {
@@ -1749,53 +1992,81 @@ function Invoke-Stamp {
     Write-Host ''
     Write-Host '=== agent-machines stamp (defer runtime to first use) ===' -ForegroundColor Cyan
     if (-not $SrcVersion) { Write-Fail 'Cannot stamp: no version in pyproject.toml'; exit 1 }
-    $stampHash = [BitConverter]::ToString(
-        [Security.Cryptography.SHA256]::Create().ComputeHash(
-            [Text.Encoding]::UTF8.GetBytes($InstallDir.ToLowerInvariant())
-        )
-    ).Replace('-', '').Substring(0, 24)
-    $stampMutexName = if ($env:OS -eq 'Windows_NT') {
-        "Local\CopilotExtensions.AgentMachines.Stamp.$stampHash"
-    } else {
-        "CopilotExtensions.AgentMachines.Stamp.$stampHash"
+    # Same round-10 finding as Invoke-StampBinstubOnly above: the generated
+    # launcher's marker root is hardcoded, not -InstallDir-aware.
+    if (-not [StringComparer]::OrdinalIgnoreCase.Equals($InstallDir, $DefaultInstallDir)) {
+        Write-Fail "stamp only supports the default install dir ($DefaultInstallDir) -- the generated launcher hardcodes that root and cannot read markers written to '$InstallDir'."
+        exit 1
     }
-    $stampMutex = New-Object Threading.Mutex($false, $stampMutexName)
-    $stampLockHeld = $false
+    $stampMutex = Enter-StampLock
     try {
-        try {
-            $stampLockHeld = $stampMutex.WaitOne([TimeSpan]::FromSeconds(20))
-        } catch [Threading.AbandonedMutexException] {
-            $stampLockHeld = $true
-        }
-        if (-not $stampLockHeld) { throw 'Timed out waiting for the agent-machines stamp lock.' }
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
     $payloadDirMarker = Join-Path $InstallDir 'payload-dir'
     $payloadOriginMarker = Join-Path $InstallDir 'payload-origin'
-    Remove-Item $payloadDirMarker, $payloadOriginMarker -Force -ErrorAction SilentlyContinue
+    # Review finding (round 7): this used to Remove-Item both markers HERE,
+    # before the (slow, several-second) snapshot copy below even starts --
+    # deleting the marker `stamp-binstub` already published and leaving NONE
+    # at all for the entire copy duration. A first-turn invocation racing that
+    # window reads a MISSING payload-dir (not merely a stale one) and 127s --
+    # exactly the regression this whole two-stage split exists to prevent, and
+    # strictly worse than a torn write. Do NOT pre-clear: the atomic
+    # Move-Item -Force further below replaces each marker in place only once
+    # the new snapshot is actually ready, so the previous usable marker (or,
+    # on a genuinely first-ever stamp, the absence of one) is left untouched
+    # until then.
     $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
-    $snapTmp = "$snapDir.tmp-$PID"
-    if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
-    New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
-    $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
-    Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
-        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+    # Review finding (round 9): re-stamping the SAME version (e.g. two
+    # first-install sessionStart hooks, one after another) used to
+    # unconditionally Remove-Item the existing $snapDir before copying a
+    # fresh one -- deleting the snapshot payload-dir STILL advertises as
+    # live, well before the marker is switched to anything else, since a
+    # reader (the binstub) never takes this mutex. A first-turn invocation
+    # racing that window reads a missing scripts\init.ps1 and 127s. Since a
+    # re-stamp of the identical $SrcVersion would copy byte-identical
+    # content anyway, skip the whole remove+recopy dance when a snapshot for
+    # this exact version already looks valid -- the fast, safe, idempotent
+    # path -- and only build a fresh one when it's genuinely missing/broken.
+    $snapAlreadyValid = Test-Path (Join-Path (Join-Path $snapDir 'scripts') 'init.ps1')
+    if (-not $snapAlreadyValid) {
+        $snapTmp = "$snapDir.tmp-$PID"
+        if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
+        New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
+        $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+        Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+        }
+        # A concurrent re-stamp of the SAME version (two first-install hooks
+        # racing, neither serialized against the other's Test-Path check
+        # above) could have already built $snapDir by now. Rename the
+        # now-redundant old copy aside (a directory rename is metadata-only,
+        # far faster than the delete this replaces) rather than deleting the
+        # live, currently-advertised snapshot outright, then move the fresh
+        # copy into place and reap the aside-renamed old one.
+        if (Test-Path $snapDir) {
+            $snapStale = "$snapDir.stale-$PID"
+            Rename-Item -LiteralPath $snapDir -NewName (Split-Path -Leaf $snapStale) -ErrorAction SilentlyContinue
+        }
+        Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
+        Get-ChildItem -LiteralPath (Split-Path -Parent $snapDir) -Directory -Filter "$(Split-Path -Leaf $snapDir).stale-*" -ErrorAction SilentlyContinue |
+            ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
     }
-    if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
-    Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
-    [System.IO.File]::WriteAllText($payloadOriginMarker, $probePayload, $utf8NoBom)
-    [System.IO.File]::WriteAllText($payloadDirMarker, $snapDir, $utf8NoBom)
+    # Same atomic-publish rationale as Invoke-StampBinstubOnly above: a
+    # generated binstub reads payload-dir outside this stamp mutex.
+    Publish-FileAtomically -Path $payloadOriginMarker -Content $probePayload -Encoding $utf8NoBom
+    Publish-FileAtomically -Path $payloadDirMarker -Content $snapDir -Encoding $utf8NoBom
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
     Write-Ok "Snapshot: $snapDir"
     Deploy-SelfProvisioningBinstub
     Write-Ok 'Stamped: agent-machines binstub on PATH; runtime provisions on first use.'
     } finally {
-        if ($stampLockHeld) { [void]$stampMutex.ReleaseMutex() }
+        [void]$stampMutex.ReleaseMutex()
         $stampMutex.Dispose()
     }
 }
 
+if ($Action -eq 'stamp-binstub') { Invoke-StampBinstubOnly; exit 0 }
 if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
 
 # -- Preflight checks --------------------------------------------------

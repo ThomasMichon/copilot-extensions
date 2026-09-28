@@ -15,6 +15,7 @@ import base64
 import subprocess
 
 from agent_bridge import __main__ as m
+from agent_bridge import service_process_cli
 
 
 def test_wmi_broker_invokes_encoded_powershell_win32_process_create(monkeypatch, tmp_path):
@@ -30,11 +31,19 @@ def test_wmi_broker_invokes_encoded_powershell_win32_process_create(monkeypatch,
         return _Out()
 
     monkeypatch.setattr(subprocess, "run", _run)
+    # Deterministic host resolution: simulate pwsh (PowerShell 7) present on
+    # PATH, which is the preferred host over legacy Windows PowerShell 5.1.
+    # Reset the memoization cache so this test doesn't inherit a resolution
+    # from an earlier test in the same process.
+    monkeypatch.setattr(service_process_cli, "_powershell_host_cache", None)
+    monkeypatch.setattr(
+        service_process_cli.shutil, "which", lambda name: r"C:\pwsh.exe" if name == "pwsh" else None
+    )
 
     ok = m._spawn_via_wmi_broker([r"C:\py.exe", "-m", "agent_bridge", "start"])
 
     assert ok is True
-    assert captured["cmd"][0] == "powershell"
+    assert captured["cmd"][0] == r"C:\pwsh.exe"
     assert "-EncodedCommand" in captured["cmd"]
     encoded = captured["cmd"][captured["cmd"].index("-EncodedCommand") + 1]
     decoded = base64.b64decode(encoded).decode("utf-16-le")

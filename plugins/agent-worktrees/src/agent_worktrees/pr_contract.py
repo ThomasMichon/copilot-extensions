@@ -208,6 +208,22 @@ class ThreadsResult:
 
 
 @dataclass(frozen=True)
+class ReviewNudgeResult:
+    """Result of asking a provider's bound automated reviewer to (re-)review
+    a PR -- the ``pr-nudge`` primitive.
+
+    ``supported`` False means nothing to nudge (no ``pr.reviewer`` bound, or
+    unmapped). ``requested`` True means the request API call succeeded --
+    NOT that a fresh verdict is guaranteed (async; poll pr-status after)."""
+
+    supported: bool = True
+    requested: bool = False
+    reviewer: str = ""      # concrete identity nudged (e.g. a GitHub bot login)
+    detail: str = ""
+    error: str = ""
+
+
+@dataclass(frozen=True)
 class Baseline:
     """The arm-time reference a wait diffs against ("notify me of changes from
     here on"), serializable as an opaque cursor."""
@@ -216,20 +232,15 @@ class Baseline:
     merged: bool = False
     closed: bool = False
     mergeable: bool | None = None
-    """The arm-time mergeable flag a ``conflict`` / ``mergeable`` transition
-    diffs against.  ``None`` means "not yet known" -- the wait loop adopts the
-    first concrete value without firing.  Deliberately **not** encoded in the
-    cursor (tri-state, recomputed cheaply next poll)."""
+    """Arm-time mergeable flag a conflict/mergeable transition diffs against.
+    ``None`` = not yet known (adopted without firing). Not in the cursor
+    (tri-state, recomputed each poll)."""
     checks_state: str = ""
-    """The arm-time CI rollup a ``checks_failed`` transition diffs against (#225).
-    ``""`` means "not yet known"; the wait loop adopts the first concrete value
-    without firing (only a later flip *into* failure is a transition). Not
-    encoded in the cursor (recomputed each poll)."""
+    """Arm-time CI rollup a ``checks_failed`` transition diffs against (#225).
+    ``""`` = not yet known. Not encoded in the cursor (recomputed each poll)."""
     approved: bool | None = None
-    """Whether the PR had an effective approval at arm time (#225). ``None`` means
-    "not yet known"; the wait loop adopts the first concrete value without firing.
-    A True->dismissed regression fires ``approval_dismissed``. Not encoded in the
-    cursor."""
+    """Whether the PR had an effective approval at arm time (#225). ``None`` =
+    not yet known. A True->dismissed regression fires ``approval_dismissed``."""
 
     @classmethod
     def from_snapshot(cls, snap: PRSnapshot) -> Baseline:
@@ -620,20 +631,16 @@ def classify_state(
 ) -> PRState:
     """Map a provider snapshot onto the unified :class:`PRState`.
 
-    The one classifier the family shares.  The multi-machine system binding
-    (``automerge_label`` / ``hold_labels`` / ``wip_title_prefixes``) is passed
-    in; with everything empty it degrades cleanly -- no holds, no WIP, and
-    ``consent_action`` still reflects the verdict + mergeability (it just reports
-    that no auto-merge label is configured rather than proposing to apply one).
+    The one classifier the family shares. The binding (``automerge_label`` /
+    ``hold_labels`` / ``wip_title_prefixes``) is passed in; with everything
+    empty it degrades cleanly -- no holds, no WIP, and ``consent_action``
+    still reflects the verdict + mergeability.
 
     "Consent" is the *concept* (has the author authorized the merge?);
-    ``automerge_label`` is the concrete label that expresses it (multi-machine system value:
-    ``auto-merge``; think ADO's "auto-complete").
-
-    ``review_blocking`` (default ``True``) forwards to
-    :func:`effective_verdict`; it never changes ``consent_action``.
-
-    ``consent_action`` mirrors the multi-machine system ``pr-consent`` eligibility rules:
+    ``automerge_label`` is the concrete label expressing it (think ADO's
+    "auto-complete"). ``review_blocking`` forwards to :func:`effective_verdict`
+    only; it never changes ``consent_action``, which mirrors the
+    ``pr-consent`` eligibility rules:
 
     - ``already`` -- the auto-merge label is already present (nothing to do).
     - ``apply``   -- open, not draft/WIP, no hold, mergeable, approved at head,
@@ -849,7 +856,7 @@ PROFILE_PR_AGENT_MERGE = "pr-agent-merge"  # PR-gated, author signals merge cons
 PROFILE_PR_SELF_MERGE = "pr-self-merge"    # PR-gated, submitter merges directly
 
 #: Every pr-* author verb, for describing applicability.
-_ALL_PR_VERBS = ("create-pr", "pr-watch", "pr-status", "pr-merge", "pr-complete")
+_ALL_PR_VERBS = ("create-pr", "pr-watch", "pr-status", "pr-merge", "pr-complete", "pr-nudge")
 
 
 @dataclass(frozen=True)
@@ -858,8 +865,7 @@ class PRFlowProfile:
     "which flow does *this* repo use, and do the pr-* verbs apply here?"
 
     Not a per-PR classification (that is :class:`PRState`); a per-*repo* one.
-    Agents should read this **before** driving a PR so they pick the right flow
-    for the target repo instead of assuming the local multi-machine system's shape.
+    Agents should read this before driving a PR to pick the right flow.
 
     - ``profile``       -- one of the ``PROFILE_*`` tokens.
     - ``requires_pr``   -- direct-to-default-branch is refused (``pr.required``).
@@ -868,14 +874,12 @@ class PRFlowProfile:
     - ``applicable_verbs`` -- pr-* verbs that apply to this repo.
     - ``summary``       -- one-line human description of the flow.
 
-    Legibility matrix (drives :func:`pr_reminder`):
-
-    - ``reviewer`` / ``review_blocking`` / ``review_latency_hint`` -- who
-      reviews, whether it gates the merge, and roughly how long it takes.
-    - ``self_approve`` -- legacy provider capability used to select the
-      submitter-direct profile; it never tells a GitHub author to cast a review.
-    - ``conflict_retriggers_review`` -- a post-approval rebase+push re-reviews.
-    - ``rebase_owner`` -- who keeps the PR mergeable (``"submitter"`` / ``""``).
+    Legibility matrix (drives :func:`pr_reminder`): ``reviewer`` /
+    ``review_blocking`` / ``review_latency_hint`` (who reviews, whether it
+    gates the merge, how long); ``self_approve`` (legacy submitter-direct
+    selector; never tells a GitHub author to cast a review);
+    ``conflict_retriggers_review`` (a post-approval rebase+push re-reviews);
+    ``rebase_owner`` (who keeps the PR mergeable: ``"submitter"`` / ``""``).
     """
 
     profile: str
@@ -1002,7 +1006,7 @@ def classify_pr_flow(
         summary=(
             f"PR-gated ({provider or 'provider'}); a human approves and merges "
             f"(no auto-merge consent label bound). Use create-pr / pr-watch / "
-            f"pr-status / pr-complete; pr-merge does not apply here."
+            f"pr-status / pr-nudge / pr-complete; pr-merge does not apply here."
         ),
         **_matrix,
     )
@@ -1046,7 +1050,7 @@ class PRReminder:
     Pure data derived from a :class:`PRFlowProfile` (+ the verb, the coarse PR
     state, and command outcome). Rendered to prose for stdio and to a dict for
     the ``--json`` ``reminder`` node, so a calling agent never has to remember
-    the per-repo flow -- and is never nudged off the sanctioned rails.
+    the per-repo flow.
 
     - ``headline``    -- one line: where you are (or what was refused).
     - ``next_step``   -- the recommended next action, a sanctioned verb.
@@ -1105,15 +1109,11 @@ def _review_phrase(flow: PRFlowProfile) -> str:
 def _merge_instruction(flow: PRFlowProfile) -> str:
     """The sanctioned way THIS repo merges -- always an agent-worktrees verb."""
     if flow.profile == PROFILE_PR_SELF_MERGE:
-        return (
-            "merge with `pr-merge <#> --now` once required checks/reviews "
-            "allow it"
-            + (
-                " (GitHub authors cannot approve their own PRs)"
-                if flow.provider.lower() == "github"
-                else ""
-            )
+        caveat = (
+            " (GitHub authors cannot approve their own PRs)"
+            if flow.provider.lower() == "github" else ""
         )
+        return f"merge with `pr-merge <#> --now` once required checks/reviews allow it{caveat}"
     if flow.profile == PROFILE_PR_AGENT_MERGE:
         label = flow.automerge_label or "the consent label"
         return (f"after an approval, consent with `pr-merge <#>` (applies "

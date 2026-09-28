@@ -846,10 +846,28 @@ def test_payload_shims_propagate_ownership_root() -> None:
     powershell = (
         PLUGIN / "bin" / "payload" / "agent-worktrees.ps1"
     ).read_text(encoding="utf-8")
+    inner_posix = (
+        PLUGIN / "scripts" / "invoke-payload-runtime.sh"
+    ).read_text(encoding="utf-8")
+    inner_powershell = (
+        PLUGIN / "scripts" / "invoke-payload-runtime.ps1"
+    ).read_text(encoding="utf-8")
     assert 'export AGENT_WORKTREES_PAYLOAD_ROOT="$_payload_root"' in posix
     assert "$env:AGENT_WORKTREES_PAYLOAD_ROOT = $_payloadRoot" in powershell
     assert "scripts/invoke-payload-runtime.sh" in posix
     assert "scripts\\invoke-payload-runtime.ps1" in powershell
+    # The outer shim only forwards `shim-start`'s timestamp via env var and
+    # never itself writes the durable JSONL record (it cannot know which
+    # runtime root -- legacy or an active namespaced context -- is genuinely
+    # active); the inner, installation-context-aware dispatcher is the one
+    # that actually resolves the root and performs the durable write
+    # (Copilot review, PR #3310 round 3).
+    assert "COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS" in posix
+    assert "COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS" in powershell
+    assert 'logs/activity.jsonl' in inner_posix
+    assert "logs\\activity.jsonl" in inner_powershell
+    assert '\\"event\\":\\"boot_trace\\"' in inner_posix
+    assert '"event":"boot_trace"' in inner_powershell
     dispatcher = (
         PLUGIN / "scripts" / "invoke-payload-runtime.ps1"
     ).read_text(encoding="utf-8")

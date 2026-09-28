@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-pull-requests"
-version = "0.1.0-dev4"
+version = "0.1.0-dev5"
 description = "Cross-repository pull-request CLI with agent-worktrees-mediated GitHub auth."
 readme = "README.md"
 license = "MIT"

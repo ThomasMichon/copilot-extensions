@@ -568,6 +568,35 @@ survey above.
       own `require_sidecar` lesson: trace what an existing pattern's *net*
       effect actually guarantees before changing it, not just what its
       stated policy/guideline suggests.)
+- [x] **Read-side companion (2026-09-27, not itself a Phase-3 write-migration
+      cluster): daemon writes push straight into the in-process read
+      cache.** Reframed from an initial "verb-ify `terminal_conclusion.py`'s
+      `_save_session_conclusion`" plan once the operator redirected scope:
+      the actual ask was narrower and squarely serves this effort's own
+      Guiding Intent ("every read *and* every mutation... funneled
+      through") without requiring the daemon to become the sole
+      authoritative writer first — a read/write-broker daemon gets the
+      same consistency guarantee. `record_cache.store()` seeds/refreshes
+      the existing per-process `(mtime_ns, size)`-keyed cache
+      (`copilot-extensions#3751`) with a record this process just wrote;
+      `tracking._save_record_unlocked` — not only `tracking.save_record`,
+      since several callers (the execution-leg CLI's own nested mutation
+      lock, `tracking_lifecycle.create_new_record_if_absent`) call
+      `_save_record_unlocked` directly to avoid re-acquiring a lock they
+      already hold, bypassing `save_record` entirely — calls it right
+      after its atomic write, inside whichever lock the caller already
+      holds. `tracking.load_record()` now routes through
+      `record_cache.cached_load()`, giving every one of its ~140 call
+      sites the same benefit without touching each one. Landed in PR
+      [#4265](https://github.com/ThomasMichon/copilot-extensions/pull/4265)
+      (2 review rounds; see Journal). This does NOT close
+      `terminal_conclusion.py`'s `_save_session_conclusion` holdout as a
+      write-migration candidate -- it still does not dispatch through a
+      daemon verb, and remains listed below as genuinely open for that.
+      What this pass DOES confirm: that holdout was always correctness-
+      safe (the cache self-invalidates on ANY writer's stat change, verb-
+      mediated or direct) and needs no further work to get this same
+      read-consistency benefit -- the two are separate axes.
 - [ ] One call site (or a closely related cluster) at a time, each its own
       reviewable PR, per this repo's serial-single-writer convention —
       across whichever of `tracking.py` / `tracking_claims.py` /
@@ -595,10 +624,50 @@ survey above.
       inside a bigger single-lock cascade with two separate `save_record`
       calls around it; `register_session`'s own internal `link_handoff`
       call is now moot -- it moved into the `session_register` verb
-      itself, per the option above).
+      itself, per the option above). Still genuinely open for THIS
+      Phase's write-migration purpose (it does not yet dispatch through a
+      daemon verb) -- but the separate read-side cache-push work above
+      already covers it for read-consistency, since that cache-push is
+      universal at `_save_record_unlocked` regardless of which caller
+      reaches it, verb-mediated or still-direct.
 
-### Phase 4 — Sibling-plugin guard + audit _(not started)_
-- [ ] Add the CI guard described above.
+### Phase 4 — Sibling-plugin guard + audit _(in progress)_
+- [x] Add the CI guard described above:
+      `tools/check-no-sibling-tracking-writes.py` (mirrors
+      `check-no-agent-machines-packages.py`'s structural-invariant style),
+      an AST-based scan of every `plugins/*` sibling plugin (excluding
+      `agent-worktrees` itself) for a direct import/call of a
+      hand-curated denylist covering every tracking-record write function
+      across 12 modules (55 functions total: `tracking.py` /
+      `tracking_lifecycle.py` / `tracking_claims.py` /
+      `tracking_session_registry.py` / `tracking_controller_relations.py`
+      / `tracking_write.py` / the 6 `tracking_*_write.py` verb-handler
+      modules). Twenty review rounds found real gaps each time (see Journal
+      for the full blow-by-blow: a missing re-export module, a
+      package-root-alias attribute chain never tracked at all, an
+      incomplete denylist, a wildcard-import escape hatch, the daemon's
+      own verb handlers being an equally-importable write surface, a
+      fail-open exception path on unreadable/unparseable files, two
+      private read-modify-write helpers, `tracking_write`'s own
+      generic direct-execution APIs, a trivial-reassignment alias
+      evasion, and two documentation-accuracy findings) -- every one
+      fixed with a dedicated regression test, none assumed away. Wired
+      into CI alongside `test_check_no_sibling_tracking_writes.py` (28
+      tests). **Scoped to every `plugins/*` directory except
+      `agent-worktrees` itself** (not filtered by an `agent-*` name
+      prefix -- this repo ships several non-`agent-*`-named plugins too)
+      -- deliberately does NOT cover
+      `worktree-manager/` (a separate, non-plugin, out-of-plugin
+      control-plane app), which already imports several of these same
+      write functions directly today via its own in-process
+      `_engine_runtime` bridge
+      (`stamp_bound_live`/`stamp_mux_live`/`stamp_session_state` in
+      `production_picker/picker_tui/data_local.py`) -- a KNOWN,
+      already-tracked gap (see `efforts/active/worktree-manager-control-
+      plane/README.md` Phase 3d's own "Design the `data_local.py` hot
+      path" TODO, explicitly sequenced after that effort's Phase 3c), not
+      an oversight this guard should silently flag or fold in without that
+      separate effort's own coordination.
 - [ ] Re-run the cross-plugin survey from this effort's Context to confirm
       it still finds zero direct writers, now backed by an enforced check
       instead of only a point-in-time grep.
@@ -636,6 +705,481 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-09-27 — Phase 4 CI guard landed; process-consolidation cross-link confirmed with worktree-manager-control-plane
+Operator directed continuing this effort "as you go" while explicitly
+checking alignment with process consolidation -- reducing rogue process
+spawns from `launch_session`, the mux monitor's status sweep, and Worktree
+Manager reads/refreshes/writes. A live-host process census
+(`status-monitor`, `mux-daemon`) found both resident singletons healthy
+(exactly one of each, no duplicates) -- the accelerator effort's
+single-instance lease is holding as designed; no rogue spawn observed
+right now.
+
+Investigating the three named sources traced each to an already-tracked,
+in-progress owner, none of them this effort:
+- `launch_session` (`worktree-manager/bin/launch-session.{sh,ps1}`) and the
+  mux monitor's own sweep are `worktree-manager-control-plane`'s Phase 3b
+  (Mux status-monitor consolidation -- Done) and Phase 3d's still-open
+  "design the `runner.py` process-lifecycle call sites" TODO
+  (`reap_orphan_mux_sessions`/`_sweep_finished_sessions_on_cadence`/etc.).
+- Worktree Manager's own reads/refreshes/writes is that same effort's
+  Phase 3d "design the `data_local.py` hot path" TODO -- its Picker's
+  refresh loop (`tracking.list_records`/`stamp_bound_live`/`stamp_mux_live`/
+  `stamp_session_state`) already runs in-process today (an in-process
+  import of agent-worktrees' own `tracking.py` via `_engine_runtime.py`,
+  not yet even a subprocess), and that TODO explicitly names "one new
+  atomic, batched `--json` verb (read + reconcile + stamp in a single
+  agent-worktrees-owned call)" as its own prerequisite, sequenced after
+  that effort's Phase 3c. This effort's `tracking_write.py` verb registry
+  (dispatch/`AmbiguousWriteOutcome`/capability-aware endpoint selection) is
+  exactly the substrate that future batched verb will need -- direct,
+  concrete alignment, not incidental.
+
+This also surfaced a real, previously-unsurveyed gap this effort's own
+Context section's cross-plugin survey (2026-09-26) did not cover: that
+survey scoped to `agent-*` PLUGINS only and found zero direct writers, but
+`worktree-manager/` (a separate, non-plugin, out-of-plugin control-plane
+app) already calls `tracking.stamp_bound_live`/`stamp_mux_live`/
+`stamp_session_state` directly today via its own in-process bridge --
+exactly the write-surface exposure this effort's `no-writer-bypasses-the-
+daemon` behavior means to close, just not yet caught because it isn't a
+"plugin." Confirmed this is a KNOWN gap (Phase 3d's own TODO already
+names it and gates its resolution behind that effort's own Phase 3c), not
+a new incident -- filing a duplicate fix here would fork ownership of one
+call site across two efforts. Cross-linked instead: this effort's Phase 4
+now explicitly documents the gap and points at Phase 3d/3c rather than
+silently missing it or unilaterally rewriting a hot path another effort
+already has an ordered plan for.
+
+Landed the Phase 4 CI guard proper: `tools/check-no-sibling-tracking-
+writes.py`, an AST-based scan of every sibling `plugins/*` (excluding
+`agent-worktrees` itself) for a direct import/call of a hand-curated
+denylist covering every tracking-record write function -- derived by
+AST-walking each protected module for functions whose body calls
+`save_record`/`_save_record_unlocked`/the async stamp queue, then
+hand-verified against the remainder (the final denylist, after twenty
+review rounds below, covers 55 functions across 12 modules:
+`tracking.py`/`tracking_lifecycle.py`/`tracking_claims.py`/
+`tracking_session_registry.py`/`tracking_controller_relations.py`/
+`tracking_write.py`/the 6 `tracking_*_write.py` verb-handler modules).
+Scoped deliberately to
+sibling PLUGINS only, matching this effort's own original survey/Plan
+wording -- NOT extended to cover `worktree-manager/`'s own already-tracked
+exception (see above), since that scope decision belongs to a
+coordinated cross-effort call, not something to fold in unilaterally here.
+
+**Twenty review rounds found real gaps, none assumed away:**
+(1) `tracking_controller_relations.py`'s own thin
+`save_record`/`_save_record_unlocked` re-export wrappers were absent from
+the protected module set, so a sibling could route through that module
+instead and pass clean. (2) The attribute-chain matcher only handled a
+single-level module alias (`tracking.save_record(...)`), missing the
+two-level `import agent_worktrees as aw; aw.tracking.save_record(...)`
+form -- a package-root alias was never tracked at all. (3) The denylist
+itself was incomplete: `backfill_legacy_controller_relations`/
+`set_controller_relation`/`end_controller_relation`/
+`remove_controller_relation` persist records in
+`tracking_controller_relations.py` AND are re-exported by `tracking.py`
+itself, plus `load_or_create_anchor_record` conditionally persists via
+`create_new_record` -- none were in the original list. The SECOND
+round then caught that round one's own fix for gap (2) was itself
+semantically wrong: `import agent_worktrees.tracking` with NO `as` binds
+only the top-level `agent_worktrees` name (Python's own import semantics
+-- the submodule name is never bound locally), so modeling it as a
+`tracking` module alias both mis-caught an unrelated bare
+`tracking.save_record(...)` name collision as if it came through this
+import AND missed the actual valid `agent_worktrees.tracking.save_record
+(...)` shape this import produces -- fixed by routing the unaliased
+dotted-import case into the package-alias tracking instead, matching
+`import agent_worktrees`'s own already-correct handling. A THIRD
+review round then found a wildcard-import escape hatch entirely outside
+the alias-tracking model: `from agent_worktrees import *` (or `from
+agent_worktrees.tracking import *`) followed by a bare `save_record(...)`
+call produces an `ImportFrom` alias literally named `*`, which neither
+existing branch ever matches -- fixed by rejecting the wildcard import
+itself outright (unresolvable safely against the denylist, so treated as
+a violation on sight). A FOURTH review round found two more real
+gaps: the module set stopped at the five original "public" tracking
+modules, but the daemon's own 6 `tracking_*_write.py` verb-handler
+modules (`apply_claim_add`/`apply_claim_release`/`apply_claim_settle`/
+`apply_status_disposition`/`apply_follow_up_add`/
+`apply_follow_up_resolve`/`apply_follow_up_dismiss`/
+`apply_session_deregister`/`apply_session_conclude`/
+`apply_session_link_succession`/`apply_session_register`, 11 functions)
+are an EQUALLY importable write surface -- each one itself acquires
+`_RecordLock`, mutates the record, and calls `tracking.save_record`,
+just skipping the verb-dispatch layer on the way there; and (7) the
+file-scan's own exception handling failed OPEN -- an unreadable,
+non-UTF-8, or syntactically invalid sibling `.py` file was silently
+treated as clean, so a file the guard simply couldn't parse was a
+guaranteed way to smuggle a forbidden import past CI. Fixed by adding
+the verb-handler modules/functions to the protected sets, and by turning
+every file-scan failure into a reported `Violation` instead of a silent
+empty list. A FIFTH review round found one more private
+read-modify-write helper absent: `_stamp_liveness` (backs
+`stamp_mux_live`/`stamp_bound_live`) -- underscore-prefixed, but nothing
+in Python actually prevents a sibling from importing a private name
+directly. Re-ran a comprehensive AST scan (every top-level function
+across all 11 modules whose body calls a known writer, plus a
+transitive-closure pass over the growing denylist itself) to catch any
+further stragglers before a sixth round could -- found one more genuine
+gap this way (`_apply_session_state_stamp`, backing
+`stamp_session_state`) and one false-positive candidate the transitive
+pass surfaced but manual inspection ruled out
+(`reopen_finalized_owner` calls `tracking.update_status(...,
+save=False)` -- mutates in-memory only, never itself persists, so it
+does not belong on the denylist). A SIXTH review round found four
+more real findings: **(a)** `tracking_write.py`'s own generic
+direct-execution APIs -- `run_direct(verb, args, reason=...)` and
+`compute(kind, payload)` -- can load and invoke ANY registered verb's
+handler in-process without ever naming the handler function itself
+(e.g. `tracking_write.run_direct("claim_add", {...}, reason=...)` never
+mentions `apply_claim_add`), a bypass shape entirely outside the
+name-matching model; fixed by adding `tracking_write` to the protected
+modules and `run_direct`/`compute` to the denylist, while deliberately
+leaving `dispatch`/`write_with_boot` unprotected -- those two ARE the
+sanctioned daemon-mediated API. **(b)** A trivial reassignment
+(`writer_module = tracking`) evaded every alias check, since aliases
+were only ever populated from import nodes; fixed with a fixed-point
+propagation pass over simple `Name = Name` assignments (handling
+multi-hop chains like `a = tracking; b = a; c = b`). **(c)** The
+docstring claimed this guard scoped to `agent-*`-named plugins, but the
+scan itself has always covered every directory under `plugins/`
+(including non-`agent-*`-named ones, e.g. `visions`,
+`customizing-copilot`) except `agent-worktrees` -- fixed by correcting
+the docstring (and the `main()` output text) to describe the actual,
+broader, name-prefix-independent scope rather than narrowing the scan
+to match a now-inaccurate claim. **(d)** This very Journal entry still
+quoted an earlier round's stale function/module counts after two later
+rounds had already changed them -- fixed by updating every remaining
+count in this entry, not just the one flagged. A SEVENTH review
+round found the reassignment-propagation fix from round 6 was itself
+incomplete: it only handled a bare `Name = Name` RHS, missing the
+equally simple `tracking_module = aw.tracking` (a two-level `Attribute`
+RHS off a package alias) -- fixed by resolving that shape into the same
+`module_aliases` set a direct `aw.tracking.save_record(...)` call
+already populates, rather than adding a second parallel check
+downstream. An EIGHTH review round found three lingering
+documentation-accuracy stragglers from fix (c) above -- the CI step's
+own comment in `.github/workflows/ci.yml`, the test file's own module
+docstring, and this Journal's own "(25 tests)" count -- all still said
+"agent-*" or a stale count after the code and the main docstring had
+already been corrected; fixed by sweeping every remaining mention, not
+just the one flagged each time. One of round 8's own CI runs also hit a
+genuinely unrelated, pre-existing flaky test
+(`test_first_use_provision_is_serialized` in
+`libs/payload-invocation`/`agent-index`, nothing to do with this guard)
+-- confirmed unrelated and cleared with a CI rerun, not a code change.
+A NINTH review round found the round-6/7 reassignment-propagation
+fix was STILL incomplete: it only handled plain `ast.Assign`, missing
+the equally simple annotated form (`writer_module: object = tracking`)
+-- an annotation adds no actual indirection, so `ast.AnnAssign` needed
+the identical treatment; fixed by unifying both assignment forms into
+one shared propagation pass rather than a third parallel branch. This
+round also caught the PR description's own stale test count ("adds 8
+tests") and a logically backwards claim in the
+`worktree-manager-control-plane` cross-link (implying the guard would
+need the `worktree-manager` call site added once it converts to the
+batched verb, when conversion should REMOVE that call site entirely) --
+both corrected. A TENTH review round found the deepest gap yet:
+`getattr(tracking, "save_record")` and
+`tracking.__dict__["save_record"]` both fetch a write function
+reflectively -- neither produces an `ast.Attribute` node, so both
+evaded the entire attribute-matching model regardless of how complete
+the denylist or alias tracking was. Fixed by adding two narrow,
+literal-string-only checks: a `getattr(<tracked-module>, "<write-fn>")`
+call and a `<tracked-module>.__dict__["<write-fn>"]` subscript, both
+resolved through the SAME module/package-alias tracking the ordinary
+attribute check already uses. Deliberately NOT a general
+reflection-proof analysis -- a non-literal name
+(`getattr(tracking, some_variable)`) is genuinely undecidable statically
+and is not attempted; a dedicated regression test documents that
+boundary rather than asserting false safety. This round also caught two
+more documentation stragglers: the guard's own maintenance note still
+named only the original four modules (missing
+`tracking_controller_relations`/`tracking_write`/the six
+`tracking_*_write.py` modules added in later rounds), and this Journal
+entry's own "(26 tests)"/"five review rounds" phrasing had gone stale
+again after round 9's edits. An ELEVENTH review round found the
+final escape hatch this static model had left open: a literal-string
+dynamic import (`importlib.import_module("agent_worktrees.tracking")`
+or `__import__("agent_worktrees.tracking")`) resolves a tracked module
+just as statically as an ordinary `import` statement, but produced
+neither an `Import` nor `ImportFrom` node, so it bypassed every alias
+check entirely. Fixed by recognizing both call forms (literal-string
+argument only, matching the same non-literal boundary already accepted
+for `getattr`/`__dict__`) and feeding their resolved target into the
+SAME alias-propagation machinery an ordinary import already populates --
+both as an assignment RHS and as an inline, unassigned call whose result
+is used directly. A TWELFTH review round found two more real gaps:
+**(a)** the denylist protected `tracking.stamp_mux_live`/
+`stamp_bound_live`/`stamp_session_state` but not the shared
+`_STAMP_QUEUE` singleton those wrappers themselves funnel through --
+`tracking._STAMP_QUEUE.submit(...)`/`.submit_mux(...)` (and its own
+direct `._apply(...)` path) trigger the exact same persisted write while
+bypassing those wrappers' own best-effort/throttle semantics entirely,
+a THREE-level attribute chain (module -> `_STAMP_QUEUE` -> method) the
+existing two-level matcher never modeled. Fixed by adding a dedicated
+`STAMP_QUEUE_WRITE_METHODS` check reusing the same module/package-alias
+resolution the rest of the guard already has. **(b)** The dynamic-import
+detector from round 11 only recognized the literal identifier
+`importlib` as the receiver, missing `import importlib as il` and
+`from importlib import import_module` (calling it completely bare) --
+fixed by tracking `importlib`'s own aliases and `import_module`'s own
+direct bindings the same way every other name in this guard is tracked,
+rather than hardcoding one spelling. A THIRTEENTH review round
+found the queue-specific matcher from round 12 only recognized the
+INLINE `<module>._STAMP_QUEUE.<method>` chain in one expression -- a
+sibling reassigning the queue object itself first
+(`queue = tracking._STAMP_QUEUE; queue.submit(...)`, or a direct
+`from agent_worktrees.tracking import _STAMP_QUEUE`) evaded it entirely.
+Fixed by adding a `queue_aliases` set populated the same way
+`module_aliases`/`package_aliases` already are (a direct import of
+`_STAMP_QUEUE` itself, or an assignment whose RHS resolves to
+`<tracked-module>._STAMP_QUEUE`), then matching `<queue-alias>.<method>`
+alongside the existing inline chain. A FOURTEENTH review round
+found the deepest layer still uncovered: `_atomic_write` -- the
+low-level function `save_record` itself calls to actually emit the
+serialized YAML -- was absent from the denylist entirely. A sibling
+importing it directly could write raw content straight to a
+`tracking.yaml` path, bypassing every validation/locking/merge layer
+above it, not merely one specific field-level wrapper. Added to
+`WRITE_FUNCTIONS`. A FIFTEENTH review round found two more real
+gaps at the very bottom of the stack: **(a)** `_replace_with_retry`,
+the even-lower-level `os.replace(src, dst)` helper `_atomic_write`
+itself calls, was still missing; **(b)** `tracking_write._VERBS` -- the
+raw verb-name -> handler registry `run_direct`/`compute` themselves
+dispatch through -- was entirely unprotected, so
+`tracking_write._VERBS["claim_add"](args)` reaches a mutating handler
+without ever naming `run_direct`, `compute`, or any `apply_*` function.
+Fixed by adding `_replace_with_retry` to the denylist, and by
+denylisting the `_VERBS` ATTRIBUTE NAME itself (not a specific key) so
+any access to it -- subscripted immediately or bound to a variable
+first -- is caught the moment `._VERBS` is touched at all. A
+SIXTEENTH review round -- the checks turning green for the first time --
+found four more real gaps: **(a)** `_StampWriteQueue`, the CLASS behind
+`_STAMP_QUEUE`, was itself importable/instantiable separately from the
+resident singleton, reaching the exact same writers via a fresh
+instance; denylisted the class name itself. **(b)** The dynamic-import
+detector's non-literal-target boundary was too conservative in one
+specific, real-but-bounded case: `mod = "agent_worktrees.tracking";
+importlib.import_module(mod)` is STATICALLY resolvable (the target is a
+plain local name previously assigned a string literal), unlike a
+genuinely dynamic value (a parameter, an f-string) -- resolving this
+narrow shape (not every non-literal dynamic import, which would be far
+too broad and noisy against the whole codebase) closed a real,
+bounded gap without widening the guard's blast radius. **(c)**
+`__import__` without a `fromlist` argument returns CPython's own
+TOP-LEVEL package, not the deepest submodule (a real semantics bug in
+round 11's original fix, which had modeled every dotted `__import__`
+target as resolving straight to the submodule) -- fixed by only
+treating a dotted `__import__` target as a `module` resolution when a
+non-empty `fromlist` is actually present, defaulting to `package`
+otherwise, matching Python's own real import machinery. **(d)** The
+existing internal `_tracking()` lazy-import helper (a pattern repeated
+across several `agent_worktrees` modules to dodge circular imports,
+always returning the `tracking` submodule) was entirely unmodeled --
+`_tracking().save_record(...)` never matched any existing receiver
+shape. Fixed by tracking which local names were actually imported (by
+that exact name) from one of the protected modules, and recognizing a
+bare, no-argument call to one of those specific names as resolving to
+`tracking` -- deliberately NOT a blanket "any function named `_tracking`
+anywhere" rule, which would risk flagging an unrelated sibling's own
+identically-named local helper. A SEVENTEENTH review round found
+two more real gaps, both refinements of round 16's own fixes: **(a)**
+`_has_fromlist` treated ANY supplied fourth-argument/keyword as
+non-empty, but `fromlist=[]` and `fromlist=None` are exactly equivalent
+to omitting the argument entirely (CPython still returns the top-level
+package) -- the previous version reported a false violation for
+`__import__("agent_worktrees.tracking", fromlist=[])` used as a bare
+package. Fixed by recognizing a literal empty list/tuple or `None`
+fromlist as "absent," while still conservatively treating anything else
+non-literal as "present." **(b)** The reflective-access checks
+(`getattr`/`__dict__`) only recognized names in `WRITE_FUNCTIONS`, but
+`_STAMP_QUEUE` is tracked separately (via `STAMP_QUEUE_ATTR`), so
+`getattr(tracking, "_STAMP_QUEUE")` and
+`tracking.__dict__["_STAMP_QUEUE"]` both reflectively fetched the same
+queue object the plain-attribute check already flags outright, while
+evading both reflective checks entirely. Fixed by extending both checks
+to also recognize `STAMP_QUEUE_ATTR` alongside `WRITE_FUNCTIONS`. An
+EIGHTEENTH review round found two more real gaps, plus a documentation
+mismatch: **(a)** round 17's `_STAMP_QUEUE` reflective fix only
+recognized `getattr(<module>, "_STAMP_QUEUE")` (fetching the QUEUE
+OBJECT from a module), missing the deeper chain
+`getattr(tracking._STAMP_QUEUE, "submit")` (fetching a write-triggering
+METHOD off an ALREADY-resolved queue expression) -- fixed by adding a
+`_queue_expr_label` helper mirroring `_module_expr_label` one level
+down the stack, and using it for both the plain-attribute and
+reflective (`getattr`/`__dict__`) queue-method checks alike. **(b)** The
+inline package-alias chain (`aw.tracking.save_record(...)`) only
+recognized a bare `Name` package alias as its base, missing
+`__import__("agent_worktrees.tracking").tracking.save_record(...)` --
+`__import__` with no fromlist returning the package INLINE, immediately
+chained with `.tracking`, never assigned to a variable at all -- fixed
+by generalizing the package-base check (`_is_package_expr`) to also
+accept an inline dynamic-import call that itself resolves to the
+package. **(c)** This Journal's own per-round numbering (`(N)` prefixes
+before each spelled-out ordinal) had drifted out of sync with the
+actual round count -- a leftover artifact of numbering individual
+FINDINGS rather than ROUNDS, which diverge once a round contains more
+than one lettered finding. Fixed by dropping the redundant numeric
+prefixes entirely, keeping only the spelled-out round ordinals (which
+were themselves always accurate) as the source of truth. A NINETEENTH
+review round then found two more real gaps, both the SAME shape as
+earlier fixes -- an already-established recognized expression
+reassigned to a new name before use, one level further out than
+previously covered: **(a)** the `_tracking()` lazy-helper recognition
+only matched the helper call as the IMMEDIATE receiver
+(`_tracking().save_record(...)`), missing
+`tracking = _tracking(); tracking.save_record(...)` -- fixed by
+extending the reassignment-propagation loop to recognize a bare,
+no-argument call to a tracked `_tracking` name as a module-resolving RHS,
+alongside the Name/Attribute/dynamic-import forms it already handled.
+**(b)** `getattr(aw, "tracking")` (a single reflective CALL doing the
+package-to-module hop the plain `aw.tracking` Attribute chain already
+caught) was unrecognized entirely as a receiver expression, and -- once
+added -- also needed the same reassignment coverage
+(`tracking = getattr(aw, "tracking")`). A TWENTIETH review round found
+one more real gap, converging quickly this time (a single finding, not
+several): the reflective checks (`getattr`/`__dict__`) still only
+accepted an INLINE string literal for the fetched name itself, so
+`fn = "save_record"; getattr(tracking, fn)(...)` and
+`key = "_STAMP_QUEUE"; tracking.__dict__[key]` both evaded them even
+though the value is exactly as statically resolvable as the
+dynamic-import target already handles via `_string_arg_value`/
+`constant_string_aliases`. Fixed by reusing that SAME resolution for
+the reflective name/key argument across all four reflective branches
+(write-function `getattr`, queue-method `getattr`, write-function
+`__dict__`, queue-method `__dict__`), rather than requiring an inline
+literal at each site independently. Every fix across all twenty rounds
+has a dedicated regression test.
+
+72 tests total (`test_check_no_sibling_tracking_writes.py`): a clean
+tree, the sanctioned read-only accessors staying unflagged, three
+single-level import/call shapes (module attribute call, direct
+`from agent_worktrees import <fn>`, `from agent_worktrees.tracking_claims
+import <fn>`), an aliased-module-import evasion case, three
+package-root-alias evasion cases (aliased, unaliased bare, and unaliased
+dotted), the `tracking_controller_relations` re-export case, the four
+added controller-relation functions, `load_or_create_anchor_record`, two
+wildcard-import rejection cases, two verb-handler-module cases, two
+fail-closed file-scan-error cases (unreadable, syntactically invalid),
+the two private liveness-writer helpers, `tracking_write`'s own
+direct-execution APIs (one denylisted case, one confirming
+`dispatch`/`write_with_boot` stay unflagged), three reassignment-evasion
+cases (single-hop Name, multi-hop chained Name, and the
+package-attribute RHS form), two annotated-assignment cases (plain and
+package-attribute RHS), four reflective-access cases (`getattr` via a
+module alias, `getattr` via a package-alias chain, a non-literal
+`getattr` name confirming that boundary is not claimed safe, and the
+`__dict__` subscript form), a confirmation that an unrelated module's
+`getattr` is never flagged, five literal-dynamic-import cases
+(`importlib.import_module` assigned then used, `__import__` of the bare
+package assigned then used, an inline unassigned call, a non-literal
+import-target boundary confirmation, and an unrelated module's dynamic
+import never flagged), an aliased-`importlib`-module case, a bare
+`import_module`-name case, six `_STAMP_QUEUE` cases (`submit`,
+`submit_mux` via a package-alias chain, `_apply`, a confirmation that an
+unrelated queue attribute is never flagged, the queue object reassigned
+to a new name, and a direct `_STAMP_QUEUE` import), an `_atomic_write`
+denylist case, a `_replace_with_retry` denylist case, two `_VERBS`
+registry cases (subscripted directly, and bound to a variable first), a
+constant-string-alias dynamic-import case, three `__import__`-fromlist
+semantics cases (no fromlist resolving to the package, the WRONG
+submodule-direct resolution confirmed NOT flagged, and a fromlist
+present resolving to the submodule), a `_StampWriteQueue` class case, a
+`_tracking()` lazy-helper case, a confirmation that an unrelated
+identically-named local `_tracking` is never flagged, the owning-plugin's
+own exemption, and a live-repo smoke test (confirmed clean: zero
+violations today, matching the original survey's own finding). Wired
+into `.github/workflows/ci.yml` alongside the existing
+`check-no-agent-machines-packages.py` guard.
+
+### 2026-09-27 — PR #4265: daemon writes push straight into record_cache -- the read-consistency companion to Phase 3's write migration, plus two real bugs review caught
+Operator redirected scope mid-session, away from an initially-discussed
+"redesign `terminal_conclusion.py`'s `_save_session_conclusion`" plan: the
+actual ask was narrower and squarely serves this effort's own Guiding
+Intent ("every read *and* every mutation... funneled through") without
+requiring the daemon to become the sole authoritative writer first --
+"whether the daemon becomes the authoritative state handler, or just a
+read/write broker, the same effect is achieved: all entities reading and
+writing through the daemon get a consistent state."
+
+Investigated `record_cache.py` (an existing per-process, `(mtime_ns,
+size)`-keyed memoization cache, `copilot-extensions#3751`, used only by
+`tracking.list_records`) and confirmed `tracking.load_record` (the
+single-record read path, ~140 call sites) did NOT use it at all -- always a
+fresh re-parse. Added `record_cache.store()` (seeds/refreshes the cache
+with a record this process just wrote) and routed `load_record()` itself
+through `cached_load()`, giving every one of its call sites the benefit
+without touching each one.
+
+**First review round found two real bugs, both fixed, neither assumed
+away:**
+1. **High: recursive cache lookup in `list_records`.** The first attempt
+   left `list_records` calling `record_cache.cached_load(yaml_file,
+   load_record)` -- but `load_record()` now already IS a `cached_load`
+   call, so every cache MISS recursed into itself until `RecursionError`,
+   silently swallowed by `list_records`'s own broad `except Exception`
+   (returning no records at all, not stale ones). Fixed by calling
+   `load_record(yaml_file)` directly.
+2. **Medium: transient projection-dirty state was cached too.**
+   `copy.deepcopy(record)` also copied the runtime-only, never-serialized
+   `_session_projection_dirty` / `_session_projection_initial_registration`
+   / `_controller_projection_dirty` attributes `_save_record_unlocked` can
+   populate while serializing; these are cleared on the CALLER's own
+   object only after the cache write returns
+   (`_flush_session_projections`, once the lock releases). A cache-hit
+   `load_record()` could hand back a record that still looked dirty --
+   unlike a fresh uncached parse, which never carries these attributes at
+   all. Fixed by stripping them in `record_cache.store()`.
+
+**Also found, while manually validating before pushing (not by review):**
+a genuine regression in `test_execution_leg_cli.py` (2 failing tests) from
+an initial version that pushed the cache only from `tracking.save_record`.
+Several real callers -- the execution-leg CLI's own nested mutation lock,
+`tracking_lifecycle.create_new_record_if_absent` -- call
+`tracking._save_record_unlocked` DIRECTLY to avoid re-acquiring a lock
+they already hold, bypassing `save_record` entirely. Root-caused via
+`git stash` bisection (confirmed the failures were new, not
+pre-existing) down to a `_loaded_from`-staleness bug: `store()` cached a
+plain passthrough of the caller's `record`, whose `_loaded_from` is only
+set correctly by `save_record` AFTER the cache write (to avoid a
+write/stat race); a cache-hit `load_record()` handing that back to a
+caller that resaves with no explicit `path` (resolving one via
+`record.yaml_path`) silently wrote to the WRONG file. Fixed two ways: (a)
+`store()` stamps its own copy's `_loaded_from` explicitly rather than
+trusting the passthrough, and (b) moved the cache push from
+`save_record` down into `_save_record_unlocked` itself -- the ACTUAL
+universal physical-write chokepoint, reaching every direct caller too.
+Review's own third (Low) finding independently asked for regression
+coverage of exactly this direct-caller path; added
+`test_a_direct_unlocked_save_caller_also_pushes_the_cache`, which would
+fail if the push were ever moved back into `save_record` alone.
+
+Never a TTL/blackout cache: any writer's STAT-CHANGING write (verb-
+mediated, `save_record`, a direct `_save_record_unlocked` caller, or a
+raw external rewrite whose resulting `(mtime_ns, size)` differs from
+what's cached) is visible on the very next read -- this was always a
+performance/consistency improvement, never a correctness fix, which is
+also why `terminal_conclusion.py`'s still-open write-migration holdout
+needed no further work to get this SAME read-consistency benefit (a
+separate axis from write-migration, which it still awaits). Every writer
+THIS effort actually cares about (any `tracking.py` write function, verb-
+mediated or direct) is unaffected by the `(mtime_ns, size)` key's own
+theoretical blind spot (a raw external rewrite landing on the exact same
+size at the exact same nanosecond as what's cached) -- `store()` always
+stats the file itself, right after its own write, so it can never miss
+its own change; only a write bypassing `tracking.py` entirely could hit
+that pre-existing, narrower edge case, unchanged by this PR.
+
+Full `agent-worktrees` suite: 5733 passed before the review-fix commit's
+new regression tests, 5743 passed after (10 new tests added: the two
+review-caught-bug regressions plus the direct-`_save_record_unlocked`-
+caller and transient-attribute-stripping tests) -- both runs showed only
+the two known pre-existing failures (`test_doctor.py::
+test_no_drift_when_consistent`, `test_registration_home.py`).
 
 ### 2026-09-27 — PR #4238: Phase 3's eighth migrated call-site cluster, deregister_session itself -- a lock-scope 'fix' tried and reverted twice in one review
 Migrated `deregister_session` (the symmetric sessionEnd counterpart to

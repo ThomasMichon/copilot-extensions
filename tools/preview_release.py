@@ -245,6 +245,24 @@ def _materialize_file_pointers_into_preview(dest: Path) -> list[str]:
     return mm.materialize_file_pointers(dest, canonical_root=REPO)
 
 
+def _materialize_uv_editable_refs_into_preview(dest: Path, plugin: str) -> list[str]:
+    """Expand every `uv`-editable canonical-reference entry declared in the
+    REAL ``plugins/<plugin>/pyproject.toml`` (never ``dest``'s own copy --
+    ``dest`` sits directly under ``workdir``, a different nesting depth than
+    the real ``plugins/<plugin>``, so the entry's authored relative path
+    would resolve to the wrong place if read from ``dest`` itself) into
+    ``dest``: copies canonical's complete lib tree and rewrites ``dest``'s
+    own ``pyproject.toml`` entry to the local non-editable form, mirroring
+    ``materialize_main.py``'s whole-repo promotion step for a single
+    plugin's preview."""
+    mm = _load_materialize_main()
+    return mm.materialize_uv_editable_ref_into(
+        source_consumer_dir=PLUGINS_DIR / plugin,
+        dest_consumer_dir=dest,
+        canonical_root=REPO,
+    )
+
+
 def build(plugin: str, workdir: Path) -> Path:
     src = PLUGINS_DIR / plugin
     if not src.is_dir():
@@ -257,6 +275,7 @@ def build(plugin: str, workdir: Path) -> Path:
 
     materialize_log = _materialize_into_preview(dest)
     file_pointer_log = _materialize_file_pointers_into_preview(dest)
+    uv_editable_log = _materialize_uv_editable_refs_into_preview(dest, plugin)
 
     grouped = {p: t for p, t in acc.pending_bumps().items() if p == plugin}
     computed = acc.compute(grouped) if grouped else {}
@@ -275,6 +294,7 @@ def build(plugin: str, workdir: Path) -> Path:
         "source_commit": _git_head(),
         "vendored_libs_materialize_log": materialize_log,
         "vendored_file_pointers_materialize_log": file_pointer_log,
+        "vendored_uv_editable_refs_materialize_log": uv_editable_log,
     }
     (dest / "PREVIEW.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return dest

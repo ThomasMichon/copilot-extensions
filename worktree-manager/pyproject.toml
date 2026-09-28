@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "copilot-extensions-worktree-manager"
-version = "0.1.0-dev87"
+version = "0.1.0-dev94"
 description = "Standalone, out-of-plugin control plane (installer, configurator & worktree launcher) for the copilot-extensions harness."
 readme = "README.md"
 license = "MIT"
@@ -67,7 +67,12 @@ agent-dropin-registry = { path = "libs/dropin-registry" }
 # roots for attributed registry entries (module ``plugin_activation``).
 agent-plugin-activation = { path = "libs/plugin-activation" }
 # Coalesce/refcount/idle-exit daemon wire protocol + client (module
-# ``work_coalescing_singleton``).
+# ``work_coalescing_singleton``). This is a `uv`-editable canonical reference
+# (vendor-pointer-generalization effort, Phase 1): `path` escapes this
+# project's own root and resolves live to `libs/work-coalescing-singleton`,
+# so this `dev`-branch checkout has nothing to keep manually in sync -- only
+# a real `main`-branch release (tools/materialize_main.py) ever gets a real
+# local copy.
 agent-work-coalescing-singleton = { path = "libs/work-coalescing-singleton" }
 
 [project.scripts]

@@ -21,14 +21,15 @@ _CONTEXT_ENV = "COPILOT_EXTENSIONS_CONTEXT"
 
 
 def _legacy_root() -> Path:
+    _legacy = ".agent-worktrees"  # marketplace-isolation: allow legacy compatibility root
     override = os.environ.get("AGENT_HOME", "").strip()
     if override:
-        return Path(override).expanduser() / ".agent-worktrees"
+        return Path(override).expanduser() / _legacy
     if platform.system() == "Windows":
         home = Path(os.environ.get("USERPROFILE") or Path.home())
     else:
         home = Path.home()
-    return home / ".agent-worktrees"
+    return home / ".agent-worktrees"  # marketplace-isolation: allow legacy compatibility root
 
 
 def _context_receipt_path(context: dict[str, object]) -> str | None:

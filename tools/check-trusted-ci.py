@@ -60,8 +60,19 @@ core.setFailed(
 GITHUB_SCRIPT_SHA = "f28e40c7f34bde8b3046d885e986cb6290c5673b"
 SETUP_PYTHON_SHA = "a26af69be951a213d495a4c3e4e4022e16d87065"
 SETUP_UV_SHA = "c771a70e6277c0a99b617c7a806ffedaca235ff9"
+# `ubuntu-slim`: a real, standard GitHub-hosted single-CPU runner label,
+# documented in GitHub's own "GitHub-hosted runners reference" table
+# (docs.github.com/en/actions/reference/runners/github-hosted-runners) right
+# alongside `ubuntu-latest` -- NOT a self-hosted or custom-runner-group name.
+# Added when `gh-aw`-compiled workflows' generated infra jobs
+# (`activation`/`conclusion`/`pre_activation`/`safe_outputs`) defaulted to it
+# and this allowlist (which predates this repo's `gh-aw` adoption) rejected
+# them as an "unauthorized self-hosted runner route" -- a false positive this
+# guard's own allowlist just hadn't caught up to yet, not a real
+# self-hosted-routing risk.
 GITHUB_HOSTED_LABELS = {
     "ubuntu-latest",
+    "ubuntu-slim",
     "ubuntu-24.04",
     "ubuntu-22.04",
     "windows-latest",

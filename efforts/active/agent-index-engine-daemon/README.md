@@ -6,7 +6,10 @@
 - **Created:** 2026-08-03
 - **Status:** Active <!-- Draft | Active | Blocked | Done --> (all implementation
   phases landed to `main`; one Validation Plan item -- a rollback-path
-  live-validation -- is not yet proven, see Validation Plan)
+  live-validation -- is not yet proven, see Validation Plan). The packaging
+  half of "durable" is carried forward by
+  `efforts/active/agent-index-server-package-split` (separating the engine
+  into its own installable program, not just its own venv/extra).
 - **Vision:** extends [`visions/plugins/agent-index`](../../../visions/plugins/agent-index/README.md)
   (§*The embedding engine*, §self-contained-service, §local-first-standalone) —
   **vision-extending**: the durable-daemon intent is new and must be written into

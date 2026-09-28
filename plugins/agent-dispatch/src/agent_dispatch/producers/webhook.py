@@ -162,7 +162,8 @@ def build_app(
     tel_cfg = cfg.get("telemetry") or {}
 
     if client_factory is None:
-        coord_url = cfg.get("url") or os.environ.get("AGENT_DISPATCH_URL") or "http://127.0.0.1:9847"
+        _default_url = "http://127.0.0.1:9847"  # marketplace-isolation: allow legacy-compatibility
+        coord_url = cfg.get("url") or os.environ.get("AGENT_DISPATCH_URL") or _default_url
         coord_token = cfg.get("coordinator_token") or os.environ.get("AGENT_DISPATCH_TOKEN")
 
         def client_factory() -> DispatchClient:  # type: ignore[misc]

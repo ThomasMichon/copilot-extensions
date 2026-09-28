@@ -900,6 +900,49 @@ The following reason codes are stable for version 1:
 Implementations may add a more specific stable invalid-evidence reason, such as
 `activation-invalid` or `context-invalid`, without changing status precedence.
 
+#### Durable runtime-root pointer (resolver-free consumers)
+
+**Added 2026-09-27** (`marketplace-scoped-installations` effort, Phase 2
+consumer-resolution correction). Some callers must run before a full
+resolver invocation is safely possible — a session-start hook on a
+"tools-half box" (before the plugin's own runtime is provisioned), or any
+caller for which even `bash` 4.4/`awk`/Python cannot be assumed. These
+callers cannot invoke the resolver directly, yet still need a best-effort
+answer to "is there a currently active runtime for plugin X, and where."
+
+Every `status` resolution (`resolve_installation_mode` / `installation-context.sh
+status` / `installation-context.ps1 status`) that reaches `status: "ready"`
+with a non-null `runtimeRoot` publishes that value, as a side effect, to a
+durable, plain-text, well-known location:
+
+```text
+<durable-home>/<plugin-id>/runtime-root
+```
+
+(`<durable-home>` is the same canonical `.copilot-extensions` root used by
+`installation-mode.json`.) The file contains exactly one line: the absolute
+`runtimeRoot` path, UTF-8, LF-terminated, written with the same atomic
+same-directory-replacement discipline as every other durable-home write. It
+is not a secret (a path, not a credential); each runtime follows its own
+existing atomic-write primitive's default permissions rather than adding new
+platform-specific permission-hardening code for this one file. Publication is
+skipped — the existing pointer, if any, is left
+untouched — whenever `status` is not `"ready"` or `runtimeRoot` is null;
+a transient bad resolution must never overwrite a last-known-good pointer,
+and a failed write must never fail or block the resolver's real result.
+
+**This pointer is advisory-only and never authoritative.** It exists purely
+to let a resolver-free reader make a best-effort existence/path check
+(`test -x "$(cat .../runtime-root 2>/dev/null)/bin/<command>"`, or equivalent)
+with a plain `cat`/`head -n1` — no JSON parsing, no `awk`, no bash-4.4
+features required to read it. Any caller that can afford the real resolver
+must call it directly instead of trusting this file; the pointer may be
+stale (a plugin update, migration, or rollback since the last `status` call)
+and a resolver-free reader that finds it missing or stale must fail open
+exactly as it already does today for "no answer" — it must never treat the
+pointer's absence as proof nothing is installed, and never use it to gate a
+mutating decision.
+
 #### Effective-mode and status table
 
 | Policy/evidence | Activation and legacy state | Effective result |

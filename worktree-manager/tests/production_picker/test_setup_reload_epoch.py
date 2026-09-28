@@ -438,9 +438,40 @@ def test_sync_setup_disposes_payload_when_apply_raises():
 
     screen = _Screen()
     with pytest.raises(RuntimeError, match="apply blew up"):
-        screen.setup()
+        screen.setup_sync_for_tests()
 
     assert disposed.is_set()
+
+
+def test_setup_sync_runs_one_local_reconcile_batch_per_epoch():
+    pytest.importorskip("textual")
+    from worktree_manager.production_picker.picker_tui import engine as eng
+    from worktree_manager.production_picker.picker_tui import data_local
+
+    calls = {"batch": 0}
+
+    screen = eng.PickerScreen(data_local, live=False)
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(data_local.context, "project", lambda: "example")
+    monkeypatch.setattr(
+        data_local.engine_client,
+        "list_worktree_rows",
+        lambda *_args, **_kwargs: [{"id": "wt-a", "state": "wip"}],
+    )
+    monkeypatch.setattr(
+        data_local.engine_group_c,
+        "picker_reconcile_local",
+        lambda *_args, **_kwargs: calls.__setitem__("batch", calls["batch"] + 1)
+        or type("Batch", (), {"rows": [{"id": "wt-a"}], "summary": {"mux_scan_ok": True}})(),
+    )
+
+    try:
+        screen.setup_sync_for_tests()
+        screen.setup_sync_for_tests()
+    finally:
+        monkeypatch.undo()
+
+    assert calls == {"batch": 2}
 
 
 def test_apply_setup_payload_cancels_replaced_loader():
@@ -758,7 +789,7 @@ def test_non_live_mount_paints_skeleton_before_blocked_load_returns(
     asyncio.run(run())
 
 
-def test_non_live_mount_eventually_matches_sync_setup_result(
+def test_non_live_mount_eventually_matches_sync_test_setup_result(
     monkeypatch,
     wait_for_current_setup_epoch_applied,
 ):
@@ -810,7 +841,7 @@ def test_non_live_mount_eventually_matches_sync_setup_result(
     monkeypatch.setattr(PickerScreen, "_scan_pivot_payload", lambda self: pivot_payload)
 
     baseline = PickerScreen(SyncSrc(), live=False)
-    baseline.setup()
+    baseline.setup_sync_for_tests()
     expected = _setup_state(baseline)
 
     async def run():
@@ -866,7 +897,8 @@ def test_setup_reload_ui_entrypoints_do_not_block_while_collecting_payload(
     ``_collect_setup_payload()`` inline.
 
     The worker's collect phase is gated behind an Event. If any entrypoint is
-    changed back to synchronous ``setup()`` (or an equivalent direct-I/O path),
+    changed back to synchronous inline setup (for example
+    ``setup_sync_for_tests()``) or an equivalent direct-I/O path,
     the trigger call itself blocks here and this test fails with a targeted
     message naming the offending UI callback.
     """

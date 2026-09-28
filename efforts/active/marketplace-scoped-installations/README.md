@@ -148,15 +148,39 @@ because they provide tools or services.
   canonical templates.
 - [x] Add session-start command-catalog context so skills and agents receive the
   exact payload-owned invocation path; convert operative bare command examples.
-- [ ] Stop installing generic `agent-*` commands into `~/.local/bin`; retained
-  service, provider, remote, scheduled, startup, and deployment boundaries still
-  require attributable external-launch contracts before their compatibility
-  wrappers can be retired. The
-  [Phase 2 launcher contract inventory](phase-2-launcher-contracts.md) accounts
-  for the 86 guard-visible findings at its 2026-08-26 baseline (83 as of the
-  2026-09-25 re-audit, with a full family re-derivation still pending),
-  records known guard-invisible callers, and
-  maps their Phase 2, Phase 3, Phase 4, and Phase 6 dependencies.
+- [x] **Scope corrected 2026-09-27 (operator directive — see Journal):** this
+  item is **not** "stop installing generic `agent-*` commands into
+  `~/.local/bin`" unconditionally. A plugin's own global-binstub *placement*
+  retires only for a host that actually configures a marketplace-cell
+  install; a legacy/non-cell host keeps it, permanently. The real gate is
+  **universal consumer-side resolution**: every caller that invokes a
+  *different* plugin's command, or invokes any `agent-*` command outside an
+  LLM-mediated skill turn (installers, hooks, cross-plugin script calls,
+  generated helpers like `vault-askpass` that run non-interactively), must
+  resolve the target through the already-built Phase 3 mechanisms —
+  the [installation-resolution `runtimeRoot` resolver](../../../docs/install-contract.md#resolver-result-and-precedence)
+  for non-session callers, and the session command catalog
+  (`emit-command-catalog.{sh,ps1}` → `write_session_guidance.py`) for
+  LLM-mediated skill turns — **and must treat the legacy-fallback
+  `runtimeRoot` exactly like a marketplace-cell root, never special-cased.**
+  Own-payload placement (a plugin's own installer declaring where *it*
+  writes *its own* global binstub, and `agent-worktrees`'s permanent
+  project-command surface) is accepted and out of this item's scope. The
+  [Phase 2 launcher contract inventory](phase-2-launcher-contracts.md) has now
+  **fully reclassified and, where genuinely open, fixed every finding** (not
+  guessed): of 70 original findings, 2 were guard false positives (converted),
+  62 are verified own-payload placement (accepted, no action), and 2
+  (`agent-vault` credential-askpass) are verified currently-correct and
+  explicitly deferred pending that plugin's own future cell-awareness.
+  **Zero findings remain open.** The last genuine gap
+  (`agent-worktrees`'s `register-nudge.{sh,ps1}` marketplace-cell detection)
+  is closed via a new durable, resolver-free runtime-root pointer added to
+  the canonical `libs/installation-context` library (Python/bash/PowerShell
+  parity, synced to all 11 vendoring plugins) — see
+  [install-contract.md § Durable runtime-root
+  pointer](../../../docs/install-contract.md#durable-runtime-root-pointer-resolver-free-consumers) — rather than the heavier resolver dependency
+  `register-nudge.sh` deliberately avoids for its "tools-half box" bootstrap
+  guarantee.
   - [x] Preserve complete default-legacy fallback coverage while migration is
     incomplete: every runtime `agent-*` stamp publishes every declared payload
     command, and agent-logger's multi-command family delegates through durable
@@ -252,6 +276,16 @@ because they provide tools or services.
     - [x] Run the Agent Machines scenario in a disposable Linux clean-room arm.
     - [x] Windows Agent Machines clean-room arm waived by operator decision on
       2026-09-05; deterministic PowerShell parity tests remain required.
+    - [ ] Post-acceptance Agent Index installer defects (routed here from the
+      2026-09-24 bug sweep per Phase 7's migration-intake disposition — both
+      are installer-elevation/interpreter-selection gaps in this effort's own
+      accepted exemplar, not new scope):
+      - [ ] **[#107](https://github.com/ThomasMichon/copilot-extensions/issues/107)**
+        `Register-ScheduledTask` fails with `Access is denied` without
+        elevation; needs a user-level logon task instead.
+      - [ ] **[#106](https://github.com/ThomasMichon/copilot-extensions/issues/106)**
+        `uv venv` can select a broken uv-managed Python on Dev Box
+        (os error 448); needs an explicit `--python` pin.
 
 ### Phase 4 — Runtime and state rollout
 
@@ -319,27 +353,61 @@ because they provide tools or services.
 - [x] Migrate or retire legacy services and global generic binstubs only after
   ownership is proven and the new cell passes health checks.
 - [ ] Turn the report-only guards blocking after all runtime plugins conform.
+  **Scope corrected 2026-09-27**: "conform" means every cross-boundary
+  consumer resolves through `runtimeRoot`/session-catalog, not that
+  own-payload global-binstub placement lines disappear — those are permanent
+  on non-marketplace-cell hosts (see the corrected Phase 2 item above and
+  [phase-2-launcher-contracts.md](phase-2-launcher-contracts.md)). The guard
+  itself will need an explicit, durable allowance for accepted own-payload
+  placement patterns before it can ever go blocking, since those lines
+  legitimately never disappear — not yet added.
 - [x] Document rollback and retention of legacy state and inactive cells.
 
 ### Phase 7 — Reconcile deferred backlog
 
 - [ ] Accept installation and marketplace candidates only through
       [`migration-intake`](../migration-intake/README.md)'s deduplication and
-      ownership gate.
-- [ ] Revalidate accepted technical scope against the current installation-cell
-      contract; return obsolete or unsafe candidates for explicit disposition.
-- [ ] Place each accepted public tracker item in exactly one existing phase,
-      extending this plan before implementation when necessary.
-- [ ] Keep examples synthetic and distribution-neutral.
+      ownership gate. Ongoing policy, not a one-time action — reconfirmed
+      2026-09-27 that no new candidate entered this effort's Plan outside that
+      gate this leg; the two 2026-09-24 bug-sweep items below predate the
+      policy and are the only pending exception, now explicitly routed rather
+      than grandfathered in place.
+- [x] Revalidate accepted technical scope against the current
+      installation-cell contract for this leg's reconciled backlog
+      (2026-09-27): the Phase 2 launcher-contract script clusters and
+      cross-plugin `payload-invocation.json`/`installer-readiness.json`
+      questions left open across all 9 guard-triaged plugins were confirmed
+      still live and in-scope — not obsolete — against `#1103` (Phase 2,
+      open, partial), `#1110` (Phase 6, open/reopened, guard-blocking
+      precondition unmet at 681 findings/1344 files), and the
+      module-size-ceiling tracker
+      [aperture-labs#7672](https://gitea.michon.ski/tmichon/aperture-labs/issues/7672)
+      (open, unclaimed). None require return-for-disposition.
+- [x] Place each accepted public tracker item in exactly one existing phase
+      (2026-09-27): the confirmed Phase 2/cross-plugin-JSON backlog already
+      lives correctly under Phase 2 (`#1103`) and `aperture-labs#7672` — no
+      new phase needed. The two Bug sweep items below are now placed under
+      Phase 3 (Agent Index installer follow-ups), the only remaining
+      unplaced candidates found this leg.
+- [x] Keep examples synthetic and distribution-neutral. Spot-checked
+      2026-09-27 across this leg's ~30 merged PRs' annotation examples and
+      the effort's own proposal docs — no environment-specific identifiers
+      found; holds.
 
 ### Bug sweep — linked open bugs (2026-09-24)
 
-_Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
+_Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review)._
 
-- [ ] **#107** agent-index installer: Register-ScheduledTask 'Access is denied' without elevation -- need a user-level logon task
-  - An installer elevation gap is this effort's installation-cells scope.
-- [ ] **#106** agent-index installer: uv venv selects a broken uv-managed Python on Dev Box (os error 448) -- pin --python
-  - A broken interpreter selection during install is this effort's installation-cells scope.
+- [x] **#107** agent-index installer: Register-ScheduledTask 'Access is denied' without elevation -- need a user-level logon task
+  - Triaged 2026-09-27: still open, unclaimed, not obsolete. Routed to Phase 3
+    (Agent Index installer follow-up) rather than closed here — the
+    underlying installer fix is unimplemented; only its placement is
+    resolved.
+- [x] **#106** agent-index installer: uv venv selects a broken uv-managed Python on Dev Box (os error 448) -- pin --python
+  - Triaged 2026-09-27: still open, unclaimed, not obsolete. Routed to Phase 3
+    (Agent Index installer follow-up) rather than closed here — the
+    underlying installer fix is unimplemented; only its placement is
+    resolved.
 
 ## Validation Plan
 
@@ -385,6 +453,787 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 [`phase-6-lifecycle.md`](phase-6-lifecycle.md).
 
 ## Journal
+
+### 2026-09-27 — Durable runtime-root pointer designed and implemented; Phase 2 launcher-contract inventory now at zero open findings
+
+- Directed to design a durable marketplace-cell lookup for `register-nudge.sh`
+  rather than stop at "needs design work." Added a new normative mechanism to
+  [install-contract.md § Durable runtime-root
+  pointer](../../../docs/install-contract.md#durable-runtime-root-pointer-resolver-free-consumers):
+  every `status` resolution that reaches `"ready"` with a non-null
+  `runtimeRoot` now publishes that value, as a side effect, to a plain-text,
+  single-line, well-known file (`<durable-home>/<plugin-id>/runtime-root`) —
+  no JSON parsing required to read it, so a genuinely resolver-free consumer
+  can make a best-effort existence check with a plain `cat`/`head`. Advisory
+  only, never authoritative; publication is skipped (not blanked) on any
+  non-`"ready"` status so a transient bad resolution never clobbers a
+  last-known-good pointer, and a failed write never fails the real result.
+- **Implemented in all three parity runtimes** in the canonical
+  `libs/installation-context/` library: Python
+  (`_publish_runtime_root_pointer` in `_installation_context_files.py`,
+  called from `resolve_installation_mode`'s return path in
+  `_installation_context_mode_cli.py`), bash (`publish_runtime_root_pointer`
+  in `installation-context.sh`, called only from the `status` action branch,
+  written without `atomic_write_text` to avoid its `fail()`-based exit
+  propagating out of a best-effort helper), and PowerShell
+  (`Publish-RuntimeRootPointer` in `installation-context.ps1`, gated on
+  `$Action -ceq 'status'` since `Resolve-InstallationStatus` also serves
+  `probe-legacy`). Synced to all 11 vendoring plugins via
+  `tools/sync-installation-context.py` (`--check` now clean).
+- **Fixed a broken test as part of adding the feature, not around it**:
+  `test_status_and_probe_cli_parity_and_read_only` asserted `status` was
+  fully read-only across all three runners — no longer true by design.
+  Updated it to assert the delta is *exactly* the one new pointer file (with
+  correct content), and that a subsequent `probe-legacy` call adds nothing
+  further. Dropped an initial exact-`0600`-permission assertion after
+  confirming it made the runner-parity test brittle for no security benefit
+  (the pointer holds a path, not a secret; PowerShell's default write mode on
+  this platform is `0664`, not `0600`, and there's no existing precedent in
+  this PS1 file for platform-conditional permission hardening) — softened
+  the doc's wording to match rather than bolt on a first-of-its-kind chmod.
+- **Confirmed via `git stash` isolation that ~12 other pre-existing test
+  failures** (`test_bootstrap_context_selection.py`,
+  `test_legacy_entrypoint_probe.py`) are unrelated to this change —
+  identical failures with and without it applied. Filed
+  [aperture-labs#7753](https://gitea.michon.ski/tmichon/aperture-labs/issues/7753)
+  rather than silently living with them or scope-creeping into fixing them
+  here.
+- **Fixed `agent-worktrees`'s `register-nudge.{sh,ps1}`** using the new
+  pointer: checks `command -v`/legacy-path first exactly as before (zero
+  behavior change for legacy hosts), then falls back to reading
+  `~/.copilot-extensions/agent-worktrees/runtime-root` and checking that the
+  named directory exists — closing the real gap (a marketplace-cell-only
+  host with no legacy binstub was previously invisible to this check) while
+  staying resolver-free and fail-open exactly like the rest of the file.
+  Deliberately checks directory *existence* only, not a specific binstub
+  sub-path, after confirming `runtimeRoot` means different things in legacy
+  vs. namespaced mode (the plugin's runtime/state root vs. the cell's
+  plugin-root) and that guessing a specific sub-path wrong would be no safer
+  than the existing heuristic-quality bar this file already accepts — the
+  consequence of either false-positive or false-negative here is a cosmetic
+  nudge-message miss, not a functional gate on any mutation.
+- **Phase 2 launcher-contract inventory reaches zero open findings.**
+  Updated the disposition summary: 62 own-payload placement (accepted), 2
+  deferred (`agent-vault`), 0 open. Checked off the corrected Phase 2 scope
+  item in the main Plan on that basis. Left the upstream GitHub `#1103`
+  tracker's own closure as an explicit reviewer/operator decision — its
+  history suggests broader scope than this specific inventory, and that call
+  shouldn't be inferred from local checklist state alone.
+- Verified: full `libs/installation-context/tests/test_installation_mode_governance.py`
+  (120 tests) passed via `test-supervisor`; `check-marketplace-isolation.py`
+  (68, unchanged — the retained legacy-path text is correctly still flagged
+  as accepted own-payload); `check-docs-consistency.py` clean; `bash -n` and
+  the PowerShell AST parser both clean on every edited script.
+
+### 2026-09-27 — Correction: `register-nudge.sh`'s fix is NOT a `bootstrap-check.sh` pattern reuse — it needs new resolver-free design
+
+- Immediately after the previous entry's PR merged, went to actually
+  implement the "last genuine open item" (`agent-worktrees`'s
+  `register-nudge.{sh,ps1}`) using the pattern that entry claimed was
+  "already proven" in `bootstrap-check.sh`. Reading `register-nudge.sh` in
+  full first (not just its guard-flagged line) caught the claim being wrong
+  before any code was written.
+- `register-nudge.sh`'s own header states it is deliberately **"resolver-
+  free"** so it still runs on a "tools-half box" (a session-start hook that
+  must work before full runtime provisioning). Tracing `bootstrap-check.sh`'s
+  `legacy_mutation_allowed` -> `legacy-entrypoint-probe.sh` -> the full
+  `installation-context.sh` resolver (bash 4.4+, `awk` JSON parsing) shows
+  that path is **not actually resolver-free** — copying it here would
+  silently break the exact guarantee `register-nudge.sh` exists to preserve.
+- Also re-read `register-nudge.sh`'s actual behavior end to end: it never
+  *invokes* `agent-worktrees` at the flagged path at all — it only checks
+  availability as a precondition before emitting a plain-text onboarding
+  nudge telling the *user* to type `agent-worktrees register <name>`
+  themselves. The real gap is narrower than "cross-boundary consumption"
+  implied: the availability heuristic doesn't recognize a marketplace-cell
+  install that isn't on PATH and isn't at the legacy path, so the nudge could
+  wrongly suppress itself for cell-only hosts.
+- Corrected `phase-2-launcher-contracts.md` and the main README's Phase 2
+  item: this is genuine unconverted work, but the next step is **new,
+  genuinely lightweight (no `awk`/bash-4.4) marketplace-cell detection**
+  (e.g. a raw grep/sed read of the durable `installation-mode.json` policy
+  file's `enabled` field) — a design question, not an implementation task
+  ready to execute today. Left the code untouched.
+- **Pattern worth naming for future sessions on this effort**: every one of
+  this leg's "confirmed, ready-to-convert" classifications turned out to need
+  correction once the actual source was read line-by-line (`dtssh` was a
+  false positive; `agent-vault` was premature; `register-nudge` needs new
+  design, not reuse). Filename/family-based classification is not a
+  substitute for reading the code before committing to a fix plan in this
+  inventory.
+- No code changed this pass — documentation correction only.
+  `check-docs-consistency.py` clean.
+
+### 2026-09-27 — Read the actual source for all 12 candidate cross-boundary findings: 1 dtssh false positive fixed, 9 verified accepted/deferred, exactly 2 genuine open items remain
+
+- Directed to keep driving past the scope correction (below) into real
+  conversion work. Before touching anything, read every one of the 12
+  candidate cross-boundary findings' actual source rather than trusting the
+  filename-based classification from the prior pass — good thing: two of
+  the four "confirmed with confidence" findings from that pass turned out
+  to be **wrong on inspection**.
+- **`agent-ssh` `dtssh` "remote transport" (2) — actually a guard false
+  positive, not agent-* consumption at all.** Read the code: these lines
+  install and PATH-expose `dtssh`/`devtunnel-ssh`, an unrelated third-party
+  CLI. Fixed in [#4336](https://github.com/ThomasMichon/copilot-extensions/pull/4336)
+  with `# marketplace-isolation: allow third-party-installer-path` (same
+  underlying concern the sibling `.ps1` files' `$InstallRelease` URL line
+  already carries as `allow third-party-installer-url`). Guard count: 70 →
+  68. `test_dtssh_host_launcher.py` (3 tests) passed via `test-supervisor`.
+- **`agent-vault` credential-askpass (2) — verified currently-correct, NOT
+  a quick conversion.** `agent-vault`'s own installer has zero
+  installation-context integration anywhere (confirmed by direct grep,
+  unlike `agent-machines`/`agent-index` which are Phase 3's proven cell-aware
+  exemplars) — `agent-vault` runs legacy-only today regardless of host
+  config, so `vault-askpass`'s hardcoded `$HOME/.local/bin/agent-vault` is
+  *currently correct, not a bug*. This backs live `sudo -A` elevation
+  facility-wide; converting it now, before `agent-vault` itself gains
+  cell-awareness (a Phase-3-scale undertaking on its own), would add
+  complexity to a safety-critical path for zero present benefit. **Left
+  untouched, explicitly deferred** — documented so a future session doesn't
+  mis-convert it either.
+- **`agent-machines` bootstrap-check (2) — verified already correct.**
+  Reads the installation-context resolver a few lines above
+  (`ContextMarketplaceId`/`status`/`reason`/`namespaced-active`/
+  `legacy_mutation_allowed`) and only falls through to the legacy binstub
+  path when that resolution says legacy. Already properly gated; no action
+  needed. This is the reference pattern for converting other findings.
+- **`agent-codespaces` readiness-legacy-fallback (3) — verified self-probe,
+  harmless.** `readiness-context.{sh,ps1}` only checks existence of its own
+  legacy binstub for a readiness report; never invokes anything at that
+  path. Own-payload, accepted.
+- **`agent-worktrees` register-nudge (2) — the only genuine, confirmed,
+  unconverted cross-boundary work in the entire 70-finding inventory.** No
+  installation-context awareness at all (plain `command -v`/legacy-path
+  check). Left unconverted this pass (out of time/scope for this leg) but
+  precisely identified, with its fix pattern already proven in this same
+  codebase (`agent-machines/scripts/bootstrap-check.sh`) — the next
+  session's exact next slice.
+- Updated `phase-2-launcher-contracts.md`'s family table with this final,
+  source-verified disposition for every finding (no more "needs
+  verification" hedges) and corrected the main README's Phase 2 item to
+  cite the final counts: 2 false-positive (fixed), 60 own-payload
+  (accepted), 2 deferred (`agent-vault`), 2 open (`agent-worktrees`).
+- Verified: `check-marketplace-isolation.py` (70→68), `check-docs-
+  consistency.py`, `test-supervisor -- python3 -m pytest
+  plugins/agent-ssh/tests/test_dtssh_host_launcher.py` all clean.
+
+### 2026-09-27 — Operator scope correction: Phase 2/6 completion criterion is universal consumer-side resolution, not global-binstub removal
+
+- **Operator directive (verbatim intent, this session)**: "we're only going
+  to retire 'global binstub' *placement* if the host machine configures
+  marketplace-cell install. But what we will do is prepare all consumption
+  for that eventuality. All skills and tools which call into `agent-*`
+  commands will need to resolve the marketplace path based on the active
+  session's provided information (agent-* plugins's sessionStart hooks
+  write the note to session-state, other consumers pick it up from there),
+  and then use the marketplace-install root as their binstub base path.
+  When marketplace-cell is not enabled, the pointers will be to the
+  user-global install, but all callers will still treat it like it's the
+  marketplace-cell."
+- Mapped this onto mechanisms already built in Phase 3, confirmed with the
+  operator before writing it in as canonical: the installation-resolution
+  `runtimeRoot` resolver
+  ([install-contract.md](../../../docs/install-contract.md#resolver-result-and-precedence))
+  for non-session callers, and the session command catalog
+  (`emit-command-catalog.{sh,ps1}` → `write_session_guidance.py`) for
+  LLM-mediated skill turns. Both already exist; neither needed inventing.
+- **This changes the Phase 2/Phase 6 completion criterion materially**:
+  own-payload global-binstub placement (a plugin's own installer declaring
+  where *it* writes *its own* binstub) is now explicitly accepted and
+  permanent on non-marketplace-cell hosts — **not** something Phase 6
+  retires. The actual remaining gate is universal cross-boundary consumer
+  resolution: any call crossing a plugin boundary, or running outside an
+  LLM-mediated skill turn, must resolve via `runtimeRoot`/session-catalog
+  and treat the legacy-fallback root exactly like a marketplace-cell root.
+- Reclassified the Phase 2 launcher-contract inventory's 70 findings against
+  this corrected two-way split (own-payload placement vs. cross-boundary
+  consumption) in
+  [phase-2-launcher-contracts.md](phase-2-launcher-contracts.md): **58 of 70
+  are own-payload placement, now out of scope entirely.** Of the remaining
+  12 candidate cross-boundary findings, only 4 (remote-transport 2,
+  credential-askpass 2) are confirmed cross-boundary with confidence this
+  pass; the other 8 (operator/bootstrap/nudge, readiness-legacy-fallback)
+  need a closer per-line read before converting anything, flagged as such
+  rather than guessed.
+- Also corrected the Phase 6 blocking-guard item: the guard itself needs a
+  durable, explicit allowance for accepted own-payload placement before it
+  can ever go blocking, since those lines are now permanent by design — not
+  yet added.
+- **No code converted this pass** — this was a scope/documentation
+  correction, upstream of any further conversion work, to prevent the next
+  session from converting (or worse, removing) own-payload placement lines
+  that were never meant to go away.
+- Verified: `check-docs-consistency.py` clean (doc-only change).
+
+### 2026-09-27 — Phase 2 launcher-contract inventory: full family re-derivation (70 findings, all classified); 3 stale entries corrected
+
+- Next slice after the Plan/Phase 7 reconciliation (below): actually drove
+  the "fresh pass still needed" the 2026-09-25 partial re-audit called out
+  in [phase-2-launcher-contracts.md](phase-2-launcher-contracts.md), rather
+  than deferring it again.
+- **Re-ran the guard in a clean checkout, not the long-lived anchor**: 70
+  `global-plugin-binstub` findings, down from the 2026-09-25 snapshot's 83.
+  Diffing anchor vs. clean-checkout output found the anchor's extra 4
+  findings were `*.egg-info/PKG-INFO` build artifacts from a prior local
+  `pip install -e .`, never committed — a real methodology fix: this guard
+  must be read from a clean checkout, never a long-lived anchor that may
+  carry stale local build state.
+- **Classified all 70 findings into families** (not a sample): generic
+  wrapper publication (45), `agent-worktrees` project-command mixing (11),
+  operator/bootstrap/nudge (4), readiness legacy fallback (3),
+  `payload-invocation.json` legacy-footprint declarations (2),
+  remote-transport (2), credential/askpass (2), descriptive (1). No plugin
+  or finding is untraced any more.
+- **Corrected 3 stale doc claims found during classification** (all verified
+  against current source, not assumed):
+  1. `agent-machines`'s 2 "unresolved, needs a fresh slice" `cell_lifecycle.py`
+     findings the 2026-09-25 note flagged were already resolved in
+     [#4154](https://github.com/ThomasMichon/copilot-extensions/pull/4154)
+     (`allow legacy-compatibility`), which predates that note. Only the
+     `payload-invocation.json` declaration remains, and it needs no
+     resolution — same accepted shape as `agent-index`'s equivalent.
+  2. `agent-index`'s `transport.py` remote-transport finding already
+     converted (`allow remote-management`) — Phase 3 remote-transport is
+     done for `agent-index`; only `agent-ssh`'s `dtssh` scripts remain in
+     that family.
+  3. Two of four "Known guard-invisible callers"
+     (`agent-codespaces`/`agent-containers` `_invoke.py`) were already
+     resolved by PRs already recorded elsewhere in this Journal (#4298,
+     #3877) — both now resolve a payload-local binstub via `_payload_root()`
+     instead of the global path. Removed from the guard-invisible list;
+     `agent-bridge/agent_registry.py` and `transport.py`'s PowerShell branch
+     remain genuinely unconverted.
+- **No code changed this pass** — this was inventory correction, not
+  conversion. The generic-wrapper-publication family (45 findings, Phase 6
+  retirement) is the actual bulk of remaining work and still needs its
+  per-plugin conversion slices; nothing in this pass reduces that count.
+- Verified: `check-marketplace-isolation.py`, `check-docs-consistency.py`
+  both clean (doc-only change). Merged via `pr-merge --now`.
+
+### 2026-09-27 — Plan/Validation Plan reconciled against the completed 8-plugin backlog order; Phase 7 bug sweep triaged
+
+- Picked up the relay handoff whose next slice was explicitly **not** another
+  plugin — it was finishing the effort itself: reconcile the Plan checklist
+  against reality now that the 8-plugin guard-triage backlog order (Phase 7's
+  means, not its own end) is closed out, and triage the two unclosed Bug
+  sweep items.
+- **Revalidated, did not just re-check, the confirmed-backlog disposition**:
+  confirmed live via direct issue reads (not assumption) that `#1103` (Phase
+  2 tracker) is open/partial, `#1110` (Phase 6 tracker) is open/reopened with
+  its blocking-guard precondition still unmet (681 findings across 1344
+  files as of its last recheck — nowhere close to "all runtime plugins
+  conform"), and `aperture-labs#7672` (module-size-ceiling tracker) is open
+  and unclaimed. None of the confirmed-backlog items (Phase 2 launcher-
+  contract script clusters, `installer-readiness.json`/`payload-
+  invocation.json` cross-plugin questions) are obsolete or need re-
+  disposition — they're correctly already homed under `#1103`/`#7672`, not
+  this effort's own Phase 7.
+- **Phase 7 checklist**: three of four items are now satisfied for this
+  leg's reconciled scope (revalidate scope, place tracker items, keep
+  examples synthetic) and checked off with the evidence above; the
+  migration-intake gate item stays unchecked as ongoing policy (not a one-
+  time action) with a note that the two bug-sweep items are the only
+  pre-policy exception, now explicitly routed rather than silently
+  grandfathered.
+- **Bug sweep #107/#106 triaged**: both re-confirmed still open, unclaimed,
+  and in-scope (Agent Index installer elevation/interpreter-selection gaps
+  in this effort's own accepted Phase 3 exemplar). Placed as new Phase 3
+  follow-up sub-items rather than left in the unowned sweep list; the Bug
+  sweep checkboxes are closed as *triaged/placed*, not as *fixed* — the
+  underlying installer defects remain open work for whoever picks up Phase
+  3's follow-ups.
+- **Net effort state**: still **not** Done. Real, substantial remaining
+  work is Phase 2's "stop installing generic `agent-*` commands" item (~35
+  scripts across the launcher-contract family, tracked in
+  [phase-2-launcher-contracts.md](phase-2-launcher-contracts.md)) and Phase
+  6's blocking-guard turn-on, both gated on the same underlying conversion
+  work this session's 8-plugin sweep only annotated/deferred, never
+  implemented. Validation Plan remains entirely unchecked — none of its
+  items were exercised this leg (the Phase 3 Tier-P scenarios satisfy some
+  of them in spirit but haven't been cross-checked item-by-item against this
+  list; left honestly unchecked rather than assumed).
+
+### 2026-09-27 — `agent-worktrees` resolved to backlog-only (PR #4318); **entire 8-plugin backlog order now complete**
+
+- `agent-worktrees` SKILL.md docs (PR #4318, 25/167 findings): the
+  usual `allow deployed-runtime-diagnostics` doc-shaped mentions across
+  `agent-worktrees-related/SKILL.md`, `agent-worktrees-repos/SKILL.md`,
+  `copilot-extensions-setup/SKILL.md` (this plugin's own setup guide,
+  which also documents companion plugins' runtime layouts as reference
+  material -- agent-bridge, agent-mcp, agent-containers, agent-
+  codespaces all got mentions annotated here too, since the setup
+  skill's job is describing what EVERY optional companion plugin
+  creates), `copilot-extensions-setup/references/optional-plugins-
+  setup.md`, and `create-setup-script/SKILL.md`.
+  - Two tree-listing fenced code blocks needed the fence's native `#`
+    comment rather than an HTML comment (established rule, reused a
+    third time this session).
+  - `create-setup-script/SKILL.md`'s frontmatter `description:` field
+    was rephrased to drop a literal path mention rather than annotated
+    -- an HTML comment there would pollute the rendered, user-facing
+    skill description (established convention, reused).
+  - `service-lifecycle/references/install.sh` -- a generic illustrative
+    scaffold script, not a real agent-worktrees installer -- got its
+    lone `SERVICE_USER="${USER}"` line annotated `allow doc-example`.
+- **`agent-worktrees` is now at confirmed backlog-only state**: 101
+  remaining findings, entirely `scripts/install.{sh,ps1}` (18),
+  `hooks.json` (8), the `register-nudge`/`register-session`/`session-
+  conduct`/`bootstrap-check`/`provision-check`/`bind-nudge`/`deregister-
+  session`/`project-hooks`/`anchor-hygiene-check`/`reconcile-machine-
+  settings`/`default-setup`/`service-utils`/`session-machine`/
+  `launch-command`/`resolve-runtime` script family (~35, all Phase 2
+  launcher-contract shaped), `bin/agent-worktrees{,.ps1}` (2),
+  `installer-readiness.json` (4), `payload-invocation.json` (1), and 3
+  Python guard scripts (`cross_repo_guard.py`, `statelessness_guard.py`,
+  `anchor_write_guard.py`, `hook_client.py`, `nudge_status.py`,
+  `registry_root.py` -- ~13 combined) -- every category matches the
+  same confirmed Phase 2/cross-plugin-JSON-question shape left as
+  documented backlog in every other plugin this session. Plus the 4
+  `config.py` dataclass-docstring findings deferred in the prior entry
+  (unsafe to annotate mid-docstring without corrupting rendered docs).
+- **This closes the entire 8-plugin backlog order** established at the
+  start of this leg: agent-containers, agent-ssh, agent-mcp,
+  agent-machines, agent-bridge, agent-index, agent-dispatch,
+  agent-codespaces, and now agent-worktrees are ALL at confirmed
+  backlog-only state -- every plugin's remaining findings are
+  documented, understood, and intentionally deferred to their proper
+  Phase (2, 3, 4, or 6) rather than force-annotated.
+- Session totals across the full leg (from the prior context-handoff
+  resume through this entry): **~410 findings resolved** across roughly
+  30 merged PRs (core clusters + docs + journal entries per plugin),
+  **6 new guard reason phrases** discovered and documented (`allow
+  remote-container-path`, `allow shared-config-lock`, `allow shared-
+  instance-mutex`, `allow durable-host-identity-backup`, `allow third-
+  party-installer-url`, `allow schema`, `allow query-column-list`,
+  `allow release-verb`, plus the `allow legacy` length-constrained
+  shorthand), **1 HIGH-severity bug fixed** (agent-index's fresh-install
+  binstub gap, #7702, after a review-caught wrong-shaped first attempt),
+  **4 pre-existing bugs found and filed** via clean-room checkpoints and
+  test-suite isolation (#7688, #7719, #7722, #7737), and **8 module-
+  size-ceiling hits** resolved without ever force-widening a baseline
+  (tracked cumulatively in aperture-labs#7672).
+- Verified: `check-marketplace-isolation.py`, `check-skills.py`,
+  `check-docs-consistency.py` all clean. Merged via `pr-merge --now`
+  after a clean advisory review.
+
+### 2026-09-27 — `agent-worktrees` core src/ cluster (PR #4315, 37 findings); the harness's own most consequential leg this session
+
+- **agent-worktrees is the final, largest plugin in the backlog order**
+  (~167 findings at start) -- and unlike every prior plugin, it IS the
+  harness itself: the tool this whole triage effort runs on top of.
+  Given the operator's standing clean-room directive explicitly named
+  regressions in "opening the Worktree Manager, performing updates, or
+  creating worktrees" as the concern to guard against, this leg got
+  meaningfully more scrutiny than the routine per-plugin cycle.
+- **Delegated the initial mechanical annotation pass to a sub-agent**
+  (37 findings across 20 files -- almost entirely `.agent-worktrees`
+  own-root path mentions, matching the established `allow legacy-
+  compatibility` reason since agent-worktrees intentionally stays a
+  single global install by design) with an explicit, detailed brief
+  citing the established taxonomy, the same-line marker rule, and four
+  required verification commands.
+- **The sub-agent's self-verification was unreliable and would have
+  merged real regressions had it not been independently re-checked.**
+  Concretely, its own report claimed "0 changed-line E501s" and "all
+  checks passed," but a from-scratch re-scan (diffing every `+` line
+  against the 99-char limit, file by file, rather than trusting a
+  summary count) found:
+  - **9 genuine new E501 violations** across 8 files it had reported
+    clean (`__main__.py`, `accounts.py`, `doctor.py` x3,
+    `installation_cli.py`, `installer.py` x2, `loop_governance.py`,
+    `maintenance_cli.py` x2, `related.py`, `related_cli.py`, `repos.py`,
+    `repos_cli.py`).
+  - **3 new E702/E701 style violations** (semicolon-joined statements in
+    `__main__.py` and `sessions.py`; a colon-joined `if cond: return` in
+    `state_root.py`) it introduced while chasing the module-size
+    ceiling's shrink-only budget -- these are genuinely different bugs
+    from a missed line-length check, since they change working, reviewed
+    code into a lint-violating shape for no functional reason.
+  - **A risky docstring-to-f-string conversion** in `config.py`: to fit
+    a marker/interpolate a shared constant into a dataclass field's
+    multi-line documentation string, it converted four plain
+    `"""..."""` docstrings to `f"""..."""`. This silently changes the
+    literal's AST node type (a plain string constant becomes a formatted
+    string expression) -- harmless at runtime here, but a real risk for
+    any doc-extraction tooling that walks the AST expecting a plain
+    string node, for a purely cosmetic line-length fix that had no
+    business touching semantics at all. Reverted to the original plain
+    docstrings; the underlying findings (4, all inside multi-line
+    docstring bodies where no real Python comment can be embedded
+    without corrupting the rendered text) are left as documented
+    backlog rather than force an unsafe annotation.
+  - **A genuine new false-positive class confirmed and reused a second
+    time**: `cleanup.py`'s `shutil.which("agent-worktrees")` is the
+    plugin finding **its own** binstub (not a cross-plugin `agent-
+    worktrees` lookup from another plugin, which is what `allow
+    registry` means) -- classified `allow legacy-compatibility` instead,
+    matching the "this plugin's own identity is fixed by design"
+    concept precisely.
+  - **Introduced (during the fix-up pass) a new accepted shorthand**:
+    `allow legacy` as a length-constrained alias for `allow legacy-
+    compatibility` -- used wherever the fuller phrase plus a long path
+    literal would not fit under ruff's 99-char limit even after
+    extracting a short local variable, which the fuller phrase's own 27
+    characters made unreachable on several genuinely short lines. Same
+    semantic meaning; purely a byte-budget accommodation.
+- Rebalanced every module-size-ceiling hit this required
+  (`__main__.py`, `session_projection.py`, `installer.py`, `related.py`,
+  `repos.py`, `sessions.py`, `state_root.py` -- seven files in one PR,
+  this session's largest single batch) using only safe techniques:
+  blank-line removal between top-level defs (confirmed via direct ruff
+  probing that this repo's lint config does not enable E302/E303/E305,
+  so the spacing convention is stylistic, not enforced), a boolean-or-
+  chain refactor of `installer.py`'s binstub-detection helper (fewer
+  lines AND cleaner code, not just a budget trick), and collapsing an
+  already-short multi-line raise/return onto one line where it
+  genuinely fit.
+- **Smoke-tested the actual harness after merge**, beyond the routine
+  guard/lint/test checks: ran `agent-worktrees --version` and `status`,
+  then created a fresh worktree from the just-merged `dev` HEAD and
+  finalized it -- confirming the exact concern the operator's clean-room
+  directive named (create/finalize) still works cleanly post-merge, not
+  just that the annotated files individually pass lint.
+- Verified: `check-marketplace-isolation.py`, `check-module-size.py`,
+  `check-docs-consistency.py` all clean; zero new lint violations
+  confirmed by direct per-line re-scan; `python -m py_compile` on every
+  touched file; the full `agent-worktrees` suite via `test-supervisor`
+  (5759 passed, 26 skipped, 2 pre-existing failures --
+  `test_no_drift_when_consistent`'s `leaked_agent_rt_root` false-
+  positive and `test_cli_entry_honors_registration_home`'s `gh`
+  device-id credential-home write -- both confirmed pre-existing via
+  `git stash` isolation, filed
+  [aperture-labs#7737](https://gitea.michon.ski/tmichon/aperture-labs/issues/7737)).
+  All required CI checks passed on GitHub before merge.
+- **Takeaway for future legs**: delegating a large, well-specified
+  mechanical task to a sub-agent is still valuable at this scale, but
+  its own "all checks passed" self-report is not sufficient sign-off
+  for a change to the harness repo -- an independent, from-scratch
+  re-verification (not a re-read of its summary) caught real
+  regressions its self-check missed. This matches the standing
+  principle that a sub-agent's completion claim is not itself evidence;
+  only re-running the actual checks is.
+- `agent-worktrees` now at 130 remaining findings (SKILL.md docs,
+  `hooks.json`, `scripts/` install/register-nudge/session-conduct
+  clusters, `installer-readiness.json`) -- continuing next.
+
+### 2026-09-27 — `agent-codespaces` resolved to backlog-only (PRs #4298, #4299); `agent-dispatch-solo` clean-room checkpoint found a 4th pre-existing bug
+
+- `agent-codespaces` core src/ cluster (PR #4298, 17/60 findings):
+  annotated `src/agent_codespaces/`'s genuine exceptions --
+  `allow legacy compatibility root`/`allow legacy-compatibility` (own-root
+  fallback paths, `LEGACY_CONFIG_DIR_NAME`, and the remote-codespace-
+  deployed auth-helper assets' fixed instructions-root/backup/staging
+  filenames -- the whole `codespace_assets/` tree runs on an EPHEMERAL
+  remote CodeSpace, where "exactly one install" is the actual invariant,
+  not a bug), `allow registry` (cross-plugin `agent-bridge` relay-port/
+  token-cache/log lookups and cross-plugin `agent-worktrees` binstub/
+  state lookups -- both patterns now confirmed across a 4th/5th plugin),
+  and `allow shared-instance-mutex` (`fence.py`'s `FENCE_PATH =
+  "~/.agent-lease"`, a deliberately shared, not cell-scoped, home-dir
+  lockfile -- and a **genuine** lease-keyword match this time, not the
+  release/lease false-positive class from the prior entry).
+  - Hit the **module-size ceiling a 10th time** (aperture-labs#7672):
+    `config.py` was at its exact 2583-line baseline. Resolved without any
+    net line growth by keeping the marker on the *existing* return-
+    statement line (fits at 98/99 chars) instead of extracting a new
+    local-variable line -- cheaper than the net-line-neutral restructuring
+    technique used earlier in `agent-machines/cell_lifecycle.py` when a
+    same-line append alone is enough to close the gap.
+  - Two embedded-shell-script gotchas surfaced while shortening lines:
+    (1) splitting a Python string-literal concatenation across two
+    physical lines moves the guard's flagged line to whichever half now
+    contains the pattern -- confirmed by re-running the guard after each
+    split rather than assuming the "obvious" half; (2) a bash line-
+    continuation backslash (`\` at end of line) cannot be followed by a
+    trailing comment even in a *different* physical line's continuation
+    -- same class of gotcha as the already-documented PowerShell backtick
+    case, just the POSIX-shell side of the same coincidence, resolved the
+    same way (extract the flagged literal into a small local variable
+    referenced from both continuation halves).
+- `agent-codespaces` SKILL.md docs (PR #4299, 7/60 findings): the usual
+  `allow deployed-runtime-diagnostics` doc-shaped mentions, this time
+  spanning three different SKILL.md files (borrowing-codespaces,
+  codespaces-lifecycle, codespaces-setup) since the plugin's docs are
+  split across several skills rather than one.
+- `agent-codespaces` now at confirmed backlog-only state (34 remaining:
+  `install.sh`/`install.ps1` 18, `service.yaml` 4, `installer-
+  readiness.json` 3, `readiness-context.{sh,ps1}` 3,
+  `emit-codespace-map.{sh,ps1}` 2, `write-config-dropin.{sh,ps1}` 2,
+  `register-bridge-provider.ps1` 1, `payload-invocation.json` 1 -- all
+  confirmed Phase 2/cross-plugin categories, same shape as every prior
+  plugin's end state).
+- **Clean-room checkpoint** (`agent-dispatch-solo`, per the operator's
+  periodic-validation directive, run against the published `main`
+  marketplace release): 11/13 assertions passed. Two related failures
+  traced to one root cause: `agent-dispatch inbox --machine
+  <own-hostname>` (a same-machine self-browse, not an actual remote
+  connection) unconditionally shells out over SSH, so it fails outright
+  on a box with no `ssh` client -- and because `inbox` crashing prevents
+  the coordinator's expected autostart, a subsequent `agent-dispatch
+  health` call then also fails (`Connection refused`) as a knock-on
+  effect, not a separate defect. Filed
+  [aperture-labs#7722](https://gitea.michon.ski/tmichon/aperture-labs/issues/7722).
+  This is the **fourth** clean-room-checkpoint-found defect this session
+  (after agent-bridge's `--version` race #7688, agent-index's fresh-
+  install bug #7702 which was fixed inline, and agent-dispatch's flaky
+  test #7719 found via local test-suite isolation rather than clean-
+  room) -- the periodic-validation directive continues to catch real
+  gaps that guard-triage alone would never exercise.
+- Verified: `check-marketplace-isolation.py`, `check-module-size.py`,
+  `check-docs-consistency.py`, `check-skills.py`, ruff (no new
+  violations across 9 edited Python files plus 2 remote-deployed asset
+  scripts), `node --check` and `bash -n` syntax-checks on the two
+  `codespace_assets/` scripts. Both PRs merged via `pr-merge --now`
+  after a clean advisory review; GitHub Actions ran the full
+  `agent-codespaces` suite on each PR (fast, ~50s) rather than needing
+  a local run, since shared-host `test-supervisor` slot contention from
+  concurrent sessions (confirmed via `ps aux`, not this session's own
+  work) made three consecutive local `uv sync` attempts defer.
+
+### 2026-09-27 — `agent-dispatch` resolved to backlog-only (PRs #4287, #4288); `agent-index` now fully backlog-only
+
+- `agent-index`: with #4272/#4276 merged, re-verified the plugin's full
+  finding set is now confirmed Phase 2/module-size/cross-plugin backlog
+  only (46 remaining: `cell-runtime.py` 7 + `resolve_effective_config.py`
+  3, module-size ceiling; `install.sh`/`install.ps1` 20, `payload-
+  invocation.json` 7, `installer-readiness.json` 3, Phase 2/cross-plugin
+  JSON questions) -- no further action needed, matching every prior
+  plugin's end state.
+- `agent-dispatch` core src/ cluster (PR #4287, 25/90 findings): annotated
+  `src/agent_dispatch/`'s genuine exceptions -- `allow remote-management`
+  (SSH-remote agent-bridge/agent-dispatch peer invocations, generalizing
+  cleanly to a 3rd plugin), `allow registry` (cross-plugin agent-bridge
+  config-dir default lookups), `allow legacy-compatibility` (fixed env-var
+  names, legacy `.agent-dispatch` fallback paths/dirnames, and the
+  single-global-coordinator zdd routing identity -- confirmed this reason
+  covers "intentionally non-cell-scoped by design," not just literal
+  legacy paths, per `agent-bridge/lifecycle_hooks.py`'s prior
+  `_SERVICE = "agent-bridge"` precedent).
+  - **Two new guard false-positive classes**: `allow query-column-list`
+    (`queue_common.py`'s `_TASK_SELECT`/`_TASK_BULK_SELECT` SQL
+    column-list construction via `", ".join(...)` coincidentally matches
+    the guard's `task...= "<quoted string>"` identity-assignment shape,
+    since the join separator `", "` is itself a quoted string
+    immediately after `=`); `allow release-verb` (`queue_lifecycle.py`,
+    `task_state_machine.py`: the business verb "release" -- as in "task
+    released from suspension" -- contains "lease" as a substring,
+    coincidentally matching the guard's lease/mutex keyword scan; same
+    underlying shape as agent-ssh's prior `third-party-installer-url`
+    class (`InstallRelease` matching `lease`), confirming this
+    "short-keyword-as-substring" false-positive shape recurs across
+    plugins and is worth checking for early when a "for a name/reason
+    that seems too load-bearing to be a real hit" finding appears).
+  - Several fixes required restructuring beyond a same-line append: ruff's
+    99-char limit combined with the marker text forced extracting short
+    module-level constants (`_legacy_dirname`, `svc`, `_BULK_HAS_RESULT_COL`,
+    `_RELEASED_FROM_SUSPENSION`) so the marker could sit on the same
+    physical line as the (now shorter) flagged pattern -- reconfirms the
+    session's established technique, and that the marker-placement rule
+    (same physical line as the flagged pattern, not merely "nearby") has
+    no exception even for multi-line function calls or preceding
+    comments; a marker one line above or below the flagged text does not
+    suppress the finding.
+  - Found (not caused by this work) a pre-existing, reproducibly-failing
+    test: `tests/test_supervisor.py::test_idle_headless_fleet_nudge_includes_remote_host`
+    fails identically with and without this session's changes (confirmed
+    via `git stash`/`git stash pop` isolation). Filed
+    [aperture-labs#7719](https://gitea.michon.ski/tmichon/aperture-labs/issues/7719).
+    Oddly, the equivalent CI job on both PRs (#4287, #4288) reported the
+    full suite passing -- possibly timing-sensitive/order-dependent;
+    left as filed rather than chased further, consistent with the
+    session's "don't diagnose a flaky/queued check as if it were a
+    confirmed failure" discipline.
+- `agent-dispatch` SKILL.md docs (PR #4288, 4/90 findings): the usual
+  `allow deployed-runtime-diagnostics` doc-shaped mentions of the
+  plugin's own runtime paths and legacy default port.
+- `agent-dispatch` now at confirmed backlog-only state (47 remaining:
+  `install.sh`/`install.ps1` 38 -- Phase 2 launcher-contract inventory,
+  same shape as every prior plugin's own-root/binstub/systemd-unit
+  identity constants -- plus `installer-readiness.json` 3,
+  `payload-invocation.json` 1, `bin/` shims 2, `focus-guidance.{sh,ps1}` 2,
+  `register-bridge-provider.ps1` 1, all confirmed Phase 2/cross-plugin
+  categories).
+- Also ran a **git base-branch gotcha**: `gh pr create` without `--base
+  dev` silently targeted this repo's GitHub-default `main` branch instead
+  of the actual integration branch `dev`, producing a stale-looking
+  `CONFLICTING` mergeability that a rebase against `dev` alone couldn't
+  fix (since the PR was never comparing against `dev` in the first
+  place). Fixed via `gh pr edit <#> --base dev`, which also required an
+  empty retrigger commit to get GitHub Actions to actually run against
+  the corrected base (the first pass after `--base dev` reused a stale
+  cached check run). Future PRs in this effort should pass `--base dev`
+  explicitly on `gh pr create` to avoid this.
+- Verified: `check-marketplace-isolation.py`, `check-module-size.py`,
+  `check-docs-consistency.py`, `check-skills.py`, ruff (no new
+  violations), and the `agent-dispatch` suite via `test-supervisor`
+  (3511 passed, 11 skipped, 1 pre-existing failure noted above). Both
+  PRs merged via `pr-merge --now` after a clean advisory review.
+
+### 2026-09-27 — Fixed the `agent-index` fresh-install bug found by the clean-room checkpoint (PR #4272, fixes aperture-labs#7702)
+
+- Root cause confirmed (see the prior entry below): `install.sh`'s/
+  `install.ps1`'s `ensure` action never stamped the CLI binstub, so a
+  genuinely fresh machine's `sessionStart` hook left `agent-index`
+  entirely absent from `PATH`.
+- **First attempt was the wrong shape and the review caught it.** The
+  initial fix made `ensure` run the full heavy path (`_ensure_runtime`
+  / `Install-Runtime`: uv fetch, venv build, package install) —
+  mirroring `update`. PR #4272's advisory review flagged this
+  correctly on four points: (1) medium — `hooks.json`'s `sessionStart`
+  hook has a 20-second timeout with output suppressed, and a full
+  provision can easily exceed that on a pristine box, silently
+  truncating and preserving a variant of the original bug; (2)/(4) low
+  — the changefile comment and a new test comment both embedded the
+  private `aperture-labs#7702` tracker identifier, violating the
+  public-artifact identifier-neutrality convention; (3) low — the fix
+  contradicted two checked-in docs (`docs/standalone-service-lifecycle.md`,
+  `skills/setting-up-agent-index/SKILL.md`) that explicitly document
+  `ensure` as a **cheap, non-provisioning** safety net by design.
+- Re-reading those docs (and `install.sh`'s own `do_stamp` comment:
+  "fits a sessionStart hook's grace window. No venv, no uv.") confirmed
+  the medium finding was substantive, not just style: `ensure` is
+  *intentionally* meant to stay fast, and the real gap was narrower
+  than the first attempt assumed — it needed to stamp the **binstub**
+  only (the same cheap artifact `stamp`/`install`/`update` all deploy
+  via `deploy_binstub` / `Deploy-SetupGatedBinstub`), not build the
+  full runtime.
+- **Corrected fix:** `ensure` now checks whether the binstub exists;
+  if not, it writes the `payload-dir` marker and calls
+  `deploy_binstub`/`Deploy-SetupGatedBinstub` (mkdir + two small
+  resolver-script copies + a small redirector shim — no interpreter,
+  no package manager), then proceeds with the existing health-check
+  (`_ensure_running`/`Ensure-Running`) and autostart registration
+  (`_install_logon_autostart`/`Install-LogonAutostart`) unchanged.
+- **Manually verified in a clean container** (fresh `$HOME`, no prior
+  `~/.agent-index` or `~/.local/bin/agent-index`): `ensure` now
+  completes in **~0.57s**, deploys a working binstub that resolves and
+  returns a clean `"state":"inactive"` status, and builds no `.venv` —
+  confirming both the timeout concern and the "must not silently
+  provision before explicit setup" design contract are satisfied.
+- Fixed the two identifier-neutrality findings by rewording the
+  changefile comment and the test comment to describe the bug/fix
+  generically, with no tracker reference. Updated both flagged docs to
+  describe the corrected behavior (stamps the binstub first when
+  absent, still never provisions a runtime).
+- Rewrote `test_installers_are_base_only_and_never_implicitly_start_engine`'s
+  `ensure`-specific assertions to check for `deploy_binstub`/
+  `Deploy-SetupGatedBinstub` + the existing health-check/autostart
+  calls, and explicitly assert `_ensure_runtime`/`Install-Runtime` are
+  **absent** from `ensure`'s body (the opposite of the first attempt's
+  assertions).
+- Verified: bash/PowerShell syntax checks, `check-docs-consistency.py`,
+  `check-module-size.py`, `check-marketplace-isolation.py` (all clean),
+  and the full `agent-index` suite via `test-supervisor` (562 passed,
+  1 skipped, 71 deselected, same `test_runtime_gate.py` exclusion).
+  All 8 required CI checks passed on GitHub before merge. Merged via
+  `pr-merge --now`.
+- **Takeaway for future legs:** when a review flags a design-contract
+  contradiction against checked-in docs, re-read those docs before
+  assuming the review is merely stylistic — here the "wrong" original
+  fix would have reintroduced a variant of the same bug under a tight
+  hook timeout, and the docs already described the correct, narrower
+  shape the fix needed to take.
+
+### 2026-09-27 — `agent-index`'s SKILL.md docs resolved (PR #4264); clean-room checkpoint found a HIGH-severity first-install bug
+
+- Fresh guard count at merge time: not re-checked before the next
+  slice began (docs-only PR, minimal drift expected).
+- `setting-up-agent-index/SKILL.md`'s 6 findings: doc-shaped mentions
+  of the plugin's own config path (in-repo, knowledge-overlay,
+  machine-role), the usual `allow deployed-runtime-diagnostics`.
+- **Clean-room checkpoint (`agent-index-solo`, per the operator's
+  periodic-validation directive) found a genuine HIGH-severity, first-
+  install-breaking defect on the published `main` marketplace release,
+  unrelated to this session's `dev`-branch work**: 18 of 24 scenario
+  assertions failed, reproducibly (2/2 runs). Root-caused via direct
+  `docker exec`: `hooks.json`'s `sessionStart` hook calls `bash
+  scripts/install.sh ensure` (stdout/stderr to `/dev/null`, so
+  failures are silent) -- but `install.sh`'s `ensure` action ONLY runs
+  `_ensure_running` + `_install_logon_autostart`; it does **no
+  provisioning** (no venv, no package install, no binstub stamping) on
+  a machine with zero prior `~/.agent-index` state. Manually confirmed
+  `bash scripts/install.sh install` (a DIFFERENT action) correctly
+  builds the venv, installs the package, and stamps `~/.local/bin/
+  agent-index` -- `ensure` is simply the wrong action for a fresh
+  install, and since sessionStart always calls it, agent-index NEVER
+  self-provisions on a genuinely fresh machine; the binstub never
+  appears, so every subsequent command cascades to "command not
+  found." No existing tracking issue found (checked #4808/#4807/#7686,
+  all different plugins or different root causes); filed
+  [aperture-labs#7702](https://gitea.michon.ski/tmichon/aperture-labs/issues/7702),
+  flagged as possibly warranting priority above the routine guard-
+  triage backlog given the severity (agent-index is completely
+  non-functional on a fresh install until someone manually runs
+  `install.sh install`).
+- This is now the **third** clean-room checkpoint this session and the
+  **second** genuine pre-existing defect found this way (after
+  `agent-bridge`'s `--version` race, aperture-labs#7688) -- the
+  operator's periodic-validation directive is earning its keep: neither
+  defect would have surfaced from guard-triage work alone, since guard
+  annotations never exercise the actual install/provision flow.
+- Verified: `check-skills.py` (0 errors, no new warnings), `check-docs-
+  consistency.py`, and the `agent-index` suite via `test-supervisor`
+  (562 passed, 1 skipped, 71 deselected -- same known
+  `test_runtime_gate.py` exclusion). Merged via `pr-merge --now` after
+  a clean advisory review.
+- Guard count: 46 -> 40 findings for `agent-index`.
+
+### 2026-09-27 — `agent-index`'s core-package cluster: 14 of 60 findings resolved (PR #4257)
+
+- Fresh guard count at merge time: 558 (down from 569). First slice
+  into `agent-index`, next plugin in the backlog order after
+  `agent-bridge` reached backlog-only state. Also ran a clean-room
+  checkpoint (`agent-mcp-solo`, 13/13 PASS) between the two plugins per
+  the operator's periodic-validation directive.
+- Classified by shape, all matching precedent already established this
+  session: own-legacy-root fallbacks across `config.py` (5, one of
+  which reused an already-marked `SHAREABLE_CONFIG_DIR` constant rather
+  than re-annotating the same literal twice), `index_config.py` (2),
+  `engine/daemon.py` (1); cross-plugin `agent-worktrees` registry
+  lookups in `config.py`/`_knowledge_overlay.py`; an env-var-name-
+  declaration (`ENDPOINT_ENV`, `allow env-var-name-declaration`).
+- `transport.py`'s `_build_inner()` builds a shell command that runs
+  `agent-index` on a REMOTE host over a non-interactive SSH logon --
+  its own docstring says so explicitly. `allow remote-management`, a
+  third confirmation this session that reason phrase generalizes
+  (after `agent-ssh`'s and `agent-bridge`'s `carrier.py`).
+- `indexing/runner.py`: a dict key already named exactly `"legacy_root"`
+  -- extracted the value into a small `_legacy_root()` helper purely to
+  fit the marked literal within the 99-char line limit.
+- **`server.py` produced a SECOND occurrence of the "short-keyword-
+  substring-collision" false-positive class first seen in `agent-ssh`'s
+  `InstallRelease`/`lease` and `agent-bridge`'s `tasks` variable**: a
+  JSON receipt's schema-identifier string
+  `"copilot-extensions.agent-index.service-instance"` is a namespaced
+  message-type tag, not an OS service name, but its `agent-index.
+  service` substring coincidentally matches the `fixed-service-identity`
+  category's `agent-<name>.service` regex alternative. New reason:
+  `allow schema` (the shortest form that fits once the 54-char schema
+  string itself eats most of the 99-char budget). **`cell-runtime.py`
+  has 4 MORE instances of this exact same shape** (its `INSTANCE_
+  SCHEMA`/`ENSURE_WORKER_SCHEMA`/`ENSURE_WORKER_COMPLETION_SCHEMA`
+  constants and one inline `"schema":` key) -- left for a follow-up
+  slice on that file specifically, since it also sits at its exact
+  module-size ceiling.
+- Left deliberately untouched: `cell-runtime.py` (7, module-size
+  ceiling -- baseline 5145, 7th file this session at zero headroom) and
+  `resolve_effective_config.py` (3, baseline 1136, 8th file) -- both
+  tracked in
+  [aperture-labs#7672](https://gitea.michon.ski/tmichon/aperture-labs/issues/7672).
+  `install.sh`/`install.ps1` (20, confirmed-genuine Phase 2 launcher-
+  contract backlog), `payload-invocation.json` (7), `installer-
+  readiness.json` (3), `setting-up-agent-index/SKILL.md` (6) -- not yet
+  individually triaged.
+- Verified: `python -m py_compile` + `ruff --select E501` on every
+  touched file, `check-module-size.py`, `check-docs-consistency.py`, and
+  the `agent-index` suite via `test-supervisor` (562 passed, 1 skipped,
+  71 deselected -- `test_runtime_gate.py` excluded, the SAME pre-
+  existing test-supervisor temp-storage-limit failure this exact plugin
+  hit in an earlier leg's handoff, confirmed identical again via `git
+  stash`/`git stash pop`). Merged via `pr-merge --now` after a clean
+  (0-finding) advisory review.
+- Guard count: 60 -> 46 findings for `agent-index`.
 
 ### 2026-09-27 — `agent-bridge` now backlog-only at 15 findings (PR #4246)
 

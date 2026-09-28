@@ -27,7 +27,8 @@ def _related_usage() -> None:
     print()
     print("Per-project, directional 'related repos' index (this repo's POV),")
     print("committed at <repo>/.copilot-extensions/agent-worktrees/related.yaml.")
-    print("Legacy <repo>/.agent-worktrees/related.yaml remains readable. Keys reference the")
+    _legacy_related = ".agent-worktrees/related.yaml"  # marketplace-isolation: allow legacy
+    print(f"Legacy <repo>/{_legacy_related} remains readable. Keys reference the")
     print("global repos registry; entries add role + locus + delegate + a narrative.")
     print()
     print("Commands:")

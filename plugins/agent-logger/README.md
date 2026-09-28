@@ -170,6 +170,25 @@ value for every machine in the fleet) -- no other sync setting, machine
 identity, or credential is ever repo-configurable. Invalid or unsafe
 configuration fails explicitly instead of silently falling back.
 
+### Discovering a fleet config repo for the scheduled sync
+
+The scheduled sync (a systemd user timer on POSIX, a Scheduled Task on
+Windows) runs with no meaningful working directory of its own, so it can't
+rely on CWD-based repo-local config discovery the way an interactive shell
+does. To still pick up a fleet repo's schema v3 `sync.local_path`
+declaration, set `config_repo: <name>` in
+`$AGENT_LOGGER_HOME/config.yaml` at install time -- `<name>` is a project
+name resolvable via `agent-worktrees repos find`. When set, the installer
+(`install.sh` / `install.ps1`) resolves that project's checkout, validates
+it against the same registered-project + default-branch trust gate as
+normal discovery, and wires the resolved config file into the scheduled
+unit/task as `AGENT_LOGGER_REPO_CONFIG`. Leaving `config_repo` unset (the
+default) only omits *repo-local* discovery for the scheduled run -- the
+generated unit/task still sets `AGENT_LOGGER_HOME`, so the scheduled sync
+continues to read the machine-local `$AGENT_LOGGER_HOME/config.yaml` (and
+any `AGENT_LOGGER_*` environment overrides) exactly as it always did; only
+a fleet repo's own `sync.local_path` declaration is unreachable without it.
+
 ## License
 
 MIT

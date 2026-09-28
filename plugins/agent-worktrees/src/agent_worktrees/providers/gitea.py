@@ -812,6 +812,15 @@ class GiteaProvider:
                 break
         return None
 
+    def request_review(
+        self, repo: str, number: int, *, reviewer: str = "", api_base: str = "",
+        token: str | None = None,
+    ):
+        """Not implemented: Gitea has no automated PR-reviewer bot to nudge today."""
+        from .base import _unsupported_review_request
+        _ = (repo, number, api_base, token)
+        return _unsupported_review_request(self.name, reviewer)
+
     def request_auto_complete(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
         automerge_label: str = "", squash: bool = True,

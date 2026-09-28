@@ -392,6 +392,15 @@ class AzureDevOpsProvider:
         _ = (repo, number, squash, admin, api_base, token)
         return _unsupported_merge(self.name)
 
+    def request_review(
+        self, repo: str, number: int, *, reviewer: str = "", api_base: str = "",
+        token: str | None = None,
+    ):
+        """Not implemented: no automated PR-reviewer bot mapped for ADO today."""
+        from .base import _unsupported_review_request
+        _ = (repo, number, api_base, token)
+        return _unsupported_review_request(self.name, reviewer)
+
     def enable_auto_merge(
         self, repo: str, number: int, *, squash: bool = True,
         api_base: str = "", token: str | None = None,
