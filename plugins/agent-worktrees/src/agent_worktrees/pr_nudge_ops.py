@@ -15,7 +15,7 @@ outcome, not a failure.
 
 from __future__ import annotations
 
-from . import config as cfg, pr_ops
+from . import config as cfg, pr_ops, tracking
 from .config import Config
 
 
@@ -35,7 +35,11 @@ def pr_nudge(worktree_id: str, *, config: Config | None = None) -> dict:
     if config is None:
         config = cfg.load_config()
     active = record.active_pr()
-    if active is None or active.number is None:
+    # ``active_pr()`` falls back to the most recent PR overall when every
+    # tracked PR is terminal -- exclude that fallback here (mirrors
+    # ``pr_ops``'s own ``tracking._pr_is_terminal`` checks) so a nudge never
+    # targets an already-merged/closed PR.
+    if active is None or active.number is None or tracking._pr_is_terminal(active):
         return {**base, "has_pr": False, "supported": False,
                 "detail": "No open PR tracked for this worktree (nothing to nudge)."}
     prcfg = config.default_repo.pr

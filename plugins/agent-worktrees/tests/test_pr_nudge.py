@@ -41,6 +41,23 @@ class TestPRNudge:
         assert res["has_pr"] is False
         assert res["supported"] is False
 
+    def test_merged_pr_is_not_targeted(self, pr_repo, monkeypatch):
+        """``active_pr()`` falls back to the most recent PR overall once every
+        tracked PR is terminal -- a nudge must never target that fallback."""
+        from agent_worktrees import providers
+
+        config, wid, _wt, _ = pr_repo
+        config = _config_with_reviewer(config, "copilot")
+        pr_ops.set_pr(wid, number=7, state="merged", provider="github")
+
+        def boom(name):
+            raise AssertionError("provider must not be consulted for a terminal PR")
+
+        monkeypatch.setattr(providers, "get_provider", boom)
+        res = pr_nudge_ops.pr_nudge(wid, config=config)
+        assert res["has_pr"] is False
+        assert res["supported"] is False
+
     def test_unconfigured_reviewer_reports_unsupported(self, pr_repo, monkeypatch):
         from agent_worktrees import providers
 

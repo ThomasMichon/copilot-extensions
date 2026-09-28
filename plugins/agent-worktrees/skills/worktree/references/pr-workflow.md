@@ -104,7 +104,10 @@ So an **ADO repo** (e.g. `example-marketplace`) binds `automerge_label: auto-com
 The natural "wait for the auto-review, then complete" loop is
 `pr-watch` (blocks until the reviewer weighs in / mergeability settles) →
 `pr-merge` (requests auto-complete once eligible) → `pr-complete` (post-merge
-reconcile).
+reconcile). If the wait times out with no verdict at all (or a stale one
+sitting untouched), `pr-nudge` asks this repo's bound automated reviewer
+(`pr.reviewer`) to (re-)review before you re-arm the watch -- it reports
+`supported: False` rather than erroring when no such binding exists.
 
 **`pr-watch` tells you when to run `pr-merge`.** Its result payload carries a
 `merge` block derived from the same verdict/consent classifier `pr-status` uses:

@@ -1803,6 +1803,71 @@ class TestGitHubProvider:
             github.GitHubProvider().get_snapshot("o/r", 7, token="t")
         assert ei2.value.transient is False
 
+    def test_request_review_posts_requested_reviewers(self, monkeypatch):
+        from agent_worktrees.providers import github
+
+        captured = {}
+
+        def fake_run(args, **kwargs):
+            captured["args"] = args
+            captured["env"] = kwargs.get("env")
+            return _proc()
+
+        monkeypatch.setattr(github, "run_cli", fake_run)
+
+        result = github.GitHubProvider().request_review(
+            "o/r", 7, reviewer="copilot", token="t",
+        )
+
+        assert result.supported is True
+        assert result.requested is True
+        assert result.reviewer == "copilot-pull-request-reviewer[bot]"
+        args = captured["args"]
+        assert args[:4] == ["gh", "api", "--hostname", "github.com"]
+        assert "-X" in args and args[args.index("-X") + 1] == "POST"
+        assert "repos/o/r/pulls/7/requested_reviewers" in args
+        assert "reviewers[]=copilot-pull-request-reviewer[bot]" in args
+        assert captured["env"].get("GH_TOKEN") == "t"
+
+    def test_request_review_reports_failure_without_raising(self, monkeypatch):
+        from agent_worktrees.providers import github
+
+        monkeypatch.setattr(
+            github, "run_cli",
+            lambda args, **kw: _proc(returncode=1, stderr="gh: HTTP 404 Not Found"),
+        )
+
+        result = github.GitHubProvider().request_review("o/r", 7, reviewer="copilot")
+
+        assert result.supported is True
+        assert result.requested is False
+        assert "404" in result.error
+
+    def test_request_review_unmapped_reviewer_is_unsupported(self, monkeypatch):
+        from agent_worktrees.providers import github
+
+        def boom(args, **kw):
+            raise AssertionError("gh must not be invoked for an unmapped reviewer")
+
+        monkeypatch.setattr(github, "run_cli", boom)
+
+        result = github.GitHubProvider().request_review("o/r", 7, reviewer="external")
+
+        assert result.supported is False
+        assert result.requested is False
+
+    def test_request_review_no_reviewer_configured_is_unsupported(self, monkeypatch):
+        from agent_worktrees.providers import github
+
+        def boom(args, **kw):
+            raise AssertionError("gh must not be invoked with no reviewer configured")
+
+        monkeypatch.setattr(github, "run_cli", boom)
+
+        result = github.GitHubProvider().request_review("o/r", 7)
+
+        assert result.supported is False
+
 
 class TestAzureDevOpsProvider:
     def test_publish_source_marker_creates_thread(self, monkeypatch):

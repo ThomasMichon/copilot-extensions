@@ -321,6 +321,7 @@ hidden source metadata never substitutes for reviewable intent.
 | **PR mode: create + push a feature branch** | `<agent-worktrees catalog argv[0]> create-pr --title "desc" --body-file <path>` |
 | **PR mode: record PR metadata** (after sub-agent opens it) | `<agent-worktrees catalog argv[0]> set-pr --url URL --number N` |
 | **PR mode: show tracked PR state** | `<agent-worktrees catalog argv[0]> pr-status` |
+| **PR mode: nudge the bound automated reviewer** | `<agent-worktrees catalog argv[0]> pr-nudge` |
 | **Check the target repo's PR flow** | `<agent-worktrees catalog argv[0]> get pr-profile` |
 | Set/update title only | `<agent-worktrees catalog argv[0]> push-changes --title "desc" --title-only` |
 | Show worktree git status | `<agent-worktrees catalog argv[0]> status` |

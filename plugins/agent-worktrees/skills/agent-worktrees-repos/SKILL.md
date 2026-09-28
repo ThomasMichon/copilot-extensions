@@ -304,7 +304,7 @@ inline, so agents never hand-switch:
   to pick the `gh` account for `gh codespace …`) shell out to it rather than
   importing agent-worktrees.
 - **gh/PR ops** (`create-pr`, `pr-merge`, `pr-ready`, `pr-status`, `pr-watch`,
-  `pr-complete`, label/GraphQL): the resolved account mints a token
+  `pr-complete`, `pr-nudge`, label/GraphQL): the resolved account mints a token
   (`gh auth token --user <account>` → `GH_TOKEN`); an explicit
   `pr.token_command`/`pr.token_env` still wins. No global switch.
 - **git push/fetch**: the account credential is injected per-invocation via
