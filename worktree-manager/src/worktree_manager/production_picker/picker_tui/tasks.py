@@ -154,6 +154,16 @@ def prewarm_optional_modules() -> None:
     bug entry). A pure import has no side effects, so warming it here makes
     that cost disappear from the keypress entirely instead of relocating it.
 
+    Also imports ``pivots`` (profiled at ~0.6s cold, non-trivial):
+    ``_setup_live_pivots()``'s own registry scan imports it moments later on
+    this same thread, but the FIRST render-thread call that needs it --
+    ``_wt_submenu_verbs()``'s cross-plugin action loop, reached the instant
+    the operator opens ANY worktree row's Actions menu -- can race ahead of
+    that scan now that the picker paints (and accepts keys) immediately.
+    Warming it here, ahead of that scan, closes the same class of gap
+    ``self.src.LOCAL`` had (#picker-menu-open-latency) instead of leaving
+    another render-thread caller to pay for it first.
+
     Call this directly from a thread that is *already* off the UI thread
     (e.g. ``engine.py``'s ``_setup_live_pivots``) so the import reliably
     finishes before pivots are installed/activated -- spawning ANOTHER
@@ -165,6 +175,10 @@ def prewarm_optional_modules() -> None:
     instead."""
     try:
         from . import data_ssh  # noqa: F401
+    except Exception:
+        pass
+    try:
+        from . import pivots  # noqa: F401
     except Exception:
         pass
 

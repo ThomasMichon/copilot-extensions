@@ -385,17 +385,17 @@ def test_setup_sync_for_tests_prewarm_starts_before_the_pivot_scan(monkeypatch):
         "prewarm_optional_modules must start before _scan_pivot_payload, not after")
 
 
-def test_prewarm_optional_modules_imports_data_ssh(monkeypatch):
+def test_prewarm_optional_modules_imports_data_ssh_and_pivots(monkeypatch):
     """Unlike the call-count test above (which spies on the seam so
     ``_setup_live_pivots`` stays independently testable), this exercises the
-    real function to confirm it actually imports ``data_ssh`` -- not merely
-    *some* import. Spies on ``builtins.__import__`` (the function uses
-    ``from . import data_ssh``) rather than popping the module from
-    ``sys.modules``: popping doesn't clear the parent package's own cached
-    attribute, so a subsequent ``from . import x`` can silently rebind the
-    stale attribute without ever re-registering the module in
-    ``sys.modules`` -- an import-system quirk that made an earlier version
-    of this test spuriously fail."""
+    real function to confirm it actually imports ``data_ssh`` AND ``pivots``
+    -- not merely *some* import. Spies on ``builtins.__import__`` (the
+    function uses ``from . import data_ssh``/``pivots``) rather than
+    popping the module from ``sys.modules``: popping doesn't clear the
+    parent package's own cached attribute, so a subsequent ``from . import
+    x`` can silently rebind the stale attribute without ever re-registering
+    the module in ``sys.modules`` -- an import-system quirk that made an
+    earlier version of this test spuriously fail."""
     pytest.importorskip("textual")
     from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
 
@@ -417,7 +417,7 @@ def test_prewarm_optional_modules_imports_data_ssh(monkeypatch):
         mod = real_import(name, globals, locals, fromlist, level)
         if level and fromlist:
             for item in fromlist:
-                if item == "data_ssh":
+                if item in ("data_ssh", "pivots"):
                     imported.append(item)
         return mod
 
@@ -426,6 +426,7 @@ def test_prewarm_optional_modules_imports_data_ssh(monkeypatch):
     tasks_mod.prewarm_optional_modules()
 
     assert "data_ssh" in imported
+    assert "pivots" in imported
 
 
 def test_prewarm_optional_modules_survives_import_error(monkeypatch):
