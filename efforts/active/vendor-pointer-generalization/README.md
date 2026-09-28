@@ -1939,3 +1939,27 @@ _Pending._
   did this up front rather than waiting for the reviewer to ask again).
 - Non-editable install probe and `materialize_main.py` round-trip both
   confirmed clean.
+- **Review round 1 caught a real HIGH-severity gap I missed**:
+  `plugins/agent-worktrees/scripts/install.ps1`'s config-migrate
+  pre-install block had no repo-root fallback (unlike its bash
+  counterpart's other 3 consumers, which already had the fallback from
+  the `credential-relay` precedent). `Invoke-VenvPackageInstall`'s bare-
+  `pip` fallback path (used when `uv` fails/is absent) does not honor
+  `[tool.uv.sources]`, so a dev checkout with no local copy would fail to
+  resolve `agent-config-migrate` on that path. Fixed by mirroring
+  `agent-codespaces`'s existing repo-root-fallback pattern; syntax-
+  validated with PowerShell's own parser (no pwsh test harness available
+  for a full functional run). Confirmed bash's `install.sh` needs no
+  equivalent fix (`_ensure_uv || exit 1` guards every `deploy_package`
+  call site, so `uv` -- which does honor `[tool.uv.sources]` -- is always
+  present there).
+  - **Discovered a broader latent gap while investigating**: the 3 libs
+    already converted to `uv`-editable for `agent-worktrees`
+    (`single-instance-lease`, `work-coalescing-singleton`,
+    `lazy-cli-dispatch`) have **zero** equivalent pre-install handling in
+    this same `install.ps1` -- they'd hit the identical bare-pip-fallback
+    failure mode if a `uv` invocation ever transiently fails, even though
+    `Ensure-Uv` normally guarantees `uv`'s presence. Filed as tracked
+    issue **#4410** (scoped to also audit other plugins' Windows
+    installers for the same already-converted-lib gap) rather than fixed
+    speculatively here -- out of scope for this PR's specific finding.
