@@ -37,7 +37,7 @@ agent-worktrees claims sweep --apply  # after review
 ```
 
 Per-obligation-kind detail is in the `worktree` skill's
-`references/obligations.md` -- read it before `--handoff-to` or a selective
+`references/obligations.md` -- read before `--handoff-to` or a selective
 `claims cleanup`. Tracing *whose* claim something is is the
 `tracing-claimant-graphs` skill.
 
@@ -63,7 +63,8 @@ persists? Escalate to a human or `agent-worktrees doctor --fix`.
 it's genuinely open (`pr-merge-obligation-gate` defense 2) -- a live
 obligation like a child worktree/CodeSpace/bridge session, **regardless of
 `pr.strategy`**: `finalize`'s gate reads the local claim ledger only.
-Merging is the only thing that clears it.
+Merging clears it on its own; anything else needs explicit operator action
+(see below).
 
 - Drive every PR you (or a delegate) opened through to a real merge --
   opening and stopping, or reporting "landed" pre-merge, isn't the end
