@@ -306,6 +306,9 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     hook_server = None
     classify_server = None
     tracking_write_server = None
+    retired_hook_servers: list[HookIpcServer] = []
+    retired_classify_servers = []
+    retired_tracking_write_servers = []
 
     def _start_request_surfaces() -> None:
         nonlocal hook_server, classify_server, tracking_write_server
@@ -332,12 +335,15 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     def _close_request_surfaces() -> None:
         nonlocal hook_server, classify_server, tracking_write_server
         if hook_server is not None:
+            retired_hook_servers.append(hook_server)
             hook_server.close()
             hook_server = None
         if classify_server is not None:
+            retired_classify_servers.append(classify_server)
             classify_server.close()
             classify_server = None
         if tracking_write_server is not None:
+            retired_tracking_write_servers.append(tracking_write_server)
             tracking_write_server.close()
             tracking_write_server = None
 
@@ -376,16 +382,38 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         return extra
 
     def _hook_busy() -> bool:
-        return hook_server is not None and hook_server.active_handler_count() > 0
+        return any(
+            server.active_handler_count() > 0
+            for server in ([hook_server] if hook_server is not None else []) + retired_hook_servers
+        )
 
     def _classify_busy() -> bool:
-        return classify_server is not None and classify_server.active_handler_count() > 0
+        return any(
+            server.active_handler_count() > 0
+            for server in ([classify_server] if classify_server is not None else [])
+            + retired_classify_servers
+        )
 
     def _tracking_write_busy() -> bool:
-        return (
-            tracking_write_server is not None
-            and tracking_write_server.active_handler_count() > 0
+        return any(
+            server.active_handler_count() > 0
+            for server in ([tracking_write_server] if tracking_write_server is not None else [])
+            + retired_tracking_write_servers
         ) or tracking_write.has_inflight_write()
+
+    def _cleanup_retired_request_surfaces() -> None:
+        retired_hook_servers[:] = [
+            server for server in retired_hook_servers if server.active_handler_count() > 0
+        ]
+        retired_classify_servers[:] = [
+            server for server in retired_classify_servers if server.active_handler_count() > 0
+        ]
+        if not tracking_write.has_inflight_write():
+            retired_tracking_write_servers[:] = [
+                server
+                for server in retired_tracking_write_servers
+                if server.active_handler_count() > 0
+            ]
 
     def _drain_busy_reasons() -> list[str]:
         reasons: list[str] = []
@@ -424,6 +452,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             }
         if action == "promote":
             with state_lock:
+                _cleanup_retired_request_surfaces()
                 published_lock = True
                 _locks.write_lock(lock, extra=_lock_extra())
             wake_event.set()
@@ -436,6 +465,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             with state_lock:
                 admission_closed = False
                 _start_request_surfaces()
+                _cleanup_retired_request_surfaces()
                 published_lock = True
                 _locks.write_lock(lock, extra=_lock_extra())
             wake_event.set()
@@ -451,6 +481,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             _close_request_surfaces()
         deadline = time.time() + max(0.0, timeout)
         while True:
+            _cleanup_retired_request_surfaces()
             reasons = _drain_busy_reasons()
             if not reasons:
                 return {
@@ -470,6 +501,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
 
     try:
         while True:
+            _cleanup_retired_request_surfaces()
             if self_retire_generation is None:
                 self_retire_generation = status_monitor_cutover.active_generation_for_pid(os.getpid())
                 if self_retire_generation is None and runtime_superseded():

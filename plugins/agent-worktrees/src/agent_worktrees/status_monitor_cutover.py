@@ -8,11 +8,13 @@ import socketserver
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlparse
 
 from agent_procutil import detached_kwargs, windowless_python, windowless_python_env
+from single_instance_lease import AlreadyRunningError, SingleInstance
 from zdd import routing
 from zdd.cutover import CutoverOrchestrator
 
@@ -20,6 +22,7 @@ from . import locks
 
 _BIND = "127.0.0.1"
 _READ_TIMEOUT_S = 5.0
+_CUTOVER_LOCK_TIMEOUT_S = 300.0
 
 
 def routing_dir(runtime_home: Path | None = None) -> Path:
@@ -252,25 +255,31 @@ def activate_after_update(
         summary["restart"] = smr._restart_status_monitor()
         return summary
 
+    try:
+        lease = _acquire_cutover_lock(routing_dir())
+    except AlreadyRunningError as exc:
+        summary["reason"] = f"cutover-busy:{exc.holder_pid or 'unknown'}"
+        return summary
     py = runtime_python or sys.executable
-    orch = CutoverOrchestrator(
-        routing_dir(),
-        bind=_BIND,
-        version=None,
-        spawn_passive=lambda port: spawn_passive(py, port=port),
-        health_check=_health_check,
-        make_client=_make_client,
-        pick_free_port=pick_free_port,
-    )
-    result = orch.run(
-        health_timeout=health_timeout,
-        drain_timeout=drain_timeout,
-        force=False,
-    )
+    try:
+        orch = CutoverOrchestrator(
+            routing_dir(),
+            bind=_BIND,
+            version=None,
+            spawn_passive=lambda port: spawn_passive(py, port=port),
+            health_check=_health_check,
+            make_client=_make_client,
+            pick_free_port=pick_free_port,
+        )
+        result = orch.run(
+            health_timeout=health_timeout,
+            drain_timeout=drain_timeout,
+            force=False,
+        )
+    finally:
+        lease.release()
     summary["action"] = "cutover"
     summary["result"] = result.to_dict()
-    if not result.ok:
-        summary["fallback_restart"] = smr._restart_status_monitor()
     return summary
 
 
@@ -298,14 +307,26 @@ def installer_after_update() -> int:
     if result.get("ok"):
         print(f"cut over live monitor to port {result.get('new_port')}")
     else:
-        print(f"cutover failed; kept serving state ({result.get('error')})")
-        fallback = summary.get("fallback_restart")
-        if isinstance(fallback, dict):
-            if fallback.get("spawned"):
-                print("fallback restart spawned a current monitor")
-            elif fallback.get("already_current"):
-                print("fallback restart found a current monitor already running")
+        print(f"cutover failed; rollback kept serving state ({result.get('error')})")
     return 0
+
+
+def _acquire_cutover_lock(
+    lock_root: Path,
+    *,
+    timeout_s: float = _CUTOVER_LOCK_TIMEOUT_S,
+    poll_s: float = 0.2,
+) -> SingleInstance:
+    lease = SingleInstance(lock_root, service="status-monitor-cutover", lock_name="cutover.lock")
+    deadline = time.monotonic() + timeout_s
+    while True:
+        try:
+            lease.acquire()
+            return lease
+        except AlreadyRunningError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(poll_s)
 
 
 def live_endpoint() -> routing.Endpoint | None:
