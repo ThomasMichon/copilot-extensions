@@ -393,7 +393,12 @@ def _file_hashes(root: Path) -> dict[str, str]:
     carries them as ordinary local dev artifacts) -- never a fixed
     allowlist of expected subpaths, so an unexpected extra file (a
     root-level LICENSE, package metadata, or anything else) is never
-    silently invisible to a caller that compares two trees for equality."""
+    silently invisible to a caller that compares two trees for equality.
+    Checks the ignored names against the path RELATIVE to ``root`` only
+    (never the full absolute path) -- otherwise a checkout merely
+    *located* under a directory named e.g. ``build`` would have every
+    file's ``.parts`` match that ancestor name too, silently emptying the
+    whole result and making any two trees compare as falsely equal."""
     ignored_dirs = {".git", "__pycache__", ".pytest_cache", ".ruff_cache", "build", "dist"}
     out: dict[str, str] = {}
     if not root.is_dir():
@@ -401,7 +406,7 @@ def _file_hashes(root: Path) -> dict[str, str]:
     for f in root.rglob("*"):
         if not f.is_file():
             continue
-        if ignored_dirs & set(f.parts) or f.suffix in (".pyc", ".pyo"):
+        if ignored_dirs & set(f.relative_to(root).parts) or f.suffix in (".pyc", ".pyo"):
             continue
         out[f.relative_to(root).as_posix()] = hashlib.sha256(f.read_bytes()).hexdigest()
     return out

@@ -1806,3 +1806,31 @@ _Pending._
   session hooks/scripts** -- this round's 4 findings were ALL this same
   class of gap, missed because they sit outside the plugin test suites
   the earlier recipe steps already cover.
+
+### 2026-09-28 — Fifth review round: absolute-path filtering bug in the shared hash comparison helper
+
+- **Real bug in the `_file_hashes` fix from the previous round**: the
+  ignored-directory-name check (`ignored_dirs & set(f.parts)`) operated
+  on each file's FULL path, not the path relative to the tree being
+  hashed -- so a checkout merely *located* under an ancestor directory
+  happening to share a name with one of the ignored patterns (`build`,
+  `dist`, `.git`, etc.) would have every single file's `.parts` match
+  that ancestor, silently emptying `_file_hashes`' whole result and
+  making ANY two trees compare as falsely equal (`lib_tree_matches`
+  returning `True` for genuinely different content) -- a real
+  correctness gap for the exact validation this round's own earlier fix
+  was built to provide. Fixed by scoping the check to
+  `f.relative_to(root).parts` in both `tools/uv_editable_ref.py` and the
+  trusted `_trusted_pointer_materializer.py` copy.
+- Added a regression test
+  (`test_lib_tree_matches_ignores_only_relative_build_dir_names`) that
+  places the comparison itself under a `build/` ancestor directory and
+  confirms two genuinely different trees still compare as different
+  (would have failed before the fix), while a real `build/` SUBDIRECTORY
+  *inside* a tree is still correctly ignored.
+- Re-validated: `test_uv_editable_ref.py`/`test_materialize_main.py` 103
+  passed; worktree-manager's own full suite 1548 passed, 4 skipped;
+  real-repo materialize round-trip and all other guards still green.
+- **Fifth review round otherwise reported the prior 9 findings as
+  already resolved** (this specific finding was the only genuinely new
+  one) -- awaiting the next round to confirm zero remaining findings.

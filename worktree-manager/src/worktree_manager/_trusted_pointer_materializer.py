@@ -382,7 +382,7 @@ def _file_hashes(root: Path) -> dict[str, str]:
     for f in root.rglob("*"):
         if not f.is_file():
             continue
-        if ignored_dirs & set(f.parts) or f.suffix in (".pyc", ".pyo"):
+        if ignored_dirs & set(f.relative_to(root).parts) or f.suffix in (".pyc", ".pyo"):
             continue
         out[f.relative_to(root).as_posix()] = hashlib.sha256(f.read_bytes()).hexdigest()
     return out
