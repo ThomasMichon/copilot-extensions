@@ -34,6 +34,24 @@ def pr_nudge(worktree_id: str, *, config: Config | None = None) -> dict:
                 "error": f"No tracking record found for '{worktree_id}'."}
     if config is None:
         config = cfg.load_config()
+    prcfg = config.default_repo.pr
+    # Refuse a provider/credential mismatch before touching the provider at
+    # all (mirrors pr_ops.create_pr's own guard): a tracked PR recorded under
+    # a different provider than this repo is now configured for must never
+    # have the *configured* provider's token/api_base sent to it.
+    recorded_active = record.active_pr()
+    if (
+        recorded_active is not None
+        and not tracking._pr_is_terminal(recorded_active)
+        and recorded_active.provider
+        and recorded_active.provider != prcfg.provider
+    ):
+        return {**base, "has_pr": True, "supported": False, "requested": False,
+                "error": (
+                    f"Tracked PR provider {recorded_active.provider!r} differs from "
+                    f"configured provider {prcfg.provider!r}; refusing provider "
+                    "access with mismatched credentials."
+                )}
     pr_ops._reconcile_active_pr(record, config)
     active = record.active_pr()
     # ``active_pr()`` falls back to the most recent PR overall when every
@@ -43,7 +61,6 @@ def pr_nudge(worktree_id: str, *, config: Config | None = None) -> dict:
     if active is None or active.number is None or tracking._pr_is_terminal(active):
         return {**base, "has_pr": False, "supported": False,
                 "detail": "No open PR tracked for this worktree (nothing to nudge)."}
-    prcfg = config.default_repo.pr
     provider_name = active.provider or prcfg.provider
     target_repo = active.repo or (record.repo or "")
     api_base = getattr(prcfg, "api_base", "") or ""

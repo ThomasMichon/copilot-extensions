@@ -89,6 +89,26 @@ class TestPRNudge:
         assert res["has_pr"] is False
         assert res["supported"] is False
 
+    def test_provider_mismatch_refuses_before_touching_provider(self, pr_repo, monkeypatch):
+        """A tracked PR recorded under a different provider than this repo is
+        now configured for must never have the *configured* provider's
+        token/api_base sent to it (#4355 review finding, mirrors
+        pr_ops.create_pr's own guard)."""
+        from agent_worktrees import providers
+
+        config, wid, _wt, _ = pr_repo
+        config = _config_with_reviewer(config, "copilot")  # provider="github"
+        pr_ops.set_pr(wid, number=7, state="open", provider="gitea")
+
+        def boom(name):
+            raise AssertionError("provider must not be consulted on a mismatch")
+
+        monkeypatch.setattr(providers, "get_provider", boom)
+        res = pr_nudge_ops.pr_nudge(wid, config=config)
+        assert res["has_pr"] is True
+        assert res["supported"] is False
+        assert "differs from configured provider" in res["error"]
+
     def test_unconfigured_reviewer_reports_unsupported(self, pr_repo, monkeypatch):
         from agent_worktrees import providers
 
