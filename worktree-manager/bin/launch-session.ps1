@@ -667,6 +667,14 @@ function Invoke-UpdateApply {
                         }
                     }
                 }
+                # Re-resolve before the re-check: one of the updates just
+                # applied above (e.g. agent-worktrees) may have swapped the
+                # runtime venv slot out from under the cached $VenvPython,
+                # leaving it pointing at a now-deleted python.exe (#stale-venv).
+                $reresolvedPython = Resolve-RuntimePython
+                if ($reresolvedPython -and (Test-Path -LiteralPath $reresolvedPython)) {
+                    $script:VenvPython = $reresolvedPython
+                }
                 Write-SetupLog 'Re-checking staleness after update'
                 $preJson = & $VenvPython -m agent_worktrees pre-launch 2>$null
                 if ($LASTEXITCODE -eq 0 -and $preJson) {
@@ -739,6 +747,14 @@ function Invoke-UpdateApply {
                         )
                     }
                 }
+            }
+            # Re-resolve before the next pass: this pass's reconcile actions
+            # (the runtime-gated pass in particular) may have swapped the
+            # runtime venv slot out from under the cached $VenvPython, leaving
+            # it pointing at a now-deleted python.exe (#stale-venv).
+            $reresolvedPython = Resolve-RuntimePython
+            if ($reresolvedPython -and (Test-Path -LiteralPath $reresolvedPython)) {
+                $script:VenvPython = $reresolvedPython
             }
         }
     }

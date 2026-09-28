@@ -536,6 +536,13 @@ for key, value in environment.items():
                         || setup_log WARN "Update failed for $SVC_NAME (exit $?)"
                 fi
             done
+            # Re-resolve before the re-check: one of the updates just applied
+            # above (e.g. agent-worktrees) may have swapped the runtime venv
+            # slot out from under the cached $PYTHON, leaving it pointing at a
+            # now-deleted interpreter (#stale-venv).
+            if _refreshed_python="$(resolve_runtime_python)" && [[ -n "$_refreshed_python" && -x "$_refreshed_python" ]]; then
+                PYTHON="$_refreshed_python"
+            fi
             setup_log INFO 'Re-checking staleness after update'
             PRE_JSON=$("$PYTHON" -m agent_worktrees pre-launch 2>/dev/null) || PRE_JSON='{"action":"continue"}'
             _log_prelaunch_diagnostics "$PRE_JSON"
@@ -609,6 +616,13 @@ for key, value in update.get('environment', {}).items():
                 env ${_RENV[@]+"${_RENV[@]}"} "${_RARGV[@]}" 2>&1 | while IFS= read -r _rl; do setup_log INFO "reconcile: $_rl"; done \
                     || setup_log WARN "Plugin reconcile: step failed for $_RSVC"
             done
+            # Re-resolve before the next pass: this pass's reconcile actions
+            # (the runtime-gated pass in particular) may have swapped the
+            # runtime venv slot out from under the cached $PYTHON, leaving it
+            # pointing at a now-deleted interpreter (#stale-venv).
+            if _refreshed_python="$(resolve_runtime_python)" && [[ -n "$_refreshed_python" && -x "$_refreshed_python" ]]; then
+                PYTHON="$_refreshed_python"
+            fi
         done
     fi
 }
