@@ -707,32 +707,40 @@ reached a stable resting point before Phase 2 actually starts cutting code.
 ## Journal
 
 ### 2026-09-28 — Confirmed operational pattern: duplicate resident `status-monitor` processes are a real, correctable bug, not benign
-Found while updating the Windows-native install (Lambda-Core) after the two
-fixes above: **two** `status-monitor` processes were running simultaneously
-on one host, both on the same (already-fixed) version -- not a version-
-supersession race `status-monitor-restart` would reap (that command only
-ever reaps a version-*superseded* owner; a same-version duplicate is left
-alone, exactly as it did here: "a current monitor already owns the host --
-left as-is"). Confirmed which PID was the genuine lock owner by reading
+Found while updating a Windows-native install after the two fixes above:
+**two** `status-monitor` processes were running simultaneously on one host,
+both on the same (already-fixed) version -- not a version-supersession race
+`status-monitor-restart` would reap (that command only ever reaps a
+version-*superseded* owner; a same-version duplicate is left alone, exactly
+as it did here: "a current monitor already owns the host -- left as-is").
+Confirmed which PID was the genuine lock owner by reading
 `~/.agent-worktrees/status-monitor.lock`'s own `pid` field directly, then
 killed only the non-owning duplicate by specific PID. The same host also had
 a dozen stale `worktree_manager --project ...` Picker processes accumulated
-across three old versions (`dev59`/`dev76`/`dev87` x2) with no Picker
-terminal actually open -- confirmed with the operator before killing all of
-them, since "no open terminals" is exactly the kind of claim that needs the
-operator's own confirmation, not an agent's assumption, before a bulk kill.
+across three old versions with no Picker terminal actually open -- confirmed
+with the operator before killing all of them, since "no open terminals" is
+exactly the kind of claim that needs the operator's own confirmation, not an
+agent's assumption, before a bulk kill.
 
 **This is now a documented, sanctioned diagnostic+remediation pattern** (not
 a one-off cleanup): a duplicate resident `status-monitor` is a genuine,
 potentially-blocking bug -- two instances can race applying `mux-status-v1`
 writes to the same session, corrupting rendering in ways indistinguishable
 from the render-freeze bugs fixed above. Added to the facility's own
-`docs/error-response-discipline.md` Quick Reference table (aperture-labs
-repo) as a cross-host/cross-OS trigger: **whenever an agent observes more
-than one resident `status-monitor` process on a single host, read the lock
-file's `pid` for the sole legitimate owner and kill every other instance by
-specific PID** -- never assume duplicates are harmless, and never blanket-
-kill without first confirming which one actually holds the lock.
+error-response-discipline documentation as a cross-host/cross-OS trigger,
+with a TOCTOU/PID-reuse-safe recipe (Copilot review correctly flagged the
+initial draft's naive "kill every non-owning PID" as racy -- a lock can be
+replaced, or its PID reused by an unrelated process, between an earlier read
+and the kill): **whenever an agent observes more than one resident
+`status-monitor` process on a single host, immediately before acting,
+re-read the lock file and validate it with `locks.read_lock`/
+`locks.lock_is_live`** (`plugins/agent-worktrees/src/agent_worktrees/locks.py`
+-- live iff the recorded pid is alive AND its `start_time` token still
+matches, guarding against exactly this reuse case) **for the one currently-
+live legitimate owner, confirm each OTHER candidate's own command line still
+genuinely names `status-monitor` right before terminating it, and kill only
+those by specific PID** -- never assume duplicates are harmless, never trust
+a single stale read, and never blanket-kill without both checks.
 
 ### 2026-09-28 — Real bug found via CI drift: `picker-reconcile-local`'s fast-dispatch path was broken, blocking the whole dev->main promotion pipeline
 Found while pushing the `_StatusSegmentCache` fix (above) through the release
