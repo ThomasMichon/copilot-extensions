@@ -60,14 +60,17 @@ risk (**coverage debt saturation** — many PRs landing between one baseline
 and the next). The fallback is a safety net, not a second-class citizen: it
 is itself a deliberately curated, evidence-backed set, not an afterthought.
 
-### baseline propagation
+### baseline correlation
 
 The coverage baseline generated at a trunk-gate event is only useful to
-in-flight and future changes if it reaches the branch they are validated
-against. A repo adopting this capability closes that loop explicitly —
-feeding the freshly-earned baseline back into its ordinary contribution
-branch — rather than leaving each promotion's evidence stranded on the trunk
-side of the gate.
+in-flight and future changes if it can be reliably **located and correlated**
+to the exact point in the contribution branch's history it was earned
+against — whether that means the baseline itself lands *in* the contribution
+branch, or is durably published elsewhere (e.g. alongside whatever
+trunk-side artifact the gate already produces) with a precise pointer back
+to its originating commit. A repo adopting this capability closes that loop
+explicitly, rather than leaving each promotion's evidence stranded or
+ambiguously attributed.
 
 ### coverage debt accounting
 
@@ -98,12 +101,14 @@ missing, stale, or the accumulated coverage debt has crossed a bounded
 threshold — visibly and deliberately, never by quietly narrowing coverage
 past what the evidence can actually support.
 
-### baseline feedback into the contribution branch
+### baseline reachable at the point it was earned
 
-A newly-earned baseline is propagated back into whichever branch ordinary
-changes are validated against, so the very next change already has fresh,
-authoritative targeting evidence rather than working from a stale or absent
-one.
+A newly-earned baseline is durably associated with the exact contribution-
+branch commit it was measured against, and a subsequent change can reliably
+resolve "the baseline for the commit my branch forked from" — whether the
+artifact lives on that branch directly or is published and pointer-linked
+from elsewhere — so the very next change already has fresh, authoritative
+targeting evidence rather than working from a stale or absent one.
 
 ### observable coverage debt
 
@@ -143,13 +148,33 @@ on its own cadence regardless of what any individual change's targeted CI
 selected — targeting narrows fast feedback; it never substitutes for the
 deeper, full-portfolio pass that earns the next baseline.
 
+### attribution stays true to the branch under diff
+
+A trunk-gate event may apply its own downstream transforms when producing
+its published artifacts (materializing vendored dependencies, expanding a
+DRY pointer into a full copy, or similar) — but the coverage measurement
+this capability relies on is taken against the **same source form ordinary
+changes are diffed against**, never a transformed/materialized copy. Where a
+repo's trunk-gate output and its contribution branch's own source layout
+diverge, the baseline is earned pre-transform, or the divergence is
+reconciled before attribution is trusted — otherwise line-level correlation
+between a change's diff and the baseline silently corrupts.
+
+### coverage debt's threshold is a tunable dial
+
+The bound past which coverage debt forces the smoke fallback (whether framed
+as elapsed time, commit count, or diff volume since the baseline) is an
+adjustable setting a repo tunes for its own churn rate, not a hardcoded
+constant — a repo under heavy concurrent-PR churn can tighten it; a quieter
+one can loosen it, without changing this capability's own shape.
+
 ### the propagation loop never silently breaks
 
-If a trunk-gate event cannot feed its freshly-earned baseline back into the
-contribution branch, that failure is visible (the same way a stuck
-changefile-cleanup PR or a failed promotion already surfaces) rather than
-leaving subsequent changes to silently regress to the smoke fallback without
-anyone noticing why.
+If a trunk-gate event cannot durably record and correlate its freshly-earned
+baseline, that failure is visible (the same way a stuck changefile-cleanup
+PR or a failed promotion already surfaces) rather than leaving subsequent
+changes to silently regress to the smoke fallback without anyone noticing
+why.
 
 ## Non-Goals / Boundaries
 
@@ -186,8 +211,8 @@ anyone noticing why.
 - Realization vehicle (pre-vision): the
   [`dev-branch-release-pipeline`](../../efforts/active/dev-branch-release-pipeline/README.md)
   effort's promotion gate is this repo's current trunk-validation event and
-  the natural place to earn the coverage baseline and feed it back into
-  `dev`
+  the natural place to earn the coverage baseline and durably correlate it
+  back to the `dev` commit it was measured against
 - Testing guide: [`TESTING.md`](../../TESTING.md)
 - Current per-plugin runner:
   [`tools/run-plugin-tests.py`](../../tools/run-plugin-tests.py)
@@ -207,3 +232,19 @@ anyone noticing why.
   should-be shape above is mined directly from that conversation, generalized
   to stay portable to a repo (aperture-labs was named explicitly) that has no
   dev→main promotion of its own.
+- **2026-09-28 (same day, follow-up)** — The operator observed that this
+  repo's own promotion already writes a commit to `main`, so it may be more
+  natural to check the baseline in *there* rather than back into `dev` — but
+  `main`'s tree is a materialized/vendor-expanded copy of `dev`'s DRY
+  pointer-sourced tree, so a baseline earned against `main`'s post-transform
+  layout would misattribute line numbers when correlated against a diff
+  computed on `dev`'s own source form. Generalized this into two should-be
+  refinements rather than picking `dev` vs. `main` (a mechanism choice the
+  vision deliberately leaves open): baseline *correlation* need not mean the
+  artifact lives on the contribution branch, only that it is reliably
+  locatable and tied to the exact commit it was earned against; and
+  attribution must be measured against the same source form a diff is
+  computed against, never a downstream-transformed copy, generalizing past
+  vendoring to any repo-specific trunk-gate transform. Also folded in the
+  operator's point that the coverage-debt threshold should be a tunable
+  dial, not a fixed constant.
