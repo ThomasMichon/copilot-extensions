@@ -300,6 +300,39 @@ def _busy_session_message(client, session_id: str, agent_name: str, caller_id: s
     return "\n".join(lines)
 
 
+def _resolve_known_session(client, session_id: str, session: dict, *, force: bool) -> str:
+    """Given an already-fetched session record, apply the shared idle/stopped/
+    busy dispatch and return the session id to operate on (which the caller
+    delivers to). Exits on an unrecoverable busy-without-force conflict."""
+    core = _core()
+    status = session.get("status", "")
+    if status == "idle":
+        return session_id
+    if status == "stopped":
+        print(f"[>] Resuming stopped session {session_id}...")
+        client.resume_session(session_id, request_timeout=core._startup_request_timeout(resume=True))
+        return session_id
+    agent = session.get("agent_name") or ""
+    if not force:
+        print(
+            _busy_session_message(client, session_id, agent or session_id, session.get("caller_id")),
+            file=sys.stderr,
+        )
+        sys.exit(core._SEND_BUSY_EXIT)
+    print(f"[>] --force: ending busy session {session_id} to take over...")
+    try:
+        client.end_session(session_id)
+    except Exception:
+        pass
+    if agent:
+        return core._start_agent_session(client, agent, force=False)
+    print(
+        f"[FAIL] Session {session_id} ended; no agent recorded -- re-send to the agent name to start a fresh session.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
 def _resolve_target(
     client,
     target: str,
@@ -319,36 +352,37 @@ def _resolve_target(
     try:
         session = client.get_session(target)
         if session:
-            status = session.get("status", "")
-            if status == "idle":
-                return target
-            elif status == "stopped":
-                print(f"[>] Resuming stopped session {target}...")
-                client.resume_session(target, request_timeout=core._startup_request_timeout(resume=True))
-                return target
-            else:
-                agent = session.get("agent_name") or ""
-                if not force:
-                    print(
-                        _busy_session_message(client, target, agent or target, session.get("caller_id")),
-                        file=sys.stderr,
-                    )
-                    sys.exit(core._SEND_BUSY_EXIT)
-                print(f"[>] --force: ending busy session {target} to take over...")
-                try:
-                    client.end_session(target)
-                except Exception:
-                    pass
-                if agent:
-                    return core._start_agent_session(client, agent, force=False)
-                print(
-                    f"[FAIL] Session {target} ended; no agent recorded -- re-send to the agent name to start a fresh session.",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
+            return _resolve_known_session(client, target, session, force=force)
     except BridgeClientError as exc:
         if exc.status != 404:
             raise
+
+    # `target` may be a *worktree handle*, not a session id -- the case a
+    # bridge-managed session created via `agent-bridge create --worktree-id`
+    # (or resumed via `agent-bridge resume <worktree-id>`, which can mint a
+    # session id that differs from the worktree handle) falls into: it is
+    # never registered in the interactive `live-sessions` registry
+    # `resolve_live_session` above already checked, and it isn't its own
+    # session id either, so the direct `get_session(target)` lookup above
+    # 404s. Resolve it the same way `read`/`wait` already do (by worktree id
+    # against the bridge's own session registry) before falling through to
+    # agent-name matching -- otherwise a perfectly valid, just-created or
+    # just-resumed worktree session is misread as an unknown agent name to
+    # spawn fresh (copilot-extensions#2247). `resume_worktree` is a
+    # synchronous server call, so an instant lookup (no retry/grace wait) is
+    # correct here and keeps an ordinary agent-name `send` exactly as fast as
+    # before -- unlike `read`'s streaming-reconnect race, there is no
+    # eventual-consistency window to wait out in this call chain.
+    worktree_session_id = core._resolve_read_worktree_session(client, target)
+    if worktree_session_id:
+        try:
+            session = client.get_session(worktree_session_id)
+        except BridgeClientError as exc:
+            if exc.status != 404:
+                raise
+            session = None
+        if session:
+            return _resolve_known_session(client, worktree_session_id, session, force=force)
 
     try:
         agents = client.list_agents()
