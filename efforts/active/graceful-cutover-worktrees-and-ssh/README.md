@@ -14,7 +14,11 @@
 
 ## Guiding Intent
 
-Close the last gap in an already-proven pattern: `docs/patterns/graceful-daemon-cutover.md`
+Close three of the remaining gaps in an already-proven pattern (not the
+*last* gap overall — the pattern's own adoption table separately still
+carries `agent-vault` at `❌ None` and an open outlive/reconnect item for
+`agent-index`'s engine daemon; both are out of this effort's scope):
+`docs/patterns/graceful-daemon-cutover.md`
 and the shared `zdd` library have made agent-bridge, agent-dispatch, and
 agent-index (and, per that doc's own rollout table, agent-mcp) update
 without ever killing in-flight, non-resumable work. `agent-worktrees`,
@@ -181,11 +185,22 @@ cover: `agent-worktrees`, `worktree-manager`, `agent-ssh`.**
       not `zdd`." Do not force this system into the cutover shape if the
       audit finds nothing that needs it.
 - [ ] For each daemon confirmed to genuinely exist (not assumed), name the
-      concrete **safe cutover point** (the drain boundary):
-      - `agent-worktrees status-monitor`: between sweep ticks (no in-flight
-        non-resumable turn; each sweep is already a bounded, restartable unit).
+      concrete **safe cutover point** (the drain boundary). **Correction
+      (Copilot review, round 4):** a sweep-tick boundary alone is too weak
+      for `status-monitor` — `status_monitor_cli.cmd_status_monitor` also
+      serves concurrent hook/classify/tracking-write requests and tracks
+      active handlers and in-flight writes *separately* from the sweep
+      loop, so a generation could retire between sweeps while one of those
+      is still non-resumably in flight. The real drain boundary is
+      **admission closed (refuse new hook/classify/tracking-write
+      connections) AND every already-active handler/write has drained** —
+      not merely "between sweeps":
+      - `agent-worktrees status-monitor`: admission closed + sweep between
+        ticks + every active hook/classify/tracking-write handler drained.
       - `worktree-manager mux-daemon`: between mapping-registry mutations /
-        republish cycles (mirrors the above).
+        republish cycles (confirm during Phase 2 whether it has an
+        equivalent concurrent-handler surface needing the same admission-
+        closed treatment, rather than assuming a simpler shape by default).
       - `agent-ssh`: pending Phase 0's audit outcome above.
 
 ### Phase 1 — `agent-worktrees` `status-monitor`
@@ -203,7 +218,8 @@ cover: `agent-worktrees`, `worktree-manager`, `agent-ssh`.**
       startup, so a same-tick rapid-fire re-release is still caught.
 - [ ] **Land `plugin.json`'s `"zeroDowntimeUpdate": true` atomically with
       `scripts/install.ps1`/`install.sh` actually accepting and implementing
-      `-ZeroDowntime`, in the same PR — never as two separate steps.**
+      automatic cutover on BOTH platforms, in the same PR — never as
+      separate steps, and never Windows-only.**
       (Copilot review, round 1): `agent_worktrees.reconcile.runtime_installer_argv`
       **already** reads this flag and appends `-ZeroDowntime` to a reconcile-
       driven `install.ps1 update` for any plugin that sets it, but
@@ -212,6 +228,14 @@ cover: `agent-worktrees`, `worktree-manager`, `agent-ssh`.**
       supports it, would break reconcile-driven self-updates with a
       parameter-binding failure the moment anything reconciles
       agent-worktrees itself the same way it reconciles siblings.
+      **Correction (Copilot review, round 4):** `runtime_installer_argv`
+      appends `-ZeroDowntime` only on the `install.ps1` (Windows) branch;
+      its `install.sh` (POSIX) branch receives no equivalent argument today.
+      Define and implement the **POSIX activation path explicitly** (a
+      matching `install.sh update` seam, or the SIGTERM-graceful-restart
+      fallback the pattern doc's own Cross-platform-parity table already
+      describes for other plugins) alongside the Windows switch — do not
+      ship Windows-only and call the flag "done."
 - [ ] Define the **hand-off manifest**: what "outstanding work" a
       `status-monitor` generation must persist for its successor (per-session
       claim/observation state it would otherwise reconstruct from scratch —
@@ -247,12 +271,17 @@ cover: `agent-worktrees`, `worktree-manager`, `agent-ssh`.**
       table).
 
 ### Phase 4 — Close the loop in the pattern doc itself
-- [ ] Add `agent-worktrees`, `worktree-manager`, `agent-ssh` rows to
+- [ ] Add `agent-worktrees` and `worktree-manager` rows to
       `docs/patterns/graceful-daemon-cutover.md`'s **Per-plugin adoption**
-      table and **Rollout sequencing** list once each phase lands, so the
-      pattern doc stays the single source of truth for adoption state
-      (never let this effort's own README become a second, drifting copy of
-      that table).
+      table and **Rollout sequencing** list once Phases 1-2 land.
+- [ ] Add an `agent-ssh` row **only if** Phase 3's audit finds a real daemon
+      and lands actual cutover work; if the audit instead concludes "no
+      cutover needed" (Phase 3's own stated possible outcome), do NOT add a
+      row implying adoption — note the audit conclusion in this effort's
+      Journal instead, so Phase 3 and Phase 4 never contradict each other.
+      Keep the pattern doc as the single source of truth for adoption state
+      either way (never let this effort's own README become a second,
+      drifting copy of that table).
 
 ## Validation Plan
 
@@ -280,8 +309,8 @@ _Pending._
 ### 2026-09-28 — Review round 1: three real corrections
 Automated PR review (the effort's own mandatory review gate) caught three
 real issues in the initial plan, all fixed before merge:
-1. **Publication safety** — the plan named the private `aperture-labs` org
-   and a path only that private repo has; genericized.
+1. **Publication safety** — the plan named a private downstream
+   organization and a path only that private repo has; genericized.
 2. **Ordering hazard in Phase 1/2** — `agent_worktrees.reconcile.
    runtime_installer_argv` (`plugins/agent-worktrees/src/agent_worktrees/
    reconcile.py:1298-1324`) **already** reads a plugin's
