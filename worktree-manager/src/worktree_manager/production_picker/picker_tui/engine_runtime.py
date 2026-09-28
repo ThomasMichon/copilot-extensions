@@ -390,20 +390,24 @@ class PickerScreenRuntimeMixin:
                 ),
                 None,
             )
-            # Warm ``self.src.LOCAL`` unconditionally, inside the cache scope,
+            # Warm ``self.src.LOCAL`` unconditionally, off the render thread
+            # (this method already runs on the setup/reload worker thread),
             # even when ``local`` was already found via ``source_tabs`` above
             # (the real ``data_ssh`` source always sets a ``"local"`` key per
             # tab, so the ``if local is None:`` fallback below was otherwise
             # dead in practice). ``data_ssh.LOCAL`` is a PEP 562 module
-            # attribute resolved lazily on first access via an uncached
-            # ``load_config()`` call (several real seconds on a fleet with
-            # many registered repos) and memoized forever after -- it must be
-            # touched HERE, inside a cache scope already running off the
-            # render thread, not left for whichever later render-thread
-            # comparison (e.g. ``_wt_submenu_verbs()``'s
-            # ``(machine, env) == self.src.LOCAL``, reached the instant the
-            # operator opens ANY worktree row's Actions menu) touches it first
-            # (#picker-menu-open-latency).
+            # attribute resolved lazily on first access (see
+            # ``data_ssh._resolve_local()``) and memoized forever after --
+            # that first resolution reads
+            # ``worktree_manager.production_picker.project_config``'s
+            # ``lru_cache``-backed project/machine lookups (a real file read
+            # plus an ``engine_client`` cross-process call the first time;
+            # free on every call after, module-wide). It must be touched HERE
+            # so that one-time cost lands on this worker thread, not left for
+            # whichever later render-thread comparison (e.g.
+            # ``_wt_submenu_verbs()``'s ``(machine, env) == self.src.LOCAL``,
+            # reached the instant the operator opens ANY worktree row's
+            # Actions menu) touches it first (#picker-menu-open-latency).
             with self._load_config_cache_scope():
                 try:
                     self.src.LOCAL
