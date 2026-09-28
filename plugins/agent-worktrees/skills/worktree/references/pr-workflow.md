@@ -229,10 +229,11 @@ The normal, expected flow for a worktree with work to land:
 6. **Repeat 4–5** until the PR is **approved and merged upstream**. With
    auto-merge set, merge happens automatically on approval; otherwise a human
    merges.
-7. **Finalize.** Once the feature branch is safely pushed you *may* `finalize`
-   at any point — finalize is decoupled from merge (see below). Choose the
-   disposition deliberately (keep-alive to babysit review, detach to let it
-   ride).
+7. **Finalize.** Under `detach`, the feature branch being safely pushed is
+   enough to `finalize` at any point, before merge (see below) — the rare,
+   operator-approved opt-out. Under `keep-alive` (the safe default),
+   `finalize` requires the PR to have actually **merged** first; stay on the
+   PR through review, consent, and merge, then finalize.
 
 **Rare opt-out — submit and detach without babysitting review.** Per the
 sanctioned-deviations list above: an agent may, when the operator approves (or
@@ -559,12 +560,30 @@ does not create a PR; it updates the existing one.
 <agent-worktrees catalog argv[0]> finalize
 ```
 
-**Finalize is decoupled from merge.** A PR-mode worktree finalizes as soon as
-its work is *safely upstream* -- the feature branch is pushed with no unpushed
-commits. The PR does **not** need to be merged first. Finalize tears down the
-worktree and removes the local branches but **leaves the remote feature branch
-intact** (it backs the open PR). If there are unpushed commits, finalize blocks
-and tells you to run `push-changes`.
+**`finalize`'s HEAD-reset behavior depends on `pr.strategy`; it is never a
+blanket "decoupled from merge."** The safe default, `keep-alive`, requires
+the PR to have **merged** (or the branch's content to already sit on
+`origin/<default>`) before finalize will proceed -- an open-but-unmerged PR
+blocks it, by design, so a worktree can never tear itself down while it is
+still the sole party positioned to drive that PR to merge. Only the
+explicit, operator-approved `detach` opt-out accepts "the feature branch is
+safely pushed" as sufficient on its own, without requiring a merge --
+finalize tears down the worktree and local branches but **leaves the remote
+feature branch intact** (it backs the open PR), for asynchronous review to
+land later. If there are unpushed commits, finalize blocks either way and
+tells you to run `push-changes` first.
+
+Every code path that moves a worktree branch's HEAD off unmerged commits
+(`finalize`'s own pointer-reconciliation pass, and `pr-complete`'s
+post-squash-merge realignment) is independently gated on the branch's
+content being **already confirmed present on upstream** before it resets or
+rebases anything -- never on an assumption, and never while real unmerged
+work would be discarded. `detach` is the only strategy where finalize itself
+accepts an open, unmerged PR as sufficient to proceed; every other path
+requires actual merge (or upstream-equivalent content) first. See the
+`pr-merge-obligation-gate` effort (`efforts/active/pr-merge-obligation-gate/`)
+for the audit that confirmed this and the further structural (obligation-
+claim) and guidance defenses layered on top of it.
 
 ### Recovering a PR after teardown (detach disposition)
 

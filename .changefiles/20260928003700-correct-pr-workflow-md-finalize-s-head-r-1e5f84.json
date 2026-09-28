@@ -1,0 +1,9 @@
+{
+  "comment": "Correct pr-workflow.md: finalize's HEAD-reset behavior depends on pr.strategy, not universally decoupled from merge",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}
