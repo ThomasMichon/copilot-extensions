@@ -1,6 +1,0 @@
-{
-  "schema": "copilot-extensions.vendor-pointer",
-  "version": 1,
-  "source": "libs/plugin-activation",
-  "kind": "src-passthrough"
-}

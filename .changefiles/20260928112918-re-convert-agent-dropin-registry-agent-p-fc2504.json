@@ -1,0 +1,9 @@
+{
+  "comment": "Re-convert agent-dropin-registry, agent-plugin-resolve, and agent-plugin-activation from per-plugin copies to uv-editable canonical references (vendor-pointer-generalization effort, Phase 1).",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

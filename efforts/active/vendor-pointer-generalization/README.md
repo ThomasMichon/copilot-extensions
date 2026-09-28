@@ -1963,3 +1963,101 @@ _Pending._
     issue **#4410** (scoped to also audit other plugins' Windows
     installers for the same already-converted-lib gap) rather than fixed
     speculatively here -- out of scope for this PR's specific finding.
+
+### 2026-09-28 — Phase 1: converted `dropin-registry` + `plugin-resolve` + `plugin-activation` (bundled)
+
+- `plugin-activation` depends on `agent-dropin-registry`/`agent-plugin-resolve`
+  (its own `pyproject.toml` `dependencies`), and EVERY one of its 7 real
+  consumers (`agent-worktrees`, `agent-dispatch`, `agent-logger`,
+  `agent-bridge`, `agent-machines`, `agent-codespaces`, `worktree-manager`)
+  ALSO directly depends on both as real copies -- the exact ordering
+  hazard this effort's own Plan flagged. Converted all 3 libs together, for
+  the same 7 consumers, in one bundled PR (mirroring the earlier
+  `ssh-manager` + `agent-procutil` precedent).
+- `plugin-activation` was already `src-passthrough` (converted forward in
+  PR #4004, before this effort's course-correction back to `uv`-editable) --
+  `tools/sync-vendored-libs.py --uv-editable` handles a pointer-copy
+  source exactly like a real copy, no special handling needed.
+- **`dropin-registry` has 9 real consumers total, not 7** -- `agent-ssh`
+  and `agent-index` also vendor it as a real copy but do NOT depend on
+  `plugin-activation`, so they were correctly left un-converted (no
+  ordering conflict forces their hand); a future dedicated `dropin-
+  registry` leg should pick those 2 up. Re-confirmed `plugin-resolve`'s
+  consumer count is exactly the same 7 (no similar miss there).
+- **Canonical drift discovered for `plugin-resolve`** (not caused by this
+  PR): the tool's full-tree byte comparison (`lib_tree_matches`, used to
+  gate the destructive local-copy deletion) refused all 7 consumers --
+  canonical had grown a `tests/conftest.py` (added in an earlier, unrelated
+  PR #4088) and bumped its `setuptools`/`pytest` version floors plus 2 new
+  test functions, none of which had ever been backported to any consumer's
+  real copy. Confirmed via diff that `src/` itself was byte-identical
+  everywhere (so no runtime-behavior risk) before syncing each copy to
+  canonical and retrying the conversion -- this is exactly the kind of
+  silent canonical-vs-copies drift `sync-vendored-libs.py --check`'s
+  advisory reporting does NOT catch today (it only compares copies against
+  each other, not against canonical, for anything except `src/`+version).
+- **`customizing-copilot`'s `plugin-activation.py` follow-up, done alongside
+  this conversion as planned**: it has no `pyproject.toml` of its own (never
+  consumes the lib via `[tool.uv.sources]`), so `--uv-editable` doesn't
+  apply to it directly. Deleted its local `src-passthrough` pointer copy
+  and rewrote `_resolve_state_py()` to always resolve `state.py` straight to
+  the monorepo's own canonical path -- the same "no local copy, resolve to
+  canonical" principle, just via a bespoke path computation instead of a
+  `[tool.uv.sources]` entry (the effort's own forward-looking note assumed
+  a consumer `pyproject.toml` existed to parse; it doesn't, so the simpler
+  direct-canonical-resolution fix was used instead).
+- **Test-suite regressions found and fixed, all in test infrastructure, none
+  in runtime code**:
+  - `agent-logger`'s `tests/test_install_binstub.py::
+    test_installers_install_plugin_activation_after_its_own_transitive_deps`
+    started raising `KeyError: 'plugin-activation'` -- its own
+    `_vendored_path_dependencies()` regex only matched the real-copy
+    `path = "libs/<dir>"` form, never the `uv`-editable
+    `path = "../../libs/<dir>", editable = true` form, so converted libs
+    silently vanished from its own "which libs need this check" discovery.
+    `agent-logger`'s actual `install.sh`/`install.ps1` were ALREADY correct
+    (both already had proper marketplace-vs-dev-checkout fallback blocks
+    for all 4 libs, built in an earlier, unrelated pass) -- only the test's
+    own regex needed fixing to also match the new pointer form.
+  - `worktree-manager/src/worktree_manager/agent_worktrees_runtime.py`'s
+    `ensure_engine_runtime()` hardcodes the specific list of `agent-
+    worktrees` libs it backfills onto `sys.path` for compatibility-layer
+    imports (`plugin-resolve`, `config-migrate`, `single-instance-lease`,
+    `lazy-cli-dispatch`) -- missing `work-coalescing-singleton` (converted
+    in an EARLIER, unrelated leg, PR #4331, and apparently never added
+    here) plus this leg's own `dropin-registry`/`plugin-activation`. Added
+    all 3. This is a genuine functional gap (not just a test staleness
+    issue): without it, `worktree_manager`'s compatibility imports of
+    `agent_worktrees` modules that transitively import these libs would
+    `ModuleNotFoundError` in a dev checkout. Also rewrote
+    `worktree-manager/tests/test_production_picker_transplant.py`'s
+    repeatedly-stale "still real-copy-vendored lib" worked example (this
+    is now the SECOND time it needed fixing, having been swapped from
+    `config-migrate` to `plugin-resolve` in the prior PR, now stale again
+    since plugin-resolve just converted too) -- reframed the comment to
+    explain the fixture is deliberately synthetic and names a lib from
+    `ensure_engine_runtime()`'s own checked list regardless of that lib's
+    real, live conversion status, so it never goes stale again.
+- **Confirmed pre-existing, unrelated failures/flakes via `git stash`/
+  `git stash pop` against unmodified `dev`** (none caused by this PR):
+  - `customizing-copilot`'s
+    `test_shipped_projection_budgets.py::...[agent-worktrees]` --
+    `head-claim-fallback.instructions.md` (5519 bytes) exceeds the 4 KiB
+    instruction-projection template budget, introduced by an unrelated
+    merged PR (#4406). Filed as tracked issue **#4416**.
+  - `agent-dispatch`'s full-suite run intermittently exceeds
+    `run-plugin-tests.py`'s 300s default per-sub-suite wall-clock budget
+    (hits a DIFFERENT specific test each retry, and every individually-
+    isolated test/file passes instantly) -- this is genuine suite-duration
+    growth under this sandbox's current CPU constraints, not a hang;
+    passed cleanly (3523 passed) with `--timeout 550 --plugin-timeout 580`.
+    Not filed as a tracked issue (an environment/resource characteristic,
+    not a code defect) but worth remembering for future legs' validation.
+- Proactively added dev-vs-release vendoring notes to all 3 libs'
+  READMEs up front (continuing the practice started last leg).
+- Non-editable install probe and `materialize_main.py` round-trip both
+  confirmed clean for all 3 libs (including the nested-dependency
+  materialize case: `plugin-activation`'s own promoted `pyproject.toml`
+  correctly loses `editable = true` on its internal `dropin-registry`/
+  `plugin-resolve` references, exactly as `ssh-manager`'s precedent
+  established for `agent-procutil`).

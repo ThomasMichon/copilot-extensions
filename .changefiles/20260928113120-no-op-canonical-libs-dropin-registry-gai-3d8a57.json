@@ -1,0 +1,9 @@
+{
+  "comment": "No-op: canonical libs/dropin-registry gained a new tests/conftest.py and README update (vendor-pointer-generalization effort); this plugin's own real per-plugin copy is unaffected until it too is converted or re-synced.",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "dev"
+    }
+  ]
+}
