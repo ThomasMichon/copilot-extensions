@@ -1,0 +1,9 @@
+{
+  "comment": "Fix pr.strategy fail-safe default (keep-alive, not detach) to stop worktrees finalizing before their PR merges",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

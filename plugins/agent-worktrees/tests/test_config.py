@@ -157,7 +157,7 @@ class TestDataModels:
         repo = cfg.RepoConfig(anchor="/tmp/repo", worktree_root="/tmp/wt")
         assert repo.pr.enabled is False
         assert repo.pr.provider == "gitea"
-        assert repo.pr.strategy == "detach"
+        assert repo.pr.strategy == "keep-alive"
         assert repo.pr.branch_prefix == "feature"
 
     def test_pr_config_defaults(self):
@@ -2155,3 +2155,18 @@ def test_overlay_branch_overrides_registry_fallback(
     )
     c = cfg.load_config(ml)
     assert c.default_repo.default_branch == "develop"  # overlay wins
+
+
+def test_own_checked_in_config_resolves_strategy_keep_alive():
+    """Regression guard: this repo's own ``.agent-worktrees/config.yaml`` must
+    resolve ``pr.strategy`` to ``keep-alive``, not the unsafe ``detach``
+    fallback. A duplicate later ``strategy:`` mapping key under the same
+    ``pr:`` block silently wins under YAML's last-value-wins rule and would
+    reintroduce the exact stranded-open-PR bug this default flip fixed --
+    this test fails loudly if that regresses, instead of only being caught
+    by an ad hoc PR review."""
+    import yaml
+
+    config_path = Path(__file__).resolve().parents[3] / ".agent-worktrees" / "config.yaml"
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert data["pr"]["strategy"] == "keep-alive"

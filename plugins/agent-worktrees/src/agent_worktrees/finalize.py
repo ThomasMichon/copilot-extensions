@@ -1162,7 +1162,7 @@ def _pr_finalize_precondition(
     feature = record.pr.branch
     cwd = worktree_path if Path(worktree_path).exists() else anchor
     upstream = f"{remote}/{repo.default_branch}"
-    strategy = (getattr(repo.pr, "strategy", "") or "detach").strip().lower()
+    strategy = (getattr(repo.pr, "strategy", "") or "keep-alive").strip().lower()
 
     # (1) Fast path: content already on origin/<default>. Resolve a durable ref
     #     (feature -> worktree/<id> -> HEAD); the refspec head scheme keeps no

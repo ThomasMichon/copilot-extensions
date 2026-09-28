@@ -100,6 +100,7 @@ pr:
   required: true
   provider: github
   auto_open: true
+  strategy: keep-alive  # keep the worktree to shepherd the PR to merge; detach is the rare opt-out
   # Hidden source markers carry raw machine/worktree/session identifiers.
   # This public repo must never publish the raw marker (source_attribution:
   # true); closed-circuit repos may opt into that. This repo relies on the
@@ -114,7 +115,6 @@ pr:
   # repo's fail-closed posture even for that narrower case. Every
   # WorktreeRecord's own persisted codename_source stays authoritative,
   # exactly as before this key was removed.
-  strategy: detach
   # PR-flow legibility matrix (surfaced as reminders by the pr-* verbs) -->
   # classifies this repo as `pr-self-merge`.
   self_approve: true

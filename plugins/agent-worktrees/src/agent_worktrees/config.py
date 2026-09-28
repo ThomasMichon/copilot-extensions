@@ -174,16 +174,16 @@ class PRConfig:
     it does not control squash timing (squashing always happens at
     ``create-pr``):
 
-    - ``detach``    -- finalize the worktree immediately; resume later via a
-                       fresh ``create`` workflow if the PR needs more work.
-    - ``keep-alive`` -- keep the worktree open to iterate on review feedback,
-                        pushing updates to the feature branch.
+    - ``detach``    -- finalize immediately (rare opt-out; needs operator
+                       approval); resume via a fresh ``create`` workflow.
+    - ``keep-alive`` -- keep iterating on review feedback. Safe default;
+                        unset falls back here, never to ``detach``.
     """
 
     enabled: bool = False
     required: bool = False         # enforce PRs: refuse direct-to-master
     provider: str = "gitea"        # gitea | github | azure-devops
-    strategy: str = "detach"       # default disposition: keep-alive | detach
+    strategy: str = "keep-alive"   # default disposition: keep-alive | detach
     branch_prefix: str = "feature"
     # ``head_scheme`` selects how create-pr *publishes* the PR head (#1815) --
     # its NAME + push mechanism. It does NOT change the local worktree, which
@@ -1803,7 +1803,7 @@ def _parse_pr(raw: Any) -> PRConfig:
         enabled=enabled,
         required=required,
         provider=str(raw.get("provider", "gitea")),
-        strategy=str(raw.get("strategy", "detach")),
+        strategy=str(raw.get("strategy", "keep-alive")),
         branch_prefix=str(raw.get("branch_prefix", "feature")),
         head_scheme=head_scheme,
         head_pattern=str(raw.get("head_pattern", "")),
