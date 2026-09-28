@@ -19,6 +19,24 @@ from . import config as cfg, pr_ops, tracking
 from .config import Config
 
 
+def _provider_mismatch_error(pr, prcfg) -> str:
+    """Non-empty when ``pr``'s recorded provider conflicts with ``prcfg``'s.
+
+    Never flags a terminal PR (nothing will be sent to it) or an unset
+    recorded provider (nothing to conflict with).
+    """
+    if (
+        pr is not None and not tracking._pr_is_terminal(pr)
+        and pr.provider and pr.provider != prcfg.provider
+    ):
+        return (
+            f"Tracked PR provider {pr.provider!r} differs from configured "
+            f"provider {prcfg.provider!r}; refusing provider access with "
+            "mismatched credentials."
+        )
+    return ""
+
+
 def pr_nudge(worktree_id: str, *, config: Config | None = None) -> dict:
     """Ask this repo's bound automated reviewer to (re-)review the active PR.
 
@@ -38,22 +56,20 @@ def pr_nudge(worktree_id: str, *, config: Config | None = None) -> dict:
     # Refuse a provider/credential mismatch before touching the provider at
     # all (mirrors pr_ops.create_pr's own guard): a tracked PR recorded under
     # a different provider than this repo is now configured for must never
-    # have the *configured* provider's token/api_base sent to it.
-    recorded_active = record.active_pr()
-    if (
-        recorded_active is not None
-        and not tracking._pr_is_terminal(recorded_active)
-        and recorded_active.provider
-        and recorded_active.provider != prcfg.provider
-    ):
+    # have the *configured* provider's token/api_base sent to it. Re-checked
+    # after reconciliation below too -- reconcile can flip the previously
+    # active PR terminal and expose a *different* still-live tracked PR that
+    # this pre-check never saw.
+    mismatch = _provider_mismatch_error(record.active_pr(), prcfg)
+    if mismatch:
         return {**base, "has_pr": True, "supported": False, "requested": False,
-                "error": (
-                    f"Tracked PR provider {recorded_active.provider!r} differs from "
-                    f"configured provider {prcfg.provider!r}; refusing provider "
-                    "access with mismatched credentials."
-                )}
+                "error": mismatch}
     pr_ops._reconcile_active_pr(record, config)
     active = record.active_pr()
+    mismatch = _provider_mismatch_error(active, prcfg)
+    if mismatch:
+        return {**base, "has_pr": True, "supported": False, "requested": False,
+                "error": mismatch}
     # ``active_pr()`` falls back to the most recent PR overall when every
     # tracked PR is terminal -- exclude that fallback here (mirrors
     # ``pr_ops``'s own ``tracking._pr_is_terminal`` checks) so a nudge never

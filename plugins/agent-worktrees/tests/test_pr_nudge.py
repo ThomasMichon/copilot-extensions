@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agent_worktrees import config as cfg, pr_nudge_ops, pr_ops
+from agent_worktrees import config as cfg, pr_nudge_ops, pr_ops, tracking
 
 
 def _config_with_reviewer(base_config, reviewer: str):
@@ -106,6 +106,47 @@ class TestPRNudge:
         monkeypatch.setattr(providers, "get_provider", boom)
         res = pr_nudge_ops.pr_nudge(wid, config=config)
         assert res["has_pr"] is True
+        assert res["supported"] is False
+        assert "differs from configured provider" in res["error"]
+
+    def test_provider_mismatch_revalidated_after_reconciliation(self, pr_repo, monkeypatch):
+        """Reconciliation can flip the pre-checked active PR terminal and
+        expose a *different*, still-live tracked PR the pre-check never saw
+        -- that record must be revalidated too (#4355 review finding)."""
+        from agent_worktrees import providers
+        from agent_worktrees.providers.base import PullResult
+
+        config, wid, _wt, _ = pr_repo
+        config = _config_with_reviewer(config, "copilot")  # provider="github"
+        yaml_path = cfg.tracking_dir() / f"{wid}.yaml"
+        record = tracking.load_record(yaml_path)
+        record.prs.append(
+            tracking.PRRecord(branch="b1", number=7, state="open", provider="github")
+        )
+        record.prs.append(
+            tracking.PRRecord(branch="b2", number=8, state="open", provider="gitea")
+        )
+        tracking.save_record(record)
+        nudge_calls = []
+
+        class _Prov:
+            name = "github"
+
+            def get_pull(self, repo, number, *, api_base="", token=None):
+                # Reconciling PR #7 (the pre-check's active PR) reports it
+                # merged, which flips active_pr() over to tracked PR #8 --
+                # recorded under a different (gitea) provider.
+                return PullResult(number=number, state="closed", merged=True)
+
+            def request_review(self, repo, number, *, reviewer="", api_base="", token=None):
+                nudge_calls.append(number)
+                from agent_worktrees.pr_contract import ReviewNudgeResult
+                return ReviewNudgeResult(supported=True, requested=True)
+
+        monkeypatch.setattr(providers, "get_provider", lambda name: _Prov())
+        monkeypatch.setattr(providers, "account_token_for_slug", lambda repo, prcfg: "tok")
+        res = pr_nudge_ops.pr_nudge(wid, config=config)
+        assert nudge_calls == []
         assert res["supported"] is False
         assert "differs from configured provider" in res["error"]
 
