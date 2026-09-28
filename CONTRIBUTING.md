@@ -117,11 +117,14 @@ copilot-extensions create            # isolated worktree (no mux/session)
 copilot-extensions create-pr         # squashes the worktree, pushes pr/<slug>,
                                      # and (auto_open) opens the GitHub PR
 #   → wait ~5 minutes for Copilot's review to land
-#   → Approved: merge. Commented: address findings, push, wait ~5 minutes for
-#     the automatic post-push review; still not Approved -> re-request review
-#     via the API (see "Requesting a fresh review" below), wait ~5 minutes
-#     again. Repeat until Approved, or until the maintainer bypass below
-#     applies. See "Waiting for a verdict" for the full loop.
+#   → Contributor PR, Approved: merge. Owner-authored PR, clean Comment (no
+#     Medium/High findings open): merge -- that's the passing verdict here,
+#     Copilot structurally never renders Approve on this repo's own PRs.
+#     Otherwise: address findings, push, wait ~5 minutes for the automatic
+#     post-push review; still not passing -> re-request review via the API
+#     (see "Requesting a fresh review" below), wait ~5 minutes again. Repeat
+#     until passing, or until the contributor-PR-only maintainer bypass
+#     below applies. See "Waiting for a verdict" for the full loop.
 copilot-extensions pr-merge ThomasMichon/copilot-extensions <#> --now   # MANUAL squash-merge (you own the merge)
 copilot-extensions finalize          # clean up the worktree
 ```
