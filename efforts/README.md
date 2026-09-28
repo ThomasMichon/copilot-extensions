@@ -41,7 +41,7 @@ that pattern to this repository.
 | [Account-Aware Operations](active/account-aware-operations/README.md) | Draft | See effort |
 | [Agent Machines Declarative Control Plane](active/agent-machines-declarative-control-plane/README.md) | Active | #1418 (closed; historical, no live umbrella) |
 | [Review Automation Reliability](active/review-automation-reliability/README.md) | Draft | See effort |
-| [Worktree Finality and Obligations](active/worktree-finality-and-obligations/README.md) | Active | #1312 |
+| [PR-Merge Obligation Gate](active/pr-merge-obligation-gate/README.md) | Draft | #4375 |
 | [Marketplace-Scoped Installations](active/marketplace-scoped-installations/README.md) | Active | #1096 |
 | [Native-Construct Convergence](active/native-construct-convergence/README.md) | Active | #985 |
 | [Plugin Process Hygiene](active/plugin-process-hygiene/README.md) | Active | #736 |
