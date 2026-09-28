@@ -101,14 +101,18 @@ missing, stale, or the accumulated coverage debt has crossed a bounded
 threshold — visibly and deliberately, never by quietly narrowing coverage
 past what the evidence can actually support.
 
-### baseline reachable at the point it was earned
+### baseline reachable from any fork point
 
 A newly-earned baseline is durably associated with the exact contribution-
-branch commit it was measured against, and a subsequent change can reliably
-resolve "the baseline for the commit my branch forked from" — whether the
-artifact lives on that branch directly or is published and pointer-linked
-from elsewhere — so the very next change already has fresh, authoritative
-targeting evidence rather than working from a stale or absent one.
+branch commit it was measured against. Because baselines are earned
+periodically rather than on every commit, a subsequent change rarely forks
+from that exact commit — it resolves instead to the **newest baseline whose
+measured commit is an ancestor of its own fork point**, whether the artifact
+lives on that branch directly or is published and pointer-linked from
+elsewhere, with every commit between that baseline and the fork point
+counted as coverage debt the selection has to carry (see coverage debt
+accounting). A fork point with no ancestor baseline at all is the absent
+case the smoke fallback already covers.
 
 ### observable coverage debt
 
