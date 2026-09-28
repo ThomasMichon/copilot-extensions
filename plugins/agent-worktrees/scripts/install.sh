@@ -1004,6 +1004,19 @@ deploy_package() {
         fi
     fi
 
+    # Vendored zero-downtime cutover lib (agent-zdd / module zdd). Install it
+    # before the main package so the bare `python -m pip` fallback path on
+    # Windows (which ignores `[tool.uv.sources]`) never tries to resolve this
+    # unpublished dependency from the package index.
+    local zdd_dir="$PLUGIN_DIR/libs/zdd"
+    if [[ -f "$zdd_dir/pyproject.toml" ]]; then
+        if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-zdd \
+                "$zdd_dir" --quiet; then
+            err "zdd library install failed"
+            return 1
+        fi
+    fi
+
     if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-worktrees "$PLUGIN_DIR" --quiet; then
         err "Package install failed"
         return 1

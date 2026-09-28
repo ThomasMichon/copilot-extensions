@@ -1877,6 +1877,21 @@ function Deploy-Package {
         }
     }
 
+    # Vendored zero-downtime cutover lib (agent-zdd / module zdd). Install it
+    # before the main package so the bare `python -m pip` fallback path (used
+    # when `uv` is absent and therefore ignoring `[tool.uv.sources]`) never
+    # tries to resolve this unpublished dependency from the package index.
+    $zddDir = Join-Path $PluginDir 'libs\zdd'
+    if (Test-Path (Join-Path $zddDir 'pyproject.toml')) {
+        $libRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-zdd' -PkgDir $zddDir
+        if ($libRes.ExitCode -ne 0) {
+            Write-ServiceErr "zdd library install failed (exit $($libRes.ExitCode))"
+            if ($libRes.Output.Trim()) { Write-ServiceErr ("install: " + $libRes.Output.Trim()) }
+            $ErrorActionPreference = $prevEAP
+            return $false
+        }
+    }
+
     $installRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-worktrees' -PkgDir $PluginDir
     $rc = $installRes.ExitCode
     $ErrorActionPreference = $prevEAP

@@ -179,8 +179,11 @@ def test_real_status_monitor_cutover_drains_live_classify_request(monkeypatch) -
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows-only windowless-parent contract")
 def test_spawn_passive_is_windowless_from_pythonw_parent(tmp_path: Path) -> None:
     pythonw = Path(sys.executable).with_name("pythonw.exe")
+    python = Path(sys.executable).with_name("python.exe")
     if not pythonw.is_file():
         pytest.skip("pythonw.exe is unavailable")
+    if not python.is_file():
+        pytest.skip("python.exe is unavailable")
     parent = tmp_path / "windowless_parent.py"
     output = tmp_path / "result.json"
     parent.write_text(
@@ -189,15 +192,16 @@ def test_spawn_passive_is_windowless_from_pythonw_parent(tmp_path: Path) -> None
         "from agent_worktrees import status_monitor_cutover as smc\n"
         "from agent_worktrees import status_monitor_runtime as smr\n"
         "root = Path(sys.argv[1])\n"
+        "runtime_python = str(Path(sys.argv[3]))\n"
         "smr._daemon_environment = lambda: dict(os.environ)\n"
         "smr._daemon_cwd = lambda: str(root)\n"
         "pids = []\n"
         "for port in (49151, 49152):\n"
-        " handle = smc.spawn_passive(sys.executable, port=port)\n"
+        " handle = smc.spawn_passive(runtime_python, port=port)\n"
         " pids.append(getattr(handle, 'pid', None))\n"
-        " time.sleep(0.5)\n"
+        " time.sleep(2.5)\n"
         " handle.terminate()\n"
-        " time.sleep(0.2)\n"
+        " time.sleep(0.5)\n"
         "Path(sys.argv[2]).write_text(json.dumps(pids), encoding='utf-8')\n",
         encoding="utf-8",
     )
@@ -249,7 +253,7 @@ def test_spawn_passive_is_windowless_from_pythonw_parent(tmp_path: Path) -> None
     }
     surfaced = set()
     focus_changes = set()
-    with subprocess.Popen([str(pythonw), "-I", str(parent), str(tmp_path), str(output)]) as proc:
+    with subprocess.Popen([str(pythonw), "-I", str(parent), str(tmp_path), str(output), str(python)]) as proc:
         deadline = time.monotonic() + 25
         while proc.poll() is None and time.monotonic() < deadline:
             surfaced.update(

@@ -1,12 +1,11 @@
-"""Guards for install.ps1's plugin-resolve/dropin-registry/plugin-activation
+"""Guards for install.ps1's vendored shared-lib pre-install blocks.
 pre-install blocks (vendor-pointer-generalization effort): each must resolve
 both the plugin-local (marketplace/release) copy and the repo-root canonical
 fallback (dev checkout, uv-editable canonical reference). A regression that
 drops any fallback would still pass every other installer guard while
 silently reintroducing the bare-pip dependency failure Copilot's review
-caught on PR #4420 -- and plugin-activation's block must always run AFTER
-dropin-registry's and plugin-resolve's, since it imports both at module load
-time."""
+caught on PR #4420 -- and the later transitive-dependency blocks must keep
+their required order."""
 
 from __future__ import annotations
 
@@ -34,7 +33,7 @@ _BLOCKS = {
     ),
     "plugin-activation": (
         "# Vendored plugin activation/inventory lib (agent-plugin-activation /",
-        "\n    $installRes = Invoke-VenvPackageInstall",
+        "# Vendored zero-downtime cutover lib",
     ),
 }
 
@@ -133,3 +132,12 @@ def test_plugin_activation_block_runs_after_its_own_transitive_deps():
     }
     assert positions["plugin-activation"] > positions["dropin-registry"]
     assert positions["plugin-activation"] > positions["plugin-resolve"]
+
+
+def test_zdd_preinstall_block_exists_before_main_package_install():
+    installer = INSTALLER.read_text(encoding="utf-8")
+    zdd_marker = "# Vendored zero-downtime cutover lib (agent-zdd / module zdd)."
+    main_install = "$installRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-worktrees' -PkgDir $PluginDir"
+    assert zdd_marker in installer
+    assert "-PkgName 'agent-zdd'" in installer
+    assert installer.index(zdd_marker) < installer.index(main_install)
