@@ -587,6 +587,7 @@ class TestClassifyPRFlow:
         assert f.applies("pr-merge") is True
         assert f.applies("pr-watch") is True
         assert f.applies("pr-complete") is True
+        assert f.applies("pr-nudge") is True
         assert "auto-merge" in f.summary
 
     def test_human_merge_when_enabled_but_no_label(self):
@@ -601,6 +602,7 @@ class TestClassifyPRFlow:
         assert f.applies("pr-watch") is True
         assert f.applies("pr-status") is True
         assert f.applies("pr-complete") is True
+        assert f.applies("pr-nudge") is True
         assert "human" in f.summary.lower()
         assert "pr-merge does not apply" in f.summary
 
@@ -621,6 +623,7 @@ class TestClassifyPRFlow:
         # pr-merge applies here (the --now direct-merge path).
         assert f.applies("pr-merge") is True
         assert f.applies("create-pr") is True
+        assert f.applies("pr-nudge") is True
         assert f.reviewer == "copilot"
         assert f.review_latency_hint == "~2m"
         assert f.self_approve is True

@@ -856,7 +856,7 @@ PROFILE_PR_AGENT_MERGE = "pr-agent-merge"  # PR-gated, author signals merge cons
 PROFILE_PR_SELF_MERGE = "pr-self-merge"    # PR-gated, submitter merges directly
 
 #: Every pr-* author verb, for describing applicability.
-_ALL_PR_VERBS = ("create-pr", "pr-watch", "pr-status", "pr-merge", "pr-complete")
+_ALL_PR_VERBS = ("create-pr", "pr-watch", "pr-status", "pr-merge", "pr-complete", "pr-nudge")
 
 
 @dataclass(frozen=True)
