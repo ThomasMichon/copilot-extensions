@@ -1,0 +1,9 @@
+{
+  "comment": "agent-bridge: a represented live session's bridge-delivered message carries its text (relay_body/relay_from/relay_kind from the <agent-message> envelope), not only its 'Message from ...' header",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    }
+  ]
+}

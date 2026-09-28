@@ -28,6 +28,31 @@ class TestTranslateSdkEvent:
             ("agent_message", {"text": "yo"})
         ]
 
+    def test_a_bridge_delivered_message_carries_its_text(self) -> None:
+        envelope = (
+            "<current_datetime>x</current_datetime>\n\n"
+            '<agent-message from="D:\\repos\\h.worktrees\\w1" reply-to="w1" msg-id="156" kind="prompt">\n'
+            "Operator: please re-check the Playwright run.\n</agent-message>"
+        )
+        out = translate_sdk_event("user.message", {
+            "content": "Message from D:\\repos\\h.worktrees\\w1 (via agent-bridge)",
+            "source": "agent-bridge", "transformedContent": envelope,
+        })
+        assert out == [("user_message", {
+            "content": "Message from D:\\repos\\h.worktrees\\w1 (via agent-bridge)",
+            "relay_body": "Operator: please re-check the Playwright run.",
+            "relay_from": "D:\\repos\\h.worktrees\\w1", "relay_kind": "prompt",
+        })]
+        # Only the bridge's own deliveries are read; anything else is unchanged.
+        assert translate_sdk_event("user.message", {
+            "content": "hi", "transformedContent": "<agent-message>x</agent-message>",
+        }) == [("user_message", {"content": "hi"})]
+        long = translate_sdk_event("user.message", {
+            "content": "h", "source": "agent-bridge",
+            "transformedContent": "<agent-message>" + "y" * 9000 + "</agent-message>",
+        })[0][1]["relay_body"]
+        assert len(long) == 8001 and long.endswith("\u2026")
+
     def test_reasoning_maps_to_thought(self) -> None:
         assert translate_sdk_event(
             "assistant.reasoning", {"content": "thinking"}
