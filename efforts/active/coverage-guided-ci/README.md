@@ -125,6 +125,14 @@ order.
 ### Phase 1 — Baseline generation + correlation at the promotion gate
 - [ ] Instrument the promotion gate's full-suite run to emit a durable,
       versioned baseline (test → covered lines/branches).
+- [ ] Publish baselines **atomically**: since `validate-and-promote.yml` runs
+      per-plugin suites as separate matrix jobs (plus `worktree-manager`
+      separately), never persist per-job coverage results directly as a
+      selectable generation. Aggregate first, and create the generation only
+      after every required validation result for the pinned commit has
+      succeeded — the same all-required-jobs-green condition the `promote`
+      job itself already gates on — so a job failure/cancellation can never
+      leave a partial, silently-incomplete baseline live for selection.
 - [ ] Implement baseline correlation: durably tie the artifact to the exact
       `dev` commit it was measured against, resolvable later by commit
       ancestry.
@@ -163,9 +171,20 @@ order.
 - [ ] Wire `ci.yml`'s `worktrees-smoke` job to use diff-scoped selection
       (Phases 1-3's output) instead of `--collect-only`, keeping the
       existing `--guards` real-execution step alongside it.
-- [ ] Validate against the motivating case: a constructed change reproducing
-      the shape of #4353/#4378/#4379's `_CLUSTER_FREE_MODULES` drift must
-      get selected and fail, not silently pass collect-only.
+- [ ] Validate against a **genuinely runtime-covered** regression, not
+      #4353/#4378/#4379: that regression's own detecting test
+      (`test_cluster_free_modules_matches_regenerated_scan`) reads each CLI
+      module as text and parses its AST rather than executing the changed
+      lines, so ordinary line/branch coverage can never create a
+      test→changed-file attribution edge for it — the `--guards` step
+      already catches that specific class independently of selection
+      (real, but not proof selection works). Construct or pick a change
+      whose regression is caught by a test that actually *executes* the
+      changed lines, and confirm diff-scoped selection selects that test
+      and fails, not silently passes an incomplete subset. Text/AST-scanning
+      guard tests (this drift-check pair included) remain validated by the
+      `--guards` tier, not by coverage-guided selection, until/unless a
+      later phase adds non-runtime (static-analysis) dependency edges.
 - [ ] Measure and record real wall-clock PR-CI impact for `agent-worktrees`
       changes (before/after).
 
@@ -203,11 +222,13 @@ copilot-extensions-specific Phase 1.
       touched ones not), or a change crossing the debt threshold each falls
       back to the smoke tier — all three paths verified by test, and all
       three are auditable after the fact.
-- [ ] Phase 4: reproduce the #4353/#4378/#4379 regression shape on a branch
-      predating this effort's fix and confirm diff-scoped selection would
-      have caught it (selects the drifted test); confirm real `worktrees-smoke`
-      PR-CI wall-clock time versus the prior collect-only baseline and the
-      full-suite baseline.
+- [ ] Phase 4: construct a change whose regression is caught by a
+      genuinely runtime-executed test (not #4353/#4378/#4379's text/AST
+      scanner — see that phase's own note on why it can't prove selection)
+      and confirm diff-scoped selection selects that test and fails, rather
+      than silently passing an incomplete subset; separately confirm real
+      `worktrees-smoke` PR-CI wall-clock time versus the prior collect-only
+      baseline and the full-suite baseline.
 - [ ] No phase regresses `test-portfolio`'s own host-safety or budget
       guarantees — the selector is an additional CLI mode, not a rewrite of
       how any existing test tier runs.
