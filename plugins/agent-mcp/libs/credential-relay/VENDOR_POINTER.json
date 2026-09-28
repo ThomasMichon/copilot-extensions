@@ -1,6 +1,0 @@
-{
-  "schema": "copilot-extensions.vendor-pointer",
-  "version": 1,
-  "source": "libs/credential-relay",
-  "kind": "src-passthrough"
-}

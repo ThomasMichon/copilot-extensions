@@ -1468,3 +1468,47 @@ _Pending._
   smallest-blast-radius-first ordering. Its conversion (and every later
   one) must extend that canonical-lib CI step with the newly converted
   lib, so no lib loses its suite the same way.
+
+### 2026-09-28 — Phase 1: converted `credential-relay` (4 consumers)
+
+- Applied the now-standard recipe to `credential-relay`'s 4 consumers
+  (`agent-containers`, `agent-mcp`, `agent-bridge`, `agent-codespaces`):
+  `tools/sync-vendored-libs.py --uv-editable` per consumer, hand-updated
+  each consumer's `[tool.uv.sources]` prose comment, added
+  `libs/credential-relay/tests/conftest.py` and extended the CI canonical-
+  lib test step (PR #4331's own fix, applied proactively this time rather
+  than as a follow-up review finding) to run `libs/credential-relay/tests`
+  alongside the other two canonical suites.
+- Validated end-to-end: `sync-vendored-libs.py --check`/`check-vendored-
+  libs-sync.py`/`check-install-contract.py` all green; all 4 consumers'
+  full plugin suites via `run-plugin-tests.py <plugin> --reinstall`:
+  `agent-mcp` (358+258 passed across sub-suites), `agent-bridge` (225
+  passed, 10 skipped), `agent-codespaces` (294+41 passed) all fully
+  green; `agent-containers` (137 passed, 1 skipped, 1 pre-existing
+  failure in `test_worktrees_peer.py` unrelated to this lib -- confirmed
+  via `git stash` against unmodified `dev` tip, same single failure).
+  Non-editable install probe (`uv pip install plugins/agent-bridge`, no
+  `-e`) -- `credential_relay.__file__` resolved live to canonical, not a
+  frozen copy. `materialize_main.py --dest` round-tripped all 4 pointers
+  byte-for-byte (no source drift; cache-artifact-only diffs).
+- **Caught the same stray-build-artifact false alarm as the previous
+  lib** (documented in the prior journal entry, now a known pattern for
+  this recipe): the non-editable-install probe left an empty stray
+  `plugins/agent-containers/libs/credential-relay/src/` directory,
+  which made `materialize_main.py` report a false `SKIP ... already
+  exists` for that one pointer. Removed it and re-ran; materialized
+  cleanly.
+- **`libs/credential-relay/tests/test_az_login.py`'s `az`-CLI-dependent
+  tests fail locally in a sandbox with no `az` binary on `PATH`**
+  (`shutil.which("az")` gates real resolution before the test's own
+  subprocess mock ever intercepts) -- confirmed environment-only, not a
+  regression: stubbing a fake `az` executable onto `PATH` made all 112
+  tests in the file pass. GitHub Actions `ubuntu-latest` runners ship
+  Azure CLI preinstalled, so the new CI step is expected to pass there
+  even though it can fail in a bare local sandbox.
+- Added a changefile per touched plugin (`agent-containers`, `agent-mcp`,
+  `agent-bridge`, `agent-codespaces`); no changefile needed for the
+  `.github/workflows/ci.yml` step extension
+  (`check-changefile-presence.py` confirmed clean without one).
+- **Next up**: `ssh-manager` (4 consumers), per the effort's own
+  smallest-blast-radius-first ordering.
