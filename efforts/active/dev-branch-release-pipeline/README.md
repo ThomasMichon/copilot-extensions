@@ -7,8 +7,13 @@
   before assuming it's "live").
 - **Created:** 2026-09-22
 - **Status:** Active
-- **Vision:** none yet — this effort may spawn a `visions/release-pipeline`
-  entry once the design settles; revisit at Phase 2/3 boundary.
+- **Vision:** none yet for the pipeline itself — this effort may spawn a
+  `visions/release-pipeline` entry once the design settles; revisit at
+  Phase 2/3 boundary. It is, however, the named realization vehicle for the
+  [`coverage-guided-ci`](../../../visions/coverage-guided-ci/README.md)
+  vision's baseline-generation/propagation concept (this pipeline's
+  promotion gate is the natural place to earn and feed back a coverage
+  baseline) — a candidate future phase, not yet planned below.
 - **Umbrella issue:** ThomasMichon/copilot-extensions#3336
 - **Sub-issues:** ThomasMichon/copilot-extensions#182 (immediate pain this
   also resolves); #3567 (promote.yml read the wrong SHA from
