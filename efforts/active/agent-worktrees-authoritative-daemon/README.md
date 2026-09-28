@@ -728,19 +728,26 @@ potentially-blocking bug -- two instances can race applying `mux-status-v1`
 writes to the same session, corrupting rendering in ways indistinguishable
 from the render-freeze bugs fixed above. Added to the facility's own
 error-response-discipline documentation as a cross-host/cross-OS trigger,
-with a TOCTOU/PID-reuse-safe recipe (Copilot review correctly flagged the
-initial draft's naive "kill every non-owning PID" as racy -- a lock can be
-replaced, or its PID reused by an unrelated process, between an earlier read
-and the kill): **whenever an agent observes more than one resident
-`status-monitor` process on a single host, immediately before acting,
-re-read the lock file and validate it with `locks.read_lock`/
-`locks.lock_is_live`** (`plugins/agent-worktrees/src/agent_worktrees/locks.py`
--- live iff the recorded pid is alive AND its `start_time` token still
-matches, guarding against exactly this reuse case) **for the one currently-
-live legitimate owner, confirm each OTHER candidate's own command line still
-genuinely names `status-monitor` right before terminating it, and kill only
-those by specific PID** -- never assume duplicates are harmless, never trust
-a single stale read, and never blanket-kill without both checks.
+with a fail-closed, identity-bound recipe (two rounds of Copilot review
+correctly hardened this: first flagging the initial draft's naive "kill
+every non-owning PID from an earlier read" as racy, then flagging that even
+a fresh command-line check before a plain PID kill is still not
+reuse-safe -- the candidate can exit and its PID be reused between that
+check and the kill itself): **whenever an agent observes more than one
+resident `status-monitor` process on a single host, re-read the lock file
+(`locks.read_lock`) and check `locks.lock_is_live`** for each candidate PID's
+own recorded `start_time` (`plugins/agent-worktrees/src/agent_worktrees/locks.py`)
+-- **note `lock_is_live` itself fails OPEN (treats a pid as live) when
+`start_time` is absent or unreadable, so it alone does not prove a candidate
+is stale; use it only to find the one entry the lock FILE claims as current
+owner, never as the sole basis for judging a candidate safe to kill** --
+then **terminate every OTHER candidate only via
+`procs.terminate_pid_if_identity(pid, expected_start_time)`**, never a plain
+`kill`/`Stop-Process` by bare PID: that helper binds the termination itself
+to the verified process identity (an open pidfd + start-time check on POSIX,
+a creation-time check through the same handle `TerminateProcess` uses on
+Windows) and fails closed if the identity can't be proven, closing the
+reuse window a check-then-kill can never fully close on its own.
 
 ### 2026-09-28 — Real bug found via CI drift: `picker-reconcile-local`'s fast-dispatch path was broken, blocking the whole dev->main promotion pipeline
 Found while pushing the `_StatusSegmentCache` fix (above) through the release
