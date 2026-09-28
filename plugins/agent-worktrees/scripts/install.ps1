@@ -792,6 +792,14 @@ function Invoke-VersionedActivate {
             Write-ServiceWarn "Could not touch superseded slot mtime ($prevSlot): $($_.Exception.Message)"
         }
     }
+    $monitorWasLive = $false
+    if (-not $ContextualInstall) {
+        $prevHealthPP = $env:PYTHONPATH
+        $env:PYTHONPATH = $null
+        & $VenvPython -c 'from agent_worktrees.status_monitor_cutover import monitor_live_now as _f; raise SystemExit(0 if _f() else 1)' > $null 2>&1
+        $monitorWasLive = ($LASTEXITCODE -eq 0)
+        $env:PYTHONPATH = $prevHealthPP
+    }
     & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
         ForEach-Object { Write-ServiceChanged $_ }
     if ($LASTEXITCODE -ne 0) {
@@ -805,9 +813,11 @@ function Invoke-VersionedActivate {
     # back once to the legacy restart path). Best-effort, never fatal.
     if (-not $ContextualInstall) {
         try {
+            $env:AGENT_WORKTREES_MONITOR_WAS_LIVE = if ($monitorWasLive) { '1' } else { '0' }
             & $LinkPython -c 'from agent_worktrees.status_monitor_cutover import installer_after_update as _f; raise SystemExit(_f())' 2>&1 |
                 ForEach-Object { Write-ServiceChanged "monitor: $_" }
         } catch {}
+        finally { Remove-Item Env:AGENT_WORKTREES_MONITOR_WAS_LIVE -ErrorAction SilentlyContinue }
     }
     # #742: record the just-activated version as `last-known-good` so a future
     # marker-absent resolution (resolve-runtime.ps1 tier 2) prefers it over a

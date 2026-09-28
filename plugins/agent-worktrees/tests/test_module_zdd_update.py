@@ -35,7 +35,8 @@ def _make_tree(tmp_path, *, zero_downtime: bool, unix: bool = False):
     (mod_dir / "scripts").mkdir(parents=True)
     (mod_dir / "scripts" / "install.ps1").write_text("# installer\n")
     if unix:
-        (mod_dir / "scripts" / "install.sh").write_text("#!/usr/bin/env bash\n")
+        marker = "\n# --zero-downtime\n" if zero_downtime else "\n"
+        (mod_dir / "scripts" / "install.sh").write_text("#!/usr/bin/env bash" + marker)
     pj: dict = {"name": "agent-bridge"}
     if zero_downtime:
         pj["zeroDowntimeUpdate"] = True
@@ -89,6 +90,16 @@ def test_non_windows_uses_posix_flag(tmp_path, recorded):
     assert argv is not None
     assert "--zero-downtime" in argv
     assert "-ZeroDowntime" not in argv
+
+
+def test_non_windows_skips_flag_without_installer_support(tmp_path, recorded):
+    plugin_dir = _make_tree(tmp_path, zero_downtime=False, unix=True)
+    mod_dir = plugin_dir.parent / "agent-bridge"
+    (mod_dir / "plugin.json").write_text(json.dumps({"name": "agent-bridge", "zeroDowntimeUpdate": True}))
+    m._update_modules(plugin_dir, "linux", None, force=True)
+    argv = _installer_update_argv(recorded)
+    assert argv is not None
+    assert "--zero-downtime" not in argv
 
 
 def test_unified_update_skips_inactive_module_runtime(tmp_path, recorded):

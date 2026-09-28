@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import socket
 import socketserver
 import subprocess
@@ -235,6 +236,7 @@ def activate_after_update(
     runtime_python: str | None = None,
     health_timeout: float = 60.0,
     drain_timeout: float = 30.0,
+    monitor_was_live: bool | None = None,
 ) -> dict[str, object]:
     """Installer seam: cut over a live monitor after activating a new slot."""
     from . import status_monitor_runtime as smr
@@ -246,13 +248,21 @@ def activate_after_update(
     if not summary["enabled"]:
         summary["reason"] = "disabled"
         return summary
+    monitor_was_live = _monitor_lock_is_live() if monitor_was_live is None else bool(monitor_was_live)
     if not _monitor_lock_is_live():
+        if monitor_was_live:
+            summary["action"] = "restart"
+            summary["restart"] = smr._restart_status_monitor()
+            return summary
         summary["reason"] = "no-live-monitor"
         return summary
     active_url = _monitor_control_url_from_route()
     if active_url is None:
-        summary["action"] = "restart"
-        summary["restart"] = smr._restart_status_monitor()
+        if monitor_was_live:
+            summary["action"] = "restart"
+            summary["restart"] = smr._restart_status_monitor()
+            return summary
+        summary["reason"] = "no-routed-monitor"
         return summary
 
     try:
@@ -285,7 +295,9 @@ def activate_after_update(
 
 def installer_after_update() -> int:
     """Non-fatal installer wrapper that prints a short cutover summary."""
-    summary = activate_after_update()
+    summary = activate_after_update(
+        monitor_was_live=os.environ.get("AGENT_WORKTREES_MONITOR_WAS_LIVE") == "1",
+    )
     action = str(summary.get("action") or "noop")
     if not summary.get("enabled"):
         print("status-monitor disabled; skipped")
@@ -327,6 +339,10 @@ def _acquire_cutover_lock(
             if time.monotonic() >= deadline:
                 raise
             time.sleep(poll_s)
+
+
+def monitor_live_now() -> bool:
+    return _monitor_lock_is_live()
 
 
 def live_endpoint() -> routing.Endpoint | None:

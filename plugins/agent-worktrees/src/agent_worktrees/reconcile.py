@@ -1306,6 +1306,14 @@ def _zero_downtime_update(plugin_dir: Path) -> bool:
     return bool(data.get("zeroDowntimeUpdate"))
 
 
+def _posix_zero_downtime_flag_supported(plugin_dir: Path) -> bool:
+    install_sh = plugin_dir / "scripts" / "install.sh"
+    try:
+        return install_sh.is_file() and "--zero-downtime" in install_sh.read_text(encoding="utf-8")
+    except OSError:
+        return False
+
+
 def runtime_installer_argv(
     plugin_dir: Path,
     *,
@@ -1395,7 +1403,8 @@ def runtime_installer_argv(
         p = scripts / fname
         if p.is_file():
             argv = ["bash", str(p)] + (["update"] if has_update else [])
-            if has_update and zero_downtime: argv.append("--zero-downtime")
+            if has_update and zero_downtime and _posix_zero_downtime_flag_supported(plugin_dir):
+                argv.append("--zero-downtime")
             return " ".join(argv), argv
     return None
 

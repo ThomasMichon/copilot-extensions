@@ -740,7 +740,7 @@ def _update_modules(
         if _reconcile._zero_downtime_update(module_dir):
             if platform_name == "windows":
                 update_args.append("-ZeroDowntime")
-            else:
+            elif _reconcile._posix_zero_downtime_flag_supported(module_dir):
                 update_args.append("--zero-downtime")
         output.header(f"Updating Module: {name}")
         try:

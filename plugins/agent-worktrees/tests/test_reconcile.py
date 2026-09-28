@@ -1959,7 +1959,7 @@ def test_zero_downtime_appends_flag(tmp_path, monkeypatch):
     pdir = tmp_path / "plug"
     (pdir / "scripts").mkdir(parents=True)
     (pdir / "scripts" / "install.ps1").write_text("", encoding="utf-8")
-    (pdir / "scripts" / "install.sh").write_text("", encoding="utf-8")
+    (pdir / "scripts" / "install.sh").write_text("# --zero-downtime\n", encoding="utf-8")
 
     # No zeroDowntimeUpdate -> plain `update`, no flag.
     (pdir / "plugin.json").write_text(
@@ -1980,6 +1980,10 @@ def test_zero_downtime_appends_flag(tmp_path, monkeypatch):
     monkeypatch.setattr(reconcile.platform, "system", lambda: "Linux")
     _, argv = reconcile.runtime_installer_argv(pdir)
     assert argv[-2:] == ["update", "--zero-downtime"]
+
+    (pdir / "scripts" / "install.sh").write_text("", encoding="utf-8")
+    _, argv = reconcile.runtime_installer_argv(pdir)
+    assert "--zero-downtime" not in argv
 
 
 

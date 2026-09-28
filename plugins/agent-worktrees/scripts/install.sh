@@ -717,6 +717,13 @@ _versioned_activate() {
     if [[ -n "$prev" ]]; then
         touch "$INSTALL_DIR/versions/$prev" 2>/dev/null || true
     fi
+    local monitor_was_live=0
+    if ! $CONTEXTUAL_INSTALL && PYTHONPATH= "$VENV_PYTHON" - <<'PY' >/dev/null 2>&1; then
+from agent_worktrees.status_monitor_cutover import monitor_live_now
+raise SystemExit(0 if monitor_live_now() else 1)
+PY
+        monitor_was_live=1
+    fi
     if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --no-link; then
         err "Failed to activate runtime version (marker -> versions/$SRC_VERSION)"
         return 1
@@ -727,7 +734,8 @@ _versioned_activate() {
     # (or, for a pre-cutover daemon with no routed control endpoint yet, fall
     # back once to the legacy restart path). Best-effort, never fatal.
     if ! $CONTEXTUAL_INSTALL; then
-        "$VENV_PYTHON" - <<'PY' 2>&1 | sed 's/^/  → monitor: /' || true
+        AGENT_WORKTREES_MONITOR_WAS_LIVE="$monitor_was_live" \
+            "$VENV_PYTHON" - <<'PY' 2>&1 | sed 's/^/  → monitor: /' || true
 from agent_worktrees.status_monitor_cutover import installer_after_update
 raise SystemExit(installer_after_update())
 PY
