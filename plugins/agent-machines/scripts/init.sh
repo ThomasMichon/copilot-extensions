@@ -669,19 +669,28 @@ if [[ ( "$ACTION" == "cell-provision" || "$ACTION" == "slot-cutover" ) &&
             owner="$(readlink "$LOCK_LINK" 2>/dev/null || true)"
             if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
                 sleep 1
-            elif mkdir "$LOCK_LINK.reap" 2>/dev/null; then
+            elif ln -s "$$" "$LOCK_LINK.reap" 2>/dev/null; then
                 # Review finding (round 10, on the stamp lock's identical
                 # sibling pattern below): a plain readlink-then-rm here is a
                 # TOCTOU race -- another process could reap the same stale
                 # link and create its own live one between our two readlink
-                # calls, and this rm -f would then delete THAT live lock.
-                # `mkdir` is atomic, so only one process at a time can hold
-                # this reap mutex; re-verify the link is still the SAME
-                # stale value we observed before removing it.
+                # calls, and this rm -f would then delete THAT live lock. A
+                # PID-bearing symlink (same pattern as the main lock, NOT a
+                # bare `mkdir`) is atomic AND self-healing: only one process
+                # at a time can hold it, and if ITS owner dies before
+                # cleanup, the `elif` branch below reclaims it instead of
+                # wedging every future reap attempt forever (round-11
+                # finding on the round-10 fix itself). Re-verify the link is
+                # still the SAME stale value we observed before removing it.
                 if [[ "$(readlink "$LOCK_LINK" 2>/dev/null || true)" == "$owner" ]]; then
                     rm -f "$LOCK_LINK"
                 fi
-                rmdir "$LOCK_LINK.reap" 2>/dev/null || true
+                rm -f "$LOCK_LINK.reap"
+            elif [[ "$(readlink "$LOCK_LINK.reap" 2>/dev/null || true)" =~ ^[0-9]+$ ]] &&
+                 ! kill -0 "$(readlink "$LOCK_LINK.reap" 2>/dev/null)" 2>/dev/null; then
+                # The reap mutex itself is stale (its owner died mid-reap) --
+                # reclaim it so the main lock can never wedge permanently.
+                rm -f "$LOCK_LINK.reap" 2>/dev/null || true
             else
                 sleep 0.1
             fi
@@ -1440,6 +1449,21 @@ STUBEOF
 # default) and COPILOT_EXT_NO_FLOCK=1 still get real mutual exclusion, not a
 # best-effort no-op.
 if [[ "$ACTION" == "stamp" ]]; then
+    # Review finding (round 11): deploy_binstub's generated stub hardcodes
+    # `$HOME/.agent-machines` as its marker root (matching the Windows
+    # `.cmd`'s own hardcoded `%USERPROFILE%\.agent-machines`, rejected for
+    # the same reason in round 10) -- it does NOT follow a custom
+    # --install-dir. A custom INSTALL_DIR would therefore publish payload-dir
+    # under a root the generated stub can never read, producing a broken
+    # (exit-1-on-first-use) launcher. bootstrap-check.sh's real
+    # sessionStart-hook call never passes --install-dir for this action, so
+    # reject it explicitly here rather than silently deploying a stub that
+    # cannot work.
+    _default_install_dir="$HOME/.agent-machines"
+    if [[ "$INSTALL_DIR" != "$_default_install_dir" ]]; then
+        _fail "stamp only supports the default install dir ($_default_install_dir) -- the generated binstub hardcodes that root and cannot read markers written to '$INSTALL_DIR'."
+        exit 1
+    fi
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
     _stamp_lock_link=""
     _unlock_stamp() {
@@ -1462,18 +1486,26 @@ if [[ "$ACTION" == "stamp" ]]; then
             owner="$(readlink "$_stamp_lock_link" 2>/dev/null || true)"
             if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
                 sleep 1
-            elif mkdir "$_stamp_lock_link.reap" 2>/dev/null; then
+            elif ln -s "$$" "$_stamp_lock_link.reap" 2>/dev/null; then
                 # Review finding (round 10): a plain readlink-then-rm is a
                 # TOCTOU race -- another process could reap the same stale
                 # link and create its own live one between our two readlink
-                # calls, and this rm -f would then delete THAT live lock.
-                # `mkdir` is atomic, so only one process at a time can hold
-                # this reap mutex; re-verify the link is still the SAME
+                # calls, and this rm -f would then delete THAT live lock. A
+                # PID-bearing symlink (NOT a bare `mkdir`) is atomic AND
+                # self-healing: if ITS owner dies before cleanup, the next
+                # `elif` branch below reclaims it instead of wedging every
+                # future reap attempt forever (round-11 finding on the
+                # round-10 fix itself). Re-verify the link is still the SAME
                 # stale value we observed before removing it.
                 if [[ "$(readlink "$_stamp_lock_link" 2>/dev/null || true)" == "$owner" ]]; then
                     rm -f "$_stamp_lock_link"
                 fi
-                rmdir "$_stamp_lock_link.reap" 2>/dev/null || true
+                rm -f "$_stamp_lock_link.reap"
+            elif [[ "$(readlink "$_stamp_lock_link.reap" 2>/dev/null || true)" =~ ^[0-9]+$ ]] &&
+                 ! kill -0 "$(readlink "$_stamp_lock_link.reap" 2>/dev/null)" 2>/dev/null; then
+                # The reap mutex itself is stale (its owner died mid-reap) --
+                # reclaim it so the main lock can never wedge permanently.
+                rm -f "$_stamp_lock_link.reap" 2>/dev/null || true
             else
                 sleep 0.1
             fi

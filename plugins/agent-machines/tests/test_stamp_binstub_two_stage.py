@@ -32,6 +32,7 @@ import pytest
 PLUGIN = Path(__file__).resolve().parents[1]
 INIT_PS1 = PLUGIN / "scripts" / "init.ps1"
 INIT_SH = PLUGIN / "scripts" / "init.sh"
+BOOTSTRAP_CHECK_PS1 = PLUGIN / "scripts" / "bootstrap-check.ps1"
 
 WINDOWS_HOSTS = [
     path for path in (
@@ -251,6 +252,58 @@ def test_windows_concurrent_stamp_binstub_leaves_no_torn_binstub(tmp_path, host)
         for _ in range(3)
     ]
     _assert_no_torn_reads_while_running(binstub, procs, prefix="@echo off", suffix=":eof")
+
+
+@pytest.mark.skipif(not WINDOWS_HOSTS, reason="Windows PowerShell required")
+@pytest.mark.parametrize("host", WINDOWS_HOSTS, ids=lambda h: h.stem)
+def test_windows_bootstrap_check_hook_publishes_binstub_before_return(tmp_path, host):
+    """Review finding (round 11): every other test in this file invokes
+    `init.ps1` actions directly, never the actual sessionStart hook entry
+    point (`bootstrap-check.ps1`) with a genuinely fresh install (no
+    deploy-manifest.json). A regression in the synchronous `stamp-binstub`
+    call, `$LASTEXITCODE` handling, command quoting, or the background
+    `Start-Process` launch would pass every other test here while the real
+    hook still violated its own startup contract. This test drives the real
+    hook end-to-end in a fresh sandbox and verifies the launcher is on disk
+    immediately when the hook returns, before waiting for the background
+    `stamp`'s slower snapshot copy to also complete.
+    """
+    env = _sandbox_env(tmp_path)
+    result = subprocess.run(
+        [str(host), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(BOOTSTRAP_CHECK_PS1)],
+        env=env, cwd=tmp_path, capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "{}", (
+        "bootstrap-check.ps1 must emit the session-start hook's expected {} contract"
+    )
+
+    binstub = tmp_path / "userprofile" / ".local" / "bin" / "agent-machines.cmd"
+    assert binstub.is_file(), (
+        "the launcher must exist the instant the hook returns -- the whole "
+        "guarantee the synchronous stamp-binstub call exists to provide"
+    )
+    _assert_binstub_resolves_marker(binstub, env, tmp_path)
+
+    # Give the backgrounded full `stamp` a bounded window to finish its
+    # slower snapshot copy, then confirm it actually did its job too: the
+    # markers should now point at a real snapshots/<version> directory
+    # rather than the fast path's durable-payload-root fallback.
+    install_dir = tmp_path / "userprofile" / ".agent-machines"
+    deadline = time.monotonic() + 30
+    snapshot_marker = install_dir / "stamped-version"
+    while time.monotonic() < deadline and not snapshot_marker.is_file():
+        time.sleep(0.5)
+    assert snapshot_marker.is_file(), (
+        "the backgrounded stamp must eventually complete and record a "
+        "stamped-version marker"
+    )
+    payload_dir = Path((install_dir / "payload-dir").read_text(encoding="utf-8").strip())
+    assert "snapshots" in payload_dir.parts, (
+        "once the background stamp completes, payload-dir must point at the "
+        "real versioned snapshot, not still the fast path's durable-origin "
+        "fallback"
+    )
 
 
 @pytest.mark.skipif(not BASH, reason="bash required")

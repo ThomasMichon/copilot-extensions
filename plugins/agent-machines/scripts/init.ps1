@@ -1913,45 +1913,50 @@ function Invoke-StampBinstubOnly {
         Write-Fail "stamp-binstub only supports the default install dir ($DefaultInstallDir) -- the generated launcher hardcodes that root and cannot read markers written to '$InstallDir'."
         exit 1
     }
-    $mutex = Enter-StampLock
-    try {
-        foreach ($dir in @($InstallDir, $LocalBin)) {
-            if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-        }
-        # Review finding: without a usable payload-dir marker, the generated
-        # binstub's self-provisioning path (":_prov" in the .cmd) reads an
-        # empty %_ROOT%\payload-dir, finds no installer, and exits 127 --
-        # even though the binstub itself now exists. Point the marker at a
-        # durable payload root as an immediate, correct fallback (see the
-        # round-7 comment below for exactly which one and why); the
-        # background `stamp` overwrites both markers with the real snapshot
-        # path once its copy completes, same as before.
-        $payloadDirMarker = Join-Path $InstallDir 'payload-dir'
-        $payloadOriginMarker = Join-Path $InstallDir 'payload-origin'
-        # Publish atomically (Replace-or-Move via Publish-FileAtomically): a
-        # generated binstub reads payload-dir OUTSIDE this stamp mutex, so a
-        # direct truncating write or a non-atomic Move-Item here could hand a
-        # concurrent reader an empty/partial marker and a spurious exit 127.
-        # Review finding (round 7): the ORIGINAL fix pointed the marker at
-        # $PluginDir -- on a marketplace install this is the per-invocation
-        # `.install-stage/<ts>-<pid>/...` copy the install-contract self-stage
-        # above creates, NOT a durable location. Once this process exits, a
-        # LATER invocation's own self-stage reaper (see the dead-stage-dir
-        # cleanup a few hundred lines above) is free to delete this exact
-        # stage dir, leaving payload-dir pointing at a missing scripts\init.ps1
-        # and a spurious exit 127. $probePayload is the durable original
-        # payload root (the marketplace's own installed-plugins singleton, or
-        # the value COPILOT_PLUGIN_STAGED_FROM was already re-exec'd with) --
-        # it is never a throwaway per-invocation directory, so use it here
-        # instead; the background `stamp` still overwrites both markers with
-        # the even-more-durable snapshot path once its copy completes.
-        Publish-FileAtomically -Path $payloadDirMarker -Content $probePayload -Encoding $utf8NoBom
-        Publish-FileAtomically -Path $payloadOriginMarker -Content $probePayload -Encoding $utf8NoBom
-        Deploy-SelfProvisioningBinstub
-    } finally {
-        [void]$mutex.ReleaseMutex()
-        $mutex.Dispose()
+    # Review finding (round 11): this used to take the SAME Enter-StampLock
+    # mutex Invoke-Stamp holds across its whole (multi-second) snapshot copy.
+    # A concurrent slow `stamp` already holding it made this "fast" path wait
+    # behind it for up to 20 seconds -- reintroducing the very hook-timeout
+    # race this two-stage split exists to prevent. Deliberately NOT taking
+    # any lock here: every operation below (Publish-FileAtomically's marker
+    # writes, Deploy-SelfProvisioningBinstub's stub/resolver writes) was
+    # already hardened in round 9 to be safe under UNLOCKED concurrent
+    # callers -- non-overwriting Move-Item with retry-through-Replace() on a
+    # destination race -- so this fast path no longer needs mutual exclusion
+    # to be correct, only to be genuinely fast.
+    foreach ($dir in @($InstallDir, $LocalBin)) {
+        if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
+    # Review finding: without a usable payload-dir marker, the generated
+    # binstub's self-provisioning path (":_prov" in the .cmd) reads an
+    # empty %_ROOT%\payload-dir, finds no installer, and exits 127 --
+    # even though the binstub itself now exists. Point the marker at a
+    # durable payload root as an immediate, correct fallback (see the
+    # round-7 comment below for exactly which one and why); the
+    # background `stamp` overwrites both markers with the real snapshot
+    # path once its copy completes, same as before.
+    $payloadDirMarker = Join-Path $InstallDir 'payload-dir'
+    $payloadOriginMarker = Join-Path $InstallDir 'payload-origin'
+    # Publish atomically (Replace-or-Move via Publish-FileAtomically): a
+    # generated binstub reads payload-dir OUTSIDE any lock, so a direct
+    # truncating write or a non-atomic Move-Item here could hand a
+    # concurrent reader an empty/partial marker and a spurious exit 127.
+    # Review finding (round 7): the ORIGINAL fix pointed the marker at
+    # $PluginDir -- on a marketplace install this is the per-invocation
+    # `.install-stage/<ts>-<pid>/...` copy the install-contract self-stage
+    # above creates, NOT a durable location. Once this process exits, a
+    # LATER invocation's own self-stage reaper (see the dead-stage-dir
+    # cleanup a few hundred lines above) is free to delete this exact
+    # stage dir, leaving payload-dir pointing at a missing scripts\init.ps1
+    # and a spurious exit 127. $probePayload is the durable original
+    # payload root (the marketplace's own installed-plugins singleton, or
+    # the value COPILOT_PLUGIN_STAGED_FROM was already re-exec'd with) --
+    # it is never a throwaway per-invocation directory, so use it here
+    # instead; the background `stamp` still overwrites both markers with
+    # the even-more-durable snapshot path once its copy completes.
+    Publish-FileAtomically -Path $payloadDirMarker -Content $probePayload -Encoding $utf8NoBom
+    Publish-FileAtomically -Path $payloadOriginMarker -Content $probePayload -Encoding $utf8NoBom
+    Deploy-SelfProvisioningBinstub
 }
 
 function Invoke-Stamp {
