@@ -1,0 +1,336 @@
+"""Installer-driven status-monitor cutover helpers."""
+
+from __future__ import annotations
+
+import json
+import socket
+import socketserver
+import subprocess
+import sys
+import threading
+from collections.abc import Callable
+from pathlib import Path
+from urllib.parse import urlparse
+
+from agent_procutil import detached_kwargs, windowless_python, windowless_python_env
+from zdd import routing
+from zdd.cutover import CutoverOrchestrator
+
+from . import locks
+
+_BIND = "127.0.0.1"
+_READ_TIMEOUT_S = 5.0
+
+
+def routing_dir(runtime_home: Path | None = None) -> Path:
+    from . import status_monitor_runtime as smr
+
+    root = runtime_home if runtime_home is not None else smr._aw_runtime_home()
+    return Path(root) / "status-monitor-routing"
+
+
+def pick_free_port(bind: str = _BIND) -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind((bind, 0))
+        return int(sock.getsockname()[1])
+
+
+class _ControlServer(socketserver.ThreadingTCPServer):
+    allow_reuse_address = False
+    daemon_threads = True
+
+    def __init__(self, address, handler, *, owner):
+        self.owner = owner
+        super().__init__(address, handler)
+
+    def process_request(self, request, client_address) -> None:
+        self.owner._on_request_accepted()
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self.owner._on_request_finished()
+            raise
+
+    def process_request_thread(self, request, client_address) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self.owner._on_request_finished()
+
+
+class _ControlHandler(socketserver.StreamRequestHandler):
+    def handle(self) -> None:
+        try:
+            self.request.settimeout(_READ_TIMEOUT_S)
+            raw = self.rfile.readline(256 * 1024)
+            request = json.loads(raw.decode("utf-8"))
+            if not isinstance(request, dict):
+                return
+            action = str(request.get("action") or "health")
+            payload = request.get("payload")
+            if not isinstance(payload, dict):
+                payload = {}
+            result = self.server.owner.handle(action, payload)  # type: ignore[attr-defined]
+            if not isinstance(result, dict):
+                result = {}
+            self.wfile.write(
+                json.dumps({"version": 1, "result": result}, separators=(",", ":")).encode("utf-8")
+                + b"\n"
+            )
+        except Exception:
+            return
+
+
+class ControlServer:
+    """Loopback control plane for the resident status-monitor."""
+
+    def __init__(self, handle: Callable[[str, dict], dict], *, port: int | None = None):
+        self._handle = handle
+        self._active_handlers = 0
+        self._active_handlers_lock = threading.Lock()
+        bind = (_BIND, int(port) if port is not None else 0)
+        self.server = _ControlServer(bind, _ControlHandler, owner=self)
+        self.thread = threading.Thread(
+            target=self.server.serve_forever,
+            name="agent-worktrees-status-monitor-control",
+            daemon=True,
+        )
+
+    def start(self) -> None:
+        self.thread.start()
+
+    @property
+    def port(self) -> int:
+        return int(self.server.server_address[1])
+
+    def close(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=1)
+
+    def handle(self, action: str, payload: dict) -> dict:
+        return self._handle(action, payload)
+
+    def _on_request_accepted(self) -> None:
+        with self._active_handlers_lock:
+            self._active_handlers += 1
+
+    def _on_request_finished(self) -> None:
+        with self._active_handlers_lock:
+            self._active_handlers -= 1
+
+    def active_handler_count(self) -> int:
+        with self._active_handlers_lock:
+            return self._active_handlers
+
+
+class ControlClient:
+    """Small JSON-line client for the status-monitor control surface."""
+
+    def __init__(self, base_url: str, *, timeout: float = 5.0):
+        parsed = urlparse(base_url)
+        if parsed.scheme not in ("http", "") or not parsed.hostname or parsed.port is None:
+            raise ValueError(f"invalid status-monitor control URL: {base_url!r}")
+        self.host = parsed.hostname
+        self.port = int(parsed.port)
+        self.timeout = timeout
+
+    def _request(self, action: str, payload: dict | None = None) -> dict:
+        body = json.dumps(
+            {"version": 1, "action": action, "payload": payload or {}},
+            separators=(",", ":"),
+        ).encode("utf-8") + b"\n"
+        with socket.create_connection((self.host, self.port), timeout=self.timeout) as sock:
+            sock.settimeout(self.timeout)
+            sock.sendall(body)
+            sock.shutdown(socket.SHUT_WR)
+            buf = b""
+            while not buf.endswith(b"\n"):
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                buf += chunk
+        response = json.loads(buf.decode("utf-8"))
+        result = response.get("result")
+        if not isinstance(result, dict):
+            raise ValueError("status-monitor control response missing result")
+        return result
+
+    def health(self) -> dict:
+        return self._request("health")
+
+    def drain(self, *, timeout: float, poll: float, force: bool) -> dict:
+        return self._request(
+            "drain",
+            {"timeout": timeout, "poll": poll, "force": force},
+        )
+
+    def undrain(self) -> dict:
+        return self._request("undrain")
+
+    def shutdown(self) -> dict:
+        return self._request("shutdown")
+
+    def adopt_relay(self) -> dict:
+        return self._request("promote")
+
+
+def spawn_passive(runtime_python: str, *, port: int):
+    from . import status_monitor_runtime as smr
+
+    child_env = smr._daemon_environment()
+    child_env["AGENT_WORKTREES_STATUS_MONITOR_ROUTING_DIR"] = str(routing_dir())
+    child_env.update(windowless_python_env(runtime_python))
+    kwargs: dict[str, object] = {
+        "env": child_env,
+        "cwd": smr._daemon_cwd(),
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
+    kwargs.update(detached_kwargs())
+    return subprocess.Popen(  # noqa: S603
+        [
+            windowless_python(runtime_python),
+            "-m",
+            "agent_worktrees",
+            "status-monitor",
+            "--passive",
+            "--control-port",
+            str(port),
+        ],
+        **kwargs,
+    )
+
+
+def _monitor_control_url_from_route() -> str | None:
+    endpoint = routing.read_active_endpoint(routing_dir())
+    if endpoint is None:
+        return None
+    return endpoint.base_url
+
+
+def _monitor_lock_is_live() -> bool:
+    from . import status_monitor_runtime as smr
+
+    return locks.lock_is_live(locks.read_lock(smr._monitor_lock_path()))
+
+
+def _health_check(host: str, port: int) -> bool:
+    try:
+        return ControlClient(f"http://{host}:{port}").health().get("status") != "draining"
+    except Exception:
+        return False
+
+
+def _make_client(base_url: str) -> ControlClient:
+    return ControlClient(base_url, timeout=65.0)
+
+
+def activate_after_update(
+    *,
+    runtime_python: str | None = None,
+    health_timeout: float = 60.0,
+    drain_timeout: float = 30.0,
+) -> dict[str, object]:
+    """Installer seam: cut over a live monitor after activating a new slot."""
+    from . import status_monitor_runtime as smr
+
+    summary: dict[str, object] = {
+        "enabled": smr._status_monitor_enabled(),
+        "action": "noop",
+    }
+    if not summary["enabled"]:
+        summary["reason"] = "disabled"
+        return summary
+    if not _monitor_lock_is_live():
+        summary["reason"] = "no-live-monitor"
+        return summary
+    active_url = _monitor_control_url_from_route()
+    if active_url is None:
+        summary["action"] = "restart"
+        summary["restart"] = smr._restart_status_monitor()
+        return summary
+
+    py = runtime_python or sys.executable
+    orch = CutoverOrchestrator(
+        routing_dir(),
+        bind=_BIND,
+        version=None,
+        spawn_passive=lambda port: spawn_passive(py, port=port),
+        health_check=_health_check,
+        make_client=_make_client,
+        pick_free_port=pick_free_port,
+    )
+    result = orch.run(
+        health_timeout=health_timeout,
+        drain_timeout=drain_timeout,
+        force=False,
+    )
+    summary["action"] = "cutover"
+    summary["result"] = result.to_dict()
+    if not result.ok:
+        summary["fallback_restart"] = smr._restart_status_monitor()
+    return summary
+
+
+def installer_after_update() -> int:
+    """Non-fatal installer wrapper that prints a short cutover summary."""
+    summary = activate_after_update()
+    action = str(summary.get("action") or "noop")
+    if not summary.get("enabled"):
+        print("status-monitor disabled; skipped")
+        return 0
+    if action == "noop":
+        print(f"status-monitor {summary.get('reason', 'noop')}; left as-is")
+        return 0
+    if action == "restart":
+        restart = summary.get("restart")
+        if isinstance(restart, dict):
+            if restart.get("already_current"):
+                print("no routed live monitor; current monitor already owns the host")
+            elif restart.get("spawned"):
+                print("no routed live monitor; restarted the current monitor")
+            else:
+                print("no routed live monitor; restart attempt did not spawn a monitor")
+        return 0
+    result = summary.get("result") if isinstance(summary.get("result"), dict) else {}
+    if result.get("ok"):
+        print(f"cut over live monitor to port {result.get('new_port')}")
+    else:
+        print(f"cutover failed; kept serving state ({result.get('error')})")
+        fallback = summary.get("fallback_restart")
+        if isinstance(fallback, dict):
+            if fallback.get("spawned"):
+                print("fallback restart spawned a current monitor")
+            elif fallback.get("already_current"):
+                print("fallback restart found a current monitor already running")
+    return 0
+
+
+def live_endpoint() -> routing.Endpoint | None:
+    return routing.read_active_endpoint(routing_dir(), verify_listener=False)
+
+
+def clear_route_if_owner(pid: int) -> bool:
+    return routing.clear_if_owner(routing_dir(), pid=pid)
+
+
+def publish_route(port: int, *, pid: int, version: str | None) -> routing.Endpoint:
+    return routing.publish_active(
+        routing_dir(),
+        bind=_BIND,
+        port=port,
+        pid=pid,
+        version=version,
+        demote_existing=True,
+    )
+
+
+def active_generation_for_pid(pid: int) -> int | None:
+    table = routing.read_table(routing_dir())
+    raw = table.get("active") if isinstance(table, dict) else None
+    endpoint = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+    if endpoint is None or endpoint.pid != pid:
+        return None
+    return int(endpoint.generation)

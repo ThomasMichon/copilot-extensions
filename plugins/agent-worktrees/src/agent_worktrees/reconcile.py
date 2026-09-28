@@ -1319,10 +1319,11 @@ def runtime_installer_argv(
 
     A plugin that supports a zero-downtime redeploy declares
     ``"zeroDowntimeUpdate": true`` in its plugin.json; the reconcile-driven
-    ``install.ps1 update`` then carries ``-ZeroDowntime`` so a routine version
-    bump updates in place and hands off via the ZDD cutover (`agent-bridge
-    deploy`) rather than a stop-and-swap (#533 Part B). An operator's manual
-    ``update`` never passes the flag, so its behavior is unchanged.
+    installer update then carries the platform's compatibility flag
+    (``-ZeroDowntime`` on PowerShell, ``--zero-downtime`` on POSIX). The flag
+    is now a deprecated no-op because the installer auto-detects and performs
+    the live cutover whenever it can, but reconcile still passes it so older
+    shipped installers keep their historical contract.
     """
     scripts = plugin_dir / "scripts"
     if context is not None:
@@ -1386,8 +1387,7 @@ def runtime_installer_argv(
             p = scripts / fname
             if p.is_file():
                 argv = ["pwsh", "-File", str(p)] + (["update"] if has_update else [])
-                if has_update and zero_downtime:
-                    argv.append("-ZeroDowntime")
+                if has_update and zero_downtime: argv.append("-ZeroDowntime")
                 return " ".join(argv), argv
         return None
     order = (("install.sh", True), ("init.sh", False))
@@ -1395,9 +1395,9 @@ def runtime_installer_argv(
         p = scripts / fname
         if p.is_file():
             argv = ["bash", str(p)] + (["update"] if has_update else [])
+            if has_update and zero_downtime: argv.append("--zero-downtime")
             return " ".join(argv), argv
     return None
-
 
 def runtime_uninstall_argv(
     plugin_dir: Path, *, dry_run: bool = False

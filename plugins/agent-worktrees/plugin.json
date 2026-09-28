@@ -21,5 +21,6 @@
   "sessionContext": "session-context.json",
   "version": "1.5.5-dev274",
   "runtimeScope": "universal",
-  "installerReadiness": "installer-readiness.json"
+  "installerReadiness": "installer-readiness.json",
+  "zeroDowntimeUpdate": true
 }

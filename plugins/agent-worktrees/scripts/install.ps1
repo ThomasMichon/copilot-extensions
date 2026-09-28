@@ -31,6 +31,10 @@
 
 .PARAMETER Force
     Overwrite config without drift confirmation.
+
+.PARAMETER ZeroDowntime
+    Deprecated no-op. Update now auto-detects and cuts over a live
+    status-monitor whenever possible.
 #>
 [CmdletBinding()]
 param(
@@ -42,7 +46,8 @@ param(
 
     [string]$InstallDir,
     [switch]$RemoveConfig,
-    [switch]$Force
+    [switch]$Force,
+    [switch]$ZeroDowntime
 )
 
 Set-StrictMode -Version Latest
@@ -794,15 +799,13 @@ function Invoke-VersionedActivate {
         return $false
     }
     Write-ServiceOk "Runtime version $SrcVersion active (marker -> versions/$SrcVersion)"
-    # Consolidated-status-daemon Phase 1 (#1696): the cutover just superseded any
-    # running status-monitor, which self-retires but only RESPAWNS on the next
-    # session start -- leaving live sessions' status bars frozen until then. Reap
-    # the superseded monitor + spawn the current one now (from the NEW slot's
-    # python), so every live session's bar is re-served with no session restart.
-    # Best-effort, never fatal.
+    # Graceful status-monitor cutover: now that the new slot is active, ask the
+    # newly-activated runtime to cut over a live resident monitor in-process
+    # (or, for a pre-cutover daemon with no routed control endpoint yet, fall
+    # back once to the legacy restart path). Best-effort, never fatal.
     if (-not $ContextualInstall) {
         try {
-            & $LinkPython -m agent_worktrees status-monitor-restart 2>&1 |
+            & $LinkPython -c 'from agent_worktrees.status_monitor_cutover import installer_after_update as _f; raise SystemExit(_f())' 2>&1 |
                 ForEach-Object { Write-ServiceChanged "monitor: $_" }
         } catch {}
     }

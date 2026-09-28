@@ -1,0 +1,9 @@
+{
+  "comment": "Add graceful status-monitor cutover for runtime updates",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

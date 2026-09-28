@@ -735,11 +735,13 @@ def _update_modules(
             shell_prefix = ["bash", str(installer)]
 
         update_args = ["update"]
-        if platform_name == "windows":
-            from . import reconcile as _reconcile
+        from . import reconcile as _reconcile
 
-            if _reconcile._zero_downtime_update(module_dir):
+        if _reconcile._zero_downtime_update(module_dir):
+            if platform_name == "windows":
                 update_args.append("-ZeroDowntime")
+            else:
+                update_args.append("--zero-downtime")
         output.header(f"Updating Module: {name}")
         try:
             r = subprocess.run(

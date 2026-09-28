@@ -2831,24 +2831,27 @@ def test_cmd_restart_reports_stale_runtime_reap_count(monkeypatch, capsys):
     assert "reaped 2 stale-runtime process(es)" in out
 
 
-def test_installers_invoke_monitor_restart_at_cutover():
-    # Consolidated-status-daemon Phase 1 contract: BOTH runtime installers must
-    # invoke `status-monitor-restart` at the version cutover, or a deploy silently
-    # regresses to frozen bars. Pin it so an installer refactor can't drop it.
+def test_installers_invoke_monitor_cutover_after_activation():
+    # Graceful-cutover Phase 1 contract: BOTH runtime installers must invoke the
+    # post-activation cutover helper, or a live status-monitor silently regresses
+    # to a hard restart / frozen bars path. Pin it so an installer refactor can't
+    # drop it.
     from pathlib import Path
 
     scripts = Path(m.__file__).resolve().parents[2] / "scripts"
     for name in ("install.ps1", "install.sh"):
         text = (scripts / name).read_text("utf-8")
-        assert "status-monitor-restart" in text, (
-            f"{name} must invoke `status-monitor-restart` after activating the "
-            "new runtime slot (consolidated-status-daemon Phase 1, dotfiles#1696)"
+        assert "status_monitor_cutover" in text, (
+            f"{name} must invoke the status-monitor cutover helper after "
+            "activating the new runtime slot"
         )
 
 
 def test_status_monitor_backs_off_at_iteration_boundary_without_mutating(
     tmp_path, monkeypatch
 ):
+    from agent_worktrees import status_monitor_cutover as smc
+
     lock = tmp_path / "status-monitor.lock"
     monkeypatch.setattr(m, "_monitor_lock_path", lambda: lock)
     monkeypatch.setattr(m, "_load_hook_client_module", lambda: None)
@@ -2858,6 +2861,9 @@ def test_status_monitor_backs_off_at_iteration_boundary_without_mutating(
         "write_lock",
         lambda _path, extra=None: writes.append(extra),
     )
+    monkeypatch.setattr(smc, "publish_route", lambda *a, **k: None)
+    monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: None)
+    monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
     runtime_states = iter([False, True])
     monkeypatch.setattr(m, "_runtime_superseded", lambda **_kw: next(runtime_states))
     monkeypatch.setattr(
@@ -2895,11 +2901,15 @@ def test_status_monitor_binds_and_unbinds_resident_push(tmp_path, monkeypatch):
     single-iteration governance-backoff exit `test_status_monitor_backs_off_
     at_iteration_boundary_without_mutating` uses."""
     from agent_worktrees import resident_push
+    from agent_worktrees import status_monitor_cutover as smc
 
     lock = tmp_path / "status-monitor.lock"
     monkeypatch.setattr(m, "_monitor_lock_path", lambda: lock)
     monkeypatch.setattr(m, "_load_hook_client_module", lambda: None)
     monkeypatch.setattr(m.locks, "write_lock", lambda _path, extra=None: None)
+    monkeypatch.setattr(smc, "publish_route", lambda *a, **k: None)
+    monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: None)
+    monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
     runtime_states = iter([False, True])
     monkeypatch.setattr(m, "_runtime_superseded", lambda **_kw: next(runtime_states))
     monkeypatch.setattr(
@@ -2959,6 +2969,8 @@ def test_classify_daemon_started_published_in_lock_and_closed_on_exit(
     loop after exactly one iteration) with a REAL `classify_daemon` server,
     never this host's own real resident monitor or lock file.
     """
+    from agent_worktrees import status_monitor_cutover as smc
+
     lock = tmp_path / "status-monitor.lock"
     monkeypatch.setattr(m, "_monitor_lock_path", lambda: lock)
     monkeypatch.setattr(m, "_load_hook_client_module", lambda: None)
@@ -2968,6 +2980,9 @@ def test_classify_daemon_started_published_in_lock_and_closed_on_exit(
         "write_lock",
         lambda _path, extra=None: writes.append(extra),
     )
+    monkeypatch.setattr(smc, "publish_route", lambda *a, **k: None)
+    monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: None)
+    monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
     runtime_states = iter([False, True])
     monkeypatch.setattr(m, "_runtime_superseded", lambda **_kw: next(runtime_states))
     monkeypatch.setattr(

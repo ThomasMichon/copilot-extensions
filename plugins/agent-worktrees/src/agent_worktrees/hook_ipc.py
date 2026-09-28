@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import secrets
 import socketserver
 import threading
@@ -24,7 +25,27 @@ class _Server(socketserver.ThreadingTCPServer):
     def __init__(self, address, handler, *, token: str, decide: Decision):
         self.token = token
         self.decide = decide
+        self.owner = None
         super().__init__(address, handler)
+
+    def process_request(self, request, client_address) -> None:
+        owner = self.owner
+        if owner is not None:
+            owner._on_request_accepted()
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            if owner is not None:
+                owner._on_request_finished()
+            raise
+
+    def process_request_thread(self, request, client_address) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            owner = self.owner
+            if owner is not None:
+                owner._on_request_finished()
 
 
 class _Handler(socketserver.StreamRequestHandler):
@@ -51,6 +72,13 @@ class _Handler(socketserver.StreamRequestHandler):
             result = self.server.decide(kind, payload, deadline)
             if not isinstance(result, dict):
                 result = {}
+            if os.environ.get("PYTEST_CURRENT_TEST"):
+                try:
+                    delay_s = float(payload.get("__test_delay_s") or 0.0)
+                except (TypeError, ValueError):
+                    delay_s = 0.0
+                if delay_s > 0:
+                    time.sleep(delay_s)
             response = {
                 "version": 1,
                 "capabilities": ["session-lifecycle-v1"],
@@ -78,11 +106,14 @@ class HookIpcServer:
         self.server = _Server(
             ("127.0.0.1", 0), _Handler, token=self.token, decide=decide
         )
+        self.server.owner = self
         self.thread = threading.Thread(
             target=self.server.serve_forever,
             name="agent-worktrees-hook-ipc",
             daemon=True,
         )
+        self._active_handlers = 0
+        self._active_handlers_lock = threading.Lock()
 
     def start(self) -> None:
         self.thread.start()
@@ -100,3 +131,15 @@ class HookIpcServer:
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=1)
+
+    def _on_request_accepted(self) -> None:
+        with self._active_handlers_lock:
+            self._active_handlers += 1
+
+    def _on_request_finished(self) -> None:
+        with self._active_handlers_lock:
+            self._active_handlers -= 1
+
+    def active_handler_count(self) -> int:
+        with self._active_handlers_lock:
+            return self._active_handlers
