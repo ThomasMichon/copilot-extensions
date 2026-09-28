@@ -1834,3 +1834,31 @@ _Pending._
 - **Fifth review round otherwise reported the prior 9 findings as
   already resolved** (this specific finding was the only genuinely new
   one) -- awaiting the next round to confirm zero remaining findings.
+
+### 2026-09-28 — PR #4372 merged out-of-band before the fifth-round fix landed; follow-up PR #4383
+
+- **PR #4372 merged (by the repo owner, ~2 minutes after the fifth
+  review round's comment) BEFORE the round-5 `_file_hashes` fix above was
+  pushed** -- the fix commit's own timestamp (00:21:54 local) postdates
+  the merge (00:19:35 local per the PR's `merged_at`). The absolute-path
+  filtering bug therefore landed on `dev` unfixed via #4372's merge.
+- Opened a small follow-up PR (**#4383**) cherry-picking just that one
+  fix commit cleanly onto fresh `dev` (clean cherry-pick, no conflicts).
+- **Review found 1 more real finding**: the new regression test only
+  exercised `tools/uv_editable_ref.py`'s (canonical) `lib_tree_matches`,
+  never the trusted `_trusted_pointer_materializer.py` copy's own
+  `_lib_tree_matches` -- a future one-line drift in the trusted path
+  could reintroduce the false-equality bug while the existing test stays
+  green. Added a direct parity test
+  (`test_lib_tree_matches_parity_ignores_only_relative_build_dir_names`)
+  exercising BOTH implementations side-by-side against the same
+  ancestor-directory scenario (initially had a test-construction bug of
+  its own -- reused `_canonical_lib`'s lib-name-derived package dir name
+  for both trees being compared, so the two lib DIRECTORIES had
+  different relative paths regardless of the fix; rewrote to give both
+  trees the same internal `src/zdd/` shape at different sibling
+  locations, confirmed it now correctly fails without the fix and passes
+  with it).
+- Re-validated: `test_trusted_materializer_parity.py` 11 passed;
+  worktree-manager's own full suite 1550 passed, 4 skipped (both counts
+  +2 from the two new tests added across this session's fixes).

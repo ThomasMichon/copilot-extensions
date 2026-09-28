@@ -350,3 +350,35 @@ def test_uv_editable_parity_fixes_up_a_nested_canonical_dependency(tmp_path: Pat
             "real = True\n"
         )
 
+
+def test_lib_tree_matches_parity_ignores_only_relative_build_dir_names(
+    tmp_path: Path, canonical,
+):
+    """Review finding (PR #4383): both `_lib_tree_matches` (trusted) and
+    `lib_tree_matches` (canonical `uv_editable_ref.py`, imported here as
+    `canonical.uer`) must scope their ignored-directory-name check to the
+    path RELATIVE to each tree's own root, never the full absolute path --
+    otherwise a checkout merely *located* under an ancestor directory
+    happening to be named e.g. `build` would have every file's `.parts`
+    match that ancestor, silently emptying the comparison and making two
+    genuinely DIFFERENT trees compare as falsely equal."""
+    build_root = tmp_path / "build" / "checkout"
+    a = _canonical_lib(build_root, "zdd", version="0.1.0", content="x = 1\n")
+    b = build_root / "libs" / "zdd-b"
+    (b / "src" / "zdd").mkdir(parents=True)
+    (b / "src" / "zdd" / "__init__.py").write_text("x = 2\n", encoding="utf-8")  # genuinely differs
+    (b / "pyproject.toml").write_text('[project]\nname = "x"\nversion = "0.1.0"\n', encoding="utf-8")
+
+    assert trusted._lib_tree_matches(a, b) is False
+    assert canonical.uer.lib_tree_matches(a, b) is False
+
+    # A real build/ SUBDIRECTORY inside the tree is still correctly ignored.
+    c = build_root / "libs" / "zdd-c"
+    (c / "src" / "zdd").mkdir(parents=True)
+    (c / "src" / "zdd" / "__init__.py").write_text("x = 1\n", encoding="utf-8")  # matches a
+    (c / "pyproject.toml").write_text('[project]\nname = "x"\nversion = "0.1.0"\n', encoding="utf-8")
+    (a / "build").mkdir()
+    (a / "build" / "stray.txt").write_text("stray build artifact\n", encoding="utf-8")
+    assert trusted._lib_tree_matches(a, c) is True
+    assert canonical.uer.lib_tree_matches(a, c) is True
+
