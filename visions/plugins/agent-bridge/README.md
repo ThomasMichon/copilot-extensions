@@ -6,7 +6,7 @@
   machines, and venue providers.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-09-20
+- **Last revised:** 2026-09-28
 - **Reality docs:** [`plugins/agent-bridge/README.md`](../../../plugins/agent-bridge/README.md) ·
   [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md)
 
@@ -64,6 +64,25 @@ sessions, hooks, or extension callbacks reach it — the suite-wide
 guarantee applied to the mesh. A hook or extension that needs the bridge
 resolves and reaches this one daemon; it never spawns a rival to be sure one is
 there.
+
+### the daemon generation and its session-host handoff
+
+An install/update is not a fork in behavior — it is the **one** way the bridge
+daemon ever moves from one running generation to the next, whether triggered by
+a background reconcile, an operator-invoked update, or any future caller. A new
+generation stands up its own slot, confirms it is actually reachable, and only
+then may the prior generation let go. What makes that safe rather than merely
+sequenced is the **session-host handoff**: every hosted session-host process is
+durably recorded — its location, port, and the daemon generation that currently
+owns it — so a *specific*, narrow ownership claim (not "the daemon is up") is
+what the new generation actually waits to acquire, and what the prior generation
+actually releases, one host at a time, before it retires. A generation that
+terminates abruptly rather than releasing cleanly leaves a claim a **future**
+generation can recognize as stale and recover — the durable record, not a live
+handshake with the dead process, is what makes recovery possible. Upstream
+callers are shielded from all of this by the fabric's own routing/discovery
+seam: they resolve *the current generation*, never a specific process, so a
+cutover in flight looks like nothing worse than a brief, buffered pause.
 
 ### bridge CLI
 
@@ -326,12 +345,24 @@ delivery progress, topology, capability resolution, peer reachability, drain
 state, current heads, and stranded hosts are visible from logs, CLI output, and
 event streams before a caller needs to guess.
 
+### one-canonical-deploy-path
+
+There is exactly **one** way the bridge daemon ever updates — an install, a
+background reconcile, and an operator-invoked update all resolve to the same
+generation-cutover behavior. Nothing named "restart" or "redeploy" is a
+lighter-weight, un-orchestrated alternative that skips draining or the
+session-host handoff; a raw stop/start of the daemon process is not a
+supported maintenance path.
+
 ### graceful-deployment-and-version-survival
 
 Bridge updates cooperate with live sessions. Frontends reattach where compatible;
 in-flight work is drained, cancelled-and-resumed, or handed off deliberately; and
 older hosts remain bounded but alive long enough for their children to reach a
-safe stop.
+safe stop. The prior generation confirms the next generation is actually up
+before it lets go of anything, and each session-host's ownership moves from one
+generation to the next individually and durably recorded — never inferred from
+"the new daemon is reachable" alone.
 
 ### version-skew-safe-contract-evolution
 
@@ -428,6 +459,24 @@ Stopping, updating, cutting over, or retiring a session first seeks a safe
 state: finish the turn, cancel gracefully, mark for resume, carry context
 forward, and only then let go. A hard kill is an explicit last resort, never the
 normal maintenance path.
+
+### the next generation earns the handoff, never assumes it
+
+A new daemon generation is not entitled to a session-host merely by starting
+successfully. It acquires that specific host's ownership claim — durably, one
+host at a time — and only the prior generation that actually held the claim
+releases it. A generation that dies before releasing leaves its claims
+recognizably stale rather than silently orphaned, so a **later** generation can
+recover them without ever needing to talk to the process that held them.
+
+### the outgoing generation waits for confirmation, not for Copilot
+
+The prior generation's only obligations before it may terminate are: see the
+next generation actually running, hand off (or durably record as stale-
+recoverable) every session-host claim it held, and let any single in-flight
+event finish crossing the wire. It never waits on a Copilot turn, a client, or
+anything the *next* generation is now responsible for — that dependency is
+exactly what turns an update into an outage.
 
 ### one-owner-many-callers
 
@@ -640,6 +689,11 @@ machine may deliberately gate outbound reach until policy allows it.
 - **Not the connectivity provisioner.** SSH keys, host adoption, tunnel setup,
   and reachability verification belong to the connectivity layer; the bridge
   routes over declared reachability.
+- **Not multiple deploy behaviors.** A separate "just restart it" maintenance
+  path that bypasses the session-host handoff is not a smaller, faster
+  alternative — it is an outage the vision explicitly excludes. Any operator
+  or automated affordance that stops and starts the daemon goes through the
+  same one cutover.
 - **Not a web UX.** A rich UI/front may consume the bridge, but the bridge is the
   runtime and headless control plane underneath it.
 - **Not a scheduler inside the caller.** The bridge can hold an attached
@@ -769,3 +823,34 @@ machine may deliberately gate outbound reach until policy allows it.
   stays inside the provider that owns it. Paired with a new
   §Features/*cold-store-provider-registration* on the agent-logger leaf,
   which registers as the reference (and likely only) implementation.
+
+- **2026-09-28** — Added §Concepts/*the daemon generation and its
+  session-host handoff*, §Features/*one-canonical-deploy-path*, §Behaviors/
+  *the next generation earns the handoff, never assumes it* and *the
+  outgoing generation waits for confirmation, not for Copilot*, and a
+  matching §Non-Goals/*not multiple deploy behaviors*. Prompted by a live
+  incident: a facility's `agent-bridge` daemon hadn't picked up a needed fix
+  in 18+ days despite repeated `copilot plugin update` runs, because the
+  only update trigger (a `sessionStart` background-reconcile hook) is opt-in
+  per project and was never enabled there — a silent, undetectable gap. That
+  investigation also surfaced that `agent-bridge deploy` (a real ZDD cutover
+  via the shared `zdd` lib's `CutoverOrchestrator`) and `agent-bridge service
+  restart` (a raw stop-then-start with no cutover at all) are two genuinely
+  different behaviors reachable for the same maintenance intent — exactly
+  the kind of special-cased variant this revision closes off. It also
+  surfaced that the generic cutover orchestrator coordinates only with the
+  daemon's own drain endpoint, not with individual `session-host`
+  subprocesses — durable session-host locations exist (`HostIndex`), but
+  carry no per-generation ownership claim, no graceful-release notification,
+  and no stale-claim recovery for an abruptly-terminated generation. Intent
+  mined from the operator's own detailed redesign: a new generation stands
+  up its slot, confirms liveness, and only then may the prior generation
+  begin releasing session-host claims one at a time (durably recorded, so a
+  future generation can recover a claim whose owner died mid-release);
+  upstream callers are shielded by the existing routing/discovery seam
+  (`zdd.routing`'s `active.json` table) the same way session-host clients
+  already tolerate a daemon changeover. This vision states the *should-be*
+  (one behavior, generation-scoped claims, liveness-gated handoff,
+  caller-transparent cutover); the concrete claim schema, recovery protocol,
+  and CLI unification are carved as the `agent-bridge-unified-zdd-cutover`
+  effort, which also tracks the confirmed root cause of the 18-day gap.
