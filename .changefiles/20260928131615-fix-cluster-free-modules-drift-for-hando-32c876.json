@@ -1,0 +1,9 @@
+{
+  "comment": "fix _CLUSTER_FREE_MODULES drift for handoff_cli (LaunchPreflightError eager _core import); mark lazy-dispatch drift-scan tests guard-tier so they run on every PR",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
