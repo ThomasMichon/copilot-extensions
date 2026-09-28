@@ -246,8 +246,8 @@ why.
   resulting baseline back into `dev`, and named the smoke-tier fallback for
   when accumulated change volume outpaces a fresh baseline — the whole
   should-be shape above is mined directly from that conversation, generalized
-  to stay portable to a repo (aperture-labs was named explicitly) that has no
-  dev→main promotion of its own.
+  to stay portable to a repo (a private downstream repo was named
+  explicitly) that has no dev→main promotion of its own.
 - **2026-09-28 (same day, follow-up)** — The operator observed that this
   repo's own promotion already writes a commit to `main`, so it may be more
   natural to check the baseline in *there* rather than back into `dev` — but
