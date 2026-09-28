@@ -57,6 +57,7 @@ from __future__ import annotations
 import json
 import math
 import time
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -242,16 +243,31 @@ def run_registry_tick(client, now: float | None = None) -> dict:
 def serve(
     spec_path: str | Path,
     *,
-    url: str,
+    url: str | None = None,
     token: str | None = None,
     interval: float = 60.0,
     on_tick=None,
+    resolve_target: Callable[[], tuple[str, str | None]] | None = None,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> None:
     """Built-in timer: reload the spec and :func:`run_tick` every ``interval``
     seconds until interrupted. The spec is re-read each tick so edits take
     effect without a restart. ``on_tick(result)`` is called with each tick's
-    result (defaults to a compact stderr line)."""
+    result (defaults to a compact stderr line).
+
+    Like :func:`agent_dispatch.producers.emitter.serve`, this is a long-lived
+    loop that must never trust a coordinator address resolved only once at
+    startup. ``resolve_target`` (when given) is called at the START OF EVERY
+    TICK to re-derive ``(url, token)`` fresh, so a coordinator that restarts
+    onto a new ephemeral port between ticks is picked up on the very next
+    cycle instead of wedging this loop against a dead port indefinitely (see
+    aperture-labs#7762). Pass a fixed ``url``/``token`` instead for a
+    deliberately pinned, non-rediscovering target.
+    """
     import sys
+
+    if resolve_target is None and url is None:
+        raise ValueError("serve() requires either 'url' or 'resolve_target'")
 
     def _default_on_tick(result: dict) -> None:
         print(
@@ -264,7 +280,10 @@ def serve(
     while True:
         try:
             spec = load_spec(spec_path)
-            with DispatchClient(url, token=token) as client:
+            tick_url, tick_token = (
+                resolve_target() if resolve_target is not None else (url, token)
+            )
+            with DispatchClient(tick_url, token=tick_token) as client:
                 result = run_tick(client, spec)
             on_tick(result)
         except KeyboardInterrupt:
@@ -272,14 +291,14 @@ def serve(
         except Exception as exc:
             print(f"agent-dispatch schedule: tick failed: {exc}", file=sys.stderr)
         try:
-            time.sleep(interval)
+            sleep(interval)
         except KeyboardInterrupt:
             return
 
 
 def serve_registry(
     *,
-    url: str,
+    url: str | None = None,
     token: str | None = None,
     interval: float = 60.0,
     lease_scope: str,
@@ -287,6 +306,8 @@ def serve_registry(
     holder_session: str | None = None,
     lease_ttl: float | None = None,
     on_tick=None,
+    resolve_target: Callable[[], tuple[str, str | None]] | None = None,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> None:
     """Lease-gated registry timer -- the fleet chronicler's producer loop.
 
@@ -299,8 +320,14 @@ def serve_registry(
     resumes on wake, with the schedules' own lookback windows replaying any
     just-missed occurrences (idempotent via ``dedup_key``). No wall-clock
     takeover ever moves the lease to another host.
+
+    ``resolve_target`` re-derives ``(url, token)`` fresh at the start of every
+    tick, same rationale/incident as :func:`serve` above (aperture-labs#7762).
     """
     import sys
+
+    if resolve_target is None and url is None:
+        raise ValueError("serve_registry() requires either 'url' or 'resolve_target'")
 
     def _default_on_tick(result: dict) -> None:
         if result.get("held"):
@@ -319,7 +346,10 @@ def serve_registry(
     on_tick = on_tick or _default_on_tick
     while True:
         try:
-            with DispatchClient(url, token=token) as client:
+            tick_url, tick_token = (
+                resolve_target() if resolve_target is not None else (url, token)
+            )
+            with DispatchClient(tick_url, token=tick_token) as client:
                 lease = client.acquire_schedule_lease(
                     lease_scope,
                     holder,
@@ -336,6 +366,6 @@ def serve_registry(
         except Exception as exc:
             print(f"agent-dispatch schedule[registry]: tick failed: {exc}", file=sys.stderr)
         try:
-            time.sleep(interval)
+            sleep(interval)
         except KeyboardInterrupt:
             return

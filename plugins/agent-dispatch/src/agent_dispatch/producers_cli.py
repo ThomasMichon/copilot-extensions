@@ -52,15 +52,22 @@ def _cmd_schedule(args: argparse.Namespace) -> int:
     cmd = args.schedule_command
 
     if cmd == "serve":
-        _url, _token = _resolve_client_target(args)
+        # Resolve once upfront purely to fail fast (e.g. ``--shared`` with no
+        # configured shared coordinator raises SystemExit here). The actual
+        # long-lived loop re-resolves fresh every tick via ``resolve_target``
+        # below -- see ``schedule.serve``/``serve_registry``'s own docstrings
+        # and aperture-labs#7762: a coordinator that restarts onto a new
+        # ephemeral port between ticks must never leave this loop wedged
+        # against a dead, once-cached address.
+        _resolve_client_target(args)
+        resolve_target = lambda: _resolve_client_target(args)  # noqa: E731
         if getattr(args, "registry", False):
             if not args.lease_scope or not args.holder:
                 raise SystemExit(
                     "schedule serve --registry: --lease-scope and --holder are required"
                 )
             schedule.serve_registry(
-                url=_url,
-                token=_token,
+                resolve_target=resolve_target,
                 interval=args.interval,
                 lease_scope=args.lease_scope,
                 holder=args.holder,
@@ -70,7 +77,7 @@ def _cmd_schedule(args: argparse.Namespace) -> int:
         else:
             if not args.spec:
                 raise SystemExit("schedule serve: pass a SPEC path or --registry")
-            schedule.serve(args.spec, url=_url, token=_token, interval=args.interval)
+            schedule.serve(args.spec, resolve_target=resolve_target, interval=args.interval)
         return 0
 
     if cmd == "tick":
@@ -165,11 +172,13 @@ def _cmd_emitter(args: argparse.Namespace) -> int:
             return 2
     spec = emitter.load_spec(args.spec)
     if args.emitter_command == "serve":
-        url, token = _resolve_client_target(args)
+        # Resolve once upfront purely to fail fast; the loop itself
+        # re-resolves fresh every tick via ``resolve_target`` -- see
+        # ``emitter.serve``'s own docstring and aperture-labs#7762.
+        _resolve_client_target(args)
         emitter.serve(
             args.spec,
-            url=url,
-            token=token,
+            resolve_target=lambda: _resolve_client_target(args),
             holder=args.holder,
         )
         return 0

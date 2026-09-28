@@ -1,0 +1,9 @@
+{
+  "comment": "Producer serve loops (emitter, schedule) now re-resolve the coordinator's URL/token every tick instead of caching it once at startup, so a coordinator restart onto a new ephemeral port self-heals on the next cycle instead of wedging the loop against a dead port indefinitely (aperture-labs#7762).",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
