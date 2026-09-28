@@ -328,3 +328,135 @@ def test_registered_side_load_accepts_null_env():
         current_env="default",
         runner=runner,
     )["created"]
+
+
+# -- serve() re-resolves its coordinator target every tick -------------------
+#
+# Regression coverage for aperture-labs#7762: a long-lived ``emitter serve``
+# process (started once at host boot, running for hours/days) must never
+# trust a coordinator URL/token resolved only once at its own startup -- a
+# coordinator restart mid-lifetime (a new OS-assigned ephemeral port) left a
+# real emitter permanently pointed at a dead port with no self-healing for
+# ~10 hours, silently freezing the Intelligence Dampener readiness receipt
+# and stalling all PR review/merge dispatch.
+
+
+def test_serve_requires_url_or_resolve_target(tmp_path, monkeypatch):
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text('{"id": "x", "command": ["true"], "interval_seconds": 60}')
+    with pytest.raises(emitter.EmitterError):
+        emitter.serve(spec_path, holder="host-a")
+
+
+def test_serve_re_resolves_target_every_tick(tmp_path, monkeypatch):
+    """Each tick must call ``resolve_target`` fresh, not reuse a cached value."""
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text('{"id": "x", "command": ["true"], "interval_seconds": 60}')
+
+    seen_targets: list[tuple[str, str | None]] = []
+    resolved = iter(
+        [("http://127.0.0.1:1111", None), ("http://127.0.0.1:2222", None)]
+    )
+
+    class _RecordingClient:
+        def __init__(self, url, token=None):
+            self.url = url
+            self.token = token
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def fake_resolve_target():
+        target = next(resolved)
+        seen_targets.append(target)
+        return target
+
+    monkeypatch.setattr(emitter, "DispatchClient", _RecordingClient)
+    monkeypatch.setattr(
+        emitter,
+        "run_tick",
+        lambda client, spec, *, holder: {
+            "held": True,
+            "returncode": 0,
+            "error": None,
+            "duration_seconds": 0.0,
+            "url_seen": client.url,
+        },
+    )
+
+    ticks: list[dict] = []
+    sleeps: list[float] = []
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        if len(ticks) >= 2:
+            raise KeyboardInterrupt
+
+    emitter.serve(
+        spec_path,
+        holder="host-a",
+        resolve_target=fake_resolve_target,
+        on_tick=lambda result: ticks.append(result),
+        sleep=fake_sleep,
+    )
+
+    # Two ticks ran, and each hit a DIFFERENT resolved endpoint -- proving the
+    # loop re-resolved rather than reusing a URL captured once outside it.
+    assert [t["url_seen"] for t in ticks] == [
+        "http://127.0.0.1:1111",
+        "http://127.0.0.1:2222",
+    ]
+    assert seen_targets == [
+        ("http://127.0.0.1:1111", None),
+        ("http://127.0.0.1:2222", None),
+    ]
+
+
+def test_serve_still_supports_a_pinned_static_target(tmp_path, monkeypatch):
+    """A caller that wants a fixed, non-rediscovering target (e.g. an explicit
+    ``--url`` override) keeps working exactly as before -- no ``resolve_target``
+    needed."""
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text('{"id": "x", "command": ["true"], "interval_seconds": 60}')
+
+    class _RecordingClient:
+        def __init__(self, url, token=None):
+            self.url = url
+            self.token = token
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(emitter, "DispatchClient", _RecordingClient)
+    monkeypatch.setattr(
+        emitter,
+        "run_tick",
+        lambda client, spec, *, holder: {
+            "held": True,
+            "returncode": 0,
+            "error": None,
+            "duration_seconds": 0.0,
+            "url_seen": client.url,
+        },
+    )
+
+    ticks: list[dict] = []
+
+    def fake_sleep(seconds):
+        raise KeyboardInterrupt
+
+    emitter.serve(
+        spec_path,
+        url="http://127.0.0.1:9847",
+        holder="host-a",
+        on_tick=lambda result: ticks.append(result),
+        sleep=fake_sleep,
+    )
+
+    assert ticks[0]["url_seen"] == "http://127.0.0.1:9847"

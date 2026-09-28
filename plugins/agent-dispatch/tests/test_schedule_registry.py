@@ -310,3 +310,110 @@ def test_serve_registry_ticks_only_while_lease_held(client, monkeypatch):
         on_tick=on_tick,
     )
     assert ticks and ticks[0]["held"] is False  # refused -> idled, did not tick
+
+
+# -- serve()/serve_registry() re-resolve their coordinator target every tick -
+#
+# Regression coverage for aperture-labs#7762 (see the matching emitter.serve
+# tests): a long-lived schedule timer must never trust a coordinator
+# URL/token resolved only once at startup -- it must re-derive it fresh every
+# tick so a coordinator restart (new ephemeral port) mid-lifetime is picked
+# up on the very next cycle instead of wedging the loop against a dead port.
+
+
+def test_schedule_serve_requires_url_or_resolve_target(tmp_path):
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text('{"schedules": []}')
+    with pytest.raises(ValueError):
+        schedule.serve(spec_path)
+
+
+def test_serve_registry_requires_url_or_resolve_target():
+    with pytest.raises(ValueError):
+        schedule.serve_registry(lease_scope="chronicle", holder="cloud1")
+
+
+def test_schedule_serve_re_resolves_target_every_tick(tmp_path, monkeypatch):
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text('{"schedules": []}')
+
+    resolved = iter(
+        [("http://127.0.0.1:1111", None), ("http://127.0.0.1:2222", None)]
+    )
+    seen_urls: list[str] = []
+
+    class _RecordingClient:
+        def __init__(self, url, token=None):
+            self.url = url
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(schedule, "DispatchClient", _RecordingClient)
+    monkeypatch.setattr(
+        schedule,
+        "run_tick",
+        lambda client, spec, **kwargs: (seen_urls.append(client.url) or {
+            "created": [], "errors": [],
+        }),
+    )
+
+    calls = {"n": 0}
+
+    def fake_sleep(_seconds):
+        calls["n"] += 1
+        if calls["n"] >= 2:
+            raise KeyboardInterrupt
+
+    schedule.serve(
+        spec_path,
+        resolve_target=lambda: next(resolved),
+        interval=0,
+        sleep=fake_sleep,
+    )
+
+    assert seen_urls == ["http://127.0.0.1:1111", "http://127.0.0.1:2222"]
+
+
+def test_serve_registry_re_resolves_target_every_tick(monkeypatch):
+    resolved = iter(
+        [("http://127.0.0.1:1111", None), ("http://127.0.0.1:2222", None)]
+    )
+    seen_urls: list[str] = []
+
+    class _RecordingClient:
+        def __init__(self, url, token=None):
+            self.url = url
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def acquire_schedule_lease(self, scope, holder, **kwargs):
+            seen_urls.append(self.url)
+            return {"granted": False, "lease": {"scope": scope, "holder": "other"}}
+
+    monkeypatch.setattr(schedule, "DispatchClient", _RecordingClient)
+
+    calls = {"n": 0}
+
+    def fake_sleep(_seconds):
+        calls["n"] += 1
+        if calls["n"] >= 2:
+            raise KeyboardInterrupt
+
+    schedule.serve_registry(
+        resolve_target=lambda: next(resolved),
+        interval=0,
+        lease_scope="chronicle",
+        holder="cloud1",
+        on_tick=lambda _result: None,
+        sleep=fake_sleep,
+    )
+
+    assert seen_urls == ["http://127.0.0.1:1111", "http://127.0.0.1:2222"]

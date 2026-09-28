@@ -312,13 +312,30 @@ def run_tick(
 def serve(
     spec_path: str | Path,
     *,
-    url: str,
+    url: str | None = None,
     holder: str,
     token: str | None = None,
+    resolve_target: Callable[[], tuple[str, str | None]] | None = None,
     on_tick: Callable[[dict[str, Any]], None] | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> None:
-    """Reload and tick a command emitter on its declared cadence."""
+    """Reload and tick a command emitter on its declared cadence.
+
+    This is a long-lived loop -- often started once at host boot and never
+    restarted -- so it must never trust a coordinator address resolved only
+    once at startup. ``resolve_target`` (when given) is called at the START
+    OF EVERY TICK to re-derive ``(url, token)`` fresh (e.g. via the same
+    rendezvous/``endpoint.json`` discovery a one-shot CLI invocation would
+    use), so a coordinator that restarts onto a new ephemeral port between
+    ticks is picked up on the very next cycle instead of leaving this emitter
+    permanently pointed at a dead port (confirmed incident:
+    aperture-labs#7762 -- a stale-cached URL froze the Intelligence Dampener
+    readiness receipt for ~10 hours with no self-healing). Pass a fixed
+    ``url``/``token`` instead when the caller genuinely wants a pinned,
+    non-rediscovering target (e.g. an explicit ``--url`` override).
+    """
+    if resolve_target is None and url is None:
+        raise EmitterError("serve() requires either 'url' or 'resolve_target'")
 
     def _default_on_tick(result: dict[str, Any]) -> None:
         if not result.get("held"):
@@ -346,7 +363,10 @@ def serve(
         try:
             spec = load_spec(spec_path)
             interval = float(spec["interval_seconds"])
-            with DispatchClient(url, token=token) as client:
+            tick_url, tick_token = (
+                resolve_target() if resolve_target is not None else (url, token)
+            )
+            with DispatchClient(tick_url, token=tick_token) as client:
                 result = run_tick(client, spec, holder=holder)
                 report(result)
                 health_path.write_text(
