@@ -404,7 +404,7 @@ bindings still resolve correctly through the compatibility view.
       path, and the separate built-in progress-envelope follow-up was filed as
       [#4274](https://github.com/ThomasMichon/copilot-extensions/issues/4274).
 
-### Phase 3d — Retire the Picker's in-process engine-module boundary (Done — #3360)
+### Phase 3d — Retire the Picker's in-process engine-module boundary (Done, one residual gap flagged — #3360)
 
 _(agent-recommended scoping below the two linked issues; the issues
 themselves are operator-filed.)_
@@ -579,6 +579,38 @@ PR [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
       `agent_worktrees` import. With Step 7 landed, Groups A/B/C and the full
       Phase 3d plan are complete. See
       [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
+      **Residual gap flagged 2026-09-27 (re-audit, not yet fixed):** the
+      Step 7 regression guard proves no `production_picker/*.py` file
+      contains a literal `import agent_worktrees` statement, but
+      `production_picker/housekeeping.py` (the Step 3-ported Picker-owned
+      lifecycle sweeps: `reap_orphan_mux_sessions`, `sweep_managed_on_exit`,
+      `sweep_launcher_shells_on_exit`, `sweep_finished_sessions_on_cadence`)
+      still calls `worktree_manager.agent_worktrees_runtime.engine_module(...)`
+      for `config`/`tracking`/`sessions`/`activity`/`reap_cli`/`gc`/
+      `status_monitor_runtime` — the same dynamic in-process
+      `importlib.import_module("agent_worktrees.<name>")` mechanism
+      `_engine_runtime.py` used, just relocated one module up so the
+      package-scoped regression guard's literal-import scan doesn't trip on
+      it. `agent_worktrees_runtime.py`'s own docstring is candid about this
+      ("a small number of Worktree Manager-owned helpers ... still import
+      selected agent-worktrees modules directly"), but `housekeeping.py` is
+      Picker-owned code by Step 3's own framing, not a legitimately-separate
+      Worktree-Manager-internal concern — so this reads as the phase's
+      stated goal (no in-process `agent_worktrees` access from Picker-owned
+      code) not being fully met, dressed as met by a guard that checks the
+      letter (no direct import *statement* in the package) rather than the
+      substance (no in-process access from Picker-owned code, however
+      indirected). Closing this for real means converting `housekeeping.py`'s
+      7-module usage to `--json` verbs/subprocess calls, which has a genuine,
+      undecided tradeoff: these functions run from process-exit hooks and a
+      background cadence timer, not just Picker refresh cycles, so a
+      subprocess-per-sweep cost profile needs evaluation before committing to
+      that conversion (unlike Group A/B/C's already-established low-frequency
+      or already-async call sites). **Not resolved in this pass** — recorded
+      here rather than silently accepted so a future session (or the
+      operator) can make an informed call: either do the conversion, or
+      explicitly amend the vision's Non-Goal wording to carve out this
+      documented exception on purpose instead of by omission.
       **Cross-linked 2026-09-27** (`agent-worktrees-authoritative-daemon`
       effort, Phase 4): Step 5's batched verb should register against that
       effort's `tracking_write.py` verb registry
@@ -855,6 +887,38 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-09-27** — Re-audited Phase 3d Step 7's "Done" claim (PR #4357,
+  landed concurrently by another session) instead of taking it at face
+  value, per this effort's own investigate-before-trusting-prior-reports
+  discipline. Finding: the Step 7 regression guard
+  (`test_production_picker_runtime_boundary.py`) only scans for a literal
+  `import agent_worktrees` statement inside `production_picker/*.py`, and
+  passes clean -- but `production_picker/housekeeping.py` (Step 3's ported
+  Picker-owned lifecycle sweeps) still calls
+  `worktree_manager.agent_worktrees_runtime.engine_module(...)` for 7
+  modules (`config`, `tracking`, `sessions`, `activity`, `reap_cli`, `gc`,
+  `status_monitor_runtime`) -- the identical dynamic
+  `importlib.import_module("agent_worktrees.<name>")` mechanism the deleted
+  `_engine_runtime.py` used, just relocated one module up so the
+  package-scoped literal-import scan doesn't trip on it. This satisfies the
+  guard's letter, not the phase's own stated substance ("no in-process
+  `agent_worktrees` import for production Picker **behavior**," not merely
+  "no import statement in this **package**"). Did not attempt a fix this
+  pass: genuinely converting `housekeeping.py`'s 7-module usage to `--json`
+  verbs is a real, undecided design tradeoff (these sweeps run from
+  process-exit hooks and a background cadence timer, not the Picker's own
+  refresh cycle, so a subprocess-per-sweep cost/latency profile needs actual
+  evaluation, unlike Group A/B/C's already-established low-frequency or
+  already-async call sites). Recorded the gap explicitly in both this file
+  (Phase 3d's Step 7 checkbox, header changed to "Done, one residual gap
+  flagged") and
+  [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md)'s
+  own Step 7 entry, rather than silently letting an incomplete boundary
+  closure stand as fully "Done." Docs-only; no code changed. Left as an open
+  item for whoever picks this up next: either do the conversion, or
+  deliberately amend the governing visions' exit criteria to carve out
+  `housekeeping.py` as a reasoned exception instead of an accidental one.
 
 - **2026-09-27** — Fixed a real production regression discovered live during
   facility diagnosis: since Phase 3b Sub-slice 3 (#3865), the companion

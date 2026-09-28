@@ -6,7 +6,8 @@
 - **Scope of this doc:** the ordered implementation plan for removing the
   Picker's last in-process `agent_worktrees.*` import boundary, building on the
   evidence-gathering inventory already recorded here.
-- **Status:** Done — #3359's vendored-lib prework is done via PR
+- **Status:** Done, one residual gap flagged (2026-09-27 re-audit) — #3359's
+  vendored-lib prework is done via PR
   [#3368](https://github.com/ThomasMichon/copilot-extensions/pull/3368),
   Group D's `profiles` dependency is closed via Phase 3e / PR
   [#3626](https://github.com/ThomasMichon/copilot-extensions/pull/3626), and
@@ -703,6 +704,34 @@ once every remaining caller is already off the import boundary.
      `tests/production_picker/test_picker_tui.py`,
      `tests/production_picker/test_profiles_io.py` -> `367 passed`;
      `tests/production_picker/test_config_readers.py` + the runtime-helper lane
+   - **Residual gap flagged 2026-09-27 (re-audit, not yet fixed):** "repointed
+     the remaining ... housekeeping callers to the top-level helper" is the
+     tell — `production_picker/housekeeping.py` still calls
+     `worktree_manager.agent_worktrees_runtime.engine_module(...)` for
+     `config`/`tracking`/`sessions`/`activity`/`reap_cli`/`gc`/
+     `status_monitor_runtime`, the exact same dynamic
+     `importlib.import_module("agent_worktrees.<name>")` mechanism as the
+     deleted `_engine_runtime.py`, just relocated one module up. The new
+     regression guard only scans for a literal `import agent_worktrees`
+     statement inside `production_picker/*.py`, so it passes while the actual
+     in-process coupling for Step 3's Picker-owned lifecycle sweeps
+     (`reap_orphan_mux_sessions`, `sweep_managed_on_exit`,
+     `sweep_launcher_shells_on_exit`, `sweep_finished_sessions_on_cadence`)
+     remains. This satisfies the guard's letter, not the phase's stated
+     substance ("no in-process `agent_worktrees` import for production
+     Picker behavior" — see the original Step 4 exit criterion above, which
+     used the same "Picker behavior," not "Picker package," framing).
+     Genuinely converting `housekeeping.py` to `--json` verbs is not a free
+     mechanical follow-up: these sweeps run from process-exit hooks and a
+     background cadence timer, not the Picker's own refresh cycle, so a
+     subprocess-per-sweep cost/latency profile needs real evaluation before
+     committing to that conversion — unlike Group A/B/C's already-established
+     low-frequency or already-async call sites. **Left unresolved on
+     purpose** rather than silently accepted: either do the conversion in a
+     future slice, or explicitly amend this doc's (and the governing
+     visions') exit criteria to carve out `housekeeping.py` as a deliberate,
+     reasoned exception instead of an accidental one hidden behind a
+     package-scoped guard.
      -> `63 passed`; `tests/production_picker/test_picker_first_paint.py -k
      "import_does_not_load_config"` -> `2 passed`). Full `worktree-manager`
      suite matched the current unrelated Windows baseline at
