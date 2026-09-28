@@ -1,9 +1,14 @@
-"""Tests for the Mux Companion's pure rendering/resolution logic
-(visions/mux-companion). v1 is view-only; these tests cover status
-explanation text and current-worktree resolution, not any Textual rendering.
+"""Tests for the Mux Companion (visions/mux-companion). Most cover pure
+rendering/resolution logic (status explanation text, current-worktree
+resolution, action-message text) without any Textual rendering; one
+end-to-end test (mux-companion-manual-cutover-diagnostics, #4369) drives a
+real compose/mount/button-press cycle via ``run_test()`` to verify the
+"Cut over"/"Refresh" wiring itself, not just the underlying pure functions.
 """
 
 from __future__ import annotations
+
+import asyncio
 
 from worktree_manager import engine_client as ec
 from worktree_manager import handoff_client as hc
@@ -169,6 +174,7 @@ def test_status_text_shows_pending_handoff_headline():
     """#3307 Phase 8: a pending handoff's title renders as a read-only,
     situational-awareness line -- never shown when there's no pending baton."""
     app = companion.MuxCompanionApp.__new__(companion.MuxCompanionApp)
+    app._action_message = None
     app._data = companion._CompanionData(
         worktree={"state": "wip"},
         pending_handoff={"title": "Finish the retry-budget fix"},
@@ -178,4 +184,150 @@ def test_status_text_shows_pending_handoff_headline():
 
     app._data = companion._CompanionData(worktree={"state": "wip"})
     assert "Pending handoff" not in app._status_text().plain
+
+
+def test_status_text_includes_action_message_when_set():
+    """#mux-companion-manual-cutover-diagnostics: a "Cut over"/"Refresh"
+    outcome renders below the closure explanation, once set."""
+    from rich.text import Text
+
+    app = companion.MuxCompanionApp.__new__(companion.MuxCompanionApp)
+    app._data = companion._CompanionData(worktree={"state": "wip"})
+    app._action_message = Text("\u2713 Cut over: head old \u2192 new")
+    assert "Cut over: head old" in app._status_text().plain
+
+
+def test_cut_over_reports_change_and_updates_action_message(monkeypatch):
+    """#mux-companion-manual-cutover-diagnostics: pressing "Cut over" shells
+    out to handoff_client.trigger_cutover and reflects a real change."""
+    app = companion.MuxCompanionApp.__new__(companion.MuxCompanionApp)
+    app._cwd = "/w"
+    app._action_message = None
+    app._data = companion._CompanionData(
+        worktree={"id": "wt-ab12", "state": "wip"},
+        pending_handoff={"title": "Finish the retry-budget fix"},
+    )
+    calls = []
+
+    def _fake_trigger(project, worktree_id, **kwargs):
+        calls.append(worktree_id)
+        return {
+            "worktree_id": worktree_id, "head_before": "old-sess",
+            "head_after": "new-sess", "changed": True,
+        }
+
+    monkeypatch.setattr(hc, "trigger_cutover", _fake_trigger)
+    monkeypatch.setattr(app, "_refresh_view", lambda **k: None)
+
+    app._cut_over()
+
+    assert calls == ["wt-ab12"]
+    assert "old-sess" in app._action_message.plain
+    assert "new-sess" in app._action_message.plain
+
+
+def test_cut_over_reports_no_actionable_handoff(monkeypatch):
+    app = companion.MuxCompanionApp.__new__(companion.MuxCompanionApp)
+    app._cwd = "/w"
+    app._action_message = None
+    app._data = companion._CompanionData(worktree={"id": "wt-ab12", "state": "wip"})
+
+    monkeypatch.setattr(
+        hc, "trigger_cutover",
+        lambda project, worktree_id, **k: {"changed": False},
+    )
+    monkeypatch.setattr(app, "_refresh_view", lambda **k: None)
+
+    app._cut_over()
+
+    assert "no actionable pending handoff" in app._action_message.plain
+
+
+def test_cut_over_surfaces_engine_error_visibly(monkeypatch):
+    app = companion.MuxCompanionApp.__new__(companion.MuxCompanionApp)
+    app._cwd = "/w"
+    app._action_message = None
+    app._data = companion._CompanionData(worktree={"id": "wt-ab12", "state": "wip"})
+
+    def _raise(project, worktree_id, **k):
+        raise ec.EngineError("the agent-worktrees engine is not installed")
+
+    monkeypatch.setattr(hc, "trigger_cutover", _raise)
+    refreshed = []
+    monkeypatch.setattr(app, "_refresh_view", lambda **k: refreshed.append(k))
+
+    app._cut_over()
+
+    assert "Cut over failed" in app._action_message.plain
+    assert refreshed  # still repaints so the error is actually shown
+
+
+def test_cut_over_is_a_no_op_without_a_resolved_worktree_id(monkeypatch):
+    app = companion.MuxCompanionApp.__new__(companion.MuxCompanionApp)
+    app._cwd = "/w"
+    app._action_message = None
+    app._data = companion._CompanionData(worktree={"state": "wip"})  # no "id"
+    calls = []
+    monkeypatch.setattr(hc, "trigger_cutover", lambda *a, **k: calls.append(1))
+
+    app._cut_over()
+
+    assert not calls
+
+
+def test_end_to_end_cut_over_button_press_updates_the_live_view(monkeypatch):
+    """#mux-companion-manual-cutover-diagnostics: a real compose/mount/
+    button-press cycle, not just the pure `_cut_over` function -- verifies
+    the "Cut over" button is enabled exactly when a pending handoff exists,
+    disabled after a successful cutover clears it, and the lineage table
+    reflects the reloaded data."""
+    payload = {"version": 1, "id": "wt-ab12", "path": "/w", "state": "wip"}
+    monkeypatch.setattr(ec, "current_worktree_status", lambda **k: dict(payload))
+    session_calls = {"n": 0}
+
+    def _fake_sessions(*a, **k):
+        session_calls["n"] += 1
+        if session_calls["n"] == 1:
+            return [{"id": "old-sess", "is_head": True, "state": "handed-off"}]
+        return [
+            {"id": "old-sess", "is_head": False, "state": "handed-off"},
+            {"id": "new-sess", "is_head": True, "state": "active"},
+        ]
+
+    monkeypatch.setattr(ec, "list_worktree_sessions", _fake_sessions)
+    pending_calls = {"n": 0}
+
+    def _fake_pending(*a, **k):
+        pending_calls["n"] += 1
+        if pending_calls["n"] == 1:
+            return {"title": "Finish the retry-budget fix"}
+        return None  # the baton is consumed once cut over
+
+    monkeypatch.setattr(hc, "pending_handoff", _fake_pending)
+    monkeypatch.setattr(
+        hc, "trigger_cutover",
+        lambda project, worktree_id, **k: {
+            "head_before": "old-sess", "head_after": "new-sess", "changed": True},
+    )
+
+    async def run():
+        app = companion.MuxCompanionApp(cwd="/w")
+        async with app.run_test() as pilot:
+            from textual.widgets import Button, DataTable
+
+            cutover_btn = app.query_one("#cutover-btn", Button)
+            assert cutover_btn.disabled is False
+            table = app.query_one("#lineage", DataTable)
+            assert table.row_count == 1
+
+            await pilot.click("#cutover-btn")
+            await pilot.pause()
+
+            assert "old-sess" in app._action_message.plain
+            assert "new-sess" in app._action_message.plain
+            table = app.query_one("#lineage", DataTable)
+            assert table.row_count == 2
+            assert app.query_one("#cutover-btn", Button).disabled is True
+
+    asyncio.run(run())
 
