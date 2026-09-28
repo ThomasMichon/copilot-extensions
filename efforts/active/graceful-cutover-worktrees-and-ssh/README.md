@@ -5,6 +5,10 @@
 - **Branch(es):** per-phase feature branches / independent per-slice PRs
 - **Created:** 2026-09-28
 - **Status:** Draft <!-- Draft | Active | Blocked | Done -->
+- **Vision:** extends [`visions/plugin-services`](../../../visions/plugin-services/README.md)
+  §`zero-downtime-cutover` — applies its already-generalized zero-downtime
+  service model to the three plugins not yet covered by
+  `docs/patterns/graceful-daemon-cutover.md`'s own rollout.
 - **Umbrella issue:** _pending_
 - **Sub-issues:** _pending_
 
@@ -22,10 +26,24 @@ never a source of stacked stale processes, and never silently corrupts
 in-flight state the way today's ad-hoc `status-monitor-restart`/`mux-daemon
 ensure` reaping already does.
 
+## Coordination
+
+Solo effort, single host, no delegates today.
+
+- **Topology:** independent per-phase PRs (each phase lands as its own
+  reviewable change; no shared feature branch needed since phases are
+  sequential, not concurrent).
+- **Host (owns PRs):** the driving agent/session, whichever is current.
+- **Delegates:** none at present.
+- **Handoff:** a resuming agent picks up from the last unchecked Plan item
+  and this Journal's latest entry — no cross-participant handoff protocol
+  needed until this effort actually gains a delegate.
+
 ## Participants
 
-Single-repo, solo-driven effort; no external participants/coordination
-section needed today.
+| Participant | Role in this effort | Reached via |
+|-------------|---------------------|-------------|
+| Driving agent/session | Plans, implements, and drives every phase | Whichever worktree/session is currently head |
 
 ## Context
 
