@@ -39,18 +39,33 @@ import yaml
 # Deliberately generic and whimsical -- small mechanical/workshop objects and
 # their moods, not tied to any product, franchise, or brand. Kept short so
 # generated handles stay compact; extend either list to grow variety.
+#
+# Expanded 2026-09-28 (33->63 nouns, 24->48 adjectives, ~792->~3024 pairs):
+# real cross-machine codename collisions were observed in practice (this is
+# a documented, deliberate "detection, not prevention" tradeoff --
+# codename_reverse_lookup.py -- so a bigger vocabulary is the intended,
+# low-risk mitigation, not a workaround for a bug).
 CODENAME_NOUNS: tuple[str, ...] = (
     "gizmo", "widget", "sprocket", "gadget", "contraption", "doohickey",
     "cog", "pulley", "lever", "hinge", "bolt", "rivet", "spanner", "wrench",
     "bracket", "bearing", "flywheel", "valve", "gauge", "dial", "switch",
     "circuit", "capacitor", "resistor", "beacon", "compass", "lantern",
     "satchel", "toolbox", "ledger", "blueprint", "workbench", "crate",
+    "anvil", "chisel", "mallet", "forge", "kiln", "spindle", "axle",
+    "piston", "cylinder", "gasket", "washer", "staple", "buckle", "latch",
+    "clasp", "socket", "conduit", "filament", "coil", "magnet", "battery",
+    "diode", "relay", "actuator", "rotor", "pendulum", "ratchet", "crank",
+    "knob", "pedal",
 )
 CODENAME_ADJECTIVES: tuple[str, ...] = (
     "rusty", "humming", "lopsided", "tinkling", "restless", "squeaky",
     "wobbly", "gleaming", "tarnished", "nimble", "stubborn", "tidy",
     "patient", "curious", "drowsy", "brisk", "quiet", "sturdy", "faded",
-    "polished", "crooked", "steady", "eager", "placid",
+    "polished", "crooked", "steady", "eager", "placid", "creaky",
+    "clanking", "whirring", "buzzing", "jittery", "sluggish", "spry",
+    "grimy", "weathered", "battered", "shiny", "dusty", "oiled",
+    "greased", "welded", "soldered", "bolted", "jointed", "hinged",
+    "threaded", "spinning", "ticking", "chugging", "rattling",
 )
 
 #: Branch/filename-safe handle: one or more lowercase-alnum segments joined
