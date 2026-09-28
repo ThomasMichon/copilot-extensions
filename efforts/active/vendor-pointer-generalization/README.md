@@ -2125,3 +2125,26 @@ _Pending._
     converted) -- this class of finding has now recurred across 3
     consecutive PRs in this effort (#4409, and twice within #4420) and is
     clearly the single most-missed step in the whole recipe.
+- **Review round 3 asked for test coverage on all 3 new/changed Windows
+  installer fallback blocks** (none of the existing installer guards
+  exercised these new branches): added `test_installer_uv_editable_lib_
+  fallback.py` (`agent-worktrees`, static + pwsh-execution guards for the
+  plugin-resolve/dropin-registry/plugin-activation blocks plus an
+  ordering check), `test_installer_uv_editable_lib_preinstall.py`
+  (`agent-dispatch`, pwsh-execution guard for the 4-lib parameterized
+  loop, both local-copy and repo-root-canonical-fallback cases, ordering
+  asserted), and both `test_installer_uv_editable_lib_preinstall_ps1.py`
+  + `_sh.py` (`agent-machines`, covering both the `uv` path and the
+  bare-pip fallback path for both scripts). All new tests hit real
+  `pwsh`/`bash` execution (never static-only), following the precedent
+  already established for `config-migrate`'s own guard in PR #4409.
+  Debugging notes worth carrying forward: a stub function invoked via
+  `& $VenvPython ...` (PowerShell) does NOT reset `$LASTEXITCODE`, and an
+  unset `$LASTEXITCODE` compares `-ne 0` as **true** (`$null -ne 0` is
+  `$true`) -- a stub must explicitly set `$global:LASTEXITCODE = 0` or
+  the surrounding script's own error-check spuriously fires; and each
+  script's own exact positional argument order for its `uv pip install`/
+  `pip install` call differs (double-check with the real source, don't
+  assume the same index works across scripts). Re-validated: full
+  `agent-worktrees` + `agent-machines` (673 passed) and `agent-dispatch`
+  (3525 passed) suites green with the new tests included.

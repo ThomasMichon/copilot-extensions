@@ -1,0 +1,9 @@
+{
+  "comment": "Add focused installer guard tests for the uv-editable canonical-lib preinstall fallback blocks (dropin-registry/plugin-resolve/plugin-activation/single-instance-lease where applicable).",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
