@@ -1,4 +1,4 @@
-# Graceful daemon cutover — close the agent-worktrees/worktree-manager/agent-ssh gap
+# Graceful daemon cutover — a binding design invariant for every agent-* daemon
 
 - **Slug:** `graceful-cutover-worktrees-and-ssh`
 - **Repo:** copilot-extensions
@@ -8,7 +8,9 @@
 - **Vision:** extends [`visions/plugin-services`](../../../visions/plugin-services/README.md)
   §`zero-downtime-cutover` — applies its already-generalized zero-downtime
   service model to the three plugins not yet covered by
-  `docs/patterns/graceful-daemon-cutover.md`'s own rollout.
+  `docs/patterns/graceful-daemon-cutover.md`'s own rollout, then elevates
+  that pattern from a per-plugin convention to a binding design invariant
+  for every `agent-*` daemon.
 - **Umbrella issue:** _pending_
 - **Sub-issues:** _pending_
 
@@ -29,6 +31,16 @@ parallel one, so a daemon update on any host, for any of these systems, is
 never a source of stacked stale processes, and never silently corrupts
 in-flight state the way today's ad-hoc `status-monitor-restart`/`mux-daemon
 ensure` reaping already does.
+
+**Expanded charter (operator direction, 2026-09-28 — see Request below):**
+beyond landing the three-plugin rollout, this pattern must become a
+**binding design invariant** every `agent-*` plugin with a daemon is audited
+against at design time, implementation time, and review time — not a
+convention a plugin can simply not adopt — **and** the facility needs
+**diagnostic + self-repair tooling** so an abnormality (a stray duplicate
+daemon, a stranded passive, a stale generation) can be detected and safely
+fixed up wherever it's found, not just hand-remediated per incident the way
+today's `status-monitor` duplicate was.
 
 ## Coordination
 
@@ -154,6 +166,20 @@ outlive-and-reconnect proof, and are out of this effort's scope — track
 them under the existing pattern doc / their own efforts). **This effort's
 actual net-new scope is exactly three plugins the pattern doc does not yet
 cover: `agent-worktrees`, `worktree-manager`, `agent-ssh`.**
+
+**Round 2 (2026-09-28):**
+
+> Drive this in a handoff. We need this to be a design invariant of all
+> agent-* plugins and their daemons, thoroughly audited for during design,
+> implementation, and review, and we need to have diagnostic and
+> self-repair steps, to help detect abnormalities and allow careful fixup
+> when this does occur.
+
+_(agent-recommended structuring of the above, not the operator's own
+phrasing)_: reconciled into two new phases below (Phase 5 — binding design
+invariant; Phase 6 — diagnostic + self-repair tooling) plus a handoff to a
+successor session, since Phases 1-4's own execution is unstarted and
+substantial in its own right.
 
 ## Plan
 
@@ -283,6 +309,87 @@ cover: `agent-worktrees`, `worktree-manager`, `agent-ssh`.**
       either way (never let this effort's own README become a second,
       drifting copy of that table).
 
+### Phase 5 — Elevate to a binding design invariant (operator round 2)
+- [ ] Update `docs/patterns/graceful-daemon-cutover.md`'s own **Invariants**
+      section: today it binds *how* a cutover behaves once a plugin adopts
+      the pattern (no stop-then-start, never strand clients, drain-gated
+      retirement, etc.) but does not yet bind *which* plugins must adopt it
+      at all. Add an explicit invariant: **any `agent-*` plugin that owns a
+      long-lived resident daemon (the `docs/patterns/README.md` "Runtime
+      service" plugin shape, or any daemon meeting that description
+      regardless of shape label) MUST implement this pattern** — not an
+      opt-in convention.
+- [ ] Update `docs/patterns/README.md`'s **Plugin shapes** table (or its
+      accompanying **Design principles** list) so classifying a plugin as
+      "Runtime service" (or adding a new resident daemon to any plugin)
+      carries an explicit, visible pointer to this requirement — the
+      classification step itself is the natural **design-time** audit
+      point (a plugin design/effort that introduces a daemon must reconcile
+      against this invariant the same way Design principle 0 already
+      requires vision reconciliation).
+- [ ] **Implementation-time audit**: add the requirement to `CONTRIBUTING.md`
+      (near its existing "Documentation impact" / review-gate conventions)
+      so a PR introducing or materially changing a resident daemon must
+      state how it satisfies (or is exempted from, with justification) the
+      graceful-cutover invariant — mirroring how `CONTRIBUTING.md` already
+      makes "Documentation impact" a required PR-description statement.
+- [ ] **Review-time audit**: investigate whether an automated guard is
+      feasible (a script in the `check-*.py` family, e.g.
+      `check-module-size.py`/`check-changefile-presence.py`'s own shape) that
+      can detect a plugin newly introducing a long-lived resident process
+      (a `serve`/daemon-style entry point, a `while True` service loop) with
+      no corresponding `zdd` vendoring/consumer-contract implementation, and
+      fails CI the way those other guards do. If a reliable automated
+      signal isn't feasible, fall back to the CONTRIBUTING.md checklist
+      item above as the review-time gate instead, and say so explicitly
+      rather than leaving review-time enforcement silently unaddressed.
+
+### Phase 6 — Diagnostic + self-repair tooling (operator round 2)
+- [ ] Design a **generic, plugin-agnostic daemon-health audit** capability
+      (natural home: `libs/zdd/` itself, e.g. a new `zdd.diagnostics`
+      module, since it already owns the routing table + breadcrumb shapes
+      every consumer's lock/generation state is built from) that can, for
+      any consumer, detect the concrete abnormality classes this session's
+      own incident and prior field sightings already named:
+      - a **duplicate resident daemon** (more than one live process
+        claiming the same lock/routing-table `active` slot) — this
+        session's own `status-monitor` incident.
+      - a **never-promoted abandoned passive** (already named and handled
+        in the pattern doc's own § Never-Promoted Abandoned Passive —
+        confirm the diagnostic surfaces this uniformly too, not just
+        agent-bridge/agent-dispatch's own bespoke reap loops).
+      - a **stranded survivor from an aborted cutover** (already named in
+        `zdd.breadcrumb.recover_stale_cutover` — same ask: surface it
+        uniformly, don't just rely on each consumer's own ad-hoc wiring).
+      - a **stale (superseded) generation still running** past its own
+        self-retire window (the generation self-retire predicate exists,
+        but a diagnostic should be able to answer "is any daemon in this
+        state right now?" without waiting for self-retire to notice on its
+        own next poll).
+    Each check should reuse (not re-derive) the exact validated-owner +
+    identity-bound-termination discipline this session's own duplicate-
+    `status-monitor` remediation established (`locks.read_lock`/
+    `lock_is_live` for a confirmed live owner; `procs.terminate_pid_if_identity`
+    for the actual fixup) — the design already proven correct through three
+    rounds of review on that remediation recipe (see the
+    `agent-worktrees-authoritative-daemon` effort Journal, 2026-09-28 entry).
+- [ ] Expose it as a **consistent, per-plugin `doctor`-style surface**: each
+      consuming plugin's own `doctor`/health-check command reports its
+      daemon(s)' audit findings using the shared module, rather than every
+      plugin growing its own bespoke detection logic (mirrors how `zdd`
+      itself is vendored byte-identically rather than reinvented per
+      plugin).
+- [ ] **Self-repair, gated correctly**: an automatic fixup path must never
+      run destructively without the same "validated live owner, or stop and
+      re-enumerate" floor this session's remediation recipe established —
+      distinguish a **report-only** mode (safe to run unattended, e.g. from
+      a periodic sweep or `doctor`) from an **apply** mode (performs the
+      actual identity-bound termination), and default to report-only.
+- [ ] Validate against a reproduction of this session's own incident
+      (two same-version resident daemons) before calling this phase done —
+      the diagnostic must both detect that exact shape and fix it via the
+      apply path without disturbing the genuine live owner.
+
 ## Validation Plan
 
 - [ ] Per phase: a clean-room / isolated-HOME rehearsal of the plugin's
@@ -299,12 +406,38 @@ cover: `agent-worktrees`, `worktree-manager`, `agent-ssh`.**
       commands keep working for their own narrower cases (version-
       supersession reap) without behavior change for callers that don't hit
       the new automatic path.
+- [ ] Phase 5: a new effort/design doc introducing a resident daemon in any
+      `agent-*` plugin can be shown to reconcile against the invariant (a
+      dry-run test case: draft a hypothetical new-daemon design and confirm
+      the CONTRIBUTING.md checklist item actually surfaces the requirement).
+- [ ] Phase 6: the diagnostic correctly identifies each of the four named
+      abnormality classes in a synthetic reproduction (not just the one this
+      session hit), reports report-only findings without side effects, and
+      the apply path never terminates a confirmed-live, uniquely-legitimate
+      owner in any of those synthetic cases.
 
 ## Proposal
 
 _Pending._
 
 ## Journal
+
+### 2026-09-28 — Scope expanded to a binding invariant + diagnostic tooling; handing off
+Operator direction (Request § Round 2): elevate this pattern from a
+three-plugin rollout to a **binding design invariant** for every `agent-*`
+daemon, audited at design/implementation/review time, plus **generic
+diagnostic + self-repair tooling** so an abnormality (duplicate daemon,
+stranded passive, stale generation) can be detected and safely fixed up
+anywhere it's found, not hand-remediated per incident. Added Phase 5
+(invariant: `docs/patterns/graceful-daemon-cutover.md`'s own Invariants
+section, the `docs/patterns/README.md` plugin-shapes classification point,
+`CONTRIBUTING.md`'s PR-description requirements, and an automated-guard
+feasibility check) and Phase 6 (a `zdd.diagnostics`-shaped generic audit +
+report-only/apply self-repair, reusing this session's already-hardened
+validated-owner + identity-bound-termination recipe rather than
+re-deriving it). **Handing off here**: Phases 1-6 are all still unstarted
+execution, substantial in their own right, and the operator explicitly
+asked for a handoff rather than continued in-turn execution.
 
 ### 2026-09-28 — Review round 1: three real corrections
 Automated PR review (the effort's own mandatory review gate) caught three
