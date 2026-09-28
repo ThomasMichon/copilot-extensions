@@ -673,3 +673,27 @@ correction inline, per the effort's own journal discipline)._
   -- convergence (findings per round: 5, 3, 2, 6, 2, 3) suggests the
   remaining surface is shrinking, not that the process is stuck; continuing
   the same discipline rather than merging through open findings.
+- **Round 11** (same cycle): 4 more findings, none as consequential as
+  round 10's self-stage discovery but all real. The fast `stamp-binstub`
+  path shared its mutex with the SLOW `Invoke-Stamp` snapshot copy, so a
+  concurrent slow stamp could make the "fast" path wait up to 20s behind
+  it -- fixed by dropping the lock from the fast path entirely, since round
+  9 had already made its individual operations safe unlocked. Round 10's
+  own `mkdir`-based reap-mutex fix turned out to be itself buggy: an
+  unowned mutex that could wedge forever if its holder died mid-reap --
+  replaced with a self-healing PID-symlink (matching the main lock's own
+  pattern) on both occurrences. POSIX's `stamp` action had the same
+  custom-install-dir/mismatched-launcher bug round 10 fixed on Windows,
+  unfixed -- now rejects it too. Added the first test in this whole chain
+  that drives the REAL `bootstrap-check.ps1` hook end-to-end (every prior
+  test called `init.ps1` actions directly), catching exactly the class of
+  regression (`$LASTEXITCODE` handling, quoting, `Start-Process` launch)
+  none of the other tests could. Verified against the full suite again
+  (642 passed).
+- This is now 11 review rounds on one PR (findings per round: 5, 3, 2, 6,
+  2, 3, 4) -- unusual, but every single round has caught a real,
+  previously-undetected bug, including round 10's discovery that the
+  entire two-stage split's core premise didn't hold on a real marketplace
+  install. Continuing the same discipline; the operator has authorized an
+  admin-merge fallback if a future re-request cycle returns clean or times
+  out, but not while genuine findings keep surfacing.
