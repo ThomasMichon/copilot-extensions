@@ -1944,3 +1944,16 @@ efforts' own PRs).
   `gate` validated," including for manual dispatch) -- recorded here since
   this effort's README is the authoritative narrative for that guarantee;
   no other doc describes it independently.
+- **Review round 2 caught a third gap the same PR (#4419) had left open:**
+  the `promote` job's own `decide` step still fast-pathed
+  `workflow_dispatch` straight to `proceed=true`, skipping BOTH
+  `gate.outputs.is_dev` and the `full`/`worktree-manager`/
+  `guards-full-sweep` result checks entirely for that event -- meaning a
+  manual dispatch could promote even when those validation jobs failed,
+  or (now that `gate` requires ancestor proof for dispatch too) run with
+  an empty `sha` once `gate` correctly rejected a non-`dev` ref, since
+  `decide` never consulted `is_dev` for that path at all. Removed the
+  special case outright: every trigger now runs through the identical
+  `gate`-success / `is_dev` / validation-result checks before promoting --
+  manual dispatch forces a promotion RUN, never a bypass of what that run
+  validates.

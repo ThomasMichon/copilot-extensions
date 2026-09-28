@@ -442,11 +442,21 @@ jobs:
         # cross-workflow "did Validation Gate's whole run succeed" check --
         # `needs.<job>.result`/`.outputs` are ordinary same-run facts, not
         # event metadata, so there is nothing left here to be unreliable.
+        #
+        # Deliberately NO `workflow_dispatch` special case any more: it
+        # used to fast-path straight to `proceed=true`, skipping both
+        # `gate.outputs.is_dev` and the `full`/`worktree-manager`/
+        # `guards-full-sweep` result checks below entirely -- meaning a
+        # manual dispatch could promote even when those validation jobs
+        # failed (or, once `gate` started requiring ancestor proof for
+        # dispatch too, ran with an EMPTY `sha`, since `full`/
+        # `worktree-manager`/`guards-full-sweep` are skipped by their own
+        # `if: needs.gate.outputs.is_dev == 'true'` whenever `gate` finds a
+        # non-`dev` ref, but `decide` never checked that). Every trigger
+        # now goes through the identical checks below -- manual dispatch
+        # is for forcing a promotion RUN, never for bypassing what that
+        # run validates.
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
           if [ "${{ needs.gate.result }}" != "success" ]; then
             echo "proceed=false" >> "$GITHUB_OUTPUT"
             echo "::notice::gate job did not succeed (${{ needs.gate.result }}) -- skipping promotion."
