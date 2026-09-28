@@ -274,7 +274,7 @@ before signing off -- it is not the same everywhere:**
 ```
 
 - **`direct`** -- no PR flow; `finalize` lands to the default branch.
-- **`pr-human-merge`** -- a **human** approves + merges: `create-pr` / `pr-watch` / `pr-status` / `pr-complete`; **`pr-merge` does not apply**.
+- **`pr-human-merge`** -- a **human** approves + merges: `create-pr` / `pr-watch` / `pr-status` / `pr-nudge` / `pr-complete`; **`pr-merge` does not apply**.
 - **`pr-agent-merge`** -- after approval the author runs `pr-merge` to signal consent and the review gate merges.
 - **`pr-self-merge`** -- the submitter merges directly once checks/reviews allow. On GitHub, never approve your own PR. Use `pr-merge <pr> --now` when ready; bare `pr-merge` refuses in this profile.
 

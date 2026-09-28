@@ -58,6 +58,37 @@ class TestPRNudge:
         assert res["has_pr"] is False
         assert res["supported"] is False
 
+    def test_externally_merged_pr_is_reconciled_before_nudging(self, pr_repo, monkeypatch):
+        """A record still saying ``open`` (merged externally, e.g. via the
+        auto-merge label bypassing finalize/pr-watch) must be reconciled
+        against the provider first -- nudging it would otherwise send a
+        review request to an already-merged PR (#4355 review finding)."""
+        from agent_worktrees import providers
+        from agent_worktrees.providers.base import PullResult
+
+        config, wid, _wt, _ = pr_repo
+        config = _config_with_reviewer(config, "copilot")
+        pr_ops.set_pr(wid, number=7, state="open", provider="github")
+        nudge_calls = []
+
+        class _Prov:
+            name = "github"
+
+            def get_pull(self, repo, number, *, api_base="", token=None):
+                return PullResult(number=number, state="closed", merged=True)
+
+            def request_review(self, repo, number, *, reviewer="", api_base="", token=None):
+                nudge_calls.append(number)
+                from agent_worktrees.pr_contract import ReviewNudgeResult
+                return ReviewNudgeResult(supported=True, requested=True)
+
+        monkeypatch.setattr(providers, "get_provider", lambda name: _Prov())
+        monkeypatch.setattr(providers, "account_token_for_slug", lambda repo, prcfg: "tok")
+        res = pr_nudge_ops.pr_nudge(wid, config=config)
+        assert nudge_calls == []
+        assert res["has_pr"] is False
+        assert res["supported"] is False
+
     def test_unconfigured_reviewer_reports_unsupported(self, pr_repo, monkeypatch):
         from agent_worktrees import providers
 

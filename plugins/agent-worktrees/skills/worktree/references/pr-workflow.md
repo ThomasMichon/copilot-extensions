@@ -45,7 +45,7 @@ The three profiles (derived purely from config -- provider-generic, no network):
 | Profile | Config shape | How work lands | Verbs that apply |
 |---------|--------------|----------------|------------------|
 | **`direct`** | `pr.enabled: false` | `finalize` lands to the default branch | *(none -- no PR flow)* |
-| **`pr-human-merge`** | enabled, **no** `automerge_label` | PR-gated; a **human** approves + merges | `create-pr`, `pr-watch`, `pr-status`, `pr-complete` -- **not `pr-merge`** |
+| **`pr-human-merge`** | enabled, **no** `automerge_label` | PR-gated; a **human** approves + merges | `create-pr`, `pr-watch`, `pr-status`, `pr-nudge`, `pr-complete` -- **not `pr-merge`** |
 | **`pr-agent-merge`** | enabled + an `automerge_label` bound | PR-gated; the author **signals merge consent** after approval; the review gate merges | the full `pr-*` family, including `pr-merge` |
 
 **Applicability is self-describing.** `pr-status` prints the profile (`flow:`

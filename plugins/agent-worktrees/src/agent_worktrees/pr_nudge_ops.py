@@ -34,6 +34,7 @@ def pr_nudge(worktree_id: str, *, config: Config | None = None) -> dict:
                 "error": f"No tracking record found for '{worktree_id}'."}
     if config is None:
         config = cfg.load_config()
+    pr_ops._reconcile_active_pr(record, config)
     active = record.active_pr()
     # ``active_pr()`` falls back to the most recent PR overall when every
     # tracked PR is terminal -- exclude that fallback here (mirrors

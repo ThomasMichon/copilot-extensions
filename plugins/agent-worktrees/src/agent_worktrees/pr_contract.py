@@ -1006,7 +1006,7 @@ def classify_pr_flow(
         summary=(
             f"PR-gated ({provider or 'provider'}); a human approves and merges "
             f"(no auto-merge consent label bound). Use create-pr / pr-watch / "
-            f"pr-status / pr-complete; pr-merge does not apply here."
+            f"pr-status / pr-nudge / pr-complete; pr-merge does not apply here."
         ),
         **_matrix,
     )
