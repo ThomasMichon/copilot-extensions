@@ -3,7 +3,10 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
 
+
+@pytest.mark.guard
 def test_production_picker_has_no_direct_agent_worktrees_imports():
     root = (
         Path(__file__).resolve().parents[1]

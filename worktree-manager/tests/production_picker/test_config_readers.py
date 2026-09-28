@@ -80,3 +80,35 @@ def test_machines_yaml_path_uses_knowledge_repo_overlay(monkeypatch, tmp_path):
         context.reset()
 
     assert resolved == overlay
+
+
+def test_machines_yaml_path_prefers_active_repo_registry(monkeypatch, tmp_path):
+    launch_root = tmp_path / "launch"
+    local = launch_root / ".agent-worktrees" / "machines.yaml"
+    local.parent.mkdir(parents=True)
+    local.write_text("machines: {}\n", encoding="utf-8")
+    knowledge_root = tmp_path / "knowledge"
+    overlay = knowledge_root / ".agent-worktrees" / "machines.yaml"
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text("machines: {shadow: {}}\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        harness_state,
+        "build_projects",
+        lambda home_dir=None: [
+            _project("demo", launch_root),
+            _project("knowledge", knowledge_root),
+        ],
+    )
+    monkeypatch.setattr(
+        harness_state,
+        "project_config",
+        lambda name, home_dir=None: {"knowledge_repo": "knowledge"} if name == "demo" else {},
+    )
+    context.set_project("demo")
+    try:
+        resolved = project_config.machines_yaml_path(launch_root)
+    finally:
+        context.reset()
+
+    assert resolved == local

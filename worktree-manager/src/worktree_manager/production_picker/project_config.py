@@ -176,10 +176,7 @@ def _load_repo_yaml(project: str) -> dict:
 
 @lru_cache(maxsize=None)
 def _load_machines_yaml(repo_dir: str) -> dict[str, MachineEntry]:
-    root = Path(repo_dir)
-    path = root / ".agent-worktrees" / "machines.yaml"
-    if not path.is_file():
-        path = root / "machines.yaml"
+    path = machines_yaml_path(repo_dir)
     if not path.is_file():
         raise FileNotFoundError(f"Machine registry not found at {path}")
     raw = _read_yaml(path)
@@ -247,6 +244,12 @@ def load_machines_yaml(repo_dir: str | Path) -> dict[str, MachineEntry]:
 def machines_yaml_path(repo_dir: str | Path) -> Path:
     root = Path(repo_dir)
     project = project_name()
+    for candidate in (
+        root / ".agent-worktrees" / "machines.yaml",
+        root / "machines.yaml",
+    ):
+        if candidate.is_file():
+            return candidate
     knowledge_repo = str(harness_state.project_config(project).get("knowledge_repo") or "").strip()
     if knowledge_repo:
         for info in harness_state.build_projects():
@@ -259,10 +262,4 @@ def machines_yaml_path(repo_dir: str | Path) -> Path:
             ):
                 if candidate.is_file():
                     return candidate
-    for candidate in (
-        root / ".agent-worktrees" / "machines.yaml",
-        root / "machines.yaml",
-    ):
-        if candidate.is_file():
-            return candidate
     return root / ".agent-worktrees" / "machines.yaml"
