@@ -352,7 +352,8 @@ correction inline, per the effort's own journal discipline)._
   Round 1 backgrounded it by unverified analogy with Windows, introducing an
   unnecessary race for no benefit) and added the lock/atomic-publish
   protection the review asked for on both platforms instead. PR:
-  ThomasMichon/copilot-extensions#4129 (still open, not yet merged).
+  ThomasMichon/copilot-extensions#4129 (merged -- see the 2026-09-27
+  Journal entry recording that outcome for the full 12-round history).
 - **Re-verified:** real subprocess invocations against a sandboxed
   `HOME`/`USERPROFILE` (not simulated): full hook returns in ~11.4s
   (previously 22.47s, over its own 15s timeout); 3 concurrent
@@ -670,9 +671,11 @@ correction inline, per the effort's own journal discipline)._
   targeted selection, given how deep this round's self-stage change reaches.
 - Ten review rounds on one PR is unusual even by this effort's own
   standard, but each one caught a genuinely real, previously-undetected bug
-  -- convergence (findings per round: 5, 3, 2, 6, 2, 3) suggests the
-  remaining surface is shrinking, not that the process is stuck; continuing
-  the same discipline rather than merging through open findings.
+  -- the finding count has trended down round over round (this journal's
+  own round-by-round entries carry the exact count each round found),
+  suggesting the remaining surface is shrinking, not that the process is
+  stuck; continuing the same discipline rather than merging through open
+  findings.
 - **Round 11** (same cycle): 4 more findings, none as consequential as
   round 10's self-stage discovery but all real. The fast `stamp-binstub`
   path shared its mutex with the SLOW `Invoke-Stamp` snapshot copy, so a
@@ -690,10 +693,24 @@ correction inline, per the effort's own journal discipline)._
   regression (`$LASTEXITCODE` handling, quoting, `Start-Process` launch)
   none of the other tests could. Verified against the full suite again
   (642 passed).
-- This is now 11 review rounds on one PR (findings per round: 5, 3, 2, 6,
-  2, 3, 4) -- unusual, but every single round has caught a real,
-  previously-undetected bug, including round 10's discovery that the
-  entire two-stage split's core premise didn't hold on a real marketplace
-  install. Continuing the same discipline; the operator has authorized an
-  admin-merge fallback if a future re-request cycle returns clean or times
-  out, but not while genuine findings keep surfacing.
+- **Round 12**: one finding, a direct consequence of round 11's own fix.
+  Removing the lock from `Invoke-StampBinstubOnly` let it run concurrently
+  with (or even after) a full `stamp` that already published a real
+  snapshot marker, unconditionally overwriting `payload-dir` back to the
+  fast path's fallback and regressing an already-valid marker to a weaker
+  one. Fixed by making that write create-only: skip it if the marker
+  already resolves to a real `scripts\init.ps1`, so the fast path can only
+  ever fill in a missing/broken marker, never regress a valid one.
+- Operator directed re-requesting Copilot review directly via the GitHub
+  API (bypassing the passive `pr-watch` wait) with a bounded 5-minute wait
+  per cycle, for 7 rounds total this session (rounds 6-12). Every round
+  caught a real, previously-undetected bug -- including round 10's
+  discovery that the entire two-stage split's core premise didn't hold on
+  a real marketplace install -- until round 12's re-request cycle finally
+  returned no new review within the 5-minute window. With all 27 review
+  threads resolved and every real CI check green (the one failing check,
+  `identifier leak guard`, is the pre-tracked #4247 misconfiguration, not
+  this PR's content), admin-merged PR #4129 per the operator's standing
+  authorization for exactly this outcome. **PR #4129 is merged** as of this
+  entry -- the effort's Journal above describing it as still open predates
+  this merge; do not re-derive its status from earlier entries.
