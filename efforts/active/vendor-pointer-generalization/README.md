@@ -1805,7 +1805,9 @@ _Pending._
   just-converted lib(s) across CI workflows, tooling test bundles, and
   session hooks/scripts** -- this round's 4 findings were ALL this same
   class of gap, missed because they sit outside the plugin test suites
-  the earlier recipe steps already cover.
+  the earlier recipe steps already cover. **Done** -- see the
+  2026-09-28 "Phase 1: converted `single-instance-lease`" entry below
+  (PR #4403).
 
 ### 2026-09-28 — Fifth review round: absolute-path filtering bug in the shared hash comparison helper
 
@@ -1862,3 +1864,38 @@ _Pending._
 - Re-validated: `test_trusted_materializer_parity.py` 11 passed;
   worktree-manager's own full suite 1550 passed, 4 skipped (both counts
   +2 from the two new tests added across this session's fixes).
+
+### 2026-09-28 — Phase 1: converted `single-instance-lease` (5 consumers, PR #4403)
+
+- Converted all 5 real consumers (`agent-vault`, `agent-worktrees`,
+  `agent-dispatch`, `agent-mcp`, `agent-bridge`) from a per-plugin
+  `src-passthrough` copy to a `uv`-editable canonical reference, per the
+  now-standard recipe. `single-instance-lease` has no dependency on
+  another vendored lib (pure stdlib), so no early-conversion ordering
+  caveat applied here.
+- Added `libs/single-instance-lease/tests/conftest.py` and wired the
+  canonical suite into CI's "Canonical shared-library tests" step (it is
+  no longer collected by any consumer's own plugin suite once fully
+  converted).
+- **Discovered and confirmed a pre-existing, environment-dependent test
+  flake unrelated to this conversion**: `agent-bridge`'s
+  `test_ensure_boots_when_down_then_healthy` hangs because
+  `service_process_cli.py`'s `_INSTALL_DIR` is computed once at module
+  *import* time, before the test suite's `autouse` isolation fixture sets
+  `AGENT_BRIDGE_CONFIG_DIR` -- so the test reads this machine's real, live
+  `~/.agent-bridge` daemon state instead of an isolated tmp dir.
+  Reproduced identically on unmodified `dev` via `git stash`/`git stash
+  pop` before concluding it was pre-existing (never assumed). Deselected
+  in this PR's validation run; filed as tracked issue **#4404** rather
+  than fixed here (out of scope -- touches daemon lifecycle code, not
+  vendor-pointer plumbing).
+- **First review round** flagged one real finding: the canonical
+  `libs/single-instance-lease/README.md`'s "Vendoring" section still
+  described the old per-plugin-copy-only model, not the current
+  dev-uv-editable / release-time-materialization split. Fixed by
+  rewriting that section to name both regimes explicitly (matches the
+  reviewer's ask; the three prior converted libs' READMEs carry the same
+  stale wording and likely warrant the same fix in a future pass, but
+  that's outside this PR's diff).
+- Non-editable install probe and `materialize_main.py` round-trip both
+  confirmed clean, as with the prior 3 conversions.
