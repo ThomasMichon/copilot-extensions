@@ -472,12 +472,31 @@ jobs:
         if: steps.decide.outputs.proceed == 'true'
         env:
           PUSH_INPUT: ${{ github.event.inputs.push }}
+          # Pin to the EXACT commit `gate` validated as a real `dev`
+          # ancestor -- the same commit `full`/`worktree-manager`/
+          # `guards-full-sweep` checked out and tested -- never a fresh
+          # re-resolve of `origin/dev`. This job's own checkout above only
+          # fetches (`ref: main` + full history); it never re-runs gate's
+          # ancestor check. `full`/`worktree-manager`/`guards-full-sweep`
+          # are a genuine 10-30 min validation window by this workflow's
+          # own design (see top-of-file comment) -- if new commits (and
+          # new changefiles) land on `dev` while those are still running,
+          # a bare `origin/dev` re-resolved at THIS checkout would
+          # silently be newer than what was validated, sweeping
+          # never-validated changefiles into this promotion's consumed/
+          # deleted set. Confirmed live: PR #4397 ("clear changefiles
+          # consumed by promotion 36394331795") was initially misdiagnosed
+          # as deleting two unconsumed changefiles -- that specific alarm
+          # was a false positive (the wrong promotion commit was used for
+          # comparison), but it surfaced this real structural gap: nothing
+          # here actually pinned promotion to what `gate` validated.
+          DEV_SHA: ${{ needs.gate.outputs.sha }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$PUSH_INPUT" = "false" ]; then
-            python tools/promote_release.py --dev-ref origin/dev --main-ref origin/main
+            python tools/promote_release.py --dev-ref "$DEV_SHA" --main-ref origin/main
             echo "land=false" >> "$GITHUB_OUTPUT"
           else
-            output=$(python tools/promote_release.py --dev-ref origin/dev --main-ref origin/main \
+            output=$(python tools/promote_release.py --dev-ref "$DEV_SHA" --main-ref origin/main \
               --push --candidate-branch "$CANDIDATE_BRANCH")
             echo "$output"
             echo "land=true" >> "$GITHUB_OUTPUT"
