@@ -1,0 +1,9 @@
+{
+  "comment": "trigger_handoff: explicit force bypass to arm live-cutover signaling under manual-only mode (mux-companion-manual-cutover-diagnostics)",
+  "changes": [
+    {
+      "plugin": "context-handoff",
+      "type": "minor"
+    }
+  ]
+}

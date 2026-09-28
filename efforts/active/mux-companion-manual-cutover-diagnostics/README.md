@@ -101,12 +101,12 @@ view highlighting whether resolved head matches the just-resumed session).
       never invoke the graceful path on explicit human command." Cross-link
       the PR #3041 safety gate this stays underneath.
 
-### Step 2 — `context-handoff`: explicit `force` bypass
-- [ ] `triggerHandoff()` gains a `force` boolean (default `false`); when set,
+### Step 2 — `context-handoff`: explicit `force` bypass (Done 2026-09-28)
+- [x] `triggerHandoff()` gains a `force` boolean (default `false`); when set,
       `autoEnabled = automaticHandoffEnabled(mode) || force`. Never inferred
       from config -- an explicit, separate caller-supplied opt-in only.
-- [ ] `handoff-cli.mjs trigger` gains `--force`, wired through.
-- [ ] Tests: force arms the ledger/activity signal in `manual-only` mode;
+- [x] `handoff-cli.mjs trigger` gains `--force`, wired through.
+- [x] Tests: force arms the ledger/activity signal in `manual-only` mode;
       omitting force preserves today's exact behavior (regression coverage
       for PR #3041's own fix).
 
@@ -158,3 +158,33 @@ view highlighting whether resolved head matches the just-resumed session).
   its own effort (not reopening the now-closed `worktrees-pivot-ux-overhaul`)
   per the operator's own call, cross-linked to `handoff-live-cutover` (#2249)
   as the mechanism this builds an on-demand counterpart for.
+
+### 2026-09-28 — Step 1 (vision) merged; Step 2 (context-handoff force) complete
+- Step 1 landed as PR #4371: `visions/mux-companion` now carries
+  `manual-cutover-trigger` and `post-cutover-head-verification` as Features,
+  with three new/revised Behaviors precisely bounding the exception (never
+  inferred, never authors a handoff, detects-never-repairs).
+- Step 2: `triggerHandoff()` gains `force = false`; `autoEnabled =
+  automaticHandoffEnabled(mode) || force`. `handoff-cli.mjs trigger` gains
+  `--force`, registered as a boolean flag (not a value-taking one).
+  Regression-tested against the exact PR #3041 scenario (omitting force
+  preserves manual-only's prior behavior byte-for-byte: `noteHandoff`/
+  activity/bridge all skipped, `automaticCutoverDisabled: true`); a new
+  force=true test proves all three signals now fire.
+- **Near-miss worth recording**: an initial CLI-level end-to-end test
+  (`trigger --force` via a real spawned subprocess, unmocked) actually
+  invoked live `agent-worktrees`/`agent-dispatch` provisioning inside an
+  isolated temp HOME -- 164s runtime, a fresh `agent-dispatch` runtime
+  install (cryptography/rust bindings and all), and an EPERM cleanup
+  failure on a locked `.pyd` from the mid-test install. Removed that test
+  in favor of a fast, side-effect-free structural check (the CLI wires
+  `force: Boolean(args.force)` through and registers `force` as a boolean
+  flag) -- the actual arming behavior is already fully covered by
+  `handoff-core.test.mjs`'s properly-injected/mocked tests. Lesson for the
+  remaining steps: never spawn the real CLI for a code path that can reach
+  live provisioning, even in an "isolated" temp HOME.
+- Tests: `handoff-core.test.mjs` 52/52 (2 new); `cli-parity.test.mjs` 8/8
+  (1 new, replacing the risky one); full `tests/*.test.mjs` suite 142
+  passed/11 skipped/0 failed (unchanged skip count from baseline).
+  `tools/check-module-size.py` clean.
+- **Next up**: Step 3 (agent-worktrees on-demand claim+spawn+retire verb).

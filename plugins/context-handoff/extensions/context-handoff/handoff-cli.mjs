@@ -62,7 +62,7 @@ function parseArgs(argv) {
     if (a.startsWith("--")) {
       const key = a.slice(2);
       const flags = new Set([
-        "no-task", "json", "defer-complete",
+        "no-task", "json", "defer-complete", "force",
       ]);
       if (flags.has(key)) { out[key] = true; continue; }
       out[key] = argv[++i];
@@ -108,7 +108,10 @@ const HELP = `handoff-cli -- invoke a context handoff from the CLI (extension-fr
   node handoff-cli.mjs sync-worktree --json                     shared lock/rebase-safe worktree sync
 
 Options: --prompt-file|--prompt|stdin, --title, --session-id ($COPILOT_AGENT_SESSION_ID),
-         --cwd, --no-task, --handoff-token,
+         --cwd, --no-task, --handoff-token, --force (trigger: arm live-cutover
+         signaling as if mode were "auto", regardless of the configured mode --
+         a deliberate, explicit, human-gated bypass for diagnostics; never set
+         this from an agent-invoked call),
          --locator|--task-id|--handoff-id|--path, --defer-complete, --json`;
 
 function requireSid(command, args) {
@@ -195,6 +198,7 @@ async function cmdTrigger(args) {
     title: normalizeHandoffTitle(args.title),
     preferTask: !args["no-task"],
     mode: config.mode,
+    force: Boolean(args.force),
     handoffToken: args["handoff-token"] || null,
   });
   if (!result.ok) {
