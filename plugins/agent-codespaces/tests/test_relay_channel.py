@@ -97,7 +97,9 @@ async def test_argv_shape_reverse_only(monkeypatch) -> None:
     assert "-R" in argv
     assert "51234:127.0.0.1:51234" in argv
     assert "-L" not in argv
-    assert "ExitOnForwardFailure=yes" not in argv
+    # The channel carries only the relay, so a failed remote bind ends ssh and
+    # the monitor re-establishes it (a quiet CodeSpace hides the warning).
+    assert "ExitOnForwardFailure=yes" in argv
     assert "ServerAliveInterval=30" in argv
     joined = " ".join(argv)
     assert "ControlMaster" not in joined

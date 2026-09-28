@@ -58,6 +58,24 @@ class TestBuildForwardArgs:
         # bind collision cannot tear down the -L endpoint.
         assert "ExitOnForwardFailure=yes" not in " ".join(args)
 
+    def test_a_reverse_only_relay_channel_can_exit_on_a_failed_bind(self) -> None:
+        # A channel that carries only the relay has nothing to protect: a
+        # failed remote bind must end ssh so its supervisor re-establishes it,
+        # whatever the host's own ssh options say.
+        cfg = SSHConfig(host_alias="box", extra_options={"ExitOnForwardFailure": "no", "LogLevel": "quiet"})
+        args = build_forward_ssh_args(
+            cfg, None, None, reverse_forwards=["51234:127.0.0.1:51234"],
+            exit_on_forward_failure=True,
+        )
+        joined = " ".join(args)
+        assert "ExitOnForwardFailure=yes" in joined
+        assert "ExitOnForwardFailure=no" not in joined
+        assert args.index("-R") < args.index("box")
+        # The default for a reverse-only argv is unchanged.
+        assert "ExitOnForwardFailure=yes" not in " ".join(
+            build_forward_ssh_args(cfg, None, None, reverse_forwards=["51234:127.0.0.1:51234"])
+        )
+
 
 class TestPickFreePort:
     def test_returns_bindable_port(self) -> None:
