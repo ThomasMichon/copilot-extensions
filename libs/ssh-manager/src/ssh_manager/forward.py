@@ -107,11 +107,12 @@ def build_forward_ssh_args(
     # pure ``-L`` forward: with a ``-R`` relay present, a remote bind collision
     # (relay port already forwarded by another connection) must NOT tear down
     # the ``-L`` endpoint too -- the endpoint's own TCP-accept probe is the
-    # readiness gate.
+    # readiness gate. The value is always explicit: ssh keeps the first value
+    # it sees, and command-line options beat the ``-F`` config file, so neither
+    # a generated config nor an option map can override the per-shape choice.
     if exit_on_forward_failure is None:
         exit_on_forward_failure = local_port is not None and not reverse_forwards
-    if exit_on_forward_failure:
-        args += ["-o", "ExitOnForwardFailure=yes"]
+    args += ["-o", f"ExitOnForwardFailure={'yes' if exit_on_forward_failure else 'no'}"]
     for key, val in config.extra_options.items():
         # ControlMaster machinery must not leak in: a dedicated forward is not
         # multiplexed over the shared master (that master may not exist on
@@ -122,6 +123,8 @@ def build_forward_ssh_args(
             continue  # decided above, per forward shape
         args += ["-o", f"{key}={val}"]
     for key, val in (extra_options or {}).items():
+        if key.lower() == "exitonforwardfailure":
+            continue  # decided above, per forward shape
         args += ["-o", f"{key}={val}"]
     if local_port is not None:
         args += ["-L", f"127.0.0.1:{local_port}:{remote_host}:{remote_port}"]

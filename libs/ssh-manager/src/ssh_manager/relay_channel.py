@@ -180,12 +180,17 @@ class SupervisedRelayForward:
                 return
 
             stderr = settled.stderr or await self._drain_stderr(proc)
-            last_err = stderr or "ssh exited"
+            last_err = stderr or last_err or "ssh exited"
+            exited_early = proc.returncode is not None
             await self._kill(proc)
             if self._proc is proc:
                 self._proc = None
 
-            if settled.remote_forward_failed and attempt < _ESTABLISH_ATTEMPTS:
+            # This channel runs with ExitOnForwardFailure, so an early exit is
+            # almost always the remote bind failing -- and under a CodeSpace's
+            # LogLevel=quiet ssh may exit without saying so. Retry either way.
+            if (settled.remote_forward_failed or exited_early) \
+                    and attempt < _ESTABLISH_ATTEMPTS:
                 delay = min(
                     self._backoff_max,
                     max(2.0, self._backoff_base * (2 ** (attempt - 1))),
