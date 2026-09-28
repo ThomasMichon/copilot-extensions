@@ -145,8 +145,18 @@ jobs:
         # Replaces the old manual three-file version-bump requirement
         # (tools/check-version-bump.py) now that dev-branch-release-pipeline's CI
         # promotion pipeline (Phase 3) exists to actually consume changefiles.
+        #
+        # --head is pinned explicitly (not left to default to "HEAD") because
+        # actions/checkout with no `ref:` override checks out the ephemeral
+        # refs/pull/<n>/merge commit -- the PR's head merged into whatever the
+        # CURRENT tip of `dev` happens to be, not the PR's own head. Once `dev`
+        # has moved since the PR opened, diffing that merge commit against the
+        # (increasingly stale) base.sha silently folds every intervening dev
+        # commit into "this PR's diff", misattributing other PRs' plugin
+        # changes to this one. Pinning --head to the PR's real head sha keeps
+        # the diff scoped to this PR's own commits regardless of dev's drift.
         if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'dev'
-        run: python tools/check-changefile-presence.py --base ${{ github.event.pull_request.base.sha }}
+        run: python tools/check-changefile-presence.py --base ${{ github.event.pull_request.base.sha }} --head ${{ github.event.pull_request.head.sha }}
       - name: Module size (hard cap + shrink-only baseline, PR diff only)
         # Scoped to files THIS PR's own commits touch (like the changefile-
         # presence step above) -- a PR is never blocked by growth in a file it
