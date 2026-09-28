@@ -753,7 +753,15 @@ function Invoke-VersionedActivate {
         try { Remove-Item -LiteralPath $lkgTmp -Force -ErrorAction SilentlyContinue } catch {}
     }
     $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-    $gcArgs = @($vr, '--root', $InstallDir, '--link-name', '.venv', 'gc', '--protect-pids')
+    # --min-age-days is a recency floor protecting a STORED (not-running)
+    # path-pinned reference -- launch-session.ps1/.sh's `resolve` bakes the
+    # runtime interpreter's path into a plan BEFORE this activation runs; if
+    # that plan hasn't launched its pane yet, its baked path names a slot that
+    # is neither `current` nor `--keep`-protected nor attributable to a live
+    # process (the resolving process already exited). 0.05 days (~72min)
+    # matches agent-mcp's init.ps1 precedent for the same class of not-yet-live
+    # reference. See #4432 for the concrete failure this closes.
+    $gcArgs = @($vr, '--root', $InstallDir, '--link-name', '.venv', 'gc', '--protect-pids', '--min-age-days', '0.05')
     if ($prev) { $gcArgs += @('--keep', $prev) }
     & $LinkPython @gcArgs 2>&1 | ForEach-Object { Write-ServiceChanged "gc: $_" }
     $ErrorActionPreference = $prevEAP

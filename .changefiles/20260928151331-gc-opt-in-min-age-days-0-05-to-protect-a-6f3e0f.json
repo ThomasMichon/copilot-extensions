@@ -1,0 +1,9 @@
+{
+  "comment": "gc: opt in --min-age-days 0.05 to protect a stored, not-running plan reference from mid-boot reap (#4432)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

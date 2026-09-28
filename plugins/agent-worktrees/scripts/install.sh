@@ -671,9 +671,17 @@ _versioned_activate() {
             || rm -f "$INSTALL_DIR/last-known-good.tmp.$$" 2>/dev/null
     fi
     if [[ -n "$prev" ]]; then
-        "$VENV_PYTHON" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids --keep "$prev" 2>&1 | sed 's/^/  → gc: /' || true
+        # --min-age-days is a recency floor protecting a STORED (not-running)
+        # path-pinned reference -- launch-session.ps1/.sh's `resolve` bakes the
+        # runtime interpreter's path into a plan BEFORE this activation runs;
+        # if that plan hasn't launched its pane yet, its baked path names a
+        # slot that is neither `current` nor `--keep`-protected nor attributable
+        # to a live process (the resolving process already exited). 0.05 days
+        # (~72min) matches agent-mcp's init.sh precedent for the same class of
+        # not-yet-live reference. See #4432 for the concrete failure this closes.
+        "$VENV_PYTHON" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids --keep "$prev" --min-age-days 0.05 2>&1 | sed 's/^/  → gc: /' || true
     else
-        "$VENV_PYTHON" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids 2>&1 | sed 's/^/  → gc: /' || true
+        "$VENV_PYTHON" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids --min-age-days 0.05 2>&1 | sed 's/^/  → gc: /' || true
     fi
     return 0
 }
