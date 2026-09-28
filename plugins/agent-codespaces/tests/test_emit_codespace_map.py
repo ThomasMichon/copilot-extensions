@@ -223,3 +223,29 @@ def test_powershell_wrapper_preserves_newline_free_output():
 
     assert "Write-Output" not in wrapper
     assert "[Console]::Out.Write([string]$out)" in wrapper
+
+
+def test_agent_procutil_src_prefers_materialized_payload_copy(tmp_path: Path):
+    """A real release (materialize_main.py copies canonical in at
+    promotion time) has a local libs/agent-procutil/src -- prefer it."""
+    payload = tmp_path / "payload"
+    local_src = payload / "libs" / "agent-procutil" / "src"
+    local_src.mkdir(parents=True)
+
+    assert mod._agent_procutil_src(payload) == str(local_src)
+
+
+def test_agent_procutil_src_falls_back_to_canonical_when_local_copy_absent(
+    tmp_path: Path,
+):
+    """vendor-pointer-generalization effort, Phase 1: agent-procutil is a
+    `uv`-editable canonical reference for agent-codespaces, so a dev
+    checkout has NO local payload/libs/agent-procutil copy at all -- must
+    resolve the canonical repo-root libs/agent-procutil/src instead."""
+    repo_root = tmp_path / "repo"
+    payload = repo_root / "plugins" / "agent-codespaces"
+    payload.mkdir(parents=True)
+    canonical_src = repo_root / "libs" / "agent-procutil" / "src"
+    canonical_src.mkdir(parents=True)
+
+    assert mod._agent_procutil_src(payload) == str(canonical_src)

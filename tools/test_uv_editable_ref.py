@@ -116,6 +116,23 @@ def test_lib_tree_matches_false_when_only_copy_has_tests(tmp_path: Path):
     assert uer.lib_tree_matches(a, b) is False
 
 
+def test_lib_tree_matches_ignores_only_relative_build_dir_names(tmp_path: Path):
+    """Review finding (PR #4372): the ignored-name check must apply to the
+    path RELATIVE to each tree's own root, never the full absolute path.
+    Placing the whole comparison under an ancestor directory that happens
+    to be named e.g. ``build`` must not make every file "invisible" (which
+    would make two genuinely DIFFERENT trees compare as falsely equal)."""
+    build_root = tmp_path / "build" / "checkout"
+    a = _lib(build_root / "a", content="x = 1\n", version="0.1.0")
+    b = _lib(build_root / "b", content="x = 2\n", version="0.1.0")  # genuinely differs
+    assert uer.lib_tree_matches(a, b) is False
+    # A real build/ SUBDIRECTORY inside the tree is still correctly ignored.
+    c = _lib(build_root / "c", content="x = 1\n", version="0.1.0")
+    (a / "build").mkdir()
+    (a / "build" / "stray.txt").write_text("stray build artifact\n", encoding="utf-8")
+    assert uer.lib_tree_matches(a, c) is True
+
+
 def test_uv_editable_problems_rejects_a_symlinked_canonical_lib_root(tmp_path: Path, monkeypatch):
     # A symlinked libs/<lib> that happens to resolve to the SAME target the
     # referenced path also resolves to must still be rejected -- comparing

@@ -5,7 +5,7 @@
   any future custom Mux-side command.
 - **Scope:** leaf
 - **Status:** Draft
-- **Last revised:** 2026-09-15
+- **Last revised:** 2026-09-27
 - **Reality docs:** [plugins/agent-worktrees/docs/cli-reference.md](../../plugins/agent-worktrees/docs/cli-reference.md) (status-segment / status-updater), [plugins/agent-worktrees/docs/mux.md](../../plugins/agent-worktrees/docs/mux.md), [plugins/agent-worktrees/docs/worktree-lifecycle.md](../../plugins/agent-worktrees/docs/worktree-lifecycle.md)
 
 ## Purpose & Intent
@@ -94,6 +94,31 @@ Companion. Any current or future custom Mux-side trigger is registered through
 the same seam and dispatched the same way, so adding another is a
 registration, not a bespoke integration.
 
+### manual-cutover-trigger
+While `.context-handoff/config.yaml`'s `mode` is not `auto`, the automatic
+live-cutover path (`handoff-live-cutover`) never arms — by design (see
+Behaviors/companion-cutover-trigger-is-explicit-and-never-inferred). The
+Companion offers an explicit "Cut over" action, shown only when a pending
+handoff baton is detected for the current worktree, that runs the SAME
+claim → spawn-successor → retire-predecessor machinery the automatic path
+uses, on demand, for exactly one worktree, only on direct human command. This
+exists for diagnosing and exercising the live-cutover mechanism while
+`mode: auto` is not (yet) the configured default — never as a silent or
+inferred substitute for that configuration.
+
+### post-cutover-head-verification
+The Companion's session-lineage view marks whether the durable, resolved head
+(the session the Worktree Picker will resume) matches the session the
+operator most recently cut over to or manually resumed — both the previous and
+new session are listed, so a mismatch is visible immediately rather than
+discovered later when Resume launches the wrong one. The view is refreshable
+on demand (a key, not just at popup-open), so reopening the Companion after a
+manual `/clear` + paste-`HANDOFF_SEED` resume shows current state without
+exiting Mux. Detecting a mismatch is as far as the Companion goes — the
+Companion does not repair a mismatched head or file a report about it; the
+operator directs the CURRENT session to do that, per
+Behaviors/companion-detects-never-repairs.
+
 ## Behaviors
 
 ### mux-bind-is-a-pure-relay
@@ -105,11 +130,33 @@ cutover policy — that remains owned above it, per
 
 ### companion-reads-handoff-schema-never-drives-it
 The Companion may read and display a pending context-handoff baton's headline
-for situational awareness. It never composes, signals, or consumes one, and
-never triggers context-handoff's own cutover machinery. A graceful handoff
-remains exclusively context-handoff's path; the Companion's override is the
-*other*, deliberately blunter path — never a shortcut through the first, and
-never confused for it in the lineage record.
+for situational awareness, and — only on explicit human command, never
+inferred or automatic — invoke the same graceful cutover machinery the
+automatic path uses (see companion-cutover-trigger-is-explicit-and-never-
+inferred). It never composes a handoff, decides on its own that one should
+happen, or silently arms/consumes one. A graceful handoff remains exclusively
+context-handoff's *authored* path; the Companion only ever offers an explicit
+button for a baton that ALREADY exists, never originates one. The raw
+force-head override remains the *other*, deliberately blunter path for when a
+graceful cutover is not wanted or not possible — never a shortcut through the
+first, and never confused for it in the lineage record.
+
+### companion-cutover-trigger-is-explicit-and-never-inferred
+The manual-cutover-trigger action requires a direct human button press every
+time; it is never offered as a consequence of merely opening the Companion,
+never auto-fires on a timer or on detecting a pending baton, and never
+silently upgrades `mode: manual-only` to behave like `mode: auto` beyond that
+one, explicit, single invocation. The underlying `force` bypass this relies on
+(see `plugins/context-handoff` §trigger_handoff) is itself never inferred
+from config; the Companion is one caller among possibly others (e.g. a plain
+CLI invocation) that must each opt in explicitly.
+
+### companion-detects-never-repairs
+Post-cutover-head-verification is read-only: the Companion computes and shows
+whether resolved head matches the expected session, but never writes a repair
+itself and never files a report on the operator's behalf. A detected mismatch
+is the operator's cue to direct the current session to patch it up and file
+the diagnostic themselves, not an action surface the Companion owns.
 
 ### override-is-visible-and-attributable
 A raw force-head override is never silent. The durable lineage records that it
@@ -129,9 +176,13 @@ not its only possible one.
 
 ## Non-Goals / Boundaries
 
-- **Not a handoff orchestrator.** The Companion does not replace, reimplement,
-  or invoke context-handoff's cutover, baton composition, or pending-pickup
-  signal. It only reads that baton's schema for display.
+- **Not a handoff orchestrator.** The Companion does not replace or
+  reimplement context-handoff's cutover choreography, and it never composes a
+  baton or decides on its own that a handoff should happen — it only ever
+  invokes the graceful cutover path for a baton that already exists, and only
+  on an explicit human button press (manual-cutover-trigger). It is not a
+  second way to author or arm a handoff; it is a second way to TRIGGER one
+  someone (or something) else already prepared.
 - **Not a general status-bar click framework.** The Companion is
   hotkey-summoned. Whether Mux-bind's command seam ever extends to clickable
   status-bar regions is future scope for Mux-bind, not a requirement this
@@ -146,11 +197,22 @@ not its only possible one.
 ## See Also
 
 - Parent vision: [agent-fabric](../agent-fabric/README.md)
-- Related visions: [picker](../picker/README.md), [plugins/agent-worktrees](../plugins/agent-worktrees/README.md), [plugins/context-handoff](../plugins/context-handoff/README.md) (schema-read relationship only), [session-hosting](../session-hosting/README.md)
+- Related visions: [picker](../picker/README.md), [plugins/agent-worktrees](../plugins/agent-worktrees/README.md), [plugins/context-handoff](../plugins/context-handoff/README.md) (schema-read + explicit-trigger relationship — see `mux-companion-manual-cutover-diagnostics`), [session-hosting](../session-hosting/README.md)
 - Reality docs: [plugins/agent-worktrees/docs/cli-reference.md](../../plugins/agent-worktrees/docs/cli-reference.md), [plugins/agent-worktrees/docs/mux.md](../../plugins/agent-worktrees/docs/mux.md), [plugins/agent-worktrees/docs/worktree-lifecycle.md](../../plugins/agent-worktrees/docs/worktree-lifecycle.md)
 
 ## Provenance
 
+- **2026-09-27** — Added *manual-cutover-trigger* and
+  *post-cutover-head-verification* (effort
+  `mux-companion-manual-cutover-diagnostics`, #4369): an explicit,
+  human-gated on-demand invocation of the SAME graceful cutover machinery
+  `handoff-live-cutover` already runs automatically under `mode: auto`, for
+  diagnosing/exercising it while that mode is not yet the operator's
+  configured default. Revised the "Not a handoff orchestrator" Non-Goal
+  accordingly — it was previously read as forbidding this entirely; the
+  actual, narrower boundary this vision has always meant is that the
+  Companion never *authors or decides* a handoff, only ever *triggers* one
+  someone else already prepared, and only on direct human command.
 - **2026-09-15** — Updated *hotkey-summoned-status-explainer* to point at the
   decomposed sub-state model (plugins/agent-worktrees §Derived status)
   instead of naming the FINAL/MERGED split directly, following that vision's

@@ -385,17 +385,17 @@ def test_setup_sync_for_tests_prewarm_starts_before_the_pivot_scan(monkeypatch):
         "prewarm_optional_modules must start before _scan_pivot_payload, not after")
 
 
-def test_prewarm_optional_modules_imports_data_ssh(monkeypatch):
+def test_prewarm_optional_modules_imports_data_ssh_and_pivots(monkeypatch):
     """Unlike the call-count test above (which spies on the seam so
     ``_setup_live_pivots`` stays independently testable), this exercises the
-    real function to confirm it actually imports ``data_ssh`` -- not merely
-    *some* import. Spies on ``builtins.__import__`` (the function uses
-    ``from . import data_ssh``) rather than popping the module from
-    ``sys.modules``: popping doesn't clear the parent package's own cached
-    attribute, so a subsequent ``from . import x`` can silently rebind the
-    stale attribute without ever re-registering the module in
-    ``sys.modules`` -- an import-system quirk that made an earlier version
-    of this test spuriously fail."""
+    real function to confirm it actually imports ``data_ssh`` AND ``pivots``
+    -- not merely *some* import. Spies on ``builtins.__import__`` (the
+    function uses ``from . import data_ssh``/``pivots``) rather than
+    popping the module from ``sys.modules``: popping doesn't clear the
+    parent package's own cached attribute, so a subsequent ``from . import
+    x`` can silently rebind the stale attribute without ever re-registering
+    the module in ``sys.modules`` -- an import-system quirk that made an
+    earlier version of this test spuriously fail."""
     pytest.importorskip("textual")
     from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
 
@@ -417,7 +417,7 @@ def test_prewarm_optional_modules_imports_data_ssh(monkeypatch):
         mod = real_import(name, globals, locals, fromlist, level)
         if level and fromlist:
             for item in fromlist:
-                if item == "data_ssh":
+                if item in ("data_ssh", "pivots"):
                     imported.append(item)
         return mod
 
@@ -426,6 +426,7 @@ def test_prewarm_optional_modules_imports_data_ssh(monkeypatch):
     tasks_mod.prewarm_optional_modules()
 
     assert "data_ssh" in imported
+    assert "pivots" in imported
 
 
 def test_prewarm_optional_modules_survives_import_error(monkeypatch):
@@ -718,6 +719,99 @@ def test_cache_only_local_load_skips_group_c_batch(monkeypatch):
     rows = data_local.load("host", "Win", classify=False)
 
     assert rows[0]["raw"]["id"] == "wt-a"
+
+
+def test_prepare_live_source_warms_src_local_even_when_tabs_already_have_it():
+    """``_prepare_live_source`` must touch ``self.src.LOCAL`` unconditionally,
+    not only as a fallback when ``tabs`` scanning fails to find a local
+    entry. On the real ``data_ssh`` source, every ``source_tabs()`` tab
+    already carries its own ``"local"`` key, so the OLD code's
+    ``if local is None: local = self.src.LOCAL`` fallback was dead in
+    practice -- ``data_ssh.LOCAL`` (a PEP 562 module attribute resolved
+    lazily via an uncached ``load_config()`` call, then memoized forever)
+    was never touched during startup at all. Its first REAL access then
+    happened later, outside any cache scope -- e.g. ``_wt_submenu_verbs()``'s
+    ``(machine, env) == self.src.LOCAL`` comparison on the operator's first
+    Enter press of a worktree row -- reproducing as a synchronous,
+    spinner-less multi-second UI freeze (#picker-menu-open-latency). This
+    method runs inside ``_load_config_cache_scope()``, so warming LOCAL here
+    is nearly free (shared with whatever else that scope already computed)."""
+    pytest.importorskip("textual")
+    from worktree_manager.production_picker.picker_tui import engine as eng
+
+    local_accesses = []
+
+    class Src:
+        REPO = "r"
+        BRANCH = "b"
+
+        @staticmethod
+        def source_tabs(_snapshot=None):
+            # Mirrors data_ssh.source_tabs(): every tab already carries its
+            # own "local" key, so `tabs` scanning alone would always find a
+            # match and never fall through to the LOCAL fallback.
+            return [
+                {"label": "book2 Win", "machine": "book2", "env": "Win",
+                 "ready": True, "local": True, "source_kind": "machine-ssh",
+                 "source_id": None, "capabilities": {}},
+            ]
+
+        @staticmethod
+        def setup_metadata(_snapshot):
+            return {}
+
+        @property
+        def LOCAL(self):
+            local_accesses.append(1)
+            return ("book2", "Win")
+
+    screen = eng.PickerScreen(Src(), live=True)
+    screen._prepare_live_source(None)
+
+    assert local_accesses, "self.src.LOCAL must be touched during _prepare_live_source"
+
+
+def test_collect_setup_payload_warms_src_local_even_when_tabs_already_have_it():
+    """The same fix as ``_prepare_live_source``'s (above), applied to
+    ``_collect_setup_payload()`` -- the shared collector behind both the
+    async ``_start_setup_reload_worker()`` (manual 'r' reload / live) path
+    and the synchronous ``setup_sync_for_tests()`` path -- for defense in
+    depth: whichever entrypoint runs first must not leave the same dead
+    LOCAL fallback unwarmed."""
+    pytest.importorskip("textual")
+    from worktree_manager.production_picker.picker_tui import engine as eng
+
+    local_accesses = []
+
+    class Src:
+        REPO = "r"
+        BRANCH = "b"
+
+        @staticmethod
+        def source_tabs(_snapshot=None):
+            return [
+                {"label": "book2 Win", "machine": "book2", "env": "Win",
+                 "ready": True, "local": True, "source_kind": "machine-ssh",
+                 "source_id": None, "capabilities": {}},
+            ]
+
+        @staticmethod
+        def make_loader(*_a, **_k):
+            return None
+
+        @staticmethod
+        def load():
+            return []
+
+        @property
+        def LOCAL(self):
+            local_accesses.append(1)
+            return ("book2", "Win")
+
+    screen = eng.PickerScreen(Src(), live=False)
+    screen.setup_sync_for_tests()
+
+    assert local_accesses, "self.src.LOCAL must be touched during _collect_setup_payload"
 
 
 def test_setup_live_async_records_failure():

@@ -37,6 +37,13 @@ import _core_cluster_scan  # noqa: E402 -- must follow the sys.path insert above
 
 # Every module build_parser() delegates a subparser to (see build_parser()'s
 # own `*.add_parsers(sub)` / `pane_lifecycle.register_cli(sub)` call list).
+# `picker_reconcile_cli` is deliberately listed AFTER `context_cli`: its own
+# "picker-reconcile-local" parser is registered twice in this simulation --
+# once nested inside `context_cli.add_parsers()`'s own call to
+# `picker_reconcile_cli.add_parsers()`, and once directly here -- and only
+# the LATER iteration's `table[command] = modname` assignment survives,
+# which must be this module's own name so the handler-module cross-check
+# below (`handler_module != modname`) matches instead of dropping the entry.
 _ADD_PARSERS_MODULES = [
     "resolve_cli", "finalize_cli", "pr_state_cli", "status_cli", "status_bar_cli",
     "status_updater_cli", "status_monitor_cli", "status_monitor_runtime",
@@ -46,6 +53,7 @@ _ADD_PARSERS_MODULES = [
     "installation_cli", "update_cli", "context_cli", "services_cli",
     "repos_cli", "related_cli", "git_cli", "pr_cli", "session_binding_cli",
     "session_inspection_cli", "session_tracking_cli", "worktree_status_audit",
+    "picker_reconcile_cli",
 ]
 
 
@@ -236,9 +244,9 @@ def _deferred_only_global_names() -> frozenset[str]:
         ("pre-launch", ["pre-launch"]),
         ("reconcile-plugins", ["reconcile-plugins", "--peek"]),
         ("worktree-status-audit", ["worktree-status-audit", "--sample", "1", "--no-log", "--seed", "1"]),
-        ("machine-context", ["machine-context"]),
         ("list-sessions", ["list-sessions"]),
         ("reconcile-sessions", ["reconcile-sessions"]),
+        ("picker-reconcile-local", ["picker-reconcile-local", "--json"]),
     ],
 )
 def test_cluster_free_command_handler_body_runs_without_cluster(command, argv, monkeypatch, capsys):

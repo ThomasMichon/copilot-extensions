@@ -237,6 +237,63 @@ function Install-AgentSshPackage {
     return $LASTEXITCODE -eq 0
 }
 
+function Resolve-VendoredLib {
+    param([Parameter(Mandatory)][string]$LibName)
+    # 1. Vendored inside agent-ssh (marketplace install layout)
+    $candidate = Join-Path $PluginDir "libs\$LibName"
+    if (Test-Path (Join-Path $candidate 'pyproject.toml')) {
+        return (Resolve-Path $candidate).Path
+    }
+
+    # 2. Relative path (git checkout layout)
+    $candidate = Join-Path $PluginDir "..\..\libs\$LibName"
+    if (Test-Path (Join-Path $candidate 'pyproject.toml')) {
+        return (Resolve-Path $candidate).Path
+    }
+
+    # 3. Git repo registry (~/.git-repos) -- use Python for safe YAML parsing
+    $gitRepos = Join-Path $env:USERPROFILE '.git-repos'
+    if (Test-Path $gitRepos) {
+        try {
+            $result = & python3 -c @"
+import pathlib, os
+try:
+    import yaml
+except ImportError:
+    raise SystemExit(1)
+reg = yaml.safe_load(pathlib.Path.home().joinpath('.git-repos').read_text())
+repo = (reg or {}).get('repos', {}).get('copilot-extensions', {})
+if repo:
+    p = repo.get('path', os.path.join(reg.get('srcroot', ''), 'copilot-extensions'))
+    p = os.path.expanduser(p)
+    lib = os.path.join(p, 'libs', '$LibName')
+    if os.path.isfile(os.path.join(lib, 'pyproject.toml')):
+        print(lib)
+        raise SystemExit(0)
+raise SystemExit(1)
+"@ 2>$null
+            if ($LASTEXITCODE -eq 0 -and $result) {
+                return $result.Trim()
+            }
+        } catch { }
+    }
+
+    # 4. Common checkout path (repo exists but registry absent/stale)
+    $candidate = Join-Path $env:USERPROFILE "src\copilot-extensions\libs\$LibName"
+    if (Test-Path (Join-Path $candidate 'pyproject.toml')) {
+        return (Resolve-Path $candidate).Path
+    }
+
+    return $null
+}
+
+# Resolve the ssh-manager / agent-procutil vendored libs (thin wrappers) --
+# both are now consumed as `uv`-editable canonical references
+# (vendor-pointer-generalization effort, Phase 1), so a dev checkout has
+# no `$PluginDir\libs\<lib>` copy for either one.
+function Resolve-SshManager { return (Resolve-VendoredLib -LibName 'ssh-manager') }
+function Resolve-AgentProcutil { return (Resolve-VendoredLib -LibName 'agent-procutil') }
+
 $PluginDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $PkgSrcDir = Join-Path $PluginDir 'src\agent_ssh'
 
@@ -697,10 +754,20 @@ if ($Force -or -not (Test-Path $VenvPython)) {
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 Remove-ConsoleTrampolines -VenvDir $VenvDir
+$agentProcutilDir = Resolve-AgentProcutil
+if (-not $agentProcutilDir) {
+    Write-Fail 'Cannot locate agent-procutil library'
+    exit 1
+}
+$sshManagerDir = Resolve-SshManager
+if (-not $sshManagerDir) {
+    Write-Fail 'Cannot locate ssh-manager library'
+    exit 1
+}
 $vendoredDependencies = @(
-    (Join-Path $PluginDir 'libs\agent-procutil'),
+    $agentProcutilDir,
     (Join-Path $PluginDir 'libs\dropin-registry'),
-    (Join-Path $PluginDir 'libs\ssh-manager'),
+    $sshManagerDir,
     (Join-Path $PluginDir 'libs\venue-copilot'),
     (Join-Path $PluginDir 'libs\zdd')
 )

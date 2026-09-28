@@ -1835,7 +1835,9 @@ class TestPRFinalizeAndPush:
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         rec.pr = tracking.PRRecord(state="creating", branch="feature/never-pushed-aaaa")
         tracking.save_record(rec)
+        import dataclasses
         repo = config.default_repo
+        repo = dataclasses.replace(repo, pr=dataclasses.replace(repo.pr, strategy="detach"))
         ok, err = fin._pr_finalize_precondition(rec, repo, str(wt_path), repo.anchor)
         assert ok is False
         assert "not upstream" in err
@@ -1845,7 +1847,9 @@ class TestPRFinalizeAndPush:
         config, wid, wt_path, _ = pr_repo
         pr_ops.create_pr(wid, config, title="Add feature")
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        import dataclasses
         repo = config.default_repo
+        repo = dataclasses.replace(repo, pr=dataclasses.replace(repo.pr, strategy="detach"))
         ok, err = fin._pr_finalize_precondition(rec, repo, str(wt_path), repo.anchor)
         assert ok is True, err
         assert err is None
@@ -1862,7 +1866,9 @@ class TestPRFinalizeAndPush:
         _git("add", "-A", cwd=wt_path)
         _git("commit", "-m", "feedback", cwd=wt_path)
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        import dataclasses
         repo = config.default_repo
+        repo = dataclasses.replace(repo, pr=dataclasses.replace(repo.pr, strategy="detach"))
         ok, err = fin._pr_finalize_precondition(rec, repo, str(wt_path), repo.anchor)
         assert ok is False
         assert "unpushed" in err
@@ -2872,7 +2878,9 @@ class TestPRFinalizeAndPush:
         config = self._refspec_config(config)
         pr_ops.create_pr(wid, config, title="Add feature")
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        import dataclasses
         repo = config.default_repo
+        repo = dataclasses.replace(repo, pr=dataclasses.replace(repo.pr, strategy="detach"))
         ok, err = fin._pr_finalize_precondition(rec, repo, str(wt_path), repo.anchor)
         assert ok is True, err
         assert err is None

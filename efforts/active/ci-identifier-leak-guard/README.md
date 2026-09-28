@@ -149,7 +149,7 @@ an untrusted findings artifact at all.
   and `dev`, prepare the exact before/after required-check diff for the new
   custom Check Run name, and stop for explicit operator confirmation before any
   mutating admin call.
-- [ ] After operator confirmation, add `identifier leak guard` to the required
+- [x] After operator confirmation, add `identifier leak guard` to the required
   status checks on `main` ruleset `18553911` and `dev` ruleset `23904550`.
 
 ### Phase 4 - Provision the secret-backed denylists
@@ -246,6 +246,18 @@ _Pending._
 - No identifier-guard PR feedback comment was posted on the clean scratch PR,
   and the check-run output named only the configuration gap -- no raw matched
   values appeared because no denylist-backed scan actually ran.
+
+### 2026-09-26 - Required check registered (operator-confirmed)
+- Operator confirmed the exact before/after diff and the mutation was applied
+  directly via the GitHub API (fetch-then-PUT full ruleset payload, preserving
+  every pre-existing rule):
+  - `main` ruleset `18553911`: required status checks
+    `["main source gate"]` -> `["main source gate", "identifier leak guard"]`.
+  - `dev` ruleset `23904550`: added a new `required_status_checks` rule with
+    `["identifier leak guard"]` (previously had no such rule).
+- Phase 3 is now fully complete. Remaining work is entirely Phase 4
+  (operator-only secret provisioning) plus the two validation items gated on
+  those secrets existing.
 
 ### 2026-09-27 - Interim non-blocking fix: misconfigured reports neutral, not failure
 - Neither `main` (ruleset `18553911`) nor `dev` (rulesets `23904550`/`24069919`)

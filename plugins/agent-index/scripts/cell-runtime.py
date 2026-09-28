@@ -1087,7 +1087,7 @@ def _runtime_module_path(
 
 def _runtime_install_target(snapshot_root: Path, role: str | None) -> str:
     if role == "host":
-        return f"{snapshot_root}[store]"
+        return f"{snapshot_root}[store,server]"
     return str(snapshot_root)
 
 

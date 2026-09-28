@@ -11,10 +11,27 @@ PLUGIN = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.guard
 
 
-def test_windows_ssh_manager_selectors_match_vendored_distribution():
-    metadata = (PLUGIN / "libs" / "ssh-manager" / "pyproject.toml").read_text(
-        encoding="utf-8"
+def _ssh_manager_pyproject() -> Path:
+    """The real ``ssh-manager`` ``pyproject.toml`` this dev checkout would
+    resolve, mirroring ``install.ps1``'s own ``Resolve-VendoredLib``
+    two-tier resolution: a local marketplace-layout copy under
+    ``PLUGIN/libs/ssh-manager`` first, else the canonical `uv`-editable
+    reference at the repo-root ``libs/ssh-manager`` (vendor-pointer-
+    generalization effort, Phase 1 -- this plugin's own vendored copy no
+    longer exists in a `dev`-branch checkout)."""
+    local = PLUGIN / "libs" / "ssh-manager" / "pyproject.toml"
+    if local.is_file():
+        return local
+    canonical = PLUGIN.parents[1] / "libs" / "ssh-manager" / "pyproject.toml"
+    assert canonical.is_file(), (
+        f"neither {local} nor {canonical} exists -- ssh-manager is "
+        "unresolvable from this checkout"
     )
+    return canonical
+
+
+def test_windows_ssh_manager_selectors_match_vendored_distribution():
+    metadata = _ssh_manager_pyproject().read_text(encoding="utf-8")
     project = re.search(r"(?ms)^\[project\]\s*\n(.*?)(?=^\[|\Z)", metadata)
     assert project is not None
     name = re.search(r'(?m)^name\s*=\s*"([^"]+)"\s*$', project.group(1))

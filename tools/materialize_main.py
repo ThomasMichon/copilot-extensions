@@ -70,6 +70,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import nested_uv_editable_ref as nuer  # noqa: E402
 import uv_editable_ref as uer  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
@@ -488,6 +489,26 @@ def materialize_uv_editable_ref_into(
         log.append(result)
         if result.startswith("OK"):
             materialized_libs.add(lib)
+            # Fix up any `uv`-editable reference the just-copied canonical
+            # lib declares FOR ITSELF (e.g. ssh-manager depending on
+            # agent-procutil) -- found in review (PR #4372): without this,
+            # the consumer's own entry gets rewritten to the local
+            # non-editable form above, but a nested entry inside the
+            # copied lib's own pyproject.toml is left untouched, still
+            # `editable = true` -- a real release then has the SAME path
+            # required both editable and non-editable at once, and `uv`
+            # refuses to resolve it. Nested libs it successfully handles
+            # are folded into `materialized_libs` too -- a LATER top-level
+            # entry for that same lib (the consumer's own direct
+            # dependency, processed after this one) must take the
+            # "alias" (rewrite-only) path below, not the hard "already
+            # exists" refusal, since the nested step already placed it at
+            # the exact same sibling location a top-level entry would.
+            nested_log, nested_materialized = nuer.materialize_nested_uv_editable_refs(
+                dest_lib_dir, canonical_root=canonical_root_r, dest_root=dest_root_r,
+            )
+            log.extend(nested_log)
+            materialized_libs.update(nested_materialized)
     return log
 
 

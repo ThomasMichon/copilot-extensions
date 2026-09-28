@@ -134,6 +134,63 @@ def test_scan_reports_stale_output(tmp_path):
     assert stale == [repo.resolve() / ".github" / "agents" / "widget.agent.md"]
 
 
+def test_sync_never_deletes_a_hand_authored_file_without_the_banner(tmp_path):
+    # Regression test for #2861: a hand-authored, non-plugin agent file that
+    # happens to sit in the output directory (never hoisted, never
+    # plugin-owned) must survive `sync` even though it isn't in `desired()`'s
+    # expected output.
+    repo = _basic_repo(tmp_path)
+    output_dir = repo / ".github" / "agents"
+    output_dir.mkdir(parents=True)
+    hand_authored = output_dir / "reviewer.agent.md"
+    hand_authored.write_text(
+        "---\nname: reviewer\ndescription: hand-authored, never hoisted\n---\n"
+        "Body\n",
+        encoding="utf-8",
+    )
+
+    written, stale = hoist.sync(repo, PurePosixPath(".github/agents"))
+
+    assert stale == []
+    assert hand_authored.exists()
+    assert hand_authored.read_text(encoding="utf-8") == (
+        "---\nname: reviewer\ndescription: hand-authored, never hoisted\n---\n"
+        "Body\n"
+    )
+    assert output_dir / "widget.agent.md" in written
+
+
+def test_scan_never_reports_a_hand_authored_file_as_stale(tmp_path):
+    repo = _basic_repo(tmp_path)
+    output_dir = repo / ".github" / "agents"
+    output_dir.mkdir(parents=True)
+    (output_dir / "reviewer.agent.md").write_text(
+        "---\nname: reviewer\ndescription: hand-authored, never hoisted\n---\n"
+        "Body\n",
+        encoding="utf-8",
+    )
+
+    mismatches, stale = hoist.scan(repo, PurePosixPath(".github/agents"))
+
+    assert stale == []
+    assert len(mismatches) == 1  # widget.agent.md, not yet written
+
+
+def test_a_previously_hoisted_file_is_still_treated_as_stale_when_disabled(tmp_path):
+    # The provenance check must not weaken the existing, intended behavior:
+    # a file this script actually wrote is still cleaned up once its plugin
+    # is disabled.
+    repo = _basic_repo(tmp_path)
+    hoist.sync(repo, PurePosixPath(".github/agents"))
+    _settings(repo, {}, {})  # disable everything
+
+    written, stale = hoist.sync(repo, PurePosixPath(".github/agents"))
+
+    assert written == []
+    assert stale == [repo.resolve() / ".github" / "agents" / "widget.agent.md"]
+    assert not (repo / ".github" / "agents" / "widget.agent.md").exists()
+
+
 def test_conflicting_agent_names_across_plugins_raise(tmp_path):
     _settings(
         tmp_path,

@@ -19,6 +19,7 @@ import pytest
 
 from agent_index import config
 from agent_index import __main__ as agent_main
+from agent_index import __version__
 from agent_index.index_config import IndexConfig
 
 
@@ -3519,7 +3520,7 @@ def test_selected_completed_runtime_requires_successful_import(
 @pytest.mark.parametrize(
     ("role", "expected_target"),
     [
-        ("host", "payload[store]"),
+        ("host", "payload[store,server]"),
         ("client", "payload"),
         (None, "payload"),
     ],
@@ -4210,13 +4211,13 @@ def test_private_cell_start_requires_reconciling_transaction_state(
                 "state": "prepared",
                 "management": {
                     "path": str(PLUGIN),
-                    "version": agent_main.__version__,
+                    "version": __version__,
                 },
                 "target": {
                     "payloadRoot": str(PLUGIN),
-                    "payloadVersion": agent_main.__version__,
-                    "snapshotId": agent_main.__version__,
-                    "runtimeVersion": agent_main.__version__,
+                    "payloadVersion": __version__,
+                    "snapshotId": __version__,
+                    "runtimeVersion": __version__,
                 },
             }
         ),
@@ -4288,9 +4289,9 @@ def test_passive_process_publishes_no_shared_active_evidence(
                 "management": {"path": str(PLUGIN), "version": "test"},
                 "target": {
                     "payloadRoot": str(PLUGIN),
-                    "payloadVersion": agent_main.__version__,
-                    "snapshotId": agent_main.__version__,
-                    "runtimeVersion": agent_main.__version__,
+                    "payloadVersion": __version__,
+                    "snapshotId": __version__,
+                    "runtimeVersion": __version__,
                 },
             }
         ),

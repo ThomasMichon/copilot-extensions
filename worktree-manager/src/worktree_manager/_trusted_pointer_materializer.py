@@ -35,6 +35,7 @@ still run it after any hand-applied sync.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import shutil
@@ -367,6 +368,32 @@ def _uv_editable_ignore(_dir: str, names: list[str]) -> set[str]:
     } or n.endswith((".pyc", ".pyo"))}
 
 
+def _file_hashes(root: Path) -> dict[str, str]:
+    """Mirrors ``uv_editable_ref.py``'s identically-named helper --
+    relative-path -> sha256 for every real file anywhere under ``root``,
+    ignoring the same build/tool-cache directory names a copytree's own
+    ``ignore`` callback excludes (so a fresh copy is never falsely
+    reported as "not matching" a canonical tree that still carries them
+    as ordinary local dev artifacts)."""
+    ignored_dirs = {".git", "__pycache__", ".pytest_cache", ".ruff_cache", "build", "dist"}
+    out: dict[str, str] = {}
+    if not root.is_dir():
+        return out
+    for f in root.rglob("*"):
+        if not f.is_file():
+            continue
+        if ignored_dirs & set(f.relative_to(root).parts) or f.suffix in (".pyc", ".pyo"):
+            continue
+        out[f.relative_to(root).as_posix()] = hashlib.sha256(f.read_bytes()).hexdigest()
+    return out
+
+
+def _lib_tree_matches(canonical: Path, copy_dir: Path) -> bool:
+    """Mirrors ``uv_editable_ref.py``'s ``lib_tree_matches`` -- True when
+    ``copy_dir``'s complete tree is byte-identical to ``canonical``'s."""
+    return _file_hashes(canonical) == _file_hashes(copy_dir)
+
+
 def _materialize_one_uv_editable_ref(
     *, canonical: Path, dest_lib_dir: Path, pyproject: Path, name: str, raw_path: str, lib: str,
 ) -> str:
@@ -397,6 +424,159 @@ def _materialize_one_uv_editable_ref(
     if error is not None:
         return error
     return f"OK   {dest_lib_dir} <- {raw_path}"
+
+
+def _rewrite_nested_uv_editable_entry(
+    *, pyproject: Path, name: str, raw_path: str
+) -> str | None:
+    """Mirrors ``materialize_main.py``'s identically-named helper -- see
+    its docstring for why a NESTED entry (one belonging to a just-copied
+    canonical lib's own manifest, not a top-level consumer's) is rewritten
+    to drop ``editable = true`` while keeping its ``path`` unchanged."""
+    text = pyproject.read_text(encoding="utf-8")
+    span = uv_sources_table_span(text)
+    if span is None:
+        return f"SKIP {pyproject}: no [tool.uv.sources] table found"
+    start, end = span
+    pattern = _uv_source_entry_pattern(name, raw_path)
+    if pattern.search(text[start:end]) is None:
+        return f"SKIP {pyproject}: could not find {name}'s uv-editable entry to rewrite"
+    new_table_text, count = pattern.subn(
+        lambda m: f'{m.group(1)}{{ path = "{raw_path}" }}', text[start:end], count=1
+    )
+    assert count == 1  # already confirmed via the preflight search() above
+    pyproject.write_text(text[:start] + new_table_text + text[end:], encoding="utf-8")
+    return None
+
+
+def _materialize_nested_uv_editable_refs(
+    dest_lib_dir: Path, *, canonical_root: Path, dest_root: Path,
+) -> tuple[list[str], set[str]]:
+    """Mirrors ``materialize_main.py``'s identically-named function -- see
+    its docstring for the full contract (PR #4372: a canonical lib such as
+    ``ssh-manager`` can itself depend on another canonical lib such as
+    ``agent-procutil`` via its own escaping `uv`-editable entry; the outer
+    rewrite only fixes the CONSUMER's top-level entry, leaving the
+    just-copied lib's own nested entry still ``editable = true``).
+
+    Hardened per PR #4372's second review round: (1) the UNRESOLVED
+    canonical path is checked for a symlinked ancestor BEFORE ever calling
+    ``.resolve()`` on it; (2) ``raw_path`` must resolve to EXACTLY
+    ``<consumer>/libs/<nested_lib>`` (derived independently of
+    ``raw_path``), not merely "somewhere inside the snapshot root"."""
+    log: list[str] = []
+    materialized: set[str] = set()
+    dest_pyproject = dest_lib_dir / "pyproject.toml"
+    if dest_pyproject.is_symlink():
+        return ([
+            f"SKIP {dest_pyproject}: is a symlink -- refusing to trust it "
+            "for nested uv-editable canonical-reference expansion"
+        ], materialized)
+    try:
+        nested_refs = find_uv_editable_refs(dest_lib_dir)
+    except ManifestUnreadable as exc:
+        return ([f"SKIP {dest_lib_dir}: {exc}"], materialized)
+    canonical_root_r = canonical_root.resolve()
+    dest_root_r = dest_root.resolve()
+    # dest_lib_dir was placed at <dest_consumer_dir>/libs/<lib> by the
+    # caller -- the expected sibling location for a nested dependency is
+    # <dest_consumer_dir>/libs/<nested_lib>, computed independently of
+    # nested_raw_path so a crafted raw_path can never redirect the copy.
+    dest_consumer_dir = dest_lib_dir.parent.parent.resolve()
+    for nested_name, nested_raw_path, nested_lib, nested_editable in nested_refs:
+        if not nested_editable:
+            log.append(
+                f"SKIP {dest_pyproject}: {nested_name} references {nested_raw_path} "
+                "outside its own root but is missing editable = true -- "
+                "refusing to ship an unresolved external reference"
+            )
+            continue
+        if not _is_safe_lib_name(nested_lib):
+            log.append(
+                f"SKIP {dest_pyproject}: {nested_name} references "
+                f"{nested_raw_path}, whose final path component "
+                f"{nested_lib!r} is not a safe lib name -- refusing"
+            )
+            continue
+        # Check the UNRESOLVED canonical path for a symlinked ancestor
+        # BEFORE ever calling .resolve() on anything derived from it --
+        # resolving first would silently follow (and erase) a symlink
+        # along the way.
+        canonical_unresolved = canonical_root_r / "libs" / nested_lib
+        bad_ancestor = _find_symlinked_ancestor(canonical_unresolved, canonical_root_r)
+        if bad_ancestor is not None:
+            log.append(f"SKIP {dest_pyproject}: {bad_ancestor} is a symlink -- refusing")
+            continue
+        nested_canonical = canonical_unresolved.resolve()
+
+        nested_dest_expected = dest_consumer_dir / "libs" / nested_lib
+        bad_ancestor = _find_symlinked_ancestor(nested_dest_expected, dest_root_r)
+        if bad_ancestor is not None:
+            log.append(f"SKIP {nested_dest_expected}: {bad_ancestor} is a symlink -- refusing")
+            continue
+        nested_dest = (dest_lib_dir / nested_raw_path).resolve()
+        # Require the resolved path to be EXACTLY the expected sibling --
+        # not merely "somewhere inside dest_root". A looser containment
+        # check would accept an escaping raw_path (e.g.
+        # ../../plugins/other) and copy canonical's <nested_lib> content
+        # into that OTHER location while the manifest still points at the
+        # wrong path.
+        if nested_dest != nested_dest_expected.resolve():
+            log.append(
+                f"SKIP {dest_pyproject}: {nested_name} references "
+                f"{nested_raw_path} (resolved {nested_dest}) which is not "
+                f"<consumer>/libs/{nested_lib} -- refusing"
+            )
+            continue
+        if not nested_canonical.is_dir():
+            log.append(
+                f"SKIP {dest_pyproject}: {nested_name} references "
+                f"{nested_raw_path} (resolved canonical {nested_canonical}) "
+                "which does not exist"
+            )
+            continue
+        if nested_dest.exists() or nested_dest.is_symlink():
+            # A pre-existing sibling at this path must never be silently
+            # trusted as "already materialized" -- accept it only when
+            # it's a real directory whose COMPLETE tree is byte-identical
+            # to canonical.
+            if nested_dest.is_symlink():
+                log.append(f"SKIP {nested_dest}: is a symlink -- refusing")
+                continue
+            if not nested_dest.is_dir():
+                log.append(
+                    f"SKIP {nested_dest}: already exists but is not a "
+                    "directory -- refusing"
+                )
+                continue
+            if not _lib_tree_matches(nested_canonical, nested_dest):
+                log.append(
+                    f"SKIP {nested_dest}: already exists but does not "
+                    "match canonical -- refusing"
+                )
+                continue
+        else:
+            if not (nested_canonical / "src").is_dir():
+                log.append(
+                    f"SKIP {nested_dest}: {nested_canonical}/src not found "
+                    "-- refusing (canonical lib source must exist)"
+                )
+                continue
+            stray = _find_symlink(nested_canonical)
+            if stray is not None:
+                where = str(nested_canonical) if stray == "." else f"{nested_canonical}/{stray}"
+                log.append(f"SKIP {nested_dest}: {where} is a symlink -- refusing")
+                continue
+            shutil.copytree(nested_canonical, nested_dest, ignore=_uv_editable_ignore)
+        error = _rewrite_nested_uv_editable_entry(
+            pyproject=dest_pyproject, name=nested_name, raw_path=nested_raw_path,
+        )
+        if error is not None:
+            log.append(error)
+            continue
+        log.append(f"OK   {nested_dest} <- {nested_raw_path} (nested in {dest_lib_dir})")
+        materialized.add(nested_lib)
+    return log, materialized
 
 
 def materialize_uv_editable_ref_into(
@@ -500,4 +680,17 @@ def materialize_uv_editable_ref_into(
         log.append(result)
         if result.startswith("OK"):
             materialized_libs.add(lib)
+            # Fix up any `uv`-editable reference the just-copied canonical
+            # lib declares FOR ITSELF (e.g. ssh-manager depending on
+            # agent-procutil) -- mirrors materialize_main.py's identically
+            # -named function; see its docstring for the full rationale
+            # (PR #4372). Nested libs successfully handled are folded into
+            # `materialized_libs` too, so a LATER top-level entry for that
+            # same lib takes the alias (rewrite-only) path, not the hard
+            # "already exists" refusal.
+            nested_log, nested_materialized = _materialize_nested_uv_editable_refs(
+                dest_lib_dir, canonical_root=canonical_root_r, dest_root=dest_root_r,
+            )
+            log.extend(nested_log)
+            materialized_libs.update(nested_materialized)
     return log

@@ -57,13 +57,27 @@ def _aw_binstub() -> str | None:
     return None
 
 
+def _agent_procutil_src(payload: Path) -> str:
+    """Resolve ``agent_procutil``'s ``src/`` directory across layouts:
+    the materialized payload copy (a real release -- ``materialize_main.py``
+    copies canonical in at promotion time) if present, else the canonical
+    repo-root ``libs/agent-procutil/src`` (a dev checkout -- agent-procutil
+    is now a `uv`-editable canonical reference, vendor-pointer-
+    generalization effort Phase 1, so this plugin carries no local copy at
+    all there)."""
+    local = payload / "libs" / "agent-procutil" / "src"
+    if local.is_dir():
+        return str(local)
+    return str(payload.parents[1] / "libs" / "agent-procutil" / "src")
+
+
 def _aw(*args: str, cwd: str | None = None) -> str | None:
     """Run ``agent-worktrees`` via its own binstub and return stdout."""
     if os.environ.get("COPILOT_EXTENSIONS_CONTEXT", ""):
         # The hook also runs directly from a deployed payload, outside its venv.
         payload = Path(__file__).resolve().parent.parent
         sys.path.insert(0, str(payload / "src"))
-        sys.path.insert(0, str(payload / "libs" / "agent-procutil" / "src"))
+        sys.path.insert(0, _agent_procutil_src(payload))
         from agent_codespaces import worktrees
 
         proc = worktrees.run(*args, cwd=cwd, timeout=20)

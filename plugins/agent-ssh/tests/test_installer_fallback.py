@@ -120,6 +120,9 @@ def test_package_install_falls_back_when_resolved_uv_cannot_launch(
 )
 def test_shell_pip_fallback_includes_vendored_dependencies(tmp_path: Path) -> None:
     installer = SHELL_INSTALLER.read_text(encoding="utf-8")
+    resolve_vendored_lib = _shell_function_source(
+        installer, "_resolve_vendored_lib", "\n_resolve_ssh_manager()",
+    )
     install_package = _shell_function_source(
         installer,
         "_install_agent_ssh_package",
@@ -128,7 +131,10 @@ def test_shell_pip_fallback_includes_vendored_dependencies(tmp_path: Path) -> No
 
     plugin = tmp_path / "plugin"
     (plugin / "libs" / "agent-procutil").mkdir(parents=True)
+    (plugin / "libs" / "agent-procutil" / "pyproject.toml").write_text("", encoding="utf-8")
     (plugin / "libs" / "dropin-registry").mkdir(parents=True)
+    (plugin / "libs" / "ssh-manager").mkdir(parents=True)
+    (plugin / "libs" / "ssh-manager" / "pyproject.toml").write_text("", encoding="utf-8")
     marker = tmp_path / "pip-fallback-ran"
     fake_python = tmp_path / "python"
     fake_python.write_text(
@@ -143,6 +149,10 @@ def test_shell_pip_fallback_includes_vendored_dependencies(tmp_path: Path) -> No
             [
                 "set -euo pipefail",
                 "_step() { printf '%s\\n' \"$1\"; }",
+                "_fail() { printf '%s\\n' \"$1\" >&2; }",
+                resolve_vendored_lib,
+                "_resolve_ssh_manager() { _resolve_vendored_lib ssh-manager; }",
+                "_resolve_agent_procutil() { _resolve_vendored_lib agent-procutil; }",
                 install_package,
                 "HAVE_UV=0",
                 f"VENV_PYTHON='{fake_python}'",
@@ -167,4 +177,78 @@ def test_shell_pip_fallback_includes_vendored_dependencies(tmp_path: Path) -> No
     fallback_args = marker.read_text(encoding="ascii")
     assert str(plugin / "libs" / "agent-procutil") in fallback_args
     assert str(plugin / "libs" / "dropin-registry") in fallback_args
+    assert str(plugin / "libs" / "ssh-manager") in fallback_args
     assert str(plugin) in fallback_args
+
+
+def test_shell_pip_fallback_resolves_canonical_when_local_copy_absent(tmp_path: Path) -> None:
+    """vendor-pointer-generalization effort, Phase 1: ssh-manager and
+    agent-procutil are `uv`-editable canonical references, so a real
+    dev checkout has NO local `plugin/libs/<lib>` copy for either one --
+    the pip fallback must resolve the canonical `../../libs/<lib>` path
+    instead (mirroring `install.ps1`'s own `Resolve-VendoredLib`)."""
+    installer = SHELL_INSTALLER.read_text(encoding="utf-8")
+    resolve_vendored_lib = _shell_function_source(
+        installer, "_resolve_vendored_lib", "\n_resolve_ssh_manager()",
+    )
+    install_package = _shell_function_source(
+        installer,
+        "_install_agent_ssh_package",
+        "\n# #935:",
+    )
+
+    # git-checkout layout: repo_root/plugins/agent-ssh (no local libs/
+    # copy) and repo_root/libs/{ssh-manager,agent-procutil} (canonical).
+    repo_root = tmp_path / "repo"
+    plugin = repo_root / "plugins" / "agent-ssh"
+    plugin.mkdir(parents=True)
+    (plugin / "libs" / "dropin-registry").mkdir(parents=True)
+    canonical_ssh_manager = repo_root / "libs" / "ssh-manager"
+    canonical_ssh_manager.mkdir(parents=True)
+    (canonical_ssh_manager / "pyproject.toml").write_text("", encoding="utf-8")
+    canonical_agent_procutil = repo_root / "libs" / "agent-procutil"
+    canonical_agent_procutil.mkdir(parents=True)
+    (canonical_agent_procutil / "pyproject.toml").write_text("", encoding="utf-8")
+
+    marker = tmp_path / "pip-fallback-ran"
+    fake_python = tmp_path / "python"
+    fake_python.write_text(
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$*" > "$TEST_FALLBACK_MARKER"\n',
+        encoding="ascii",
+    )
+    fake_python.chmod(0o755)
+
+    script = tmp_path / "fallback.sh"
+    script.write_text(
+        "\n".join(
+            [
+                "set -euo pipefail",
+                "_step() { printf '%s\\n' \"$1\"; }",
+                "_fail() { printf '%s\\n' \"$1\" >&2; }",
+                resolve_vendored_lib,
+                "_resolve_ssh_manager() { _resolve_vendored_lib ssh-manager; }",
+                "_resolve_agent_procutil() { _resolve_vendored_lib agent-procutil; }",
+                install_package,
+                "HAVE_UV=0",
+                f"VENV_PYTHON='{fake_python}'",
+                f"PLUGIN_DIR='{plugin}'",
+                "_install_agent_ssh_package",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    env = {**os.environ, "TEST_FALLBACK_MARKER": str(marker), "HOME": str(tmp_path / "home")}
+
+    proc = subprocess.run(
+        [BASH, str(script)],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+        check=False,
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    fallback_args = marker.read_text(encoding="ascii")
+    assert str(canonical_ssh_manager.resolve()) in fallback_args
+    assert str(canonical_agent_procutil.resolve()) in fallback_args

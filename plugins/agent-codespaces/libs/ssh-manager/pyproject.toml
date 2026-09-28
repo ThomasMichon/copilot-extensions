@@ -15,6 +15,13 @@ authors = [
 dependencies = ["agent-procutil"]
 
 [tool.uv.sources]
+# ssh-manager is itself consumed as a `uv`-editable canonical reference by
+# every plugin (vendor-pointer-generalization effort, Phase 1); its own
+# dependency on agent-procutil must resolve `editable = true` too, or a
+# consumer that ALSO depends on agent-procutil directly (with its own
+# `editable = true` entry) hits a uv resolution conflict: the same file
+# path required both editable (via the consumer's direct dependency) and
+# non-editable (via this transitive one) at once.
 agent-procutil = { path = "../agent-procutil" }
 
 [tool.setuptools.packages.find]

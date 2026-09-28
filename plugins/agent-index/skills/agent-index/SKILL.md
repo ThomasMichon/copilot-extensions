@@ -30,7 +30,7 @@ commands are refused.
 does not start a service. After repository opt-in, an operator explicitly chooses
 `setup --single` or `setup --indexer <machine> --ssh <alias>`; that setup call
 may provision only the lightweight client/base CLI (`::agent-provisioning::`).
-The configured host's light `[store]` runtime is then provisioned and
+The configured host's light `[store,server]` runtime is then provisioned and
 supervised by the plugin's own installer/runtime lifecycle (`install`, `start`,
 `update`, `deploy`); the durable engine remains on its own explicit `engine` /
 `engine-update` path. Setup never starts the host. Automation must also pass

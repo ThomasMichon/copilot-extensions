@@ -59,20 +59,36 @@ protected_branches: [main, dev]
 # is a deliberate, explicitly-called-out operator action, never a routine
 # contribution, and every other agent still defaults to `dev`.
 #
-# Flow for every agent (see CONTRIBUTING.md § "Contribution flow"):
+# Flow for every agent (see CONTRIBUTING.md § "Waiting for a verdict"):
 #   copilot-extensions create  ->  edit  ->  create-pr  (auto_open opens the PR)
-#   ->  Copilot posts its (non-blocking) review  ->  the submitter self-merges:
-#       agent-worktrees pr-merge <#> --now      (direct squash merge onto `dev`)
+#   ->  wait for Copilot's review, address findings, re-request as needed
+#   until a passing verdict lands (a genuine Approve for a contributor PR; a
+#   clean Comment -- zero Medium/High findings open -- for this repo's own
+#   owner-authored PRs, which structurally never get Approve)  ->  the
+#   submitter merges: agent-worktrees pr-merge <#> --now (direct squash
+#   merge onto `dev`)
 #
-# This repo is a **submitter-self-merge** repo: it is PR-required, but the only
-# review is a NON-BLOCKING Copilot pass, so the PR author (the owner) approves
-# and merges their own PR directly rather than waiting on a separate human or a
-# consent-label gate. The matrix below makes that contract legible to the pr-*
-# verbs, which classify it as the `pr-self-merge` flow profile:
+# This repo is a **submitter-self-merge** repo: it is PR-required, and the
+# PR author (the owner) approves and merges their own PR directly rather
+# than waiting on a separate human or a consent-label gate. The matrix
+# below makes that contract legible to the pr-* verbs, which classify it
+# as the `pr-self-merge` flow profile:
 #
 #   - no `automerge_label` bound (there is no consent-label gate here);
 #   - `self_approve: true` + `merge_actor: submitter-direct` -> pr-self-merge;
-#   - `reviewer: copilot`, `review_blocking: false` -> the review never gates;
+#   - `reviewer: copilot`, `review_blocking: false` -> **the tooling itself
+#     still does not gate the merge on Copilot's verdict** (`pr-merge --now`
+#     passes `--admin`, bypassing GitHub's own review-gate check
+#     unconditionally) -- CONTRIBUTING.md's own "Waiting for a verdict"
+#     protocol requires waiting for a real passing verdict before merging
+#     anyway (Approve for a contributor PR; a clean Comment for this
+#     repo's own owner-authored PRs, which structurally never get Approve);
+#     that is agent discipline layered on top of this config, not something
+#     this flag currently enforces. Flipping this to `true` is a real lever
+#     for closing that gap but is its own decision (this repo's ruleset
+#     already exempts the maintainer from any required approving review
+#     count, so its practical effect here needs its own validation) --
+#     not changed here;
 #   - `pr-merge <#> --now` performs the sanctioned direct squash-merge, so an
 #     agent never falls back to a raw `gh pr merge`.
 #
@@ -84,6 +100,7 @@ pr:
   required: true
   provider: github
   auto_open: true
+  strategy: keep-alive  # keep the worktree to shepherd the PR to merge; detach is the rare opt-out
   # Hidden source markers carry raw machine/worktree/session identifiers.
   # This public repo must never publish the raw marker (source_attribution:
   # true); closed-circuit repos may opt into that. This repo relies on the
@@ -98,7 +115,6 @@ pr:
   # repo's fail-closed posture even for that narrower case. Every
   # WorktreeRecord's own persisted codename_source stays authoritative,
   # exactly as before this key was removed.
-  strategy: detach
   # PR-flow legibility matrix (surfaced as reminders by the pr-* verbs) -->
   # classifies this repo as `pr-self-merge`.
   self_approve: true
@@ -107,9 +123,17 @@ pr:
   review_blocking: false
   review_latency_hint: "~2m"
   conflict_retriggers_review: true
-  # Merge/update policy (#225). This repo's bot review is non-blocking and is a
-  # review, not a required status check, so nothing gates the merge -- the owner
-  # self-merges immediately. Opt out of prefer-auto-merge so `pr-merge --now`
-  # performs the intended immediate squash self-merge rather than arming a
-  # CI-gated auto-merge that has no required check to wait on.
+  # Merge/update policy (#225). `review_blocking: false` means the tooling
+  # itself does not gate the merge on Copilot's review (it's a review, not
+  # a required status check) -- the owner can self-merge immediately as far
+  # as this flag is concerned. CONTRIBUTING.md's "Waiting for a verdict"
+  # protocol requires waiting for a real passing verdict before doing so
+  # anyway (a genuine Approve for a contributor PR; a clean Comment -- zero
+  # Medium/High findings open -- for this repo's own owner-authored PRs,
+  # which structurally never get Approve); that is agent discipline
+  # layered on top of this config, not something
+  # this flag currently enforces. Opt out of prefer-auto-merge so
+  # `pr-merge --now` performs the intended immediate squash self-merge
+  # rather than arming a CI-gated auto-merge that has no required check to
+  # wait on.
   prefer_auto_merge: false

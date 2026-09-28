@@ -297,3 +297,88 @@ def test_uv_editable_parity_refuses_a_symlinked_canonical(tmp_path: Path, canoni
     assert got_trusted == got_canonical
     assert got_trusted == "skip: is a symlink"
 
+
+def test_uv_editable_parity_fixes_up_a_nested_canonical_dependency(tmp_path: Path, canonical):
+    """A canonical lib (e.g. `ssh-manager`) can itself depend on another
+    canonical lib (e.g. `agent-procutil`) via its own escaping
+    `uv`-editable entry -- found in review (PR #4372). Both implementations
+    must fix up that nested entry (materializing the dependency as a
+    sibling of the copied lib, then dropping `editable = true` from the
+    nested entry) alongside the consumer's own top-level rewrite."""
+    def _build(root: Path) -> Path:
+        _canonical_lib(root, "agent-procutil", version="0.2.0-dev1", content="real = True\n")
+        dep_dir = _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
+        (dep_dir / "pyproject.toml").write_text(
+            '[project]\nname = "x"\nversion = "0.1.0-dev1"\n'
+            'dependencies = ["agent-procutil"]\n'
+            "\n[tool.uv.sources]\n"
+            'agent-procutil = { path = "../agent-procutil", editable = true }\n',
+            encoding="utf-8",
+        )
+        consumer_dir = root / "consumer"
+        consumer_dir.mkdir(parents=True)
+        (consumer_dir / "pyproject.toml").write_text(
+            '[project]\nname = "consumer"\nversion = "0.0.0"\n'
+            "\n[tool.uv.sources]\n"
+            'agent-zdd = { path = "../libs/zdd", editable = true }\n',
+            encoding="utf-8",
+        )
+        return consumer_dir
+
+    trusted_root = tmp_path / "nested-trusted" / "repo"
+    trusted_consumer = _build(trusted_root)
+    trusted_log = trusted.materialize_uv_editable_ref_into(
+        source_consumer_dir=trusted_consumer, dest_consumer_dir=trusted_consumer,
+        canonical_root=trusted_root, dest_root=trusted_consumer,
+    )
+
+    canonical_root = tmp_path / "nested-canonical" / "repo"
+    canonical_consumer = _build(canonical_root)
+    canonical_log = canonical.materialize_uv_editable_ref_into(
+        source_consumer_dir=canonical_consumer, dest_consumer_dir=canonical_consumer,
+        canonical_root=canonical_root, dest_root=canonical_consumer,
+    )
+
+    for log in (trusted_log, canonical_log):
+        assert all(not line.startswith("SKIP") for line in log), log
+
+    for consumer in (trusted_consumer, canonical_consumer):
+        nested_pp = (consumer / "libs/zdd/pyproject.toml").read_text()
+        assert 'agent-procutil = { path = "../agent-procutil" }' in nested_pp
+        assert "editable" not in nested_pp
+        assert (consumer / "libs/agent-procutil/src/agent_procutil/__init__.py").read_text() == (
+            "real = True\n"
+        )
+
+
+def test_lib_tree_matches_parity_ignores_only_relative_build_dir_names(
+    tmp_path: Path, canonical,
+):
+    """Review finding (PR #4383): both `_lib_tree_matches` (trusted) and
+    `lib_tree_matches` (canonical `uv_editable_ref.py`, imported here as
+    `canonical.uer`) must scope their ignored-directory-name check to the
+    path RELATIVE to each tree's own root, never the full absolute path --
+    otherwise a checkout merely *located* under an ancestor directory
+    happening to be named e.g. `build` would have every file's `.parts`
+    match that ancestor, silently emptying the comparison and making two
+    genuinely DIFFERENT trees compare as falsely equal."""
+    build_root = tmp_path / "build" / "checkout"
+    a = _canonical_lib(build_root, "zdd", version="0.1.0", content="x = 1\n")
+    b = build_root / "libs" / "zdd-b"
+    (b / "src" / "zdd").mkdir(parents=True)
+    (b / "src" / "zdd" / "__init__.py").write_text("x = 2\n", encoding="utf-8")  # genuinely differs
+    (b / "pyproject.toml").write_text('[project]\nname = "x"\nversion = "0.1.0"\n', encoding="utf-8")
+
+    assert trusted._lib_tree_matches(a, b) is False
+    assert canonical.uer.lib_tree_matches(a, b) is False
+
+    # A real build/ SUBDIRECTORY inside the tree is still correctly ignored.
+    c = build_root / "libs" / "zdd-c"
+    (c / "src" / "zdd").mkdir(parents=True)
+    (c / "src" / "zdd" / "__init__.py").write_text("x = 1\n", encoding="utf-8")  # matches a
+    (c / "pyproject.toml").write_text('[project]\nname = "x"\nversion = "0.1.0"\n', encoding="utf-8")
+    (a / "build").mkdir()
+    (a / "build" / "stray.txt").write_text("stray build artifact\n", encoding="utf-8")
+    assert trusted._lib_tree_matches(a, c) is True
+    assert canonical.uer.lib_tree_matches(a, c) is True
+

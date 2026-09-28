@@ -193,6 +193,13 @@ class EntraInjector(TokenInjector):
             )
             return None
         token = stdout.decode(errors="replace").strip()
+        if not token and stderr:
+            # A clean exit with an empty token is the shape of a *silent* relay
+            # denial (e.g. the resource/scope isn't in this Codespace's az-login
+            # allowlist) -- log whatever diagnostic the helper did emit so the
+            # next caller isn't left guessing why acquisition produced nothing.
+            err = stderr.decode(errors="replace").strip().replace("\n", " ")[:200]
+            log.warning("%s get-access-token returned no token: %s", helper, err)
         return token or None
 
     async def _acquire(self) -> str | None:

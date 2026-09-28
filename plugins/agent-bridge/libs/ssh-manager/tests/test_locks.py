@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 
 import pytest
@@ -86,8 +87,9 @@ class TestContention:
         lock = _make("cs-busy", lock_dir, op="remote-cmd")
         # Simulate another live process holding the lock (use a real live pid).
         lock._dir.mkdir(parents=True, exist_ok=True)
+        victim, reaper = _spawn_sleeper()
         holder = LockHolder(
-            pid=_spawn_sleeper(),
+            pid=victim,
             op="stdio",
             target="cs-busy",
             started_at=time.time(),
@@ -100,6 +102,7 @@ class TestContention:
             assert "BUSY" in ei.value.user_message()
         finally:
             _terminate_pid(holder.pid)
+            reaper.join(timeout=5)
 
     def test_stale_lock_reclaimed(self, lock_dir):
         lock = _make("cs-stale", lock_dir)
@@ -129,7 +132,7 @@ class TestContention:
     def test_force_evicts_live_holder(self, lock_dir):
         lock = _make("cs-force", lock_dir)
         lock._dir.mkdir(parents=True, exist_ok=True)
-        victim = _spawn_sleeper()
+        victim, reaper = _spawn_sleeper()
         holder = LockHolder(
             pid=victim, op="stdio", target="cs-force", started_at=time.time()
         )
@@ -143,19 +146,36 @@ class TestContention:
         finally:
             lock.release()
             _terminate_pid(victim)
+            reaper.join(timeout=5)
 
 
-def _spawn_sleeper() -> int:
-    """Spawn a short-lived child process and return its pid."""
+def _spawn_sleeper() -> tuple[int, threading.Thread]:
+    """Spawn a short-lived child process and return its pid, plus a daemon
+    thread that reaps it as soon as it exits.
+
+    ``_terminate()`` (production code) sends a signal, then polls
+    ``pid_alive()`` (``os.kill(pid, 0)``) until it sees the process gone --
+    but for a process this TEST itself spawned as a direct child, only ITS
+    OWN parent (this test process) can reap it; nothing else will. Without
+    an active ``waitpid``, a SIGTERM'd child becomes a zombie that
+    ``os.kill(pid, 0)`` still reports as "alive" indefinitely, so
+    ``_terminate()``'s polling loop -- and this test's own
+    ``pid_alive(victim) is False`` assertion -- would never observe real
+    death. A background thread blocked in ``Popen.wait()`` reaps the child
+    the moment it actually exits, which real production usage never needs
+    (a lock holder is typically an unrelated process already reparented to
+    init, which reaps it for free)."""
     proc = subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(30)"],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+    reaper = threading.Thread(target=proc.wait, daemon=True)
+    reaper.start()
     # Give it a moment to actually start.
     time.sleep(0.2)
-    return proc.pid
+    return proc.pid, reaper
 
 
 def _terminate_pid(pid: int) -> None:

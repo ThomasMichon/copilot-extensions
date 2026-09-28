@@ -15,7 +15,10 @@ import promote_release as pr
 import rollback_release as rb
 
 _TOOLS = Path(__file__).resolve().parent
-_REQUIRED_TOOLS = ("accumulate_bumps.py", "materialize_main.py", "changefile.py", "uv_editable_ref.py")
+_REQUIRED_TOOLS = (
+    "accumulate_bumps.py", "materialize_main.py", "changefile.py", "uv_editable_ref.py",
+    "nested_uv_editable_ref.py",
+)
 
 
 def _git(args: list[str], cwd: Path, check: bool = True) -> str:

@@ -41,7 +41,7 @@ that pattern to this repository.
 | [Account-Aware Operations](active/account-aware-operations/README.md) | Draft | See effort |
 | [Agent Machines Declarative Control Plane](active/agent-machines-declarative-control-plane/README.md) | Active | #1418 (closed; historical, no live umbrella) |
 | [Review Automation Reliability](active/review-automation-reliability/README.md) | Draft | See effort |
-| [Worktree Finality and Obligations](active/worktree-finality-and-obligations/README.md) | Active | #1312 |
+| [PR-Merge Obligation Gate](active/pr-merge-obligation-gate/README.md) | Draft | #4375 |
 | [Marketplace-Scoped Installations](active/marketplace-scoped-installations/README.md) | Active | #1096 |
 | [Native-Construct Convergence](active/native-construct-convergence/README.md) | Active | #985 |
 | [Plugin Process Hygiene](active/plugin-process-hygiene/README.md) | Active | #736 |
@@ -60,6 +60,7 @@ that pattern to this repository.
 | [Componentization Campaign Auto-Worker](active/componentization-campaign-auto-worker/README.md) | Draft | #3372 |
 | [Authoritative Write-Through Daemon](active/agent-worktrees-authoritative-daemon/README.md) | Active | #3761 |
 | [agent-dispatch Worker Operating Procedures](active/agent-dispatch-worker-operating-procedures/README.md) | Draft | #3897 |
+| [Mux Companion Manual Cutover Diagnostics](active/mux-companion-manual-cutover-diagnostics/README.md) | Active | #4369 |
 
 
 ## Local conventions

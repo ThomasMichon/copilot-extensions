@@ -447,6 +447,22 @@ shape before committing to a design)_
             re-conversion also closes out its own instance of issue #3905
             (the non-editable-install gap no longer applies once that lib
             is back on the `uv`-editable form).
+            - [x] **Ordering caveat found during `ssh-manager`'s
+                  conversion (2026-09-28)**: a lib with its OWN dependency
+                  on another vendored lib (per its `pyproject.toml`
+                  `dependencies`/`[tool.uv.sources]`) cannot be converted
+                  ahead of that dependency for any consumer that ALSO
+                  directly vendors the same dependency -- `uv` sees
+                  conflicting resolutions (a local copy path vs.
+                  canonical) for the same distribution name and refuses to
+                  resolve. Check every remaining lib's own `pyproject.toml`
+                  `dependencies` FIRST, before assuming this list's
+                  original ordering is still safe as written; convert the
+                  dependency early (bundled into the same PR, for the
+                  affected consumers only) if it isn't already done. Any
+                  canonical lib's OWN internal `[tool.uv.sources]` entry
+                  for another vendored lib must ALSO carry
+                  `editable = true` -- not just consumer-facing entries.
             - [ ] **`plugin-activation`'s re-conversion needs an explicit
                   consumer-side follow-up, not just a pointer-directory
                   swap** (found in review): `plugins/customizing-copilot/
@@ -466,7 +482,9 @@ shape before committing to a design)_
                   TOML, find the `agent-plugin-activation` entry's `path`,
                   resolve `state.py` under it) — still never importing the
                   `plugin_activation` package itself, preserving the
-                  original PyYAML-avoidance design.
+                  original PyYAML-avoidance design. **This same lib also
+                  depends on `agent-dropin-registry`/`agent-plugin-resolve`
+                  -- apply the ordering caveat above too.**
       - [ ] Remaining real lib copies never yet converted at all
             (`agent-procutil`, `dropin-registry`, `plugin-resolve`,
             `session-liveness-probe`, `venue-copilot`, `zdd`) — convert
@@ -1468,3 +1486,379 @@ _Pending._
   smallest-blast-radius-first ordering. Its conversion (and every later
   one) must extend that canonical-lib CI step with the newly converted
   lib, so no lib loses its suite the same way.
+
+### 2026-09-28 — Phase 1: converted `credential-relay` (4 consumers)
+
+- Applied the now-standard recipe to `credential-relay`'s 4 consumers
+  (`agent-containers`, `agent-mcp`, `agent-bridge`, `agent-codespaces`):
+  `tools/sync-vendored-libs.py --uv-editable` per consumer, hand-updated
+  each consumer's `[tool.uv.sources]` prose comment, added
+  `libs/credential-relay/tests/conftest.py` and extended the CI canonical-
+  lib test step (PR #4331's own fix, applied proactively this time rather
+  than as a follow-up review finding) to run `libs/credential-relay/tests`
+  alongside the other two canonical suites.
+- Validated end-to-end: `sync-vendored-libs.py --check`/`check-vendored-
+  libs-sync.py`/`check-install-contract.py` all green; all 4 consumers'
+  full plugin suites via `run-plugin-tests.py <plugin> --reinstall`:
+  `agent-mcp` (358+258 passed across sub-suites), `agent-bridge` (225
+  passed, 10 skipped), `agent-codespaces` (294+41 passed) all fully
+  green; `agent-containers` (137 passed, 1 skipped, 1 pre-existing
+  failure in `test_worktrees_peer.py` unrelated to this lib -- confirmed
+  via `git stash` against unmodified `dev` tip, same single failure).
+  Non-editable install probe (`uv pip install plugins/agent-bridge`, no
+  `-e`) -- `credential_relay.__file__` resolved live to canonical, not a
+  frozen copy. `materialize_main.py --dest` round-tripped all 4 pointers
+  byte-for-byte (no source drift; cache-artifact-only diffs).
+- **Caught the same stray-build-artifact false alarm as the previous
+  lib** (documented in the prior journal entry, now a known pattern for
+  this recipe): the non-editable-install probe left an empty stray
+  `plugins/agent-containers/libs/credential-relay/src/` directory,
+  which made `materialize_main.py` report a false `SKIP ... already
+  exists` for that one pointer. Removed it and re-ran; materialized
+  cleanly.
+- **`libs/credential-relay/tests/test_az_login.py`'s `az`-CLI-dependent
+  tests fail locally in a sandbox with no `az` binary on `PATH`**
+  (`shutil.which("az")` gates real resolution before the test's own
+  subprocess mock ever intercepts) -- confirmed environment-only, not a
+  regression: stubbing a fake `az` executable onto `PATH` made all 112
+  tests in the file pass. GitHub Actions `ubuntu-latest` runners ship
+  Azure CLI preinstalled, so the new CI step is expected to pass there
+  even though it can fail in a bare local sandbox.
+- Added a changefile per touched plugin (`agent-containers`, `agent-mcp`,
+  `agent-bridge`, `agent-codespaces`); no changefile needed for the
+  `.github/workflows/ci.yml` step extension
+  (`check-changefile-presence.py` confirmed clean without one).
+- **Filed as PR #4363**, targeting `dev`. First review round found 2 real
+  findings, fixed in the same PR: (1) the new CI step's `checks` job only
+  installs bare `pytest` (never `pytest-asyncio`, which `credential-relay`'s
+  own suite needs for its `@pytest.mark.asyncio` tests) -- added an
+  explicit `pip install pytest-asyncio` to that step; (2) missed this
+  repo's required **Documentation impact** PR-description statement
+  (CONTRIBUTING.md) -- added one explaining why no authoritative doc
+  besides this effort's own journal is affected by an internal Phase 1
+  re-conversion.
+- **Next up**: `ssh-manager` (4 consumers), per the effort's own
+  smallest-blast-radius-first ordering. **Remember the Documentation
+  impact PR-description statement going forward** -- missed on both this
+  PR and #4331 (which already merged without it).
+
+### 2026-09-28 — Phase 1: converted `ssh-manager` (4 consumers) + `agent-procutil` (early, same 4 consumers)
+
+- Applied the standard recipe to `ssh-manager`'s 4 consumers (`agent-ssh`,
+  `agent-containers`, `agent-bridge`, `agent-codespaces`):
+  `tools/sync-vendored-libs.py --uv-editable` per consumer, hand-updated
+  each `[tool.uv.sources]` prose comment.
+- **Real, previously-undocumented structural finding**: `uv pip install
+  --reinstall` for `agent-ssh` failed outright with `Requirements contain
+  conflicting URLs for package agent-procutil` -- `libs/ssh-manager`'s OWN
+  `pyproject.toml` declares a dependency on `agent-procutil` (unlike every
+  lib converted so far, which had zero dependencies), resolved via its own
+  `[tool.uv.sources]` entry pointing at canonical `libs/agent-procutil`.
+  Every one of `ssh-manager`'s 4 consumers ALSO directly depends on
+  `agent-procutil` -- but still via each consumer's own OLD local vendored
+  copy. `uv` sees two different resolutions (a copy path vs. canonical)
+  for the same distribution name and refuses to resolve at all. **This
+  changes the effort's understood safe ordering**: a lib with its own
+  vendored-lib dependencies (also true of `plugin-activation`, which
+  depends on `agent-dropin-registry`/`agent-plugin-resolve`) cannot be
+  converted ahead of that dependency for any shared consumer -- the
+  dependency must be converted first (or bundled into the same PR) for
+  every affected consumer. Resolved here by converting `agent-procutil`
+  to `uv`-editable early, for these same 4 consumers only (7 of its other
+  11 consumers remain real copies for now, untouched, since they don't
+  share this conflict) -- confirmed `sync-vendored-libs.py --check` treats
+  this mixed per-consumer state as valid (same DRY-pointer-copy-exclusion
+  pattern already established for other partially-converted libs).
+- **Second real finding, caught only after fixing the first**: even with
+  matching file paths, `uv` STILL refused to resolve --
+  `libs/ssh-manager/pyproject.toml`'s own `agent-procutil` source entry
+  lacked `editable = true`, conflicting with the now-editable entry from
+  each consumer's own direct dependency on the same path. **General rule
+  surfaced**: any canonical lib's OWN internal dependency on another
+  vendored lib must ALSO declare `editable = true`, not just the
+  consumer-facing entries -- fixed in `libs/ssh-manager/pyproject.toml`
+  directly.
+- **Third real finding**: `agent-bridge`'s own
+  `test_install_ssh_manager_selectors.py` read
+  `PLUGIN/libs/ssh-manager/pyproject.toml` directly to cross-check its
+  Windows installer's hardcoded distribution-name selectors -- broke once
+  the local copy was deleted. `install.ps1`'s own `Resolve-VendoredLib`
+  already had a two-tier fallback (local copy, then the `../../libs/<lib>`
+  git-checkout-layout canonical path) so the REAL installer was never at
+  risk -- only the test's own path resolution needed the same fallback.
+  Fixed by adding an equivalent two-tier resolver to the test.
+- **Fourth finding, a genuine (dormant) pre-existing bug surfaced for the
+  first time**: extending the CI canonical-lib test step to
+  `libs/ssh-manager/tests` (per the by-now-standard practice) uncovered
+  `test_force_evicts_live_holder` failing 100% reproducibly, unrelated to
+  this conversion -- these tests were NEVER actually collected by any
+  consumer's own plugin suite before (confirmed: `agent-bridge`'s test
+  count was identical, 225, both before and after this whole effort's
+  conversions), so this bug had never been exercised in CI at all. Root
+  cause: the test spawns a child via bare `subprocess.Popen` and discards
+  the handle without ever reaping it; `_terminate()` (production code)
+  sends `SIGTERM` then polls `pid_alive()` (`os.kill(pid, 0)`) waiting for
+  it to report "gone" -- but an un-reaped terminated child becomes a
+  zombie, which `os.kill(pid, 0)` reports as alive indefinitely. Real
+  production usage never hits this (a lock holder is typically an
+  unrelated process already reparented to init, which reaps it for free)
+  -- purely a test-harness artifact. Fixed by having the test spawn a
+  daemon thread blocked in `Popen.wait()` to reap the child the moment it
+  actually exits; confirmed stable across 3 repeated runs.
+- Added `libs/ssh-manager/tests/conftest.py` and
+  `libs/agent-procutil/tests/conftest.py`; extended the CI canonical-lib
+  test step to run both (`agent-procutil`'s canonical suite is included
+  even though only 4 of 11 consumers are converted so far, since the step
+  is meant to test the canonical copy directly, independent of any
+  particular consumer's pointer form).
+- Validated end-to-end: all 4 consumers' full plugin suites green except
+  each one's own single already-confirmed-pre-existing failure
+  (`agent-ssh`: `test_host_restore.py`; `agent-containers`:
+  `test_worktrees_peer.py`; both re-confirmed via `git stash` against
+  unmodified `dev`); `agent-bridge`/`agent-codespaces` fully green.
+  Non-editable install probe (fresh venv, `uv pip install
+  plugins/agent-ssh`, no `-e`) -- both `ssh_manager.__file__` and
+  `agent_procutil.__file__` resolved live to canonical, confirming the
+  nested-dependency case works too. `materialize_main.py --dest`
+  round-tripped all 8 pointers (4 `ssh-manager` + 4 `agent-procutil`)
+  byte-for-byte.
+- **Repeated the same stray-build-artifact false alarm** from the
+  `work-coalescing-singleton` conversion, twice more this round (once in
+  a consumer's `libs/agent-procutil`, once in canonical
+  `libs/agent-procutil/src`, once in a leftover empty
+  `plugins/agent-ssh/libs/ssh-manager` directory) -- all self-inflicted by
+  this session's own non-editable-install probes and `--reinstall` test
+  runs. Cleaning stray `build/`/`*.egg-info`/empty directories before
+  trusting any `--refuses to discard local changes`/`SKIP ... already
+  exists` message is now this effort's standing practice for every
+  remaining lib.
+- Added a changefile per touched plugin (`agent-ssh`, `agent-containers`,
+  `agent-bridge`, `agent-codespaces`).
+- **Filed as PR #4372**, targeting `dev`. First review round found 2 real
+  findings (1 critical, 1 moderate), fixed in the same PR:
+  - **Critical: promotion left conflicting editability in nested path
+    dependencies.** `materialize_uv_editable_ref_into()`'s outer rewrite
+    only fixed the CONSUMER's own top-level `[tool.uv.sources]` entry --
+    a just-copied canonical lib's OWN nested entry (`ssh-manager`'s own
+    dependency on `agent-procutil`) was left untouched, still
+    `editable = true`. A real `main` release would then require the SAME
+    path both editable (the nested entry) and non-editable (the
+    consumer's rewritten entry) at once, which `uv` refuses to resolve --
+    a genuine promotion-correctness bug, not just a dev-checkout issue.
+    Added `_materialize_nested_uv_editable_refs()` (and its own
+    `_rewrite_nested_uv_editable_entry()`, which drops `editable = true`
+    while keeping the nested entry's `path` UNCHANGED -- unlike the
+    top-level rewrite's different `libs/<lib>` form, a nested reference's
+    relative path already resolves correctly once its target lib is
+    materialized at the matching relative depth) to `tools/
+    materialize_main.py`, mirrored into the trusted
+    `_trusted_pointer_materializer.py` copy for `self_install.py`. Added
+    4 new tests (2 in `test_materialize_main.py`, 2 in
+    `test_trusted_materializer_parity.py`) covering the clean nested-fixup
+    case, the "dependency already materialized by a sibling top-level
+    entry" alias case, and the missing-`editable = true` refusal case.
+    Verified against the REAL repo tree too (not just synthetic tests):
+    `materialize_main.py --dest <tmp>` now correctly produces
+    `agent-procutil = { path = "../agent-procutil" }` (no `editable`) in
+    every promoted `ssh-manager` copy.
+  - **Moderate: the pip-fallback install path in `agent-ssh`'s own
+    `install.sh`/`install.ps1` still hardcoded the removed plugin-local
+    `libs/ssh-manager`/`libs/agent-procutil` paths.** If `uv` is
+    unavailable or fails in a source checkout, the fallback would supply
+    nonexistent directories and installation would fail outright. Ported
+    the `_resolve_vendored_lib`/`Resolve-VendoredLib` two-tier (local
+    copy, then canonical `../../libs/<lib>`) resolver -- already
+    established in `agent-bridge`'s own install scripts for an earlier
+    conversion -- into `agent-ssh`'s scripts too, and updated
+    `_install_agent_ssh_package`/`Install-AgentSshPackage`'s vendored-deps
+    list to use it for these 2 libs. (Checked `agent-containers` --no
+    such fallback exists there at all-- and `agent-codespaces` --already
+    had an equivalent two-tier fallback for `ssh-manager`, and never
+    hardcoded `agent-procutil` at all, resolving it via normal `uv`
+    dependency resolution instead-- neither needed a change.) Updated
+    `test_installer_fallback.py`'s existing test to extract the resolver
+    functions too (not just the install function) and added a new test
+    proving the canonical fallback path resolves correctly when no local
+    copy exists.
+  - Re-validated after both fixes: `test_materialize_main.py` 70 passed;
+    `test_trusted_materializer_parity.py` 10 passed;
+    `test_installer_fallback.py` 2 passed + 1 skipped (Windows-only);
+    `run-plugin-tests.py agent-ssh --reinstall` 172 passed, 7 skipped, the
+    same 1 pre-existing failure; `worktree-manager`'s own full suite 1548
+    passed, 4 skipped; all guards
+    (`sync-vendored-libs.py --check`/`check-vendored-libs-sync.py`/
+    `check-install-contract.py`/`check-version-consistency.py`) green.
+  - **`tools/materialize_main.py` crossed the repo's 1000-line module-size
+    cap** once the nested-fixup landed (1011 lines) -- split the two new
+    functions (`materialize_nested_uv_editable_refs`/
+    `rewrite_nested_uv_editable_entry`, plus their own small private
+    helpers) into a new `tools/nested_uv_editable_ref.py`, matching this
+    same session's earlier PR #4245 precedent for handling this exact
+    cap. `materialize_main.py` now 873 lines, the new module 219;
+    `check-module-size.py` confirmed green; re-verified the whole test
+    suite (70 passed) and the real-repo materialize round-trip still
+    produce identical output after the move.
+  - **Second review round found 2 more real hardening findings** in the
+    new nested-fixup code, both symlink/traversal-class issues this
+    effort's own established pattern already guards against on the
+    OUTER (top-level) path -- the nested path had missed both:
+    - **Path-traversal**: `materialize_nested_uv_editable_refs` only
+      checked the resolved nested destination didn't ESCAPE the whole
+      snapshot root, not that it equalled the EXACT expected sibling
+      (`<consumer>/libs/<nested_lib>`, derived independently of
+      `raw_path`). A crafted nested `raw_path` such as
+      `../../plugins/other` would still be "inside" the snapshot yet
+      copy canonical content into an unrelated project's directory while
+      the manifest kept pointing at the wrong path. Fixed by comparing
+      the resolved destination against the independently-derived
+      expected sibling exactly, mirroring the outer function's own
+      `canonical != canonical_unresolved.resolve()` pattern.
+    - **Symlink resolved-before-checked**: the canonical path was
+      `.resolve()`-d BEFORE its ancestor symlink check ran, so a
+      symlinked canonical lib would resolve to its external target
+      first and the subsequent check would see no symlink at all. Fixed
+      by checking the UNRESOLVED path's ancestors first, then resolving
+      only after confirming no symlink -- same ordering the outer
+      function already used.
+    - Added 2 regression tests (`test_materialize_nested_uv_editable_refs_
+      refuses_a_path_traversal_raw_path`,
+      `test_materialize_nested_uv_editable_refs_refuses_a_symlinked_
+      canonical`) to `test_materialize_main.py`; mirrored the identical
+      hardening into the trusted `_trusted_pointer_materializer.py` copy.
+      Re-validated: `test_materialize_main.py` 72 passed;
+      `test_trusted_materializer_parity.py` 10 passed; worktree-manager's
+      own full suite 1548 passed, 4 skipped; real-repo materialize
+      round-trip and all other guards still green.
+  - **Third review round found 2 more real hardening findings + 1 new
+    finding from itself**: `materialize_nested_uv_editable_refs` treated
+    ANY pre-existing path at the expected sibling location as "already
+    materialized" without verifying it -- accepting a non-directory
+    artifact (a regular file) or a stale/mismatched prior copy, either of
+    which would rewrite the manifest over content the promoted package
+    couldn't actually import correctly. Fixed by requiring the existing
+    path be a real directory AND byte-identical to canonical (reusing
+    `uv_editable_ref.py`'s own `lib_tree_matches`, already built for
+    exactly this "does this copy match canonical" comparison) before
+    treating it as equivalent to a fresh copy; refuse a symlink,
+    non-directory, or mismatched directory outright instead. Mirrored
+    into the trusted copy (which needed its own local `_file_hashes`/
+    `_lib_tree_matches`, since it can't import `uv_editable_ref.py`).
+  - **Caught and fixed a self-inflicted false alarm while validating this
+    same fix**: `lib_tree_matches`'s own `_file_hashes` excluded only
+    `__pycache__`/`.pyc`/`.pyo`, not the FULL set of build/cache
+    directory names a copytree's own `ignore` callback excludes
+    (`.git`, `.pytest_cache`, `.ruff_cache`, `build`, `dist`) -- so
+    comparing a canonical tree that still carries a local `.ruff_cache`
+    (an ordinary dev artifact) against its own freshly-copied sibling
+    (which correctly omits it) reported a false mismatch on the REAL
+    repo tree, even though every earlier synthetic test passed (none of
+    them had a real `.ruff_cache` present). Fixed `_file_hashes` (both
+    copies) to exclude the same ignore-list, confirmed against the real
+    repo tree afterward with no false SKIP.
+  - Added 2 regression tests (`test_materialize_nested_uv_editable_refs_
+    refuses_a_non_directory_sibling`,
+    `test_materialize_nested_uv_editable_refs_refuses_stale_mismatched_
+    content`) to `test_materialize_main.py`. Re-validated: `test_
+    materialize_main.py` 74 passed; `test_sync_vendored_libs.py` (uses
+    the same `lib_tree_matches`) unaffected, still passing;
+    `test_trusted_materializer_parity.py` 10 passed; worktree-manager's
+    own full suite 1548 passed, 4 skipped; real-repo materialize
+    round-trip and all guards green.
+  - **Fourth review round found 4 more real findings** -- all fallout
+    from CI/tooling/hooks that still hardcoded the removed local
+    `plugins/agent-bridge/libs/ssh-manager`/`plugins/agent-codespaces/
+    libs/agent-procutil` paths, missed because those surfaces sit
+    outside the plugin test suites and the tooling's own unit tests:
+    - CI's "Test shared SSH proxy contracts" smoke step (in the `full`
+      per-plugin matrix job, distinct from the "checks" job's canonical-
+      lib step) still set `PYTHONPATH=plugins/agent-bridge/libs/
+      ssh-manager/src` -- updated to the canonical `libs/ssh-manager/src`
+      + `libs/agent-procutil/src` (ssh-manager's own dependency).
+    - `tools/nested_uv_editable_ref.py` (this session's own new module)
+      was missing from `test_promote_release.py`/`test_rollback_
+      release.py`'s `_REQUIRED_TOOLS` isolated-bundle lists -- their
+      synthetic scratch repos only worked because the real repo's
+      `tools/` directory leaked onto `sys.path` via this test module's
+      own import-time `sys.path.insert`. Added it to both lists, and
+      added a genuinely isolated subprocess-based test
+      (`test_required_tools_bundle_is_self_contained`) with an explicit
+      minimal `PYTHONPATH` that would have caught this bundle gap
+      directly (verified: reproduced the exact `ModuleNotFoundError`
+      manually before the fix).
+    - `agent-codespaces`'s `emit_codespace_map.py` sessionStart hook
+      hardcoded `payload/libs/agent-procutil/src` with no fallback --
+      broken in a dev checkout (no local copy there anymore), though
+      still correct for a real materialized release (which DOES get a
+      local copy at promotion time). Added `_agent_procutil_src()`, a
+      two-tier resolver (materialized payload copy, else canonical
+      repo-root `libs/agent-procutil/src`) mirroring the same pattern
+      used everywhere else in this effort; covered both layouts with new
+      tests.
+  - Re-validated: `test_materialize_main.py` 74 passed;
+    `test_promote_release.py`/`test_rollback_release.py` 25 passed;
+    `agent-codespaces`'s full suite (including 2 new tests) fully green;
+    all guards still green.
+- **Next up**: `single-instance-lease` (5 consumers) -- check its own
+  `pyproject.toml` dependencies FIRST this time, per the ordering lesson
+  above, before assuming the effort's original Plan ordering is still
+  safe as written. **Also sweep for hardcoded plugin-local paths to the
+  just-converted lib(s) across CI workflows, tooling test bundles, and
+  session hooks/scripts** -- this round's 4 findings were ALL this same
+  class of gap, missed because they sit outside the plugin test suites
+  the earlier recipe steps already cover.
+
+### 2026-09-28 — Fifth review round: absolute-path filtering bug in the shared hash comparison helper
+
+- **Real bug in the `_file_hashes` fix from the previous round**: the
+  ignored-directory-name check (`ignored_dirs & set(f.parts)`) operated
+  on each file's FULL path, not the path relative to the tree being
+  hashed -- so a checkout merely *located* under an ancestor directory
+  happening to share a name with one of the ignored patterns (`build`,
+  `dist`, `.git`, etc.) would have every single file's `.parts` match
+  that ancestor, silently emptying `_file_hashes`' whole result and
+  making ANY two trees compare as falsely equal (`lib_tree_matches`
+  returning `True` for genuinely different content) -- a real
+  correctness gap for the exact validation this round's own earlier fix
+  was built to provide. Fixed by scoping the check to
+  `f.relative_to(root).parts` in both `tools/uv_editable_ref.py` and the
+  trusted `_trusted_pointer_materializer.py` copy.
+- Added a regression test
+  (`test_lib_tree_matches_ignores_only_relative_build_dir_names`) that
+  places the comparison itself under a `build/` ancestor directory and
+  confirms two genuinely different trees still compare as different
+  (would have failed before the fix), while a real `build/` SUBDIRECTORY
+  *inside* a tree is still correctly ignored.
+- Re-validated: `test_uv_editable_ref.py`/`test_materialize_main.py` 103
+  passed; worktree-manager's own full suite 1548 passed, 4 skipped;
+  real-repo materialize round-trip and all other guards still green.
+- **Fifth review round otherwise reported the prior 9 findings as
+  already resolved** (this specific finding was the only genuinely new
+  one) -- awaiting the next round to confirm zero remaining findings.
+
+### 2026-09-28 — PR #4372 merged out-of-band before the fifth-round fix landed; follow-up PR #4383
+
+- **PR #4372 merged (by the repo owner, ~2 minutes after the fifth
+  review round's comment) BEFORE the round-5 `_file_hashes` fix above was
+  pushed** -- the fix commit's own timestamp (00:21:54 local) postdates
+  the merge (00:19:35 local per the PR's `merged_at`). The absolute-path
+  filtering bug therefore landed on `dev` unfixed via #4372's merge.
+- Opened a small follow-up PR (**#4383**) cherry-picking just that one
+  fix commit cleanly onto fresh `dev` (clean cherry-pick, no conflicts).
+- **Review found 1 more real finding**: the new regression test only
+  exercised `tools/uv_editable_ref.py`'s (canonical) `lib_tree_matches`,
+  never the trusted `_trusted_pointer_materializer.py` copy's own
+  `_lib_tree_matches` -- a future one-line drift in the trusted path
+  could reintroduce the false-equality bug while the existing test stays
+  green. Added a direct parity test
+  (`test_lib_tree_matches_parity_ignores_only_relative_build_dir_names`)
+  exercising BOTH implementations side-by-side against the same
+  ancestor-directory scenario (initially had a test-construction bug of
+  its own -- reused `_canonical_lib`'s lib-name-derived package dir name
+  for both trees being compared, so the two lib DIRECTORIES had
+  different relative paths regardless of the fix; rewrote to give both
+  trees the same internal `src/zdd/` shape at different sibling
+  locations, confirmed it now correctly fails without the fix and passes
+  with it).
+- Re-validated: `test_trusted_materializer_parity.py` 11 passed;
+  worktree-manager's own full suite 1550 passed, 4 skipped (both counts
+  +2 from the two new tests added across this session's fixes).

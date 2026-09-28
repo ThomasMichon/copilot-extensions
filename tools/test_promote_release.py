@@ -14,7 +14,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import promote_release as pr
 
 _TOOLS = Path(__file__).resolve().parent
-_REQUIRED_TOOLS = ("accumulate_bumps.py", "materialize_main.py", "changefile.py", "uv_editable_ref.py")
+_REQUIRED_TOOLS = (
+    "accumulate_bumps.py", "materialize_main.py", "changefile.py", "uv_editable_ref.py",
+    "nested_uv_editable_ref.py",
+)
 
 
 def _git(args: list[str], cwd: Path, check: bool = True) -> str:
@@ -541,3 +544,28 @@ def test_promote_projection_sync_is_a_noop_without_customizing_copilot(repo: Pat
 
     assert report["promoted"] is True
     assert report["projections_synced"] == []
+
+
+def test_required_tools_bundle_is_self_contained(tmp_path: Path):
+    """Review finding (PR #4372): a scratch worktree's copied
+    ``tools/materialize_main.py`` must import successfully using ONLY the
+    files ``_REQUIRED_TOOLS`` actually copies -- never relying on the
+    real repo's own ``tools/`` directory leaking onto ``sys.path``
+    (which every other test in this file is exposed to via this module's
+    own ``sys.path.insert`` at import time). Runs in a genuinely isolated
+    subprocess with an explicit, minimal ``PYTHONPATH`` to catch a bundle
+    gap that an in-process check could mask."""
+    isolated = tmp_path / "isolated_tools"
+    isolated.mkdir()
+    for name in _REQUIRED_TOOLS:
+        shutil.copy(_TOOLS / name, isolated / name)
+
+    proc = subprocess.run(
+        [sys.executable, "-c", "import materialize_main"],
+        cwd=isolated,
+        env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(isolated)},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr

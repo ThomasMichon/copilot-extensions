@@ -1405,18 +1405,22 @@ function Install-Runtime {
         exit 1
     }
     Remove-ConsoleTrampolines -VenvDir $VenvDir
-    # A host runs the local indexing/vector-store stack and needs the [store]
-    # extra (numpy, pyarrow, lancedb, tree-sitter*, mcp); a client stays on the
-    # light base deps only. This is distinct from -- and must never pull in --
-    # the durable agent-index-engine program (torch), which is provisioned
-    # exclusively by `engine`/`engine-update` (see durable-vs-versioned-runtime.md).
-    # Resolve role BEFORE the package install so a host's versioned venv actually
-    # carries what its own service/search/index code imports -- Get-ActivationRole
+    # A host runs the local indexing/vector-store stack and the FastAPI/uvicorn
+    # server, so it needs the [store,server] extras (numpy, pyarrow, lancedb,
+    # tree-sitter*, mcp, fastapi, uvicorn, pydantic); a client stays on the
+    # light base deps only (no local store, no server -- see
+    # agent-index-server-venv-split, which will eventually move [server] into
+    # its own dedicated per-version venv instead of this shared one). This is
+    # distinct from -- and must never pull in -- the durable agent-index-engine
+    # program (torch), which is provisioned exclusively by `engine`/
+    # `engine-update` (see durable-vs-versioned-runtime.md). Resolve role
+    # BEFORE the package install so a host's versioned venv actually carries
+    # what its own service/search/index code imports -- Get-ActivationRole
     # falls back to Get-MachineRole, so this is correct even before any
     # per-repo role config exists.
     $installRole = Get-ActivationRole
     if ($installRole -eq 'unconfigured') { $installRole = Get-MachineRole }
-    $pkgSpec = if ($installRole -eq 'host') { "$PluginDir[store]" } else { "$PluginDir" }
+    $pkgSpec = if ($installRole -eq 'host') { "$PluginDir[store,server]" } else { "$PluginDir" }
     if (Get-Command uv -ErrorAction SilentlyContinue) {
         $out = & uv pip install --python $VenvPython $pkgSpec 2>&1 | Out-String
     } else {

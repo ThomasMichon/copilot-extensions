@@ -22,7 +22,6 @@ from agent_procutil import (
 )
 import httpx
 
-from . import __version__
 from .client import AgentIndexClient
 from .config import (
     Config,
@@ -32,11 +31,11 @@ from .config import (
     load_config,
     routing_dir,
     run_dir,
+    server_venv_python,
 )
 from .query_surface import format_error, hit_to_dict
 from .rendezvous import clear_endpoint, pid_alive as _pid_exists
 from .runtime_version import current_runtime_version
-from .server import serve
 
 
 def _emit(value: Any) -> int:
@@ -455,6 +454,8 @@ def _owned_service_client(
 
 
 def _setup_required_payload(*, runtime_state: str = "ready") -> dict[str, Any]:
+    from . import __version__
+
     return {
         "schema": "agent-index.lifecycle",
         "schema_version": 1,
@@ -477,7 +478,7 @@ def _setup_required_payload(*, runtime_state: str = "ready") -> dict[str, Any]:
 
 
 def _status_payload() -> dict[str, Any]:
-    from . import transport
+    from . import __version__, transport
 
     role, _indexer = transport.plan_route()
     if role == "unconfigured":
@@ -582,6 +583,23 @@ def _config_from_args(args: argparse.Namespace) -> Config:
     return Config(host=host, port=cfg.port if port is None else int(port))
 
 
+def serve(cfg: Config | None = None, *, passive: bool = False) -> None:
+    """Lazily import and delegate to the real ``.server.serve``.
+
+    Kept as a real, always-present module attribute (not a bare local
+    import inside each caller) so tests can monkeypatch ``cli.serve``
+    exactly as before -- only the heavy FastAPI/uvicorn import underneath
+    is deferred, to the first actual call. Signature (parameter name
+    ``cfg``, defaulting to ``None``) matches ``server.serve`` exactly, so
+    any existing caller of ``agent_index.__main__.serve()`` -- positional
+    or keyword, with no argument or with ``cfg=...`` -- keeps working
+    unchanged.
+    """
+    from .server import serve as _serve
+
+    return _serve(cfg, passive=passive)
+
+
 def cmd_start(args: argparse.Namespace) -> int:
     """Run the local service in the current interpreter."""
     serve(_config_from_args(args), passive=bool(getattr(args, "passive", False)))
@@ -642,6 +660,8 @@ def cmd_installer_readiness(_args: argparse.Namespace) -> int:
 
 
 def cmd_version(_args: argparse.Namespace) -> int:
+    from . import __version__
+
     payload = _status_payload()
     print(payload.get("version") or __version__)
     return 0
@@ -1286,7 +1306,12 @@ def cmd_deploy(args: argparse.Namespace) -> int:
 
     def spawn_passive(port: int):
         start_command = "__cell-start" if expected_installation else "start"
-        python = sys.executable
+        # Prefer the dedicated SERVER venv's own interpreter, if one has been
+        # provisioned (agent-index-server-venv-split) -- the passive instance
+        # then never loads fastapi/uvicorn/pydantic into a client-shaped venv.
+        # Falls back to the current interpreter (today's single-venv layout)
+        # when no server venv exists yet.
+        python = str(server_venv_python() or sys.executable)
         cmd = [
             windowless_python(python),
             "-I",
@@ -1573,9 +1598,34 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     return 0 if result.ok else 1
 
 
+class _LazyVersionAction(argparse.Action):
+    """Defer ``__version__`` resolution until ``--version`` is actually
+    passed, instead of eagerly formatting it into every parser build
+    (argparse's own ``action="version"`` requires the finished string up
+    front, forcing the ``importlib.metadata`` lookup on every invocation
+    regardless of subcommand)."""
+
+    def __init__(self, option_strings, dest=argparse.SUPPRESS,
+                 default=argparse.SUPPRESS, help=None):
+        super().__init__(
+            option_strings=option_strings, dest=dest, default=default,
+            nargs=0, help=help,
+        )
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        from . import __version__
+
+        parser._print_message(f"{__version__}\n", sys.stdout)
+        parser.exit()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agent-index")
-    parser.add_argument("--version", action="version", version=__version__)
+    parser.add_argument(
+        "--version",
+        action=_LazyVersionAction,
+        help="show program's version number and exit",
+    )
     sub = parser.add_subparsers(dest="command")
 
     def add_start_args(p: argparse.ArgumentParser) -> None:

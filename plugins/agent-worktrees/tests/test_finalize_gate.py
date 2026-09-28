@@ -310,6 +310,16 @@ def test_finalize_parser_accepts_named_handoff_target():
     assert args.handoff_to == "operator-flow"
 
 
+def test_finalize_parser_accepts_force_open_pr():
+    args = build_parser().parse_args(["finalize", "wt", "--force-open-pr"])
+    assert args.force_open_pr is True
+
+
+def test_finalize_parser_force_open_pr_defaults_false():
+    args = build_parser().parse_args(["finalize", "wt"])
+    assert args.force_open_pr is False
+
+
 def test_pending_resource_creation_cannot_be_handed_off(monkeypatch, capsys):
     _gate(monkeypatch, "block")
     rec = SimpleNamespace(machine="m", repo="p", worktree_id="wt", resources=[

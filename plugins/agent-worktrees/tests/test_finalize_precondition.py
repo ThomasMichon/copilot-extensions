@@ -211,9 +211,31 @@ def _push_feature_head(env: SimpleNamespace) -> None:
     _git("fetch", "origin", cwd=env.clone)
 
 
-def test_precondition_blocks_when_not_upstream(refspec_worktree):
+def test_precondition_blocks_when_not_upstream_detach(refspec_worktree):
     env = refspec_worktree
     # Do NOT land the work on master; the remote also has no pr/<slug> head.
+    _git("fetch", "origin", cwd=env.clone)
+    record, repo = _record_and_repo(env)
+    repo.pr.strategy = "detach"
+
+    ok, err = finalize._pr_finalize_precondition(
+        record, repo, str(env.clone), str(env.clone)
+    )
+    assert ok is False
+    assert err is not None
+    # Detached and neither merged nor branch-on-origin -> guide to
+    # create-pr; never point at a (possibly deleted) feature branch as the fix.
+    assert "not upstream" in err
+    assert "create-pr" in err
+
+
+def test_precondition_blocks_when_not_upstream_default_is_keep_alive(refspec_worktree):
+    # The safe default (unset strategy) must behave as keep-alive, not detach:
+    # neither merged nor on master yet -> guide to sync (realign after merge),
+    # never accept "a PR is merely open" as sufficient. Regression coverage for
+    # the strategy fallback itself (config.py / finalize.py), not just the
+    # explicit keep-alive case already covered by test_keepalive_ignores_feature_branch.
+    env = refspec_worktree
     _git("fetch", "origin", cwd=env.clone)
     record, repo = _record_and_repo(env)
 
@@ -222,10 +244,7 @@ def test_precondition_blocks_when_not_upstream(refspec_worktree):
     )
     assert ok is False
     assert err is not None
-    # Detached (default) and neither merged nor branch-on-origin -> guide to
-    # create-pr; never point at a (possibly deleted) feature branch as the fix.
-    assert "not upstream" in err
-    assert "create-pr" in err
+    assert "sync" in err
 
 
 def test_precondition_passes_when_pr_recorded_merged(refspec_worktree):

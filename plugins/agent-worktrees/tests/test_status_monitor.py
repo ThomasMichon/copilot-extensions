@@ -1006,6 +1006,29 @@ def test_segment_cache_reuses_canonical_target_before_record_lookup(monkeypatch)
     assert renders == ["/w/a", "/w/a"]
 
 
+def test_segment_cache_get_works_without_full_command_surface_loaded(monkeypatch):
+    """Real-bug regression (#4341): resident status-monitor's fast-dispatch
+    path never calls `_load_full_command_surface()`, so the bare
+    `_find_record_for_path`/`_render_status_segment` globals this method used
+    to reference directly were never bound there -- a `NameError` silently
+    swallowed by `_monitor_sweep`'s blanket `except Exception: pass`,
+    rendering every managed session's status segment "" forever. This suite's
+    own conftest always pre-loads the full surface (unlike production), which
+    is exactly why this went unnoticed -- delete the bare globals to
+    reproduce the real unloaded state, and confirm `.get()` still resolves
+    correctly via the `status_bar_cli` import + `_self_override`."""
+    from agent_worktrees import status_bar_cli
+
+    monkeypatch.delattr(m, "_find_record_for_path", raising=False)
+    monkeypatch.delattr(m, "_render_status_segment", raising=False)
+    monkeypatch.setattr(status_bar_cli, "_find_record_for_path", lambda path: None)
+    monkeypatch.setattr(
+        status_bar_cli, "_render_status_segment", lambda path, **kwargs: "REAL-SEGMENT"
+    )
+    cache = m._StatusSegmentCache(ttl=60)
+    assert cache.get("/w/unloaded") == "REAL-SEGMENT"
+
+
 def test_resident_hook_scopes_and_restores_project(monkeypatch):
     prior = m.cfg.active_project()
     seen = []

@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from agent_index import __main__
+from agent_index import __version__
 
 
 def _capture_promoting_routing(monkeypatch, tmp_path, capsys):
@@ -130,7 +131,7 @@ def test_deploy_wires_cutover_orchestrator(monkeypatch, tmp_path, capsys) -> Non
             SimpleNamespace(
                 base_url="http://127.0.0.1:4444",
                 pid=None,
-                version=__main__.__version__,
+                version=__version__,
             ),
         ]
     )
@@ -140,7 +141,7 @@ def test_deploy_wires_cutover_orchestrator(monkeypatch, tmp_path, capsys) -> Non
         "_owned_service_status",
         lambda *_args, **_kwargs: {
             "installationId": "",
-            "version": __main__.__version__,
+            "version": __version__,
         },
     )
 
@@ -167,7 +168,7 @@ def test_deploy_wires_cutover_orchestrator(monkeypatch, tmp_path, capsys) -> Non
     assert rc == 0
     assert captured["config_dir"] == tmp_path / "home"
     assert captured["bind"] == "127.0.0.1"
-    assert captured["version"] == __main__.__version__
+    assert captured["version"] == __version__
     for key in ("spawn_passive", "health_check", "make_client", "pick_free_port"):
         assert callable(captured[key])
     assert captured["run"] == {"health_timeout": 7.0, "drain_timeout": 11.0, "force": True}
@@ -238,7 +239,7 @@ def test_namespaced_deploy_spawns_private_cell_entrypoint(
             SimpleNamespace(
                 base_url="http://127.0.0.1:4555",
                 pid=4321,
-                version=__main__.__version__,
+                version=__version__,
             ),
         ]
     )
@@ -253,7 +254,7 @@ def test_namespaced_deploy_spawns_private_cell_entrypoint(
         "_owned_service_status",
         lambda *_args, **_kwargs: {
             "installationId": "cell-a/agent-index",
-            "version": __main__.__version__,
+            "version": __version__,
             "pid": 4321,
             "instanceToken": "instance-token",
         },
@@ -315,7 +316,7 @@ def test_governance_block_after_passive_health_leaves_old_route_and_service(
         bind="127.0.0.1",
         port=4111,
         pid=os.getpid(),
-        version=__main__.__version__,
+        version=__version__,
         demote_existing=True,
     )
     route_path = routing.routing_table_path(route_root)
@@ -356,7 +357,7 @@ def test_governance_block_after_passive_health_leaves_old_route_and_service(
                 "status": "passive",
                 "plugin": "agent-index",
                 "installationId": "cell-a/agent-index",
-                "version": __main__.__version__,
+                "version": __version__,
                 "pid": Handle.pid,
                 "instanceToken": "passive-token",
                 "promoted": False,
@@ -365,7 +366,7 @@ def test_governance_block_after_passive_health_leaves_old_route_and_service(
             "status": "ok",
             "plugin": "agent-index",
             "installationId": "cell-a/agent-index",
-            "version": __main__.__version__,
+            "version": __version__,
             "pid": old.pid,
             "instanceToken": "old-token",
             "promoted": True,
@@ -615,12 +616,12 @@ def test_deploy_refuses_foreign_active_endpoint(monkeypatch, tmp_path, capsys) -
                 "context": str(context),
                 "token": token,
                 "state": "reconciling",
-                "management": {"path": str(tmp_path), "version": __main__.__version__},
+                "management": {"path": str(tmp_path), "version": __version__},
                 "target": {
                     "payloadRoot": str(tmp_path),
-                    "payloadVersion": __main__.__version__,
-                    "snapshotId": __main__.__version__,
-                    "runtimeVersion": __main__.__version__,
+                    "payloadVersion": __version__,
+                    "snapshotId": __version__,
+                    "runtimeVersion": __version__,
                 },
             }
         ),
@@ -690,7 +691,7 @@ def test_deploy_recover_undrains_stranded_survivor(
         bind="127.0.0.1",
         port=4111,
         pid=os.getpid(),
-        version=__main__.__version__,
+        version=__version__,
         demote_existing=True,
     )
     breadcrumb.write_breadcrumb(
@@ -717,7 +718,7 @@ def test_deploy_recover_undrains_stranded_survivor(
             "status": state["status"],
             "plugin": "agent-index",
             "installationId": "cell-a/agent-index",
-            "version": __main__.__version__,
+            "version": __version__,
             "pid": active.pid,
             "instanceToken": "exact-token",
             "promoted": True,

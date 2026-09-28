@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-codespaces"
-version = "0.5.0-dev1"
+version = "0.5.1-dev1"
 description = "GitHub Codespaces lifecycle management, SSH transport, and credential relay"
 readme = "README.md"
 license = "MIT"
@@ -30,17 +30,33 @@ dependencies = [
 # Always resolve the vendored lib from the local path, never an index.
 # The distribution is named agent-ssh-manager (not the squatted PyPI name
 # "ssh-manager") to prevent dependency-confusion; the import module stays
-# ``ssh_manager``.
+# ``ssh_manager``. This is a `uv`-editable canonical reference
+# (vendor-pointer-generalization effort, Phase 1): `path` escapes this
+# plugin's own root and resolves live to `libs/ssh-manager`, so this
+# `dev`-branch checkout has nothing to keep manually in sync -- only a
+# real `main`-branch release (tools/materialize_main.py) ever gets a real
+# local copy.
 agent-ssh-manager = { path = "libs/ssh-manager" }
 # credential-relay framework + host-credential sources (module ``credential_relay``).
+# This is a `uv`-editable canonical reference (vendor-pointer-generalization
+# effort, Phase 1): `path` escapes this plugin's own root and resolves live
+# to `libs/credential-relay`, so this `dev`-branch checkout has nothing to
+# keep manually in sync -- only a real `main`-branch release
+# (tools/materialize_main.py) ever gets a real local copy.
 agent-credential-relay = { path = "libs/credential-relay" }
 # config schema versioning + migration (module ``config_migrate``).
 agent-config-migrate = { path = "libs/config-migrate" }
 # Copilot CLI + Claude plugin resolution -- marketplaces, plugins, repo settings
 # (module ``plugin_resolve``). Shared with agent-bridge.
 agent-plugin-resolve = { path = "libs/plugin-resolve" }
-# Windows-headless process-spawn helpers (module ``agent_procutil``). Vendored
-# per plugin; byte-identical src across copies.
+# Windows-headless process-spawn helpers (module ``agent_procutil``). This
+# is a `uv`-editable canonical reference (vendor-pointer-generalization
+# effort, Phase 1 -- converted early as a prerequisite for `ssh-manager`'s
+# own conversion, which depends on it): `path` escapes this plugin's own
+# root and resolves live to `libs/agent-procutil`, so this `dev`-branch
+# checkout has nothing to keep manually in sync -- only a real
+# `main`-branch release (tools/materialize_main.py) ever gets a real
+# local copy.
 agent-procutil = { path = "libs/agent-procutil" }
 # Resilient scan authority, entry decisions, and bounded warning tracking for
 # config.d (module ``dropin_registry``).

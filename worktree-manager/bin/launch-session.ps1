@@ -985,17 +985,21 @@ Remove-Item Env:WORKTREE_PROJECT -ErrorAction SilentlyContinue
 # machine looks otherwise idle, and simply reports/warns (never blocks this
 # launch) the rest of the time. Best-effort and never fatal: a
 # resolution/login failure here must not block an otherwise-good launch.
-if ($env:AGENT_WORKTREES_SKIP_COPILOT_IDENTITY -ne '1') {
-    try {
-        $identityArgs = @('-m', 'agent_worktrees', 'copilot-identity', 'ensure', '--json')
-        if ($script:LaunchProject) {
-            $identityArgs += @('--repo', $script:LaunchProject)
-        }
-        $identityOutput = & $VenvPython @identityArgs 2>&1
-        Write-SetupLog "Copilot identity ensure (exit ${LASTEXITCODE}): $identityOutput"
-    } catch {
-        Write-SetupLog "Copilot identity ensure threw (non-fatal): $_" 'WARN'
+#
+# Gated entirely inside 'copilot-identity ensure' itself by this machine's
+# config.yaml (copilot_identity_switch_enabled, default false -- opt-in, no
+# environment-variable override): when disabled it's a pure no-op (status
+# "disabled") that never touches gh/copilot, so it's always safe to call
+# unconditionally here.
+try {
+    $identityArgs = @('-m', 'agent_worktrees', 'copilot-identity', 'ensure', '--json')
+    if ($script:LaunchProject) {
+        $identityArgs += @('--repo', $script:LaunchProject)
     }
+    $identityOutput = & $VenvPython @identityArgs 2>&1
+    Write-SetupLog "Copilot identity ensure (exit ${LASTEXITCODE}): $identityOutput"
+} catch {
+    Write-SetupLog "Copilot identity ensure threw (non-fatal): $_" 'WARN'
 }
 
 $cmd = @($plan.cmd)

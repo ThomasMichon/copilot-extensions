@@ -62,7 +62,7 @@ env:
 jobs:
   main-gate:
     name: main source gate
-    # The gate for any PR targeting `main`. Exactly two shapes are legitimate:
+    # The gate for any PR targeting `main`. Exactly three shapes are legitimate:
     # (1) the promotion pipeline's own PR (a release/promote-<run id> branch,
     #     opened via the APERTURE_RELEASE_TOKEN PAT -- a personal fine-grained
     #     token minted under the maintainer's own account, this repo having no
@@ -73,9 +73,14 @@ jobs:
     #     their own YAML from `main`, never the branch that triggered them, so
     #     a fix to those files must occasionally land on main directly, ahead
     #     of the next real promotion -- the pipeline can't fix itself via its
-    #     own not-yet-working promotion path otherwise.
+    #     own not-yet-working promotion path otherwise; or
+    # (3) module-size-baseline-widen.yml's own automated PR (fixed branch
+    #     name `automation/module-size-baseline-widen`, also opened via the
+    #     APERTURE_RELEASE_TOKEN PAT so it's PR_AUTHOR == ThomasMichon too,
+    #     and whose diff is never anything but the one generated baseline
+    #     JSON file).
     #
-    # Shape (2) is enforced by DIFF CONTENT here, not by admin/human bypass --
+    # Shapes (2) and (3) are enforced by DIFF CONTENT here, not by admin/human bypass --
     # this is deliberate, prompted by a real incident (an unrelated
     # vision-doc PR landed directly on `main` via `gh pr merge --admin`,
     # stranding content that the next promotion would have silently reverted,
@@ -112,11 +117,26 @@ jobs:
             echo "::error::No changed files detected between base and head -- refusing to land on main."
             exit 1
           fi
+          # Third legitimate shape: module-size-baseline-widen.yml's own
+          # automated, purely-mechanical PR (see that workflow) -- it opens
+          # from a fixed branch name, authored under this same PAT (hence
+          # PR_AUTHOR == ThomasMichon, checked above), and its diff is never
+          # anything but the one generated baseline file. Checked by exact
+          # branch name AND single-file diff content together (not one
+          # alone) so this narrow exception can't be widened by pushing
+          # unrelated content onto that branch name, or by a real PR simply
+          # touching that one file.
+          if [[ "$HEAD_REF" == "automation/module-size-baseline-widen" \
+                && "$changed" == "tools/module-size-baseline.json" ]]; then
+            echo "Automated module-size-baseline-widen PR -- OK. Files:"
+            echo "$changed"
+            exit 0
+          fi
           non_workflow="$(echo "$changed" | grep -v '^\.github/workflows/' || true)"
           if [ -n "$non_workflow" ]; then
             echo "::error::This PR touches file(s) outside .github/workflows/, so it cannot use the workflow-only bootstrap exception:"
             echo "::error::$non_workflow"
-            echo "::error::main only ever moves via a release/promote-* PR, or a workflow-file-ONLY bootstrap PR. Please retarget this PR's base branch to 'dev' -- see CONTRIBUTING.md > Release & Versioning."
+            echo "::error::main only ever moves via a release/promote-* PR, a workflow-file-ONLY bootstrap PR, or module-size-baseline-widen.yml's own automated PR. Please retarget this PR's base branch to 'dev' -- see CONTRIBUTING.md > Release & Versioning."
             exit 1
           fi
           echo "Workflow-file-only bootstrap PR by the repo owner -- OK. Files:"
@@ -145,8 +165,18 @@ jobs:
         # Replaces the old manual three-file version-bump requirement
         # (tools/check-version-bump.py) now that dev-branch-release-pipeline's CI
         # promotion pipeline (Phase 3) exists to actually consume changefiles.
+        #
+        # --head is pinned explicitly (not left to default to "HEAD") because
+        # actions/checkout with no `ref:` override checks out the ephemeral
+        # refs/pull/<n>/merge commit -- the PR's head merged into whatever the
+        # CURRENT tip of `dev` happens to be, not the PR's own head. Once `dev`
+        # has moved since the PR opened, diffing that merge commit against the
+        # (increasingly stale) base.sha silently folds every intervening dev
+        # commit into "this PR's diff", misattributing other PRs' plugin
+        # changes to this one. Pinning --head to the PR's real head sha keeps
+        # the diff scoped to this PR's own commits regardless of dev's drift.
         if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'dev'
-        run: python tools/check-changefile-presence.py --base ${{ github.event.pull_request.base.sha }}
+        run: python tools/check-changefile-presence.py --base ${{ github.event.pull_request.base.sha }} --head ${{ github.event.pull_request.head.sha }}
       - name: Module size (hard cap + shrink-only baseline, PR diff only)
         # Scoped to files THIS PR's own commits touch (like the changefile-
         # presence step above) -- a PR is never blocked by growth in a file it
@@ -276,9 +306,23 @@ jobs:
         # stays enforced. Each suite puts its own lib on `sys.path` from its
         # `tests/conftest.py`, as the sibling canonical-lib suites do -- run
         # one invocation per lib so a suite only ever sees its own `src`.
+        # `credential-relay`'s suite uses `@pytest.mark.asyncio` (its own
+        # `pyproject.toml` declares `pytest-asyncio` as a `dev` extra, never
+        # installed here since this job only installs bare `pytest`) --
+        # install it explicitly or collection fails outright. `agent-procutil`
+        # is only converted for 4 of its 11 consumers so far -- included here
+        # too (rather than waiting for its own full conversion) since its
+        # canonical suite is the one this step is designed to keep testing,
+        # independent of which pointer form any particular consumer uses.
         run: >-
+          python -m pip install pytest-asyncio &&
           python -m pytest -q libs/work-coalescing-singleton/tests &&
-          python -m pytest -q libs/lazy-cli-dispatch/tests
+          python -m pytest -q libs/lazy-cli-dispatch/tests &&
+          python -m pytest -q libs/credential-relay/tests &&
+          python -m pytest -q libs/ssh-manager/tests &&
+          python -m pytest -q libs/agent-procutil/tests
+      - name: Plugin resolution contract tests
+        run: python -m pytest -q libs/plugin-resolve/tests
       - name: Vendored library synchronization
         run: python tools/check-vendored-libs-sync.py
       - name: Windows headless launch invariants
@@ -486,8 +530,14 @@ jobs:
         run: python tools/run-plugin-tests.py ${{ matrix.plugin }}
       - name: Test shared SSH proxy contracts
         if: matrix.plugin == 'agent-bridge'
+        # ssh-manager is now consumed as a `uv`-editable canonical
+        # reference (vendor-pointer-generalization, Phase 1), so
+        # agent-bridge no longer carries a local libs/ssh-manager/src
+        # copy -- point PYTHONPATH at canonical instead. ssh-manager
+        # itself depends on agent-procutil, so that canonical src/ must
+        # be on the path too.
         env:
-          PYTHONPATH: plugins/agent-bridge/libs/ssh-manager/src
+          PYTHONPATH: libs/ssh-manager/src:libs/agent-procutil/src
         run: >-
           .test-venvs/linux/agent-bridge/bin/python -m pytest -q
           libs/ssh-manager/tests/test_process.py

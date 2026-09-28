@@ -85,6 +85,12 @@ plugin, version, and script -- never hand-edit a hoisted copy; edit the source
   error for the same reason.
 - Malformed `enabledPlugins` / `extraKnownMarketplaces` in the settings
   files is a hard error rather than a best-effort skip.
+- Only files carrying this script's own `GENERATED` banner are ever treated
+  as stale/deletable output. A hand-authored `.github/agents/*.agent.md` file
+  that was never hoisted (e.g. a repo's own harness/reviewer agents living
+  alongside hoisted copies in the same directory) is never touched by `sync`
+  or reported by `scan`, regardless of whether it happens to match a
+  currently-enabled plugin's expected filename.
 
 ## Retiring the workaround
 

@@ -174,16 +174,16 @@ class PRConfig:
     it does not control squash timing (squashing always happens at
     ``create-pr``):
 
-    - ``detach``    -- finalize the worktree immediately; resume later via a
-                       fresh ``create`` workflow if the PR needs more work.
-    - ``keep-alive`` -- keep the worktree open to iterate on review feedback,
-                        pushing updates to the feature branch.
+    - ``detach``    -- finalize immediately (rare opt-out; needs operator
+                       approval); resume via a fresh ``create`` workflow.
+    - ``keep-alive`` -- keep iterating on review feedback. Safe default;
+                        unset falls back here, never to ``detach``.
     """
 
     enabled: bool = False
     required: bool = False         # enforce PRs: refuse direct-to-master
     provider: str = "gitea"        # gitea | github | azure-devops
-    strategy: str = "detach"       # default disposition: keep-alive | detach
+    strategy: str = "keep-alive"   # default disposition: keep-alive | detach
     branch_prefix: str = "feature"
     # ``head_scheme`` selects how create-pr *publishes* the PR head (#1815) --
     # its NAME + push mechanism. It does NOT change the local worktree, which
@@ -539,14 +539,13 @@ class Config:
     worktrees are left untouched.  Set false to opt out of auto-update."""
     default_copilot_account: str = ""
     """This machine's default **Copilot CLI** login (distinct from ``gh``'s
-    ``account_map`` -- see ``repos.RepoEntry.copilot_account``) for a repo
-    with no explicit per-repo override. Deliberately machine-local policy,
-    NOT a portable knowledge-repo operator preference (see
-    ``_KNOWLEDGE_OVERLAY_TOP_KEYS``): two machines used for different
-    purposes may legitimately want different defaults. Resolves
+    ``account_map``) for a repo with no explicit per-repo override.
+    Machine-local policy, not a portable knowledge-repo preference. Resolves
     machine-local ``config.yaml`` > global ``~/.agent-worktrees/config.yaml``
-    only. Empty means no machine-wide preference (ambient Copilot login,
-    today's behavior). See ThomasMichon/copilot-extensions#3296."""
+    only. Empty means no machine-wide preference. See
+    ThomasMichon/copilot-extensions#3296."""
+    copilot_identity_switch_enabled: bool = False
+    """Master switch for :mod:`copilot_identity`; default false, config-file based. See docs/config-reference.md."""
 
     @property
     def default_repo(self) -> RepoConfig:
@@ -1233,6 +1232,7 @@ def _load_config_uncached(
             )
             or ""
         ),
+        copilot_identity_switch_enabled=bool(machine_raw.get("copilot_identity_switch_enabled", global_raw.get("copilot_identity_switch_enabled", False))),
     )
 
 
@@ -1803,7 +1803,7 @@ def _parse_pr(raw: Any) -> PRConfig:
         enabled=enabled,
         required=required,
         provider=str(raw.get("provider", "gitea")),
-        strategy=str(raw.get("strategy", "detach")),
+        strategy=str(raw.get("strategy", "keep-alive")),
         branch_prefix=str(raw.get("branch_prefix", "feature")),
         head_scheme=head_scheme,
         head_pattern=str(raw.get("head_pattern", "")),

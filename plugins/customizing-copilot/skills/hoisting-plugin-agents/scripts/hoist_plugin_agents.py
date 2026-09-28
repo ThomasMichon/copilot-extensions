@@ -47,6 +47,12 @@ SETTINGS_CANDIDATES = (
 _LINK_PATTERN = re.compile(r"(\]\()([^)\s]+)(\))")
 _ABSOLUTE_SCHEMES = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
 
+# A stable substring of `_GENERATED_BANNER` below (independent of its
+# `{source}`/`{version}` placeholders), used as the sole provenance check for
+# whether a file under the output directory is this script's own output --
+# see `_is_hoisted_output`.
+_GENERATED_BANNER_MARKER = "GENERATED -- hoisted by hoist_plugin_agents.py"
+
 _GENERATED_BANNER = """
 <!-- GENERATED -- hoisted by hoist_plugin_agents.py from {source}
 (plugin version {version}). This is a workaround for a Copilot CLI limitation
@@ -251,11 +257,30 @@ def desired(repo_root: Path, output_dir: PurePosixPath) -> dict[Path, bytes]:
     return output
 
 
+def _is_hoisted_output(path: Path) -> bool:
+    """Whether `path` actually carries this script's own generated banner.
+
+    `sync`/`scan` must never treat a hand-authored `.github/agents/*.agent.md`
+    file as this script's output just because it happens to sit in the
+    conventional output directory and no longer matches a currently-enabled
+    plugin's expected content -- that file may never have been hoisted output
+    at all. A missing/unreadable/undecodable file is conservatively treated
+    as not ours.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    return _GENERATED_BANNER_MARKER in text
+
+
 def existing_output_files(repo_root: Path, output_dir: PurePosixPath) -> set[Path]:
     directory = repo_root.resolve() / output_dir
     if not directory.is_dir():
         return set()
-    return set(directory.glob("*.agent.md"))
+    return {
+        path for path in directory.glob("*.agent.md") if _is_hoisted_output(path)
+    }
 
 
 def sync(repo_root: Path, output_dir: PurePosixPath) -> tuple[list[Path], list[Path]]:

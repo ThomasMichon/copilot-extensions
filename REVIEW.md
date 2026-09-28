@@ -100,6 +100,28 @@ specifically when reviewing a pull request, not a replacement for them.
 - **ruff signal, not noise.** Hold changed Python to at least the `F`/`E9`
   groups; do not block on pre-existing style debt in code the PR did not
   touch.
-- **Make every comment count.** Copilot review comments (it does not
-  approve or block merges here), so each comment should be actionable and
-  worth the author's attention.
+- **Render `Approve` when ready — on a contributor's PR.** Copilot code
+  review can only ever submit `Approve` or `Comment` (there is no
+  `Request changes` capability in Copilot code review at all — see
+  CONTRIBUTING.md § "Waiting for a verdict" for the current GitHub-docs
+  citation). Approvals
+  are enabled in this repo (Settings → Copilot → Code review →
+  Auto-approval), so for a PR authored by someone other than this repo's
+  owner, once there is no remaining Medium/High-severity finding and the
+  overview's own readiness assessment says it's ready to merge, **submit
+  that as a genuine `Approve` review**, not a `Comment` review whose text
+  merely says the PR looks ready. A `Comment`-only verdict there is the
+  submitter's and maintainer's signal that real, unresolved findings
+  remain (see `CONTRIBUTING.md` § "Waiting for a verdict") — do not leave
+  that PR in `Comment` limbo once nothing substantive is left to flag.
+  **This repo's own PRs authored by its owner are a documented exception**
+  (`plugins/agent-worktrees/src/agent_worktrees/pr_contract.py`'s
+  `NONBLOCKING_VERDICT_STATES`, empirically confirmed: every review on
+  every owner-authored PR in this repo's history has been `Comment`, never
+  `Approve`) — on those, a `Comment` review with zero remaining
+  Medium/High-severity findings **is** the passing verdict; do not
+  attempt to force an `Approve` there, and do not treat a clean `Comment`
+  on an owner-authored PR as an unfinished review.
+- **Make every comment count.** Copilot review comments should each be
+  actionable and worth the author's attention, whether the review's overall
+  verdict ends up `Approve` or `Comment`.
