@@ -1079,111 +1079,118 @@ def _remote_machine_env(decision: dict) -> tuple[str | None, str | None]:
 
 
 def _run_production_picker(project: str) -> int:
-    """Run the transplanted production UX and act on its launch decision."""
+    """Run the transplanted production UX and act on its launch decision.
+
+    ``"refresh"``/``"manager-update"`` apply an update and loop back to
+    reopen the Picker (#4423); every other decision ends this function.
+    """
     from . import picker_app
     from .production_picker import runner
 
-    try:
-        decision = runner.run(project)
-    except Exception as error:
-        print(f"error: production Picker failed: {error}")
-        return 1
-    if not decision:
-        return 0
-
-    action = str(decision.get("action") or "")
-    options = decision.get("options")
-    opts = dict(options) if isinstance(options, dict) else {}
-    if action == "resume":
-        worktree_id = decision.get("worktree_id")
-        if not worktree_id:
-            print("error: Picker returned a resume decision with no worktree id.")
-            return 1
-        if not decision.get("is_local", True) and opts.get("ahp"):
-            print("error: AHP is supported only for same-machine launches.")
-            return 1
-        machine, environment = _remote_machine_env(decision)
-        return _run_launch(picker_app.LaunchRequest(
-            project=str(decision.get("project") or project or ""),
-            worktree_id=str(worktree_id),
-            mode="bare-resume" if opts.get("bare_resume") else "resume",
-            title=str(decision.get("title") or "") or None,
-            no_mux=bool(opts.get("no_mux")),
-            ahp=bool(opts.get("ahp")),
-            machine=machine,
-            environment=environment,
-        ))
-    if action == "restore":
-        worktree_id = decision.get("worktree_id")
-        if not worktree_id:
-            print("error: Picker returned a restore decision with no worktree id.")
-            return 1
-        return _restore_production_picker_session(
-            project,
-            str(worktree_id),
-            title=str(decision.get("title") or "") or None,
-            is_local=bool(decision.get("is_local", True)),
-            machine=str(decision.get("machine") or "") or None,
-            environment=str(decision.get("env") or "") or None,
-        )
-    if action == "dispose-hosted-session":
-        worktree_id = decision.get("worktree_id")
-        if not worktree_id:
-            print("error: Picker returned a disposal decision with no worktree id.")
-            return 1
-        if not decision.get("is_local", True):
-            print("error: AHP session disposal is supported only on this machine.")
-            return 1
-        request = picker_app.LaunchRequest(
-            project=project,
-            worktree_id=str(worktree_id),
-            mode="resume",
-        )
-        plan, code = _resolve_for(request)
-        if plan is None:
-            return code
-        from . import ahp_provider, engine_client, manager_config
-
+    while True:
         try:
-            disposed = ahp_provider.dispose_worktree_session(
+            decision = runner.run(project)
+        except Exception as error:
+            print(f"error: production Picker failed: {error}")
+            return 1
+        if not decision:
+            return 0
+        action = str(decision.get("action") or "")
+        options = decision.get("options")
+        opts = dict(options) if isinstance(options, dict) else {}
+        if action == "resume":
+            worktree_id = decision.get("worktree_id")
+            if not worktree_id:
+                print("error: Picker returned a resume decision with no worktree id.")
+                return 1
+            if not decision.get("is_local", True) and opts.get("ahp"):
+                print("error: AHP is supported only for same-machine launches.")
+                return 1
+            machine, environment = _remote_machine_env(decision)
+            return _run_launch(picker_app.LaunchRequest(
+                project=str(decision.get("project") or project or ""),
+                worktree_id=str(worktree_id),
+                mode="bare-resume" if opts.get("bare_resume") else "resume",
+                title=str(decision.get("title") or "") or None,
+                no_mux=bool(opts.get("no_mux")),
+                ahp=bool(opts.get("ahp")),
+                machine=machine,
+                environment=environment,
+            ))
+        if action == "restore":
+            worktree_id = decision.get("worktree_id")
+            if not worktree_id:
+                print("error: Picker returned a restore decision with no worktree id.")
+                return 1
+            return _restore_production_picker_session(
                 project,
                 str(worktree_id),
-                str(plan.work_dir or ""),
+                title=str(decision.get("title") or "") or None,
+                is_local=bool(decision.get("is_local", True)),
+                machine=str(decision.get("machine") or "") or None,
+                environment=str(decision.get("env") or "") or None,
             )
-        except (
-            ahp_provider.AhpProviderError,
-            engine_client.EngineError,
-            manager_config.ManagerConfigError,
-        ) as error:
-            print(f"error: could not dispose AHP session: {error}")
-            return 1
-        print(
-            "Disposed the AHP-hosted session."
-            if disposed
-            else "No active AHP-hosted session was present."
-        )
-        return 0
-    if action == "new":
-        if not decision.get("is_local", True) and opts.get("ahp"):
-            print("error: AHP is supported only for same-machine launches.")
-            return 1
-        machine, environment = _remote_machine_env(decision)
-        return _run_launch(picker_app.LaunchRequest(
-            project=project,
-            worktree_id=None,
-            mode="base" if opts.get("anchor") else "new",
-            no_mux=bool(opts.get("no_mux")),
-            ahp=bool(opts.get("ahp")),
-            machine=machine,
-            environment=environment,
-        ))
-    if action == "refresh":
-        return _cmd_update(["--project", project])
-    if action == "open-venue":
-        from . import launcher
-        return launcher.open_venue(decision.get("provider", ""), decision.get("venue", ""))
-    print(f"error: Picker returned an unsupported decision: {action!r}")
-    return 1
+        if action == "dispose-hosted-session":
+            worktree_id = decision.get("worktree_id")
+            if not worktree_id:
+                print("error: Picker returned a disposal decision with no worktree id.")
+                return 1
+            if not decision.get("is_local", True):
+                print("error: AHP session disposal is supported only on this machine.")
+                return 1
+            request = picker_app.LaunchRequest(
+                project=project,
+                worktree_id=str(worktree_id),
+                mode="resume",
+            )
+            plan, code = _resolve_for(request)
+            if plan is None:
+                return code
+            from . import ahp_provider, engine_client, manager_config
+
+            try:
+                disposed = ahp_provider.dispose_worktree_session(
+                    project,
+                    str(worktree_id),
+                    str(plan.work_dir or ""),
+                )
+            except (
+                ahp_provider.AhpProviderError,
+                engine_client.EngineError,
+                manager_config.ManagerConfigError,
+            ) as error:
+                print(f"error: could not dispose AHP session: {error}")
+                return 1
+            print(
+                "Disposed the AHP-hosted session."
+                if disposed
+                else "No active AHP-hosted session was present."
+            )
+            return 0
+        if action == "new":
+            if not decision.get("is_local", True) and opts.get("ahp"):
+                print("error: AHP is supported only for same-machine launches.")
+                return 1
+            machine, environment = _remote_machine_env(decision)
+            return _run_launch(picker_app.LaunchRequest(
+                project=project,
+                worktree_id=None,
+                mode="base" if opts.get("anchor") else "new",
+                no_mux=bool(opts.get("no_mux")),
+                ahp=bool(opts.get("ahp")),
+                machine=machine,
+                environment=environment,
+            ))
+        if action in ("refresh", "manager-update"):
+            # Apply the update, then loop back to reopen the Picker rather
+            # than exiting the process (#4423).
+            _cmd_update(["--project", project])
+            continue
+        if action == "open-venue":
+            from . import launcher
+            return launcher.open_venue(decision.get("provider", ""), decision.get("venue", ""))
+        print(f"error: Picker returned an unsupported decision: {action!r}")
+        return 1
 
 
 def _restore_production_picker_session(
@@ -1697,6 +1704,12 @@ def _cmd_update(rest: list[str]) -> int:
         print(f"    ✓ already current ({su.version})")
     else:
         print(f"    ○ self-update {su.action}: {su.reason} — continuing")
+    # The manager_update_check cache is stale after a version change -- drop
+    # it so the next poll re-checks for real instead of serving the
+    # pre-update verdict (#4424).
+    from . import manager_update_check as _muc
+
+    _muc.invalidate()
 
     # 2. Orchestrate via the engine, bypassing the seam. A threaded --project is
     #    forwarded through run_engine_passthrough's own project param (placed

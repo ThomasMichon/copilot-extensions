@@ -594,15 +594,18 @@ class PickerScreenRenderingMixin:
             t.append(arrow, style=C_HINT)
         t.append(" " * max(0, W - t.cell_len))
         return t
-    def _manager_update_seg(self):
+    def _manager_update_seg(self, focused: bool, show_text: bool = True):
         """Render the Manager's OWN update-availability state -- distinct
         from :meth:`_update_seg` (the engine/marketplace payload's staged
         state). Directly qualifies the ``v{VERSION}`` string it sits next
         to: ``idle`` shows nothing (never checked yet / non-GitHub source),
-        ``current`` shows a plain ✓, ``available`` names the newer version
-        and the command to fetch it (no in-picker apply flow -- unlike the
-        engine's staged-update refresh, updating the Manager itself needs a
-        real network fetch, so this stays purely informational)."""
+        ``current`` shows a plain ✓, ``available`` shows a short, focusable
+        ``↻ Update available`` button (Enter self-updates the Manager and
+        restarts the picker on it -- see zone ``"MUP"``). Kept intentionally
+        terse (no embedded version number or literal command) to match
+        :meth:`_update_seg`'s style and avoid overflowing the topbar; the
+        exact target version remains available via
+        ``manager_update_check.read_status()`` for anyone who wants it."""
         st = getattr(self, "manager_update_state", "idle")
         if st == "idle":
             return None
@@ -610,12 +613,10 @@ class PickerScreenRenderingMixin:
         if st == "current":
             t.append(" ✓", style=C_READY)
         elif st == "available":
-            from ... import manager_update_check as _muc
-
-            remote = _muc.read_status().get("remote_version") or "newer"
-            t.append(" ↻ ", style=C_HINT_ON)
-            t.append(f"Manager update available ({remote}) -- run "
-                     "`worktree-manager update`", style=C_HINT_ON)
+            t.append(" ↻", style=(C_BTN_SEL if focused else C_HINT_ON))
+            if show_text:
+                t.append(" Update available",
+                         style=C_BTN_SEL if focused else C_HINT_ON)
         return t
     def _update_seg(self, focused: bool):
         """Render the launcher's idle/paused/checking/current/available state."""
@@ -643,9 +644,10 @@ class PickerScreenRenderingMixin:
         # fixture source) so the segment is dropped rather than showing a
         # fabricated name.
         repo, branch = self._src_repo_branch()
-        present = {"update_text": True, "version": True, "repo": bool(repo),
-                   "env": bool(e), "branch": bool(branch)}
+        present = {"mgr_update_text": True, "update_text": True, "version": True,
+                   "repo": bool(repo), "env": bool(e), "branch": bool(branch)}
         upd_focused = self.sel[0] == "UPD"
+        mup_focused = self.sel[0] == "MUP"
 
         def build():
             left = Text(" Worktree Manager", style="bold")
@@ -655,7 +657,7 @@ class PickerScreenRenderingMixin:
             # directly above (distinct from the engine/marketplace segment
             # below -- see _manager_update_seg's own docstring for why they
             # must not be conflated).
-            mgr_seg = self._manager_update_seg()
+            mgr_seg = self._manager_update_seg(mup_focused, present["mgr_update_text"])
             if mgr_seg is not None:
                 left.append_text(mgr_seg)
             # Update indicator (#1430): spinner while the launcher stages the
@@ -679,7 +681,7 @@ class PickerScreenRenderingMixin:
                 right.append(f" · {branch}", style=C_DIM)
             return left, right
 
-        for drop in ("update_text", "version", "branch", "env", "repo"):
+        for drop in ("mgr_update_text", "update_text", "version", "branch", "env", "repo"):
             left, right = build()
             if left.cell_len + 1 + right.cell_len + 1 <= W:
                 break
@@ -727,6 +729,9 @@ class PickerScreenRenderingMixin:
         zone = self.sel[0]
         if zone == "UPD":
             return ("Enter: apply staged update + restart the picker"
+                    " · ↑↓ move · Tab region")
+        if zone == "MUP":
+            return ("Enter: update the Worktree Manager + restart the picker"
                     " · ↑↓ move · Tab region")
         if zone == "V":
             return (f"◀▶ view / ⚙ Config (on {self.htabs[self.htab]})"

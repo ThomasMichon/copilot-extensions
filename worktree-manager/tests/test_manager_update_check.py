@@ -87,3 +87,27 @@ def test_indicator_state_never_triggers_a_network_check(tmp_path, monkeypatch):
 
     monkeypatch.setattr(self_install, "fetch_remote_version", boom)
     assert muc.indicator_state(tmp_path) == "idle"
+
+
+def test_invalidate_clears_a_persisted_status(tmp_path, monkeypatch):
+    """After a Manager self-update, the pre-update cache is stale -- calling
+    `invalidate` must drop it so the next poll re-checks for real instead of
+    serving the (now-wrong) "available"/"current" verdict for up to
+    CHECK_INTERVAL_SECS."""
+    monkeypatch.setattr(self_install, "current_version", lambda root=None: "0.1.0-dev54")
+    monkeypatch.setattr(
+        self_install, "fetch_remote_version", lambda root=None: "0.1.0-dev55")
+    muc.check_now(tmp_path)
+    assert muc.indicator_state(tmp_path) == "available"
+
+    muc.invalidate(tmp_path)
+
+    assert muc.read_status(tmp_path) == {}
+    assert muc.indicator_state(tmp_path) == "idle"
+    assert muc.should_check(tmp_path) is True
+
+
+def test_invalidate_is_a_no_op_when_nothing_was_persisted(tmp_path):
+    """Never raises even when there is no cache file to remove yet."""
+    muc.invalidate(tmp_path)
+    assert muc.read_status(tmp_path) == {}

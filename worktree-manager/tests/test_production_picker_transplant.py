@@ -523,15 +523,22 @@ def test_manager_acts_on_production_picker_resume_decision(monkeypatch):
 
 
 def test_manager_acts_on_production_picker_refresh_decision(monkeypatch):
-    """The "Update available" gesture (`action: refresh`) must thread the
+    """The "Update available" gesture (`action: refresh`) must (1) thread the
     resolved project through to `_cmd_update`, mirroring every other decision
-    branch here -- otherwise `agent-worktrees update` runs with no `--project`
-    and can't resolve context outside an adopted repo/worktree."""
-    monkeypatch.setattr(
-        runner,
-        "run",
-        lambda project: {"action": "refresh"},
-    )
+    branch here, and (2) loop back to reopen the very same Picker afterward
+    instead of ending the whole `worktree-manager` process -- a prior bug
+    (#worktree-manager-update-loop) `return`ed `_cmd_update`'s own exit code
+    from here, silently exiting the process on "Update available" instead of
+    reloading the Manager."""
+    run_calls = []
+
+    def fake_run(project):
+        run_calls.append(project)
+        if len(run_calls) == 1:
+            return {"action": "refresh"}
+        return None  # operator closed the picker on the reopened run
+
+    monkeypatch.setattr(runner, "run", fake_run)
     calls = []
     monkeypatch.setattr(
         entrypoint,
@@ -541,6 +548,34 @@ def test_manager_acts_on_production_picker_refresh_decision(monkeypatch):
 
     assert entrypoint._run_production_picker("demo") == 0
     assert calls == [["--project", "demo"]]
+    # The Picker was reopened (a second `runner.run` call) rather than the
+    # function returning `_cmd_update`'s own exit code straight away.
+    assert run_calls == ["demo", "demo"]
+
+
+def test_manager_acts_on_production_picker_manager_update_decision(monkeypatch):
+    """The Manager's OWN update button (`action: manager-update`, zone
+    "MUP") runs the same update command (which self-updates the Manager
+    first) and likewise reopens the Picker rather than exiting."""
+    run_calls = []
+
+    def fake_run(project):
+        run_calls.append(project)
+        if len(run_calls) == 1:
+            return {"action": "manager-update"}
+        return None
+
+    monkeypatch.setattr(runner, "run", fake_run)
+    calls = []
+    monkeypatch.setattr(
+        entrypoint,
+        "_cmd_update",
+        lambda rest: calls.append(rest) or 0,
+    )
+
+    assert entrypoint._run_production_picker("demo") == 0
+    assert calls == [["--project", "demo"]]
+    assert run_calls == ["demo", "demo"]
 
 
 def test_manager_acts_on_production_picker_open_venue_decision(monkeypatch):
