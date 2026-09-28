@@ -753,6 +753,27 @@ function Invoke-VersionedActivate {
         try { Remove-Item -LiteralPath $lkgTmp -Force -ErrorAction SilentlyContinue } catch {}
     }
     $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    # Touch the just-superseded slot's mtime NOW, at the moment of supersession.
+    # `gc`'s --min-age-days floor measures a slot's age from its directory mtime
+    # (~= install time, versioned_runtime.py's _slot_age_days), NOT from when it
+    # stopped being current. Without this touch, a slot that was installed more
+    # than --min-age-days ago (the common case -- most versions live for days
+    # between releases) gets ZERO protection from the floor the moment it's
+    # superseded, defeating the point (review finding on #4451: a V1 -> V2 -> V3
+    # sequence within one boot still reaps V1 once V1 is neither `current` nor
+    # `--keep`-protected). Resetting $prev's mtime here makes the floor measure
+    # what it needs to: time-since-superseded, so a plan resolved against $prev
+    # moments before this activation survives the immediately-following gc.
+    if ($prev) {
+        try {
+            $prevSlot = Join-Path (Join-Path $InstallDir 'versions') $prev
+            if (Test-Path -LiteralPath $prevSlot) {
+                (Get-Item -LiteralPath $prevSlot).LastWriteTime = Get-Date
+            }
+        } catch {
+            Write-SetupLog "Could not touch superseded slot mtime ($prevSlot): $($_.Exception.Message)" 'WARN'
+        }
+    }
     # --min-age-days is a recency floor protecting a STORED (not-running)
     # path-pinned reference -- launch-session.ps1/.sh's `resolve` bakes the
     # runtime interpreter's path into a plan BEFORE this activation runs; if
