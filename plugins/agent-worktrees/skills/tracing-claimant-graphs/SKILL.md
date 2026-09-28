@@ -183,14 +183,19 @@ When `claims find pr` returns no match and the PR carries no codename
 marker, the claiming session's own raw state may still be recoverable
 directly, bypassing the claim-graph tracking store entirely:
 
-1. Grep every local session's `events.jsonl` for the literal PR reference
-   (e.g. `PR #<n>` or `PR <n> opened`) across **all** per-user session-state
-   roots on the machine -- there can be more than one independently-rooted
-   store (for example a native-Windows Copilot install and a WSL install
-   each keep their own `~/.copilot/session-state/`, matching the "separate
-   cell" caveat above). Exclude your own current session directory first --
-   a search run *from* a session that itself discusses the target PR number
-   will match its own later narration, not a genuine other-session hit.
+1. Grep every local session's `events.jsonl` for a **repo-qualified**
+   reference to the target PR (its full URL, or `<owner>/<repo>#<n>`) --
+   never a bare `PR #<n>` / `PR <n> opened` pattern. A bare number is not
+   enough to establish who *opened* the PR: it also matches a later session
+   that merely reviewed or discussed the same PR, or an entirely different
+   repository's PR that happens to share the number. Exclude your own
+   current session directory first regardless -- a search run *from* a
+   session that itself discusses the target PR will match its own later
+   narration, not a genuine other-session hit. This can span **all**
+   per-user session-state roots on the machine -- there can be more than
+   one independently-rooted store (for example a native-Windows Copilot
+   install and a WSL install each keep their own
+   `~/.copilot/session-state/`, matching the "separate cell" caveat above).
 2. For each matching session directory, read its `worktree-binding.json`
    directly -- it carries `worktreeId`, `worktreeDir`, and `machine` as
    plain structured fields, which is more reliable than trying to reverse
@@ -198,9 +203,13 @@ directly, bypassing the claim-graph tracking store entirely:
    reliably carry it** -- confirmed live: a PR opened the same week the
    by-default codename effort landed had neither a branch-name suffix nor
    a body marker).
-3. Treat a hit found this way as attribution evidence of last resort, not a
-   replacement for the claim graph or the codename marker when either is
-   available -- it has no liveness signal and no cross-check of its own.
+3. Even a repo-qualified match is **unverified** until you read the
+   matching event's own text and confirm it actually records *creating/
+   opening* the PR (e.g. "Opened PR #n" / a `create-pr`-style tool result),
+   not just a mention in passing. Treat any hit found this way as
+   attribution evidence of last resort, not a replacement for the claim
+   graph or the codename marker when either is available -- it has no
+   liveness signal and no cross-check of its own.
 
 ## See also
 
