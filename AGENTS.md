@@ -194,28 +194,39 @@ Release & Versioning in CONTRIBUTING.md.
 **Wait for a real verdict before merging -- contributor and maintainer PRs
 alike.** Copilot code review can only ever render `Approve` or `Comment`
 (there is no "Request changes" capability in the product at all); Approvals
-are enabled in this repo, so a genuinely ready PR should come back `Approve`,
-not merely `Comment` (see `REVIEW.md`). A `Comment`-only verdict means real
-findings remain -- it is not a pass:
+are enabled in this repo, so a genuinely ready **contributor** PR should
+come back `Approve`, not merely `Comment` (see `REVIEW.md`). **This repo's
+own owner-authored PRs are a documented, empirically confirmed exception**
+(`plugins/agent-worktrees/src/agent_worktrees/pr_contract.py`'s
+`NONBLOCKING_VERDICT_STATES`; every merged owner-authored PR in this repo's
+history has been `Comment`-only, never `Approve`) -- there, a clean
+`Comment` (zero Medium/High findings open) *is* the passing verdict, not an
+unfinished one. Either way, a `Comment` review with a Medium/High finding
+still open is never a pass:
 1. Open/update the PR, wait ~5 minutes for a review. No review landed
    (a timeout, not a review event): skip straight to step 4 -- there's
    nothing to address or push yet.
-2. `Approve` landed: merge (subject to the separate maintainer-approval gate
-   on a non-maintainer's PR).
+2. Contributor PR, `Approve` landed: merge (subject to the separate
+   maintainer-approval gate on a non-maintainer's PR). Owner-authored PR,
+   `Comment` landed with zero Medium/High findings open: merge -- that's
+   the passing verdict here.
 3. `Comment` landed: address genuinely valuable findings (explain/dismiss
    the rest). If that requires an actual change, push it and wait ~5
    minutes for the automatic post-push review; if every finding was
    dismissed/explained with no real change needed, skip the push (there's
    nothing new for a re-review to see) and go straight to step 4.
-4. Still not `Approve` (including a post-push timeout, which counts the
-   same as a `Comment`): explicitly re-request review via the API (see
-   CONTRIBUTING.md § "Requesting a fresh review" for the exact call) and wait
-   ~5 minutes again -- do not just keep pushing small commits hoping the next
-   automatic pass flips on its own.
-5. **Narrow maintainer bypass:** after at least one full loop, if the
-   *current* `Comment` review's remaining findings are all Low severity, the
-   maintainer may self-merge, stating what was dismissed and why. Any
-   Medium/High finding blocks self-merge regardless of who authored the PR.
+4. Still not passing (a `Comment` with a Medium/High finding still open on
+   either PR type, or a contributor PR still short of `Approve`, including
+   a post-push timeout, which counts the same as a `Comment`): explicitly
+   re-request review via the API (see CONTRIBUTING.md § "Requesting a
+   fresh review" for the exact call) and wait ~5 minutes again -- do not
+   just keep pushing small commits hoping the next automatic pass flips on
+   its own.
+5. **Narrow maintainer bypass, contributor PRs only:** after at least one
+   full loop, if the *current* `Comment` review's remaining findings are
+   all Low severity, the maintainer may self-merge, stating what was
+   dismissed and why. Any Medium/High finding blocks self-merge regardless
+   of who authored the PR.
 Full mechanics, the re-request API call, and the non-maintainer approval gate
 this doesn't override: CONTRIBUTING.md § "Waiting for a verdict". **This is
 agent discipline, not yet tool-enforced** -- `pr-merge --now` does not itself
