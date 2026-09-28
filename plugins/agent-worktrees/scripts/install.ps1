@@ -755,7 +755,7 @@ function Invoke-VersionedActivate {
             }
         }
     } catch {
-        Write-SetupLog "Could not resolve pre-activation runtime slot: $($_.Exception.Message)" 'WARN'
+        Write-ServiceWarn "Could not resolve pre-activation runtime slot: $($_.Exception.Message)"
     } finally {
         $env:AGENT_RT_ROOT = $savedRtRoot
     }
@@ -784,7 +784,7 @@ function Invoke-VersionedActivate {
                 (Get-Item -LiteralPath $prevSlot).LastWriteTime = Get-Date
             }
         } catch {
-            Write-SetupLog "Could not touch superseded slot mtime ($prevSlot): $($_.Exception.Message)" 'WARN'
+            Write-ServiceWarn "Could not touch superseded slot mtime ($prevSlot): $($_.Exception.Message)"
         }
     }
     & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
