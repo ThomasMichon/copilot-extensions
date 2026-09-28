@@ -1,0 +1,9 @@
+{
+  "comment": "Document class-G head-mismatch root cause and cross-link upstream #3716 in the repairing-worktrees skill; add a pre-promotion sanity check for handoff-seed candidates.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

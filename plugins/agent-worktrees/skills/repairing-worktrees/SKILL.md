@@ -212,6 +212,36 @@ to the final real session. Do not choose by timestamp alone: test probes and
 failed successor shells can be newer than the authoritative agent. A handoff
 whose successor never became usable leaves the predecessor authoritative.
 
+**Why class G happens at all (root cause, not just symptom).**
+`register_session` (the `sessionStart` hook) only *initializes* a worktree's
+head when it has none; by design it **never moves an existing active head**
+once one is set (see `docs/architecture.md` § *Current session, conclusion,
+and succession*). Moving the head normally requires a session to claim its
+*exact* pending handoff token via `bind-session --handoff-token <token>` /
+`link-succession`. So a worktree drifts into class G whenever a later session
+starts in the same directory **without** claiming that token — an informal
+resume, a bare interactive restart, or `embody` with no seed — and just does
+real work. Nothing in the ordinary path ever re-points the head afterward:
+`doctor`'s `session_head_mismatch` scan (`#3307`) detects the resulting
+divergence by diffing the registered head against the session most-recently
+touched on disk, but it is **report-only** — it does not auto-repair, and
+nothing warns at the moment that actually matters (resume time). Expect this
+class to recur in bursts across many worktrees whenever informal resumes are
+common; `handoffs[]` entries stuck at `state: "pending"` with `successor:
+null` are the tell that a handoff was opened but never claimed by whatever
+session actually continued the work. Recovery is exactly the `link-succession`
+call above — promote the real last-working session over the stale head — but
+this is presently a **manual, after-the-fact fix**, not something the engine
+prevents. Tracked upstream: an architecture-level fix (`sessionStart` itself
+staying authoritative for "the most recent legitimately-started session," with
+non-front-door starters such as a bare `copilot -p` invocation or a native
+sub-agent's own `sessionStart` firing guarded out of claiming head, and a
+resume-time discrepancy warning instead of a silent divergence) is proposed on
+[#3716](https://github.com/ThomasMichon/copilot-extensions/issues/3716) — read
+that issue before assuming this is a one-off bug in the local install; it
+generalizes past `embody` to any informal resume. Class **F**'s foreign-cwd
+registration bug has the same "no engine guard yet" shape — see `#1553` above.
+
 ### Verify which class you're in — cheap structured signals first
 
 Work **cheap → expensive**; most cases resolve without ever touching the
@@ -228,6 +258,24 @@ state root:
    Copilot session store's index for sessions whose `cwd` is the worktree path,
    rather than walking the filesystem — this finds a real in-worktree session
    without any directory iteration.
+
+### Before promoting a class-G candidate, confirm it isn't itself an unconsumed handoff seed
+
+A session with the highest `created_at`/most turns is the right promotion
+target *only if it actually did work* — not merely if it exists. A session
+that only ever received the handoff/continuation-brief prompt and never
+progressed (0-1 turns, `ended_at_marker: null`) is not a legitimate successor;
+promoting it just moves the same problem one hop later. Before running
+`link-succession`, pull that candidate's first and last user-turn content
+(`<project> worktrees session-transcript <id> --json`, or grep its
+`user.message` events if the transcript is large) and confirm both: (a) the
+**first** turn is the expected handoff seed (`Task: ... | Resume:
+/consume-handoff ... | Recovery: context-handoff ...`) — proving it really is
+a successor and not an unrelated session that happens to share the cwd — and
+(b) the **last** turn shows real closing activity (e.g. "finalize worktree",
+a concrete result), not the seed still sitting unanswered. A candidate with
+only the seed and nothing after it means the true successor is a *later*
+session still on the worktree, or a class-E "no local transcript" gap.
 
 ### Verify head repair survives reconciliation
 
