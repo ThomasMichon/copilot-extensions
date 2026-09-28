@@ -728,14 +728,14 @@ def test_prepare_live_source_warms_src_local_even_when_tabs_already_have_it():
     already carries its own ``"local"`` key, so the OLD code's
     ``if local is None: local = self.src.LOCAL`` fallback was dead in
     practice -- ``data_ssh.LOCAL`` (a PEP 562 module attribute resolved
-    lazily via an uncached ``load_config()`` call, then memoized forever)
-    was never touched during startup at all. Its first REAL access then
-    happened later, outside any cache scope -- e.g. ``_wt_submenu_verbs()``'s
+    lazily on first access, then memoized forever) was never touched during
+    startup at all. Its first REAL access then happened later, on the
+    render thread -- e.g. ``_wt_submenu_verbs()``'s
     ``(machine, env) == self.src.LOCAL`` comparison on the operator's first
     Enter press of a worktree row -- reproducing as a synchronous,
-    spinner-less multi-second UI freeze (#picker-menu-open-latency). This
-    method runs inside ``_load_config_cache_scope()``, so warming LOCAL here
-    is nearly free (shared with whatever else that scope already computed)."""
+    spinner-less UI freeze (#picker-menu-open-latency). This method already
+    runs on the setup worker thread (off the render flow), so warming LOCAL
+    here moves that one-time cost there instead."""
     pytest.importorskip("textual")
     from worktree_manager.production_picker.picker_tui import engine as eng
 

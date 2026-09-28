@@ -73,6 +73,19 @@ test("trigger requires either markdown input or a stored handoff token", () => {
   }));
 });
 
+test("trigger --force is parsed as a boolean flag and reaches triggerHandoff", () => {
+  // #mux-companion-manual-cutover-diagnostics: --force must never shell out
+  // to real provisioning as a side effect of merely being parsed -- the
+  // actual arming behavior is covered by handoff-core.test.mjs's fully
+  // mocked (noteHandoff/logActivity/requestBridge injected) tests. This is
+  // a structural check only: the CLI passes `force: Boolean(args.force)`
+  // through to triggerHandoff, and "force" is registered as a boolean flag
+  // (not `--force <value>`, which would swallow the next argv token).
+  const source = readFileSync(cli, "utf-8");
+  assert.match(source, /"no-task", "json", "defer-complete", "force"/);
+  assert.match(source, /force: Boolean\(args\.force\)/);
+});
+
 test("CLI handoff commands refuse mode=off repositories", () => {
   withRepository((root) => {
     mkdirSync(join(root, ".context-handoff"));

@@ -1166,6 +1166,89 @@ test("triggerHandoff under the default (manual-only) mode never wires up automat
   );
 });
 
+test("triggerHandoff force=true arms live-cutover signaling even under manual-only mode", async () => {
+  // #mux-companion-manual-cutover-diagnostics: an explicit, single-call
+  // opt-in for a human-gated diagnostic trigger (never set by an ordinary
+  // agent-invoked trigger_handoff call) -- arms the SAME noteHandoff/
+  // activity/bridge signals `mode: auto` would, without changing the
+  // configured mode itself.
+  const calls = [];
+  const result = await triggerHandoff({
+    promptText: "stored markdown",
+    sid: "predecessor-1",
+    cwd: "C:\\repo",
+    title: "Parser follow-up",
+    mode: "manual-only",
+    force: true,
+    store: () => ({
+      storage: "file",
+      id: "handoff-predecessor-1",
+      path: "C:\\state\\handoff-predecessor-1.json",
+      metadata: { worktree: "wt-example", title: "Parser follow-up" },
+    }),
+    writeSessionState: ({ seed }) => ({ ok: true, path: "C:\\state\\handoff-request.json", seed }),
+    noteHandoff: (...args) => { calls.push(["note-handoff", ...args]); },
+    logActivity: (...args) => {
+      calls.push(["activity", ...args]);
+      return { logged: true };
+    },
+    requestBridge: (...args) => {
+      calls.push(["bridge", ...args]);
+      return { attempted: true, accepted: true, response: { queued: true } };
+    },
+    readPickupSignals: () => ({
+      pickedUp: false, spawnInFlight: false, via: [],
+      sessionState: { path: "C:\\state\\handoff-request.json", consumed: false },
+      worktree: { pickedUp: false }, dispatch: { consumed: false },
+    }),
+    sleepFn: async () => { calls.push(["sleep"]); },
+    waitMs: 0,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.automaticCutoverDisabled, false);
+  assert.equal(result.worktreeSignal.noted, true);
+  assert.equal(result.worktreeSignal.activity.logged, true);
+  assert.equal(result.bridge.attempted, true);
+  assert.ok(calls.some(([name]) => name === "note-handoff"));
+  assert.ok(calls.some(([name]) => name === "activity"));
+  assert.ok(calls.some(([name]) => name === "bridge"));
+});
+
+test("triggerHandoff omitting force preserves manual-only's exact prior behavior", async () => {
+  // Regression guard for the PR #3041 fix this effort builds on top of --
+  // force defaults to false, so an ordinary call (mode omitted or
+  // manual-only, no force) must behave identically to before force existed.
+  const calls = [];
+  const result = await triggerHandoff({
+    promptText: "stored markdown",
+    sid: "predecessor-1",
+    cwd: "C:\\repo",
+    title: "Parser follow-up",
+    mode: "manual-only",
+    store: () => ({
+      storage: "file",
+      id: "handoff-predecessor-1",
+      path: "C:\\state\\handoff-predecessor-1.json",
+      metadata: { worktree: "wt-example", title: "Parser follow-up" },
+    }),
+    writeSessionState: ({ seed }) => ({ ok: true, path: "C:\\state\\handoff-request.json", seed }),
+    noteHandoff: (...args) => { calls.push(["note-handoff", ...args]); },
+    logActivity: (...args) => { calls.push(["activity", ...args]); return { logged: true }; },
+    requestBridge: (...args) => { calls.push(["bridge", ...args]); return { attempted: true, accepted: true }; },
+    readPickupSignals: () => ({
+      pickedUp: false, spawnInFlight: false, via: [],
+      sessionState: { path: "C:\\state\\handoff-request.json", consumed: false },
+      worktree: { pickedUp: false }, dispatch: { consumed: false },
+    }),
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.automaticCutoverDisabled, true);
+  assert.equal(result.worktreeSignal.noted, false);
+  assert.equal(result.worktreeSignal.activity.logged, false);
+  assert.equal(result.bridge.attempted, false);
+  assert.deepEqual(calls, []);
+});
+
 test("storeHandoff never notes the worktree record itself (save_handoff_prompt must never arm pickup)", () => {
   // Root-cause fix for the same High-severity gap: `storeHandoff()` backs
   // BOTH `save_handoff_prompt` (documented as never arming pickup) and

@@ -3072,6 +3072,19 @@ export async function triggerHandoff(
     // stores/seeds the handoff normally; it just never wires up automatic
     // pickup, so the operator/agent must consume it manually.
     mode = DEFAULT_HANDOFF_MODE,
+    // Explicit, single-call opt-in that arms live-cutover signaling AS IF
+    // `mode` were "auto", regardless of the configured mode -- never
+    // inferred from config, never persisted, and never set by this module
+    // itself. The sanctioned caller is a human-gated diagnostic trigger
+    // (visions/mux-companion Companion "Cut over" button, or a direct
+    // `handoff-cli.mjs trigger --force` invocation) exercising the SAME
+    // graceful cutover path `mode: auto` runs automatically, while that
+    // mode is not (yet) the operator's configured default -- see
+    // `mux-companion-manual-cutover-diagnostics`. This does not weaken the
+    // PR #3041 fix: an ordinary `trigger_handoff` call (the MCP tool the
+    // agent itself invokes) never passes `force`, so an agent cannot cause
+    // this on its own -- only an explicit, separate caller can.
+    force = false,
     execute = runCli,
     store = storeHandoff,
     writeSessionState = writeSessionStateHandoff,
@@ -3164,7 +3177,7 @@ export async function triggerHandoff(
   // despite) a store failure above.
   afterStore();
 
-  const autoEnabled = automaticHandoffEnabled(mode);
+  const autoEnabled = automaticHandoffEnabled(mode) || force;
   // Runs after the baton above is durably stored, but strictly before any
   // live-pickup signal below is armed -- see beforeArmPickup's own comment.
   // Only worth awaiting when a live signal can actually fire (manual-only

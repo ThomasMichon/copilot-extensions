@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** per-phase PRs against `dev`
 - **Created:** 2026-09-27
-- **Status:** Draft
+- **Status:** Active (Phase 1 done; Phase 2/3 remain)
 - **Vision:** `visions/agent-fabric` §§ `resource-claims` / `resource-accountability`
   — extends the `worktree-finality-and-obligations` effort's implementation of
   that vision (`efforts/2026/08/28 worktree-finality-and-obligations/`, Done)
@@ -135,15 +135,53 @@ already fixed via #4374. This phase is the remaining *policy* half: making
 "never reset HEAD off unmerged commits except under explicit detach"
 explicit and enforced, not just implied by the default.)_
 
-- [ ] Audit `finalize.py`/`sync`/`git_ops.py` for any path that can move
+- [x] Audit `finalize.py`/`sync`/`git_ops.py` for any path that can move
       `worktree/<id>` off unmerged commits without either (a) the PR having
       merged, or (b) `pr.strategy == "detach"` explicitly. Confirm today's
       actual behavior matches the stated contract before changing anything.
-- [ ] Where a gap exists, add an explicit guard (not just documentation)
+      **Findings:** every HEAD-moving path was audited and is already
+      correctly gated:
+      - `sync`/`fast_forward_worktree` (`git_ops.py`) refuses whenever the
+        branch is `ahead > 0` of upstream — it never touches unmerged work,
+        full stop.
+      - `finalize`'s direct-push (non-PR) path requires
+        `_is_content_on_upstream` before proceeding; unmerged work always
+        blocks with "Unmerged work detected."
+      - `finalize`'s PR-mode gate (`_pr_finalize_precondition`) only accepts
+        an **open, unmerged** PR as sufficient under `strategy == "detach"`
+        — the deliberate, already-correctly-scoped opt-out. Under
+        `keep-alive` it requires actual merge or upstream-equivalent
+        content; an open PR alone is refused ("tracked PR is not merged").
+      - `finalize`'s pointer-reconciliation pass (`_reconcile_merged_pointers`)
+        and `pr-complete`'s post-squash-merge realignment (`pr_complete.py`)
+        each independently re-verify content is already confirmed on
+        upstream (via ancestry or patch-id/tree equivalence) *before*
+        rebasing or hard-resetting anything — never on assumption.
+      - The remaining `reset --hard` call sites (`git_ops.squash_branch`,
+        `pr_ops._rollback`) are squash/rollback-with-backup-ref mechanisms
+        that restore to a *pre-operation* commit on failure, not paths that
+        discard real unmerged work.
+      **Conclusion:** the policy this phase set out to formalize was already
+      correctly implemented in code — the only real gap was the `strategy`
+      **config value** silently resolving to `detach` by accident (config
+      default + duplicate-key bugs), both fixed in #4374. No `keep-alive`
+      worktree can currently reset HEAD off unmerged, unowned-PR content.
+- [x] Where a gap exists, add an explicit guard (not just documentation)
       that refuses a HEAD-reset-past-unmerged-commits operation unless
-      `strategy == "detach"`, naming the blocking reason.
-- [ ] Document the guard in `references/pr-workflow.md` and this effort's
-      Journal.
+      `strategy == "detach"`, naming the blocking reason. **No code gap
+      found** (see above) — the existing `_pr_finalize_precondition` branch
+      already names the blocking reason correctly for `keep-alive`
+      ("tracked PR is not merged and no feature branch is on '{remote}'" /
+      "In 'keep-alive' mode finalize verifies only alignment with
+      {upstream}").
+- [x] Document the guard in `references/pr-workflow.md` and this effort's
+      Journal. **Found and fixed real doc drift while documenting:**
+      `pr-workflow.md`'s "Finalizing a PR-mode worktree" section (and its
+      step-7 summary earlier in the same file) stated "finalize is
+      decoupled from merge" and "the PR does not need to be merged first"
+      as if universally true — this was only ever accurate for `detach`.
+      Rewrote both sections to state the actual `keep-alive`/`detach` split
+      explicitly, matching the code audited above.
 
 ### Phase 2 — Wire up the existing `pr` claim kind
 
@@ -261,3 +299,18 @@ _Pending._
   default) already shipped same-day via #4374; this effort covers the
   remaining reset-guard policy plus defenses 2 and 3.
 - Filed umbrella issue #4375.
+
+### 2026-09-28 — Phase 1 done
+- Audited every HEAD-moving code path (`sync`/`fast_forward_worktree`,
+  `finalize`'s direct-push and PR-mode gates, `_reconcile_merged_pointers`,
+  `pr-complete`'s post-merge realignment, and the remaining squash/rollback
+  `reset --hard` call sites). Conclusion: the "never reset HEAD off unmerged
+  commits except explicit `detach`" policy was **already correctly
+  implemented in code** end-to-end; the only real defect was the `strategy`
+  config value silently resolving to `detach` by accident, already fixed in
+  #4374. No new code guard was needed.
+- Found and fixed real doc drift while documenting the audit:
+  `references/pr-workflow.md` stated "finalize is decoupled from merge"
+  universally, when that was only ever true under `detach`. Corrected both
+  the workflow-step summary and the "Finalizing a PR-mode worktree" section
+  to state   the actual `keep-alive`/`detach` split.

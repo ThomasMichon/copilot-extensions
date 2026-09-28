@@ -7,7 +7,7 @@
 - **Scope:** leaf (a per-plugin vision; a **consumer** that rides the
   [agent-fabric](../../agent-fabric/README.md) delegation layer, not a layer of it)
 - **Status:** Draft
-- **Last revised:** 2026-09-18
+- **Last revised:** 2026-09-28
 - **Reality docs:** [`plugins/agent-logger/docs/architecture.md`](../../../plugins/agent-logger/docs/architecture.md) ·
   [`plugins/agent-logger/docs/deployment-topologies.md`](../../../plugins/agent-logger/docs/deployment-topologies.md) ·
   [`plugins/agent-logger/docs/manifest-contract.md`](../../../plugins/agent-logger/docs/manifest-contract.md)
@@ -127,6 +127,47 @@ itself. Execution is **pinned, not hot-failover**: if the elected place is
 asleep, the chronicle simply **waits and catches up** on its next run; it does
 not thrash execution to a standby.
 
+### Durable hosting — record-state and the digest pipeline, generalized
+Several consumers began by building their own bespoke record-state database
+and session-digest pipeline in front of this daemon's writer, because agent-
+logger did not yet host either generically. That duplication is the thing to
+retire: agent-logger is the natural, shared home for a consumer's **durable
+record of what has been chronicled** (which sessions, which ranges, which
+outcome) and for the **digest pipeline** that turns synced raw/zipped session
+state into the compact material a writer agent consumes — both offered as
+generic, hookable infrastructure rather than something every consumer
+reimplements. A consumer that still wants its own store is free to keep one;
+the point is that agent-logger is a legitimate, complete place to **not** have
+to.
+
+### Consumer-configurable hooks
+Because the daemon is meant to be adopted far beyond one facility, every
+consumer-specific knob is a named, discoverable hook rather than a fork point:
+**telemetry** (a registrable sink a consumer plugs its own observability into,
+mirroring the fabric's `process_spawn`-style seam), **template** (the shape of
+a rendered entry), **voice/profile** (tone, as already named above),
+**schedule** (cadence and settle window), **DB storage location** (where the
+durable record-state above actually lives), and **containerization**
+(how the daemon and its store are packaged/deployed). None of these hooks
+changes the daemon's guarantees; they only change where its effects are
+observed and how its state is hosted.
+
+### The optional enrichment seam — hoisting action items, inline
+A third, **optional** seam alongside session-source and log-sink: a consumer
+may supply an **enrichment target** (a tracker to file into) and a **dedup
+search capability** (a semantic-search substrate such as VEI). When supplied,
+the same writer agent that is chronicling a range is also empowered — in that
+**same task**, not a separate pass — to notice a proposed action item in the
+material it is reading, research and dedup-check it against the consumer's
+tracker and search substrate, file it if it is genuinely new, and **link the
+filed item back to the log entry that raised it** (and record the link the
+other way for the consumer's own accounting). A consumer that supplies no
+enrichment target gets none of this; the daemon never invents a place to file
+into. This seam exists precisely so that **enrichment never becomes a second,
+retroactive corpus-mining pass** — the writer already holds full context of
+the sessions it just read, which a later cold reread of the rendered log
+cannot recover as cheaply or as accurately.
+
 ### The cold-store retrieval provider — a sibling capability, not the chronicler
 
 Distinct from the scheduled chronicle daemon above: agent-logger already knows
@@ -208,6 +249,27 @@ bridge) never needs to know which. This makes agent-bridge the **single
 caller-facing surface for any session, live or not**, without teaching the
 bridge itself anything about archival formats.
 
+### hostable-record-state-and-digest-pipeline
+A consumer's durable record of what has been chronicled, and the pipeline
+that turns synced raw/zipped session state into writer-ready digests, can be
+**hosted by agent-logger itself** rather than reimplemented per consumer. This
+generalizes what was previously bespoke, consumer-owned machinery into shared,
+optional infrastructure behind the same seams.
+
+### consumer-configurable-hooks
+Telemetry emission, rendering template, voice/profile, schedule, DB storage
+location, and containerization are each a **named, discoverable hook** a
+consumer sets — never a fork point. A consumer that needs none of them gets
+sensible generic defaults; one that needs all of them never has to patch the
+daemon to get there.
+
+### optional-inline-enrichment
+When a consumer supplies an enrichment target and a dedup search capability,
+the writer agent hoists proposed action items it notices while chronicling
+into tracked issues **in the same task**, bidirectionally linked to the log
+entry that raised them, and reports what it filed back to the consumer. This
+is off by default and additive per consumer — never assumed.
+
 ## Behaviors
 
 ### idempotent-under-catch-up
@@ -277,6 +339,18 @@ operate when the aggregate plan is invalid. This keeps broad plugin
 availability separate from permission to collect, retain, render, prune, or
 publish session material.
 
+### enrichment-is-inline-and-off-by-default
+A writer agent proposes and files action items only when its consumer has
+supplied both an enrichment target and a dedup search capability, and does so
+**within the same chronicling task** — never as a separate scheduled job, and
+never against a consumer that hasn't opted in.
+
+### hooks-change-observation-and-hosting-never-guarantees
+Setting a telemetry sink, a template, a voice/profile, a schedule, a DB
+location, or a containerization mode changes **where** the daemon's effects
+are observed and **how** its state is hosted. None of them changes
+idempotency, single-election, fencing, or any other core guarantee.
+
 ## Non-Goals / Boundaries
 
 - **Not a per-session live logger.** Writing the *current* session on demand, and
@@ -309,6 +383,14 @@ publish session material.
   reads and returns session content; it never resumes, re-embodies, edits, or
   otherwise acts on a session or worktree. That remains agent-bridge's (and,
   beneath it, agent-worktrees') job.
+- **Not a bug tracker.** The optional enrichment seam only files into a
+  **consumer-supplied** tracker through a consumer-supplied dedup search
+  capability; agent-logger owns neither. A consumer that supplies neither gets
+  no enrichment behavior at all.
+- **Not a mandatory migration.** Hosting a consumer's record-state and digest
+  pipeline is an **offered**, optional capability. A consumer may keep its own
+  store and pipeline indefinitely; nothing in this vision requires migrating
+  away from one.
 
 ## See Also
 
@@ -365,3 +447,24 @@ publish session material.
   work-locking invariants, generalized to ride agent-dispatch's claimable mesh
   rather than a bespoke lock. The *retrieval-not-narration* purpose and the
   *objective-by-default, voice-per-consumer* split are operator framing.
+
+- **2026-09-28** — Added §Concepts/*Durable hosting*, *Consumer-configurable
+  hooks*, and *The optional enrichment seam*, plus matching §Features
+  (`hostable-record-state-and-digest-pipeline`, `consumer-configurable-hooks`,
+  `optional-inline-enrichment`), §Behaviors
+  (`enrichment-is-inline-and-off-by-default`,
+  `hooks-change-observation-and-hosting-never-guarantees`), and two new
+  §Non-Goals (not a bug tracker; not a mandatory migration). Carved alongside a
+  companion revision on the downstream facility **permanent-record** leaf,
+  after an operator review of a multi-day chronicling outage there prompted a
+  wider look at where facility-specific machinery should generalize upstream.
+  Three intents: agent-logger becomes a legitimate, optional **host** for a
+  consumer's record-state database and digest pipeline (retiring per-consumer
+  duplication of that machinery, without mandating migration away from one);
+  every consumer-specific choice (telemetry, template, voice/profile, schedule,
+  DB location, containerization) is named as a discoverable **hook**, not a
+  fork point; and action-item enrichment is generalized as a **third, optional
+  seam** on the writer itself — filed inline, in the same task, against a
+  consumer-supplied tracker and dedup search capability — so that no consumer
+  needs to build (or retroactively run) its own separate corpus-mining pass to
+  get the same outcome the facility wanted.

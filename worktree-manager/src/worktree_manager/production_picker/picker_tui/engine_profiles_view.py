@@ -133,19 +133,11 @@ class ProfilesView:
         def work():
             from . import profiles_io
             cols = {}
-            # Every load_column() call below resolves the local host's own
-            # identity via roster.local_host() -> agent_worktrees.config.
-            # load_config(), which is uncached at that layer (its control-
-            # plane related-PR discovery is expensive -- see
-            # _load_config_cache_scope's own docstring). Looping per host
-            # without sharing a cache scope would re-pay that full discovery
-            # once per machine instead of once for the whole load pass.
-            with self._eng._load_config_cache_scope():
-                for hi, (_lbl, hm, he) in enumerate(self.host_cols):
-                    try:
-                        cols[hi] = self._prof_load(hm, he)
-                    except Exception:
-                        cols[hi] = None   # load failure -> unmanaged (default column)
+            for hi, (_lbl, hm, he) in enumerate(self.host_cols):
+                try:
+                    cols[hi] = self._prof_load(hm, he)
+                except Exception:
+                    cols[hi] = None   # load failure -> unmanaged (default column)
             with self._prof_lock:
                 # Don't clobber edits the user already started before the load
                 # resolved -- only project columns onto a pristine grid.
