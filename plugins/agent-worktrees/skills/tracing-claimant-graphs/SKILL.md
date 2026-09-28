@@ -167,6 +167,40 @@ Implemented for
 - This graph only covers worktrees created through the tracked paths above;
   a PR opened fully out-of-band (raw `gh`/API, no `create-pr` and no claim
   journaled by hand) has no claimant to trace at all.
+- **A worktree can be fully pruned from the local claim store while its
+  originating session's own state folder still exists.** Confirmed live:
+  `claims <worktree-id>` can return `"error": "worktree not found"` for a
+  worktree that opened a real, merged PR only ten days earlier -- pruning
+  runs on its own schedule, independent of the PR's lifecycle. When that
+  happens, `claims find pr` also won't surface the PR at all (there's no
+  claim record left to scan), and there may be no codename marker in the
+  PR body either (see the marker gap below) -- both of this skill's normal
+  paths come up empty even though the PR is genuine and well-attributed.
+
+### Fallback when the claim graph has nothing: raw session-state search
+
+When `claims find pr` returns no match and the PR carries no codename
+marker, the claiming session's own raw state may still be recoverable
+directly, bypassing the claim-graph tracking store entirely:
+
+1. Grep every local session's `events.jsonl` for the literal PR reference
+   (e.g. `PR #<n>` or `PR <n> opened`) across **all** per-user session-state
+   roots on the machine -- there can be more than one independently-rooted
+   store (for example a native-Windows Copilot install and a WSL install
+   each keep their own `~/.copilot/session-state/`, matching the "separate
+   cell" caveat above). Exclude your own current session directory first --
+   a search run *from* a session that itself discusses the target PR number
+   will match its own later narration, not a genuine other-session hit.
+2. For each matching session directory, read its `worktree-binding.json`
+   directly -- it carries `worktreeId`, `worktreeDir`, and `machine` as
+   plain structured fields, which is more reliable than trying to reverse
+   the worktree codename out of the PR's branch name (**branch names don't
+   reliably carry it** -- confirmed live: a PR opened the same week the
+   by-default codename effort landed had neither a branch-name suffix nor
+   a body marker).
+3. Treat a hit found this way as attribution evidence of last resort, not a
+   replacement for the claim graph or the codename marker when either is
+   available -- it has no liveness signal and no cross-check of its own.
 
 ## See also
 

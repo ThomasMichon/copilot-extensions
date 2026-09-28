@@ -1,0 +1,9 @@
+{
+  "comment": "tracing-claimant-graphs: document raw session-state fallback for pruned worktrees",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}
