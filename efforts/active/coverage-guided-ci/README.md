@@ -86,7 +86,7 @@ full, verbatim exchange):
 > feedback loop so the baseline reaches `dev`. This is a standing capability
 > ("part of copilot-extensions' self-maintaining system"), not a one-off
 > tool — author a vision for it. ~~Separately~~, consider the same pattern
-> for aperture-labs later, which has no dev-to-main promotion of its own.
+> for another repo later, one with no dev-to-main promotion of its own.
 >
 > Follow-up: rather than feeding the baseline back into `dev`, it may be more
 > natural to check it into `main` at the same commit the promotion already
@@ -175,11 +175,12 @@ order.
       output as one of its own promotion-gate responsibilities.
 
 _(agent-recommended, out of this effort's scope, tracked for later)_
-Adopting the same coverage-guided pattern for `aperture-labs`'s own CI flow
-is explicitly a separate, later effort per the operator's own request — that
-repo has no dev-to-main promotion, so its baseline-generation anchor point
-(a scheduled run, or a different trunk gate) needs its own design pass
-against this vision's portable concepts, not a copy of this effort's
+Adopting the same coverage-guided pattern for another repo's own CI flow is
+explicitly a separate, later effort per the operator's own request — a repo
+without this repo's own dev-to-main promotion needs its own
+baseline-generation anchor point (a scheduled run, or a different trunk
+gate), designed against this vision's portable concepts, not a copy of this
+effort's
 copilot-extensions-specific Phase 1.
 
 ## Validation Plan

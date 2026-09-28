@@ -50,8 +50,8 @@ of PRs going in before a new baseline can establish). We'll need a way to
 feed back the result of the dev-to-main promo into dev, so we have complete
 coverage info when needed. It's worth building out a vision for this, as
 part of copilot-extensions' self-maintaining system. It's *also* a great
-idea to consider adopting the same pattern for aperture-labs with *our* CI
-flow, though we don't use a dev-to-main promotion."
+idea to consider adopting the same pattern for [a private downstream repo]
+with *our* CI flow, though we don't use a dev-to-main promotion."
 
 This is the operator's own words for the should-be shape, essentially
 unedited into the vision:
@@ -67,9 +67,9 @@ unedited into the vision:
   on the trunk side);
 - this belongs as a **vision** — standing intent for copilot-extensions'
   "self-maintaining system" — not a one-off tool;
-- **aperture-labs** is named as a second, later candidate, explicitly
-  flagged as architecturally different (no dev-to-main promotion of its
-  own), so whatever gets built must not assume that pipeline shape.
+- **a second, private downstream repo** is named as a later candidate,
+  explicitly flagged as architecturally different (no dev-to-main promotion
+  of its own), so whatever gets built must not assume that pipeline shape.
 
 The agent authored `visions/coverage-guided-ci/README.md` from this
 directly (PR #4440, merged), cross-linked from `test-portfolio` and
