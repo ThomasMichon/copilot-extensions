@@ -1294,8 +1294,6 @@ def running_version_lag(repo_dir: Path) -> list[dict[str, Any]]:
         except Exception:
             continue
     return lags
-
-
 def _zero_downtime_update(plugin_dir: Path) -> bool:
     """Whether the plugin supports a zero-downtime in-place update (#533 Part B).
 
@@ -1305,8 +1303,6 @@ def _zero_downtime_update(plugin_dir: Path) -> bool:
     """
     data = _read_json(plugin_dir / "plugin.json") or {}
     return bool(data.get("zeroDowntimeUpdate"))
-
-
 def runtime_installer_argv(
     plugin_dir: Path,
     *,
