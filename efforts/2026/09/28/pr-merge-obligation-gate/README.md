@@ -4,8 +4,8 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** per-phase PRs against `dev`
 - **Created:** 2026-09-27
-- **Status:** In Progress (Phases 1-3 core landed; operator-authorization
-  follow-up deferred, see Plan)
+- **Status:** Done (Phases 1-3 landed; operator-authorization primitive
+  deferred to `#4411`, a separate follow-up effort)
 - **Vision:** `visions/agent-fabric` §§ `resource-claims` / `resource-accountability`
   — extends the `worktree-finality-and-obligations` effort's implementation of
   that vision (`efforts/2026/08/28 worktree-finality-and-obligations/`, Done)
@@ -247,16 +247,15 @@ incompatible claim type alongside it.)_
       confirmed open; `finalize` itself now also calls
       `pr_ops._reconcile_active_pr` before the gate runs (closes the
       out-of-band-`set-pr` gap — see design questions below).
-- [ ] Explicit, attributable release path: an operator-directed
-      `--abandon`-style flag ... — **not done as its own dedicated verb.**
-      The existing general `finalize --abandon --handoff-to <recipient>`
-      escape hatch already releases ANY unsettled claim (including a `pr`
-      one) attributably (it's logged + requires a named recipient); a
-      *PR-specific* abandon flag distinct from that path, plus real
-      operator-vs-agent authorization (see the design question below), is
-      deliberately deferred — this repo has no invoker-identity mechanism at
-      this layer to enforce it cryptographically, and inventing one is a
-      separate, larger effort. Tracked as a follow-up, not silently dropped.
+- [x] Deferred to `#4411`: Explicit, attributable release path: an
+      operator-directed `--abandon`-style flag with real operator-vs-agent
+      authorization. The existing general `finalize --abandon
+      --handoff-to <recipient>` escape hatch already releases ANY unsettled
+      claim (including a `pr` one) attributably (logged + requires a named
+      recipient); a *PR-specific* abandon flag distinct from that path,
+      enforcing real operator-vs-agent authorization, needs an
+      invoker-identity primitive this repo doesn't have today — a separate,
+      larger design effort, now tracked at #4411.
 - [x] Tests: claim created on an actually-opened PR (not a numberless
       `creating` record), blocks `finalize` while open, auto-releases on
       merge observed through the shared `_reconcile_active_pr` path (the one
@@ -293,14 +292,13 @@ incompatible claim type alongside it.)_
   (`sweep.py`'s `pr_merged` + `tracking_claims.sweep_abandoned_obligations`)
   is fixed to settle a `pr`-kind claim as `released` (a clean hand-back)
   instead of the generic `abandoned` it used for every other kind.
-- **Operator-only enforcement, not just a CLI flag.** **Not resolved** —
-  deferred with the abandon-path bullet above. This needs its own design
-  (an actual invoker-identity/provenance signal this layer doesn't have
-  today), not a bolt-on flag that would look enforced without being so.
+- **Operator-only enforcement, not just a CLI flag.** Deferred to `#4411` —
+  same reason as the abandon-path bullet above (an actual invoker-identity/
+  provenance signal this layer doesn't have today).
 - **Generic `claims release`/`claims settle` are an existing bypass.**
-  **Not resolved** — same reason as above (gating them meaningfully needs
-  the same authorization primitive). Still an open side door; noted here so
-  it isn't rediscovered as a surprise later.
+  Deferred to `#4411` — same reason (gating them meaningfully needs the
+  same authorization primitive). Noted there so it isn't rediscovered as a
+  surprise later.
 
 ### Phase 3 — Agent-guidance instruction
 
@@ -336,13 +334,13 @@ incompatible claim type alongside it.)_
       `TestReconcileActivePrSelfHeal::test_merge_releases_pr_claim` /
       `test_zombie_heal_to_merged_also_releases_claim` and
       `test_sweep_settles_merged_pr_claim_as_released_not_abandoned`.
-- [ ] An operator-directed release (abandon the PR claim, reset HEAD) works,
-      is attributable in the claim ledger, and is refused without explicit
-      operator direction. **Partially covered**: the pre-existing generic
-      `--abandon --handoff-to` path already does the first two (attributable,
-      logged); "refused without explicit operator direction" needs the
-      deferred authorization primitive from Phase 2's design questions — not
-      yet implemented or tested.
+- [x] Deferred to `#4411`: An operator-directed release (abandon the PR
+      claim, reset HEAD) works, is attributable in the claim ledger, and is
+      refused without explicit operator direction. Partially covered: the
+      pre-existing generic `--abandon --handoff-to` path already does the
+      first two (attributable, logged); "refused without explicit operator
+      direction" needs the deferred authorization primitive, now tracked at
+      #4411.
 - [x] Existing `worktree-finality-and-obligations` obligation-gate tests
       (CodeSpace/container/bridge-session claims) show no regression. Full
       `test_finalize_gate.py`/`test_obligation_sweep.py`/`test_pr_ops.py`/
@@ -682,3 +680,28 @@ gate", #4389, landed independently the same day -- see below)
   release`/`claims settle` side door) — this layer has no invoker-identity
   signal to enforce that boundary on today, and inventing one is its own,
   separate effort. Surfaced explicitly rather than silently narrowing scope.
+
+### 2026-09-28 — PR #4400 merged; effort complete
+
+- PR #4400 landed after 17 review rounds total (the ten rounds already
+  logged above for the original audit, plus rounds 11-17 fixing genuinely
+  distinct further safety gaps the reviewer surfaced round by round: a
+  fallback-reintroduced stale-snapshot bug, cleanup validating only one ref
+  when it deletes several, a tri-state merge-status/incomplete-record
+  misclassification, per-PR-branch head_sha attribution, a TOCTOU race
+  between the precondition and the destructive cleanup (narrowed across two
+  further rounds to the practical minimum short of a write-blocking hook),
+  and a closed-PR unreachable-branch gap). Every fix carries a dedicated
+  regression test, each independently confirmed to fail without its fix via
+  temporary revert-and-rerun. Merged as a self-direct squash (this repo's
+  `pr-self-merge` profile) on a non-blocking `COMMENTED` verdict once the
+  two remaining findings stabilized as the same documented, architecturally-
+  accepted residuals (an irreducible race sliver, honestly reasoned as
+  content-safe by construction) rather than new issues.
+- Worktree synced onto the merged squash commit and finalized cleanly.
+- Filed `#4411` for the deferred operator-vs-agent authorization primitive
+  (Phase 2/Validation Plan's one remaining item) and transferred both to it
+  per the effort's own machine-checked deferral form.
+- **Status → Done.** All three phases landed; the one item requiring a new,
+  larger design (an invoker-identity primitive this repo doesn't have) is
+  now tracked as its own effort rather than left as a dangling checkbox.
