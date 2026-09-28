@@ -174,7 +174,9 @@ installer. Know which kind you are changing.
    - **Wait for `Approve` on a contributor's PR; a clean `Comment` is the
      passing verdict on this repo's own owner-authored PRs.** Copilot code
      review can only ever render `Approve` or `Comment` (no "Request
-     changes" capability exists in the product); Approvals are enabled in
+     changes" capability exists in the product -- see CONTRIBUTING.md §
+     "Waiting for a verdict" for the current GitHub-docs citation);
+     Approvals are enabled in
      this repo, so a genuinely ready **contributor** PR should come back
      `Approve`. **This repo's own owner-authored PRs are a documented,
      empirically confirmed exception**

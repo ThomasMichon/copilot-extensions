@@ -142,8 +142,16 @@ copilot-extensions finalize          # clean up the worktree
 
 **Copilot code review can only ever render two outcomes: `Approve` or
 `Comment`.** (There is no "Request changes" capability in Copilot code
-review at all — confirmed against GitHub's own docs; do not write or expect
-a `CHANGES_REQUESTED` state from it.) Approvals are enabled in this repo
+review at all — confirmed against GitHub's own current docs, which state
+"By default, Copilot leaves a 'Comment' review, not an 'Approve' review or
+a 'Request changes' review... if configured to do so, Copilot can leave
+'Approve' reviews" ([Using GitHub Copilot code
+review](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review),
+step 4) — the only configurable outcome beyond the default `Comment` is
+`Approve`; [Configuring code review by GitHub
+Copilot](https://docs.github.com/en/copilot/how-tos/copilot-on-github/set-up-copilot/configure-code-review)
+documents no setting that adds a `Request changes` outcome; do not write or
+expect a `CHANGES_REQUESTED` state from it.) Approvals are enabled in this repo
 (Settings → Copilot → Code review → Auto-approval) — see [`REVIEW.md`](REVIEW.md)'s
 directive requiring Copilot to render `Approve` whenever it has no blocking
 findings, rather than habitually leaving a `Comment` review that just

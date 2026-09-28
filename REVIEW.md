@@ -102,7 +102,9 @@ specifically when reviewing a pull request, not a replacement for them.
   touch.
 - **Render `Approve` when ready — on a contributor's PR.** Copilot code
   review can only ever submit `Approve` or `Comment` (there is no
-  `Request changes` capability in Copilot code review at all). Approvals
+  `Request changes` capability in Copilot code review at all — see
+  CONTRIBUTING.md § "Waiting for a verdict" for the current GitHub-docs
+  citation). Approvals
   are enabled in this repo (Settings → Copilot → Code review →
   Auto-approval), so for a PR authored by someone other than this repo's
   owner, once there is no remaining Medium/High-severity finding and the
