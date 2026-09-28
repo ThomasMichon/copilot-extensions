@@ -478,7 +478,7 @@ def test_capture_update_state_override_reliably_paints(monkeypatch, tmp_path):
             update_state="current", manager_update_state="available",
         )["text"]
         assert "✓" in grid.splitlines()[0]
-        assert "Manager update available" in grid.splitlines()[0]
+        assert "Update available" in grid.splitlines()[0]
 
 
 def test_capture_modal_screenshots_a_native_modal(monkeypatch, tmp_path):
