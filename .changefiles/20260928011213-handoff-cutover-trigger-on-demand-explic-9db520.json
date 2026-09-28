@@ -1,0 +1,9 @@
+{
+  "comment": "handoff-cutover-trigger: on-demand, explicit claim+spawn+retire for one worktree (mux-companion-manual-cutover-diagnostics)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "minor"
+    }
+  ]
+}

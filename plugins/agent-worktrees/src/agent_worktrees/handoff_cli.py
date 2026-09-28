@@ -43,6 +43,7 @@ def _resolve_worktree_id(*args, **kwargs): return _core()._resolve_worktree_id(*
 def _unsupported_hosted_launch(*args, **kwargs): return _core()._unsupported_hosted_launch(*args, **kwargs)
 def _pending_handoff_retire_requests(*args, **kwargs): return _core()._pending_handoff_retire_requests(*args, **kwargs)
 def _monitor_retire_handoff_predecessor(*args, **kwargs): return _core()._monitor_retire_handoff_predecessor(*args, **kwargs)
+def _monitor_maybe_process_handoff_record(*args, **kwargs): return _core()._monitor_maybe_process_handoff_record(*args, **kwargs)
 def resolve_worktree_id_by_codename(*args, **kwargs): return _core().resolve_worktree_id_by_codename(*args, **kwargs)
 
 
@@ -181,6 +182,9 @@ def add_parsers(sub) -> None:
     g.add_argument("--worktree-id", dest="worktree_id", default=None, help="Check only this worktree")
     g.add_argument("--all", action="store_true", help="Check every tracked worktree in this project")
     p.add_argument("--execute", action="store_true", help="Retire each found stale predecessor now (default: read-only report)")
+    p.add_argument("--json", action="store_true", help="JSON output")
+    p = sub.add_parser("handoff-cutover-trigger", help="Explicit, on-demand invocation of the resident status-monitor's own pending-handoff pickup+retire choreography for ONE worktree (mux-companion-manual-cutover-diagnostics) -- the manual-trigger counterpart to handoffs-check's read-only, retire-only report. There is no --execute/preview split: invoking this verb IS the explicit human action.")
+    p.add_argument("--worktree-id", dest="worktree_id", required=True, help="Target worktree")
     p.add_argument("--json", action="store_true", help="JSON output")
     p = sub.add_parser("embody", help="Create or resume a DETACHED mux+Copilot CLI session in a worktree (the agent-facing embodiment verb; auto-registers with the bridge)")
     g = p.add_mutually_exclusive_group()
@@ -877,4 +881,59 @@ def cmd_handoffs_check(args: argparse.Namespace) -> int:
                 )
     if execute and any(not f.get("retired") for f in findings):
         return 1
+    return 0
+
+
+def cmd_handoff_cutover_trigger(args: argparse.Namespace) -> int:
+    """Explicit, on-demand invocation of the resident status-monitor's own
+    per-worktree pending-handoff pickup+retire choreography, for exactly one
+    worktree (mux-companion-manual-cutover-diagnostics, #4369).
+
+    ``handoffs-check`` is the on-demand counterpart to the daemon's own
+    automatic sweep for the RETIRE half only; this is the same pattern
+    extended to the claim+spawn half too, via
+    ``_monitor_maybe_process_handoff_record`` -- the exact function the
+    resident daemon calls per worktree per tick. There is no read-only
+    preview mode here: invoking this verb IS the explicit human action (the
+    Mux Companion's "Cut over" button, or a direct CLI call) -- the same
+    hardlink-based single-writer claim the daemon itself relies on makes a
+    second concurrent call (or a genuinely running daemon) safely no-op
+    rather than double-spawn.
+
+    A worktree with nothing actionable pending is a silent, successful
+    no-op, not an error -- pressing "Cut over" when nothing is pending must
+    never look like a bug. Reports the resolved head and session count
+    before/after so a caller can tell whether anything actually changed,
+    without needing its own copy of the daemon's internal checks (which
+    cannot safely be called twice -- the claim step is one-shot)."""
+    worktree_id = getattr(args, "worktree_id", None)
+    resolved = _resolve_worktree_id(worktree_id)
+    record_path = cfg.tracking_dir() / f"{resolved}.yaml"
+    if not record_path.exists():
+        return _json_error(f"Worktree not found: {resolved}")
+    before = tracking.load_record(record_path)
+    before_head = before.resolved_head_session
+    before_sessions = len(getattr(before, "sessions", None) or [])
+
+    _monitor_maybe_process_handoff_record(before)
+
+    after = tracking.load_record(record_path)
+    after_head = after.resolved_head_session
+    after_sessions = len(getattr(after, "sessions", None) or [])
+    payload = {
+        "worktree_id": resolved,
+        "head_before": before_head,
+        "head_after": after_head,
+        "session_count_before": before_sessions,
+        "session_count_after": after_sessions,
+        "changed": after_head != before_head or after_sessions != before_sessions,
+    }
+    if getattr(args, "json", False):
+        _json_output(payload)
+    elif payload["changed"]:
+        output.ok(
+            f"{resolved}: head {before_head or '(none)'} -> {after_head or '(none)'}"
+        )
+    else:
+        output.ok(f"{resolved}: no actionable pending handoff found.")
     return 0
