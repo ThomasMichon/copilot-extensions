@@ -17,6 +17,10 @@ import pytest
 from agent_worktrees import locks
 from agent_worktrees import status_monitor_cutover as smc
 
+if sys.platform == "win32":
+    import ctypes
+    from ctypes import wintypes
+
 
 def _write_fake_mux(fake_bin: Path) -> None:
     script = """#!/usr/bin/env bash
@@ -121,6 +125,7 @@ def test_real_status_monitor_cutover_drains_live_classify_request(monkeypatch) -
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+    pids_to_kill = {monitor.pid}
     try:
         _wait_for(
             lambda: lock_path.exists() and "hook_endpoint" in _read_json(lock_path),
@@ -130,6 +135,7 @@ def test_real_status_monitor_cutover_drains_live_classify_request(monkeypatch) -
             lambda: _active_pid(routing_path),
             message="status-monitor never published its routed endpoint",
         )
+        pids_to_kill.add(old_pid)
         hook_response: dict[str, object] = {}
         hook_thread = threading.Thread(
             target=lambda: hook_response.update(_send_delayed_hook(lock_path, delay_s=3.0)),
@@ -149,6 +155,7 @@ def test_real_status_monitor_cutover_drains_live_classify_request(monkeypatch) -
             lambda: (pid := _active_pid(routing_path)) and pid != old_pid and pid,
             message="cutover never published a successor route",
         )
+        pids_to_kill.add(new_pid)
         assert hook_thread.is_alive(), "delayed hook finished before the route flipped"
         cutover_thread.join(timeout=20)
         assert not cutover_thread.is_alive(), "cutover thread did not finish"
@@ -159,7 +166,102 @@ def test_real_status_monitor_cutover_drains_live_classify_request(monkeypatch) -
         assert hook_response.get("version") == 1
         assert locks.pid_alive(new_pid)
     finally:
+        for pid in pids_to_kill:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except OSError:
+                pass
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only windowless-parent contract")
+def test_spawn_passive_is_windowless_from_pythonw_parent(tmp_path: Path) -> None:
+    pythonw = Path(sys.executable).with_name("pythonw.exe")
+    if not pythonw.is_file():
+        pytest.skip("pythonw.exe is unavailable")
+    parent = tmp_path / "windowless_parent.py"
+    output = tmp_path / "result.json"
+    parent.write_text(
+        "import json, os, sys, time\n"
+        "from pathlib import Path\n"
+        "from agent_worktrees import status_monitor_cutover as smc\n"
+        "from agent_worktrees import status_monitor_runtime as smr\n"
+        "root = Path(sys.argv[1])\n"
+        "smr._daemon_environment = lambda: dict(os.environ)\n"
+        "smr._daemon_cwd = lambda: str(root)\n"
+        "pids = []\n"
+        "for port in (49151, 49152):\n"
+        " handle = smc.spawn_passive(sys.executable, port=port)\n"
+        " pids.append(getattr(handle, 'pid', None))\n"
+        " time.sleep(0.5)\n"
+        " handle.terminate()\n"
+        " time.sleep(0.2)\n"
+        "Path(sys.argv[2]).write_text(json.dumps(pids), encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    user32.GetForegroundWindow.restype = wintypes.HWND
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.QueryFullProcessImageNameW.argtypes = [
+        wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD),
+    ]
+    callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    user32.EnumWindows.argtypes = [callback_type, wintypes.LPARAM]
+
+    def visible_windows():
+        windows = set()
+
+        @callback_type
+        def visit(hwnd, _):
+            if user32.IsWindowVisible(hwnd):
+                windows.add(hwnd)
+            return True
+
+        user32.EnumWindows(visit, 0)
+        return windows
+
+    def process_name(hwnd):
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        handle = kernel32.OpenProcess(0x1000, False, pid.value)
+        if not handle:
+            return ""
         try:
-            os.kill(monitor.pid, signal.SIGTERM)
-        except OSError:
-            pass
+            length = wintypes.DWORD(32768)
+            name = ctypes.create_unicode_buffer(length.value)
+            if kernel32.QueryFullProcessImageNameW(handle, 0, name, ctypes.byref(length)):
+                return Path(name.value).name.lower()
+            return ""
+        finally:
+            kernel32.CloseHandle(handle)
+
+    baseline = visible_windows()
+    foreground = user32.GetForegroundWindow()
+    process_names = {
+        "python.exe", "pythonw.exe", "powershell.exe", "conhost.exe",
+        "openconsole.exe", "windowsterminal.exe",
+    }
+    surfaced = set()
+    focus_changes = set()
+    with subprocess.Popen([str(pythonw), "-I", str(parent), str(tmp_path), str(output)]) as proc:
+        deadline = time.monotonic() + 25
+        while proc.poll() is None and time.monotonic() < deadline:
+            surfaced.update(
+                hwnd for hwnd in visible_windows() - baseline
+                if process_name(hwnd) in process_names
+            )
+            current = user32.GetForegroundWindow()
+            if current != foreground and current not in baseline and process_name(current) in process_names:
+                focus_changes.add(current)
+            time.sleep(0.02)
+        if proc.poll() is None:
+            proc.terminate()
+            pytest.fail("windowless passive-monitor probe exceeded its deadline")
+        assert proc.returncode == 0
+    pids = json.loads(output.read_text(encoding="utf-8"))
+    assert len(pids) == 2
+    assert all(isinstance(pid, int) and pid > 0 for pid in pids)
+    assert surfaced == focus_changes == set()

@@ -461,6 +461,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             with state_lock:
                 _cleanup_retired_request_surfaces()
                 published_lock = True
+                _start_request_surfaces()
                 _locks.write_lock(lock, extra=_lock_extra())
             wake_event.set()
             return {"adopted": True}
@@ -564,7 +565,6 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     governance=governance,
                     managed_mux_cache=managed_mux_runtime.cache,
                 )
-                sweep_active = False
                 wait_for_lifecycle_priority(lifecycle_priority)
                 with state_lock:
                     try:
@@ -581,6 +581,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         raise
                     except Exception:
                         pass
+                sweep_active = False
             except status_monitor_governance_deferred as exc:
                 sweep_active = False
                 print(
