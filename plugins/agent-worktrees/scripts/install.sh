@@ -649,7 +649,20 @@ _versioned_activate() {
     _versioned_mark_complete
     local prev
     prev="$("$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo "")"
-    # Touch the just-superseded slot's mtime IMMEDIATELY after reading $prev,
+    # Also read last-known-good BEFORE this activation overwrites it (review
+    # finding on #4451): `current` only reports the current-version MARKER
+    # (tier 1 of resolve-runtime.sh's three-tier resolution). If the marker
+    # is absent/stale at the moment a launch plan resolves, resolve-runtime
+    # .sh falls back to last-known-good (tier 2) instead -- so the ACTUAL
+    # slot a pending plan pins can differ from what `current` reports here.
+    # Protecting both candidates covers both tiers a real resolve() could
+    # have used. (Tier 3 -- newest slot on a true first-run with neither
+    # marker nor last-known-good present -- has no prior slot to protect:
+    # that state means no version was ever activated before, so there is no
+    # "previous" a plan could have resolved against.)
+    local prev_lkg
+    prev_lkg="$(cat "$INSTALL_DIR/last-known-good" 2>/dev/null || echo "")"
+    # Touch the just-superseded slot(s)' mtime IMMEDIATELY after reading them,
     # BEFORE activate() runs (review finding on #4451): installs run
     # concurrently by design, so a delay here (activate + status-monitor-
     # restart + last-known-good write all used to run first) leaves a window
@@ -662,13 +675,16 @@ _versioned_activate() {
     # .py's _slot_age_days), NOT from when it stopped being current. Without
     # this touch, a slot installed more than --min-age-days ago (the common
     # case -- most versions live for days between releases) gets ZERO
-    # protection from the floor the moment it's superseded. Resetting $prev's
-    # mtime here makes the floor measure what it needs to: time-since-
-    # superseded, so a plan resolved against $prev moments before this
+    # protection from the floor the moment it's superseded. Resetting a
+    # candidate's mtime here makes the floor measure what it needs to: time-
+    # since-superseded, so a plan resolved against it moments before this
     # activation survives the immediately-following gc. Best-effort; a touch
     # failure never blocks activation.
     if [[ -n "$prev" ]]; then
         touch "$INSTALL_DIR/versions/$prev" 2>/dev/null || true
+    fi
+    if [[ -n "$prev_lkg" && "$prev_lkg" != "$prev" ]]; then
+        touch "$INSTALL_DIR/versions/$prev_lkg" 2>/dev/null || true
     fi
     if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --no-link; then
         err "Failed to activate runtime version (marker -> versions/$SRC_VERSION)"
@@ -691,19 +707,18 @@ _versioned_activate() {
         mv -f "$INSTALL_DIR/last-known-good.tmp.$$" "$INSTALL_DIR/last-known-good" 2>/dev/null \
             || rm -f "$INSTALL_DIR/last-known-good.tmp.$$" 2>/dev/null
     fi
-    if [[ -n "$prev" ]]; then
-        # --min-age-days is a recency floor protecting a STORED (not-running)
-        # path-pinned reference -- launch-session.ps1/.sh's `resolve` bakes the
-        # runtime interpreter's path into a plan BEFORE this activation runs;
-        # if that plan hasn't launched its pane yet, its baked path names a
-        # slot that is neither `current` nor `--keep`-protected nor attributable
-        # to a live process (the resolving process already exited). 0.05 days
-        # (~72min) matches agent-mcp's init.sh precedent for the same class of
-        # not-yet-live reference. See #4432 for the concrete failure this closes.
-        "$VENV_PYTHON" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids --keep "$prev" --min-age-days 0.05 2>&1 | sed 's/^/  → gc: /' || true
-    else
-        "$VENV_PYTHON" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids --min-age-days 0.05 2>&1 | sed 's/^/  → gc: /' || true
-    fi
+    local -a gc_keep_args=()
+    [[ -n "$prev" ]] && gc_keep_args+=(--keep "$prev")
+    [[ -n "$prev_lkg" && "$prev_lkg" != "$prev" ]] && gc_keep_args+=(--keep "$prev_lkg")
+    # --min-age-days is a recency floor protecting a STORED (not-running)
+    # path-pinned reference -- launch-session.ps1/.sh's `resolve` bakes the
+    # runtime interpreter's path into a plan BEFORE this activation runs;
+    # if that plan hasn't launched its pane yet, its baked path names a
+    # slot that is neither `current` nor `--keep`-protected nor attributable
+    # to a live process (the resolving process already exited). 0.05 days
+    # (~72min) matches agent-mcp's init.sh precedent for the same class of
+    # not-yet-live reference. See #4432 for the concrete failure this closes.
+    "$VENV_PYTHON" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids "${gc_keep_args[@]}" --min-age-days 0.05 2>&1 | sed 's/^/  → gc: /' || true
     return 0
 }
 # === end install-contract:v3 versioned-venv ===

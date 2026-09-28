@@ -723,7 +723,25 @@ function Invoke-VersionedActivate {
     }
     Invoke-VersionedMarkComplete
     $prev = (& $py $vr --root $InstallDir --link-name '.venv' current 2>$null); $prev = ("$prev").Trim()
-    # Touch the just-superseded slot's mtime IMMEDIATELY after reading $prev,
+    # Also read last-known-good BEFORE this activation overwrites it (review
+    # finding on #4451): `current` only reports the current-version MARKER
+    # (tier 1 of resolve-runtime.ps1's three-tier resolution). If the marker
+    # is absent/stale at the moment a launch plan resolves, resolve-runtime
+    # .ps1 falls back to last-known-good (tier 2) instead -- so the ACTUAL
+    # slot a pending plan pins can differ from what `current` reports here.
+    # Protecting both candidates covers both tiers a real resolve() could
+    # have used. (Tier 3 -- newest slot on a true first-run with neither
+    # marker nor last-known-good present -- has no prior slot to protect:
+    # that state means no version was ever activated before, so there is no
+    # "previous" a plan could have resolved against.)
+    $prevLkg = ''
+    try {
+        $lkgPath = Join-Path $InstallDir 'last-known-good'
+        if (Test-Path -LiteralPath $lkgPath) {
+            $prevLkg = ([IO.File]::ReadAllText($lkgPath)).Trim()
+        }
+    } catch {}
+    # Touch the just-superseded slot(s)' mtime IMMEDIATELY after reading them,
     # BEFORE activate() runs (review finding on #4451): installs run
     # concurrently by design, so a delay here (activate + status-monitor-
     # restart + last-known-good write all used to run first) leaves a window
@@ -736,18 +754,19 @@ function Invoke-VersionedActivate {
     # .py's _slot_age_days), NOT from when it stopped being current. Without
     # this touch, a slot installed more than --min-age-days ago (the common
     # case -- most versions live for days between releases) gets ZERO
-    # protection from the floor the moment it's superseded. Resetting $prev's
-    # mtime here makes the floor measure what it needs to: time-since-
-    # superseded, so a plan resolved against $prev moments before this
+    # protection from the floor the moment it's superseded. Resetting a
+    # candidate's mtime here makes the floor measure what it needs to: time-
+    # since-superseded, so a plan resolved against it moments before this
     # activation survives the immediately-following gc.
-    if ($prev) {
+    foreach ($cand in @($prev, $prevLkg) | Select-Object -Unique) {
+        if (-not $cand) { continue }
         try {
-            $prevSlot = Join-Path (Join-Path $InstallDir 'versions') $prev
-            if (Test-Path -LiteralPath $prevSlot) {
-                (Get-Item -LiteralPath $prevSlot).LastWriteTime = Get-Date
+            $candSlot = Join-Path (Join-Path $InstallDir 'versions') $cand
+            if (Test-Path -LiteralPath $candSlot) {
+                (Get-Item -LiteralPath $candSlot).LastWriteTime = Get-Date
             }
         } catch {
-            Write-SetupLog "Could not touch superseded slot mtime ($prevSlot): $($_.Exception.Message)" 'WARN'
+            Write-SetupLog "Could not touch superseded slot mtime ($candSlot): $($_.Exception.Message)" 'WARN'
         }
     }
     & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
@@ -790,6 +809,7 @@ function Invoke-VersionedActivate {
     # reference. See #4432 for the concrete failure this closes.
     $gcArgs = @($vr, '--root', $InstallDir, '--link-name', '.venv', 'gc', '--protect-pids', '--min-age-days', '0.05')
     if ($prev) { $gcArgs += @('--keep', $prev) }
+    if ($prevLkg -and $prevLkg -ne $prev) { $gcArgs += @('--keep', $prevLkg) }
     & $LinkPython @gcArgs 2>&1 | ForEach-Object { Write-ServiceChanged "gc: $_" }
     $ErrorActionPreference = $prevEAP
     return $true
