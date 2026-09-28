@@ -23,7 +23,7 @@ def _json_error(*args, **kwargs):
     return _core()._json_error(*args, **kwargs)
 
 
-def add_parser(sub) -> None:
+def add_parsers(sub) -> None:
     parser = sub.add_parser(
         "picker-reconcile-local",
         help="Run the Group C local reconcile-and-stamp sweep as one JSON batch",

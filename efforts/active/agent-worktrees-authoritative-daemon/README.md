@@ -706,6 +706,47 @@ reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
 
+### 2026-09-28 — Real bug found via CI drift: `picker-reconcile-local`'s fast-dispatch path was broken, blocking the whole dev->main promotion pipeline
+Found while pushing the `_StatusSegmentCache` fix (above) through the release
+pipeline: the `full - agent-worktrees` full-tree CI job -- one of the gates
+`validate-and-promote.yml` requires before it will promote anything -- was
+failing on `dev`, silently blocking **every** promotion attempt repo-wide
+(not just this one) for hours. Two real, independent, previously-undetected
+bugs, both surfaced by `test_lazy_dispatch.py`'s drift checks:
+1. **`picker_reconcile_cli.add_parser`/`add_parsers` naming mismatch.** The
+   shared `lazy_cli_dispatch` fast-path mechanism calls `module.add_parsers(sub)`
+   by convention; `picker_reconcile_cli.py` only ever defined the singular
+   `add_parser`. Its `_LAZY_DISPATCH_TABLE` entry meant
+   `agent-worktrees picker-reconcile-local` crashed with `AttributeError` via
+   the real fast-dispatch path in production today -- a genuine, currently-
+   shipping regression, not a test artifact. Renamed to `add_parsers`
+   (updating `context_cli.py`'s own nested call to it) rather than adding a
+   test-only special case.
+2. **`_CLUSTER_FREE_MODULES` drift**, both directions: `picker_reconcile_cli`
+   needed adding (confirmed cluster-free only after fix #1 -- before it, the
+   real-handler-execution test correctly caught the `AttributeError` a
+   static-only scan couldn't); `context_cli` needed removing, since it now
+   transitively reaches `_in_ssh_session` (a `resolve_machine_cli`-owned name
+   bound only inside the deferred `_load_full_command_surface()` block) --
+   not a crash (module `__getattr__` self-heals via an eager full load) but a
+   silent perf regression that defeats the fast path for every context_cli-
+   routed command. Removed the now-invalid `test_cluster_free_command_handler_
+   body_runs_without_cluster` parametrize case for a `context_cli` command
+   (`machine-context`) and added a real one for `picker-reconcile-local`
+   instead, per this test suite's own stated philosophy: a scanner alone
+   already missed both directions of this once.
+Also fixed `test_lazy_dispatch_table_matches_regenerated_scan`'s own
+regeneration helper: it hadn't accounted for a parser nested inside a
+*different* module's `add_parsers()` (here, `picker_reconcile_cli`'s own
+registration is ALSO invoked from inside `context_cli.add_parsers()`),
+which silently dropped the entry from the simulated table. Module-size-
+neutral swap in `_CLUSTER_FREE_MODULES` (one name out, one in). Full
+`agent-worktrees` suite: 5813 passed (up from 5797), 26 skipped, only the
+same two already-confirmed-pre-existing/environmental failures remain
+(a local `gh` CLI device-id leak and a local `leaked_agent_rt_root` doctor
+finding, both artifacts of this machine's own heavy use this session, not
+this repo's code).
+
 ### 2026-09-27 — Real-bug fix: `_StatusSegmentCache.get()` NameError on the resident monitor's fast-dispatch path (#4341)
 Found live while chasing the mux status-bar freeze (see
 `worktree-manager-control-plane`'s companion fix, journaled there): after

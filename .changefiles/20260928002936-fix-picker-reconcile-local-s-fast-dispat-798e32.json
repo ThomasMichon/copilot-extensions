@@ -1,0 +1,9 @@
+{
+  "comment": "Fix picker-reconcile-local's fast-dispatch AttributeError (picker_reconcile_cli.add_parser -> add_parsers, matching the shared lazy-dispatch convention); correct _CLUSTER_FREE_MODULES drift (add picker_reconcile_cli, remove context_cli, which now transitively touches a deferred-only name via _in_ssh_session); fix _LAZY_DISPATCH_TABLE regeneration test to account for a nested cross-module parser registration. Was blocking the entire dev-to-main promotion pipeline via the full - agent-worktrees CI job.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -5853,7 +5853,6 @@ _ALL_KNOWN_VERBS: frozenset[str] = frozenset(_LAZY_DISPATCH_TABLE.keys()) | froz
 _CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "claims_cli",
     "cleanup_gc_cli",
-    "context_cli",
     "finalize_cli",
     "follow_ups_cli",
     "handoff_cli",
@@ -5862,6 +5861,7 @@ _CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "maintenance_cli",
     "pane_lifecycle",
     "picker_profiles_cli",
+    "picker_reconcile_cli",
     "pr_state_cli",
     "reap_cli",
     "reclaim_cli",
