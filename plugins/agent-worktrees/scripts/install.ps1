@@ -1707,9 +1707,17 @@ function Deploy-Package {
 
     # Vendored config-schema-migration lib (agent-config-migrate / module
     # config_migrate). Install it first so the package dependency resolves from
-    # the local path on every deploy. It lives inside the plugin folder, so the
-    # path is identical in the git-checkout and marketplace layouts.
+    # the local path on every deploy. Plugin-vendored (marketplace/release
+    # layout) or, when absent, the monorepo's own canonical `libs/config-migrate`
+    # (git-checkout/dev layout, where this is a `uv`-editable canonical
+    # reference with no per-plugin copy -- vendor-pointer-generalization
+    # effort, Phase 1). Needed even when `uv` is available, since the
+    # `Invoke-VenvPackageInstall` fallback to bare `python -m pip` (used when
+    # `uv` is absent) does not honor `[tool.uv.sources]` at all.
     $cfgMigrateDir = Join-Path $PluginDir 'libs\config-migrate'
+    if (-not (Test-Path (Join-Path $cfgMigrateDir 'pyproject.toml'))) {
+        $cfgMigrateDir = Join-Path $PluginDir '..\..\libs\config-migrate'
+    }
     if (Test-Path (Join-Path $cfgMigrateDir 'pyproject.toml')) {
         $libRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-config-migrate' -PkgDir $cfgMigrateDir
         if ($libRes.ExitCode -ne 0) {
