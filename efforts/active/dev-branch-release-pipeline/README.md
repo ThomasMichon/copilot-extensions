@@ -1906,3 +1906,41 @@ efforts' own PRs).
   `report-failure` correctly skipped, since its own scope explicitly
   excludes the `Promote dev -> main` job), but exactly the kind of real
   bug that same monitoring discipline was well-positioned to catch.
+
+### 2026-09-28 — `promote` job's own re-fetch could outrun `gate`'s validated sha (found while triaging a false-positive changefile-deletion alarm)
+- Investigating PR #4397 ("clear changefiles consumed by promotion
+  36394331795") initially looked like a real bug -- the two changefiles it
+  deleted appeared to have never been consumed by any real promotion.
+  That specific read turned out to be a misdiagnosis (comparison against
+  the wrong promotion commit; both changefiles were genuinely consumed by
+  `#4396`, produced by the same workflow run, and already safely cleared
+  by a later cleanup PR `#4402` by the time it was re-checked) -- but
+  chasing it surfaced two real, independent gaps in `validate-and-promote.yml`:
+  1. **`promote` job never reused `gate`'s validated sha.** `gate` resolves
+     and confirms a specific `dev` commit via `git merge-base
+     --is-ancestor` (`needs.gate.outputs.sha`) -- the same commit `full`/
+     `worktree-manager`/`guards-full-sweep` check out and validate, a real
+     10-30 min window by this workflow's own design. But `promote`'s own
+     checkout only fetches (`ref: main`), then re-resolved `origin/dev`
+     fresh at ITS OWN, later checkout time -- any commit (and changefile)
+     landing on `dev` during that validation window would silently ride
+     into promotion (and the changefile-consumed/deletion set) having
+     never been covered by this run's own validation.
+  2. **`workflow_dispatch` never validated ancestry at all.** `gate`
+     unconditionally set `is_dev=true` / `sha=github.sha` for manual
+     dispatch, trusting whatever ref it was run against -- safe only
+     because promotion always hard-coded `origin/dev` downstream
+     regardless. Fixing (1) alone (making promotion trust `gate`'s `sha`)
+     would have turned that into a real hole: manually dispatching from an
+     unreviewed feature/PR branch could then promote that branch's own
+     content straight to `main`.
+- **Fix (PR #4419):** `promote`'s `DEV_SHA` env now pins to
+  `needs.gate.outputs.sha` instead of re-resolving `origin/dev`; `gate`'s
+  own check step now runs the identical `git merge-base --is-ancestor`
+  proof for `workflow_dispatch` that the `workflow_run` path already had,
+  closing both gaps together rather than trading one for the other.
+- Documentation impact: this changes `validate-and-promote.yml`'s own
+  promotion guarantee (now genuinely "never promote anything beyond what
+  `gate` validated," including for manual dispatch) -- recorded here since
+  this effort's README is the authoritative narrative for that guarantee;
+  no other doc describes it independently.

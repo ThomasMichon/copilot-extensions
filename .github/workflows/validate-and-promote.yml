@@ -79,19 +79,32 @@ jobs:
           fetch-depth: 0
       - id: check
         run: |
+          # Resolve the candidate sha for EITHER trigger the same way, then
+          # apply the identical ancestor check to both -- `workflow_dispatch`
+          # previously short-circuited straight to `is_dev=true` for
+          # whatever `github.sha` happened to be (the tip of whatever ref
+          # it was run against), never verified against `dev` at all. That
+          # was safe only by accident, because every downstream promotion
+          # call hard-coded `origin/dev` regardless of this job's own `sha`
+          # output -- once promotion started trusting `sha` (see the
+          # `promote` job's `DEV_SHA`), an operator manually dispatching
+          # this workflow from an unreviewed feature/PR branch could
+          # promote that branch's own unreviewed content straight to
+          # `main`. Requiring the SAME `git merge-base --is-ancestor`
+          # proof for both events closes that gap without giving manual
+          # dispatch any special trust `workflow_run` doesn't also get.
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "is_dev=true" >> "$GITHUB_OUTPUT"
-            echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
-            exit 0
+            sha="${{ github.sha }}"
+          else
+            sha="${{ github.event.workflow_run.head_sha }}"
           fi
-          sha="${{ github.event.workflow_run.head_sha }}"
           git fetch origin dev
           if git merge-base --is-ancestor "$sha" origin/dev; then
             echo "is_dev=true" >> "$GITHUB_OUTPUT"
             echo "sha=$sha" >> "$GITHUB_OUTPUT"
           else
             echo "is_dev=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::$sha is not on origin/dev's history -- skipping (this CI completion was for a different branch/PR)."
+            echo "::notice::$sha is not on origin/dev's history -- skipping (this CI completion was for a different branch/PR, or workflow_dispatch was run against a non-dev ref)."
           fi
 
   full:
