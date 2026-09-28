@@ -20,12 +20,388 @@ then refuses finalize while any of them is still genuinely open. A worktree
 whose local record was never populated at all (``create-pr``/``set-pr`` were
 bypassed) is outside this gate's reach -- it is a backup on top of the pr-*
 tools establishing claims correctly, not a replacement for them.
+
+:func:`content_exceeds_merged_head` is a second, orthogonal gate added here
+for the same module-size reason (#4388): it catches a keep-alive worktree
+that kept committing *after* its tracked PR merged -- a case
+:func:`assert_no_live_pr` cannot see, since the merged PR is terminal, not
+live.
 """
 
 from __future__ import annotations
 
 from . import output, tracking
 from .config import Config
+
+
+def dirty_worktree_error(worktree_path: str, *, wt_exists: bool) -> str | None:
+    """Refuse a PR-mode finalize on uncommitted/untracked changes (#4400).
+
+    ``_pr_finalize_precondition`` only inspects commits, never the working
+    tree -- a modified or untracked file at an otherwise-safe merged head
+    would silently be discarded by the destructive cleanup that follows it.
+    Returns an error message when dirty, else ``None``.
+    """
+    if not wt_exists:
+        return None
+    from . import git_ops
+    if git_ops.is_clean(cwd=worktree_path):
+        return None
+    detail = "\n".join(f"    {ln}" for ln in git_ops.get_dirty_files(cwd=worktree_path))
+    return (
+        f"Working tree has uncommitted changes. Commit or stash them before "
+        f"finalizing:\n{detail}"
+    )
+
+
+def resolve_precondition_ref(
+    feature: str,
+    worktree_id: str,
+    worktree_path: str,
+    *,
+    cwd: str,
+) -> str | None:
+    """Resolve the ref that must represent this worktree's ACTUAL current
+    content for ``_pr_finalize_precondition``'s safety checks (#4400).
+
+    ``finalize._resolve_content_ref`` prefers a local ``feature/<slug>``
+    snapshot branch when one exists -- correct for publishing
+    (push-changes), but dangerous here: under the ``snapshot`` head scheme
+    that branch is a FROZEN snapshot of the PR head at push time, distinct
+    from the live checkout (#1804 keeps HEAD on ``worktree/<id>`` under
+    refspec; a legacy flow can instead leave HEAD on the feature branch
+    itself, `pr_ops.py`). A later commit on whichever branch is actually
+    checked out would be invisible to a check that trusts the frozen
+    snapshot instead -- letting both the upstream-content fast path and the
+    merged-head check wrongly certify it safe.
+
+    When the worktree directory is a live checkout, this trusts the current
+    checkout (a named branch, or detached ``HEAD``) ONLY when neither
+    tracked branch name this worktree can legitimately be on (``worktree/
+    <id>``, or the tracked ``feature`` branch under the legacy flow) carries
+    commits beyond it. Trusting *any* current checkout unconditionally --
+    an unrelated branch, or a detached HEAD sitting behind the tracked
+    branch -- would itself be a hole (#4400 rounds 7-8):
+    ``validate_and_finalize`` deletes ``record.branch`` on cleanup
+    regardless of what's checked out, so real, still-unmerged content
+    sitting on a tracked branch the checkout has drifted away from must
+    never go unvalidated. When the checkout can't be trusted (or the
+    worktree directory is gone), this resolves ``worktree/<id>`` BEFORE
+    ``feature`` (#4400 round 10) -- never delegating to
+    ``_resolve_content_ref``, whose feature-preferring order is correct for
+    publishing but would silently reintroduce the frozen-snapshot hole this
+    function exists to close.
+    """
+    from pathlib import Path
+
+    from . import git_ops
+    worktree_ref = f"worktree/{worktree_id}"
+    if Path(worktree_path).exists() and cwd == worktree_path:
+        current = git_ops._get_current_branch_safe(cwd) or "HEAD"
+        if git_ops.ref_exists(current, cwd=cwd) and not _tracked_branch_ahead(
+            feature, worktree_id, current, cwd=cwd,
+        ):
+            return current
+    for ref in (worktree_ref, feature, "HEAD"):
+        if ref and git_ops.ref_exists(ref, cwd=cwd):
+            return ref
+    return None
+
+
+def _tracked_branch_ahead(
+    feature: str, worktree_id: str, current: str, *, cwd: str,
+) -> bool:
+    """True iff either tracked branch name carries commits beyond ``current``."""
+    from . import git_ops
+    for tracked in (feature, f"worktree/{worktree_id}"):
+        if not tracked or not git_ops.ref_exists(tracked, cwd=cwd):
+            continue
+        ahead = git_ops.git(
+            "rev-list", "--count", f"{current}..{tracked}", cwd=cwd, check=False,
+        )
+        if ahead.returncode != 0 or ahead.stdout.strip() not in ("", "0"):
+            return True
+    return False
+
+
+def pr_merge_status(record: tracking.WorktreeRecord, repo) -> bool | None:
+    """Tri-state merge lookup: ``True`` (confirmed merged), ``False``
+    (confirmed NOT merged -- no ``pr`` at all, or NEITHER ``number`` nor
+    ``repo`` recorded, meaning a PR was never even opened -- nothing that
+    could have merged), ``None`` (indeterminate: a PR record exists with
+    identifying fields but is otherwise unqueryable -- exactly ONE of
+    ``number``/``repo`` present, or a provider/network error, #4400 rounds
+    13-14).
+
+    ``finalize._pr_is_merged`` collapses ``None`` into ``False`` for ITS OWN
+    fail-closed purpose (never certify unmerged-or-unknown work safe to
+    prune). That collapse is the wrong direction for a caller instead
+    proving "definitely NOT yet merged, safe to skip the merged-head check"
+    (:func:`upstream_match_is_trustworthy`) -- an indeterminate lookup
+    (unlike "no PR tracked at all") must never be read as a confirmed
+    non-merge. A record with only ONE of ``number``/``repo`` set is a
+    broken/partial write, not "never opened" -- treating it as confirmed
+    unmerged would let a tree-only upstream match certify and prune a
+    record whose merge boundary genuinely can't be checked.
+    """
+    pr = getattr(record, "pr", None)
+    if not pr:
+        return False
+    if getattr(pr, "state", "") == "merged":
+        return True
+    number = getattr(pr, "number", None)
+    slug = getattr(pr, "repo", "") or ""
+    if not number and not slug:
+        return False
+    if not number or not slug:
+        return None
+    prcfg = repo.pr
+    try:
+        from . import providers
+        provider = providers.get_provider(prcfg.provider)
+        token = providers.account_token_for_slug(slug, prcfg)
+        result = provider.get_pull(
+            slug, int(number),
+            api_base=getattr(prcfg, "api_base", "") or "", token=token,
+        )
+        return bool(getattr(result, "merged", False))
+    except Exception:
+        return None
+
+
+def upstream_match_is_trustworthy(
+    record: tracking.WorktreeRecord, content_ref: str | None, upstream: str, *, cwd: str, repo,
+) -> bool:
+    """True iff step 1's tree-level upstream match may be trusted without a
+    further merged-head check (#4400 fourth + eleventh + twelfth rounds).
+
+    Closes the empty-commit/revert edge case: a no-op or add+revert commit
+    after the tracked PR merged leaves the net tree byte-identical to
+    upstream even though a real commit exists past the merged head. Safe
+    (git-only) to trust when the tracked PR is not (yet) locally recorded as
+    merged -- nothing to compare against, matching the pre-existing content-
+    match contract. A **merged** record missing `head_sha` (a legacy/
+    incomplete record) is fail-closed *untrustworthy* rather than skipped --
+    the same "don't certify safety on an inconclusive check" rule as
+    `content_exceeds_merged_head` itself. Delegates to the "_any" multi-ref
+    check (not just ``content_ref``) so this fast path can never certify
+    safety while a separate branch cleanup will force-delete still carries
+    unmerged commits.
+
+    "Merged" here uses the SAME authoritative source as
+    :func:`pr_merge_status` -- not merely the local, possibly-stale
+    ``pr.state`` field (#4400 round 12): a provider-confirmed merge can
+    predate a stale/failed local reconcile, in which case ``state`` is still
+    ``"open"`` even though the PR genuinely merged. Trusting ``state`` alone
+    would let a missing-``head_sha`` record slip through this fast path
+    unvalidated. Trustworthy ONLY on a status of exactly ``False``
+    (confirmed NOT merged, #4400 round 13) -- ``True`` (confirmed merged)
+    and ``None`` (indeterminate: a tracked PR whose live status couldn't be
+    confirmed) both fail closed, since an indeterminate lookup must never
+    stand in for "provably unmerged." The provider is only asked when
+    ``head_sha`` is actually missing (the one case that needs it) -- the
+    common, fully-populated-record path stays git-only, no network call.
+
+    A confirmed-NOT-merged status (e.g. a terminal CLOSED/rejected PR) is
+    NOT trustworthy on its own either (#4400 round 15): ``assert_no_live_pr``
+    permits that terminal state (it isn't "live"), yet cleanup still
+    force-deletes every OTHER tracked PR's own feature branch regardless --
+    there is no merged head to compare those against, so the fallback check
+    is against ``upstream`` directly, via :func:`other_pr_branches_unreachable_
+    from_upstream`. The worktree's OWN tracked branch needs no such check
+    here -- step 1's TREE-level match already covers it (squash-safe, unlike
+    an ancestor check).
+    """
+    pr = getattr(record, "pr", None)
+    head_sha = (getattr(pr, "head_sha", "") or "").strip()
+    if not head_sha:
+        if pr_merge_status(record, repo) is not False:
+            return False
+        return not other_pr_branches_unreachable_from_upstream(record, upstream, cwd=cwd)
+    return not content_exceeds_merged_head_any(record, content_ref, upstream, cwd=cwd)
+
+
+def other_pr_branches_unreachable_from_upstream(
+    record: tracking.WorktreeRecord, upstream: str, *, cwd: str,
+) -> bool:
+    """True iff any OTHER tracked PR's own feature branch (never the
+    worktree's own TRACKED branch, which step 1 already tree-validated)
+    carries commits not reachable from ``upstream`` at all (#4400 round 15).
+
+    Applies specifically to the "confirmed NOT merged" case (a closed/
+    rejected PR, or none tracked at all), where there is no merged head to
+    compare a feature branch against -- yet cleanup still unconditionally
+    force-deletes every ``record.prs[*].branch``. Reuses
+    ``_extra_commit_count`` with ``upstream`` standing in for both exclusion
+    refs (equivalent to ``rev-list ref ^upstream``). Fails closed on any
+    unresolvable ref.
+    """
+    from . import git_ops
+    if not git_ops.ref_exists(upstream, cwd=cwd):
+        return True
+    for pr in getattr(record, "prs", None) or []:
+        branch = (getattr(pr, "branch", "") or "").strip()
+        if not branch or not git_ops.ref_exists(branch, cwd=cwd):
+            continue
+        count = _extra_commit_count(branch, upstream, upstream, cwd=cwd)
+        if count is None or count > 0:
+            return True
+    return False
+
+
+def merged_pr_block_message(
+    record: tracking.WorktreeRecord, content_ref: str | None, upstream: str, *, cwd: str,
+) -> str:
+    """Compose ``_pr_finalize_precondition``'s merged-but-blocked message,
+    distinguishing a *confirmed* later commit from an *unverifiable* merge
+    boundary (#4400 review findings, rounds 8 + 11 + 14): the fail-closed
+    branches in ``content_exceeds_merged_head`` block on an inconclusive
+    lookup too -- an unresolvable ``head_sha``/``upstream``, or ANY ref
+    cleanup will force-delete (not just ``content_ref``), each checked
+    against ITS OWN corresponding PR's ``head_sha`` (never a shared/active
+    one) -- and unconditionally saying "carries further commits" there would
+    send an operator hunting for a commit that may not exist, or at the
+    wrong ref entirely. Only reports "confirmed" when a genuine positive
+    count resolves on some checked ref; every other case -- including one
+    that failed closed elsewhere -- reports the unverifiable message.
+    """
+    from . import git_ops
+    if git_ops.ref_exists(upstream, cwd=cwd):
+        active_head_sha = (getattr(record.pr, "head_sha", "") or "").strip()
+        pairs = (
+            [(content_ref, active_head_sha)] if content_ref else []
+        ) + _cleanup_branch_refs(record)
+        checked: set[str] = set()
+        for ref, head_sha in pairs:
+            if (
+                not ref or ref in checked or not head_sha
+                or not git_ops.ref_exists(ref, cwd=cwd)
+                or not git_ops.ref_exists(head_sha, cwd=cwd)
+            ):
+                continue
+            checked.add(ref)
+            count = _extra_commit_count(ref, head_sha, upstream, cwd=cwd)
+            if count is not None and count > 0:
+                return f"Worktree/{record.worktree_id}: PR merged but carries further commits."
+    return (
+        f"Worktree/{record.worktree_id}: PR merged, but its merge boundary "
+        f"can't be verified (unresolvable head_sha/upstream/checkout ref) -- "
+        f"refusing rather than certifying unverified content safe."
+    )
+
+
+def _cleanup_branch_refs(record: tracking.WorktreeRecord) -> list[tuple[str, str]]:
+    """Every ``(ref, head_sha)`` pair finalize's cleanup will delete for this
+    worktree, beyond whichever single ref was chosen as the live-content
+    safety ref (#4400 rounds 11 + 13 + 14): the TRACKED worktree branch --
+    ``record.branch`` when set (a legacy/non-canonical name; the same
+    resolution ``finalize._worktree_branch`` uses at cleanup time), else
+    ``worktree/<id>`` -- checked against the ACTIVE PR's ``head_sha`` (the
+    one that record tracks), plus every OTHER tracked PR's local feature
+    branch (force-deleted unconditionally, serial + parallel -- see
+    ``validate_and_finalize``'s cleanup block) checked against THAT PR's OWN
+    ``head_sha``, never the active one's: a historical/parallel PR's branch
+    can carry a commit that is an ancestor of the ACTIVE PR's head (and so
+    invisible to a shared boundary) yet never actually reached upstream.
+    """
+    active_head_sha = (getattr(record.pr, "head_sha", "") or "").strip()
+    tracked = (getattr(record, "branch", "") or "").strip() or f"worktree/{record.worktree_id}"
+    pairs = [(tracked, active_head_sha)]
+    seen = {tracked}
+    for pr in getattr(record, "prs", None) or []:
+        branch = (getattr(pr, "branch", "") or "").strip()
+        if branch and branch not in seen:
+            seen.add(branch)
+            pairs.append((branch, (getattr(pr, "head_sha", "") or "").strip()))
+    return pairs
+
+
+def _extra_commit_count(
+    content_ref: str, head_sha: str, upstream: str, *, cwd: str,
+) -> int | None:
+    """Count of commits on ``content_ref`` beyond ``head_sha``/``upstream``,
+    or ``None`` when the count itself couldn't be determined (unresolvable
+    ``content_ref``, or a failed ``rev-list`` -- including an unresolvable
+    ``upstream``). Callers must treat ``None`` as inconclusive, never zero.
+    """
+    from . import git_ops
+    if not git_ops.ref_exists(content_ref, cwd=cwd):
+        return None
+    extra = git_ops.git(
+        "rev-list", "--count", content_ref, f"^{head_sha}", f"^{upstream}",
+        cwd=cwd, check=False,
+    )
+    if extra.returncode != 0:
+        return None
+    stripped = extra.stdout.strip()
+    return int(stripped) if stripped.isdigit() else None
+
+
+def content_exceeds_merged_head(
+    record: tracking.WorktreeRecord, content_ref: str | None, upstream: str, *, cwd: str,
+) -> bool:
+    """True iff ``content_ref`` carries commits beyond the tracked PR's merged
+    head that are NOT already reachable from ``upstream``.
+
+    ``content_ref`` must be the caller's LIVE-checkout resolution
+    (``finalize_open_pr_gate.resolve_precondition_ref``, #4400), never
+    ``_resolve_content_ref``'s feature-branch-preferring result: under the
+    ``snapshot`` head scheme that branch is a frozen snapshot of the PR head
+    at push time, distinct from the live checkout (#1804 keeps HEAD on
+    ``worktree/<id>`` under refspec; a legacy flow can leave HEAD on the
+    feature branch itself). Comparing against a frozen snapshot would
+    silently miss later commits on the real checkout and let finalize prune
+    real, un-PR'd work.
+    Excluding commits already reachable from ``upstream`` (not just
+    ``head_sha``) avoids a false positive after a normal squash merge or
+    ``pr-complete``/``sync`` realignment: ``content_ref`` can legitimately
+    sit on a later, upstream-confirmed commit (the squash commit itself, or
+    a forward rebase) that is not an ancestor of the pre-merge ``head_sha``
+    but *is* safely on ``upstream`` -- that must never count as "exceeds."
+    Fail-closed: a missing/unresolvable ``head_sha``, a ``None``/unresolvable
+    ``content_ref``, or a failed ``rev-list`` all count as "exceeds" -- never
+    certifies newer work safe on an inconclusive check.
+    """
+    head_sha = (getattr(record.pr, "head_sha", "") or "").strip()
+    if not head_sha or content_ref is None:
+        return True
+    count = _extra_commit_count(content_ref, head_sha, upstream, cwd=cwd)
+    return count is None or count > 0
+
+
+def content_exceeds_merged_head_any(
+    record: tracking.WorktreeRecord, content_ref: str | None, upstream: str, *, cwd: str,
+) -> bool:
+    """True iff ``content_ref`` OR any branch finalize's cleanup will
+    force-delete carries commits beyond ITS OWN corresponding PR's merged
+    head not already reachable from ``upstream`` (#4400 rounds 11 + 14).
+
+    ``content_exceeds_merged_head`` alone only validates the ONE ref chosen
+    as the live-content safety ref -- but ``validate_and_finalize``'s cleanup
+    unconditionally force-deletes every ``record.prs[*].branch`` (the local
+    feature branch) once this precondition passes, regardless of which ref
+    was checked. Validating only ``content_ref`` can certify safety while
+    separate unmerged commits sitting solely on a feature branch cleanup
+    will delete go unvalidated. Each OTHER PR's branch is checked against
+    THAT PR's own ``head_sha`` (never the active PR's, round 14) -- sharing
+    one boundary across unrelated PRs can mask real content via unrelated
+    ancestry. A tracked branch with no ``head_sha`` to validate against
+    fails closed.
+    """
+    if content_ref is None:
+        return True
+    if content_exceeds_merged_head(record, content_ref, upstream, cwd=cwd):
+        return True
+    from . import git_ops
+    for ref, head_sha in _cleanup_branch_refs(record):
+        if ref == content_ref or not git_ops.ref_exists(ref, cwd=cwd):
+            continue
+        if not head_sha:
+            return True
+        count = _extra_commit_count(ref, head_sha, upstream, cwd=cwd)
+        if count is None or count > 0:
+            return True
+    return False
 
 
 def reconcile_every_live_pr(
@@ -142,3 +518,26 @@ def assert_no_live_pr(
         "the provider -- pass 'finalize --force-open-pr' to override."
     )
     return False
+
+
+def pr_precondition_recheck(
+    record: tracking.WorktreeRecord,
+    repo,
+    worktree_path: str,
+    anchor: str,
+    *,
+    precondition_fn,
+) -> str | None:
+    """Re-run the dirty-tree guard + full PR-mode precondition (#4400 round
+    16). Returns an error message on failure, else ``None``. Shared by
+    finalize's pre-reconciliation AND last-moment re-checks -- callers own
+    the rollback + early return. ``precondition_fn`` is
+    ``finalize._pr_finalize_precondition`` -- passed in rather than imported
+    to avoid a hard cross-module cycle at import time.
+    """
+    from pathlib import Path
+    dirty_err = dirty_worktree_error(worktree_path, wt_exists=Path(worktree_path).exists())
+    if dirty_err:
+        return dirty_err
+    ok, err = precondition_fn(record, repo, worktree_path, anchor)
+    return None if ok else (err or "PR finalize precondition not met.")

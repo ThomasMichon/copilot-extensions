@@ -2929,6 +2929,142 @@ class TestPRFinalizeAndPush:
         assert ok is True, err
         assert err is None
 
+    def test_finalize_refuses_dirty_worktree_at_merged_head(self, pr_repo):
+        # #4400 review finding: _pr_finalize_precondition only inspects
+        # commits, never the working tree -- a modified/untracked file at an
+        # otherwise-safe merged head must still block finalize, or the
+        # destructive cleanup that follows would silently discard it.
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, _ = pr_repo
+        pr_ops.create_pr(wid, config, title="Add feature")
+        feature = "feature/add-feature-aaaa"
+        self._simulate_squash_merge(config, wid, feature)
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        rec.pr.state = "merged"
+        tracking.save_record(rec)
+        (wt_path / "uncommitted.txt").write_text("real work, never committed\n")
+
+        ok = fin.validate_and_finalize(wid, config)
+        assert ok is False
+        assert (wt_path / "uncommitted.txt").exists()
+
+    def test_finalize_reruns_precondition_after_lock_acquired(self, pr_repo, monkeypatch):
+        # #4400 round 14: the merged-head precondition previously ran only
+        # BEFORE the finalize lock was acquired -- a commit landing in that
+        # TOCTOU window (between the preflight and the destructive cleanup)
+        # would be silently discarded. validate_and_finalize must re-run the
+        # SAME precondition immediately after the lock is held.
+        from agent_worktrees import finalize as fin
+        from agent_worktrees import finalize_lock
+        config, wid, wt_path, _ = pr_repo
+        pr_ops.create_pr(wid, config, title="Add feature")
+        feature = "feature/add-feature-aaaa"
+        self._simulate_squash_merge(config, wid, feature)
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        rec.pr.state = "merged"
+        tracking.save_record(rec)
+
+        real_acquire = finalize_lock.FinalizeLock.acquire
+
+        def racing_acquire(lock_self):
+            real_acquire(lock_self)
+            # Simulate a commit landing in the TOCTOU window, after the
+            # preflight validated safety but before lock-protected cleanup.
+            (wt_path / "raced_in.txt").write_text("landed after preflight\n")
+            git_ops.git("add", "-A", cwd=str(wt_path))
+            git_ops.git("commit", "-m", "race window commit", cwd=str(wt_path))
+
+        monkeypatch.setattr(finalize_lock.FinalizeLock, "acquire", racing_acquire)
+
+        ok = fin.validate_and_finalize(wid, config)
+        assert ok is False
+        assert (wt_path / "raced_in.txt").exists()
+
+    def test_finalize_catches_race_commit_landing_during_process_termination(
+        self, pr_repo, monkeypatch,
+    ):
+        # #4400 round 15: round 14's re-check ran ONCE, immediately after the
+        # finalize lock was acquired -- but further code (record reload,
+        # pointer reconciliation, live-session checks, process termination)
+        # still ran AFTER that point and BEFORE the actual destructive
+        # removal, leaving a residual window. The re-check must run as the
+        # LAST possible step, immediately before the destructive git
+        # operation -- proven here by racing a commit in AFTER process
+        # termination, later than round 14's check point.
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, _ = pr_repo
+        pr_ops.create_pr(wid, config, title="Add feature")
+        feature = "feature/add-feature-aaaa"
+        self._simulate_squash_merge(config, wid, feature)
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        rec.pr.state = "merged"
+        tracking.save_record(rec)
+
+        real_terminate = fin.procs.terminate_processes_under
+
+        def racing_terminate(worktree_path):
+            result = real_terminate(worktree_path)
+            (wt_path / "raced_in_late.txt").write_text("landed during cleanup\n")
+            git_ops.git("add", "-A", cwd=str(wt_path))
+            git_ops.git("commit", "-m", "late race window commit", cwd=str(wt_path))
+            return result
+
+        monkeypatch.setattr(fin.procs, "terminate_processes_under", racing_terminate)
+
+        ok = fin.validate_and_finalize(wid, config)
+        assert ok is False
+        assert (wt_path / "raced_in_late.txt").exists()
+
+    def test_finalize_rechecks_precondition_before_reconciliation(
+        self, pr_repo, monkeypatch,
+    ):
+        # #4400 round 16: reconciliation (`_reconcile_merged_pointers`)
+        # rebases the worktree branch onto upstream -- and git's rebase
+        # silently DROPS a commit whose patch is already reachable/applied
+        # upstream, exactly the kind of commit a race could land right
+        # before this call, with no trace left to detect afterward. The
+        # precondition must re-run immediately before reconciliation is
+        # invoked, not only once after lock acquisition and once at the
+        # very end. Verified deterministically via call-order spies (a
+        # full git-level reproduction would need to reconstruct git's own
+        # patch-id "already applied" heuristic, which is unreliable to pin
+        # down across git versions) rather than assuming a specific git
+        # rebase outcome.
+        from agent_worktrees import finalize as fin
+        config, wid, _wt_path, _ = pr_repo
+        pr_ops.create_pr(wid, config, title="Add feature")
+        feature = "feature/add-feature-aaaa"
+        self._simulate_squash_merge(config, wid, feature)
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        rec.pr.state = "merged"
+        tracking.save_record(rec)
+
+        from agent_worktrees import finalize_open_pr_gate
+
+        call_order: list[str] = []
+        real_reconcile = fin._reconcile_merged_pointers
+        real_precheck = finalize_open_pr_gate.pr_precondition_recheck
+
+        def spy_reconcile(*a, **k):
+            call_order.append("reconcile")
+            return real_reconcile(*a, **k)
+
+        def spy_precheck(*a, **k):
+            call_order.append("precheck")
+            return real_precheck(*a, **k)
+
+        monkeypatch.setattr(fin, "_reconcile_merged_pointers", spy_reconcile)
+        monkeypatch.setattr(
+            finalize_open_pr_gate, "pr_precondition_recheck", spy_precheck,
+        )
+
+        ok = fin.validate_and_finalize(wid, config)
+        assert ok is True
+        assert "precheck" in call_order and "reconcile" in call_order
+        assert call_order.index("precheck") < call_order.index("reconcile"), (
+            f"precondition recheck must run BEFORE reconciliation, got {call_order}"
+        )
+
     def test_precondition_ok_after_merge_remote_branch_deleted(self, pr_repo):
         from agent_worktrees import finalize as fin
         config, wid, wt_path, _ = pr_repo
