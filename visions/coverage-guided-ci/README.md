@@ -164,6 +164,18 @@ diverge, the baseline is earned pre-transform, or the divergence is
 reconciled before attribution is trusted — otherwise line-level correlation
 between a change's diff and the baseline silently corrupts.
 
+### attribution survives the commits between baseline and fork point
+
+Resolving to the nearest ancestor baseline (see baseline reachable from any
+fork point) is necessary but not sufficient: any intervening commit that
+inserts or deletes lines shifts where a previously-covered line now sits,
+independent of whether coverage debt has crossed its threshold. Selection
+either **remaps** the baseline's attribution through the intervening commits
+to the fork point's own coordinates, or **invalidates** attribution for the
+specific files those commits touched (falling those files through to the
+smoke fallback) — ancestry alone, without one of these, is not sufficient to
+trust a baseline's line numbers against a later fork point.
+
 ### coverage debt's threshold is a tunable dial
 
 The bound past which coverage debt forces the smoke fallback (whether framed
