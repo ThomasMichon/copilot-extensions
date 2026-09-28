@@ -6,7 +6,7 @@
 - **Scope of this doc:** the ordered implementation plan for removing the
   Picker's last in-process `agent_worktrees.*` import boundary, building on the
   evidence-gathering inventory already recorded here.
-- **Status:** In progress — #3359's vendored-lib prework is done via PR
+- **Status:** Done — #3359's vendored-lib prework is done via PR
   [#3368](https://github.com/ThomasMichon/copilot-extensions/pull/3368),
   Group D's `profiles` dependency is closed via Phase 3e / PR
   [#3626](https://github.com/ThomasMichon/copilot-extensions/pull/3626), and
@@ -671,9 +671,11 @@ once every remaining caller is already off the import boundary.
        still reports the same unrelated pre-existing version drift on
        `delegation-guidance`, `efforts`, `harness-knowledge`, and `wsl-setup`.
 
-7. [ ] **Delete `_engine_runtime.py` and the remaining proxy shims, then lock in
-   the regression guard.** This is the cleanup PR after every live call site is
-   already off the import boundary.
+7. [x] **Delete `_engine_runtime.py` and the remaining proxy shims, then lock in
+   the regression guard.** **Landed in PR
+   [#4357](https://github.com/ThomasMichon/copilot-extensions/pull/4357).**
+   This is the cleanup PR after every live call site is already off the import
+   boundary.
    - Remove `_engine_runtime.py` and any leftover `production_picker/*.py`
      proxy modules whose only job was `engine_module(...)` pass-through.
    - Add a focused regression guard that fails if the production Picker grows a
@@ -682,6 +684,31 @@ once every remaining caller is already off the import boundary.
      `worktree_manager.production_picker`, not a repo-wide style rule).
    - Reconcile the phase doc / README wording to the final post-cutover state
      so future work does not treat `_engine_runtime.py` as a still-valid seam.
+   - **Landing details:** moved the last non-Picker compatibility bootstrap to
+     the top-level `worktree_manager.agent_worktrees_runtime` helper, deleted
+     `production_picker/_engine_runtime.py` plus the dead
+     `config`/`pr_ops`/`reclaim`/`sessions`/`tracking` proxy modules, and
+     repointed the remaining transplant/conftest + housekeeping callers to the
+     top-level helper so `worktree_manager.production_picker` itself no longer
+     imports `agent_worktrees` directly. Added
+     `tests/test_production_picker_runtime_boundary.py`, which scans
+     `src/worktree_manager/production_picker/` for direct `agent_worktrees`
+     imports and fails if any deleted proxy file returns.
+   - Validation: focused Step 7 regression lanes green
+     (`tests/test_production_picker_runtime_boundary.py`,
+     `tests/test_production_picker_transplant.py`,
+     `tests/production_picker/test_housekeeping.py`,
+     `tests/production_picker/test_closure_cross_surface_parity.py`,
+     `tests/production_picker/test_picker_cache.py`,
+     `tests/production_picker/test_picker_tui.py`,
+     `tests/production_picker/test_profiles_io.py` -> `367 passed`;
+     `tests/production_picker/test_config_readers.py` + the runtime-helper lane
+     -> `63 passed`; `tests/production_picker/test_picker_first_paint.py -k
+     "import_does_not_load_config"` -> `2 passed`). Full `worktree-manager`
+     suite matched the current unrelated Windows baseline at
+     `14 failed, 1552 passed, 7 skipped, 1 warning`; `ruff check --select
+     F,E9`, `tools/check-install-contract.py`, and
+     `tools/check-version-consistency.py` passed.
 
 ## Validation
 

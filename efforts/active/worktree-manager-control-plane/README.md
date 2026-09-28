@@ -404,7 +404,7 @@ bindings still resolve correctly through the compatibility view.
       path, and the separate built-in progress-envelope follow-up was filed as
       [#4274](https://github.com/ThomasMichon/copilot-extensions/issues/4274).
 
-### Phase 3d — Retire the Picker's in-process engine-module boundary (In progress — Step 7 cleanup remains; #3360)
+### Phase 3d — Retire the Picker's in-process engine-module boundary (Done — #3360)
 
 _(agent-recommended scoping below the two linked issues; the issues
 themselves are operator-filed.)_
@@ -567,10 +567,17 @@ PR [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
       coverage proves the hot path stayed O(1) in subprocesses rather than one
       subprocess per worktree/helper. See
       [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
-- [ ] **Step 7 — retire `_engine_runtime.py` and its remaining proxy shims.**
-      Cleanup lands only after Groups A/B/C are fully cut over, with a focused
-      regression guard that production Picker code no longer imports
-      `agent_worktrees` in-process. See
+- [x] **Step 7 — retire `_engine_runtime.py` and its remaining proxy shims.**
+      Landed in PR
+      [#4357](https://github.com/ThomasMichon/copilot-extensions/pull/4357):
+      moved the last non-Picker compatibility bootstrap to
+      `worktree_manager.agent_worktrees_runtime`, deleted
+      `production_picker/_engine_runtime.py` plus the dead
+      `config`/`pr_ops`/`reclaim`/`sessions`/`tracking` proxy modules, and
+      added a focused source-level regression guard proving
+      `worktree_manager.production_picker` no longer carries a direct
+      `agent_worktrees` import. With Step 7 landed, Groups A/B/C and the full
+      Phase 3d plan are complete. See
       [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
       **Cross-linked 2026-09-27** (`agent-worktrees-authoritative-daemon`
       effort, Phase 4): Step 5's batched verb should register against that
@@ -910,6 +917,24 @@ claiming discipline alone.
   `harness-knowledge`, and `wsl-setup`. With Step 6 done, only Step 7 (delete
   `_engine_runtime.py` + the remaining proxy shims and add the regression
   guard) remains for Phase 3d.
+- **2026-09-27** — Landed Phase 3d Step 7, PR
+  [#4357](https://github.com/ThomasMichon/copilot-extensions/pull/4357).
+  Deleted the production Picker's last in-package engine import seam:
+  `worktree_manager.production_picker._engine_runtime` moved to the top-level
+  compatibility helper `worktree_manager.agent_worktrees_runtime`, the dead
+  `production_picker.config` / `pr_ops` / `reclaim` / `sessions` /
+  `tracking` pass-through shims were removed, and `housekeeping.py` plus the
+  remaining transplant/conftest callers now import the top-level helper
+  instead of anything under `production_picker`. Added a focused
+  `test_production_picker_runtime_boundary.py` guard that proves those deleted
+  files stay gone and that no Python source under
+  `worktree_manager.production_picker` imports `agent_worktrees` directly.
+  Validation: focused runtime-boundary/transplant/housekeeping/regression
+  lanes green (`367 passed` for the main Step 7 slice, plus `63 passed` for the
+  config-reader/runtime-helper follow-up lane); full `worktree-manager` suite
+  matched the current unrelated Windows baseline at
+  `14 failed, 1552 passed, 7 skipped, 1 warning`; `ruff check --select F,E9`
+  passed; Phase 3d's ordered plan is now fully complete.
 - **2026-09-27** — Landed Phase 3d Step 5, PR
   [#4327](https://github.com/ThomasMichon/copilot-extensions/pull/4327).
   Added Group C's additive, unused-at-first engine seam instead of cutting the
