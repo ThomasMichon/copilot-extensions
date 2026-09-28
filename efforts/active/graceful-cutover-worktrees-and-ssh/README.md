@@ -64,26 +64,27 @@ independently re-derived the shape of a protocol that **already exists**:
     covers the *installed slot*; it says nothing about a *live daemon
     process* (the resident `status-monitor` / companion `mux-daemon`)
     noticing a newer slot exists and cutting over.
-  - **Open question, not yet resolved:** the pattern doc's per-plugin table
-    describes `install.ps1`/`install.sh` as the trigger for agent-bridge/
-    agent-dispatch/agent-index/agent-vault/agent-mcp, citing `dotfiles#…`
-    issue numbers — those installers may live in a separate `dotfiles`
-    repo this effort has not confirmed access to. `agent-worktrees` and
-    `worktree-manager`, by contrast, have their **own native, in-repo**
-    `update` command implementations (exercised directly, repeatedly, this
-    session) — for those two, the integration point is that native command,
-    not an external installer script. `agent-ssh`'s own installer shape is
-    not yet confirmed (Phase 0).
+  - **Resolved (Copilot review, round 1):** the "who drives the installer"
+    question is answered inside this repo, not an external `dotfiles`
+    repo — `agent_worktrees.reconcile.runtime_installer_argv`
+    (`plugins/agent-worktrees/src/agent_worktrees/reconcile.py:1298-1324`)
+    already reads a **sibling** plugin's `plugin.json["zeroDowntimeUpdate"]`
+    and appends `-ZeroDowntime` when reconcile-driving that plugin's own
+    `install.ps1 update`. **But agent-worktrees' own installer
+    (`plugins/agent-worktrees/scripts/install.ps1`) does not yet accept that
+    switch at all** — so the flag and the installer support are not
+    independent steps; see Phase 1's corrected ordering below.
 - **Today's live incident, as the motivating validation case**: two
   `status-monitor` processes were found running simultaneously on one host,
   both already on the fixed version — not a version-supersession race
   `status-monitor-restart` reaps (it only reaps a version-*superseded*
   owner; a same-version duplicate is left alone). Remediated manually this
   session (confirmed the lock owner, killed the duplicate via
-  `procs.terminate_pid_if_identity`) and documented as a stop-gap in
-  `docs/error-response-discipline.md` (aperture-labs) and this repo's own
-  `agent-worktrees-authoritative-daemon` effort Journal — **this effort is
-  the real fix that makes that manual remediation unnecessary.**
+  `procs.terminate_pid_if_identity`) and documented as a stop-gap in this
+  repo's own `agent-worktrees-authoritative-daemon` effort Journal, plus a
+  generic operational-runbook entry in a downstream adopter's own error-
+  response documentation — **this effort is the real fix that makes that
+  manual remediation unnecessary.**
 
 ## Request
 
@@ -145,19 +146,29 @@ cover: `agent-worktrees`, `worktree-manager`, `agent-ssh`.**
       resident `mux-daemon` (companion process, not the Picker CLI itself)
       needs its own cutover, distinct from the Picker/CLI's own
       self-versioning.
-- [ ] `agent-ssh`: locate its installer entry point (`install.sh`/`install.ps1`
-      in this repo, or confirm it truly is dotfiles-repo-owned like
-      agent-bridge); locate every resident daemon it owns (the
-      `libs/ssh-manager` tunnel/session daemon(s)) and their current
-      lifecycle (spawned how, tracked how, restarted how today).
-- [ ] For each of the three, name the concrete **safe cutover point** (the
-      drain boundary) per daemon:
+- [ ] `agent-ssh`: **corrected premise (Copilot review, round 1)** — this is
+      NOT a persistent-daemon system. `plugins/agent-ssh/README.md:10`
+      states the CLI "does not require a harness, daemon, or sibling
+      plugin"; `libs/ssh-manager/README.md:39-51` states its Windows proxy
+      broker explicitly "lives in the calling process and closes with its
+      SSH root... No persistent broker service or cached loopback port is
+      created." There is no long-lived resident process here for `zdd`
+      cutover semantics to attach to. Audit instead whether
+      `ssh_manager.forward_keeper` (`libs/ssh-manager/src/ssh_manager/forward_keeper.py`)
+      or any other spawned child can genuinely outlive its parent/session
+      across a release and accumulate — if nothing does, this phase's
+      correct conclusion may be "no cutover needed here; the
+      [`ephemeral-process-reaping`](../../../docs/patterns/ephemeral-process-reaping.md)
+      pattern (if not already applied) is the right fix for any leak found,
+      not `zdd`." Do not force this system into the cutover shape if the
+      audit finds nothing that needs it.
+- [ ] For each daemon confirmed to genuinely exist (not assumed), name the
+      concrete **safe cutover point** (the drain boundary):
       - `agent-worktrees status-monitor`: between sweep ticks (no in-flight
         non-resumable turn; each sweep is already a bounded, restartable unit).
       - `worktree-manager mux-daemon`: between mapping-registry mutations /
         republish cycles (mirrors the above).
-      - `agent-ssh`'s daemon(s): TBD in Phase 0's own investigation — likely
-        between tunnel-handshake completions, not mid-handshake.
+      - `agent-ssh`: pending Phase 0's audit outcome above.
 
 ### Phase 1 — `agent-worktrees` `status-monitor`
 - [ ] Vendor `zdd` into `plugins/agent-worktrees/libs/zdd/` (byte-identical
@@ -172,9 +183,17 @@ cover: `agent-worktrees`, `worktree-manager`, `agent-ssh`.**
       "before any repeated loop, subscription connection, request" framing
       — checked at the top of every sweep iteration, not only at daemon
       startup, so a same-tick rapid-fire re-release is still caught.
-- [ ] Add `plugin.json`: `"zeroDowntimeUpdate": true` (inert until/unless an
-      external installer consumes it, per the Phase 0 open question — still
-      correct metadata either way).
+- [ ] **Land `plugin.json`'s `"zeroDowntimeUpdate": true` atomically with
+      `scripts/install.ps1`/`install.sh` actually accepting and implementing
+      `-ZeroDowntime`, in the same PR — never as two separate steps.**
+      (Copilot review, round 1): `agent_worktrees.reconcile.runtime_installer_argv`
+      **already** reads this flag and appends `-ZeroDowntime` to a reconcile-
+      driven `install.ps1 update` for any plugin that sets it, but
+      agent-worktrees' own `scripts/install.ps1` does not yet declare that
+      parameter at all — setting the flag first, before the installer
+      supports it, would break reconcile-driven self-updates with a
+      parameter-binding failure the moment anything reconciles
+      agent-worktrees itself the same way it reconciles siblings.
 - [ ] Define the **hand-off manifest**: what "outstanding work" a
       `status-monitor` generation must persist for its successor (per-session
       claim/observation state it would otherwise reconstruct from scratch —
@@ -189,10 +208,25 @@ cover: `agent-worktrees`, `worktree-manager`, `agent-ssh`.**
       already the durable source of truth (confirmed this session) — likely
       needs no *new* breadcrumb, only a successor that reads it on boot
       (already true) and a predecessor that stops writing before exiting.
+- [ ] Apply Phase 1's same atomic-landing lesson here first: confirm whether
+      `worktree-manager` has (or `agent-worktrees` reconcile has) an
+      analogous flag/installer-argv coupling before setting any manifest
+      flag ahead of real installer support.
 
-### Phase 3 — `agent-ssh` (ssh-manager)
-- [ ] Depends on Phase 0's investigation outcome; likely mirrors Phase 1's
-      shape once the daemon inventory and installer seam are confirmed.
+### Phase 3 — `agent-ssh` (ssh-manager): audit first, cutover only if warranted
+- [ ] Run the Phase 0 audit (`forward_keeper.py` + any other spawned
+      children) to conclusion. **Do not assume a persistent daemon exists**
+      — confirmed this round of review that it does not, by design, for the
+      Windows proxy broker at least.
+- [ ] If the audit finds a genuine long-lived/leak-prone process: scope a
+      right-sized fix (full `zdd` cutover only if it is truly a persistent,
+      stateful daemon; otherwise the lighter `ephemeral-process-reaping`
+      pattern is more likely correct).
+- [ ] If the audit finds nothing: close this phase as "no cutover needed,"
+      not "done" — record the audit finding in the Journal so a later
+      re-check isn't repeated from scratch, and drop `agent-ssh` from
+      Phase 4's pattern-doc update (only real adopters belong in that
+      table).
 
 ### Phase 4 — Close the loop in the pattern doc itself
 - [ ] Add `agent-worktrees`, `worktree-manager`, `agent-ssh` rows to
@@ -224,6 +258,34 @@ cover: `agent-worktrees`, `worktree-manager`, `agent-ssh`.**
 _Pending._
 
 ## Journal
+
+### 2026-09-28 — Review round 1: three real corrections
+Automated PR review (the effort's own mandatory review gate) caught three
+real issues in the initial plan, all fixed before merge:
+1. **Publication safety** — the plan named the private `aperture-labs` org
+   and a path only that private repo has; genericized.
+2. **Ordering hazard in Phase 1/2** — `agent_worktrees.reconcile.
+   runtime_installer_argv` (`plugins/agent-worktrees/src/agent_worktrees/
+   reconcile.py:1298-1324`) **already** reads a plugin's
+   `plugin.json["zeroDowntimeUpdate"]` and appends `-ZeroDowntime` to a
+   reconcile-driven `install.ps1 update` for that plugin — but
+   agent-worktrees' own `scripts/install.ps1` does not yet accept that
+   switch. Setting the flag before the installer supports it would have
+   broken reconcile-driven self-updates with a parameter-binding failure.
+   Plan now requires the flag and the installer support to land in the same
+   PR, never as separate steps. This also resolves Phase 0's original "where
+   does the installer-driving mechanism live" open question: it's this
+   repo's own `reconcile.py`, not an external `dotfiles` repo.
+3. **Wrong premise for `agent-ssh`** — the plan assumed a persistent
+   tunnel/session daemon needing cutover semantics. `plugins/agent-ssh/
+   README.md` and `libs/ssh-manager/README.md` both explicitly document the
+   opposite: no daemon/harness required, and the Windows proxy broker
+   "lives in the calling process and closes with its SSH root... No
+   persistent broker service." Phase 3 rewritten to **audit first**
+   (starting with `forward_keeper.py`) and only add cutover machinery if the
+   audit actually finds a genuine long-lived process — otherwise the
+   correct fix is the lighter `ephemeral-process-reaping` pattern, or no fix
+   at all.
 
 ### 2026-09-28 — Kickoff
 - Effort created directly from the operator's own request, cross-referenced
