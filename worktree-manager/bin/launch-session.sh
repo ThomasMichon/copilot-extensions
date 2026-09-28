@@ -931,6 +931,25 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
     PYTHON="$_REFRESHED_PYTHON"
     setup_log INFO "Runtime refreshed before knowledge preflight: $PYTHON"
 
+    # Patch a stale `--runtime-python` embedded in CMD_ARRAY (#stale-venv).
+    # `resolve` (run BEFORE the update-apply above) bakes the interpreter that
+    # ran it (Python's `sys.executable`) into the plan's cmd as the literal
+    # `--runtime-python <path>` argument default-setup.sh will use. If
+    # stage-update swapped the runtime venv in between (installing a new
+    # version and pruning the old one's pyvenv.cfg / marker), that baked path
+    # now points at a partially-deleted venv -- rewrite it to the
+    # just-refreshed $PYTHON so the pane command always launches on a runtime
+    # that's actually still on disk.
+    for _i in "${!CMD_ARRAY[@]}"; do
+        if [[ "${CMD_ARRAY[$_i]}" == "--runtime-python" ]]; then
+            _next=$((_i + 1))
+            if [[ $_next -lt ${#CMD_ARRAY[@]} && "${CMD_ARRAY[$_next]}" != "$PYTHON" ]]; then
+                setup_log INFO "Patching stale --runtime-python in resolved plan: ${CMD_ARRAY[$_next]} -> $PYTHON"
+                CMD_ARRAY[$_next]="$PYTHON"
+            fi
+        fi
+    done
+
     _KNOWLEDGE_CWD="${STATUS_PATH:-${WORK_DIR:-$PWD}}"
     _KNOWLEDGE_ARGS=(-m agent_worktrees)
     [[ -n "$LAUNCH_PROJECT" ]] \
