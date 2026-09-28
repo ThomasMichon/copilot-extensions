@@ -276,7 +276,12 @@ jobs:
         # stays enforced. Each suite puts its own lib on `sys.path` from its
         # `tests/conftest.py`, as the sibling canonical-lib suites do -- run
         # one invocation per lib so a suite only ever sees its own `src`.
+        # `credential-relay`'s suite uses `@pytest.mark.asyncio` (its own
+        # `pyproject.toml` declares `pytest-asyncio` as a `dev` extra, never
+        # installed here since this job only installs bare `pytest`) --
+        # install it explicitly or collection fails outright.
         run: >-
+          python -m pip install pytest-asyncio &&
           python -m pytest -q libs/work-coalescing-singleton/tests &&
           python -m pytest -q libs/lazy-cli-dispatch/tests &&
           python -m pytest -q libs/credential-relay/tests

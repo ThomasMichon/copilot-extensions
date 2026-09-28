@@ -1510,5 +1510,16 @@ _Pending._
   `agent-bridge`, `agent-codespaces`); no changefile needed for the
   `.github/workflows/ci.yml` step extension
   (`check-changefile-presence.py` confirmed clean without one).
+- **Filed as PR #4363**, targeting `dev`. First review round found 2 real
+  findings, fixed in the same PR: (1) the new CI step's `checks` job only
+  installs bare `pytest` (never `pytest-asyncio`, which `credential-relay`'s
+  own suite needs for its `@pytest.mark.asyncio` tests) -- added an
+  explicit `pip install pytest-asyncio` to that step; (2) missed this
+  repo's required **Documentation impact** PR-description statement
+  (CONTRIBUTING.md) -- added one explaining why no authoritative doc
+  besides this effort's own journal is affected by an internal Phase 1
+  re-conversion.
 - **Next up**: `ssh-manager` (4 consumers), per the effort's own
-  smallest-blast-radius-first ordering.
+  smallest-blast-radius-first ordering. **Remember the Documentation
+  impact PR-description statement going forward** -- missed on both this
+  PR and #4331 (which already merged without it).
