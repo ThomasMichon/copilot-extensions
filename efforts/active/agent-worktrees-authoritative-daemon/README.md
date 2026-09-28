@@ -728,23 +728,29 @@ potentially-blocking bug -- two instances can race applying `mux-status-v1`
 writes to the same session, corrupting rendering in ways indistinguishable
 from the render-freeze bugs fixed above. Added to the facility's own
 error-response-discipline documentation as a cross-host/cross-OS trigger,
-with a fail-closed, identity-bound recipe (two rounds of Copilot review
+with a fail-closed, identity-bound recipe (three rounds of Copilot review
 correctly hardened this: first flagging the initial draft's naive "kill
 every non-owning PID from an earlier read" as racy, then flagging that even
 a fresh command-line check before a plain PID kill is still not
-reuse-safe -- the candidate can exit and its PID be reused between that
-check and the kill itself): **whenever an agent observes more than one
-resident `status-monitor` process on a single host, re-read the lock file
-(`locks.read_lock`) and check `locks.lock_is_live`** for each candidate PID's
-own recorded `start_time` (`plugins/agent-worktrees/src/agent_worktrees/locks.py`)
--- **note `lock_is_live` itself fails OPEN (treats a pid as live) when
-`start_time` is absent or unreadable, so it alone does not prove a candidate
-is stale; use it only to find the one entry the lock FILE claims as current
-owner, never as the sole basis for judging a candidate safe to kill** --
-then **terminate every OTHER candidate only via
-`procs.terminate_pid_if_identity(pid, expected_start_time)`**, never a plain
-`kill`/`Stop-Process` by bare PID: that helper binds the termination itself
-to the verified process identity (an open pidfd + start-time check on POSIX,
+reuse-safe, then flagging that the recipe still had no floor -- if the
+re-read finds no live owner at all, "kill every other candidate" degenerates
+into killing everything observed): **whenever an agent observes more than
+one resident `status-monitor` process on a single host, re-read the lock
+file (`locks.read_lock`) and check `locks.lock_is_live`** for each candidate
+PID's own recorded `start_time`
+(`plugins/agent-worktrees/src/agent_worktrees/locks.py`) -- **note
+`lock_is_live` itself fails OPEN (treats a pid as live) when `start_time` is
+absent or unreadable, so it alone does not prove a candidate is stale; use
+it only to find the one entry the lock FILE claims as current owner, never
+as the sole basis for judging a candidate safe to kill. If that re-read
+finds no parseable lock, or `lock_is_live` is false, or the claimed owner PID
+isn't present in a fresh process census, STOP -- there is no validated live
+owner to exclude, so no candidate may be terminated yet; re-enumerate (or
+just retry the whole check) until a real live owner is confirmed present.**
+Only once a validated live owner is confirmed, **terminate every OTHER
+candidate via `procs.terminate_pid_if_identity(pid, expected_start_time)`**,
+never a plain `kill`/`Stop-Process` by bare PID: that helper binds the
+termination itself to the verified process identity (an open pidfd + start-time check on POSIX,
 a creation-time check through the same handle `TerminateProcess` uses on
 Windows) and fails closed if the identity can't be proven, closing the
 reuse window a check-then-kill can never fully close on its own.
