@@ -1,0 +1,9 @@
+{
+  "comment": "finalize: add a backup open-PR gate (defense-in-depth against a worktree finalizing while its own attributed PR is still open)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "minor"
+    }
+  ]
+}

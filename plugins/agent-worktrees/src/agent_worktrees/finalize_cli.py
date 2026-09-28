@@ -46,6 +46,14 @@ def add_parsers(sub) -> None:
         help="With --abandon, affirmative recipient or cleanup flow "
         "that accepts responsibility for every re-homed resource",
     )
+    p.add_argument(
+        "--force-open-pr",
+        action="store_true",
+        help="Finalize past the backup open-PR gate even when a tracked PR "
+        "is, per a live re-check just performed, still genuinely open. "
+        "Only for a confirmed superseded/abandoned PR -- there is no soft "
+        "env-var bypass for this gate.",
+    )
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
     p.add_argument("--config", default=None)
 
@@ -308,6 +316,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
             dry_run=args.dry_run,
             abandon=abandon,
             handoff_to=handoff_to or None,
+            force_open_pr=getattr(args, "force_open_pr", False),
         )
 
         if use_json:

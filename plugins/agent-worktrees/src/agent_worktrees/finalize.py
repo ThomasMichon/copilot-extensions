@@ -1568,6 +1568,7 @@ def validate_and_finalize(
     dry_run: bool = False,
     abandon: bool = False,
     handoff_to: str | None = None,
+    force_open_pr: bool = False,
 ) -> bool:
     """Validate that worktree content is on upstream, then clean up.
 
@@ -1585,6 +1586,7 @@ def validate_and_finalize(
             escape hatch for the resource-obligation-settlement finalize gate.
         handoff_to: Required with ``abandon`` when obligations remain; the
             affirmative recipient or flow recorded on every orphan entry.
+        force_open_pr: Sole override for the backup open-PR gate.
 
     Returns:
         True on success, False if content is not yet on upstream.
@@ -1675,6 +1677,13 @@ def validate_and_finalize(
     # AGENT_WORKTREES_OBLIGATION_GATE=warn/off relaxes it, and --abandon overrides.
     if not _assert_obligations_settled(
         record, worktree_id, abandon=abandon, handoff_to=handoff_to,
+    ):
+        return False
+
+    # Backup open-PR gate (finalize_open_pr_gate.py); force_open_pr overrides.
+    from . import finalize_open_pr_gate
+    if not finalize_open_pr_gate.assert_no_live_pr(
+        record, config, worktree_id, force=force_open_pr,
     ):
         return False
 
