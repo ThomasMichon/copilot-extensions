@@ -735,6 +735,7 @@ PY
     # back once to the legacy restart path). Best-effort, never fatal.
     if ! $CONTEXTUAL_INSTALL; then
         AGENT_WORKTREES_MONITOR_WAS_LIVE="$monitor_was_live" \
+            PYTHONPATH= \
             "$VENV_PYTHON" - <<'PY' 2>&1 | sed 's/^/  → monitor: /' || true
 from agent_worktrees.status_monitor_cutover import installer_after_update
 raise SystemExit(installer_after_update())

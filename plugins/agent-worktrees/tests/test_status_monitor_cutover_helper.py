@@ -23,7 +23,7 @@ class _Handle:
 
 
 class _FakeDaemon:
-    def __init__(self, pid: int, *, port: int | None = None):
+    def __init__(self, pid: int, *, port: int | None = None, token: str = "test-token"):
         self.pid = pid
         self.port = port
         self.alive = True
@@ -34,11 +34,12 @@ class _FakeDaemon:
         self.busy = threading.Event()
         self.control = None
         self.promote_calls = 0
+        self.token = token
         if port is not None:
             self.start(port)
 
     def start(self, port: int | None = None) -> None:
-        self.control = smc.ControlServer(self._handle, port=port)
+        self.control = smc.ControlServer(self._handle, port=port, token=self.token)
         self.control.start()
         self.port = self.control.port
 
@@ -131,6 +132,7 @@ def test_activate_after_update_cuts_over_and_converges(tmp_path, monkeypatch):
 
     monkeypatch.setattr(smc, "routing_dir", lambda runtime_home=None: route_dir)
     monkeypatch.setattr(smc, "_monitor_lock_is_live", lambda: True)
+    monkeypatch.setattr(smc, "load_or_create_control_token", lambda runtime_home=None: "test-token")
     def _spawn(runtime_python, *, port):
         daemon = pending.pop(0)
         daemon.start(port)

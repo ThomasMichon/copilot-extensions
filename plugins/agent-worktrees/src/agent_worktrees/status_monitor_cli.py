@@ -509,8 +509,16 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     try:
         while True:
             _cleanup_retired_request_surfaces()
+            active_generation = status_monitor_cutover.active_generation_for_pid(os.getpid())
+            if active_generation is not None and not published_lock:
+                with state_lock:
+                    if not published_lock:
+                        published_lock = True
+                        _start_request_surfaces()
+                        _locks.write_lock(lock, extra=_lock_extra())
+                wake_event.set()
             if self_retire_generation is None:
-                self_retire_generation = status_monitor_cutover.active_generation_for_pid(os.getpid())
+                self_retire_generation = active_generation
                 if self_retire_generation is None and runtime_superseded():
                     break
             if shutdown_requested.is_set() and not _drain_busy_reasons():

@@ -813,11 +813,16 @@ function Invoke-VersionedActivate {
     # back once to the legacy restart path). Best-effort, never fatal.
     if (-not $ContextualInstall) {
         try {
+            $prevHelperPP = $env:PYTHONPATH
+            $env:PYTHONPATH = $null
             $env:AGENT_WORKTREES_MONITOR_WAS_LIVE = if ($monitorWasLive) { '1' } else { '0' }
             & $LinkPython -c 'from agent_worktrees.status_monitor_cutover import installer_after_update as _f; raise SystemExit(_f())' 2>&1 |
                 ForEach-Object { Write-ServiceChanged "monitor: $_" }
         } catch {}
-        finally { Remove-Item Env:AGENT_WORKTREES_MONITOR_WAS_LIVE -ErrorAction SilentlyContinue }
+        finally {
+            $env:PYTHONPATH = $prevHelperPP
+            Remove-Item Env:AGENT_WORKTREES_MONITOR_WAS_LIVE -ErrorAction SilentlyContinue
+        }
     }
     # #742: record the just-activated version as `last-known-good` so a future
     # marker-absent resolution (resolve-runtime.ps1 tier 2) prefers it over a

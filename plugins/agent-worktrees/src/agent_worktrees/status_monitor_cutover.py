@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import socket
 import socketserver
 import subprocess
@@ -40,12 +41,35 @@ def pick_free_port(bind: str = _BIND) -> int:
         return int(sock.getsockname()[1])
 
 
+def control_token_path(runtime_home: Path | None = None) -> Path:
+    return (runtime_home if runtime_home is not None else routing_dir().parent) / "status-monitor-control.token"
+
+
+def load_or_create_control_token(runtime_home: Path | None = None) -> str:
+    path = control_token_path(runtime_home)
+    try:
+        token = path.read_text(encoding="utf-8").strip()
+        if token:
+            return token
+    except OSError:
+        pass
+    token = secrets.token_urlsafe(32)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(token + "\n", encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+    return token
+
+
 class _ControlServer(socketserver.ThreadingTCPServer):
     allow_reuse_address = False
     daemon_threads = True
 
-    def __init__(self, address, handler, *, owner):
+    def __init__(self, address, handler, *, owner, token: str):
         self.owner = owner
+        self.token = token
         super().__init__(address, handler)
 
     def process_request(self, request, client_address) -> None:
@@ -69,7 +93,12 @@ class _ControlHandler(socketserver.StreamRequestHandler):
             self.request.settimeout(_READ_TIMEOUT_S)
             raw = self.rfile.readline(256 * 1024)
             request = json.loads(raw.decode("utf-8"))
-            if not isinstance(request, dict):
+            if (
+                not isinstance(request, dict)
+                or not secrets.compare_digest(
+                    str(request.get("token") or ""), self.server.token  # type: ignore[attr-defined]
+                )
+            ):
                 return
             action = str(request.get("action") or "health")
             payload = request.get("payload")
@@ -89,12 +118,19 @@ class _ControlHandler(socketserver.StreamRequestHandler):
 class ControlServer:
     """Loopback control plane for the resident status-monitor."""
 
-    def __init__(self, handle: Callable[[str, dict], dict], *, port: int | None = None):
+    def __init__(
+        self,
+        handle: Callable[[str, dict], dict],
+        *,
+        port: int | None = None,
+        token: str | None = None,
+    ):
         self._handle = handle
         self._active_handlers = 0
         self._active_handlers_lock = threading.Lock()
+        self.token = token or load_or_create_control_token()
         bind = (_BIND, int(port) if port is not None else 0)
-        self.server = _ControlServer(bind, _ControlHandler, owner=self)
+        self.server = _ControlServer(bind, _ControlHandler, owner=self, token=self.token)
         self.thread = threading.Thread(
             target=self.server.serve_forever,
             name="agent-worktrees-status-monitor-control",
@@ -132,19 +168,27 @@ class ControlServer:
 class ControlClient:
     """Small JSON-line client for the status-monitor control surface."""
 
-    def __init__(self, base_url: str, *, config_dir: Path | None = None, timeout: float = 5.0):
+    def __init__(
+        self,
+        base_url: str,
+        *,
+        token: str | None = None,
+        config_dir: Path | None = None,
+        timeout: float = 5.0,
+    ):
         parsed = urlparse(base_url)
         if parsed.scheme not in ("http", "") or not parsed.hostname or parsed.port is None:
             raise ValueError(f"invalid status-monitor control URL: {base_url!r}")
         self.host = parsed.hostname
         self.port = int(parsed.port)
         self.base_url = base_url
+        self.token = token or load_or_create_control_token()
         self.config_dir = Path(config_dir) if config_dir is not None else None
         self.timeout = timeout
 
     def _request(self, action: str, payload: dict | None = None) -> dict:
         body = json.dumps(
-            {"version": 1, "action": action, "payload": payload or {}},
+            {"version": 1, "token": self.token, "action": action, "payload": payload or {}},
             separators=(",", ":"),
         ).encode("utf-8") + b"\n"
         with socket.create_connection((self.host, self.port), timeout=self.timeout) as sock:
@@ -171,7 +215,10 @@ class ControlClient:
             active = routing.read_active_endpoint(self.config_dir, verify_listener=False)
             if active is not None and active.base_url != self.base_url:
                 promoted = ControlClient(
-                    active.base_url, config_dir=self.config_dir, timeout=self.timeout
+                    active.base_url,
+                    token=self.token,
+                    config_dir=self.config_dir,
+                    timeout=self.timeout,
                 ).promote()
                 if not promoted.get("adopted"):
                     raise ValueError("status-monitor successor refused promotion")
@@ -195,10 +242,10 @@ class ControlClient:
 
 def spawn_passive(runtime_python: str, *, port: int):
     from . import status_monitor_runtime as smr
+    core = smr._core()
 
     child_env = smr._daemon_environment()
     child_env["AGENT_WORKTREES_STATUS_MONITOR_ROUTING_DIR"] = str(routing_dir())
-    child_env.update(windowless_python_env(runtime_python))
     kwargs: dict[str, object] = {
         "env": child_env,
         "cwd": smr._daemon_cwd(),
@@ -206,19 +253,22 @@ def spawn_passive(runtime_python: str, *, port: int):
         "stdout": subprocess.DEVNULL,
         "stderr": subprocess.DEVNULL,
     }
-    kwargs.update(detached_kwargs())
-    return subprocess.Popen(  # noqa: S603
-        [
-            windowless_python(runtime_python),
-            "-m",
-            "agent_worktrees",
-            "status-monitor",
-            "--passive",
-            "--control-port",
-            str(port),
-        ],
-        **kwargs,
-    )
+    argv = [
+        runtime_python,
+        "-m",
+        "agent_worktrees",
+        "status-monitor",
+        "--passive",
+        "--control-port",
+        str(port),
+    ]
+    if os.name == "nt":
+        kwargs.update(core.windowless_daemon_kwargs(breakaway=True))
+    else:
+        argv[0] = windowless_python(runtime_python)
+        child_env.update(windowless_python_env(runtime_python))
+        kwargs.update(detached_kwargs())
+    return subprocess.Popen(argv, **kwargs)  # noqa: S603
 
 
 def _monitor_control_url_from_route() -> str | None:
@@ -236,7 +286,8 @@ def _monitor_lock_is_live() -> bool:
 
 def _health_check(host: str, port: int) -> bool:
     try:
-        return ControlClient(f"http://{host}:{port}").health().get("status") != "draining"
+        status = ControlClient(f"http://{host}:{port}").health()
+        return status.get("status") != "draining"
     except Exception:
         return False
 

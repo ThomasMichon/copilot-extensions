@@ -109,6 +109,7 @@ def test_real_status_monitor_cutover_drains_live_classify_request(monkeypatch) -
     monkeypatch.setenv("AGENT_HOME", str(home))
     monkeypatch.setenv("PATH", env["PATH"])
     monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "1")
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", env["PYTEST_CURRENT_TEST"])
 
     install_dir = home / ".agent-worktrees"
     registry = install_dir / "status-monitor.d"
@@ -165,6 +166,8 @@ def test_real_status_monitor_cutover_drains_live_classify_request(monkeypatch) -
         assert not hook_thread.is_alive(), "delayed hook did not drain to completion"
         assert hook_response.get("version") == 1
         assert locks.pid_alive(new_pid)
+        new_lock = _read_json(lock_path)
+        assert "hook_endpoint" in new_lock and "classify_endpoint" in new_lock
     finally:
         for pid in pids_to_kill:
             try:
