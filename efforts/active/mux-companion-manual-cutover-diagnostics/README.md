@@ -122,15 +122,17 @@ view highlighting whether resolved head matches the just-resumed session).
       on-demand call (or the real daemon, if running) safely no-ops via the
       existing hardlink claim (unchanged, untouched by this step).
 
-### Step 4 — `worktree-manager`: Mux Companion UI
-- [ ] "Cut over" button, shown only when `pending_handoff` is set; invokes
-      Step 3's verb (with Step 2's `--force` upstream of it, as needed for
-      the ledger to exist for the verb to find).
-- [ ] Session-lineage table gains a head-match marker (does resolved head
-      point at the session the operator most recently resumed) and a manual
-      refresh key, so reopening Ctrl-K after a `/clear` + paste-seed shows
-      updated state without exiting Mux.
-- [ ] Explicitly NOT built (per the operator's own request): no
+### Step 4 — `worktree-manager`: Mux Companion UI (Done 2026-09-28)
+- [x] "Cut over" button, shown only when `pending_handoff` is set (disabled
+      otherwise); invokes Step 3's verb directly. Step 3 was extended to
+      auto-arm the ledger from the unconditionally-written session-state
+      marker itself, so the Companion never needs to separately shell out
+      to context-handoff's `--force` -- one call, one process boundary.
+- [x] "Refresh" button reloads the whole view (status + lineage + pending-
+      handoff + Cut-over enablement) in place, so reopening after a manual
+      `/clear` + paste-seed resume, or after Cut over, shows updated state
+      without exiting Mux.
+- [x] Explicitly NOT built (per the operator's own request): no
       auto-repair-head or auto-file-a-bug action in the Companion itself --
       a detected mismatch is surfaced for the operator to hand to the
       current session to patch up and file, not acted on by the Companion.
@@ -142,7 +144,7 @@ view highlighting whether resolved head matches the just-resumed session).
       and the predecessor pane retires.
 - [ ] Live-tested: after a manual `/clear` + paste-`HANDOFF_SEED` resume
       (no button), reopening the Companion shows the new session as head.
-- [ ] Unit tests green per step; `tools/check-module-size.py` clean.
+- [x] Unit tests green per step; `tools/check-module-size.py` clean.
 
 ## Journal
 
@@ -211,3 +213,68 @@ view highlighting whether resolved head matches the just-resumed session).
   `tools/check-module-size.py` clean after the baseline nudge.
 - **Next up**: Step 4 (Mux Companion "Cut over" button + refreshable
   session-lineage/head-match verification) -- the last step.
+
+### 2026-09-28 — Step 3 revisited + Step 4 complete: this effort's Plan is fully executed
+- **Revisited Step 3 before building the Companion on top of it**: the
+  original design assumed the Companion would separately call
+  context-handoff's `trigger --force` (Step 2) to arm the ledger, THEN call
+  `handoff-cutover-trigger`. Building Step 4 surfaced that this means a
+  SECOND process boundary (the Companion, Python, would need to locate and
+  shell out to a Node CLI too) for something `handoff-cutover-trigger`
+  could arm itself, in pure Python, using data ALREADY available to it:
+  the session-state `handoff-request.json` marker `writeSessionStateHandoff`
+  writes UNCONDITIONALLY (regardless of mode) already carries the exact
+  `handoffId`/token `tracking.open_handoff` needs. Added
+  `_arm_pending_handoff_from_session_state` to `handoff-cutover-trigger`:
+  before running the daemon's own choreography, it scans the worktree's
+  registered sessions for an unconsumed session-state marker not yet
+  reflected in the ledger, and opens it directly (idempotent -- a token
+  already present is left alone). This means `handoff-cutover-trigger`
+  now works standing completely alone, whether or not `--force` was ever
+  separately invoked -- Step 2's `--force` remains independently valuable
+  as a plain CLI escape hatch (matching the operator's own "prepare"/
+  "trigger"/"force" mental model) but is no longer load-bearing for the
+  Companion's own "Cut over" button. 2 new tests
+  (`test_arms_ledger_from_unconsumed_session_state_marker_before_
+  processing`, `test_does_not_rearm_an_already_open_token`) -- 6/6 in
+  `TestCmdHandoffCutoverTrigger`, 109/109 in the full file.
+- **Step 4**: `handoff_client.trigger_cutover()` shells out to
+  `handoff-cutover-trigger --json`; the Companion gains a "Cut over" button
+  (enabled only when `pending_handoff` is set) and a "Refresh" button, both
+  driving a new `_refresh_view()` that reloads `_load_current_worktree()`
+  and repaints status/lineage/pending-handoff/button-enablement in place --
+  satisfying post-cutover-head-verification's "refreshable on demand, not
+  just at popup-open" requirement without needing a separate head-match
+  marker (the lineage table's existing `●` head marker already IS that,
+  once reloaded). A "Cut over" outcome (or failure) renders as a message
+  below the status explanation. Per the operator's own explicit request,
+  NO auto-repair or auto-file-a-bug action exists anywhere in the Companion.
+- **Found and fixed a genuine pre-existing bug while writing the first-ever
+  real Textual mount test for this file**: `mux_companion.py`'s CSS used
+  Rich-style numbered grey names (`grey19`/`grey27`/`grey42`/`grey70`),
+  which the installed Textual version's CSS parser rejects outright
+  ("Did you mean 'grey'?") -- the app had literally never been mounted by
+  any test before (the file's own docstring said so explicitly: "not any
+  Textual rendering"), so this had shipped broken and unnoticed. Replaced
+  every occurrence with equivalent hex (`#303030`/`#454545`/`#6c6c6c`/
+  `#b2b2b2`) across the WHOLE file (my own new CSS rules used the same
+  broken names, too, copying the existing style). Verified by adding one
+  real `run_test()`-driven end-to-end test (compose -> mount -> click
+  "Cut over" -> observe the repainted status/lineage/button state) --
+  the first genuine integration-level coverage this module has ever had,
+  not just its pure-function unit tests.
+- Tests: `test_mux_companion.py` 20/20 (6 new: action-message rendering,
+  4 pure `_cut_over()` behavior tests, 1 end-to-end `run_test()` test).
+  Full `tests/` suite green apart from 3 already-known-pre-existing,
+  unrelated failures (the machine-load-sensitive Picker modal-timing flake
+  documented in earlier phases; two genuinely unrelated failures --
+  `test_mux_daemon.py`'s backstop-cadence test and `test_trusted_
+  materializer_parity.py`'s editable-reference test -- both reproduced
+  identically on an unmodified checkout via `git stash`). `tools/check-
+  module-size.py` clean.
+- **This is the last step in this effort's Plan.** The Validation Plan's
+  two live-test items are the operator's own to exercise (a real pending
+  handoff, a real manual `/clear` + paste-seed resume) -- left unchecked
+  here since they need the operator's own worktree/session, not something
+  checkable from within a dev session. Everything buildable is built and
+  merged.

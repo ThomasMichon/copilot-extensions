@@ -1,20 +1,28 @@
 """Mux Companion (visions/mux-companion).
 
-A hotkey-summoned, read-only in-session view for the **current worktree** --
-resolved from the process's own cwd, the same way the status bar / status
-core resolve it (``agent-worktrees status-segment --json``, the same
-non-daemon classify pass the mux bar itself uses). It explains the worktree's
-status in plain language and lists its session lineage with the current head
-clearly marked.
+A hotkey-summoned in-session view for the **current worktree** -- resolved
+from the process's own cwd, the same way the status bar / status core
+resolve it (``agent-worktrees status-segment --json``, the same non-daemon
+classify pass the mux bar itself uses). It explains the worktree's status in
+plain language and lists its session lineage with the current head clearly
+marked.
 
-v1 is deliberately view-only: no session switching, resume, or head override
-lives here yet. That is a distinct, later feature
-(visions/mux-companion §Features/break-glass-head-override) and must not be
-folded in silently -- see the vision's Non-Goals.
+v1 was view-only. mux-companion-manual-cutover-diagnostics (#4369) adds
+exactly two explicit, human-gated actions, both bounded by the vision's own
+Non-Goals: "Cut over" (manual-cutover-trigger) invokes the SAME graceful
+claim/spawn/retire machinery `mode: auto` runs automatically, on direct
+button press only, for a baton that already exists -- never composing or
+deciding a handoff itself; and "Refresh" reloads the view in place
+(post-cutover-head-verification) so reopening after a manual `/clear` +
+paste-seed resume, or after "Cut over", shows current state without exiting
+Mux. Session switching and the raw break-glass head override remain a
+distinct, later feature (visions/mux-companion §Features/break-glass-head-
+override) and must not be folded in silently.
 
 Reaches the ``agent-worktrees`` engine only through the same process-boundary
-``engine_client`` module the Picker uses (subprocess + JSON, never an
-``import`` of the plugin) -- see ``engine_client``'s own module docstring.
+``engine_client``/``handoff_client`` modules the Picker uses (subprocess +
+JSON, never an ``import`` of the plugin) -- see ``engine_client``'s own
+module docstring.
 """
 
 from __future__ import annotations
@@ -198,22 +206,21 @@ def _closure_explanation(row: dict) -> list[str]:
 
 
 class MuxCompanionApp(App):
-    """Read-only status + session-lineage view for the CURRENT worktree.
-
-    View-only by design (v1): explains status, lists lineage, marks the head
-    -- no resume/switch/override action lives here yet. Styled to match the
-    Worktree Manager's own Picker palette (grey/orange chrome, per-state
-    colors) rather than Textual's default theme.
+    """Status + session-lineage view for the CURRENT worktree, plus two
+    explicit, human-gated actions ("Cut over", "Refresh") -- see the module
+    docstring for the exact boundary. Styled to match the Worktree Manager's
+    own Picker palette (grey/orange chrome, per-state colors) rather than
+    Textual's default theme.
     """
 
     CSS = """
     Screen {
         background: #1a1a1a;
-        border: round grey42;
+        border: round #6c6c6c;
     }
 
     Header {
-        background: grey19;
+        background: #303030;
         color: white;
         text-style: bold;
     }
@@ -225,7 +232,7 @@ class MuxCompanionApp(App):
 
     #lineage-label {
         padding: 0 2;
-        color: grey70;
+        color: #b2b2b2;
         text-style: bold;
     }
 
@@ -240,23 +247,31 @@ class MuxCompanionApp(App):
         align: center middle;
     }
 
-    #exit-btn {
+    #exit-btn, #cutover-btn, #refresh-btn {
         width: 24;
-        background: grey27;
+        background: #454545;
         color: white;
         border: none;
+        margin: 0 1;
     }
 
-    #exit-btn:focus {
+    #exit-btn:focus, #cutover-btn:focus, #refresh-btn:focus {
         background: #d78700;
         color: black;
         text-style: bold;
+    }
+
+    #cutover-btn:disabled {
+        background: #303030;
+        color: #6c6c6c;
     }
     """
 
     def __init__(self, cwd: str | None = None) -> None:
         super().__init__()
+        self._cwd = cwd
         self._data = _load_current_worktree(cwd)
+        self._action_message: Text | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
@@ -268,31 +283,52 @@ class MuxCompanionApp(App):
             )
             yield DataTable(id="lineage")
         with Horizontal(id="footer-row"):
+            if not self._data.error:
+                yield Button("Cut over", id="cutover-btn")
+                yield Button("Refresh", id="refresh-btn")
             yield Button("Exit", id="exit-btn")
         yield Footer()
 
     def on_mount(self) -> None:
+        self._refresh_view(reload=False)
+
+    def _refresh_view(self, *, reload: bool = True) -> None:
+        """(Re)paint the whole view from ``self._data`` -- optionally
+        reloading it first (visions/mux-companion §post-cutover-head-
+        verification: refreshable on demand, not just at popup-open, so
+        reopening after a manual ``/clear`` + paste-seed resume, or pressing
+        "Cut over" in THIS popup, shows current state without exiting Mux)."""
+        if reload:
+            self._data = _load_current_worktree(self._cwd)
         row = self._data.worktree
         self.title = str(row.get("id") or "Mux Companion")
         repo = row.get("repo") or "?"
         branch = row.get("branch") or "?"
         self.sub_title = f"{repo} \u00b7 {branch}"
+        self.query_one("#status", Static).update(self._status_text())
         if self._data.error:
             return
         table = self.query_one("#lineage", DataTable)
+        table.clear(columns=True)
         table.cursor_type = "row"
         table.add_columns("", "Session", "State", "Turns", "Updated")
-        for row in self._data.sessions:
-            sid = str(row.get("id") or "")
+        for session_row in self._data.sessions:
+            sid = str(session_row.get("id") or "")
             short_id = sid if len(sid) <= 12 else f"{sid[:10]}\u2026"
             table.add_row(
-                "\u25cf" if row.get("is_head") else "",
+                "\u25cf" if session_row.get("is_head") else "",
                 short_id,
-                str(row.get("state") or "active"),
-                str(row.get("turn_count") or 0),
-                str(row.get("updated_at") or "")[:19],
+                str(session_row.get("state") or "active"),
+                str(session_row.get("turn_count") or 0),
+                str(session_row.get("updated_at") or "")[:19],
                 key=sid or None,
             )
+        try:
+            cutover_btn = self.query_one("#cutover-btn", Button)
+        except Exception:
+            cutover_btn = None
+        if cutover_btn is not None:
+            cutover_btn.disabled = not bool(self._data.pending_handoff)
 
     def _status_text(self) -> Text:
         text = Text()
@@ -313,11 +349,50 @@ class MuxCompanionApp(App):
         if pending and pending.get("title"):
             text.append("\u23f3 Pending handoff: ", style="bold #d7af00")
             text.append(str(pending["title"]) + "\n")
+        if self._action_message is not None:
+            text.append("\n")
+            text.append_text(self._action_message)
         return text
+
+    def _cut_over(self) -> None:
+        """visions/mux-companion §manual-cutover-trigger: an explicit,
+        human-gated on-demand invocation of the SAME claim -> spawn-successor
+        -> retire-predecessor machinery `mode: auto` runs automatically --
+        never inferred, only on this direct button press. Shells out to
+        agent-worktrees' `handoff-cutover-trigger` verb (mux-companion-
+        manual-cutover-diagnostics, #4369); the Companion holds no cutover
+        logic of its own, per companion-reads-handoff-schema-never-drives-it."""
+        worktree_id = self._data.worktree.get("id")
+        if not worktree_id:
+            return
+        try:
+            result = hc.trigger_cutover(None, str(worktree_id))
+        except ec.EngineError as exc:
+            self._action_message = Text(f"Cut over failed: {exc}", style="bold red")
+            self._refresh_view(reload=False)
+            return
+        if result.get("changed"):
+            head_before = result.get("head_before") or "(none)"
+            head_after = result.get("head_after") or "(none)"
+            self._action_message = Text(
+                f"\u2713 Cut over: head {head_before} \u2192 {head_after}",
+                style="bold #00af00",
+            )
+        else:
+            self._action_message = Text(
+                "Cut over: no actionable pending handoff was found.",
+                style="#d78700",
+            )
+        self._refresh_view()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "exit-btn":
             self.exit()
+        elif event.button.id == "refresh-btn":
+            self._action_message = None
+            self._refresh_view()
+        elif event.button.id == "cutover-btn":
+            self._cut_over()
 
 
 def run() -> int:

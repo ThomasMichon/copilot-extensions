@@ -44,6 +44,8 @@ def _unsupported_hosted_launch(*args, **kwargs): return _core()._unsupported_hos
 def _pending_handoff_retire_requests(*args, **kwargs): return _core()._pending_handoff_retire_requests(*args, **kwargs)
 def _monitor_retire_handoff_predecessor(*args, **kwargs): return _core()._monitor_retire_handoff_predecessor(*args, **kwargs)
 def _monitor_maybe_process_handoff_record(*args, **kwargs): return _core()._monitor_maybe_process_handoff_record(*args, **kwargs)
+def _monitor_session_state_handoff_path(*args, **kwargs): return _core()._monitor_session_state_handoff_path(*args, **kwargs)
+def _monitor_read_session_state_handoff(*args, **kwargs): return _core()._monitor_read_session_state_handoff(*args, **kwargs)
 def resolve_worktree_id_by_codename(*args, **kwargs): return _core().resolve_worktree_id_by_codename(*args, **kwargs)
 
 
@@ -884,6 +886,47 @@ def cmd_handoffs_check(args: argparse.Namespace) -> int:
     return 0
 
 
+def _arm_pending_handoff_from_session_state(record) -> bool:
+    """Best-effort: if a registered session's session-state
+    ``handoff-request.json`` marker names an unconsumed handoff with no
+    matching entry in ``record.handoffs`` yet, open it now
+    (``tracking.open_handoff``) -- mirroring exactly what ``note-handoff``
+    (called from context-handoff's ``trigger_handoff`` when ``mode: auto``,
+    or its ``force`` bypass) would have done. This is what lets
+    ``handoff-cutover-trigger`` work end-to-end even when the operator never
+    ran a ``--force`` trigger separately: the session-state marker
+    (``writeSessionStateHandoff``) is written UNCONDITIONALLY by
+    ``triggerHandoff()`` regardless of mode, so it is always available here;
+    only the ledger entry ``_monitor_pending_handoff_request`` scans was
+    ever mode-gated. Idempotent (``open_handoff`` returns the existing entry
+    for a token already present) and scoped to a session actually tracked on
+    THIS record. Returns whether an entry was (already, or newly) armed."""
+    open_handoff = tracking.open_handoff
+    existing_tokens = {h.token for h in record.handoffs}
+    armed = False
+    for entry in getattr(record, "sessions", None) or []:
+        sid = entry.session_id
+        path = _monitor_session_state_handoff_path(sid)
+        if path is None or not path.exists():
+            continue
+        request = _monitor_read_session_state_handoff(path)
+        if not request or request.get("consumed"):
+            continue
+        token = str(request.get("handoffId") or "").strip()
+        if not token:
+            continue
+        if token in existing_tokens:
+            armed = True
+            continue
+        try:
+            open_handoff(record, sid, token, save=False)
+        except Exception:
+            continue
+        existing_tokens.add(token)
+        armed = True
+    return armed
+
+
 def cmd_handoff_cutover_trigger(args: argparse.Namespace) -> int:
     """Explicit, on-demand invocation of the resident status-monitor's own
     per-worktree pending-handoff pickup+retire choreography, for exactly one
@@ -900,6 +943,12 @@ def cmd_handoff_cutover_trigger(args: argparse.Namespace) -> int:
     second concurrent call (or a genuinely running daemon) safely no-op
     rather than double-spawn.
 
+    Before the pickup choreography runs, best-effort arms any pending
+    session-state handoff marker that isn't yet reflected in the ledger
+    (see :func:`_arm_pending_handoff_from_session_state`) -- so this verb
+    works standing alone, whether or not the operator separately ran
+    context-handoff's ``trigger --force``.
+
     A worktree with nothing actionable pending is a silent, successful
     no-op, not an error -- pressing "Cut over" when nothing is pending must
     never look like a bug. Reports the resolved head and session count
@@ -914,6 +963,10 @@ def cmd_handoff_cutover_trigger(args: argparse.Namespace) -> int:
     before = tracking.load_record(record_path)
     before_head = before.resolved_head_session
     before_sessions = len(getattr(before, "sessions", None) or [])
+
+    if _arm_pending_handoff_from_session_state(before):
+        tracking.save_record(before, record_path)
+        before = tracking.load_record(record_path)
 
     _monitor_maybe_process_handoff_record(before)
 

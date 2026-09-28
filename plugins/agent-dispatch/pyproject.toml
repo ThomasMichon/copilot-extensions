@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-dispatch"
-version = "0.6.1-dev1"
+version = "0.6.2-dev1"
 description = "Portable agent task-queue + per-host coordinator: a single-writer SQLite work queue so agents coordinate without push latency or an account per agent."
 readme = "README.md"
 license = "MIT"
@@ -39,9 +39,12 @@ agent-dropin-registry = { path = "libs/dropin-registry" }
 agent-plugin-activation = { path = "libs/plugin-activation" }
 # Copilot CLI + Claude marketplace/plugin/settings resolution.
 agent-plugin-resolve = { path = "libs/plugin-resolve" }
-# Single-instance lease (module ``single_instance_lease``). Vendored per
-# plugin; byte-identical src across copies. Supplies the shared fail-safe
-# supersession decision (``is_superseded``) that ``self_retire.py`` wraps.
+# Single-instance lease (module ``single_instance_lease``). Supplies the
+# shared fail-safe supersession decision (``is_superseded``) that
+# ``self_retire.py`` wraps. This is a `uv`-editable canonical reference
+# (vendor-pointer-generalization effort, Phase 1): `path` escapes this
+# plugin's own root and resolves live to `libs/single-instance-lease`, so
+# every consumer shares one canonical copy.
 agent-single-instance-lease = { path = "libs/single-instance-lease" }
 
 [project.optional-dependencies]

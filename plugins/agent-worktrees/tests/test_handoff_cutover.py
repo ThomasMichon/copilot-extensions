@@ -3201,6 +3201,77 @@ class TestCmdHandoffCutoverTrigger:
         assert out["head_after"] == "successor-1"
         assert out["session_count_after"] == out["session_count_before"] + 1
 
+    def test_arms_ledger_from_unconsumed_session_state_marker_before_processing(
+        self, monkeypatch, tmp_path, tmp_tracking_dir, monkeypatch_config,
+    ):
+        # #mux-companion-manual-cutover-diagnostics: the ledger entry
+        # (record.handoffs) is what triggerHandoff() withholds under
+        # manual-only mode (PR #3041) -- but the session-state marker
+        # (writeSessionStateHandoff) is written UNCONDITIONALLY. This verb
+        # must arm the ledger from that marker itself, so it works even when
+        # the operator never separately ran `trigger --force`.
+        from agent_worktrees import tracking as _tracking
+
+        path = self._record(tmp_tracking_dir, "wt-trigger-4")
+        _tracking.register_session("wt-trigger-4", "predecessor-2")
+        marker_path = tmp_path / "handoff-request.json"
+        marker_path.write_text(json.dumps({
+            "handoffId": "handoff-predecessor-2", "sessionId": "predecessor-2",
+            "consumed": False,
+        }), encoding="utf-8")
+        monkeypatch.setattr(
+            m, "_monitor_session_state_handoff_path",
+            lambda sid: marker_path if sid == "predecessor-2" else None,
+        )
+        seen_records = []
+        monkeypatch.setattr(
+            m, "_monitor_maybe_process_handoff_record",
+            lambda record: seen_records.append(record),
+        )
+
+        rc = m.cmd_handoff_cutover_trigger(
+            argparse.Namespace(worktree_id="wt-trigger-4", json=True))
+
+        assert rc == 0
+        assert len(seen_records) == 1
+        tokens = {h.token for h in seen_records[0].handoffs}
+        assert "handoff-predecessor-2" in tokens
+        # The ledger entry is durable -- reloading the record from disk
+        # (not just the in-memory object passed to the stub) shows it too.
+        reloaded = _tracking.load_record(path)
+        assert any(h.token == "handoff-predecessor-2" for h in reloaded.handoffs)
+
+    def test_does_not_rearm_an_already_open_token(
+        self, monkeypatch, tmp_path, tmp_tracking_dir, monkeypatch_config,
+    ):
+        from agent_worktrees import tracking as _tracking
+
+        path = self._record(tmp_tracking_dir, "wt-trigger-5")
+        _tracking.register_session("wt-trigger-5", "predecessor-3")
+        loaded = _tracking.load_record(path)
+        _tracking.open_handoff(loaded, "predecessor-3", "handoff-predecessor-3")
+        _tracking.save_record(loaded, path)
+        marker_path = tmp_path / "handoff-request.json"
+        marker_path.write_text(json.dumps({
+            "handoffId": "handoff-predecessor-3", "sessionId": "predecessor-3",
+            "consumed": False,
+        }), encoding="utf-8")
+        monkeypatch.setattr(
+            m, "_monitor_session_state_handoff_path",
+            lambda sid: marker_path if sid == "predecessor-3" else None,
+        )
+        seen_records = []
+        monkeypatch.setattr(
+            m, "_monitor_maybe_process_handoff_record",
+            lambda record: seen_records.append(len(record.handoffs)),
+        )
+
+        rc = m.cmd_handoff_cutover_trigger(
+            argparse.Namespace(worktree_id="wt-trigger-5", json=True))
+
+        assert rc == 0
+        assert seen_records == [1]  # still exactly one entry -- not duplicated
+
     def test_human_readable_output_when_nothing_changed(
         self, monkeypatch, capsys, tmp_tracking_dir, monkeypatch_config,
     ):

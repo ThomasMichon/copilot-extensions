@@ -327,7 +327,8 @@ jobs:
           python -m pytest -q libs/lazy-cli-dispatch/tests &&
           python -m pytest -q libs/credential-relay/tests &&
           python -m pytest -q libs/ssh-manager/tests &&
-          python -m pytest -q libs/agent-procutil/tests
+          python -m pytest -q libs/agent-procutil/tests &&
+          python -m pytest -q libs/single-instance-lease/tests
       - name: Plugin resolution contract tests
         run: python -m pytest -q libs/plugin-resolve/tests
       - name: Vendored library synchronization

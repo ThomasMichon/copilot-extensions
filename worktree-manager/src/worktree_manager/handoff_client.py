@@ -1,9 +1,12 @@
-"""Read-only pending-handoff lookup (#3307 Phase 8, visions/mux-companion).
+"""Read-only pending-handoff lookup (#3307 Phase 8, visions/mux-companion),
+plus the explicit, on-demand cutover trigger
+(mux-companion-manual-cutover-diagnostics, #4369).
 
 Split out of ``engine_client.py`` (module-size cap): resolving and reading a
 worktree's pending context-handoff baton is a cohesive, separable concern
 from that module's general ``--json`` verb plumbing, even though it reuses
-``engine_client``'s own process-boundary ``_run`` helper and ``EngineError``.
+``engine_client``'s own process-boundary ``_run``/``run_json`` helpers and
+``EngineError``.
 """
 
 from __future__ import annotations
@@ -11,7 +14,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .engine_client import EngineError, _run
+from .engine_client import EngineError, _run, run_json
 
 
 def worktree_state_dir(
@@ -84,3 +87,26 @@ def pending_handoff(
         "createdAt": best.get("createdAt"),
         "sessionId": best.get("sessionId"),
     }
+
+
+def trigger_cutover(
+    project: str | None,
+    worktree_id: str,
+    *,
+    runner=None,
+) -> dict:
+    """Explicit, on-demand invocation of ``agent-worktrees``'
+    ``handoff-cutover-trigger`` verb for ONE worktree
+    (mux-companion-manual-cutover-diagnostics, #4369) -- the manual-
+    cutover-trigger Feature (visions/mux-companion). This IS the human
+    action (the Companion's "Cut over" button); there is no separate
+    read-only preview to call first. Returns the engine's own
+    ``{worktree_id, head_before, head_after, session_count_before,
+    session_count_after, changed}`` envelope. Raises :class:`EngineError`
+    on any resolution failure (unadopted worktree, engine unreachable) --
+    the Companion surfaces that as a visible error, never silently."""
+    return run_json(
+        project,
+        ["handoff-cutover-trigger", "--worktree-id", worktree_id, "--json"],
+        runner=runner,
+    )

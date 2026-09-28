@@ -76,7 +76,16 @@ python -m pytest
 
 ## Vendoring
 
-Like the other shared libs (`zdd`, `ssh-manager`, ...), this is vendored per
-consuming plugin at `plugins/<plugin>/libs/single-instance-lease/`. Every copy's
-`src/` tree and version must stay byte-identical (enforced by
-`tools/check-vendored-libs-sync.py`).
+**In dev**, every consumer's `pyproject.toml` references this library through
+a `uv`-editable canonical pointer (`vendor-pointer-generalization` effort,
+Phase 1) --
+`agent-single-instance-lease = { path = "../../libs/single-instance-lease",
+editable = true }` -- so every consumer resolves to this one source tree; there
+is no per-plugin dev copy to keep in sync.
+
+**At release**, `tools/materialize_main.py` rewrites that same pointer into a
+real, promoted copy at `plugins/<plugin>/libs/single-instance-lease/` for each
+consumer -- non-editable, so a published plugin installs a self-contained
+source tree with no cross-plugin `path` reference. `tools/sync-vendored-libs.py
+--check` verifies every materialized copy's `src/` tree and version stay
+byte-identical to this canonical one and to each other.

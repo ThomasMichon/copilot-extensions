@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-vault"
-version = "0.1.6-dev1"
+version = "0.1.7-dev1"
 description = "Local KeePassXC-backed secret store for Copilot CLI agents."
 readme = "README.md"
 license = "MIT"
@@ -28,9 +28,11 @@ agent-procutil = { path = "libs/agent-procutil" }
 # restart, so the unlocked master secret survives (#743).
 agent-zdd = { path = "libs/zdd" }
 # single-instance lease + supersession self-retire (module
-# ``single_instance_lease``). Vendored per plugin; byte-identical src across
-# copies. Guards "one active vault per host" and drives the drained predecessor's
-# self-retire during a cutover (#743).
+# ``single_instance_lease``). Guards "one active vault per host" and drives the
+# drained predecessor's self-retire during a cutover (#743). This is a
+# `uv`-editable canonical reference (vendor-pointer-generalization effort,
+# Phase 1): `path` escapes this plugin's own root and resolves live to
+# `libs/single-instance-lease`, so every consumer shares one canonical copy.
 agent-single-instance-lease = { path = "libs/single-instance-lease" }
 
 [project.optional-dependencies]
