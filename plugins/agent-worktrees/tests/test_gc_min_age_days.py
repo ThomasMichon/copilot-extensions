@@ -100,6 +100,10 @@ def test_install_ps1_gc_call_has_min_age_days_floor():
     assert "$prevLkg" in text
     assert "Join-Path $InstallDir 'last-known-good'" in text
     assert "if ($prevLkg -and $prevLkg -ne $prev) { $gcArgs += @('--keep', $prevLkg) }" in text
+    # Tier 3: when both marker and last-known-good are unreadable, every
+    # OTHER existing slot is conservatively protected too.
+    assert "$prevOthers" in text
+    assert "foreach ($other in $prevOthers) { $gcArgs += @('--keep', $other) }" in text
     # Ordering guard: the touch loop must happen BEFORE activate() runs, not
     # after -- installs run concurrently by design, so a delayed touch leaves
     # a window where a concurrent installer's own gc (protecting only ITS
@@ -119,6 +123,10 @@ def test_install_sh_gc_call_has_min_age_days_floor():
     assert 'cat "$INSTALL_DIR/last-known-good"' in text
     assert 'touch "$INSTALL_DIR/versions/$prev_lkg"' in text
     assert 'gc_keep_args+=(--keep "$prev_lkg")' in text
+    # Tier 3: when both marker and last-known-good are unreadable, every
+    # OTHER existing slot is conservatively protected too.
+    assert "prev_others=()" in text
+    assert 'gc_keep_args+=(--keep "$other")' in text
     # Ordering guard: same reasoning as the ps1 test.
     touch_idx = text.index('touch "$INSTALL_DIR/versions/$prev"')
     activate_idx = text.index('".venv" activate "$SRC_VERSION" --no-link')
@@ -199,3 +207,38 @@ def test_marker_absent_resolution_falls_back_to_last_known_good_and_survives(tmp
 
     removed = vr.gc(tmp_path, keep=["2.0.0", "1.0.0"], protect_pids=False, min_age_days=0.05)
     assert "1.0.0" not in removed
+
+
+def test_both_markers_corrupted_falls_back_to_protecting_every_other_slot(tmp_path):
+    """Proves the review round-3 HIGH-severity finding: when BOTH the marker
+    and last-known-good are unreadable/corrupted at once (a rare double-
+    corruption state -- not just "no version was ever activated", since other
+    version dirs can still exist from prior installs), resolve-runtime.ps1/.sh's
+    tier-3 fallback picks the newest complete slot among whatever exists.
+    install.ps1/.sh conservatively protects EVERY other existing slot in this
+    state rather than replicating the exact version-sort, so V1 (an old,
+    pre-existing slot) must survive gc even with neither marker candidate
+    resolving to it."""
+    _install(tmp_path, "1.0.0", age_days=30.0)
+    _install(tmp_path, "2.0.0", age_days=15.0)
+
+    # Both marker and last-known-good are absent/corrupted.
+    marker = tmp_path / "current-version"
+    if marker.exists():
+        marker.unlink()
+    lkg = tmp_path / "last-known-good"
+    if lkg.exists():
+        lkg.unlink()
+
+    # install.ps1/.sh's tier-3 fallback: touch/keep every OTHER existing slot
+    # (here, both 1.0.0 and 2.0.0) before activating 3.0.0.
+    _touch_now(vr.version_dir(tmp_path, "1.0.0"))
+    _touch_now(vr.version_dir(tmp_path, "2.0.0"))
+    _install(tmp_path, "3.0.0", age_days=0.0)
+    vr.activate(tmp_path, "3.0.0", link_name=".venv", link_free=True)
+
+    removed = vr.gc(
+        tmp_path, keep=["3.0.0", "1.0.0", "2.0.0"], protect_pids=False, min_age_days=0.05
+    )
+    assert "1.0.0" not in removed
+    assert "2.0.0" not in removed

@@ -655,13 +655,25 @@ _versioned_activate() {
     # is absent/stale at the moment a launch plan resolves, resolve-runtime
     # .sh falls back to last-known-good (tier 2) instead -- so the ACTUAL
     # slot a pending plan pins can differ from what `current` reports here.
-    # Protecting both candidates covers both tiers a real resolve() could
-    # have used. (Tier 3 -- newest slot on a true first-run with neither
-    # marker nor last-known-good present -- has no prior slot to protect:
-    # that state means no version was ever activated before, so there is no
-    # "previous" a plan could have resolved against.)
     local prev_lkg
     prev_lkg="$(cat "$INSTALL_DIR/last-known-good" 2>/dev/null || echo "")"
+    # Tier 3 (review finding, round 3): if BOTH the marker and last-known-good
+    # are unreadable/corrupted at once (a rare double-corruption state, not
+    # just "no version was ever activated" -- other version dirs can still
+    # exist on disk from prior installs), resolve-runtime.sh's tier 3 falls
+    # back to the newest COMPLETE slot among whatever exists. Replicating that
+    # exact version-sort is unnecessary precision for a rare corruption path:
+    # conservatively protect every OTHER existing slot in this case instead
+    # (a bounded, one-time-only cost -- this never fires when tier 1 or 2
+    # resolved something).
+    local -a prev_others=()
+    if [[ -z "$prev" && -z "$prev_lkg" ]]; then
+        while IFS= read -r d; do
+            local name
+            name="$(basename "$d")"
+            [[ "$name" != "$SRC_VERSION" ]] && prev_others+=("$name")
+        done < <(find "$INSTALL_DIR/versions" -mindepth 1 -maxdepth 1 -type d 2>/dev/null)
+    fi
     # Touch the just-superseded slot(s)' mtime IMMEDIATELY after reading them,
     # BEFORE activate() runs (review finding on #4451): installs run
     # concurrently by design, so a delay here (activate + status-monitor-
@@ -686,6 +698,9 @@ _versioned_activate() {
     if [[ -n "$prev_lkg" && "$prev_lkg" != "$prev" ]]; then
         touch "$INSTALL_DIR/versions/$prev_lkg" 2>/dev/null || true
     fi
+    for other in "${prev_others[@]}"; do
+        touch "$INSTALL_DIR/versions/$other" 2>/dev/null || true
+    done
     if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --no-link; then
         err "Failed to activate runtime version (marker -> versions/$SRC_VERSION)"
         return 1
@@ -710,6 +725,9 @@ _versioned_activate() {
     local -a gc_keep_args=()
     [[ -n "$prev" ]] && gc_keep_args+=(--keep "$prev")
     [[ -n "$prev_lkg" && "$prev_lkg" != "$prev" ]] && gc_keep_args+=(--keep "$prev_lkg")
+    for other in "${prev_others[@]}"; do
+        gc_keep_args+=(--keep "$other")
+    done
     # --min-age-days is a recency floor protecting a STORED (not-running)
     # path-pinned reference -- launch-session.ps1/.sh's `resolve` bakes the
     # runtime interpreter's path into a plan BEFORE this activation runs;

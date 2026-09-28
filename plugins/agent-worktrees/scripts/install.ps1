@@ -729,11 +729,6 @@ function Invoke-VersionedActivate {
     # is absent/stale at the moment a launch plan resolves, resolve-runtime
     # .ps1 falls back to last-known-good (tier 2) instead -- so the ACTUAL
     # slot a pending plan pins can differ from what `current` reports here.
-    # Protecting both candidates covers both tiers a real resolve() could
-    # have used. (Tier 3 -- newest slot on a true first-run with neither
-    # marker nor last-known-good present -- has no prior slot to protect:
-    # that state means no version was ever activated before, so there is no
-    # "previous" a plan could have resolved against.)
     $prevLkg = ''
     try {
         $lkgPath = Join-Path $InstallDir 'last-known-good'
@@ -741,6 +736,23 @@ function Invoke-VersionedActivate {
             $prevLkg = ([IO.File]::ReadAllText($lkgPath)).Trim()
         }
     } catch {}
+    # Tier 3 (review finding, round 3): if BOTH the marker and last-known-good
+    # are unreadable/corrupted at once (a rare double-corruption state, not
+    # just "no version was ever activated" -- other version dirs can still
+    # exist on disk from prior installs), resolve-runtime.ps1's tier 3 falls
+    # back to the newest COMPLETE slot among whatever exists. Replicating that
+    # exact version-sort is unnecessary precision for a rare corruption path:
+    # conservatively protect every OTHER existing slot in this case instead
+    # (a bounded, one-time-only cost -- this never fires when tier 1 or 2
+    # resolved something).
+    $prevOthers = @()
+    if (-not $prev -and -not $prevLkg) {
+        $prevOthers = @(
+            Get-ChildItem (Join-Path $InstallDir 'versions') -Directory -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -ne $SrcVersion } |
+                Select-Object -ExpandProperty Name
+        )
+    }
     # Touch the just-superseded slot(s)' mtime IMMEDIATELY after reading them,
     # BEFORE activate() runs (review finding on #4451): installs run
     # concurrently by design, so a delay here (activate + status-monitor-
@@ -758,7 +770,7 @@ function Invoke-VersionedActivate {
     # candidate's mtime here makes the floor measure what it needs to: time-
     # since-superseded, so a plan resolved against it moments before this
     # activation survives the immediately-following gc.
-    foreach ($cand in @($prev, $prevLkg) | Select-Object -Unique) {
+    foreach ($cand in @($prev, $prevLkg) + $prevOthers | Select-Object -Unique) {
         if (-not $cand) { continue }
         try {
             $candSlot = Join-Path (Join-Path $InstallDir 'versions') $cand
@@ -810,6 +822,7 @@ function Invoke-VersionedActivate {
     $gcArgs = @($vr, '--root', $InstallDir, '--link-name', '.venv', 'gc', '--protect-pids', '--min-age-days', '0.05')
     if ($prev) { $gcArgs += @('--keep', $prev) }
     if ($prevLkg -and $prevLkg -ne $prev) { $gcArgs += @('--keep', $prevLkg) }
+    foreach ($other in $prevOthers) { $gcArgs += @('--keep', $other) }
     & $LinkPython @gcArgs 2>&1 | ForEach-Object { Write-ServiceChanged "gc: $_" }
     $ErrorActionPreference = $prevEAP
     return $true
