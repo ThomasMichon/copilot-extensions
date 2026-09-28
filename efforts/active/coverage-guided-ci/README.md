@@ -150,8 +150,12 @@ order.
       resolved baseline) with a tunable threshold, per the vision's own
       Behavior.
 - [ ] Wire the smoke-fallback trigger: missing baseline, stale baseline,
-      unresolvable/invalidated attribution for a touched file, or debt past
-      threshold — any one trips the fallback for the affected scope.
+      unresolvable/invalidated attribution for a touched file, a changed
+      line or module with **no attribution even where its own file has
+      other baseline entries** (the common new-code/previously-uncovered-code
+      case — a partially-attributed file is not the same as a fully-covered
+      one), or debt past threshold — any one trips the fallback for the
+      affected scope, never a silently smaller subset.
 - [ ] Make the selection auditable: which baseline generation was used, and
       why (fresh subset vs. fallback + trigger), discoverable per CI run.
 
@@ -194,9 +198,11 @@ copilot-extensions-specific Phase 1.
       against a hand-computed expected result, not just "no exception."
 - [ ] Phase 3: a change touching only files with valid, resolvable
       attribution selects a strict subset of the full suite; a change
-      touching a file with no baseline entry, or crossing the debt
-      threshold, falls back to the smoke tier — both paths verified by
-      test, and both are auditable after the fact.
+      touching a file with no baseline entry at all, a change touching a
+      **partially-attributed file** (some lines/modules covered, the
+      touched ones not), or a change crossing the debt threshold each falls
+      back to the smoke tier — all three paths verified by test, and all
+      three are auditable after the fact.
 - [ ] Phase 4: reproduce the #4353/#4378/#4379 regression shape on a branch
       predating this effort's fix and confirm diff-scoped selection would
       have caught it (selects the drifted test); confirm real `worktrees-smoke`

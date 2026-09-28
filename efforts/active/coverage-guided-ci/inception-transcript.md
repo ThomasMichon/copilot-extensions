@@ -3,11 +3,14 @@
 Full operator↔agent exchange that produced the
 [`coverage-guided-ci`](../../../visions/coverage-guided-ci/README.md) vision
 and this effort. Captured verbatim (operator turns) / paraphrased faithfully
-(agent turns, where reproducing full tool output would dominate this file);
-see the vision's own Provenance section for the condensed should-be summary.
-This file is historical record, not the should-be contract — the vision and
-this effort's own Plan are that; nothing here should be re-derived as a
-delta on its own.
+(agent turns, where reproducing full tool output would dominate this file),
+**except one deliberate redaction**: a private downstream repository name the
+operator used in Round 3 is replaced with a public-safe placeholder
+(`[a private downstream repo]`) — that placeholder is not the operator's
+original wording, only a stand-in for it. See the vision's own Provenance
+section for the condensed should-be summary. This file is historical record,
+not the should-be contract — the vision and this effort's own Plan are that;
+nothing here should be re-derived as a delta on its own.
 
 ## Round 1 — general question, not yet about this effort
 
