@@ -61,6 +61,7 @@ that pattern to this repository.
 | [Authoritative Write-Through Daemon](active/agent-worktrees-authoritative-daemon/README.md) | Active | #3761 |
 | [agent-dispatch Worker Operating Procedures](active/agent-dispatch-worker-operating-procedures/README.md) | Draft | #3897 |
 | [Mux Companion Manual Cutover Diagnostics](active/mux-companion-manual-cutover-diagnostics/README.md) | Active | #4369 |
+| [Coverage-Guided CI Test Selection](active/coverage-guided-ci/README.md) | Draft | #4453 |
 
 
 ## Local conventions
