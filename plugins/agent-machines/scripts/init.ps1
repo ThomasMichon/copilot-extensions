@@ -1954,7 +1954,31 @@ function Invoke-StampBinstubOnly {
     # it is never a throwaway per-invocation directory, so use it here
     # instead; the background `stamp` still overwrites both markers with
     # the even-more-durable snapshot path once its copy completes.
-    Publish-FileAtomically -Path $payloadDirMarker -Content $probePayload -Encoding $utf8NoBom
+    #
+    # Review finding (round 12): without ANY lock, this fast path can now
+    # run concurrently with -- or even AFTER -- a full `stamp` that already
+    # published a real `snapshots/<version>` marker, unconditionally
+    # overwriting `payload-dir` back to this fallback and silently
+    # regressing an already-valid, more-durable snapshot marker to the
+    # weaker one. Make the payload-dir write CREATE-ONLY: skip it entirely
+    # if the marker already resolves to something with a real
+    # scripts\init.ps1 (whether from a concurrent/prior full `stamp` or a
+    # concurrent/prior stamp-binstub), so this fast path can never regress
+    # an already-valid marker -- it only ever fills in a genuinely missing
+    # or broken one. payload-origin needs no such guard: both functions
+    # always write it the identical value ($probePayload).
+    $payloadDirAlreadyValid = $false
+    if (Test-Path -LiteralPath $payloadDirMarker -PathType Leaf) {
+        try {
+            $existingPayloadDir = (Get-Content -LiteralPath $payloadDirMarker -Raw -ErrorAction Stop).Trim()
+            if ($existingPayloadDir -and (Test-Path -LiteralPath (Join-Path $existingPayloadDir 'scripts\init.ps1') -PathType Leaf)) {
+                $payloadDirAlreadyValid = $true
+            }
+        } catch {}
+    }
+    if (-not $payloadDirAlreadyValid) {
+        Publish-FileAtomically -Path $payloadDirMarker -Content $probePayload -Encoding $utf8NoBom
+    }
     Publish-FileAtomically -Path $payloadOriginMarker -Content $probePayload -Encoding $utf8NoBom
     Deploy-SelfProvisioningBinstub
 }
