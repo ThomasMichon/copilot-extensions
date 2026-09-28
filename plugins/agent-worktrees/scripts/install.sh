@@ -647,34 +647,44 @@ _versioned_activate() {
         return 1
     fi
     _versioned_mark_complete
-    local prev
-    prev="$("$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo "")"
-    # Also read last-known-good BEFORE this activation overwrites it (review
-    # finding on #4451): `current` only reports the current-version MARKER
-    # (tier 1 of resolve-runtime.sh's three-tier resolution). If the marker
-    # is absent/stale at the moment a launch plan resolves, resolve-runtime
-    # .sh falls back to last-known-good (tier 2) instead -- so the ACTUAL
-    # slot a pending plan pins can differ from what `current` reports here.
-    local prev_lkg
-    prev_lkg="$(cat "$INSTALL_DIR/last-known-good" 2>/dev/null || echo "")"
-    # Tier 3 (review finding, round 3): if BOTH the marker and last-known-good
-    # are unreadable/corrupted at once (a rare double-corruption state, not
-    # just "no version was ever activated" -- other version dirs can still
-    # exist on disk from prior installs), resolve-runtime.sh's tier 3 falls
-    # back to the newest COMPLETE slot among whatever exists. Replicating that
-    # exact version-sort is unnecessary precision for a rare corruption path:
-    # conservatively protect every OTHER existing slot in this case instead
-    # (a bounded, one-time-only cost -- this never fires when tier 1 or 2
-    # resolved something).
-    local -a prev_others=()
-    if [[ -z "$prev" && -z "$prev_lkg" ]]; then
-        while IFS= read -r d; do
-            local name
-            name="$(basename "$d")"
-            [[ "$name" != "$SRC_VERSION" ]] && prev_others+=("$name")
-        done < <(find "$INSTALL_DIR/versions" -mindepth 1 -maxdepth 1 -type d 2>/dev/null)
+    # Determine the just-superseded slot by calling the CANONICAL resolver
+    # (resolve-runtime.sh) directly, rather than reimplementing its tiered
+    # marker/last-known-good/newest-slot validity logic here (review finding,
+    # round 5): reading `current`/last-known-good as raw strings only checks
+    # for EMPTINESS, not whether the resolver actually considers that slot
+    # valid/complete -- a nonempty but incomplete marker or last-known-good
+    # value makes the resolver reject it and fall through to a further tier,
+    # while this heuristic would have stopped at the first nonempty value and
+    # protected the WRONG (or no) slot. Calling the resolver directly is
+    # authoritative by construction: it IS the exact code path a real
+    # resolve()/launch would use, so whatever slot it returns here is exactly
+    # what a plan resolved moments earlier would have pinned.
+    local prev=""
+    local _saved_rt_root="${AGENT_RT_ROOT-}"
+    local _resolver_src="$SCRIPT_DIR/resolve-runtime.sh"
+    if [[ -f "$_resolver_src" ]]; then
+        AGENT_RT_ROOT="$INSTALL_DIR"
+        # install.sh runs under `set -euo pipefail`; resolve-runtime.sh has
+        # bare (non-&&/||-guarded) commands that can return non-zero on a
+        # normal miss (e.g. an invalid marker), which would abort THIS script
+        # under -e once sourced in-process. Suspend -e for the source call
+        # only, best-effort; never let a resolver hiccup fail the install.
+        set +e
+        # shellcheck source=resolve-runtime.sh
+        . "$_resolver_src"
+        set -e
+        if [[ -n "${AW_PY-}" ]]; then
+            # AW_PY = .../versions/<ver>/{bin/python,Scripts/python.exe}; the
+            # version is two directory levels up from the interpreter.
+            prev="$(basename "$(dirname "$(dirname "$AW_PY")")")"
+        fi
+        if [[ -n "$_saved_rt_root" ]]; then
+            AGENT_RT_ROOT="$_saved_rt_root"
+        else
+            unset AGENT_RT_ROOT
+        fi
     fi
-    # Touch the just-superseded slot(s)' mtime IMMEDIATELY after reading them,
+    # Touch the just-superseded slot's mtime IMMEDIATELY after resolving it,
     # BEFORE activate() runs (review finding on #4451): installs run
     # concurrently by design, so a delay here (activate + status-monitor-
     # restart + last-known-good write all used to run first) leaves a window
@@ -687,20 +697,14 @@ _versioned_activate() {
     # .py's _slot_age_days), NOT from when it stopped being current. Without
     # this touch, a slot installed more than --min-age-days ago (the common
     # case -- most versions live for days between releases) gets ZERO
-    # protection from the floor the moment it's superseded. Resetting a
-    # candidate's mtime here makes the floor measure what it needs to: time-
-    # since-superseded, so a plan resolved against it moments before this
+    # protection from the floor the moment it's superseded. Resetting $prev's
+    # mtime here makes the floor measure what it needs to: time-since-
+    # superseded, so a plan resolved against it moments before this
     # activation survives the immediately-following gc. Best-effort; a touch
     # failure never blocks activation.
     if [[ -n "$prev" ]]; then
         touch "$INSTALL_DIR/versions/$prev" 2>/dev/null || true
     fi
-    if [[ -n "$prev_lkg" && "$prev_lkg" != "$prev" ]]; then
-        touch "$INSTALL_DIR/versions/$prev_lkg" 2>/dev/null || true
-    fi
-    for other in "${prev_others[@]}"; do
-        touch "$INSTALL_DIR/versions/$other" 2>/dev/null || true
-    done
     if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --no-link; then
         err "Failed to activate runtime version (marker -> versions/$SRC_VERSION)"
         return 1
@@ -724,10 +728,6 @@ _versioned_activate() {
     fi
     local -a gc_keep_args=()
     [[ -n "$prev" ]] && gc_keep_args+=(--keep "$prev")
-    [[ -n "$prev_lkg" && "$prev_lkg" != "$prev" ]] && gc_keep_args+=(--keep "$prev_lkg")
-    for other in "${prev_others[@]}"; do
-        gc_keep_args+=(--keep "$other")
-    done
     # --min-age-days is a recency floor protecting a STORED (not-running)
     # path-pinned reference -- launch-session.ps1/.sh's `resolve` bakes the
     # runtime interpreter's path into a plan BEFORE this activation runs;

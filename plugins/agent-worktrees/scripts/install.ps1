@@ -722,38 +722,37 @@ function Invoke-VersionedActivate {
         return $false
     }
     Invoke-VersionedMarkComplete
-    $prev = (& $py $vr --root $InstallDir --link-name '.venv' current 2>$null); $prev = ("$prev").Trim()
-    # Also read last-known-good BEFORE this activation overwrites it (review
-    # finding on #4451): `current` only reports the current-version MARKER
-    # (tier 1 of resolve-runtime.ps1's three-tier resolution). If the marker
-    # is absent/stale at the moment a launch plan resolves, resolve-runtime
-    # .ps1 falls back to last-known-good (tier 2) instead -- so the ACTUAL
-    # slot a pending plan pins can differ from what `current` reports here.
-    $prevLkg = ''
+    # Determine the just-superseded slot by calling the CANONICAL resolver
+    # (resolve-runtime.ps1) directly, rather than reimplementing its tiered
+    # marker/last-known-good/newest-slot validity logic here (review finding,
+    # round 5): `current`/reading last-known-good as raw strings only checks
+    # for EMPTINESS, not whether the resolver actually considers that slot
+    # valid/complete -- a nonempty but incomplete marker or last-known-good
+    # value makes the resolver reject it and fall through to a further tier,
+    # while this heuristic would have stopped at the first nonempty value and
+    # protected the WRONG (or no) slot. Calling the resolver directly is
+    # authoritative by construction: it IS the exact code path a real
+    # resolve()/launch would use, so whatever slot it returns here is exactly
+    # what a plan resolved moments earlier would have pinned.
+    $prev = $null
     try {
-        $lkgPath = Join-Path $InstallDir 'last-known-good'
-        if (Test-Path -LiteralPath $lkgPath) {
-            $prevLkg = ([IO.File]::ReadAllText($lkgPath)).Trim()
+        $savedRtRoot = $env:AGENT_RT_ROOT
+        $env:AGENT_RT_ROOT = $InstallDir
+        $resolverSrc = Join-Path $ScriptDir 'resolve-runtime.ps1'
+        if (Test-Path -LiteralPath $resolverSrc) {
+            . $resolverSrc
+            if ($AwPy) {
+                # $AwPy = .../versions/<ver>/{Scripts/python.exe,bin/python};
+                # the version is two directory levels up from the interpreter.
+                $prev = Split-Path -Leaf (Split-Path -Parent (Split-Path -Parent $AwPy))
+            }
         }
-    } catch {}
-    # Tier 3 (review finding, round 3): if BOTH the marker and last-known-good
-    # are unreadable/corrupted at once (a rare double-corruption state, not
-    # just "no version was ever activated" -- other version dirs can still
-    # exist on disk from prior installs), resolve-runtime.ps1's tier 3 falls
-    # back to the newest COMPLETE slot among whatever exists. Replicating that
-    # exact version-sort is unnecessary precision for a rare corruption path:
-    # conservatively protect every OTHER existing slot in this case instead
-    # (a bounded, one-time-only cost -- this never fires when tier 1 or 2
-    # resolved something).
-    $prevOthers = @()
-    if (-not $prev -and -not $prevLkg) {
-        $prevOthers = @(
-            Get-ChildItem (Join-Path $InstallDir 'versions') -Directory -ErrorAction SilentlyContinue |
-                Where-Object { $_.Name -ne $SrcVersion } |
-                Select-Object -ExpandProperty Name
-        )
+    } catch {
+        Write-SetupLog "Could not resolve pre-activation runtime slot: $($_.Exception.Message)" 'WARN'
+    } finally {
+        $env:AGENT_RT_ROOT = $savedRtRoot
     }
-    # Touch the just-superseded slot(s)' mtime IMMEDIATELY after reading them,
+    # Touch the just-superseded slot's mtime IMMEDIATELY after resolving it,
     # BEFORE activate() runs (review finding on #4451): installs run
     # concurrently by design, so a delay here (activate + status-monitor-
     # restart + last-known-good write all used to run first) leaves a window
@@ -766,19 +765,18 @@ function Invoke-VersionedActivate {
     # .py's _slot_age_days), NOT from when it stopped being current. Without
     # this touch, a slot installed more than --min-age-days ago (the common
     # case -- most versions live for days between releases) gets ZERO
-    # protection from the floor the moment it's superseded. Resetting a
-    # candidate's mtime here makes the floor measure what it needs to: time-
-    # since-superseded, so a plan resolved against it moments before this
+    # protection from the floor the moment it's superseded. Resetting $prev's
+    # mtime here makes the floor measure what it needs to: time-since-
+    # superseded, so a plan resolved against it moments before this
     # activation survives the immediately-following gc.
-    foreach ($cand in @($prev, $prevLkg) + $prevOthers | Select-Object -Unique) {
-        if (-not $cand) { continue }
+    if ($prev) {
         try {
-            $candSlot = Join-Path (Join-Path $InstallDir 'versions') $cand
-            if (Test-Path -LiteralPath $candSlot) {
-                (Get-Item -LiteralPath $candSlot).LastWriteTime = Get-Date
+            $prevSlot = Join-Path (Join-Path $InstallDir 'versions') $prev
+            if (Test-Path -LiteralPath $prevSlot) {
+                (Get-Item -LiteralPath $prevSlot).LastWriteTime = Get-Date
             }
         } catch {
-            Write-SetupLog "Could not touch superseded slot mtime ($candSlot): $($_.Exception.Message)" 'WARN'
+            Write-SetupLog "Could not touch superseded slot mtime ($prevSlot): $($_.Exception.Message)" 'WARN'
         }
     }
     & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
@@ -821,8 +819,6 @@ function Invoke-VersionedActivate {
     # reference. See #4432 for the concrete failure this closes.
     $gcArgs = @($vr, '--root', $InstallDir, '--link-name', '.venv', 'gc', '--protect-pids', '--min-age-days', '0.05')
     if ($prev) { $gcArgs += @('--keep', $prev) }
-    if ($prevLkg -and $prevLkg -ne $prev) { $gcArgs += @('--keep', $prevLkg) }
-    foreach ($other in $prevOthers) { $gcArgs += @('--keep', $other) }
     & $LinkPython @gcArgs 2>&1 | ForEach-Object { Write-ServiceChanged "gc: $_" }
     $ErrorActionPreference = $prevEAP
     return $true
