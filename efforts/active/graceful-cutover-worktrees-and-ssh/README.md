@@ -1,0 +1,238 @@
+# Graceful daemon cutover — close the agent-worktrees/worktree-manager/agent-ssh gap
+
+- **Slug:** `graceful-cutover-worktrees-and-ssh`
+- **Repo:** copilot-extensions
+- **Branch(es):** per-phase feature branches / independent per-slice PRs
+- **Created:** 2026-09-28
+- **Status:** Draft <!-- Draft | Active | Blocked | Done -->
+- **Umbrella issue:** _pending_
+- **Sub-issues:** _pending_
+
+## Guiding Intent
+
+Close the last gap in an already-proven pattern: `docs/patterns/graceful-daemon-cutover.md`
+and the shared `zdd` library have made agent-bridge, agent-dispatch, and
+agent-index (and, per that doc's own rollout table, agent-mcp) update
+without ever killing in-flight, non-resumable work. `agent-worktrees`,
+`worktree-manager`, and `agent-ssh` (ssh-manager) are the pattern's own
+"remaining plugins" — not yet in its Per-plugin adoption table at all. This
+effort adopts the *existing* protocol for those three rather than inventing a
+parallel one, so a daemon update on any host, for any of these systems, is
+never a source of stacked stale processes, and never silently corrupts
+in-flight state the way today's ad-hoc `status-monitor-restart`/`mux-daemon
+ensure` reaping already does.
+
+## Participants
+
+Single-repo, solo-driven effort; no external participants/coordination
+section needed today.
+
+## Context
+
+This effort's seed is the live incident this same session drove end-to-end:
+diagnosing and fixing a facility-wide mux status-bar freeze traced through
+three real bugs in `agent-worktrees`'/`worktree-manager`'s resident daemons
+(PRs #4335, #4377, #4386), then finding — while deploying those fixes to a
+second host — that duplicate `status-monitor` processes can accumulate with
+no bounded, automatic cleanup at all. The operator's own request (below)
+independently re-derived the shape of a protocol that **already exists**:
+
+- **`docs/patterns/graceful-daemon-cutover.md`** — the canonical pattern.
+  Read this in full before touching any phase below; it defines the
+  consumer contract, the generation self-retire predicate (staleness-check-
+  before-continuing, exactly what the operator asked for), the
+  never-promoted-abandoned-passive fix, and the per-plugin adoption table
+  this effort's job is to extend.
+- **`libs/zdd/`** (package `agent-zdd`, import `zdd`) — the shared,
+  consumer-agnostic primitive: `zdd.routing` (file-based `active.json`
+  routing table, no front proxy), `zdd.cutover.CutoverOrchestrator` (spawn
+  passive → health-gate → flip → drain → retire, with rollback and
+  commit-forward), `zdd.breadcrumb` (stranded-survivor recovery and
+  abandoned-passive reaping). Vendored byte-identically into each real
+  consumer's own `libs/zdd/` — never a shared runtime import.
+- **Confirmed today, by direct inspection, that the adoption gap is real**:
+  - `agent-bridge`, `agent-dispatch` plugin.json: `"zeroDowntimeUpdate": true`.
+    `agent-worktrees`, `worktree-manager`, `agent-ssh` plugin.json: **absent**.
+  - `agent-ssh` has `zdd` vendored under `plugins/agent-ssh/libs/zdd/` but
+    **zero** references to `CutoverOrchestrator`/`cutover` anywhere in its own
+    `src/` — the library is present but entirely unwired.
+  - `agent-worktrees`/`worktree-manager` have **no `zdd` presence at all**.
+    They already use the sibling `durable-vs-versioned-runtime` shape
+    (`versions/<N>/` slots + a `current-version` marker + rewritten
+    binstubs — directly observed and manipulated this session via
+    `agent-worktrees update`/`worktree-manager update`), but that shape only
+    covers the *installed slot*; it says nothing about a *live daemon
+    process* (the resident `status-monitor` / companion `mux-daemon`)
+    noticing a newer slot exists and cutting over.
+  - **Open question, not yet resolved:** the pattern doc's per-plugin table
+    describes `install.ps1`/`install.sh` as the trigger for agent-bridge/
+    agent-dispatch/agent-index/agent-vault/agent-mcp, citing `dotfiles#…`
+    issue numbers — those installers may live in a separate `dotfiles`
+    repo this effort has not confirmed access to. `agent-worktrees` and
+    `worktree-manager`, by contrast, have their **own native, in-repo**
+    `update` command implementations (exercised directly, repeatedly, this
+    session) — for those two, the integration point is that native command,
+    not an external installer script. `agent-ssh`'s own installer shape is
+    not yet confirmed (Phase 0).
+- **Today's live incident, as the motivating validation case**: two
+  `status-monitor` processes were found running simultaneously on one host,
+  both already on the fixed version — not a version-supersession race
+  `status-monitor-restart` reaps (it only reaps a version-*superseded*
+  owner; a same-version duplicate is left alone). Remediated manually this
+  session (confirmed the lock owner, killed the duplicate via
+  `procs.terminate_pid_if_identity`) and documented as a stop-gap in
+  `docs/error-response-discipline.md` (aperture-labs) and this repo's own
+  `agent-worktrees-authoritative-daemon` effort Journal — **this effort is
+  the real fix that makes that manual remediation unnecessary.**
+
+## Request
+
+> We need to ensure that `agent-worktrees` and `worktree-manager` have their
+> install/update flows handle this *automatically*. The result after an
+> install/update flow must be that the old (now stale) processes terminate
+> in a bounded amount of time. For `agent-worktrees` and `worktree-manager`,
+> it's okay if a daemon has to finish one final sweep, to maintain
+> transactional integrity, but we then need it to detect that it's no
+> longer the current version and exit. It must also force-disconnect any
+> "subscribers", which should nudge those subscribers to re-discover the
+> correct, updated port from the new deployment. `agent-bridge`,
+> `agent-dispatch`, `ssh-manager`, `agent-index` etc must all work this way:
+> no long-lived daemons may stack up excessively.
+>
+> It's *possible*, during a rapid-fire release flow, that while we're busy
+> performing one update, a new one will come in. So by the time an agent-*
+> daemon process gets installed, it will no longer be the current version.
+> We want to ensure that each daemons regularly checks its staleness,
+> before any repeated loop, subscription connection, request, etc., so they
+> terminate early. Outgoing processes don't need to take responsibility for
+> booting their successors; that's the installer's job. The install/update
+> must always launch the new version after doing the version-dance, booting
+> the new version and ensuring it's running. The new version registers its
+> port for discovery and handles new requests, and the old one gracefully
+> exits and "hands off" any outstanding work (session hosts, index tasks,
+> emitter/evaluator tracking, etc.) to the new process by leaving a
+> manifest of process pointers and metadata for the new process to
+> discover and pick up in its next sweep.
+
+**Reconciling the request against the existing pattern (agent-recommended
+framing, not a change of scope):** every element the operator described
+already has a named counterpart in `graceful-daemon-cutover.md` —
+"finish one final sweep, then detect staleness and exit" is *generation
+self-retire*; "force-disconnect subscribers, nudge them to re-discover the
+port" is the *routing-table flip* + *drain*; "the installer boots the new
+version, not the old one" is *Invariant #1* (installer-driven, automatic,
+no operator verb); "a manifest of process pointers for the new process to
+pick up" is the *breadcrumb* + per-daemon *outlive-and-reconnect* story
+(exactly what agent-index's engine daemon and agent-dispatch's
+supervisor/workers already do via their own durable state). `agent-bridge`/
+`agent-dispatch`/`agent-index` are **already done** per the pattern's own
+table (only minor open items remain, e.g. agent-index's engine
+outlive-and-reconnect proof, and are out of this effort's scope — track
+them under the existing pattern doc / their own efforts). **This effort's
+actual net-new scope is exactly three plugins the pattern doc does not yet
+cover: `agent-worktrees`, `worktree-manager`, `agent-ssh`.**
+
+## Plan
+
+### Phase 0 — Confirm the exact integration seam per plugin
+- [ ] `agent-worktrees`: confirm the native `update` command's implementation
+      path (already located this session: `update_cli.py` / the
+      `_load_full_command_surface`/version-marker machinery); identify the
+      exact point where it currently rewrites `current-version` and decide
+      where a live-daemon-cutover check must be inserted.
+- [ ] `worktree-manager`: same for its own `update` command
+      (`worktree_manager/__main__.py`'s update path); note the *separate*
+      resident `mux-daemon` (companion process, not the Picker CLI itself)
+      needs its own cutover, distinct from the Picker/CLI's own
+      self-versioning.
+- [ ] `agent-ssh`: locate its installer entry point (`install.sh`/`install.ps1`
+      in this repo, or confirm it truly is dotfiles-repo-owned like
+      agent-bridge); locate every resident daemon it owns (the
+      `libs/ssh-manager` tunnel/session daemon(s)) and their current
+      lifecycle (spawned how, tracked how, restarted how today).
+- [ ] For each of the three, name the concrete **safe cutover point** (the
+      drain boundary) per daemon:
+      - `agent-worktrees status-monitor`: between sweep ticks (no in-flight
+        non-resumable turn; each sweep is already a bounded, restartable unit).
+      - `worktree-manager mux-daemon`: between mapping-registry mutations /
+        republish cycles (mirrors the above).
+      - `agent-ssh`'s daemon(s): TBD in Phase 0's own investigation — likely
+        between tunnel-handshake completions, not mid-handshake.
+
+### Phase 1 — `agent-worktrees` `status-monitor`
+- [ ] Vendor `zdd` into `plugins/agent-worktrees/libs/zdd/` (byte-identical
+      sync from `libs/zdd/`, per the pattern's own sync convention).
+- [ ] Implement the consumer contract: `spawn_passive`, `health_check`,
+      `make_client` (drain/undrain/shutdown), `pick_free_port`.
+- [ ] Wire `agent-worktrees update`'s activation path to invoke
+      `CutoverOrchestrator` automatically whenever it detects a live
+      `status-monitor` (no operator flag, no new CLI verb — Invariant #1).
+- [ ] Add the **generation self-retire** loop (`self_retire.is_superseded`)
+      inside the resident sweep loop itself, gated per the pattern's own
+      "before any repeated loop, subscription connection, request" framing
+      — checked at the top of every sweep iteration, not only at daemon
+      startup, so a same-tick rapid-fire re-release is still caught.
+- [ ] Add `plugin.json`: `"zeroDowntimeUpdate": true` (inert until/unless an
+      external installer consumes it, per the Phase 0 open question — still
+      correct metadata either way).
+- [ ] Define the **hand-off manifest**: what "outstanding work" a
+      `status-monitor` generation must persist for its successor (per-session
+      claim/observation state it would otherwise reconstruct from scratch —
+      confirm whether this is already fully derivable from existing durable
+      state, e.g. the tracking dir + managed-mux registry, or needs a new
+      breadcrumb).
+
+### Phase 2 — `worktree-manager` `mux-daemon`
+- [ ] Same shape as Phase 1, scoped to the companion `mux-daemon` process
+      specifically (not the Picker CLI's own one-shot invocations).
+      Hand-off manifest: the `mux_mapping_registry`'s own on-disk state is
+      already the durable source of truth (confirmed this session) — likely
+      needs no *new* breadcrumb, only a successor that reads it on boot
+      (already true) and a predecessor that stops writing before exiting.
+
+### Phase 3 — `agent-ssh` (ssh-manager)
+- [ ] Depends on Phase 0's investigation outcome; likely mirrors Phase 1's
+      shape once the daemon inventory and installer seam are confirmed.
+
+### Phase 4 — Close the loop in the pattern doc itself
+- [ ] Add `agent-worktrees`, `worktree-manager`, `agent-ssh` rows to
+      `docs/patterns/graceful-daemon-cutover.md`'s **Per-plugin adoption**
+      table and **Rollout sequencing** list once each phase lands, so the
+      pattern doc stays the single source of truth for adoption state
+      (never let this effort's own README become a second, drifting copy of
+      that table).
+
+## Validation Plan
+
+- [ ] Per phase: a clean-room / isolated-HOME rehearsal of the plugin's
+      `update` command against a live prior-version daemon, proving (a) the
+      new daemon serves before the old one exits, (b) no in-flight
+      operation is dropped, (c) the old process count converges to exactly
+      one live daemon within a bounded time, (d) a rapid-fire second update
+      arriving mid-cutover does not leave two live daemons stacked.
+- [ ] Live-host proof (operator-gated, matching Invariant #7): reproduce
+      today's exact incident shape (two resident `status-monitor`s on one
+      host) is no longer possible after Phase 1 lands — an `update` run
+      against a live prior daemon always converges to one.
+- [ ] Regression: existing `status-monitor-restart`/`mux-daemon ensure`
+      commands keep working for their own narrower cases (version-
+      supersession reap) without behavior change for callers that don't hit
+      the new automatic path.
+
+## Proposal
+
+_Pending._
+
+## Journal
+
+### 2026-09-28 — Kickoff
+- Effort created directly from the operator's own request, cross-referenced
+  against the pre-existing `docs/patterns/graceful-daemon-cutover.md` +
+  `libs/zdd/` (found already fully designed and proven in production for
+  `agent-bridge`/`agent-dispatch`/`agent-index`/`agent-mcp`, per that doc's
+  own Per-plugin adoption table). Confirmed by direct inspection that
+  `agent-worktrees`, `worktree-manager`, and `agent-ssh` are the actual gap
+  — absent from that table, no `"zeroDowntimeUpdate"` flag, and (for
+  `agent-ssh`) `zdd` vendored but entirely unwired. Scoped this effort to
+  exactly that gap rather than re-deriving a new protocol, per the pattern
+  doc's own explicit instruction ("do not reinvent it per plugin").
