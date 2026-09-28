@@ -312,6 +312,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
 
     def _start_request_surfaces() -> None:
         nonlocal hook_server, classify_server, tracking_write_server
+        if admission_closed or not published_lock:
+            return
         if hook_server is None and hook_policy.ready():
             try:
                 hook_server = HookIpcServer(_decide)
@@ -347,7 +349,11 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             tracking_write_server.close()
             tracking_write_server = None
 
-    _start_request_surfaces()
+    def _enter_drain_only_state() -> None:
+        nonlocal admission_closed, published_lock
+        admission_closed = True
+        published_lock = False
+        _close_request_surfaces()
 
     worktree_status_runtime = worktree_status_daemon.InProcessRuntime()
     worktree_status_runtime.start(
@@ -437,6 +443,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         pid=os.getpid(),
         version=None,
     ) if not passive_mode else None
+    _start_request_surfaces()
     if published_lock:
         _locks.write_lock(lock, extra=_lock_extra())
     empty_strikes = 0
@@ -464,9 +471,9 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         if action == "undrain":
             with state_lock:
                 admission_closed = False
-                _start_request_surfaces()
                 _cleanup_retired_request_surfaces()
                 published_lock = True
+                _start_request_surfaces()
                 _locks.write_lock(lock, extra=_lock_extra())
             wake_event.set()
             return {"draining": False}
@@ -476,9 +483,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         poll = float(payload.get("poll") or 0.1)
         force = bool(payload.get("force"))
         with state_lock:
-            admission_closed = True
-            published_lock = False
-            _close_request_surfaces()
+            _enter_drain_only_state()
         deadline = time.time() + max(0.0, timeout)
         while True:
             _cleanup_retired_request_surfaces()
@@ -517,22 +522,30 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     )
                 except Exception:
                     superseded = False
+                if superseded:
+                    with state_lock:
+                        _enter_drain_only_state()
                 if superseded and not _drain_busy_reasons():
                     self_retire_confirms += 1
                     if self_retire_confirms >= self_retire_confirmations:
                         break
                 else:
                     self_retire_confirms = 0
+            with state_lock:
+                can_sweep = published_lock and not admission_closed
+                if can_sweep:
+                    sweep_active = True
+            if not can_sweep:
+                _wake_interruptible_wait(wake_event, interval)
+                continue
             try:
                 core._status_monitor_recheck(governance, "iteration-boundary")
-                if published_lock:
-                    core._status_monitor_recheck(governance, "pre-mutation:lock-renewal")
-                    _locks.write_lock(lock, extra=_lock_extra())
+                core._status_monitor_recheck(governance, "pre-mutation:lock-renewal")
+                _locks.write_lock(lock, extra=_lock_extra())
 
                 picker_projects = monitor_roots.live_picker_projects()
                 demand_projects = core.list_cache.recent_demand_projects()
                 external_projects = picker_projects | demand_projects
-                sweep_active = True
                 served = core._monitor_sweep(
                     mux_bin,
                     token,

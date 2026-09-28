@@ -16,10 +16,11 @@ from urllib.parse import urlparse
 
 from agent_procutil import detached_kwargs, windowless_python, windowless_python_env
 from single_instance_lease import AlreadyRunningError, SingleInstance
+from zdd import breadcrumb
 from zdd import routing
 from zdd.cutover import CutoverOrchestrator
 
-from . import locks
+from . import locks, procs
 
 _BIND = "127.0.0.1"
 _READ_TIMEOUT_S = 5.0
@@ -231,6 +232,56 @@ def _make_client(base_url: str) -> ControlClient:
     return ControlClient(base_url, timeout=65.0)
 
 
+def _is_status_monitor_cmdline(cmdline: str) -> bool:
+    tokens = cmdline.split()
+    for index in range(len(tokens) - 2):
+        if tokens[index] == "-m" and tokens[index + 1] == "agent_worktrees":
+            return tokens[index + 2] == "status-monitor"
+    return False
+
+
+def _iter_status_monitor_pids() -> set[int]:
+    if os.name == "nt":
+        return set()
+    argv = ["ps", "-eo", "pid=,args="]
+    out = subprocess.run(argv, capture_output=True, text=True, timeout=5, check=False)  # noqa: S603
+    hits: set[int] = set()
+    for line in (out.stdout or "").splitlines():
+        parts = line.strip().split(None, 1)
+        if len(parts) != 2:
+            continue
+        pid_s, cmdline = parts
+        try:
+            pid = int(pid_s)
+        except ValueError:
+            continue
+        if _is_status_monitor_cmdline(cmdline):
+            hits.add(pid)
+    return hits
+
+
+def _reap_abandoned_passive(record: dict | None) -> dict:
+    table = routing.read_table(routing_dir()) or {}
+    active = table.get("active") if isinstance(table, dict) else None
+    active_pid = active.get("pid") if isinstance(active, dict) else None
+
+    def _pid_alive(pid: int) -> bool:
+        return pid in _iter_status_monitor_pids()
+
+    def _terminate(pid: int) -> bool:
+        return bool(
+            procs.terminate_pid_if_identity(pid, locks.process_start_time(pid)).get("killed")
+        )
+
+    return breadcrumb.reap_abandoned_passive(
+        routing_dir(),
+        pid_alive=_pid_alive,
+        terminate=_terminate,
+        active_pid=int(active_pid) if active_pid else None,
+        record=record,
+    )
+
+
 def activate_after_update(
     *,
     runtime_python: str | None = None,
@@ -272,6 +323,13 @@ def activate_after_update(
         return summary
     py = runtime_python or sys.executable
     try:
+        pre_recovery = breadcrumb.read_breadcrumb(routing_dir())
+        summary["recovery"] = breadcrumb.recover_stale_cutover(
+            routing_dir(),
+            _make_client,
+            health_check=_health_check,
+        )
+        summary["passive_reap"] = _reap_abandoned_passive(pre_recovery)
         orch = CutoverOrchestrator(
             routing_dir(),
             bind=_BIND,
