@@ -669,8 +669,21 @@ if [[ ( "$ACTION" == "cell-provision" || "$ACTION" == "slot-cutover" ) &&
             owner="$(readlink "$LOCK_LINK" 2>/dev/null || true)"
             if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
                 sleep 1
-            elif [[ "$(readlink "$LOCK_LINK" 2>/dev/null || true)" == "$owner" ]]; then
-                rm -f "$LOCK_LINK"
+            elif mkdir "$LOCK_LINK.reap" 2>/dev/null; then
+                # Review finding (round 10, on the stamp lock's identical
+                # sibling pattern below): a plain readlink-then-rm here is a
+                # TOCTOU race -- another process could reap the same stale
+                # link and create its own live one between our two readlink
+                # calls, and this rm -f would then delete THAT live lock.
+                # `mkdir` is atomic, so only one process at a time can hold
+                # this reap mutex; re-verify the link is still the SAME
+                # stale value we observed before removing it.
+                if [[ "$(readlink "$LOCK_LINK" 2>/dev/null || true)" == "$owner" ]]; then
+                    rm -f "$LOCK_LINK"
+                fi
+                rmdir "$LOCK_LINK.reap" 2>/dev/null || true
+            else
+                sleep 0.1
             fi
         done
     fi
@@ -1449,8 +1462,20 @@ if [[ "$ACTION" == "stamp" ]]; then
             owner="$(readlink "$_stamp_lock_link" 2>/dev/null || true)"
             if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
                 sleep 1
-            elif [[ "$(readlink "$_stamp_lock_link" 2>/dev/null || true)" == "$owner" ]]; then
-                rm -f "$_stamp_lock_link"
+            elif mkdir "$_stamp_lock_link.reap" 2>/dev/null; then
+                # Review finding (round 10): a plain readlink-then-rm is a
+                # TOCTOU race -- another process could reap the same stale
+                # link and create its own live one between our two readlink
+                # calls, and this rm -f would then delete THAT live lock.
+                # `mkdir` is atomic, so only one process at a time can hold
+                # this reap mutex; re-verify the link is still the SAME
+                # stale value we observed before removing it.
+                if [[ "$(readlink "$_stamp_lock_link" 2>/dev/null || true)" == "$owner" ]]; then
+                    rm -f "$_stamp_lock_link"
+                fi
+                rmdir "$_stamp_lock_link.reap" 2>/dev/null || true
+            else
+                sleep 0.1
             fi
         done
     fi

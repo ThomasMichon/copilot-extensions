@@ -152,6 +152,22 @@ if ($cellSlotDirect) {
     $env:COPILOT_PLUGIN_INSTALL_STAGED = 'cell-slot-action'
 }
 
+# Review finding (round 10): `stamp-binstub` (#3303, full-harness-startup-
+# reliability) exists SPECIFICALLY so bootstrap-check.ps1's synchronous
+# sessionStart-hook call stays sub-second, inside its 15s hook timeout. But
+# the self-stage block right below unconditionally copies the WHOLE plugin
+# payload (Copy-Item -Recurse, no excludes) before ANY action dispatches on
+# a real marketplace install -- exactly the cost this two-stage split
+# exists to avoid backgrounding, silently reintroducing the same
+# command-not-found race on a slow disk/first invocation. Skip self-stage
+# for this action alone, the same way cell-/slot- actions already do:
+# Invoke-StampBinstubOnly only ever reads/writes via $probePayload/
+# $InstallDir (never $PluginDir, since the round-7 fix), so it needs no
+# staged copy to run correctly.
+if ($Action -eq 'stamp-binstub' -and -not $env:COPILOT_PLUGIN_INSTALL_STAGED) {
+    $env:COPILOT_PLUGIN_INSTALL_STAGED = 'stamp-binstub-fast-path'
+}
+
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
 # pyproject.toml) to build the venv, so while it runs -- especially if it wedges
@@ -732,6 +748,7 @@ if (-not $InstallDir) {
     $InstallDir = Join-Path $env:USERPROFILE '.agent-machines'
 }
 $InstallDir = [IO.Path]::GetFullPath($InstallDir)
+$DefaultInstallDir = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.agent-machines'))
 $VenvDir  = Join-Path $InstallDir '.venv'
 $LocalBin = Join-Path $env:USERPROFILE '.local\bin'
 
@@ -1883,6 +1900,19 @@ function Enter-StampLock {
 # so redesigning the on-disk format is real, valuable future work but out of
 # this short-PR-cycle round's scope -- logged in the effort's Round Ledger.
 function Invoke-StampBinstubOnly {
+    # Review finding (round 10): Deploy-SelfProvisioningBinstub generates a
+    # launcher whose self-provisioning path hardcodes
+    # `%USERPROFILE%\.agent-machines` (and `$HOME/.agent-machines` for its
+    # POSIX stub) as the marker root -- it does NOT follow a custom
+    # -InstallDir. A custom -InstallDir would therefore publish markers the
+    # generated launcher can never read, producing a broken (127-on-first-
+    # use) binstub. bootstrap-check.ps1's real sessionStart-hook call never
+    # passes -InstallDir for this action, so reject it explicitly here
+    # rather than silently deploying a launcher that cannot work.
+    if (-not [StringComparer]::OrdinalIgnoreCase.Equals($InstallDir, $DefaultInstallDir)) {
+        Write-Fail "stamp-binstub only supports the default install dir ($DefaultInstallDir) -- the generated launcher hardcodes that root and cannot read markers written to '$InstallDir'."
+        exit 1
+    }
     $mutex = Enter-StampLock
     try {
         foreach ($dir in @($InstallDir, $LocalBin)) {
@@ -1933,6 +1963,12 @@ function Invoke-Stamp {
     Write-Host ''
     Write-Host '=== agent-machines stamp (defer runtime to first use) ===' -ForegroundColor Cyan
     if (-not $SrcVersion) { Write-Fail 'Cannot stamp: no version in pyproject.toml'; exit 1 }
+    # Same round-10 finding as Invoke-StampBinstubOnly above: the generated
+    # launcher's marker root is hardcoded, not -InstallDir-aware.
+    if (-not [StringComparer]::OrdinalIgnoreCase.Equals($InstallDir, $DefaultInstallDir)) {
+        Write-Fail "stamp only supports the default install dir ($DefaultInstallDir) -- the generated launcher hardcodes that root and cannot read markers written to '$InstallDir'."
+        exit 1
+    }
     $stampMutex = Enter-StampLock
     try {
     foreach ($dir in @($InstallDir, $LocalBin)) {

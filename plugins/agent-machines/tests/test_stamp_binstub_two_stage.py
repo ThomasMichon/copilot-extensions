@@ -236,13 +236,16 @@ def _assert_no_torn_reads_while_running(
 @pytest.mark.skipif(not WINDOWS_HOSTS, reason="Windows PowerShell required")
 @pytest.mark.parametrize("host", WINDOWS_HOSTS, ids=lambda h: h.stem)
 def test_windows_concurrent_stamp_binstub_leaves_no_torn_binstub(tmp_path, host):
-    install_dir = tmp_path / "install"
     env = _sandbox_env(tmp_path)
+    # No -InstallDir override: round-10 review found the generated .cmd's
+    # marker root is hardcoded (not -InstallDir-aware), so init.ps1 now
+    # rejects a custom -InstallDir for this action outright -- match the
+    # other tests' pattern (and bootstrap-check.ps1's own real invocation).
     binstub = tmp_path / "userprofile" / ".local" / "bin" / "agent-machines.cmd"
     procs = [
         subprocess.Popen(
             [str(host), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(INIT_PS1),
-             "-Action", "stamp-binstub", "-InstallDir", str(install_dir)],
+             "-Action", "stamp-binstub"],
             env=env, cwd=tmp_path, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         )
         for _ in range(3)
