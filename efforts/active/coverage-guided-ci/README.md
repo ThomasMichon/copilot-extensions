@@ -157,6 +157,14 @@ order.
 - [ ] Implement coverage-debt accounting (age and/or commit-volume since the
       resolved baseline) with a tunable threshold, per the vision's own
       Behavior.
+- [ ] **Curate and validate the fallback set itself**, not just its trigger
+      conditions: today `worktrees-smoke` only has `--collect-only` (no real
+      execution) plus the always-run structural `--guards` step, neither of
+      which is a genuine "run a safe, evidence-backed subset" fallback the
+      vision requires. Define what the smoke tier actually *executes* when
+      triggered, and validate that curated set carries real assurance (per
+      `test-portfolio`'s own evidence-bearing-family bar), not just that it
+      exists.
 - [ ] Wire the smoke-fallback trigger: missing baseline, stale baseline,
       unresolvable/invalidated attribution for a touched file, a changed
       line or module with **no attribution even where its own file has
@@ -210,7 +218,11 @@ copilot-extensions-specific Phase 1.
 
 - [ ] Phase 1: a promotion run genuinely produces a baseline correlated to
       its own commit; a deliberately-broken correlation step is visibly
-      surfaced, not silently swallowed.
+      surfaced, not silently swallowed; and a constructed run where one
+      required matrix job (a per-plugin `full -` job, or
+      `worktree-manager (out-of-plugin, full)`) fails or is cancelled
+      produces **no** selectable generation at all — proving the atomic-
+      publication gate, not just asserting it exists.
 - [ ] Phase 2: a constructed multi-commit history (baseline → several
       line-shifting commits → fork point) resolves to the correct nearest
       ancestor and correctly remaps/invalidates attribution — verified
@@ -221,7 +233,9 @@ copilot-extensions-specific Phase 1.
       **partially-attributed file** (some lines/modules covered, the
       touched ones not), or a change crossing the debt threshold each falls
       back to the smoke tier — all three paths verified by test, and all
-      three are auditable after the fact.
+      three are auditable after the fact. The fallback tier itself
+      genuinely executes its curated set (not collect-only) and that set's
+      own assurance is evidenced, not assumed.
 - [ ] Phase 4: construct a change whose regression is caught by a
       genuinely runtime-executed test (not #4353/#4378/#4379's text/AST
       scanner — see that phase's own note on why it can't prove selection)
