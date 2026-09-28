@@ -1,0 +1,9 @@
+{
+  "comment": "codespaces-lifecycle skill: document three live-diagnosed --remote-cmd/credential-relay gotchas (PowerShell \\$ interpolation before SSH ever sees it, the 60s default timeout being too tight for relay/az work, and silent get-azure-token denial for an out-of-allowlist resource)",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

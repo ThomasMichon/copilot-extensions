@@ -187,6 +187,34 @@ async def test_entra_injector_falls_back_when_helper_returns_no_token(monkeypatc
     assert await inj.acquire_secret() == "FALLBACK"
 
 
+async def test_entra_injector_logs_stderr_on_silent_denial(monkeypatch, caplog):
+    """A clean exit with an empty token (the shape of a silent relay denial --
+    e.g. a resource outside the Codespace's az-login allowlist) must surface
+    whatever diagnostic the helper *did* emit, not swallow it silently."""
+    monkeypatch.setattr(
+        "agent_mcp.auth.injectors.shutil.which",
+        lambda name: "/fake/ado-auth-helper" if name == "ado-auth-helper" else None,
+    )
+
+    async def fake_exec(*argv, **kwargs):
+        return _FakeProc(
+            b"", b"ado-auth-helper-relay: get-azure-token denied for scope='...'\n", 0,
+        )
+
+    monkeypatch.setattr("agent_mcp.auth.injectors.asyncio.create_subprocess_exec", fake_exec)
+
+    inj = build_injector(_cfg({"kind": "entra", "resource": "res"}))
+
+    class FakeSource:
+        async def resolve(self, action, fields, *, timeout=30.0):
+            return "protocol=https\nhost=h\ntoken=FALLBACK\n\n"
+
+    inj._source = FakeSource()
+    with caplog.at_level("WARNING", logger="agent-mcp.auth"):
+        assert await inj.acquire_secret() == "FALLBACK"
+    assert any("get-azure-token denied" in rec.message for rec in caplog.records)
+
+
 class _HangingProc:
     """A fake process whose ``communicate()`` never returns on its own."""
 

@@ -532,3 +532,31 @@ by agent-codespaces.
 - **"gh CLI not found"** -- install from https://cli.github.com/
 - **WSL credential slowness** -- first GCM call through PowerShell
   takes ~25s. Subsequent calls use the 300s cache.
+- **PowerShell swallows `$` before it ever reaches the remote shell** -- a
+  double-quoted `--remote-cmd` string is expanded by **PowerShell itself**
+  first: `"...$?..."` and `"...$LC_GIT_CREDENTIAL_RELAY..."` become PowerShell's
+  own `$?`/an undefined variable (often silently empty) *before* SSH ever sees
+  them, not the remote bash values. Symptoms: an unexpected literal
+  `True`/`False`, or a variable that reads as empty when the remote-side value
+  is known to be set. Fix: single-quote the whole `--remote-cmd` value (or
+  backtick-escape every `$` you want the remote shell to see), e.g.
+  `--remote-cmd 'echo scope=$LC_GIT_CREDENTIAL_RELAY'`.
+- **A `--remote-cmd` that touches the credential relay or mints a token times
+  out at the 60 s default** -- `stage 4/target-auth-env` (credential-relay
+  warm-up) alone commonly takes 20-40 s, and a live `az`/relay token mint can
+  take significantly longer under host load (tens of seconds is normal, not a
+  hang). Pass explicit, generous budgets for any relay- or `az`-touching
+  command, e.g. `--timeout 90 --connect-timeout 220`, rather than assuming the
+  default 60 s is enough and treating an early cutoff as a real failure.
+- **A `get-azure-token` relay request for an Azure resource/scope returns
+  nothing, with no error** -- a resource outside the CodeSpace's az-login
+  allowlist is silently denied: the request can come back as a fully empty
+  response (no `token=` line, no diagnostic) instead of a clear rejection.
+  Before assuming the relay or `ado-auth-helper` is broken, check what that
+  CodeSpace is actually allowed to mint: the host's
+  `~/.agent-codespaces/relay-tokens.json` has a per-CodeSpace
+  `allowed_resources` list (commonly just the ADO resource GUID
+  `499b84ac-1321-427f-aa17-267ca6975798` and `https://storage.azure.com/`
+  unless the target repo's own `agent-codespaces/config.yaml` grants more) --
+  test against one of those first. The empty-response-on-denial gap itself is
+  tracked as `ThomasMichon/copilot-extensions#4367`.

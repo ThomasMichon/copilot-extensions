@@ -1,0 +1,9 @@
+{
+  "comment": "entra auth: log the helper's stderr when a clean exit still returns no token (the shape of a silent relay denial), so a caller isn't left guessing why acquisition produced nothing",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}
