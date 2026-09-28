@@ -281,6 +281,33 @@ activity_log() {
         "${fields[@]+"${fields[@]}"}" >/dev/null 2>&1 & ) || true
 }
 
+# ── Crash detector ──────────────────────────────────────────────────────────
+# A global ERR trap so `set -e` killing the script anywhere below this point
+# (a tmux create/attach failure not otherwise caught, or any other unguarded
+# command) is diagnosed and recorded instead of exiting silently with a bare
+# code (#4454, Windows counterpart of this gap in launch-session.ps1).
+# WORKTREE_ID/LAUNCH_PROJECT may still be unset if the crash happens early;
+# handled defensively so this never masks the real failure with a trap error.
+_aw_crash_trap() {
+    local exit_code=$? line_no=$1 cmd="$2"
+    setup_log ERROR "UNHANDLED: '$cmd' failed (exit $exit_code) at line $line_no"
+    if [[ -n "${WORKTREE_ID:-}" ]]; then
+        activity_log mux_failed "$WORKTREE_ID" mux=unknown reason=unhandled_exception "exit_code=$exit_code"
+    fi
+    local recovery_project="${LAUNCH_PROJECT:-agent-worktrees}"
+    local recovery_hint
+    if [[ -n "${WORKTREE_ID:-}" ]]; then
+        recovery_hint="Run '$recovery_project --worktree-id $WORKTREE_ID' to retry, or use --no-mux to request a direct session explicitly."
+    else
+        recovery_hint="Run '$recovery_project' again to retry, or use --no-mux to request a direct session explicitly."
+    fi
+    echo "" >&2
+    echo "Worktree launcher crashed unexpectedly ('$cmd' exited $exit_code)." >&2
+    echo "$recovery_hint" >&2
+    echo "Details logged to: $SETUP_LOG" >&2
+}
+trap '_aw_crash_trap "$LINENO" "$BASH_COMMAND"' ERR
+
 # ── Plugin auto-update ─────────────────────────────────────────────────────
 # If installed from the copilot-extensions marketplace plugin, check for
 # updates.  When the plugin source changes: run the full installer (which

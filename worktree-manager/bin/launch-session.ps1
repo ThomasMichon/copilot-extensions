@@ -113,6 +113,50 @@ try {
         Remove-Item -Force -ErrorAction SilentlyContinue
 } catch {}
 
+# ---------------------------------------------------------------------------
+# Crash detector -- a top-level trap so an otherwise-unhandled terminating
+# error anywhere below this point (a hard PSMux/ConPTY failure between a
+# successful `new-session` and the attach handoff, a native exception in a
+# console API call, etc.) is diagnosed and recorded instead of silently
+# killing the launcher with a bare, unexplained exit code (#4454). Guards
+# every dependency defensively: `$script:LaunchWorktreeId`/`$plan` and
+# `Write-AwMuxFailure` may not exist yet if the crash happens early.
+# ---------------------------------------------------------------------------
+$script:LaunchWorktreeId = $null
+trap {
+    $errorMessage = $_.Exception.Message
+    $errorLine = if ($_.InvocationInfo) {
+        " at $($_.InvocationInfo.ScriptName):$($_.InvocationInfo.ScriptLineNumber)"
+    } else { '' }
+    Write-SetupLog (
+        "UNHANDLED: $errorMessage$errorLine"
+    ) 'ERROR'
+    Write-SetupLog ($_.ScriptStackTrace) 'ERROR'
+    $worktreeId = if ($script:LaunchWorktreeId) {
+        $script:LaunchWorktreeId
+    } elseif ((Get-Variable -Name plan -Scope Script -ErrorAction SilentlyContinue) -and $script:plan.worktree_id) {
+        $script:plan.worktree_id
+    } else { $null }
+    if ($worktreeId -and (Get-Command Write-AwMuxFailure -ErrorAction SilentlyContinue)) {
+        try {
+            Write-AwMuxFailure -Reason 'unhandled_exception' -ExitCode 70 -Fields @(
+                "message=$($errorMessage -replace '[\r\n]+', ' ')"
+            )
+        } catch {}
+    }
+    $recoveryProject = if ($script:LaunchProject) { $script:LaunchProject } else { 'agent-worktrees' }
+    $recoveryHint = if ($worktreeId) {
+        "Run '$recoveryProject --worktree-id $worktreeId' to retry, or use --no-mux to request a direct session explicitly."
+    } else {
+        "Run '$recoveryProject' again to retry, or use --no-mux to request a direct session explicitly."
+    }
+    Write-Host ''
+    Write-Host "Worktree launcher crashed unexpectedly: $errorMessage" -ForegroundColor Red
+    Write-Host $recoveryHint -ForegroundColor Yellow
+    Write-Host "Details logged to: $script:SetupLog" -ForegroundColor DarkGray
+    exit 70
+}
+
 # --recovery: bypass worktree resolution entirely, go straight to setup script
 # --project: explicit project identity for CWD-neutral callers
 # --no-update: skip pre-launch self-update (propagated via WORKTREE_NO_UPDATE)
@@ -773,6 +817,11 @@ $plan = ($jsonOutput -join "`n") | ConvertFrom-Json -ErrorAction Stop
 if ($plan.PSObject.Properties.Name -contains 'launch') {
     $plan = $plan.launch
 }
+
+# Feed the crash-detector trap a stable, cheap worktree-id reference so it
+# can record/hint accurately even if it fires deep in the create/attach flow
+# below, without depending on $plan still being reachable at trap time.
+if ($plan.worktree_id) { $script:LaunchWorktreeId = [string]$plan.worktree_id }
 
 # The resolved plan's `project` is authoritative for the worktree this launch
 # actually targets -- it can legitimately differ from this script's own
