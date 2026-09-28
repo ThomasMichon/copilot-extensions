@@ -352,8 +352,9 @@ correction inline, per the effort's own journal discipline)._
   Round 1 backgrounded it by unverified analogy with Windows, introducing an
   unnecessary race for no benefit) and added the lock/atomic-publish
   protection the review asked for on both platforms instead. PR:
-  ThomasMichon/copilot-extensions#4129 (merged -- see the 2026-09-27
-  Journal entry recording that outcome for the full 12-round history).
+  ThomasMichon/copilot-extensions#4129 (open at the time of this Round 2
+  entry; merged much later -- see the 2026-09-27 Journal entry recording
+  that outcome for the full 12-round history in between).
 - **Re-verified:** real subprocess invocations against a sandboxed
   `HOME`/`USERPROFILE` (not simulated): full hook returns in ~11.4s
   (previously 22.47s, over its own 15s timeout); 3 concurrent
