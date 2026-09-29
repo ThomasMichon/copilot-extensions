@@ -515,10 +515,11 @@ def _try_acquire_cutover_guard(ctx: DiagnosticContext):
         return None, str(exc)
 
 
-def audit_daemon_health(
+def _audit_daemon_health(
     ctx: DiagnosticContext,
     *,
     now: datetime | None = None,
+    cutover_state: str = "auto",
 ) -> dict[str, object]:
     candidates = _candidate_map(ctx.list_candidates())
     owner, owner_reason = _validated_owner(ctx, candidates)
@@ -526,10 +527,16 @@ def audit_daemon_health(
     record = breadcrumb.read_breadcrumb(ctx.config_dir)
     active_raw = table.get("active") if isinstance(table, dict) else None
     active_pid = active_raw.get("pid") if isinstance(active_raw, dict) else None
-    guard, guard_error = _try_acquire_cutover_guard(ctx)
+    guard = None
+    guard_error = None
+    cutover_busy = False
+    if cutover_state == "auto":
+        guard, guard_error = _try_acquire_cutover_guard(ctx)
+        cutover_busy = ctx.acquire_cutover_guard is not None and guard is None
+    elif cutover_state == "busy":
+        cutover_busy = True
 
     findings: list[dict[str, object]] = []
-    cutover_busy = ctx.acquire_cutover_guard is not None and guard is None
     try:
         if not cutover_busy:
             stranded = _inspect_stranded_survivor(ctx, record)
@@ -576,6 +583,14 @@ def audit_daemon_health(
     }
 
 
+def audit_daemon_health(
+    ctx: DiagnosticContext,
+    *,
+    now: datetime | None = None,
+) -> dict[str, object]:
+    return _audit_daemon_health(ctx, now=now)
+
+
 def _target_pid_sequence(report: dict[str, object]) -> list[tuple[str, dict[str, object]]]:
     findings = report.get("findings")
     if not isinstance(findings, list):
@@ -602,7 +617,7 @@ def apply_daemon_health(
 ) -> dict[str, object]:
     guard, guard_error = _try_acquire_cutover_guard(ctx)
     if ctx.acquire_cutover_guard is not None and guard is None:
-        blocked = audit_daemon_health(ctx, now=now)
+        blocked = _audit_daemon_health(ctx, now=now, cutover_state="busy")
         return {
             "service": ctx.service,
             "mode": "apply",
@@ -621,7 +636,7 @@ def apply_daemon_health(
         }
 
     try:
-        before = audit_daemon_health(ctx, now=now)
+        before = _audit_daemon_health(ctx, now=now, cutover_state="held")
         actions: list[dict[str, object]] = []
 
         for finding in before.get("findings", []):
@@ -647,7 +662,7 @@ def apply_daemon_health(
         attempted: set[int] = set()
         max_iterations = max(1, before.get("candidate_count", 0) * 3)
         for _ in range(max_iterations):
-            current = audit_daemon_health(ctx, now=now)
+            current = _audit_daemon_health(ctx, now=now, cutover_state="held")
             next_target = None
             for kind, item in _target_pid_sequence(current):
                 if item["pid"] not in attempted:
@@ -681,7 +696,7 @@ def apply_daemon_health(
             )
             attempted.add(item["pid"])
 
-        after = audit_daemon_health(ctx, now=now)
+        after = _audit_daemon_health(ctx, now=now, cutover_state="held")
         return {
             "service": ctx.service,
             "mode": "apply",

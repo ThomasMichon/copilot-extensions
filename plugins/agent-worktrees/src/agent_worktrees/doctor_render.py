@@ -3,9 +3,19 @@
 from __future__ import annotations
 
 
+def _cutover_blocked(report: dict[str, object]) -> bool:
+    if report.get("cutover_in_progress"):
+        return True
+    nested = report.get("before")
+    return isinstance(nested, dict) and bool(nested.get("cutover_in_progress"))
+
+
 def render_daemon_health_report(report: dict[str, object]) -> None:
     chk = "\u2713"
     findings = report.get("findings")
+    if _cutover_blocked(report):
+        print("  ! Resident daemon health: cutover in progress; audit skipped")
+        return
     if not isinstance(findings, list) or not findings:
         print(f"  {chk} Resident daemon health: no abnormal cutover findings")
         return

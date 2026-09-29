@@ -12,6 +12,13 @@ from .self_install import status as self_status
 _BANNER = "copilot-extensions Worktree Manager"
 
 
+def _cutover_blocked(report: dict[str, object]) -> bool:
+    if report.get("cutover_in_progress"):
+        return True
+    nested = report.get("before")
+    return isinstance(nested, dict) and bool(nested.get("cutover_in_progress"))
+
+
 def _prereq_line(s) -> str:
     if not s.present:
         state = "optional, absent" if s.optional else "MISSING"
@@ -142,6 +149,10 @@ def cmd_doctor(rest: list[str]) -> int:
                     f"{'terminated' if termination.get('killed') else 'left running'} "
                     f"({termination.get('method')})"
                 )
+        print()
+    elif _cutover_blocked(daemon_report):
+        print("  mux-daemon health:")
+        print("    ! cutover in progress; audit skipped")
         print()
     else:
         print("  mux-daemon health:")

@@ -16,6 +16,7 @@ def _ctx(
     health_check=None,
     make_client=None,
     is_superseded=None,
+    acquire_cutover_guard=None,
 ) -> diagnostics.DiagnosticContext:
     def _candidates() -> list[diagnostics.DaemonCandidate]:
         return [
@@ -41,6 +42,7 @@ def _ctx(
         lock_is_live=lambda data: data == state["lock"],
         list_candidates=_candidates,
         is_superseded=is_superseded or (lambda pid, generation: False),
+        acquire_cutover_guard=acquire_cutover_guard,
         terminate_pid_if_identity=_terminate,
         make_client=make_client,
         health_check=health_check,
@@ -199,3 +201,46 @@ def test_apply_blocks_duplicate_repair_without_validated_owner(tmp_path: Path):
     assert state["terminated"] == []
     assert result["actions"][0]["blocked"] is True
     assert result["actions"][0]["reason"] == "no validated live owner"
+
+
+def test_apply_does_not_reacquire_nonreentrant_cutover_guard(tmp_path: Path):
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=101, version="1.0.0")
+    state = {
+        "lock": {"pid": 101, "start_time": "owner"},
+        "live": {101: "owner", 202: "duplicate"},
+        "terminated": [],
+    }
+    held = {"locked": False}
+
+    class _Guard:
+        def release(self) -> None:
+            held["locked"] = False
+
+    def _acquire(_timeout: float):
+        if held["locked"]:
+            raise RuntimeError("busy")
+        held["locked"] = True
+        return _Guard()
+
+    result = diagnostics.apply_daemon_health(
+        _ctx(tmp_path, state=state, acquire_cutover_guard=_acquire)
+    )
+
+    assert state["terminated"] == [202]
+    assert result["actions"][0]["termination"]["killed"] is True
+    assert result["after"]["counts"]["total"] == 0
+
+
+def test_report_marks_busy_cutover_as_skipped_not_healthy(tmp_path: Path):
+    state = {
+        "lock": {"pid": 101, "start_time": "owner"},
+        "live": {101: "owner", 202: "duplicate"},
+        "terminated": [],
+    }
+
+    report = diagnostics.audit_daemon_health(
+        _ctx(tmp_path, state=state, acquire_cutover_guard=lambda _timeout: (_ for _ in ()).throw(RuntimeError("busy")))
+    )
+
+    assert report["cutover_in_progress"] is True
+    assert report["counts"]["total"] == 0
