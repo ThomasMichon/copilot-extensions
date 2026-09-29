@@ -817,12 +817,7 @@ def create_pr(
             authority_sensitive=False,
         )
         prcfg = actor_flow.pr_config
-        base.update({
-            "flow_profile": actor_flow.flow.profile,
-            "configured_flow_profile": actor_flow.configured_flow.profile,
-            "flow_resolution": actor_flow.resolution,
-            "viewer_permission": actor_flow.viewer_permission,
-        })
+        base["viewer_permission"] = actor_flow.viewer_permission
     if prcfg.fork.enabled:
         if not confirm_fork:
             return {

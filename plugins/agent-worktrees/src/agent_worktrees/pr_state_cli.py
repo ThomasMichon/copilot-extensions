@@ -257,11 +257,11 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
     worktree_id = core._resolve_worktree_id(worktree_id)
 
     repo_cfg = config.default_repo
+    configured_flow = pr_config._pr_flow_profile(repo_cfg)
     actor_flow = pr_config.ActorPRFlow(
-        repo_cfg.pr,
-        repo_cfg.pr,
-        pr_config._pr_flow_profile(repo_cfg),
-        pr_config._pr_flow_profile(repo_cfg),
+        pr_config=repo_cfg.pr,
+        configured_flow=configured_flow,
+        flow=configured_flow,
     )
     live_requested = not getattr(args, "no_live", False)
     if live_requested:

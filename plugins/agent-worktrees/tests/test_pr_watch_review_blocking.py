@@ -43,15 +43,41 @@ class TestPrWatchReviewBlocking:
         assert m._pr_watch_review_blocking(config, _args()) is True
         called.assert_not_called()
 
-    def test_non_self_merge_repo_stays_non_blocking_no_network(self, monkeypatch):
-        """review_blocking=False but not a pr-self-merge profile (no
-        self_approve/merge_actor): nothing to gate by actor authority."""
+    def test_human_merge_repo_waits_for_binding_review_no_network(self, monkeypatch):
+        """A human-merge flow waits for a binding approval even when its
+        automated reviewer is otherwise configured as non-blocking."""
         repo = _repo_config(review_blocking=False)
         config = SimpleNamespace(default_repo=repo)
         called = MagicMock()
         monkeypatch.setattr("agent_worktrees.providers.get_provider", called)
-        assert m._pr_watch_review_blocking(config, _args()) is False
+        assert m._pr_watch_review_blocking(config, _args()) is True
         called.assert_not_called()
+
+    def test_conservative_base_maintain_override_keeps_actor_postures(
+        self, monkeypatch,
+    ):
+        """A conservative human-merge base blocks Write actors on approval,
+        while its Maintain override gets the configured non-blocking
+        submitter-direct wait."""
+        repo = _repo_config(
+            review_blocking=False,
+            provider="github",
+            roles={
+                "maintain": cfg.PRRoleOverride(
+                    merge_actor="submitter-direct",
+                ),
+            },
+        )
+        config = SimpleNamespace(default_repo=repo)
+        permission = {"value": "write"}
+        monkeypatch.setattr(
+            "agent_worktrees.providers.actor_viewer_permission",
+            lambda *a, **k: permission["value"],
+        )
+        assert m._pr_watch_review_blocking(config, _args()) is True
+
+        permission["value"] = "maintain"
+        assert m._pr_watch_review_blocking(config, _args()) is False
 
     def test_self_merge_maintainer_stays_non_blocking(self, monkeypatch):
         """Live authority True (write/maintain/admin): the maintainer waits

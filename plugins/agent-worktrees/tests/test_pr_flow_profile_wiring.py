@@ -105,7 +105,7 @@ def test_effective_actor_profile_honors_explicit_write_non_self_merge(monkeypatc
     assert actor.configured_flow.profile == pc.PROFILE_PR_SELF_MERGE
     assert actor.flow.profile == pc.PROFILE_PR_HUMAN_MERGE
     assert actor.pr_config.merge_actor == ""
-    assert actor.authority is True
+    assert actor.viewer_permission == "write"
     assert actor.resolution == "actor-role"
 
 
@@ -122,7 +122,7 @@ def test_effective_actor_profile_honors_explicit_read_non_self_merge(monkeypatch
     actor = pr_config.resolve_actor_pr_flow(repo, "o/r", token="tok")
 
     assert actor.flow.profile == pc.PROFILE_PR_HUMAN_MERGE
-    assert actor.authority is False
+    assert actor.viewer_permission == "read"
     assert actor.resolution == "actor-role"
 
 
@@ -156,7 +156,7 @@ def test_unknown_permission_preserves_historical_self_merge_fail_open(monkeypatc
     actor = pr_config.resolve_actor_pr_flow(repo, "o/r", token="tok")
 
     assert actor.flow.profile == pc.PROFILE_PR_SELF_MERGE
-    assert actor.authority is None
+    assert actor.viewer_permission == ""
     assert actor.resolution == "configured-fallback"
 
 

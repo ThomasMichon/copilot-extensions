@@ -76,12 +76,10 @@ def _pr_flow_profile(repo: cfg.RepoConfig):
 class ActorPRFlow:
     """Configured and actor-effective views of one repo's PR flow."""
 
-    configured_pr_config: cfg.PRConfig
     pr_config: cfg.PRConfig
     configured_flow: pc.PRFlowProfile
     flow: pc.PRFlowProfile
     viewer_permission: str = ""
-    authority: bool | None = None
     resolution: str = "configured"
 
 
@@ -117,7 +115,7 @@ def resolve_actor_pr_flow(
         and configured_flow.profile == pc.PROFILE_PR_SELF_MERGE
     )
     if not repo_slug or not (role_aware or needs_authority):
-        return ActorPRFlow(base_pr, base_pr, configured_flow, configured_flow)
+        return ActorPRFlow(base_pr, configured_flow, configured_flow)
 
     try:
         provider = providers.get_provider(base_pr.provider)
@@ -137,7 +135,6 @@ def resolve_actor_pr_flow(
 
     if not permission:
         return ActorPRFlow(
-            base_pr,
             base_pr,
             configured_flow,
             configured_flow,
@@ -167,21 +164,16 @@ def resolve_actor_pr_flow(
         resolution = "actor-authority"
 
     return ActorPRFlow(
-        base_pr,
         effective_pr,
         configured_flow,
         effective_flow,
         viewer_permission=permission,
-        authority=authority,
         resolution=resolution,
     )
 
 
 def actor_review_blocking(actor_flow: ActorPRFlow) -> bool:
     """Return the effective ``pr-watch`` verdict posture for this actor."""
-    if (
-        actor_flow.configured_flow.profile == pc.PROFILE_PR_SELF_MERGE
-        and actor_flow.flow.profile != pc.PROFILE_PR_SELF_MERGE
-    ):
+    if actor_flow.flow.profile == pc.PROFILE_PR_HUMAN_MERGE:
         return True
     return bool(getattr(actor_flow.pr_config, "review_blocking", False))
