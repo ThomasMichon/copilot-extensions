@@ -538,7 +538,7 @@ mismatches remain unclaimable and emit a bounded, fingerprinted
   judgment half of emitters-and-evaluators. `--dry-run` prints decisions only.
   For the **service-driven** loop,
   `agent-dispatch supervise --evaluator <cfg>` <!-- marketplace-isolation: allow supervisor-management -->
-  runs the same rules each cycle over newly-terminal tasks (advancing the loop
+  runs the same rules each cycle over newly-concluded tasks (advancing the loop
   with no bespoke module; idempotent via the emit's `dedup_key`).
 
 See the plugin README (**Producers**) for the spec/config shapes.
@@ -641,14 +641,14 @@ Completion may record an optional JSON object/array result with
 `--result-json` or the cross-platform-friendly `--result-file` (`-` reads
 stdin; one leading UTF-8 BOM is accepted on every input path). The canonical
 UTF-8 encoding is capped at 64 KiB and is committed atomically with
-`status=completed`, `result_ref`, and the stable completing identity; invalid
+`status=submitted`, `result_ref`, and the stable completing identity; invalid
 input is HTTP 400, oversized input is HTTP 413, and both leave the task
 non-terminal. JSON null and scalars are rejected. MCP callers should pass a
 decoded object or array; the MCP SDK may normalize a JSON-encoded object string.
 `show` retains the full decoded value; bulk `list`/`find`/`sweep`/`inbox` rows
 expose only `has_result`. Retrieve the value with `result <id>`,
 `GET /tasks/<id>/result`, or `dispatch_result`. SSE events likewise carry only
-`has_result`: initial completion emits `task.completed`, retry-fill emits
+`has_result`: initial completion emits `task.submitted`, retry-fill emits
 `task.result_recorded`, and an identical retry emits no duplicate event.
 
 A client sending a structured result verifies that the coordinator returned the
@@ -757,7 +757,7 @@ to `machine` only when the mismatch is machine-wide.
 <agent-dispatch catalog argv[0]> show    <id>       # full task record
 <agent-dispatch catalog argv[0]> events  <id>       # append-only audit trail of every transition
 <agent-dispatch catalog argv[0]> payload <id>       # resolved payload (inline or blob); --raw prints content only
-<agent-dispatch catalog argv[0]> consume <id>       # resume-and-consume: drive to completed (idempotent) + print payload
+<agent-dispatch catalog argv[0]> consume <id>       # resume-and-consume: drive to submitted (idempotent) + print payload
 <agent-dispatch catalog argv[0]> consume <id> --defer-complete  # TAKEOVER pickup: approve->claim->start + print brief, NO complete
 <agent-dispatch catalog argv[0]> watch              # stream task.* events (SSE) as JSON lines
 ```
@@ -824,7 +824,7 @@ to `machine` only when the mismatch is machine-wide.
 > - **Baton (default `consume <id>`):** rolls the whole
 >   approve → claim → start → complete lifecycle into one idempotent call and
 >   then prints the payload, so a successor's *single* command loads the brief
->   **and** marks the baton spent -- a handoff is completed the moment it is
+>   **and** marks the baton spent -- a handoff is submitted the moment it is
 >   picked up. The continuation *work* is tracked by its effort/issue, not this
 >   task. Use for a **human in-place resume** (`/resume-handoff`, a pasted seed).
 > - **Deferred (`consume <id> --defer-complete`):** approve → claim → **start**

@@ -800,7 +800,7 @@ agent-dispatch webhook --config webhook.json --host 127.0.0.1 --port 9331
 A producer puts work on the queue; an **evaluator** decides what happens *next* as
 that work progresses -- the *judgment* half of emitters-and-evaluators. It is
 hook-like: it receives one task **lifecycle event** (the coordinator shape
-`{"type": "task.completed", "task": {...}}`) and returns decisions -- emit a
+`{"type": "task.submitted", "task": {...}}`) and returns decisions -- emit a
 follow-up task, or nothing. A declarative spec of rules matches on the event and
 mints follow-ups from templates, so a standing domain automates a whole cycle
 (reviewer done -> open a conflict-resolution follow-up; a goal met -> the next
@@ -808,7 +808,7 @@ goal) without a bespoke module.
 
 ```bash
 # apply an evaluator to an event read from stdin (a hook/producer pipes it in):
-echo '{"type":"task.completed","task":{"id":"t1","labels":["recipe:reviewer"],"status":"submitted","origin_ref":"o/n#42"}}' \
+echo '{"type":"task.submitted","task":{"id":"t1","labels":["recipe:reviewer"],"status":"submitted","origin_ref":"o/n#42"}}' \
   | agent-dispatch evaluate --spec evaluator.json --repo o/n
 agent-dispatch evaluate --spec evaluator.json --event-file event.json --dry-run
 ```
@@ -1238,7 +1238,7 @@ the MCP SDK may normalize a JSON-encoded object string before tool invocation.
 the potentially large value and expose `has_result`; retrieve it with
 `result <id>`, `GET /tasks/<id>/result`, or MCP `dispatch_result`. SSE events
 also expose only `has_result`, never the result body. Initial completion emits
-`task.completed`; a later retry that fills a previously missing result emits
+`task.submitted`; a later retry that fills a previously missing result emits
 `task.result_recorded`. Repeating the identical recorded result is a no-op and
 emits neither event again.
 
@@ -1423,8 +1423,8 @@ a healthy companion; selection and cutover are separate lifecycle increments.
 
 
 **Evaluator pass — advance the loop (`--evaluator <spec>`).** With an evaluator
-spec, each cycle feeds every **newly-terminal** task's lifecycle event
-(`task.completed` / `task.abandoned`) to the evaluator (§ Evaluator) and applies
+spec, each cycle feeds every **newly-concluded** task's lifecycle event
+(`task.submitted` / `task.abandoned`) to the evaluator (§ Evaluator) and applies
 its decisions — emitting a follow-up task. This is the **service-driven** half of
 *a-loop-runs-with-or-without-a-service*: a standing supervisor advances a domain's
 loop (reviewer done → conflict-resolution follow-up; goal met → the next goal)

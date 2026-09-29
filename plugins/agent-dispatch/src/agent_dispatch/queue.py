@@ -282,13 +282,13 @@ class TaskQueue(
                 ")"
             )
             status_rename = "2026-09-29-status-rename-submitted-completed"
-            renamed = conn.execute(
-                "SELECT 1 FROM queue_migrations WHERE name = ?",
-                (status_rename,),
-            ).fetchone()
-            if renamed is None:
-                conn.execute("BEGIN IMMEDIATE")
-                try:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                renamed = conn.execute(
+                    "SELECT 1 FROM queue_migrations WHERE name = ?",
+                    (status_rename,),
+                ).fetchone()
+                if renamed is None:
                     conn.execute(
                         "UPDATE tasks SET status = CASE"
                         " WHEN status = 'completed' THEN 'submitted'"
@@ -313,10 +313,10 @@ class TaskQueue(
                         "INSERT INTO queue_migrations(name, applied_at) VALUES (?, ?)",
                         (status_rename, self._now(None)),
                     )
-                    conn.execute("COMMIT")
-                except Exception:
-                    conn.execute("ROLLBACK")
-                    raise
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
             # Rows completed before ``completed_by`` existed retain their
             # original completing identity when the durable audit trail proves
             # exactly one owner.  A completion retry is a completed->completed

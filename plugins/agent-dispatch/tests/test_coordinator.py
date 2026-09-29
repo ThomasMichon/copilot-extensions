@@ -1354,7 +1354,8 @@ def test_sse_stream_distinguishes_retry_recorded_result(server_url):
         try:
             for ev in streamer.stream_events():
                 received.append(ev)
-                if ev.get("type") == "task.result_recorded":
+                types = {item.get("type") for item in received}
+                if {"task.result_recorded", "task.completed"} <= types:
                     break
         except Exception:
             return  # stream closed / server stopped -- best effort
@@ -1377,6 +1378,7 @@ def test_sse_stream_distinguishes_retry_recorded_result(server_url):
     mutator.start(tid, "w1")
     mutator.complete(tid, "w1")
     mutator.complete(tid, "w1", result={"summary": "done"})
+    mutator.confirm(tid, actor="evaluator")
 
     t.join(timeout=5)
     streamer.close()
@@ -1386,8 +1388,10 @@ def test_sse_stream_distinguishes_retry_recorded_result(server_url):
     assert "task.created" in types
     assert "task.claimed" in types
     assert "task.submitted" in types
+    assert "task.completed" in types
     assert "task.result_recorded" in types
     assert types.count("task.submitted") == 1
+    assert types.count("task.completed") == 1
     created = next(e for e in received if e["type"] == "task.created")
     assert created["task"]["id"] == tid
     completed = next(e for e in received if e["type"] == "task.submitted")
@@ -1398,6 +1402,8 @@ def test_sse_stream_distinguishes_retry_recorded_result(server_url):
     )
     assert recorded["task"]["has_result"] is True
     assert "result" not in recorded["task"]
+    confirmed = next(e for e in received if e["type"] == "task.completed")
+    assert confirmed["task"]["status"] == "completed"
 
 
 def test_health_reports_zero_subscribers_initially(api):

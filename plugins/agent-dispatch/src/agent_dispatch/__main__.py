@@ -750,8 +750,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="status-grouped board for the picker Tasks pivot: tasks across "
         "proposed/queued/claimed/started/suspended PLUS recently "
-        "completed/abandoned, each tagged with a display `group` "
-        "(Blocked/Proposed/Started/Queued/Suspended/Completed/Abandoned) "
+        "submitted/completed/abandoned, each tagged with a display `group` "
+        "(Blocked/Proposed/Started/Queued/Suspended/Submitted/Completed/Abandoned) "
         "and ordered by that priority. Overrides "
         "--status and --awaiting-steer.",
     )
@@ -760,7 +760,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="recent_mins",
         type=int,
         default=120,
-        help="with --board: include completed/abandoned tasks whose terminal time "
+        help="with --board: include submitted/completed/abandoned tasks whose terminal time "
         "is within this many minutes (default: 120).",
     )
     p.add_argument("--label")
@@ -870,7 +870,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser(
         "consume",
-        help="resume-and-consume a handoff: drive it to completed (idempotent; "
+        help="resume-and-consume a handoff: drive it to submitted (idempotent; "
         "a spent submitted/completed handoff is refused, exit 3, never replayed) "
         "and print its payload -- the successor's one-command pickup",
     )
