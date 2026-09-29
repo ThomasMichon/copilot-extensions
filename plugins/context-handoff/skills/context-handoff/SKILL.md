@@ -126,10 +126,14 @@ Before composing the **Continuing Objective** / **Successor Work Roster** /
    for open-ended language: "still open," "future pass," "not yet," "didn't
    verify," "follow-up," "left as-is," "deferred," "out of scope for this,"
    or similar.
-2. For each hit, either fold it into the Successor Work Roster (even as a
-   single line) or state explicitly in the brief that it was deliberately
-   scoped out and why -- never let it silently disappear because the primary
-   ask happened to be done.
+2. For each hit, fold it into the brief's own carrier for open work -- the
+   **Successor Work Roster** for the standalone shape, or the **Next Slice**
+   for the effort-backed shape (which has no Successor Work Roster; route
+   the hit there, or into the active effort itself when it doesn't belong to
+   this handoff leg specifically) -- or state explicitly in the brief that it
+   was deliberately scoped out and why. Never let it silently disappear
+   because the primary ask happened to be done, and never drop it for lack
+   of a Successor Work Roster in the shape you're using.
 3. Only write "None outstanding" once this scan has actually happened, not
    because nothing came immediately to mind.
 
@@ -341,23 +345,36 @@ yourself deserves a lighter version of the same check before you report
 "nothing outstanding" to the user:
 
 1. When a session-history/transcript query surface is available (for example
-   a session-store query tool), pull the predecessor session's own turns --
-   not just its final summary -- and skim for open-ended language ("still
-   open," "future pass," "didn't verify," "follow-up," "deferred") the brief
-   itself didn't carry forward. This is a spot-check, not a full re-read: you
-   are looking for a dropped thread, not re-doing the predecessor's work.
-2. If the predecessor session's own first turn shows it was itself resuming
-   from an earlier handoff, treat that as a chain: a terse or all-green brief
-   is more likely to be compressed rather than complete, so extend the same
-   spot-check one hop further back before accepting "nothing outstanding" at
-   face value.
-3. If you find a dropped item, surface it to the user rather than quietly
+   a session-store query tool), **search it for the same open-ended phrases**
+   ("still open," "future pass," "didn't verify," "follow-up," "deferred")
+   rather than pulling the predecessor's full turn history into your own
+   context -- a session can run to hundreds of turns, and reading all of them
+   defeats the point of a bounded handoff. Fetch only the matched turns plus a
+   little surrounding context; if the available surface can only return a
+   full transcript with no way to search or page it, delegate the read to a
+   sub-agent (the same context-firewall pattern the `session-rampup` agent
+   uses) rather than loading it directly.
+2. **Identifying the right predecessor session is best-effort, not
+   guaranteed.** Nothing today reliably threads a predecessor's session ID
+   through the handoff payload into your hands, so resolve it from whatever
+   lineage signals the available tooling exposes (worktree/session history,
+   timestamps, the brief's own content) rather than assuming an authoritative
+   pointer exists. If you can't identify a specific predecessor session with
+   reasonable confidence, that itself is a retrieval failure -- see point 4.
+3. If the identified predecessor session's own first turn shows it was itself
+   resuming from an earlier handoff, treat that as a chain: a terse or
+   all-green brief is more likely to be compressed rather than complete, so
+   extend the same spot-check one hop further back before accepting "nothing
+   outstanding" at face value.
+4. If you find a dropped item, surface it to the user rather than quietly
    picking it up or quietly dropping it again -- it may be intentional, or it
    may be exactly the kind of gap this check exists to catch.
-4. When no history surface is available at all, say so plainly instead of
-   silently skipping the check -- "the brief looks complete but I could not
-   cross-check it against the predecessor's own transcript" is honest; a bare
-   "nothing outstanding" is not, when it was never actually verified.
+5. **Disclose whenever the check didn't actually happen** -- not only when no
+   history surface exists at all, but whenever the specific predecessor
+   transcript is missing, remote, expired, unreadable, or unidentifiable (per
+   point 2). "The brief looks complete but I could not cross-check it against
+   the predecessor's own transcript (<reason>)" is honest; a bare "nothing
+   outstanding" is not, when the check was never actually completed.
 
 ### When consume fails because the handoff is already claimed
 
