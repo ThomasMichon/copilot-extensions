@@ -1899,21 +1899,38 @@ test("getPreviousSession requires a session id", () => {
   assert.match(result.reason, /session id is required/);
 });
 
+// Stub for the ledger-cancellation calls (`agent-worktrees get worktree-id`
+// then `agent-worktrees cancel-handoff`) abortHandoffTask/abortFileHandoff
+// now make after retiring the backing handoff record.
+function ledgerExecuteStub({ worktreeId = "wt-1", cancelled = true } = {}) {
+  return (bin, argv) => {
+    if (bin === "agent-worktrees" && argv[0] === "get") return worktreeId;
+    if (bin === "agent-worktrees" && argv[0] === "cancel-handoff") {
+      const token = argv[argv.indexOf("--token") + 1];
+      return JSON.stringify({ cancelled, worktree_id: worktreeId, token });
+    }
+    throw new Error(`unexpected CLI call: ${bin} ${argv.join(" ")}`);
+  };
+}
+
 test("abortHandoffTask abandons the agent-dispatch task with the given reason", () => {
   const calls = [];
+  const ledger = ledgerExecuteStub();
   const execute = (bin, argv) => {
     calls.push({ bin, argv });
     if (argv[0] === "show") {
       return JSON.stringify({ id: "task-42", labels: ["handoff"], source: "context-handoff", status: "queued" });
     }
     if (argv[0] === "payload") return "";
+    if (bin === "agent-worktrees") return ledger(bin, argv);
     return "{}";
   };
   const result = abortHandoffTask("C:\\repo", "task-42", "no longer needed", execute);
   assert.equal(result.ok, true);
   assert.equal(result.id, "task-42");
   assert.equal(result.kind, "task");
-  assert.match(result.ledgerNote, /handoffs-check/);
+  assert.equal(result.ledgerCancelled, true);
+  assert.equal(result.ledgerNote, undefined);
   assert.deepEqual(calls, [
     { bin: "agent-dispatch", argv: ["show", "task-42"] },
     {
@@ -1924,7 +1941,27 @@ test("abortHandoffTask abandons the agent-dispatch task with the given reason", 
       ],
     },
     { bin: "agent-dispatch", argv: ["payload", "task-42", "--raw"] },
+    { bin: "agent-worktrees", argv: ["get", "worktree-id"] },
+    { bin: "agent-worktrees", argv: ["cancel-handoff", "--worktree-id", "wt-1", "--token", "task-42"] },
   ]);
+});
+
+test("abortHandoffTask reports honestly when the ledger cancellation itself can't be confirmed", () => {
+  const execute = (bin, argv) => {
+    if (argv[0] === "show") {
+      return JSON.stringify({ id: "task-42", labels: ["handoff"], source: "context-handoff", status: "queued" });
+    }
+    if (argv[0] === "payload") return "";
+    if (bin === "agent-worktrees" && argv[0] === "get") return "wt-1";
+    if (bin === "agent-worktrees" && argv[0] === "cancel-handoff") {
+      return JSON.stringify({ cancelled: false, reason: "unknown token" });
+    }
+    return "{}";
+  };
+  const result = abortHandoffTask("C:\\repo", "task-42", null, execute);
+  assert.equal(result.ok, true);
+  assert.equal(result.ledgerCancelled, false);
+  assert.match(result.ledgerNote, /handoffs-check/);
 });
 
 test("abortHandoffTask refuses to abandon a task that isn't a context-handoff handoff", () => {
@@ -2001,6 +2038,7 @@ test("abortFileHandoff marks an unconsumed file handoff aborted, never claiming 
       });
       const result = abortFileHandoff(
         "C:\\repo", "aborting-session", "handoff-to-abort", path, "changed my mind",
+        { execute: ledgerExecuteStub() },
       );
       assert.equal(result.ok, true);
       assert.equal(result.record.consumed, true);
@@ -2008,7 +2046,7 @@ test("abortFileHandoff marks an unconsumed file handoff aborted, never claiming 
       assert.equal(result.record.aborted, true);
       assert.equal(result.record.abortedBySession, "aborting-session");
       assert.equal(result.record.abortReason, "changed my mind");
-      assert.match(result.ledgerNote, /handoffs-check/);
+      assert.equal(result.ledgerCancelled, true);
       const onDisk = JSON.parse(readFileSync(path, "utf-8"));
       assert.equal(onDisk.aborted, true);
       // Best-effort side effect: the predecessor's own session-state marker
@@ -2046,6 +2084,7 @@ test("abortFileHandoff reclaims a stale lock left by a crashed consumer instead 
     }), "utf-8");
     const result = abortFileHandoff(
       "C:\\repo", "aborting-session", "handoff-stale-lock", path, "reclaim test",
+      { execute: ledgerExecuteStub() },
     );
     assert.equal(result.ok, true);
     assert.equal(result.record.aborted, true);

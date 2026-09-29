@@ -271,6 +271,25 @@ def _cancel_pending_handoffs(record: tracking.WorktreeRecord) -> bool:
     return changed
 
 
+def cancel_handoff(record: tracking.WorktreeRecord, token: str) -> bool:
+    """Cancel ONE pending handoff by its exact token (the handoff/task id a
+    caller already knows), unlike `_cancel_pending_handoffs`'s
+    cancel-everything-pending sweep (a side effect of a NEW session
+    registering). This is the targeted primitive an explicit external
+    cancellation (context-handoff's `abort`) needs: retiring a handoff before
+    consumption must also close ITS OWN ledger entry, not every pending entry
+    on the worktree, or a genuinely different in-flight handoff would be
+    silently cancelled too. A no-op (returns False) when the token isn't
+    found or isn't `pending` (already linked/cancelled) -- never raises for
+    that case, since a caller retrying an already-cancelled abort should see
+    a clean, idempotent result."""
+    for handoff in record.handoffs:
+        if handoff.token == token and handoff.state == "pending":
+            handoff.state = "cancelled"
+            return True
+    return False
+
+
 def _handoff_state(record: tracking.WorktreeRecord, token: str) -> str | None:
     handoff = next((handoff for handoff in record.handoffs if handoff.token == token), None)
     return handoff.state if handoff is not None else None

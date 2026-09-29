@@ -1,0 +1,104 @@
+"""``agent-worktrees cancel-handoff`` -- targeted pending-handoff retirement.
+
+Split out of ``session_binding_cli`` (which owns the paired ``note-handoff``)
+purely to stay under this repo's module-size cap; the two commands are each
+other's counterpart and should be read together.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+
+from . import tracking
+from . import config as cfg
+from . import status_updater_cli
+
+
+def _core():
+    """Lazily resolve ``agent_worktrees.__main__`` -- see ``pr_cli._core``."""
+    from . import __main__ as core
+
+    return core
+
+
+def _core_helper(name: str, local):
+    candidate = vars(_core()).get(name)
+    if callable(candidate) and candidate is not local:
+        return candidate
+    return local
+
+
+def _json_output(*args, **kwargs):
+    return _core()._json_output(*args, **kwargs)
+
+
+def _activate_project_for_path(*args, **kwargs):
+    return _core_helper("_activate_project_for_path", status_updater_cli._activate_project_for_path)(*args, **kwargs)
+
+
+def _resolve_worktree_id(*args, **kwargs):
+    return _core()._resolve_worktree_id(*args, **kwargs)
+
+
+def add_parsers(sub) -> None:
+    """Register the ``cancel-handoff`` subcommand."""
+    sp = sub.add_parser(
+        "cancel-handoff",
+        help="Cancel ONE pending handoff ledger entry by its exact token -- "
+        "the targeted counterpart to note-handoff, for an explicit external "
+        "retirement (e.g. context-handoff's abort) before consumption",
+    )
+    sp.add_argument(
+        "--token",
+        required=True,
+        help="The exact handoff token to cancel -- same value note-handoff's --task recorded",
+    )
+    sp.add_argument(
+        "--worktree-dir",
+        dest="worktree_dir",
+        default=None,
+        help="The worktree checkout dir (default: cwd)",
+    )
+    sp.add_argument(
+        "--worktree-id", default=None, help="Worktree ID (alternative to --worktree-dir)"
+    )
+
+
+def cmd_cancel_handoff(args: argparse.Namespace) -> int:
+    """Cancel one pending handoff ledger entry by its exact token. Idempotent:
+    a token that's already cancelled/linked, or was never opened, reports
+    `cancelled: false` rather than raising -- a caller retrying an abort
+    should see a clean result, not an error."""
+    wt_id = getattr(args, "worktree_id", None)
+    wdir = getattr(args, "worktree_dir", None) or os.getcwd()
+    if wt_id:
+        wt_id = _resolve_worktree_id(wt_id)
+    else:
+        _activate_project_for_path(wdir)
+        try:
+            wt_id = tracking.find_worktree_id_by_cwd(wdir)
+        except Exception:
+            wt_id = None
+    if not wt_id:
+        _json_output({"cancelled": False, "reason": "not a tracked worktree"})
+        return 0
+
+    token = (getattr(args, "token", None) or "").strip()
+    if not token:
+        _json_output({"cancelled": False, "reason": "a token is required"})
+        return 1
+
+    try:
+        yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
+        with tracking._RecordLock(yaml_path):
+            record = tracking.load_record(yaml_path)
+            cancelled = tracking.cancel_handoff(record, token)
+            if cancelled:
+                tracking.save_record(record, yaml_path)
+    except Exception as exc:
+        _json_output({"cancelled": False, "worktree_id": wt_id, "reason": str(exc)})
+        return 1
+
+    _json_output({"cancelled": cancelled, "worktree_id": wt_id, "token": token})
+    return 0

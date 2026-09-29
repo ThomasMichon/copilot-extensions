@@ -1,0 +1,9 @@
+{
+  "comment": "agent-worktrees: add a precisely-scoped cancel-handoff primitive (tracking_lifecycle.cancel_handoff + CLI subcommand) so an external cancellation of one pending handoff never blanket-cancels every pending entry; invoked from context-handoff's abort path",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

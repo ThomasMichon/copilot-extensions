@@ -4052,6 +4052,7 @@ from .tracking_lifecycle import (  # noqa: F401
     _next_lifecycle_revision,
     _pending_handoffs_all_from_yielded,
     associate_handoff_candidate,
+    cancel_handoff,
     conclude_session,
     create_new_record,
     create_new_record_if_absent,

@@ -496,6 +496,7 @@ async function cmdAbort(args) {
   if (args.json) return emit(result, args);
   process.stdout.write(
     `Aborted ${result.kind}-backed handoff ${result.id}. It will not be offered for consumption again.\n` +
+    (result.ledgerCancelled ? "Cancelled the matching agent-worktrees pending-handoff ledger entry.\n" : "") +
     (result.ledgerNote ? `\n${result.ledgerNote}\n` : ""),
   );
 }

@@ -525,6 +525,96 @@ class TestNoteHandoff:
         assert captured["noted"] is False
 
 
+class TestCancelHandoff:
+    def test_cancels_the_one_matching_pending_entry(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch
+    ):
+        _save_record(tmp_tracking_dir, "wt-hd", "/tmp/src/wt-hd")
+        monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
+        monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: "wt-hd")
+        captured = {}
+        monkeypatch.setattr(m, "_json_output", lambda o: captured.update(o))
+        monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "sess-pred")
+
+        # Open the handoff the same way note-handoff would.
+        rc = m.cmd_note_handoff(argparse.Namespace(
+            task="task123", title="Fix the widget",
+            worktree_dir="/tmp/src/wt-hd", worktree_id=None, session_id=None))
+        assert rc == 0
+        record = m.tracking.load_record(tmp_tracking_dir / "wt-hd.yaml")
+        assert record.handoffs[0].state == "pending"
+
+        rc = m.cmd_cancel_handoff(argparse.Namespace(
+            token="task123", worktree_dir="/tmp/src/wt-hd", worktree_id=None))
+        assert rc == 0
+        assert captured["cancelled"] is True
+        assert captured["worktree_id"] == "wt-hd"
+        record = m.tracking.load_record(tmp_tracking_dir / "wt-hd.yaml")
+        assert record.handoffs[0].state == "cancelled"
+
+    def test_does_not_cancel_an_unrelated_pending_handoff(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch
+    ):
+        # Real regression this guards: cancel-handoff must be scoped to its
+        # exact token, never a blanket "cancel everything pending" sweep --
+        # that's _cancel_pending_handoffs's job, reserved for new-session
+        # registration, not an explicit external abort of ONE handoff.
+        #
+        # Both predecessor sessions are registered up front (rather than via
+        # separate cmd_note_handoff calls) so opening the second handoff
+        # doesn't itself look like a brand-new session bootstrapping onto a
+        # worktree with only yielded predecessors -- that's a distinct,
+        # legitimate register_session rebind heuristic
+        # (_pending_handoffs_all_from_yielded) this test isn't exercising.
+        yaml_path = tmp_tracking_dir / "wt-hd.yaml"
+        _save_record(tmp_tracking_dir, "wt-hd", "/tmp/src/wt-hd")
+        monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
+        monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: "wt-hd")
+        monkeypatch.setattr(m, "_json_output", lambda o: None)
+        m.tracking.register_session("wt-hd", "sess-pred", source="handoff")
+        m.tracking.register_session("wt-hd", "sess-other", source="handoff")
+
+        with m.tracking._RecordLock(yaml_path):
+            record = m.tracking.load_record(yaml_path)
+            m.tracking.open_handoff(record, "sess-pred", "task-keep", save=False)
+            m.tracking.open_handoff(record, "sess-other", "task-cancel", save=False)
+            m.tracking.save_record(record, yaml_path)
+
+        rc = m.cmd_cancel_handoff(argparse.Namespace(
+            token="task-cancel", worktree_dir="/tmp/src/wt-hd", worktree_id=None))
+        assert rc == 0
+        record = m.tracking.load_record(yaml_path)
+        by_token = {h.token: h.state for h in record.handoffs}
+        assert by_token["task-cancel"] == "cancelled"
+        assert by_token["task-keep"] == "pending"
+
+    def test_idempotent_on_an_already_cancelled_or_unknown_token(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch
+    ):
+        monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
+        monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: "wt-hd")
+        captured = {}
+        monkeypatch.setattr(m, "_json_output", lambda o: captured.update(o))
+        _save_record(tmp_tracking_dir, "wt-hd", "/tmp/src/wt-hd")
+
+        rc = m.cmd_cancel_handoff(argparse.Namespace(
+            token="never-existed", worktree_dir="/tmp/src/wt-hd", worktree_id=None))
+        assert rc == 0
+        assert captured["cancelled"] is False
+
+    def test_untracked_is_silent_noop(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch
+    ):
+        monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
+        monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: None)
+        captured = {}
+        monkeypatch.setattr(m, "_json_output", lambda o: captured.update(o))
+        rc = m.cmd_cancel_handoff(argparse.Namespace(
+            token="t", worktree_dir="/tmp/nope", worktree_id=None))
+        assert rc == 0
+        assert captured["cancelled"] is False
+
+
 class TestSessionRole:
     def _rec(self, sessions, head=None):
         from agent_worktrees.tracking import WorktreeRecord

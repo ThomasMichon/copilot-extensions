@@ -3617,7 +3617,14 @@ export function abortHandoffTask(cwd, taskId, reason, execute = runCli) {
         });
       } catch { /* best-effort */ }
     }
-    return { ok: true, id: taskId, kind: "task", ledgerNote: ABORT_LEDGER_ADVISORY };
+    const ledger = cancelHandoffInRecord(cwd, predecessorSessionId, taskId, execute);
+    return {
+      ok: true,
+      id: taskId,
+      kind: "task",
+      ledgerCancelled: ledger.cancelled,
+      ...(ledger.cancelled ? {} : { ledgerNote: ledgerFailureNote(ledger.reason) }),
+    };
   } catch (error) {
     return {
       ok: false,
@@ -3628,19 +3635,56 @@ export function abortHandoffTask(cwd, taskId, reason, execute = runCli) {
   }
 }
 
-// context-handoff has no primitive to directly cancel the agent-worktrees
-// ledger's own `pending_handoffs` entry for this specific handoff (that
-// state lives in a different plugin's tracking store; agent-worktrees only
-// clears it internally, as a side effect of a NEW session registering on
-// the worktree -- there is no standalone "cancel this one" CLI verb today).
-// Abort therefore cannot claim to have fully retired a `mode: auto`
-// worktree's live-cutover arming on its own; surface that gap honestly
-// rather than silently leaving it unmentioned.
-const ABORT_LEDGER_ADVISORY =
-  "This retires the backing handoff record, but context-handoff has no " +
-  "primitive to directly cancel agent-worktrees' own pending-handoff ledger " +
-  "entry (if one was armed under mode: auto). Run `agent-worktrees " +
-  "handoffs-check --worktree-id <id> --execute --json` to reconcile it.";
+// Retire the agent-worktrees ledger's own `pending_handoffs` entry for this
+// EXACT handoff token (the `cancel-handoff` primitive -- distinct from
+// agent-worktrees' broad `_cancel_pending_handoffs` sweep, which only fires
+// internally as a side effect of a new session registering). Best-effort:
+// a failure here never fails the abort itself, since the backing handoff
+// record (agent-dispatch task or file) has already been retired by the
+// time this runs -- report the outcome honestly instead.
+export function cancelHandoffInRecord(cwd, sessionId, token, execute = runCli) {
+  const worktreeId = agentWorktreesGet("worktree-id", cwd, sessionId, execute);
+  if (!worktreeId) {
+    return {
+      cancelled: false,
+      reason: "could not resolve a worktree id for this cwd to target the cancellation",
+      raw: null,
+    };
+  }
+  try {
+    const raw = JSON.parse(
+      execute(
+        "agent-worktrees", // marketplace-isolation: allow agent-worktrees-management
+        ["cancel-handoff", "--worktree-id", worktreeId, "--token", token],
+        { cwd, timeout: 5000 },
+      ),
+    );
+    return {
+      cancelled: Boolean(raw?.cancelled),
+      reason: raw?.cancelled ? null : (raw?.reason || "token was not a pending ledger entry"),
+      raw,
+    };
+  } catch (error) {
+    return {
+      cancelled: false,
+      reason: describeCliError(error) || "agent-worktrees cancel-handoff failed",
+      raw: null,
+    };
+  }
+}
+
+// Surfaced only when cancelHandoffInRecord's own best-effort call didn't
+// report `cancelled: true` -- the backing handoff record is still retired
+// either way; this just tells the caller the agent-worktrees ledger entry
+// (if one was armed under `mode: auto`) may still need manual reconciliation.
+function ledgerFailureNote(reason) {
+  return (
+    `Could not confirm agent-worktrees' own pending-handoff ledger entry was ` +
+    `cancelled${reason ? ` (${reason})` : ""}. If one was armed under ` +
+    "`mode: auto`, run `agent-worktrees handoffs-check --worktree-id <id> " +
+    "--execute --json` to reconcile it manually."
+  );
+}
 
 // File-backed abort participates in the SAME `.consume.lock` protocol
 // `consumeFileHandoffOnce` uses (open the lock file exclusively, re-read the
@@ -3706,7 +3750,7 @@ export function abortFileHandoff(
     writeJsonAtomic(current.path, aborted);
     // Best-effort: the file record's own `sessionId` IS the predecessor
     // session -- mark its session-state handoff-request marker aborted too
-    // (see the identical note on the task path above and ABORT_LEDGER_ADVISORY).
+    // (see the identical note on the task path above and cancelHandoffInRecord).
     if (current.record.sessionId) {
       try {
         markSessionStateHandoffConsumed(current.record.sessionId, {
@@ -3714,9 +3758,15 @@ export function abortFileHandoff(
         });
       } catch { /* best-effort */ }
     }
+    const ledger = cancelHandoffInRecord(cwd, current.record.sessionId, aborted.id, execute);
     return {
-      ok: true, kind: "file", id: aborted.id, path: current.path, record: aborted,
-      ledgerNote: ABORT_LEDGER_ADVISORY,
+      ok: true,
+      kind: "file",
+      id: aborted.id,
+      path: current.path,
+      record: aborted,
+      ledgerCancelled: ledger.cancelled,
+      ...(ledger.cancelled ? {} : { ledgerNote: ledgerFailureNote(ledger.reason) }),
     };
   } finally {
     try { closeSync(lockFd); } catch { /* best-effort */ }

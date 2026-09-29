@@ -613,6 +613,31 @@ gate land._
   contracts, CLI usage-error parity with `consume`, and the existing
   no-binstub guard continuing to pass unmodified).
 
+### 2026-09-29 (later) — abort now really cancels the agent-worktrees ledger entry
+- PR #4570 review round 5 rejected the abort path's original "ledger
+  advisory" design: `abort` retired the backing handoff record (task/file)
+  but only pointed operators at `agent-worktrees handoffs-check --execute`
+  for the separate `agent-worktrees` ledger's own `pending_handoffs` entry --
+  and that remediation **cannot** reconcile a pre-consumption abort (it only
+  acts once a successor/candidate plus a recorded spawn already exist). The
+  reviewer's explicit call: add a dedicated agent-worktrees cancellation
+  primitive and invoke it from abort, rather than leaving an ineffective
+  pointer.
+- Added a new, precisely-scoped `cancel_handoff(record, token)` to
+  `agent-worktrees` (`tracking_lifecycle.py`), exposed as a new
+  `cancel-handoff` CLI subcommand -- deliberately narrower than the existing
+  `_cancel_pending_handoffs` sweep (which only fires internally as a side
+  effect of a brand-new session registering): this cancels ONE pending
+  handoff by its exact token, never a blanket sweep, so an explicit external
+  abort never silently cancels a genuinely different in-flight handoff.
+- Wired both `abortHandoffTask` and `abortFileHandoff` in context-handoff to
+  call it (best-effort, via the same `execute` injection point tests already
+  use) and report the real outcome (`ledgerCancelled: true/false` plus an
+  honest failure note) instead of the old static advisory text.
+- Cross-plugin PR: this is the first context-handoff change in this effort
+  to land a capability inside `agent-worktrees` itself rather than working
+  around a gap in it.
+
 ### 2026-09-17 — Phase 5 coordination closure
 - Closed this effort's Phase 5 by updating the owning
   `handoff-cutover-lifecycle-journal` effort in place rather than creating a
