@@ -96,6 +96,60 @@ def test_payload_command_uses_read_only_health_surfaces(monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out)["state"] == "configuration-empty"
 
 
+def test_unconfigured_machine_never_probes_gh_auth(monkeypatch, capsys):
+    """An unattended maintenance sweep (agent-machines' runtime-spot-check)
+    probes every INSTALLED runtime plugin regardless of per-repo enablement --
+    a machine that has never adopted CodeSpaces must not be forced to hold a
+    CodeSpace-scoped gh token (or gh at all) just to report healthy. Simulate
+    a gh auth preflight that WOULD fail (missing codespace scope) and confirm
+    it's never even called when nothing is configured/adopted.
+    """
+    reports = _provider_reports()
+    preflight_calls = []
+
+    def _would_fail_preflight():
+        preflight_calls.append(1)
+        return ["gh token is missing the 'codespace' scope"]
+
+    monkeypatch.setattr(cli, "_gh_auth_preflight", _would_fail_preflight)
+    monkeypatch.setattr(cli, "scan_config_providers", lambda: reports)
+    monkeypatch.setattr(cli, "load_merged_config", lambda **_: CodespacesConfig())
+    monkeypatch.setattr(cli, "load_adopted_repos", lambda: [])
+
+    assert cli._cmd_installer_readiness() == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["state"] == "configuration-empty"
+    assert not preflight_calls
+    assert "was not checked" in result["detail"]
+    assert "not required until this plugin is actually configured" in result["detail"]
+
+
+def test_configured_machine_still_fails_on_missing_gh_scope(monkeypatch, capsys):
+    """The inverse of the above: a machine that HAS adopted CodeSpaces
+    somewhere must still fail readiness on a genuine gh auth/scope
+    regression -- the fix only skips the preflight when unconfigured, it
+    never weakens the check for a machine that actually needs it.
+    """
+    reports = _provider_reports()
+    monkeypatch.setattr(
+        cli,
+        "_gh_auth_preflight",
+        lambda: ["gh token is missing the 'codespace' scope"],
+    )
+    monkeypatch.setattr(cli, "scan_config_providers", lambda: reports)
+    monkeypatch.setattr(cli, "load_merged_config", lambda **_: CodespacesConfig())
+    monkeypatch.setattr(
+        cli,
+        "load_adopted_repos",
+        lambda: [SimpleNamespace(path=Path("standard-repo"))],
+    )
+
+    assert cli._cmd_installer_readiness() == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["state"] == "failed"
+    assert "codespace" in result["detail"]
+
+
 def test_adopted_standard_repo_without_supplemental_config_is_ready(
     monkeypatch, capsys
 ):

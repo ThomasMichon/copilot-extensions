@@ -1,0 +1,9 @@
+{
+  "comment": "installer-readiness: only require the codespace gh scope when this plugin is actually configured/adopted somewhere, so an unattended maintenance sweep on an unconfigured machine no longer fails on a missing CodeSpace-scoped gh token",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

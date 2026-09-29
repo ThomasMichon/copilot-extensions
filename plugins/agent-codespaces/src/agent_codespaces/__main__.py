@@ -4567,9 +4567,8 @@ def _cmd_status() -> int:
 
 def _cmd_installer_readiness() -> int:
     """Report runtime/config readiness without requiring a live CodeSpace."""
-    from .installer_readiness import emit, evaluate
+    from .installer_readiness import emit, evaluate, should_check_gh_auth
 
-    auth_findings = _gh_auth_preflight()
     provider_reports = scan_config_providers()
     merged = load_merged_config(provider_reports=provider_reports)
     authoritative_owners = {
@@ -4604,6 +4603,7 @@ def _cmd_installer_readiness() -> int:
         or provider_reports.active_configs
         or merged.source_paths
     )
+    auth_findings = _gh_auth_preflight() if should_check_gh_auth(configured=configured) else []
     config_issues = validate_config(merged)
     config_issues = [
         issue
