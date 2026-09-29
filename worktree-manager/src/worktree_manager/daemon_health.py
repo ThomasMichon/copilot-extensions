@@ -28,6 +28,10 @@ def _context(root: Path | None = None) -> diagnostics.DiagnosticContext:
         config_dir=mux_daemon_cutover.routing_dir(resolved_root),
         read_lock=lambda: mux_daemon.read_lock_data(mux_daemon.lock_path(resolved_root)),
         list_candidates=lambda: _candidates(resolved_root),
+        acquire_cutover_guard=lambda timeout: mux_daemon_cutover._acquire_cutover_lock(
+            resolved_root,
+            timeout_s=timeout,
+        ),
         is_superseded=lambda pid, generation: mux_daemon_cutover.is_superseded(
             resolved_root, pid, generation
         ),
@@ -35,7 +39,6 @@ def _context(root: Path | None = None) -> diagnostics.DiagnosticContext:
         health_check=lambda host, port: mux_daemon_cutover._health_check(
             host, port, root=resolved_root
         ),
-        abandoned_passive_grace_seconds=0.0,
     )
 
 

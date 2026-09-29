@@ -281,6 +281,7 @@ class DiagnosticContext:
     read_lock: Callable[[], dict | None]
     list_candidates: Callable[[], list[DaemonCandidate]]
     is_superseded: Callable[[int, int], bool]
+    acquire_cutover_guard: Callable[[float], Any] | None = None
     terminate_pid_if_identity: Callable[[int, str | None], dict] = terminate_pid_if_identity
     lock_is_live: Callable[[dict | None], bool] = lock_data_is_live
     make_client: Callable[[str], Any] | None = None
@@ -505,6 +506,15 @@ def _counts(findings: list[dict[str, object]]) -> dict[str, int]:
     return counts
 
 
+def _try_acquire_cutover_guard(ctx: DiagnosticContext):
+    if ctx.acquire_cutover_guard is None:
+        return None, None
+    try:
+        return ctx.acquire_cutover_guard(0.0), None
+    except Exception as exc:  # noqa: BLE001 - consumer-specific lock classes vary
+        return None, str(exc)
+
+
 def audit_daemon_health(
     ctx: DiagnosticContext,
     *,
@@ -516,34 +526,49 @@ def audit_daemon_health(
     record = breadcrumb.read_breadcrumb(ctx.config_dir)
     active_raw = table.get("active") if isinstance(table, dict) else None
     active_pid = active_raw.get("pid") if isinstance(active_raw, dict) else None
+    guard, guard_error = _try_acquire_cutover_guard(ctx)
 
     findings: list[dict[str, object]] = []
-    stranded = _inspect_stranded_survivor(ctx, record)
-    if stranded is not None:
-        findings.append(stranded)
+    cutover_busy = ctx.acquire_cutover_guard is not None and guard is None
+    try:
+        if not cutover_busy:
+            stranded = _inspect_stranded_survivor(ctx, record)
+            if stranded is not None:
+                findings.append(stranded)
 
-    abandoned, abandoned_pid = _inspect_abandoned_passive(
-        ctx, record, int(active_pid) if isinstance(active_pid, int) else None, candidates, now=now
-    )
-    if abandoned is not None:
-        findings.append(abandoned)
+            abandoned, abandoned_pid = _inspect_abandoned_passive(
+                ctx,
+                record,
+                int(active_pid) if isinstance(active_pid, int) else None,
+                candidates,
+                now=now,
+            )
+            if abandoned is not None:
+                findings.append(abandoned)
 
-    superseded, superseded_pids = _inspect_superseded_generations(ctx, table, candidates)
-    if superseded is not None:
-        findings.append(superseded)
+            superseded, superseded_pids = _inspect_superseded_generations(
+                ctx, table, candidates
+            )
+            if superseded is not None:
+                findings.append(superseded)
 
-    excluded = set(superseded_pids)
-    if abandoned_pid is not None:
-        excluded.add(abandoned_pid)
-    duplicate = _inspect_duplicates(candidates, owner, excluded)
-    if duplicate is not None:
-        findings.append(duplicate)
+            excluded = set(superseded_pids)
+            if abandoned_pid is not None:
+                excluded.add(abandoned_pid)
+            duplicate = _inspect_duplicates(candidates, owner, excluded)
+            if duplicate is not None:
+                findings.append(duplicate)
+    finally:
+        if guard is not None and hasattr(guard, "release"):
+            guard.release()
 
     return {
         "service": ctx.service,
         "mode": "report",
         "validated_owner": owner,
         "owner_validation_reason": owner_reason,
+        "cutover_in_progress": cutover_busy,
+        "cutover_guard_error": guard_error,
         "candidate_count": len(candidates),
         "candidates": [candidate.to_dict() for _, candidate in sorted(candidates.items())],
         "findings": findings,
@@ -575,72 +600,98 @@ def apply_daemon_health(
     *,
     now: datetime | None = None,
 ) -> dict[str, object]:
-    before = audit_daemon_health(ctx, now=now)
-    actions: list[dict[str, object]] = []
-
-    for finding in before.get("findings", []):
-        if finding.get("kind") != "stranded_survivor":
-            continue
-        if ctx.make_client is None or ctx.health_check is None:
-            actions.append(
+    guard, guard_error = _try_acquire_cutover_guard(ctx)
+    if ctx.acquire_cutover_guard is not None and guard is None:
+        blocked = audit_daemon_health(ctx, now=now)
+        return {
+            "service": ctx.service,
+            "mode": "apply",
+            "before": blocked,
+            "after": blocked,
+            "findings": blocked["findings"],
+            "remaining_findings": blocked["findings"],
+            "counts": blocked["counts"],
+            "actions": [
                 {
-                    "kind": "stranded_survivor",
+                    "kind": "cutover_guard",
                     "blocked": True,
-                    "reason": "cutover recovery hooks unavailable",
+                    "reason": guard_error or "cutover in progress",
                 }
-            )
-            break
-        recovery = breadcrumb.recover_stale_cutover(
-            ctx.config_dir,
-            ctx.make_client,
-            health_check=ctx.health_check,
-        )
-        actions.append({"kind": "stranded_survivor", "result": recovery})
-        break
+            ],
+        }
 
-    attempted: set[int] = set()
-    max_iterations = max(1, before.get("candidate_count", 0) * 3)
-    for _ in range(max_iterations):
-        current = audit_daemon_health(ctx, now=now)
-        next_target = None
-        for kind, item in _target_pid_sequence(current):
-            if item["pid"] not in attempted:
-                next_target = (kind, item, current)
+    try:
+        before = audit_daemon_health(ctx, now=now)
+        actions: list[dict[str, object]] = []
+
+        for finding in before.get("findings", []):
+            if finding.get("kind") != "stranded_survivor":
+                continue
+            if ctx.make_client is None or ctx.health_check is None:
+                actions.append(
+                    {
+                        "kind": "stranded_survivor",
+                        "blocked": True,
+                        "reason": "cutover recovery hooks unavailable",
+                    }
+                )
                 break
-        if next_target is None:
+            recovery = breadcrumb.recover_stale_cutover(
+                ctx.config_dir,
+                ctx.make_client,
+                health_check=ctx.health_check,
+            )
+            actions.append({"kind": "stranded_survivor", "result": recovery})
             break
-        kind, item, current = next_target
-        owner = current.get("validated_owner")
-        if not isinstance(owner, dict):
+
+        attempted: set[int] = set()
+        max_iterations = max(1, before.get("candidate_count", 0) * 3)
+        for _ in range(max_iterations):
+            current = audit_daemon_health(ctx, now=now)
+            next_target = None
+            for kind, item in _target_pid_sequence(current):
+                if item["pid"] not in attempted:
+                    next_target = (kind, item, current)
+                    break
+            if next_target is None:
+                break
+            kind, item, current = next_target
+            owner = current.get("validated_owner")
+            if not isinstance(owner, dict):
+                actions.append(
+                    {
+                        "kind": kind,
+                        "pid": item["pid"],
+                        "blocked": True,
+                        "reason": "no validated live owner",
+                    }
+                )
+                attempted.add(item["pid"])
+                continue
+            termination = ctx.terminate_pid_if_identity(
+                item["pid"], item.get("start_time")
+            )
             actions.append(
                 {
                     "kind": kind,
                     "pid": item["pid"],
-                    "blocked": True,
-                    "reason": "no validated live owner",
+                    "owner_pid": owner.get("pid"),
+                    "termination": termination,
                 }
             )
             attempted.add(item["pid"])
-            continue
-        termination = ctx.terminate_pid_if_identity(item["pid"], item.get("start_time"))
-        actions.append(
-            {
-                "kind": kind,
-                "pid": item["pid"],
-                "owner_pid": owner.get("pid"),
-                "termination": termination,
-            }
-        )
-        attempted.add(item["pid"])
 
-    after = audit_daemon_health(ctx, now=now)
-    return {
-        "service": ctx.service,
-        "mode": "apply",
-        "before": before,
-        "after": after,
-        "findings": before["findings"],
-        "remaining_findings": after["findings"],
-        "counts": after["counts"],
-        "actions": actions,
-    }
+        after = audit_daemon_health(ctx, now=now)
+        return {
+            "service": ctx.service,
+            "mode": "apply",
+            "before": before,
+            "after": after,
+            "findings": before["findings"],
+            "remaining_findings": after["findings"],
+            "counts": after["counts"],
+            "actions": actions,
+        }
+    finally:
+        if guard is not None and hasattr(guard, "release"):
+            guard.release()

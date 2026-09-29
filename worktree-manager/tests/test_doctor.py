@@ -39,18 +39,22 @@ def _self() -> SimpleNamespace:
 
 
 def test_doctor_json_includes_daemon_health(monkeypatch, capsys):
-    from worktree_manager import daemon_health, source_config
+    from worktree_manager import doctor_cli, source_config
 
-    monkeypatch.setattr(wm, "detect_baseline", lambda: [_status(True)])
-    monkeypatch.setattr(wm, "core_status", _core)
-    monkeypatch.setattr(wm, "self_status", _self)
+    monkeypatch.setattr(doctor_cli, "detect_baseline", lambda: [_status(True)])
+    monkeypatch.setattr(doctor_cli, "core_status", _core)
+    monkeypatch.setattr(doctor_cli, "self_status", _self)
     monkeypatch.setattr(source_config, "configured_source", lambda: ("", ""))
     monkeypatch.setattr(source_config, "resolved_repo", lambda: "repo")
     monkeypatch.setattr(source_config, "resolved_ref", lambda: "dev")
     monkeypatch.setattr(
-        daemon_health,
+        doctor_cli.daemon_health,
         "doctor_report",
-        lambda *, apply: {"mode": "apply" if apply else "report", "findings": [], "counts": {"total": 0}},
+        lambda *, apply: {
+            "mode": "apply" if apply else "report",
+            "findings": [],
+            "counts": {"total": 0},
+        },
     )
 
     assert wm.main(["doctor", "--json"]) == 0
@@ -60,16 +64,16 @@ def test_doctor_json_includes_daemon_health(monkeypatch, capsys):
 
 
 def test_doctor_apply_renders_daemon_actions(monkeypatch, capsys):
-    from worktree_manager import daemon_health, source_config
+    from worktree_manager import doctor_cli, source_config
 
-    monkeypatch.setattr(wm, "detect_baseline", lambda: [_status(True)])
-    monkeypatch.setattr(wm, "core_status", _core)
-    monkeypatch.setattr(wm, "self_status", _self)
+    monkeypatch.setattr(doctor_cli, "detect_baseline", lambda: [_status(True)])
+    monkeypatch.setattr(doctor_cli, "core_status", _core)
+    monkeypatch.setattr(doctor_cli, "self_status", _self)
     monkeypatch.setattr(source_config, "configured_source", lambda: ("", ""))
     monkeypatch.setattr(source_config, "resolved_repo", lambda: "repo")
     monkeypatch.setattr(source_config, "resolved_ref", lambda: "dev")
     monkeypatch.setattr(
-        daemon_health,
+        doctor_cli.daemon_health,
         "doctor_report",
         lambda *, apply: {
             "mode": "apply" if apply else "report",
@@ -80,7 +84,17 @@ def test_doctor_apply_renders_daemon_actions(monkeypatch, capsys):
                     "targets": [{"pid": 202, "start_time": "dup"}],
                 }
             ],
+            "before": {
+                "findings": [
+                    {
+                        "kind": "duplicate_resident",
+                        "summary": "more than one live daemon matches the resident active slot",
+                        "targets": [{"pid": 202, "start_time": "dup"}],
+                    }
+                ]
+            },
             "after": {"findings": []},
+            "remaining_findings": [],
             "actions": [
                 {
                     "kind": "duplicate_resident",

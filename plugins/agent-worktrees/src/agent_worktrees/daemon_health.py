@@ -24,13 +24,16 @@ def _context() -> diagnostics.DiagnosticContext:
         read_lock=lambda: locks.read_lock(status_monitor_runtime._monitor_lock_path()),
         lock_is_live=locks.lock_is_live,
         list_candidates=_candidates,
+        acquire_cutover_guard=lambda timeout: status_monitor_cutover._acquire_cutover_lock(
+            status_monitor_cutover.routing_dir(),
+            timeout_s=timeout,
+        ),
         is_superseded=lambda pid, generation: self_retire.is_superseded(
             status_monitor_cutover.routing_dir(), pid, generation
         ),
         terminate_pid_if_identity=procs.terminate_pid_if_identity,
         make_client=status_monitor_cutover._make_client,
         health_check=status_monitor_cutover._health_check,
-        abandoned_passive_grace_seconds=0.0,
     )
 
 
