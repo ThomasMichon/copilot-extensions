@@ -465,8 +465,12 @@ statement in the PR description.
 2. State how the change satisfies
    [`docs/patterns/graceful-daemon-cutover.md`](docs/patterns/graceful-daemon-cutover.md),
    including the safe cutover/drain boundary; or, if claiming an exemption,
-   explain why the process is **not** a long-lived resident daemon and which
-   lifecycle pattern governs it instead.
+   explain either **why the process is not a long-lived resident daemon** and
+   which lifecycle pattern governs it instead, **or** why it fits the
+   documented lighter
+   [`service-lifecycle-supervision`](docs/patterns/service-lifecycle-supervision.md)
+   singleton-handoff path (no shared endpoint and no in-flight request to
+   drain).
 3. Link the doc/effort updates that record the contract, or explain why
    existing documentation remains accurate and complete.
 
@@ -479,7 +483,9 @@ over names like `serve`/`daemon`, `while True` loops, vendored `zdd`, or
 and flag unrelated code, while legitimate adopters already span plugin and
 non-plugin surfaces (`worktree-manager`) plus both `install.*` and `init.*`
 activation seams. Until the suite gains a manifest-level daemon declaration,
-this PR-description statement is the review-time gate.
+this PR-description statement is the review-time gate; reviewers also enforce
+that any claimed singleton-handoff exception really matches the documented
+`service-lifecycle-supervision` criteria above.
 
 ## Release & Versioning
 
