@@ -467,32 +467,33 @@ parallelizable across worktrees.
 ### Phase 9 — Reconcile deferred backlog
 - [ ] Fold in further wishlist items raised after this effort's initial
       review (the operator flagged "I'll think of more").
-- [ ] **2026-09-29 operator feedback batch (not yet started):**
-      - **Condense CLAIMS type presentation.** Short-form kind prefixes:
-        `session`→`SESS`, `worktree`→`WT`, `codespace`→`CS`,
-        `container`→`CT`, `task`→`T` (etc. for any remaining kind). PRs and
-        bugs/issues are self-explanatory via their ref alone and need NO
-        kind prefix at all — `odsp-web#2578906`, `copilot-extensions#4507`,
-        `#589` (bare same-repo). Session claims are the least-interesting
-        kind for this column (every worktree effectively has one) and
-        should rank lowest in the pecking order.
-      - **Stretch:** interactive claims navigation — highlight a Worktrees
-        row, press Right to move focus into that row's claims list;
-        continuing Right scrolls through every claim in the cell; Enter (or
-        a click) on a PR/bug claim opens it. Render claim links underlined
-        where possible.
-      - **Rename the SESS/T column to `LENGTH`**, formatted `1s 25t`
-        (session count + turn count, unit-suffixed) rather than the current
-        `1/25` (reads ambiguously like a date).
-      - **LIVE column value taxonomy**: `MUX`, `ACP`, `LOCK`, `-` (replacing
-        today's `●N`/`○`/`ACP`/`PROC`/`LOCK`/`·` glyph set). Stretch: a
-        `(n)` connected-client-count suffix, e.g. `MUX(0)`, `MUX(1)`,
-        `ACP(3)`.
-      - **Render performance**: the operator reports rendering has gotten
-        noticeably slower; investigate for over-painting on updates (redraw
-        more than the changed region) before/alongside the column changes
-        above, since new column formats are an easy place to accidentally
-        regress this further if not measured.
+- [ ] **2026-09-29 operator feedback batch:**
+      - [x] **Condense CLAIMS type presentation** (Done 2026-09-29). Short-form
+        kind prefixes: `session`→`SESS`, `worktree`→`WT`, `codespace`→`CS`,
+        `container`→`CT`, `task`→`T`, `bridge`→`BR`, `ssh`→`SSH`,
+        `effort`→`EFF`. PRs and bugs/issues carry NO kind prefix by default —
+        `odsp-web#2578906`, `copilot-extensions#4507`, `#589` (bare
+        same-repo) — but a plugin-contributed `label_overrides[kind]` (e.g.
+        an ADO-sourced "bug") still applies and IS prefixed, preserving that
+        extensibility point. Session claims (not yet a claimable kind) now
+        rank lowest (8) in `DEFAULT_PECKING_ORDER`, below `task` — the least
+        differentiating kind, per the operator's own reasoning.
+      - [ ] **Stretch:** interactive claims navigation (highlight a row,
+        Right moves focus into its claims list, continuing Right scrolls
+        through every claim, Enter/click opens a PR/bug) — not started.
+      - [x] **Underlined claim links** (Done 2026-09-29): a linked CLAIMS
+        cell entry now renders `underline link <url>` (previously `link
+        <url>` with no underline), so it visually reads as clickable.
+      - [x] **Rename the SESS/T column to `LENGTH`** (Done 2026-09-29),
+        formatted `1s 25t` rather than `1/25`.
+      - [x] **LIVE column value taxonomy** (Done 2026-09-29): `MUX(n)`
+        (recovering the old attached/unattached `●N`/`○` distinction via an
+        explicit connected-client count), `ACP`, `PROC` (kept distinct — see
+        journal), `LOCK`, `-`. **Not implemented**: an `ACP(n)` client count
+        — no producer emits a connected-client count for an ACP/bridge-hosted
+        session today (unlike `mux_clients`); fabricating one was rejected.
+      - [ ] **Render performance / over-painting investigation** — not
+        started.
 - [x] CLAIMS/activity mock-data enrichment + a real, distinct "Activity"
       disposition field (`agent-worktrees status --activity`) replacing the
       second line's old STATE-reuse fallback (2026-09-26).
@@ -1334,3 +1335,62 @@ Operator feedback on the rendered pivot, addressed as a bundled follow-up
   mesh — still blocked on #3418), and updated Proposal to state the
   effort's actual current shape (all named phases Done; Phase 9's one
   open item is intentionally open-ended, not stalled work).
+
+### 2026-09-29 — CLAIMS condensing + LENGTH/LIVE column rework (operator feedback batch, part 1)
+- **CLAIMS condensing** (`claims_rank.py`): added short-form kind prefixes
+  (`SESS`/`WT`/`CS`/`CT`/`T`/`BR`/`SSH`/`EFF`); dropped the default `PR`/
+  `bug` prefix entirely (bare `#N`/`repo#N`). **Correction made mid-slice**:
+  an initial blanket "no prefix for pr/bug/issue" pass would have silently
+  broken a real, deliberate extensibility point — a plugin-contributed
+  `label_overrides[kind]` (e.g. an ADO-sourced "bug" wanting to read
+  distinctly from a native GitHub issue, per `test_claim_kinds_registry
+  .py`'s existing end-to-end test). Fixed: only the UNLABELED default is
+  bare; an explicit override still applies and is prefixed. Added
+  `"worktree": 5` cross-repo prefix (`"WT <last4>"`/`"WT <repo>:<last4>"`,
+  previously bare with no prefix at all despite `DEFAULT_LABEL_PREFIX`
+  already declaring one — dead code, now actually wired). Added `"session"`
+  to `DEFAULT_PECKING_ORDER` at the lowest tier (8, below `task`) even
+  though it isn't yet a claimable kind (matches the existing `effort`/
+  `bridge` precedent) — ready the moment a producer emits one.
+- **Underlined claim links** (`engine_helpers._claims_cell`): a linked
+  entry's style gained `underline` alongside the existing OSC 8 `link`
+  annotation.
+- **LENGTH column** (`derive._sess_turns` renamed `_length_display`,
+  `engine_helpers.py`'s column specs): `"1s 25t"` format, replacing
+  `"1/25"`; header relabeled `sess/t` → `length`.
+- **LIVE column taxonomy** (`derive._sess`): `MUX(n)`/`ACP`/`PROC`/`LOCK`/
+  `-`, replacing `●N`/`○`/`ACP`/`PROC`/`LOCK`/`·`. Widened the column
+  4→8 chars to fit `MUX(12)` without truncation. **Judgment call, flagged
+  for operator confirmation rather than silently guessed**: the operator's
+  own taxonomy named only `MUX`/`ACP`/`LOCK`/`-` — `PROC` (a live CLI
+  session, bound but neither muxed nor ACP-hosted: a bare-resumed session
+  or an execution leg) was not in that list. Kept it as a DISTINCT 5th
+  value rather than folding it into `MUX` or `ACP`, since it is a genuinely
+  different hosting mechanism and collapsing it would misrepresent real
+  state — please confirm this reading is right.
+- **Stretch implemented alongside the core ask**: `MUX`'s `(n)` connected-
+  client-count suffix (`mux_clients`, already tracked by the engine's mux-
+  fleet reconciliation) — implementing bare `MUX` without it would have
+  been a real regression (losing the attached/unattached distinction the
+  old `●N`/`○` split gave for free), so the "stretch" closed the exact gap
+  the core change would have opened. **`ACP(n)` NOT implemented**: no
+  producer emits a connected-client count for an ACP/bridge-hosted session
+  today (unlike `mux_clients`) — fabricating one was rejected; a real
+  count would need new agent-bridge plumbing, tracked as a separate,
+  distinct follow-up if wanted.
+- **Not yet started this slice**: the interactive claims-navigation stretch
+  goal (Right-arrow-into-claims-list, Enter/click to open), and the
+  render-performance/over-painting investigation — both deferred to
+  follow-up slices.
+- Updated every test asserting the old label/format/glyph shapes
+  (`test_claims_rank.py`, `test_claim_kinds_registry.py`, `test_pr_ops.py`,
+  `test_picker_tui.py`) and regenerated all 7 affected goldens. Full suite:
+  `agent-worktrees` 622/622 (claim-related subset; full-plugin run not
+  re-executed this slice, no plugin-wide change made outside
+  `claims_rank.py`), `worktree-manager` 1483 passed / 1 skipped / 5 failed
+  — all 5 failures confirmed pre-existing environment flakes (Windows
+  symlink-privilege quirks in `test_update.py`/`test_trusted_materializer_
+  parity.py`, already documented in this effort's own 2026-09-27 journal
+  entry; `test_mux_daemon.py` and one `test_registered_pivot_*` failure
+  both confirmed to pass in isolation, i.e. full-suite-load flakes, not
+  regressions from this change).

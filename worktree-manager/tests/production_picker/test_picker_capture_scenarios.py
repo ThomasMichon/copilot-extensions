@@ -139,7 +139,7 @@ def test_claims_worktree_matches_golden(monkeypatch, tmp_path):
          "status": "active", "started_at": "2026-06-27T15:00:00",
          "turn_count": 8, "state": "wip", "ahead": 3, "behind": 0,
          "pr": {"number": 4821, "state": "open"},
-         "claims_summary": "PR #4821"},
+         "claims_summary": "#4821"},
     ]
     grid = _capture_grid(monkeypatch, tmp_path, raws)
     assert grid == _golden("scenario_claims.txt", grid)

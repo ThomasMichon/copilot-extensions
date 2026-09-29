@@ -474,36 +474,37 @@ def _asset_hints(w):
 
 
 def _sess(w):
+    """LIVE column value (operator feedback, 2026-09-29): ``MUX``/``ACP``/
+    ``PROC``/``LOCK``/``-``, replacing the prior glyph set (``●N``/``○``).
+    ``MUX(n)`` carries the connected-client count, recovering the old
+    attached-vs-unattached split (``MUX(0)`` == the old bare ``○``). No
+    analogous ``ACP(n)`` count exists yet (deferred, not fabricated).
+    ``PROC`` (live, bound, but neither muxed nor ACP-hosted) stays distinct
+    -- a genuinely different hosting mechanism."""
     if w.get("mux_attached"):
-        return f"●{w.get('mux_clients', 1)}"
+        return f"MUX({w.get('mux_clients', 1)})"
     if w.get("mux_session"):
-        return "○"
+        return "MUX(0)"
     if (w.get("session_lock_live") or w.get("session_bound_live")
             or w.get("session_bridge_live") or w.get("session_ahp_live")
             or w.get("execution_leg_live")
             or w.get("session_bare_orphan")):
-        # #3307 Phase 5: the retired "R" column's BOUND-vs-CONTROL split
-        # folds in here as the worktree's own CLI/ACP interface mode
-        # (``interface``, already resolved by the engine: a bridge-hosted
-        # worktree runs ACP; everything else is a normal interactive CLI
-        # session) -- a more directly useful distinction than
-        # ``reciprocal_relation``'s binding/control axis, which a worktree
-        # created and owned by an orchestrating CLI session still reads as
-        # "controlled-elsewhere" despite the worktree's own live session
-        # being perfectly ordinary CLI.
+        # #3307 Phase 5: bridge-hosted -> ACP; everything else -> PROC.
         return "ACP" if w.get("interface") == "acp" else "PROC"
     if w.get("session_lock_stale"):
         return "LOCK"
-    return "·"
+    return "-"
 
 
-def _sess_turns(w):
-    """Combined SESS/TURNS display (#3307 Phase 6): ``"<session_count>/
-    <turn_count>"``, e.g. ``"3/47"``. ``session_count`` renders as ``"-"``
-    when absent (a fixture, or an old remote, #662) rather than fabricated."""
+def _length_display(w):
+    """LENGTH column (renamed from SESS/T, 2026-09-29): ``"<sc>s <tc>t"``,
+    e.g. ``"1s 25t"`` -- unit-suffixed so it never reads like a date (the
+    prior ``"1/25"``'s complaint). ``session_count`` renders ``"-"`` when
+    absent rather than fabricated."""
     sc = w.get("session_count")
     sc_display = sc if isinstance(sc, int) else "-"
-    return f"{sc_display}/{w.get('turn_count', 0)}"
+    return f"{sc_display}s {w.get('turn_count', 0)}t"
+
 
 
 def _age_secs(w):
@@ -852,10 +853,8 @@ def norm(
         "sess": _sess(w),
         "turns": w.get("turn_count", 0),
         "session_count": w.get("session_count"),
-        # #3307 Phase 6: combined SESS/TURNS column ("3/47") for both the
-        # Worktrees pivot's ACTIVE (LIVE rows) and Recent sections -- see
-        # ``_sess_turns``'s own docstring.
-        "sess_turns": _sess_turns(w),
+        # #3307 Phase 6, renamed LENGTH: see ``_length_display``'s docstring.
+        "sess_turns": _length_display(w),
         "sessionless": _sessionless(w),
         "pr": _pr(w),
         # #3307 Phase 4: the engine's already-ranked claims summary (computed

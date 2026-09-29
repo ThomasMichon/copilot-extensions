@@ -1,0 +1,9 @@
+{
+  "comment": "Rename SESS/T to LENGTH (1s 25t format); LIVE column MUX(n)/ACP/PROC/LOCK/- taxonomy; underlined claim links",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "minor"
+    }
+  ]
+}

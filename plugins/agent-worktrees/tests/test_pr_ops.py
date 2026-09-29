@@ -3869,7 +3869,7 @@ class TestWorktreeToDictClaimsSummary:
             tracking.ResourceClaim(kind="codespace", ref="cs-123", state="active"),
         ])
         d = _worktree_to_dict(rec)
-        assert d["claims_summary"] == "codespace cs-123"
+        assert d["claims_summary"] == "CS cs-123"
 
     def test_backfills_pr_claim_from_active_pr_when_ledger_has_none(self):
         """A worktree whose PR predates the create-pr-time auto-claim (no
@@ -3879,7 +3879,7 @@ class TestWorktreeToDictClaimsSummary:
         from agent_worktrees.tracking import PRRecord
         rec = self._rec(prs=[PRRecord(state="open", branch="b", number=42)])
         d = _worktree_to_dict(rec)
-        assert d["claims_summary"] == "PR #42"
+        assert d["claims_summary"] == "#42"
 
     def test_ledger_pr_claim_takes_precedence_over_backfill(self):
         """A ledger already carrying a live 'pr' claim (the normal,
@@ -3893,7 +3893,7 @@ class TestWorktreeToDictClaimsSummary:
             )],
         )
         d = _worktree_to_dict(rec)
-        assert d["claims_summary"] == "PR #42"
+        assert d["claims_summary"] == "#42"
 
     def test_no_backfill_for_merged_pr(self):
         """A merged/closed PR is never backfilled -- summarize_claims would
@@ -3915,7 +3915,7 @@ class TestWorktreeToDictClaimsSummary:
             tracking.ResourceClaim(kind="pr", ref="acme/sample#9", state="active"),
         ])
         d = _worktree_to_dict(rec)
-        assert d["claims_summary"] == "PR #9 \u00b7 codespace cs-1"
+        assert d["claims_summary"] == "#9 \u00b7 CS cs-1"
 
     def test_claims_links_pairs_label_with_url_own_repo_aware(self):
         """#3307 follow-up: claims_links carries the same ranked claims as
@@ -3928,7 +3928,7 @@ class TestWorktreeToDictClaimsSummary:
         ])
         d = _worktree_to_dict(rec)
         assert d["claims_links"] == [
-            {"label": "PR #9", "url": "https://github.com/acme/sample/pull/9"},
+            {"label": "#9", "url": "https://github.com/acme/sample/pull/9"},
         ]
 
 
