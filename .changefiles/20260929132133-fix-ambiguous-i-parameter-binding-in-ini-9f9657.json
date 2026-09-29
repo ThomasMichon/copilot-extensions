@@ -1,0 +1,9 @@
+{
+  "comment": "Fix ambiguous -I parameter binding in init.ps1's cutover call that silently skipped the live-daemon cutover on Windows",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}
