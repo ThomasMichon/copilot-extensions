@@ -434,6 +434,7 @@ def cmd_doctor(args) -> int:
     }
     stale = []
     stale_fixed = 0
+    stale_active, stale_active_fixed = [], 0
     gc_result = {"count": 0, "removed_dirs": 0, "removed_rows": 0, "ids": []}
     misaligned = []
     orphaned = []
@@ -508,6 +509,8 @@ def cmd_doctor(args) -> int:
                 record.status = "complete"
                 tracking.save_record(record)
                 stale_fixed += 1
+
+        stale_active, stale_active_fixed = health.reconcile_stale_active(records, apply=apply)
 
         exclude = health.registered_session_ids(records) | _current_session_ids()
         shells = health.find_empty_session_shells(session_dir, exclude_ids=frozenset(exclude))
@@ -594,6 +597,8 @@ def cmd_doctor(args) -> int:
             "fixed": stale_fixed,
             "ids": [r.worktree_id for r in stale],
         },
+        "stale_active": {"found": len(stale_active), "fixed": stale_active_fixed,
+                         "items": [f.as_dict() for f in stale_active]},
         "empty_sessions": gc_result,
         "misaligned": {"count": len(misaligned), "worktrees": misaligned},
         "orphaned_handoffs": {
@@ -737,6 +742,14 @@ def _render_doctor_report(
         )
     else:
         print(f"  {chk} No stale statuses")
+
+    stale_active = report.get("stale_active", {"found": 0, "fixed": 0, "items": []})
+    if stale_active["found"]:
+        ids = ", ".join(i["worktree_id"] for i in stale_active["items"][:8])
+        print(f"  {chk if applied else '!'} Stale active: {stale_active['found']} "
+              f"{'fixed' if applied else 'found'} -> {ids}")
+    else:
+        print(f"  {chk} No active records disagree with their real state")
 
     empty_sessions = report["empty_sessions"]
     if empty_sessions["count"]:

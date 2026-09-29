@@ -1,0 +1,9 @@
+{
+  "comment": "doctor: reconcile stale-active worktree status against real git/liveness state",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
