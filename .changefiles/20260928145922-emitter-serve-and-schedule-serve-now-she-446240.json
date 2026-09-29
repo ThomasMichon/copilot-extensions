@@ -1,0 +1,9 @@
+{
+  "comment": "emitter.serve() and schedule.serve() now shell out to their own 'agent-dispatch emitter/schedule tick' CLI command in a fresh subprocess every cycle instead of building/holding a DispatchClient in-process, so a long-lived serve loop never holds any coordinator-address state at all for a restart to strand (follow-up to the #4439 fix, per operator design feedback).",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

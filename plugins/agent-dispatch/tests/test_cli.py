@@ -400,6 +400,112 @@ def test_resolve_target_prefers_local_when_live(monkeypatch):
     assert url == "http://127.0.0.1:9847"
 
 
+# -- serve loop re-exec argv: preserving routing/auth flags across a forked
+# per-tick subprocess -------------------------------------------------------
+#
+# ``emitter serve``/``schedule serve`` shell out to their own CLI ``tick``
+# command every cycle (see ``producers/emitter.py``/``producers/schedule.py``
+# docstrings). ``_reexec_argv`` builds that forked invocation's argv prefix --
+# it must reproduce an operator's explicit, deliberately pinned routing/auth
+# flags so a pinned target keeps applying to every tick, but nothing else.
+
+
+def test_reexec_argv_default_has_no_extra_flags():
+    from agent_dispatch.producers_cli import _reexec_argv
+
+    args = _args(["emitter", "serve", "spec.json", "--holder", "h"])
+    argv = _reexec_argv(args)
+    assert argv[1:] == ["-m", "agent_dispatch"]
+
+
+def test_reexec_argv_preserves_pinned_url_and_token():
+    from agent_dispatch.producers_cli import _reexec_argv
+
+    args = _args(
+        [
+            "--url", "http://pinned-host:9847",
+            "--token", "secret-token",
+            "--control-token", "secret-control",
+            "emitter", "serve", "spec.json", "--holder", "h",
+        ]
+    )
+    argv = _reexec_argv(args)
+    assert argv[1:] == [
+        "-m", "agent_dispatch",
+        "--url", "http://pinned-host:9847",
+        "--token", "secret-token",
+        "--control-token", "secret-control",
+    ]
+
+
+def test_reexec_argv_preserves_shared_flag():
+    from agent_dispatch.producers_cli import _reexec_argv
+
+    args = _args(["--shared", "schedule", "serve", "spec.json"])
+    argv = _reexec_argv(args)
+    assert argv[1:] == ["-m", "agent_dispatch", "--shared"]
+
+
+def test_cmd_emitter_serve_wires_reexec_argv_through(tmp_path, monkeypatch):
+    """Integration coverage: ``agent-dispatch emitter serve`` must actually
+    pass ``_reexec_argv(args)`` (not a stale/hand-built prefix) to
+    ``emitter.serve`` -- proving the pinned-target/local-discovery routing
+    tested above for ``_reexec_argv`` in isolation really reaches the
+    forked-per-tick subprocess path."""
+    from agent_dispatch import producers_cli
+    from agent_dispatch.producers import emitter as emitter_mod
+
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text('{"id": "x", "command": ["true"], "interval_seconds": 60}')
+
+    captured = {}
+
+    def fake_serve(spec, **kwargs):
+        captured["spec"] = spec
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(emitter_mod, "serve", fake_serve)
+
+    args = _args(
+        [
+            "--url", "http://pinned-host:9847",
+            "emitter", "serve", str(spec_path), "--holder", "h1",
+        ]
+    )
+    assert producers_cli._cmd_emitter(args) == 0
+
+    assert captured["spec"] == str(spec_path)
+    assert captured["kwargs"]["holder"] == "h1"
+    assert captured["kwargs"]["cli_argv"][1:] == [
+        "-m", "agent_dispatch", "--url", "http://pinned-host:9847",
+    ]
+
+
+def test_cmd_schedule_serve_wires_reexec_argv_through(tmp_path, monkeypatch):
+    """Same integration coverage as above, for the plain (non-registry)
+    ``schedule serve`` branch."""
+    from agent_dispatch import producers_cli
+    from agent_dispatch.producers import schedule as schedule_mod
+
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text('{"schedules": []}')
+
+    captured = {}
+
+    def fake_serve(spec, **kwargs):
+        captured["spec"] = spec
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(schedule_mod, "serve", fake_serve)
+
+    args = _args(["--shared", "schedule", "serve", str(spec_path)])
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_URL", "https://coordinator.example/dispatch")
+    assert producers_cli._cmd_schedule(args) == 0
+
+    assert captured["spec"] == str(spec_path)
+    assert captured["kwargs"]["cli_argv"][1:] == ["-m", "agent_dispatch", "--shared"]
+
+
 # -- supervise override (operator kill-switch) -------------------------------
 
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -63,6 +65,52 @@ def test_run_tick_acquires_lease_and_runs_command(monkeypatch):
     assert result["held"] is True
     assert result["returncode"] == 0
     assert result["duration_seconds"] == 2.5
+
+
+def test_run_tick_always_pipes_json_command_output_and_never_over_specifies(
+    monkeypatch,
+):
+    """The JSON task-output protocol path must use a real pipe (``text=True``)
+    so ``_author_tasks`` gets exact decoded bytes -- confirms the kwarg
+    shape ``run_tick`` passes through to its ``runner``."""
+    client = FakeClient()
+    seen = {}
+
+    def runner(_command, **kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(returncode=0, stdout="[]")
+
+    emitter.run_tick(client, _spec(task_output="json"), holder="host-a", runner=runner)
+
+    assert seen["stdout"] is subprocess.PIPE
+    assert seen["stderr"] is subprocess.PIPE
+    assert seen["text"] is True
+
+
+def test_run_tick_routes_non_json_command_output_directly_to_our_stderr(capfd):
+    """A command that prints on stdout must never corrupt the tick's own
+    result via inherited-stdout interleaving -- a subprocess-based caller
+    (a serve loop shelling out to ``emitter tick``) treats the CLI's own
+    stdout as one JSON payload, so the launched command's output must never
+    land there. Real subprocess, real OS-level redirection (no Python-side
+    capture-then-forward): its output streams straight to OUR stderr, and
+    the returned result is unaffected."""
+    client = FakeClient()
+    spec = _spec(
+        command=[
+            sys.executable, "-c",
+            "import sys; print('some log line'); print('a warning', file=sys.stderr)",
+        ],
+    )
+
+    result = emitter.run_tick(client, spec, holder="host-a")
+
+    assert result["returncode"] == 0
+    assert result["error"] is None
+    captured = capfd.readouterr()
+    assert "some log line" in captured.err
+    assert "a warning" in captured.err
+    assert captured.out == ""
 
 
 def test_run_tick_idles_when_another_holder_owns_lease():
@@ -330,133 +378,167 @@ def test_registered_side_load_accepts_null_env():
     )["created"]
 
 
-# -- serve() re-resolves its coordinator target every tick -------------------
+
+
+# -- serve() shells out to `emitter tick` fresh every cycle -------------------
 #
-# Regression coverage for aperture-labs#7762: a long-lived ``emitter serve``
+# Regression coverage: a long-lived ``emitter serve``
 # process (started once at host boot, running for hours/days) must never
-# trust a coordinator URL/token resolved only once at its own startup -- a
-# coordinator restart mid-lifetime (a new OS-assigned ephemeral port) left a
-# real emitter permanently pointed at a dead port with no self-healing for
-# ~10 hours, silently freezing the Intelligence Dampener readiness receipt
-# and stalling all PR review/merge dispatch.
+# build/hold a DispatchClient (or any resolved coordinator address) across
+# its sleep boundary -- a coordinator restart mid-lifetime (a new OS-assigned
+# ephemeral port) once left a real emitter permanently pointed at a dead port
+# with no self-healing for ~10 hours. The fix: each tick re-invokes this same
+# emitter's own ``agent-dispatch emitter tick`` CLI command in a fresh
+# subprocess, which re-discovers the coordinator exactly like any other
+# one-shot CLI invocation would -- there is no in-process coordinator state
+# left for a restart to strand.
 
 
-def test_serve_requires_url_or_resolve_target(tmp_path, monkeypatch):
-    spec_path = tmp_path / "spec.json"
-    spec_path.write_text('{"id": "x", "command": ["true"], "interval_seconds": 60}')
-    with pytest.raises(emitter.EmitterError):
-        emitter.serve(spec_path, holder="host-a")
-
-
-def test_serve_re_resolves_target_every_tick(tmp_path, monkeypatch):
-    """Each tick must call ``resolve_target`` fresh, not reuse a cached value."""
+def test_serve_runs_emitter_tick_as_a_fresh_subprocess_every_cycle(tmp_path):
     spec_path = tmp_path / "spec.json"
     spec_path.write_text('{"id": "x", "command": ["true"], "interval_seconds": 60}')
 
-    seen_targets: list[tuple[str, str | None]] = []
-    resolved = iter(
-        [("http://127.0.0.1:1111", None), ("http://127.0.0.1:2222", None)]
+    seen_argv: list[list[str]] = []
+    payloads = iter(
+        [
+            '{"held": true, "returncode": 0, "error": null, "duration_seconds": 0.1}',
+            '{"held": true, "returncode": 0, "error": null, "duration_seconds": 0.2}',
+        ]
     )
 
-    class _RecordingClient:
-        def __init__(self, url, token=None):
-            self.url = url
-            self.token = token
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-    def fake_resolve_target():
-        target = next(resolved)
-        seen_targets.append(target)
-        return target
-
-    monkeypatch.setattr(emitter, "DispatchClient", _RecordingClient)
-    monkeypatch.setattr(
-        emitter,
-        "run_tick",
-        lambda client, spec, *, holder: {
-            "held": True,
-            "returncode": 0,
-            "error": None,
-            "duration_seconds": 0.0,
-            "url_seen": client.url,
-        },
-    )
+    def fake_runner(argv, **kwargs):
+        seen_argv.append(list(argv))
+        return SimpleNamespace(returncode=0, stdout=next(payloads), stderr="")
 
     ticks: list[dict] = []
-    sleeps: list[float] = []
+    calls = {"n": 0}
 
-    def fake_sleep(seconds):
-        sleeps.append(seconds)
-        if len(ticks) >= 2:
+    def fake_sleep(_seconds):
+        calls["n"] += 1
+        if calls["n"] >= 2:
             raise KeyboardInterrupt
 
     emitter.serve(
         spec_path,
         holder="host-a",
-        resolve_target=fake_resolve_target,
+        cli_argv=["fake-python", "-m", "agent_dispatch"],
+        runner=fake_runner,
         on_tick=lambda result: ticks.append(result),
         sleep=fake_sleep,
     )
 
-    # Two ticks ran, and each hit a DIFFERENT resolved endpoint -- proving the
-    # loop re-resolved rather than reusing a URL captured once outside it.
-    assert [t["url_seen"] for t in ticks] == [
-        "http://127.0.0.1:1111",
-        "http://127.0.0.1:2222",
+    # Every tick is the SAME fixed argv -- proving there is no cached
+    # per-process coordinator address embedded in it, and each invocation
+    # would independently re-discover the coordinator exactly as a fresh CLI
+    # command does.
+    expected_argv = [
+        "fake-python", "-m", "agent_dispatch", "emitter", "tick",
+        str(spec_path), "--holder", "host-a",
     ]
-    assert seen_targets == [
-        ("http://127.0.0.1:1111", None),
-        ("http://127.0.0.1:2222", None),
-    ]
+    assert seen_argv == [expected_argv, expected_argv]
+    assert [t["duration_seconds"] for t in ticks] == [0.1, 0.2]
 
 
-def test_serve_still_supports_a_pinned_static_target(tmp_path, monkeypatch):
-    """A caller that wants a fixed, non-rediscovering target (e.g. an explicit
-    ``--url`` override) keeps working exactly as before -- no ``resolve_target``
-    needed."""
+def test_serve_synthesizes_an_error_from_a_hard_subprocess_failure(tmp_path):
+    """A coordinator that's still genuinely unreachable makes the forked tick
+    crash (nonzero exit, no JSON on stdout -- its own traceback already
+    streamed live to our inherited stderr) -- ``serve`` must report that as
+    an error tick, not choke on the missing payload."""
     spec_path = tmp_path / "spec.json"
     spec_path.write_text('{"id": "x", "command": ["true"], "interval_seconds": 60}')
 
-    class _RecordingClient:
-        def __init__(self, url, token=None):
-            self.url = url
-            self.token = token
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-    monkeypatch.setattr(emitter, "DispatchClient", _RecordingClient)
-    monkeypatch.setattr(
-        emitter,
-        "run_tick",
-        lambda client, spec, *, holder: {
-            "held": True,
-            "returncode": 0,
-            "error": None,
-            "duration_seconds": 0.0,
-            "url_seen": client.url,
-        },
-    )
+    def fake_runner(_argv, **_kwargs):
+        return SimpleNamespace(returncode=1, stdout="")
 
     ticks: list[dict] = []
 
-    def fake_sleep(seconds):
+    def fake_sleep(_seconds):
         raise KeyboardInterrupt
 
     emitter.serve(
         spec_path,
-        url="http://127.0.0.1:9847",
         holder="host-a",
+        cli_argv=["fake-python", "-m", "agent_dispatch"],
+        runner=fake_runner,
         on_tick=lambda result: ticks.append(result),
         sleep=fake_sleep,
     )
 
-    assert ticks[0]["url_seen"] == "http://127.0.0.1:9847"
+    assert ticks[0]["error"] == "emitter tick produced no valid JSON result (exit 1)"
+
+
+def test_serve_default_cli_argv_uses_this_interpreter(tmp_path):
+    """With no explicit ``cli_argv``, ``serve`` re-invokes ``agent_dispatch``
+    under THIS process's own interpreter (``sys.executable``) -- the same
+    default a plain, unqualified CLI re-run would use."""
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text('{"id": "x", "command": ["true"], "interval_seconds": 60}')
+
+    seen_argv: list[list[str]] = []
+
+    def fake_runner(argv, **kwargs):
+        seen_argv.append(list(argv))
+        return SimpleNamespace(returncode=0, stdout='{"held": true}')
+
+    def fake_sleep(_seconds):
+        raise KeyboardInterrupt
+
+    emitter.serve(spec_path, holder="host-a", runner=fake_runner, sleep=fake_sleep)
+
+    assert seen_argv[0][:3] == [sys.executable, "-m", "agent_dispatch"]
+
+
+def test_serve_only_pipes_stdout_leaving_stderr_to_inherit_ours(tmp_path):
+    """``serve``'s own subprocess call must pipe ONLY stdout (needed to parse
+    the JSON result) and never touch stderr at all -- no ``capture_output``,
+    no explicit ``stderr=``. Leaving stderr unspecified means the OS
+    inherits ours directly, so the forked tick's own diagnostics (and, per
+    ``run_tick``'s own redirection, any non-JSON command's output) stream
+    straight through in real time with no Python-side buffering at this
+    layer, exactly matching the previously-inherited passthrough behavior
+    this PR's subprocess redesign must not regress."""
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text('{"id": "x", "command": ["true"], "interval_seconds": 60}')
+
+    seen_kwargs: dict = {}
+
+    def fake_runner(_argv, **kwargs):
+        seen_kwargs.update(kwargs)
+        return SimpleNamespace(returncode=0, stdout='{"held": true}')
+
+    def fake_sleep(_seconds):
+        raise KeyboardInterrupt
+
+    emitter.serve(spec_path, holder="host-a", runner=fake_runner, sleep=fake_sleep)
+
+    assert seen_kwargs["stdout"] is subprocess.PIPE
+    assert "stderr" not in seen_kwargs
+    assert "capture_output" not in seen_kwargs
+
+
+def test_serve_rejects_a_zero_exit_payload_missing_the_held_key(tmp_path):
+    """A zero-exit tick whose stdout doesn't decode to a dict with a bool
+    ``held`` key is a protocol violation, not a vacuous success -- it must
+    surface as an error, never silently normalize to an empty
+    ``{}`` result that ``on_tick`` would otherwise treat as an idle tick
+    while reporting ``ok: true``."""
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text('{"id": "x", "command": ["true"], "interval_seconds": 60}')
+
+    def fake_runner(_argv, **_kwargs):
+        return SimpleNamespace(returncode=0, stdout="")
+
+    ticks: list[dict] = []
+
+    def fake_sleep(_seconds):
+        raise KeyboardInterrupt
+
+    emitter.serve(
+        spec_path,
+        holder="host-a",
+        runner=fake_runner,
+        on_tick=lambda result: ticks.append(result),
+        sleep=fake_sleep,
+    )
+
+    assert ticks[0]["error"] == "emitter tick produced no valid JSON result (exit 0)"
