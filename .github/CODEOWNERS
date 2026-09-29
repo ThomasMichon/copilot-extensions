@@ -21,12 +21,11 @@
 # bypass above covers ordinary review, but never this: a *separate*,
 # required-status-check-based ruleset ("dev branch policy: workflow/CODEOWNERS
 # lockdown") with NO bypass actors at all (not even ThomasMichon) hard-blocks
-# any merge -- Maintainer or not -- that touches these paths unless EVERY
-# commit in the PR has both author AND committer login attributed to
-# ThomasMichon (checked per-commit via the API, not the PR's overall author
-# or triggering event's sender -- see workflow-lockdown-guard.yml; CODEOWNERS
-# review alone can't enforce this since a Maintainer's PR bypasses
-# code-owner review entirely).
+# any merge -- Maintainer or not -- that touches these paths unless the PR's
+# registered author (an authenticated GitHub fact, not per-commit git
+# metadata, which is trivially forgeable) is ThomasMichon (see
+# workflow-lockdown-guard.yml; CODEOWNERS review alone can't enforce this
+# since a Maintainer's PR bypasses code-owner review entirely).
 /.github/workflows/    @ThomasMichon
 /.github/actions/      @ThomasMichon
 /.github/CODEOWNERS    @ThomasMichon

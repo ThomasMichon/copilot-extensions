@@ -144,23 +144,33 @@ explicit admin escalation).** This is enforced on four layers that agree:
    (`workflow-lockdown-guard`, from `.github/workflows/workflow-lockdown-guard.yml`,
    run via `pull_request_target` so a PR can't neuter its own trusted
    definition) in its own ruleset ("dev branch policy: workflow/CODEOWNERS
-   lockdown") fails whenever a protected path is touched unless **every
-   commit making up the PR** has both author and committer login attributed
-   to ThomasMichon — checked per-commit via the API, not the PR's overall
-   author or the triggering event's `sender` (an event's `sender` is only
-   whoever triggered *that* webhook delivery, not durable evidence of who
-   pushed code — e.g. a Contributor's failing `synchronize` run could be
-   laundered into a pass by anyone closing+reopening the same, unchanged PR;
-   `.github/workflows/trusted-ci.yml`'s author+sender pattern is a
-   *different*, narrower mechanism used for a different purpose and is not
-   what this guard does). This is not airtight: `author`/`committer` login
-   is GitHub's resolution of the commit's plain-text git identity, not a
-   cryptographic proof — an already-invited Write collaborator could
-   deliberately forge it. Closing that gap needs verified commit signing,
-   which this repo has decided against setting up (too much operational
-   hassle for the residual risk — see
-   ThomasMichon/copilot-extensions#4519, declined); the forged commit still
-   remains permanently visible in history for after-the-fact audit.
+   lockdown") fails whenever a protected path is touched unless the **PR's
+   registered author** (`pull_request.user.login`) is ThomasMichon. This
+   deliberately checks the PR's submitter, not individual commit metadata:
+   an earlier version of this check inspected each commit's API-reported
+   author/committer login, but that's just GitHub's resolution of the
+   commit's plain-text git identity (name + email) against an account, not
+   a cryptographic proof — any contributor could set
+   `git commit --author="ThomasMichon <NNN+ThomasMichon@users.noreply.github.com>"`
+   locally and pass it with zero real involvement, so checking commit
+   metadata bought nothing but complexity. A PR's `user.login`, by
+   contrast, is an authenticated fact GitHub sets once at PR-creation time
+   (you cannot open a PR as another account) — there's no equivalent way to
+   forge it, and unlike an event's `sender` (whoever triggered *that*
+   webhook delivery), it doesn't change on close/reopen, so it isn't
+   vulnerable to the "fail once, then close+reopen to launder a pass"
+   game an earlier design of this check was vulnerable to.
+   **Known, accepted residual risk:** this checks who *opened* the PR, not
+   who pushed every commit in it — an already-invited Write collaborator
+   with push access to the same repo could still push a follow-up commit
+   directly onto ThomasMichon's own already-open PR branch, and this check
+   would still pass. Closing that fully would need commit-signature
+   verification, which this repo has decided against setting up (too much
+   operational hassle for the residual risk — see
+   ThomasMichon/copilot-extensions#4519, declined). This is a narrower,
+   more unusual threat (an already-trusted collaborator actively pushing an
+   unwanted commit onto someone else's PR) than an arbitrary outsider or a
+   Contributor's own PR, both of which this check fully closes.
    This ruleset has **no bypass actors at all** — not even ThomasMichon —
    because the check's own pass condition already grants exactly the
    intended exemption; a bypass actor here would let the exemption apply to
