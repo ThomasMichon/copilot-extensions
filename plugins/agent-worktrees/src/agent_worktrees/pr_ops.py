@@ -1122,7 +1122,7 @@ def create_pr(
     _finish_auto_open(
         result, config, record, target_pr, title=eff_title, body=body,
         worktree_id=worktree_id, head_sha=head_sha, open_pr=open_pr,
-        draft=want_draft, attribution=attribution,
+        draft=want_draft, attribution=attribution, prcfg=prcfg,
     )
     observation_error = refresh_head_observation(
         config, record, target_pr, head_sha
@@ -1269,6 +1269,7 @@ def _open_via_provider(
     worktree_id: str,
     head_sha: str,
     *,
+    prcfg,
     draft: bool = False,
     attribution: SourceAttribution = False,
 ) -> None:
@@ -1276,7 +1277,6 @@ def _open_via_provider(
     from . import providers
     from .providers import attribution as attr
 
-    prcfg = config.default_repo.pr
     machine = record.machine if record else ""
     session = ""
     if record and record.sessions:
@@ -1329,7 +1329,6 @@ def _open_via_provider(
             # so this re-raise is a defense-in-depth backstop for the
             # narrow TOCTOU window between that preflight and this actual
             # backfill, not the primary enforcement mechanism.
-            prcfg = config.default_repo.pr
             try:
                 codename_tracking.ensure_codename(
                     record, cfg.tracking_dir(),
@@ -1430,7 +1429,7 @@ def _open_via_provider(
     if not draft:
         from . import pr_config
 
-        flow = pr_config._pr_flow_profile(config.default_repo)
+        flow = pr_config._profile_for_pr_config(prcfg)
         note = self_merge_bypass_note(
             flow, provider, scope.repo, pull.number,
             api_base=getattr(prcfg, "api_base", "") or "", token=token,
@@ -1643,6 +1642,7 @@ def _finish_auto_open(
     open_pr: bool | None,
     draft: bool,
     attribution: SourceAttribution | None,
+    prcfg,
 ) -> None:
     """Open the PR (when pending) or surface an already-open PR's number/url.
 
@@ -1654,7 +1654,6 @@ def _finish_auto_open(
     * target PR already opened          -> surface its number/url on ``result``
                                            (never re-create -> no duplicate, #1167).
     """
-    prcfg = config.default_repo.pr
     want_open = prcfg.auto_open if open_pr is None else open_pr
     if not want_open or target_pr is None:
         return
@@ -1686,7 +1685,7 @@ def _finish_auto_open(
         want_attribution = tracking.attribution_from_frozen_mode(target_pr)
         _open_via_provider(
             result, config, record, target_pr, title, body, worktree_id,
-            head_sha, draft=draft, attribution=want_attribution,
+            head_sha, prcfg=prcfg, draft=draft, attribution=want_attribution,
         )
         return
     # The PR is already open on the provider -- report it so the caller trusts
@@ -2227,14 +2226,10 @@ def pr_status(worktree_id: str, *, all_prs: bool = False,
     history is included alongside the active one.  ``pr_count`` is always
     present so the orphan-detection probe can key on existence.
 
-    Before reporting, the active PR is reconciled against the provider so a PR
-    merged or closed *externally* (e.g. via the ``auto-merge`` label, bypassing
-    ``finalize``/``pr-watch``) is reported with its true terminal state rather
-    than a stale ``open``.  This is the agent's authoritative "did my PR land?"
-    check; when it lands, the result also carries a **pull-forward
-    recommendation** (``pull_forward_recommended`` + ``next_action``) directing
-    the standard post-merge move -- ``agent-worktrees git sync`` to rebase the
-    worktree onto the updated default branch.
+    With ``live`` (default), the active PR is first reconciled against the
+    provider so a PR merged or closed *externally* is reported with its true
+    terminal state rather than a stale ``open``. ``live=False`` performs no
+    provider reconciliation or snapshot read.
 
     With ``live`` (default), a best-effort ``live`` block is added for the
     active PR carrying its review **verdict**, **conflict**, **merge state**, and
@@ -2249,7 +2244,8 @@ def pr_status(worktree_id: str, *, all_prs: bool = False,
                 "error": f"No tracking record found for '{worktree_id}'."}
     if config is None:
         config = cfg.load_config()
-    _reconcile_active_pr(record, config)
+    if live:
+        _reconcile_active_pr(record, config)
     active = record.active_pr()
     result = {**base, "has_pr": active is not None, "pr_count": len(record.prs)}
     if active is not None:
@@ -2526,7 +2522,7 @@ def _push_existing_feature(
     _finish_auto_open(
         result, config, record, target, title=title, body=body,
         worktree_id=worktree_id, head_sha=head_sha, open_pr=open_pr,
-        draft=draft, attribution=attribution,
+        draft=draft, attribution=attribution, prcfg=prcfg,
     )
     observation_error = refresh_head_observation(config, record, target, head_sha)
     if observation_error:
