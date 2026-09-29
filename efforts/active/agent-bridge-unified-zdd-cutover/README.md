@@ -404,6 +404,49 @@ session-host concept):
      agent-bridge/docs/architecture.md`'s API list. Added there, plus a new
      "Session-host generation handoff" subsection summarizing the
      claim/release/retry flow and the `HostIndex` locking fix above.
+- **A second automated review pass caught five more real gaps** (the fixture
+  #1 fix above wasn't wrong, just incomplete -- the write path was safe, the
+  ordering and the passive-startup window around it were not):
+  1. HIGH: `/api/v1/shutdown` released every claim *before* confirming a
+     server handle existed to actually shut down -- a still-live daemon
+     (shutdown couldn't be initiated) would have abandoned ownership it
+     still held. Fixed: check for the server handle first; release only on
+     the path that actually shuts down.
+  2. HIGH: on Phase 3's first rollout (and for any record its own active
+     generation never itself claimed -- i.e. every normal `register()`),
+     an unclaimed record is *correctly* "recoverable" by Phase 2's own
+     contract, which let a still-**passive**, not-yet-promoted daemon's
+     startup reattach scan claim (and reattach to) a Session Host the truly
+     active old generation was still driving, before the verified-retirement
+     gate ever ran. Fixed: `reattach_session_hosts(claim_hosts=...)` -- a
+     passive instance (`publish_on_ready=False`) still warms up its ACP
+     connections (unchanged, pre-Phase-3 behavior) but never touches claim
+     state; claiming happens only via the post-cutover retry once the old
+     generation is confirmed exited, or at a normal (non-passive) cold
+     start, which has no other live generation to race.
+  3. MEDIUM: query methods (`all()`/`live_records()`) still read each
+     process's own in-memory cache, so the post-cutover reattach sweep could
+     miss a session id registered by the other generation *after* this
+     `HostIndex` was constructed -- a per-record `claim()` reload cannot
+     discover an id absent from a stale enumeration in the first place.
+     Fixed: new `HostIndex.refresh()`, called before every reattach scan.
+  4. Contract: the new endpoint introduces a client-detectable capability
+     with no matching protocol bump. Fixed: `HTTP_PROTOCOL_VERSION` 18->19,
+     new `SESSION_HOST_REATTACH_PROTOCOL_VERSION`; the post-cutover retry
+     call now gates on `daemon_supports()` and skips (non-fatal) against an
+     older daemon. Updated the agent-bridge HTTP-wire contract registry and
+     fixtures accordingly (new generation-19 evidence, a new
+     `previous-generation-18` snapshot) -- and, while touching it, fixed a
+     genuinely **pre-existing, unrelated** drift found by the full
+     `check-agent-bridge-contracts.py` run: `session-create-response.json`'s
+     own `captured_from.source_sha256` for `models.py` didn't match either
+     the registry's recorded hash or the file's actual current hash (dating
+     to before this effort).
+  5. Test quality: the original two-instance `HostIndex` tests were
+     sequential, so they would still pass even with the cross-process lock
+     removed entirely. Added a genuinely overlapping (thread + barrier
+     synchronized) concurrent-writer test that only passes if the lock
+     actually excludes one writer while the other is mid reload-mutate-flush.
 - This effort's own umbrella issue's Phase 4/5 remain: the caller-facing
   mask/routing layer and the two validation drills.
 
