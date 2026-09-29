@@ -562,12 +562,6 @@ def _audit_daemon_health(
     now: datetime | None = None,
     cutover_state: str = "auto",
 ) -> dict[str, object]:
-    candidates = _candidate_map(ctx.list_candidates())
-    table = routing.read_table(ctx.config_dir)
-    owner, owner_reason = _validated_owner(ctx, candidates, table)
-    record = breadcrumb.read_breadcrumb(ctx.config_dir)
-    active_raw = table.get("active") if isinstance(table, dict) else None
-    active_pid = active_raw.get("pid") if isinstance(active_raw, dict) else None
     guard = None
     guard_error = None
     cutover_busy = False
@@ -577,35 +571,55 @@ def _audit_daemon_health(
     elif cutover_state == "busy":
         cutover_busy = True
 
+    if cutover_busy:
+        return {
+            "service": ctx.service,
+            "mode": "report",
+            "validated_owner": None,
+            "owner_validation_reason": None,
+            "cutover_in_progress": True,
+            "cutover_guard_error": guard_error,
+            "candidate_count": 0,
+            "candidates": [],
+            "findings": [],
+            "counts": {"total": 0},
+        }
+
+    candidates = _candidate_map(ctx.list_candidates())
+    table = routing.read_table(ctx.config_dir)
+    owner, owner_reason = _validated_owner(ctx, candidates, table)
+    record = breadcrumb.read_breadcrumb(ctx.config_dir)
+    active_raw = table.get("active") if isinstance(table, dict) else None
+    active_pid = active_raw.get("pid") if isinstance(active_raw, dict) else None
+
     findings: list[dict[str, object]] = []
     try:
-        if not cutover_busy:
-            stranded = _inspect_stranded_survivor(ctx, record)
-            if stranded is not None:
-                findings.append(stranded)
+        stranded = _inspect_stranded_survivor(ctx, record)
+        if stranded is not None:
+            findings.append(stranded)
 
-            abandoned, abandoned_pid = _inspect_abandoned_passive(
-                ctx,
-                record,
-                int(active_pid) if isinstance(active_pid, int) else None,
-                candidates,
-                now=now,
-            )
-            if abandoned is not None:
-                findings.append(abandoned)
+        abandoned, abandoned_pid = _inspect_abandoned_passive(
+            ctx,
+            record,
+            int(active_pid) if isinstance(active_pid, int) else None,
+            candidates,
+            now=now,
+        )
+        if abandoned is not None:
+            findings.append(abandoned)
 
-            superseded, superseded_pids = _inspect_superseded_generations(
-                ctx, table, candidates
-            )
-            if superseded is not None:
-                findings.append(superseded)
+        superseded, superseded_pids = _inspect_superseded_generations(
+            ctx, table, candidates
+        )
+        if superseded is not None:
+            findings.append(superseded)
 
-            excluded = set(superseded_pids)
-            if abandoned_pid is not None:
-                excluded.add(abandoned_pid)
-            duplicate = _inspect_duplicates(ctx, candidates, owner, excluded)
-            if duplicate is not None:
-                findings.append(duplicate)
+        excluded = set(superseded_pids)
+        if abandoned_pid is not None:
+            excluded.add(abandoned_pid)
+        duplicate = _inspect_duplicates(ctx, candidates, owner, excluded)
+        if duplicate is not None:
+            findings.append(duplicate)
     finally:
         if guard is not None and hasattr(guard, "release"):
             guard.release()
@@ -675,25 +689,6 @@ def apply_daemon_health(
                 }
             ],
         }
-    if not ctx.repair_supported:
-        report = _audit_daemon_health(ctx, now=now, cutover_state="held" if guard is not None else "auto")
-        return {
-            "service": ctx.service,
-            "mode": "apply",
-            "before": report,
-            "after": report,
-            "findings": report["findings"],
-            "remaining_findings": report["findings"],
-            "counts": report["counts"],
-            "actions": [
-                {
-                    "kind": "repair_support",
-                    "blocked": True,
-                    "reason": "identity-bound repair unsupported on this platform",
-                }
-            ],
-        }
-
     try:
         before = _audit_daemon_health(ctx, now=now, cutover_state="held")
         actions: list[dict[str, object]] = []
@@ -739,6 +734,17 @@ def apply_daemon_health(
             owner = current.get("validated_owner")
             for item in targets:
                 if not isinstance(item, dict) or not isinstance(item.get("pid"), int):
+                    continue
+                if not ctx.repair_supported:
+                    actions.append(
+                        {
+                            "kind": "abandoned_passive",
+                            "pid": item["pid"],
+                            "blocked": True,
+                            "reason": "identity-bound repair unsupported on this platform",
+                        }
+                    )
+                    attempted.add(item["pid"])
                     continue
                 if not isinstance(owner, dict):
                     actions.append(
@@ -787,6 +793,17 @@ def apply_daemon_health(
                 break
             kind, item, current = next_target
             owner = current.get("validated_owner")
+            if not ctx.repair_supported:
+                actions.append(
+                    {
+                        "kind": kind,
+                        "pid": item["pid"],
+                        "blocked": True,
+                        "reason": "identity-bound repair unsupported on this platform",
+                    }
+                )
+                attempted.add(item["pid"])
+                continue
             if not isinstance(owner, dict):
                 actions.append(
                     {
