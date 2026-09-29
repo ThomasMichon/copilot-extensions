@@ -33,8 +33,9 @@ you report "nothing outstanding" to the user:
    session** (a `**Predecessor session:**` line) -- use that directly rather
    than guessing from timestamps or brief content. When `agent-worktrees` is
    installed, the same response also names the worktree, letting you resolve
-   the *full* lineage (predecessor's own predecessor, and so on) and this
-   worktree's current disposition in one call -- see **Orient using the
+   the retained (bounded, not necessarily complete -- see below) lineage
+   (predecessor's own predecessor, and so on) and this worktree's current
+   disposition in one call -- see **Orient using the
    worktree's own status and session lineage** below. Without
    `agent-worktrees`, or if the predecessor session id is genuinely absent
    from the response, fall back to whatever lineage signals remain (worktree/
